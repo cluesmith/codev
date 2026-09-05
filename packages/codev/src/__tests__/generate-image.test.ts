@@ -29,7 +29,12 @@ vi.mock('node:fs', async () => {
 });
 
 // Import after mocks are set up
-import { generateImage, generateViaAtlas, GenerateImageOptions } from '../commands/generate-image.js';
+import {
+  generateImage,
+  generateViaAtlas,
+  generateViaMuapi,
+  GenerateImageOptions,
+} from '../commands/generate-image.js';
 
 describe('generate-image', () => {
   const originalEnv = process.env;
@@ -703,6 +708,139 @@ describe('generate-image', () => {
         expect.stringContaining('Atlas image download failed: no response within 120000ms')
       );
       expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('muapi provider', () => {
+    const originalFetch = global.fetch;
+    const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+
+    type FetchCall = { url: string; init?: RequestInit };
+
+    function stubMuapi(options: {
+      polls?: Array<Partial<Response> & { json?: () => Promise<unknown>; text?: () => Promise<string> }>;
+      upload?: Partial<Response> & { json?: () => Promise<unknown>; text?: () => Promise<string> };
+      download?: Partial<Response> & { arrayBuffer?: () => Promise<ArrayBuffer>; text?: () => Promise<string> };
+    } = {}): FetchCall[] {
+      const calls: FetchCall[] = [];
+      let pollIndex = 0;
+      global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        calls.push({ url: href, init });
+        if (href.endsWith('/upload_file')) {
+          return (options.upload ?? {
+            ok: true,
+            status: 200,
+            json: async () => ({ url: 'https://cdn.muapi.ai/input.jpg' }),
+          }) as Response;
+        }
+        if (href.endsWith('/nano-banana-pro') || href.endsWith('/nano-banana-pro-edit')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ request_id: 'muapi-pred-1', status: 'processing' }),
+          } as Response;
+        }
+        if (href.includes('/predictions/')) {
+          const polls = options.polls ?? [{
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: 'muapi-pred-1',
+              status: 'completed',
+              outputs: ['https://cdn.muapi.ai/result.jpg'],
+            }),
+          }];
+          const poll = polls[Math.min(pollIndex, polls.length - 1)];
+          pollIndex += 1;
+          return poll as Response;
+        }
+        return (options.download ?? {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => JPEG_BYTES.buffer,
+        }) as Response;
+      }) as unknown as typeof fetch;
+      return calls;
+    }
+
+    beforeEach(() => {
+      process.env.MUAPI_API_KEY = 'test-muapi-key';
+      delete process.env.MU_API_KEY;
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('requires a MuAPI API key', async () => {
+      delete process.env.MUAPI_API_KEY;
+      delete process.env.MU_API_KEY;
+
+      await expect(
+        generateViaMuapi('test prompt', 'output.png', '1:1', '1K', [], { pollIntervalMs: 0 })
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('MUAPI_API_KEY or MU_API_KEY environment variable not set')
+      );
+    });
+
+    it('submits, polls, validates the result URL, and never sends the key to the CDN', async () => {
+      const calls = stubMuapi();
+
+      await generateViaMuapi('test prompt', 'output.png', '16:9', '2K', [], { pollIntervalMs: 0 });
+
+      expect(calls.map((call) => call.url)).toEqual([
+        'https://api.muapi.ai/api/v1/nano-banana-pro',
+        'https://api.muapi.ai/api/v1/predictions/muapi-pred-1/result',
+        'https://cdn.muapi.ai/result.jpg',
+      ]);
+      const submitted = JSON.parse(String(calls[0]?.init?.body));
+      expect(submitted).toEqual({
+        prompt: 'test prompt',
+        aspect_ratio: '16:9',
+        resolution: '2k',
+      });
+      const authOf = (call?: FetchCall) => new Headers(call?.init?.headers ?? {}).get('x-api-key');
+      expect(authOf(calls[0])).toBe('test-muapi-key');
+      expect(authOf(calls[1])).toBe('test-muapi-key');
+      expect(authOf(calls[2])).toBeNull();
+      expect(JSON.stringify(calls[2]?.init ?? {})).not.toContain('test-muapi-key');
+      expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith('output.jpg', expect.any(Buffer));
+    });
+
+    it('uploads local references and switches to the edit model', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(Buffer.from('fake image'));
+      const calls = stubMuapi();
+
+      await generateViaMuapi('edit this', 'edited.png', '1:1', '1K', ['reference.png'], { pollIntervalMs: 0 });
+
+      expect(calls[0]?.url).toBe('https://api.muapi.ai/api/v1/upload_file');
+      expect(calls[0]?.init?.body).toBeInstanceOf(FormData);
+      expect(calls[1]?.url).toBe('https://api.muapi.ai/api/v1/nano-banana-pro-edit');
+      const submitted = JSON.parse(String(calls[1]?.init?.body));
+      expect(submitted.images_list).toEqual(['https://cdn.muapi.ai/input.jpg']);
+      expect(submitted.resolution).toBe('1k');
+      expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith('edited.jpg', expect.any(Buffer));
+    });
+
+    it('fails immediately on an unrecognized prediction status', async () => {
+      const calls = stubMuapi({
+        polls: [{
+          ok: true,
+          status: 200,
+          json: async () => ({ status: 'cancelled_by_user' }),
+        }],
+      });
+
+      await expect(
+        generateViaMuapi('test prompt', 'output.png', '1:1', '1K', [], { pollIntervalMs: 0 })
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('unrecognized status: cancelled_by_user')
+      );
+      expect(calls.filter((call) => call.url.includes('/predictions/'))).toHaveLength(1);
     });
   });
 });

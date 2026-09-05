@@ -1,6 +1,6 @@
 ---
 name: generate-image
-description: AI image generation via Gemini, or Atlas Cloud with `-p atlas`. Use when the user wants to generate, create, or make an image, or when you need to create visual assets like logos, diagrams, or illustrations. Requires GEMINI_API_KEY or GOOGLE_API_KEY, or ATLASCLOUD_API_KEY when using `-p atlas`.
+description: AI image generation via Gemini with optional async providers. Use when the user wants to generate, create, or make an image, or when you need to create visual assets like logos, diagrams, or illustrations. Requires the API key for the selected provider.
 ---
 
 # generate-image - AI Image Generation
@@ -22,7 +22,7 @@ Note: this is a `codev` subcommand, not standalone.
 -r, --resolution <res>     Resolution: 1K, 2K, 4K (default: 1K)
 -a, --aspect <ratio>       Aspect ratio (default: 1:1)
 --ref <image>              Reference image (repeatable, max 14)
--p, --provider <name>      Provider: gemini (default) or atlas
+-p, --provider <name>      Provider name (default: gemini)
 ```
 
 ## Aspect ratios
@@ -64,3 +64,20 @@ Measured differences on that path:
   than silently ignoring the images.
 - The model returns JPEG, so the output file is named after its actual bytes
   instead of writing JPEG into the default `output.png`.
+
+## MuAPI provider
+
+`-p muapi` uses MuAPI's Nano Banana Pro endpoint with the same aspect-ratio and
+resolution controls. Set `MUAPI_API_KEY` (or `MU_API_KEY`) using the [MuAPI
+access keys page](https://muapi.ai/access-keys). Reference images are uploaded
+to MuAPI and sent to the edit endpoint; returned media is downloaded only over
+HTTPS.
+
+```bash
+codev generate-image "A sunset over mountains" -p muapi -a 16:9
+codev generate-image "Keep the subject, change the lighting" -p muapi --ref subject.png
+```
+
+The provider submits a job, polls the [MuAPI image API](https://muapi.ai/ai-image-api),
+and writes the returned image locally. Polling and individual requests are
+bounded, and the API key is never sent to the returned media host.
