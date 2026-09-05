@@ -257,6 +257,13 @@ function gateSession(mockWrite: (data: string) => void, ring: string, writable =
     // normal state for a session sitting at an idle prompt. A test modelling a still-repainting
     // composer overrides it with a recent timestamp.
     lastDataAt: 0,
+    // Issue #1473 input signals. This fake reaches the LIVE mailbox wiring, so both are
+    // load-bearing at runtime, not just for the types: without `lastInputAt` the gate computes
+    // `now() - undefined` → NaN, every comparison against NaN is false, the input settle reads
+    // as unsettled, and every send test in this file would HOLD instead of delivering. Epoch 0
+    // is "nobody has typed here since the epoch", the state an idle prompt is in.
+    inputSeq: 0,
+    lastInputAt: 0,
     gateScreen,
   };
 }

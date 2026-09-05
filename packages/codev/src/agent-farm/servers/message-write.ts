@@ -19,6 +19,37 @@ export interface WritableSession {
   write(data: string): boolean;
 }
 
+/**
+ * The session shape {@link submitMessagePaced} needs, over and above {@link WritableSession}
+ * (Issue #1473).
+ *
+ * Kept SEPARATE from `WritableSession` rather than widening it: the escape/message helpers and
+ * every fake behind them need only the one-arg `write`, and requiring an id + counter of them
+ * would be churn for a field they never read.
+ *
+ * `write` takes the origin here because the delivery's own bytes must NOT move the gate's input
+ * signal — the gate has just authorised precisely these bytes, and counting them would make
+ * every delivery block the one after it. `'delivery'` is the only value this module ever passes,
+ * so that is the only one it names; the full vocabulary is `WriteOrigin` in `pty-session.ts`,
+ * which this module deliberately does not import (a one-arg `write` is still assignable here,
+ * which is what keeps the delivery module's structural fakes working).
+ */
+export interface PacedWriteSession {
+  /**
+   * The per-terminal submission lock's key (Issue #1365). A double MUST supply a real, distinct
+   * one — see the throw in {@link submitMessagePaced}.
+   */
+  readonly id: string;
+  /**
+   * The session's monotone input-change counter (Issue #1473). Sampled either side of the paced
+   * write so a human keystroke that landed BETWEEN the first byte and the trailing Enter can be
+   * REPORTED. It cannot be prevented — the bytes are already going out — so this is a reporting
+   * signal, not a gate.
+   */
+  readonly inputSeq: number;
+  write(data: string, origin?: 'delivery'): boolean;
+}
+
 // Messages longer than this threshold are written line-by-line with delays
 // to prevent the receiving terminal from classifying the input as a paste
 // and swallowing the final Enter.
@@ -118,8 +149,19 @@ export function writeMessageToSession(
  * instantiates `A` with its hold reasons.
  */
 export type PacedSubmitResult<A> =
-  /** The whole submit — text and, unless `noEnter`, the trailing Enter — reached the PTY. */
-  | { status: 'written' }
+  /**
+   * The whole submit — text and, unless `noEnter`, the trailing Enter — reached the PTY.
+   *
+   * `racedByInput` (Issue #1473) means the terminal's input counter moved between the first
+   * byte and the last: a human typed while our body was going out, so it may have been
+   * TRUNCATED (`^U`/`^W`/`^C`) or SUBMITTED EARLY (their Enter carrying our partial text). It is
+   * a FLAG, not a hold — the bytes are already on the wire, and re-writing a message that
+   * landed is the #1584 re-injection failure this module is forbidden to reproduce.
+   *
+   * OMITTED when false, never `racedByInput: false`, so exact `{ status: 'written' }` equality
+   * assertions keep meaning what they meant.
+   */
+  | { status: 'written'; racedByInput?: boolean }
   /** #1198: a scheduled write was dropped mid-pace (the shellper socket died). */
   | { status: 'dropped' }
   /**
@@ -160,7 +202,7 @@ export type PacedSubmitResult<A> =
  * first — which is what makes the per-agent serializer's completion-chaining real.
  */
 export async function submitMessagePaced<A>(
-  session: WritableSession & { id: string },
+  session: PacedWriteSession,
   message: string,
   noEnter: boolean,
   precheck: () => A | null,
@@ -186,9 +228,17 @@ export async function submitMessagePaced<A>(
   try {
     let delivered = true;
     let abort: A | null = null;
+    // Sampled inside the lock, immediately before the first byte (below), so the comparison
+    // spans exactly the paced write and not the lock wait that preceded it.
+    let inputSeqBefore = session.inputSeq;
+    // The origin is HARD-CODED here rather than forwarded through a parameter (Issue #1473).
+    // A one-arg function is assignable to a two-arg function type, so a wrapper that forgot to
+    // pass the origin along would compile cleanly — and its failure mode is the delivery
+    // counting its own bytes as human input, i.e. "mail never delivers". Removing the parameter
+    // removes the opportunity.
     const tracked: WritableSession = {
       write: (data: string): boolean => {
-        const ok = session.write(data);
+        const ok = session.write(data, 'delivery');
         if (!ok) delivered = false;
         return ok;
       },
@@ -199,6 +249,7 @@ export async function submitMessagePaced<A>(
       () => {
         abort = precheck();
         if (abort !== null) return 0; // refused in-lock: not one byte goes out
+        inputSeqBefore = session.inputSeq;
         return writeMessageToSession(tracked, message, noEnter);
       },
       clock,
@@ -211,6 +262,11 @@ export async function submitMessagePaced<A>(
     if (refused !== null) return { status: 'aborted', abort: refused };
     if (!(delivered as boolean)) return { status: 'dropped' };
     if (bypasses.raced()) return { status: 'preempted' };
+    // The prechecks close everything up to the first byte; between the first byte and the
+    // trailing Enter there is still an 80 ms-to-seconds window, and by then the bytes are out.
+    // So this is a REPORTING signal — flag it and let the caller tell the operator, rather than
+    // hold and re-write a message that may well have landed (#1584). Omitted when false.
+    if (session.inputSeq !== inputSeqBefore) return { status: 'written', racedByInput: true };
     return { status: 'written' };
   } finally {
     bypasses.release();

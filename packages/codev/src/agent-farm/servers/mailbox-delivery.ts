@@ -89,6 +89,31 @@ export interface DeliverySession {
    * minute, and writing into a settling composer is what ate the leading bytes in #1521.
    */
   readonly lastDataAt: number;
+  /**
+   * The session's MONOTONE cumulative INPUT-change counter (Issue #1473) — the input-side twin
+   * of {@link bytesWritten}, and the half of the gate's change token that a keystroke moves.
+   *
+   * `bytesWritten` counts OUTPUT, so until this existed a human keystroke landing in the
+   * gate→write window moved nothing the gate compared: both samples agreed, the verdict stayed
+   * CLEAN, and the message fused into the draft the human had started. Folding this into
+   * {@link ringToken} closes that, and — the case that earns it on its own — stops a memoized
+   * CLEAN verdict from being reused across a keystroke, which a token of output alone cannot
+   * see because PTY input does not advance the ring.
+   *
+   * REQUIRED, not optional, and test doubles must supply a real number: an optional field would
+   * let production compile a port that silently reads "no input ever" while presenting as a
+   * working gate.
+   */
+  readonly inputSeq: number;
+  /**
+   * Epoch ms of the session's most recent HUMAN input (Issue #1473) — the input-side twin of
+   * {@link lastDataAt}, and the only signal that can see input which landed BEFORE the gate
+   * sampled anything and has not been echoed yet. No counter comparison can catch that case:
+   * both samples agree, correctly, and the classifier reads a genuinely empty composer because
+   * the character is still in flight to the TUI. `0` on a session that has never had input,
+   * which reads as settled.
+   */
+  readonly lastInputAt: number;
   readonly info: { cols: number; rows: number };
   readonly command: string;
   readonly launchArgs: string[];
@@ -110,8 +135,15 @@ export interface DeliverySession {
  * {@link deliverAgentMail}'s precheck at the write instant rather than before the lock.
  */
 export type WriteAbort =
-  /** Re-hold the row for this reason and retry on a later clean pass. */
-  | { kind: 'hold'; reason: MailboxReason }
+  /**
+   * Re-hold the row for this reason and retry on a later clean pass.
+   *
+   * `detail` carries the gate detail when the in-lock refusal has one to give (Issue #1473's
+   * `recent-input`); absent/null keeps the detail-nulling behaviour every other refusal wants.
+   * `retryAfterMs` is set only when the refusal was PURELY an input settle — see
+   * {@link DeliveryOutcome.retryAfterMs}.
+   */
+  | { kind: 'hold'; reason: MailboxReason; detail?: MailboxGateDetail | null; retryAfterMs?: number }
   /** The row was dismissed/superseded under us — a terminal state, so it must NOT be re-held. */
   | { kind: 'row-resolved' };
 
@@ -326,6 +358,12 @@ export interface UnverifiedDeliveryInfo {
   mailboxId: string;
   /** The terminal the bytes were written to, for correlating against its transcript. */
   terminalId: string;
+  /**
+   * Why it could not be confirmed (Issue #1473) — the notification text branches on it, since
+   * "its header never appeared on that screen" is a false statement about a delivery whose
+   * header DID appear and whose tail was eaten by a human keystroke.
+   */
+  cause: UnverifiedCause;
 }
 
 /**
@@ -347,6 +385,18 @@ export interface EscalationInfo {
    */
   detail: MailboxGateDetail | null;
 }
+
+/**
+ * A hold's diagnostic detail as this module reports it: the render gate's own verdict details,
+ * plus `'recent-input'` (Issue #1473), which no classifier produces — it is decided by the
+ * delivery path from the session's input signals, not from anything on the screen.
+ *
+ * Both halves stay inert in {@link isUnverifiableVerdict} by construction: that predicate is an
+ * allow-list of the two can't-verify details, so a value it does not name can never escalate.
+ * `'recent-input'` must stay outside it — it is the same self-clearing "a human is at the line"
+ * class as `user-text`, and escalating it would false-alarm on every ordinary typist.
+ */
+export type DeliveryDetail = GateVerdict['detail'] | 'recent-input';
 
 /** Outcome of one delivery pass over an agent's held mail. */
 export interface DeliveryOutcome {
@@ -375,8 +425,47 @@ export interface DeliveryOutcome {
    * which {@link MailboxDrainer.recordStreak} escalates to liveness telemetry. Absent
    * for non-gate holds (`no-live-pty`/`no-profile`) and deliveries.
    */
-  detail?: GateVerdict['detail'];
+  detail?: DeliveryDetail;
+  /**
+   * Why a completed delivery could not be confirmed (Issue #1473). Present only alongside a
+   * delivery that was flagged — absent means confirmed, or not verifiable in the first place.
+   *
+   *   - `'input-raced'` — human input landed on the terminal DURING the paced write, so the
+   *     body may have been truncated (`^U`/`^W`/`^C`) or submitted early (their Enter);
+   *   - `'no-echo'` — the write completed but the message's header never appeared on screen.
+   *
+   * `'input-raced'` WINS when both are true: it names the more actionable remedy, and a missing
+   * echo is often just the downstream symptom of the race.
+   *
+   * Deliberately NOT overloaded onto {@link verified}, which would make one field mean two
+   * different things — and the input-raced case frequently has `verified: true` (the header did
+   * land; it was the tail that was lost), which is exactly why the sender was being told plain
+   * "Message delivered" for it.
+   */
+  unverifiedCause?: UnverifiedCause;
+  /**
+   * Present only when this pass held SOLELY because the terminal had recent input (Issue #1473)
+   * — the ms after which {@link inputSettled} would pass. The drainer arms one coalesced,
+   * generation-guarded re-drain for it, so the row delivers roughly one settle after the typing
+   * stops rather than on the next 1.5 s backstop tick.
+   *
+   * It is not a speculative optimisation: the `'submit'` fast trigger fires SYNCHRONOUSLY from
+   * `stopComposing`, and the drain it schedules runs in a microtask — so at that pass
+   * `lastInputAt` is always `now`, and the submit trigger is now provably always held. Without
+   * the re-drain, pressing Enter to clear the line would reliably cost a full backstop period.
+   * It also shortens the escalation-blind hold below from "forever" to "one settle".
+   */
+  retryAfterMs?: number;
 }
+
+/**
+ * Why a committed delivery is flagged unconfirmed (Issue #1473) — carried to every operator
+ * surface, the SENDER included. Before this, `tower-routes` surfaced only `verified` and the
+ * CLI warned only on `verified === false`, so the truncation case this exists for — where the
+ * header landed and `verified` is `true` — reported an unqualified success to the one human who
+ * was standing there.
+ */
+export type UnverifiedCause = 'no-echo' | 'input-raced';
 
 /**
  * A gate outcome the render gate CANNOT bound to a decision — an unrecognized app
@@ -399,7 +488,7 @@ export interface DeliveryOutcome {
  */
 function isClassifierStuck(
   reason: MailboxReason | null,
-  detail: GateVerdict['detail'] | undefined
+  detail: DeliveryDetail | undefined
 ): boolean {
   return isUnverifiableVerdict(reason, detail);
 }
@@ -446,6 +535,46 @@ export interface EchoWatch {
  */
 function settled(ports: DeliveryPorts, session: DeliverySession): boolean {
   return ports.now() - session.lastDataAt >= SETTLE_BEFORE_WRITE_MS;
+}
+
+/**
+ * How long the receiving session must have been free of HUMAN INPUT before a gated delivery
+ * may write onto it (Issue #1473) — the input-side counterpart of {@link SETTLE_BEFORE_WRITE_MS}.
+ *
+ * The change token catches input that arrives after the gate sampled it. It cannot catch input
+ * that arrived just BEFORE the sample and has not been echoed yet: nothing has moved, both
+ * samples agree — correctly — and the classifier reads a genuinely empty composer while the
+ * character is still travelling to the TUI. Only elapsed time can see that.
+ *
+ * One notch above the output settle because the round trip it covers is strictly the longer
+ * one: an echo has to reach the TUI, be processed, be painted, and come back as output, whereas
+ * the output settle only waits for painting to stop.
+ *
+ * **This BOUNDS the echo-lag window; it does not close it.** Input older than this interval
+ * whose echo is still delayed, and input in flight from the browser at sample time, both
+ * survive by construction. A larger constant buys coverage at the price of latency on every
+ * delivery, which is why the next tightening (if measurement wants one) is a BOUNDED
+ * `lastInputAt > lastDataAt` hold rather than a bigger number here.
+ */
+export const INPUT_SETTLE_BEFORE_WRITE_MS = 300;
+
+/**
+ * Has the session been free of human input long enough to write onto (Issue #1473)?
+ *
+ * Positive `>=` for the same reason {@link settled} is: a session carrying no usable timestamp
+ * yields NaN, every NaN comparison is false, and an unknown input age must read as NOT settled.
+ */
+function inputSettled(ports: DeliveryPorts, session: DeliverySession): boolean {
+  return ports.now() - session.lastInputAt >= INPUT_SETTLE_BEFORE_WRITE_MS;
+}
+
+/**
+ * How long until {@link inputSettled} would pass, in ms — what the drainer arms its one-shot
+ * re-drain for (Issue #1473). Clamped at 0 so a clock skew can never schedule into the past.
+ */
+function msUntilInputSettled(ports: DeliveryPorts, session: DeliverySession): number {
+  const remaining = INPUT_SETTLE_BEFORE_WRITE_MS - (ports.now() - session.lastInputAt);
+  return Number.isFinite(remaining) && remaining > 0 ? remaining : 0;
 }
 
 /**
@@ -516,9 +645,28 @@ export function agentKey(workspacePath: string, toAgent: string): string {
  *   2. the drainer's verdict memo ({@link CachedVerdict}) — a cached verdict is reused only
  *      while this token is unchanged, so a static screen is classified once instead of
  *      re-checked every 1.5 s backstop tick.
+ *
+ * `inputSeq` is the INPUT half (Issue #1473), and neither consumer worked without it:
+ *
+ *   - **The memo (this one earns the counter on its own).** A `CachedVerdict` survives across
+ *     backstop ticks, so the gap between the cached classify and its reuse is bounded by no
+ *     settle at all. Without an input term a CLEAN verdict is reusable ACROSS a keystroke —
+ *     PTY input never advances the ring, so the output token is genuinely unchanged. That is
+ *     the caveat this module used to admit in a comment and now closes.
+ *   - **Unbounded awaits inside the gate→write gap.** `tokenBefore` is sampled before
+ *     `ports.classify` AND before `ports.watchEcho`, the latter flushing the mirror parser and
+ *     scanning up to 1000 lines. Neither is bounded by the input-settle interval on a loaded
+ *     box, so "the settle covers it" is not true.
+ *
+ * (The delivery's OWN paced write is excluded by construction — it writes with the `'delivery'`
+ * origin, which moves no input signal — so folding this in cannot make a delivery block itself.)
+ *
+ * Monotonicity, precisely: the TOKEN is not globally monotone (geometry and app can change back
+ * and forth), but both COUNTERS in it are, and that plus {@link CachedVerdict}'s session-identity
+ * guard is what makes non-aliasing hold.
  */
 function ringToken(session: DeliverySession, profile: GateProfile): string {
-  return `${session.bytesWritten}:${session.info.cols}x${session.info.rows}:${profile.app}`;
+  return `${session.bytesWritten}:${session.inputSeq}:${session.info.cols}x${session.info.rows}:${profile.app}`;
 }
 
 /**
@@ -583,16 +731,24 @@ export async function deliverAgentMail(
   const held = findHeldForAgent(db, workspacePath, toAgent, ports.now());
   if (held.length === 0) return { delivered: [], reason: null };
 
-  // Every NON-gate hold, plus the post-classify re-holds (token moved / not settled). It
-  // deliberately nulls `detail` (Issue #1482): a detail describes a gate verdict, and holding
-  // for `no-live-pty` — or re-holding a screen that moved under us — is not one. Leaving the
+  // Every NON-gate hold, plus the post-classify re-holds (token moved / not settled). `detail`
+  // defaults to null (Issue #1482): a detail describes a gate verdict, and holding for
+  // `no-live-pty` — or re-holding a screen that moved under us — is not one. Leaving the
   // previous detail in place would let `afx inbox` keep asserting "a human is at the composer"
   // about a session whose PTY has since died.
-  const hold = (reason: MailboxReason): DeliveryOutcome => {
+  //
+  // The one caller that passes a detail is the input hold (Issue #1473). It needs one because
+  // `hold('busy')` with a null detail is invisible to #1482's whole diagnostic axis AND to
+  // `isClassifierStuck`, which excludes plain `busy` — so an input hold that RECURRED (an app
+  // polling geometry every repaint, say, whose reply this module failed to recognise) would
+  // hold indefinitely with nothing to escalate it and nothing on any surface saying why. With
+  // the detail, `afx inbox` and the send response read `busy:recent-input` through the existing
+  // shared formatter, no formatter change required.
+  const hold = (reason: MailboxReason, detail: MailboxGateDetail | null = null): DeliveryOutcome => {
     for (const row of held) {
-      if (row.reason !== reason || row.detail !== null) setHeldVerdict(db, row.id, reason, null, ports.now());
+      if (row.reason !== reason || row.detail !== detail) setHeldVerdict(db, row.id, reason, detail, ports.now());
     }
-    return { delivered: [], reason };
+    return { delivered: [], reason, ...(detail ? { detail } : {}) };
   };
 
   const session = ports.getSessionForAgent(workspacePath, toAgent);
@@ -601,9 +757,19 @@ export async function deliverAgentMail(
   const profile = ports.resolveProfile(session);
   if (!profile) return hold('no-profile');
 
+  /** {@link hold} for the input-settle case, carrying the drainer's one-shot re-drain delay. */
+  const holdOnInput = (): DeliveryOutcome => ({
+    ...hold('busy', 'recent-input'),
+    retryAfterMs: msUntilInputSettled(ports, session),
+  });
+
   // Sample the ring's change-token BEFORE the (possibly memoized) classify, so we can
   // re-validate afterward that the screen didn't move under us (below).
   const tokenBefore = ringToken(session, profile);
+  // …and the input counter alone, so a token that moved can be ATTRIBUTED (Issue #1473). The
+  // token folds output and input together, and a re-hold that blamed a repaint on the human at
+  // the keyboard would put a false `recent-input` on every surface that reads the row.
+  const inputSeqBefore = session.inputSeq;
 
   // Verdict memo (Spec 1313 render-gate follow-up). The 1.5 s backstop re-checks every held
   // agent's screen each tick; for a STATIC screen that classify is pure waste. Reuse the
@@ -650,13 +816,27 @@ export async function deliverAgentMail(
   // draft — the exact false-clean the gate prevents. Hold instead; it delivers on the next
   // clean tick. (On a memo hit no await occurred, so the token is unchanged and this passes
   // trivially.)
-  if (ringToken(session, profile) !== tokenBefore) return hold('busy');
+  // (The token now carries `inputSeq` too, so this same comparison is what catches a HUMAN
+  // KEYSTROKE landing during the classify — Issue #1473. Before that term it caught only the
+  // app's own repaints, and a keystroke moved nothing it compared. The detail names whichever
+  // half actually moved; blaming a repaint on the human would be a false statement on every
+  // surface that reads the row.)
+  if (ringToken(session, profile) !== tokenBefore) {
+    return session.inputSeq !== inputSeqBefore ? hold('busy', 'recent-input') : hold('busy');
+  }
 
   // Settle-before-write (Issue #1573). A clean verdict says the composer is EMPTY, not that it
   // has finished being drawn. Require a quiet interval since the session's last output byte
   // before putting anything on the line; see {@link SETTLE_BEFORE_WRITE_MS}. Re-checked inside
   // the per-terminal lock below, because that is where the last byte before ours can land.
   if (!settled(ports, session)) return hold('busy');
+
+  // Input-settle (Issue #1473). The token above sees input that arrived AFTER we sampled it;
+  // this sees input that arrived just BEFORE and has not been echoed yet — nothing moved, both
+  // samples agree, and the classifier read a genuinely empty composer while the character was
+  // still in flight. Only elapsed time can catch that. Re-checked in the lock below for the
+  // same reason the output settle is.
+  if (!inputSettled(ports, session)) return holdOnInput();
 
   // Clean, verified-empty prompt → deliver the oldest held message. Await the
   // write's paced completion so a serialized follow-up delivery never begins
@@ -693,15 +873,39 @@ export async function deliverAgentMail(
   // `--interrupt`/`--escape` had just cleared. Cheap enough to repeat — a synchronous ring
   // read and one indexed better-sqlite3 lookup.
   //
-  // The residual it CANNOT close: `ringToken` counts OUTPUT bytes, so input written by a
-  // path that does not take this lock (the raw `/api/terminals/:id/write` passthrough, or a
-  // human's keystrokes over the WebSocket) can sit un-echoed on the line and read as
-  // unchanged. Serialization — not this precheck — is what makes the lock-taking writers
-  // safe; the echo-lag residual for the rest is #1473's territory.
+  // Issue #1473 narrowed the residual this block used to describe. `ringToken` now carries
+  // `inputSeq` as well as `bytesWritten`, so input from a writer that does NOT take this lock —
+  // the raw `/api/terminals/:id/write` passthrough, a human's keystrokes over the WebSocket, the
+  // delayed `^C` — moves the token even while it sits un-echoed on the line, and the
+  // `inputSettled` check below covers input that landed before we sampled. What SURVIVES, and
+  // must not be claimed closed:
+  //
+  //   • input older than the input-settle interval whose echo is still delayed, and input in
+  //     flight from the browser at sample time — the settle bounds this window, it does not
+  //     close it;
+  //   • an `afx attach` client entirely: it speaks to the shellper socket directly and never
+  //     touches `PtySession`, so neither its input nor its terminal's replies are observed here;
+  //   • a reply shape `stripTerminalReplies` does not recognise, which counts as input — a
+  //     spurious hold, now visible as `busy:recent-input` rather than silent;
+  //   • a race DURING the paced write, which is reported (`racedByInput`) rather than prevented,
+  //     because by then the bytes are already out.
   const precheck = (): WriteAbort | null => {
     if (!session.writable) return { kind: 'hold', reason: 'no-live-pty' };
-    if (ringToken(session, profile) !== tokenBefore) return { kind: 'hold', reason: 'busy' };
+    if (ringToken(session, profile) !== tokenBefore) {
+      // Attribute it: `recent-input` only when the INPUT half is what moved (see the sampling
+      // of `inputSeqBefore`); a repaint re-holds with the plain, detail-less `busy`.
+      const detail = session.inputSeq !== inputSeqBefore ? ('recent-input' as const) : null;
+      return { kind: 'hold', reason: 'busy', detail };
+    }
     if (!settled(ports, session)) return { kind: 'hold', reason: 'busy' };
+    if (!inputSettled(ports, session)) {
+      return {
+        kind: 'hold',
+        reason: 'busy',
+        detail: 'recent-input',
+        retryAfterMs: msUntilInputSettled(ports, session),
+      };
+    }
     const stillHeld = getById(db, row.id);
     if (!stillHeld || stillHeld.status !== 'held') return { kind: 'row-resolved' };
     return null;
@@ -731,10 +935,14 @@ export async function deliverAgentMail(
     // putting SOME bytes on the wire, e.g. the text landed but the Enter dropped → we hold below;
     // (c) writeMessage REJECTS after partial bytes — its port contract (`boolean | Promise<boolean>`)
     // permits a binding to throw, and a bare throw would skip a delete placed after the await. In
-    // every case a leftover CLEAN would let a follow-up held message memo-hit the SAME token (PTY
-    // INPUT does not advance the ring — only OUTPUT does) and write onto the not-yet-echoed line, so
-    // the memo must die here. The deeper input-echo-lag window — a fresh classify racing the echo — is
-    // the pre-existing gate→write INPUT race in the review's Technical Debt.
+    // every case a leftover CLEAN would let a follow-up held message memo-hit the SAME token and
+    // write onto the not-yet-echoed line, so the memo must die here. (A DELIVERY's own bytes still
+    // advance no signal by design — it writes with the `'delivery'` origin — so this delete, not
+    // the token, is what covers our own write.) Issue #1473 closed the sibling case, a HUMAN
+    // keystroke: `ringToken` now carries the session's input counter, so a memoized CLEAN verdict
+    // can no longer be reused across one. What survives is the echo-lag window the input-settle
+    // interval BOUNDS rather than closes — input older than the settle whose echo is still
+    // delayed, and input in flight from the client at sample time.
     memo?.delete(cacheKey);
   }
 
@@ -776,7 +984,13 @@ export async function deliverAgentMail(
       ports.onHeldStateChange(); // the held set changed under us → refresh the indicator
       return { delivered: [], reason: null };
     }
-    return hold(result.abort.reason);
+    // Carry the in-lock refusal's detail and re-drain delay through (Issue #1473): an input
+    // hold decided inside the lock is the same hold as one decided before it, and must reach
+    // the operator surfaces and the drainer's retry timer identically.
+    const outcome = hold(result.abort.reason, result.abort.detail ?? null);
+    return result.abort.retryAfterMs === undefined
+      ? outcome
+      : { ...outcome, retryAfterMs: result.abort.retryAfterMs };
   }
 
   // THE POINT OF NO RETURN (Issue #1584). Past this line the write COMPLETED — every byte,
@@ -832,29 +1046,53 @@ export async function deliverAgentMail(
       verified = false;
       ports.log(`[mailbox] echo verification errored for ${row.id.slice(0, 8)}…: ${String(err)}`, 'WARN');
     }
-    if (!verified) {
-      // The row is already `delivered`, so this is the delivered-only counterpart of the
-      // drainer's held-only `markEscalated`.
-      markEscalatedDelivered(db, row.id, ports.now());
-      ports.log(
-        `[mailbox] delivered-unverified ${row.id.slice(0, 8)}… → ${toAgent} @ ` +
-          `${path.basename(workspacePath)} (terminal ${session.id}, needle ${needle.length} chars): ` +
-          `the write completed but its header never appeared on the terminal. Recorded as ` +
-          `delivered and flagged — NOT re-written (Issue #1584).`,
-        'WARN',
-      );
-      // Raise it where a human will see it. The sender's `verified: false` covers an
-      // interactive `afx send`, but a cron or backstop delivery has no sender waiting on a
-      // response, and a DELIVERED row is invisible to every held-scoped surface (`afx inbox`,
-      // the held-count indicator) — without this its only trace is a log line (CMAP round 1 —
-      // Codex).
-      ports.onUnverifiedDelivery?.({
-        workspacePath,
-        toAgent,
-        mailboxId: row.id,
-        terminalId: session.id,
-      });
-    }
+  }
+
+  // The escalation decision sits OUTSIDE `if (echo)` (Issue #1473). A during-write input race
+  // is a reason to flag a delivery whether or not it had a needle worth matching — and in its
+  // most common shape (a human's Enter submitting our half-written body) the header DID land,
+  // so `verified` is `true` and the old `if (!verified)` inside the echo block never fired.
+  // Computed once, so a delivery that is both raced AND unechoed escalates exactly once.
+  const racedByInput = result.racedByInput === true;
+  const unverified = racedByInput || verified === false;
+  if (unverified) {
+    // `'input-raced'` takes precedence: it names the more actionable remedy, and a missing echo
+    // is frequently just the downstream symptom of the race.
+    const cause: UnverifiedCause = racedByInput ? 'input-raced' : 'no-echo';
+    // The row is already `delivered`, so this is the delivered-only counterpart of the
+    // drainer's held-only `markEscalated`.
+    markEscalatedDelivered(db, row.id, ports.now());
+    // BRANCH the text rather than appending to it. The no-echo wording asserts the header never
+    // appeared, which is false for the raced case; and its `needle N chars` clause would run
+    // with no needle at all here and print "needle 0 chars".
+    const what = racedByInput
+      ? `the write completed, but the terminal received input while it was in flight, so the ` +
+        `body may have been truncated or submitted early`
+      : `the write completed but its header never appeared on the terminal (needle ` +
+        `${needle ? needle.length : 0} chars)`;
+    ports.log(
+      `[mailbox] delivered-unverified ${row.id.slice(0, 8)}… → ${toAgent} @ ` +
+        `${path.basename(workspacePath)} (terminal ${session.id}, ${cause}): ${what}. Recorded as ` +
+        `delivered and flagged — NOT re-written (Issue #1584).`,
+      'WARN',
+    );
+    // Raise it where a human will see it. The sender's response covers an interactive
+    // `afx send`, but a cron or backstop delivery has no sender waiting on a response, and a
+    // DELIVERED row is invisible to every held-scoped surface (`afx inbox`, the held-count
+    // indicator) — without this its only trace is a log line (CMAP round 1 — Codex).
+    ports.onUnverifiedDelivery?.({
+      workspacePath,
+      toAgent,
+      mailboxId: row.id,
+      terminalId: session.id,
+      cause,
+    });
+    return {
+      delivered: [row.id],
+      reason: null,
+      unverifiedCause: cause,
+      ...(verified === undefined ? {} : { verified }),
+    };
   }
   return { delivered: [row.id], reason: null, ...(verified === undefined ? {} : { verified }) };
 }
@@ -910,6 +1148,18 @@ const LIVENESS_STREAK_THRESHOLD = 10;
 // spam owners. Derived from escalationMs (default 60s → 180s), so it scales with the
 // configured `mailbox.escalationSeconds` without a separate config knob.
 const DEFAULT_OWNER_NOTICE_MULTIPLE = 3;
+// Issue #1473: slack added to a pass's `retryAfterMs` when arming the one-shot input re-drain,
+// so the retry lands just PAST the settle boundary rather than exactly on it (where a timer
+// firing a millisecond early would re-hold and cost another full cycle).
+const INPUT_RETRY_MARGIN_MS = 25;
+// Issue #1473: consecutive input-holds for one agent after which the drainer logs a diagnostic.
+// A human types in BURSTS, so an unbroken run of sub-settle input holds this long (~90s at the
+// 300ms re-drain cadence) is a machine, not a person — most likely a reply shape the filter does
+// not recognise, arriving on every repaint. Deliberately a log line and not an escalation: the
+// hold class it describes is the same "a human is at the line" class as `user-text`, and wiring
+// it to the escalation path would false-alarm on every ordinary typist. This is the trace that
+// makes the otherwise-silent case findable after the fact.
+const CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD = 60;
 
 /**
  * The poll backstop that replaces `SendBuffer`'s flush timer. On each tick it walks
@@ -947,6 +1197,14 @@ export class MailboxDrainer {
   // with the persistent bounded mirror, a classify is O(viewport) regardless of history, so there
   // is no expensive whole-ring render left to throttle — every tick just re-classifies cheaply.)
   private readonly verdictMemo = new Map<string, CachedVerdict>();
+  // Issue #1473: the one-shot input re-drain. At most one pending timer per agent (a later
+  // hold coalesces onto the timer already armed), generation-guarded exactly like
+  // `scheduleDrain`, and cleared in `stop()` alongside the backstop timer.
+  private readonly inputRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Issue #1473: consecutive input-holds per agent — the diagnostic behind
+  // {@link CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD}. Reset by any outcome that is not an input
+  // hold, delivery included.
+  private readonly consecutiveInputHolds = new Map<string, number>();
   // Lifecycle generation (CMAP round 2 — Codex/Claude): the drainer instance is REUSED across
   // stop()/start() (mailbox-wiring `ensureDrainer`), and the tests do start/stop/start. Bumped on
   // stop() so an in-flight tick/scheduleDrain that resumes after a restart bails before mutating
@@ -992,12 +1250,77 @@ export class MailboxDrainer {
     this.notCleanStreak.clear();
     this.scheduledDrains.clear();
     this.notifiedAgents.clear();
+    // Issue #1473: the input re-drain timers are real pending timers, not just map entries, so
+    // they must be CLEARED here and not merely dropped — the generation guard inside each one
+    // would make a survivor harmless, but leaving it pending keeps the event loop alive.
+    for (const timer of this.inputRetryTimers.values()) clearTimeout(timer);
+    this.inputRetryTimers.clear();
+    this.consecutiveInputHolds.clear();
     this.generation++;
   }
 
   /** Per-agent consecutive not-clean count (liveness telemetry; Phase 7 reads this). */
   get streaks(): ReadonlyMap<string, number> {
     return this.notCleanStreak;
+  }
+
+  /** Agents with a pending input re-drain timer (Issue #1473; test/observability). */
+  get pendingInputRetries(): ReadonlyArray<string> {
+    return [...this.inputRetryTimers.keys()];
+  }
+
+  /** Per-agent consecutive input-hold count (Issue #1473; test/observability). */
+  get inputHoldStreaks(): ReadonlyMap<string, number> {
+    return this.consecutiveInputHolds;
+  }
+
+  /**
+   * Arm the one-shot input re-drain and track the consecutive-input-hold diagnostic
+   * (Issue #1473). Called from both pass sites, exactly where {@link recordStreak} is, so the
+   * backstop tick and the fast trigger behave identically.
+   *
+   * The retry exists because the `'submit'` fast trigger is now provably ALWAYS held: it fires
+   * synchronously from `stopComposing`, and the drain it schedules runs in a microtask, so at
+   * that pass the input timestamp is `now` by construction. Without a retry, the single most
+   * common "the line just cleared, deliver now" path would silently degrade to the 1.5 s
+   * backstop — as would any navigation key that provokes no output of its own.
+   *
+   * COALESCED: while a timer is pending for an agent, later input holds do not stack another.
+   * GENERATION-GUARDED like {@link scheduleDrain}, so a timer that survives a stop()/start()
+   * bails instead of driving the new generation's state.
+   */
+  private armInputRetry(
+    key: string,
+    workspacePath: string,
+    toAgent: string,
+    outcome: DeliveryOutcome,
+    gen: number,
+  ): void {
+    if (outcome.retryAfterMs === undefined) {
+      this.consecutiveInputHolds.delete(key);
+      return;
+    }
+    const consecutive = (this.consecutiveInputHolds.get(key) ?? 0) + 1;
+    this.consecutiveInputHolds.set(key, consecutive);
+    // Report once at the crossing, not every pass past it.
+    if (consecutive === CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD) {
+      this.ports?.log(
+        `[mailbox] ${toAgent} @ ${path.basename(workspacePath)} has held on recent terminal input ` +
+          `for ${consecutive} consecutive checks. A human types in bursts, so an unbroken run this ` +
+          `long usually means something is emitting input-shaped bytes continuously — most likely a ` +
+          `terminal reply the gate's filter does not recognise (Issue #1473). Mail for this agent is ` +
+          `NOT being delivered while this persists.`,
+        'WARN',
+      );
+    }
+    if (this.inputRetryTimers.has(key)) return; // a retry is already pending for this agent
+    const timer = setTimeout(() => {
+      this.inputRetryTimers.delete(key);
+      if (this.generation !== gen) return; // stop() ran while we waited → old ports/db
+      void this.scheduleDrain(workspacePath, toAgent);
+    }, outcome.retryAfterMs + INPUT_RETRY_MARGIN_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+    this.inputRetryTimers.set(key, timer);
   }
 
   /**
@@ -1047,6 +1370,7 @@ export class MailboxDrainer {
           if (this.generation !== gen) return; // stop() landed during the await → do NOT mutate the
                                                // NEW generation's freshly-cleared streak map
           this.recordStreak(key, outcome);
+          this.armInputRetry(key, workspacePath, toAgent, outcome, gen);
         } catch (err) {
           ports.log(`[mailbox] backstop delivery failed for ${toAgent}: ${String(err)}`);
         }
@@ -1244,6 +1568,7 @@ export class MailboxDrainer {
         if (this.generation !== gen) return; // stop() landed during the await → do NOT mutate the
                                              // NEW generation's freshly-cleared streak map
         this.recordStreak(key, outcome);
+        this.armInputRetry(key, workspacePath, toAgent, outcome, gen);
       } catch (err) {
         ports.log(`[mailbox] scheduled drain failed for ${toAgent}: ${String(err)}`);
       }

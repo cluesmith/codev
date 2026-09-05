@@ -2288,6 +2288,15 @@ async function handleSend(
       ...(outcome?.delivered.includes(row.id) && outcome.verified !== undefined
         ? { verified: outcome.verified }
         : {}),
+      // Issue #1473. `verified` alone was not enough for the SENDER — the case that motivated
+      // it is a human's Enter submitting our half-written body, where the header landed, so
+      // `verified` is `true` (or absent) and this human read a plain "Message delivered". The
+      // cause says which flag it is: `input-raced` (may be truncated or submitted early) or
+      // `no-echo` (header never appeared). Same id guard as `verified` — reported only when
+      // THIS pass is the one that delivered THIS row.
+      ...(outcome?.delivered.includes(row.id) && outcome.unverifiedCause !== undefined
+        ? { unverifiedCause: outcome.unverifiedCause }
+        : {}),
     });
     return;
   }
