@@ -128,3 +128,69 @@ shape repeated six times, so that shape is what is pinned. The *behaviour* —
 what `sanitizeAgentEnv` strips and keeps — is pinned properly by unit tests.
 
 <signal>PHASE_COMPLETE</signal>
+
+## PR + CMAP
+
+PR #1626. Four CMAP rounds, because the first design was wrong and the review
+caught it. Verdict history:
+
+| Round | gemini | codex | claude |
+|---|---|---|---|
+| 1 | APPROVE | **REQUEST_CHANGES** | APPROVE |
+| 2 | APPROVE | **REQUEST_CHANGES** | APPROVE |
+| 3 | — | COMMENT | — |
+| 4 | APPROVE | **REQUEST_CHANGES** (scope only) | APPROVE |
+
+### What the review actually changed
+
+**codex R1 — the allowlist was wrong, and this was the big one.** I had denied
+`CLAUDE_CODE_*` wholesale with an allowlist, arguing a missed marker (silent,
+unresumable) beats a missed config var (loud, harmless). codex said the second
+half of that was false. I checked the shipped binary instead of arguing: **594**
+distinct `CLAUDE_CODE_*` variables, overwhelmingly configuration. Every name
+codex cited is real — `USE_FOUNDRY`, `USE_MANTLE`, `USE_ANTHROPIC_AWS`,
+`SKIP_FOUNDRY_AUTH`, `OAUTH_REFRESH_TOKEN`, `OAUTH_SCOPES` — plus `API_BASE_URL`,
+`PROXY_URL`, `CLIENT_CERT`, `MANAGED_SETTINGS_PATH` that I'd have dropped too.
+Dropping a provider selector or a credential is not harmless; it is the #985
+metered-billing scar. Inverted to a session-identity denylist (4 prefix families
++ 10 names).
+
+**codex R2 — the doctor check had a false negative.** `towerStop` leaves
+shellpers running by design, so after a plain restart the daemon reads clean
+while its earlier agents keep the markers. My check read only the daemon and the
+hint said "restart Tower" as if that were sufficient. Now scans shellper envs
+too, with two honest remediation strings. **This machine was already in that
+state**: 71 shellpers, 5 contaminated, Tower clean — old check said `ok`.
+
+**claude R1 — `tower-cron.ts` spawned with raw `process.env`.** A genuine missed
+site. Fixed and added to SPAWN_SITES.
+
+**claude/codex R3-4 — spawn assertions were file-granular.** One of
+tower-routes' four sites could revert with the test still green. Now pins a call
+count per file plus forbidden raw-env shapes; verified by actually reverting one
+of four and watching 2 assertions fail.
+
+**claude R4 — two false-clean bugs of mine.** `readProcessEnv` returned `{}`
+(reads as "clean") when ps shows no env; and "Tower is clean" printed with no
+Tower running. Both fixed, verified live against pid 1.
+
+### Open disagreement for the architect
+
+codex R4 is REQUEST_CHANGES on **scope only** — 321 net production LOC vs
+BUGFIX's ~300. Its arithmetic is right. The breakdown: 366 added = 174 comment +
+21 blank + 171 code, and 24 of those code lines are the `getProcessesOnPort`
+move, so ~147 lines are genuinely new. codex itself says "the implementation is
+focused; no correctness or security defect was found," and gemini R4 reads the
+same diff as "without scope creep or unnecessary abstractions."
+
+My read: within BUGFIX's spirit — one helper module, no architecture change, and
+all three deliverables were named in the issue. But escalation is the
+architect's call, so it goes to them undecided. I declined to trim doc comments
+to hit a line count, and declined to drop the doctor check the issue asked for.
+
+Follow-ups filed rather than buried: #1627 (architect.ts unsanitized),
+#1628 (doctor custom port + ps spawn cost).
+
+CI: all 7 checks green.
+
+<signal>PHASE_COMPLETE</signal>
