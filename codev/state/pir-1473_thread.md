@@ -248,3 +248,60 @@ uses `Date.now()` while the gate uses `ports.now()`, so ANY test pairing a fake 
 `PtySessionConfig` as the seam.
 
 Revision 3 committed. Still at `plan-approval`.
+
+## Implement phase
+
+Plan revision 3 approved; implementing it as written. Four commits, tests alongside.
+
+### What I verified before writing code, rather than taking the plan's word
+
+The plan's xterm emission table is the load-bearing claim in the whole change — an under-strip
+holds mail with nobody typing, an over-strip silently stops counting real keys. So I enumerated
+`triggerDataEvent` in the pinned 5.5.0 bundle myself rather than trusting revision 3's table.
+It held up, and three details are worth recording:
+
+- The DA2 `linux` branch emits `e.params[0]+"c"` with **no ESC prefix** — a bare `"0c"`. Nothing
+  ESC-anchored can strip it, so on a `TERM=linux` client it would count as 2 chars of input.
+  Under-strip = spurious hold = fail-safe, and it is now visible as `busy:recent-input` rather
+  than silent. Left alone deliberately: an unanchored `0c` pattern would eat real typing.
+- X10 mouse goes out via `triggerBinaryEvent`, not `triggerDataEvent`, and `Terminal.tsx` wires
+  only `onData` — so it never reaches the server from the web client at all. The X10 survival
+  test is therefore about the filter's shape, not a live path.
+- `requestStatusString` builds DECRQSS as `ESC + "P1$r…" + ESC + "\"`, which the plan's pattern
+  matches. Confirmed rather than assumed, because that one is easy to get wrong by an ESC.
+
+### Two deviations from the plan, both forced
+
+1. **§3's type split as literally specified does not compile.** The plan keeps `WritableSession`
+   at a one-arg `write` and types the paced seam as `WritableSession & { id; inputSeq }` — but
+   the wrapper body calls `session.write(data, 'delivery')`, which is a two-arg call against a
+   one-arg type. Introduced a standalone `PacedWriteSession` instead (id + inputSeq + an
+   origin-taking `write`). `WritableSession` is untouched, so no helper or fake churns, and a
+   one-arg `write` is still assignable to the seam — which is what keeps the delivery module's
+   structural `DeliverySession` fakes working without an origin they never pass.
+
+2. **A token that moved is not necessarily input.** The plan folds `inputSeq` into `ringToken`
+   and then re-holds with `detail: 'recent-input'` on any token mismatch. But the token also
+   carries `bytesWritten` and the geometry, so an ordinary repaint would have been reported to
+   every operator surface as "a human is at the keyboard" — a false statement on the row. I
+   sample `inputSeqBefore` separately and attribute: `recent-input` only when the input half is
+   what moved, plain detail-less `busy` otherwise. Same guard, honest label.
+
+### Test-double migration — the plan's classification was right about the shape, wrong about one file
+
+`spec-1313-paced-write-drop.test.ts` was predicted to break at COMPILE time. It does not:
+`packages/codev/tsconfig.json` excludes `**/__tests__/**`, so no test in this repo is
+type-checked by the build at all. Every double therefore fails (or doesn't) at RUNTIME only,
+which makes `tower-routes.test.ts` the one that actually mattered — it reaches the live mailbox
+binding, so a missing `lastInputAt` gives `now() - undefined` = NaN, and NaN fails the settle's
+positive comparison, holding every send test in the file. That one is now commented in place so
+the next person adding a field knows why it is not optional.
+
+### Baseline discipline
+
+Ran the suite at the merge-base in a scratch worktree before trusting any red. Baseline: 1 file
+failing (`worktree-write-guard`, environmental — it passes in this worktree). Post-change:
+285 files pass, 0 fail. So every red I saw mid-flight was mine, and every one is now green.
+
+Still to do: the manual verification steps at the dev-approval gate — they are why this is PIR
+and not AIR, and the 300 ms constant has a rollback criterion attached to step 2.
