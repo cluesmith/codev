@@ -106,6 +106,41 @@ const TERMINAL_REPLY_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
+ * Every recognized terminal reply in `data`, in the order the patterns match them.
+ *
+ * Diagnostics only — {@link stripTerminalReplies} does the real work and never calls this. It
+ * backs the `AF_LOG_INPUT_SIGNAL` trace, whose whole purpose is to let a human SEE which bytes
+ * were treated as a reply and which survived as input, rather than infer it from a hold that
+ * did or did not happen.
+ */
+export function terminalReplyMatches(data: string): string[] {
+  const found: string[] = [];
+  for (const pattern of TERMINAL_REPLY_PATTERNS) {
+    for (const m of data.matchAll(pattern)) found.push(m[0]);
+  }
+  return found;
+}
+
+/**
+ * Render a byte run so it can be read in a log line: ESC as `\e`, other C0 controls and DEL as
+ * `\xNN`, everything else literal.
+ *
+ * Printing raw ESC to a terminal log would make the log itself move the cursor and repaint —
+ * the diagnostic would corrupt the thing it is diagnosing, and the reply bytes under
+ * investigation would be the ones that vanished.
+ */
+export function escapeBytes(data: string): string {
+  let out = '';
+  for (const ch of data) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (ch === '\x1b') out += '\\e';
+    else if (code < 0x20 || code === 0x7f) out += `\\x${code.toString(16).padStart(2, '0')}`;
+    else out += ch;
+  }
+  return out;
+}
+
+/**
  * The human-input residue of one upstream chunk: `data` with every recognized terminal reply
  * removed. Returns `''` when the chunk was nothing but replies — the caller reads that as "no
  * human input here" and leaves the gate's input signal untouched.

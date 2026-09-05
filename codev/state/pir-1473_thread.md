@@ -375,3 +375,66 @@ not the code; the assertion now checks the ESC reached the terminal.
 
 Still outstanding: manual steps 1, 3 and 4, plus the real-harness half of step 2. Named
 precisely in the transcript and not marked done.
+
+## The human runbook (`codev/evidence/1473-human-runbook.md`)
+
+Manual steps 1, 2 (real-harness half), 3 and 4 need hands. This is the tooling and the script
+for them, written so a human who has read neither the plan nor the diff can execute it.
+
+### Why the runbook cannot say `afx`
+
+`afx send` and `afx inbox` build `new TowerClient()` with no port, so they always talk to the
+live Tower on 4100 — where two real builders are running. A runbook that said `afx send` would
+drive them. `scripts/pir-1473-human-harness.mts` therefore carries its own `send` / `inbox`
+against an isolated Tower on 14793 (own DB, own workspace, own shellper socket dir), rendering
+through the SAME shared `formatVerdict`, so the pass string in the runbook is the string a real
+operator sees.
+
+It also must not say `afx attach`: attach talks to the shellper socket directly and never
+touches `PtySession`, so step 1 would log zero chunks and read as a pass. That is residual 3,
+and it is the one way this runbook could certify nothing while looking green.
+
+### Four things the smoke test found that guessing would have missed
+
+1. **`GET /api/inbox` answers with a bare array**, not `{messages:[…]}`. My first `inbox`
+   printed "(no held messages)" over a populated mailbox — which in step 4 is precisely the
+   FAIL shape. A runbook whose pass criterion can be faked by a client bug is worthless, so
+   this one is now read the way `afx inbox` reads it.
+2. **Ctrl-C on `up` is not teardown.** Shellper sessions are detached by design, so the harness
+   processes outlived the Tower and sat in `ps` looking exactly like real builders. Added a
+   `down` subcommand that matches on the isolated run directory in each process's own argv —
+   a string nothing on the live Tower can carry — and the runbook now ends with it.
+3. **Activating the workspace auto-creates an `architect` terminal** running `claude`. So
+   "the last terminal in the list" is not reliably the probe; `up` now writes the probe's id to
+   a file and `calibrate` reads it. Calibrating the wrong app would have produced a number that
+   looked fine and meant nothing.
+4. **A human cannot race the 300 ms settle from a second terminal.** Step 3 (mouse) needs a
+   click within the settle of the gate's sample. `send --delay N` turns that unrepeatable race
+   into an 8-second interval the human can simply be clicking through; step 4 uses the same
+   trick to place the send at ten different points in a keystroke stream.
+
+### The trace, verified end to end
+
+`AF_LOG_INPUT_SIGNAL=1` on a live Tower, bytes pushed over the terminal WebSocket:
+
+```
+[input-signal 3c09c9db] raw="\e[?1;2c"     stripped="\e[?1;2c"  survived=<NOTHING> inputSeq=0→0
+[input-signal 3c09c9db] raw="x"            stripped=<none>      survived="x"       inputSeq=0→1
+[input-signal 3c09c9db] raw="a\e[12;40Rb"  stripped="\e[12;40R" survived="ab"      inputSeq=1→3
+```
+
+A reply moves nothing, a keystroke moves the counter, and a mixed chunk splits correctly. The
+runbook's step 1 also asks the human to type one character *after* the hands-off minute — a
+silent trace and a clean trace look identical, and without that check a wiring failure would
+read as the strongest possible pass.
+
+`escapeBytes` exists so these lines cannot repaint the terminal they are being read in; a test
+now asserts no recognized reply survives it with a raw control byte.
+
+### State
+
+Build green. Full suite: **286 files passed, 3 skipped, 5819 tests, 0 failures** — unchanged
+from before this work. Live Tower on 4100 verified listening and untouched after every run;
+isolated port 14793 free; no leftover processes.
+
+Still parked at `dev-approval`. Not opening the PR, not approving the gate.

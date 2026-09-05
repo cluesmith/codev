@@ -9,7 +9,12 @@
 
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
-import { stripTerminalReplies, XTERM_REPLY_TABLE_VERSION } from '../terminal-replies.js';
+import {
+  stripTerminalReplies,
+  terminalReplyMatches,
+  escapeBytes,
+  XTERM_REPLY_TABLE_VERSION,
+} from '../terminal-replies.js';
 
 const ESC = '\x1b';
 const BEL = '\x07';
@@ -155,5 +160,49 @@ describe('the reply table is pinned to a specific xterm version', () => {
     const require = createRequire(import.meta.url);
     const pkg = require('@xterm/xterm/package.json') as { version: string };
     expect(pkg.version).toBe(XTERM_REPLY_TABLE_VERSION);
+  });
+});
+
+describe('terminalReplyMatches / escapeBytes — the AF_LOG_INPUT_SIGNAL trace', () => {
+  // Manual step 1 is "sit with hands off the keyboard and read the log". These two functions
+  // ARE that reading. If they lie, the human's PASS is a false pass, and the filter's whole
+  // correctness argument rests on it.
+  it('names each recognized reply in a chunk, so the human sees WHAT was stripped', () => {
+    expect(terminalReplyMatches(`${ESC}[?1;2c${ESC}[0n`)).toEqual([`${ESC}[?1;2c`, `${ESC}[0n`]);
+  });
+
+  it('reports no matches for a chunk that is purely typed text', () => {
+    expect(terminalReplyMatches('hello')).toEqual([]);
+  });
+
+  it('agrees with stripTerminalReplies about a mixed chunk', () => {
+    const chunk = `a${ESC}[12;40Rb`;
+    expect(terminalReplyMatches(chunk)).toEqual([`${ESC}[12;40R`]);
+    expect(stripTerminalReplies(chunk)).toBe('ab');
+  });
+
+  it('has no cross-call state either (same `g` regexes)', () => {
+    const seq = `${ESC}[0n`;
+    expect(terminalReplyMatches(seq)).toEqual([seq]);
+    expect(terminalReplyMatches(seq)).toEqual([seq]);
+  });
+
+  it('renders ESC as \\e so a logged reply cannot repaint the terminal reading the log', () => {
+    expect(escapeBytes(`${ESC}[?1;2c`)).toBe('\\e[?1;2c');
+    expect(escapeBytes(escapeBytes(`${ESC}[0n`))).not.toContain(ESC);
+  });
+
+  it('renders other C0 controls and DEL as \\xNN, and leaves printable bytes alone', () => {
+    expect(escapeBytes(`${BEL}\r\n\x7f`)).toBe('\\x07\\x0d\\x0a\\x7f');
+    expect(escapeBytes('plain text 123')).toBe('plain text 123');
+  });
+
+  it('emits no raw control byte for any reply the filter recognizes', () => {
+    // The trace prints these verbatim into a live terminal. One unescaped ESC and the operator
+    // is reading a log that has moved their cursor.
+    for (const reply of terminalReplyMatches(`${ESC}[?1;2c${ESC}[0n${ESC}]11;rgb:0000/0000/0000${BEL}`)) {
+      // eslint-disable-next-line no-control-regex
+      expect(escapeBytes(reply)).not.toMatch(/[\x00-\x1f\x7f]/);
+    }
   });
 });

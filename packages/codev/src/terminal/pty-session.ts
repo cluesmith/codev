@@ -9,7 +9,23 @@ import { EventEmitter } from 'node:events';
 import type { IPty } from 'node-pty';
 import { RingBuffer } from './ring-buffer.js';
 import { SessionScreen } from './session-screen.js';
-import { stripTerminalReplies } from './terminal-replies.js';
+import { stripTerminalReplies, terminalReplyMatches, escapeBytes } from './terminal-replies.js';
+
+/**
+ * Set `AF_LOG_INPUT_SIGNAL=1` to trace every external write's effect on the delivery gate's
+ * input signal (Issue #1473): the raw chunk, what the reply filter removed, and what survived
+ * as human input.
+ *
+ * It exists because the filter's correctness is otherwise INVISIBLE. An under-strip shows up as
+ * a hold with nobody at the keyboard and an over-strip shows up as nothing at all, and neither
+ * can be told apart from normal operation by watching the outside of the system. The one
+ * measurement that settles it — sit with hands off the keyboard and see whether anything is
+ * recorded as input — needs this trace to be readable.
+ *
+ * Read once at module load: this is on the write path for every keystroke, and a per-write
+ * `process.env` lookup is a string-map hit on the hottest line in the terminal layer.
+ */
+const LOG_INPUT_SIGNAL = process.env.AF_LOG_INPUT_SIGNAL === '1';
 import type { IShellperClient } from './shellper-client.js';
 import { isDeliberateExit } from './shellper-protocol.js';
 
@@ -694,6 +710,7 @@ export class PtySession extends EventEmitter {
   write(data: string, origin: WriteOrigin = 'external'): boolean {
     if (origin === 'external') {
       const human = stripTerminalReplies(data);
+      if (LOG_INPUT_SIGNAL) this.logInputSignal(data, human);
       if (human) this.recordUserInput(human);
     }
     if (this._shellperBacked) {
@@ -999,6 +1016,24 @@ export class PtySession extends EventEmitter {
    */
   get bytesWritten(): number {
     return this.ringBuffer.bytesWritten;
+  }
+
+  /**
+   * One `AF_LOG_INPUT_SIGNAL` trace line. See {@link LOG_INPUT_SIGNAL}.
+   *
+   * `survived=<NOTHING>` is the line to look for with hands off the keyboard: it means the
+   * chunk was entirely terminal replies and moved no input signal. A line with a non-empty
+   * `survived` while nobody is typing names the exact bytes the filter failed to recognise —
+   * which is the whole finding, so they are printed escaped rather than summarised.
+   */
+  private logInputSignal(raw: string, survived: string): void {
+    const stripped = terminalReplyMatches(raw);
+    console.log(
+      `[input-signal ${this.id.slice(0, 8)}] raw="${escapeBytes(raw)}" ` +
+        `stripped=${stripped.length === 0 ? '<none>' : stripped.map((r) => `"${escapeBytes(r)}"`).join(' ')} ` +
+        `survived=${survived === '' ? '<NOTHING>' : `"${escapeBytes(survived)}"`} ` +
+        `inputSeq=${this._inputSeq}→${this._inputSeq + survived.length}`,
+    );
   }
 
   /**
