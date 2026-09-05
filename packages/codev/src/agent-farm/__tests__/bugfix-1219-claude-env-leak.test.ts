@@ -155,17 +155,30 @@ describe('bugfix-1219 — findClaudeSessionMarkers', () => {
  * The alternative — booting a Tower and a shellper to read `ps eww` on the
  * grandchild — is exactly the kind of non-deterministic test this repo already
  * confines to `.e2e.test.ts`. What actually regressed here is a *code shape*:
- * six sites each hand-rolled `{ ...process.env }` and deleted one variable. So
- * that shape is what gets pinned. If a site is refactored, this test fails loudly
- * and the refactorer has to reassert the invariant deliberately.
+ * seven sites across six files each hand-rolled `{ ...process.env }` and deleted
+ * one variable. So that shape is what gets pinned.
+ *
+ * Both the count and the negative matter (CMAP review): asserting only that a
+ * file mentions `sanitizeAgentEnv` somewhere would let ONE of `tower-routes.ts`'s
+ * four spawn sites revert while the other three keep the test green. The count
+ * catches a removal, and `FORBIDDEN` catches the specific shape a reverted or
+ * copy-pasted site would take.
  */
-const SPAWN_SITES = [
-  'agent-farm/commands/tower.ts',       // the daemon itself
-  'agent-farm/servers/tower-routes.ts', // builder terminals and workspace shells
-  'agent-farm/servers/tower-instances.ts', // architect launch
-  'agent-farm/servers/tower-terminals.ts', // architect reconnect / auto-restart
-  'agent-farm/servers/tower-cron.ts',    // cron tasks, which may launch an agent
-  'terminal/session-manager.ts',        // the shellper daemon
+const SPAWN_SITES: Array<{ file: string; calls: number; what: string }> = [
+  { file: 'agent-farm/commands/tower.ts', calls: 1, what: 'the daemon itself' },
+  { file: 'agent-farm/servers/tower-routes.ts', calls: 4, what: 'builder terminals + workspace shells, and both non-persistent fallbacks' },
+  { file: 'agent-farm/servers/tower-instances.ts', calls: 2, what: 'architect launch: main + siblings' },
+  { file: 'agent-farm/servers/tower-terminals.ts', calls: 2, what: 'architect reconnect: startup reconcile + on-the-fly' },
+  { file: 'agent-farm/servers/tower-cron.ts', calls: 1, what: 'cron tasks, which may launch an agent' },
+  { file: 'terminal/session-manager.ts', calls: 1, what: 'the shellper daemon' },
+];
+
+/** The shapes a reverted or copy-pasted spawn site would take. */
+const FORBIDDEN: Array<{ pattern: RegExp; why: string }> = [
+  { pattern: /env: process\.env\b/, why: 'spawns with the raw inherited environment' },
+  { pattern: /\{\s*\.\.\.process\.env\b/, why: 'spreads the raw inherited environment' },
+  { pattern: /\.\.\.\(env \|\| process\.env\)/, why: 'spreads the raw inherited environment' },
+  { pattern: /delete\s+\w+\[['"]CLAUDECODE['"]\]/, why: 'hand-rolls the old CLAUDECODE-only strip' },
 ];
 
 function readSource(relative: string): string {
@@ -173,26 +186,23 @@ function readSource(relative: string): string {
 }
 
 describe('bugfix-1219 — every Tower spawn path routes through the sanitizer', () => {
-  for (const site of SPAWN_SITES) {
-    it(`${site} sanitizes the env it spawns with`, () => {
-      const src = readSource(site);
-      expect(src, `${site} must import the shared sanitizer`).toMatch(/agent-env\.js'/);
-      expect(src, `${site} must call sanitizeAgentEnv`).toContain('sanitizeAgentEnv(');
+  for (const { file, calls, what } of SPAWN_SITES) {
+    it(`${file} sanitizes all ${calls} of its spawn env(s) — ${what}`, () => {
+      const src = readSource(file);
+      expect(src, `${file} must import the shared sanitizer`).toMatch(/agent-env\.js'/);
+      // Count, not mere presence: one site reverting inside a multi-site file
+      // must fail even while its siblings still call the sanitizer.
+      const actual = src.match(/sanitizeAgentEnv\(/g)?.length ?? 0;
+      expect(actual, `${file} should call sanitizeAgentEnv() ${calls}x (${what})`).toBe(calls);
     });
 
-    it(`${site} no longer hand-rolls a CLAUDECODE-only strip`, () => {
-      // The pre-fix shape. Its absence is the regression guard: a new spawn site
-      // copy-pasted from an old one would reintroduce the leak for everything
-      // except CLAUDECODE.
-      expect(readSource(site)).not.toMatch(/delete\s+\w+\[['"]CLAUDECODE['"]\]/);
+    it(`${file} keeps no raw-environment spawn shape`, () => {
+      const src = readSource(file);
+      for (const { pattern, why } of FORBIDDEN) {
+        expect(src, `${file} ${why} (${pattern})`).not.toMatch(pattern);
+      }
     });
   }
-
-  it('tower.ts daemonizes with a sanitized env, not raw process.env', () => {
-    const src = readSource('agent-farm/commands/tower.ts');
-    expect(src).toContain('env: sanitizeAgentEnv(process.env)');
-    expect(src).not.toContain('env: process.env,');
-  });
 });
 
 describe('bugfix-1219 — codev doctor surfaces a contaminated Tower', () => {
