@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
@@ -97,15 +97,29 @@ const { getGlobalDb } = await import('../db/index.js');
 const mailbox = await import('../db/mailbox.js');
 const { normalizeWorkspacePath } = await import('../utils/workspace-path.js');
 
-/** A real directory so `normalizeWorkspacePath`'s realpathSync resolves on both sides. */
-const workspaceRoot = realpathSync(mkdtempSync(join(tmpdir(), 'air-1477-cleanup-')));
-/** Exactly what the mailbox keys rows under. */
-const WS = normalizeWorkspacePath(workspaceRoot);
+/**
+ * TWO names for one directory, and the difference is the whole point.
+ *
+ * `WS` is the canonical path — what the mailbox keys its rows under. `workspaceRoot` is a SYMLINK
+ * to it, and is what `getConfig()` hands `cleanupBuilder`, exactly as a config pointing at a
+ * symlinked checkout would. So `config.workspaceRoot !== WS` as raw strings, and only
+ * `normalizeWorkspacePath` collapses one onto the other.
+ *
+ * An earlier version of this fixture used `join(realRoot, 'nested', '..')` and was VACUOUS: that
+ * collapses lexically inside `path.join` before normalization is ever reached, so the raw and
+ * normalized strings were already identical and the suite stayed green with
+ * `normalizeWorkspacePath` deleted from `cleanup.ts`. A symlink cannot be resolved lexically —
+ * only a real `realpathSync` gets from one to the other.
+ */
+const WS = realpathSync(mkdtempSync(join(tmpdir(), 'air-1477-cleanup-')));
+const workspaceRoot = join(realpathSync(tmpdir()), `air-1477-cleanup-link-${process.pid}`);
+symlinkSync(WS, workspaceRoot);
 
 afterAll(() => {
   db?.close();
   db = null;
-  rmSync(workspaceRoot, { recursive: true, force: true });
+  unlinkSync(workspaceRoot); // remove the symlink itself, never its target's contents
+  rmSync(WS, { recursive: true, force: true });
 });
 
 function config(overrides: Partial<Config> = {}): Config {
@@ -188,15 +202,18 @@ describe('Issue #1477 — cleanup() dismisses the removed builder\'s held mail',
   });
 
   it('normalizes the configured workspaceRoot to the path the mailbox keyed rows under', async () => {
-    // A non-canonical but equivalent workspaceRoot — the round-trip only matches because the
-    // call site normalizes. A raw `config.workspaceRoot` would key a different string and dismiss
-    // nothing.
-    mockGetConfig.mockReturnValue(config({ workspaceRoot: join(workspaceRoot, 'nested', '..') }));
+    // Guard the fixture itself: if these two ever became the same string, this test would go
+    // quietly vacuous again rather than failing.
+    expect(workspaceRoot).not.toBe(WS);
+    expect(normalizeWorkspacePath(workspaceRoot)).toBe(WS);
+
     const held = hold('air-1477', 1000);
     mockLoadState.mockReturnValue({ builders: [builder('air-1477')], architects: [], utils: [], annotations: [] });
 
     await cleanup({ project: 'air-1477' });
 
+    // Only reachable because `cleanup.ts:389` normalizes: keying on the raw symlinked
+    // `config.workspaceRoot` matches no row, and this stays `held`.
     expect(mailbox.getById(getGlobalDb(), held.id)?.status).toBe('dismissed');
   });
 

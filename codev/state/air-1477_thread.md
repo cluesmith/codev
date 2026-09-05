@@ -83,3 +83,61 @@ would fail.
   pins current behaviour and says so explicitly, so the discrepancy is visible rather than silent.
 - 2026-09-05: Final: 13 tests, 5 mutation points verified (workspace scope, sender affinity,
   architect-skip, scheduleDrain target, clear-notice key).
+
+## Review round 2 (PR #1625, architect 3-way CMAP)
+
+Verdicts: gemini APPROVE-HIGH, codex COMMENT-MEDIUM, claude REQUEST_CHANGES-HIGH. One blocker.
+
+**The blocker was real, and it was mine.** `air-1477-cleanup-dismiss-invocation.test.ts`'s
+"normalizes the configured workspaceRoot" test was VACUOUS. I reproduced it before fixing:
+stripping `normalizeWorkspacePath` from `cleanup.ts:389` left all 4 tests green.
+
+Two independent mistakes stacked:
+1. `workspaceRoot` was already `realpathSync`'d at creation, so `normalizeWorkspacePath` on it was
+   the identity.
+2. The "non-canonical" override `join(workspaceRoot, 'nested', '..')` collapses LEXICALLY inside
+   `path.join` — no filesystem access — so it was byte-identical to `workspaceRoot` before
+   normalization was ever reached.
+
+So `config.workspaceRoot === WS` in every test, and the assertion I described as "only reachable
+because the call site normalizes" was reachable no matter what. My inline comment and the matching
+PR-description line were both false as written.
+
+Fix: the fixture now creates a real dir as `WS` and a SYMLINK to it as `workspaceRoot`, and the
+symlink is what `getConfig()` returns — so every test in the file now traverses the normalization,
+not just one. A symlink cannot be resolved lexically; only `realpathSync` gets from one to the
+other. Added a guard (`expect(workspaceRoot).not.toBe(WS)`) so the fixture cannot silently
+degenerate again. Confirmed by mutation: the fixed test now FAILS (3 tests) without
+`normalizeWorkspacePath`.
+
+Lesson worth keeping: I "verified" this test by mutation in round 1 — but only mutated the *call*,
+never the *argument*. Deleting `dismissHeldForAgent` failed the test, which felt like proof, so I
+never asked whether the normalization specifically was pinned. A mutation sweep is only as good as
+the set of mutations you think to try, and the ones you skip are exactly the ones you were already
+confident about.
+
+Also fixed (both confirmed by reading the source):
+- `scheduleDrain.mockRestore()` was the last statement of its `it` body, so a failed assertion
+  above it would leak the spy into later tests. Moved to an `afterEach` (`vi.restoreAllMocks()`).
+- The architect fixture used `new Date().toISOString()` for both architects, which can tie. Now
+  takes an explicit `startedAt`, and the id-order test registers `zeta` with the EARLIER timestamp
+  so id order and registration order genuinely disagree. Confirmed by mutation: switching
+  `getArchitects` to `ORDER BY started_at` now fails that test (it would not have before).
+
+Non-blocking, done: cross-referenced `spec-1313-cleanup-dismiss.test.ts`'s header to the invocation
+test so the seam-vs-wiring split is discoverable from either side.
+
+Non-blocking, NOT done, with reasons:
+- `scheduleDrain`'s workspace argument is genuinely unpinnable from outside:
+  `resolveRegistryArchitect` returns the workspace it was asked about, so `owner.workspacePath` and
+  `info.workspacePath` are equal by construction. Documented in a comment rather than faked.
+- `loadConfig(homedir())` hermeticity is inherited from production (`ensureDrainer`) and
+  try/catch-guarded; fixing it would need a production change.
+- The `spec-755-lookup-builder.test.ts` `GLOBAL_SCHEMA` follow-up is explicitly for MAINTAIN.
+
+Architect is holding the `resolveRegistryArchitect` id-order issue for the human — I am NOT filing
+it. My test keeps pinning current behaviour with the divergence comment unchanged, as instructed.
+
+Mutation sweep now 7 points, all caught: strip normalize / drop workspace scope / delete dismissal
+call / drop sender affinity / delete architect-skip / retarget scheduleDrain / getArchitects
+registration order.

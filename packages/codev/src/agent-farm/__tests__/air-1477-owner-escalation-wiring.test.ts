@@ -15,7 +15,7 @@
  * as they run in production.
  */
 
-import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdtempSync, mkdirSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,8 +56,12 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function architect(name: string): ArchitectState {
-  return { name, cmd: 'claude', startedAt: new Date().toISOString() };
+/**
+ * `startedAt` is explicit, never `new Date()`: two architects created in the same millisecond tie,
+ * and a tie would make any registration-order assertion arbitrary rather than discriminating.
+ */
+function architect(name: string, startedAt = '2026-01-01T00:00:00.000Z'): ArchitectState {
+  return { name, cmd: 'claude', startedAt };
 }
 
 /** Register a builder whose worktree places it in WS (upsertBuilder derives the workspace). */
@@ -107,6 +111,12 @@ describe('Issue #1477 — escalateHeldToOwner owner-resolution wiring', () => {
     logs.length = 0;
   });
 
+  // The drainer is a module singleton shared by every test in this file, so a spy on it must be
+  // torn down unconditionally — an in-body restore is skipped when an assertion above it fails.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('never raises a notice about a starving ARCHITECT — not even to a different architect', () => {
     setArchitectByName(WS, 'main', architect('main'));
     setArchitectByName(WS, 'zeta', architect('zeta'));
@@ -152,8 +162,10 @@ describe('Issue #1477 — escalateHeldToOwner owner-resolution wiring', () => {
   });
 
   it('falls back to the workspace\'s first architect (getArchitects\' id order) when there is no `main`', () => {
-    // Registered zeta-then-alpha on purpose: `resolveRegistryArchitect` takes `architects[0]`
-    // from `getArchitects`, which is `ORDER BY id` — LEXICOGRAPHIC, not insertion order.
+    // Registered zeta first and, crucially, with the EARLIER `started_at`. So id order and
+    // registration order disagree, and only one of them can produce `alpha`:
+    // `resolveRegistryArchitect` takes `architects[0]` from `getArchitects`, which is
+    // `ORDER BY id` — LEXICOGRAPHIC, not registration order.
     //
     // This asserts what ships, and what ships is not quite what the surrounding prose promises:
     // the doc comments say "first registered", and both `loadState`
@@ -162,8 +174,8 @@ describe('Issue #1477 — escalateHeldToOwner owner-resolution wiring', () => {
     // offline hold can name a different architect than a live send would. That divergence is a
     // production question, not something a test-only change should quietly fix — the test pins
     // current behaviour so the discrepancy is visible rather than silent.
-    setArchitectByName(WS, 'zeta', architect('zeta'));
-    setArchitectByName(WS, 'alpha', architect('alpha'));
+    setArchitectByName(WS, 'zeta', architect('zeta', '2026-01-01T00:00:00.000Z'));
+    setArchitectByName(WS, 'alpha', architect('alpha', '2026-06-01T00:00:00.000Z'));
     registerBuilder('air-1477'); // legacy row: no spawning architect recorded
 
     expect(ports().escalateHeldToOwner!(info())).toBe(true);
@@ -210,13 +222,17 @@ describe('Issue #1477 — escalateHeldToOwner owner-resolution wiring', () => {
     // Spy on the module's drainer singleton — the same instance `escalateHeldToOwner` reaches via
     // `ensureDrainer()`. Without this the glue is invisible: the drainer is never started in a unit
     // test, so `scheduleDrain` no-ops and deleting the call would leave every other test green.
+    // Restored by the suite's afterEach, NOT here: a failed assertion below would skip an
+    // in-body restore and leak the spy into every later test in the file.
     const scheduleDrain = vi.spyOn(getMailboxDrainer(), 'scheduleDrain').mockResolvedValue();
 
     expect(ports().escalateHeldToOwner!(info())).toBe(true);
 
     // The drain targets the OWNER (who must read the notice), never the starving agent.
+    // NB the workspace argument is NOT pinned here: production passes `owner.workspacePath`, and
+    // `resolveRegistryArchitect` returns the very workspace it was asked about, so owner and
+    // starving workspace are equal by construction and swapping them is undetectable from outside.
     expect(scheduleDrain).toHaveBeenCalledWith(WS, 'alpha');
-    scheduleDrain.mockRestore();
   });
 
   it('clearHeldOwnerNotice dismisses the pending notice once the starvation is over', () => {
