@@ -20,7 +20,12 @@ import {
   findClaudeSessionMarkers,
   isClaudeSessionMarker,
 } from '../../lib/agent-env.js';
-import { checkTowerEnv, readProcessEnv, TOWER_ENV_RESTART_HINT } from '../../commands/doctor.js';
+import {
+  checkTowerEnv,
+  readProcessEnv,
+  TOWER_ENV_RESTART_HINT,
+  TOWER_ENV_SESSION_HINT,
+} from '../../commands/doctor.js';
 
 /** The marker set observed on a real contaminated Tower via `ps eww` (#1219). */
 const OBSERVED_MARKERS = {
@@ -191,6 +196,8 @@ describe('bugfix-1219 — every Tower spawn path routes through the sanitizer', 
 });
 
 describe('bugfix-1219 — codev doctor surfaces a contaminated Tower', () => {
+  const clean = () => ({ PATH: '/usr/bin' });
+
   it('warns, names the markers, and says how to fix it', () => {
     const result = checkTowerEnv(() => ({ PATH: '/usr/bin', ...OBSERVED_MARKERS }));
     expect(result.status).toBe('warn');
@@ -199,16 +206,52 @@ describe('bugfix-1219 — codev doctor surfaces a contaminated Tower', () => {
     expect(result.recommendation).toBe(TOWER_ENV_RESTART_HINT);
   });
 
-  it('passes a clean Tower', () => {
-    const result = checkTowerEnv(() => ({ PATH: '/usr/bin' }));
+  it('passes a clean Tower with clean sessions', () => {
+    const result = checkTowerEnv(clean, () => [clean(), clean()]);
     expect(result.status).toBe('ok');
     expect(result.markers).toEqual([]);
+    expect(result.contaminatedSessions).toBe(0);
   });
 
   it('skips rather than warns when no Tower is running', () => {
     const result = checkTowerEnv(() => null);
     expect(result.status).toBe('skipped');
     expect(result.recommendation).toBeUndefined();
+  });
+
+  it('still warns when Tower is clean but its earlier sessions are not', () => {
+    // The false negative the CMAP review caught: shellpers are detached and
+    // survive `afx tower stop` by design, so after a plain restart a
+    // daemon-only check reports "clean" while the agents spawned by the
+    // contaminated Tower are still running and still unresumable.
+    const result = checkTowerEnv(clean, () => [
+      { ...clean(), CLAUDE_CODE_CHILD_SESSION: 'true' },
+      clean(),
+      { ...clean(), CLAUDE_CODE_SESSION_ID: 'abc' },
+    ]);
+    expect(result.status).toBe('warn');
+    expect(result.markers).toEqual([]);
+    expect(result.contaminatedSessions).toBe(2);
+    expect(result.summary).toContain('2 running session(s)');
+    expect(result.recommendation).toBe(TOWER_ENV_SESSION_HINT);
+  });
+
+  it('reports contaminated sessions alongside a contaminated Tower', () => {
+    const result = checkTowerEnv(
+      () => ({ ...clean(), ...OBSERVED_MARKERS }),
+      () => [{ ...clean(), CLAUDE_CODE_CHILD_SESSION: 'true' }],
+    );
+    expect(result.status).toBe('warn');
+    expect(result.contaminatedSessions).toBe(1);
+    expect(result.summary).toContain('1 running session(s) already carry them');
+  });
+
+  it('never tells the user a plain Tower restart is sufficient on its own', () => {
+    // `afx tower stop` deliberately leaves shellpers running, so a hint that
+    // stopped at "restart Tower" would read as a full fix and would not be one.
+    expect(TOWER_ENV_RESTART_HINT).toContain('restart each affected agent');
+    expect(TOWER_ENV_RESTART_HINT).toContain('leaves existing shellper sessions running');
+    expect(TOWER_ENV_SESSION_HINT).toContain('restart each affected agent');
   });
 });
 

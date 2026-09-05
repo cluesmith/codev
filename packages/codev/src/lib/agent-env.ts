@@ -33,10 +33,15 @@
  * subscription credential and reroutes CMAP to the metered API (the #985 scar).
  *
  * So the rule is: **strip what is per-session identity, keep everything else.**
- * Identity is a small, stable, nameable set; configuration is not. A marker
- * added upstream that this list has not caught up with is a bug to fix here —
- * and `codev doctor`'s Tower Environment check plus Claude Code's own
- * "transcript saving is off" banner are what surface it.
+ * Identity is a small, stable, nameable set; configuration is not.
+ *
+ * The cost of that direction is real and worth stating plainly: a marker added
+ * upstream that this list has not caught up with will pass through, and nothing
+ * here will notice. `codev doctor`'s Tower Environment check is not a backstop
+ * for that case — it classifies with this same list, so it is blind to exactly
+ * what it would need to catch. Claude Code's own "transcript saving is off"
+ * banner is the only real signal, and it is how #1219 was found in the first
+ * place. Adding the new name here is the fix when that happens.
  */
 
 /**

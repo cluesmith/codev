@@ -134,6 +134,8 @@ export interface TowerEnvCheck {
   status: 'ok' | 'warn' | 'skipped';
   /** Claude Code session markers found on the running Tower daemon. */
   markers: string[];
+  /** Running shellper daemons whose own env still carries markers. */
+  contaminatedSessions: number;
   /** Human-readable one-liner. No colour codes. */
   summary: string;
   /** Present only when `status === 'warn'`. */
@@ -141,11 +143,27 @@ export interface TowerEnvCheck {
 }
 
 /**
- * The exact command that restarts Tower with a clean environment (#1219).
- * Kept as one string so the doctor warning and the docs cannot drift apart.
+ * Remediation for a Tower daemon that inherited the markers (#1219).
+ *
+ * A plain restart is enough for the *daemon*, but deliberately not for what it
+ * already spawned: `towerStop` leaves shellpers running on purpose
+ * (`commands/tower.ts` — they are detached so terminals survive a restart), so
+ * their agent processes keep the markers until each is restarted. Saying only
+ * "restart Tower" would be a half-truth that reads as a full fix.
  */
 export const TOWER_ENV_RESTART_HINT =
-  'restart Tower to clear them: afx tower stop && afx tower start';
+  'restart Tower (afx tower stop && afx tower start), then restart each affected agent — '
+  + 'a plain restart leaves existing shellper sessions running with the markers';
+
+/**
+ * Remediation when Tower itself is clean but sessions it spawned earlier are not.
+ *
+ * The force-kill flag is named but not recommended outright: it ends every
+ * running agent on the machine, which is a bigger hammer than most cases need.
+ */
+export const TOWER_ENV_SESSION_HINT =
+  'restart each affected agent to clear them (or, to end every running session at once, '
+  + 'afx tower stop --force-kill-all-child-processes — this kills all agents)';
 
 /**
  * Decide what the "Tower environment" doctor section should say (#1219).
@@ -157,30 +175,69 @@ export const TOWER_ENV_RESTART_HINT =
  * something other than `afx tower start`) can still be carrying them, and that
  * is invisible until a crash-recovery attempt fails.
  *
- * `readEnv` is injected so the decision is unit-testable without a live daemon;
- * `doctor()` passes the real `ps eww` reader. A `null` return means no Tower is
- * running (or its env could not be read) — reported as `skipped`, never a
- * warning, since "no Tower" is not a fault.
+ * The readers are injected so the decision is unit-testable without a live
+ * daemon; `doctor()` passes the real `ps eww` ones. A `null` Tower env means no
+ * Tower is running (or its env could not be read) — reported as `skipped`, never
+ * a warning, since "no Tower" is not a fault.
+ *
+ * `readSessionEnvs` covers what a daemon-only check would miss (CMAP review):
+ * shellpers are detached and survive `afx tower stop` by design, so after a
+ * plain restart Tower reads clean while the agents it spawned earlier are still
+ * carrying the markers — and still unresumable.
  */
 export function checkTowerEnv(
-  readEnv: () => Record<string, string> | null,
+  readTowerEnv: () => Record<string, string> | null,
+  readSessionEnvs: () => Array<Record<string, string>> = () => [],
 ): TowerEnvCheck {
-  const env = readEnv();
+  const env = readTowerEnv();
+  const markers = env ? findClaudeSessionMarkers(env) : [];
+  const contaminatedSessions = readSessionEnvs()
+    .filter((sessionEnv) => findClaudeSessionMarkers(sessionEnv).length > 0)
+    .length;
+
+  if (markers.length > 0) {
+    const sessionNote = contaminatedSessions > 0
+      ? `; ${contaminatedSessions} running session(s) already carry them`
+      : '';
+    return {
+      status: 'warn',
+      markers,
+      contaminatedSessions,
+      summary: `Tower inherited ${markers.length} Claude Code session marker(s): ${markers.join(', ')}${sessionNote}`,
+      recommendation: TOWER_ENV_RESTART_HINT,
+    };
+  }
+
+  // Tower is clean but sessions it spawned before the restart are not — the
+  // case a daemon-only check would call "ok" while agents stay unresumable.
+  if (contaminatedSessions > 0) {
+    return {
+      status: 'warn',
+      markers,
+      contaminatedSessions,
+      summary: `Tower is clean, but ${contaminatedSessions} running session(s) still carry Claude Code session markers`,
+      recommendation: TOWER_ENV_SESSION_HINT,
+    };
+  }
+
   if (!env) {
-    return { status: 'skipped', markers: [], summary: 'Tower not running' };
+    return { status: 'skipped', markers: [], contaminatedSessions: 0, summary: 'Tower not running' };
   }
 
-  const markers = findClaudeSessionMarkers(env);
-  if (markers.length === 0) {
-    return { status: 'ok', markers, summary: 'Tower environment is clean' };
-  }
+  return { status: 'ok', markers, contaminatedSessions, summary: 'Tower environment is clean' };
+}
 
-  return {
-    status: 'warn',
-    markers,
-    summary: `Tower inherited ${markers.length} Claude Code session marker(s): ${markers.join(', ')}`,
-    recommendation: TOWER_ENV_RESTART_HINT,
-  };
+/**
+ * PIDs of the running shellper daemons — the processes that outlive Tower and
+ * so can still be carrying markers after Tower itself has been restarted clean.
+ */
+export function findShellperPids(): number[] {
+  const out = runCommand('pgrep', ['-f', 'shellper-main.js']);
+  if (!out) return [];
+  return out
+    .split('\n')
+    .map((line) => parseInt(line.trim(), 10))
+    .filter((pid) => !isNaN(pid));
 }
 
 /**
@@ -1235,7 +1292,12 @@ export async function doctor(): Promise<number> {
   // session's markers spawns agents whose transcripts are never saved, so they
   // cannot be resumed after a crash — silent until recovery time.
   const towerPids = getProcessesOnPort(DEFAULT_TOWER_PORT);
-  const towerEnv = checkTowerEnv(() => (towerPids.length > 0 ? readProcessEnv(towerPids[0]) : null));
+  const towerEnv = checkTowerEnv(
+    () => (towerPids.length > 0 ? readProcessEnv(towerPids[0]) : null),
+    () => findShellperPids()
+      .map(readProcessEnv)
+      .filter((e): e is Record<string, string> => e !== null),
+  );
   console.log(chalk.bold('Tower Environment') + ` (port ${DEFAULT_TOWER_PORT})`);
   console.log('');
   if (towerEnv.status === 'warn') {
