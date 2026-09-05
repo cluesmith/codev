@@ -305,3 +305,73 @@ failing (`worktree-write-guard`, environmental — it passes in this worktree). 
 
 Still to do: the manual verification steps at the dev-approval gate — they are why this is PIR
 and not AIR, and the 300 ms constant has a rollback criterion attached to step 2.
+
+## dev-approval evidence — and the bug it found
+
+The architect sent the gate back for evidence, correctly: I had requested it on build-green +
+suite-green, which is not what this gate asks. Built
+`packages/codev/scripts/pir-1473-dev-approval-evidence.mts` on the 1365/1475 precedent —
+isolated Towers on private ports, real shellper-backed PTYs, real HTTP + WebSocket endpoints —
+and committed the transcript to `codev/evidence/1473-dev-approval-transcript.txt`. 20/20.
+
+### The evidence found a real gap that no unit test could have
+
+Step 5 measured the input-hold recovery at **237.8ms**. That is not the re-drain; it is almost
+exactly the quiescence debounce (500ms) minus my pre-send wait. The re-drain should have fired
+at ~60ms.
+
+Cause: `tower-routes.ts:2266` — the `afx send` REQUEST path calls `deliverAgentMailSerialized`
+DIRECTLY, not through the drainer. So `armInputRetry` never sees that pass's outcome and the
+`retryAfterMs` is dropped on the floor. Every unit test I wrote drives the drainer, so all 27
+passed while the operator-facing path silently fell through to quiescence or the backstop — in
+precisely the case where a human is sitting there watching the send.
+
+Fixed with `MailboxDrainer.noteOutcome()`, called from the request path. Re-measured: **61.9ms**,
+and the assertion now compares against the QUIESCENCE debounce rather than the backstop, because
+"faster than 1.5s" would have passed while quiescence did all the work — which is exactly how I
+missed it the first time. Two regression tests added, one of them pinning that the direct pass
+arms nothing on its own.
+
+This is the whole argument for the PIR gate in one finding. "Tests pass" was true and useless.
+
+### The calibration, and what it does and does not prove
+
+Keystroke→echo, measured on the real client path (terminal WebSocket → handleUserInput → write
+→ PTY → app repaint → ring → WebSocket), one clock, no polling interval:
+
+| combo | n | p50 | p95 | p99 |
+|---|---|---|---|---|
+| claude, shellper-backed | 40 | 0.9ms | 1.3ms | 4.2ms |
+| codex, shellper-backed | 40 | 0.7ms | 1.1ms | 3.3ms |
+
+Rollback criterion NOT fired — worst p99 is 4.2ms against a 300ms budget, ~70x margin. But the
+fixture is a repaint shim, not a real harness, so this is a LOWER BOUND and the script says so
+where it evaluates the rule. Confirming against real claude/codex is on the human list.
+
+### Two things I could not script, and did not fake
+
+- **The local (non-persistent) PTY combos** fail inside the Tower with `nodePty.spawn is not a
+  function`. I reproduced it identically against a build of the merge-base, so it is
+  pre-existing and outside this issue — recorded as a SKIP carrying its reason rather than
+  fixed here or quietly dropped.
+- **The "vs main" baseline** could not be the shared main checkout: its `dist` is from July and
+  no longer even starts (`./reconnect-policy` is not exported by its vendored codev-core). I
+  build a detached worktree at the merge-base instead, which is the better comparison anyway —
+  exactly the code this branch changed, nothing else moving. Path comes from
+  `PIR1473_BASELINE_DIST`; unset makes every delta SKIP rather than report one-sided numbers.
+
+### A script bug worth naming, since it briefly looked like a code bug
+
+The first run "failed" `--escape still writes its body through`. `--escape` writes a bare ESC
+and returns — it never writes a body, by design (tower-routes.ts:2109). The script was wrong,
+not the code; the assertion now checks the ESC reached the terminal.
+
+### Latency deltas against the merge-base
+
+- Idle terminal (the common path): branch 5.4ms vs baseline 7.3ms — **−1.9ms**, no regression.
+- Freshly-painted terminal: branch 442.1ms vs baseline 441.0ms — **+1.1ms**. Both hold on the
+  output settle and recover on quiescence, so the new input guard costs essentially nothing
+  here.
+
+Still outstanding: manual steps 1, 3 and 4, plus the real-harness half of step 2. Named
+precisely in the transcript and not marked done.

@@ -1,0 +1,154 @@
+PIR #1473 — dev-approval evidence (render gate: the gate→write input race)
+isolated Towers on ports 14790 (branch) / 14791 (baseline) — NOT 4100
+branch build: /home/user/code/codev_root/codev/.builders/pir-1473/packages/codev/dist/agent-farm/servers/tower-server.js
+baseline build: /tmp/claude-1000/-home-user-code-codev-root-codev--builders-pir-1473/4d07e0a7-575f-441a-b8b1-1ec9be8a41b6/scratchpad/baseline/packages/codev/dist/agent-farm/servers/tower-server.js
+started: 2026-09-05T20:49:03.526Z
+live Tower on 4100 before: LISTENING
+
+workspace: /home/user/.agent-farm/test-workspaces/pir1473-rzbRl5/ws-vSUcsk
+
+==============================================================================
+STEP 2 — keystroke→echo calibration, and the rollback criterion
+==============================================================================
+  note  measured on the REAL client path: terminal WebSocket → PtySession.handleUserInput →
+  note  write() → PTY → app repaint → ring → WebSocket. One clock, no polling interval.
+  note  the constant under test is INPUT_SETTLE_BEFORE_WRITE_MS = 300ms
+  claude, shellper-backed            n= 40  min=   0.6ms  p50=   0.9ms  p95=   1.2ms  p99=   4.7ms  max=   4.7ms
+  PASS  claude, shellper-backed: collected a full sample set — 40/40
+  SKIP  calibration: claude, local pty
+        Error: terminal register failed: 500 {"error":"INTERNAL_ERROR","message":"nodePty.spawn is not a function"}
+  codex,  shellper-backed            n= 40  min=   0.4ms  p50=   0.8ms  p95=   1.3ms  p99=   3.3ms  max=   3.3ms
+  PASS  codex,  shellper-backed: collected a full sample set — 40/40
+  SKIP  calibration: codex,  local pty
+        Error: terminal register failed: 500 {"error":"INTERNAL_ERROR","message":"nodePty.spawn is not a function"}
+
+  ALL COMBOS POOLED                  n= 80  min=   0.4ms  p50=   0.9ms  p95=   1.3ms  p99=   4.7ms  max=   4.7ms
+
+  ROLLBACK CRITERION (from the plan's Test Plan, step 2):
+    p99 <= 300ms                → keep the constant
+    p99 >  300ms                → raise it to p99 + margin
+    ...and if that would exceed ~500ms → adopt the bounded `lastInputAt > lastDataAt`
+       refinement instead of a larger constant, and RE-OPEN the plan.
+
+    worst per-combo p99 = 4.7ms  (pooled p99 = 4.7ms)
+    → criterion NOT fired: the whole distribution sits far inside the budget.
+  PASS  every combo's p99 keystroke→echo gap is within the 300ms settle — worst p99 4.7ms
+
+  note  CAVEAT, stated because it bounds what this number proves: the fixture is a repaint
+  note  shim, not claude or codex. It pays a real process boundary, a real PTY and a real
+  note  full-composer redraw, but a real harness runs a heavier render on top — so these are a
+  note  LOWER BOUND. The criterion is evaluated at the floor above; confirming it against the
+  note  actual harnesses is listed under WHAT STILL NEEDS A HUMAN.
+
+delivery terminal: ec6b4bde-68a7-4324-bb5d-ab224169b1de (real shellper-backed PTY running the echo shim)
+main-build terminal: b2403ff6-0904-432d-aba2-de53f7593bc5
+
+==============================================================================
+STEP 5 — after input stops, delivery lands on the re-drain, not the backstop
+==============================================================================
+  note  the keystroke below goes over the terminal's own WebSocket — the real human input
+  note  path. It is a Right-arrow on purpose: it counts as input, but it changes only the
+  note  cursor, so the composer stays CLEAN and the input signal is the ONLY thing holding the
+  note  row. A printable character would leave a draft and hold `user-text`, which is the OLD
+  note  guard and would prove nothing about this issue.
+
+  (a) send arriving while ONLY the input settle is outstanding
+      send response: held=true reason=busy detail=recent-input
+      row state transitions:
+      +    2ms  status=held      reason=busy        detail=recent-input
+      +  107ms  status=delivered reason=null        detail=null
+      send → body on the wire: 61.9ms
+  PASS  the row was observably held on `recent-input` — the new gate fired
+  PASS  the body reached the terminal
+      what the quiescence trigger alone would have cost: ~235.0ms
+  PASS  it was recovered by the RE-DRAIN specifically — faster than quiescence could have been — 61.9ms < ~235.0ms
+  PASS  and far inside the backstop interval it replaces — 61.9ms < 1500ms
+
+  (b) send arriving IMMEDIATELY after the keystroke (both settles outstanding)
+      row state transitions:
+      +    0ms  status=held      reason=busy        detail=null
+      +  551ms  status=delivered reason=null        detail=null
+      send → body on the wire: 503.5ms
+      the backstop interval it must beat: 1500ms
+  PASS  the body reached the terminal
+  PASS  a keystroke immediately followed by a send still delivers inside one backstop period — 503.5ms
+
+==============================================================================
+STEP 6 — the common path, as a delta against the merge-base
+==============================================================================
+
+  (a) IDLE terminal — the common path
+      branch: 5.4ms  (response delivered=true)
+  PASS  branch: an idle terminal still receives the body
+      main:   7.3ms  (response delivered=true)
+      delta:  -1.9ms
+  PASS  branch adds less than one settle to the idle common path — no regression there — -1.9ms
+
+  (b) FRESHLY-PAINTED terminal — where the branch pays for the guard
+      branch: 442.1ms  held-first=true detail=null
+      main:   441.0ms  held-first=true
+      delta:  +1.1ms
+  note  this is the disclosed cost of the change, not a defect: a send arriving within one
+  note  settle of terminal input now waits for that input to settle before it writes.
+  PASS  branch: a freshly-painted terminal still receives the body
+
+==============================================================================
+STEP 7 — operator bypasses, and the delayed ^C as an input source
+==============================================================================
+  --interrupt → status=200 delivered=true degraded=false
+  PASS  --interrupt still writes its body through (the explicit bypass)
+  PASS  and the ^C reached the terminal ahead of it
+  --escape    → status=200 (bare ESC + Enter; no body, by design)
+  PASS  --escape still returns 200
+  PASS  and its ESC keystroke reached the terminal
+  --interrupt --delay 1 → scheduled=true row=47cb9fc9…
+  row state transitions:
+      +    0ms  status=held      reason=null        detail=null
+      + 1007ms  status=held      reason=busy        detail=recent-input
+      + 1381ms  status=delivered reason=null        detail=null
+  PASS  the delayed body eventually reached the terminal
+  send → body on the wire: 1332.5ms (of which ~1000ms is the requested delay)
+  PASS  the unattended ^C was OBSERVED as input — the drain nudge right after it held `recent-input`
+  PASS  and the body still delivered, so the hold was recovered rather than sticking
+
+==============================================================================
+WHAT STILL NEEDS A HUMAN (not simulated, not inferred, NOT marked done)
+==============================================================================
+
+  STEP 1 — reply-traffic measurement, 60s, hands OFF the keyboard, agent running.
+           Log every handleUserInput chunk plus what the filter strips vs keeps.
+           Expected: zero surviving residue. If replies still get through, nothing
+           downstream of it is trustworthy.
+           Run it in a BROWSER and again in the VS CODE INTEGRATED TERMINAL (a different
+           xterm build, and the one surface whose reply set may differ).
+           NOT against 'afx attach': it talks to the shellper socket directly and never
+           touches PtySession, so it would log zero chunks and read as a FALSE PASS.
+
+  STEP 2 (confirmation half) — re-run the keystroke→echo measurement against REAL claude
+           and codex. The scripted figures above are a lower bound from a repaint proxy;
+           the rollback criterion's decisive evaluation needs the real harnesses.
+
+  STEP 3 — mouse: click into a builder's composer mid-'afx send' → the message must hold.
+           This is the assertion that would have FAILED under plan revision 2, which
+           stripped mouse reports out of the input signal.
+
+  STEP 4 — 'afx send' while typing into the target's composer → holds, the draft is
+           untouched, and 'afx inbox' shows busy:recent-input. ~10x at different points
+           in the keystroke stream.
+
+
+==============================================================================
+LIVE TOWER UNTOUCHED
+==============================================================================
+  live Tower on 4100 after: LISTENING
+  PASS  the live Tower on 4100 is exactly as it was
+
+==============================================================================
+RESULT
+==============================================================================
+  20/20 checks passed
+  2 skipped: calibration: claude, local pty; calibration: codex,  local pty
+  ALL EXECUTED CHECKS PASSED
+
+  NOTE: this covers the SCRIPTABLE half of the gate. The four human steps
+        above are outstanding and are not claimed by this run.
