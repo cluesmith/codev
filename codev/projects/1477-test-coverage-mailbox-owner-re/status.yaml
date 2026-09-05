@@ -1,0 +1,14 @@
+id: '1477'
+title: test-coverage-mailbox-owner-re
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-05T15:45:20.744Z'
+updated_at: '2026-09-05T15:45:20.745Z'
