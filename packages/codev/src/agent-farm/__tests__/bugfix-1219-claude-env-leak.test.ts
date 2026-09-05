@@ -19,7 +19,6 @@ import {
   sanitizeAgentEnv,
   findClaudeSessionMarkers,
   isClaudeSessionMarker,
-  CLAUDE_CODE_ENV_ALLOWLIST,
 } from '../../lib/agent-env.js';
 import { checkTowerEnv, readProcessEnv, TOWER_ENV_RESTART_HINT } from '../../commands/doctor.js';
 
@@ -35,6 +34,46 @@ const OBSERVED_MARKERS = {
   CLAUDE_CODE_BRIDGE_SESSION_ID: 'bridge-1',
 };
 
+/**
+ * Configuration and credentials that MUST survive into a spawned agent.
+ *
+ * Every name here was verified present in the shipped `claude` binary (2.1.261,
+ * 594 `CLAUDE_CODE_*` variables). This list is the reason the module strips
+ * named session families instead of denying the namespace: dropping any of these
+ * silently points an agent at the wrong provider or strips its credential.
+ */
+const MUST_SURVIVE = {
+  // Auth — stripping OAUTH_TOKEN downgrades subscription auth to the metered API (#985).
+  CLAUDE_CODE_OAUTH_TOKEN: 'sub-token',
+  CLAUDE_CODE_OAUTH_REFRESH_TOKEN: 'refresh',
+  CLAUDE_CODE_OAUTH_SCOPES: 'scope-a scope-b',
+  CLAUDE_CODE_OAUTH_CLIENT_ID: 'client',
+  // Provider selection — dropping one routes the agent at the wrong backend.
+  CLAUDE_CODE_USE_BEDROCK: '1',
+  CLAUDE_CODE_USE_VERTEX: '1',
+  CLAUDE_CODE_USE_FOUNDRY: '1',
+  CLAUDE_CODE_USE_MANTLE: '1',
+  CLAUDE_CODE_USE_ANTHROPIC_AWS: '1',
+  CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: '1',
+  CLAUDE_CODE_USE_GATEWAY: '1',
+  // Matching auth-skip switches.
+  CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1',
+  CLAUDE_CODE_SKIP_VERTEX_AUTH: '1',
+  CLAUDE_CODE_SKIP_FOUNDRY_AUTH: '1',
+  CLAUDE_CODE_SKIP_MANTLE_AUTH: '1',
+  CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH: '1',
+  // Routing, transport and policy.
+  CLAUDE_CODE_API_BASE_URL: 'https://example.invalid',
+  CLAUDE_CODE_PROXY_URL: 'http://proxy.invalid',
+  CLAUDE_CODE_HTTPS_PROXY: 'http://proxy.invalid',
+  CLAUDE_CODE_CLIENT_CERT: '/etc/cert.pem',
+  CLAUDE_CODE_MANAGED_SETTINGS_PATH: '/etc/claude/settings.json',
+  // Behavioural configuration a user sets deliberately in their shell rc.
+  CLAUDE_CODE_MAX_OUTPUT_TOKENS: '8192',
+  CLAUDE_CODE_SUBAGENT_MODEL: 'claude-sonnet-5',
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+};
+
 describe('bugfix-1219 — sanitizeAgentEnv', () => {
   it('strips every session marker seen on a contaminated Tower', () => {
     const clean = sanitizeAgentEnv({ ...OBSERVED_MARKERS, PATH: '/usr/bin' });
@@ -44,26 +83,32 @@ describe('bugfix-1219 — sanitizeAgentEnv', () => {
     expect(clean.PATH).toBe('/usr/bin');
   });
 
-  it('strips markers Claude Code has not invented yet (deny-by-default)', () => {
-    // The namespace is denied wholesale precisely so a marker added upstream
-    // tomorrow does not silently reintroduce unresumable agents.
-    const clean = sanitizeAgentEnv({ CLAUDE_CODE_SOME_FUTURE_MARKER: 'x' });
+  it('strips whole session-identity families, not just the names seen so far', () => {
+    const clean = sanitizeAgentEnv({
+      CLAUDE_CODE_SESSION_KIND: 'interactive',
+      CLAUDE_CODE_SESSION_LOG: '/tmp/s.log',
+      CLAUDE_CODE_SESSION_ACCESS_TOKEN: 'tok',
+      CLAUDE_CODE_REMOTE_SESSION_UUID: 'uuid',
+      CLAUDE_CODE_BRIDGE_OWNER_ORG_UUID: 'org',
+      CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/m.sock',
+    });
     expect(clean).toEqual({});
   });
 
-  it('preserves CLAUDE_CODE_OAUTH_TOKEN so consult keeps subscription auth', () => {
-    // #985: consult reads this from the agent's own env; stripping it silently
-    // reroutes every CMAP review to the metered API.
-    const clean = sanitizeAgentEnv({
-      CLAUDE_CODE_OAUTH_TOKEN: 'sub-token',
-      CLAUDE_CODE_CHILD_SESSION: 'true',
-    });
-    expect(clean).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'sub-token' });
+  it('preserves provider, auth and routing configuration', () => {
+    // The regression the CMAP review caught: an earlier version denied the whole
+    // `CLAUDE_CODE_*` namespace, which would have dropped every one of these.
+    // Each name is verified present in the shipped claude binary.
+    const clean = sanitizeAgentEnv({ ...MUST_SURVIVE, ...OBSERVED_MARKERS });
+    expect(clean).toEqual(MUST_SURVIVE);
   });
 
-  it('preserves every allowlisted config var', () => {
-    const env = Object.fromEntries(CLAUDE_CODE_ENV_ALLOWLIST.map((k) => [k, 'v']));
-    expect(sanitizeAgentEnv(env)).toEqual(env);
+  it('preserves an unrecognised CLAUDE_CODE_* variable', () => {
+    // 594 variables and counting: a name this module has never heard of is far
+    // more likely to be new configuration than a new session marker, and
+    // silently dropping configuration is the worse failure.
+    const clean = sanitizeAgentEnv({ CLAUDE_CODE_SOME_FUTURE_SETTING: 'x' });
+    expect(clean).toEqual({ CLAUDE_CODE_SOME_FUTURE_SETTING: 'x' });
   });
 
   it('drops undefined-valued entries so the result is spawn-ready', () => {
@@ -95,7 +140,7 @@ describe('bugfix-1219 — findClaudeSessionMarkers', () => {
   });
 
   it('reports none for a clean environment', () => {
-    expect(findClaudeSessionMarkers({ PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 't' })).toEqual([]);
+    expect(findClaudeSessionMarkers({ PATH: '/usr/bin', ...MUST_SURVIVE })).toEqual([]);
   });
 });
 
