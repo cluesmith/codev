@@ -108,3 +108,36 @@ own failure mode silent and permanent, and asks for escalation *or* a doctor pro
 escalate branch, which the architect confirmed. Noted in the table so nobody reads §2 as unaddressed.
 
 Still waiting on the human for: plan approval, and the Kimi-credentials decision (items 3+5).
+
+## 2026-09-05 — human decision on Kimi: items 5+6 handed to Mohid
+
+No authenticated Kimi maintainer-side and no credentials to give. Human's call: this lane does not
+run the re-measurement or the live demo; both go to @mohidmakhdoomi, who has an authenticated Kimi
+and ran the original 7/7. Plan revised accordingly (still pre-approval — no `porch approve`).
+
+What the revision actually changed, beyond deleting two work items:
+
+- **Item 5–6 became a handoff with its consequences spelled out.** `KIMI_PROFILE` now ships on
+  0.34.0-era measurement rather than a fresh capture; `markerRequiresCursorRow` is *not* adopted
+  (previously conditional on captures we now can't take — so it becomes a question on Mohid's
+  checklist instead of a guess); Kimi's echo behaviour stays unmeasured by us.
+- **Our dev-approval gate re-scoped, and it is a better gate for it.** With no Kimi to exercise, the
+  thing worth proving is that a change *for* Kimi moved nothing *else* — `render-gate.ts`,
+  `message-write.ts` and `hold-verdict.ts` carry claude/codex/agy delivery for every user. Six
+  non-Kimi steps now, the load-bearing ones being: generated launch scripts for the existing
+  harnesses must be **byte-identical**, live claude delivery still logs `delivered` (not
+  `delivered-unverified` — the #1573 echo path is timing-dependent and least likely to be caught by
+  a green suite), and a claude draft still holds as `busy:user-text` rather than an unverifiable
+  verdict (proves the `isUnverifiableVerdict` edit didn't widen the escalation class).
+- **A seven-step checklist for Mohid** in item 7, to be posted on #1203 when the implementation
+  commits land: exact commands, the eight fixture filenames, which spike drives each measurement,
+  the one question we cannot answer (does anything but the composer match `/^\s*│\s*>/`?), and
+  where evidence goes (`codev/evidence/1620-kimi-measurement/`). Step 2 is flagged as the one that
+  can block the merge: if a post-reply steady-state composer grows past one interior row, the
+  `growsWithDraft` rule holds every later message forever and must not ship.
+- **A new risk, named rather than buried**: we ship a Kimi feature none of us ran, on measurements
+  seven minors old — the same staleness that made #1203 un-mergeable, recurring. Mitigation is
+  procedural and partial and the plan says so.
+
+The review doc will state plainly that live re-verification was not performed by this lane, and
+name the 0.34.0 → 0.41.0 drift.

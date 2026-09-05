@@ -37,13 +37,13 @@ Main added echo verification (#1573: `bufferLines`, `watchEchoOnScreen`, `normal
 ### Two claims in the issue that do not survive checking
 
 1. **"Drop `launchLoopTail` changes already on main."** Main still defines `launchLoopTail` module-locally in `spawn-worktree.ts:803`, byte-identical to the PR's relocated copy (diffed). The PR does not *change* the tail — it *moves* it into `utils/harness.ts` and exports it, because `KIMI_HARNESS.buildBuilderLaunchScript` needs it and `spawn-worktree.ts` already imports from `harness.ts` (so the move is the acyclic direction). **Plan: keep the relocation**, since dropping it would break the Kimi provider script. Flagged here rather than silently ignored.
-2. **"kimi ≥ 0.33.0 … the branch was measured at 0.34.0 and it ships weekly."** Latest on npm today is **`@moonshot-ai/kimi-code@0.41.0`** — seven minors past the measured version. And `kimi` is **not installed on this machine** and there is no `~/.kimi-code` and no Moonshot credential in the environment. Items 3 and 5 are therefore **blocked on an authenticated Kimi CLI** (see *Blocked scope*).
+2. **"kimi ≥ 0.33.0 … the branch was measured at 0.34.0 and it ships weekly."** Latest on npm today is **`@moonshot-ai/kimi-code@0.41.0`** — seven minors past the measured version. And `kimi` is **not installed on this machine** and there is no `~/.kimi-code` and no Moonshot credential in the environment. The 2026-09-05 human decision is that this lane does **not** re-measure: no authenticated Kimi here, no credentials to supply, so items 5 and 6 go to @mohidmakhdoomi (see *What this lane does not do*).
 
 ---
 
 ## Proposed Change
 
-Seven work items. Items 1–4 and 7 are unblocked and will be delivered in full; items 5–6 need a Kimi install (below).
+Seven work items. **Items 1–4 and 7 are this lane's deliverable and ship in full.** Items 5–6 need an authenticated Kimi, which is not available here, and are handed to @mohidmakhdoomi (below).
 
 ### 1. Merge `origin/main` into `builder/pir-1201`
 
@@ -125,17 +125,33 @@ export type KimiTrustDecision =
 
 The approved 1201 plan still describes the **retired** seed-session design — `kimi -p` bootstrap, `.builder-seed.txt`, captured session id, `kimi -S <id>` loop, a sentinel-gated store-verified `BEGIN` PTY kick, and `message-pacing.ts`. None of that is in the branch; the 2026-08-09 pivot replaced it. Rewritten to what the code does: **mailbox task delivery** (the script calls `afx send <builderId>` on each fresh launch; no PTY write, so Spec 1313 holds), **`--agent-file` role injection** composed around `${base_prompt}`, **guarded `kimi -c` resume** (store probe on both stdout *and* exit status, superseded-id comparison for #1267 sticky-fresh), the **trust record** as amended by item 3, the **render-gate Kimi profile**, per-harness **Enter pacing**, and the **0.33.0 version floor**. This file is committed in the plan phase and approved together with this one.
 
-### 5. Re-measure under verified delivery *(needs Kimi — see Blocked scope)*
+### 5–6. Live re-measurement and the demo re-run — **handed to @mohidmakhdoomi**
 
-Install the current `@moonshot-ai/kimi-code` (0.41.0 today; floor stays 0.33.0, never lowered), authenticate, then:
-- Re-run the three existing measurement spikes — `pir-1201-kimi-gate-measure.mjs`, `pir-1201-kimi-box-growth.mjs`, `pir-1201-kimi-working-states.mjs` — and refresh the eight `__tests__/fixtures/gate/kimi-*.txt` captures. The `growsWithDraft` premise (box grows **only** for a multi-line draft; idle / single-line / `/` menu / `@` picker / post-reply steady state all hold at one interior row) is re-verified on the current engine or the rule does not ship.
-- **New:** drive a real Kimi session through the *production* paced write and echo verification — `submitMessagePaced` + `watchEchoOnScreen` — and record what Kimi's composer and transcript do to the `### [ARCHITECT INSTRUCTION | <iso>] ###` header. Claude eats the `###` as a markdown H3 and `normalizeForEcho` absorbs it; Kimi is unmeasured. Record whether the needle confirms, and at which sample.
-- If Kimi cannot be verified: **no code change is needed for safety** — #1584 already commits the delivery first and reports `delivered-unverified` + `markEscalatedDelivered` + `onUnverifiedDelivery`, so a negative can never loop. What ships instead is the *documented measurement* plus a doc line telling operators that Kimi deliveries are expected to read unverified, so the flag is not mistaken for a fault.
-- Evidence (raw captures, transcripts, the driver's output) into `codev/evidence/1620-kimi-measurement/`.
+Human decision, 2026-09-05: there is no authenticated Kimi available on this side and no
+credentials to supply, so **this lane does not run items 5 and 6.** They go to Mohid, who has an
+authenticated Kimi and ran the original 7/7 demo; the architect has asked him on PR #1203 to
+review our commits and run both on his side. His evidence attaches to PR #1203.
 
-### 6. Live demo re-run *(needs Kimi — see Blocked scope)*
+What that changes for *our* work — stated here because it is not free:
 
-`codev/spikes/pir-1201-kimi-builder-demo.mjs`, all 7 recorded scenarios, against the current CLI: (1) gate classifies the live composer, (2) role honored via `--agent-file` in the TUI, (3) multi-line delivery submits at the pinned Enter delay, (4a) crash restart consults the store probe and chooses resume, (4b) role survives `kimi -c`, (5) store probe fails closed on an empty store, (6) trust pre-record is idempotent. Scenario 6 is rewritten for the new `KimiTrustDecision` return and **two scenarios are added**: 6b — opted-out spawn writes no record; 6c — a worktree carrying `.mcp.json` writes no record and logs the refusal. Run under the `dev-approval` gate with the output attached.
+- **`KIMI_PROFILE` ships on 0.34.0-era measurement**, not on a fresh capture. The eight
+  `fixtures/gate/kimi-*.txt` captures stay as Mohid recorded them, and the `growsWithDraft`
+  premise — the load-bearing "the box grows a row only when the draft gains a line" claim — is
+  **re-verified by him, not by us.** Where the code asserts a measured fact, the comment says
+  which version measured it.
+- **`markerRequiresCursorRow` is not adopted for Kimi.** The plan previously made it conditional
+  on new captures; with no captures, the honest answer is "not adopted, and here is the question
+  someone must answer" — it goes on Mohid's checklist rather than being guessed at.
+- **Kimi's echo behaviour under #1573/#1584 stays unmeasured by us.** No code change is needed for
+  safety: #1584 already commits the delivery first and reports `delivered-unverified` +
+  `markEscalatedDelivered` + `onUnverifiedDelivery`, so an unconfirmed Kimi delivery can never
+  loop. What is missing is the *number*, and Mohid supplies it.
+- **The burden shifts onto proving no regression for the measured harnesses.** We are editing
+  `render-gate.ts`, `message-write.ts` and `hold-verdict.ts` — code that carries claude, codex and
+  agy delivery for every user — without being able to exercise the one harness the change is *for*.
+  So "claude/codex/agy behave identically" stops being a footnote and becomes the primary thing our
+  own dev-approval gate proves (see Test Plan).
+
 
 ### 7. Close the loop on the PR
 
@@ -156,10 +172,59 @@ Install the current `@moonshot-ai/kimi-code` (0.41.0 today; floor stays 0.33.0, 
   follow-up achievable rather than impossible).
 - **Echo-verification cost recorded, not discovered later.** claude's §6 computes it: `enterDelayMs`
   1000 plus two 600 ms verify windows makes a Kimi `afx send` cost ~2.2 s worst case, and every
-  message may report `delivered-unverified`. Item 5 measures whether it actually does; either way the
-  number goes in the review doc as an accepted cost, so nobody reads the flag as a fault.
+  message may report `delivered-unverified`. @mohidmakhdoomi measures whether it actually does (item 7
+  checklist step 4); either way the number goes in the review doc as an accepted cost, so nobody
+  reads the flag as a fault.
 
 ---
+- **A handoff checklist for @mohidmakhdoomi, posted as a PR comment the moment the implementation
+  commits are pushed** — specific enough that his round is one pass, not a negotiation:
+
+  ```bash
+  gh pr checkout 1203 && git pull          # our merge + commits are on your branch
+  pnpm install && pnpm build && pnpm test  # expect green before touching kimi
+  npm i -g @moonshot-ai/kimi-code          # 0.41.0 today; floor stays 0.33.0
+  kimi --version                           # record it — it goes in the evidence
+  ```
+
+  1. **Re-capture the eight gate fixtures** on your Kimi version, into
+     `packages/codev/src/agent-farm/__tests__/fixtures/gate/`: `kimi-idle.clean.txt`,
+     `kimi-draft.busy.txt`, `kimi-multiline.busy.txt`, `kimi-multiline-bare.busy.txt`,
+     `kimi-newline-bare.busy.txt`, `kimi-menu.busy.txt`, `kimi-picker.busy.txt`,
+     `kimi-trust.busy.txt` — plus the version stamp in that directory's `README.md`.
+     Driver: `node codev/spikes/pir-1201-kimi-gate-measure.mjs`.
+  2. **Re-verify the `growsWithDraft` premise** — `node codev/spikes/pir-1201-kimi-box-growth.mjs`
+     and `node codev/spikes/pir-1201-kimi-working-states.mjs`. The load-bearing row is the
+     **post-reply steady state**: if a composer that has already carried a turn grows past one
+     interior row, the rule holds every later message forever and **must not ship** as-is. Idle,
+     single-line draft, `/` menu, `@` picker, mid-generation, shift+tab chrome and a
+     draft-while-working must all sit at exactly one interior row.
+  3. **Answer the one question we could not**: on a live screen, does anything *other* than the
+     composer match `/^\s*│\s*>/`? If yes, `KIMI_PROFILE` should take
+     `markerRequiresCursorRow: true` (the #1474 anchor) and we will add it. If no, say so and we
+     record that the region bound alone is sufficient.
+  4. **Measure verified delivery (#1573/#1584)** — the genuinely new one, and the reason this is
+     not just a demo re-run. Drive a real Kimi through the *production* paced write and echo
+     verification (`submitMessagePaced` → `watchEchoOnScreen`) and record what Kimi's composer and
+     transcript do to the `### [ARCHITECT INSTRUCTION | <iso>] ###` header. claude eats the `###`
+     as a markdown H3 and `normalizeForEcho` absorbs that; Kimi is unmeasured. Report: does the
+     needle confirm, on which sample, and what is the wall-clock cost per `afx send` (we predict
+     ~2.2 s worst case — 1000 ms Enter + two 600 ms windows). **A negative is a fine outcome**, not
+     a failure: #1584 commits first and reports `delivered-unverified`, so it can never loop. We
+     just need to know, so the docs can say it rather than operators discovering it.
+  5. **Run the demo driver** — `node codev/spikes/pir-1201-kimi-builder-demo.mjs`. Now **9**
+     scenarios: the original 7, plus **6b** (an opted-out spawn writes no trust record) and **6c**
+     (a worktree carrying `.mcp.json` writes no record and logs `project-mcp-config`). Scenario 6
+     changed shape — `ensureKimiWorkspaceTrust` returns a `KimiTrustDecision`, not a boolean.
+  6. **Exercise the spawn-race retry** (item 2g): spawn a Kimi builder and confirm the task
+     actually arrives. If you can, start it with Tower under load so `codev_queue_task`'s first
+     attempt loses the race — the retry should win and the task should still land.
+  7. **Evidence** → `codev/evidence/1620-kimi-measurement/`, committed to the branch: the Kimi
+     version, raw captures, the demo driver's full output, and the verified-delivery numbers.
+     A PR comment with the headline results is enough for us to finish the review doc.
+
+  Anything that fails, tell us and we fix it on this side — you should not have to touch the
+  TypeScript.
 
 ## KEY_ISSUES disposition (2026-09-04 3-way review)
 
@@ -168,7 +233,7 @@ three lanes, and where this plan answers it. This table is the skeleton of the r
 
 | Lane | KEY_ISSUE | Where answered |
 |---|---|---|
-| gemini | *(none — APPROVE)* | Its two integration notes (0.33.0 floor is correct; write-guard as follow-up is appropriate) are honoured in items 5 and 7. |
+| gemini | *(none — APPROVE)* | Its two integration notes (0.33.0 floor is correct; write-guard as follow-up is appropriate) are honoured in the 1201 plan's floor section and in item 7. |
 | codex | Trust pre-write silently enables repo-controlled MCP servers; refuse on project MCP config, preferably behind an explicit opt-in | **Item 3** — both refusals, opt-in defaulting to off |
 | codex | The approved plan no longer describes the implementation | **Item 4** — `codev/plans/1201-…md` rewritten this phase, re-approved at this gate |
 | codex | Write-guard limitation acceptable as follow-up *only if maintainers explicitly accept it* | **Item 7** — acceptance recorded in the maintainer's own words in the review doc |
@@ -177,16 +242,29 @@ three lanes, and where this plan answers it. This table is the skeleton of the r
 | claude | `multi-row-draft` holds on geometry but is excluded from the stuck set; no doctor probe covers the box-growth premise | **Item 2d** — we take the *escalate* branch of claude's own "either escalate or add a doctor probe"; the probe is filed as a follow-up. Note this supersedes the `multi-row-draft → false` parenthetical in claude's §2, which its §3 then argues against. |
 | claude | Trust pre-write should refuse when the worktree carries project-level MCP config | **Item 3a** |
 | claude | No `PreToolUse` write guard while kimi is documented as supported | **Item 7** — follow-up filed before merge and referenced from the docs *where kimi is documented as supported*, per claude's own bound |
-| claude | Kimi echo behaviour unmeasured against #1573/#1584; the 7/7 demo predates that path | **Item 5** (measurement) + **item 7** (the ~2.2 s cost recorded) |
+| claude | Kimi echo behaviour unmeasured against #1573/#1584; the 7/7 demo predates that path | **Item 7 checklist step 4** — @mohidmakhdoomi measures it; the ~2.2 s predicted cost and his result both go in the review doc |
 | claude | §7 *(not a KEY_ISSUE, but it found a real one)* — confirm what a builder self-send attributes to | **Item 2g** — chasing it surfaced an unguarded race that can drop a Kimi builder's task entirely |
 
 ---
 
-## Blocked scope
+## What this lane does not do
 
-**Items 5 and 6 require an installed, authenticated Kimi CLI.** `kimi` is not on this machine, `~/.kimi-code` does not exist, and no Moonshot credential is in the environment. Installing is trivial (`npm i -g @moonshot-ai/kimi-code`); **authenticating is not something I can do** — it needs a Moonshot account or API key.
+**Items 5 and 6 are not ours.** Human decision, 2026-09-05: no authenticated Kimi here and no
+credentials to supply, so live re-measurement and the demo re-run are handed to
+@mohidmakhdoomi, whose evidence attaches to PR #1203.
 
-Everything else (items 1–4, 7, and every unit test) is delivered regardless. If no Kimi access appears, items 5–6 do not ship, the acceptance criterion "dev-approval evidence attached" cannot be met, and the honest outcome is a PR that is mergeable and re-planned but whose live re-verification is deferred — **which is the architect's call to make, not mine.** Asked explicitly at the gate.
+Consequences, recorded so that nobody has to reconstruct them later:
+
+- **We do not claim the feature was live-verified.** The review doc says so in plain words: this
+  lane merged, re-derived, secured and re-planned the work, and did **not** run Kimi. It also names
+  the drift — the branch was measured on **0.34.0**; latest is **0.41.0**, seven minors on, which is
+  the same failure mode this lane exists to repair, recurring.
+- **Our `dev-approval` gate is scoped to what is verifiable without Kimi**: config parsing, `afx
+  status` and the rest of the CLI unaffected, the generated launch scripts for every *existing*
+  harness byte-identical, and the full suite green. See Test Plan.
+- **The Kimi-side acceptance bar moves to Mohid's round.** If his results contradict a measured
+  claim in the code — the `growsWithDraft` premise above all — the fix comes back to this lane
+  before merge. That is a real possibility, not a formality.
 
 ---
 
@@ -211,7 +289,7 @@ Everything else (items 1–4, 7, and every unit test) is delivered regardless. I
 | `codev/resources/arch.md` | Kimi subsection rewritten off the seed design |
 | `codev/plans/1201-support-kimi-code-cli-as-a-bui.md` | rewritten to the shipped architecture (this phase) |
 | `codev/spikes/pir-1201-kimi-builder-demo.mjs` | scenario 6 updated; 6b / 6c added |
-| `__tests__/fixtures/gate/kimi-*.txt` | re-captured on the current CLI (item 5) |
+| `__tests__/fixtures/gate/kimi-*.txt` | **unchanged by this lane** — 0.34.0 captures; re-captured by @mohidmakhdoomi (item 7 checklist step 1) |
 | tests: `harness.test.ts`, `render-gate.test.ts`, `spawn-worktree.test.ts`, `mailbox-pacing.test.ts`, `kimi-session-discovery.test.ts`, `config.test.ts`, + new `hold-verdict` exhaustiveness test | |
 
 ---
@@ -222,6 +300,13 @@ Everything else (items 1–4, 7, and every unit test) is delivered regardless. I
 - **Risk — `markerFgPalette`'s hardcoded `getCell(0)`.** Latent today (only agy uses it, marker at column 0), a live bug the moment anyone gives Kimi a palette anchor. Generalizing it now costs one helper and one test; leaving it is a trap laid directly under the first non-column-0 profile.
 - **Risk — `multi-row-draft` escalation false-alarms on a real human draft.** Accepted with the cost stated in 2d, and flagged as gate-reversible in one line.
 - **Risk — the 0.34.0 → 0.41.0 drift repeats the exact failure this lane exists to fix.** Nothing prevents another seven-minor gap. Mitigation is not a code change: the doctor drift probes (store layout + trust-record naming) already fail loudly on a scheme change, and the follow-up premise probe covers the box-growth assumption.
+- **Risk — we ship a Kimi feature none of us ran.** The measured claims in the code (the
+  `growsWithDraft` box-growth premise above all) rest on 0.34.0 captures; latest is 0.41.0. This is
+  the *same* staleness that made PR #1203 un-mergeable, and no code change removes it. Mitigation is
+  procedural and partial, and worth naming as such: Mohid re-verifies before merge (item 7
+  checklist), the doctor drift probes fail loudly if the store or trust schemes move, and the
+  box-growth premise gets its own doctor probe as a filed follow-up. If Mohid's round contradicts a
+  measured claim, the fix returns to this lane rather than shipping.
 - **Alternative rejected — cherry-pick Mohid's work onto a fresh maintainer branch.** Cleaner diff, but it drops his authorship and abandons PR #1203, which the owner decision explicitly forbids.
 - **Alternative rejected — `harness.kimi.autoTrustWorkspace`.** Reasons under 3b.
 - **Alternative rejected — make trust pre-write default-on with an opt-*out*.** Preserves unattended spawning out of the box, and is exactly the "silently grant a capability the user never chose" shape #1328 is named for. Default-off is the only direction where the failure mode is an inconvenience rather than a security event.
@@ -240,12 +325,30 @@ Everything else (items 1–4, 7, and every unit test) is delivered regardless. I
 
 **Build + suites:** `pnpm build` clean; full `pnpm test` green including the `codev-core`/`codev-sdk` boundary tests (the `hold-verdict.ts` edit touches the SDK, so the isolation tests are load-bearing here).
 
-**Manual, at `dev-approval` (the reviewer drives the running worktree):**
-1. `pnpm -w run local-install`, then from the main workspace root `afx spawn --task "<small task>" --builder-cmd kimi` — with `harnessOptions.kimi.autoTrustWorkspace` **unset**: the trust dialog appears, the log names the refusal, the task message is *held* (not lost), and `afx inbox` shows it.
-2. Same spawn with the opt-in set and a clean worktree: trust is pre-recorded, the composer renders, the task delivers.
-3. Same spawn with the opt-in set and a `.mcp.json` in the repo root: **no** record is written, the log names `project-mcp-config`, the dialog appears.
-4. `afx send <builder-id>` with a >3-line message → arrives as one submitted message (the 1000 ms Enter), and the log line says `delivered` or `delivered-unverified` — matching what item 5 measured.
-5. `codev doctor` with kimi installed → presence, 0.33.0 floor, store and trust drift probes.
-6. `node codev/spikes/pir-1201-kimi-builder-demo.mjs` → 9/9 (the 7 original scenarios plus 6b/6c).
+**Manual, at `dev-approval` — deliberately all non-Kimi.** With no Kimi on this side, the thing
+our gate can actually prove is that a change *for* Kimi did not move anything *else*. That is the
+larger risk anyway: `render-gate.ts`, `message-write.ts` and `hold-verdict.ts` carry claude, codex
+and agy delivery for every user.
+
+1. **The measured harnesses are untouched.** Generate a builder launch script for claude, codex
+   and opencode before and after the change and diff them — **byte-identical**, or the change is
+   wrong. (`markerSpanEnd` is a no-op only because every existing marker matches at column 0 with a
+   1–2 cell span; the guardrail test pins that number per profile, and this is its manual mirror.)
+2. **Live delivery to a claude builder still works end-to-end** — `afx spawn`, then `afx send`
+   with a multi-line body: it arrives as one submitted message and the log says `delivered`, not
+   `delivered-unverified`. This is the regression that would matter most and the one a green suite
+   is least likely to catch (the #1573 echo path is timing-dependent).
+3. **A held row still renders correctly.** Put a claude builder's composer in a draft state, send
+   to it, and check `afx inbox`: the hold reads `busy:user-text`, *not* an unverifiable verdict.
+   Proves the `isUnverifiableVerdict` edit did not widen the escalation class for existing details.
+4. **Config**: with no `harnessOptions` block, `afx status`, `afx spawn --help` and `codev doctor`
+   behave exactly as before; with a malformed one, the failure is loud and names the key.
+5. **`codev doctor` with kimi absent** (the state of this machine) degrades cleanly — reports kimi
+   not installed, does not throw, and does not fail the run.
+6. Full `pnpm build` + `pnpm test` green, including the `codev-core` / `codev-sdk` boundary tests.
+
+**Kimi-side verification is @mohidmakhdoomi's round**, per the checklist in item 7 — the nine demo
+scenarios, the fixture re-capture, the `growsWithDraft` re-verification, and the verified-delivery
+measurement. This lane does not sign off on those and the review doc says so.
 
 **Cross-platform:** macOS only. Kimi's store and trust paths are `$HOME`-relative and the code already routes them through `KIMI_CODE_HOME`, so the tests are platform-independent; the live demo is not re-run on Linux/Windows and that is stated rather than implied.
