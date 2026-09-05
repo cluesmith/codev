@@ -31,6 +31,9 @@ import {
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
+import { findClaudeSessionMarkers } from '../lib/agent-env.js';
+import { getProcessesOnPort } from '../agent-farm/commands/tower.js';
+import { DEFAULT_TOWER_PORT } from '../agent-farm/lib/tower-client.js';
 import {
   measureSessionLogs,
   resolveLogRetentionDays,
@@ -125,6 +128,90 @@ export function checkSessionLogs(
       ? 'retention is disabled (AGENT_FARM_LOG_RETENTION_DAYS=0) — unset it and restart Tower to let the sweep run'
       : 'restart Tower to run the retention sweep (afx tower stop && afx tower start)',
   };
+}
+
+export interface TowerEnvCheck {
+  status: 'ok' | 'warn' | 'skipped';
+  /** Claude Code session markers found on the running Tower daemon. */
+  markers: string[];
+  /** Human-readable one-liner. No colour codes. */
+  summary: string;
+  /** Present only when `status === 'warn'`. */
+  recommendation?: string;
+}
+
+/**
+ * The exact command that restarts Tower with a clean environment (#1219).
+ * Kept as one string so the doctor warning and the docs cannot drift apart.
+ */
+export const TOWER_ENV_RESTART_HINT =
+  'restart Tower to clear them: afx tower stop && afx tower start';
+
+/**
+ * Decide what the "Tower environment" doctor section should say (#1219).
+ *
+ * A Tower started from inside a Claude Code session inherits that session's
+ * markers and hands them to every agent it spawns, which turns transcript
+ * saving — and therefore resume — off for all of them. Newly started Towers
+ * scrub themselves, but a *long-running* daemon started before this fix (or by
+ * something other than `afx tower start`) can still be carrying them, and that
+ * is invisible until a crash-recovery attempt fails.
+ *
+ * `readEnv` is injected so the decision is unit-testable without a live daemon;
+ * `doctor()` passes the real `ps eww` reader. A `null` return means no Tower is
+ * running (or its env could not be read) — reported as `skipped`, never a
+ * warning, since "no Tower" is not a fault.
+ */
+export function checkTowerEnv(
+  readEnv: () => Record<string, string> | null,
+): TowerEnvCheck {
+  const env = readEnv();
+  if (!env) {
+    return { status: 'skipped', markers: [], summary: 'Tower not running' };
+  }
+
+  const markers = findClaudeSessionMarkers(env);
+  if (markers.length === 0) {
+    return { status: 'ok', markers, summary: 'Tower environment is clean' };
+  }
+
+  return {
+    status: 'warn',
+    markers,
+    summary: `Tower inherited ${markers.length} Claude Code session marker(s): ${markers.join(', ')}`,
+    recommendation: TOWER_ENV_RESTART_HINT,
+  };
+}
+
+/**
+ * Read a running process's environment via `ps eww`.
+ *
+ * `ps eww -o command=` prints the argv followed by the environment on one line,
+ * and `ps ww -o command=` prints the argv alone — so subtracting the second from
+ * the first leaves the environment with no argv tokens to misparse. Returns
+ * `null` when the process is gone or the two readings disagree (a race), rather
+ * than guessing. macOS has no `/proc`, so `ps` is the portable reader here.
+ *
+ * `ps` separates environment entries with spaces and does not quote them, so a
+ * *value* containing a space is truncated at that space. Names are unaffected,
+ * and this check only ever asks which variables are present — but that is why
+ * the result is not a general-purpose environment reader.
+ */
+export function readProcessEnv(pid: number): Record<string, string> | null {
+  // `ww` in both: without it `ps` truncates to the terminal width when stdout is
+  // a tty, and a truncated argv would break the prefix subtraction below.
+  const command = runCommand('ps', ['ww', '-o', 'command=', '-p', String(pid)]);
+  const withEnv = runCommand('ps', ['eww', '-o', 'command=', '-p', String(pid)]);
+  if (command === null || withEnv === null) return null;
+  if (!withEnv.startsWith(command)) return null;
+
+  const env: Record<string, string> = {};
+  for (const token of withEnv.slice(command.length).trim().split(' ')) {
+    const eq = token.indexOf('=');
+    if (eq <= 0) continue;
+    env[token.slice(0, eq)] = token.slice(eq + 1);
+  }
+  return env;
 }
 
 /**
@@ -1141,6 +1228,28 @@ export async function doctor(): Promise<number> {
     console.log(`  ${chalk.green('✓')} ${sessionLogs.summary}`);
   } else {
     console.log(`  ${chalk.green('✓')} ${sessionLogs.summary} ${chalk.blue(`(${sessionLogs.retentionNote})`)}`);
+  }
+  console.log('');
+
+  // Tower environment hygiene (#1219). A Tower that inherited a Claude Code
+  // session's markers spawns agents whose transcripts are never saved, so they
+  // cannot be resumed after a crash — silent until recovery time.
+  const towerPids = getProcessesOnPort(DEFAULT_TOWER_PORT);
+  const towerEnv = checkTowerEnv(() => (towerPids.length > 0 ? readProcessEnv(towerPids[0]) : null));
+  console.log(chalk.bold('Tower Environment') + ` (port ${DEFAULT_TOWER_PORT})`);
+  console.log('');
+  if (towerEnv.status === 'warn') {
+    console.log(`  ${chalk.yellow('⚠')} ${towerEnv.summary}`);
+    warnings++;
+    warningDetails.push({
+      name: 'Tower environment',
+      issue: towerEnv.summary,
+      recommendation: towerEnv.recommendation,
+    });
+  } else if (towerEnv.status === 'skipped') {
+    console.log(`  ${chalk.blue('-')} ${towerEnv.summary}`);
+  } else {
+    console.log(`  ${chalk.green('✓')} ${towerEnv.summary}`);
   }
   console.log('');
 

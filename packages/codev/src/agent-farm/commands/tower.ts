@@ -16,6 +16,7 @@ import { isPortAvailable } from '../utils/shell.js';
 import Database from 'better-sqlite3';
 import { getGlobalDbPath } from '../db/index.js';
 import { activeStateDbPath, planMigration } from '../db/consolidate.js';
+import { sanitizeAgentEnv, findClaudeSessionMarkers } from '../../lib/agent-env.js';
 
 // Log file location
 const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
@@ -249,10 +250,20 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
   logToFile(`Starting tower server on port ${port}`);
   logToFile(`Command: ${command} ${args.join(' ')}`);
 
+  // Issue #1219: scrub Claude Code session markers before daemonizing. Starting
+  // Tower from inside a Claude Code session is routine, and the markers it plants
+  // would otherwise bake into the daemon and cascade into every agent it spawns,
+  // silently disabling transcript saving (and therefore resume) for all of them.
+  const inheritedMarkers = findClaudeSessionMarkers(process.env);
+  if (inheritedMarkers.length > 0) {
+    logger.info(`Scrubbed inherited Claude Code session markers: ${inheritedMarkers.join(', ')}`);
+    logToFile(`Scrubbed inherited Claude Code session markers: ${inheritedMarkers.join(', ')}`);
+  }
+
   // Start tower server fully detached - stdio: 'ignore' ensures parent can exit
   const serverProcess = spawn(command, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: sanitizeAgentEnv(process.env),
     detached: true,
     stdio: 'ignore', // Must be 'ignore' for true daemonization
   });
