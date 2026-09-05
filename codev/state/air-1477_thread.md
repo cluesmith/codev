@@ -191,3 +191,34 @@ architect relays an explicit human decision. Architect notified; parked.
 
 Protocol trace so far: implement (build ✓ / tests ✓) → pr (pr_exists ✓ / e2e_tests ✓) → pr gate
 [WAITING]. Nothing left for me to do on #1477 until the gate is approved.
+
+## Protocol complete (round 4)
+
+Human approved the pr gate; architect relayed it. Ran
+`porch approve 1477 pr --a-human-explicitly-approved-this` → checks re-ran green → `porch done 1477`
+→ **PROTOCOL COMPLETE**, phase `verified`.
+
+**Filed Issue #1633** (the human's call was that I file it, reversing the earlier hold):
+"Offline architect resolver picks alphabetically, live resolver picks first-registered
+(getArchitects ORDER BY id)". Labelled `area/tower`, deliberately NOT under #1483 — that tracks the
+post-1313 mailbox program, this is a Spec 755 defect the mailbox work merely walked into.
+
+Verified every claim against source before writing it, and found one thing worth more than the
+report itself: **this exact bug was already fixed once, in the singular.** `getArchitect`
+(state.ts:487) carries the comment "not the lexicographically-first name" and uses
+`ORDER BY started_at`, and `spec-755-migration.test.ts:279` pins it as a Codex-flagged regression.
+`getArchitects` (plural) — which is what the offline resolver actually reads — never got the same
+treatment. So the original fix landed on one of the two functions and nobody noticed the other.
+That reframes it from "an inconsistency" to "a known bug, half-fixed".
+
+Cross-linked both directions so neither dies alone: the test comment names #1633 and says that
+fixing it SHOULD break the assertion (flip to `zeta`, don't delete); the issue names the test and
+explains why it pins current behaviour.
+
+**Size figure corrected again** — and this is the second time it was wrong. 511 was the round-1
+count left stale by round 2; 544 was right when I wrote it but went stale when the `rmSync` lines
+landed in 3bb65d0f2. Now 554 insertions (252 + 296 + 6). The PR body quotes the command rather than
+a remembered number, because a number I retype by hand is a number that goes stale silently. Small
+lesson, same shape as the big one: state the thing that regenerates, not the snapshot.
+
+Parked: no merge, no issue close, no worktree cleanup.
