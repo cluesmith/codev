@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev-streamdeck",
-  "version": "3.3.2",
+  "version": "3.3.3",
   "private": true,
   "description": "Codev Stream Deck plugin — a controller that drives Codev via Tower's command relay + overview API.",
   "type": "module",
