@@ -958,6 +958,9 @@ async function handleTerminalRoutes(
         res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
         return;
       }
+      // Deliberately the default `'external'` origin (Issue #1473): this is a foreign writer, so
+      // its bytes count as input at the delivery gate and are reply-filtered on the way — both
+      // for free, because the recording lives inside `write()` rather than at each call site.
       session.write(body.data);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));

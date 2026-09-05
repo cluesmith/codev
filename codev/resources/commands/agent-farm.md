@@ -561,7 +561,12 @@ Sends text to a builder's terminal. Useful for:
 
 - **delivered** — the message was written to the recipient's prompt after a clean render-gate pass (an empty, render-verified prompt).
 - **held** — the prompt was not clear, so the message is persisted in Tower's durable mailbox and **delivers automatically** the moment the recipient's prompt is clean (after a submit, on output quiescence, or a poll backstop). The response carries a **why-held reason** and a mailbox id:
-  - `busy` — a draft, menu, dialog, or wrapper screen occupies the prompt;
+  - `busy` — the prompt is occupied. `afx inbox` qualifies it with the gate's own detail:
+    `busy:user-text` (a draft, menu, dialog, or wrapper screen), `busy:recent-input` (the
+    terminal was typed into within the last fraction of a second, so the composer may be
+    changing under the gate — it clears by itself a moment after the typing stops), or
+    `busy:no-region-end` / `busy:no-composer-marker` (the classifier could not verify the
+    composer at all — the one hold class that does NOT clear on its own);
   - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
   - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
 
