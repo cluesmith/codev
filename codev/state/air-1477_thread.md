@@ -141,3 +141,43 @@ it. My test keeps pinning current behaviour with the divergence comment unchange
 Mutation sweep now 7 points, all caught: strip normalize / drop workspace scope / delete dismissal
 call / drop sender affinity / delete architect-skip / retarget scheduleDrain / getArchitects
 registration order.
+
+## Protocol completion (round 3)
+
+Architect verified the round-2 fixes independently and requested no further changes; all three of
+my declines were accepted with their stated reasons. But the AIR protocol itself was still
+incomplete — `porch status 1477` showed PHASE: implement with build/tests "not yet run". A PR being
+open is not the same as the protocol being done, and #1477's checkbox in the #1483 tracking issue
+can't be ticked until it is.
+
+- `porch check 1477` → build ✓ (13.4s), tests ✓ (28.7s).
+- `porch done 1477` → advanced implement → **pr**.
+- PR phase criteria: `pr_exists`, `e2e_tests`.
+- Running the PR-stage 3-way CMAP (`--type pr`) as instructed. This is a DIFFERENT review from the
+  architect's integration CMAP on the PR — different stage, different prompt — so it is not skipped
+  on the grounds that the PR was already reviewed.
+
+### PR-stage CMAP verdicts
+
+**gemini APPROVE (HIGH)** — no issues. **codex COMMENT (HIGH)** — one real doc inaccuracy.
+**claude APPROVE (HIGH)** — none blocking, three minor items.
+
+Claude re-ran three mutations itself against real source (restoring after) and reproduced my
+claimed counts exactly. It also checked CI is ubuntu+macos only, so the symlink fixture has no
+Windows exposure — a platform risk I had not thought to check when I chose symlinks.
+
+Acted on:
+- **Stale size disclosure** (codex): PR body said 511 lines; actual is 544 (248 + 296), or 550
+  added lines counting the cross-reference. That was my round-1 number left unrevised after round 2
+  grew the files — the same class of error as the false normalization claim, just cosmetic this
+  time. Corrected, with a note saying it was corrected.
+- **Stale-symlink EEXIST hazard** (claude): the module-scope `symlinkSync` uses a PID-derived name,
+  so a hard-killed run strands the link and a later run drawing the same PID dies at COLLECTION —
+  losing the whole file with an opaque error, not one test. Added `rmSync(..., { force: true })`
+  before it. Verified the primitive both ways: EEXIST without, idempotent with.
+
+NOT acted on, deliberately:
+- Claude flagged that the `resolveRegistryArchitect` ORDER BY id divergence has no filed issue and
+  "dies with this review thread". The concern is right, but the architect explicitly holds that one
+  for the human and told me not to file it. Raised it with them instead of acting. A reviewer being
+  correct does not override an explicit instruction about whose call it is.

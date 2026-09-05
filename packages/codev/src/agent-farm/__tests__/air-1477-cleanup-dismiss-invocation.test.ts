@@ -113,6 +113,10 @@ const { normalizeWorkspacePath } = await import('../utils/workspace-path.js');
  */
 const WS = realpathSync(mkdtempSync(join(tmpdir(), 'air-1477-cleanup-')));
 const workspaceRoot = join(realpathSync(tmpdir()), `air-1477-cleanup-link-${process.pid}`);
+// A hard-killed run (SIGKILL/OOM) skips afterAll and strands this link; a later run that draws the
+// same pid would then die on EEXIST at module load — taking the whole FILE, not one test, and with
+// an opaque error. Clearing first makes the fixture idempotent.
+rmSync(workspaceRoot, { force: true });
 symlinkSync(WS, workspaceRoot);
 
 afterAll(() => {
