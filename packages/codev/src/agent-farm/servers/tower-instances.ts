@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import { encodeWorkspacePath } from '../lib/tower-client.js';
 import { loadConfig } from '../../lib/config.js';
+import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 
 const execAsync = promisify(exec);
 import { getGlobalDb } from '../db/index.js';
@@ -576,16 +577,15 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
           _deps.log('INFO', `Resuming architect '${DEFAULT_ARCHITECT_NAME}' session ${mainSessionId.slice(0, 8)}… in ${workspacePath}`);
         }
 
-        // Build env with CLAUDECODE removed so spawned Claude processes
-        // don't detect a nested session, and merge harness env vars.
-        // Spec 755: inject CODEV_ARCHITECT_NAME so afx spawn invocations
+        // Build env with Claude Code session markers removed so spawned Claude
+        // processes don't detect a nested session (#1219), and merge harness env
+        // vars. Spec 755: inject CODEV_ARCHITECT_NAME so afx spawn invocations
         // from inside this terminal can record the spawning architect.
         const cleanEnv = {
-          ...process.env,
+          ...sanitizeAgentEnv(process.env),
           ...harnessEnv,
           CODEV_ARCHITECT_NAME: DEFAULT_ARCHITECT_NAME,
         } as Record<string, string>;
-        delete cleanEnv['CLAUDECODE'];
 
         // Try shellper first for persistent session with auto-restart
         let shellperCreated = false;
@@ -1115,11 +1115,10 @@ export async function addArchitect(
   // Spec 755: inject CODEV_ARCHITECT_NAME so the new architect terminal's
   // afx spawn invocations tag builders with this architect's name.
   const cleanEnv = {
-    ...process.env,
+    ...sanitizeAgentEnv(process.env),
     ...harnessEnv,
     CODEV_ARCHITECT_NAME: name,
   } as Record<string, string>;
-  delete cleanEnv['CLAUDECODE'];
 
   // Try shellper first; fall back to a non-persistent PTY if shellper is
   // unavailable (matches launchInstance's degradation).

@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import * as yaml from 'js-yaml';
 import { parseCronExpression, isDue } from './tower-cron-parser.js';
+import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 import type { CronSchedule } from './tower-cron-parser.js';
 import { CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
@@ -286,7 +287,9 @@ function runCommand(
       cwd: options.cwd,
       timeout: options.timeout,
       maxBuffer: 1024 * 1024, // 1MB
-      env: process.env,
+      // Issue #1219: a cron task runs an arbitrary command, which may itself be
+      // (or launch) an agent. Same rule as every other Tower-descendant spawn.
+      env: sanitizeAgentEnv(process.env),
     }, (error, stdout, stderr) => {
       if (!error) {
         resolve({ output: stdout, exitCode: 0 });

@@ -11,6 +11,7 @@ import path from 'node:path';
 import { AGENT_FARM_DIR, encodeWorkspacePath } from '../lib/tower-client.js';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { loadConfig } from '../../lib/config.js';
+import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 import { getGlobalDb } from '../db/index.js';
 import {
   saveFileTab as saveFileTabToDb,
@@ -720,8 +721,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
         } catch { /* use default */ }
       }
       const cmdParts = architectCmd.split(/\s+/);
-      const cleanEnv = { ...process.env } as Record<string, string>;
-      delete cleanEnv['CLAUDECODE'];
+      const cleanEnv = sanitizeAgentEnv(process.env);
       // Spec 786 Phase 2: preserve architect identity across shellper auto-
       // restart. Without this, the new claude process would inherit Tower's
       // CODEV_ARCHITECT_NAME (or none), and builders spawned by a restarted
@@ -1007,8 +1007,7 @@ export async function getTerminalsForWorkspace(
             } catch { /* use default */ }
           }
           const cmdParts = architectCmd.split(/\s+/);
-          const cleanEnv = { ...process.env } as Record<string, string>;
-          delete cleanEnv['CLAUDECODE'];
+          const cleanEnv = sanitizeAgentEnv(process.env);
           // Spec 786 Phase 2: preserve architect identity across shellper auto-
           // restart (see matching block in reconcileTerminalSessionsInner above).
           const architectName = dbSession.role_id || 'main';

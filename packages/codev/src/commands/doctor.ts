@@ -31,6 +31,9 @@ import {
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
+import { findClaudeSessionMarkers } from '../lib/agent-env.js';
+import { getProcessesOnPort } from '../agent-farm/utils/port.js';
+import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import {
   measureSessionLogs,
   resolveLogRetentionDays,
@@ -125,6 +128,155 @@ export function checkSessionLogs(
       ? 'retention is disabled (AGENT_FARM_LOG_RETENTION_DAYS=0) — unset it and restart Tower to let the sweep run'
       : 'restart Tower to run the retention sweep (afx tower stop && afx tower start)',
   };
+}
+
+export interface TowerEnvCheck {
+  status: 'ok' | 'warn' | 'skipped';
+  /** Claude Code session markers found on the running Tower daemon. */
+  markers: string[];
+  /** Running shellper daemons whose own env still carries markers. */
+  contaminatedSessions: number;
+  /** Human-readable one-liner. No colour codes. */
+  summary: string;
+  /** Present only when `status === 'warn'`. */
+  recommendation?: string;
+}
+
+/**
+ * Remediation for a Tower daemon that inherited the markers (#1219).
+ *
+ * A plain restart is enough for the *daemon*, but deliberately not for what it
+ * already spawned: `towerStop` leaves shellpers running on purpose
+ * (`commands/tower.ts` — they are detached so terminals survive a restart), so
+ * their agent processes keep the markers until each is restarted. Saying only
+ * "restart Tower" would be a half-truth that reads as a full fix.
+ */
+export const TOWER_ENV_RESTART_HINT =
+  'restart Tower (afx tower stop && afx tower start), then restart each affected agent — '
+  + 'a plain restart leaves existing shellper sessions running with the markers';
+
+/**
+ * Remediation when Tower itself is clean but sessions it spawned earlier are not.
+ *
+ * The force-kill flag is named but not recommended outright: it ends every
+ * running agent on the machine, which is a bigger hammer than most cases need.
+ */
+export const TOWER_ENV_SESSION_HINT =
+  'restart each affected agent to clear them (or, to end every running session at once, '
+  + 'afx tower stop --force-kill-all-child-processes — this kills all agents)';
+
+/**
+ * Decide what the "Tower environment" doctor section should say (#1219).
+ *
+ * A Tower started from inside a Claude Code session inherits that session's
+ * markers and hands them to every agent it spawns, which turns transcript
+ * saving — and therefore resume — off for all of them. Newly started Towers
+ * scrub themselves, but a *long-running* daemon started before this fix (or by
+ * something other than `afx tower start`) can still be carrying them, and that
+ * is invisible until a crash-recovery attempt fails.
+ *
+ * The readers are injected so the decision is unit-testable without a live
+ * daemon; `doctor()` passes the real `ps eww` ones. A `null` Tower env means no
+ * Tower is running (or its env could not be read) — reported as `skipped`, never
+ * a warning, since "no Tower" is not a fault.
+ *
+ * `readSessionEnvs` covers what a daemon-only check would miss (CMAP review):
+ * shellpers are detached and survive `afx tower stop` by design, so after a
+ * plain restart Tower reads clean while the agents it spawned earlier are still
+ * carrying the markers — and still unresumable.
+ */
+export function checkTowerEnv(
+  readTowerEnv: () => Record<string, string> | null,
+  readSessionEnvs: () => Array<Record<string, string>> = () => [],
+): TowerEnvCheck {
+  const env = readTowerEnv();
+  const markers = env ? findClaudeSessionMarkers(env) : [];
+  const contaminatedSessions = readSessionEnvs()
+    .filter((sessionEnv) => findClaudeSessionMarkers(sessionEnv).length > 0)
+    .length;
+
+  if (markers.length > 0) {
+    const sessionNote = contaminatedSessions > 0
+      ? `; ${contaminatedSessions} running session(s) already carry them`
+      : '';
+    return {
+      status: 'warn',
+      markers,
+      contaminatedSessions,
+      summary: `Tower inherited ${markers.length} Claude Code session marker(s): ${markers.join(', ')}${sessionNote}`,
+      recommendation: TOWER_ENV_RESTART_HINT,
+    };
+  }
+
+  // Sessions spawned before the restart are still contaminated — the case a
+  // daemon-only check would call "ok" while agents stay unresumable. Shellpers
+  // outlive Tower, so this holds whether or not a Tower is running now; only
+  // the wording changes, since "Tower is clean" is not true of an absent Tower.
+  if (contaminatedSessions > 0) {
+    const lead = env ? 'Tower is clean, but' : 'No Tower running, but';
+    return {
+      status: 'warn',
+      markers,
+      contaminatedSessions,
+      summary: `${lead} ${contaminatedSessions} running session(s) still carry Claude Code session markers`,
+      recommendation: TOWER_ENV_SESSION_HINT,
+    };
+  }
+
+  if (!env) {
+    return { status: 'skipped', markers: [], contaminatedSessions: 0, summary: 'Tower not running' };
+  }
+
+  return { status: 'ok', markers, contaminatedSessions, summary: 'Tower environment is clean' };
+}
+
+/**
+ * PIDs of the running shellper daemons — the processes that outlive Tower and
+ * so can still be carrying markers after Tower itself has been restarted clean.
+ */
+export function findShellperPids(): number[] {
+  const out = runCommand('pgrep', ['-f', 'shellper-main.js']);
+  if (!out) return [];
+  return out
+    .split('\n')
+    .map((line) => parseInt(line.trim(), 10))
+    .filter((pid) => !isNaN(pid));
+}
+
+/**
+ * Read a running process's environment via `ps eww`.
+ *
+ * `ps eww -o command=` prints the argv followed by the environment on one line,
+ * and `ps ww -o command=` prints the argv alone — so subtracting the second from
+ * the first leaves the environment with no argv tokens to misparse. Returns
+ * `null` when the process is gone or the two readings disagree (a race), rather
+ * than guessing. macOS has no `/proc`, so `ps` is the portable reader here.
+ *
+ * `ps` separates environment entries with spaces and does not quote them, so a
+ * *value* containing a space is truncated at that space. Names are unaffected,
+ * and this check only ever asks which variables are present — but that is why
+ * the result is not a general-purpose environment reader.
+ */
+export function readProcessEnv(pid: number): Record<string, string> | null {
+  // `ww` in both: without it `ps` truncates to the terminal width when stdout is
+  // a tty, and a truncated argv would break the prefix subtraction below.
+  const command = runCommand('ps', ['ww', '-o', 'command=', '-p', String(pid)]);
+  const withEnv = runCommand('ps', ['eww', '-o', 'command=', '-p', String(pid)]);
+  if (command === null || withEnv === null) return null;
+  if (!withEnv.startsWith(command)) return null;
+
+  const env: Record<string, string> = {};
+  for (const token of withEnv.slice(command.length).trim().split(' ')) {
+    const eq = token.indexOf('=');
+    if (eq <= 0) continue;
+    env[token.slice(0, eq)] = token.slice(eq + 1);
+  }
+  // No pairs parsed means `ps` showed us no environment at all — another user's
+  // process, or a platform where `e` is not honoured. Returning `{}` here would
+  // read downstream as "an environment with no markers", i.e. a clean bill of
+  // health for a process we never actually inspected. Say "unknown" instead.
+  if (Object.keys(env).length === 0) return null;
+  return env;
 }
 
 /**
@@ -1141,6 +1293,33 @@ export async function doctor(): Promise<number> {
     console.log(`  ${chalk.green('✓')} ${sessionLogs.summary}`);
   } else {
     console.log(`  ${chalk.green('✓')} ${sessionLogs.summary} ${chalk.blue(`(${sessionLogs.retentionNote})`)}`);
+  }
+  console.log('');
+
+  // Tower environment hygiene (#1219). A Tower that inherited a Claude Code
+  // session's markers spawns agents whose transcripts are never saved, so they
+  // cannot be resumed after a crash — silent until recovery time.
+  const towerPids = getProcessesOnPort(DEFAULT_TOWER_PORT);
+  const towerEnv = checkTowerEnv(
+    () => (towerPids.length > 0 ? readProcessEnv(towerPids[0]) : null),
+    () => findShellperPids()
+      .map(readProcessEnv)
+      .filter((e): e is Record<string, string> => e !== null),
+  );
+  console.log(chalk.bold('Tower Environment') + ` (port ${DEFAULT_TOWER_PORT})`);
+  console.log('');
+  if (towerEnv.status === 'warn') {
+    console.log(`  ${chalk.yellow('⚠')} ${towerEnv.summary}`);
+    warnings++;
+    warningDetails.push({
+      name: 'Tower environment',
+      issue: towerEnv.summary,
+      recommendation: towerEnv.recommendation,
+    });
+  } else if (towerEnv.status === 'skipped') {
+    console.log(`  ${chalk.blue('-')} ${towerEnv.summary}`);
+  } else {
+    console.log(`  ${chalk.green('✓')} ${towerEnv.summary}`);
   }
   console.log('');
 

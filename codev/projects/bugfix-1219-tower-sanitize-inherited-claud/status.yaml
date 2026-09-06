@@ -1,0 +1,16 @@
+id: bugfix-1219
+title: tower-sanitize-inherited-claud
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+    requested_at: '2026-09-05T19:00:58.823Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-05T18:12:23.945Z'
+updated_at: '2026-09-05T19:00:58.824Z'
+pr_ready_for_human: true
