@@ -153,8 +153,9 @@ describe('Spec 1313 — mailbox table migration (v15) via runGlobalMigrations', 
     h.migrate();
 
     expect(h.tableExists('mailbox')).toBe(true);
-    // v15 creates the table; the same call then walks v16/v17/v18, so `not_before`
-    // (v17) and `detail` (v18) are present too — precisely the shape a real upgrade lands on.
+    // v15 creates the table; the same call then walks v16/v17/v18/v19, so `not_before` (v17),
+    // `detail` (v18) and the bounded-patience interrupt columns (v19, Issue #1481) are present
+    // too — precisely the shape a real upgrade lands on.
     expect(h.columns('mailbox')).toEqual(
       [
         'body',
@@ -165,6 +166,10 @@ describe('Spec 1313 — mailbox table migration (v15) via runGlobalMigrations', 
         'from_agent',
         'from_workspace',
         'id',
+        'interrupt_at',
+        'interrupt_claimed_at',
+        'interrupt_outcome',
+        'interrupt_prior_partial',
         'no_enter',
         'not_before',
         'reason',

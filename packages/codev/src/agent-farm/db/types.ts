@@ -115,6 +115,43 @@ export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
 export type MailboxGateDetail = 'user-text' | 'no-region-end' | 'no-composer-marker';
 
 /**
+ * Audit vocabulary for a bounded-patience force (Issue #1481, `afx send --interrupt-after`).
+ *
+ * Deliberately EXPLICIT rather than a lossy precedence, because every one of these states is a
+ * different thing to tell an operator, and the difference between "we claimed the row" and "the
+ * bytes reached the agent" is exactly what this feature must never blur:
+ *
+ *   - `armed` — a deadline is set and no force has run. The ONLY state the restart sweep and the
+ *     starvation suppression treat as "this will self-resolve".
+ *   - `claimed` / `claimed-degraded` — the row was transitioned held→delivered immediately BEFORE
+ *     the first byte (the same loss-over-duplicate trade immediate `--interrupt` already makes).
+ *     After a crash this means the write outcome is UNKNOWN, never that it was received.
+ *     `-degraded` records that the write edge was entered ahead of unfinished predecessor work on
+ *     that terminal, and is preserved even if completion is never recorded.
+ *   - `written-unverified` / `degraded-written-unverified` — the writer completed and every byte
+ *     was accepted. Still NOT acknowledgment: nothing here proves the agent read it.
+ *   - `failed` / `degraded-failed` — a write was observed to fail (a dropped PTY write).
+ *   - `skipped-offline` / `skipped-session-replaced` / `skipped-restart` — no bytes were written
+ *     and nothing was claimed; the body stays held for ordinary gated delivery. `skipped-restart`
+ *     is the lifetime boundary: force authority does not survive a Tower restart, even when the
+ *     deadline is still in the future.
+ *
+ * Row `status` remains authoritative for cancellation: a row delivered/dismissed/superseded by
+ * another path keeps whatever outcome it had (usually `armed`) and is simply never forced.
+ */
+export type MailboxInterruptOutcome =
+  | 'armed'
+  | 'claimed'
+  | 'claimed-degraded'
+  | 'written-unverified'
+  | 'degraded-written-unverified'
+  | 'failed'
+  | 'degraded-failed'
+  | 'skipped-offline'
+  | 'skipped-session-replaced'
+  | 'skipped-restart';
+
+/**
  * Database row type for the mailbox table (Spec 1313).
  *
  * Rows address AGENTS (`to_agent` within `workspace_path`), not PTYs, so a
@@ -139,6 +176,19 @@ export interface DbMailbox {
   supersede_key: string | null;
   escalated: number;       // 0 | 1 — set once escalation age crossed (visibility only)
   not_before: number | null; // epoch ms; delayed-send due time (Spec 1313 round 3). null = deliver-ASAP; row is deliverable only when not_before IS NULL OR not_before <= now
+  /**
+   * Issue #1481 (`--interrupt-after`): epoch ms at which a FORCED interrupt delivery becomes
+   * armed for this row. null on every ordinary row. Unlike {@link not_before} it does NOT gate
+   * eligibility — the row competes for ordinary gated delivery from the moment it is enqueued,
+   * and this is only the moment patience runs out.
+   */
+  interrupt_at: number | null;
+  /** Epoch ms the force claimed the row immediately before its first byte; null if it never did. */
+  interrupt_claimed_at: number | null;
+  /** Force audit state; null on ordinary rows. Never receipt — see {@link MailboxInterruptOutcome}. */
+  interrupt_outcome: MailboxInterruptOutcome | null;
+  /** 0 | 1 — an ordinary write for this row may already have emitted bytes (audit/disclosure only). */
+  interrupt_prior_partial: number;
   created_at: number;      // epoch ms; per-agent enqueue order
   updated_at: number;      // epoch ms
   resolved_at: number | null;  // delivered/superseded/dismissed timestamp; null while held

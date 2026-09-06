@@ -271,6 +271,10 @@ CREATE TABLE IF NOT EXISTS mailbox (
   supersede_key TEXT,                     -- cron-only; null for direct sends
   escalated INTEGER NOT NULL DEFAULT 0,   -- set once escalation age crossed (visibility only)
   not_before INTEGER,                     -- epoch ms; delayed-send due time (Spec 1313 round 3, --delay). null = deliver ASAP; a row is deliverable only when not_before IS NULL OR not_before <= now
+  interrupt_at INTEGER,                   -- epoch ms; bounded-patience deadline (Issue #1481, --interrupt-after). null = ordinary row. DISTINCT from not_before: the row is ELIGIBLE immediately and delivers through the gate all along; this is only when a forced interrupt delivery is armed for it
+  interrupt_claimed_at INTEGER,           -- epoch ms the timed force claimed the row (held -> delivered) immediately BEFORE its first byte. null when force never claimed
+  interrupt_outcome TEXT,                 -- audit for the armed force: 'armed' | 'claimed' | 'claimed-degraded' | 'written-unverified' | 'degraded-written-unverified' | 'failed' | 'degraded-failed' | 'skipped-offline' | 'skipped-session-replaced' | 'skipped-restart'. NEVER receipt: 'claimed' only means the row was claimed before the write. No CHECK on purpose -- SQLite cannot ALTER one in, so a fresh install would diverge from an upgraded one (same reasoning as the detail column); the value set is enforced in TypeScript (MailboxInterruptOutcome)
+  interrupt_prior_partial INTEGER NOT NULL DEFAULT 0,  -- 1 once an ordinary write for this row may have emitted bytes (dropped/preempted/threw). Monotonic audit fact, NEVER a reason to disarm force -- it exists so a later forced body can disclose possible duplicate effects
   created_at INTEGER NOT NULL,            -- epoch ms (enqueue order per agent)
   updated_at INTEGER NOT NULL,
   resolved_at INTEGER                     -- delivered/superseded/dismissed timestamp

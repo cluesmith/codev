@@ -26,7 +26,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /** Current migration version — bump when adding new migrations. */
-export const GLOBAL_CURRENT_VERSION = 18;
+export const GLOBAL_CURRENT_VERSION = 19;
 
 export interface GlobalMigrationOptions {
   /**
@@ -565,5 +565,44 @@ export function runGlobalMigrations(
     }
     db.prepare('INSERT INTO _migrations (version) VALUES (18)').run();
     log('[info] Added detail column to mailbox (Issue #1482 gate-verdict detail)');
+  }
+
+  // Migration v19: Add the bounded-patience interrupt columns to mailbox (Issue #1481 —
+  // `afx send --interrupt-after <seconds>`). The row is enqueued and delivered through the
+  // ordinary render gate from the instant it is persisted; `interrupt_at` says only WHEN a
+  // forced interrupt delivery becomes armed for it if it is still held. That is why this is a
+  // separate column from `not_before` rather than a reuse of it: `not_before` withholds
+  // ELIGIBILITY, which would defeat the whole point (the gate is given the full patience budget
+  // to find a clean prompt first).
+  //
+  //   - `interrupt_claimed_at` / `interrupt_outcome` are the force's AUDIT trail. `claimed`
+  //     means the row was transitioned held→delivered immediately before the first byte — it is
+  //     never evidence of receipt, and after a crash it means the write outcome is UNKNOWN.
+  //   - `interrupt_prior_partial` records that an ORDINARY write for this row may already have
+  //     emitted bytes (dropped/preempted/threw). It is disclosure metadata for a later forced
+  //     body, never a reason to disarm the force the operator asked for.
+  //
+  // NOT NULL DEFAULT 0 on `interrupt_prior_partial` is safe under ALTER TABLE ADD COLUMN
+  // (SQLite backfills the constant default), so existing rows converge with a fresh install.
+  // No CHECK on `interrupt_outcome`, for the same reason v18 omitted one on `detail`: SQLite
+  // cannot ALTER a CHECK in, so a constraint present in GLOBAL_SCHEMA and absent here would
+  // make a fresh install structurally different from an upgraded one — the exact convergence
+  // the migration suite asserts. The value set is enforced in TypeScript
+  // (`MailboxInterruptOutcome`). Same PRAGMA-gated shape as v16/v17/v18, per column: a blanket
+  // try/catch would let a real ALTER failure be recorded as "migrated", and every subsequent
+  // mailbox insert (which now names these columns) would fail against a table missing them.
+  const v19 = db.prepare('SELECT version FROM _migrations WHERE version = 19').get();
+  if (!v19) {
+    const columns = new Set(
+      (db.prepare(`PRAGMA table_info(mailbox)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!columns.has('interrupt_at')) db.exec(`ALTER TABLE mailbox ADD COLUMN interrupt_at INTEGER`);
+    if (!columns.has('interrupt_claimed_at')) db.exec(`ALTER TABLE mailbox ADD COLUMN interrupt_claimed_at INTEGER`);
+    if (!columns.has('interrupt_outcome')) db.exec(`ALTER TABLE mailbox ADD COLUMN interrupt_outcome TEXT`);
+    if (!columns.has('interrupt_prior_partial')) {
+      db.exec(`ALTER TABLE mailbox ADD COLUMN interrupt_prior_partial INTEGER NOT NULL DEFAULT 0`);
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (19)').run();
+    log('[info] Added bounded-patience interrupt columns to mailbox (Issue #1481 --interrupt-after)');
   }
 }

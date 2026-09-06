@@ -23,7 +23,7 @@
 
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import type { DbMailbox, MailboxGateDetail, MailboxReason } from './types.js';
+import type { DbMailbox, MailboxGateDetail, MailboxInterruptOutcome, MailboxReason } from './types.js';
 
 /**
  * Fields a caller supplies to persist a new held row. The repository fills in the
@@ -53,17 +53,28 @@ export interface EnqueueInput {
    * time so the delay is durable across a Tower restart.
    */
   notBefore?: number | null;
+  /**
+   * Bounded-patience force deadline in epoch-ms (Issue #1481 — `--interrupt-after`). null (the
+   * default) means no force is armed. Setting it does NOT defer eligibility — the row is
+   * deliverable immediately, exactly like an ordinary send; this is only the instant at which a
+   * still-held row becomes eligible for a forced interrupt delivery. A row carrying it is
+   * persisted with `interrupt_outcome = 'armed'`, which is what every downstream surface reads
+   * to mean "this one will self-resolve".
+   */
+  interruptAt?: number | null;
 }
 
 const INSERT_SQL = `
   INSERT INTO mailbox (
     id, workspace_path, to_agent, terminal_id, from_agent, from_workspace,
     body, formatted_message, no_enter, status, reason, detail, supersede_key,
-    escalated, not_before, created_at, updated_at, resolved_at
+    escalated, not_before, interrupt_at, interrupt_claimed_at, interrupt_outcome,
+    interrupt_prior_partial, created_at, updated_at, resolved_at
   ) VALUES (
     @id, @workspace_path, @to_agent, @terminal_id, @from_agent, @from_workspace,
     @body, @formatted_message, @no_enter, @status, @reason, @detail, @supersede_key,
-    @escalated, @not_before, @created_at, @updated_at, @resolved_at
+    @escalated, @not_before, @interrupt_at, @interrupt_claimed_at, @interrupt_outcome,
+    @interrupt_prior_partial, @created_at, @updated_at, @resolved_at
   )
 `;
 
@@ -87,6 +98,13 @@ function buildRow(input: EnqueueInput, now: number): DbMailbox {
     supersede_key: input.supersedeKey ?? null,
     escalated: 0,
     not_before: input.notBefore ?? null,
+    interrupt_at: input.interruptAt ?? null,
+    interrupt_claimed_at: null,
+    // `armed` is set at enqueue, not by the coordinator, so the DB never has a window where a
+    // deadline exists with no state naming it — the restart sweep and the starvation
+    // suppression both key off this exact value.
+    interrupt_outcome: input.interruptAt == null ? null : 'armed',
+    interrupt_prior_partial: 0,
     created_at: now,
     updated_at: now,
     resolved_at: null,
@@ -157,8 +175,30 @@ export function findHeldForAgent(
  * 3: "measure escalation age from max(created_at, not_before)"). `not_before` is always ≥
  * `created_at` when set (due = created + delay), so MAX == COALESCE(not_before, created_at);
  * MAX is kept so a hand-written earlier not_before can never move the start before enqueue.
+ *
+ * Issue #1481 adds a third term for a row whose forced interrupt is still ARMED: its clock runs
+ * from the patience deadline. Such a row is not "stuck" before then — it is a row that has
+ * PROMISED to resolve itself at a known instant, so alarming about it beforehand would be noise,
+ * and the grace period after the deadline is what gives the force time to actually run. The term
+ * is gated on `interrupt_outcome = 'armed'` rather than on `interrupt_at` alone: once the force
+ * has been SKIPPED (restart, offline, replaced session) there is no self-resolution left to wait
+ * for, so the row instantly reverts to the ordinary creation/eligibility clock and alarms like
+ * any other stuck mail.
  */
-const ESCALATION_START_SQL = 'MAX(created_at, COALESCE(not_before, created_at))';
+const ESCALATION_START_SQL =
+  "MAX(created_at, COALESCE(not_before, created_at), " +
+  "CASE WHEN interrupt_outcome = 'armed' THEN COALESCE(interrupt_at, created_at) ELSE created_at END)";
+
+/**
+ * TypeScript twin of {@link ESCALATION_START_SQL}, for the ONE surface that reports an age it
+ * did not compute in SQL (the drainer's escalation broadcast). Two expressions is one more than
+ * ideal; the alternative — re-deriving the age in SQL for an already-fetched row — costs a
+ * second query per escalation. They are kept adjacent and asserted equal in the unit tests.
+ */
+export function escalationStart(row: DbMailbox): number {
+  const armed = row.interrupt_outcome === 'armed' ? row.interrupt_at ?? row.created_at : row.created_at;
+  return Math.max(row.created_at, row.not_before ?? row.created_at, armed);
+}
 
 /**
  * Held rows whose escalation age ({@link ESCALATION_START_SQL} → now) has crossed `maxAgeMs`
@@ -295,6 +335,154 @@ export function setHeldVerdict(
 }
 
 /**
+ * Claim a still-held bounded-patience row for a FORCED interrupt delivery (Issue #1481).
+ *
+ * ONE guarded statement, and its guard is the whole safety argument: it transitions only a row
+ * that is still `held` AND still `armed`, so a delivery/dismissal/supersession that won the race
+ * makes this a zero-row no-op and the caller writes nothing at all — not even the Ctrl+C. The
+ * caller invokes it SYNCHRONOUSLY at the write edge, with no await between this and the first
+ * byte, so no gated pass can observe the row as held once the bytes are on their way.
+ *
+ * Claim-before-write is the same loss-over-duplicate trade immediate `--interrupt` already makes
+ * (`tower-routes.ts`): a crash after this returns leaves a row reading `delivered` for a body
+ * that may never have reached the terminal. `outcome` (`claimed` / `claimed-degraded`) is what
+ * says so — it means the row was CLAIMED, never that the message was received. Re-holding
+ * instead would let the backstop gate-deliver a second copy of a body the operator has already
+ * force-injected.
+ *
+ * @param outcome `claimed-degraded` when the write edge was entered ahead of unfinished
+ *                predecessor work on that terminal, so the degradation survives even if the
+ *                completion update never lands.
+ * @returns true if this call won the claim; false if the row was already terminal, was never
+ *          armed, or another force claimed it first.
+ */
+export function claimForForcedInterrupt(
+  db: Database.Database,
+  id: string,
+  outcome: 'claimed' | 'claimed-degraded',
+  now: number = Date.now()
+): boolean {
+  const info = db
+    .prepare(
+      "UPDATE mailbox SET status = 'delivered', reason = NULL, detail = NULL, " +
+        "interrupt_claimed_at = ?, interrupt_outcome = ?, updated_at = ?, resolved_at = ? " +
+        "WHERE id = ? AND status = 'held' AND interrupt_outcome = 'armed'"
+    )
+    .run(now, outcome, now, now, id);
+  return info.changes > 0;
+}
+
+/**
+ * Record the force's FINAL audit outcome on a row this process already claimed.
+ *
+ * Guarded on `interrupt_claimed_at IS NOT NULL` so it can only ever refine a claim this Tower
+ * made — it can never invent a completion for a row that was skipped, cancelled, or never armed.
+ * Deliberately NOT lossy: the caller passes the fully-qualified value (`degraded-*` variants
+ * included) rather than this function deriving a precedence, because "the write completed" and
+ * "the write was degraded" are independent facts and collapsing them is how an unverified
+ * degraded write comes to read as a clean success.
+ *
+ * A completion outcome is still not acknowledgment: `written-unverified` means every byte was
+ * accepted by the session, nothing more.
+ */
+export function setForcedInterruptOutcome(
+  db: Database.Database,
+  id: string,
+  outcome: MailboxInterruptOutcome,
+  now: number = Date.now()
+): boolean {
+  const info = db
+    .prepare(
+      'UPDATE mailbox SET interrupt_outcome = ?, updated_at = ? WHERE id = ? AND interrupt_claimed_at IS NOT NULL'
+    )
+    .run(outcome, now, id);
+  return info.changes > 0;
+}
+
+/**
+ * Record that the force was SKIPPED without writing anything (Issue #1481).
+ *
+ * Held-and-armed only, so it cannot overwrite a claim or relabel a row another path resolved.
+ * The body is left exactly as it was: still held, still eligible, still delivered by the
+ * ordinary render gate whenever the recipient's prompt next clears. What is lost is only the
+ * FORCE, and losing it visibly is the point — the row also stops suppressing the starvation
+ * alarm the moment its outcome stops being `armed`, so a dead force can never hide stuck mail.
+ */
+export function skipForcedInterrupt(
+  db: Database.Database,
+  id: string,
+  outcome: 'skipped-offline' | 'skipped-session-replaced' | 'skipped-restart',
+  now: number = Date.now()
+): boolean {
+  const info = db
+    .prepare(
+      "UPDATE mailbox SET interrupt_outcome = ?, updated_at = ? WHERE id = ? AND status = 'held' AND interrupt_outcome = 'armed'"
+    )
+    .run(outcome, now, id);
+  return info.changes > 0;
+}
+
+/**
+ * Record that an ORDINARY write for this row may already have emitted bytes (Issue #1481).
+ *
+ * Set when a normal delivery reports `dropped`/`preempted` or throws after entering its
+ * byte-attempting edge. Monotonic (the `= 0` guard makes a repeat a no-op) and deliberately
+ * INDEPENDENT of `interrupt_outcome`: it is a fact about history, not a force state, so it
+ * survives every later transition and shows up beside whatever outcome the force reaches.
+ *
+ * It is disclosure, NEVER a disarm. The ordinary path is itself still allowed to retry such a
+ * row, so cancelling the operator's escalation on this evidence would be a stricter rule than
+ * the one the normal path lives by. What it buys is honesty: when the force does run afterwards,
+ * every surface can say that some or all of this body's effects may already have landed once.
+ *
+ * @returns true if this call flipped it (worth a one-time warning), false if already recorded.
+ */
+export function markInterruptPriorPartial(db: Database.Database, id: string, now: number = Date.now()): boolean {
+  const info = db
+    .prepare('UPDATE mailbox SET interrupt_prior_partial = 1, updated_at = ? WHERE id = ? AND interrupt_prior_partial = 0')
+    .run(now, id);
+  return info.changes > 0;
+}
+
+/**
+ * Held rows with an ARMED force, oldest deadline first (Issue #1481).
+ *
+ * Two callers, both at Tower start: the disarm sweep (below) reads it to retire every leftover
+ * policy, and diagnostics read it to say what is pending. Bounded by the held set.
+ */
+export function findArmedInterrupts(db: Database.Database): DbMailbox[] {
+  return db
+    .prepare(
+      "SELECT * FROM mailbox WHERE status = 'held' AND interrupt_outcome = 'armed' ORDER BY interrupt_at ASC, id ASC"
+    )
+    .all() as DbMailbox[];
+}
+
+/**
+ * Retire every leftover armed force at Tower start (Issue #1481) — the lifetime boundary.
+ *
+ * Force authority is scoped to the Tower lifetime that accepted it, exactly like the delayed
+ * `--interrupt` ^C nudge, and unlike the message BODY, which is durable and still delivers
+ * through the gate. A future deadline is disarmed too, not rearmed: the operator asked to
+ * interrupt a specific turn that a restart has already ended, and firing into whatever turn
+ * exists minutes later is a surprise nobody asked for. The deliberate cost is that a restart
+ * inside the patience window silently downgrades that send to an ordinary hold — visible in
+ * `afx inbox` as `skipped-restart`, never silent in the audit.
+ *
+ * Runs BEFORE any writer starts, so no coordinator can arm a row this sweep is about to retire.
+ *
+ * @returns the number of rows disarmed (the caller logs it and fires ONE held-state refresh).
+ */
+export function disarmInterruptsOnRestart(db: Database.Database, now: number = Date.now()): number {
+  const info = db
+    .prepare(
+      "UPDATE mailbox SET interrupt_outcome = 'skipped-restart', updated_at = ? WHERE status = 'held' AND interrupt_outcome = 'armed'"
+    )
+    .run(now);
+  return info.changes;
+}
+
+/**
  * Flag a still-held row as escalated — **visibility only, NEVER affects delivery**. The
  * drainer's escalation pass calls this when a row crosses the escalation age, then emits
  * the escalation broadcast; the row still delivers only on a later clean gate pass.
@@ -369,6 +557,15 @@ export interface StarvingAgent {
  * membership of the returned set to decide when a prior notice can be cleared (agent no longer
  * has any eligible non-notice held row → drained). PRE-DUE delayed rows are excluded (not
  * stuck), so a scheduled send never trips the alarm nor keeps one alive.
+ *
+ * Issue #1481 excludes one more class, and ONLY that class: a row whose forced interrupt is
+ * still `armed` and whose deadline has not passed. It is not stuck — it will resolve itself at a
+ * known instant. Written as three explicit null-tolerant disjuncts rather than a `NOT (...)`
+ * because `interrupt_outcome` is NULL on every ordinary row, and `NOT (NULL AND …)` is NULL, not
+ * true — an ordinary row would silently vanish from the alarm. The exclusion is per-ROW, never
+ * per-agent: ordinary held mail to the same recipient still aggregates and still alarms, which
+ * is the whole reason this is not a recipient-level skip. Past the deadline (including a skipped
+ * force, whose outcome is no longer `armed`) the row participates normally again.
  */
 export function findStarvingAgents(db: Database.Database, now: number = Date.now()): StarvingAgent[] {
   return db
@@ -381,10 +578,12 @@ export function findStarvingAgents(db: Database.Database, now: number = Date.now
          FROM mailbox
         WHERE status = 'held'
           AND (not_before IS NULL OR not_before <= ?)
+          AND (interrupt_outcome IS NULL OR interrupt_outcome <> 'armed'
+               OR interrupt_at IS NULL OR interrupt_at <= ?)
           AND (supersede_key IS NULL OR supersede_key NOT LIKE ?)
         GROUP BY workspace_path, to_agent`
     )
-    .all(now, `${NOTICE_SUPERSEDE_PREFIX}%`) as StarvingAgent[];
+    .all(now, now, `${NOTICE_SUPERSEDE_PREFIX}%`) as StarvingAgent[];
 }
 
 /**

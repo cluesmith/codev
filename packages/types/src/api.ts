@@ -667,6 +667,28 @@ export interface HeldMessage {
    * with a countdown rather than an age.
    */
   notBefore: number | null;
+  /**
+   * Issue #1481 (`afx send --interrupt-after`): epoch ms at which this row's bounded-patience
+   * force becomes armed; `null` on every ordinary row.
+   *
+   * Unlike {@link notBefore} it does NOT make the row scheduled: the message is deliverable now
+   * and counts toward `heldCount` like any other held mail. It says only that if the row is
+   * still here at that instant, a forced interrupt delivery runs for it.
+   */
+  interruptAt: number | null;
+  /**
+   * Issue #1481: the force's audit state — `'armed'` while pending, then a claim, completion,
+   * failure, or skip (see the server's `MailboxInterruptOutcome`). `null` on ordinary rows.
+   * NEVER receipt: a claimed or written outcome records what this Tower did, not what the agent
+   * received.
+   */
+  interruptOutcome: string | null;
+  /**
+   * Issue #1481: true once an ORDINARY write for this row may already have put bytes on the
+   * terminal (a dropped, preempted, or throwing attempt). It does not disarm the force — it is
+   * the disclosure that a later forced body may duplicate effects that already landed.
+   */
+  interruptPriorPartial: boolean;
 }
 
 export interface AnalyticsResponse {

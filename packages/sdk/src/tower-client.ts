@@ -801,6 +801,23 @@ export class TowerClient {
        * the pending send is listable/cancellable via `afx inbox`.
        */
       deliverAfter?: number;
+      /**
+       * Issue #1481 (`--interrupt-after`): bounded patience. The message is enqueued and
+       * delivered through the ordinary render gate immediately; only if it is STILL held after
+       * this many seconds does Tower escalate to a forced interrupt delivery (Ctrl+C, a fixed
+       * settle, then the body, ungated) for that same row.
+       *
+       * Between the two existing shapes: `interrupt` forces NOW, a plain send waits forever,
+       * this waits a bounded amount and then forces. Use it for time-sensitive mail that should
+       * land soon but would rather land on a clean prompt; use `interrupt` for mail that must
+       * land right now.
+       *
+       * Accepts fractions. Rejected in combination with `interrupt`, `escape` or `deliverAfter`.
+       * The deadline bounds when the escalation STARTS — not when (or whether) the agent reads
+       * it. The force is scoped to the Tower lifetime that accepted it: a restart disarms it and
+       * the body reverts to ordinary gated delivery.
+       */
+      interruptAfter?: number;
     },
   ): Promise<{
     ok: boolean;
@@ -863,6 +880,12 @@ export class TowerClient {
      * absent reads exactly as `true` always did.
      */
     verified?: boolean;
+    /**
+     * Issue #1481: epoch ms at which this row's `--interrupt-after` force becomes armed. Present
+     * only when one was requested. It reports when patience runs out, NOT a delivery guarantee —
+     * the escalation's own outcome lands long after this response and is visible in `afx inbox`.
+     */
+    interruptAt?: number;
   }> {
     const result = await this.request<{
       ok: boolean;
@@ -879,6 +902,7 @@ export class TowerClient {
       notBefore?: number;
       bodyLength?: number;
       verified?: boolean;
+      interruptAt?: number;
     }>(
       '/api/send',
       {
@@ -895,6 +919,7 @@ export class TowerClient {
             interrupt: options?.interrupt,
             escape: options?.escape,
             deliverAfter: options?.deliverAfter,
+            interruptAfter: options?.interruptAfter,
           },
         }),
       },
@@ -919,6 +944,7 @@ export class TowerClient {
       notBefore: result.data!.notBefore,
       bodyLength: result.data!.bodyLength,
       verified: result.data!.verified,
+      interruptAt: result.data!.interruptAt,
     };
   }
 
