@@ -1,7 +1,7 @@
 id: '1481'
 title: afx-send-add-interrupt-after-s
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-06T18:50:04.653Z'
-updated_at: '2026-09-06T19:50:17.647Z'
+updated_at: '2026-09-06T19:50:21.044Z'
