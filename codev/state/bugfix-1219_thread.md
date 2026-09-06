@@ -194,3 +194,57 @@ Follow-ups filed rather than buried: #1627 (architect.ts unsanitized),
 CI: all 7 checks green.
 
 <signal>PHASE_COMPLETE</signal>
+
+## Incident during verification — read this before starting any Tower
+
+I took down every terminal on this machine at 18:26:59 UTC on 2026-09-05.
+
+I started a test Tower on port 14733 to verify the daemon scrub end to end and
+exported `AGENT_FARM_DIR` to isolate it. **That is not the override** — the real
+one is `CODEV_AGENT_FARM_DIR` (`packages/core/src/constants.ts:18`, #1515). So
+the test Tower opened the PRODUCTION `~/.agent-farm/global.db`.
+
+Its startup reconcile adopted all 56 live terminal rows and connected to every
+production shellper socket. A shellper holds one client, so the real Tower on
+4100 lost all of them; both Towers fought over reconnects and the stale-row path
+deleted 53 of the 56 rows. Killing my Tower orphaned them: 60 unregistered
+shellpers, every architect terminal across 12 workspaces gone — including the
+architect's own. The architect restored the rows by hand from the checkpointed
+DB and restarted Tower.
+
+Log evidence: 56 `reconcile-adopt` at 18:26:59.4xx, 54 `Session … removed but
+shellper pid=… is alive` by 18:27:02.5xx.
+
+**My reporting was the second failure.** I told the architect it "briefly
+contended with the live Tower for the cloud tunnel. It recovered." I had noticed
+the tunnel flapping in the log and never looked for session loss, so I reported
+the symptom I happened to see and framed a fleet-wide outage as a transient
+blip. Checking `~/.agent-farm/tower.log` for reconcile/removal lines — which I
+did only when told to — would have shown it immediately. The rule I'd take from
+it: after touching shared state by accident, go look for what you broke before
+characterising it, and never report "it recovered" on the strength of one metric.
+
+#1629 filed for the systemic half: a second Tower must not be able to open a
+live global.db and adopt rows owned by a running Tower, and an isolation env var
+whose misspelling silently means "use production" is a trap. My mistake was the
+trigger; neither should be one variable name away.
+
+Standing order from the architect: **no Tower starts from this lane.** Field
+verification is deferred to `local-install` on `main` after merge.
+
+## Post-gate review round
+
+Architect's two required changes (arch-001 + arch-002), both done:
+- Incident section written into the PR body, referencing #1629.
+- `CLAUDE_PID` disposition. Checked the binary: the child env is one object
+  literal `{CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_CHILD_SESSION,
+  CLAUDE_PID: String(process.pid)}`. Not read for nesting detection (its only
+  reader is the Bash tool's pkill guard) but identity by construction, so it is
+  now stripped. `CLAUDE_EFFORT` is planted by the same function and stays —
+  "Claude Code sets it" is not the test; it carries a setting, not an identity.
+
+Scope objection: architect accepted as within BUGFIX, no trimming.
+
+Note: arch-001 never arrived in my session — I read it only when arch-002
+pointed at it. If instruction files are the channel, a dropped message is
+invisible to the builder.
