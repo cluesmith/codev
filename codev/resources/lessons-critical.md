@@ -8,7 +8,7 @@ MAINTAIN polices the cap and keeps the map in sync with lessons-learned.md's sec
 ## Critical lessons (consult before deciding)
 - Trust the protocol — never skip CMAP/consultation; it catches security, design, and protocol issues solo review misses.
 - Check for existing work (PRs, git history) before building from scratch.
-- "It compiled" / "tests pass" is not "it works" — verify the real user path end-to-end before calling it done.
+- "It compiled" / "tests pass" is not "it works" — verify the real user path end-to-end before calling it done. Derive the check from the USER'S ACTION, not from the code you changed: a check picked after the fix can only confirm the fix.
 - Model permissions as roles/capabilities, not booleans — booleans don't extend.
 - Single source of truth beats distributed state — consolidate duplicates rather than syncing them.
 - After any rename or framework change, grep the whole repo across BOTH codev/ and codev-skeleton/ before claiming "all fixed."
