@@ -1995,8 +1995,9 @@ async function handleSend(
   //   - `interrupt` already forces NOW, so a patience budget after it is a contradiction;
   //   - `deliverAfter` withholds eligibility, so "be patient with a message that is not yet
   //     deliverable" has no single obvious reading (does the budget start at send or at due
-  //     time?) — and `deliverAfter: 0` is refused for the same reason, explicitly, rather than
-  //     being treated as "no delay";
+  //     time?). The guard tests `!== undefined && !== null` rather than truthiness so an
+  //     explicit `deliverAfter: 0` cannot read as "no delay" — today `--delay`'s own
+  //     validator refuses zero before this point, and this stays correct if that changes;
   //   - `escape` writes a bare ESC with no body to escalate at all.
   // A quietly-dropped option would look like it worked, which for a force is the worst failure.
   let interruptAfter: number | undefined;

@@ -2072,6 +2072,198 @@ describe('tower-routes', () => {
       });
     });
   });
+  // =========================================================================
+  // POST /api/send — bounded patience (`--interrupt-after`, Issue #1481)
+  //
+  // The route's whole job for this flag is the BOUNDARY: validate, refuse the
+  // combinations that have no single reading, anchor the deadline to the REQUEST,
+  // persist it on the row, and report it on a held response without ever claiming
+  // the later escalation will succeed. The escalation itself is the coordinator's
+  // and is tested in pir-1481-interrupt-after.test.ts.
+  // =========================================================================
+  describe('POST /api/send — --interrupt-after (Issue #1481)', () => {
+    /** A send that resolves to a known-but-offline builder → the registry hold path. */
+    function offlineTarget() {
+      mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+      mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+    }
+
+    /** POST /api/send with the given options, returning status + parsed body. */
+    async function send(options: Record<string, unknown>, over: Record<string, unknown> = {}) {
+      mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'wrap up soon', workspace: '/tmp/ws', options, ...over });
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      return { status: statusCode(), parsed: JSON.parse(body()) as Record<string, any> };
+    }
+
+    /** Every mailbox row in the test DB — the proof that a rejection persisted nothing. */
+    const rowCount = (): number =>
+      (sendDbHolder.db.prepare('SELECT COUNT(*) AS n FROM mailbox').get() as { n: number }).n;
+
+    describe('validation happens before anything is persisted', () => {
+      // A quietly-dropped or quietly-accepted force option is the worst failure mode this
+      // flag has: the operator believes a bounded escalation is armed when it is not.
+      it.each([
+        ['zero', 0, 'greater than zero'],
+        ['a negative number', -5, 'greater than zero'],
+        ['Infinity', Number.POSITIVE_INFINITY, 'finite number'],
+        ['NaN', Number.NaN, 'finite number'],
+        ['a numeric string', '30', 'finite number'],
+        ['a boolean', true, 'finite number'],
+        ['past the one-hour bound', 3601, 'at most 3600 seconds'],
+      ])('rejects %s with 400 INVALID_PARAMS and no row', async (_label, value, fragment) => {
+        offlineTarget();
+        const { status, parsed } = await send({ interruptAfter: value });
+        expect(status).toBe(400);
+        expect(parsed.error).toBe('INVALID_PARAMS');
+        expect(parsed.message).toContain(fragment as string);
+        expect(rowCount()).toBe(0);
+      });
+
+      it('accepts a positive fraction — sub-second patience is a real ask, unlike --delay', async () => {
+        offlineTarget();
+        const { status, parsed } = await send({ interruptAfter: 0.5 });
+        expect(status).toBe(200);
+        expect(parsed.held).toBe(true);
+        expect(typeof parsed.interruptAt).toBe('number');
+      });
+
+      it('leaves a send with no interruptAfter completely untouched', async () => {
+        offlineTarget();
+        const { status, parsed } = await send({});
+        expect(status).toBe(200);
+        expect(parsed.held).toBe(true);
+        expect(parsed).not.toHaveProperty('interruptAt'); // additive-only: absent, not null
+        expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.interrupt_at).toBeNull();
+        expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.interrupt_outcome).toBeNull();
+      });
+
+      // `null`/`undefined` are how an older client or a partially-filled body arrives. Neither
+      // is a request for a force, so neither may 400 — it would break clients that send the
+      // whole options object with empty fields.
+      it.each([['null', null], ['undefined', undefined]])(
+        'treats %s as "no force requested", not as invalid input',
+        async (_label, value) => {
+          offlineTarget();
+          const { status, parsed } = await send({ interruptAfter: value });
+          expect(status).toBe(200);
+          expect(parsed).not.toHaveProperty('interruptAt');
+        },
+      );
+    });
+
+    describe('combinations with no unambiguous reading are refused', () => {
+      it('refuses --interrupt-after with --interrupt (nothing left to be patient about)', async () => {
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-c', workspacePath: '/tmp/ws', agent: 'spir-9' });
+        mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(vi.fn(), '❯ '), listSessions: () => [] });
+        const { status, parsed } = await send({ interrupt: true, interruptAfter: 30 });
+        expect(status).toBe(400);
+        expect(parsed.error).toBe('INVALID_PARAMS');
+        expect(parsed.message).toContain('cannot be combined with interrupt');
+        expect(rowCount()).toBe(0);
+      });
+
+      it('refuses --interrupt-after with escape (an ESC carries no body to escalate)', async () => {
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-c', workspacePath: '/tmp/ws', agent: 'spir-9' });
+        mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(vi.fn(), '❯ '), listSessions: () => [] });
+        const { status, parsed } = await send({ escape: true, interruptAfter: 30 }, { message: '\x1b' });
+        expect(status).toBe(400);
+        expect(parsed.message).toContain('cannot be combined with escape');
+        expect(rowCount()).toBe(0);
+      });
+
+      it('refuses --interrupt-after with a delay (the budget has no unambiguous start)', async () => {
+        offlineTarget();
+        const { status, parsed } = await send({ deliverAfter: 30, interruptAfter: 10 });
+        expect(status).toBe(400);
+        expect(parsed.message).toContain('cannot be combined with a delay');
+        expect(rowCount()).toBe(0);
+      });
+
+      // `deliverAfter: 0` is the interesting one: it is falsy, so a guard written as
+      // `if (options.deliverAfter)` would read it as "no delay" and silently pair the two.
+      // In practice `--delay`'s own validator refuses zero first, so the pairing never
+      // reaches the conflict check — the assertion that matters is that it is refused and
+      // persists nothing, whichever validator says so. The conflict guard tests
+      // `!== undefined && !== null` rather than truthiness so it stays correct if delay's
+      // own bounds ever change.
+      it('refuses an EXPLICIT deliverAfter: 0 rather than reading it as "no delay"', async () => {
+        offlineTarget();
+        const { status, parsed } = await send({ deliverAfter: 0, interruptAfter: 10 });
+        expect(status).toBe(400);
+        expect(parsed.error).toBe('INVALID_PARAMS');
+        expect(parsed.message).toContain('greater than zero');
+        expect(rowCount()).toBe(0);
+      });
+    });
+
+    describe('the deadline is persisted and reported', () => {
+      it('anchors interrupt_at to the REQUEST and arms the row (offline target)', async () => {
+        offlineTarget();
+        const before = Date.now();
+        const { status, parsed } = await send({ interruptAfter: 30 });
+        const after = Date.now();
+
+        expect(status).toBe(200);
+        expect(parsed.held).toBe(true);
+        expect(parsed.interruptAt).toBeGreaterThanOrEqual(before + 30_000);
+        expect(parsed.interruptAt).toBeLessThanOrEqual(after + 30_000);
+
+        const row = mailbox.getById(sendDbHolder.db, parsed.mailboxId)!;
+        expect(row.status).toBe('held');
+        expect(row.interrupt_at).toBe(parsed.interruptAt);
+        expect(row.interrupt_outcome).toBe('armed');
+        expect(row.interrupt_claimed_at).toBeNull();
+        expect(row.interrupt_prior_partial).toBe(0);
+        // Bounded patience is HELD mail, not scheduled mail: it is eligible for the gate
+        // from the moment it is persisted, which is the whole point of preferring a clean
+        // prompt if one appears first.
+        expect(row.not_before).toBeNull();
+        expect(parsed.scheduled).toBeUndefined();
+        expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9', Date.now())).toHaveLength(1);
+      });
+
+      it('reports the deadline on a gate-held response from a live but busy session', async () => {
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-busy', workspacePath: '/tmp/ws', agent: 'spir-9' });
+        const mockWrite = vi.fn();
+        // A screen mid-turn: no empty composer, so the render gate holds.
+        mockGetTerminalManager.mockReturnValue({
+          getSession: () => gateSession(mockWrite, 'Thinking…', true, 'term-busy'),
+          listSessions: () => [],
+        });
+        const { status, parsed } = await send({ interruptAfter: 5 });
+
+        expect(status).toBe(200);
+        expect(parsed.held).toBe(true);
+        expect(parsed.delivered).toBe(false);
+        expect(mockWrite).not.toHaveBeenCalled(); // the gate held; no force is due yet
+        expect(typeof parsed.interruptAt).toBe('number');
+        expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.interrupt_outcome).toBe('armed');
+      });
+
+      it('omits interruptAt when the very first gated attempt already delivered', async () => {
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-clean', workspacePath: '/tmp/ws', agent: 'spir-9' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({
+          getSession: () => gateSession(mockWrite, '❯ ', true, 'term-clean'),
+          listSessions: () => [],
+        });
+        const { status, parsed } = await send({ interruptAfter: 30 });
+
+        expect(status).toBe(200);
+        expect(parsed.delivered).toBe(true);
+        expect(mockWrite).toHaveBeenCalled();
+        // The clean prompt won, so there is no patience left to report — and the response
+        // must not imply a force is still coming for a row that is already terminal.
+        expect(parsed).not.toHaveProperty('interruptAt');
+        const row = mailbox.getById(sendDbHolder.db, parsed.mailboxId)!;
+        expect(row.status).toBe('delivered');
+        // The deadline metadata is kept as audit even though the row is terminal; row STATUS
+        // is what cancels the force, and the coordinator refuses a non-held row at its claim.
+        expect(row.interrupt_at).not.toBeNull();
+      });
+    });
+  });
 
   // =========================================================================
   // GET /api/analytics (Spec 456)

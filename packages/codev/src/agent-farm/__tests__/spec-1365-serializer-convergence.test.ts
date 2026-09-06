@@ -27,6 +27,7 @@ import {
   trySubmitToSession,
   isSubmissionInFlight,
   pendingSubmissionSessions,
+  pendingOperatorSessions,
   resetSubmissionChains,
   unserializedWriteCount,
   bypassCountedSessions,
@@ -463,6 +464,222 @@ describe('Issue #1365 — deliveries decline contention, operators wait (bounded
     expect(await second).toEqual({ status: 'preempted' });
     await sleep(0);
     expect(bypassCountedSessions()).toBe(0);
+  });
+});
+/**
+ * Issue #1481 §3 — the operator chain, and why the ceiling had to stop being a latch.
+ *
+ * `--interrupt-after` manufactures OPERATOR submissions that nobody is watching: they fire on a
+ * timer, they routinely decline to write, and several can queue on one terminal. That turned two
+ * previously-rare corners into everyday ones:
+ *
+ *   1. a second operator queued behind a first operator AND a long delivery used to inherit an
+ *      unbounded wait decided once at enqueue;
+ *   2. a ceiling that expired while waiting for that first operator used to latch, so the second
+ *      operator reported a bypass of a delivery that had already finished.
+ *
+ * The traces below are wall-clock, in units of 100 ms, and name the instants from the plan.
+ */
+describe('Issue #1481 — an operator waits for operators, and degradation is a write-edge fact', () => {
+  beforeEach(() => resetSubmissionChains());
+  afterEach(() => resetSubmissionChains());
+
+  /** A DELIVERY write occupying the line for `ms`, as the paced writer does. */
+  function delivery(c: ReturnType<typeof makeComposer>, ms: number): Promise<boolean> {
+    return trySubmitToSession(c.session.id, () => {
+      c.session.write('D');
+      setTimeout(() => c.session.write('\r'), ms);
+      return ms;
+    });
+  }
+
+  /** An operator that writes a body and holds the line for `ms` (its trailing Enter). */
+  function operator(
+    c: ReturnType<typeof makeComposer>,
+    body: string,
+    ms: number,
+    opts: { waitCeilingMs?: number; onCeilingExpired?: (n: number) => void } = {},
+  ): Promise<void> {
+    return submitToSession(c.session.id, () => {
+      c.session.write('\x03');
+      c.session.write(body);
+      // `ms === 0` is the synchronous, nothing-pending write the serializer models: its Enter
+      // must land inside the callback, not on a later tick, or the submission would report
+      // itself complete with the body still sitting in the composer.
+      if (ms === 0) c.session.write('\r');
+      else setTimeout(() => c.session.write('\r'), ms);
+      return ms;
+    }, undefined, opts);
+  }
+
+  it('runs O2 after O1 without making it wait out the whole delivery, and charges it no bypass', async () => {
+    // The plan's F1 trace. D active t=0..4; O1 enqueues t=1 and its ceiling opens it at t=3;
+    // O1's own submission ends t=5. O2 enqueues t=1.5 and its ceiling expires at t=3.5 — but it
+    // must still wait for O1, so it enters at t=5. By then D has been finished for a full unit,
+    // so O2 bypassed NOTHING: no counter, no warning. A latched ceiling would report one.
+    const c = makeComposer();
+    const expired: number[] = [];
+    const onCeilingExpired = (ms: number) => expired.push(ms);
+
+    const d = delivery(c, 400);                                  // t=0 .. t=4
+    await sleep(100);
+    const o1 = operator(c, 'OP-ONE', 200, { waitCeilingMs: 200, onCeilingExpired }); // opens t=3, ends t=5
+    await sleep(50);
+    const o2Start = Date.now();
+    const o2 = operator(c, 'OP-TWO', 0, { waitCeilingMs: 200, onCeilingExpired });   // ceiling t=3.5
+    await Promise.all([d, o1, o2]);
+    const o2Waited = Date.now() - o2Start;
+
+    // Exactly one degradation: O1's, which really did enter ahead of a running delivery.
+    expect(expired).toEqual([200]);
+    expect(unserializedWriteCount(c.session.id)).toBe(1);
+    // O2 waited for O1 (well past its own ceiling) — operator-vs-operator stays serialized...
+    expect(o2Waited).toBeGreaterThanOrEqual(300);
+    // ...and the operators are strictly ordered, neither clobbering the other.
+    expect(c.submitted.filter((s) => s.startsWith('OP-'))).toEqual(['OP-ONE', 'OP-TWO']);
+  });
+
+  it('still charges O2 a bypass when the delivery is genuinely STILL running at its write edge', async () => {
+    // The companion trace, and the reason the check is "who is writing right now" rather than
+    // "was my ceiling irrelevant": same shape as above, but D runs to t=10. O2 enters at t=5
+    // into a terminal a delivery really is using, so this one IS interference and is reported.
+    const c = makeComposer();
+    const expired: number[] = [];
+    const onCeilingExpired = (ms: number) => expired.push(ms);
+
+    const d = delivery(c, 1000);                                 // t=0 .. t=10
+    await sleep(100);
+    const o1 = operator(c, 'OP-ONE', 200, { waitCeilingMs: 200, onCeilingExpired }); // opens t=3, ends t=5
+    await sleep(50);
+    const o2 = operator(c, 'OP-TWO', 0, { waitCeilingMs: 200, onCeilingExpired });   // enters t=5, D still live
+    await Promise.all([o1, o2]);
+
+    expect(expired).toEqual([200, 200]); // both really did write into a busy line
+    expect(unserializedWriteCount(c.session.id)).toBe(2);
+    expect(c.submitted.filter((s) => s.startsWith('OP-'))).toEqual(['OP-ONE', 'OP-TWO']);
+    await d;
+  });
+
+  it('reports zero bypasses for pure operator contention, however long the ceiling has been elapsed', async () => {
+    // No delivery anywhere in this trace, so there is nothing bypassable by construction. The
+    // second operator's ceiling expires almost immediately and stays expired for the whole wait;
+    // the write edge is what decides, and at that edge the line is free.
+    const c = makeComposer();
+    const expired: number[] = [];
+    const onCeilingExpired = (ms: number) => expired.push(ms);
+
+    const first = operator(c, 'OP-ONE', 300, { waitCeilingMs: 20, onCeilingExpired });
+    await sleep(10);
+    const startedAt = Date.now();
+    const second = operator(c, 'OP-TWO', 0, { waitCeilingMs: 20, onCeilingExpired });
+    await Promise.all([first, second]);
+
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(200); // the ceiling was long gone
+    expect(expired).toEqual([]);
+    expect(unserializedWriteCount(c.session.id)).toBe(0);
+    expect(bypassCountedSessions()).toBe(0);
+    expect(c.submitted.filter((s) => s.startsWith('OP-'))).toEqual(['OP-ONE', 'OP-TWO']);
+  });
+
+  it('keeps a no-op operator in the order — a successor waits for it, not around it', async () => {
+    // The timed force declines to write far more often than it writes (the row was delivered,
+    // the session was replaced, another writer holds the row). If a declining submission did not
+    // settle its place in the operator chain, the next operator could start while it was still
+    // deciding — and "decide, then maybe write" is not atomic.
+    const c = makeComposer();
+    const order: string[] = [];
+
+    const noop = submitToSession(c.session.id, () => {
+      order.push('noop-start');
+      return 150; // occupies its slot without putting a byte on the line
+    }, undefined, { wroteBytes: () => false });
+    await sleep(10);
+    const after = submitToSession(c.session.id, () => {
+      order.push('after-start');
+      c.session.write('\x03');
+      c.session.write('AFTER');
+      c.session.write('\r');
+      return 0;
+    });
+    await Promise.all([noop, after]);
+
+    expect(order).toEqual(['noop-start', 'after-start']);
+    expect(c.submitted).toEqual(['AFTER']); // the no-op contributed no bytes
+    expect(unserializedWriteCount(c.session.id)).toBe(0);
+  });
+
+  it('lets a successor run after a THROWING operator, and reports the failure only to its caller', async () => {
+    // A force callback can throw (a session vanishing mid-write, a DB error in its audit
+    // update). Poisoning the chain would strand every later message on that terminal.
+    const c = makeComposer();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const boom = submitToSession(c.session.id, () => {
+        throw new Error('write edge exploded');
+      });
+      const rejection = expect(boom).rejects.toThrow('write edge exploded');
+      await sleep(10);
+      const next = submitToSession(c.session.id, () => {
+        c.session.write('\x03');
+        c.session.write('SURVIVOR');
+        c.session.write('\r');
+        return 0;
+      });
+
+      await rejection;
+      await expect(next).resolves.toBeUndefined(); // the successor is unaffected
+      expect(c.submitted).toEqual(['SURVIVOR']);
+      await sleep(10);
+      expect(unhandled).toEqual([]); // the rejection reached exactly one place: the caller
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('does not let a finished operator evict a newer one from the chain (identity guard)', async () => {
+    // `operatorTails` holds ONE entry per session, so the finisher must check that the entry is
+    // still its own before deleting it. Without the guard, O1 finishing would clear the map
+    // while O2 was still writing, and O3 — arriving next — would see no operator to wait for.
+    const c = makeComposer();
+
+    const o1 = operator(c, 'OP-ONE', 0, {});     // finishes almost immediately
+    await sleep(5);
+    const o2 = operator(c, 'OP-TWO', 200, {});   // still writing when O1's tail resolves
+    await o1;
+    await sleep(20);                             // O1 is done; O2 is mid-write
+    expect(pendingOperatorSessions()).toBe(1);   // O1 did NOT delete O2's entry
+
+    const o3 = operator(c, 'OP-THREE', 0, {});
+    await Promise.all([o2, o3]);
+
+    expect(c.submitted.filter((s) => s.startsWith('OP-'))).toEqual(['OP-ONE', 'OP-TWO', 'OP-THREE']);
+  });
+
+  it('leaves BOTH maps empty after success, rejection and a no-op have drained', async () => {
+    // The leak assertion. `operatorTails` is a second per-session map added by this issue, and a
+    // Tower arming unattended forces would grow it forever if any exit path skipped its
+    // eviction — including the two paths that are easy to forget: a throw, and a decline.
+    const c = makeComposer();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const ok = operator(c, 'OP-OK', 0, {});
+      const bad = submitToSession(c.session.id, () => { throw new Error('nope'); });
+      const badSettled = bad.catch(() => undefined);
+      const noop = submitToSession(c.session.id, () => 0, undefined, { wroteBytes: () => false });
+      await Promise.all([ok, badSettled, noop]);
+      await sleep(10); // let the eviction bookkeeping run
+
+      expect(pendingSubmissionSessions()).toBe(0);
+      expect(pendingOperatorSessions()).toBe(0);
+      expect(bypassCountedSessions()).toBe(0);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 });
 
