@@ -65,10 +65,33 @@ afx send [builder] [message]
 | `--interrupt` | Send Ctrl+C first |
 | `--raw` | Skip structured formatting |
 | `--no-enter` | Don't press Enter after message |
+| `--delay <seconds>` | Deliver after N seconds (persisted, survives a Tower restart) |
+| `--interrupt-after <s>` | Try a clean delivery first; FORCE it if still held after N seconds |
 
 ```bash
 afx send 0042 "PR approved, please merge"
 afx send 0585 "check the test output" --file /tmp/test-results.txt
+```
+
+**Choosing how hard to push** — a plain send waits for a clean prompt forever; the others bound that:
+
+| Flag | Contract | Use for |
+|------|----------|---------|
+| (none) | hold until the prompt is clean | ordinary mail |
+| `--delay <s>` | not deliverable until `<s>` from now, then gated; **never** forces | scheduling |
+| `--interrupt-after <s>` | gated from the start; forces **only if still held** at `<s>` | **time-sensitive** |
+| `--interrupt` | force **now**: Ctrl+C, then the body, no render gate | **urgent** |
+
+`--interrupt-after` is an opt-in exception to the never-force rule, so it carries the same risk as
+`--interrupt` if it fires: the body skips the render gate and can land in a draft or a menu. What it
+promises is that the *escalation starts* at the deadline — not that the agent has read anything by
+then. A clean prompt (or `afx inbox dismiss`) before the deadline cancels it; a Tower restart cancels
+the force but keeps the message as ordinary held mail. `--all` arms one per recipient. Outcomes —
+including `⚠ a normal write may have already emitted part of this message` — are audit only, never
+receipt: read them with `afx inbox show <id>`.
+
+```bash
+afx send 0042 --interrupt-after 30 "Release cuts in 10 min — wrap up and open the PR."
 ```
 
 **Addressing forms** — the recipient isn't only a builder ID:
