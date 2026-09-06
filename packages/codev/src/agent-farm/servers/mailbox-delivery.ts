@@ -1218,9 +1218,9 @@ export class MailboxDrainer {
   // hold coalesces onto the timer already armed), generation-guarded exactly like
   // `scheduleDrain`, and cleared in `stop()` alongside the backstop timer.
   private readonly inputRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  // Issue #1473: consecutive input-holds per agent — the diagnostic behind
-  // {@link CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD}. Reset by any outcome that is not an input
-  // hold, delivery included.
+  // Issue #1473: each agent's unbroken run of input-holds — the diagnostic behind
+  // {@link CONSECUTIVE_INPUT_HOLD_WARN_MS}. Reset by any outcome that is not an input hold,
+  // delivery included; that reset is what makes the run UNBROKEN rather than cumulative.
   private readonly consecutiveInputHolds = new Map<string, InputHoldStreak>();
   // Lifecycle generation (CMAP round 2 — Codex/Claude): the drainer instance is REUSED across
   // stop()/start() (mailbox-wiring `ensureDrainer`), and the tests do start/stop/start. Bumped on

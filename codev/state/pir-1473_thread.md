@@ -621,3 +621,30 @@ still on record: it is the REQUEST_CHANGES verdict in the architect's lane, and 
 are the four fixed above.
 
 Build green. Full suite **286 files, 5836 tests, 0 failures** (+17 this round).
+
+## Closing the review phase
+
+Architect verified all four blocking fixes against the branch and accepted the three
+not-changed dispositions with their reasons. Two follow-ups (the xterm pin's package, and the
+`afx attach` hole) go on their list — explicitly NOT filed from here.
+
+Two last things went into the review:
+
+- **The sharpest evidence that the old constant was wrong is not the arithmetic.** It is that
+  step 4a's ten repetitions each drove 15-20s of unbroken cursor-key input — so the old rule
+  would have fired on the human confirming that the feature respects ordinary typists. When a
+  guard's own acceptance test is indistinguishable from the abuse it is meant to catch, the
+  guard is measuring the wrong thing, and tuning the number does not fix that.
+- **`consult -m claude` failing three times with "Prompt is too long" is recorded as a tooling
+  limit at this diff size** (41 files, +5834), not as a missing verdict. It cost nothing here
+  because the architect's lane got a full claude review of the same branch, and its four
+  findings are the four blocking fixes. But a PIR leaning on the porch lane alone would have
+  silently lost a third of its consultation at this size. Not retrying it narrowed: a
+  less-informed second opinion from a model that already gave a fully-informed one is worse
+  than no second opinion.
+
+Also fixed a dangling `{@link CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD}` left pointing at the
+constant I replaced. Grepped the repo for the old name: the only remaining hits are the codex
+verdict file (a historical record) and the review quoting it while describing the finding.
+
+Next: finish the review phase and park at the `pr` gate. That gate is the human's.

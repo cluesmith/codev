@@ -180,7 +180,17 @@ of bug, not just an instance.
 Two independent review lanes ran on this PR (the architect's integration CMAP and porch's
 single-pass consultation). Verdicts: **gemini APPROVE**, **codex COMMENT/REQUEST_CHANGES**,
 **claude REQUEST_CHANGES**. Every finding below was verified against the branch before acting;
-none was taken on the summary alone.
+none was taken on the summary alone — including one that did not survive the check (gemini
+reported the governance updates as landing in `codev-skeleton/` too; they must not, since those
+are `<placeholder>` starter templates for adopters and there is no skeleton `arch.md` /
+`lessons-learned.md` at all).
+
+**Tooling limit worth knowing for the next large PIR:** porch's `consult -m claude` failed three
+times on this diff with `Prompt is too long` — a size limit at roughly this scale (41 files,
++5834), not a transient error. It is not a gap in coverage here, because the architect's
+integration lane obtained a full claude review of the same branch and its four findings are the
+four blocking fixes below; but a PIR relying on the porch lane alone would have silently lost
+a third of its consultation at this size. Budget for splitting the review, or expect two lanes.
 
 **Fixed — the new hold class was "unrecognized" in `afx inbox show`.** `describeDetail()`
 (`commands/inbox.ts`) had no `recent-input` case, so the one verdict this PR exists to make
@@ -197,13 +207,23 @@ fourth value reaches consumers.
 
 **Fixed — the starvation warning was sized against one cadence and documented against another.**
 `CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD = 60` claimed "~90s at the 300ms re-drain cadence", but
-60 × (300 + 25) ≈ **19.5s**. That constant exists specifically to avoid libelling an ordinary
-typist as a machine, and ~20s of continuous input is ordinary — the manual verification for this
-very issue ran 15–20s of unbroken arrow presses per repetition. Replaced with a wall-clock
-`CONSECUTIVE_INPUT_HOLD_WARN_MS = 90_000` measured from the start of the unbroken run, which is
-what the comment always meant and cannot drift when the drain cadence changes. Three tests pin
-it: 200 passes across 20s must **not** warn (this fails against the old code), 20 passes across
-95s must warn once, and two 60s runs separated by a delivery must not add up.
+60 × (300 + 25) ≈ **19.5s**.
+
+The arithmetic is the weaker half of the argument. The sharper evidence is that **the manual
+verification of this very feature would have tripped it**: step 4a's ten repetitions each drove
+15–20 seconds of unbroken cursor-key input, which is precisely the window the old rule called
+machine-generated. A constant written to avoid libelling an ordinary typist as a machine would
+have fired on the human confirming that the feature respects ordinary typists. When a guard's
+own acceptance test is indistinguishable from the abuse it is meant to catch, the guard is
+measuring the wrong thing — no amount of tuning the number fixes that.
+
+So it is now a duration, not a count: `CONSECUTIVE_INPUT_HOLD_WARN_MS = 90_000`, measured from
+the start of the unbroken run. That is what the comment always meant, and unlike a count it
+cannot silently re-scale when the drain cadence changes — the backstop, quiescence and submit
+triggers all drive passes too, so the pass rate was never a stable unit in the first place.
+Three tests pin it: 200 passes across 20s must **not** warn (this one fails against the old
+code), 20 passes across 95s must warn exactly once, and two 60s runs separated by a delivery
+must not add up.
 
 **Fixed — `AF_LOG_INPUT_SIGNAL=1` logs keystrokes verbatim.** `survived="a"` is literal typed
 input, and the runbook has operators typing into live composers. There is no redaction to add
