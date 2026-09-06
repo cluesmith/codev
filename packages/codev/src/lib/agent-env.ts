@@ -67,10 +67,26 @@ export const CLAUDE_SESSION_MARKER_PREFIXES: readonly string[] = [
  * lives here now so there is one list rather than six copies of one `delete`.
  * `CHILD_SESSION`, `ENTRYPOINT` and `EXECPATH` are the nesting-detection triple
  * that #1219 is actually about.
+ *
+ * `CLAUDE_PID` sits outside the `CLAUDE_CODE_` namespace but belongs here on the
+ * merits: the shipped binary builds its child environment as
+ * `{CLAUDECODE:"1", CLAUDE_CODE_SESSION_ID:…, CLAUDE_CODE_CHILD_SESSION:"1",
+ * CLAUDE_PID:String(process.pid)}` — one object literal, so it is identity by
+ * construction, not by namespace. Nothing reads it for nesting detection; its
+ * only reader is the `pkill` guard in the Bash tool's shell prelude, which
+ * refuses a pattern matching the Claude CLI's own pid. An inherited stale value
+ * points that guard at a dead or unrelated pid, which is its own small bug.
+ *
+ * `CLAUDE_EFFORT` is planted by that same function and is deliberately NOT here:
+ * being planted by Claude Code is not the test — it carries a *setting* (the
+ * effort level), not an identity, so it is configuration and passes through.
  */
 export const CLAUDE_SESSION_MARKER_NAMES: readonly string[] = [
   'CLAUDECODE',
   'CLAUDE_CODE_CHILD_SESSION',
+  // Not in the CLAUDE_CODE_ namespace, but planted by the same object literal
+  // as CHILD_SESSION and set to `String(process.pid)` — see the note below.
+  'CLAUDE_PID',
   'CLAUDE_CODE_ENTRYPOINT',
   'CLAUDE_CODE_EXECPATH',
   'CLAUDE_CODE_SSE_PORT',

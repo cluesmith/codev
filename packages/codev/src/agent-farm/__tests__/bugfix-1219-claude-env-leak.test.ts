@@ -37,6 +37,7 @@ const OBSERVED_MARKERS = {
   CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/claude.sock',
   CLAUDE_CODE_MESSAGING_TOKEN: 'secret',
   CLAUDE_CODE_BRIDGE_SESSION_ID: 'bridge-1',
+  CLAUDE_PID: '4038',
 };
 
 /**
@@ -129,12 +130,23 @@ describe('bugfix-1219 — sanitizeAgentEnv', () => {
     expect(source).toEqual(OBSERVED_MARKERS);
   });
 
-  it('leaves unrelated CLAUDE_* names alone', () => {
-    // CLAUDE_PID / CLAUDE_EFFORT are not in the CLAUDE_CODE_ namespace and are
-    // not nesting markers; the fix must not overreach into them.
-    expect(isClaudeSessionMarker('CLAUDE_PID')).toBe(false);
+  it('strips CLAUDE_PID despite it being outside the CLAUDE_CODE_ namespace', () => {
+    // The binary builds its child env as one object literal —
+    // {CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_CHILD_SESSION,
+    //  CLAUDE_PID: String(process.pid)} — so this is identity by construction,
+    // not by namespace. An inherited stale value also points the Bash tool's
+    // pkill guard at a dead pid.
+    expect(isClaudeSessionMarker('CLAUDE_PID')).toBe(true);
+    expect(sanitizeAgentEnv({ CLAUDE_PID: '4038', PATH: '/usr/bin' }))
+      .toEqual({ PATH: '/usr/bin' });
+  });
+
+  it('keeps CLAUDE_EFFORT and unrelated names', () => {
+    // CLAUDE_EFFORT is planted by that same function, so "Claude Code sets it"
+    // is not the test: it carries a setting, not an identity.
     expect(isClaudeSessionMarker('CLAUDE_EFFORT')).toBe(false);
     expect(isClaudeSessionMarker('ANTHROPIC_API_KEY')).toBe(false);
+    expect(sanitizeAgentEnv({ CLAUDE_EFFORT: 'high' })).toEqual({ CLAUDE_EFFORT: 'high' });
   });
 });
 
