@@ -704,3 +704,37 @@ honest state is simply not expressible in porch's vocabulary. Both files now rec
 Rebuttal written at `1473-review-iter1-rebuttals.md` (that one is NOT gitignored — only
 `codev/projects/*/*.txt` is — so it ships with the PR). Every codex finding was accepted; none
 rebutted as a false positive.
+
+---
+
+## 2026-09-06 — pr gate approved; the COMMENT finding scoped down one more notch
+
+The human approved the `pr` gate. Before recording it, two corrections to the paragraph above,
+both verified against the shipped files rather than taken on report.
+
+**`status.yaml` does not carry per-model verdicts.** I wrote that the `COMMENT` fallback
+"persists into `status.yaml`". It does not. The file is phases, gate approvals, iteration,
+`build_complete`, and `pr_history` — 29 lines, no verdicts anywhere. `parseVerdict`'s `COMMENT`
+surfaces only in `porch next`'s transient output. So no shipped artifact ever claims claude
+reviewed this PR: what reaches a maintainer is `status.yaml` (no verdicts), the rebuttals doc,
+and the review subsection saying the lane could not run. The architect caught this and flagged it
+in the reassuring direction; the finding survives intact but is now stated as what it is — porch's
+verdict **vocabulary** has no slot for a model that could not run — not as "porch wrote a false
+verdict into project state." Both the review doc and the failure record now say that.
+
+The source comment is worth quoting because it names the false premise exactly:
+`verdict.ts:47` — "No valid VERDICT: line found **but the consult ran** — treat as COMMENT
+(non-blocking skip)". The consult did not run. That clause is the bug.
+
+**The failure record is gitignored, so the review doc has to stand alone.** `.gitignore:65`
+(`codev/projects/*/*.txt`) covers the claude `.txt` exactly as it covers gemini's and codex's, and
+it was deliberately not force-added. That makes the review's "consultation lane degrades silently"
+subsection the only durable, shareable account of what happened, so the three attempts, the
+verbatim `Prompt is too long`, the 41 files / +5834 −88 diff size, and the link to claude's real
+opinion (PR #1634 comment 5558099314) are now inlined there rather than delegated to a file no
+reader outside this worktree can open.
+
+Standing orders unchanged: no merge, no issue close, no worktree cleanup, no follow-up issues.
+The human's decision is that none of the three follow-ups (porch consultation gap, `afx attach`
+input blindness, xterm pin scope) get filed for now — they live in the review doc and the
+architect's notes. Recording the gate approval and parking.

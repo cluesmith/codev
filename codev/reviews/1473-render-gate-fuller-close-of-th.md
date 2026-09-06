@@ -187,11 +187,20 @@ are `<placeholder>` starter templates for adopters and there is no skeleton `arc
 
 #### The consultation lane degrades silently on a large PR
 
-porch's `consult -m claude` failed three times on this diff with `Prompt is too long` — a hard
-model input limit at roughly this scale (41 files, +5834), not a transient error. Coverage did
-not actually suffer: the architect's integration lane obtained a full claude review of the same
-branch, and its four findings are the four blocking fixes below. What suffered was the
-*second, independent* opinion.
+porch's `consult -m claude --protocol pir --type impl --project-id 1473` was invoked three
+times on 2026-09-06 and produced no review. Attempts 1 and 3 died with the verbatim error
+`Prompt is too long`; attempt 2 hit an unrelated usage limit that later reset. The two attempts
+that reached the model were hours apart, on unchanged input, and failed identically — a hard
+model input limit at this diff size (**41 files, +5834 / −88** against merge-base
+`03bc5213e`), not a transient error. A fourth retry was considered and rejected for the same
+reason.
+
+Coverage did not actually suffer. Claude *did* review this branch, in the architect's separate
+integration CMAP lane, which ran on a different input and did not hit the limit; that review
+asked for changes (HIGH confidence) and is published in full at
+[PR #1634 comment 5558099314](https://github.com/cluesmith/codev/pull/1634#issuecomment-5558099314).
+Its four blocking findings are the four fixed below in `d807c1802`. What this lane's failure
+cost was the *second, independent* opinion — not a claude review of this code.
 
 The protocol gap is worth more than the incident. **porch models consultation completeness as
 file presence per model** (`commands/porch/next.ts:598` — `reviews.length <
@@ -205,26 +214,37 @@ That shape has a failure mode beyond inconvenience: the pressure it puts on an a
 manufacture the missing file, which is precisely the action that would make a consultation look
 like it happened when it did not. Here the builder escalated instead and a human authorized a
 **failure record** at that path
-(`codev/projects/1473-*/1473-review-iter1-claude.txt`) — a file carrying no verdict line, so
-porch's own `grep … || echo UNKNOWN` extraction resolves it as `UNKNOWN`, which is the case the
-protocol already anticipates for an unavailable model. Anyone opening that file finds an
-account of three failed attempts and a pointer to where claude's real opinion lives, not a
-review.
+(`codev/projects/1473-*/1473-review-iter1-claude.txt`) — a file carrying no verdict line, so the
+PIR review prompt's line-anchored `grep … || echo UNKNOWN` extraction resolves it as `UNKNOWN`,
+the case the protocol already anticipates for an unavailable model. Anyone opening that file
+finds an account of the three failed attempts and a pointer to where claude's real opinion
+lives, not a review.
+
+That file is **gitignored** (`.gitignore:65`, `codev/projects/*/*.txt`), exactly as the gemini
+and codex outputs are, and it was deliberately not force-added. So it does not ship with this
+PR, and **this section is the only durable, shareable record of what happened** — which is why
+the attempts, the verbatim error, the diff size and the pointer are all stated above rather than
+delegated to the `.txt`.
 
 Writing that file surfaced a sharper instance of the same gap. **porch's `parseVerdict`
 (`commands/porch/verdict.ts:24-48`) has no "unknown" or "did not run" value at all** — a file
-with no `VERDICT:` line falls through to `COMMENT`, labelled in the source as a "non-blocking
-skip". So porch's project state now records this failure as a claude review whose verdict was
-`COMMENT`, which is a reviewer position, not what happened. The PIR review prompt's own
-extraction (a line-anchored grep with an `|| echo UNKNOWN` fallback) resolves the same file as
-`UNKNOWN`. Two extractions, two answers — and the one that persists into project state is the
-one that cannot express "no review". The remedy is *not* to add a `VERDICT:` line: any value
-would assert a position no reviewer held. The honest state is simply not expressible in porch's
-current vocabulary.
+with no `VERDICT:` line falls through to `COMMENT` under the comment "No valid VERDICT: line
+found *but the consult ran* — treat as COMMENT (non-blocking skip)" (`verdict.ts:47`). "But the
+consult ran" is exactly the premise that is false here, so the fallback turns "this model could
+not run" into `COMMENT`, an actual reviewer position.
+
+Scope that claim carefully, because it is easy to overstate and we did at first: this is a
+defect in porch's verdict **vocabulary**, not a false verdict written into shipped state.
+`status.yaml` carries phases, gate approvals and PR history — no per-model verdicts at all — so
+the `COMMENT` fallback surfaces only in `porch next`'s transient output. No artifact that
+reaches a reader claims claude reviewed this PR. The PIR review prompt's own extraction reads
+the same file as `UNKNOWN`. Two extractions, two answers, and neither vocabulary has a slot for
+a model that *could not* run. The remedy is *not* to add a `VERDICT:` line: any value would
+assert a position no reviewer held. The honest state is simply not expressible.
 
 Practical consequence for the next large PIR: expect the porch lane to lose a model somewhere
 around this diff size, plan for a second lane or a split review rather than discovering it at
-the gate, and do not read a `COMMENT` verdict in `status.yaml` as proof a model actually ran.
+the gate, and do not read porch's `COMMENT` fallback as proof a model actually ran.
 
 **Fixed — the new hold class was "unrecognized" in `afx inbox show`.** `describeDetail()`
 (`commands/inbox.ts`) had no `recent-input` case, so the one verdict this PR exists to make
