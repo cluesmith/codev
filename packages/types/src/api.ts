@@ -651,9 +651,12 @@ export interface HeldMessage {
   /**
    * The gate's detail behind a `busy` reason (Issue #1482):
    * `'user-text'` — a draft or menu occupies the composer; a human is at the line and the hold
-   * clears by itself. `'no-region-end'` / `'no-composer-marker'` — the classifier could not
-   * verify the composer at all (a drifted profile, a torn frame, or Tower's dimensions
-   * diverging from the real PTY); this hold does NOT clear on its own.
+   * clears by itself. `'recent-input'` (Issue #1473) — the composer is EMPTY but a keystroke or
+   * click landed within the input-settle window; also self-clearing, and distinct from
+   * `user-text` in that no draft exists to be corrupted. `'no-region-end'` /
+   * `'no-composer-marker'` — the classifier could not verify the composer at all (a drifted
+   * profile, a torn frame, or Tower's dimensions diverging from the real PTY); this hold does
+   * NOT clear on its own.
    * `null` for a non-gate hold (`no-live-pty`, `no-profile`) and once delivered.
    */
   detail: string | null;

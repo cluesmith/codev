@@ -1152,14 +1152,31 @@ const DEFAULT_OWNER_NOTICE_MULTIPLE = 3;
 // so the retry lands just PAST the settle boundary rather than exactly on it (where a timer
 // firing a millisecond early would re-hold and cost another full cycle).
 const INPUT_RETRY_MARGIN_MS = 25;
-// Issue #1473: consecutive input-holds for one agent after which the drainer logs a diagnostic.
-// A human types in BURSTS, so an unbroken run of sub-settle input holds this long (~90s at the
-// 300ms re-drain cadence) is a machine, not a person — most likely a reply shape the filter does
-// not recognise, arriving on every repaint. Deliberately a log line and not an escalation: the
-// hold class it describes is the same "a human is at the line" class as `user-text`, and wiring
-// it to the escalation path would false-alarm on every ordinary typist. This is the trace that
-// makes the otherwise-silent case findable after the fact.
-const CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD = 60;
+// Issue #1473: how long an agent must hold on recent input, UNBROKEN, before the drainer logs a
+// diagnostic. A human types in BURSTS, so a run this long without a single gap is a machine, not
+// a person — most likely a reply shape the filter does not recognise, arriving on every repaint.
+// Deliberately a log line and not an escalation: the hold class it describes is the same "a human
+// is at the line" class as `user-text`, and wiring it to the escalation path would false-alarm on
+// every ordinary typist. This is the trace that makes the otherwise-silent case findable later.
+//
+// ELAPSED TIME, not a pass count. It was a count of 60, documented as "~90s at the 300ms re-drain
+// cadence" — but the arithmetic was wrong (60 x ~325ms is ~20s) and, worse, a count silently
+// re-scales whenever the drain cadence changes: the backstop, the quiescence trigger and the
+// submit trigger all drive passes too, so the real interval is bounded above by the re-drain and
+// has no fixed floor. Twenty seconds of unbroken cursor-key or mouse activity is something a
+// person genuinely does — the manual verification for this very issue ran 15-20s of continuous
+// arrow presses per repetition — so the old threshold would have libelled a human as a machine.
+// A wall-clock bound says what the comment always meant and cannot drift with the cadence.
+const CONSECUTIVE_INPUT_HOLD_WARN_MS = 90_000;
+
+/** One agent's unbroken run of input-holds (Issue #1473). See {@link CONSECUTIVE_INPUT_HOLD_WARN_MS}. */
+interface InputHoldStreak {
+  count: number;
+  /** Epoch ms of the FIRST hold in this run — the warning is measured from here. */
+  since: number;
+  /** Set once the warning has fired for this run, so it reports at the crossing only. */
+  warned: boolean;
+}
 
 /**
  * The poll backstop that replaces `SendBuffer`'s flush timer. On each tick it walks
@@ -1204,7 +1221,7 @@ export class MailboxDrainer {
   // Issue #1473: consecutive input-holds per agent — the diagnostic behind
   // {@link CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD}. Reset by any outcome that is not an input
   // hold, delivery included.
-  private readonly consecutiveInputHolds = new Map<string, number>();
+  private readonly consecutiveInputHolds = new Map<string, InputHoldStreak>();
   // Lifecycle generation (CMAP round 2 — Codex/Claude): the drainer instance is REUSED across
   // stop()/start() (mailbox-wiring `ensureDrainer`), and the tests do start/stop/start. Bumped on
   // stop() so an in-flight tick/scheduleDrain that resumes after a restart bails before mutating
@@ -1271,7 +1288,7 @@ export class MailboxDrainer {
 
   /** Per-agent consecutive input-hold count (Issue #1473; test/observability). */
   get inputHoldStreaks(): ReadonlyMap<string, number> {
-    return this.consecutiveInputHolds;
+    return new Map([...this.consecutiveInputHolds].map(([k, v]) => [k, v.count]));
   }
 
   /**
@@ -1319,16 +1336,22 @@ export class MailboxDrainer {
       this.consecutiveInputHolds.delete(key);
       return;
     }
-    const consecutive = (this.consecutiveInputHolds.get(key) ?? 0) + 1;
-    this.consecutiveInputHolds.set(key, consecutive);
-    // Report once at the crossing, not every pass past it.
-    if (consecutive === CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD) {
+    const now = this.ports?.now() ?? Date.now();
+    // `since` is the START of the unbroken run, so the warning measures wall-clock, not passes.
+    // `warned` makes it report once at the crossing rather than on every pass past it — the
+    // streak can run for hours and the operator needs one line, not a stream.
+    const streak = this.consecutiveInputHolds.get(key) ?? { count: 0, since: now, warned: false };
+    streak.count += 1;
+    this.consecutiveInputHolds.set(key, streak);
+    const heldForMs = now - streak.since;
+    if (!streak.warned && heldForMs >= CONSECUTIVE_INPUT_HOLD_WARN_MS) {
+      streak.warned = true;
       this.ports?.log(
         `[mailbox] ${toAgent} @ ${path.basename(workspacePath)} has held on recent terminal input ` +
-          `for ${consecutive} consecutive checks. A human types in bursts, so an unbroken run this ` +
-          `long usually means something is emitting input-shaped bytes continuously — most likely a ` +
-          `terminal reply the gate's filter does not recognise (Issue #1473). Mail for this agent is ` +
-          `NOT being delivered while this persists.`,
+          `continuously for ${Math.round(heldForMs / 1000)}s (${streak.count} checks). A human types ` +
+          `in bursts, so an unbroken run this long usually means something is emitting input-shaped ` +
+          `bytes continuously — most likely a terminal reply the gate's filter does not recognise ` +
+          `(Issue #1473). Mail for this agent is NOT being delivered while this persists.`,
         'WARN',
       );
     }

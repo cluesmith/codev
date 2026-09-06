@@ -106,14 +106,22 @@ function truncate(text: string, width: number): string {
 /**
  * One line explaining a gate detail, for `afx inbox show` (Issue #1482).
  *
- * The split that matters to an operator is "will this clear by itself?": `user-text` will (a
- * human is at the composer), the other two will not (the classifier cannot find a bounded
- * composer region at all, so no amount of waiting helps).
+ * The split that matters to an operator is "will this clear by itself?": `user-text` and
+ * `recent-input` will (a human is at the keyboard), the other two will not (the classifier
+ * cannot find a bounded composer region at all, so no amount of waiting helps).
+ *
+ * Every value the gate can persist needs a case here. `recent-input` was missing for exactly
+ * one release of this feature: the LIST view rendered `busy:recent-input` correctly through the
+ * shared formatter while `inbox show` — the view an operator opens *because* they want the
+ * explanation — answered 'unrecognized gate detail' for the one hold class Issue #1473 exists
+ * to make diagnosable. A default arm that reads as a bug report is not a safe place to land.
  */
 function describeDetail(detail: string): string {
   switch (detail) {
     case 'user-text':
       return 'a draft or menu occupies the composer; a human is at the line and delivery resumes when it clears';
+    case 'recent-input':
+      return 'a keystroke or click reached the terminal moments ago; the composer is empty but too recently touched to write onto, and delivery resumes about a third of a second after the typing stops';
     case 'no-region-end':
       return 'the composer marker was found but nothing bounds the region below it (a partial frame, or dimensions that do not match the real terminal) — this will not clear on its own';
     case 'no-composer-marker':

@@ -557,3 +557,67 @@ The runbook's 1b now opens with `vscode-check` as a pre-flight, so the next fail
 broken lookup instead of presenting as a toast.
 
 Tower 4100 and both real builders untouched throughout. Still parked at `dev-approval`.
+
+## Review round — two lanes, six fixes
+
+The architect's integration CMAP (gemini APPROVE / codex COMMENT / claude REQUEST_CHANGES) and
+porch's own consultation both landed. Every finding was checked against the branch before acting.
+
+### The four blocking ones
+
+1. **`afx inbox show` called the new hold class "unrecognized".** `describeDetail()` had no
+   `recent-input` case. The list view was right — it goes through the shared `formatVerdict` —
+   so the surface that renders a canned *explanation* was the one that had no explanation for
+   the verdict this whole issue exists to make diagnosable. I surfaced the detail on three
+   operator surfaces and missed the fourth. The test is now table-driven over every value the
+   gate can persist, so the next detail added cannot repeat it.
+2. **`packages/types` still enumerated three details.** `api.ts` and `sse.ts` documented the
+   pre-#1473 vocabulary, and `recent-input` genuinely reaches the SSE payload because escalation
+   is age-based. Server and client disagreed on a shared contract.
+3. **The starvation constant.** Mine said "60 checks ≈ 90s at the 300ms cadence"; 60 × 325ms is
+   ~20s. Worse than the arithmetic: a *count* silently re-scales whenever the drain cadence
+   changes, and the backstop, quiescence and submit triggers all drive passes too. The constant
+   existed to avoid libelling an ordinary typist as a machine — and 20s of continuous input is
+   ordinary. The human's own 4a reps were 15-20s of unbroken arrow presses, so this would have
+   fired during the verification of the feature it belongs to. Now wall-clock from the start of
+   the run. The regression test runs 200 passes in 20s and asserts silence; it fails against the
+   old code.
+4. **The trace logs keystrokes verbatim.** `survived="a"` is literal typed input and the runbook
+   has operators typing into live composers. There is no redaction that leaves the diagnostic
+   useful — printing the exact bytes IS the feature — so the control is the flag: prominent
+   warnings at both sites in `pty-session.ts` and a callout at the top of the runbook.
+
+### Two more from the porch lane, same shape as the lesson
+
+Neither `/api/send`'s `unverifiedCause` nor `commands/send.ts`'s cause-aware warning had a test.
+Codex's phrasing is the useful one: *removing that plumbing would leave the suite green.* And the
+raw write route's input coupling — it counts as input only because it passes no `origin` and the
+default is `'external'` — was untested, so "tidying" it to `'delivery'` would reopen the race for
+every non-WebSocket client with every gate test still passing. That one is now tested against a
+REAL `PtySession`, because a double could only assert what the double was told to do.
+
+This is the same lesson again, from the other side: I tested `DeliveryOutcome`, the layer I wrote,
+and not the boundary the operator meets.
+
+### What I deliberately did not change
+
+- **`retryAfterMs` asymmetry** at `:825`/`:897`. Those branches fire when the screen moved during
+  the classify, so input may still be arriving and there is no settle boundary to compute a
+  deadline from. A made-up number there would arm a timer against nothing.
+- **The xterm pin resolves from `packages/codev`, but `apps/web` is the emitting client** and
+  declares its own copy. Real gap, one-line fix, and a cross-package ownership question behind it
+  — making that change inside a REQUEST_CHANGES turn is how a small correct change ships
+  unreviewed. Flagged for its own issue.
+- **`isUserIdle()` has no production consumers left.** MAINTAIN candidate, not this PR.
+- **`afx attach`** — recorded in the review as the largest remaining hole (neither its keystrokes
+  nor its replies are observed, and it is the surface a human is most likely to be sitting at).
+  The architect asked me to flag it and NOT file the issue, so I have not.
+
+### Lane status
+
+Porch's claude consultation failed three times with "Prompt is too long" — the diff is genuinely
+too large for it, so this is a tooling limit rather than a transient error. Claude's opinion is
+still on record: it is the REQUEST_CHANGES verdict in the architect's lane, and its four findings
+are the four fixed above.
+
+Build green. Full suite **286 files, 5836 tests, 0 failures** (+17 this round).

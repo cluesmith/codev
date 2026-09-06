@@ -575,7 +575,34 @@ describe('Issue #1473 — the gate→write input race', () => {
       expect(h.writes).toHaveLength(0);
     });
 
-    it('warns once when input holds run unbroken past the diagnostic threshold', async () => {
+    /** The diagnostic's log line, whatever its wording. */
+    const inputHoldWarns = (h: ReturnType<typeof harness>): string[] =>
+      h.logs.filter((l) => l.includes('has held on recent terminal input'));
+
+    it('does NOT warn on twenty seconds of unbroken input — that is a person, not a machine', async () => {
+      // The regression test for the threshold's original form: a COUNT of 60 passes, documented
+      // as "~90s at the 300ms re-drain cadence". The arithmetic was wrong — 60 passes at the
+      // re-drain cadence is ~20s — and the manual verification for this very issue ran 15-20s of
+      // continuous arrow presses per repetition. So the old rule libelled a human as a machine,
+      // and it did so on exactly the input this feature exists to respect.
+      //
+      // 200 passes here, far past the old count, across a window a person plausibly fills.
+      const h = harness();
+      enqueue();
+      h.session.inputAt = NOW - 100;
+      drainer.start(h.ports, db);
+
+      for (let i = 0; i < 200; i++) {
+        h.now = NOW + i * 100; // 20s total, well under the wall-clock bound
+        h.session.inputAt = h.now - 100; // still typing, every single pass
+        await drainer.tick();
+      }
+
+      expect(drainer.inputHoldStreaks.get(agentKey(WS, AGENT))).toBeGreaterThanOrEqual(200);
+      expect(inputHoldWarns(h)).toEqual([]);
+    });
+
+    it('warns once when input holds run unbroken past the wall-clock threshold', async () => {
       // A human types in bursts. An unbroken run of sub-settle input holds this long is a
       // machine — most likely a terminal reply the filter does not recognise, arriving on every
       // repaint. That case would otherwise hold forever in silence: plain `busy` nulls its
@@ -586,14 +613,49 @@ describe('Issue #1473 — the gate→write input race', () => {
       h.session.inputAt = NOW - 100;
       drainer.start(h.ports, db);
 
-      for (let i = 0; i < 60; i++) {
-        h.session.inputAt = h.now - 100; // still typing, every single pass
+      // Deliberately FEW passes across a LONG window — the mirror image of the test above. The
+      // warning tracks elapsed time, so it must fire here on a fraction of the passes that were
+      // silent above; a count-based rule would get both of these backwards.
+      for (let i = 0; i < 20; i++) {
+        h.now = NOW + i * 5_000; // 95s total
+        h.session.inputAt = h.now - 100;
         await drainer.tick();
       }
 
-      const warns = h.logs.filter((l) => l.includes('consecutive checks'));
+      const warns = inputHoldWarns(h);
       expect(warns).toHaveLength(1); // reported at the crossing, not once per pass
       expect(warns[0]).toContain(AGENT);
+      expect(warns[0]).toMatch(/continuously for 9\ds/); // reports the elapsed time it measured
+    });
+
+    it('restarts the clock after the streak breaks, so two short runs never add up', async () => {
+      // `since` is per-RUN, not per-agent-lifetime. Without the reset, a user who types for 60s,
+      // sends, and types again for 60s would trip a warning that claims unbroken machine input.
+      const h = harness();
+      enqueue();
+      h.session.inputAt = NOW - 100;
+      drainer.start(h.ports, db);
+
+      h.now = NOW;
+      await drainer.tick();
+      h.now = NOW + 60_000;
+      h.session.inputAt = h.now - 100;
+      await drainer.tick();
+
+      // The line goes quiet: the message delivers and the streak is over.
+      h.now = NOW + 61_000;
+      h.session.inputAt = NOW; // long settled
+      await drainer.scheduleDrain(WS, AGENT);
+      expect(drainer.inputHoldStreaks.get(agentKey(WS, AGENT))).toBeUndefined();
+
+      // A second 60s run. Cumulatively past 90s, but not unbroken — so still no warning.
+      enqueue();
+      for (let i = 0; i < 3; i++) {
+        h.now = NOW + 62_000 + i * 30_000;
+        h.session.inputAt = h.now - 100;
+        await drainer.tick();
+      }
+      expect(inputHoldWarns(h)).toEqual([]);
     });
 
     it('counts consecutive input holds and resets the count on a delivery', async () => {

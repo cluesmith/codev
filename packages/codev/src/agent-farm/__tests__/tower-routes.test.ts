@@ -16,6 +16,11 @@ import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
 import { MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
+// Issue #1473: a REAL PtySession for the raw-write route test. The claim under test is that the
+// route's bytes reach the gate's input signal, and a session double cannot make that claim —
+// it would only assert what the double was written to do.
+import { PtySession } from '../../terminal/pty-session.js';
+import type { IShellperClient } from '../../terminal/shellper-client.js';
 // Spec 1313 round 3: the real delayed-send timer registry + per-session submission lock
 // (NOT mocked) so the delayed-`--interrupt` reshape is exercised through the same singletons
 // handleSend uses. shutdownDelayedSends() models a Tower restart (bumps the liveness
@@ -1917,6 +1922,91 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled();
     }, 10_000);
 
+    // ------------------------------------------------------------------
+    // `unverifiedCause` on the /api/send response (Issue #1473)
+    //
+    // The SENDER's boundary, and the reason the field exists at all. `verified` alone did not
+    // serve the case that motivated it — a human's Enter submitting our half-written body — 
+    // because there the header DID land, so `verified` is true and the operator read a plain
+    // "Message delivered". Without these two tests the whole route→SDK→CLI plumbing could be
+    // deleted and the suite would stay green.
+    // ------------------------------------------------------------------
+
+    it("propagates unverifiedCause 'no-echo' to the sender when the header never appeared", async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hi', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-swallow2', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      const swallowing = {
+        ...gateSession(mockWrite, '❯ ', true, 'term-swallow2'),
+        write: (data: string): boolean => { mockWrite(data); return true; },
+      };
+      mockGetTerminalManager.mockReturnValue({ getSession: () => swallowing, listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true);
+      expect(parsed.unverifiedCause).toBe('no-echo');
+    }, 10_000);
+
+    it("propagates unverifiedCause 'input-raced' even though the header DID land", async () => {
+      // The motivating case. The session echoes normally — so `verified` is true and nothing
+      // else on this response says anything is wrong — but a keystroke lands DURING the paced
+      // write. That is the delivery an operator must be told about, and it is invisible without
+      // this field.
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hi', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-raced', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      const base = gateSession(mockWrite, '❯ ', true, 'term-raced');
+      const raced = {
+        ...base,
+        // A human typing while our bytes go out: the counter moves between the write's own
+        // before/after samples. Mutating on write is the only faithful model — the race is
+        // defined by the counter changing across the write, not by its value.
+        write: (data: string): boolean => { raced.inputSeq += 1; return base.write(data); },
+      };
+      mockGetTerminalManager.mockReturnValue({ getSession: () => raced, listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true);
+      expect(parsed.unverifiedCause).toBe('input-raced');
+    }, 10_000);
+
+    it('omits unverifiedCause entirely on an ordinary clean delivery', async () => {
+      // The field is additive: absent must read exactly as it did before it existed, so a
+      // sender that never races never sees a new key.
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hi', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-clean', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(mockWrite, '❯ ', true, 'term-clean'),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true);
+      expect(parsed).not.toHaveProperty('unverifiedCause');
+    }, 10_000);
+
     it('a body-bearing interrupt that crosses the wait ceiling reports degraded (Issue #1365)', async () => {
       // codex review of PR #1492: the interrupt claims its mailbox row `delivered` BEFORE the
       // write (un-claiming would risk a double delivery), so if the ceiling expires and the
@@ -1951,6 +2041,78 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled(); // the escape hatch still landed
       await holder;
     }, 10_000);
+  });
+
+  // ==========================================================================
+  // POST /api/terminals/:id/write — the raw write route feeds the input signal
+  //
+  // The route is a FOREIGN writer: the dashboard, the VS Code terminal and any script hit it,
+  // and its bytes must count as human input at the delivery gate. That works only because
+  // `session.write()` defaults to `origin: 'external'` and the route passes no override — an
+  // invisible coupling, one word wide. Someone "tidying" the call to `write(data, 'delivery')`
+  // would silently reopen the race for every non-WebSocket client while every gate test kept
+  // passing, because the gate tests supply their own sessions.
+  //
+  // These use a REAL PtySession on a shellper double, so the assertion is about the production
+  // recording path rather than about a fake's bookkeeping.
+  // ==========================================================================
+
+  describe('POST /api/terminals/:id/write (Issue #1473 input signal)', () => {
+    function realSession(id: string): { session: PtySession; ptyWrites: string[] } {
+      const ptyWrites: string[] = [];
+      const client = new EventEmitter() as unknown as IShellperClient;
+      Object.defineProperty(client, 'lastDataAt', { get: () => Date.now() });
+      Object.defineProperty(client, 'connected', { get: () => true });
+      (client as { write: (d: string) => boolean }).write = (d: string) => { ptyWrites.push(d); return true; };
+      (client as { resize: () => boolean }).resize = () => true;
+      const session = new PtySession({
+        id, command: '', args: [], cols: 80, rows: 24, cwd: '/tmp', env: {},
+        label: 'test', logDir: '/tmp', diskLogEnabled: false,
+      });
+      session.attachShellper(client, Buffer.alloc(0), 1234);
+      return { session, ptyWrites };
+    }
+
+    async function writeVia(session: PtySession, data: string): Promise<number> {
+      mockParseJsonBody.mockResolvedValue({ data });
+      mockGetTerminalManager.mockReturnValue({ getSession: () => session, listSessions: () => [] });
+      const { res, statusCode } = makeRes();
+      await handleRequest(makeReq('POST', `/api/terminals/${session.id}/write`), res, makeCtx());
+      return statusCode();
+    }
+
+    it('advances the input signal for a keystroke sent through the route', async () => {
+      const { session } = realSession('raw-write-1');
+      const before = session.inputSeq;
+
+      expect(await writeVia(session, 'hello')).toBe(200);
+
+      expect(session.inputSeq).toBe(before + 5);
+      expect(session.lastInputAt).toBeGreaterThan(0);
+    });
+
+    it('does NOT advance it for a terminal reply sent through the route, but still writes it to the PTY', async () => {
+      // The self-trip this whole filter exists to prevent, exercised at the route rather than at
+      // `write()`: a client answering the TUI's DA query must not read as a human at the
+      // keyboard — while the PTY must still receive the answer, or the app blocks forever.
+      const { session, ptyWrites } = realSession('raw-write-2');
+      const before = session.inputSeq;
+
+      expect(await writeVia(session, '\x1b[?1;2c')).toBe(200);
+
+      expect(session.inputSeq).toBe(before);
+      expect(ptyWrites).toContain('\x1b[?1;2c');
+    });
+
+    it('keeps only the human residue of a mixed chunk', async () => {
+      const { session, ptyWrites } = realSession('raw-write-3');
+      const before = session.inputSeq;
+
+      expect(await writeVia(session, 'a\x1b[12;40Rb')).toBe(200);
+
+      expect(session.inputSeq).toBe(before + 2); // 'a' and 'b'; the CPR reply is not input
+      expect(ptyWrites).toContain('a\x1b[12;40Rb'); // …and the PTY still saw all of it
+    });
   });
 
   // ==========================================================================

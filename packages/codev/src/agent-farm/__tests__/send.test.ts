@@ -344,6 +344,78 @@ describe('send command', () => {
       expect(successMessages.some((m) => m.includes('unverified — header not seen on the terminal'))).toBe(true);
     });
 
+    // ----------------------------------------------------------------
+    // The cause-aware qualifier (Issue #1473)
+    //
+    // The SENDER's last line of defence, and the reason `unverifiedCause` exists. `verified`
+    // alone was the wrong condition: in the case that motivated the whole issue — a human's
+    // Enter submitting our half-written body — the header DID land, so `verified` is true or
+    // absent, and the one person standing there read an unqualified "Message delivered".
+    // Without these, the route→SDK→CLI plumbing could be deleted and the suite stays green.
+    // ----------------------------------------------------------------
+
+    it("qualifies the delivered line and warns when the terminal was typed into mid-write", async () => {
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', bodyLength: 7,
+        verified: true, unverifiedCause: 'input-raced',
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'hi' });
+
+      const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+      expect(successMessages[0]).toBe(
+        'Message delivered to builder-spir-109 (7 bytes) (unconfirmed — the terminal was typed into mid-write)',
+      );
+      const warnings = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0]));
+      expect(warnings.some((m) => /typed into that terminal/.test(m))).toBe(true);
+      // It must say the message will NOT be re-sent: re-writing a landed message is #1584, so a
+      // sender who re-sends by hand recreates the bug the design exists to prevent.
+      expect(warnings.some((m) => /NOT be re-sent/.test(m))).toBe(true);
+    });
+
+    it("uses the header-not-seen wording for a no-echo cause, and does not warn about typing", async () => {
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', bodyLength: 7, unverifiedCause: 'no-echo',
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'hi' });
+
+      const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+      expect(successMessages[0]).toContain('(unverified — header not seen on the terminal)');
+      const warnings = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0]));
+      expect(warnings.some((m) => /typed into that terminal/.test(m))).toBe(false);
+    });
+
+    it("keeps the old wording for an older Tower that sends verified:false but no cause", async () => {
+      // Backward compatibility is the point of the fallback arm: a Tower predating #1473 sends
+      // `verified` and no `unverifiedCause`, and must still produce the #1584 sentence.
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', bodyLength: 7, verified: false,
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'hi' });
+
+      const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+      expect(successMessages[0]).toContain('(unverified — header not seen on the terminal)');
+    });
+
+    it('never leaks the echo-needle internals into operator-facing text', async () => {
+      // The plan called this out by name: an early draft said "needle 0 chars", which is a
+      // sentence about the verifier's implementation, not about the operator's message.
+      for (const extra of [{ unverifiedCause: 'input-raced' }, { unverifiedCause: 'no-echo' }, { verified: false }]) {
+        vi.mocked(logger.success).mockClear();
+        vi.mocked(logger.warn).mockClear();
+        mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'builder-spir-109', bodyLength: 7, ...extra });
+
+        await send({ builder: 'builder-spir-109', message: 'hi' });
+
+        const text = [...vi.mocked(logger.success).mock.calls, ...vi.mocked(logger.warn).mock.calls]
+          .map((c) => String(c[0])).join('\n');
+        expect(text).not.toMatch(/needle/i);
+        expect(text).not.toMatch(/\b0 chars\b/);
+      }
+    });
+
     it('prints the plain delivered line when verification confirmed or does not apply (Issue #1584)', async () => {
       // `verified: true` and an absent field (older Tower, or a body with no header worth
       // matching) must read exactly as they always did — the field is additive.

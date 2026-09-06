@@ -24,6 +24,18 @@ with its own database and its own workspace.
 - Do not use `afx attach` at any point. It bypasses the code under test entirely, logs nothing,
   and would read as a pass when nothing was measured.
 
+> ### ⚠️ This runbook turns on a trace that logs what you type, verbatim
+>
+> `AF_LOG_INPUT_SIGNAL=1` is on for the whole session. Every keystroke that reaches any composer
+> on the throwaway Tower is printed to terminal 1 as `survived="..."` — that is the point of
+> step 1, and it is why the trace can prove anything at all.
+>
+> So: **type nothing real.** No credentials, no tokens, no private text, in any composer, at any
+> step. The steps below only ever ask for throwaway characters and cursor keys.
+>
+> Terminal 1's scrollback holds that log. Close it when you are done, and do not paste raw
+> `[input-signal …]` output into an issue, a PR, or a chat without reading it first.
+
 **You need:** this worktree, a browser, VS Code, and real `claude` and `codex` binaries on your
 PATH. Run every command from
 `/home/user/code/codev_root/codev/.builders/pir-1473/packages/codev`.

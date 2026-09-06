@@ -26,29 +26,50 @@ every byte verbatim, because applications block waiting on their own DA/DSR answ
 
 ## Files Changed
 
-- `packages/codev/src/terminal/terminal-replies.ts` (+159 / -0) — new; the reply filter
-- `packages/codev/src/terminal/pty-session.ts` (+171 / -0) — input observation + the diagnostic trace
-- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` (+436 / -0) — the gate consumes the input signal
-- `packages/codev/src/agent-farm/servers/message-write.ts` (+64 / -0) — race reporting through the paced write
-- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` (+18 / -0)
-- `packages/codev/src/agent-farm/servers/session-submit.ts` (+11 / -0)
-- `packages/codev/src/agent-farm/servers/tower-routes.ts` (+18 / -0) — arm the re-drain from the request path
-- `packages/codev/src/agent-farm/commands/send.ts` (+19 / -0) — operator-facing `unverifiedCause`
-- `packages/codev/src/agent-farm/db/types.ts` (+20 / -0)
-- `packages/sdk/src/tower-client.ts` (+14 / -0)
-- `packages/codev/src/agent-farm/__tests__/pir-1473-input-race-gate.test.ts` (+622 / -0) — new
-- `packages/codev/src/terminal/__tests__/pty-session-input-signal.test.ts` (+232 / -0) — new
-- `packages/codev/src/terminal/__tests__/terminal-replies.test.ts` (+208 / -0) — new
-- eight existing test files touched (+64 / -4) for the new call shapes
-- `packages/codev/scripts/pir-1473-dev-approval-evidence.mts` (+917 / -0) — scripted evidence
-- `packages/codev/scripts/pir-1473-human-harness.mts` (+581 / -0) — the manual-step harness
-- `codev/evidence/1473-dev-approval-transcript.txt` (+154 / -0)
-- `codev/evidence/1473-human-runbook.md` (+404 / -0)
-- `codev/plans/1473-render-gate-fuller-close-of-th.md` (+598 / -0)
-- `codev/state/pir-1473_thread.md` (+559 / -0)
-- `codev/resources/commands/agent-farm.md` (+7 / -0) and its skeleton twin (+7 / -0)
+Against merge-base `03bc5213e` — **41 files, +5834 / -88**. Measured after the
+final review commit, so this list includes the review and governance files themselves.
 
-31 files, +5228 / -77 against merge-base `03bc5213e`.
+- `codev-skeleton/resources/commands/agent-farm.md` (+6 / -1)
+- `codev/evidence/1473-dev-approval-transcript.txt` (+154 / -0)
+- `codev/evidence/1473-human-runbook.md` (+416 / -0)
+- `codev/plans/1473-render-gate-fuller-close-of-th.md` (+598 / -0)
+- `codev/projects/1473-render-gate-fuller-close-of-th/status.yaml` (+27 / -0)
+- `codev/resources/arch-critical.md` (+1 / -1)
+- `codev/resources/arch.md` (+8 / -0)
+- `codev/resources/commands/agent-farm.md` (+6 / -1)
+- `codev/resources/lessons-critical.md` (+1 / -1)
+- `codev/resources/lessons-learned.md` (+4 / -0)
+- `codev/reviews/1473-render-gate-fuller-close-of-th.md` (+172 / -0)
+- `codev/state/pir-1473_thread.md` (+559 / -0)
+- `packages/codev/scripts/pir-1473-dev-approval-evidence.mts` (+917 / -0)
+- `packages/codev/scripts/pir-1473-human-harness.mts` (+581 / -0)
+- `packages/codev/src/agent-farm/__tests__/bugfix-1573-delivery-verification.test.ts` (+6 / -1)
+- `packages/codev/src/agent-farm/__tests__/bugfix-1584-no-rewrite-after-write.test.ts` (+13 / -3)
+- `packages/codev/src/agent-farm/__tests__/cron-delivery.test.ts` (+2 / -0)
+- `packages/codev/src/agent-farm/__tests__/inbox-cli.test.ts` (+44 / -0)
+- `packages/codev/src/agent-farm/__tests__/pir-1473-input-race-gate.test.ts` (+684 / -0)
+- `packages/codev/src/agent-farm/__tests__/send-delivery.test.ts` (+18 / -0)
+- `packages/codev/src/agent-farm/__tests__/send-integration.e2e.test.ts` (+7 / -0)
+- `packages/codev/src/agent-farm/__tests__/send-mailbox-repro.test.ts` (+3 / -0)
+- `packages/codev/src/agent-farm/__tests__/send.test.ts` (+72 / -0)
+- `packages/codev/src/agent-farm/__tests__/spec-1365-serializer-convergence.test.ts` (+2 / -0)
+- `packages/codev/src/agent-farm/__tests__/spec-1470-reentry-delivery.test.ts` (+2 / -0)
+- `packages/codev/src/agent-farm/__tests__/tower-routes.test.ts` (+169 / -0)
+- `packages/codev/src/agent-farm/commands/inbox.ts` (+11 / -3)
+- `packages/codev/src/agent-farm/commands/send.ts` (+18 / -1)
+- `packages/codev/src/agent-farm/db/types.ts` (+15 / -5)
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` (+413 / -46)
+- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` (+14 / -4)
+- `packages/codev/src/agent-farm/servers/message-write.ts` (+60 / -4)
+- `packages/codev/src/agent-farm/servers/session-submit.ts` (+7 / -4)
+- `packages/codev/src/agent-farm/servers/tower-routes.ts` (+18 / -0)
+- `packages/codev/src/terminal/__tests__/pty-session-input-signal.test.ts` (+232 / -0)
+- `packages/codev/src/terminal/__tests__/terminal-replies.test.ts` (+208 / -0)
+- `packages/codev/src/terminal/pty-session.ts` (+178 / -7)
+- `packages/codev/src/terminal/terminal-replies.ts` (+159 / -0)
+- `packages/sdk/src/tower-client.ts` (+14 / -0)
+- `packages/types/src/api.ts` (+6 / -3)
+- `packages/types/src/sse.ts` (+9 / -3)
 
 ## Commits
 
@@ -69,10 +90,11 @@ every byte verbatim, because applications block waiting on their own DA/DSR answ
 ## Test Results
 
 - `pnpm --filter @cluesmith/codev build`: ✓ pass
-- `pnpm --filter @cluesmith/codev test`: ✓ pass — **286 test files, 3 skipped, 5819 tests, 0
-  failures**. **116 tests are new**, across three new files. A baseline run at merge-base
-  `03bc5213e` failed only `worktree-write-guard` (environmental in a `/tmp` worktree; it passes
-  here), so nothing red is being hidden.
+- `pnpm --filter @cluesmith/codev test`: ✓ pass — **286 test files, 3 skipped, 5836 tests, 0
+  failures**. **133 tests are new** — 116 in three new files, plus 17 added across four existing
+  files in response to the review findings below. A baseline run at merge-base `03bc5213e`
+  failed only `worktree-write-guard` (environmental in a `/tmp` worktree; it passes here), so
+  nothing red is being hidden.
 - **Scripted evidence**: `codev/evidence/1473-dev-approval-transcript.txt` — 20/20 checks
   against a real Tower on a private port with its own test DB, with the live Tower on 4100
   verified untouched before and after.
@@ -152,6 +174,90 @@ the `afx send` request path, *outside* the drainer, so `armInputRetry` never saw
 outcome and `retryAfterMs` was dropped — the operator-facing path fell through to quiescence.
 All 27 unit tests passed because every one of them drives the drainer. Worth a look as a class
 of bug, not just an instance.
+
+### Review findings and their disposition
+
+Two independent review lanes ran on this PR (the architect's integration CMAP and porch's
+single-pass consultation). Verdicts: **gemini APPROVE**, **codex COMMENT/REQUEST_CHANGES**,
+**claude REQUEST_CHANGES**. Every finding below was verified against the branch before acting;
+none was taken on the summary alone.
+
+**Fixed — the new hold class was "unrecognized" in `afx inbox show`.** `describeDetail()`
+(`commands/inbox.ts`) had no `recent-input` case, so the one verdict this PR exists to make
+diagnosable printed as `unrecognized gate detail` — in the view an operator opens *because*
+they want the explanation, while the list view rendered it correctly through the shared
+formatter. Added with `user-text`-style self-clearing wording, plus a table-driven test over
+**every** value the gate can persist, so the next added detail cannot repeat this.
+
+**Fixed — the shared contract still enumerated three details.** `packages/types/src/api.ts` and
+`sse.ts` documented the pre-#1473 vocabulary. The SSE payload genuinely carries `recent-input`
+(escalation is age-based, so a long-held row escalates whatever its detail says), so server and
+client disagreed on the contract. Both updated, with a note on the SSE type saying why the
+fourth value reaches consumers.
+
+**Fixed — the starvation warning was sized against one cadence and documented against another.**
+`CONSECUTIVE_INPUT_HOLD_WARN_THRESHOLD = 60` claimed "~90s at the 300ms re-drain cadence", but
+60 × (300 + 25) ≈ **19.5s**. That constant exists specifically to avoid libelling an ordinary
+typist as a machine, and ~20s of continuous input is ordinary — the manual verification for this
+very issue ran 15–20s of unbroken arrow presses per repetition. Replaced with a wall-clock
+`CONSECUTIVE_INPUT_HOLD_WARN_MS = 90_000` measured from the start of the unbroken run, which is
+what the comment always meant and cannot drift when the drain cadence changes. Three tests pin
+it: 200 passes across 20s must **not** warn (this fails against the old code), 20 passes across
+95s must warn once, and two 60s runs separated by a delivery must not add up.
+
+**Fixed — `AF_LOG_INPUT_SIGNAL=1` logs keystrokes verbatim.** `survived="a"` is literal typed
+input, and the runbook has operators typing into live composers. There is no redaction to add
+without destroying the diagnostic — printing the exact bytes *is* the feature — so the control
+is the flag, and it now carries a prominent sensitive-data warning at both sites in
+`pty-session.ts` and a callout box at the top of the runbook telling the operator to type
+nothing real and not to paste raw trace output into an issue or chat.
+
+**Fixed — two operator-facing boundaries had plumbing and no test.** Neither `/api/send`'s
+`unverifiedCause` propagation nor `commands/send.ts`'s cause-aware warning was pinned; as codex
+put it, removing that plumbing would have left the suite green. Added route tests for both
+causes plus the additive-absence case, and CLI tests for both wordings, the older-Tower
+`verified: false` fallback, and an explicit assertion that operator text never leaks the
+verifier's internals ("needle", "0 chars") — which the plan had called out by name.
+
+**Fixed — the raw write route's input coupling was untested.** `POST /api/terminals/:id/write`
+counts as input only because it passes no `origin` and the default is `'external'` — an
+invisible coupling one word wide, and "tidying" it to `'delivery'` would reopen the race for
+every non-WebSocket client while every gate test kept passing. Now tested against a **real**
+`PtySession` (a double could only assert what the double was told to do): a keystroke advances
+the signal, a DA reply does not but still reaches the PTY, and a mixed chunk keeps only the
+human residue.
+
+**Not changed — `retryAfterMs` asymmetry** (`mailbox-delivery.ts:825`, `:897`). The
+token-moved-by-input branches omit it while the settle branches supply it. Deliberate: those
+branches fire when the screen moved *during* the classify, so the input may still be arriving
+and there is no settle boundary to compute a deadline from — the next pass re-samples and arms
+the retry properly once the input is actually the only thing holding. Supplying a made-up
+deadline there would arm a timer against a number that describes nothing.
+
+**Flagged, not fixed — the xterm pin test does not guard the emitting client.**
+`terminal-replies.test.ts` resolves `@xterm/xterm` from `packages/codev`, but `apps/web`
+declares its own and is what actually emits replies through `Terminal.tsx`. Both are `^5.5.0`
+today, so the guard works now but would not trip on an `apps/web`-only bump. Left alone
+deliberately: pointing the test at the right package is a one-line change with a cross-package
+dependency question behind it (which package should own the pin), and doing it inside a
+REQUEST_CHANGES turn without a reviewer seeing it is how a small correct change becomes an
+unreviewed one. Worth its own issue.
+
+**Flagged, not fixed — `isUserIdle()` now has zero production consumers.** The gate reads
+`lastInputAt` directly, leaving Spec 403's typing-awareness API vestigial. A MAINTAIN candidate,
+not this PR's business.
+
+### `afx attach` is the largest remaining hole
+
+The gate observes input at `PtySession.write()`. `afx attach` talks to the shellper socket
+directly and never passes through it, so **neither its keystrokes nor its terminal's replies are
+observed at all** — and it is the surface a human is most likely to be sitting at. The plan
+scoped it out and this PR does not change it; the manual runbook is explicitly forbidden from
+using it, because a step-1 trace run there would log zero chunks and read as a clean pass.
+
+Two consequences for a reader: the `afx` command documentation's claim that a held delivery
+"cannot fuse" with a draft is an absolute that `attach` does not honour, and closing this hole
+is a separate piece of work. **It deserves its own issue** — deliberately not filed from here.
 
 ## How to Test Locally
 

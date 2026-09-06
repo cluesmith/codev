@@ -24,6 +24,15 @@ import { stripTerminalReplies, terminalReplyMatches, escapeBytes } from './termi
  *
  * Read once at module load: this is on the write path for every keystroke, and a per-write
  * `process.env` lookup is a string-map hit on the hottest line in the terminal layer.
+ *
+ * ## SENSITIVE DATA — this logs what a human types, verbatim
+ *
+ * `survived="..."` is literal keystrokes. Everything typed into any composer on this Tower goes
+ * to the log while the flag is on: prompts, pasted content, and anything a person types into a
+ * password or token field an app happens to be showing. It is off by default and must stay a
+ * short, deliberate, supervised diagnostic session — never a setting left on in a shared or
+ * long-lived Tower, never enabled in an environment whose logs are shipped or retained. Delete
+ * or truncate the captured output when the session ends.
  */
 const LOG_INPUT_SIGNAL = process.env.AF_LOG_INPUT_SIGNAL === '1';
 import type { IShellperClient } from './shellper-client.js';
@@ -1025,6 +1034,11 @@ export class PtySession extends EventEmitter {
    * chunk was entirely terminal replies and moved no input signal. A line with a non-empty
    * `survived` while nobody is typing names the exact bytes the filter failed to recognise —
    * which is the whole finding, so they are printed escaped rather than summarised.
+   *
+   * SENSITIVE: that same fidelity means a `survived` run is the operator's literal keystrokes.
+   * The diagnostic is only useful if it prints the bytes exactly, so there is no redaction to
+   * add here without destroying it — the control is the flag, which is off by default. See
+   * {@link LOG_INPUT_SIGNAL}.
    */
   private logInputSignal(raw: string, survived: string): void {
     const stripped = terminalReplyMatches(raw);
