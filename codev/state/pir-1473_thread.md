@@ -438,3 +438,67 @@ from before this work. Live Tower on 4100 verified listening and untouched after
 isolated port 14793 free; no leftover processes.
 
 Still parked at `dev-approval`. Not opening the PR, not approving the gate.
+
+## Runbook revision 2 — the architect was right about step 4
+
+The human's run passed 1a, 2 and 3. Two problems came back, and the step 4 one is mine.
+
+### Step 4 asserted something its own procedure made unobservable
+
+Step 4 told the human to type printable characters and then expect `busy:recent-input`. It
+cannot happen. `mailbox-delivery.ts:797` returns on `!verdict.clean` — a non-empty composer is
+`user-text` and returns — and the input-settle check is at `:840`, after it. So `recent-input`
+is structurally unreachable the moment there is a draft on screen.
+
+The uncomfortable part: I had already reasoned this out. The evidence script picks a Right-arrow
+for step 5 for exactly this reason and says so in a comment — "a printable character would leave
+a draft and hold `user-text`, which is the OLD guard and proves nothing about this issue". I
+wrote the correct reasoning for the scripted step and then wrote the manual step as if I hadn't.
+The human's 10/10 `busy:user-text` was a correct observation of the wrong thing.
+
+Split into **4a** (empty composer, cursor-only input — Left/Right/Home/End — expecting
+`busy:recent-input`; this now carries the 10 varied repetitions) and **4b** (the original typing
+procedure, expected verdict `busy:user-text`, proving draft integrity and labelled as evidence
+for the pre-existing guard). Up/Down are excluded from 4a: they recall history into the composer
+and would void the rep.
+
+### This time I ran the procedures before writing them down
+
+Against a real `claude` on the isolated Tower, not a shim:
+
+- **4a works.** `pending → busy:recent-input → DELIVERED`, arrows about twice a second.
+- **Cadence matters, and not in the obvious direction.** At ~10 presses/sec the row sits mostly
+  in plain `busy`: fast input generates echo, the OUTPUT settle is checked first (`:835`), and
+  it fires before the input settle ever runs. Holding the key down would have looked like a
+  weaker result while actually testing a different guard. The runbook now says press
+  deliberately, and says plainly that a bare `busy` is not a failure.
+- **A rep against a busy agent is void.** After a delivered message, claude is mid-turn and
+  every subsequent send returns `user-text` — I watched one sit there for 45 s and briefly took
+  it for a defect. Each rep must start from an idle agent and an empty composer.
+- **4b confirmed:** typing holds `busy:user-text` and stays there until the draft is cleared.
+
+### The two-hands problem, and `--watch`
+
+Revision 1 said "keep clicking, then run `h1473 inbox`" — but stopping to type in the other
+terminal ENDS the condition being measured, and a single sample afterwards cannot tell "never
+held" from "held and already cleared". `send --watch N` now polls the row and prints a verdict
+timeline. It is better evidence than a point sample: the hold and its self-clearing recovery
+appear in one trace.
+
+### Step 1b — the probe was invisible to VS Code, and the settings were not the problem
+
+`codev.towerPort` is honoured everywhere (no 4100 hardcodes outside tests). The Agents view
+reads ONLY `/api/overview`, which left-joins the live terminal registry onto a `readdirSync` of
+`<workspace>/.builders/` (`overview.ts:866-869`) and matches via `worktreeNameToRoleId`
+(`overview.ts:475-512`) — which rewrites a directory `pir-1473-probe` to the roleId
+`builder-pir-1473`. My harness created no `.builders/` directory and registered the literal
+roleId `pir-1473-probe`, so it failed both halves of the join at once. The browser renders from
+the registry directly, which is why the same session was visible there and nowhere in VS Code.
+
+`up` now creates `<ws>/.builders/pir-1473-probe/` and registers as `builder-pir-1473`. Verified
+against the endpoint itself rather than by reasoning: `/api/overview` now returns
+`{roleId: "builder-pir-1473", id: "pir-1473-probe"}`. 1b is not marked passed — the human
+re-runs it.
+
+Tower 4100 confirmed listening and untouched after every run; 14793 free; no leftover processes.
+Still parked at `dev-approval`.

@@ -1,9 +1,16 @@
 # PIR #1473 — Human Runbook
 
-Four manual checks that need a real harness, a real browser and a real pair of hands. Everything
+Manual checks that need a real harness, a real browser and a real pair of hands. Everything
 else for this issue is already automated in `codev/evidence/1473-dev-approval-transcript.txt`.
 
-Budget about 30 minutes. Follow the steps in order; step 1 gates the rest.
+Budget about 30 minutes. Follow the steps in order; step 1a gates the rest.
+
+**Revision 2.** Steps 1a, 2 and 3 are banked from the first run and do not need repeating.
+Only **1b** and **4a** are outstanding. Step 4 in revision 1 was defective: it asserted a
+verdict of `busy:recent-input` while telling you to type printable characters, and a non-empty
+composer fails classification first — so that verdict was unobservable under its own procedure.
+It is now split into 4a (the new guard) and 4b (draft integrity, which is what revision 1
+actually measured).
 
 ---
 
@@ -53,10 +60,10 @@ h1473() { node --experimental-strip-types scripts/pir-1473-human-harness.mts "$@
    `Live Tower on 4100: LISTENING — it will not be touched`.
    If it says `Port 14793 is already in use`, something else owns the port — free it and retry.
 
-3. Open a **second** terminal in the same directory. Every `send` / `inbox` / `calibrate`
-   command below runs there.
+3. Open a **second** terminal in the same directory. Every `send` / `inbox` / `calibrate` /
+   `down` command below runs there.
 
-4. Open the `Browser:` URL. Click the **`pir-1473-probe`** terminal.
+4. Open the `Browser:` URL. Click the **`builder-pir-1473`** terminal.
 
    Expected: `claude` booting, then an empty composer. A second terminal named `architect` also
    exists — ignore it, it is created automatically when the workspace activates.
@@ -69,7 +76,7 @@ If this fails, stop. Nothing downstream is trustworthy.
 
 ### 1a — Browser
 
-1. Click once into the `pir-1473-probe` composer so it has focus.
+1. Click once into the `builder-pir-1473` composer so it has focus.
 
 2. **Take your hands off the keyboard and off the mouse for 60 seconds.** Watch terminal 1.
 
@@ -99,7 +106,8 @@ If this fails, stop. Nothing downstream is trustworthy.
 
 ### 1b — VS Code integrated terminal
 
-A different xterm build, and the one surface whose reply set may differ.
+A different xterm build, and the one surface whose reply set may differ. It failed to appear in
+revision 1; the cause was in the harness, not in your settings, and is fixed.
 
 1. In VS Code, open User settings (JSON) and set both:
 
@@ -108,15 +116,35 @@ A different xterm build, and the one surface whose reply set may differ.
    "codev.workspacePath": "/home/user/.agent-farm/test-workspaces/pir1473-human/ws"
    ```
 
-2. Reload the VS Code window, then open the Codev terminal for that workspace and click the
-   `pir-1473-probe` session.
+2. Reload the window.
 
-3. Repeat 1a steps 2–5, watching terminal 1.
+   Expected: the Codev **Status** view shows `Tower: connected`.
 
-   PASS and FAIL are identical to 1a.
+3. Open the **Agents** view.
 
-4. **Put the settings back** when you are done with the whole runbook:
+   Expected: one entry, **`builder-pir-1473`**. If it is missing, the harness is not running —
+   check terminal 1 for the `READY` banner and that its `Agent:` line says `builder-pir-1473`.
+
+4. Click it.
+
+   Expected: a VS Code integrated terminal opens, attached to the same session the browser
+   shows. Type a character into its composer and backspace it.
+
+   Expected: two new `[input-signal …]` lines in terminal 1, one with `survived="a"` and one
+   with `survived="\x7f"`. If nothing prints, you are looking at a different session — stop and
+   report it rather than proceeding.
+
+5. Click into that composer, then **take your hands off the keyboard and mouse for 60 seconds.**
+
+   PASS and FAIL are identical to 1a: every line in that window must read `survived=<NOTHING>`,
+   and zero lines is also a pass. Any non-empty `survived` is a FAIL — copy the `raw=` fields.
+
+6. **Put the settings back** when you are done with the whole runbook:
    `"codev.towerPort": 4100` and `"codev.workspacePath": ""`. Reload the window.
+
+> If step 3 still shows nothing: the browser at the `Browser:` URL renders the same session and
+> is a valid fallback for keeping the environment usable — but it is the SAME xterm build as
+> 1a, so it does **not** substitute for this step. Report 1b as blocked rather than passed.
 
 ---
 
@@ -166,97 +194,151 @@ A different xterm build, and the one surface whose reply set may differ.
 
 ## Step 3 — Mouse
 
-1. Make sure the browser tab is showing the `pir-1473-probe` composer, and that it is **empty**.
+Banked as a PASS from the first run. Repeat only if you want to re-confirm it.
+
+1. Make sure the browser tab is showing the `builder-pir-1473` composer, that it is **empty**,
+   and that the agent is idle.
 
 2. In terminal 2:
 
    ```
-   h1473 send "mouse test" --delay 8
+   h1473 send "mouse test" --delay 5 --watch 20
    ```
 
-   Expected: `scheduled → pir-1473-probe in 8s.`
+3. As soon as it prints `Watching for 20s`, click into the composer about twice a second and
+   keep clicking until the watch ends. Do not type.
 
-3. Immediately click into the composer, and keep clicking about once a second for 15 seconds.
-   Do not type.
+4. Read the timeline.
 
-4. Stop clicking. In terminal 2:
-
-   ```
-   h1473 inbox
-   ```
-
-   **PASS** — a row is listed, and its verdict is `busy:recent-input`:
+   **PASS** — `busy:recent-input` appears, then `DELIVERED`:
 
    ```
-   6c268d2d…  → pir-1473-probe  from architect  busy:recent-input  3s ago
+       +0.0s  pending
+       +5.1s  busy:recent-input
+       +5.6s  DELIVERED
    ```
 
-   **FAIL** — `(no held messages)`, i.e. the message was delivered while you were clicking. Also
-   a FAIL if the composer now contains "mouse test" or the text was submitted.
+   **FAIL** — `pending` straight to `DELIVERED` with no hold; or the composer now contains
+   "mouse test"; or the text was submitted.
 
-   **NEITHER** — a verdict of `pending` means the 8 seconds are not up yet. Keep clicking, wait,
-   and run `h1473 inbox` again.
-
-5. Stop clicking and wait 5 seconds, then run `h1473 inbox` again.
-
-   Expected: `(no held messages)` — the hold cleared on its own and the message was delivered.
-   Confirm the composer is untouched and the message arrived as a normal turn.
+   **VOID** — `busy:user-text` (the composer was not empty, or the agent was mid-response).
 
 ---
 
-## Step 4 — Send while typing
+## Step 4a — The input signal (this is the assertion for this issue)
 
-Ten repetitions, varying **where in the keystroke stream** the send lands.
+The verdict `busy:recent-input` can only appear when the composer is **empty**. A non-empty
+composer is classified `user-text` first and the input logic is never reached — so every action
+in this step must move the cursor without leaving a draft.
 
-1. For each repetition below, in terminal 2 run:
+**Use only:** Right arrow, Left arrow, Home, End.
+**Never:** printable characters, Up/Down (they recall history into the composer), Enter, Escape.
+
+Before each repetition:
+
+- the agent must be **idle** — not mid-response — and its composer **empty**. A repetition run
+  against a working agent returns `user-text` and is void.
+- if the composer has anything in it, clear it and wait for the screen to settle.
+
+1. For each repetition, in terminal 2 run:
 
    ```
-   h1473 send "typing test <n>" --delay 8
+   h1473 send "input signal <n>" --delay 5 --watch 20
    ```
 
-   then do the listed typing in the browser composer across the 8-second window, then run
-   `h1473 inbox`.
+2. As soon as it prints `Watching for 20s`, start the action for that row in the browser
+   composer, and keep it up until the watch ends.
+
+   | # | Action across the window |
+   |---|---|
+   | 1 | Right arrow, one deliberate press about every half second |
+   | 2 | Left arrow, same pace |
+   | 3 | Alternate Right and Left, about twice a second |
+   | 4 | `End`, then `Home`, alternating about twice a second |
+   | 5 | Right arrow twice a second, but stop 2 seconds before the watch ends |
+   | 6 | Nothing for the first 6 seconds, then Right arrow twice a second |
+   | 7 | Click into the composer with the mouse about twice a second |
+   | 8 | Alternate a mouse click and a Right arrow |
+   | 9 | Right arrow at a slow pace — one press about every 1.5 seconds |
+   | 10 | Right arrow presses in bursts of three, with a 1-second gap between bursts |
+
+3. Read the timeline the watch prints.
+
+   **PASS** — `busy:recent-input` appears at least once:
+
+   ```
+       +0.0s  pending
+       +5.1s  busy:recent-input
+       +5.6s  DELIVERED
+   ```
+
+   **FAIL** — the timeline goes straight from `pending` to `DELIVERED` with no hold at all,
+   i.e. the message was written while you were driving input.
+
+   **VOID, re-run it** — any of:
+   - `busy:user-text` — the composer was not empty, or the agent was mid-response.
+   - only `pending` for the whole watch — the send never came due.
+
+   **NOT a failure** — a plain `busy` with no detail. That is the output settle holding on the
+   repaint your own keypress caused; it is the pre-existing guard doing its job. Only a run with
+   **no hold whatsoever** is a failure. If you press keys much faster than twice a second you
+   will see mostly plain `busy`, because the output settle is checked before the input settle —
+   press deliberately rather than holding a key down.
+
+4. After each repetition, wait for the delivered message to finish being answered and the
+   composer to return to empty before starting the next.
+
+5. Record: how many of the 10 showed `busy:recent-input`, and the full timeline of any that
+   did not.
+
+---
+
+## Step 4b — Draft integrity
+
+Same procedure as revision 1. Its expected verdict is `busy:user-text` — the **pre-existing**
+guard. This step does not test the input signal; it tests that a send never corrupts a draft.
+
+1. For each row below, in terminal 2 run:
+
+   ```
+   h1473 send "typing test <n>" --delay 5 --watch 20
+   ```
+
+   then do the listed typing in the browser composer across the window.
 
    | # | What to be doing when the send comes due |
    |---|---|
-   | 1 | Composer empty; type your first character right at the 8s mark |
+   | 1 | Composer empty; type your first character right as the watch starts |
    | 2 | Mid-word, typing steadily |
    | 3 | Mid-word, typing as fast as you can (a burst) |
-   | 4 | Immediately after a 2-second pause — resume typing at the 8s mark |
+   | 4 | Immediately after a 2-second pause — resume typing mid-window |
    | 5 | Holding a key down so it auto-repeats |
    | 6 | Typing, then pressing Backspace repeatedly |
    | 7 | Pasting a line of text (Ctrl-V) |
    | 8 | Typing a multi-line draft (Shift+Enter between lines) |
    | 9 | Typing with a `/` slash-command menu open |
-   | 10 | Typing one character every ~250 ms (slower than the settle) |
+   | 10 | Typing one character every ~250 ms |
 
-2. After each repetition:
+2. After each:
 
-   **PASS** — `h1473 inbox` shows a row whose verdict is exactly:
-
-   ```
-   busy:recent-input
-   ```
-
-   and your draft in the composer is **unchanged** — same text, cursor where you left it,
-   nothing submitted.
+   **PASS** — the verdict is `busy:user-text`, **and** your draft is untouched: same text,
+   cursor where you left it, nothing submitted.
 
    **FAIL** — any of:
-   - `(no held messages)` while you were still typing (delivered onto your line);
+   - the timeline shows `DELIVERED` while you were still typing;
    - the message text appears inside your draft;
    - your half-typed draft was submitted as a turn;
    - the verdict is `busy:no-region-end`, `busy:no-composer-marker`, or `no-profile` (the
-     classifier could not read the composer — a different defect, report the exact string).
+     classifier could not read the composer — a different defect; report the exact string).
 
-   **NEITHER** — a verdict of `pending` means the send is not due yet. Keep typing, wait, and
-   run `h1473 inbox` again.
+   A verdict of `busy:recent-input` here is also a pass; it just means the gate caught the
+   keystroke before the draft was painted.
 
-3. After each PASS, clear the composer (select all, delete) and wait 2 seconds.
+3. After each pass, clear the composer and wait for it to settle.
 
-   Expected: `h1473 inbox` reports `(no held messages)` and the message is delivered.
+   Expected: the held message then delivers on its own.
 
-4. Record the tally: how many of the 10 passed, and the exact verdict string for any that
-   did not.
+4. Record the tally out of 10, and note any rep where the draft was altered.
 
 ---
 
@@ -279,7 +361,7 @@ Ten repetitions, varying **where in the keystroke stream** the send lands.
 
    Ctrl-C alone is not enough — the harness sessions are detached and outlive it.
 
-3. Restore the two VS Code settings from step 1b.4 and reload the window.
+3. Restore the two VS Code settings from step 1b.6 and reload the window.
 
 4. Confirm the live Tower is unharmed:
 
@@ -297,4 +379,6 @@ Ten repetitions, varying **where in the keystroke stream** the send lands.
 2. Step 1b: PASS or FAIL, same.
 3. Step 2: both verdict lines (claude and codex), with their p50/p95/p99.
 4. Step 3: PASS or FAIL.
-5. Step 4: the tally out of 10, plus every verdict string that was not `busy:recent-input`.
+5. Step 4a: how many of the 10 showed `busy:recent-input`, and the full timeline of any that
+   did not.
+6. Step 4b: the tally out of 10, and any rep where the draft was altered.

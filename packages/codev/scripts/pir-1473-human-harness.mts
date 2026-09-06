@@ -19,13 +19,14 @@
  *   up         start the isolated Tower + a terminal running a real harness, and hold it open
  *   down       tear the whole thing down, including the shellpers Ctrl-C leaves behind
  *   send       send a message to that terminal's agent through the render gate
+ *              (`--watch N` polls the row for N seconds and prints a verdict timeline)
  *   inbox      list held rows, rendered exactly as `afx inbox` renders them
  *   calibrate  manual step 2 against the REAL harness: keystroke→echo, percentiles, verdict
  *
  * Usage:
  *   node --experimental-strip-types scripts/pir-1473-human-harness.mts up [--harness claude]
  *   node --experimental-strip-types scripts/pir-1473-human-harness.mts down
- *   node --experimental-strip-types scripts/pir-1473-human-harness.mts send "text"
+ *   node --experimental-strip-types scripts/pir-1473-human-harness.mts send "text" [--delay N] [--watch N]
  *   node --experimental-strip-types scripts/pir-1473-human-harness.mts inbox
  *   node --experimental-strip-types scripts/pir-1473-human-harness.mts calibrate [--harness codex]
  */
@@ -49,7 +50,20 @@ const JSON_HEADERS: Record<string, string> = { 'Content-Type': 'application/json
 const PORT = 14793;
 const LIVE_TOWER_PORT = 4100;
 const DB_NAME = `test-1473-${PORT}.db`;
-const AGENT = 'pir-1473-probe';
+/**
+ * The probe's worktree directory name, and the roleId that name DERIVES.
+ *
+ * These two are not free choices, and getting them wrong is why the runbook's VS Code step
+ * failed the first time. `GET /api/overview` — the ONLY source the VS Code Agents view and its
+ * Quick Pick read — left-joins the live terminal registry onto a `readdirSync` of
+ * `<workspace>/.builders/` (overview.ts:866-869), and matches by
+ * `worktreeNameToRoleId(dirName)` (overview.ts:475-512), which rewrites `pir-1473-probe` to
+ * `builder-pir-1473`. A terminal registered under any other roleId, or with no directory on
+ * disk, is invisible to VS Code no matter how healthy it is — while remaining perfectly visible
+ * in the browser, which renders from the registry directly.
+ */
+const PROBE_DIR = 'pir-1473-probe';
+const AGENT = 'builder-pir-1473';
 
 const DIST = resolve(import.meta.dirname, '../dist');
 const TOWER = join(DIST, 'agent-farm/servers/tower-server.js');
@@ -96,6 +110,8 @@ async function cmdUp(harness: string): Promise<void> {
   rmSync(ROOT, { recursive: true, force: true });
   mkdirSync(join(WS_DIR, '.codev'), { recursive: true });
   mkdirSync(join(WS_DIR, 'codev'), { recursive: true });
+  // The half of the VS Code join that lives on disk. See PROBE_DIR.
+  mkdirSync(join(WS_DIR, '.builders', PROBE_DIR), { recursive: true });
   mkdirSync(join(ROOT, 'run'), { recursive: true });
   writeFileSync(join(WS_DIR, '.codev', 'config.json'), JSON.stringify({ shell: { builder: 'bash' } }));
   // Fresh DB each run, so held rows from a previous session cannot be mistaken for this one's.
@@ -149,10 +165,10 @@ async function cmdUp(harness: string): Promise<void> {
   console.log('='.repeat(72));
   console.log(`\n  Browser:  ${BASE}/workspace/${encodeWs(WS_DIR)}/`);
   console.log(`            Open it and click the "${AGENT}" terminal.`);
-  console.log('\n  VS Code:  set BOTH of these in your User settings, reload the window,');
-  console.log('            and open the Codev terminal for this workspace:');
+  console.log('\n  VS Code:  set BOTH of these in your User settings, then reload the window:');
   console.log(`              "codev.towerPort": ${PORT},`);
   console.log(`              "codev.workspacePath": "${WS_DIR}"`);
+  console.log(`            Then open the Agents view and click "${AGENT}".`);
   console.log(`            PUT THEM BACK to 4100 / "" when you are done.`);
   console.log(`\n  Terminal: ${termId}`);
   console.log(`  Harness:  ${harness}`);
@@ -232,7 +248,12 @@ async function requireUp(): Promise<void> {
  * terminal. Scheduling the send N seconds out turns an unrepeatable race into an interval the
  * human can simply be clicking through.
  */
-async function cmdSend(message: string, interrupt: boolean, delaySeconds: number): Promise<void> {
+async function cmdSend(
+  message: string,
+  interrupt: boolean,
+  delaySeconds: number,
+  watchSeconds: number,
+): Promise<void> {
   await requireUp();
   const options: Record<string, unknown> = {};
   if (interrupt) options.interrupt = true;
@@ -244,8 +265,9 @@ async function cmdSend(message: string, interrupt: boolean, delaySeconds: number
   });
   const body = await res.json().catch(() => ({} as Record<string, unknown>));
   if (body.scheduled || (body.notBefore && Number(body.notBefore) > Date.now())) {
-    console.log(`scheduled → ${AGENT} in ${delaySeconds}s.  Start clicking into the composer NOW;`);
-    console.log(`keep clicking until well past the due time, then run:  … inbox`);
+    console.log(`scheduled → ${AGENT} in ${delaySeconds}s  (mailbox ${String(body.mailboxId ?? '').slice(0, 8)}…)`);
+    if (watchSeconds > 0) await watchRow(String(body.mailboxId), watchSeconds);
+    else console.log('Do your keyboard/mouse action across the window, then run:  … inbox');
     return;
   }
   if (body.delivered) {
@@ -261,6 +283,39 @@ async function cmdSend(message: string, interrupt: boolean, delaySeconds: number
     return;
   }
   console.log(`status=${res.status} ${JSON.stringify(body)}`);
+}
+
+
+/**
+ * Poll one mailbox row and print every verdict CHANGE, with the time it happened.
+ *
+ * Exists because of a two-hands problem that makes the manual steps otherwise unrunnable: the
+ * hold being measured only lasts while the human is at the keyboard, and asking them to stop
+ * and type `inbox` in a second terminal ENDS the very condition under test. A single sample
+ * taken after the fact cannot distinguish "never held" from "held and already cleared".
+ *
+ * A timeline is also better evidence than a point sample: `pending → busy:recent-input →
+ * delivered` shows the hold AND its self-clearing recovery, which is the whole claim.
+ */
+async function watchRow(mailboxId: string, seconds: number): Promise<void> {
+  const started = Date.now();
+  const at = (): string => `+${((Date.now() - started) / 1000).toFixed(1)}s`;
+  let last = '';
+  console.log(`\nWatching for ${seconds}s. Do the keyboard/mouse action NOW — keep it up until this stops.\n`);
+  while ((Date.now() - started) / 1000 < seconds) {
+    const res = await fetch(`${BASE}/api/inbox?workspace=${encodeURIComponent(WS_DIR)}`, { headers: AUTH });
+    const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
+    const row = Array.isArray(rows) ? rows.find((r) => r.id === mailboxId) : undefined;
+    const verdict = row ? formatVerdict(row.reason as string, row.detail as string, 'pending') : 'DELIVERED';
+    if (verdict !== last) { console.log(`  ${at().padStart(7)}  ${verdict}`); last = verdict; }
+    if (verdict === 'DELIVERED') break;
+    await sleep(250);
+  }
+  console.log('');
+  if (last === 'DELIVERED') console.log('Final: delivered.');
+  else console.log(`Final: still held as \`${last}\` when the watch ended.`);
+  // The distinct verdicts seen are the evidence; a run that never left `pending` means the
+  // send was not due yet and proves nothing either way.
 }
 
 async function cmdInbox(): Promise<void> {
@@ -422,11 +477,14 @@ switch (cmd) {
     const delaySeconds = Number(flag('delay', '0'));
     // Drop the flag VALUE as well as the flag, or `--delay 8` puts "8" in the message body.
     const rest = process.argv.slice(3);
-    const di = rest.indexOf('--delay');
-    if (di !== -1) rest.splice(di, 2);
+    // Drop each flag together with its value, or `--delay 8 --watch 20` lands in the body.
+    for (const f of ['--delay', '--watch']) {
+      const i = rest.indexOf(f);
+      if (i !== -1) rest.splice(i, 2);
+    }
     const text = rest.filter((a) => !a.startsWith('--')).join(' ');
-    if (!text) { console.error('usage: … send "message text" [--interrupt] [--delay N]'); process.exit(1); }
-    await cmdSend(text, interrupt, delaySeconds);
+    if (!text) { console.error('usage: … send "message text" [--interrupt] [--delay N] [--watch N]'); process.exit(1); }
+    await cmdSend(text, interrupt, delaySeconds, Number(flag('watch', '0')));
     break;
   }
   case 'inbox':
