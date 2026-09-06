@@ -6,4 +6,6 @@ Add an opt-in `afx send --interrupt-after <seconds>` policy that starts ordinary
 
 Reuse the settled #1365 serialized write edge and address its second-queued-operator starvation corner. Suppress premature starvation alarms for self-resolving rows without hiding other mail. Cover durable state, cancellation, restart/offline/session changes, races and real running terminal behavior.
 
-The issue uses both “force-deliver” and delayed Ctrl+C-with-gated-body language. These are not equivalent. The companion plan proposes the latter and explicitly reserves the decision for human plan approval; no implementation or approval is implied by this document.
+Human clarification (issue comment 5561508091, 2026-09-06) settles the body contract: after the patience budget, use existing immediate `--interrupt` semantics for the same still-held row—Ctrl+C, existing fixed settle, UNGATED formatted body and Enter unless no-enter. Delivery/dismissal/supersession before the actual force ownership transition cancels escalation. An already-running normal body write must not race a second forced copy. The deadline initiates escalation; it does not guarantee receipt, exact scheduler/lock timing, or exactly-once PTY effects.
+
+The revised plan proposes skipping late force after restart or unavailable/replaced deadline target while preserving the durable ordinary mailbox body. That lifecycle choice remains subject to human plan approval; indefinite durable late interruption is not approved. The human authorized plan revision only, not implementation or a gate transition.
