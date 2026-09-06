@@ -459,8 +459,25 @@ export async function send(options: SendOptions): Promise<void> {
         // re-injected one message dozens of times in #1583 — so this line is the only place the
         // sender learns the delivery was unconfirmed. `verified` absent (older Tower, or a body
         // with no header worth matching) keeps today's wording.
-        const unverified = result.verified === false ? ' (unverified — header not seen on the terminal)' : '';
+        // Issue #1473: `verified === false` was the wrong condition on its own. The case that
+        // most needs saying — a human's Enter submitting our half-written body — has the header
+        // on screen, so `verified` is `true` or absent, and this printed a plain success to the
+        // one person standing there. Drive the qualifier off the CAUSE, and keep the old
+        // `verified === false` wording as the fallback for an older Tower that sends no cause.
+        const unverified =
+          result.unverifiedCause === 'input-raced'
+            ? ' (unconfirmed — the terminal was typed into mid-write)'
+            : result.unverifiedCause === 'no-echo' || result.verified === false
+              ? ' (unverified — header not seen on the terminal)'
+              : '';
         logger.success(`Message delivered to ${result.resolvedTo ?? target}${size}${unverified}`);
+        if (result.unverifiedCause === 'input-raced') {
+          logger.warn(
+            `Someone typed into that terminal while this message was being written, so the body ` +
+              `may have been truncated or submitted early. It is recorded as delivered and will ` +
+              `NOT be re-sent — check the agent's prompt before assuming it read cleanly.`,
+          );
+        }
         // Issue #1365: an interrupt/escape that gave up waiting for the terminal's submission
         // lock wrote unserialized, so its bytes may have interleaved with the delivery it
         // skipped. The row is claimed `delivered` before the write (un-claiming would risk a

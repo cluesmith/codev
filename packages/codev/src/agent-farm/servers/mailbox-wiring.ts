@@ -523,13 +523,23 @@ function surfaceLiveness(info: LivenessInfo, log: LogFn): void {
  */
 function surfaceUnverifiedDelivery(info: UnverifiedDeliveryInfo): void {
   const where = `${info.toAgent} @ ${path.basename(info.workspacePath)}`;
+  // Issue #1473: the body branches on the cause. The no-echo wording asserts the header never
+  // appeared, and saying that about a delivery whose header DID appear — and whose tail a human
+  // keystroke truncated or submitted early — points the reader at the wrong thing entirely.
+  const raced = info.cause === 'input-raced';
+  const what = raced
+    ? `every byte was accepted, but the terminal received input while the message was going out, so ` +
+      `the body may have been truncated or submitted early`
+    : `every byte was accepted, but its header never appeared on that screen`;
   mailboxBroadcaster?.({
     type: 'notification',
-    title: 'Mailbox: delivered but not confirmed on screen',
+    title: raced
+      ? 'Mailbox: delivered, but raced by terminal input'
+      : 'Mailbox: delivered but not confirmed on screen',
     body:
-      `${where} — the message was written to terminal ${info.terminalId.slice(0, 8)}… and every byte was ` +
-      `accepted, but its header never appeared on that screen. It is recorded as delivered and will NOT ` +
-      `be sent again (mailbox id ${info.mailboxId.slice(0, 8)}…). Check the agent's transcript.`,
+      `${where} — the message was written to terminal ${info.terminalId.slice(0, 8)}… and ${what}. It is ` +
+      `recorded as delivered and will NOT be sent again (mailbox id ${info.mailboxId.slice(0, 8)}…). ` +
+      `Check the agent's transcript.`,
     workspace: info.workspacePath,
   });
 }

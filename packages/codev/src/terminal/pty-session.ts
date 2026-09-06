@@ -9,6 +9,32 @@ import { EventEmitter } from 'node:events';
 import type { IPty } from 'node-pty';
 import { RingBuffer } from './ring-buffer.js';
 import { SessionScreen } from './session-screen.js';
+import { stripTerminalReplies, terminalReplyMatches, escapeBytes } from './terminal-replies.js';
+
+/**
+ * Set `AF_LOG_INPUT_SIGNAL=1` to trace every external write's effect on the delivery gate's
+ * input signal (Issue #1473): the raw chunk, what the reply filter removed, and what survived
+ * as human input.
+ *
+ * It exists because the filter's correctness is otherwise INVISIBLE. An under-strip shows up as
+ * a hold with nobody at the keyboard and an over-strip shows up as nothing at all, and neither
+ * can be told apart from normal operation by watching the outside of the system. The one
+ * measurement that settles it — sit with hands off the keyboard and see whether anything is
+ * recorded as input — needs this trace to be readable.
+ *
+ * Read once at module load: this is on the write path for every keystroke, and a per-write
+ * `process.env` lookup is a string-map hit on the hottest line in the terminal layer.
+ *
+ * ## SENSITIVE DATA — this logs what a human types, verbatim
+ *
+ * `survived="..."` is literal keystrokes. Everything typed into any composer on this Tower goes
+ * to the log while the flag is on: prompts, pasted content, and anything a person types into a
+ * password or token field an app happens to be showing. It is off by default and must stay a
+ * short, deliberate, supervised diagnostic session — never a setting left on in a shared or
+ * long-lived Tower, never enabled in an environment whose logs are shipped or retained. Delete
+ * or truncate the captured output when the session ends.
+ */
+const LOG_INPUT_SIGNAL = process.env.AF_LOG_INPUT_SIGNAL === '1';
 import type { IShellperClient } from './shellper-client.js';
 import { isDeliberateExit } from './shellper-protocol.js';
 
@@ -39,6 +65,27 @@ export const terminalDeliverySignals = new EventEmitter();
  */
 export const QUIESCENCE_DEBOUNCE_MS = 500;
 
+/**
+ * Who is putting bytes on this session's line (Issue #1473) — the only thing that decides
+ * whether a write moves the delivery gate's INPUT signal.
+ *
+ * The default is `'external'` on purpose: the failure this closes is a new input path that
+ * forgets to announce itself, and an opt-OUT makes that impossible — a forgotten origin
+ * over-counts (a spurious hold, self-correcting) instead of under-counting (a delivery
+ * written onto a draft, the corruption). Exactly one caller opts out, and it hard-codes the
+ * value rather than forwarding a parameter: a 1-arg function is assignable to a 2-arg
+ * function type, so a wrapper that dropped the argument would compile cleanly and present as
+ * "mail never delivers".
+ */
+export type WriteOrigin =
+  /** An unknown or foreign writer — a live client's keystrokes, the raw write route, an
+   *  operator `^C`/ESC. Counts as input. */
+  | 'external'
+  /** The gated mailbox delivery's own paced write. Must never trip the input signal: its
+   *  bytes are the thing the gate just authorised, and counting them would make every
+   *  delivery block the next one. */
+  | 'delivery';
+
 export interface PtySessionConfig {
   id: string;
   command: string;
@@ -53,6 +100,18 @@ export interface PtySessionConfig {
   diskLogEnabled?: boolean; // Default: true
   diskLogMaxBytes?: number; // Default: 50MB
   reconnectTimeoutMs?: number; // Default: 300_000 (5 min)
+  /**
+   * Injectable clock for the input-signal timestamps (Issue #1473). Defaults to `Date.now`.
+   *
+   * It exists because the delivery gate reads `lastInputAt` through its own `ports.now()`,
+   * which tests replace with a fake clock, while `recordUserInput` was hard-wired to
+   * `Date.now()`. Any test pairing a fake gate clock with a REAL `PtySession` therefore
+   * compares two unrelated time bases, and no amount of adding fields fixes it — the two
+   * clocks have to be the same one. `lastDataAt` never needed this seam because
+   * {@link attachShellper} hydrates it from the shellper's tracker; the input timestamps have
+   * no such hydration path, so this is theirs.
+   */
+  clock?: () => number;
 }
 
 export interface PtySessionInfo {
@@ -170,8 +229,12 @@ export class PtySession extends EventEmitter {
   private _quiescenceTimer: ReturnType<typeof setTimeout> | null = null;
   private clients: Set<{ send: (data: Buffer | string) => void }> = new Set();
   private _lastInputAt = 0;
+  // Issue #1473: the gate's MONOTONE input-change counter. Never reset — not on respawn, not
+  // on re-attach — see the `inputSeq` getter.
+  private _inputSeq = 0;
   private _lastDataAt = Date.now();
   private _composing = false;
+  private readonly clock: () => number;
 
   constructor(private readonly config: PtySessionConfig) {
     super();
@@ -186,6 +249,7 @@ export class PtySession extends EventEmitter {
     this.diskLogEnabled = config.diskLogEnabled ?? true;
     this.diskLogMaxBytes = config.diskLogMaxBytes ?? 50 * 1024 * 1024; // DEFAULT_DISK_LOG_MAX_BYTES
     this.reconnectTimeoutMs = config.reconnectTimeoutMs ?? 300_000;
+    this.clock = config.clock ?? Date.now;
     this.logPath = path.join(config.logDir, `${config.id}.log`);
   }
 
@@ -264,6 +328,12 @@ export class PtySession extends EventEmitter {
     // it has a value (WELCOME-side hydration carries genuine activity
     // history across Tower restart). The data-frame subscription below
     // keeps it bumped going forward via onPtyData.
+    //
+    // The INPUT signals (`_inputSeq`, `_lastInputAt`) get no such hydration and must be left
+    // strictly alone here (Issue #1473). The shellper has no view of them, and this object
+    // survives the re-attach — so resetting the counter could reproduce an earlier gate token
+    // on the same session identity and alias a stale CLEAN verdict, while resetting the
+    // timestamp would erase a keystroke that is still un-echoed on the line.
     this._lastDataAt = client.lastDataAt;
 
     // Ensure log directory exists. Guarded on logFd: with #1198 re-attach is
@@ -624,8 +694,34 @@ export class PtySession extends EventEmitter {
   /**
    * Write user input to the PTY or shellper.
    * Returns false when the input was dropped (#1198).
+   *
+   * THE GATE'S INPUT OBSERVATION POINT (Issue #1473). This is the single funnel every write
+   * to a session passes through, so it is where the delivery gate learns that somebody put
+   * something on the line. Until now it recorded nothing: `bytesWritten` counts OUTPUT and
+   * `lastDataAt` tracks OUTPUT, so a keystroke was invisible to the gate until the TUI
+   * happened to echo it — which is the whole of the echo-lag hole.
+   *
+   * Two things are deliberate here:
+   *
+   *   - **The filter, not just the counter.** xterm forwards terminal REPLIES (DA, CPR,
+   *     DECRPM, focus, …) through the same upstream path as keystrokes, so counting the raw
+   *     chunk would hold mail with nobody at the keyboard — and would SELF-TRIP, since our own
+   *     delivery repaints the TUI, which queries the client, which answers. Only the human
+   *     residue is recorded; see {@link stripTerminalReplies}. The PTY still receives the
+   *     chunk VERBATIM, because the application asked for the reply and blocks on it.
+   *   - **The bump ignores the return value.** The question the gate asks is "did a foreign
+   *     writer put input at this session?", not "did it land". A dropped write cannot
+   *     misreport itself as `busy` instead of `no-live-pty` either, because the delivery
+   *     precheck tests `writable` BEFORE the token.
+   *
+   * Record-then-write is atomic with respect to the event loop: this method has no await.
    */
-  write(data: string): boolean {
+  write(data: string, origin: WriteOrigin = 'external'): boolean {
+    if (origin === 'external') {
+      const human = stripTerminalReplies(data);
+      if (LOG_INPUT_SIGNAL) this.logInputSignal(data, human);
+      if (human) this.recordUserInput(human);
+    }
     if (this._shellperBacked) {
       if (this.shellperClient && this.status === 'running') {
         return this.shellperClient.write(data);
@@ -931,9 +1027,66 @@ export class PtySession extends EventEmitter {
     return this.ringBuffer.bytesWritten;
   }
 
-  /** Record that a user sent input to this session. */
-  recordUserInput(): void {
-    this._lastInputAt = Date.now();
+  /**
+   * One `AF_LOG_INPUT_SIGNAL` trace line. See {@link LOG_INPUT_SIGNAL}.
+   *
+   * `survived=<NOTHING>` is the line to look for with hands off the keyboard: it means the
+   * chunk was entirely terminal replies and moved no input signal. A line with a non-empty
+   * `survived` while nobody is typing names the exact bytes the filter failed to recognise —
+   * which is the whole finding, so they are printed escaped rather than summarised.
+   *
+   * SENSITIVE: that same fidelity means a `survived` run is the operator's literal keystrokes.
+   * The diagnostic is only useful if it prints the bytes exactly, so there is no redaction to
+   * add here without destroying it — the control is the flag, which is off by default. See
+   * {@link LOG_INPUT_SIGNAL}.
+   */
+  private logInputSignal(raw: string, survived: string): void {
+    const stripped = terminalReplyMatches(raw);
+    console.log(
+      `[input-signal ${this.id.slice(0, 8)}] raw="${escapeBytes(raw)}" ` +
+        `stripped=${stripped.length === 0 ? '<none>' : stripped.map((r) => `"${escapeBytes(r)}"`).join(' ')} ` +
+        `survived=${survived === '' ? '<NOTHING>' : `"${escapeBytes(survived)}"`} ` +
+        `inputSeq=${this._inputSeq}→${this._inputSeq + survived.length}`,
+    );
+  }
+
+  /**
+   * The gate's MONOTONE input-change counter (Issue #1473) — the input-side twin of
+   * {@link bytesWritten}.
+   *
+   * *A change counter, not a total.* It exists to DIFFER between two samples, never to be
+   * read as a byte count: it advances by the recorded chunk's `.length`, which is UTF-16 code
+   * units, so an emoji moves it by two and a stripped reply by nothing. Naming it `inputBytes`
+   * would have been a lie.
+   *
+   * The delivery path folds it into the gate's change token, which is what makes a keystroke
+   * landing during the async classify invalidate the clean verdict instead of being written
+   * over — and, just as importantly, what keeps a memoized CLEAN verdict from being reused
+   * across one.
+   *
+   * NEVER RESET. Not on `spawn()`, not on {@link attachShellper}: those replace the PTY while
+   * KEEPING this `PtySession` object, and the gate's verdict memo is keyed on object identity
+   * plus the token — so a counter that fell back to 0 could reproduce an earlier token value
+   * on the same object and alias a stale verdict. (`attachShellper` does hydrate
+   * `_lastDataAt` from the shellper's tracker; the input signals get no such hydration, and
+   * must not.)
+   */
+  get inputSeq(): number {
+    return this._inputSeq;
+  }
+
+  /**
+   * Record that a user sent input to this session.
+   *
+   * `chunk` is the HUMAN residue of the write — replies already stripped by
+   * {@link stripTerminalReplies} — and is what advances {@link inputSeq}. Called with no
+   * argument (Spec 403's original typing-awareness contract) it still moves
+   * {@link lastInputAt}, so an existing caller keeps working; it just contributes no change
+   * to the counter, since there is no chunk to measure.
+   */
+  recordUserInput(chunk = ''): void {
+    this._lastInputAt = this.clock();
+    this._inputSeq += chunk.length;
   }
 
   /**
@@ -945,9 +1098,17 @@ export class PtySession extends EventEmitter {
    * fast-delivery trigger emitted by {@link stopComposing}) can never diverge between
    * clients. Automated mailbox delivery calls {@link write} directly and so, correctly,
    * never trips a submit signal.
+   *
+   * The input RECORDING moved down into {@link write} (Issue #1473), so it covers every
+   * writer rather than only this one — the raw `POST /api/terminals/:id/write` route and the
+   * operator `^C`/ESC bypasses are counted for free, and a future input path is counted by
+   * default. What stays here is what only a live client can tell us: whether the chunk ends a
+   * draft. Composing state is tracked on the RAW chunk deliberately — a reply already called
+   * `startComposing()` before this change, `stopComposing` drives the `'submit'` delivery
+   * trigger, and perturbing a delivery trigger inside a delivery-safety fix is not a trade
+   * worth making for a getter with no production consumer.
    */
   handleUserInput(data: string): void {
-    this.recordUserInput();
     if (data.includes('\r') || data.includes('\n')) {
       this.stopComposing();
     } else {
@@ -958,10 +1119,20 @@ export class PtySession extends EventEmitter {
 
   /** Whether the user has been idle (no input) for at least thresholdMs. */
   isUserIdle(thresholdMs: number): boolean {
-    return Date.now() - this._lastInputAt >= thresholdMs;
+    return this.clock() - this._lastInputAt >= thresholdMs;
   }
 
-  /** Timestamp (epoch ms) of the last user input, or 0 if none. */
+  /**
+   * Timestamp (epoch ms) of the last user input, or 0 if none.
+   *
+   * Beyond Spec 403's typing-awareness, this is now the delivery gate's INPUT-SETTLE signal
+   * (Issue #1473). A change counter can only catch input that arrives AFTER the gate sampled
+   * it; input that landed just BEFORE the sample and has not been echoed yet moves no counter
+   * — both samples agree, correctly — and the classifier reads a genuinely empty composer.
+   * Only a clock can see that, so the delivery path requires a quiet interval here before it
+   * writes. `0` for a session that has never received input, which reads as settled from
+   * birth.
+   */
   get lastInputAt(): number {
     return this._lastInputAt;
   }

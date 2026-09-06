@@ -102,17 +102,27 @@ export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
  *                             dims the real TUI never adopted).
  *   - `no-composer-marker`  — no recognized marker at all (a wrapper/boot screen, a drifted
  *                             profile, or an unrenderable frame).
- * The latter two are the DEFECT class: the classifier could not verify anything, so the mail
- * will not deliver on its own. `GateVerdict.detail`'s fourth value, `empty`, is never persisted
- * — a clean verdict delivers the row (and delivery nulls both columns).
+ *   - `recent-input`        — the terminal saw INPUT too recently to write onto (Issue #1473):
+ *                             either a keystroke landed while the gate was classifying, or the
+ *                             input-settle interval has not elapsed. Like `user-text` this is a
+ *                             SAFE hold that clears on its own — it is the same "a human is at
+ *                             the line" class, caught one beat earlier, before the TUI has
+ *                             echoed anything for the classifier to see.
+ * The two can't-verify values are the DEFECT class: the classifier could not verify anything,
+ * so the mail will not deliver on its own. `GateVerdict.detail`'s fourth value, `empty`, is
+ * never persisted — a clean verdict delivers the row (and delivery nulls both columns).
+ *
+ * `recent-input` is deliberately NOT part of {@link isUnverifiableVerdict}'s set: escalating it
+ * would false-alarm on every ordinary typist. That predicate is an allow-list, so the value is
+ * correctly inert there by construction rather than by an edit.
  *
  * Null for every non-gate hold (`no-live-pty`, `no-profile`) and for the post-classify
- * token/settle re-holds, so a stale detail can never outlive the verdict that produced it.
+ * token re-hold, so a stale detail can never outlive the verdict that produced it.
  *
  * The DB column carries NO CHECK constraint (see `GLOBAL_SCHEMA` / migration v18); this type
  * is the enforcement.
  */
-export type MailboxGateDetail = 'user-text' | 'no-region-end' | 'no-composer-marker';
+export type MailboxGateDetail = 'user-text' | 'no-region-end' | 'no-composer-marker' | 'recent-input';
 
 /**
  * Database row type for the mailbox table (Spec 1313).

@@ -293,6 +293,50 @@ describe('inboxShow', () => {
     logSpy.mockRestore();
   });
 
+  // --------------------------------------------------------------------
+  // Gate-detail explanations (Issue #1482, extended by #1473)
+  //
+  // `inbox show` is the view an operator opens BECAUSE they want the explanation, so a detail
+  // with no case falls through to 'unrecognized gate detail' — a string that reads as a bug in
+  // the tool rather than an answer about their message. `recent-input` shipped in exactly that
+  // state: the list view rendered it correctly through the shared formatter while this view
+  // called it unrecognized. These pin every value the gate can persist.
+  // --------------------------------------------------------------------
+
+  it.each([
+    ['user-text', /human is at the line/],
+    ['recent-input', /keystroke or click/],
+    ['no-region-end', /will not clear on its own/],
+    ['no-composer-marker', /will not clear on its own/],
+  ])('explains the %s gate detail', async (detail, expected) => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockRequest.mockResolvedValue({ ok: true, status: 200, data: fullRow({ detail }) });
+
+    await inboxShow('abc');
+
+    const line = mockLogger.kv.mock.calls.find((c) => c[0] === 'Detail')?.[1] as string;
+    expect(line).toContain(detail);
+    expect(line).toMatch(expected);
+    expect(line).not.toContain('unrecognized');
+    logSpy.mockRestore();
+  });
+
+  it('describes recent-input as self-clearing, like user-text and unlike the two stuck details', async () => {
+    // The split that matters to an operator is "will this clear by itself?". `recent-input` is
+    // on the SAME side as `user-text` — a human is at the keyboard — even though no draft
+    // exists. Putting it on the wrong side would send someone hunting a drifted profile while
+    // a colleague simply types.
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockRequest.mockResolvedValue({ ok: true, status: 200, data: fullRow({ detail: 'recent-input' }) });
+
+    await inboxShow('abc');
+
+    const line = mockLogger.kv.mock.calls.find((c) => c[0] === 'Detail')?.[1] as string;
+    expect(line).not.toContain('will not clear on its own');
+    expect(line).toMatch(/resumes/);
+    logSpy.mockRestore();
+  });
+
   it('calls fatal when the id names no row (404)', async () => {
     mockRequest.mockResolvedValue({ ok: false, status: 404, error: "No message with id 'nope'" });
 

@@ -958,6 +958,9 @@ async function handleTerminalRoutes(
         res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
         return;
       }
+      // Deliberately the default `'external'` origin (Issue #1473): this is a foreign writer, so
+      // its bytes count as input at the delivery gate and are reply-filtered on the way — both
+      // for free, because the recording lives inside `write()` rather than at each call site.
       session.write(body.data);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -2266,6 +2269,12 @@ async function handleSend(
     // completed write); the backstop drainer will retry. Report held, not a 500.
     ctx.log('ERROR', `Delivery attempt errored for ${toAgent} (row ${row.id.slice(0, 8)}... stays held): ${(err as Error).message}`);
   }
+  // Issue #1473: this pass ran OUTSIDE the drainer, so hand it the outcome — otherwise a hold
+  // on recent terminal input arms no re-drain here, and the send an operator is watching falls
+  // through to the quiescence trigger or the backstop instead of clearing after one settle.
+  // That is exactly the latency the re-drain exists to remove, in the case where somebody is
+  // waiting for it. A no-op for every other outcome.
+  if (outcome) getMailboxDrainer().noteOutcome(result.workspacePath, toAgent, outcome);
   const stored = getMailboxById(db, row.id);
   if (stored?.status === 'delivered') {
     ctx.log('INFO', `Message delivered: ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
@@ -2287,6 +2296,15 @@ async function handleSend(
       // else's pass delivered it) reads exactly as it did before this field existed.
       ...(outcome?.delivered.includes(row.id) && outcome.verified !== undefined
         ? { verified: outcome.verified }
+        : {}),
+      // Issue #1473. `verified` alone was not enough for the SENDER — the case that motivated
+      // it is a human's Enter submitting our half-written body, where the header landed, so
+      // `verified` is `true` (or absent) and this human read a plain "Message delivered". The
+      // cause says which flag it is: `input-raced` (may be truncated or submitted early) or
+      // `no-echo` (header never appeared). Same id guard as `verified` — reported only when
+      // THIS pass is the one that delivered THIS row.
+      ...(outcome?.delivered.includes(row.id) && outcome.unverifiedCause !== undefined
+        ? { unverifiedCause: outcome.unverifiedCause }
         : {}),
     });
     return;

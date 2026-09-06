@@ -68,6 +68,9 @@ function flipSession(command = 'claude'): FlipSession {
     // Issue #1573 settle-before-write: this fake's clock is the harness's fixed `now: 1000`, so
     // 0 is "quiet long before now" — an idle prompt, which is what every case here models.
     lastDataAt: 0,
+    // Issue #1473: likewise for the input signals — nothing has been typed at this fake.
+    inputSeq: 0,
+    lastInputAt: 0,
     info: { cols: COLS, rows: ROWS },
     command,
     launchArgs: [],
