@@ -22,6 +22,7 @@
  *              (`--watch N` polls the row for N seconds and prints a verdict timeline)
  *   inbox      list held rows, rendered exactly as `afx inbox` renders them
  *   calibrate  manual step 2 against the REAL harness: keystroke→echo, percentiles, verdict
+ *   vscode-check  assert the VS Code CLICK path resolves, using the extension's own resolver
  *
  * Usage:
  *   node --experimental-strip-types scripts/pir-1473-human-harness.mts up [--harness claude]
@@ -61,8 +62,22 @@ const DB_NAME = `test-1473-${PORT}.db`;
  * `builder-pir-1473`. A terminal registered under any other roleId, or with no directory on
  * disk, is invisible to VS Code no matter how healthy it is — while remaining perfectly visible
  * in the browser, which renders from the registry directly.
+ *
+ * The DIRECTORY NAME is load-bearing a second time, on a different code path, and this is what
+ * revision 2 got wrong. Listing and clicking read different sources:
+ *
+ *   list   /api/overview → the row's `id` is the DIRECTORY NAME verbatim (overview.ts)
+ *   click  the row hands that same `b.id` to `resolveBuilderTerminal` → `resolveAgentName`,
+ *          which matches it against /api/state's ids (`builder-pir-1473`) by EXACT or TAIL
+ *          match (`agent-names.ts:39-60`)
+ *
+ * `pir-1473-probe` satisfies the first and fails the second: `builder-pir-1473` neither equals
+ * it nor ends with `-pir-1473-probe`, so the click resolved `missing` and the human got the
+ * "terminal isn't available yet" toast while the row sat right there. `pir-1473` satisfies both
+ * — `builder-pir-1473` ends with `-pir-1473`. Verify any change to this with `vscode-check`,
+ * which drives the REAL resolver, not with `/api/overview` looking right.
  */
-const PROBE_DIR = 'pir-1473-probe';
+const PROBE_DIR = 'pir-1473';
 const AGENT = 'builder-pir-1473';
 
 const DIST = resolve(import.meta.dirname, '../dist');
@@ -460,6 +475,67 @@ async function cmdCalibrate(harness: string, samples: number): Promise<void> {
   console.log('');
 }
 
+// ---------------------------------------------------------------- vscode-check
+
+/**
+ * Assert that clicking the probe in VS Code will actually open a terminal.
+ *
+ * This exists because revision 2 verified `/api/overview` — the endpoint that had just been
+ * fixed — and shipped a runbook whose VS Code step still failed, because the CLICK reads a
+ * different source. So this check deliberately does NOT look at the thing that was changed. It
+ * reproduces the extension's path end to end:
+ *
+ *   1. the row id the sidebar would hold, taken from /api/overview (the directory name);
+ *   2. /api/state, fetched the same way `client.getWorkspaceState` fetches it;
+ *   3. `resolveBuilderTerminal` — the extension's OWN function, imported, not reimplemented.
+ *
+ * Importing the real resolver is the point. A local copy of the matching rules would agree with
+ * itself and prove nothing; `terminal-resolve.ts` is vscode-free precisely so it can be driven
+ * like this.
+ */
+async function cmdVsCodeCheck(): Promise<void> {
+  await requireUp();
+  const { resolveBuilderTerminal } = await import('../../../apps/vscode/src/terminal-resolve.ts');
+
+  const ovRes = await fetch(`${BASE}/api/overview?workspace=${encodeURIComponent(WS_DIR)}`, { headers: AUTH });
+  const overview = (await ovRes.json()) as { builders?: Array<{ id: string; roleId: string | null }> };
+  const rows = overview.builders ?? [];
+  console.log(`/api/overview → ${rows.length} row(s): ${rows.map((b) => `id="${b.id}" roleId="${b.roleId}"`).join(', ') || '(none)'}`);
+  if (rows.length === 0) {
+    console.error('\nFAIL: the sidebar would show nothing. Is `.builders/<dir>/` present?');
+    process.exit(1);
+  }
+
+  const b64 = Buffer.from(WS_DIR).toString('base64url');
+  const stRes = await fetch(`${BASE}/workspace/${b64}/api/state`, { headers: AUTH });
+  const state = (await stRes.json()) as { builders?: Array<{ id: string; terminalId?: string }> };
+  const stateBuilders = state.builders ?? [];
+  console.log(`/api/state    → ${stateBuilders.length} builder(s): ` +
+    (stateBuilders.map((b) => `id="${b.id}" terminalId=${b.terminalId ?? 'NULL'}`).join(', ') || '(none)'));
+
+  // The sidebar hands `b.id` to the opener — the DIRECTORY name, not the roleId.
+  const clicked = rows[0].id;
+  console.log(`\nClicking the row passes "${clicked}" to resolveBuilderTerminal…`);
+  const outcome = await resolveBuilderTerminal(
+    clicked,
+    async () => stateBuilders,
+    { sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)), attempts: 1 },
+  );
+
+  if (outcome.kind === 'ok') {
+    console.log(`\nPASS: resolved to builder "${outcome.builder.id}" terminal ${outcome.terminalId}.`);
+    console.log('Clicking the row in the VS Code Agents view will open that session.');
+    return;
+  }
+  if (outcome.kind === 'ambiguous') {
+    console.error(`\nFAIL: ambiguous — ${outcome.matches.map((m) => m.id).join(', ')}`);
+    process.exit(1);
+  }
+  console.error(`\nFAIL: resolved "missing" — VS Code would show "…terminal isn't available yet".`);
+  console.error(`The row id "${clicked}" neither equals nor tail-matches any /api/state id above.`);
+  process.exit(1);
+}
+
 // ---------------------------------------------------------------- main
 
 function flag(name: string, fallback: string): string {
@@ -493,10 +569,13 @@ switch (cmd) {
   case 'down':
     await cmdDown();
     break;
+  case 'vscode-check':
+    await cmdVsCodeCheck();
+    break;
   case 'calibrate':
     await cmdCalibrate(flag('harness', 'claude'), Number(flag('samples', '40')));
     break;
   default:
-    console.error(`unknown command "${cmd}" — expected up | down | send | inbox | calibrate`);
+    console.error(`unknown command "${cmd}" — expected up | down | send | inbox | calibrate | vscode-check`);
     process.exit(1);
 }

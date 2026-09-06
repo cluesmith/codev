@@ -5,12 +5,11 @@ else for this issue is already automated in `codev/evidence/1473-dev-approval-tr
 
 Budget about 30 minutes. Follow the steps in order; step 1a gates the rest.
 
-**Revision 2.** Steps 1a, 2 and 3 are banked from the first run and do not need repeating.
-Only **1b** and **4a** are outstanding. Step 4 in revision 1 was defective: it asserted a
-verdict of `busy:recent-input` while telling you to type printable characters, and a non-empty
-composer fails classification first — so that verdict was unobservable under its own procedure.
-It is now split into 4a (the new guard) and 4b (draft integrity, which is what revision 1
-actually measured).
+**Revision 3.** Steps 1a, 2, 3, 4a and 4b are banked. **Only 1b is outstanding.** Its two
+earlier failures were both in this harness, not in your settings: the probe was missing from
+the sidebar (rev 2), and then listed but unclickable (rev 3), because listing and clicking read
+different sources and the probe's directory name has to satisfy both. `h1473 vscode-check` now
+proves the click resolves before you go looking for it in the UI.
 
 ---
 
@@ -61,7 +60,7 @@ h1473() { node --experimental-strip-types scripts/pir-1473-human-harness.mts "$@
    If it says `Port 14793 is already in use`, something else owns the port — free it and retry.
 
 3. Open a **second** terminal in the same directory. Every `send` / `inbox` / `calibrate` /
-   `down` command below runs there.
+   `vscode-check` / `down` command below runs there.
 
 4. Open the `Browser:` URL. Click the **`builder-pir-1473`** terminal.
 
@@ -106,45 +105,66 @@ If this fails, stop. Nothing downstream is trustworthy.
 
 ### 1b — VS Code integrated terminal
 
-A different xterm build, and the one surface whose reply set may differ. It failed to appear in
-revision 1; the cause was in the harness, not in your settings, and is fixed.
+A different xterm build, and the one surface whose reply set may differ.
 
-1. In VS Code, open User settings (JSON) and set both:
+1. Before touching VS Code, in terminal 2:
+
+   ```
+   h1473 vscode-check
+   ```
+
+   Expected, on the last two lines:
+
+   ```
+   PASS: resolved to builder "builder-pir-1473" terminal <id>.
+   Clicking the row in the VS Code Agents view will open that session.
+   ```
+
+   If it says `FAIL`, stop and report it — VS Code cannot work until this passes, and the
+   message names which of the two lookups broke. Do not go hunting in the UI.
+
+2. In VS Code, open User settings (JSON) and set both:
 
    ```json
    "codev.towerPort": 14793,
    "codev.workspacePath": "/home/user/.agent-farm/test-workspaces/pir1473-human/ws"
    ```
 
-2. Reload the window.
+3. Reload the window.
 
    Expected: the Codev **Status** view shows `Tower: connected`.
 
-3. Open the **Agents** view.
+4. Open the **Agents** view.
 
-   Expected: one entry, **`builder-pir-1473`**. If it is missing, the harness is not running —
-   check terminal 1 for the `READY` banner and that its `Agent:` line says `builder-pir-1473`.
+   Expected: one entry, labelled `#1473`, grouped under a heading of **`UNKNOWN`**. That
+   grouping is expected and is not a fault: the group is the porch phase, and this throwaway
+   workspace has no porch project.
 
-4. Click it.
+5. Click it.
 
-   Expected: a VS Code integrated terminal opens, attached to the same session the browser
-   shows. Type a character into its composer and backspace it.
+   Expected: a VS Code integrated terminal opens on the same session the browser shows. Type a
+   character into its composer and backspace it.
 
    Expected: two new `[input-signal …]` lines in terminal 1, one with `survived="a"` and one
-   with `survived="\x7f"`. If nothing prints, you are looking at a different session — stop and
+   with `survived="\x7f"`. If nothing prints, you are attached to a different session — stop and
    report it rather than proceeding.
 
-5. Click into that composer, then **take your hands off the keyboard and mouse for 60 seconds.**
+   If instead you get "**…terminal isn't available yet**", step 1 was not run or has since
+   changed — re-run `h1473 vscode-check` and report its output.
 
-   PASS and FAIL are identical to 1a: every line in that window must read `survived=<NOTHING>`,
-   and zero lines is also a pass. Any non-empty `survived` is a FAIL — copy the `raw=` fields.
+6. Click into that composer, then **take your hands off the keyboard and mouse for 60 seconds.**
 
-6. **Put the settings back** when you are done with the whole runbook:
-   `"codev.towerPort": 4100` and `"codev.workspacePath": ""`. Reload the window.
+   **PASS** — every `[input-signal …]` line in that window reads `survived=<NOTHING>`. Zero
+   lines is also a pass.
 
-> If step 3 still shows nothing: the browser at the `Browser:` URL renders the same session and
-> is a valid fallback for keeping the environment usable — but it is the SAME xterm build as
-> 1a, so it does **not** substitute for this step. Report 1b as blocked rather than passed.
+   **FAIL** — any line with a non-empty `survived`. Copy the `raw=` fields verbatim.
+
+7. **Put the settings back** when you are done: `"codev.towerPort": 4100` and
+   `"codev.workspacePath": ""`. Reload the window.
+
+> The browser at the `Browser:` URL renders the same session, but it is the SAME xterm build as
+> 1a — it does **not** substitute for this step. If VS Code cannot be made to attach, report 1b
+> as blocked rather than passed.
 
 ---
 
@@ -361,7 +381,7 @@ guard. This step does not test the input signal; it tests that a send never corr
 
    Ctrl-C alone is not enough — the harness sessions are detached and outlive it.
 
-3. Restore the two VS Code settings from step 1b.6 and reload the window.
+3. Restore the two VS Code settings from step 1b.7 and reload the window.
 
 4. Confirm the live Tower is unharmed:
 

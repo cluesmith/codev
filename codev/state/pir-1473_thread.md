@@ -502,3 +502,58 @@ re-runs it.
 
 Tower 4100 confirmed listening and untouched after every run; 14793 free; no leftover processes.
 Still parked at `dev-approval`.
+
+## Runbook revision 3 — the same mistake, one layer down
+
+4a passed, all reps. 1b failed again, differently: the row now appears but clicking it says
+"#1473's terminal isn't available yet".
+
+### I verified the half I had changed. Again.
+
+Rev 2 fixed the listing and verified the listing. But listing and clicking read different
+sources:
+
+- **list** — `/api/overview`, filesystem-derived; the row's `id` is the DIRECTORY NAME verbatim.
+- **click** — `views/builders.ts:439` hands that same `b.id` to `openBuilderByRoleOrId` →
+  `resolveBuilderTerminal` → `resolveAgentName` (`agent-names.ts:39-60`), matched against
+  `/api/state`'s ids by EXACT or TAIL match.
+
+`pir-1473-probe` satisfies the first and fails the second: `builder-pir-1473` neither equals it
+nor ends with `-pir-1473-probe` → `kind: 'missing'` → exactly the toast. Renaming the directory
+to `pir-1473` satisfies both, since `builder-pir-1473` ends with `-pir-1473`.
+
+That is twice on the same step. The failure mode is not "I checked the wrong endpoint" — it is
+that I chose the check AFTER choosing the fix, so the check could only confirm the fix. The
+check has to be picked from the user's action ("click the row"), not from the diff.
+
+### The architect's root cause was on the right path but the wrong database
+
+They reported zero `builders` rows and no builder-type `terminal_sessions` for the harness
+workspace. That was read from `global.db` — but `up` runs the Tower with
+`AF_TEST_DB=test-1473-14793.db`, so none of the harness state is in `global.db` at all. Queried
+live, `/api/state` already returned `{id: 'builder-pir-1473', terminalId: 'cc838076…'}` with a
+non-null terminal id, which is what they asked me to confirm.
+
+So I did NOT add a `builders` row. `/api/state`'s builders come from the terminal registry
+(`entry.builders`), not that table — proven by it returning a live terminalId while the table is
+empty. A synthetic row in a table that afx and porch own would buy nothing on the click path.
+The one thing it would change is cosmetic: the row groups under `UNKNOWN` because the group is
+the porch phase and this throwaway workspace has no porch project. The runbook now says so, so
+the human does not read it as a fault.
+
+### `vscode-check`
+
+New subcommand, and the useful part is what it refuses to do: it does not re-check
+`/api/overview`. It reproduces the click — takes the row id from the overview, fetches
+`/api/state` the way the client does, and calls **the extension's own `resolveBuilderTerminal`**,
+imported rather than reimplemented (`terminal-resolve.ts` is vscode-free precisely so it can be
+driven this way). A local copy of the matching rules would agree with itself and prove nothing.
+
+Run against the live Tower before the fix it printed the human's failure verbatim
+(`FAIL: resolved "missing"`); after renaming the directory, `PASS`. The rename was applied to
+the RUNNING workspace, so 1b is retryable immediately — the Tower was not torn down.
+
+The runbook's 1b now opens with `vscode-check` as a pre-flight, so the next failure names the
+broken lookup instead of presenting as a toast.
+
+Tower 4100 and both real builders untouched throughout. Still parked at `dev-approval`.
