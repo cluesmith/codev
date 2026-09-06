@@ -1,0 +1,18 @@
+id: '1481'
+title: afx-send-add-interrupt-after-s
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-06T18:50:04.653Z'
+updated_at: '2026-09-06T18:50:04.654Z'
