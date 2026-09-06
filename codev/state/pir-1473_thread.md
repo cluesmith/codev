@@ -684,3 +684,23 @@ Note on where that file lives: `.gitignore:65` (`codev/projects/*/*.txt`) exclud
 consultation output, so the failure record is untracked exactly like the gemini and codex
 verdicts — only `status.yaml` is committed from that directory. I did not force-add it. The
 durable copy of what it says is the review doc, which is committed and ships with the PR.
+
+### porch has no "did not run" verdict — a sharper instance of the same gap
+
+Writing the failure record surfaced the better version of the finding. `parseVerdict`
+(`commands/porch/verdict.ts:24-48`) has NO unknown value: a file with no `VERDICT:` line falls
+through to `COMMENT`, labelled in the source as a "non-blocking skip". So `porch next` now lists
+claude as `COMMENT` — a reviewer position — for a consultation that never ran.
+
+Meanwhile the PIR review prompt's own extraction (line-anchored grep, `|| echo UNKNOWN`) reads
+the same file as UNKNOWN. Two extractions, two answers, and the one that persists into
+`status.yaml` is the one that cannot say "no review". The architect and I both predicted UNKNOWN;
+we were both wrong about where it lands, and that is worth saying plainly rather than letting the
+prediction stand.
+
+The fix is NOT to add a `VERDICT:` line — any value asserts a position no reviewer held. The
+honest state is simply not expressible in porch's vocabulary. Both files now record this.
+
+Rebuttal written at `1473-review-iter1-rebuttals.md` (that one is NOT gitignored — only
+`codev/projects/*/*.txt` is — so it ships with the PR). Every codex finding was accepted; none
+rebutted as a false positive.

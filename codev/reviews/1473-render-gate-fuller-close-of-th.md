@@ -211,9 +211,20 @@ protocol already anticipates for an unavailable model. Anyone opening that file 
 account of three failed attempts and a pointer to where claude's real opinion lives, not a
 review.
 
+Writing that file surfaced a sharper instance of the same gap. **porch's `parseVerdict`
+(`commands/porch/verdict.ts:24-48`) has no "unknown" or "did not run" value at all** — a file
+with no `VERDICT:` line falls through to `COMMENT`, labelled in the source as a "non-blocking
+skip". So porch's project state now records this failure as a claude review whose verdict was
+`COMMENT`, which is a reviewer position, not what happened. The PIR review prompt's own
+extraction (a line-anchored grep with an `|| echo UNKNOWN` fallback) resolves the same file as
+`UNKNOWN`. Two extractions, two answers — and the one that persists into project state is the
+one that cannot express "no review". The remedy is *not* to add a `VERDICT:` line: any value
+would assert a position no reviewer held. The honest state is simply not expressible in porch's
+current vocabulary.
+
 Practical consequence for the next large PIR: expect the porch lane to lose a model somewhere
-around this diff size, and plan for a second lane or a split review rather than discovering it
-at the gate.
+around this diff size, plan for a second lane or a split review rather than discovering it at
+the gate, and do not read a `COMMENT` verdict in `status.yaml` as proof a model actually ran.
 
 **Fixed — the new hold class was "unrecognized" in `afx inbox show`.** `describeDetail()`
 (`commands/inbox.ts`) had no `recent-input` case, so the one verdict this PR exists to make
