@@ -390,11 +390,18 @@ describe('Issue #1365 — deliveries decline contention, operators wait (bounded
     expect(await delivery).toEqual({ status: 'preempted' });
   });
 
-  it('a degraded write that writes NOTHING is not counted as a bypass', async () => {
+  it('a degraded write that writes NOTHING is neither counted nor announced as a bypass', async () => {
     // The delayed `^C` re-checks liveness INSIDE the lock and can legitimately return without
     // writing a byte. Counting that as a bypass would hold and re-deliver a message that
     // nothing actually raced — a duplicate charged for a race that never happened (claude
     // review of PR #1492).
+    //
+    // Issue #1481 extended the same rule to the ANNOUNCEMENT. `onCeilingExpired` used to fire
+    // for a no-op too, so a Tower log said a write "proceeded UNSERIALIZED and may interleave"
+    // about a submission that wrote nothing — and `--interrupt-after`, whose escalations are
+    // unattended and routinely decline to write (the row was delivered, the session was
+    // replaced, another writer holds the row), would have produced a stream of those. The
+    // callback now means one thing only: bytes went onto a line someone else was using.
     const c = makeComposer();
     const expired: number[] = [];
 
@@ -411,8 +418,8 @@ describe('Issue #1365 — deliveries decline contention, operators wait (bounded
       },
     );
 
-    expect(expired).toEqual([0]); // it DID give up waiting, and still says so
-    expect(unserializedWriteCount(c.session.id)).toBe(0); // but nothing bypassed the line
+    expect(expired).toEqual([]); // nothing was written, so there is no interference to report
+    expect(unserializedWriteCount(c.session.id)).toBe(0); // and nothing bypassed the line
     expect(await delivery).toEqual({ status: 'written' }); // so the delivery is not re-held
     expect(c.submitted).toEqual([MULTILINE]);
   });

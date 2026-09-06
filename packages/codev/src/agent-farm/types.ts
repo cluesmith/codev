@@ -180,6 +180,26 @@ export interface SendOptions {
    * are deliberate, not drift.
    */
   delay?: number;
+  /**
+   * Issue #1481 (`--interrupt-after`): bounded patience, in seconds. The message is enqueued and
+   * competes for ordinary gated delivery immediately; if it is STILL held after this long, Tower
+   * escalates that same row to a forced interrupt delivery — Ctrl+C, a fixed settle, then the
+   * body, without the render gate.
+   *
+   * The deliberate middle ground between the two existing shapes: `interrupt` forces now, a
+   * plain send waits forever. Use this for time-sensitive mail (a cron nudge, a "wrap up soon")
+   * where a clean prompt is preferred but waiting indefinitely is not; use `interrupt` for mail
+   * that must land right now.
+   *
+   * It bounds when the escalation STARTS, not delivery: the write still waits for any preceding
+   * operator submission on that terminal, and nothing here proves the agent read the message.
+   * The force is scoped to the Tower lifetime that accepted it (a restart disarms it and the
+   * body reverts to ordinary gated delivery), whereas the MESSAGE is durable either way.
+   *
+   * Named after the flag; it becomes `interruptAfter` on the wire too — unlike `delay`/
+   * `deliverAfter`, there is no second question to rename it for.
+   */
+  interruptAfter?: number;
 }
 
 /**

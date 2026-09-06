@@ -103,13 +103,22 @@
  * PR #1492). Operator-vs-operator was ALWAYS fully serialized before #1365 — `submitToSession`
  * had no ceiling — so a ceiling that could skip a queued or in-flight operator would make that
  * one pair strictly WORSE than the old behaviour, which is the opposite of the point. The
- * {@link SubmissionKind} tag plus the pending-operator count is what keeps the guarantee true
- * per pair:
+ * {@link SubmissionKind} tag plus the OPERATOR-ONLY chain ({@link operatorTails}) is what keeps
+ * the guarantee true per pair:
  *
  *   - operator vs operator — fully serialized, unbounded wait, exactly as before #1365;
  *   - operator vs delivery — serialized under the ceiling, and above it degraded to the
  *     pre-#1365 behaviour (two disjoint locks, i.e. no serialization at all), so never worse;
  *   - delivery vs delivery — the per-agent serializer, unchanged, plus a declined contention.
+ *
+ * Issue #1481 replaced the enqueue-time pending-operator COUNT with that chain. The count was
+ * consulted once, before waiting, and disarmed the ceiling for the submission's whole life: an
+ * operator queued behind another operator AND a long delivery therefore kept waiting on the
+ * DELIVERY even after the operator ahead of it had finished — an unbounded wait against the one
+ * writer the ceiling exists to bound. The two conditions are now evaluated independently and
+ * concurrently (preceding operators finished, AND predecessors finished or the ceiling expired),
+ * so each pair keeps exactly its own guarantee. `--interrupt-after` makes this corner ordinary
+ * rather than rare, because its escalations are operators that nobody is standing at.
  *
  * ### What is guaranteed, and what is not
  *
@@ -150,6 +159,20 @@
  */
 const chains = new Map<string, Promise<void>>();
 
+/**
+ * Per-session count of submissions whose write is IN PROGRESS right now — from the first byte
+ * until the scheduled Enter has been waited out (Issue #1481).
+ *
+ * The write-edge answer to "is anything actually on this line?", which is what decides whether a
+ * ceiling-expired entry is a real bypass. Deliberately not derived from {@link chains}: a chain
+ * entry covers queued work too, and its promise resolution lags the real completion by several
+ * microtask hops — either error would make a submission entering a demonstrably free terminal
+ * report interference that did not happen.
+ *
+ * Self-evicting (the entry is deleted at zero), so it cannot grow across a long-lived Tower.
+ */
+const activeWrites = new Map<string, number>();
+
 /** Injectable for tests; real timers otherwise. */
 export interface SubmitClock {
   sleep(ms: number): Promise<void>;
@@ -176,19 +199,37 @@ export interface SubmitOptions {
    */
   kind?: SubmissionKind;
   /**
-   * Max ms to wait for an in-flight submission before proceeding UNSERIALIZED.
-   * Omitted (the default) means wait as long as it takes.
+   * Max ms to wait for the combined submission chain before proceeding UNSERIALIZED against
+   * it. Omitted (the default) means wait as long as it takes.
    *
-   * **Only armed when nothing ahead of us is an operator submission.** Two operator
-   * submissions to one terminal were ALWAYS fully serialized before #1365, and a ceiling
-   * that could bypass an operator would make this pair strictly worse than that — the one
-   * corner where "never worse than the old status quo" would otherwise be false. The
-   * ceiling exists to keep the escape hatch responsive against a long DELIVERY, which is
-   * the only thing it may skip.
+   * **It can never bypass another OPERATOR.** Two operator submissions to one terminal were
+   * ALWAYS fully serialized before #1365, and a ceiling that could skip one would make that
+   * pair strictly worse — the one corner where "never worse than the old status quo" would
+   * otherwise be false. The guarantee is enforced by a separate, unbounded operator-only wait
+   * ({@link operatorTails}) that this ceiling does not apply to, rather than by refusing to arm
+   * the timer: arming is what keeps the bound measured from THIS submission's enqueue, so an
+   * earlier operator draining does not silently restart the clock (Issue #1481).
    */
   waitCeilingMs?: number;
-  /** Called instead of the write's serialization when {@link waitCeilingMs} expires. */
+  /**
+   * Called after the write, when this submission entered ahead of unfinished predecessor work
+   * AND actually wrote bytes — i.e. an announced, real degradation. NOT called for a timer that
+   * expired while waiting on an operator if the predecessor had finished by the write edge, and
+   * not called for a callback that declined to write (Issue #1481): both would be reports of
+   * interference that did not occur.
+   */
   onCeilingExpired?: (waitedMs: number) => void;
+  /**
+   * Called synchronously immediately BEFORE the write callback, when this submission is about
+   * to enter ahead of unfinished predecessor work (Issue #1481).
+   *
+   * Exists for a writer whose first action is an irreversible claim: the timed force claims its
+   * mailbox row in the same statement that records whether the write edge was degraded, and
+   * that statement runs before any byte. {@link onCeilingExpired} is too late for it, and is
+   * additionally gated on bytes actually going out — this one fires on entry regardless, so the
+   * degradation is preserved even if the completion update never lands.
+   */
+  onDegradedEntry?: () => void;
   /**
    * Consulted immediately after the write callback returns, on the DEGRADED path only:
    * did the write actually put bytes on the terminal? Defaults to yes.
@@ -301,14 +342,30 @@ function evictBypassCountIfIdle(sessionId: string): void {
 }
 
 /**
- * Per-session count of OPERATOR submissions queued or in flight (Issue #1365, codex review).
+ * Tail of the OPERATOR-ONLY submission chain per session (Issue #1481, replacing the #1365
+ * pending-operator counter).
  *
- * The ceiling consults this before arming: while any operator is ahead of us — running OR
- * merely queued — we wait as long as it takes, exactly as every submission did before the
- * ceiling existed. A queued operator counts because bypassing one that has not started yet
- * is the same violation as bypassing one mid-write.
+ * Operator-vs-operator must stay fully serialized — that pair was serialized before the ceiling
+ * existed, and a ceiling that could skip an operator would make it strictly worse. #1365 bought
+ * that with a counter consulted ONCE, at enqueue: any operator ahead of us disarmed our ceiling
+ * for the whole submission. That decision could not be revisited, so operator 2 queued behind
+ * operator 1 AND a long delivery kept waiting for the DELIVERY even after operator 1 had
+ * finished — an unbounded wait against the one writer the ceiling exists to bound. Rare when
+ * every operator was a human at a keyboard; `--interrupt-after` creates unattended ones, so it
+ * is no longer rare.
+ *
+ * A chain of the operators alone answers the question continuously instead: an operator waits
+ * for preceding OPERATORS to finish their own submissions, and separately races the ceiling
+ * against the combined (delivery-containing) chain. Both conditions must hold — see
+ * {@link submitToSession} — so operator-vs-operator keeps its unbounded serialization while
+ * operator-vs-delivery keeps its bound.
+ *
+ * Entries hold each operator's OWN submission completion, never the combined tail: chaining on
+ * a tail that includes a delivery would smuggle the delivery wait back in through the operator
+ * condition. They are rejection-neutral (a failed operator still releases its successors) and
+ * self-evict by identity once drained.
  */
-const pendingOperators = new Map<string, number>();
+const operatorTails = new Map<string, Promise<void>>();
 
 /**
  * How many unserialized (ceiling-expired) writes this session has seen.
@@ -365,73 +422,100 @@ export function submitToSession(
   // ceiling timer it would then leave dangling for its whole duration.
   const contended = chains.has(sessionId);
   const ceilingMs = options.waitCeilingMs;
-  // An operator ahead of us — in flight or merely queued — makes this an operator-vs-operator
-  // wait, which was UNBOUNDED before #1365 and must stay unbounded (see waitCeilingMs).
-  const behindOperator = (pendingOperators.get(sessionId) ?? 0) > 0;
-  const bounded = contended && ceilingMs !== undefined && ceilingMs >= 0 && !behindOperator;
+  const bounded = contended && ceilingMs !== undefined && ceilingMs >= 0;
 
-  // Count ourselves only AFTER the check above, so we do not read our own presence as a
-  // reason to block, and BEFORE any await, so a later operator sees us while we are queued.
+  // The operator-only gate: every operator submission enqueued before us, and NOT their
+  // combined tails (see {@link operatorTails}). Captured BEFORE we publish our own, so we never
+  // wait on ourselves.
   const kind = options.kind ?? 'operator';
-  if (kind === 'operator') pendingOperators.set(sessionId, (pendingOperators.get(sessionId) ?? 0) + 1);
+  const priorOperator = kind === 'operator' ? operatorTails.get(sessionId) : undefined;
 
   const current = (async () => {
-    let bypassed = false;
-    if (bounded) {
-      const winner = await Promise.race([
-        previousSettled,
-        clock.sleep(ceilingMs).then(() => CEILING_EXPIRED),
-      ]);
-      // Ceiling expired → proceed WITHOUT serialization. This is a deliberate,
-      // announced degradation to exactly the pre-Issue-#1365 behaviour for the ONE pair it
-      // can affect: an operator write against a delivery, which held a disjoint lock and so
-      // was never serialized against an operator at all. (Operator-vs-operator never arms
-      // the ceiling — see `bounded` above — so that pair keeps its unbounded wait.) Taken
-      // only when the alternative is stalling `--interrupt`, the human's escape hatch,
-      // behind a write that may run for minutes. See the boundary comment above.
-      if (winner === CEILING_EXPIRED) {
-        bypassed = true;
-        options.onCeilingExpired?.(ceilingMs);
+    // TWO conditions, evaluated concurrently and both required before a byte goes out:
+    //
+    //   1. every preceding OPERATOR has finished its own submission — unbounded, because
+    //      operator-vs-operator was fully serialized before the ceiling existed and must stay
+    //      that way (a no-op submission still settles its place in that order);
+    //   2. the combined predecessor chain has finished OR the ceiling has expired — the bound
+    //      that keeps the escape hatch responsive against a long DELIVERY.
+    //
+    // Started together rather than in sequence, so the ceiling is measured from OUR enqueue.
+    // Awaiting the operator gate first and only then arming the timer would restart the clock
+    // every time an earlier operator drained, which is precisely the unbounded wait this
+    // replaces.
+    const ceilingRace: Promise<unknown> = bounded
+      ? Promise.race([previousSettled, clock.sleep(ceilingMs).then(() => CEILING_EXPIRED)])
+      : previousSettled;
+    await Promise.all([ceilingRace, priorOperator ?? Promise.resolve()]);
+
+    // Degradation is a WRITE-EDGE fact, not a latched timer (Issue #1481). A ceiling that
+    // expired while we waited for an operator may be entirely irrelevant by now: if the write
+    // it would have bypassed has since finished, we are entering a free terminal and nothing was
+    // raced. So the question is asked of {@link activeWrites} — who is writing RIGHT NOW —
+    // rather than of a promise-derived flag. Promise ordering cannot answer it: a predecessor's
+    // completion propagates to a derived `previousSettled` several microtask hops after its
+    // write actually finished, so a flag would still read "unfinished" for a terminal that is
+    // demonstrably free, and every such submission would file a false interference report.
+    const degradedEntry = bounded && (activeWrites.get(sessionId) ?? 0) > 0;
+    // Announced to the write callback BEFORE its first byte, because a writer that claims a row
+    // ahead of writing needs to record the degradation in the same statement as the claim —
+    // afterwards is too late to be sure it is recorded at all (Issue #1481).
+    if (degradedEntry) options.onDegradedEntry?.();
+
+    // Mark the line BUSY across our whole submission — the first byte through the trailing
+    // Enter — so a later submission asking `activeWrites` gets the truth. Released in a
+    // `finally`: a throwing write still ends its occupancy, and a leaked count would make every
+    // subsequent operator on that terminal report a bypass forever.
+    activeWrites.set(sessionId, (activeWrites.get(sessionId) ?? 0) + 1);
+    try {
+      const completesInMs = write();
+      // Count the bypass, and announce it, only once bytes actually went out: a degraded write
+      // that declined to write anything raced nobody, and reporting one would make a concurrent
+      // delivery hold and re-deliver for a collision that never happened. Placed straight after
+      // `write()` with NO await in between, so a delivery holding the line cannot observe our
+      // bytes without also observing the bump when it re-samples after its own write.
+      if (degradedEntry && (options.wroteBytes?.() ?? true)) {
+        unserializedWrites.set(sessionId, unserializedWriteCount(sessionId) + 1);
+        options.onCeilingExpired?.(ceilingMs as number);
       }
-    } else {
-      await previousSettled;
+      // Wait out the scheduled Enter. Zero means the write was fully synchronous
+      // (`noEnter`), so there is nothing pending to wait for.
+      if (completesInMs > 0) await clock.sleep(completesInMs);
+    } finally {
+      const remaining = (activeWrites.get(sessionId) ?? 1) - 1;
+      if (remaining > 0) activeWrites.set(sessionId, remaining);
+      else activeWrites.delete(sessionId);
     }
-    const completesInMs = write();
-    // Count the bypass only once bytes actually went out: a degraded write that declined to
-    // write anything raced nobody. Placed straight after `write()` with NO await in between,
-    // so a delivery holding the line still cannot observe our bytes without also observing
-    // the bump when it re-samples after its own write.
-    if (bypassed && (options.wroteBytes?.() ?? true)) {
-      unserializedWrites.set(sessionId, unserializedWriteCount(sessionId) + 1);
-    }
-    // Wait out the scheduled Enter. Zero means the write was fully synchronous
-    // (`noEnter`), so there is nothing pending to wait for.
-    if (completesInMs > 0) await clock.sleep(completesInMs);
   })();
 
-  // The stored tail settles only once BOTH this submission and its predecessor are
-  // done. Identical to `current` on the normal path (current already awaited the
-  // predecessor); it matters on the degraded path, where the predecessor is still
-  // running — a third submission must not be released by our early finish.
-  const tail = bounded
-    ? Promise.all([previousSettled, current.then(() => undefined, () => undefined)]).then(() => undefined)
-    : current.then(
-        () => undefined,
-        () => undefined,
-      );
+  // Rejection-neutral view of OUR OWN submission: successors are entitled to run whatever
+  // happened to us, and only the caller sees the failure (through the returned `current`).
+  const settled = current.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  // The stored tail settles only once BOTH this submission and its predecessor are done. It
+  // matters on the bounded path, where the predecessor may still be running when we finish — a
+  // third submission must not be released by our early finish. On the unbounded path the tail is
+  // `settled` ITSELF, not an equivalent combination: an extra `Promise.all` hop there would keep
+  // the chain entry — the contention signal `trySubmitToSession` reads — alive for microtasks
+  // after `await submitToSession(...)` returned, and a delivery attempted on the next line would
+  // decline against a terminal nobody is using.
+  const tail = bounded ? Promise.all([previousSettled, settled]).then(() => undefined) : settled;
 
   chains.set(sessionId, tail);
 
-  // Release our operator claim as soon as OUR write is done — a later operator may then be
-  // bypass-eligible again if only deliveries remain ahead of it.
+  // Publish our operator tail SYNCHRONOUSLY at enqueue, so an operator arriving one tick later
+  // sees us and orders itself behind us even though we have not started writing. Its value is
+  // our own submission, never `tail` — chaining successors on a tail that includes a delivery
+  // would reintroduce the unbounded delivery wait through the back door.
   if (kind === 'operator') {
-    void current.then(
-      () => undefined,
-      () => undefined,
-    ).then(() => {
-      const remaining = (pendingOperators.get(sessionId) ?? 1) - 1;
-      if (remaining > 0) pendingOperators.set(sessionId, remaining);
-      else pendingOperators.delete(sessionId);
+    operatorTails.set(sessionId, settled);
+    void settled.then(() => {
+      // Identity-guarded: an operator that finished late must not delete a newer operator's
+      // entry and let a third one run ahead of it.
+      if (operatorTails.get(sessionId) === settled) operatorTails.delete(sessionId);
     });
   }
 
@@ -486,11 +570,24 @@ export function pendingSubmissionSessions(): number {
   return chains.size;
 }
 
-/** Drop all chains and degraded-write counters. Test-only; a live Tower should let them drain. */
+/**
+ * Number of sessions with an operator submission still in flight. Test/observability only —
+ * the assertion that {@link operatorTails} self-evicts on success, rejection AND no-op writes
+ * rather than retaining one promise per session that ever saw an operator.
+ */
+export function pendingOperatorSessions(): number {
+  return operatorTails.size;
+}
+
+/**
+ * Drop all chains, operator chains and degraded-write counters. Test-only; a live Tower should
+ * let them drain (and a test that needs this to pass has usually found a real leak).
+ */
 export function resetSubmissionChains(): void {
   chains.clear();
   unserializedWrites.clear();
-  pendingOperators.clear();
+  operatorTails.clear();
+  activeWrites.clear();
   bypassWatchers.clear();
 }
 

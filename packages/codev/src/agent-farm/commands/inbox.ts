@@ -35,6 +35,16 @@ interface InboxRow {
    * cancellable here, and rendered with its countdown.
    */
   notBefore: number | null;
+  /**
+   * Issue #1481: when this row's `--interrupt-after` force becomes armed; null on ordinary rows.
+   * NOT a scheduling field — the row is deliverable now and is listed and counted like any other
+   * held message. It only says the row will stop waiting at that instant.
+   */
+  interruptAt: number | null;
+  /** Issue #1481: the force's audit state (`armed` while pending, then claimed/written/skipped). */
+  interruptOutcome: string | null;
+  /** Issue #1481: an ordinary write for this row may already have emitted bytes. */
+  interruptPriorPartial: boolean;
 }
 
 interface InboxListOptions {
@@ -70,6 +80,10 @@ interface InboxMessage {
   body: string;
   createdAt: number; // epoch ms
   notBefore: number | null; // epoch ms; due time of a pre-due delayed row (Spec 1313 round 3)
+  interruptAt: number | null; // epoch ms; --interrupt-after deadline (Issue #1481); null on ordinary rows
+  interruptOutcome: string | null; // Issue #1481: force audit state — never receipt
+  interruptClaimedAt: number | null; // epoch ms the force claimed the row, immediately before its first byte
+  interruptPriorPartial: boolean; // an ordinary write for this row may already have emitted bytes
   resolvedAt: number | null; // epoch ms; set once the row leaves `held`
 }
 
@@ -101,6 +115,40 @@ function formatAge(createdAt: number, now: number): string {
  */
 function truncate(text: string, width: number): string {
   return text.length <= width ? text : `${text.slice(0, width - 1)}…`;
+}
+
+/**
+ * One line explaining a force outcome, for `afx inbox show` (Issue #1481).
+ *
+ * The distinction every line here defends: what Tower DID versus what the agent RECEIVED. A
+ * claimed or written force is evidence of the former only, and an operator reading this view is
+ * usually trying to find out whether a message landed — so no wording may imply that it did.
+ */
+function describeInterruptOutcome(outcome: string): string {
+  switch (outcome) {
+    case 'armed':
+      return 'waiting — if the row is still held at the deadline it will be force-delivered';
+    case 'claimed':
+      return 'claimed immediately before writing; the write outcome was never recorded (Tower stopped mid-force)';
+    case 'claimed-degraded':
+      return 'claimed while another write held the terminal; the write outcome was never recorded';
+    case 'written-unverified':
+      return 'Ctrl+C and the body were written and every byte accepted — NOT confirmed as read';
+    case 'degraded-written-unverified':
+      return 'written, but not serialized against a write already in flight — it may have interleaved';
+    case 'failed':
+      return 'a write was rejected by the terminal; the row is claimed, so the body will NOT be re-sent';
+    case 'degraded-failed':
+      return 'a write was rejected AND it was not serialized against a write already in flight';
+    case 'skipped-offline':
+      return 'no live writable session at the deadline — nothing was written; the message is still held';
+    case 'skipped-session-replaced':
+      return 'the target session was replaced while queued — nothing was written; the message is still held';
+    case 'skipped-restart':
+      return 'a Tower restart retired the force — nothing was written; the message is still held';
+    default:
+      return 'unrecognized force outcome';
+  }
 }
 
 /**
@@ -201,6 +249,32 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
     );
   });
 
+  // Issue #1481: a `--interrupt-after` row is ordinary held mail in every column above — which
+  // is exactly right, and exactly why it needs saying separately: nothing in the table
+  // distinguishes a row that will wait forever from one that is about to interrupt a turn. The
+  // columns are left alone (they are already sized to their content) and the fact is stated
+  // below them instead.
+  const armed = rows.filter((r) => r.interruptOutcome === 'armed' && r.interruptAt != null);
+  if (armed.length > 0) {
+    const when = armed
+      .map((r) => `${r.id.slice(0, 8)}… ${r.interruptAt! > now ? `in ${formatDuration(r.interruptAt! - now)}` : 'now'}`)
+      .join(', ');
+    logger.blank();
+    logger.warn(
+      `${armed.length} of these will be FORCE-delivered if still held (Ctrl+C, then the message, ` +
+        `no render gate): ${when}. Cancel one with 'afx inbox dismiss <id>'.`,
+    );
+  }
+  const skipped = rows.filter((r) => r.interruptOutcome?.startsWith('skipped-'));
+  if (skipped.length > 0) {
+    logger.blank();
+    logger.info(
+      `${skipped.length} had a --interrupt-after deadline whose force was skipped ` +
+        `(${[...new Set(skipped.map((r) => r.interruptOutcome))].join(', ')}); they now wait for a clear ` +
+        `prompt like ordinary mail.`,
+    );
+  }
+
   logger.blank();
   logger.info('Show a message body: afx inbox show <id>   ·   Dismiss: afx inbox dismiss <id>');
 }
@@ -240,6 +314,30 @@ export async function inboxShow(id: string, options: InboxShowOptions = {}): Pro
     const now = Date.now();
     const label = row.notBefore > now ? `${new Date(row.notBefore).toISOString()} (in ${formatDuration(row.notBefore - now)})` : `${new Date(row.notBefore).toISOString()} (due)`;
     logger.kv('Scheduled', label);
+  }
+  // Issue #1481: the bounded-patience deadline and what the force did with it. Reported as
+  // separate facts — deadline, outcome, claim time, prior-partial — rather than one summary
+  // word, because collapsing them is how "we claimed this row" comes to read as "the agent got
+  // this message".
+  if (row.interruptAt != null) {
+    const now = Date.now();
+    const due =
+      row.interruptOutcome === 'armed' && row.interruptAt > now
+        ? `${new Date(row.interruptAt).toISOString()} (in ${formatDuration(row.interruptAt - now)})`
+        : new Date(row.interruptAt).toISOString();
+    logger.kv('Force after', due);
+    if (row.interruptOutcome) {
+      logger.kv('Force outcome', `${row.interruptOutcome} — ${describeInterruptOutcome(row.interruptOutcome)}`);
+    }
+    if (row.interruptClaimedAt != null) {
+      logger.kv('Force claimed', new Date(row.interruptClaimedAt).toISOString());
+    }
+  }
+  if (row.interruptPriorPartial) {
+    logger.warn(
+      'An earlier ordinary write for this message may already have put bytes on the terminal, so ' +
+        'some or all of its effects may exist twice.',
+    );
   }
   if (row.resolvedAt) {
     logger.kv('Resolved', new Date(row.resolvedAt).toISOString());

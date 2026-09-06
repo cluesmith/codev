@@ -280,6 +280,10 @@ async function sendToAll(
         interrupt: options.interrupt,
         // Spec 1307: each target's delivery is scheduled independently.
         deliverAfter: options.delay,
+        // Issue #1481: each recipient gets its OWN deadline, armed when its own row is
+        // persisted. A broadcast therefore arms one unattended interrupt per builder — said
+        // plainly in the flag's help, because that is a lot of forced turns from one command.
+        interruptAfter: options.interruptAfter,
       });
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
@@ -396,6 +400,15 @@ export async function send(options: SendOptions): Promise<void> {
         `Held for ${results.held.length} builder(s): ${detail}. ` +
           `Each delivers automatically when its prompt is clear.`,
       );
+      // Issue #1481: one command, one armed force PER RECIPIENT. Said here because a broadcast
+      // is exactly where that multiplies out of sight.
+      if (options.interruptAfter !== undefined) {
+        logger.warn(
+          `Each still-held message will be FORCED after ~${options.interruptAfter}s (Ctrl+C, then the ` +
+            `message, ungated) — that is up to ${results.held.length} interrupted turns from this one ` +
+            `command. Outcomes: 'afx inbox'.`,
+        );
+      }
     }
     if (results.scheduled.length > 0) {
       logger.success(
@@ -417,6 +430,7 @@ export async function send(options: SendOptions): Promise<void> {
         noEnter: options.noEnter,
         interrupt: options.interrupt,
         deliverAfter: options.delay,
+        interruptAfter: options.interruptAfter,
       });
 
       if (!result.ok) {
@@ -440,10 +454,24 @@ export async function send(options: SendOptions): Promise<void> {
             `${result.mailboxId ? ` — mailbox id ${result.mailboxId}` : ''}. ` +
             `It delivers automatically when the prompt is clear.`,
         );
-        // Issue #1482: a hold the gate could not classify will NOT clear on its own, so saying
-        // "it delivers automatically" and stopping there would be misleading for exactly the
-        // case that needs a human. Say so, once, only for that case.
-        if (isUnverifiableVerdict(result.reason, result.detail)) {
+        // Issue #1481: this response is the LAST thing the sender will hear about the
+        // escalation — it happens seconds or minutes from now, by which time this process is
+        // usually gone. So state the contract exactly: what will be forced, and what "forced"
+        // does not promise.
+        if (result.interruptAt !== undefined) {
+          const seconds = Math.max(0, Math.round((result.interruptAt - Date.now()) / 1000));
+          logger.warn(
+            `If it is still held in ~${seconds}s, it will be FORCED: Ctrl+C, then the message, ` +
+              `without the render gate — which can interrupt a running turn or a draft in the ` +
+              `composer. The deadline bounds when that starts, not when the agent reads it. ` +
+              `A Tower restart before then cancels the force (the message still delivers ` +
+              `normally). Outcome: 'afx inbox'.`,
+          );
+        } else if (isUnverifiableVerdict(result.reason, result.detail)) {
+          // Issue #1482: a hold the gate could not classify will NOT clear on its own, so saying
+          // "it delivers automatically" and stopping there would be misleading for exactly the
+          // case that needs a human. Say so, once, only for that case — and not at all when a
+          // force is armed, because then it is not waiting for the composer indefinitely.
           logger.warn(
             `The render gate could not verify that composer (${result.detail ?? result.reason}), ` +
               `so this hold will not clear by itself — inspect with 'afx inbox'.`,

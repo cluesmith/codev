@@ -44,6 +44,12 @@ import {
   type LivenessInfo,
   type HeldOwnerNoticeInfo,
 } from './mailbox-delivery.js';
+import {
+  MailboxInterruptCoordinator,
+  type ForceOutcomeInfo,
+  type ForcedDeliveryBroadcast,
+  type InterruptPorts,
+} from './mailbox-interrupt.js';
 import type { MailboxEscalationPayload } from '@cluesmith/codev-types';
 
 /**
@@ -534,6 +540,95 @@ function surfaceUnverifiedDelivery(info: UnverifiedDeliveryInfo): void {
   });
 }
 
+/**
+ * The message/activity feed frame for a FORCED delivery (Issue #1481).
+ *
+ * Deliberately the same `broadcastDelivered` → `broadcastMessage` path a gated delivery uses, so
+ * the feed has one delivery event per row however it was delivered — not a parallel force feed a
+ * client would have to learn about separately. The force audit rides as metadata and never
+ * softens the frame: a `failed` or `degraded-*` outcome is on the event itself, so nothing
+ * downstream can render it as a clean receipt.
+ */
+function broadcastForcedDelivery(frame: ForcedDeliveryBroadcast): void {
+  broadcastDelivered({
+    type: 'message',
+    from: {
+      project: frame.fromWorkspace ? path.basename(frame.fromWorkspace) : undefined,
+      agent: frame.fromAgent ?? undefined,
+    },
+    to: { project: path.basename(frame.workspacePath), agent: frame.toAgent },
+    content: frame.body,
+    metadata: { source: 'mailbox' },
+    timestamp: frame.timestamp,
+  });
+}
+
+/**
+ * The human-facing notice for a force that completed, failed, or was skipped (Issue #1481).
+ *
+ * Separate from the feed event on purpose. The `afx send` that armed this already returned
+ * `held` — often minutes ago, to a caller that has exited — so nothing about the escalation's
+ * real outcome can reach the operator through that response. Worded to state exactly what is
+ * known: a claimed-and-written force is not an acknowledged one, and a prior partial write means
+ * some effects may now exist twice.
+ */
+function surfaceForceOutcome(info: ForceOutcomeInfo): void {
+  const where = `${info.toAgent} @ ${path.basename(info.workspacePath)}`;
+  const skipped = info.outcome.startsWith('skipped-');
+  const duplicate = info.priorPartial
+    ? ' An earlier ordinary write for this message may already have put bytes on that terminal, so some effects may be duplicated.'
+    : '';
+  mailboxBroadcaster?.({
+    type: 'notification',
+    title: skipped
+      ? 'Mailbox: timed interrupt skipped'
+      : `Mailbox: timed interrupt ${info.outcome.includes('failed') ? 'failed' : 'forced'}`,
+    body: skipped
+      ? `${where} — the --interrupt-after deadline passed but the force was skipped (${info.outcome}). ` +
+        `The message is still held and delivers through the gate on the next clean prompt ` +
+        `(mailbox id ${info.mailboxId.slice(0, 8)}…).${duplicate}`
+      : `${where} — the --interrupt-after deadline passed, so the message was force-delivered: Ctrl+C, then ` +
+        `the body, without the render gate (outcome ${info.outcome}, mailbox id ${info.mailboxId.slice(0, 8)}…). ` +
+        `That records what was WRITTEN, not what was received.${duplicate}`,
+    workspace: info.workspacePath,
+  });
+}
+
+/**
+ * Build the {@link InterruptPorts} bound to the live Tower (Issue #1481).
+ *
+ * `getSessionForAgent` is the SAME resolver the gated path uses, so a force targets exactly the
+ * session an ordinary delivery would have targeted — the canonical agent's live writable PTY,
+ * not the terminal id captured when the message was sent.
+ */
+export function makeInterruptPorts(log: LogFn): InterruptPorts {
+  return {
+    getSessionForAgent: (ws, agent) => resolveLiveSessionForAgent(ws, agent),
+    broadcast: (frame) => broadcastForcedDelivery(frame),
+    onHeldStateChange: () => broadcastHeldStateChange(),
+    onForceOutcome: (info) => surfaceForceOutcome(info),
+    log: (message, level) => log(level ?? 'INFO', message),
+    now: () => Date.now(),
+    setTimer: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      // Never hold the process open for a pending escalation: Tower's own lifetime decides
+      // whether a force still applies, and a stopped Tower has already retired it.
+      if (typeof timer.unref === 'function') timer.unref();
+      return timer;
+    },
+    clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  };
+}
+
+// The single bounded-patience coordinator (Issue #1481). One per Tower lifetime; `start` retires
+// any escalation left armed by a previous one.
+const interruptCoordinator = new MailboxInterruptCoordinator();
+
+/** The live coordinator — `handleSend` arms rows through it. */
+export function getMailboxInterrupts(): MailboxInterruptCoordinator {
+  return interruptCoordinator;
+}
+
 // The single backstop drainer instance (replaces the retired SendBuffer). Created
 // lazily so it picks up the configured retention window (below) at first use.
 let drainer: MailboxDrainer | undefined;
@@ -617,6 +712,11 @@ function unsubscribeDeliverySignals(): void {
  * than waiting for the next backstop tick.
  */
 export function startMailboxDrainer(log: LogFn): void {
+  // Issue #1481: retire leftover `--interrupt-after` escalations BEFORE any writer starts. A
+  // force belongs to the Tower lifetime that accepted it, so a row armed by a previous one must
+  // be disarmed before the drainer can begin delivering — otherwise a restart's first tick races
+  // a policy this process never agreed to.
+  interruptCoordinator.start(makeInterruptPorts(log), getGlobalDb());
   ensureDrainer().start(makeDeliveryPorts(log), getGlobalDb());
   subscribeDeliverySignals();
   log('INFO', '[mailbox] backstop drainer started');
@@ -630,6 +730,9 @@ export function startMailboxDrainer(log: LogFn): void {
 export function stopMailboxDrainer(): void {
   unsubscribeDeliverySignals();
   drainer?.stop();
+  // Cancels pending deadlines AND invalidates any escalation already queued behind a terminal
+  // lock — clearing timers alone would let a fired-but-waiting force write after shutdown.
+  interruptCoordinator.stop();
 }
 
 /** The live drainer (liveness-telemetry streaks; Phase 7 surfaces them). */

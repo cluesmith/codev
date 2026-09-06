@@ -453,6 +453,10 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--raw', 'Skip structured message formatting')
     .option('--no-enter', 'Do not send Enter after message')
     .option('--delay <seconds>', 'Deliver after N seconds (persisted; survives a Tower restart, except a delayed --interrupt ^C nudge)')
+    .option(
+      '--interrupt-after <seconds>',
+      'Wait N seconds for a clear prompt, then FORCE (Ctrl+C + message, no gate). Time-sensitive mail; use --interrupt for urgent. Fractions allowed; force is lost on a Tower restart (the message is not)',
+    )
     .action(async (builder, message, options) => {
       const { send } = await import('./commands/send.js');
       try {
@@ -477,6 +481,22 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           }
           delay = parsed;
         }
+        // Issue #1481: validated here AND server-side, with the SAME validator, for the same
+        // reason `--delay` is — a bad value does not fail the send, it silently changes when
+        // (or whether) the force happens, and a NaN budget would force immediately.
+        let interruptAfter: number | undefined;
+        if (options.interruptAfter !== undefined) {
+          const { validateInterruptAfterSeconds } = await import('./servers/mailbox-interrupt.js');
+          const parsed = Number(options.interruptAfter);
+          const interruptAfterError = validateInterruptAfterSeconds(parsed);
+          if (interruptAfterError) {
+            // Echo what the USER typed, not the parse result — `--interrupt-after abc` becoming
+            // "got 'NaN'" names an intermediate value they never entered.
+            logger.error(`--interrupt-after '${options.interruptAfter}': ${interruptAfterError.replace(/, got .*$/, '')}`);
+            process.exit(1);
+          }
+          interruptAfter = parsed;
+        }
         await send({
           builder,
           message,
@@ -486,6 +506,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           raw: options.raw,
           noEnter: !options.enter,
           delay,
+          interruptAfter,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

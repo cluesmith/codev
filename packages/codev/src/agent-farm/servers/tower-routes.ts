@@ -61,8 +61,9 @@ import {
   MAX_MESSAGE_BYTES,
 } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
-import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
-import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
+import { writeEscapeToSession, writeInterruptToSession } from './message-write.js';
+import { makeDeliveryPorts, getMailboxDrainer, getMailboxInterrupts } from './mailbox-wiring.js';
+import { validateInterruptAfterSeconds } from './mailbox-interrupt.js';
 import { deliverAgentMailSerialized, type DeliveryOutcome, type DeliveryPorts } from './mailbox-delivery.js';
 import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import {
@@ -1660,6 +1661,12 @@ function holdAndRespond(
   reason: MailboxReason,
 ): void {
   const row = enqueueMailbox(getGlobalDb(), { ...input, reason });
+  // Issue #1481: a `--interrupt-after` row arms its deadline even when the target has no live
+  // PTY right now. The patience budget runs from the SEND, not from the moment a session
+  // appears, and the coordinator re-resolves the agent's live session at the deadline — so a
+  // recipient that comes back inside the window gets the force it would have got anyway, and one
+  // that does not is recorded as `skipped-offline` with the body still held.
+  getMailboxInterrupts().arm(row);
   ctx.log(
     'INFO',
     `Message held (${reason}) → ${input.toAgent} @ ${path.basename(input.workspacePath)} (mailbox ${row.id.slice(0, 8)}...)`,
@@ -1680,6 +1687,10 @@ function holdAndRespond(
     detail: null,
     mailboxId: row.id,
     bodyLength: Buffer.byteLength(input.body, 'utf8'),
+    // Additive (Issue #1481) and present only when a force is armed, so every other response is
+    // byte-identical to before. It reports WHEN patience runs out — never that delivery is
+    // guaranteed by then.
+    ...(row.interrupt_at === null ? {} : { interruptAt: row.interrupt_at }),
   });
 }
 
@@ -1973,6 +1984,48 @@ async function handleSend(
     deliverAfter = options.deliverAfter as number;
   }
 
+  // Issue #1481 `--interrupt-after`: bounded patience. The row delivers through the ordinary gate
+  // from this instant; only if it is STILL held after this many seconds does a forced interrupt
+  // delivery (Ctrl+C, settle, ungated body) run for it. Validated here as well as at the CLI
+  // boundary, because /api/send is a public local route and an unvalidated value becomes a timer
+  // that fires immediately (NaN) or never (Infinity) — the first would silently turn bounded
+  // patience into `--interrupt`, which is the one thing this flag must not be.
+  //
+  // Rejected in combination with the other three options rather than given a merged meaning:
+  //   - `interrupt` already forces NOW, so a patience budget after it is a contradiction;
+  //   - `deliverAfter` withholds eligibility, so "be patient with a message that is not yet
+  //     deliverable" has no single obvious reading (does the budget start at send or at due
+  //     time?) — and `deliverAfter: 0` is refused for the same reason, explicitly, rather than
+  //     being treated as "no delay";
+  //   - `escape` writes a bare ESC with no body to escalate at all.
+  // A quietly-dropped option would look like it worked, which for a force is the worst failure.
+  let interruptAfter: number | undefined;
+  if (options.interruptAfter !== undefined && options.interruptAfter !== null) {
+    const interruptAfterError = validateInterruptAfterSeconds(options.interruptAfter);
+    if (interruptAfterError) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: interruptAfterError }));
+      return;
+    }
+    const conflict = interrupt
+      ? 'interrupt-after cannot be combined with interrupt: --interrupt already forces the message onto the terminal immediately, so there is no patience left to bound. Use one or the other.'
+      : escape
+        ? 'interrupt-after cannot be combined with escape: an ESC keystroke carries no message body to escalate. Send the ESC now, or send a message with --interrupt-after.'
+        : options.deliverAfter !== undefined && options.deliverAfter !== null
+          ? 'interrupt-after cannot be combined with a delay: a delayed message is not deliverable yet, so a patience budget over it has no unambiguous start. Schedule the send, or bound the patience of an immediate one.'
+          : null;
+    if (conflict) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: conflict }));
+      return;
+    }
+    interruptAfter = options.interruptAfter as number;
+  }
+  // Anchored to the REQUEST, not to whenever the first delivery attempt finishes: the operator
+  // asked for N seconds of patience from the moment they sent, and a slow classify must not
+  // silently extend it.
+  const interruptAt = interruptAfter === undefined ? null : Date.now() + interruptAfter * 1000;
+
   const db = getGlobalDb();
   const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
 
@@ -2015,6 +2068,7 @@ async function handleSend(
             fromWorkspace: senderWorkspace,
             noEnter,
             terminalId: null,
+            interruptAt,
           },
           'no-live-pty',
         );
@@ -2060,6 +2114,7 @@ async function handleSend(
         fromWorkspace: senderWorkspace,
         noEnter,
         terminalId: result.terminalId,
+        interruptAt,
       },
       'no-live-pty',
     );
@@ -2091,6 +2146,7 @@ async function handleSend(
         fromWorkspace: senderWorkspace,
         noEnter,
         terminalId: result.terminalId,
+        interruptAt,
       },
       'no-live-pty',
     );
@@ -2192,10 +2248,10 @@ async function handleSend(
     let degraded = false;
     await submitToSession(
       result.terminalId,
-      () => {
-        session.write('\x03'); // Ctrl+C
-        return writeMessageToSession(session, formattedMessage, noEnter, 100);
-      },
+      // The SHARED force writer (Issue #1481): Ctrl+C, the fixed settle, then the body. The timed
+      // escalation of `--interrupt-after` calls the same function, which is what makes "do what
+      // --interrupt does, only later" true at the byte level rather than by resemblance.
+      () => writeInterruptToSession(session, formattedMessage, noEnter),
       undefined,
       {
         waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
@@ -2244,7 +2300,14 @@ async function handleSend(
     fromWorkspace: senderWorkspace,
     noEnter,
     terminalId: result.terminalId,
+    interruptAt,
   });
+  // Issue #1481: arm the deadline BEFORE awaiting the first gated attempt. The escalation timer
+  // targets an absolute instant derived from the send, so arming after the await would hand a
+  // slow classify a free extension of the operator's patience budget. Arming does not deliver or
+  // reserve anything — the gated attempt immediately below can still win, and a delivered row
+  // cancels the force at its claim edge.
+  getMailboxInterrupts().arm(row);
   // Deliver to the session THIS request already resolved rather than re-resolving
   // by agent: the base resolver would repeat the routing-map lookup (redundant) and
   // could target a different terminal if the map changed mid-request. The backstop
@@ -2315,6 +2378,10 @@ async function handleSend(
     detail,
     mailboxId: row.id,
     bodyLength,
+    // Additive (Issue #1481): a held row with a force armed says WHEN patience runs out. The
+    // response stays `held` — it cannot retrospectively claim the later escalation succeeded,
+    // and by the time it does or does not, this request is long gone.
+    ...(interruptAt === null ? {} : { interruptAt }),
   });
 }
 
@@ -2382,6 +2449,13 @@ export function handleInboxList(res: http.ServerResponse, url: URL, workspaceOve
     // Spec 1313 round 3: due time of a pre-due delayed (`--delay`) row; null = deliver-ASAP.
     // The CLI renders "in Ns" for a row whose notBefore is still in the future.
     notBefore: r.not_before,
+    // Issue #1481: a held row with a `--interrupt-after` deadline is neither "stuck" nor
+    // "scheduled" — it is deliverable NOW and will additionally be forced if it is still here at
+    // `interruptAt`. Listed with the others (it genuinely is held mail) and rendered with its
+    // countdown, so an operator can tell which held rows will resolve themselves.
+    interruptAt: r.interrupt_at,
+    interruptOutcome: r.interrupt_outcome,
+    interruptPriorPartial: r.interrupt_prior_partial === 1,
   }));
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(projected));
@@ -2458,6 +2532,13 @@ function handleInboxShow(
     body: row.body,
     createdAt: row.created_at,
     notBefore: row.not_before,
+    // Issue #1481: the bounded-patience deadline and what the force actually did. Shown together
+    // and never collapsed — `claimed` says the row was claimed before the write, which is not
+    // the same claim as `written-unverified`, and neither is acknowledgment.
+    interruptAt: row.interrupt_at,
+    interruptOutcome: row.interrupt_outcome,
+    interruptClaimedAt: row.interrupt_claimed_at,
+    interruptPriorPartial: row.interrupt_prior_partial === 1,
     resolvedAt: row.resolved_at,
   });
 }

@@ -46,11 +46,14 @@ import {
   markEscalated,
   markEscalatedDelivered,
   findStarvingAgents,
+  escalationStart,
+  markInterruptPriorPartial,
 } from '../db/mailbox.js';
 import type { DbMailbox, MailboxGateDetail, MailboxReason } from '../db/types.js';
 import type { GateProfile, GateVerdict } from './render-gate.js';
 import type { PacedSubmitResult } from './message-write.js';
 import { KeyedSerializer } from './write-queue.js';
+import { tryAcquireRowWrite, type RowWriteHandle, type RowWriteOutcome } from './row-write-ownership.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /**
@@ -698,12 +701,25 @@ export async function deliverAgentMail(
   // human's keystrokes over the WebSocket) can sit un-echoed on the line and read as
   // unchanged. Serialization — not this precheck — is what makes the lock-taking writers
   // safe; the echo-lag residual for the rest is #1473's territory.
+  //
+  // The LAST thing it does — after every other check has passed and immediately before the
+  // first possible byte — is claim per-ROW write ownership (Issue #1481). The per-terminal lock
+  // does not cover the one writer that can bypass it: a timed force whose wait ceiling expired
+  // writes unserialized, and for the SAME row that is not an interleaving, it is the body twice.
+  // Claiming last is deliberate: an attempt that was going to abort anyway must never block the
+  // other writer. Released in the `finally` below, once this attempt's outcome is committed.
+  let rowWrite: RowWriteHandle | null = null;
   const precheck = (): WriteAbort | null => {
     if (!session.writable) return { kind: 'hold', reason: 'no-live-pty' };
     if (ringToken(session, profile) !== tokenBefore) return { kind: 'hold', reason: 'busy' };
     if (!settled(ports, session)) return { kind: 'hold', reason: 'busy' };
     const stillHeld = getById(db, row.id);
     if (!stillHeld || stillHeld.status !== 'held') return { kind: 'row-resolved' };
+    rowWrite = tryAcquireRowWrite(row.id);
+    // A force is mid-write on this very row. Write nothing and re-hold: whatever it is doing,
+    // it either delivers the row (this pass would have been a duplicate) or leaves it held for
+    // the next clean pass.
+    if (!rowWrite) return { kind: 'hold', reason: 'busy' };
     return null;
   };
 
@@ -714,11 +730,50 @@ export async function deliverAgentMail(
   const needle = echoNeedle(current.formatted_message);
   const echo = needle ? await ports.watchEcho(session, needle) : null;
 
+  /**
+   * Release this attempt's per-row ownership with what actually happened (Issue #1481). Called
+   * on EVERY exit path below, and before echo verification on the success path — verification
+   * reads the screen and writes nothing, so holding the row across it would stall a waiting
+   * force for over a second for no safety gain.
+   */
+  const finishRowWrite = (outcome: RowWriteOutcome): void => {
+    rowWrite?.settle(outcome);
+    rowWrite = null;
+  };
+
+  /**
+   * Record that this attempt may have put bytes on the terminal (Issue #1481).
+   *
+   * Only meaningful for a row that armed a force: it is what lets a later forced body disclose
+   * that some or all of its effects may already have landed once. Deliberately NOT a disarm —
+   * the ordinary path is still allowed to retry exactly this row (`dropped`/`preempted` re-hold
+   * below), so cancelling the operator's escalation on this same evidence would hold the force
+   * to a stricter standard than the delivery it is escalating past. Warned once, when the flag
+   * first flips.
+   */
+  const recordPossiblePartial = (): void => {
+    if (current.interrupt_at === null) return;
+    if (!markInterruptPriorPartial(db, row.id, ports.now())) return;
+    ports.log(
+      `[mailbox] write of ${row.id.slice(0, 8)}… → ${toAgent} @ ${path.basename(workspacePath)} did not complete ` +
+        `after entering its write edge — some bytes may already be on the terminal. This row has a ` +
+        `--interrupt-after deadline, so a later forced delivery may DUPLICATE those effects.`,
+      'WARN',
+    );
+  };
+
   // Default to a hold so an unobserved result is the SAFE failure mode (hold, never a false
   // delivery); the try either assigns the real result or throws past this point.
   let result: WriteResult = { status: 'aborted', abort: { kind: 'hold', reason: 'busy' } };
   try {
     result = await ports.writeMessage(session, current.formatted_message, current.no_enter === 1, precheck);
+  } catch (err) {
+    // A throw from the binding is the `dropped` case with less information: its port contract
+    // permits it to fail after some bytes are out. Treat it as uncertain rather than clean, then
+    // rethrow — the callers' existing "a gate/write error leaves the row held" handling stands.
+    recordPossiblePartial();
+    finishRowWrite('uncertain');
+    throw err;
   } finally {
     // Invalidate the memo on EVERY write outcome — a clean `true`, a dropped-write `false`, OR a
     // rejection — and BEFORE the markDelivered/held decisions below (CMAP round 3 moved it above the
@@ -762,16 +817,29 @@ export async function deliverAgentMail(
   //     that did not happen — the same call the `dropped` branch already makes, and the failure
   //     this whole issue exists to remove. It is the one hole the ceiling opens, and it is
   //     detected by counting lock bypasses, not by re-reading the screen.
-  if (result.status === 'dropped') return hold('no-live-pty');
+  if (result.status === 'dropped') {
+    recordPossiblePartial();
+    finishRowWrite('uncertain');
+    return hold('no-live-pty');
+  }
   if (result.status === 'preempted') {
+    recordPossiblePartial();
+    finishRowWrite('uncertain');
     ports.log(
       `[mailbox] write to ${toAgent} @ ${path.basename(workspacePath)} was raced by an unserialized ` +
         `operator write — holding ${row.id.slice(0, 8)}… for redelivery rather than reporting it delivered`,
     );
     return hold('busy');
   }
-  if (result.status === 'contended') return hold('busy');
+  // `contended` and `aborted` wrote NOTHING, and neither ever acquired row ownership (the
+  // precheck claims it last, and a contended callback never runs at all) — the settle is a
+  // null-safe no-op that keeps the release rule uniform rather than conditional.
+  if (result.status === 'contended') {
+    finishRowWrite('no-bytes');
+    return hold('busy');
+  }
   if (result.status === 'aborted') {
+    finishRowWrite('no-bytes');
     if (result.abort.kind === 'row-resolved') {
       ports.onHeldStateChange(); // the held set changed under us → refresh the indicator
       return { delivered: [], reason: null };
@@ -805,9 +873,16 @@ export async function deliverAgentMail(
   // dismissed/superseded during the paced write — accept that terminal state and do not
   // broadcast a delivery for it.
   if (!markDelivered(db, row.id, ports.now())) {
+    // Someone else resolved it while we wrote. Terminal either way — a waiting force must not
+    // write a second body for a row that is no longer held.
+    finishRowWrite('terminal');
     ports.onHeldStateChange();
     return { delivered: [], reason: null };
   }
+  // The commit is what makes this write un-repeatable, so ownership can go now: everything
+  // below reads the screen and reports, and a force that wakes up here will find the row
+  // terminal and cancel itself.
+  finishRowWrite('terminal');
   ports.broadcast(broadcastForRow(current, ports.now()));
   ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
   ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
@@ -1080,10 +1155,11 @@ export class MailboxDrainer {
     for (const row of findEscalatable(db, this.escalationMs, now)) {
       if (!markEscalated(db, row.id, now)) continue;
       escalatedAny = true;
-      // Age from the escalation START (max(created_at, not_before)) so a delayed row's clock
-      // runs from its DUE time, not its enqueue time (Spec 1313 round 3). For a normal row
-      // not_before is null → this is created_at, unchanged from before.
-      const ageMs = now - Math.max(row.created_at, row.not_before ?? row.created_at);
+      // Age from the escalation START so a delayed row's clock runs from its DUE time, not its
+      // enqueue time (Spec 1313 round 3), and an ARMED bounded-patience row's from its patience
+      // deadline (Issue #1481). Computed by the same helper the SQL mirrors, so the age reported
+      // here can never disagree with the predicate that selected the row.
+      const ageMs = now - escalationStart(row);
       ports.onEscalation({
         workspacePath: row.workspace_path,
         toAgent: row.to_agent,
