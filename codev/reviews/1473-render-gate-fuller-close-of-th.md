@@ -185,12 +185,35 @@ reported the governance updates as landing in `codev-skeleton/` too; they must n
 are `<placeholder>` starter templates for adopters and there is no skeleton `arch.md` /
 `lessons-learned.md` at all).
 
-**Tooling limit worth knowing for the next large PIR:** porch's `consult -m claude` failed three
-times on this diff with `Prompt is too long` — a size limit at roughly this scale (41 files,
-+5834), not a transient error. It is not a gap in coverage here, because the architect's
-integration lane obtained a full claude review of the same branch and its four findings are the
-four blocking fixes below; but a PIR relying on the porch lane alone would have silently lost
-a third of its consultation at this size. Budget for splitting the review, or expect two lanes.
+#### The consultation lane degrades silently on a large PR
+
+porch's `consult -m claude` failed three times on this diff with `Prompt is too long` — a hard
+model input limit at roughly this scale (41 files, +5834), not a transient error. Coverage did
+not actually suffer: the architect's integration lane obtained a full claude review of the same
+branch, and its four findings are the four blocking fixes below. What suffered was the
+*second, independent* opinion.
+
+The protocol gap is worth more than the incident. **porch models consultation completeness as
+file presence per model** (`commands/porch/next.ts:598` — `reviews.length <
+effectiveModels.length`). It has no representation of a model that *could not* run, so it cannot
+distinguish "impossible" from "not yet attempted" from "deliberately skipped". The phase blocks
+on a missing file and offers exactly two exits: make a file exist, or change the consultation
+lane config repo-wide. The honest state — "this model cannot review a diff this size" — has
+nowhere to live in porch's state at all.
+
+That shape has a failure mode beyond inconvenience: the pressure it puts on an agent is to
+manufacture the missing file, which is precisely the action that would make a consultation look
+like it happened when it did not. Here the builder escalated instead and a human authorized a
+**failure record** at that path
+(`codev/projects/1473-*/1473-review-iter1-claude.txt`) — a file carrying no verdict line, so
+porch's own `grep … || echo UNKNOWN` extraction resolves it as `UNKNOWN`, which is the case the
+protocol already anticipates for an unavailable model. Anyone opening that file finds an
+account of three failed attempts and a pointer to where claude's real opinion lives, not a
+review.
+
+Practical consequence for the next large PIR: expect the porch lane to lose a model somewhere
+around this diff size, and plan for a second lane or a split review rather than discovering it
+at the gate.
 
 **Fixed — the new hold class was "unrecognized" in `afx inbox show`.** `describeDetail()`
 (`commands/inbox.ts`) had no `recent-input` case, so the one verdict this PR exists to make

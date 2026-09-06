@@ -648,3 +648,39 @@ constant I replaced. Grepped the repo for the old name: the only remaining hits 
 verdict file (a historical record) and the review quoting it while describing the finding.
 
 Next: finish the review phase and park at the `pr` gate. That gate is the human's.
+
+## The consultation failure record
+
+Human authorized option A through the architect. The file at
+`codev/projects/1473-*/1473-review-iter1-claude.txt` is a FAILURE RECORD, written so nobody can
+mistake it for a review: no verdict line anywhere (porch's own `grep … || echo UNKNOWN` therefore
+resolves it as UNKNOWN, the case the protocol already anticipates), the three attempts and the
+verbatim error, the diff size, where claude's real opinion actually lives (the request-changes in
+the architect's CMAP on PR #1634, whose four findings are the four fixed in d807c1802), and who
+authorized the file and for what.
+
+One thing worth remembering from writing it: my first draft line-wrapped so that a line BEGAN
+with `REQUEST_CHANGES` — describing the *other* lane's verdict. porch's extraction is a
+line-anchored grep, so that would have been read as this file's own verdict, and the file whose
+entire purpose is "this is not a review" would have reported a verdict. Caught it by running the
+protocol's own grep against the file instead of eyeballing it. When a document's correctness is
+defined by a regex someone else runs, run that regex.
+
+### The gap, which is worth more than the incident
+
+porch models consultation completeness as FILE PRESENCE per model (`next.ts:598`). It cannot
+represent a model that could not run, so "impossible", "not yet attempted" and "skipped" are the
+same state to it. The phase then offers two exits: make a file exist, or change the lane config
+repo-wide.
+
+The part I want on record: that shape *pressures an agent to manufacture the missing file*, which
+is exactly the act that makes a consultation look like it happened when it did not. The gate
+against that was not in the tooling — it was declining to write the file on my own authority. A
+protocol that depends on an agent choosing to escalate at that moment has the safeguard in the
+wrong place. Written up in the review; the architect is carrying it as a follow-up with the
+xterm-pin and afx-attach items. Deliberately not filed from here.
+
+Note on where that file lives: `.gitignore:65` (`codev/projects/*/*.txt`) excludes every
+consultation output, so the failure record is untracked exactly like the gemini and codex
+verdicts — only `status.yaml` is committed from that directory. I did not force-add it. The
+durable copy of what it says is the review doc, which is committed and ships with the PR.
