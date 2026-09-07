@@ -121,3 +121,15 @@ latter, from a live shellper PTY.
 
 Only harness-owned child processes were stopped; the live Tower on 4100 was never touched, and no
 other builder's worktree was read or modified.
+
+## Resume — parked at dev-approval (2026-09-07)
+
+Resumed session; no context loss and no work outstanding. Verified rather than assumed:
+`porch next 1481` → `gate_pending` (phase `implement`, iteration 1, gate `dev-approval`);
+HEAD `286b8c404` equals `origin/builder/pir-1481` after a fetch, so every implementation,
+test, docs and evidence commit is pushed; working tree clean apart from untracked spawn
+scaffolding. Re-read the issue — the newest comment is still the architect's plan-approval
+record, so no reviewer edits, revision instructions or new dispositions have arrived.
+Re-notified the architect that the gate is ready (held for a busy prompt, delivers on clear).
+Standing orders unchanged: no `porch approve` without an explicit relayed human approval,
+no merge, no issue closure, no cleanup. Waiting.
