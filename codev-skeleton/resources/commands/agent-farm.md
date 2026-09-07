@@ -448,7 +448,9 @@ Sends text to a builder's terminal. Useful for:
   - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
   - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
 
-A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
+The system **never force-injects a held message on its own**: no timeout, valve, or fallback that Tower decides for you writes onto a busy line, so a body cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`.
+
+Exactly two flags bypass the gate, and both are per-message and chosen by the **sender**: `--interrupt` interrupts the agent and writes immediately without holding (unchanged semantics), and `--interrupt-after <seconds>` holds normally and forces the same way **only if the message is still held** when the deadline passes (Issue #1481 — see the *Bounded patience* section above). Neither is a system-applied force; what you opt into is exactly one forced write for exactly one message.
 
 **Examples:**
 

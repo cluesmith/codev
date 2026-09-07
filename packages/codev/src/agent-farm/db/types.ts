@@ -131,10 +131,12 @@ export type MailboxGateDetail = 'user-text' | 'no-region-end' | 'no-composer-mar
  *   - `written-unverified` / `degraded-written-unverified` — the writer completed and every byte
  *     was accepted. Still NOT acknowledgment: nothing here proves the agent read it.
  *   - `failed` / `degraded-failed` — a write was observed to fail (a dropped PTY write).
- *   - `skipped-offline` / `skipped-session-replaced` / `skipped-restart` — no bytes were written
- *     and nothing was claimed; the body stays held for ordinary gated delivery. `skipped-restart`
- *     is the lifetime boundary: force authority does not survive a Tower restart, even when the
- *     deadline is still in the future.
+ *   - `skipped-offline` / `skipped-session-replaced` / `skipped-contended` / `skipped-restart` —
+ *     no bytes were written and nothing was claimed; the body stays held for ordinary gated
+ *     delivery. `skipped-contended` is the give-up after the dispatch ceiling: every attempt
+ *     found another writer holding the row, so the force retires rather than leaving a durable
+ *     `armed` that nothing is armed for. `skipped-restart` is the lifetime boundary: force
+ *     authority does not survive a Tower restart, even when the deadline is still in the future.
  *
  * Row `status` remains authoritative for cancellation: a row delivered/dismissed/superseded by
  * another path keeps whatever outcome it had (usually `armed`) and is simply never forced.
@@ -149,6 +151,7 @@ export type MailboxInterruptOutcome =
   | 'degraded-failed'
   | 'skipped-offline'
   | 'skipped-session-replaced'
+  | 'skipped-contended'
   | 'skipped-restart';
 
 /**

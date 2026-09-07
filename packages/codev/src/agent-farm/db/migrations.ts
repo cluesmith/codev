@@ -578,6 +578,7 @@ export function runGlobalMigrations(
   //   - `interrupt_claimed_at` / `interrupt_outcome` are the force's AUDIT trail. `claimed`
   //     means the row was transitioned held→delivered immediately before the first byte — it is
   //     never evidence of receipt, and after a crash it means the write outcome is UNKNOWN.
+  //     A `skipped-*` outcome is terminal and means nothing was claimed and nothing written.
   //   - `interrupt_prior_partial` records that an ORDINARY write for this row may already have
   //     emitted bytes (dropped/preempted/threw). It is disclosure metadata for a later forced
   //     body, never a reason to disarm the force the operator asked for.

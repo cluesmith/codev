@@ -411,7 +411,7 @@ export function setForcedInterruptOutcome(
 export function skipForcedInterrupt(
   db: Database.Database,
   id: string,
-  outcome: 'skipped-offline' | 'skipped-session-replaced' | 'skipped-restart',
+  outcome: 'skipped-offline' | 'skipped-session-replaced' | 'skipped-contended' | 'skipped-restart',
   now: number = Date.now()
 ): boolean {
   const info = db

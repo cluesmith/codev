@@ -57,6 +57,9 @@ const BODY = 'wrap up soon';
 const MULTILINE = 'L1\nL2\nL3\nL4';
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+// One more release/re-claim cycle than the coordinator's MAX_FORCE_DISPATCHES, so the last
+// attempt is the one that exceeds the ceiling.
+const MAX_DISPATCH_CYCLES = 5;
 
 /** Poll until `check` holds, so a test never depends on how many microtasks a path takes. */
 async function waitFor(check: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
@@ -822,6 +825,54 @@ describe('Issue #1481 — the force and the ordinary delivery cannot write the s
     await waitFor(() => c.submitted.length === 1, 'force finished');
     await sleep(20);
     expect(ownedRowWriteCount()).toBe(0); // released once the paced write completed
+  });
+
+  it('retires a permanently contended force as skipped-contended, never leaving a false armed row', async () => {
+    // The dispatch ceiling exists so one row cannot loop forever being handed from one
+    // non-writing owner to the next. What it must NOT do is drop the in-memory entry and leave
+    // `interrupt_outcome = 'armed'` in the database: nothing would be armed, but `afx inbox`
+    // would keep promising an escalation for the rest of this Tower's lifetime.
+    const c = makeComposer();
+    const { ports } = makePorts(clock, () => c.session);
+    coordinator.start(ports, db);
+    const row = enqueue();
+    coordinator.arm(row);
+
+    // Someone else owns the row's write from before the deadline onward. Each release is
+    // immediately followed by a fresh claim, so every one of the force's attempts finds the row
+    // taken — the pathological hand-off the ceiling is for.
+    let owner = tryAcquireRowWrite(row.id)!;
+    expect(owner).not.toBeNull();
+
+    clock.advance(1000);
+    await sleep(40);
+
+    for (let i = 0; i < MAX_DISPATCH_CYCLES; i += 1) {
+      owner.settle('no-bytes');
+      // Synchronous, before the re-attempt's awaited lock acquisition can reach its own
+      // `tryAcquireRowWrite` — this is what keeps every attempt contended.
+      const next = tryAcquireRowWrite(row.id);
+      if (next === null) break; // the force gave up and took the row; assertions below decide
+      owner = next;
+      await sleep(20);
+    }
+
+    await waitFor(
+      () => mailbox.getById(db, row.id)!.interrupt_outcome === 'skipped-contended',
+      'contended give-up recorded',
+    );
+
+    const final = mailbox.getById(db, row.id)!;
+    expect(final.status).toBe('held');            // the body is ordinary held mail again
+    expect(final.interrupt_claimed_at).toBeNull(); // nothing was ever claimed
+    expect(c.interrupts).toEqual([]);              // and nothing was written
+    expect(c.submitted).toEqual([]);
+
+    owner.settle('no-bytes');
+    await sleep(40);
+    // Retired for good: a later release does not resurrect the escalation.
+    expect(mailbox.getById(db, row.id)!.interrupt_outcome).toBe('skipped-contended');
+    expect(c.interrupts).toEqual([]);
   });
 
   it('a busy gate is no obstacle — that is the entire point of the flag', async () => {

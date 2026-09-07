@@ -156,10 +156,11 @@ export interface InterruptPorts {
  *
  * Only a dispatch that writes NOTHING can recur — a claim ends the lifecycle, so this can never
  * multiply forced bodies. It bounds the pathological case where the row's ownership is handed
- * straight from one non-writing owner to the next. On exhaustion the force is abandoned in
- * memory and the row is left `armed` in the database: truthful (we never claimed it), and
- * harmless, because a past-deadline armed row no longer suppresses the starvation alarm and the
- * next restart retires it to `skipped-restart`.
+ * straight from one non-writing owner to the next. On exhaustion the force is retired with the
+ * terminal outcome `skipped-contended`: nothing was claimed and nothing was written, so the body
+ * stays ordinary held mail and delivers through the gate. Recording it (rather than dropping the
+ * in-memory entry and leaving `armed`) is what keeps the audit honest — an `armed` row with no
+ * live entry would advertise an escalation that cannot happen again this Tower lifetime.
  */
 const MAX_FORCE_DISPATCHES = 4;
 
@@ -301,22 +302,23 @@ export class MailboxInterruptCoordinator {
     if (this.armed.get(entry.rowId) !== entry) return;
 
     entry.dispatches += 1;
-    if (entry.dispatches > MAX_FORCE_DISPATCHES) {
-      ports.log(
-        `[mailbox] --interrupt-after for ${entry.rowId.slice(0, 8)}… → ${entry.toAgent} gave up after ` +
-          `${MAX_FORCE_DISPATCHES} attempts that could not take the row (another writer held it each time); ` +
-          `the body remains held and delivers through the gate`,
-        'WARN',
-      );
-      this.disarm(entry);
-      return;
-    }
 
     const row = getById(db, entry.rowId);
     if (!row || row.status !== 'held' || row.interrupt_outcome !== 'armed') {
       // Delivered, dismissed, superseded, or already resolved by another force: row status is
       // authoritative for cancellation, and the row keeps whatever outcome it carried.
       this.disarm(entry);
+      return;
+    }
+
+    // The ceiling is checked with the row in hand, and AFTER the cancellation check, so giving
+    // up writes a terminal outcome to the database instead of dropping the in-memory entry and
+    // leaving `armed` behind. An `armed` row nothing is armed for is a false durable state: the
+    // inbox would keep promising an escalation that can no longer happen for the rest of this
+    // Tower's lifetime. `skipped-contended` says exactly what occurred — the force never took
+    // the row, wrote nothing, and the body stays ordinary held mail.
+    if (entry.dispatches > MAX_FORCE_DISPATCHES) {
+      this.recordSkip(entry, row, 'skipped-contended', null);
       return;
     }
 
@@ -549,7 +551,7 @@ export class MailboxInterruptCoordinator {
   private recordSkip(
     entry: ArmedEntry,
     row: DbMailbox,
-    outcome: 'skipped-offline' | 'skipped-session-replaced',
+    outcome: 'skipped-offline' | 'skipped-session-replaced' | 'skipped-contended',
     terminalId: string | null,
   ): void {
     const ports = this.ports;

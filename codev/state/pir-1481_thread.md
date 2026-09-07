@@ -133,3 +133,63 @@ record, so no reviewer edits, revision instructions or new dispositions have arr
 Re-notified the architect that the gate is ready (held for a busy prompt, delivers on clear).
 Standing orders unchanged: no `porch approve` without an explicit relayed human approval,
 no merge, no issue closure, no cleanup. Waiting.
+
+## Review phase + consultation fixes (2026-09-07)
+
+Approved `dev-approval` on the architect's relay, wrote the retrospective, routed two cold
+lessons, opened **PR #1640**, recorded it with porch, and ran the consultation porch scheduled.
+
+**Porch scheduled a 2-way pass, not 3** — the verify task listed only codex and claude; gemini
+was never requested. **Claude produced no verdict**: both the first run and a retry aborted with
+`Prompt is too long` before any review text, and no output file was written. So this diff carries
+**one** model's opinion. Flagged to the architect at the gate rather than presented as "2 of 3
+approve".
+
+**Codex: REQUEST_CHANGES (HIGH).** Six findings; I checked every one against the actual files
+before acting, per the standing lesson about reviewer claims. Five were real:
+
+1. **Real bug.** `broadcastForcedDelivery` dropped `outcome`/`priorPartial` converting the frame
+   for the message bus — a `failed` force reached the feed as an ordinary delivery. Two code
+   comments asserted the opposite, which is exactly how it survived. Fixed by threading optional
+   metadata through the shared `broadcastDelivered` and widening `MessageFrame.metadata`.
+2. **Real bug.** `surfaceForceOutcome` told the human a `failed` force "was force-delivered".
+   Failed now gets its own wording (write REJECTED, row already claimed, will not be retried).
+3. **Real bug, and I had flagged it as a mere judgement call in the review.** Exhausting
+   `MAX_FORCE_DISPATCHES` left `interrupt_outcome = 'armed'` durably with nothing armed — the
+   inbox would promise an escalation for the rest of the Tower lifetime. New terminal outcome
+   `skipped-contended`; ceiling check moved after the row/cancellation read so the row is in hand.
+   No migration needed (no CHECK on the column, deliberately).
+4. **Real gap.** The coordinator suite asserted the frame handed *to* the port and never ran the
+   conversion, which is why (1) was invisible. New `pir-1481-force-wiring.test.ts` drives the real
+   `makeInterruptPorts` over the whole outcome matrix — **9 of its 16 fail without (1) and (2)**.
+   The contention give-up has its own test, which fails against the old shape.
+5. **Real doc defects.** `agent-farm.md` still said held mail is "never force-injected" (fixed in
+   both trees); my own review claimed non-integer values are rejected when **fractions are valid
+   on purpose**; and my "How to Test Locally" said to restart Tower without saying *which* Tower —
+   following it against 4100 would kill every running builder. All corrected.
+6. Not a finding: their sandbox was read-only and could not run tests.
+
+**Real-agent evidence (Codex's fifth point, and a genuine plan requirement I had missed).** The
+plan asks for clean/busy behaviour against an actual supported agent CLI; my dev-approval evidence
+was all fixture composers. Added `capture-real-agent.mjs` — child Tower on **14622**, real `claude
+--permission-mode plan` in a shellper PTY, throwaway workspace. Results: an ordinary probe against
+the real composer returns `delivered=true` (classifier validated on a screen nobody here painted);
+a **real half-typed draft** holds `busy`/`user-text` and then forces at the deadline with
+`interruptClaimedAt == interruptAt`, outcome `written-unverified`; **mid-turn**, the agent reached
+a clean prompt inside the window and the ordinary gated delivery won — row `delivered`,
+`interruptClaimedAt: null`, nothing forced.
+
+Two failed attempts before that one, both recorded rather than hidden: `claude` opens on a
+trust-folder prompt, and the ESC I used to "clear the composer" **exits the CLI**, so every send
+honestly reported `no-live-pty`. Also learned that the trust prompt cannot be detected by its
+phrase — the TUI interleaves cursor-position escapes between words.
+
+**One honest limitation now written into the review:** a real TUI does not echo injected bytes into
+its output ring and it redraws, so occurrence counts there are not write counts. The mailbox row is
+authoritative for a real agent; the byte-exact `^C count: 1 / body count: 1` proof stays with the
+`cat` fixture. Both instruments are kept for that reason.
+
+**Suite after the fixes:** `packages/codev` **288 files / 5814 tests pass, 0 fail** (was 287/5797).
+
+Standing orders unchanged: not maintainers — no merge, no issue closure, no cleanup. Waiting at
+the `pr` gate.

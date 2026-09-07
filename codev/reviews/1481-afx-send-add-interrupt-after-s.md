@@ -23,16 +23,19 @@ behind a long paced delivery must not inherit an unbounded wait.
 - `.codex/skills/afx/SKILL.md` (+23 / -0)
 - `codev-skeleton/.claude/skills/afx/SKILL.md` (+23 / -0)
 - `codev-skeleton/.codex/skills/afx/SKILL.md` (+23 / -0)
-- `codev-skeleton/resources/commands/agent-farm.md` (+53 / -0)
+- `codev-skeleton/resources/commands/agent-farm.md` (+56 / -1)
 - `codev/plans/1481-afx-send-add-interrupt-after-s.md` (+139 / -0)
-- `codev/projects/1481-afx-send-add-interrupt-after-s/status.yaml` (+22 / -0)
+- `codev/projects/1481-afx-send-add-interrupt-after-s/status.yaml` (+27 / -0)
 - `codev/resources/arch-critical.md` (+1 / -1)
 - `codev/resources/arch.md` (+11 / -3)
-- `codev/resources/commands/agent-farm.md` (+53 / -0)
+- `codev/resources/commands/agent-farm.md` (+56 / -1)
+- `codev/resources/lessons-learned.md` (+14 / -0)
+- `codev/reviews/1481-afx-send-add-interrupt-after-s.md` (+369 / -0)
 - `codev/specs/1481-afx-send-add-interrupt-after-s.md` (+13 / -0)
 - `codev/state/pir-1481_thread.md` (+135 / -0)
+- `packages/codev/src/agent-farm/__tests__/pir-1481-force-wiring.test.ts` (+176 / -0)
 - `packages/codev/src/agent-farm/__tests__/pir-1481-interrupt-after.e2e.test.ts` (+417 / -0)
-- `packages/codev/src/agent-farm/__tests__/pir-1481-interrupt-after.test.ts` (+845 / -0)
+- `packages/codev/src/agent-farm/__tests__/pir-1481-interrupt-after.test.ts` (+896 / -0)
 - `packages/codev/src/agent-farm/__tests__/pir-1481-migration.test.ts` (+211 / -0)
 - `packages/codev/src/agent-farm/__tests__/pir-1481-owner-wiring.test.ts` (+279 / -0)
 - `packages/codev/src/agent-farm/__tests__/send-architect-identity.test.ts` (+5 / -4)
@@ -41,18 +44,19 @@ behind a long paced delivery must not inherit an unbounded wait.
 - `packages/codev/src/agent-farm/__tests__/spec-1365-serializer-convergence.test.ts` (+227 / -3)
 - `packages/codev/src/agent-farm/__tests__/tower-routes.test.ts` (+192 / -0)
 - `packages/codev/src/agent-farm/cli.ts` (+21 / -0)
-- `packages/codev/src/agent-farm/commands/inbox.ts` (+98 / -0)
+- `packages/codev/src/agent-farm/commands/inbox.ts` (+100 / -0)
 - `packages/codev/src/agent-farm/commands/send.ts` (+32 / -4)
 - `packages/codev/src/agent-farm/db/mailbox.ts` (+204 / -5)
-- `packages/codev/src/agent-farm/db/migrations.ts` (+40 / -1)
+- `packages/codev/src/agent-farm/db/migrations.ts` (+41 / -1)
 - `packages/codev/src/agent-farm/db/schema.ts` (+4 / -0)
-- `packages/codev/src/agent-farm/db/types.ts` (+50 / -0)
+- `packages/codev/src/agent-farm/db/types.ts` (+53 / -0)
 - `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` (+82 / -6)
-- `packages/codev/src/agent-farm/servers/mailbox-interrupt.ts` (+586 / -0)
-- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` (+103 / -0)
+- `packages/codev/src/agent-farm/servers/mailbox-interrupt.ts` (+588 / -0)
+- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` (+138 / -3)
 - `packages/codev/src/agent-farm/servers/message-write.ts` (+40 / -0)
 - `packages/codev/src/agent-farm/servers/row-write-ownership.ts` (+131 / -0)
 - `packages/codev/src/agent-farm/servers/session-submit.ts` (+172 / -75)
+- `packages/codev/src/agent-farm/servers/tower-messages.ts` (+16 / -1)
 - `packages/codev/src/agent-farm/servers/tower-routes.ts` (+88 / -6)
 - `packages/codev/src/agent-farm/types.ts` (+20 / -0)
 - `packages/sdk/src/__tests__/tower-client-send.test.ts` (+77 / -0)
@@ -79,6 +83,11 @@ behind a long paced delivery must not inherit an unbounded wait.
 - `b0e6d86c4` [PIR #1481] Record the resume and the state re-verified at the gate
 - `1e3fe4a21` chore(porch): 1481 dev-approval gate-approved
 - `6e818c6a4` chore(porch): 1481 review phase-transition
+- `1f0319f93` [PIR #1481] Review + retrospective
+- `55fa8c332` chore(porch): 1481 record PR #1640
+- `4c8511beb` chore(porch): 1481 review build-complete
+
+(The review commit and the consultation-fix commit that follow it are not listed above.)
 
 ## What Was Built
 
@@ -140,13 +149,15 @@ escalation clock started at `max(created_at, not_before, interrupt_at)`.
 
 - `pnpm --filter @cluesmith/codev build`: ✓ pass (also green via porch's `build` check at the
   dev-approval gate, 13.8s)
-- `packages/codev` tests: ✓ pass — **287 files / 5797 tests pass, 0 fail** (3 files / 48 tests
-  skipped, all pre-existing skips)
+- `packages/codev` tests: ✓ pass — **288 files / 5814 tests pass, 0 fail** (3 files / 48 tests
+  skipped, all pre-existing skips). Before the consultation fixes: 287 files / 5797 tests.
 - `packages/sdk` tests: ✓ pass — **11 files / 135 tests pass**
 - `tsc --noEmit`: ✓ clean in both packages
 - New test files: `pir-1481-migration` (v19 up/idempotence/back-compat), `pir-1481-interrupt-after`
-  (35 — coordinator, claim guard, skips, outcomes, alarm suppression), `pir-1481-owner-wiring`
-  (15 — real drainer against a seeded registry), `pir-1481-interrupt-after.e2e` (4)
+  (36 — coordinator, claim guard, skips, outcomes, alarm suppression, contention give-up),
+  `pir-1481-owner-wiring` (15 — real drainer against a seeded registry),
+  `pir-1481-force-wiring` (16 — the production feed/notification binding, added for the
+  consultation findings), `pir-1481-interrupt-after.e2e` (4)
 - Extended: `tower-routes.test.ts` (131 pass — route-level flag boundary and refused combinations),
   `send.test.ts` (40 — CLI forwarding + force warnings), `packages/sdk` wire contract (13),
   `spec-1365-serializer-convergence.test.ts` (35 — the §3 operator chain, including the plan's F1
@@ -180,10 +191,41 @@ never stopped, restarted or written to, and no other builder's worktree was read
   `status: delivered`, `interruptClaimedAt` 1 ms after `interruptAt`, outcome `written-unverified`,
   `interruptPriorPartial: false`.
 - **`cli-flag-capture.log`** — the worktree-**built** CLI (`packages/codev/bin/afx.js`): `send --help`
-  showing the flag, and all four invalid values rejected with exit 1. Those exit before any network
+  showing the flag, and the four invalid values (`0`, `-5`, `abc`, `3601`) rejected with exit 1. Those exit before any network
   call, which is why they were safe to run here — the CLI has no port override, so a real CLI send
   would necessarily target the live Tower on 4100. Every send-path observation above therefore goes
   over HTTP against the isolated child Tower instead.
+
+**Against the REAL `claude` CLI** (`capture-real-agent.mjs` → `real-agent-capture.log`, added for
+the consultation's fifth finding — the plan asks for clean/busy behaviour on an actual supported
+agent, and everything above this point uses a fixture composer). Child Tower on port **14622**, its
+own `CODEV_AGENT_FARM_DIR`/DB and a throwaway workspace; the terminal runs `claude
+--permission-mode plan`, answers its own trust-folder prompt, and renders its own composer.
+
+- **Clean real composer** — the render gate has no read-only endpoint, so the honest probe is an
+  ordinary flagless send, whose `delivered`/`held` **is** the classifier's verdict on that screen.
+  `probe 0: delivered=true`. The classifier was validated against a prompt nobody in this repo
+  painted.
+- **Real half-typed draft** (typed into the real composer, no Enter) — held **`busy` /
+  `user-text`**, the classifier reading an actual draft. At the 5 s deadline the escalation fired:
+  `interruptClaimedAt` equals `interruptAt` to the millisecond, outcome `written-unverified`, row
+  `delivered`, and the `^C` precedes the body in the ring.
+- **Mid-turn** (a real prompt submitted, the agent generating) — held **`busy`**, and then the
+  agent reached a clean prompt *inside* the 5 s window, so the ordinary gated delivery won: row
+  `delivered` with **`interruptClaimedAt: null`** and outcome still `armed`. That is the designed
+  cancellation — row `status` is authoritative, the coordinator wrote nothing, and no `^C` fired.
+  It is also the clean-before-deadline path demonstrated against a live agent.
+
+**One honest limitation, worth knowing before reading that log.** A real TUI does not echo injected
+bytes into its output ring the way the `cat` fixture does, and it redraws — so in this capture the
+body string appears twice for a single delivery and the injected `^C` does not appear as a new byte
+at all. **Occurrence counts in a real agent's ring are not write counts.** The mailbox row
+(`interruptClaimedAt`, `interruptOutcome`, `status`) is the authoritative record for a real agent;
+the byte-exact `^C count: 1 / body count: 1` evidence comes from the `cat` fixture, which echoes
+verbatim, and that is why both instruments are kept rather than one. The first two runs of this
+script are worth a glance for what they cost: `claude` opened on its trust-folder prompt, an ESC
+sent to "clear the composer" **exited the CLI**, and every subsequent send honestly reported
+`no-live-pty` — no false evidence was produced, but no useful evidence was either.
 
 ## Architecture Updates
 
@@ -238,9 +280,10 @@ the second a specific evidence-hygiene recipe. Nothing here qualifies for the al
   bytes, inheriting immediate `--interrupt`'s existing loss-over-duplicate crash semantics. That is a
   deliberate consistency choice, not an oversight; the cost is that a crash between claim and write
   loses the body. Check that nothing in the logs, `afx inbox`, or the API response reads as receipt.
-- **`MAX_FORCE_DISPATCHES = 4`** is a loop guard, and an exhausted row is deliberately left `armed`
-  (truthful — it was never claimed) for the next restart sweep to retire. Judgement call, flagged
-  rather than buried.
+- **`MAX_FORCE_DISPATCHES = 4`** is a loop guard on how many times one row's force may enter the
+  submission lock without writing. On exhaustion the row is now retired with the terminal outcome
+  `skipped-contended` (see *Consultation findings* below — the original shape left a durable
+  `armed` that nothing was armed for).
 - **The coordinator leaves `interrupt_outcome = 'armed'` on a row another path delivered.** Row
   `status` is authoritative for cancellation, per the plan; the outcome column is audit of what the
   *coordinator* did, and it did nothing. Reviewers expecting a `cancelled` outcome should read it
@@ -249,6 +292,65 @@ the second a specific evidence-hygiene recipe. Nothing here qualifies for the al
   visibility and inbox listings — the intent is "not stuck", not "not there".
 - **Migration v19 back-compat**: `GLOBAL_CURRENT_VERSION` moves 18 → 19; `pir-1481-migration.test.ts`
   covers up-migration, idempotence, and rows written by v18.
+
+## Consultation Findings (3-way pass, iteration 1)
+
+PIR runs the consultation **once** (`max_iterations: 1`), so nothing below was independently
+re-reviewed after the fixes. Each finding was checked against the actual files before acting on
+it, and the disposition is stated honestly.
+
+- **Gemini** — not scheduled by porch for this project (the verify block produced a 2-way task
+  list; only Codex and Claude were requested).
+- **Codex (`gpt-5.6-sol`) — REQUEST_CHANGES, HIGH confidence.** Five of six findings were real and
+  are fixed below; the sixth was an environment limitation, not a defect.
+- **Claude (`claude-opus-5`) — no verdict.** Two attempts both aborted with `Prompt is too long`
+  before the model produced any review (the +4.6k-line diff exceeds its consultation window). No
+  output file was written. **This diff therefore carries one model's opinion, not two.**
+
+### What was fixed
+
+1. **The force audit was dropped at the feed boundary.** `mailbox-wiring.ts`'s
+   `broadcastForcedDelivery` converted the coordinator's frame for the message bus and hardcoded
+   `metadata: { source: 'mailbox' }`, discarding `outcome` and `priorPartial` — so a **`failed`**
+   force reached every feed client indistinguishable from a clean gated delivery. Two comments in
+   the code asserted the opposite ("the outcome travels as metadata so the frame can never imply
+   receipt"), which is precisely the kind of claim that stops being checked. Fixed by threading an
+   optional `extraMetadata` through the shared `broadcastDelivered` conversion and widening
+   `MessageFrame.metadata` with `forcedOutcome` / `forcedPriorPartial`.
+2. **A failed force was described as delivered.** `surfaceForceOutcome`'s body said the message
+   "was force-delivered … That records what was WRITTEN" for every non-skipped outcome, including
+   one the terminal rejected. `failed` now gets its own wording: the write was REJECTED, the row is
+   already claimed, and the message will not be delivered or retried.
+3. **The dispatch ceiling left a false durable state.** Exhausting `MAX_FORCE_DISPATCHES` dropped
+   the in-memory entry but left `interrupt_outcome = 'armed'` in the database — an escalation
+   `afx inbox` kept promising for the rest of the Tower's lifetime, with nothing left to fire it.
+   The ceiling now records the terminal outcome **`skipped-contended`** (nothing claimed, nothing
+   written, body stays ordinary held mail), and the ceiling check moved after the row/cancellation
+   read so the row is in hand when it fires.
+4. **No production-wiring coverage.** The coordinator suite asserted the frame handed *to* the
+   port and never ran the conversion, which is why (1) was invisible. New
+   `pir-1481-force-wiring.test.ts` (16 tests) drives the real `makeInterruptPorts` with the bus and
+   the SSE broadcaster captured, over the whole outcome matrix — written, degraded, failed,
+   claimed, prior-partial, and all four `skipped-*` — plus a gated frame that must stay free of
+   force metadata. **9 of its 16 fail without fixes (1) and (2).** The contention give-up has its
+   own regression test in `pir-1481-interrupt-after.test.ts`, which fails against the old shape.
+5. **Documentation contradicted the feature.** `agent-farm.md` still said a held message is "never
+   force-injected" and named `--interrupt` as the only bypass — corrected in **both** trees to the
+   precise rule (the system never forces on its own; two per-message sender-chosen bypasses). This
+   review's own test instructions claimed non-integer values are rejected: **fractional seconds are
+   valid on purpose**, and the bullet now says so and explains why the validator is deliberately
+   not `validateDelaySeconds`. The Tower-restart bullet now states that it must be done against an
+   isolated child Tower — following it against the shared Tower on 4100 would kill every running
+   builder.
+6. **"Focused tests could not be rerun"** — a read-only filesystem in the reviewer's sandbox, not a
+   finding. The full suite runs clean here: see Test Results.
+
+### What a reviewer should still weigh
+
+The `skipped-contended` outcome is a **new value in a persisted vocabulary**. There is no CHECK
+constraint on `interrupt_outcome` (deliberate — SQLite cannot `ALTER` one in, so a fresh install
+would diverge from an upgraded one), so this needed no migration; the value set is enforced in
+TypeScript. A consumer switching exhaustively on the outcome must handle it — `afx inbox` does.
 
 ## How to Test Locally
 
@@ -261,10 +363,16 @@ the second a specific evidence-hygiene recipe. Nothing here qualifies for the al
     and **no** `^C` ever fires, even after the deadline passes.
   - `--interrupt-after` combined with `--interrupt` (and the other two refused combinations) is
     rejected at the CLI and at the route.
-  - Non-integer, zero, negative and over-ceiling values are rejected with exit 1 before any network
-    call.
+  - Non-numeric (`abc`), zero, negative and over-ceiling (`3601`) values are rejected with exit 1
+    before any network call. **Fractional seconds are accepted on purpose** — `--interrupt-after 1.5`
+    is valid. `validateInterruptAfterSeconds` is deliberately not `validateDelaySeconds`: a patience
+    budget can meaningfully be sub-second, a scheduled delivery cannot, so only the one-hour ceiling
+    is shared.
   - Restart Tower while a row is armed: the row stays `held`, records `skipped-restart`, and later
-    delivers through the gate with no `^C`.
+    delivers through the gate with no `^C`. **Do this only against an isolated child Tower** — its
+    own port (never 4100), its own `CODEV_AGENT_FARM_DIR`/DB, throwaway workspaces, exactly as
+    `pir-1481-interrupt-after.e2e.test.ts` sets one up. Restarting the shared Tower on 4100 kills
+    every running builder, so it is never the way to check this.
   - An armed pre-deadline row does not trip the held-mail starvation owner-notice; ordinary held mail
     for the same agent still does.
   - `afx inbox` shows the deadline, the outcome, and the prior-partial duplicate-risk warning.

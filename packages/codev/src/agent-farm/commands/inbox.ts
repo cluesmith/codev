@@ -144,6 +144,8 @@ function describeInterruptOutcome(outcome: string): string {
       return 'no live writable session at the deadline — nothing was written; the message is still held';
     case 'skipped-session-replaced':
       return 'the target session was replaced while queued — nothing was written; the message is still held';
+    case 'skipped-contended':
+      return 'another writer held this row at every attempt — nothing was written; the message is still held';
     case 'skipped-restart':
       return 'a Tower restart retired the force — nothing was written; the message is still held';
     default:

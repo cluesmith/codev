@@ -277,14 +277,23 @@ export async function watchEchoOnScreen(session: DeliverySession, needle: string
   };
 }
 
-/** Convert a delivered-message frame to the WebSocket bus shape and broadcast it. */
-function broadcastDelivered(frame: DeliveredBroadcast): void {
+/**
+ * Convert a delivered-message frame to the WebSocket bus shape and broadcast it.
+ *
+ * `extraMetadata` is how a FORCED delivery (Issue #1481) rides this same conversion without a
+ * parallel feed: the audit fields are merged over the base `source`, so one code path still
+ * normalizes `from`/`to` and the timestamp for both kinds of delivery.
+ */
+function broadcastDelivered(
+  frame: DeliveredBroadcast,
+  extraMetadata?: { forcedOutcome?: string; forcedPriorPartial?: boolean },
+): void {
   broadcastMessage({
     type: 'message',
     from: { project: frame.from.project ?? 'unknown', agent: frame.from.agent ?? 'unknown' },
     to: frame.to,
     content: frame.content,
-    metadata: { source: 'mailbox' },
+    metadata: { source: 'mailbox', ...extraMetadata },
     timestamp: new Date(frame.timestamp).toISOString(),
   });
 }
@@ -550,17 +559,23 @@ function surfaceUnverifiedDelivery(info: UnverifiedDeliveryInfo): void {
  * downstream can render it as a clean receipt.
  */
 function broadcastForcedDelivery(frame: ForcedDeliveryBroadcast): void {
-  broadcastDelivered({
-    type: 'message',
-    from: {
-      project: frame.fromWorkspace ? path.basename(frame.fromWorkspace) : undefined,
-      agent: frame.fromAgent ?? undefined,
+  broadcastDelivered(
+    {
+      type: 'message',
+      from: {
+        project: frame.fromWorkspace ? path.basename(frame.fromWorkspace) : undefined,
+        agent: frame.fromAgent ?? undefined,
+      },
+      to: { project: path.basename(frame.workspacePath), agent: frame.toAgent },
+      content: frame.body,
+      metadata: { source: 'mailbox' },
+      timestamp: frame.timestamp,
     },
-    to: { project: path.basename(frame.workspacePath), agent: frame.toAgent },
-    content: frame.body,
-    metadata: { source: 'mailbox' },
-    timestamp: frame.timestamp,
-  });
+    // The audit MUST cross this boundary. Without it a `failed` or `degraded-*` force is
+    // indistinguishable on the bus from a clean gated delivery — the exact "looks like a
+    // receipt" failure the outcome vocabulary exists to prevent.
+    { forcedOutcome: frame.outcome, forcedPriorPartial: frame.priorPartial },
+  );
 }
 
 /**
@@ -575,21 +590,38 @@ function broadcastForcedDelivery(frame: ForcedDeliveryBroadcast): void {
 function surfaceForceOutcome(info: ForceOutcomeInfo): void {
   const where = `${info.toAgent} @ ${path.basename(info.workspacePath)}`;
   const skipped = info.outcome.startsWith('skipped-');
+  // `failed` means the terminal REJECTED the write, so this notice must not use the same
+  // "was force-delivered" wording as a write that went out. The row is still claimed either
+  // way — a failed force does not return the message to the held set — so the notice has to
+  // say the body was lost rather than implying it is still coming.
+  const failed = info.outcome.includes('failed');
   const duplicate = info.priorPartial
     ? ' An earlier ordinary write for this message may already have put bytes on that terminal, so some effects may be duplicated.'
     : '';
+  let body: string;
+  if (skipped) {
+    body =
+      `${where} — the --interrupt-after deadline passed but the force was skipped (${info.outcome}). ` +
+      `The message is still held and delivers through the gate on the next clean prompt ` +
+      `(mailbox id ${info.mailboxId.slice(0, 8)}…).${duplicate}`;
+  } else if (failed) {
+    body =
+      `${where} — the --interrupt-after deadline passed and the force was attempted, but the terminal ` +
+      `REJECTED the write (outcome ${info.outcome}, mailbox id ${info.mailboxId.slice(0, 8)}…). The row was ` +
+      `already claimed, so this message will NOT be delivered or retried. Resend it if it still ` +
+      `matters.${duplicate}`;
+  } else {
+    body =
+      `${where} — the --interrupt-after deadline passed, so the message was force-delivered: Ctrl+C, then ` +
+      `the body, without the render gate (outcome ${info.outcome}, mailbox id ${info.mailboxId.slice(0, 8)}…). ` +
+      `That records what was WRITTEN, not what was received.${duplicate}`;
+  }
   mailboxBroadcaster?.({
     type: 'notification',
     title: skipped
       ? 'Mailbox: timed interrupt skipped'
-      : `Mailbox: timed interrupt ${info.outcome.includes('failed') ? 'failed' : 'forced'}`,
-    body: skipped
-      ? `${where} — the --interrupt-after deadline passed but the force was skipped (${info.outcome}). ` +
-        `The message is still held and delivers through the gate on the next clean prompt ` +
-        `(mailbox id ${info.mailboxId.slice(0, 8)}…).${duplicate}`
-      : `${where} — the --interrupt-after deadline passed, so the message was force-delivered: Ctrl+C, then ` +
-        `the body, without the render gate (outcome ${info.outcome}, mailbox id ${info.mailboxId.slice(0, 8)}…). ` +
-        `That records what was WRITTEN, not what was received.${duplicate}`,
+      : `Mailbox: timed interrupt ${failed ? 'failed' : 'forced'}`,
+    body,
     workspace: info.workspacePath,
   });
 }

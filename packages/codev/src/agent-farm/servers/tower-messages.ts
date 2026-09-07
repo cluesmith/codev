@@ -65,7 +65,22 @@ export interface MessageFrame {
   from: { project: string; agent: string };
   to: { project: string; agent: string };
   content: string;
-  metadata: { raw?: boolean; source?: string; escape?: boolean };
+  metadata: {
+    raw?: boolean;
+    source?: string;
+    escape?: boolean;
+    /**
+     * Issue #1481 — the force audit for a FORCED delivery, absent on a gated one.
+     *
+     * A forced delivery rides the same frame as a gated one so the feed has one delivery
+     * event per row, which means the frame alone cannot say whether the write succeeded.
+     * These fields are what stop a `failed` or `degraded-*` force from rendering as a clean
+     * receipt; a consumer that ignores them is reading an ambiguous event, not a safe one.
+     */
+    forcedOutcome?: string;
+    /** True when an ordinary write for this row may already have emitted bytes. */
+    forcedPriorPartial?: boolean;
+  };
 }
 
 // ============================================================================
