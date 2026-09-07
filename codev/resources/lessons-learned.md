@@ -208,6 +208,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From #1553] **A UI projection over overview data belongs in `codev-sdk`, not extension-local — check `builder-helpers.ts` before declaring one local.** `@cluesmith/codev-sdk/builder-helpers` is the established home for cross-client *UI policy* derived from `OverviewBuilder`/`OverviewData` (`isIdleWaiting` + threshold), whose own header states it lives there to stop the VS Code extension and the web dashboard drifting on "what needs a human." An attention roll-up (`deriveAttention`) is the same policy one level up, so co-locate it — a second client re-deriving the shape is exactly the drift the SDK home prevents. Distinguish two categories: `@cluesmith/codev-types` is **wire contracts only**, so a *derived client projection* (a shape that never crosses the Tower boundary) does NOT go there; and a message *envelope* that only crosses the extension's own `postMessage` (e.g. `RenderMessage`) correctly stays extension-local. Keep such a projection pure with an **injectable `now`** (mirroring `isIdleWaiting`) so the time-dependent branch is deterministically testable, and return a **fresh object** from the empty/degenerate path — a shared module singleton returned by reference is a footgun once the function is public package surface.
 - [secfix-1] Adding the first **runtime (value)** import of a workspace package that was previously only **type-imported** (`import type`, erased at build) requires moving that dep from `devDependencies` to `dependencies` in the importing package. A devDependency is not installed for a published/deployed consumer, so the packaged build throws `Cannot find module` at **module load** — before any logger initializes, so it surfaces as a silent boot crash (e.g. a 30s startup timeout with zero log lines), not an obvious error. It is invisible to build+test because the monorepo symlinks everything at dev time. Verify the **packaged** artifact: `pnpm --filter <pkg> deploy --prod --legacy <dir>` (or a throwaway-prefix `npm install` of the tarballs) resolves only real `dependencies`, mimicking a published install — then load the entry module from it. Also update any hand-rolled local-install/packaging script that packs a *hand-picked subset* of workspace packages: it must now pack the newly-runtime dep too, or the install can't satisfy it.
 
+- [From #1481] **A persisted row's `status` is not a "write in progress" signal.** When a second writer can contend for the *same row* as a background writer, the per-terminal lock is not enough: a gated delivery's row still reads `held` while its paced write is on the wire, so a timed force reading `status` sees "nobody is delivering this" and writes over an in-flight body. Add an explicit, synchronous, non-blocking **per-row ownership token** that *both* paths take immediately before their first byte, and have the contender decline entirely — write nothing, claim nothing, count no bypass — re-entering only once the other attempt's outcome is committed. The general rule: in-flight state needs its own signal; durable status describes what has been *decided*, not what is *happening*. Keep the lock order unchanged (here per-agent → per-terminal) and keep the contender out of the per-agent serializer, or a queued escalation stalls the sequential drainer it was meant to overtake.
+
 ## Process
 
 - [From #1482] **A conditional authorization is only as good as its condition — verify the condition, not the approval.** A reviewer pre-authorized dropping a UI change *if* browser verification was infeasible. It was feasible (Playwright was installed all along); the condition was false, so the authorization never applied. Disclosing the gap prominently and refusing to claim an unperformed verification was right and is what made it reviewable — but disclosure is not verification. Two minutes running the check would have beaten a commit, a caveat, and a retraction. When citing an approval, restate the condition it rested on and confirm that condition still holds.
@@ -437,6 +439,18 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
   check which Tower is actually running (`ps` for the `tower-server.js` path) before suspecting the
   code; restarting Tower to pick up the branch build kills every running builder, so it is the
   human's call.
+
+- [From #1481] When the deliverable **is** a force against a real terminal, report fake-clock proofs and
+  real-PTY observations as two clearly separated evidence classes — a fake-clock test proves the
+  coordinator's decision logic, and it cannot prove that exactly one `^C` reached a real composer
+  immediately before exactly one body. The artifact that settles that is the PTY's own **raw output
+  ring**, dumped with control bytes escaped and the `^C`s and bodies counted (`^C count: 1, body
+  count: 1`), sampled both mid-window (ring unchanged — nothing leaked early) and after the deadline.
+  Run it against an isolated child Tower on a non-default port with its own DB and throwaway
+  workspaces; never the shared instance. Note the asymmetry that forces this: a CLI with no port
+  override would necessarily target the live Tower, so CLI-level evidence is limited to the paths
+  that exit before any network call (flag help, validation rejections) and every send-path
+  observation goes over HTTP to the child instead.
 
 ## UI/UX
 
