@@ -303,9 +303,20 @@ it, and the disposition is stated honestly.
   list; only Codex and Claude were requested).
 - **Codex (`gpt-5.6-sol`) — REQUEST_CHANGES, HIGH confidence.** Five of six findings were real and
   are fixed below; the sixth was an environment limitation, not a defect.
-- **Claude (`claude-opus-5`) — no verdict.** Two attempts both aborted with `Prompt is too long`
-  before the model produced any review (the +4.6k-line diff exceeds its consultation window). No
-  output file was written. **This diff therefore carries one model's opinion, not two.**
+- **Claude (`claude-opus-5`) — no verdict, after four attempts.** Attempts 1 and 2 aborted with
+  `Prompt is too long` before producing any review. Attempt 3 got well into reading the
+  implementation and then died on a usage limit. Attempt 4 got furthest of all — it read the
+  review, verified the code against its claims, reached "the highest-risk hunk — the serializer
+  changes", and reported it was *"verifying the two potential issues I spotted before
+  finalizing"* — then exhausted its context with `Prompt is too long`. **Those two potential
+  issues were never named**, and no output file was written on any attempt.
+
+  The failure is structural, not transient: this diff is large enough (~4.7k lines across 41
+  files, several of them long) that the model cannot read what it needs and still have room to
+  write a verdict. **This PR therefore carries one model's opinion, not two** — and one of the
+  two knew of something it never got to state. A human reviewer should treat
+  `servers/session-submit.ts` (§3) with the extra care that missing second opinion would have
+  provided.
 
 ### What was fixed
 
