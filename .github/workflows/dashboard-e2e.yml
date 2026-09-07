@@ -46,4 +46,7 @@ jobs:
         env:
           TOWER_ARCHITECT_CMD: bash
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # #1630: the held-popover e2e test (PR #1604) refuses to run without an
+          # explicit port so it can never target a live Tower on 4100.
+          TOWER_TEST_PORT: '14100'
         run: pnpm exec playwright test --retries 3
