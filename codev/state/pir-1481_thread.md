@@ -193,3 +193,23 @@ authoritative for a real agent; the byte-exact `^C count: 1 / body count: 1` pro
 
 Standing orders unchanged: not maintainers — no merge, no issue closure, no cleanup. Waiting at
 the `pr` gate.
+
+### Blocked: the Claude consultation cannot complete on this diff
+
+Four attempts, three failure modes, none producing an output file — so porch will not leave the
+review phase:
+
+1. `Prompt is too long`, before any review text.
+2. Same.
+3. Read well into the implementation, then died on a **usage limit**.
+4. Got furthest: read the review, verified the code against its claims, reached the serializer
+   hunk, said it was *"verifying the two potential issues I spotted before finalizing"* — then
+   `Prompt is too long`. **Those two issues were never named.**
+
+Attempt 4 is the informative one: the model can start, but ~4.7k lines across 41 files leaves it
+no room to write a verdict. Structural, not transient — a fifth identical attempt is not a plan.
+
+Recorded in the review honestly (one verdict, not two; and one reviewer knew of something it
+never got to state, so `session-submit.ts` §3 deserves the extra human care that missing second
+opinion would have given). Asked the architect for the call: retry, manual override to proceed on
+Codex's verdict alone, or something else. Not merging, not closing the issue. Waiting.
