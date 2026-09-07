@@ -299,8 +299,11 @@ PIR runs the consultation **once** (`max_iterations: 1`), so nothing below was i
 re-reviewed after the fixes. Each finding was checked against the actual files before acting on
 it, and the disposition is stated honestly.
 
-- **Gemini** — not scheduled by porch for this project (the verify block produced a 2-way task
-  list; only Codex and Claude were requested).
+- **Gemini** — never ran; no output file exists. The winning protocol tier
+  (`codev/protocols/pir/protocol.json`, with no `.codev/protocols/pir` above it) declares
+  `verify.models: ["gemini", "codex"]`, but porch's runtime asked for **codex and claude** and
+  then kept asking for claude. The list porch actually enforced is not the one that file
+  declares — flagged to the architect as a porch/protocol discrepancy, out of scope for this PR.
 - **Codex (`gpt-5.6-sol`) — REQUEST_CHANGES, HIGH confidence.** Five of six findings were real and
   are fixed below; the sixth was an environment limitation, not a defect.
 - **Claude (`claude-opus-5`) — no verdict, after four attempts.** Attempts 1 and 2 aborted with
