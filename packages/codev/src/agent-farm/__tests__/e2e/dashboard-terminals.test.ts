@@ -13,7 +13,7 @@ import { resolve } from 'node:path';
 import { test, expect } from './tower-auth.js';
 import { towerWsProtocols } from './tower-key.js';
 
-const TOWER_URL = 'http://localhost:4100';
+const TOWER_URL = `http://localhost:${process.env.TOWER_TEST_PORT || '4100'}`;
 const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../../');
 const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');
 // Browsers can't set headers on a WebSocket, so Tower's key travels as a
@@ -73,7 +73,7 @@ test.describe('Dashboard Terminals E2E', () => {
     await page.goto(PAGE_URL);
     const wsConnected = await page.evaluate(({ tid, encodedPath, protocols }: { tid: string; encodedPath: string; protocols: string[] | undefined }) => {
       return new Promise<boolean>((resolve) => {
-        const ws = new WebSocket(`ws://localhost:4100/workspace/${encodedPath}/ws/terminal/${tid}`, protocols);
+        const ws = new WebSocket(`ws://localhost:${process.env.TOWER_TEST_PORT || '4100'}/workspace/${encodedPath}/ws/terminal/${tid}`, protocols);
         ws.binaryType = 'arraybuffer';
         ws.onopen = () => {
           ws.close();
@@ -104,7 +104,7 @@ test.describe('Dashboard Terminals E2E', () => {
     await page.goto(PAGE_URL);
     const wsConnected = await page.evaluate(({ tid, encodedPath, protocols }: { tid: string; encodedPath: string; protocols: string[] | undefined }) => {
       return new Promise<boolean>((resolve) => {
-        const ws = new WebSocket(`ws://localhost:4100/workspace/${encodedPath}/ws/terminal/${tid}`, protocols);
+        const ws = new WebSocket(`ws://localhost:${process.env.TOWER_TEST_PORT || '4100'}/workspace/${encodedPath}/ws/terminal/${tid}`, protocols);
         ws.binaryType = 'arraybuffer';
         ws.onopen = () => {
           ws.close();
