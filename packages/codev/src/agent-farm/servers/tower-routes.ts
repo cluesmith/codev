@@ -23,6 +23,7 @@ import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { fileURLToPath } from 'node:url';
 import { version } from '../../version.js';
+import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
@@ -800,9 +801,11 @@ async function handleTerminalCreate(
     if (requestPersistence && shellperManager && command && cwd) {
       try {
         const sessionId = crypto.randomUUID();
-        // Strip CLAUDECODE so spawned Claude processes don't detect nesting
-        const sessionEnv = { ...(env || process.env) } as Record<string, string>;
-        delete sessionEnv['CLAUDECODE'];
+        // Strip Claude Code session markers so spawned Claude processes don't
+        // detect nesting and disable transcript saving (#1219). `env` is normally
+        // absent — `createPtySession` sends no env — so this is the path by which
+        // Tower's own environment becomes every builder's environment.
+        const sessionEnv = sanitizeAgentEnv(env || process.env);
         const client = await shellperManager.createSession({
           sessionId,
           command,
@@ -862,7 +865,7 @@ async function handleTerminalCreate(
     // Fallback: non-persistent session (graceful degradation per plan)
     // Shellper is the only persistence backend for new sessions.
     if (!info) {
-      info = await manager.createSession({ command, args, cols, rows, cwd, env, label });
+      info = await manager.createSession({ command, args, cols, rows, cwd, env: env && sanitizeAgentEnv(env), label });
       persistent = false;
 
       if (workspacePath && termType && roleId) {
@@ -3164,9 +3167,9 @@ async function handleWorkspaceShellCreate(
     if (shellperManager) {
       try {
         const sessionId = crypto.randomUUID();
-        // Strip CLAUDECODE so spawned Claude processes don't detect nesting
-        const shellEnv = { ...process.env } as Record<string, string>;
-        delete shellEnv['CLAUDECODE'];
+        // Strip Claude Code session markers so spawned Claude processes don't
+        // detect nesting and disable transcript saving (#1219).
+        const shellEnv = sanitizeAgentEnv(process.env);
         // Inject session identity for afx rename (Spec 468)
         shellEnv['SHELLPER_SESSION_ID'] = sessionId;
         shellEnv['TOWER_PORT'] = String(ctx.port);
@@ -3233,7 +3236,7 @@ async function handleWorkspaceShellCreate(
         args: shellArgs,
         cwd: workspacePath,
         label: `Shell ${shellId.replace('shell-', '')}`,
-        env: process.env as Record<string, string>,
+        env: sanitizeAgentEnv(process.env),
       });
 
       const entry = getWorkspaceTerminalsEntry(workspacePath);
