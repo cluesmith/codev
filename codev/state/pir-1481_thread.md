@@ -213,3 +213,52 @@ Recorded in the review honestly (one verdict, not two; and one reviewer knew of 
 never got to state, so `session-submit.ts` §3 deserves the extra human care that missing second
 opinion would have given). Asked the architect for the call: retry, manual override to proceed on
 Codex's verdict alone, or something else. Not merging, not closing the issue. Waiting.
+
+### Attempt 5 (architect-directed retry) — same failure, and it now fails *earlier*
+
+Architect direction (2026-09-07T21:02Z): retry once, in the background; if it fails a fifth time,
+report the exact failure mode and wait. Done, and it failed.
+
+Command (verbatim the porch task):
+
+```
+consult -m claude --protocol pir --type impl --project-id 1481 \
+  --output codev/projects/1481-afx-send-add-interrupt-after-s/1481-review-iter1-claude.txt
+```
+
+Outcome: **exit 1, no output file** (the claude lane's `discardStaleOutput` removes the partial),
+so `porch next 1481` still reports the consult missing and re-issues the identical task.
+
+Transcript tail — the whole model contribution, in full:
+
+```
+[CLAUDE] model: claude-opus-5
+I'll start by reading the review file and the core implementation files.Prompt is too long
+Claude Code returned an error result: Prompt is too long
+```
+
+One assistant sentence, then the terminal error. **This is earlier than attempt 4**, which read the
+review, checked the code against it, reached the serializer hunk and was "verifying the two
+potential issues I spotted". So the failure is not drifting toward success; five attempts, and the
+trend is the wrong way.
+
+What I measured this time rather than guessed, so the next person does not re-derive it:
+
+- The payload consult actually builds is **small**. System prompt = `codev/roles/consultant.md`
+  (1,594 B) + `codev/protocols/pir/consult-types/impl-review.md` (2,700 B). Query ≈ 43 KB,
+  dominated by the inlined spec (2.5 KB) and plan (34 KB) — `buildImplQuery` inlines both and then
+  lists the 43 changed files for the model to read itself; it does **not** inline the diff.
+  Total ≈ 46 KB ≈ ~12k tokens. That does not explain "Prompt is too long" against a 200k window,
+  and it certainly does not explain failing before the first tool result comes back.
+- So the cap being hit is **not** the one consult composes. Something in the spawned Agent SDK
+  subprocess is (`runClaudeConsultation`, `index.ts:752` — `allowedTools: Read/Glob/Grep`,
+  `maxTurns`, `maxBudgetUsd: 25`, `cwd` = worktree). Note `consult` on this box is a shim
+  (`ez-cli_root/ez-cli-proxy-shim/bin/consult`) that unsets the CLI-proxy env vars; it does not
+  touch any context/output-token var, and I found none set in this session that would shrink a
+  window. I could not close the diagnosis further from inside the worktree.
+- Blast radius beyond this project: any PIR/SPIR impl review over a diff this size hits the same
+  wall, and because the lane exits non-zero with no file, **porch re-issues the same task
+  indefinitely** — the protocol cannot leave the review phase on its own.
+
+Not retrying a sixth time. Reported to the architect and waiting. Standing orders unchanged: not
+maintainers — no merge, no issue closure, no cleanup.
