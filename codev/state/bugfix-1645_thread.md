@@ -272,3 +272,18 @@ Note for anyone reading later: `extractExecutable` returns the command verbatim 
 cannot read the script, so a missing concept script would give every concept a different
 backend and fragment the suspension. `resolveConceptBackend` now falls back to the
 configured provider when the extracted value looks like a path.
+
+## 2026-09-07 — CMAP round 4
+
+Gemini: **REQUEST_CHANGES (HIGH)** — and correct. `_backendCache` keyed on
+`concept + command`, but the path-like fallback answers with the *configured provider*, so
+two workspaces resolving the same default script under different providers shared the
+first one's answer. Provider is now part of the key; the regression test reproduces the
+bleed exactly (`expected 'gitlab' not to be 'gitlab'`) when the fix is reverted.
+
+Worth recording as a pattern: this is the **third consecutive round** in which a lane found
+something real — the REST-success race (r2), provider-vs-backend keying (r3), this cache
+bleed (r4). The negative-caching core has been stable since r1; everything that has needed
+fixing was code added *in response to a review*. Each layer of hardening introduced its own
+smaller bug. Treat "the reviewers found nothing this time" as the signal to stop, not
+"I've addressed the last round".

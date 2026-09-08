@@ -200,6 +200,19 @@ describe('every overview concept resolves to the same backend (#1645)', () => {
   // heuristic reported `printf`, which would have filed that concept's limits
   // under a backend of its own and pointed `codev doctor` at the wrong CLI
   // (#1455). The `# forge-executable: gh` declaration is what holds this.
+  it('does not let one workspace\'s provider bleed into another\'s backend', () => {
+    // The path-like fallback answers with the *configured provider*, so two
+    // workspaces resolving the same default script while naming different
+    // providers must not share a memoized answer.
+    const viaGitlab = resolveConceptBackend('team-activity', { provider: 'gitlab' });
+    const viaLinear = resolveConceptBackend('team-activity', { provider: 'linear' });
+    const unresolvable = { 'issue-list': '' };
+    expect(resolveConceptBackend('issue-list', { ...unresolvable, provider: 'gitlab' }))
+      .not.toBe(resolveConceptBackend('issue-list', { ...unresolvable, provider: 'linear' }));
+    // Sanity: a concept both presets disable resolves to each one's own name.
+    expect(viaGitlab).not.toBe(viaLinear);
+  });
+
   it('resolves pr-list, issue-list and both searches to gh', () => {
     for (const concept of ['pr-list', 'issue-list', 'recently-closed', 'recently-merged']) {
       expect(resolveConceptBackend(concept, null)).toBe('gh');

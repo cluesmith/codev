@@ -329,7 +329,11 @@ export function resolveConceptBackend(
   const command = getForgeCommand(concept, forgeConfig);
   if (command === null) return provider.toLowerCase();
 
-  const key = `${concept}\u0000${command}`;
+  // `provider` belongs in the key, not just `command`: two workspaces can
+  // resolve the same default script while naming different providers, and the
+  // path-like fallback below answers with the *provider*. Keying on the command
+  // alone would let the first caller's provider bleed into the second's.
+  const key = `${concept}\u0000${command}\u0000${provider}`;
   const cached = _backendCache.get(key);
   if (cached !== undefined) return cached;
 
