@@ -1,7 +1,7 @@
 id: bugfix-1641
 title: consult-m-claude-fails-with-pr
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-08T23:31:58.758Z'
-updated_at: '2026-09-08T23:35:17.979Z'
+updated_at: '2026-09-08T23:38:21.319Z'
