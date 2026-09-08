@@ -157,12 +157,16 @@ export function escapeBytes(data: string): string {
  * Pure and allocation-cheap; called on every keystroke, so the common case (plain text with
  * no ESC at all) short-circuits before touching a regex.
  *
- * The short-circuit does NOT cover a bracketed paste (Issue #1567): `ESC[200~ … ESC[201~`
- * always contains ESC, so a pasted body — up to the 1 MiB a request body may carry — runs
- * every pattern's `replace` over its full length. Left as is deliberately: a paste is a rare,
- * human-paced event next to the per-keystroke path this function is tuned for, and any length
- * guard cheap enough to be worth adding would have to decide where a reply may legitimately
- * sit inside the payload — which is the over-strip direction, the silent one.
+ * The short-circuit does NOT cover a bracketed paste: `ESC[200~ … ESC[201~` always contains
+ * ESC, so a pasted body — up to the 1 MiB a `/write` request body may carry — runs every
+ * pattern's `replace` over its full length. This is an EXTERNAL paste only (a human pasting
+ * into the browser terminal, or a caller POSTing one to `/api/terminals/:id/write`); a mail
+ * delivery's own bracketed paste (Issue #1567) is written with origin `'delivery'` and never
+ * reaches this function at all, so no long send pays the scan. Left as is deliberately: an
+ * external paste is a rare, human-paced event next to the per-keystroke path this function is
+ * tuned for, and any length guard cheap enough to be worth adding would have to decide where a
+ * reply may legitimately sit inside the payload — which is the over-strip direction, the
+ * silent one.
  */
 export function stripTerminalReplies(data: string): string {
   if (!data.includes('\x1b')) return data;

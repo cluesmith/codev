@@ -104,11 +104,13 @@ export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
  *                             profile, or an unrenderable frame).
  *   - `recent-input`        — the terminal saw INPUT too recently to write onto (Issue #1473):
  *                             either it landed while the gate was classifying, or the
- *                             input-settle interval has not elapsed. "Input" is every write
- *                             that reaches the PTY under `PtySession.write()`'s default
- *                             `'external'` origin — a human's keystrokes, and equally an
- *                             ungated `--interrupt`/`--escape`, which is why the operator
- *                             wording says "input" rather than "typing". Like `user-text` this
+ *                             input-settle interval has not elapsed. "Input" is whatever
+ *                             survives `stripTerminalReplies` on a write reaching the PTY
+ *                             under `PtySession.write()`'s default `'external'` origin — a
+ *                             human's keystrokes, and equally an ungated `--interrupt`/
+ *                             `--escape`, which is why the operator wording says "input"
+ *                             rather than "typing"; a chunk that is nothing but a terminal
+ *                             REPLY moves neither signal. Like `user-text` this
  *                             is a SAFE hold that clears on its own — the same someone-else-is-
  *                             writing class, caught one beat earlier, before the TUI has echoed
  *                             anything for the classifier to see.

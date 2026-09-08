@@ -6,8 +6,9 @@
  * finish) and a composer it CANNOT VERIFY (`no-region-end` / `no-composer-marker` — a drifted
  * profile, a torn frame, or a mirror rendered at dims the real TUI never adopted; the hold is
  * a defect and never clears on its own). Issue #1473 added a fourth, `recent-input` — the
- * composer is empty but the terminal took input within the settle window, so it may be
- * changing under the gate; like `user-text` it clears on its own. Until #1482 that distinction
+ * rendered composer classified EMPTY, but the terminal took input within the settle window, so
+ * the real composer may already have changed under the gate; like `user-text` it clears on its
+ * own. Until #1482 that distinction
  * died in memory, and
  * every operator surface printed a bare `busy` for both — which is exactly why the dimension
  * divergence this issue is named for stayed latent.

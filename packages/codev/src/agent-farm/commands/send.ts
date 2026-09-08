@@ -466,16 +466,17 @@ export async function send(options: SendOptions): Promise<void> {
         // `verified === false` wording as the fallback for an older Tower that sends no cause.
         const unverified =
           result.unverifiedCause === 'input-raced'
-            ? ' (unconfirmed — the terminal was typed into mid-write)'
+            ? ' (unconfirmed — the terminal received input mid-write)'
             : result.unverifiedCause === 'no-echo' || result.verified === false
               ? ' (unverified — header not seen on the terminal)'
               : '';
         logger.success(`Message delivered to ${result.resolvedTo ?? target}${size}${unverified}`);
         if (result.unverifiedCause === 'input-raced') {
           logger.warn(
-            `Someone typed into that terminal while this message was being written, so the body ` +
-              `may have been truncated or submitted early. It is recorded as delivered and will ` +
-              `NOT be re-sent — check the agent's prompt before assuming it read cleanly.`,
+            `That terminal received input while this message was being written, so the body may ` +
+              `have been truncated, submitted early, or had the input absorbed into it. It is ` +
+              `recorded as delivered and will NOT be re-sent — check the agent's prompt before ` +
+              `assuming it read cleanly.`,
           );
         }
         // Issue #1365: an interrupt/escape that gave up waiting for the terminal's submission

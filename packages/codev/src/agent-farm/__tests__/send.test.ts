@@ -354,7 +354,7 @@ describe('send command', () => {
     // Without these, the route→SDK→CLI plumbing could be deleted and the suite stays green.
     // ----------------------------------------------------------------
 
-    it("qualifies the delivered line and warns when the terminal was typed into mid-write", async () => {
+    it("qualifies the delivered line and warns when the terminal received input mid-write", async () => {
       mockSendMessage.mockResolvedValue({
         ok: true, resolvedTo: 'builder-spir-109', bodyLength: 7,
         verified: true, unverifiedCause: 'input-raced',
@@ -364,16 +364,16 @@ describe('send command', () => {
 
       const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
       expect(successMessages[0]).toBe(
-        'Message delivered to builder-spir-109 (7 bytes) (unconfirmed — the terminal was typed into mid-write)',
+        'Message delivered to builder-spir-109 (7 bytes) (unconfirmed — the terminal received input mid-write)',
       );
       const warnings = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0]));
-      expect(warnings.some((m) => /typed into that terminal/.test(m))).toBe(true);
+      expect(warnings.some((m) => /received input while this message was being written/.test(m))).toBe(true);
       // It must say the message will NOT be re-sent: re-writing a landed message is #1584, so a
       // sender who re-sends by hand recreates the bug the design exists to prevent.
       expect(warnings.some((m) => /NOT be re-sent/.test(m))).toBe(true);
     });
 
-    it("uses the header-not-seen wording for a no-echo cause, and does not warn about typing", async () => {
+    it("uses the header-not-seen wording for a no-echo cause, and does not warn about an input race", async () => {
       mockSendMessage.mockResolvedValue({
         ok: true, resolvedTo: 'builder-spir-109', bodyLength: 7, unverifiedCause: 'no-echo',
       });
@@ -383,7 +383,7 @@ describe('send command', () => {
       const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
       expect(successMessages[0]).toContain('(unverified — header not seen on the terminal)');
       const warnings = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0]));
-      expect(warnings.some((m) => /typed into that terminal/.test(m))).toBe(false);
+      expect(warnings.some((m) => /received input while this message was being written/.test(m))).toBe(false);
     });
 
     it("keeps the old wording for an older Tower that sends verified:false but no cause", async () => {

@@ -159,11 +159,18 @@ describe('the reply table is pinned to a specific xterm version', () => {
   // newly-answered query (kitty keyboard, XTVERSION), and an unrecognised reply becomes an
   // uncounted-reply hold — so the bump must not pass silently.
   //
-  // BOTH workspaces are pinned, because the one this file resolves by default is NOT the one
-  // that emits (integration review — Codex). `@xterm/xterm` is a devDependency here (the test
-  // harness); the terminal a human actually types into is `apps/web`, which declares its own
-  // copy, and every DA/DSR/CPR reply the filter exists to strip is emitted by THAT bundle. A
-  // bump confined to apps/web would leave the table stale with this suite still green.
+  // BOTH workspaces are pinned, because the one this file resolves by default is NOT a
+  // production emitter (integration review — Codex). `@xterm/xterm` is a devDependency here
+  // (the test harness); `apps/web` declares its own copy and is the browser terminal a human
+  // types into, so it emits the DA/DSR/CPR answers this table was enumerated from. pnpm gives
+  // each workspace its own resolution, so a bump confined to apps/web would leave the table
+  // stale with this suite still green.
+  //
+  // apps/web is the emitter whose version this repo CONTROLS, not the only one. The VS Code
+  // integrated terminal is a second typing surface that reaches Tower through the same
+  // WebSocket (`terminal-adapter.ts`), and its replies come from VS Code's own bundled xterm —
+  // a version no test here can pin. That residual is why a bump anywhere is a review trigger
+  // for `terminal-replies.ts` rather than something this assertion can fully discharge.
   const repoRoot = fileURLToPath(new URL('../../../../../', import.meta.url));
 
   it('matches the @xterm/xterm apps/web installs — the bundle that emits the replies', () => {

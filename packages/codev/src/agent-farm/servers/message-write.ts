@@ -264,10 +264,19 @@ export type PacedSubmitResult<A> =
    * The whole submit — text and, unless `noEnter`, the trailing Enter — reached the PTY.
    *
    * `racedByInput` (Issue #1473) means the terminal's input counter moved between the first
-   * byte and the last: a human typed while our body was going out, so it may have been
-   * TRUNCATED (`^U`/`^W`/`^C`) or SUBMITTED EARLY (their Enter carrying our partial text). It is
-   * a FLAG, not a hold — the bytes are already on the wire, and re-writing a message that
-   * landed is the #1584 re-injection failure this module is forbidden to reproduce.
+   * byte and the last: something typed into the terminal while our body was going out, so it
+   * may have been TRUNCATED (`^U`/`^W`/`^C`) or SUBMITTED EARLY (their Enter carrying our
+   * partial text). It is a FLAG, not a hold — the bytes are already on the wire, and re-writing
+   * a message that landed is the #1584 re-injection failure this module is forbidden to
+   * reproduce.
+   *
+   * The SHAPE of the damage now depends on the strategy (Issue #1567). On the bracketed path a
+   * `\r` inside `ESC[200~ … ESC[201~` is literal, so a human's Enter cannot submit early — it is
+   * absorbed INTO our pasted body instead. The flag is right either way; only the operator's
+   * "what do I look for" answer differs, which is why the sender-facing warning names all three
+   * outcomes. #1567 also shrank the window it covers, because the pacing is now per CHUNK
+   * rather than per line: a 100-line frame took `99×10+80` ≈ 1,070 ms to write, and bracketed
+   * takes `(chunks−1)×5+80` — ~100 ms for a 2.5 KB body.
    *
    * OMITTED when false, never `racedByInput: false`, so exact `{ status: 'written' }` equality
    * assertions keep meaning what they meant.
