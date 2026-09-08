@@ -1,0 +1,14 @@
+id: bugfix-1645
+title: tower-overview-cache-burns-the
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-08T05:46:08.226Z'
+updated_at: '2026-09-08T05:46:08.227Z'
