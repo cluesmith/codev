@@ -396,7 +396,12 @@ export function resolveConceptBackend(
   const unknownTool =
     basename === null
     || basename.endsWith('.sh')
-    || (bareScriptRef && basename === trimmed.split('/').pop());
+    || (bareScriptRef && basename === trimmed.split('/').pop())
+    // A file named after the concept is a per-concept script, not a tool —
+    // `/opt/forge/issue-list --json …` names no CLI. Keying on it would give
+    // every concept a backend of its own and fragment one account across all
+    // of them, arguments or no arguments.
+    || basename === concept;
   const fallback = PROVIDER_EXECUTABLES[provider.toLowerCase()] ?? provider;
   const backend = (
     unknownTool || GENERIC_TRANSPORTS.has(basename!.toLowerCase()) ? fallback : basename!

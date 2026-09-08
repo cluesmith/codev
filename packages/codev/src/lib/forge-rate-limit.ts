@@ -205,7 +205,10 @@ export function noteForgeSuccess(
   startedAt: number = Date.now(),
 ): void {
   const state = stateFor(provider);
-  if (state.suspendedUntilMs > 0 && startedAt < state.suspendedSinceMs) return;
+  // `<=`, not `<`: the overview dispatches its commands in one tick, so they
+  // share a millisecond, and a limit recorded in that same millisecond would
+  // otherwise let a sibling's success clear it — the exact race this guards.
+  if (state.suspendedUntilMs > 0 && startedAt <= state.suspendedSinceMs) return;
   clearForgeSuspension(provider);
 }
 

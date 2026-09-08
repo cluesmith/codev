@@ -379,3 +379,49 @@ wait early — unaddressed. The dashboard's own refresh button is distinguishabl
 porch/VSCode/cleanup and could carry an explicit opt-in, but that is an API parameter, an
 SDK argument and a web change on a PR already five rounds deep, and the wait is bounded at
 15 min (or the forge's true reset). Raised with the architect; documented in `api.ts`.
+
+## 2026-09-08 — CMAP round 6: gemini APPROVE, codex REQUEST_CHANGES
+
+Codex's headline finding was real and significant: **repeated automated invalidations could
+start an unbounded number of concurrent commands** per concept per workspace. `invalidate()`
+cleared the join table, so every invalidation licensed another parallel flight — and porch
+fires invalidate after *every* mutating command across a dozen builders. A live fan-out path
+that bypassed single-flight entirely. Measured by the new test: **6 concurrent `gh` commands
+where 1 is correct.**
+
+Fixed by tagging join-table entries with the cache generation. A stale-generation flight is
+no longer discarded (which raced) nor joined (which served stale data): the new caller
+**chains** behind it. At most one command runs and at most one waits, however many
+invalidations arrive.
+
+Also fixed:
+- `startedAt < suspendedSinceMs` had to be `<=`. The overview dispatches its commands in one
+  tick, so they share a millisecond — a limit recorded in that same millisecond would let a
+  sibling's success clear it. The exact race the guard exists for, slipping through on
+  clock granularity.
+- `/opt/forge/issue-list --json …` still keyed by its own filename (the bare-path rule only
+  covered argument-less commands), fragmenting one account across concepts. A basename
+  equal to the concept name is now treated as a per-concept script, not a tool.
+
+### A test of mine was asserting an artifact
+
+`keeps the suspension when the REST identity call still succeeds` asserted that
+`user-identity` goes **undispatched** — which only held because `fetchCached` re-checked the
+suspension synchronously before a sibling's mocked fetcher had returned. Mocks resolve in
+the same tick; real subprocesses never do. Adding `await predecessor` exposed it. The
+assertion is gone; the test now pins the real guard (`countsAsRecovery`).
+
+Third time green tests have been misleading in this PR: two vacuous, one asserting an
+artifact of the mock harness.
+
+### Unexplained working-tree modification
+
+Mid-round I found both guards in `overview.ts` reverted in the working tree, with
+`// REVERTED FOR VACUITY CHECK` comments **I did not write**. HEAD (`b0c32427c`) was correct
+and pushed; only the working tree was affected. I verified integrity against HEAD, restored
+the two lines, and re-confirmed `git diff` was clean before continuing. I cannot account for
+the origin — the worktree write-guard hook is read-only, and none of my scripts emit that
+comment. Recording it rather than guessing. **If you see it again, treat the working tree as
+untrusted and diff against HEAD before building on it.**
+
+Full suite 5,790 green; e2e still 5 gh calls for 40 polls.

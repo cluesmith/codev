@@ -885,7 +885,7 @@ export class OverviewCache {
    * subsequent poll, and every additional client, start another duplicate
    * batch. Callers arriving mid-flight join the existing promise instead.
    */
-  private inflight = new Map<string, Promise<unknown>>();
+  private inflight = new Map<string, { promise: Promise<unknown>; generation: number }>();
   /**
    * Resolved backend per `<workspace>:<concept>` — the executable that concept
    * will actually run (`gh`, `glab`, …). Per concept, not per workspace,
@@ -1167,12 +1167,12 @@ export class OverviewCache {
     // The resolver memoizes across every cache instance and reads concept
     // scripts off disk, so an edited script would survive this invalidation.
     clearForgeBackendCache();
-    // Drop in-flight fetches from the join table. They still run — and their
-    // results still reach the callers already awaiting them — but a caller
-    // arriving *after* an explicit Refresh must not be handed a result fetched
-    // under the previous config. The generation bump below stops the old flight
-    // writing anything.
-    this.inflight.clear();
+    // The join table is deliberately NOT cleared. A caller arriving after this
+    // point must not be handed a result fetched under the previous config, and
+    // the generation bump sees to that: they chain a fresh fetch behind the
+    // running one rather than joining it. Clearing outright was worse — it let
+    // a new flight start beside every still-running one, and porch fires this
+    // path after every mutating command.
     this.generation++;
     // Deliberately NOT clearing the rate-limit suspension here.
     //
@@ -1238,11 +1238,27 @@ export class OverviewCache {
     if (isForgeSuspended(backend, dispatchedAt)) return Promise.resolve(null);
 
     const key = `${concept}:${cwd}`;
-    const existing = this.inflight.get(key);
-    if (existing) return existing as Promise<T | null>;
-
     const generation = this.generation;
+    const existing = this.inflight.get(key);
+    // Same generation: join it. That is single-flight doing its job.
+    if (existing && existing.generation === generation) {
+      return existing.promise as Promise<T | null>;
+    }
+
+    // Older generation: an invalidate() landed while that one was running, so
+    // its result is stale — but we must not just start a parallel command.
+    // porch fires invalidate after *every* mutating command, so in a busy
+    // workspace parallel flights would pile up per concept per workspace
+    // without bound: the exact fan-out this whole fix exists to stop. Chain
+    // instead — wait for the stale one, then fetch once. Callers arriving
+    // meanwhile join this chained flight, so at most one command runs and at
+    // most one waits behind it, however many invalidations arrive.
+    const predecessor = existing
+      ? existing.promise.then(() => undefined, () => undefined)
+      : Promise.resolve();
+
     const flight = (async () => {
+      await predecessor;
       const data = await fetcher();
       // An invalidate() while this was in flight means the result was fetched
       // under the previous config: return it to this caller, but do not write
@@ -1278,10 +1294,10 @@ export class OverviewCache {
     // let the next caller start yet another fetch, the fan-out single-flight
     // exists to prevent.
     void flight.finally(() => {
-      if (this.inflight.get(key) === flight) this.inflight.delete(key);
+      if (this.inflight.get(key)?.promise === flight) this.inflight.delete(key);
     });
 
-    this.inflight.set(key, flight);
+    this.inflight.set(key, { promise: flight, generation });
     return flight;
   }
 

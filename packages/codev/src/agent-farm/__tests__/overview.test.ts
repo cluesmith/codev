@@ -1956,14 +1956,13 @@ describe('overview', () => {
       // so it keeps succeeding while its GraphQL siblings are refused. A
       // refresh that hits the limit must stay suspended afterwards.
       //
-      // Two mechanisms hold that, and they are pinned in different places.
-      // Here: `fetchCached` re-checks the suspension synchronously as each
-      // fetch is dispatched, so once a sibling has recorded the limit the
-      // identity call is not dispatched at all. The other — a success that was
-      // already in flight when the limit landed must not clear it — is pinned
-      // by "ignores a success from a command dispatched BEFORE the suspension"
-      // in forge-rate-limit.test.ts, since it turns on dispatch ordering this
-      // test cannot control.
+      // What holds this is `countsAsRecovery`: the identity call runs and
+      // succeeds, and its success is simply not treated as evidence the
+      // GraphQL budget recovered. Deliberately NOT asserted here: that the
+      // identity call goes undispatched. An earlier revision did assert that,
+      // relying on `fetchCached` re-checking the suspension synchronously
+      // before a sibling's fetcher had returned — an artifact of mocks
+      // resolving in the same tick, which real subprocesses never do.
       mockFetchPRList.mockImplementation(async () => {
         noteRateLimited(OVERVIEW_BACKEND, Date.now() + 10 * 60 * 1000);
         return null;
@@ -1978,7 +1977,6 @@ describe('overview', () => {
 
       expect(isForgeSuspended(OVERVIEW_BACKEND)).toBe(true);
       expect(data.forgeStatus).toBe('rate-limited');
-      expect(mockFetchCurrentUser).not.toHaveBeenCalled();
     });
 
     it('coalesces concurrent requests into one forge call (#1645)', async () => {
@@ -2064,6 +2062,35 @@ describe('overview', () => {
       await Promise.all([second, third]);
 
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+    });
+
+    it('bounds concurrency across repeated invalidations (#1645)', async () => {
+      // porch fires invalidate() after every mutating command, so in a busy
+      // workspace they arrive constantly. Each one must not be licence to start
+      // another parallel forge command: at most one runs, at most one waits.
+      let inFlight = 0;
+      let maxConcurrent = 0;
+      let release: (v: unknown) => void = () => {};
+      const gate = new Promise(r => { release = r; });
+      mockFetchPRList.mockImplementation(async () => {
+        inFlight++;
+        maxConcurrent = Math.max(maxConcurrent, inFlight);
+        await gate;
+        inFlight--;
+        return [];
+      });
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      const calls: Promise<unknown>[] = [];
+      for (let i = 0; i < 6; i++) {
+        calls.push(cache.getOverview(tmpDir));
+        cache.invalidate();
+      }
+      release(null);
+      await Promise.all(calls);
+
+      expect(maxConcurrent).toBe(1);
     });
 
     it('does not hand a post-refresh caller a result fetched before it (#1645)', async () => {
