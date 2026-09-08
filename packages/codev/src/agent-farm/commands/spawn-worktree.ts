@@ -28,6 +28,7 @@ import { globSync } from 'glob';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness, getWorktreeConfig } from '../utils/config.js';
+import { kimiAutoTrustWorkspace } from '../../lib/config.js';
 import { shellEscapeSingleQuote, launchLoopTail, type HarnessProvider } from '../utils/harness.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, runStreaming, commandExists } from '../utils/shell.js';
@@ -1077,7 +1078,11 @@ export async function startBuilderSession(
   // above on this path too — the provider gets the same inputs, and its script
   // decides the shape.
   if (harness.buildBuilderLaunchScript) {
-    harness.prepareWorkspace?.(worktreePath);
+    // Issue #1620: consent is resolved HERE, from the workspace being spawned into, and passed
+    // in — the provider never reads config itself. Default false.
+    harness.prepareWorkspace?.(worktreePath, {
+      autoTrustWorkspace: kimiAutoTrustWorkspace(config.workspaceRoot),
+    });
     const scriptContent = harness.buildBuilderLaunchScript({
       worktreePath, baseCmd, roleFragment, taskFile: promptFile, builderId,
     });
@@ -1196,7 +1201,9 @@ export function buildWorktreeLaunchScript(
   // loop: nothing is queued on the mailbox, and the operator drives the session
   // by typing into it.
   if (harness.buildBuilderLaunchScript) {
-    harness.prepareWorkspace?.(worktreePath);
+    harness.prepareWorkspace?.(worktreePath, {
+      autoTrustWorkspace: kimiAutoTrustWorkspace(workspaceRoot),
+    });
     return harness.buildBuilderLaunchScript({
       worktreePath, baseCmd,
       roleFragment: role ? command.slice(baseCmd.length + 1) : '',

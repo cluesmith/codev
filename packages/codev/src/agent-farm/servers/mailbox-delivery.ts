@@ -409,6 +409,58 @@ export interface DeliveryOutcome {
  * escalation policy it serves, while the shared predicate takes the plain strings the CLI, the
  * dashboard and the VS Code toast actually hold.
  */
+/**
+ * Compile-time tripwire for the gate-detail union (Issue #1620).
+ *
+ * `isClassifierStuck` delegates to `isUnverifiableVerdict`, which lives in the SDK and is typed
+ * on `string | null` on purpose (the CLI reads these values back out of JSON). That typing is
+ * right, and it costs the one thing the deleted `CLASSIFIER_STUCK_DETAILS` record used to buy:
+ * a `Record` keyed on the union stops compiling when the union grows, so a new detail could not
+ * slip through unclassified.
+ *
+ * This restores that guard without restoring a second copy of the POLICY. The list below says
+ * "every one of these was reviewed against the escalation rule", not "here is the answer" — the
+ * answer stays in exactly one place. The runtime assertions on those answers live in
+ * `__tests__/hold-verdict-exhaustive.test.ts`, and this half has to be HERE rather than there
+ * because the `__tests__` glob is excluded from `tsc` (see this package's tsconfig `exclude`),
+ * which makes a `satisfies` in a test file decorative — it would have read like a guarantee and
+ * enforced nothing.
+ *
+ * Adding a member to `GateVerdict['detail']` breaks this until it is listed, at which point the
+ * next question is unavoidable: does it escalate? Removing one breaks it too, so the list cannot
+ * rot.
+ */
+type ReviewedGateDetail =
+  | 'no-composer-marker'
+  | 'no-region-end'
+  | 'no-region-start'
+  | 'multi-row-draft'
+  | 'user-text'
+  | 'empty';
+
+type AssertGateDetailsReviewed =
+  [GateVerdict['detail']] extends [ReviewedGateDetail]
+    ? [ReviewedGateDetail] extends [GateVerdict['detail']]
+      ? true
+      : ['ReviewedGateDetail lists a detail GateVerdict no longer has — remove it, and check isUnverifiableVerdict']
+    : ['GateVerdict gained a detail — list it in ReviewedGateDetail and classify it in isUnverifiableVerdict (packages/sdk/src/hold-verdict.ts)'];
+
+/**
+ * And the same guard across the module boundary: `MailboxGateDetail` (what the mailbox COLUMN
+ * stores) and `GateVerdict['detail']` (what the classifier PRODUCES) are declared in different
+ * files and can drift apart. A detail the classifier emits that the column's type forbids is
+ * precisely the divergence #1482 was filed for.
+ */
+type AssertPersistableMatchesClassifier =
+  [MailboxGateDetail] extends [GateVerdict['detail']]
+    ? [Exclude<GateVerdict['detail'], 'empty'>] extends [MailboxGateDetail]
+      ? true
+      : ['the classifier can emit a hold detail MailboxGateDetail cannot store']
+    : ['MailboxGateDetail allows a value the classifier never produces'];
+
+const gateDetailUnionsAgree: [AssertGateDetailsReviewed, AssertPersistableMatchesClassifier] = [true, true];
+void gateDetailUnionsAgree;
+
 function isClassifierStuck(
   reason: MailboxReason | null,
   detail: GateVerdict['detail'] | undefined

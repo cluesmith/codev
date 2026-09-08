@@ -428,39 +428,152 @@ export function inspectKimiTrustLayout(opts?: KimiDiscoveryOpts): KimiStoreLayou
 }
 
 /**
- * Pre-record workspace trust for a builder worktree (Issue #1201).
+ * Project-level MCP config files kimi's folder trust actually gates.
  *
- * WHY THIS EXISTS. kimi 0.33.0 added a startup "Trust this folder?" dialog, and
- * a builder worktree is always a brand-new directory. The dialog renders BEFORE
- * any composer, its only non-trusting option **exits kimi**, and there is no
- * flag, env var, or config key to suppress it (audited against 0.34.0). So an
- * unattended builder would sit on the dialog forever — its task message held by
- * the render gate (correctly: no composer marker) until a human typed into the
- * terminal. That defeats autonomous spawning outright.
+ * Trust decides ONE thing: whether kimi loads MCP servers defined by the folder itself. These
+ * are the two paths it reads them from, so their presence is what turns "pre-record trust" from
+ * a convenience into a capability grant.
  *
- * WHY IT IS SAFE. Trust gates exactly one thing — whether project-level MCP
- * servers (`.mcp.json`, `.kimi-code/mcp.json`) are loaded from the folder. It
- * does not gate tool execution or writes. The record is written ONLY for a
- * worktree Codev itself created, for a builder the human explicitly spawned,
- * which already runs with `--yolo` (auto-approved tool calls) — so this grants
- * strictly less than what launching the builder already authorized, and never
- * touches a directory the user did not hand us.
- *
- * Idempotent (an existing record is left alone) and fail-soft: on any error the
- * dialog simply appears, the gate holds the task message, and the mailbox's
- * escalation surfaces it — never a silent misdelivery.
- *
- * @returns true when a record was written, false when one already existed or the
- *          write failed.
+ * Deliberately a literal list rather than a glob: a wrong answer here fails in the unsafe
+ * direction (we pre-trust a worktree that ships servers), so the list should grow only from a
+ * documented kimi surface, never from a guess about where config *might* live.
  */
-export function ensureKimiWorkspaceTrust(root: string, opts?: KimiDiscoveryOpts): boolean {
+const KIMI_PROJECT_MCP_FILES = ['.mcp.json', join('.kimi-code', 'mcp.json')] as const;
+
+/**
+ * Why {@link ensureKimiWorkspaceTrust} did or did not write a trust record.
+ *
+ * A structured result rather than a boolean because the caller has to be able to LOG which
+ * refusal happened — "no record was written" covers a deliberate security refusal, an
+ * already-trusted worktree, and a failed write, and an operator debugging a builder stalled on
+ * the trust dialog needs to know which of the three they are looking at.
+ */
+export type KimiTrustDecision =
+  /** A record was written; kimi will open on a composer instead of the dialog. */
+  | { wrote: true }
+  /**
+   * No record was written. `reason` is which of the four cases applies:
+   *
+   *  - `not-opted-in` — the default. Pre-writing trust is off unless `.codev/config.json` sets
+   *    `harnessOptions.kimi.autoTrustWorkspace`.
+   *  - `project-mcp-config` — the worktree ships project-level MCP config, so trusting it grants
+   *    "load these servers". Refused even when opted in: this is the one case where the trust
+   *    decision is load-bearing, so it is the one case a human has to make.
+   *  - `already-trusted` — idempotent no-op, an existing record is never rewritten.
+   *  - `write-failed` — the store was unwritable. Fail-soft; never aborts a spawn.
+   */
+  | {
+      wrote: false;
+      reason: 'not-opted-in' | 'project-mcp-config' | 'already-trusted' | 'write-failed';
+      /** Human-readable specifics for the log line (e.g. which MCP file was found). */
+      detail?: string;
+    };
+
+/** Options for {@link ensureKimiWorkspaceTrust}. */
+export interface KimiTrustOpts extends KimiDiscoveryOpts {
+  /**
+   * Has the operator explicitly opted this workspace into automatic trust
+   * (`harnessOptions.kimi.autoTrustWorkspace` in `.codev/config.json`)?
+   *
+   * Defaults to **false**, and the default is the point: absent configuration must mean "do not
+   * grant anything", not "grant it quietly". A missing/omitted option and an explicit `false`
+   * are the same answer.
+   */
+  autoTrustWorkspace?: boolean;
+}
+
+/**
+ * The first project-level MCP config present in `root`, or null.
+ *
+ * Existence only — the file is never read or parsed. An unreadable or malformed `.mcp.json` is
+ * still a folder that is trying to define servers, and a parse error must not be the thing that
+ * decides we may trust it.
+ */
+function projectMcpConfigIn(root: string): string | null {
+  for (const rel of KIMI_PROJECT_MCP_FILES) {
+    try {
+      if (existsSync(join(root, rel))) return rel;
+    } catch {
+      // An unstattable path is not evidence of absence, but it is not evidence of presence
+      // either; keep looking and let the remaining checks decide.
+    }
+  }
+  return null;
+}
+
+/**
+ * Pre-record workspace trust for a builder worktree (Issue #1201), if — and only if — both
+ * safety conditions hold.
+ *
+ * WHY THIS EXISTS. kimi 0.33.0 added a startup "Trust this folder?" dialog, and a builder
+ * worktree is always a brand-new directory. The dialog renders BEFORE any composer, its only
+ * non-trusting option **exits kimi**, and there is no flag, env var, or config key to suppress
+ * it (audited against 0.34.0). So an unattended builder would sit on the dialog forever — its
+ * task message held by the render gate (correctly: no composer marker) until a human typed into
+ * the terminal. That defeats autonomous spawning outright.
+ *
+ * WHY IT IS NEVERTHELESS GATED (Issue #1620, the #1328 class). The original argument was that
+ * trust grants strictly less than `--yolo`, which the builder already runs with. That is true of
+ * *tool execution* and false of the thing trust actually controls: whether kimi loads MCP servers
+ * **defined by the folder**. Auto-approving tool calls and permitting a checkout to introduce new
+ * tool-providing processes are separate boundaries, and spawning a builder onto a contributor
+ * branch is a normal flow in this repository. So:
+ *
+ *   1. **Opt-in required** (`autoTrustWorkspace`, default false). Silence grants nothing.
+ *   2. **Refused outright when the worktree ships project-level MCP config**, opt-in or not —
+ *      the one case where the decision has teeth is the one case a human makes.
+ *
+ * On any refusal the dialog simply appears: kimi shows it, the render gate classifies
+ * `no-composer-marker` and HOLDS the task message (never misdelivers it), and because that detail
+ * is in the escalation class the hold surfaces through the mailbox's liveness telemetry rather
+ * than hanging silently. The caller is expected to log the returned reason.
+ *
+ * CONSEQUENCE, worth stating plainly: a repository that ships a root `.mcp.json` hits rule 2 on
+ * every Kimi builder worktree, so unattended Kimi spawning does not work there until a human
+ * trusts the folder once. That is the intended posture, not an oversight.
+ *
+ * Idempotent (an existing record is left alone) and fail-soft (a write error is reported, never
+ * thrown) — a failure here must degrade to the CLI's normal behavior, never abort a spawn.
+ */
+export function ensureKimiWorkspaceTrust(root: string, opts?: KimiTrustOpts): KimiTrustDecision {
+  // Order matters: the security refusal is evaluated BEFORE the opt-in, so the log tells the
+  // operator the strongest true reason. Someone who has opted in and still sees no record needs
+  // to hear "this worktree ships MCP config", not "you did not opt in" — which would be false.
+  const mcp = projectMcpConfigIn(root);
+  if (mcp !== null) {
+    return {
+      wrote: false,
+      reason: 'project-mcp-config',
+      detail:
+        `${root} contains ${mcp}; kimi's folder trust is exactly what gates loading ` +
+        `project-defined MCP servers, so this decision is left to a human. kimi will show its ` +
+        `"Trust this folder?" dialog and the builder's task will be HELD (not lost) until then.`,
+    };
+  }
+
+  if (opts?.autoTrustWorkspace !== true) {
+    return {
+      wrote: false,
+      reason: 'not-opted-in',
+      detail:
+        'automatic workspace trust is off by default; set harnessOptions.kimi.autoTrustWorkspace ' +
+        'to true in .codev/config.json to pre-record trust for builder worktrees Codev creates.',
+    };
+  }
+
+  let file: string;
   try {
-    const file = kimiTrustRecordPath(root, opts);
-    if (existsSync(file)) return false;
+    file = kimiTrustRecordPath(root, opts);
+    if (existsSync(file)) return { wrote: false, reason: 'already-trusted' };
+  } catch (err) {
+    return { wrote: false, reason: 'write-failed', detail: String(err) };
+  }
+
+  try {
     mkdirSync(join(getKimiHome(opts), 'workspace-trust'), { recursive: true });
     writeFileSync(file, JSON.stringify({ root, trustedAt: Date.now() }));
-    return true;
-  } catch {
-    return false;
+    return { wrote: true };
+  } catch (err) {
+    return { wrote: false, reason: 'write-failed', detail: String(err) };
   }
 }

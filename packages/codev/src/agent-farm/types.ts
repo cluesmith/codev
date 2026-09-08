@@ -258,6 +258,30 @@ export interface UserConfig {
     builderHarness?: string;
     shell?: string | string[];
   };
+  /**
+   * Per-harness SETTINGS for BUILT-IN harnesses (Issue #1620).
+   *
+   * Deliberately a separate namespace from `harness` below, which defines CUSTOM harnesses and
+   * whose every entry is validated at config load against a shape requiring `roleArgs` and
+   * `roleScriptFragment`. A settings-shaped entry there would throw during `loadConfig` and take
+   * unrelated commands down with it — and, because `resolveHarness` gives built-ins priority, a
+   * `harness.kimi` block is already inert config. A security opt-in does not belong in a
+   * namespace where the neighbouring key is silently ignored.
+   */
+  harnessOptions?: {
+    kimi?: {
+      /**
+       * Pre-record kimi's workspace trust for builder worktrees Codev creates, so an unattended
+       * builder is not stranded on the 0.33.0+ "Trust this folder?" dialog.
+       *
+       * **Default false, and off means off.** Trust is exactly what gates loading MCP servers
+       * defined by the folder itself, which is a different boundary from the `--yolo` tool
+       * auto-approval a builder already runs with. Even when true, the pre-write is refused for
+       * any worktree that ships `.mcp.json` or `.kimi-code/mcp.json`.
+       */
+      autoTrustWorkspace?: boolean;
+    };
+  };
   /** Custom harness provider definitions. Keys are harness names, values define role injection. */
   harness?: Record<string, {
     roleArgs: string[];

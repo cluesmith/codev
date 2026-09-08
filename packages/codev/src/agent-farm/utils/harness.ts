@@ -25,6 +25,7 @@ import {
   type KimiDiscoveryOpts,
 } from './kimi-session-discovery.js';
 import { buildWorktreeGuardFiles } from './worktree-write-guard.js';
+import { logger } from './logger.js';
 
 // =============================================================================
 // Types
@@ -115,8 +116,14 @@ export interface HarnessProvider {
    * builder would sit on that dialog forever. It pre-records trust in kimi's
    * own store. Implementations MUST be idempotent and fail-soft — a failure has
    * to degrade to the CLI's normal behavior, never abort a spawn.
+   *
+   * `opts.autoTrustWorkspace` (Issue #1620) is the operator's explicit consent, resolved from
+   * `.codev/config.json` by the CALLER rather than read here: a provider that loaded config
+   * itself would be untestable without a filesystem, and — more to the point — the consent
+   * decision belongs to the spawn path that knows which workspace it is spawning into. Absent
+   * or false means the side effect does not happen.
    */
-  prepareWorkspace?(worktreePath: string): void;
+  prepareWorkspace?(worktreePath: string, opts?: { autoTrustWorkspace?: boolean }): void;
 
   /**
    * Optional: conversation-session support, for agents whose CLI can pin and
@@ -534,10 +541,29 @@ export const KIMI_HARNESS: HarnessProvider = {
     };
   },
 
-  // 0.33.0's folder-trust dialog would block an unattended builder before its
-  // composer ever renders; pre-record trust for the worktree Codev just made.
-  // Idempotent and fail-soft — see ensureKimiWorkspaceTrust.
-  prepareWorkspace: (worktreePath) => { ensureKimiWorkspaceTrust(worktreePath); },
+  // 0.33.0's folder-trust dialog would block an unattended builder before its composer ever
+  // renders; pre-record trust for the worktree Codev just made — but only with explicit consent
+  // and only when the worktree ships no project-level MCP config (Issue #1620; see
+  // ensureKimiWorkspaceTrust for why those are separate boundaries from `--yolo`).
+  //
+  // Every outcome is LOGGED, including the refusals. A builder stalled on the trust dialog is
+  // otherwise indistinguishable from a builder stalled on anything else, and the operator's next
+  // move differs completely between "you did not opt in" and "this worktree ships .mcp.json".
+  prepareWorkspace: (worktreePath, opts) => {
+    const decision = ensureKimiWorkspaceTrust(worktreePath, {
+      autoTrustWorkspace: opts?.autoTrustWorkspace === true,
+    });
+    if (decision.wrote) {
+      logger.info(`kimi: pre-recorded workspace trust for ${worktreePath}`);
+      return;
+    }
+    if (decision.reason === 'already-trusted') return; // idempotent no-op, not worth a line
+    const level = decision.reason === 'write-failed' ? 'warn' : 'info';
+    logger[level](
+      `kimi: did NOT pre-record workspace trust (${decision.reason})` +
+      (decision.detail ? ` — ${decision.detail}` : ''),
+    );
+  },
 
   buildBuilderLaunchScript: (ctx) => {
     const tuiCmd = kimiTuiCmd(ctx.baseCmd);

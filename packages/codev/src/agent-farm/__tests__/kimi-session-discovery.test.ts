@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, utimesSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, symlinkSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -329,13 +329,104 @@ describe('kimi session discovery', () => {
     it('agrees with what ensureKimiWorkspaceTrust actually writes', () => {
       const root = mkdtempSync(join(tmpdir(), 'kimi-trust-root-'));
       try {
-        expect(ensureKimiWorkspaceTrust(root, opts())).toBe(true);
+        const optedIn = { ...opts(), autoTrustWorkspace: true };
+        expect(ensureKimiWorkspaceTrust(root, optedIn)).toEqual({ wrote: true });
         expect(inspectKimiTrustLayout(opts())).toEqual({ status: 'ok', sampled: 1 });
         // Idempotent: a second call leaves the existing record alone.
-        expect(ensureKimiWorkspaceTrust(root, opts())).toBe(false);
+        expect(ensureKimiWorkspaceTrust(root, optedIn))
+          .toEqual({ wrote: false, reason: 'already-trusted' });
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
+    });
+  });
+
+  /**
+   * The two refusals (Issue #1620, the #1328 class).
+   *
+   * kimi's folder trust gates exactly one thing: whether MCP servers DEFINED BY THE FOLDER are
+   * loaded. That is a different boundary from the `--yolo` tool auto-approval a builder already
+   * runs with, so pre-recording it is a capability grant and needs consent — and, where the
+   * folder actually ships such config, needs a human regardless of consent.
+   *
+   * Both refusals are asserted by REASON, not merely by "no record appeared". An operator
+   * debugging a builder stalled on the trust dialog has a completely different next move for
+   * "you did not opt in" than for "this worktree ships .mcp.json", and a test that only checked
+   * for absence would pass if the two were ever swapped.
+   */
+  describe('ensureKimiWorkspaceTrust — the security refusals (Issue #1620)', () => {
+    /** Opted IN. The bare `opts()` used elsewhere deliberately is not, so it reads as consent. */
+    const trustOpts = () => ({ ...opts(), autoTrustWorkspace: true });
+
+    let root: string;
+    beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'kimi-trust-root-')); });
+    afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+    const recordCount = (): number => {
+      try {
+        return readdirSync(join(kimiHome, 'workspace-trust')).length;
+      } catch {
+        return 0;
+      }
+    };
+
+    it('refuses without an explicit opt-in — silence grants nothing', () => {
+      expect(ensureKimiWorkspaceTrust(root, opts()))
+        .toMatchObject({ wrote: false, reason: 'not-opted-in' });
+      expect(recordCount()).toBe(0);
+    });
+
+    it('treats an explicit false exactly like an absent option', () => {
+      expect(ensureKimiWorkspaceTrust(root, { ...opts(), autoTrustWorkspace: false }))
+        .toMatchObject({ wrote: false, reason: 'not-opted-in' });
+      expect(recordCount()).toBe(0);
+    });
+
+    it('refuses a worktree carrying .mcp.json, even when opted in', () => {
+      writeFileSync(join(root, '.mcp.json'), '{"mcpServers":{}}', 'utf-8');
+      const decision = ensureKimiWorkspaceTrust(root, trustOpts());
+      expect(decision).toMatchObject({ wrote: false, reason: 'project-mcp-config' });
+      expect(decision.wrote === false && decision.detail).toContain('.mcp.json');
+      expect(recordCount()).toBe(0);
+    });
+
+    it('refuses a worktree carrying .kimi-code/mcp.json, even when opted in', () => {
+      mkdirSync(join(root, '.kimi-code'), { recursive: true });
+      writeFileSync(join(root, '.kimi-code', 'mcp.json'), '{}', 'utf-8');
+      expect(ensureKimiWorkspaceTrust(root, trustOpts()))
+        .toMatchObject({ wrote: false, reason: 'project-mcp-config' });
+      expect(recordCount()).toBe(0);
+    });
+
+    it('refuses on MCP config even when the file is unparseable — presence is the signal', () => {
+      // The file is never read. A folder shipping a BROKEN .mcp.json is still a folder trying to
+      // define servers, and a parse error must not be what decides we may trust it.
+      writeFileSync(join(root, '.mcp.json'), 'not json at all', 'utf-8');
+      expect(ensureKimiWorkspaceTrust(root, trustOpts()))
+        .toMatchObject({ wrote: false, reason: 'project-mcp-config' });
+      expect(recordCount()).toBe(0);
+    });
+
+    it('reports the MCP refusal ahead of the opt-in one, so the log states the strongest reason', () => {
+      // Not opted in AND carrying MCP config. "You did not opt in" would be true but misleading:
+      // it implies opting in would fix it, and it would not.
+      writeFileSync(join(root, '.mcp.json'), '{}', 'utf-8');
+      expect(ensureKimiWorkspaceTrust(root, opts()))
+        .toMatchObject({ wrote: false, reason: 'project-mcp-config' });
+    });
+
+    it('writes when opted in and the worktree ships no MCP config', () => {
+      expect(ensureKimiWorkspaceTrust(root, trustOpts())).toEqual({ wrote: true });
+      expect(recordCount()).toBe(1);
+    });
+
+    it('is fail-soft on an unwritable store — reports, never throws', () => {
+      // A trust-store failure must degrade to "kimi shows its dialog", never abort a spawn.
+      const blocked = join(kimiHome, 'workspace-trust');
+      mkdirSync(kimiHome, { recursive: true });
+      writeFileSync(blocked, 'I am a file where a directory should be', 'utf-8');
+      expect(ensureKimiWorkspaceTrust(root, trustOpts()))
+        .toMatchObject({ wrote: false, reason: 'write-failed' });
     });
   });
 });
