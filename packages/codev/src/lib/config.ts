@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { getFrameworkCacheDir as _getFrameworkCacheDir } from './skeleton.js';
+import { getFrameworkCacheDir as _getFrameworkCacheDir, findWorkspaceRoot } from './skeleton.js';
 import { validateCustomHarnessConfig } from '../agent-farm/utils/harness.js';
 import {
   validateConsultModels,
@@ -37,6 +37,18 @@ export interface CodevConfig {
     builder?: string | string[];
     builderHarness?: string;
     shell?: string | string[];
+  };
+  /**
+   * Per-harness SETTINGS for BUILT-IN harnesses (Issue #1620). Separate from `harness` below,
+   * which defines CUSTOM harnesses and is validated at load against a shape requiring
+   * `roleArgs`/`roleScriptFragment` — a settings entry there would throw during `loadConfig`.
+   * See the identical block on `UserConfig` for the full reasoning.
+   */
+  harnessOptions?: {
+    kimi?: {
+      /** Pre-record kimi workspace trust for Codev-created builder worktrees. Default false. */
+      autoTrustWorkspace?: boolean;
+    };
   };
   /** Custom harness provider definitions. Keys are harness names, values define role injection. */
   harness?: Record<string, {
@@ -340,6 +352,12 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
     }
   }
 
+  // Issue #1620: `harnessOptions` carries a SECURITY opt-in, so a typo must fail loudly at load
+  // rather than degrade to the default. A misspelled key that silently read as `false` would be
+  // merely annoying; one that silently read as `true` would be a capability granted by accident,
+  // and validating only the shape we understand is what keeps that impossible.
+  validateHarnessOptions(merged.harnessOptions);
+
   // Validate consult lane config at LOAD time, alongside harness validation above.
   //
   // Deliberately here rather than at the point of use: a typo must fail before anything runs, not
@@ -352,6 +370,69 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
   validateConsultationConfig(merged.porch?.consultation, workspaceRoot);
 
   return merged;
+}
+
+/**
+ * Validate the `harnessOptions` block (Issue #1620).
+ *
+ * Strict about unknown keys, which is unusual for this file and deliberate here: the block's
+ * only current member gates a capability grant, and the failure mode of a tolerated typo is
+ * asymmetric. `autoTrustWorkspac: true` silently meaning "off" is a puzzled operator;
+ * a future key silently meaning "on" is a grant nobody made. Fail fast on both.
+ */
+export function validateHarnessOptions(options: unknown): void {
+  if (options === undefined) return;
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+    throw new Error(`Config "harnessOptions": expected an object, got ${Array.isArray(options) ? 'array' : typeof options}`);
+  }
+  const known = new Set(['kimi']);
+  for (const key of Object.keys(options as Record<string, unknown>)) {
+    if (!known.has(key)) {
+      throw new Error(
+        `Config "harnessOptions.${key}": unknown harness. Known: ${[...known].join(', ')}. ` +
+        `(Custom harness DEFINITIONS go under "harness", not "harnessOptions".)`,
+      );
+    }
+  }
+  const kimi = (options as { kimi?: unknown }).kimi;
+  if (kimi === undefined) return;
+  if (typeof kimi !== 'object' || kimi === null || Array.isArray(kimi)) {
+    throw new Error(`Config "harnessOptions.kimi": expected an object, got ${Array.isArray(kimi) ? 'array' : typeof kimi}`);
+  }
+  const knownKimi = new Set(['autoTrustWorkspace']);
+  for (const [key, value] of Object.entries(kimi as Record<string, unknown>)) {
+    if (!knownKimi.has(key)) {
+      throw new Error(
+        `Config "harnessOptions.kimi.${key}": unknown option. Known: ${[...knownKimi].join(', ')}.`,
+      );
+    }
+    if (typeof value !== 'boolean') {
+      throw new Error(
+        `Config "harnessOptions.kimi.${key}": must be a boolean, got ${typeof value}. ` +
+        `This option gates a capability grant, so a non-boolean is rejected rather than coerced.`,
+      );
+    }
+  }
+}
+
+/**
+ * Is automatic kimi workspace-trust pre-recording enabled for this workspace (Issue #1620)?
+ *
+ * The single reader of that setting, so callers cannot each re-derive the default. Absent
+ * config, an absent block, and an explicit `false` all mean the same thing: **no**.
+ */
+export function kimiAutoTrustWorkspace(workspaceRoot?: string): boolean {
+  try {
+    // Same root resolution the harness lookup uses, so consent is read from the SAME config the
+    // spawn is configured by. A caller with no explicit root (worktree mode) must not silently
+    // read a different workspace's answer.
+    const root = workspaceRoot || findWorkspaceRoot();
+    return loadConfig(root).harnessOptions?.kimi?.autoTrustWorkspace === true;
+  } catch {
+    // A config this broken will fail loudly elsewhere; it must not be the thing that decides
+    // we may grant trust. Unreadable config means the default, and the default is no.
+    return false;
+  }
 }
 
 /**

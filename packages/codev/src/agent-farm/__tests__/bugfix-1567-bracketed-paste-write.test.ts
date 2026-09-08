@@ -206,6 +206,22 @@ describe('Issue #1567 — the write edge never hands the PTY more than its input
     expect(writeStrategyForApp(undefined)).toBe(BRACKETED_PASTE);
   });
 
+  // Issue #1620 pinned separately, because it is a DECISION rather than a measurement.
+  //
+  // The kimi lane proposed opting kimi out until someone had measured whether its TUI honours
+  // bracketed paste — an un-honoured bracket does not merely look wrong, it puts literal
+  // `\x1b[200~` in the composer and, because `framePieces` turns `\n` into `\r` inside the
+  // bracket, submits every line as its own message. The owner weighed that and declined
+  // (2026-09-08): the residual is acceptable and a live measurement beats a defensive default.
+  //
+  // Asserted rather than left implicit because "kimi is absent from the opt-out list" reads
+  // identically whether it was considered or overlooked. With this here, a future edit to
+  // `writeStrategyForApp` has to be deliberate about kimi instead of inheriting the default by
+  // silence — which is exactly how kimi would have inherited it in the first place.
+  it('strategy by app: kimi takes the bracketed default — an owner decision, not an oversight', () => {
+    expect(writeStrategyForApp('kimi')).toBe(BRACKETED_PASTE);
+  });
+
   it('submitMessagePaced forwards the strategy to the write', async () => {
     resetSubmissionChains();
     const bracketed = makeSession();

@@ -34,10 +34,27 @@ export function formatVerdict(
 /**
  * Is this verdict one the classifier could not resolve (Issue #1482)?
  *
- * True for the defect class — `no-profile` (the app is unrecognized) and the two
- * can't-verify details — and false for `user-text` (a human at the line) and for
- * `no-live-pty` (no session at all). This is the "will it clear on its own?" question, and
- * the answer decides which remedy an operator should reach for.
+ * True for the defect class — `no-profile` (the app is unrecognized) and the can't-verify
+ * details — and false for `user-text` (a human at the line) and for `no-live-pty` (no session
+ * at all). This is the "will it clear on its own?" question, and the answer decides which
+ * remedy an operator should reach for.
+ *
+ * Issue #1201 added two details, both for kimi's boxed composer:
+ *
+ *   - `no-region-start` is the exact mirror of `no-region-end` — a composer whose box TOP is
+ *     not on screen has no proven upper bound, so it is a torn frame or a drifted profile.
+ *     Unverifiable for the same reason, with the same remedy.
+ *
+ *   - `multi-row-draft` is the contested one, and it is TRUE deliberately. Every other detail
+ *     is a cell COUNT; this is the one verdict the classifier reaches when it could not count
+ *     (a draft of a newline then `>` has zero countable cells — all whitespace, box chrome, or
+ *     an exempted marker) and had to infer from box GEOMETRY instead. "The classifier could not
+ *     verify this" is therefore the truthful rendering, and a sustained streak of it is exactly
+ *     the drift signal that the measured box-growth premise has failed on a newer kimi.
+ *     Accepted cost, stated so nobody rediscovers it as a bug: a human genuinely sitting on a
+ *     multi-line kimi draft contributes to a liveness streak. `surfaceLiveness` only alarms on
+ *     recent output, which suppresses most of that — and, symmetrically, part of the drift case
+ *     too, which is why a `codev doctor` premise probe for box growth is tracked separately.
  *
  * The delivery module's `isClassifierStuck` DELEGATES to this — it is a thin wrapper typed on
  * the DB/gate unions, kept because it reads naturally beside the escalation policy it serves.
@@ -49,5 +66,11 @@ export function isUnverifiableVerdict(
   reason: string | null | undefined,
   detail: string | null | undefined,
 ): boolean {
-  return reason === 'no-profile' || detail === 'no-region-end' || detail === 'no-composer-marker';
+  return (
+    reason === 'no-profile' ||
+    detail === 'no-region-end' ||
+    detail === 'no-region-start' ||
+    detail === 'no-composer-marker' ||
+    detail === 'multi-row-draft'
+  );
 }

@@ -63,7 +63,12 @@ import {
 } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession, writeStrategyForApp } from './message-write.js';
-import { makeDeliveryPorts, getMailboxDrainer, resolveProfileForSession } from './mailbox-wiring.js';
+import {
+  makeDeliveryPorts,
+  getMailboxDrainer,
+  resolveProfileForSession,
+  resolvePacingForSession,
+} from './mailbox-wiring.js';
 import { deliverAgentMailSerialized, type DeliveryOutcome, type DeliveryPorts } from './mailbox-delivery.js';
 import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import {
@@ -2108,6 +2113,11 @@ async function handleSend(
   // bypass — no gate, no mailbox row. ESC ends the running turn so already-queued
   // messages process; the trailing Enter (default) is what lets them through
   // (matching the verified recovery `afx send <b> --raw "$(printf '\x1b')"`).
+  //
+  // Deliberately NOT per-harness paced (Issue #1201), unlike the interrupt path below:
+  // this route writes no text, and Kimi's swallowed-Enter behaviour is paste detection
+  // keyed to a preceding text burst. Unmeasured either way on Kimi, so it is left at the
+  // Spec 1273 timing rather than changed on a guess.
   if (escape) {
     // Awaited: the response must not claim delivery before the ESC and its
     // Enter have actually been written (Spec 1273 verify).
@@ -2202,12 +2212,19 @@ async function handleSend(
         // Issue #1567: the same per-harness write strategy the gated path uses — an
         // interrupt to an opted-out harness must not be bracketed just because it bypassed
         // the gate.
+        // Issue #1201: the interrupt writes body-then-Enter exactly like a gated delivery, so
+        // it needs the same per-harness Enter timing. Without it a Kimi target's interrupt text
+        // is typed and never submitted (its paste-detection window swallows an Enter at the
+        // default 80/50 ms), which reads to a human as a silently ignored bypass — the worst
+        // failure mode for the one path that exists to override the gate. Resolution is
+        // advisory and total; a miss just means the default timing.
         return writeMessageToSession(
           session,
           formattedMessage,
           noEnter,
           100,
           writeStrategyForApp(resolveProfileForSession(session)?.app),
+          resolvePacingForSession(session),
         );
       },
       undefined,

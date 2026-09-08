@@ -18,7 +18,7 @@ import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-ses
 import type { SessionScreen } from '../../terminal/session-screen.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './tower-messages.js';
-import { submitMessagePaced } from './message-write.js';
+import { submitMessagePaced, type MessagePacing } from './message-write.js';
 import { bufferLines, classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import {
@@ -26,6 +26,7 @@ import {
   harnessFromLaunchScript,
   type ContextFsPort,
 } from '../commands/reset/context.js';
+import { detectHarnessFromCommand, getBuiltinHarness } from '../utils/harness.js';
 import { getGlobalDb } from '../db/index.js';
 import { getArchitectByName } from '../state.js';
 import { formatBuilderMessage } from '../utils/message-format.js';
@@ -170,6 +171,53 @@ export function resolveProfileForSession(session: DeliverySession): GateProfile 
 }
 
 /**
+ * The built-in harness NAME behind a session, by the same two-step used for the
+ * classifier profile: the launch `command` first, then the launch script for the
+ * wrapped case (a builder's `command` is `.builder-start.sh`'s shell, not the
+ * agent). `null` when nothing recognizable is found.
+ *
+ * Deliberately a sibling of {@link resolveProfileForSession} rather than a shared
+ * root: that function resolves agy specially (agy is not a Codev *harness* — it
+ * has a gate profile but no `HarnessProvider`) and consults `launchArgs`, so
+ * folding the two would either widen the gate's strict identity rules or narrow
+ * this one. They answer related but different questions; the duplication is one
+ * cheap `.builder-start.sh` read per delivery, and the gate path is Spec 1313
+ * code that must not be perturbed for a pacing feature.
+ */
+export function resolveHarnessForSession(session: DeliverySession): string | null {
+  return detectHarnessFromCommand(session.command)
+    ?? harnessFromLaunchScript(NODE_FS_PORT, session.cwd);
+}
+
+/**
+ * Per-harness Enter timing for a delivery target (Issue #1201).
+ *
+ * Kimi's paste-detection window swallows an Enter sent 80ms after the body (the
+ * message-write default), so a Kimi builder needs ~1s or its mail is typed but
+ * never submitted. Resolution keys off the harness identity recovered from the
+ * launch script, which is the same self-describing signal the gate already
+ * resolves and is override-proof by construction: the script is GENERATED from
+ * the resolved harness, so a `--builder-cmd kimi` spawn against a
+ * claude-configured workspace still reads `kimi`. (This replaces the earlier
+ * `.builder-kimi` marker probe, which needed every launch shape to remember to
+ * write the marker — a coverage obligation that had already been missed once.)
+ *
+ * Advisory and TOTAL: pacing is an optimization, never a precondition for
+ * delivery, so every failure path (unreadable worktree, unknown/retired harness
+ * name, custom harness) degrades to the message-write defaults rather than
+ * throwing into the delivery path. A prior iteration of this feature caused a
+ * 500 on `/api/send` by not being total — that lesson is load-bearing here.
+ */
+export function resolvePacingForSession(session: DeliverySession): MessagePacing | undefined {
+  try {
+    const name = resolveHarnessForSession(session);
+    return name ? getBuiltinHarness(name)?.messagePacing : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Classify a session's CURRENT screen for the gate (Spec 1313 render-gate round 2). Reads the
  * session's persistent {@link SessionScreen} mirror — a bounded headless Terminal fed the
  * session's output from birth — and runs the shared classifier on its viewport. This replaces
@@ -306,8 +354,15 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     // LEAF inside the per-agent serializer, so a gated delivery and a concurrent
     // `--interrupt`/`--escape` can no longer interleave. The precheck is the delivery
     // module's, re-run inside that lock.
+    //
+    // Issue #1201: per-harness Enter pacing is resolved HERE rather than passed through the
+    // port, because it is a property of the target session that no unit fake should have to
+    // know about — unlike `strategy`, which the delivery module derives from the gate profile
+    // it already holds. Resolution is total: every failure path degrades to the defaults.
     writeMessage: (session, msg, noEnter, precheck, strategy) =>
-      submitMessagePaced(session, msg, noEnter, precheck, undefined, strategy),
+      submitMessagePaced(
+        session, msg, noEnter, precheck, undefined, strategy, resolvePacingForSession(session),
+      ),
     // Issue #1573: the only end-to-end evidence that the bytes reached the terminal — opened
     // before the write. Issue #1584: consulted AFTER the row is marked delivered, because the
     // commit is what makes a completed write un-repeatable; this only decides what we report.

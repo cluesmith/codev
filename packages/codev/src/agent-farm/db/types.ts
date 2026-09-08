@@ -112,7 +112,12 @@ export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
  * The DB column carries NO CHECK constraint (see `GLOBAL_SCHEMA` / migration v18); this type
  * is the enforcement.
  */
-export type MailboxGateDetail = 'user-text' | 'no-region-end' | 'no-composer-marker';
+export type MailboxGateDetail =
+  | 'user-text'
+  | 'no-region-end'
+  | 'no-region-start'   // Issue #1201: a boxed composer (kimi) whose box TOP is off screen
+  | 'no-composer-marker'
+  | 'multi-row-draft';  // Issue #1201: a boxed composer grown past one interior row — held on SHAPE
 
 /**
  * Database row type for the mailbox table (Spec 1313).

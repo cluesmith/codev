@@ -111,6 +111,51 @@ export interface GateProfile {
    */
   regionEndPatterns: RegExp[];
   /**
+   * Optional UPPER bound for the composer region, for apps whose composer spans
+   * more than the marker row (Issue #1201 — kimi draws a multi-row rounded box).
+   *
+   * Without one, scanning starts AT the marker row, and since {@link findMarkerRow}
+   * takes the LAST matching row, any lower row that looks like a marker moves the
+   * region down past real draft text — which is then never counted, so a composer
+   * holding a draft classifies CLEAN. Measured on kimi 0.34.0: a two-line draft
+   * whose second line is a bare `>` renders `│ > <text>` / `│   >`, and the second
+   * row matches kimi's marker.
+   *
+   * Set it and the region instead starts at the nearest matching line ABOVE the
+   * marker row (kimi: the box top `╭───`), so the whole composer is scanned.
+   * Left unset — claude, codex, agy — the region starts at the marker row exactly
+   * as before, and since no row below a LAST match can match, those profiles
+   * cannot reach any of the new behavior.
+   *
+   * Bounds the SCAN only. It does not arm the multi-row-draft rule — see
+   * {@link growsWithDraft}, which is deliberately a separate opt-in.
+   */
+  regionStartPatterns?: RegExp[];
+  /**
+   * Declares a MEASURED property of this app's composer: its box grows a row only
+   * when the draft gains a line, so a region taller than one interior row proves
+   * unsent input. Arms the multi-row-draft rule in {@link classifyBuffer}, which is
+   * the only thing that catches a draft with zero countable cells (kimi: a newline
+   * then `>`, whose every cell is whitespace, box chrome, or an exempted marker).
+   *
+   * Set this ONLY from a live measurement covering the app's idle screen, its menus
+   * and pickers, and — the one that matters most — its steady state after a reply.
+   * The rule holds mail on shape alone, so an app that grows its box for any reason
+   * other than a draft line would hold every message forever: a liveness failure,
+   * not the fail-safe direction. For kimi 0.34.0 that measurement is
+   * `codev/spikes/pir-1201-kimi-box-growth.mjs`.
+   *
+   * Kept separate from {@link regionStartPatterns} because the two are unrelated
+   * properties that merely coincide for kimi, and the hazard is concrete rather than
+   * theoretical: the shipped `codex-idle.clean.txt` capture — a real, genuinely EMPTY
+   * codex composer — already spans two interior rows. Were arming folded into
+   * `regionStartPatterns`, the day anyone declared one for codex (a header bound, a
+   * boxed redesign) codex mail would stop delivering, silently. Requires
+   * `regionStartPatterns` to be set as well, since without a box top the row count
+   * measures distance to the status line rather than the composer's height.
+   */
+  growsWithDraft?: true;
+  /**
    * Optional per-app marker anchor: when true, the marker row must ALSO be the row
    * holding the buffer cursor. `markerPattern` alone is a text test, and a text test
    * cannot tell a composer from any other row an app happens to prefix the same way —
@@ -128,6 +173,10 @@ export interface GateProfile {
    * signal that separates agy's composer marker (palette 12, bright blue) from its
    * transcript echo of a submitted turn (palette 4 — measured, #1474). Left unset, the
    * marker cell's color is not examined.
+   *
+   * The cell sampled is the one at the marker MATCH's start column ({@link markerSpanStart}),
+   * not column 0 — so this anchor stays correct for a profile whose marker is not at the row
+   * start, which kimi's boxed `│ > ` is (Issue #1201).
    */
   markerFgPalette?: number;
   /**
@@ -152,10 +201,19 @@ export interface GateVerdict {
    * reason). `no-composer-marker` = wrapper/boot/picker/unknown screen (or a torn
    * replay that dropped the marker); `no-region-end` = a marker with no rule/status
    * line beneath it to bound the composer (a partial/mid-repaint frame) — held
-   * rather than scanning into status chrome; `user-text` = a draft or menu occupies
-   * the composer; `empty` = clean.
+   * rather than scanning into status chrome; `no-region-start` = the mirror of that
+   * for a profile whose composer is a box (kimi), when the box TOP is not on screen;
+   * `multi-row-draft` = a boxed composer grown past one interior row, i.e. a
+   * multi-line draft, held on SHAPE because its cells can all be exempt chrome;
+   * `user-text` = a draft or menu occupies the composer; `empty` = clean.
    */
-  detail: 'no-composer-marker' | 'no-region-end' | 'user-text' | 'empty';
+  detail:
+    | 'no-composer-marker'
+    | 'no-region-end'
+    | 'no-region-start'
+    | 'multi-row-draft'
+    | 'user-text'
+    | 'empty';
 }
 
 /**
@@ -237,12 +295,123 @@ function findMarkerRow(
     if (profile.markerFgPalette !== undefined) {
       const line = buf.getLine(top + i);
       if (!line) continue;
-      line.getCell(0, cell);
+      // The marker GLYPH's own cell, wherever the profile puts it — not column 0. See
+      // {@link markerSpanStart}: a column-0 read is right for every marker anchored at the row
+      // start and wrong for a boxed composer like kimi's, whose `>` is at column 3.
+      line.getCell(markerSpanStart(lines[i], profile.markerPattern), cell);
       if (!cell.isFgPalette() || cell.getFgColor() !== profile.markerFgPalette) continue;
     }
     markerRow = i;
   }
   return markerRow;
+}
+
+/**
+ * Column of the composer marker's GLYPH on its own row — the cell whose colour a
+ * `markerFgPalette` anchor examines.
+ *
+ * Not the match's start. Those coincide only for a pattern anchored directly at the glyph
+ * (claude `^❯`, codex `^›`, agy `^>`), and the first profile where they diverge is exactly the
+ * one this function exists for: kimi's marker is `/^\s*│\s*(>)/`, which matches from column 0
+ * while its `>` sits at column 3. Returning `m.index` there samples a leading space — which is
+ * how the first version of this helper "generalized" the anchor off `getCell(0)` and changed
+ * nothing at all (caught in review; the trap it claimed to remove was still armed).
+ *
+ * So the glyph is identified EXPLICITLY, by a **named** group `(?<glyph>…)`. Named rather than
+ * positional for a concrete reason, not tidiness: the first attempt used capture group 1, and
+ * agy's marker `/^>(\s|$)/` already had a group 1 — its trailing SEPARATOR. Every agy fixture
+ * went red at once, because the anchor started sampling the space after the marker instead of the
+ * marker. A positional convention collides with any incidental group; a named one cannot.
+ * Patterns with no `glyph` group keep `m.index`, correct for every marker anchored at its own
+ * glyph. The `d` flag is added on the fly for `indices`, and `g`/`y` stripped so a stateful
+ * profile regex cannot make the answer depend on a previous call's `lastIndex`.
+ *
+ * The same narrow-glyph argument {@link markerSpanEnd} rests on applies: every shipped marker
+ * pattern admits only single-column glyphs before its group, so a string index is a cell column.
+ * `0` when the pattern does not match, which cannot happen on a row that already passed the
+ * text test.
+ */
+export function markerSpanStart(line: string, pattern: RegExp): number {
+  const flags = pattern.flags.replace(/[gy]/g, '');
+  const stateless = new RegExp(pattern.source, flags.includes('d') ? flags : flags + 'd');
+  const m = stateless.exec(line);
+  if (!m) return 0;
+  const glyph = m.indices?.groups?.glyph;
+  return glyph ? glyph[0] : m.index;
+}
+
+/**
+ * End column (exclusive) of the composer marker on its own row — the span the
+ * classifier treats as chrome rather than user text.
+ *
+ * The marker is chrome *wherever the profile puts it*. claude/codex/agy anchor
+ * theirs at column 0, which the original column-0 skip covered; kimi renders its
+ * composer inside a rounded box, so its marker sits at column 3 (`  │ > `) and a
+ * column-0 skip would count the `>` glyph as a draft — classifying a genuinely
+ * empty Kimi composer `user-text` forever, i.e. holding its mail forever
+ * (Issue #1201). Skipping the exact span the marker pattern matched covers every
+ * profile without a per-profile column constant, and is a no-op for the column-0
+ * ones (their match starts at 0 and spans 1–2 cells, the second of which is a
+ * space that was already skipped as whitespace).
+ *
+ * The pattern is re-compiled without `g`/`y` so a stateful profile regex can
+ * never make this depend on a previous call's `lastIndex`.
+ *
+ * The returned string index is used as a CELL COLUMN. That holds for every
+ * profile because each marker pattern admits only narrow (single-column) glyphs
+ * before its end — `\s`, `│`, `❯`, `›`, `>` — so no wide/CJK cell can precede the
+ * match and shift string index away from column. A future profile whose marker
+ * can follow a wide glyph would break that identity and needs a cell-aware span.
+ *
+ * Exported for the Issue #1201 guardrail test, which pins the exact span each
+ * shipped profile yields — that number is the whole basis of the "no-op for
+ * claude/codex/agy" claim this change rests on.
+ */
+export function markerSpanEnd(line: string, pattern: RegExp): number {
+  const stateless = new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ''));
+  const m = stateless.exec(line);
+  return m ? m.index + m[0].length : 1;
+}
+
+/**
+ * First row of the composer region: the row just below the nearest
+ * `regionStartPatterns` match above `markerRow`, or -1 when the profile declares
+ * one and none is on screen.
+ *
+ * A profile with no `regionStartPatterns` returns `markerRow` — the original
+ * behavior, byte for byte.
+ *
+ * The bound is EXCLUSIVE, mirroring `endRow`: the matched line is the composer's
+ * boundary, not part of it. That matters concretely — kimi's box top renders
+ * `╭────╮`, and its right corner `╮` is not in {@link IGNORE_CHARS}, so including
+ * that row would count the corner as user text and hold every idle kimi composer
+ * forever. Excluding it keeps the region to the rows that can actually hold a draft.
+ *
+ * -1 is deliberate and mirrors {@link findRegionEnd}: for an app whose composer is
+ * a box, a marker with no box top above it is a partial/mid-repaint frame, so the
+ * region has no proven UPPER bound. Scanning from the marker row anyway is exactly
+ * the false-CLEAN this bound exists to prevent, so the caller must hold instead.
+ */
+function findRegionStart(lines: string[], markerRow: number, startPatterns?: RegExp[]): number {
+  if (!hasRegionStart(startPatterns)) return markerRow;
+  for (let i = markerRow - 1; i >= 0; i--) {
+    if (startPatterns.some((p) => p.test(lines[i]))) return i + 1;
+  }
+  return -1;
+}
+
+/**
+ * Does this profile declare a proven UPPER bound for its composer region?
+ *
+ * Shared by {@link findRegionStart} and the multi-row-draft rule in
+ * {@link classifyBuffer} on purpose: both must agree on what "bounded" means. If
+ * they disagreed, a profile with an empty pattern array would fall back to
+ * `startRow = markerRow` while still being treated as bounded — and the row-count
+ * rule would then fire on claude/codex, whose composer legitimately sits more than
+ * one row above its rule line.
+ */
+function hasRegionStart(patterns?: RegExp[]): patterns is RegExp[] {
+  return patterns !== undefined && patterns.length > 0;
 }
 
 /**
@@ -370,16 +539,38 @@ export function classifyBuffer(
     // empty/dim, return a false CLEAN).
     return { clean: false, reason: 'busy', detail: 'no-region-end' };
   }
+  const startRow = findRegionStart(lines, markerRow, profile.regionStartPatterns);
+  if (startRow === -1) {
+    // A boxed composer whose box top is not on screen: the region has no proven
+    // upper bound, so scanning would count only the tail of a draft that may
+    // continue above. Hold — the same fail-toward-hold call as `no-region-end`.
+    return { clean: false, reason: 'busy', detail: 'no-region-start' };
+  }
+  // Re-compiled without g/y for the same reason markerSpanEnd does it: a stateful
+  // profile regex must not let one row's match position affect the next row's test.
+  const markerTest = new RegExp(
+    profile.markerPattern.source,
+    profile.markerPattern.flags.replace(/[gy]/g, ''),
+  );
   let userCells = 0;
 
-  for (let row = markerRow; row < endRow; row++) {
+  for (let row = startRow; row < endRow; row++) {
     const line = buf.getLine(top + row);
     if (!line) continue;
+    // The marker is chrome on EVERY row that renders it, not just the row the
+    // search settled on: a multi-row composer repeats its box edge, and with a
+    // region that starts above `markerRow` those upper rows are now scanned.
+    // Rows that do not match contribute 0, so profiles without a region start —
+    // where the only marker-matching row in the region IS `markerRow` — keep the
+    // exact previous exemption.
+    const markerEnd = markerTest.test(lines[row])
+      ? markerSpanEnd(lines[row], profile.markerPattern)
+      : 0;
     for (let col = 0; col < cols; col++) {
       line.getCell(col, cell);
       const ch = cell.getChars();
       if (!ch || WHITESPACE.test(ch) || IGNORE_CHARS.has(ch)) continue;
-      if (row === markerRow && col === 0) continue; // the marker glyph itself
+      if (col < markerEnd) continue; // the marker glyph itself (see markerSpanEnd)
       if (cell.isDim()) continue; // placeholder / hint chrome renders dim (claude/codex)
       if (
         profile.placeholderFgPalette !== undefined &&
@@ -395,9 +586,47 @@ export function classifyBuffer(
     }
   }
 
-  return userCells === 0
-    ? { clean: true, detail: 'empty' }
-    : { clean: false, reason: 'busy', detail: 'user-text' };
+  if (userCells > 0) return { clean: false, reason: 'busy', detail: 'user-text' };
+
+  // Zero countable cells is NOT yet proof of an empty composer. One draft shape has no
+  // countable cells at all: type a newline and then `>` and kimi renders
+  //
+  //     │ >        <- row 1, empty
+  //     │   >      <- row 2, matches the marker, so its `>` is span-exempted as chrome
+  //
+  // every cell being whitespace, box chrome, or an exempted marker. Bounding the region
+  // correctly does not help — the draft is real but literally uncountable — so the last
+  // evidence available is the composer's SHAPE. For a boxed composer the box grows a row
+  // only when the draft gains a line, so a region spanning more than one interior row is
+  // positive evidence of unsent input. Generalizes to any draft whose rows are all
+  // whitespace or whitespace+`>`.
+  //
+  // Sound only because box growth is EXCLUSIVE to multi-line drafts, which was measured
+  // on real kimi 0.34.0 rather than assumed (`codev/spikes/pir-1201-kimi-box-growth.mjs`):
+  // idle, a single-line draft, the `/` menu, the `@` picker and the post-reply steady
+  // state all hold at one interior row; only the newline drafts grow to two. The steady
+  // state is the load-bearing measurement — growth on a composer that has already carried
+  // a turn would hold every later message forever, a liveness bug rather than a fail-safe
+  // one.
+  //
+  // Placed AFTER the scan, not before it, so the cell count keeps its ground-truth role:
+  // a text-bearing multi-row draft still reports `user-text`, and this detail is reserved
+  // for the case the count is blind to.
+  //
+  // Two conditions, both required and each carrying its own half of the meaning:
+  // `growsWithDraft` is the app's MEASURED promise that box height tracks draft lines,
+  // and `hasRegionStart` is what makes `endRow - startRow` mean "interior rows" at all.
+  // Neither alone is sufficient, and the second is not academic — the shipped
+  // `codex-idle.clean.txt` capture is a genuinely EMPTY composer spanning two interior
+  // rows, so an unbounded profile reaching this line would hold real mail forever.
+  if (
+    profile.growsWithDraft &&
+    hasRegionStart(profile.regionStartPatterns) &&
+    endRow - startRow > 1
+  ) {
+    return { clean: false, reason: 'busy', detail: 'multi-row-draft' };
+  }
+  return { clean: true, detail: 'empty' };
 }
 
 /**

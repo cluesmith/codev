@@ -171,6 +171,29 @@ export function writeEscapeToSession(session: WritableSession, noEnter: boolean)
 }
 
 /**
+ * Per-harness pacing override (Issue #1201).
+ *
+ * Some CLIs have a longer paste-detection window than the shared defaults assume. Kimi is the
+ * measured case: bisected live on 0.27.0, an Enter arriving **80 ms or 100 ms** after the body is
+ * swallowed and the message never submits; 120, 250, 500 and 1000 ms all submit (threshold
+ * ≈ 100–120 ms). `KIMI_ENTER_DELAY_MS` is pinned at 1000 ms for ~9x margin and re-verified
+ * submitting on 0.34.0 under agent-core-v2.
+ *
+ * When set, `enterDelayMs` replaces **both** default Enter delays — {@link SIMPLE_ENTER_DELAY_MS}
+ * on the short-frame branch and {@link PASTE_ENTER_DELAY_MS} on the long-frame one. Covering both
+ * is not tidiness: since Issue #1567 a long frame's Enter fires at `PASTE_ENTER_DELAY_MS` = 80 ms,
+ * which is the *first row of Kimi's bisect* — a value measured at 0/29 losses on claude 2.1.263
+ * and codex 0.146.0, and measured fatal on Kimi. Overriding only the short branch would leave
+ * every real `afx send` broken, since a formatted message is almost always >= 4 lines.
+ *
+ * Nothing else moves: chunking, thresholds, the write strategy and the inter-piece gap are all
+ * unchanged, and the override only ever delays the Enter, never advances it.
+ */
+export interface MessagePacing {
+  enterDelayMs?: number;
+}
+
+/**
  * Write a message to a PTY session (Bugfix #584, Issue #1567).
  *
  * Short frames (under {@link BRACKET_MIN_LINES} lines AND at most {@link BRACKET_MIN_BYTES}
@@ -183,6 +206,7 @@ export function writeEscapeToSession(session: WritableSession, noEnter: boolean)
  *
  * @param delayOffset  ms offset for all scheduled writes (used to serialize
  *                     multiple messages to the same session without interleaving)
+ * @param pacing       optional per-harness timing override (Issue #1201)
  * @returns            ms timestamp (from call time) when all writes complete
  */
 export function writeMessageToSession(
@@ -191,6 +215,7 @@ export function writeMessageToSession(
   noEnter: boolean,
   delayOffset = 0,
   strategy: WriteStrategy = BRACKETED_PASTE,
+  pacing?: MessagePacing,
 ): number {
   if (!isLongFrame(message)) {
     if (delayOffset === 0) {
@@ -198,7 +223,7 @@ export function writeMessageToSession(
     } else {
       setTimeout(() => session.write(message), delayOffset);
     }
-    const enterTime = delayOffset + SIMPLE_ENTER_DELAY_MS;
+    const enterTime = delayOffset + (pacing?.enterDelayMs ?? SIMPLE_ENTER_DELAY_MS);
     if (!noEnter) {
       setTimeout(() => session.write('\r'), enterTime);
     }
@@ -218,7 +243,11 @@ export function writeMessageToSession(
 
   const lastPieceTime = delayOffset + (pieces.length - 1) * gap;
   if (noEnter) return lastPieceTime;
-  const enterTime = lastPieceTime + PASTE_ENTER_DELAY_MS;
+  // Issue #1201: the per-harness override applies HERE too, not just on the short branch above.
+  // PASTE_ENTER_DELAY_MS is 80 ms — measured 0/29 losses on claude 2.1.263 and codex 0.146.0, and
+  // measured SWALLOWED on Kimi (bisect: 80 and 100 fail, 120+ submit). A formatted `afx send` is
+  // almost always >= 4 lines, so THIS is the branch a real message takes. See {@link MessagePacing}.
+  const enterTime = lastPieceTime + (pacing?.enterDelayMs ?? PASTE_ENTER_DELAY_MS);
   setTimeout(() => session.write('\r'), enterTime);
   return enterTime;
 }
@@ -277,6 +306,7 @@ export async function submitMessagePaced<A>(
   precheck: () => A | null,
   clock?: SubmitClock,
   strategy: WriteStrategy = BRACKETED_PASTE,
+  pacing?: MessagePacing,
 ): Promise<PacedSubmitResult<A>> {
   // Fail LOUD on a missing id rather than keying the lock on `undefined`. Sessions reach
   // this through structurally-typed ports, so a double without an id compiles fine and
@@ -311,7 +341,7 @@ export async function submitMessagePaced<A>(
       () => {
         abort = precheck();
         if (abort !== null) return 0; // refused in-lock: not one byte goes out
-        return writeMessageToSession(tracked, message, noEnter, 0, strategy);
+        return writeMessageToSession(tracked, message, noEnter, 0, strategy, pacing);
       },
       clock,
     );

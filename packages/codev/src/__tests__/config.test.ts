@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { deepMerge, loadConfig, resolveProjectConfigPath, resolveLocalConfigPath } from '../lib/config.js';
+import { deepMerge, loadConfig, resolveProjectConfigPath, resolveLocalConfigPath, validateHarnessOptions, kimiAutoTrustWorkspace } from '../lib/config.js';
 import { getActivityHooks } from '../agent-farm/utils/config.js';
 
 // Helpers
@@ -322,5 +322,106 @@ describe('getActivityHooks (trusted personal layers only — never the committed
 
   it('returns [] when nothing is configured', () => {
     expect(getActivityHooks(tmpDir).hooks).toEqual([]);
+  });
+});
+
+/**
+ * `harnessOptions` (Issue #1620) — the namespace carrying the kimi workspace-trust opt-in.
+ *
+ * This block exists because the option gates a **capability grant**, and the two failure
+ * directions are not symmetric. A typo that silently reads as `false` is a puzzled operator; one
+ * that silently reads as `true` is a permission nobody granted. So the validator is strict about
+ * unknown keys and non-booleans, and `kimiAutoTrustWorkspace` fails **closed** on anything it
+ * cannot read — including a config file broken for entirely unrelated reasons.
+ */
+describe('harnessOptions — the kimi workspace-trust opt-in (Issue #1620)', () => {
+  describe('validateHarnessOptions', () => {
+    it('accepts an absent block, an empty block, and both boolean values', () => {
+      expect(() => validateHarnessOptions(undefined)).not.toThrow();
+      expect(() => validateHarnessOptions({})).not.toThrow();
+      expect(() => validateHarnessOptions({ kimi: {} })).not.toThrow();
+      expect(() => validateHarnessOptions({ kimi: { autoTrustWorkspace: true } })).not.toThrow();
+      expect(() => validateHarnessOptions({ kimi: { autoTrustWorkspace: false } })).not.toThrow();
+    });
+
+    it('rejects an unknown harness, and points at the right namespace', () => {
+      // `harness` (custom DEFINITIONS) and `harnessOptions` (built-in SETTINGS) are easy to
+      // confuse, so the error says which is which rather than only that the key is wrong.
+      expect(() => validateHarnessOptions({ claude: { autoTrustWorkspace: true } }))
+        .toThrow(/harnessOptions\.claude.*unknown harness/s);
+      expect(() => validateHarnessOptions({ claude: {} })).toThrow(/"harness", not "harnessOptions"/);
+    });
+
+    it('rejects an unknown option under kimi rather than ignoring it', () => {
+      // The whole point: a misspelled security flag must not silently mean "off".
+      expect(() => validateHarnessOptions({ kimi: { autoTrustWorkspac: true } }))
+        .toThrow(/harnessOptions\.kimi\.autoTrustWorkspac.*unknown option/s);
+    });
+
+    it('rejects a non-boolean rather than coercing it', () => {
+      for (const value of ['true', 1, null, {}, []]) {
+        expect(() => validateHarnessOptions({ kimi: { autoTrustWorkspace: value } }))
+          .toThrow(/must be a boolean/);
+      }
+    });
+
+    it('rejects non-object shapes at both levels', () => {
+      expect(() => validateHarnessOptions('yes')).toThrow(/expected an object, got string/);
+      expect(() => validateHarnessOptions([])).toThrow(/expected an object, got array/);
+      expect(() => validateHarnessOptions({ kimi: 'true' })).toThrow(/kimi.*expected an object, got string/s);
+      expect(() => validateHarnessOptions({ kimi: [] })).toThrow(/kimi.*expected an object, got array/s);
+    });
+  });
+
+  describe('loadConfig integration', () => {
+    it('parses the block through the normal config path', () => {
+      writeProjectConfig(tmpDir, { harnessOptions: { kimi: { autoTrustWorkspace: true } } });
+      expect(loadConfig(tmpDir).harnessOptions?.kimi?.autoTrustWorkspace).toBe(true);
+    });
+
+    it('fails LOAD, not the eventual spawn, on a malformed block', () => {
+      // Deliberately fail-fast: a bad security opt-in must surface on the next command, not when
+      // a kimi builder is finally spawned days later. This matches how a malformed `harness`
+      // block already behaves.
+      writeProjectConfig(tmpDir, { harnessOptions: { kimi: { autoTrustWorkspace: 'yes' } } });
+      expect(() => loadConfig(tmpDir)).toThrow(/must be a boolean/);
+    });
+
+    it('a config with no harnessOptions block is simply absent, not an error', () => {
+      writeProjectConfig(tmpDir, { shell: { builder: 'kimi' } });
+      expect(loadConfig(tmpDir).harnessOptions).toBeUndefined();
+    });
+  });
+
+  describe('kimiAutoTrustWorkspace', () => {
+    it('is false for a legacy config with no block — silence grants nothing', () => {
+      writeProjectConfig(tmpDir, { shell: { builder: 'kimi' } });
+      expect(kimiAutoTrustWorkspace(tmpDir)).toBe(false);
+    });
+
+    it('is false when no config exists at all', () => {
+      expect(kimiAutoTrustWorkspace(tmpDir)).toBe(false);
+    });
+
+    it('is true only for an explicit true', () => {
+      writeProjectConfig(tmpDir, { harnessOptions: { kimi: { autoTrustWorkspace: true } } });
+      expect(kimiAutoTrustWorkspace(tmpDir)).toBe(true);
+    });
+
+    it('is false for an explicit false, and for an empty kimi block', () => {
+      writeProjectConfig(tmpDir, { harnessOptions: { kimi: { autoTrustWorkspace: false } } });
+      expect(kimiAutoTrustWorkspace(tmpDir)).toBe(false);
+      writeProjectConfig(tmpDir, { harnessOptions: { kimi: {} } });
+      expect(kimiAutoTrustWorkspace(tmpDir)).toBe(false);
+    });
+
+    it('fails CLOSED when the config cannot be read at all', () => {
+      // A config broken for unrelated reasons must not be what decides we may grant trust. The
+      // breakage still surfaces loudly through every other `loadConfig` caller; this one reader
+      // answers "no" rather than propagating.
+      fs.mkdirSync(path.join(tmpDir, '.codev'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, '.codev', 'config.json'), '{ not json', 'utf-8');
+      expect(kimiAutoTrustWorkspace(tmpDir)).toBe(false);
+    });
   });
 });
