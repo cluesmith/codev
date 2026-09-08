@@ -118,3 +118,27 @@ rate-limit error never reached any caller for the most frequently spawned of the
 Also reverted an over-reach: `rate-limit` is no longer disabled in the gitlab/gitea/linear
 presets. It falls through to the gh default like every other non-issue concept, which is
 what the spec-719 hybrid-model guard requires.
+
+### Verification (real forge path, no Tower started)
+
+Real `OverviewCache` driven for 40 polls against a fake `gh` on `PATH` that always
+returns the GraphQL rate-limit error:
+
+| | `gh` invocations for 40 polls |
+|---|---|
+| pre-fix (negative caching reverted in the built JS) | **200** — 5 every poll |
+| with the fix | **5** — one batch, then zero until reset |
+
+Payload: `forgeStatus=rate-limited`, `forgeResetAt` populated.
+
+Full suite: 5,768 passed / 48 skipped, 0 failed.
+
+## 2026-09-07 — PR
+
+PR #1646. Follow-up for prescribed item 4 filed as issue #1647.
+
+Architect set the positive TTL to **180 s** (msg 06:06Z), not 120 s: at 120 s the
+`pr-list` + `issue-list` pair alone costs 60 calls/h per watched workspace, which is
+already the whole acceptance budget, so no search-TTL value could get under it. 180 s
+gives 40 + 12 = 52/h, and ~2,028 GraphQL points/h at 13 watched workspaces — 41 % of the
+5,000/h limit.

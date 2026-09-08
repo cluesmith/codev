@@ -1721,9 +1721,9 @@ describe('overview', () => {
     });
 
     it('projects the hourly forge spend from the TTLs (#1645)', () => {
-      // 2 list calls per 120s window (60/h) + 2 search calls per 600s window (12/h).
-      expect(projectHourlyForgeCalls(1)).toBe(72);
-      expect(projectHourlyForgeCalls(13)).toBe(936);
+      // 2 list calls per 180s window (40/h) + 2 search calls per 600s window (12/h).
+      expect(projectHourlyForgeCalls(1)).toBe(52);
+      expect(projectHourlyForgeCalls(13)).toBe(676);
       expect(projectHourlyForgeCalls(0)).toBe(0);
     });
 
@@ -1759,9 +1759,9 @@ describe('overview', () => {
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(1);
 
-      // Advance time past the 120s positive TTL (raised from 30s in #1645)
+      // Advance time past the 180s positive TTL (raised from 30s in #1645)
       vi.useFakeTimers();
-      vi.advanceTimersByTime(121_000);
+      vi.advanceTimersByTime(181_000);
 
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
@@ -1769,7 +1769,7 @@ describe('overview', () => {
       vi.useRealTimers();
     });
 
-    it('holds the positive TTL for 120s, not 30s (#1645)', async () => {
+    it('holds the positive TTL for 180s, not 30s (#1645)', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
 
@@ -1777,7 +1777,7 @@ describe('overview', () => {
       await cache.getOverview(tmpDir);
 
       vi.useFakeTimers();
-      vi.advanceTimersByTime(90_000);
+      vi.advanceTimersByTime(150_000);
       await cache.getOverview(tmpDir);
       vi.useRealTimers();
 
@@ -1794,7 +1794,7 @@ describe('overview', () => {
       await cache.getOverview(tmpDir);
 
       vi.useFakeTimers();
-      // Past the 120s list TTL, well inside the 600s search TTL.
+      // Past the 180s list TTL, well inside the 600s search TTL.
       vi.advanceTimersByTime(300_000);
       await cache.getOverview(tmpDir);
       vi.useRealTimers();
@@ -1876,7 +1876,7 @@ describe('overview', () => {
       vi.useFakeTimers();
       vi.advanceTimersByTime(61_000);
       await cache.getOverview(tmpDir); // succeeds
-      vi.advanceTimersByTime(121_000);
+      vi.advanceTimersByTime(181_000);
       await cache.getOverview(tmpDir); // normal positive TTL, not a backoff
       vi.useRealTimers();
 

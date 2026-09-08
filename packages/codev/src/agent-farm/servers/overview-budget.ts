@@ -9,12 +9,19 @@
 
 /**
  * Positive TTL for the two per-request forge lists (open PRs, open issues).
+ *
  * Raised from 30 s (#1645): the dashboard polls `/api/overview` every 2.5 s
  * (`apps/web/src/hooks/useOverview.ts`), so the TTL — not the poll — is what
- * sets the API spend. Explicit user actions bypass it via
- * `POST /api/overview/refresh`, which invalidates the whole cache.
+ * sets the API spend. At 30 s the list pair alone cost 240 calls/h per watched
+ * workspace; at 180 s it costs 40, which is what keeps 13 watched workspaces
+ * under half the account's hourly GraphQL budget.
+ *
+ * A PR/issue list up to 3 minutes stale is the deliberate trade. Everything
+ * that actually moves — builder phase, gates, progress — is filesystem-derived
+ * and still refreshes on every 2.5 s poll, and `POST /api/overview/refresh`
+ * bypasses this TTL entirely after a user action.
  */
-export const POSITIVE_TTL_MS = 120_000;
+export const POSITIVE_TTL_MS = 180_000;
 
 /**
  * Positive TTL for the two `--search`-backed 24 h windows (recently closed
@@ -41,9 +48,9 @@ export function negativeTtlMs(failures: number): number {
  * a client polling `/api/overview` continuously (#1645).
  *
  * Two calls (`pr-list`, `issue-list`) per POSITIVE_TTL_MS window plus two
- * (`recently-closed`, `recently-merged`) per SEARCH_TTL_MS window. The
- * once-an-hour `user-identity` call is REST and charged to a different budget,
- * so it is left out.
+ * (`recently-closed`, `recently-merged`) per SEARCH_TTL_MS window — 52/h per
+ * watched workspace at the current TTLs. The once-an-hour `user-identity` call
+ * is REST and charged to a different budget, so it is left out.
  */
 export function projectHourlyForgeCalls(workspaceCount: number): number {
   const perWorkspace = 2 * (3_600_000 / POSITIVE_TTL_MS) + 2 * (3_600_000 / SEARCH_TTL_MS);
