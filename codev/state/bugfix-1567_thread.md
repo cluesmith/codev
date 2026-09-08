@@ -148,3 +148,6 @@ had been tracked by the round-1 `git add <dir>` (contradicting the README) — u
 git-ignored, results.json excerpts dropped, fixed-run excerpts trimmed to 3 trials; tracked
 evidence ~720 KB → ~110 KB. (b) `framePieces` on a body that is nothing but paste markers
 produced the literal text "undefined" — now one empty well-formed paste; test added.
+
+CMAP round 3 (codex, worktree diff): **APPROVE**, no key issues. Final: gemini APPROVE, claude
+APPROVE, codex APPROVE. Full suite 5759 green. PR #1644 at the `pr` gate awaiting the human.
