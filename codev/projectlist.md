@@ -233,6 +233,11 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.3.3"
+    name: "Luxor"
+    status: released
+    target_date: "2026-09-05"
+    notes: "Delivery-integrity release that grew from a two-fix patch. Mailbox never replays an already-written message (completed write = point of no return, #1584/PR #1585); session identity is authoritative from the terminal handshake, fixing builder→architect misrouting (#1475/PR #1511); holds carry reasons and sender attribution everywhere (#1482/PR #1604 with migration v18, #1478-#1479/PR #1486); agy composer marker anchored to cursor row + palette (#1474/PR #1491); cloud tunnel requests authenticate again (#1586/PR #1588). Dashboard held-mail counter opens a popover (#1450/PR #1510); consult reviews merged PRs (#759/PR #1619). Community: pr-create forge concept (#1455/PR #1458) and working Gitea preset (#1137/PR #1146) by @pseudoseed; Atlas Cloud generate-image provider (PR #1618) by @binyangzhu000-sudo. VS Code 3.3.3 shipped same day (issue-preview metadata #1592/PR #1616, bounded escalation toast #1472/PR #1484); Stream Deck review-dial truth fix (#1606/PR #1607) rides the next Elgato batch. Contributors: @mohidmakhdoomi (delivery-integrity core), Waleed Kadous, Amr Elsayed, @pseudoseed, @binyangzhu000-sudo."
   - version: "v3.3.2"
     name: "Luxor"
     status: released

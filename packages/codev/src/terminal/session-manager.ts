@@ -19,6 +19,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
 import { defaultSessionOptions } from './index.js';
+import { sanitizeAgentEnv } from '../lib/agent-env.js';
 import type { Readable } from 'node:stream';
 import { ShellperClient, type IShellperClient } from './shellper-client.js';
 import { isDeliberateExit, type ExitMessage } from './shellper-protocol.js';
@@ -290,8 +291,13 @@ export class SessionManager extends EventEmitter {
       // Fall back to /dev/null if log file can't be opened
     }
 
+    // Issue #1219: the shellper daemon outlives Tower, so anything in its env at
+    // spawn time persists across Tower restarts. Scrub Claude Code session markers
+    // here too — the agent PTY's env is set explicitly above, but a marker-carrying
+    // shellper is still a marker-carrying ancestor for anything else it starts.
     const child = cpSpawn(this.config.nodeExecutable, [this.config.shellperScript, shellperConfig], {
       detached: true,
+      env: sanitizeAgentEnv(process.env),
       stdio: ['ignore', 'pipe', stderrFd ?? 'ignore'],
     });
 

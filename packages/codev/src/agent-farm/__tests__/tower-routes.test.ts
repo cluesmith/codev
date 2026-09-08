@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { PASTE_BEGIN, PASTE_END } from '../servers/message-write.js';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
@@ -1796,7 +1797,12 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: true }),
+        // Issue #1567: the interrupt path resolves the recipient's write strategy from the
+        // session's identity, which every real PtySession carries.
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: true,
+          command: 'claude', launchArgs: [] as string[], cwd: '/tmp/ws',
+        }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1809,6 +1815,41 @@ describe('tower-routes', () => {
       expect(parsed.deferred).toBe(false);
       // Should have written Ctrl+C and the message
       expect(mockWrite).toHaveBeenCalled();
+    });
+
+    // Issue #1567: the interrupt bypasses the GATE, not the per-harness write strategy.
+    describe('interrupt honours the per-harness write strategy (Issue #1567)', () => {
+      const LONG = 'u'.repeat(300); // over BRACKET_MIN_BYTES → the bracketed/chunked path
+
+      async function interruptTo(command: string): Promise<string[]> {
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect', message: LONG, workspace: '/tmp/ws', options: { interrupt: true },
+        });
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-001', workspacePath: '/tmp/ws', agent: 'architect' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({
+          getSession: () => ({ ...gateSession(mockWrite, '❯ '), command }),
+          listSessions: () => [],
+        });
+        const { res, statusCode } = makeRes();
+        await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+        expect(statusCode()).toBe(200);
+        await vi.waitFor(() => expect(mockWrite.mock.calls.at(-1)?.[0]).toBe('\r'));
+        return mockWrite.mock.calls.map((c) => c[0] as string);
+      }
+
+      it('a long interrupt to claude is bracketed like a gated delivery', async () => {
+        const writes = await interruptTo('claude');
+        expect(writes[0]).toBe('\x03');
+        expect(writes.some((w) => w.startsWith(PASTE_BEGIN))).toBe(true);
+      });
+
+      it('a long interrupt to agy (opted out) is chunked but NOT bracketed', async () => {
+        const writes = await interruptTo('agy');
+        expect(writes[0]).toBe('\x03');
+        expect(writes.some((w) => w.includes(PASTE_BEGIN) || w.includes(PASTE_END))).toBe(false);
+        expect(writes.slice(1, -1).join('')).toContain(LONG);
+      });
     });
 
     it('writes the message as one un-split write, Enter separate (Bugfix #481, via the gate)', async () => {

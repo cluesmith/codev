@@ -1,5 +1,17 @@
 # Change Log
 
+## [3.3.3] - 2026-09-05
+
+### What's new
+
+- **The in-editor issue preview now shows who, when, and what.** Opening an issue from the backlog renders a metadata block under the title: state and labels on one line, then who opened it and on which date, assignees, and milestone. Lines whose data is absent are simply omitted, so issues on forges that do not supply a field still render cleanly. The preview keeps refreshing the way it did before, with no extra requests.
+
+### Fixes
+
+- **Held-mail toasts say why a message is held.** The mailbox escalation toast now carries the hold reason, distinguishing "a human is typing in that composer" (clears itself) from "the composer could not be verified" (needs attention), instead of a bare busy.
+- **The escalation toast no longer grows memory for the life of the window.** Its already-shown tracking now clears when a workspace's escalations clear, with a hard cap as backstop.
+- **A restored issue preview no longer sticks on "Content unavailable".** When VS Code restored a preview tab on launch before Tower had connected, the tab showed the fallback text and never recovered. It now refreshes as soon as the connection comes up, on tab open, and at activation, so the content self-heals instead of staying blank.
+
 ## [3.3.2] - 2026-09-02
 
 ### What's new

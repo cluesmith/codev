@@ -49,7 +49,7 @@ import {
 } from '../db/mailbox.js';
 import type { DbMailbox, MailboxGateDetail, MailboxReason } from '../db/types.js';
 import type { GateProfile, GateVerdict } from './render-gate.js';
-import type { PacedSubmitResult } from './message-write.js';
+import { writeStrategyForApp, type PacedSubmitResult, type WriteStrategy } from './message-write.js';
 import { KeyedSerializer } from './write-queue.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
@@ -197,6 +197,12 @@ export interface DeliveryPorts {
     formattedMessage: string,
     noEnter: boolean,
     precheck: () => WriteAbort | null,
+    /**
+     * Issue #1567: how the frame is put on the wire (bracketed paste + chunking, or the
+     * per-line opt-out), resolved from the recipient's gate profile. Optional so unit fakes
+     * written before #1567 keep compiling; the live binding forwards it.
+     */
+    strategy?: WriteStrategy,
   ): WriteResult | Promise<WriteResult>;
   /** Emit the delivered-message broadcast frame. */
   broadcast(frame: DeliveredBroadcast): void;
@@ -605,6 +611,18 @@ export function normalizeForEcho(text: string): string {
 }
 
 /**
+ * The paste placards a TUI renders in place of a long bracketed paste (Issue #1567), in
+ * {@link normalizeForEcho} form: claude shows `[Pasted text #N +M lines]`, codex
+ * `[Pasted Content N chars]` (both measured, `codev/evidence/1567-head-loss/`). A long frame
+ * now travels as a bracketed paste, so until it is submitted the composer shows one of these
+ * instead of the header — and a `--no-enter` send never submits. The echo watch therefore
+ * counts these alongside the header needle; a NEW occurrence of either is evidence the write
+ * landed. Counted, not merely matched, for the same reason as the header: a previous paste's
+ * placard may already be on screen.
+ */
+export const PASTE_PLACARD_NEEDLES: readonly string[] = ['Pastedtext', 'PastedContent'];
+
+/**
  * The needle {@link DeliveryPorts.watchEcho} opens on: the formatted message's FIRST line,
  * normalized. Returns `''` when it is too short to be distinctive (see
  * {@link MIN_ECHO_NEEDLE_LENGTH}), which the caller reads as "skip verification".
@@ -922,7 +940,13 @@ export async function deliverAgentMail(
   // delivery); the try either assigns the real result or throws past this point.
   let result: WriteResult = { status: 'aborted', abort: { kind: 'hold', reason: 'busy' } };
   try {
-    result = await ports.writeMessage(session, current.formatted_message, current.no_enter === 1, precheck);
+    result = await ports.writeMessage(
+      session,
+      current.formatted_message,
+      current.no_enter === 1,
+      precheck,
+      writeStrategyForApp(profile.app),
+    );
   } finally {
     // Invalidate the memo on EVERY write outcome — a clean `true`, a dropped-write `false`, OR a
     // rejection — and BEFORE the markDelivered/held decisions below (CMAP round 3 moved it above the
@@ -1068,8 +1092,8 @@ export async function deliverAgentMail(
     const what = racedByInput
       ? `the write completed, but the terminal received input while it was in flight, so the ` +
         `body may have been truncated or submitted early`
-      : `the write completed but its header never appeared on the terminal (needle ` +
-        `${needle ? needle.length : 0} chars)`;
+      : `the write completed but neither its header nor a paste placard appeared on the ` +
+        `terminal (needle ${needle ? needle.length : 0} chars)`;
     ports.log(
       `[mailbox] delivered-unverified ${row.id.slice(0, 8)}… → ${toAgent} @ ` +
         `${path.basename(workspacePath)} (terminal ${session.id}, ${cause}): ${what}. Recorded as ` +

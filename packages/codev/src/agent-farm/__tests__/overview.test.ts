@@ -45,6 +45,16 @@ const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchM
 
 vi.mock('../../lib/github.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/github.js')>();
+  // #1645: OverviewCache reads through fetchForOverview/overviewBackend; route
+  // each concept to the per-fetcher mocks so tests keep their mockResolvedValue
+  // idiom. A `null` from a mock is reported as a failed command.
+  const byConcept: Record<string, (cwd: string) => Promise<unknown>> = {
+    'pr-list': mockFetchPRList,
+    'issue-list': mockFetchIssueList,
+    'recently-closed': mockFetchRecentlyClosed,
+    'recently-merged': mockFetchMergedPRs,
+    'user-identity': mockFetchCurrentUser,
+  };
   return {
     ...actual,
     fetchPRList: mockFetchPRList,
@@ -52,6 +62,13 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
     fetchRecentlyClosed: mockFetchRecentlyClosed,
     fetchRecentMergedPRs: mockFetchMergedPRs,
     fetchCurrentUser: mockFetchCurrentUser,
+    overviewBackend: () => 'gh',
+    fetchForOverview: async (concept: string, cwd: string) => {
+      const data = await byConcept[concept](cwd);
+      return data === null
+        ? { data: null, error: { message: 'mock failure', stderr: '', exitCode: 1 } }
+        : { data, error: null };
+    },
   };
 });
 
@@ -1715,20 +1732,32 @@ describe('overview', () => {
       expect(mockFetchCurrentUser).toHaveBeenCalledTimes(1);
     });
 
-    it('invalidates cache on refresh', async () => {
+    it('invalidates the open lists on refresh, debounced to once a minute (#1645)', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
       await cache.getOverview(tmpDir);
 
+      // Invalidated 10 s after the fetch: still inside the debounce, served from cache.
+      clock += 10_000;
       cache.invalidate();
       await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
 
+      // Once the entry is a minute old the invalidation takes effect.
+      clock += 51_000;
+      await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+      expect(mockFetchIssueList).toHaveBeenCalledTimes(2);
+      // The searches and identity are not owned by invalidation.
+      expect(mockFetchRecentlyClosed).toHaveBeenCalledTimes(1);
+      expect(mockFetchMergedPRs).toHaveBeenCalledTimes(1);
+      expect(mockFetchCurrentUser).toHaveBeenCalledTimes(1);
     });
 
-    it('re-fetches after 30s TTL expires (Bugfix #388)', async () => {
+    it('re-fetches after the 180 s list TTL expires (Bugfix #388, #1645)', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
       mockFetchRecentlyClosed.mockResolvedValue([]);
@@ -1737,9 +1766,9 @@ describe('overview', () => {
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(1);
 
-      // Advance time past the 30s TTL
+      // Advance time past the 180 s list TTL
       vi.useFakeTimers();
-      vi.advanceTimersByTime(31_000);
+      vi.advanceTimersByTime(181_000);
 
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
@@ -1792,23 +1821,33 @@ describe('overview', () => {
       expect(data.errors?.issues).toBeDefined();
     });
 
-    it('does not cache failed fetch results', async () => {
+    it('caches a failed fetch for the 60 s failure window, then retries (#1645)', async () => {
       // First call: gh fails
       mockFetchPRList.mockResolvedValueOnce(null);
       mockFetchIssueList.mockResolvedValue([]);
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
       const data1 = await cache.getOverview(tmpDir);
       expect(data1.errors?.prs).toBeDefined();
+      expect(data1.forgeStatus).toBe('unavailable');
 
-      // Second call: gh succeeds
-      mockFetchPRList.mockResolvedValueOnce([
+      // gh would succeed now, but inside the window the failure is served from cache.
+      mockFetchPRList.mockResolvedValue([
         { number: 1, title: 'Test', url: 'https://github.com/org/repo/pull/1', reviewDecision: '', body: '', createdAt: '2026-01-01T00:00:00Z' },
       ]);
-
+      clock += 30_000;
       const data2 = await cache.getOverview(tmpDir);
-      expect(data2.errors?.prs).toBeUndefined();
-      expect(data2.pendingPRs).toHaveLength(1);
+      expect(data2.errors?.prs).toBeDefined();
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+
+      // Past the window: one retry, which self-heals.
+      clock += 31_000;
+      const data3 = await cache.getOverview(tmpDir);
+      expect(data3.errors?.prs).toBeUndefined();
+      expect(data3.pendingPRs).toHaveLength(1);
+      expect(data3.forgeStatus).toBe('ok');
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
     it('filters backlog issues that are linked to PRs', async () => {
@@ -1916,11 +1955,13 @@ describe('overview', () => {
       createBuilderWorktree(tmpDir, 'task-AbCd');
 
       // Without filter: all 3 worktrees discovered
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
       const unfiltered = await cache.getOverview(tmpDir);
       expect(unfiltered.builders).toHaveLength(3);
 
       // With filter: only spir-42 has an active session
+      clock += 61_000;
       cache.invalidate();
       const activeSet = new Set(['builder-spir-42']);
       const filtered = await cache.getOverview(tmpDir, activeSet);
@@ -2003,7 +2044,8 @@ describe('overview', () => {
         'gates:',
       ].join('\n'), '0907-area-fix');
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
 
       // First refresh: issue is open and labeled area/vscode.
       mockFetchIssueList.mockResolvedValue([
@@ -2014,6 +2056,7 @@ describe('overview', () => {
       expect(first.builders[0].area).toBe('vscode');
 
       // Issue closes (e.g. PR merged) → drops out of the open-issues list.
+      clock += 61_000;
       cache.invalidate();
       mockFetchIssueList.mockResolvedValue([]);
       const second = await cache.getOverview(tmpDir);
@@ -2031,7 +2074,8 @@ describe('overview', () => {
         'gates:',
       ].join('\n'), '0907-area-fetchfail');
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
 
       mockFetchIssueList.mockResolvedValue([
         issueItem(907, 'Builder flash bug', [{ name: 'area/vscode' }]),
@@ -2039,6 +2083,7 @@ describe('overview', () => {
       const first = await cache.getOverview(tmpDir);
       expect(first.builders[0].area).toBe('vscode');
 
+      clock += 61_000;
       cache.invalidate();
       mockFetchIssueList.mockResolvedValue(null);
       const second = await cache.getOverview(tmpDir);
@@ -2053,7 +2098,8 @@ describe('overview', () => {
         'gates:',
       ].join('\n'), '0908-no-area');
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
 
       // Issue is present across two refreshes but carries no area/* label.
       mockFetchIssueList.mockResolvedValue([
@@ -2062,6 +2108,7 @@ describe('overview', () => {
       const first = await cache.getOverview(tmpDir);
       expect(first.builders[0].area).toBe('Uncategorized');
 
+      clock += 61_000;
       cache.invalidate();
       const second = await cache.getOverview(tmpDir);
       expect(second.builders[0].area).toBe('Uncategorized');

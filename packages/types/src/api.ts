@@ -343,6 +343,15 @@ export interface OverviewData {
   feedbackMode: 'forward' | 'queue';
   /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */
   currentUser?: string;
+  /**
+   * Issue #1645: why forge-backed sections (PRs, backlog, recently closed/merged)
+   * may be stale or empty. `rate-limited` = the backend's budget is exhausted and
+   * Tower has suspended fetches until `forgeResetAt`; `unavailable` = at least one
+   * section could not be fetched for another reason (CLI missing, offline).
+   */
+  forgeStatus?: 'ok' | 'rate-limited' | 'unavailable';
+  /** ISO instant the rate-limit suspension lifts; present only when `forgeStatus` is `rate-limited`. */
+  forgeResetAt?: string;
   errors?: { prs?: string; issues?: string };
 }
 

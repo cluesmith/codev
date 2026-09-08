@@ -33,6 +33,9 @@ import {
   OPERATOR_SUBMIT_WAIT_CEILING_MS,
 } from '../servers/session-submit.js';
 import {
+  PASTE_BEGIN,
+  PASTE_END,
+  PASTE_ENTER_DELAY_MS,
   submitMessagePaced,
   writeMessageToSession,
   writeEscapeToSession,
@@ -53,8 +56,11 @@ const AGENT = 'spir-1';
 
 /** A body long enough to take the paced multi-line path (≥4 lines) and so hold the line ~110 ms. */
 const MULTILINE = 'L1\nL2\nL3\nL4';
-/** Time for a MULTILINE paced write to finish: last line at 30 ms + the 80 ms Enter delay. */
-const MULTILINE_DONE_MS = 3 * 10 + 80;
+/**
+ * Time for a MULTILINE write to finish. Since Issue #1567 a 4-line frame is ONE bracketed
+ * paste piece (it is far under the chunk size) followed by the 80 ms Enter delay.
+ */
+const MULTILINE_DONE_MS = PASTE_ENTER_DELAY_MS;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -64,12 +70,23 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  */
 function makeComposer(id = 'term-1') {
   let pending = '';
+  let inPaste = false;
   const submitted: string[] = [];
   const bypasses: string[] = [];
   const session = {
     id,
     write(data: string): boolean {
-      if (data === '\r') {
+      // Issue #1567: a long frame arrives as a bracketed paste. Model what a real TUI does
+      // with it — everything between the markers is literal text (a `\r` inside is a newline,
+      // not Enter), and only a `\r` OUTSIDE a paste submits.
+      if (inPaste || data.startsWith(PASTE_BEGIN)) {
+        let text = data;
+        if (text.startsWith(PASTE_BEGIN)) { inPaste = true; text = text.slice(PASTE_BEGIN.length); }
+        let closes = false;
+        if (text.endsWith(PASTE_END)) { closes = true; text = text.slice(0, -PASTE_END.length); }
+        pending += text.replace(/\r/g, '\n');
+        if (closes) inPaste = false;
+      } else if (data === '\r') {
         submitted.push(pending);
         pending = '';
       } else if (data === '\x03') {

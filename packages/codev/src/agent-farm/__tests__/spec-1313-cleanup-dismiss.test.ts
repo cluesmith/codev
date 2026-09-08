@@ -12,6 +12,12 @@
  * and that the workspace-path round-trip (store side ↔ cleanup side) matches. The full
  * `cleanupBuilder` (git worktree + forge + state removal) is out of scope here by the same
  * re-implementation convention `cleanup-preserve-status.test.ts` uses.
+ *
+ * Issue #1477: the INVOCATION half — that `afx cleanup` actually reaches this seam, with the
+ * normalized workspace path and the canonical builder id — is covered by
+ * `air-1477-cleanup-dismiss-invocation.test.ts`, which drives the real exported `cleanup()`.
+ * Keep the split in mind before extending either file: this one owns the seam's semantics, that
+ * one owns the wiring that calls it.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
