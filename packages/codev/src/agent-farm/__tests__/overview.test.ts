@@ -1928,6 +1928,19 @@ describe('overview', () => {
       expect(badData.forgeStatus).toBe('unavailable');
     });
 
+    it('says the forge is rate-limited, not that gh is missing (#1645)', async () => {
+      // The dashboard renders errors.prs/errors.issues verbatim (WorkView's
+      // `work-unavailable`), so "GitHub CLI unavailable" during a rate limit
+      // sent people looking for a broken gh install.
+      noteRateLimited(Date.now() + 10 * 60 * 1000);
+
+      const data = await new OverviewCache().getOverview(tmpDir);
+
+      expect(data.errors?.prs).toContain('rate limit exhausted');
+      expect(data.errors?.issues).toContain('rate limit exhausted');
+      expect(data.errors?.prs).not.toContain('GitHub CLI unavailable');
+    });
+
     it('resumes fetching once the suspension lifts (#1645)', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);

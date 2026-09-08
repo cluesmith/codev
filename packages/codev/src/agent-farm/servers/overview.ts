@@ -844,6 +844,14 @@ export function deriveBacklog(
 // OverviewCache
 // =============================================================================
 
+/** Local wall-clock time of an ISO instant, for the rate-limit message (#1645). */
+function formatResetTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
 /**
  * One cached forge result. `data === null` records a *failure* — the entry that
  * did not exist before #1645, and whose absence let every failing poll re-spawn
@@ -956,10 +964,20 @@ export class OverviewCache {
       this.fetchCurrentUserCached(workspaceRoot),
     ]);
 
+    // #1645: name the real reason. Before this, a rate-limited forge reported
+    // "GitHub CLI unavailable", which sent people looking for a broken `gh`
+    // install instead of an exhausted API budget. The dashboard already renders
+    // these strings (`WorkView`'s `work-unavailable`), so the explanation lands
+    // without a UI change.
+    const rateLimit = getForgeRateLimit();
+    const unavailable = (what: string): string => rateLimit.resetAt
+      ? `GitHub API rate limit exhausted — ${what} paused until ${formatResetTime(rateLimit.resetAt)}`
+      : `GitHub CLI unavailable — could not fetch ${what}`;
+
     // 3. Process PRs
     let pendingPRs: OverviewPR[] = [];
     if (prs === null) {
-      errors.prs = 'GitHub CLI unavailable — could not fetch PRs';
+      errors.prs = unavailable('PRs');
     } else {
       pendingPRs = prs.map(pr => ({
         id: String(pr.number),
@@ -988,7 +1006,7 @@ export class OverviewCache {
       ? new Map(issues.map(i => [String(i.number), parseArea(i.labels)]))
       : null;
     if (issues === null) {
-      errors.issues = 'GitHub CLI unavailable — could not fetch issues';
+      errors.issues = unavailable('issues');
     } else {
       backlog = deriveBacklog(issues, workspaceRoot, activeBuilderIssues, prLinkedIssues);
 
@@ -1090,7 +1108,6 @@ export class OverviewCache {
     // deliberately not spawning anything until `forgeResetAt`; `unavailable`
     // means the commands ran and failed for some other reason. Without this the
     // dashboard could only show an empty list and a generic "gh unavailable".
-    const rateLimit = getForgeRateLimit();
     const forgeStatus: OverviewData['forgeStatus'] = rateLimit.limited
       ? 'rate-limited'
       : Object.keys(errors).length > 0 ? 'unavailable' : 'ok';
