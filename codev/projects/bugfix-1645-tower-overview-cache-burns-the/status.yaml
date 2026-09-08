@@ -1,7 +1,7 @@
 id: bugfix-1645
 title: tower-overview-cache-burns-the
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-08T08:02:34.019Z'
-updated_at: '2026-09-08T08:02:34.021Z'
+updated_at: '2026-09-08T08:09:59.820Z'
