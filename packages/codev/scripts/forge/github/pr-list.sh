@@ -1,4 +1,5 @@
 #!/bin/sh
+# forge-executable: gh
 # Forge concept: pr-list (GitHub via gh CLI)
 # Output: JSON [{number, title, url, reviewDecision, body, createdAt, author,
 #                reviewRequests, isDraft}]
@@ -12,5 +13,11 @@
 # would hand the caller jq's exit status, so a rate-limited `gh` looked like a
 # successful empty result and its stderr — the only place the rate limit is
 # named — was thrown away.
+#
+# That rewrite is also why this script needs the explicit `forge-executable`
+# declaration above: the heuristic that infers a concept's CLI reads the first
+# substantive line, which is now an assignment, and it would otherwise report
+# `printf` — leaving `codev doctor` checking for the wrong tool (#1455) and
+# filing this concept's rate limits under a backend of its own (#1645).
 out=$(gh pr list --json number,title,url,reviewDecision,body,createdAt,author,reviewRequests,isDraft) || exit $?
 printf '%s' "$out" | jq '[.[] | .reviewRequests = [.reviewRequests[].login // empty]]'

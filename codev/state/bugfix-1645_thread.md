@@ -225,3 +225,50 @@ Making `provider` optional-and-last meant `isForgeSuspended(now)` type-checked w
 reading a timestamp as a provider name, and silently answered about the wrong forge — a
 test caught it, but production code could have hit it just as easily. `provider` is now a
 **required first argument** on all five functions, so a stale call site is a type error.
+
+## 2026-09-07 — CMAP round 3 (diff-based, on the final commit)
+
+`--type pr` could not run: `consult` resolves the PR through a GraphQL-backed forge
+concept and the quota was exhausted again (reset ~06:42Z). That is #1641 happening live,
+and a reminder that the production Tower still runs the unfixed code and re-burns the
+budget within seconds of each reset. Substituted a diff-based review of the final commit
+from all three models, which needs no GitHub call.
+
+| lane | verdict |
+|---|---|
+| gemini | APPROVE (HIGH), no key issues (skipped on the first attempt — `agy` produced no output; clean on retry) |
+| claude | APPROVE (HIGH), 5 observations |
+| codex | REQUEST_CHANGES (HIGH), 2 issues |
+
+**Both non-gemini lanes independently flagged the same thing again**: suspension was keyed
+on the *configured* provider, not the backend the command actually resolves to. Providers
+are hybrid — a Linear workspace has no `pr-list` script, so that concept falls through to
+`gh` and spends GitHub's budget (spec 719). Fixed: `ForgeFailure` carries `backend` (the
+resolved executable, lowercased), `resolveConceptBackend()` is the shared resolver, and
+`OverviewCache` memoizes per `<workspace>:<concept>` — because one workspace's concepts
+can answer to different budgets. `forgeStatus` now reports limited if *any* of the four
+list concepts' backends is suspended, with the latest reset among them.
+
+Also fixed: in-flight fetches could write results after `invalidate()`, filing a result
+(or a rate limit) against a backend the workspace no longer uses — a generation counter
+now drops those writes (codex); `DEFAULT_PROVIDER` was duplicated as a bare `'github'`
+literal in two modules with nothing pinning them equal — it now lives in `forge.ts` and
+is re-exported (claude); backend keys are lowercased so a config spelling `GitHub` cannot
+split state (claude); the module header still described the suspension as process-global
+(claude); and `unavailable()` said "GitHub" on every provider (claude).
+
+### A regression of my own, found by chasing a test failure
+
+Keying by resolved executable made the overview tests fail in a way that turned out not to
+be about the tests. My earlier `pr-list.sh` rewrite — capturing `gh` into a variable so its
+exit status propagates — made the script's first substantive line an assignment, and the
+executable heuristic therefore reported **`printf`**. That would have filed pr-list's rate
+limits under a backend of its own *and* pointed `codev doctor` at the wrong CLI, which is
+exactly the silent-success bug #1455 exists to prevent. Fixed with the
+`# forge-executable: gh` declaration that mechanism provides, plus a test asserting all
+four overview concepts resolve to the same backend.
+
+Note for anyone reading later: `extractExecutable` returns the command verbatim when it
+cannot read the script, so a missing concept script would give every concept a different
+backend and fragment the suspension. `resolveConceptBackend` now falls back to the
+configured provider when the extracted value looks like a path.

@@ -11,7 +11,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executeForgeCommand, onForgeFailure, type ForgeFailure } from '../lib/forge.js';
+import {
+  executeForgeCommand,
+  onForgeFailure,
+  resolveConceptBackend,
+  type ForgeFailure,
+} from '../lib/forge.js';
 import {
   isRateLimitError,
   noteRateLimited,
@@ -58,27 +63,36 @@ describe('forge rate-limit awareness (#1645)', () => {
       expect(getForgeRateLimit(DEFAULT_PROVIDER)).toEqual({ limited: false, resetAt: null });
     });
 
-    it('suspends only the provider that was refused', () => {
-      // A GitHub limit says nothing about a GitLab workspace's forge, and
-      // blanking its Work view for the backoff window would be a regression
-      // for a workspace that is not even involved.
+    it('suspends only the backend that was refused', () => {
+      // A `gh` limit says nothing about a workspace whose concepts run `glab`,
+      // and blanking its Work view for the backoff window would be a
+      // regression for a workspace that is not even involved.
       const now = 1_000_000;
-      noteRateLimited('github', null, now);
+      noteRateLimited('gh', null, now);
 
-      expect(isForgeSuspended('github', now)).toBe(true);
-      expect(isForgeSuspended('gitlab', now)).toBe(false);
-      expect(isForgeSuspended('linear', now)).toBe(false);
-      expect(getForgeRateLimit('gitlab', now)).toEqual({ limited: false, resetAt: null });
+      expect(isForgeSuspended('gh', now)).toBe(true);
+      expect(isForgeSuspended('glab', now)).toBe(false);
+      expect(isForgeSuspended('tea', now)).toBe(false);
+      expect(getForgeRateLimit('glab', now)).toEqual({ limited: false, resetAt: null });
     });
 
-    it('backs each provider off independently', () => {
+    it('backs each backend off independently', () => {
       const now = 1_000_000;
-      noteRateLimited('github', null, now);
-      noteRateLimited('gitlab', null, now);
-      noteForgeSuccess('github', now + 1);
+      noteRateLimited('gh', null, now);
+      noteRateLimited('glab', null, now);
+      noteForgeSuccess('gh', now + 1);
 
-      expect(isForgeSuspended('github', now)).toBe(false);
-      expect(isForgeSuspended('gitlab', now)).toBe(true);
+      expect(isForgeSuspended('gh', now)).toBe(false);
+      expect(isForgeSuspended('glab', now)).toBe(true);
+    });
+
+    it('treats backend keys case-insensitively', () => {
+      // A config spelling its provider `GitHub` must not get state separate
+      // from one spelling it `github`.
+      const now = 1_000_000;
+      noteRateLimited('GitHub', null, now);
+      expect(isForgeSuspended('github', now)).toBe(true);
+      expect(isForgeSuspended('  GITHUB ', now)).toBe(true);
     });
 
     it('suspends until a reported reset instant', () => {
@@ -178,6 +192,21 @@ describe('forge rate-limit awareness (#1645)', () => {
   });
 });
 
+describe('every overview concept resolves to the same backend (#1645)', () => {
+  // Rate-limit suspension is keyed by resolved backend, so the four concepts
+  // backing the overview must agree — they all spend one `gh` account. They
+  // stopped agreeing once pr-list.sh was rewritten to capture gh's exit status
+  // (#1645): its first substantive line became an assignment, so the executable
+  // heuristic reported `printf`, which would have filed that concept's limits
+  // under a backend of its own and pointed `codev doctor` at the wrong CLI
+  // (#1455). The `# forge-executable: gh` declaration is what holds this.
+  it('resolves pr-list, issue-list and both searches to gh', () => {
+    for (const concept of ['pr-list', 'issue-list', 'recently-closed', 'recently-merged']) {
+      expect(resolveConceptBackend(concept, null)).toBe('gh');
+    }
+  });
+});
+
 describe('forge failure detail reaches its observers (#1645)', () => {
   let dir: string;
   let unsubscribe: () => void;
@@ -210,26 +239,33 @@ describe('forge failure detail reaches its observers (#1645)', () => {
     expect(failures).toHaveLength(1);
     expect(failures[0].concept).toBe('issue-list');
     expect(failures[0].exitCode).toBe(1);
+    expect(failures[0].backend).toBeTruthy();
     expect(failures[0].message).toContain('rate limit already exceeded');
   });
 
-  it('suspends the forge when the watch sees a rate-limit failure', async () => {
+  it('suspends the failing command\'s own backend when the watch sees a rate limit', async () => {
     installForgeRateLimitWatch();
     const command = script('echo "GraphQL: API rate limit already exceeded for user ID 1." >&2; exit 1');
+    const forgeConfig = { 'issue-list': command };
+    // Suspension is keyed by the backend the concept actually resolves to,
+    // not by the workspace's configured provider (#1645).
+    const backend = resolveConceptBackend('issue-list', forgeConfig);
 
-    expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(false);
-    await executeForgeCommand('issue-list', {}, { forgeConfig: { 'issue-list': command } });
+    expect(isForgeSuspended(backend)).toBe(false);
+    await executeForgeCommand('issue-list', {}, { forgeConfig });
 
-    expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(true);
+    expect(isForgeSuspended(backend)).toBe(true);
+    expect(isForgeSuspended('some-other-backend')).toBe(false);
   });
 
   it('leaves the forge alone for a non-rate-limit failure', async () => {
     installForgeRateLimitWatch();
     const command = script('echo "gh: not authenticated" >&2; exit 1');
+    const forgeConfig = { 'issue-list': command };
 
-    await executeForgeCommand('issue-list', {}, { forgeConfig: { 'issue-list': command } });
+    await executeForgeCommand('issue-list', {}, { forgeConfig });
 
-    expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(false);
+    expect(isForgeSuspended(resolveConceptBackend('issue-list', forgeConfig))).toBe(false);
   });
 
   it('does not fire for a command that succeeds', async () => {

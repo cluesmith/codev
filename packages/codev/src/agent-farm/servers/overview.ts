@@ -31,7 +31,7 @@ import {
   noteForgeSuccess,
 } from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
-import { loadForgeConfig } from '../../lib/forge.js';
+import { loadForgeConfig, resolveConceptBackend } from '../../lib/forge.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
 import { POSITIVE_TTL_MS, SEARCH_TTL_MS, negativeTtlMs } from './overview-budget.js';
 import type {
@@ -888,11 +888,22 @@ export class OverviewCache {
    */
   private inflight = new Map<string, Promise<unknown>>();
   /**
-   * Resolved forge provider per workspace. Read from `.codev/config.json`,
-   * which the 2.5 s poll should not re-read on every request; cleared by
-   * `invalidate()`, which is what a config change is followed by.
+   * Resolved backend per `<workspace>:<concept>` — the executable that concept
+   * will actually run (`gh`, `glab`, …). Per concept, not per workspace,
+   * because providers are hybrid: a Linear workspace's `pr-list` falls through
+   * to `gh` while its `issue-list` runs a Linear script, so the two answer to
+   * different rate-limit budgets. Memoized because resolving reads
+   * `.codev/config.json` and the concept script; cleared by `invalidate()`,
+   * which is what a config change is followed by.
    */
-  private providerCache = new Map<string, string>();
+  private backendCache = new Map<string, string>();
+  /**
+   * Bumped by `invalidate()`. A fetch already in flight when the cache is
+   * invalidated must not write its result afterwards: it was made under the
+   * previous config, and could file a result — or a rate limit — against a
+   * backend the workspace no longer uses.
+   */
+  private generation = 0;
   private readonly USER_TTL = 3_600_000; // 1h — GitHub identity is session-stable
 
   constructor() {
@@ -984,13 +995,14 @@ export class OverviewCache {
 
     // #1645: name the real reason. Before this, a rate-limited forge reported
     // "GitHub CLI unavailable", which sent people looking for a broken `gh`
-    // install instead of an exhausted API budget. The dashboard already renders
-    // these strings (`WorkView`'s `work-unavailable`), so the explanation lands
-    // without a UI change.
-    const rateLimit = getForgeRateLimit(this.providerFor(workspaceRoot));
+    // install instead of an exhausted API budget — and said "GitHub" even on a
+    // GitLab workspace. The dashboard already renders these strings
+    // (`WorkView`'s `work-unavailable`), so the explanation lands without a UI
+    // change.
+    const rateLimit = this.listForgeRateLimit(workspaceRoot);
     const unavailable = (what: string): string => rateLimit.resetAt
-      ? `GitHub API rate limit exhausted — ${what} paused until ${formatResetTime(rateLimit.resetAt)}`
-      : `GitHub CLI unavailable — could not fetch ${what}`;
+      ? `Forge API rate limit exhausted — ${what} paused until ${formatResetTime(rateLimit.resetAt)}`
+      : `Forge CLI unavailable — could not fetch ${what}`;
 
     // 3. Process PRs
     let pendingPRs: OverviewPR[] = [];
@@ -1152,7 +1164,8 @@ export class OverviewCache {
     this.closedCache.clear();
     this.mergedPRCache.clear();
     this.currentUserCache.clear();
-    this.providerCache.clear();
+    this.backendCache.clear();
+    this.generation++;
     // #1645: an explicit human Refresh also lifts a rate-limit suspension.
     // invalidate() is only reached from POST /api/overview/refresh, never from
     // the 2.5s poll, so this cannot reintroduce the hammering — and without it
@@ -1196,15 +1209,20 @@ export class OverviewCache {
       if (cached.data === null && age < negativeTtlMs(cached.failures)) return Promise.resolve(null);
     }
 
-    const provider = this.providerFor(cwd);
-    if (isForgeSuspended(provider, dispatchedAt)) return Promise.resolve(null);
+    const backend = this.backendFor(cwd, concept);
+    if (isForgeSuspended(backend, dispatchedAt)) return Promise.resolve(null);
 
     const key = `${concept}:${cwd}`;
     const existing = this.inflight.get(key);
     if (existing) return existing as Promise<T | null>;
 
+    const generation = this.generation;
     const flight = (async () => {
       const data = await fetcher();
+      // An invalidate() while this was in flight means the result was fetched
+      // under the previous config: return it to this caller, but do not write
+      // it, and do not credit or blame a backend that may no longer apply.
+      if (generation !== this.generation) return data;
       // Stamp the entry with *completion* time, not dispatch time: a forge
       // command can sit for its full 30 s timeout, and dating the entry from
       // dispatch would burn half the 60 s negative window before it is even
@@ -1215,12 +1233,12 @@ export class OverviewCache {
         // `dispatchedAt`, not `fetchedAt`: a command dispatched before the
         // current suspension began proves nothing about the forge having
         // recovered — see noteForgeSuccess.
-        noteForgeSuccess(provider, dispatchedAt);
+        noteForgeSuccess(backend, dispatchedAt);
       } else {
         cache.set(cwd, { data: null, fetchedAt, failures: (cached?.failures ?? 0) + 1 });
         // If that failure was a rate limit, learn when it lifts — once per
         // suspension window, and only where the probe has been enabled.
-        void maybeProbeReset(provider, cwd);
+        void maybeProbeReset(backend, cwd);
       }
       return data;
     })().finally(() => {
@@ -1231,18 +1249,44 @@ export class OverviewCache {
     return flight;
   }
 
-  /** The workspace's forge provider, read once and memoized (#1645). */
-  private providerFor(cwd: string): string {
-    let provider = this.providerCache.get(cwd);
-    if (provider === undefined) {
+  /** The backend one concept runs against in this workspace, memoized (#1645). */
+  private backendFor(cwd: string, concept: string): string {
+    const key = `${cwd}:${concept}`;
+    let backend = this.backendCache.get(key);
+    if (backend === undefined) {
       try {
-        provider = loadForgeConfig(cwd)?.provider ?? DEFAULT_PROVIDER;
+        backend = resolveConceptBackend(concept, loadForgeConfig(cwd));
       } catch {
-        provider = DEFAULT_PROVIDER;
+        backend = DEFAULT_PROVIDER;
       }
-      this.providerCache.set(cwd, provider);
+      this.backendCache.set(key, backend);
     }
-    return provider;
+    return backend;
+  }
+
+  /**
+   * The forge concepts backing the overview's lists. `user-identity` is left
+   * out on purpose: it is REST, charged to a different budget, and its being
+   * fine says nothing about whether the lists can be fetched.
+   */
+  private static readonly LIST_CONCEPTS = [
+    'pr-list', 'issue-list', 'recently-closed', 'recently-merged',
+  ] as const;
+
+  /**
+   * Rate-limit state across every backend the overview's lists depend on.
+   * Reports limited if *any* of them is suspended, with the latest reset among
+   * those — a workspace whose issues come from Linear and whose PRs come from
+   * GitHub can have one suspended and not the other.
+   */
+  private listForgeRateLimit(cwd: string): { limited: boolean; resetAt: string | null } {
+    let resetAt: string | null = null;
+    for (const concept of OverviewCache.LIST_CONCEPTS) {
+      const state = getForgeRateLimit(this.backendFor(cwd, concept));
+      if (!state.limited || state.resetAt === null) continue;
+      if (resetAt === null || state.resetAt > resetAt) resetAt = state.resetAt;
+    }
+    return { limited: resetAt !== null, resetAt };
   }
 
   private fetchPRsCached(cwd: string): Promise<ForgePR[] | null> {

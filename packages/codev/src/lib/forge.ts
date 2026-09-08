@@ -36,6 +36,17 @@ function resolveScriptPath(provider: string, concept: string): string {
 /** Default maxBuffer for forge commands (10MB). Prevents truncation for large diffs. */
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 
+/**
+ * The provider a concept resolves against when config names none, and the
+ * fallback backend key when a command's executable cannot be determined.
+ *
+ * Defined here rather than in forge-rate-limit.ts because that module imports
+ * this one; the reverse would be a cycle. It was briefly duplicated as a bare
+ * `'github'` literal in both, which would have keyed rate-limit writes and
+ * reads differently the moment either changed.
+ */
+export const DEFAULT_PROVIDER = 'github';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -298,6 +309,42 @@ export function getForgeCommand(
   return getDefaultCommands()[concept] ?? null;
 }
 
+const _backendCache = new Map<string, string>();
+
+/**
+ * The backend a concept will actually run against: the resolved command's
+ * executable, lowercased. Falls back to the configured provider, then to
+ * `DEFAULT_PROVIDER`.
+ *
+ * This is the correct key for anything accounted per-forge (rate limits), and
+ * it is deliberately *not* the workspace's configured provider — see
+ * `ForgeFailure.backend`. Memoized because resolution reads the script's first
+ * substantive line off disk.
+ */
+export function resolveConceptBackend(
+  concept: string,
+  forgeConfig?: ForgeConfig | null,
+): string {
+  const provider = forgeConfig?.provider ?? DEFAULT_PROVIDER;
+  const command = getForgeCommand(concept, forgeConfig);
+  if (command === null) return provider.toLowerCase();
+
+  const key = `${concept}\u0000${command}`;
+  const cached = _backendCache.get(key);
+  if (cached !== undefined) return cached;
+
+  // `extractExecutable` returns the command verbatim when it cannot read the
+  // script — a missing or unreadable concept script yields its own path. Keying
+  // on that would give every concept a *different* backend and fragment the
+  // suspension across them, so fall back to the configured provider instead:
+  // less precise, but it keeps concepts that share an account sharing a key.
+  const executable = extractExecutable(command);
+  const looksLikePath = executable !== null && (executable.includes('/') || executable.endsWith('.sh'));
+  const backend = (looksLikePath || executable === null ? provider : executable).toLowerCase();
+  _backendCache.set(key, backend);
+  return backend;
+}
+
 /**
  * Check if a concept is explicitly disabled (set to null in config).
  */
@@ -321,11 +368,18 @@ export interface ForgeFailure {
   /** Child exit code when Node reported one. */
   exitCode: number | null;
   /**
-   * The forge provider this command resolved against ('github' when config
-   * names none). A rate limit is charged to one forge's account, so observers
-   * must be able to scope their response to it rather than to every provider.
+   * The **backend** this command actually ran against — the executable the
+   * concept resolved to (`gh`, `glab`, `tea`, …), lowercased, falling back to
+   * the configured provider name.
+   *
+   * The resolved backend, not the configured provider: a rate limit is charged
+   * to whatever account made the call, and providers are hybrid. A Linear
+   * workspace has no `pr-list` script of its own, so that concept falls through
+   * to the github default and spends *GitHub's* budget (spec 719). Keying on
+   * the workspace's configured provider would file that limit under `linear`
+   * and leave a real GitHub workspace to discover it all over again.
    */
-  provider: string;
+  backend: string;
 }
 
 type ForgeFailureListener = (failure: ForgeFailure) => void;
@@ -349,14 +403,13 @@ export function onForgeFailure(listener: ForgeFailureListener): () => void {
 }
 
 /** Build a ForgeFailure from a child_process rejection and publish it. */
-function notifyFailure(concept: string, err: unknown, forgeConfig: ForgeConfig | null): void {
+function notifyFailure(concept: string, err: unknown, backend: string): void {
   if (failureListeners.size === 0) return;
   const e = err as { stderr?: unknown; code?: unknown; message?: unknown };
   const stderr = typeof e?.stderr === 'string' ? e.stderr.trim() : '';
   const message = stderr || (err instanceof Error ? err.message : String(err));
   const exitCode = typeof e?.code === 'number' ? e.code : null;
-  const provider = forgeConfig?.provider ?? 'github';
-  const failure: ForgeFailure = { concept, message, exitCode, provider };
+  const failure: ForgeFailure = { concept, message, exitCode, backend };
   for (const listener of failureListeners) {
     try {
       listener(failure);
@@ -406,7 +459,7 @@ export async function executeForgeCommand(
     return parseOutput(stdout, options?.raw);
   } catch (err: unknown) {
     logDebug(concept, err);
-    notifyFailure(concept, err, forgeConfig);
+    notifyFailure(concept, err, resolveConceptBackend(concept, forgeConfig));
     return null;
   }
 }
@@ -444,7 +497,7 @@ export function executeForgeCommandSync(
     return parseOutput(stdout, options?.raw);
   } catch (err: unknown) {
     logDebug(concept, err, true);
-    notifyFailure(concept, err, forgeConfig);
+    notifyFailure(concept, err, resolveConceptBackend(concept, forgeConfig));
     return null;
   }
 }

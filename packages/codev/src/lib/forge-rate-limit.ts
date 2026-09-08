@@ -8,16 +8,26 @@
  * machine: 180 `gh` processes in 60 s, which keeps the budget at zero for the
  * rest of the hour and takes down every other `gh` user on the box.
  *
- * So: when a forge command reports a rate limit, suspend *all* forge-backed
- * refreshes process-wide until the limit resets. The state is deliberately
- * global rather than per-workspace — a GitHub rate limit is charged to the
- * account, so a second workspace hitting the same API would only dig deeper.
+ * So: when a forge command reports a rate limit, suspend every refresh that
+ * would go to **that same backend** until the limit resets. The state is keyed
+ * by backend rather than by workspace — a GitHub rate limit is charged to the
+ * account, so a second workspace hitting the same API would only dig deeper —
+ * and by *backend* rather than by configured provider, because providers are
+ * hybrid: a Linear workspace's PR concepts fall through to `gh` and spend
+ * GitHub's budget. A limit on one forge never suspends another.
  *
  * The suspension is time-bounded, never permanent: it lifts at `resetAt`, and
  * the next successful command clears it outright.
  */
 
-import { onForgeFailure, executeForgeCommand, type ForgeFailure } from './forge.js';
+import {
+  DEFAULT_PROVIDER,
+  executeForgeCommand,
+  onForgeFailure,
+  type ForgeFailure,
+} from './forge.js';
+
+export { DEFAULT_PROVIDER };
 
 // =============================================================================
 // Detection
@@ -75,29 +85,35 @@ interface ProviderState {
 }
 
 /**
- * Suspension state **keyed by forge provider**, not process-global.
+ * Suspension state **keyed by resolved backend**, not process-global.
  *
- * A rate limit is charged to one forge's account. Suspending every provider on
- * a GitHub limit would blank a GitLab, Gitea or Linear workspace's Work view
- * for the whole backoff window over an outage that has nothing to do with it.
+ * A rate limit is charged to one forge's account. Suspending every backend on
+ * a GitHub limit would blank a GitLab or Gitea workspace's Work view for the
+ * whole backoff window over an outage that has nothing to do with it.
  */
 const providerStates = new Map<string, ProviderState>();
 
 /**
- * The provider a forge command resolves to when config names none.
- *
- * Every function below takes `provider` as a **required first argument**, with
+ * Every function below takes the backend as a **required first argument**, with
  * no default. An earlier revision defaulted it and put it last, which let
- * `isForgeSuspended(now)` read a timestamp as a provider name and silently
+ * `isForgeSuspended(now)` read a timestamp as a backend name and silently
  * answer about the wrong forge. Required-and-first makes that a type error.
+ *
+ * Keys are lowercased on the way in, so a config that spells its provider
+ * `GitHub` cannot end up with state separate from one that spells it `github`.
  */
-export const DEFAULT_PROVIDER = 'github';
 
-function stateFor(provider: string): ProviderState {
-  let state = providerStates.get(provider);
+/** Normalize a backend key. Casing must never split one forge's state in two. */
+function backendKey(backend: string): string {
+  return backend.trim().toLowerCase();
+}
+
+function stateFor(backend: string): ProviderState {
+  const key = backendKey(backend);
+  let state = providerStates.get(key);
   if (!state) {
     state = { suspendedUntilMs: 0, suspendedSinceMs: 0, consecutiveHits: 0, probedSuspensionMs: -1 };
-    providerStates.set(provider, state);
+    providerStates.set(key, state);
   }
   return state;
 }
@@ -186,12 +202,12 @@ export function noteForgeSuccess(
  * Refresh — which should not have to wait out a backoff window after the forge
  * has recovered. Omit `provider` to clear every provider.
  */
-export function clearForgeSuspension(provider?: string): void {
-  if (provider === undefined) {
+export function clearForgeSuspension(backend?: string): void {
+  if (backend === undefined) {
     providerStates.clear();
     return;
   }
-  providerStates.delete(provider);
+  providerStates.delete(backendKey(backend));
 }
 
 /** Reset all state. Tests only. */
@@ -257,10 +273,10 @@ export async function maybeProbeReset(
   provider: string,
   cwd?: string,
 ): Promise<void> {
-  // GitHub only: the `rate-limit` concept has no script outside the github
-  // preset, so on any other provider it would fall through to the github
+  // `gh` only: the `rate-limit` concept has no script outside the github
+  // preset, so for any other backend it would fall through to the github
   // default and shell out to `gh` for a forge that does not use it.
-  if (provider !== DEFAULT_PROVIDER) return;
+  if (backendKey(provider) !== 'gh' && backendKey(provider) !== DEFAULT_PROVIDER) return;
   if (!probeEnabled || probing.has(provider) || !isForgeSuspended(provider)) return;
   const state = stateFor(provider);
   if (state.probedSuspensionMs === state.suspendedSinceMs) return; // already probed this window
@@ -301,8 +317,8 @@ export function installForgeRateLimitWatch(): void {
   onForgeFailure((failure: ForgeFailure) => {
     if (failure.concept === 'rate-limit') return; // never suspend on the probe itself
     if (!isRateLimitError(failure.message)) return;
-    // Suspend only the provider that was refused. A GitHub limit says nothing
-    // about a GitLab workspace's forge.
-    noteRateLimited(failure.provider, null);
+    // Suspend only the backend that was refused. A `gh` limit says nothing
+    // about a workspace whose concepts run `glab`.
+    noteRateLimited(failure.backend, null);
   });
 }
