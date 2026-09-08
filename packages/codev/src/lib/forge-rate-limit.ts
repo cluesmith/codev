@@ -65,9 +65,13 @@ export const BACKOFF_MAX_MS = 900_000;
 export const SUSPEND_CAP_MS = 3_600_000;
 
 let suspendedUntilMs = 0;
+/** When the current suspension began. Guards success/probe races — see below. */
+let suspendedSinceMs = 0;
 let consecutiveHits = 0;
-/** Set while a reset probe is in flight, so a burst of failures probes once. */
+/** Set while a reset probe is in flight. */
 let probing = false;
+/** `suspendedSinceMs` of the suspension the reset probe has already run for. */
+let probedSuspensionMs = -1;
 
 export interface ForgeRateLimitState {
   /** True while forge-backed refreshes are suspended. */
@@ -93,10 +97,19 @@ export function isForgeSuspended(now: number = Date.now()): boolean {
  * With no reset instant the suspension follows a doubling backoff
  * (60 s → 15 min), so a forge that is merely flaky recovers quickly while one
  * that is genuinely throttled is left alone.
+ *
+ * The backoff escalates **once per suspension window, not once per failed
+ * command**. An overview refresh fires four forge commands in parallel and all
+ * four fail together; counting each would jump straight from 60 s to 8 minutes
+ * on the very first refresh.
  */
 export function noteRateLimited(resetAtMs: number | null, now: number = Date.now()): void {
-  const backoff = Math.min(BACKOFF_BASE_MS * 2 ** consecutiveHits, BACKOFF_MAX_MS);
-  consecutiveHits++;
+  const alreadySuspended = suspendedUntilMs > now;
+  if (!alreadySuspended) {
+    consecutiveHits++;
+    suspendedSinceMs = now;
+  }
+  const backoff = Math.min(BACKOFF_BASE_MS * 2 ** (consecutiveHits - 1), BACKOFF_MAX_MS);
   const until = resetAtMs !== null && resetAtMs > now
     ? Math.min(resetAtMs, now + SUSPEND_CAP_MS)
     : now + backoff;
@@ -104,16 +117,37 @@ export function noteRateLimited(resetAtMs: number | null, now: number = Date.now
   suspendedUntilMs = Math.max(suspendedUntilMs, until);
 }
 
-/** Clear the suspension — called when a forge command succeeds. */
-export function noteForgeSuccess(): void {
+/**
+ * Clear the suspension after a forge command succeeded.
+ *
+ * `startedAt` is when that command was dispatched, and it matters: an overview
+ * refresh dispatches its forge commands in parallel, and one of them
+ * (`user-identity`) is a REST call charged to a *different* budget. Without
+ * this guard that REST success would wipe the suspension its GraphQL siblings
+ * had just set — the very first failing refresh would un-suspend itself and
+ * the hammering would continue. Only a command dispatched *after* the current
+ * suspension began is evidence that the forge has actually recovered.
+ */
+export function noteForgeSuccess(startedAt: number = Date.now()): void {
+  if (suspendedUntilMs > 0 && startedAt < suspendedSinceMs) return;
+  clearForgeSuspension();
+}
+
+/**
+ * Drop the suspension outright. For an explicit human action — a dashboard
+ * Refresh — which should not have to wait out a backoff window after GitHub
+ * has recovered.
+ */
+export function clearForgeSuspension(): void {
   suspendedUntilMs = 0;
+  suspendedSinceMs = 0;
   consecutiveHits = 0;
+  probedSuspensionMs = -1;
 }
 
 /** Reset all state. Tests only. */
 export function resetForgeRateLimit(): void {
-  suspendedUntilMs = 0;
-  consecutiveHits = 0;
+  clearForgeSuspension();
   probing = false;
   probeEnabled = false;
 }
@@ -172,6 +206,8 @@ export function enableResetProbe(enabled = true): void {
  */
 export async function maybeProbeReset(cwd?: string): Promise<void> {
   if (!probeEnabled || probing || !isForgeSuspended()) return;
+  if (probedSuspensionMs === suspendedSinceMs) return; // already probed this window
+  probedSuspensionMs = suspendedSinceMs;
   probing = true;
   try {
     const budget = await fetchForgeBudget(cwd);
@@ -194,6 +230,13 @@ let installed = false;
 /**
  * Subscribe to forge failures and suspend on a rate limit. Idempotent, so any
  * module that depends on the suspension can call it without coordinating.
+ *
+ * Note what "suspend" does and does not mean: this module only *records* the
+ * suspension. Honouring it is up to each caller, and today the only caller that
+ * does is `OverviewCache.fetchCached` — the one on a 2.5 s timer, and so the
+ * one that turns a transient limit into a permanent one. A one-off command
+ * (`afx spawn` fetching an issue) still runs and still fails fast, which is
+ * what a human at a prompt wants.
  */
 export function installForgeRateLimitWatch(): void {
   if (installed) return;

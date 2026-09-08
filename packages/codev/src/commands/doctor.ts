@@ -34,7 +34,11 @@ import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import Database from 'better-sqlite3';
 import { parseBudget } from '../lib/forge-rate-limit.js';
 import { getGlobalDbPath } from '../agent-farm/db/index.js';
-import { projectHourlyForgeCalls } from '../agent-farm/servers/overview-budget.js';
+import {
+  GRAPHQL_POINTS_PER_CALL,
+  projectHourlyForgeCalls,
+  projectHourlyGraphqlPoints,
+} from '../agent-farm/servers/overview-budget.js';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
@@ -1317,10 +1321,16 @@ export async function doctor(): Promise<number> {
           console.log(`  ${chalk.green('✓')} ${'graphql budget'.padEnd(20)} ${label}`);
         }
 
+        // Compare points with points: the 5,000/h budget is denominated in
+        // GraphQL points, and a forge call costs several (#1645). Dividing
+        // calls by the point limit understates spend ~3x and would suppress
+        // the warning this check exists to raise.
         const workspaceCount = countKnownWorkspaces();
-        const projected = projectHourlyForgeCalls(workspaceCount);
+        const calls = projectHourlyForgeCalls(workspaceCount);
+        const projected = projectHourlyGraphqlPoints(workspaceCount);
         const share = Math.round((projected / budget.limit) * 100);
-        const projLabel = `${projected} calls/h for ${workspaceCount} workspace(s) — ${share}% of ${budget.limit}/h`;
+        const projLabel = `${calls} calls/h for ${workspaceCount} workspace(s) ≈ ${projected} pts/h `
+          + `(@${GRAPHQL_POINTS_PER_CALL} pts/call) — ${share}% of ${budget.limit}/h`;
         if (share > 50) {
           console.log(`  ${chalk.yellow('⚠')} ${'projected spend'.padEnd(20)} ${chalk.yellow(projLabel)}`);
           warnings++;

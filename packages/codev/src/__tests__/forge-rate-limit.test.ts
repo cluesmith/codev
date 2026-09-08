@@ -16,6 +16,7 @@ import {
   isRateLimitError,
   noteRateLimited,
   noteForgeSuccess,
+  clearForgeSuspension,
   resetForgeRateLimit,
   isForgeSuspended,
   getForgeRateLimit,
@@ -100,10 +101,40 @@ describe('forge rate-limit awareness (#1645)', () => {
       expect(getForgeRateLimit(now).resetAt).toBe(new Date(now + 10 * 60_000).toISOString());
     });
 
-    it('clears on a successful forge command', () => {
+    it('escalates once per window, not once per failed command', () => {
+      // An overview refresh fires four forge commands in parallel and all four
+      // fail together. Counting each would jump from 60s straight to 8 minutes
+      // on the very first refresh.
+      const now = 1_000_000;
+      noteRateLimited(null, now);
+      noteRateLimited(null, now);
+      noteRateLimited(null, now);
+      noteRateLimited(null, now);
+      expect(getForgeRateLimit(now).resetAt).toBe(new Date(now + BACKOFF_BASE_MS).toISOString());
+    });
+
+    it('clears on a forge command dispatched after the suspension began', () => {
+      const now = 1_000_000;
+      noteRateLimited(null, now);
+      expect(isForgeSuspended(now)).toBe(true);
+      noteForgeSuccess(now + 1);
+      expect(isForgeSuspended(now)).toBe(false);
+    });
+
+    it('ignores a success from a command dispatched BEFORE the suspension', () => {
+      // The REST `user-identity` call runs in the same batch as the GraphQL
+      // ones and is charged to a different budget, so it succeeds while they
+      // are refused. It must not wipe the suspension they just set.
+      const dispatchedAt = 1_000_000;
+      noteRateLimited(null, dispatchedAt + 10);
+      noteForgeSuccess(dispatchedAt);
+      expect(isForgeSuspended(dispatchedAt + 20)).toBe(true);
+    });
+
+    it('clears outright on an explicit refresh', () => {
       noteRateLimited(Date.now() + 60_000);
       expect(isForgeSuspended()).toBe(true);
-      noteForgeSuccess();
+      clearForgeSuspension();
       expect(isForgeSuspended()).toBe(false);
     });
   });

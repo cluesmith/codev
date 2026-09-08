@@ -56,3 +56,27 @@ export function projectHourlyForgeCalls(workspaceCount: number): number {
   const perWorkspace = 2 * (3_600_000 / POSITIVE_TTL_MS) + 2 * (3_600_000 / SEARCH_TTL_MS);
   return Math.round(workspaceCount * perWorkspace);
 }
+
+/**
+ * GraphQL points charged per forge call, estimated (#1645).
+ *
+ * A call is not one point. GitHub charges `max(1, nodes/100)` per request, and
+ * `gh` paginates: `issue-list` is `--limit 200` (two pages of ~100 nodes each,
+ * with author/assignee/label expansions), and the two search concepts are
+ * `--limit 1000`. Three is a deliberately conservative middle estimate — the
+ * exact figure could not be measured, because the account's budget was pinned
+ * at zero by the very bug this fixes for the whole session.
+ *
+ * Used only to report spend as a share of the point budget. If it is wrong it
+ * is wrong in the safe direction: over-estimating warns early.
+ */
+export const GRAPHQL_POINTS_PER_CALL = 3;
+
+/**
+ * Projected GraphQL *points* per hour — the unit the 5,000/h budget is actually
+ * denominated in. Reporting calls against that limit understates spend roughly
+ * threefold, which is enough to suppress the warning this exists to raise.
+ */
+export function projectHourlyGraphqlPoints(workspaceCount: number): number {
+  return projectHourlyForgeCalls(workspaceCount) * GRAPHQL_POINTS_PER_CALL;
+}

@@ -22,6 +22,7 @@ import {
 } from '../../lib/github.js';
 import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
 import {
+  clearForgeSuspension,
   getForgeRateLimit,
   installForgeRateLimitWatch,
   isForgeSuspended,
@@ -875,6 +876,15 @@ export class OverviewCache {
   // Intentionally NOT cleared by invalidate(): surviving cache invalidation is
   // the whole point. See ResolvedEnrichmentCache.
   private resolvedEnrichment = new ResolvedEnrichmentCache();
+  /**
+   * In-flight fetches, keyed `<concept>:<workspace>` (#1645). A cache entry is
+   * only written once its fetch resolves, so without this a `gh` call slower
+   * than the dashboard's 2.5 s poll — and they hang for tens of seconds when
+   * GitHub is struggling, which is exactly when this matters — lets every
+   * subsequent poll, and every additional client, start another duplicate
+   * batch. Callers arriving mid-flight join the existing promise instead.
+   */
+  private inflight = new Map<string, Promise<unknown>>();
   private readonly USER_TTL = 3_600_000; // 1h — GitHub identity is session-stable
 
   constructor() {
@@ -1134,6 +1144,11 @@ export class OverviewCache {
     this.closedCache.clear();
     this.mergedPRCache.clear();
     this.currentUserCache.clear();
+    // #1645: an explicit human Refresh also lifts a rate-limit suspension.
+    // invalidate() is only reached from POST /api/overview/refresh, never from
+    // the 2.5s poll, so this cannot reintroduce the hammering — and without it
+    // Refresh was a no-op for up to 15 minutes after GitHub had recovered.
+    clearForgeSuspension();
     // Note: resolvedEnrichment is deliberately NOT cleared here. It must survive
     // invalidation so a cleanup-triggered refresh (which calls invalidate()) can
     // still fall back to a builder's resolved area instead of UNCATEGORIZED
@@ -1157,7 +1172,8 @@ export class OverviewCache {
    *   resets (`isForgeSuspended`), because the budget is charged per account
    *   and retrying only digs deeper.
    */
-  private async fetchCached<T>(
+  private fetchCached<T>(
+    concept: string,
     cache: Map<string, CacheEntry<T>>,
     cwd: string,
     ttl: number,
@@ -1167,31 +1183,45 @@ export class OverviewCache {
     const cached = cache.get(cwd);
     if (cached) {
       const age = now - cached.fetchedAt;
-      if (cached.data !== null && age < ttl) return cached.data;
-      if (cached.data === null && age < negativeTtlMs(cached.failures)) return null;
+      if (cached.data !== null && age < ttl) return Promise.resolve(cached.data);
+      if (cached.data === null && age < negativeTtlMs(cached.failures)) return Promise.resolve(null);
     }
 
-    if (isForgeSuspended(now)) return null;
+    if (isForgeSuspended(now)) return Promise.resolve(null);
 
-    const data = await fetcher();
-    if (data !== null) {
-      cache.set(cwd, { data, fetchedAt: now, failures: 0 });
-      noteForgeSuccess();
-    } else {
-      cache.set(cwd, { data: null, fetchedAt: now, failures: (cached?.failures ?? 0) + 1 });
-      // If that failure was a rate limit, learn when it lifts — at most one
-      // probe per suspension window, and only where it has been enabled.
-      void maybeProbeReset(cwd);
-    }
-    return data;
+    const key = `${concept}:${cwd}`;
+    const existing = this.inflight.get(key);
+    if (existing) return existing as Promise<T | null>;
+
+    const flight = (async () => {
+      const data = await fetcher();
+      if (data !== null) {
+        cache.set(cwd, { data, fetchedAt: now, failures: 0 });
+        // `now` is when this command was dispatched. A command dispatched
+        // before the current suspension began proves nothing about the forge
+        // having recovered — see noteForgeSuccess.
+        noteForgeSuccess(now);
+      } else {
+        cache.set(cwd, { data: null, fetchedAt: now, failures: (cached?.failures ?? 0) + 1 });
+        // If that failure was a rate limit, learn when it lifts — once per
+        // suspension window, and only where the probe has been enabled.
+        void maybeProbeReset(cwd);
+      }
+      return data;
+    })().finally(() => {
+      this.inflight.delete(key);
+    });
+
+    this.inflight.set(key, flight);
+    return flight;
   }
 
   private fetchPRsCached(cwd: string): Promise<ForgePR[] | null> {
-    return this.fetchCached(this.prCache, cwd, POSITIVE_TTL_MS, () => fetchPRList(cwd));
+    return this.fetchCached('pr-list', this.prCache, cwd, POSITIVE_TTL_MS, () => fetchPRList(cwd));
   }
 
   private fetchIssuesCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
-    return this.fetchCached(this.issueCache, cwd, POSITIVE_TTL_MS, () => fetchIssueList(cwd));
+    return this.fetchCached('issue-list', this.issueCache, cwd, POSITIVE_TTL_MS, () => fetchIssueList(cwd));
   }
 
   /**
@@ -1199,14 +1229,14 @@ export class OverviewCache {
    * Long TTL — identity is stable for the lifetime of a Tower session.
    */
   private fetchCurrentUserCached(cwd: string): Promise<string | null> {
-    return this.fetchCached(this.currentUserCache, cwd, this.USER_TTL, () => fetchCurrentUser(cwd));
+    return this.fetchCached('user-identity', this.currentUserCache, cwd, this.USER_TTL, () => fetchCurrentUser(cwd));
   }
 
   private fetchRecentlyClosedCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
-    return this.fetchCached(this.closedCache, cwd, SEARCH_TTL_MS, () => fetchRecentlyClosed(cwd));
+    return this.fetchCached('recently-closed', this.closedCache, cwd, SEARCH_TTL_MS, () => fetchRecentlyClosed(cwd));
   }
 
   private fetchMergedPRsCached(cwd: string): Promise<ForgePR[] | null> {
-    return this.fetchCached(this.mergedPRCache, cwd, SEARCH_TTL_MS, () => fetchRecentMergedPRs(cwd));
+    return this.fetchCached('recently-merged', this.mergedPRCache, cwd, SEARCH_TTL_MS, () => fetchRecentMergedPRs(cwd));
   }
 }

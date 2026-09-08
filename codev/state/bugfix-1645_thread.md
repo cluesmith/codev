@@ -142,3 +142,51 @@ Architect set the positive TTL to **180 s** (msg 06:06Z), not 120 s: at 120 s th
 already the whole acceptance budget, so no search-TTL value could get under it. 180 s
 gives 40 + 12 = 52/h, and ~2,028 GraphQL points/h at 13 watched workspaces — 41 % of the
 5,000/h limit.
+
+## 2026-09-07 — CMAP round 1
+
+| lane | verdict |
+|---|---|
+| gemini | APPROVE (HIGH), no key issues |
+| claude | APPROVE (HIGH), 5 key issues |
+| codex | **REQUEST_CHANGES** (HIGH), 4 key issues |
+
+All findings verified against the actual files before acting. Six were real; two of
+codex's overlapped with claude's.
+
+1. **A concurrent REST success cleared a genuine GraphQL suspension** (both lanes). The
+   five fetches are dispatched together and `user-identity` is REST (`gh api user`) on a
+   *different* budget, so it succeeded while its GraphQL siblings were refused — and its
+   `noteForgeSuccess()` wiped the suspension they had just set. My e2e missed this
+   because the fake `gh` failed for *every* subcommand, `api user` included. Fixed with a
+   dispatch-time guard: a success only clears the suspension if the command was
+   dispatched *after* the suspension began. The fake `gh` is now production-shaped
+   (`api user` and `api rate_limit` succeed).
+2. **No in-flight coalescing** (codex). A cache entry was only written once its fetch
+   resolved, so a `gh` call slower than the 2.5 s poll — and they hang for tens of
+   seconds during an incident, which is exactly when it matters — let every poll and
+   every extra client start another duplicate batch. Added a per-concept-per-workspace
+   single-flight map.
+3. **Doctor compared calls against a points budget** (both lanes) — 676 calls read as
+   14 % of 5,000 when the real figure is 41 %, which would suppress the warning. Now
+   reports points via an explicit `GRAPHQL_POINTS_PER_CALL = 3`.
+4. **Backoff escalated once per failed command, not once per window** (claude). Four
+   parallel failures jumped 60 s straight to ~8 min. Now escalates once per suspension.
+5. **No manual escape from a suspension** (claude) — `invalidate()` didn't touch it, so
+   Refresh was a no-op for up to 15 min after GitHub recovered. `invalidate()` (only
+   reached from `POST /api/overview/refresh`, never the poll) now clears it.
+6. **Overstated docstrings** (claude) — the suspension is honoured only by
+   `OverviewCache.fetchCached`, and the probe guard was in-flight-only. Both corrected;
+   the probe now has a real per-suspension guard.
+
+Codex also argues the PR should not carry `Fixes #1645`, because the issue's acceptance
+says ≤60 `gh`/hour across 13 workspaces and this ships 52/h *per watched workspace*
+(676 total). That is a genuine reading of the original text and is the architect's call —
+raised with them; #1647 is what would actually close it.
+
+Note on test honesty: the overview-level REST test cannot demonstrate the dispatch-time
+guard, because the single-flight refactor made `fetchCached` re-check the suspension
+synchronously at dispatch, so `user-identity` is never dispatched once a sibling has
+recorded the limit. Verified by removing the guard: the *unit* test in
+forge-rate-limit.test.ts fails, the overview one does not. The integration test now says
+which mechanism it pins and points at the unit test for the other.

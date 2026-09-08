@@ -32,6 +32,7 @@ import {
   resetForgeRateLimit,
   isForgeSuspended,
 } from '../../lib/forge-rate-limit.js';
+import { projectHourlyGraphqlPoints, GRAPHQL_POINTS_PER_CALL } from '../servers/overview-budget.js';
 
 // ============================================================================
 // Mocks
@@ -1939,6 +1940,84 @@ describe('overview', () => {
       expect(data.errors?.prs).toContain('rate limit exhausted');
       expect(data.errors?.issues).toContain('rate limit exhausted');
       expect(data.errors?.prs).not.toContain('GitHub CLI unavailable');
+    });
+
+    it('keeps the suspension when the REST identity call still succeeds (#1645)', async () => {
+      // `user-identity` is REST (`gh api user`), charged to a different budget,
+      // so it keeps succeeding while its GraphQL siblings are refused. A
+      // refresh that hits the limit must stay suspended afterwards.
+      //
+      // Two mechanisms hold that, and they are pinned in different places.
+      // Here: `fetchCached` re-checks the suspension synchronously as each
+      // fetch is dispatched, so once a sibling has recorded the limit the
+      // identity call is not dispatched at all. The other — a success that was
+      // already in flight when the limit landed must not clear it — is pinned
+      // by "ignores a success from a command dispatched BEFORE the suspension"
+      // in forge-rate-limit.test.ts, since it turns on dispatch ordering this
+      // test cannot control.
+      mockFetchPRList.mockImplementation(async () => {
+        noteRateLimited(Date.now() + 10 * 60 * 1000);
+        return null;
+      });
+      mockFetchIssueList.mockResolvedValue(null);
+      mockFetchRecentlyClosed.mockResolvedValue(null);
+      mockFetchMergedPRs.mockResolvedValue(null);
+      mockFetchCurrentUser.mockResolvedValue('octocat');
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(isForgeSuspended()).toBe(true);
+      expect(data.forgeStatus).toBe('rate-limited');
+      expect(mockFetchCurrentUser).not.toHaveBeenCalled();
+    });
+
+    it('coalesces concurrent requests into one forge call (#1645)', async () => {
+      // A cache entry is only written once its fetch resolves. With the
+      // dashboard polling every 2.5s and `gh` hanging for tens of seconds
+      // during an incident, every poll and every extra client would otherwise
+      // start another duplicate batch.
+      let release: (v: unknown) => void = () => {};
+      const gate = new Promise(r => { release = r; });
+      mockFetchPRList.mockImplementation(async () => { await gate; return []; });
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      const all = Promise.all([
+        cache.getOverview(tmpDir),
+        cache.getOverview(tmpDir),
+        cache.getOverview(tmpDir),
+      ]);
+      release(null);
+      await all;
+
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets an explicit refresh lift a rate-limit suspension (#1645)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      noteRateLimited(Date.now() + 10 * 60 * 1000);
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).not.toHaveBeenCalled();
+
+      cache.invalidate(); // POST /api/overview/refresh
+      expect(isForgeSuspended()).toBe(false);
+
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+    });
+
+    it('projects spend in GraphQL points, not calls (#1645)', () => {
+      // Points, not calls: reporting 676 calls against a 5,000-*point* budget
+      // reads as 14% when the real figure is 41%, which would suppress the
+      // warning the doctor check exists to raise.
+      expect(projectHourlyGraphqlPoints(13)).toBe(676 * GRAPHQL_POINTS_PER_CALL);
+      expect(projectHourlyGraphqlPoints(13)).toBeGreaterThan(projectHourlyForgeCalls(13));
+      // And the shipped TTLs must keep 13 watched workspaces under half the budget.
+      expect(projectHourlyGraphqlPoints(13)).toBeLessThan(0.5 * 5000);
     });
 
     it('resumes fetching once the suspension lifts (#1645)', async () => {
