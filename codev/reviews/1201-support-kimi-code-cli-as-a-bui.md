@@ -2,85 +2,132 @@
 
 Fixes #1201
 
+> **Rewritten 2026-09-08 under #1620.** This document described the **retired** seed-session
+> design — a `kimi -p` bootstrap, a captured session id pinning `kimi -S <id>`, a sentinel-gated
+> store-verified `BEGIN` kick written straight to the PTY, `seed-kick.ts`, `message-pacing.ts`,
+> `.builder-seed.txt`. None of that is in the branch; the 2026-08-09 design pivot replaced it once
+> kimi 0.31.0's `--agent-file` and Spec 1313's mailbox gave role and task sanctioned homes. The
+> plan was rewritten for the same reason. A review artifact that describes code which does not
+> exist is worse than no artifact — it is a confident wrong answer for whoever reads it next — so
+> it now describes what shipped, including the #1620 amendments made by maintainers on top of
+> @mohidmakhdoomi's work.
+
 ## Summary
 
-Adds the Kimi Code CLI (`kimi`, ≥ 0.27.0) as a supported **builder** harness — `shell.builder: "kimi"` / `builderHarness: "kimi"` / `--builder-cmd kimi` now produce a working builder instead of the #1062 false-Claude fallthrough (which appended `--append-system-prompt` and a positional prompt, both rejected by kimi, and could route a stale Claude `--resume <uuid>` into it). Because Kimi documents no system-prompt flag and no positional prompt, the launch shape is provider-owned: a **seed-session bootstrap** (validated by spike task-Iptx) delivers role + task via a one-shot `kimi -p` whose captured session id pins a `kimi -S <id> --yolo` TUI loop, with a Tower-side **readiness barrier** (sentinel-gated, store-verified `BEGIN` kick) and a per-harness delayed-Enter pacing knob so `afx send` actually submits. Kimi as an *architect* is explicitly out of scope (stage 2).
+Adds the Kimi Code CLI (`kimi`, **≥ 0.33.0**) as a supported **builder** harness. `shell.builder:
+"kimi"` / `builderHarness: "kimi"` / `--builder-cmd kimi` now produce a working builder instead of
+the #1062 false-Claude fallthrough, which appended `--append-system-prompt` and a positional
+prompt — both rejected by kimi — and could route a stale Claude `--resume <uuid>` into it.
+
+Kimi differs from every previously supported harness in three ways the generic launch shapes cannot
+express: **no positional prompt**, **server-side session ids minted on the first message**, and a
+**startup folder-trust dialog** that renders before any composer. So the launch shape is
+provider-owned (`HarnessProvider.buildBuilderLaunchScript`), and role and task travel separately:
+
+- **Role** → `--agent-file`, an agent-definition file written into the worktree and composed around
+  kimi's `${base_prompt}` token so it *extends* rather than replaces kimi's own system prompt.
+- **Task** → an ordinary first message queued on the Spec 1313 **mailbox** and delivered by the
+  render gate onto a verified-empty composer. Never a direct PTY write, which the mailbox contract
+  forbids — so a busy line, a boot screen, or the trust dialog **holds** the message rather than
+  corrupting or losing it.
+
+Crash restart resumes with the documented, cwd-scoped **`kimi -c`**, guarded by a store probe that
+fails closed (`kimi -c` with nothing to continue does not fail — it starts a fresh session that
+never saw `--agent-file`, i.e. a silently roleless builder). Kimi as an *architect* is out of scope
+and fails loudly.
 
 ## Files Changed
 
-`git diff --stat $(git merge-base main HEAD)` (excluding porch state commits):
-
-- `packages/codev/src/agent-farm/utils/harness.ts` (+263) — `KIMI_HARNESS`, detection, `buildBuilderLaunchScript` / `seedDelivery` / `messagePacing` interface capabilities, `buildResume`
-- `packages/codev/src/agent-farm/utils/kimi-session-discovery.ts` (+197, new) — store scan / ownership verify / state reader (fail-soft; `KIMI_CODE_HOME`-aware)
-- `packages/codev/src/agent-farm/commands/spawn-worktree.ts` (+111/−9) — provider-owned script branch, `.builder-seed.txt`, `seedKick` pass-through
-- `packages/codev/src/agent-farm/servers/seed-kick.ts` (+194, new) — sentinel watcher + grace + store-verified kick retry ladder
-- `packages/codev/src/agent-farm/servers/message-pacing.ts` (+55, new) — per-target pacing resolution (worktree-marker probe first, config-resolved harness fallback)
-- `packages/codev/src/agent-farm/servers/message-write.ts` (+16/−2) — optional `pacing.enterDelayMs` override
-- `packages/codev/src/agent-farm/servers/tower-routes.ts` (+20/−2) — `seedKick` on terminal create; pacing at both send paths
-- `packages/codev/src/agent-farm/servers/tower-cron.ts` (+6/−2) — pacing at cron delivery
-- `packages/core/src/tower-client.ts` (+24) — `SeedKickRequest` wire type on `createTerminal`
-- `packages/codev/src/agent-farm/lib/tower-client.ts` (+1) — re-export
-- `packages/codev/src/commands/doctor.ts` (+110/−2) — kimi presence/minVersion, auth heuristic, `kimi doctor` config check, store smoke probe, architect-kimi warning
-- Tests (+~900 across 8 files): new `kimi-session-discovery.test.ts`, `seed-kick.test.ts`, `message-pacing.test.ts`; extended `harness.test.ts`, `spawn-worktree.test.ts`, `config.test.ts`, `discover-resume-session.test.ts`, `bugfix-584-send-multiline-pacing.test.ts`
-- Docs: `codev/resources/arch.md` (+16/−2, dedicated Kimi subsection), `codev/resources/commands/agent-farm.md` + `codev-skeleton/resources/commands/agent-farm.md` (builder-harness config examples — skeleton mirrored)
-- `codev/spikes/pir-1201-kimi-builder-demo.mjs` (+193, new) — runnable live-demo driver (real kimi, real dist modules)
-- `codev/plans/1201-…md`, `codev/state/pir-1201_thread.md`
-
-Total: 27 files, +2378/−23.
-
-## Commits
-
-- `2cf424c1` [PIR #1201] Kimi harness: detection, seed-session launch script, builder resume
-- `8e86c411` [PIR #1201] Tower: sentinel-gated BEGIN delivery + per-harness Enter pacing
-- `3d407856` [PIR #1201] doctor: kimi presence, truthful auth heuristic, store smoke probe
-- `f0754430` [PIR #1201] Docs: kimi builder harness (arch.md + config examples, skeleton mirror)
-- `b27e2d38` [PIR #1201] Pacing resolution is fully best-effort; widen cron session type
-- `ea6607c6` [PIR #1201] Pin Kimi Enter delay with live bisect evidence
-- `6b39ca5c` [PIR #1201] Live demo driver + results (all 5 checklist steps pass)
-- (plus `d49c292b` plan draft and porch state commits)
+- `packages/codev/src/agent-farm/utils/harness.ts` — `KIMI_HARNESS`, detection,
+  `buildBuilderLaunchScript` / `prepareWorkspace` / `messagePacing` capabilities, the agent-file
+  composer, the inlined resume probe, and `launchLoopTail` relocated here (exported) so the
+  provider-owned script can share it
+- `packages/codev/src/agent-farm/utils/kimi-session-discovery.ts` (new) — store scan, ownership
+  verification, state reader, the trust record and its refusals, and both drift probes; all
+  fail-soft and `KIMI_CODE_HOME`-aware
+- `packages/codev/src/agent-farm/commands/spawn-worktree.ts` — provider-owned script branch in both
+  entry points; resolves and passes the trust opt-in
+- `packages/codev/src/agent-farm/servers/gate-profiles.ts` — `KIMI_PROFILE` and registry entry
+- `packages/codev/src/agent-farm/servers/render-gate.ts` — `regionStartPatterns`, `growsWithDraft`,
+  `markerSpanEnd` / `markerSpanStart`, `findRegionStart`, the per-row marker exemption, and the two
+  new verdict details
+- `packages/sdk/src/hold-verdict.ts`, `db/types.ts`, `db/schema.ts` — both new details in the
+  shared predicate, the persisted union, and the column comment
+- `packages/codev/src/agent-farm/servers/message-write.ts` — `MessagePacing`, threaded through
+  `writeMessageToSession` and `submitMessagePaced`, overriding **both** Enter delays
+- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` — `resolveHarnessForSession`,
+  `resolvePacingForSession`, and pacing at the `writeMessage` binding (which covers cron delivery,
+  since it writes through the same port)
+- `packages/codev/src/agent-farm/servers/tower-routes.ts` — pacing on the `--interrupt` write;
+  `--escape` deliberately unpaced, with the reason recorded
+- `packages/codev/src/agent-farm/types.ts`, `packages/codev/src/lib/config.ts` — the
+  `harnessOptions` namespace, typed and validated at load
+- `packages/codev/src/commands/doctor.ts` — kimi presence, the 0.33.0 floor, an auth heuristic, the
+  store and trust drift probes, and the architect-use warning
+- Tests across `harness.test.ts`, `render-gate.test.ts`, `spawn-worktree.test.ts`,
+  `kimi-session-discovery.test.ts`, `mailbox-pacing.test.ts`, `config.test.ts`,
+  `bugfix-584-send-multiline-pacing.test.ts`, `hold-verdict-exhaustive.test.ts`, plus eight real
+  `fixtures/gate/kimi-*.txt` captures
+- Docs: `codev/resources/arch.md`, and `codev/resources/commands/agent-farm.md` mirrored into
+  `codev-skeleton/`
+- `codev/spikes/pir-1201-kimi-*.mjs` — the measurement spikes and the runnable live-demo driver
 
 ## Test Results
 
-- `pnpm build`: ✓ pass (types → core → codev, incl. dashboard + skeleton copy)
-- `pnpm test` (vitest): ✓ pass — 3592 passed, 48 skipped (~75 new tests). Porch's build/tests checks green at both the dev-approval and review transitions.
-- **#929-class regression covered from four angles**: `kimi` + a stale Claude `.jsonl` can never yield `--resume <claude-uuid>` or `--append-system-prompt` (harness `buildResume`, `discoverResumeSession`, config/override resolution, generated-script assertions).
-- **Live validation on real kimi 0.27.0**:
-  - *Enter-delay bisect* (POC probe-10 method): 80ms and 100ms swallowed; 120/250/500/1000ms submit → threshold ≈ 100–120ms; shipped `KIMI_ENTER_DELAY_MS = 1000` (~9x margin; latency-only cost).
-  - *Demo driver* (`node codev/spikes/pir-1201-kimi-builder-demo.mjs`): 5/5 PASS — seed bootstrap + id capture; sentinel-gated store-verified BEGIN (`lastPrompt="BEGIN"`); multiline delivery at pinned delay; inner-restart context retention (role token + task recalled verbatim after killing the TUI); `buildResume` returns the pinned id. The spike addendum's open question — does ack-and-wait hold with a task attached? — **held**; the pre-planned role-only-seed fallback was not needed.
-  - *Human full-path verification at the dev-approval gate*: real `afx spawn` through Tower (branch build via local-install); all 4 checklist items passed live.
+- `pnpm build`: clean.
+- `pnpm test`: **5,940 passed, 48 skipped, 0 failed** (as of the #1620 merge into converged `main`).
+- **#929-class regression covered from four angles**: `kimi` plus a stale Claude `.jsonl` can never
+  yield `--resume <claude-uuid>` or `--append-system-prompt` — harness `buildResume`,
+  `discoverResumeSession`, config/override resolution, and generated-script assertions.
+- The generated resume probe is pinned by a test that **executes** it against fixture stores and
+  asserts its printed id equals `findLatestKimiSessionId`'s, so the hand-written snippet cannot
+  drift from the TypeScript it mirrors.
+- Every generated launch-script shape is parsed by a real `bash -n` — generated shell is the one
+  artifact here no type checker reads.
+
+**Live validation status.** The original 7/7 demo ran against real kimi **0.27.0/0.34.0** in
+2026-07/08. It has **not** been re-run since: the #1620 maintainer lane has no authenticated Kimi,
+and re-measurement plus the now-nine-scenario demo are handed back to @mohidmakhdoomi (checklist on
+PR #1203). Latest kimi is **0.41.0**. Treat every measured claim below as carrying its version.
 
 ## Architecture Updates
 
-Routed to the **COLD** tier (`codev/resources/arch.md`, updated in commit `f0754430`): a dedicated "Kimi Builder Harness (Issue #1201)" subsection under Agent Farm Internals — builder-only status, the seed-session bootstrap, the sentinel + store-verified BEGIN barrier, per-harness pacing with the marker-probe resolution order, explicit-ID resume, and the caveats (undocumented store surfaces + 0.27.0 pin + doctor smoke probe; **no write-guard parity** — Kimi has no documented hook seam; in-memory kick lost on Tower restart during the seed window). The harness enumeration lines in the same section were extended.
+Routed to the **COLD** tier (`codev/resources/arch.md`), a dedicated "Kimi Builder Harness"
+subsection under Agent Farm Internals: builder-only status, `--agent-file` role injection, mailbox
+task delivery, the guarded `kimi -c` resume and its sticky-fresh identity check, per-harness Enter
+pacing across both Enter sites, the render-gate profile including `growsWithDraft` /
+`multi-row-draft` and the escalation decision, the gated workspace-trust record, the 0.33.0 floor,
+and the undocumented-surface audit with its two drift probes.
 
-No **HOT** tier (`arch-critical.md`) change: kimi support is subsystem detail, not a top-10 always-on system-shape fact; the existing hot facts (runtime resolution, dual-tree mirroring, porch/state invariants) already cover the decision surface this touches.
+No **HOT** tier change: kimi support is subsystem detail, not a top-10 always-on system-shape fact.
 
 ## Lessons Learned Updates
 
-Routed to the **COLD** tier (`codev/resources/lessons-learned.md`, Architecture section, this commit):
+Routed to the **COLD** tier (`codev/resources/lessons-learned.md`):
 
-1. *Advisory decorators on critical paths must be failure-total* — the pacing resolver's narrow try/catch let a mocked-out dependency 500 every `/api/send` in the test env; the whole body now degrades to defaults.
-2. *Per-instance runtime facts that config cannot know are best carried by a self-describing on-disk marker in the instance's own directory* — `.builder-kimi-session` makes pacing correct for `--builder-cmd` override spawns across Tower restarts with zero schema migration.
-
-No **HOT** tier (`lessons-critical.md`) change: both lessons are architecture-pattern reference material, not behavior-changing cross-cutting rules of the always-on caliber (the cap is full of broader rules that would each beat these on displacement).
+1. *Advisory decorators on critical paths must be failure-total* — a narrow `try`/`catch` in the
+   pacing resolver let a mocked-out dependency 500 every `/api/send`. The whole body now degrades
+   to defaults.
+2. *Prefer a self-describing artifact the launcher already generates over a marker file every
+   launch shape must remember to write* — the `.builder-kimi` marker was missed by one shape and
+   cost a review cycle; pacing now reads the harness out of the generated `.builder-start.sh`.
 
 ## Things to Look At During PR Review
 
-- **PR-consultation finding (codex, REQUEST_CHANGES — FIXED)**: the original delivery confirmation used `lastPrompt.includes(kickMessage)`. Real defect: on a fresh spawn `lastPrompt` initially holds the *seed prompt*, whose ack-and-wait wrapper itself says "wait for BEGIN" — so the substring check reported success before the kick ever submitted, silently defeating the swallowed-Enter recovery (the live demo's happy path masked it: the kick genuinely landed, so the false-positive window was never observed). Fixed in `seed-kick.ts` by requiring whitespace-normalized **equality** (submitted messages land in `lastPrompt` with newlines flattened to spaces — observed), with two pinning regression tests (seed-prompt-containing-BEGIN must NOT confirm and must escalate to the Enter re-send; a multi-line kick payload must still confirm through the flattening). Gemini and Claude both returned APPROVE; PIR's consultation is single-pass, so this fix was **not** independently re-reviewed — please eyeball `confirmed()` in `seed-kick.ts` at the `pr` gate. The live demo was re-run after the fix: still 5/5 PASS (no false negative).
-- **`seed-kick.ts` retry ladder semantics**: `updatedAt` movement is deliberately NOT trusted as confirmation (the TUI touches the store on open, which would false-positive and suppress the Enter re-send). A false *negative* only costs a duplicate BEGIN + loud warn.
-- **`message-pacing.ts` resolution order**: marker probe before config, by design (override robustness — see plan-review note). The probe stats one file per message send; sends are rare, so no perf concern.
-- **Undocumented-surface reliance is deliberately narrow**: discovery scans only `sessions/*/*/state.json` (not `session_index.jsonl` — one undocumented surface instead of two); every reader is fail-soft to the fresh-with-role path; doctor carries the drift probe.
-- **`kimiTuiCmd` appends `--yolo`** unless the user already passed it; `--auto` is deliberately never used (documented conflict with `--yolo`; suppresses agent→user questions the gate workflow needs).
-- **Kimi builders have NO write-guard** (#1018 parity impossible — no documented hook seam). Documented in arch.md and the config docs; the "static deny rules" hint in Kimi's `-p` docs is flagged as follow-up investigation, not a claimed guarantee.
-- Doctor's kimi lane follows the existing print-flow style (no dedicated unit tests, matching the opencode/gemini architect-warning precedent); its logic-bearing pieces (`kimiStoreLayoutLooksDrifted`, discovery readers) are unit-tested in the discovery suite.
-
-## How to Test Locally
-
-- **View diff**: VSCode sidebar → right-click builder `pir-1201` → **View Diff** (or `gh pr diff`).
-- **Standalone demo (no Tower changes needed)**: from the branch checkout, `pnpm build` then `node codev/spikes/pir-1201-kimi-builder-demo.mjs` — requires an authenticated `kimi` ≥ 0.27.0; prints PASS/FAIL for all five checklist steps.
-- **Full Tower path**: `pnpm -w run local-install` (restarts Tower), then from the main workspace root: `afx spawn --task "any small task" --builder-cmd kimi` → watch seed → `__CODEV_KIMI_SEED_DONE__` → BEGIN in the builder pane; `afx send <builder-id>` with a >3-line message → submits as one message; kill the TUI (`Ctrl+C` once) → restart resumes with context; `afx spawn --resume` after killing the terminal.
-- `codev doctor` with kimi installed → presence + version gate, heuristic auth line, smoke probe; with `shell.architect: "kimi"` → builder-only warning.
-
----
-
-*Maintainer note: please add the `area/tower` label to issue #1201 (we can't set labels cross-fork).*
+- **The trust pre-write is gated** (#1620): opt-in via `harnessOptions.kimi.autoTrustWorkspace`
+  (default false), and refused outright for any worktree shipping `.mcp.json` or
+  `.kimi-code/mcp.json`. The earlier "grants strictly less than `--yolo`" argument holds for tool
+  execution and not for what trust actually controls — loading folder-defined MCP servers.
+- **`multi-row-draft` escalates** (#1620), reversing this branch's original classification. It is
+  the one verdict reached when the classifier could not count cells and inferred from box geometry.
+- **The `growsWithDraft` premise is load-bearing and version-pinned.** If a post-reply steady-state
+  composer ever grows past one interior row, the rule holds every later message forever. Measured on
+  0.34.0; re-verification is the contributor's checklist step 2.
+- **Undocumented-surface reliance is deliberately narrow** — discovery scans only
+  `sessions/*/*/state.json`, and both it and the trust-record naming carry `codev doctor` drift
+  probes that weigh records by recency, so a store migration surfaces instead of hiding.
+- **`kimiTuiCmd` appends `--yolo`** unless the user already passed it; `--auto` is deliberately never
+  used (documented conflict, and it suppresses the agent→user questions the gate workflow needs).
+- **Kimi builders have NO write-guard** (#1018 class). kimi *does* document blocking `PreToolUse`
+  hooks since 0.32.0, so parity is achievable follow-up rather than a permanent limitation — but it
+  is not in place today.
