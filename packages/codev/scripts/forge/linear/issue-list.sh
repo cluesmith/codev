@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: issue-list (Linear via GraphQL API)
+# forge-executable: curl
 # Input: CODEV_LINEAR_TEAM (team key, e.g. "ENG")
 # Output: JSON [{number, title, url, labels, createdAt, author, assignees}]
 set -e

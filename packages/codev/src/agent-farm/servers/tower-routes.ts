@@ -105,6 +105,7 @@ import {
   searchIssues,
   fetchPRList,
   fetchCurrentUser,
+  probeGhGraphqlRateLimit,
   parseLinkedIssue,
   parseArea,
 } from '../../lib/github.js';
@@ -146,7 +147,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Singleton cache for overview endpoint (Spec 0126 Phase 4)
-const overviewCache = new OverviewCache();
+// #1645: the gh reset probe is enabled here, in Tower, and nowhere else.
+const overviewCache = new OverviewCache({ probe: probeGhGraphqlRateLimit });
 
 // Spec 1313: the in-memory SendBuffer (Spec 403) is retired. Every send is now
 // persisted to the durable `mailbox` table before the response and delivered only

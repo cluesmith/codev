@@ -112,6 +112,13 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
           onSelectTab={id => onSelectTab?.(id)}
         />
 
+        {overview?.forgeStatus === 'rate-limited' && (
+          <p className="work-unavailable">
+            Forge rate limited — PRs, backlog and recently closed are stale until{' '}
+            {overview.forgeResetAt ? new Date(overview.forgeResetAt).toLocaleTimeString() : 'the budget resets'}
+          </p>
+        )}
+
         {/* Needs Attention */}
         <section className="work-section">
           <h3 className="work-section-title">Needs Attention</h3>

@@ -15,7 +15,7 @@
 import { exec, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig as loadCodevConfig } from './config.js';
 
@@ -329,28 +329,93 @@ export async function executeForgeCommand(
   env?: Record<string, string>,
   options?: ForgeCommandOptions,
 ): Promise<unknown | null> {
-  const forgeConfig = resolveForgeConfig(options);
-  const command = getForgeCommand(concept, forgeConfig);
+  return (await executeForgeCommandDetailed(concept, env, options)).data;
+}
 
-  if (command === null) {
-    return null;
-  }
+/** Why a forge command produced no data (#1645). `null` on the result means it exited 0. */
+export interface ForgeCommandError {
+  message: string;
+  stderr: string;
+  /** Process exit code; null when the command was disabled, timed out, or config failed to load. */
+  exitCode: number | null;
+}
 
-  const forgeEnv = buildForgeEnv(forgeConfig);
+export interface ForgeCommandResult {
+  data: unknown | null;
+  error: ForgeCommandError | null;
+}
 
+/**
+ * Like `executeForgeCommand`, but keeps the failure (#1645). Callers that must
+ * tell "rate limited" from "CLI missing" need stderr and the exit code; the
+ * plain variant collapses every failure to `null`. Never throws — a malformed
+ * `.codev/config.json` is reported as an error, not raised into Tower's
+ * `unhandledRejection` handler.
+ */
+export async function executeForgeCommandDetailed(
+  concept: string,
+  env?: Record<string, string>,
+  options?: ForgeCommandOptions,
+): Promise<ForgeCommandResult> {
   try {
+    const forgeConfig = resolveForgeConfig(options);
+    const command = getForgeCommand(concept, forgeConfig);
+    if (command === null) {
+      return { data: null, error: { message: `concept '${concept}' is disabled or unknown`, stderr: '', exitCode: null } };
+    }
+
     const { stdout } = await execAsync(command, {
       cwd: options?.cwd,
-      env: { ...process.env, ...forgeEnv, ...env },
+      env: { ...process.env, ...buildForgeEnv(forgeConfig), ...env },
       timeout: 30_000,
       maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
     });
-
-    return parseOutput(stdout, options?.raw);
+    return { data: parseOutput(stdout, options?.raw), error: null };
   } catch (err: unknown) {
     logDebug(concept, err);
-    return null;
+    const e = err as { message?: string; stderr?: string; code?: unknown };
+    return {
+      data: null,
+      error: {
+        message: e?.message ?? String(err),
+        stderr: typeof e?.stderr === 'string' ? e.stderr : '',
+        exitCode: typeof e?.code === 'number' ? e.code : null,
+      },
+    };
   }
+}
+
+/**
+ * Executables that name a transport, not a forge account. A concept run through
+ * one of these is keyed by its provider (`linear`), because `curl` has no budget.
+ */
+const GENERIC_TRANSPORTS = new Set(['curl', 'wget', 'sh', 'bash', 'zsh', 'node', 'python', 'python3', 'npx', 'env']);
+const FORGE_CLIS = new Set(['gh', 'glab', 'tea']);
+
+/**
+ * The backend a concept actually spends budget on (#1645): the resolved
+ * executable's lowercased basename (`gh`, whether configured as `gh` or
+ * `/usr/local/bin/gh`), never the configured provider — a Linear workspace's
+ * `pr-list` falls through to the GitHub script and spends GitHub's budget.
+ * Generic transports and custom script paths key by provider instead.
+ * Returns null when the concept is disabled or unknown.
+ */
+export function resolveForgeBackend(concept: string, options?: ForgeCommandOptions): string | null {
+  let forgeConfig: ForgeConfig | null;
+  try {
+    forgeConfig = resolveForgeConfig(options);
+  } catch {
+    forgeConfig = null;
+  }
+  const command = getForgeCommand(concept, forgeConfig);
+  if (command === null) return null;
+  const provider = (forgeConfig?.provider ?? 'github').toLowerCase();
+  const executable = extractExecutable(command);
+  if (!executable) return provider;
+  const base = basename(executable).toLowerCase();
+  if (GENERIC_TRANSPORTS.has(base)) return provider;
+  if (executable.includes('/') && !FORGE_CLIS.has(base)) return provider;
+  return base;
 }
 
 /**
