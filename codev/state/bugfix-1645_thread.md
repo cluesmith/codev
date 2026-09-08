@@ -75,3 +75,20 @@ re-pinned to the new TTL/debounce semantics with an injected clock.
 
 Full suite first run: 67 failures in 12 files, all "embedded skeleton not found" — the
 worktree had no `dist/` (skeleton bundle). Rebuilding the package and re-running.
+
+### Verification (fix phase close)
+- Full suite after `pnpm --filter @cluesmith/codev build`: 288 files / 5767 tests passed,
+  48 skipped, 0 failed. (The earlier 67 failures were the unbuilt worktree: embedded
+  skeleton missing from `dist/`.) `tsc --noEmit` clean for packages/codev and apps/web.
+- Revert-based vacuity check (HEAD committed + pushed first; each guard patched in place,
+  test run, file restored from HEAD, tree confirmed clean): 16 guards → 16 RED. Table in the
+  PR body. One design item has no reachable red state: the identity check on single-flight
+  cleanup (`inflight.get(key) === flight`) is defensive only — nothing in this design can
+  register a newer flight while an older one is still in the map, because invalidate()
+  never touches `inflight`. Kept as a two-line guard; stated, not faked.
+- Dashboard banner rendered in Chromium via Playwright against the vite dev server on
+  :5199 with `/api/**` intercepted (overview fixture `forgeStatus: 'rate-limited'`), so no
+  request reached the live Tower. Banner text and the per-section messages visible.
+- `gh api rate_limit` misreport confirmed on this account during the investigation:
+  REST said `used: 0` while `gh api graphql -i` headers said `Used: 1420`. The probe is
+  therefore advisory (trusted only on `remaining === 0`), exactly as prescribed.
