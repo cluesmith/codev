@@ -114,7 +114,7 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
 
         {overview?.forgeStatus === 'rate-limited' && (
           <p className="work-unavailable">
-            Forge rate limited — PRs, backlog and recently closed are stale until{' '}
+            Forge rate limited — PRs, backlog and recently closed may be stale until{' '}
             {overview.forgeResetAt ? new Date(overview.forgeResetAt).toLocaleTimeString() : 'the budget resets'}
           </p>
         )}

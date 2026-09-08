@@ -92,3 +92,17 @@ worktree had no `dist/` (skeleton bundle). Rebuilding the package and re-running
 - `gh api rate_limit` misreport confirmed on this account during the investigation:
   REST said `used: 0` while `gh api graphql -i` headers said `Used: 1420`. The probe is
   therefore advisory (trusted only on `remaining === 0`), exactly as prescribed.
+
+## 2026-09-08 — pr phase
+
+PR #1652 opened via REST (`gh api repos/…/pulls`): the `pr-create` concept failed on the
+exhausted GraphQL bucket — the bug itself. Same for CMAP: `consult --type pr` resolves the
+PR through `pr-search` (`gh pr list --search`, GraphQL) and `pr-view`/`pr-diff`, so all
+three lanes first returned "No PR found". Re-ran them with a REST-only `gh` shim on PATH
+(scratchpad only, nothing committed) answering `pr list/view/diff` from `gh api`.
+
+CMAP round 1: gemini APPROVE, codex APPROVE, claude APPROVE. Tree clean after every lane.
+Claude's non-blocking notes: banner copy over-claimed staleness (fixed: "may be stale");
+freshness trade-off (lists 180 s, searches 600 s never invalidated) wants an architect ack;
+`isRateLimitError` doesn't match the abuse-detection 403 (falls to backoff — acceptable);
+pre-existing missing `Array.isArray` before `prs.map` (same on main; follow-up material).
