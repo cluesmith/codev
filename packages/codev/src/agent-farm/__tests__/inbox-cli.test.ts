@@ -305,7 +305,7 @@ describe('inboxShow', () => {
 
   it.each([
     ['user-text', /human is at the line/],
-    ['recent-input', /keystroke or click/],
+    ['recent-input', /interrupt\/escape write/],
     ['no-region-end', /will not clear on its own/],
     ['no-composer-marker', /will not clear on its own/],
   ])('explains the %s gate detail', async (detail, expected) => {
@@ -323,9 +323,9 @@ describe('inboxShow', () => {
 
   it('describes recent-input as self-clearing, like user-text and unlike the two stuck details', async () => {
     // The split that matters to an operator is "will this clear by itself?". `recent-input` is
-    // on the SAME side as `user-text` — a human is at the keyboard — even though no draft
-    // exists. Putting it on the wrong side would send someone hunting a drifted profile while
-    // a colleague simply types.
+    // on the SAME side as `user-text` — something outside the gate is writing to the terminal,
+    // and it stops — even though no draft exists. Putting it on the wrong side would send
+    // someone hunting a drifted profile while a colleague simply types.
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockRequest.mockResolvedValue({ ok: true, status: 200, data: fullRow({ detail: 'recent-input' }) });
 

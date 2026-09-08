@@ -12,8 +12,10 @@
  * `onData` event as typed characters, because from the client's point of view they are all
  * "bytes to send upstream". The web client strips a few of them, but ONLY while
  * `rc.initialPhase` is true (`Terminal.tsx`) — for a session's entire steady-state life that
- * filter is off, and `afx attach`, the VS Code webview and mobile clients never had one at
- * all. Counting a reply as human input would produce a hold with nobody at the keyboard, and
+ * filter is off, and the VS Code webview and mobile clients never had one at all. (`afx
+ * attach` is not in scope either way: it writes the shellper socket directly, so neither its
+ * keystrokes nor its replies ever pass through `PtySession.write()` — see arch.md §5.)
+ * Counting a reply as human input would produce a hold with nobody at the keyboard, and
  * worse, a SELF-TRIP: our own delivery write repaints the TUI, the TUI queries geometry, the
  * browser answers, and the answer reads as a keystroke that blocks the next delivery. So the
  * filter is a precondition of the whole design, and it lives here — server-side, where every
@@ -30,6 +32,13 @@
  *   race this issue exists to close, which is why the survival tests below are the strict half.
  * - **Under-strip** (a reply counted as input) → a spurious `busy:recent-input` hold that
  *   clears on the next settle. Fail-safe, and now visible rather than silent.
+ *
+ * The filter is **chunk-local**: it sees exactly the string one `write()` was handed, so a
+ * reply that arrives split across two calls (a short socket read, a coalescing client) matches
+ * no pattern in either half and is under-stripped. That is the fail-safe direction — a hold
+ * that clears itself a settle later — and it is why no pattern here is written to span calls:
+ * buffering across chunks to catch it would put a real keystroke's arrival at the mercy of the
+ * NEXT chunk, which is the over-strip direction, and that one is silent.
  *
  * ## The table is derived from a PINNED dependency
  *
@@ -147,6 +156,13 @@ export function escapeBytes(data: string): string {
  *
  * Pure and allocation-cheap; called on every keystroke, so the common case (plain text with
  * no ESC at all) short-circuits before touching a regex.
+ *
+ * The short-circuit does NOT cover a bracketed paste (Issue #1567): `ESC[200~ … ESC[201~`
+ * always contains ESC, so a pasted body — up to the 1 MiB a request body may carry — runs
+ * every pattern's `replace` over its full length. Left as is deliberately: a paste is a rare,
+ * human-paced event next to the per-keystroke path this function is tuned for, and any length
+ * guard cheap enough to be worth adding would have to decide where a reply may legitimately
+ * sit inside the payload — which is the over-strip direction, the silent one.
  */
 export function stripTerminalReplies(data: string): string {
   if (!data.includes('\x1b')) return data;

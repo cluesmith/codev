@@ -660,9 +660,10 @@ export interface HeldMessage {
   /**
    * The gate's detail behind a `busy` reason (Issue #1482):
    * `'user-text'` — a draft or menu occupies the composer; a human is at the line and the hold
-   * clears by itself. `'recent-input'` (Issue #1473) — the composer is EMPTY but a keystroke or
-   * click landed within the input-settle window; also self-clearing, and distinct from
-   * `user-text` in that no draft exists to be corrupted. `'no-region-end'` /
+   * clears by itself. `'recent-input'` (Issue #1473) — the composer is EMPTY but input landed
+   * within the input-settle window (a keystroke, a click, or an ungated `--interrupt`/
+   * `--escape` write); also self-clearing, and distinct from `user-text` in that no draft
+   * exists to be corrupted. `'no-region-end'` /
    * `'no-composer-marker'` — the classifier could not verify the composer at all (a drifted
    * profile, a torn frame, or Tower's dimensions diverging from the real PTY); this hold does
    * NOT clear on its own.

@@ -103,11 +103,15 @@ export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
  *   - `no-composer-marker`  — no recognized marker at all (a wrapper/boot screen, a drifted
  *                             profile, or an unrenderable frame).
  *   - `recent-input`        — the terminal saw INPUT too recently to write onto (Issue #1473):
- *                             either a keystroke landed while the gate was classifying, or the
- *                             input-settle interval has not elapsed. Like `user-text` this is a
- *                             SAFE hold that clears on its own — it is the same "a human is at
- *                             the line" class, caught one beat earlier, before the TUI has
- *                             echoed anything for the classifier to see.
+ *                             either it landed while the gate was classifying, or the
+ *                             input-settle interval has not elapsed. "Input" is every write
+ *                             that reaches the PTY under `PtySession.write()`'s default
+ *                             `'external'` origin — a human's keystrokes, and equally an
+ *                             ungated `--interrupt`/`--escape`, which is why the operator
+ *                             wording says "input" rather than "typing". Like `user-text` this
+ *                             is a SAFE hold that clears on its own — the same someone-else-is-
+ *                             writing class, caught one beat earlier, before the TUI has echoed
+ *                             anything for the classifier to see.
  * The two can't-verify values are the DEFECT class: the classifier could not verify anything,
  * so the mail will not deliver on its own. `GateVerdict.detail`'s fourth value, `empty`, is
  * never persisted — a clean verdict delivers the row (and delivery nulls both columns).
