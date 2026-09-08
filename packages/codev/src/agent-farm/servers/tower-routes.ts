@@ -99,6 +99,7 @@ import {
   removeArchitect,
 } from './tower-instances.js';
 import { OverviewCache } from './overview.js';
+import { enableResetProbe } from '../../lib/forge-rate-limit.js';
 import {
   fetchIssue,
   fetchPR,
@@ -147,6 +148,9 @@ const __dirname = path.dirname(__filename);
 
 // Singleton cache for overview endpoint (Spec 0126 Phase 4)
 const overviewCache = new OverviewCache();
+// #1645: Tower is long-lived, so it is worth one REST call to learn exactly when
+// an exhausted GraphQL budget resets instead of relying on the backoff alone.
+enableResetProbe();
 
 // Spec 1313: the in-memory SendBuffer (Spec 403) is retired. Every send is now
 // persisted to the durable `mailbox` table before the response and delivered only
@@ -1151,7 +1155,7 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     // every collection field is required ('never undefined' for `architects`,
     // Issue 1104), so emit them all empty rather than a partial payload.
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' }));
+    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward', forgeStatus: 'ok' }));
     return;
   }
 

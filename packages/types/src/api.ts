@@ -341,6 +341,29 @@ export interface OverviewData {
    * `'forward'` (the setting's own default) when unreadable.
    */
   feedbackMode: 'forward' | 'queue';
+  /**
+   * Issue 1645: why the forge-backed sections (`pendingPRs`, `backlog`,
+   * `recentlyClosed`) may be empty.
+   *
+   * - `'ok'` — the forge answered.
+   * - `'rate-limited'` — the account's API budget is exhausted and Tower has
+   *   **deliberately suspended** all forge commands until `forgeResetAt`. The
+   *   lists are stale on purpose; retrying would only extend the outage, since
+   *   the budget is charged per account and shared with every other tool on the
+   *   machine.
+   * - `'unavailable'` — the commands ran and failed for some other reason
+   *   (`gh` missing, not authenticated, offline).
+   *
+   * Distinct from `errors`, which carries the human-readable per-section
+   * message. Never `undefined`, so consumers don't branch.
+   */
+  forgeStatus: 'ok' | 'rate-limited' | 'unavailable';
+  /**
+   * Issue 1645: ISO instant the rate-limit suspension lifts. Present only while
+   * `forgeStatus === 'rate-limited'`, so the UI can say "retrying at 14:05"
+   * instead of leaving the user staring at an empty backlog.
+   */
+  forgeResetAt?: string;
   /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */
   currentUser?: string;
   errors?: { prs?: string; issues?: string };

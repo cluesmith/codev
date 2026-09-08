@@ -31,6 +31,10 @@ import {
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
+import Database from 'better-sqlite3';
+import { parseBudget } from '../lib/forge-rate-limit.js';
+import { getGlobalDbPath } from '../agent-farm/db/index.js';
+import { projectHourlyForgeCalls } from '../agent-farm/servers/overview-budget.js';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
@@ -806,6 +810,27 @@ interface WarningInfo {
 /**
  * Main doctor function
  */
+/**
+ * Count workspaces Tower knows about, for the #1645 forge-spend projection.
+ * Read-only against the shared global DB — doctor must never create or migrate
+ * it. Returns 1 (this workspace) when the DB is absent or unreadable.
+ */
+function countKnownWorkspaces(): number {
+  try {
+    const dbPath = getGlobalDbPath();
+    if (!existsSync(dbPath)) return 1;
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      const row = db.prepare('SELECT COUNT(*) AS n FROM known_workspaces').get() as { n: number } | undefined;
+      return row && row.n > 0 ? row.n : 1;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return 1;
+  }
+}
+
 export async function doctor(): Promise<number> {
   let errors = 0;
   let warnings = 0;
@@ -1201,7 +1226,7 @@ export async function doctor(): Promise<number> {
       console.log('');
     }
 
-    // Full forge concept reporting: all 18 concepts with resolution source and executable check
+    // Full forge concept reporting: every concept with resolution source and executable check
     const forgeConfig = loadForgeConfig(workspaceRoot);
     const provider = forgeConfig?.provider ?? 'github';
     console.log(chalk.bold('Forge Concepts') + ` (provider: ${provider})`);
@@ -1219,7 +1244,7 @@ export async function doctor(): Promise<number> {
       }
     }
 
-    // Report all 18 concepts with source and executable availability
+    // Report every concept with source and executable availability
     const resolutions = resolveAllConcepts(forgeConfig);
     const missingExecs = new Set<string>();
 
@@ -1268,6 +1293,45 @@ export async function doctor(): Promise<number> {
         console.log(`  ${chalk.yellow('⚠')} ${'gh auth'.padEnd(20)} not authenticated`);
         warnings++;
         warningDetails.push({ name: 'gh auth', issue: 'not authenticated', recommendation: 'run: gh auth login' });
+      }
+    }
+
+
+    // GraphQL budget + projected Tower spend (#1645). The overview cache backs
+    // every workspace with forge commands on a timer, so the interesting number
+    // is not "is there budget left" but "will Tower's steady state consume it".
+    if (provider === 'github' && commandExists('gh')) {
+      const budget = parseBudget(executeForgeCommandSync('rate-limit', {}, { cwd: workspaceRoot }));
+      if (budget) {
+        const resetIn = Math.max(0, Math.round((budget.reset * 1000 - Date.now()) / 60_000));
+        const label = `${budget.used}/${budget.limit} used, resets in ${resetIn}m`;
+        if (budget.remaining === 0) {
+          console.log(`  ${chalk.red('✗')} ${'graphql budget'.padEnd(20)} ${chalk.red(label)}`);
+          warnings++;
+          warningDetails.push({
+            name: 'GraphQL budget',
+            issue: `exhausted (${label})`,
+            recommendation: 'Tower suspends forge refreshes until reset; close unused dashboards',
+          });
+        } else {
+          console.log(`  ${chalk.green('✓')} ${'graphql budget'.padEnd(20)} ${label}`);
+        }
+
+        const workspaceCount = countKnownWorkspaces();
+        const projected = projectHourlyForgeCalls(workspaceCount);
+        const share = Math.round((projected / budget.limit) * 100);
+        const projLabel = `${projected} calls/h for ${workspaceCount} workspace(s) — ${share}% of ${budget.limit}/h`;
+        if (share > 50) {
+          console.log(`  ${chalk.yellow('⚠')} ${'projected spend'.padEnd(20)} ${chalk.yellow(projLabel)}`);
+          warnings++;
+          warningDetails.push({
+            name: 'Forge API spend',
+            issue: projLabel,
+            recommendation: 'Too many active workspaces for the hourly budget — close dashboards or reduce workspaces',
+          });
+        } else {
+          console.log(`  ${chalk.green('✓')} ${'projected spend'.padEnd(20)} ${projLabel}`);
+        }
       }
     }
 

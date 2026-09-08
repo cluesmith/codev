@@ -21,8 +21,16 @@ import {
   parseArea,
 } from '../../lib/github.js';
 import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
+import {
+  getForgeRateLimit,
+  installForgeRateLimitWatch,
+  isForgeSuspended,
+  maybeProbeReset,
+  noteForgeSuccess,
+} from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
+import { POSITIVE_TTL_MS, SEARCH_TTL_MS, negativeTtlMs } from './overview-budget.js';
 import type {
   PlanPhase,
   OverviewBuilder,
@@ -836,20 +844,36 @@ export function deriveBacklog(
 // OverviewCache
 // =============================================================================
 
+/**
+ * One cached forge result. `data === null` records a *failure* — the entry that
+ * did not exist before #1645, and whose absence let every failing poll re-spawn
+ * the command. `failures` drives the negative-cache backoff.
+ */
+interface CacheEntry<T> {
+  data: T | null;
+  fetchedAt: number;
+  failures: number;
+}
+
 export class OverviewCache {
-  private prCache = new Map<string, { data: ForgePR[]; fetchedAt: number }>();
-  private issueCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
-  private closedCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
-  private mergedPRCache = new Map<string, { data: ForgePR[]; fetchedAt: number }>();
-  private currentUserCache = new Map<string, { data: string; fetchedAt: number }>();
+  private prCache = new Map<string, CacheEntry<ForgePR[]>>();
+  private issueCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
+  private closedCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
+  private mergedPRCache = new Map<string, CacheEntry<ForgePR[]>>();
+  private currentUserCache = new Map<string, CacheEntry<string>>();
   // Cache of issue-derived builder fields (today: `area`) keyed by worktreePath,
   // so they survive refreshes where the source issue is unreachable rather than
   // snapping back to their default while the builder is still listed (PIR #907).
   // Intentionally NOT cleared by invalidate(): surviving cache invalidation is
   // the whole point. See ResolvedEnrichmentCache.
   private resolvedEnrichment = new ResolvedEnrichmentCache();
-  private readonly TTL = 30_000;
   private readonly USER_TTL = 3_600_000; // 1h — GitHub identity is session-stable
+
+  constructor() {
+    // Idempotent: subscribes this process to forge rate-limit failures so
+    // fetchCached can stop spawning commands the forge is refusing (#1645).
+    installForgeRateLimitWatch();
+  }
 
   /**
    * Build the overview response. Aggregates builder state, PRs, and backlog.
@@ -1062,7 +1086,19 @@ export class OverviewCache {
     // has no view of the live terminal sessions. `handleOverview` (tower-routes.ts)
     // injects the real architect list via `liveArchitects` before serialization,
     // mirroring how it enriches `lastDataAt`.
-    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, queuedFeedback, feedbackMode };
+    // #1645: say *why* the forge data is missing. `rate-limited` means Tower is
+    // deliberately not spawning anything until `forgeResetAt`; `unavailable`
+    // means the commands ran and failed for some other reason. Without this the
+    // dashboard could only show an empty list and a generic "gh unavailable".
+    const rateLimit = getForgeRateLimit();
+    const forgeStatus: OverviewData['forgeStatus'] = rateLimit.limited
+      ? 'rate-limited'
+      : Object.keys(errors).length > 0 ? 'unavailable' : 'ok';
+
+    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, queuedFeedback, feedbackMode, forgeStatus };
+    if (rateLimit.resetAt) {
+      result.forgeResetAt = rateLimit.resetAt;
+    }
     if (currentUser) {
       result.currentUser = currentUser;
     }
@@ -1091,79 +1127,69 @@ export class OverviewCache {
   // Private cache helpers
   // ===========================================================================
 
-  private async fetchPRsCached(cwd: string): Promise<ForgePR[] | null> {
+  /**
+   * Shared read-through cache for every forge-backed fetch (#1645).
+   *
+   * Three windows, not one:
+   * - a success is served from cache for `ttl`;
+   * - a **failure is cached too**, for a doubling `negativeTtlMs` window. This
+   *   is the fix: before it, `null` was never stored, so each 2.5 s dashboard
+   *   poll re-spawned every forge command — measured at 180 `gh` processes in
+   *   60 s once GitHub started refusing them;
+   * - while a forge rate limit is in force, nothing is spawned at all until it
+   *   resets (`isForgeSuspended`), because the budget is charged per account
+   *   and retrying only digs deeper.
+   */
+  private async fetchCached<T>(
+    cache: Map<string, CacheEntry<T>>,
+    cwd: string,
+    ttl: number,
+    fetcher: () => Promise<T | null>,
+  ): Promise<T | null> {
     const now = Date.now();
-    const cached = this.prCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
+    const cached = cache.get(cwd);
+    if (cached) {
+      const age = now - cached.fetchedAt;
+      if (cached.data !== null && age < ttl) return cached.data;
+      if (cached.data === null && age < negativeTtlMs(cached.failures)) return null;
     }
 
-    const data = await fetchPRList(cwd);
+    if (isForgeSuspended(now)) return null;
+
+    const data = await fetcher();
     if (data !== null) {
-      this.prCache.set(cwd, { data, fetchedAt: now });
+      cache.set(cwd, { data, fetchedAt: now, failures: 0 });
+      noteForgeSuccess();
+    } else {
+      cache.set(cwd, { data: null, fetchedAt: now, failures: (cached?.failures ?? 0) + 1 });
+      // If that failure was a rate limit, learn when it lifts — at most one
+      // probe per suspension window, and only where it has been enabled.
+      void maybeProbeReset(cwd);
     }
     return data;
   }
 
-  private async fetchIssuesCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
-    const now = Date.now();
-    const cached = this.issueCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
-    }
+  private fetchPRsCached(cwd: string): Promise<ForgePR[] | null> {
+    return this.fetchCached(this.prCache, cwd, POSITIVE_TTL_MS, () => fetchPRList(cwd));
+  }
 
-    const data = await fetchIssueList(cwd);
-    if (data !== null) {
-      this.issueCache.set(cwd, { data, fetchedAt: now });
-    }
-    return data;
+  private fetchIssuesCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
+    return this.fetchCached(this.issueCache, cwd, POSITIVE_TTL_MS, () => fetchIssueList(cwd));
   }
 
   /**
    * Resolve the current user's forge login via the `user-identity` concept.
    * Long TTL — identity is stable for the lifetime of a Tower session.
-   * Only successful resolutions are cached, so a transient failure (gh
-   * logged out, offline) self-heals on the next overview poll.
    */
-  private async fetchCurrentUserCached(cwd: string): Promise<string | null> {
-    const now = Date.now();
-    const cached = this.currentUserCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.USER_TTL) {
-      return cached.data;
-    }
-
-    const login = await fetchCurrentUser(cwd);
-    if (login !== null) {
-      this.currentUserCache.set(cwd, { data: login, fetchedAt: now });
-    }
-    return login;
+  private fetchCurrentUserCached(cwd: string): Promise<string | null> {
+    return this.fetchCached(this.currentUserCache, cwd, this.USER_TTL, () => fetchCurrentUser(cwd));
   }
 
-  private async fetchRecentlyClosedCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
-    const now = Date.now();
-    const cached = this.closedCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
-    }
-
-    const data = await fetchRecentlyClosed(cwd);
-    if (data !== null) {
-      this.closedCache.set(cwd, { data, fetchedAt: now });
-    }
-    return data;
+  private fetchRecentlyClosedCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
+    return this.fetchCached(this.closedCache, cwd, SEARCH_TTL_MS, () => fetchRecentlyClosed(cwd));
   }
 
-  private async fetchMergedPRsCached(cwd: string): Promise<ForgePR[] | null> {
-    const now = Date.now();
-    const cached = this.mergedPRCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
-    }
-
-    const data = await fetchRecentMergedPRs(cwd);
-    if (data !== null) {
-      this.mergedPRCache.set(cwd, { data, fetchedAt: now });
-    }
-    return data;
+  private fetchMergedPRsCached(cwd: string): Promise<ForgePR[] | null> {
+    return this.fetchCached(this.mergedPRCache, cwd, SEARCH_TTL_MS, () => fetchRecentMergedPRs(cwd));
   }
 }

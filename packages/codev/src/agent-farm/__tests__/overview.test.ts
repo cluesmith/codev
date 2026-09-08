@@ -26,6 +26,12 @@ import {
   countQueuedFeedback,
   readFeedbackMode,
 } from '../servers/overview.js';
+import { negativeTtlMs, projectHourlyForgeCalls } from '../servers/overview-budget.js';
+import {
+  noteRateLimited,
+  resetForgeRateLimit,
+  isForgeSuspended,
+} from '../../lib/forge-rate-limit.js';
 
 // ============================================================================
 // Mocks
@@ -163,6 +169,8 @@ function createStateDb(
 describe('overview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // #1645: the forge rate-limit suspension is module-level process state.
+    resetForgeRateLimit();
     tmpDir = makeTmpDir();
     // Issue #1118: per-test global.db path (file created lazily by createStateDb).
     dbState.globalDbPath = path.join(tmpDir, '.agent-farm', 'global.db');
@@ -1705,6 +1713,20 @@ describe('overview', () => {
       expect(data.backlog).toEqual([]);
     });
 
+    it('doubles the negative-cache window per failure, capped at 15 minutes (#1645)', () => {
+      expect(negativeTtlMs(1)).toBe(60_000);
+      expect(negativeTtlMs(2)).toBe(120_000);
+      expect(negativeTtlMs(3)).toBe(240_000);
+      expect(negativeTtlMs(10)).toBe(900_000);
+    });
+
+    it('projects the hourly forge spend from the TTLs (#1645)', () => {
+      // 2 list calls per 120s window (60/h) + 2 search calls per 600s window (12/h).
+      expect(projectHourlyForgeCalls(1)).toBe(72);
+      expect(projectHourlyForgeCalls(13)).toBe(936);
+      expect(projectHourlyForgeCalls(0)).toBe(0);
+    });
+
     it('caches currentUser across getOverview calls', async () => {
       mockFetchCurrentUser.mockResolvedValue('octocat');
 
@@ -1728,7 +1750,7 @@ describe('overview', () => {
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
-    it('re-fetches after 30s TTL expires (Bugfix #388)', async () => {
+    it('re-fetches after the positive TTL expires (Bugfix #388)', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
       mockFetchRecentlyClosed.mockResolvedValue([]);
@@ -1737,14 +1759,190 @@ describe('overview', () => {
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(1);
 
-      // Advance time past the 30s TTL
+      // Advance time past the 120s positive TTL (raised from 30s in #1645)
       vi.useFakeTimers();
-      vi.advanceTimersByTime(31_000);
+      vi.advanceTimersByTime(121_000);
 
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
 
       vi.useRealTimers();
+    });
+
+    it('holds the positive TTL for 120s, not 30s (#1645)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(90_000);
+      await cache.getOverview(tmpDir);
+      vi.useRealTimers();
+
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the 24h search windows cached for 10 minutes (#1645)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+      mockFetchRecentlyClosed.mockResolvedValue([]);
+      mockFetchMergedPRs.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+
+      vi.useFakeTimers();
+      // Past the 120s list TTL, well inside the 600s search TTL.
+      vi.advanceTimersByTime(300_000);
+      await cache.getOverview(tmpDir);
+      vi.useRealTimers();
+
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+      expect(mockFetchRecentlyClosed).toHaveBeenCalledTimes(1);
+      expect(mockFetchMergedPRs).toHaveBeenCalledTimes(1);
+    });
+
+    // ======================================================================
+    // Issue #1645 — negative caching, backoff, and rate-limit suspension
+    // ======================================================================
+
+    it('caches a FAILED fetch instead of re-spawning it on the next request (#1645)', async () => {
+      // The bug: `if (data !== null) cache.set(...)` never stored a failure, so
+      // every 2.5s dashboard poll re-spawned all four gh commands. Measured at
+      // 180 gh processes in 60s once GitHub started refusing them.
+      mockFetchPRList.mockResolvedValue(null);
+      mockFetchIssueList.mockResolvedValue(null);
+      mockFetchRecentlyClosed.mockResolvedValue(null);
+      mockFetchMergedPRs.mockResolvedValue(null);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      await cache.getOverview(tmpDir);
+      await cache.getOverview(tmpDir);
+
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+      expect(mockFetchIssueList).toHaveBeenCalledTimes(1);
+      expect(mockFetchRecentlyClosed).toHaveBeenCalledTimes(1);
+      expect(mockFetchMergedPRs).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries a failed fetch once the negative window expires (#1645)', async () => {
+      mockFetchPRList.mockResolvedValue(null);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(61_000); // past the 60s first negative window
+      await cache.getOverview(tmpDir);
+      vi.useRealTimers();
+
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+    });
+
+    it('backs off further on each consecutive failure (#1645)', async () => {
+      mockFetchPRList.mockResolvedValue(null);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(61_000);
+      await cache.getOverview(tmpDir); // 2nd failure -> window doubles to 120s
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(61_000); // inside the doubled window
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(61_000); // past it
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(3);
+      vi.useRealTimers();
+    });
+
+    it('clears the backoff after a success (#1645)', async () => {
+      mockFetchPRList.mockResolvedValueOnce(null).mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(61_000);
+      await cache.getOverview(tmpDir); // succeeds
+      vi.advanceTimersByTime(121_000);
+      await cache.getOverview(tmpDir); // normal positive TTL, not a backoff
+      vi.useRealTimers();
+
+      expect(mockFetchPRList).toHaveBeenCalledTimes(3);
+    });
+
+    it('spawns nothing at all while a forge rate limit is in force (#1645)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+      mockFetchRecentlyClosed.mockResolvedValue([]);
+      mockFetchMergedPRs.mockResolvedValue([]);
+      mockFetchCurrentUser.mockResolvedValue('octocat');
+
+      noteRateLimited(Date.now() + 10 * 60 * 1000);
+      expect(isForgeSuspended()).toBe(true);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      await cache.getOverview(tmpDir);
+
+      expect(mockFetchPRList).not.toHaveBeenCalled();
+      expect(mockFetchIssueList).not.toHaveBeenCalled();
+      expect(mockFetchRecentlyClosed).not.toHaveBeenCalled();
+      expect(mockFetchMergedPRs).not.toHaveBeenCalled();
+      expect(mockFetchCurrentUser).not.toHaveBeenCalled();
+    });
+
+    it('reports forgeStatus rate-limited with a reset instant (#1645)', async () => {
+      const resetAt = Date.now() + 10 * 60 * 1000;
+      noteRateLimited(resetAt);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.forgeStatus).toBe('rate-limited');
+      expect(data.forgeResetAt).toBe(new Date(resetAt).toISOString());
+    });
+
+    it('reports forgeStatus ok when the forge answers, unavailable when it fails (#1645)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const okData = await new OverviewCache().getOverview(tmpDir);
+      expect(okData.forgeStatus).toBe('ok');
+      expect(okData.forgeResetAt).toBeUndefined();
+
+      mockFetchIssueList.mockResolvedValue(null);
+      const badData = await new OverviewCache().getOverview(tmpDir);
+      expect(badData.forgeStatus).toBe('unavailable');
+    });
+
+    it('resumes fetching once the suspension lifts (#1645)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      noteRateLimited(Date.now() + 60_000);
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).not.toHaveBeenCalled();
+
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(61_000);
+      await cache.getOverview(tmpDir);
+      vi.useRealTimers();
+
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
     });
 
     it('returns degraded data when gh fails for PRs', async () => {
@@ -1792,8 +1990,10 @@ describe('overview', () => {
       expect(data.errors?.issues).toBeDefined();
     });
 
-    it('does not cache failed fetch results', async () => {
-      // First call: gh fails
+    it('recovers from a failed fetch once its negative window expires', async () => {
+      // #1645 changed *when* the retry happens — a failure is now cached for a
+      // backoff window instead of being retried on the very next request — but a
+      // transient failure must still self-heal.
       mockFetchPRList.mockResolvedValueOnce(null);
       mockFetchIssueList.mockResolvedValue([]);
 
@@ -1806,7 +2006,11 @@ describe('overview', () => {
         { number: 1, title: 'Test', url: 'https://github.com/org/repo/pull/1', reviewDecision: '', body: '', createdAt: '2026-01-01T00:00:00Z' },
       ]);
 
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(61_000);
       const data2 = await cache.getOverview(tmpDir);
+      vi.useRealTimers();
+
       expect(data2.errors?.prs).toBeUndefined();
       expect(data2.pendingPRs).toHaveLength(1);
     });

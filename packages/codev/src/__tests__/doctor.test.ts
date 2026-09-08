@@ -19,13 +19,13 @@ const executeForgeCommandSyncMock = vi.hoisted(() => vi.fn((concept: string) => 
 const loadForgeConfigMock = vi.hoisted(() => vi.fn(() => null));
 const validateForgeConfigMock = vi.hoisted(() => vi.fn(() => []));
 const resolveAllConceptsMock = vi.hoisted(() => vi.fn(() => {
-  // All 18 concepts (KNOWN_CONCEPTS in lib/forge.ts) as default/gh-based, so the
+  // All concepts (KNOWN_CONCEPTS in lib/forge.ts) as default/gh-based, so the
   // doctor report's rendering is exercised for every row it actually prints.
   const concepts = [
     'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
     'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
     'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-    'auth-status', 'repo-archive',
+    'auth-status', 'repo-archive', 'rate-limit',
   ];
   return concepts.map(c => ({ concept: c, command: `gh ${c}`, source: 'default', executable: 'gh' }));
 }));

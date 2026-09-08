@@ -65,7 +65,7 @@ const KNOWN_CONCEPTS = [
   'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
   'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
   'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-  'auth-status', 'repo-archive',
+  'auth-status', 'repo-archive', 'rate-limit',
 ] as const;
 
 // =============================================================================
@@ -310,6 +310,56 @@ export function isConceptDisabled(
 }
 
 // =============================================================================
+// Failure notification (Issue #1645)
+// =============================================================================
+
+/** A forge concept command that exited non-zero, with the detail the catch block discards. */
+export interface ForgeFailure {
+  concept: string;
+  /** stderr when the child produced any, else the Error message. Never null. */
+  message: string;
+  /** Child exit code when Node reported one. */
+  exitCode: number | null;
+}
+
+type ForgeFailureListener = (failure: ForgeFailure) => void;
+
+const failureListeners = new Set<ForgeFailureListener>();
+
+/**
+ * Observe every forge concept failure in this process.
+ *
+ * `executeForgeCommand` collapses every failure mode to `null`, which is all
+ * most callers need — but it means nothing downstream can tell "gh is not
+ * installed" from "the GitHub API rate limit is exhausted". Tower needs that
+ * distinction to stop hammering a forge that is refusing it (#1645), so the
+ * detail is published here instead of being widened into every return type.
+ *
+ * @returns an unsubscribe function.
+ */
+export function onForgeFailure(listener: ForgeFailureListener): () => void {
+  failureListeners.add(listener);
+  return () => failureListeners.delete(listener);
+}
+
+/** Build a ForgeFailure from a child_process rejection and publish it. */
+function notifyFailure(concept: string, err: unknown): void {
+  if (failureListeners.size === 0) return;
+  const e = err as { stderr?: unknown; code?: unknown; message?: unknown };
+  const stderr = typeof e?.stderr === 'string' ? e.stderr.trim() : '';
+  const message = stderr || (err instanceof Error ? err.message : String(err));
+  const exitCode = typeof e?.code === 'number' ? e.code : null;
+  const failure: ForgeFailure = { concept, message, exitCode };
+  for (const listener of failureListeners) {
+    try {
+      listener(failure);
+    } catch {
+      // A listener must never break the command path it is observing.
+    }
+  }
+}
+
+// =============================================================================
 // Execution
 // =============================================================================
 
@@ -349,6 +399,7 @@ export async function executeForgeCommand(
     return parseOutput(stdout, options?.raw);
   } catch (err: unknown) {
     logDebug(concept, err);
+    notifyFailure(concept, err);
     return null;
   }
 }
@@ -386,6 +437,7 @@ export function executeForgeCommandSync(
     return parseOutput(stdout, options?.raw);
   } catch (err: unknown) {
     logDebug(concept, err, true);
+    notifyFailure(concept, err);
     return null;
   }
 }
