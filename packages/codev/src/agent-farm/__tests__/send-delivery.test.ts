@@ -49,6 +49,12 @@ function fakeSession(overrides: Partial<DeliverySession> = {}): DeliverySession 
     // Old enough that the Issue #1573 settle window has long passed for the harness clock
     // (`now` starts at 1000): a test that wants a still-painting screen overrides it.
     lastDataAt: 0,
+    // Issue #1473 input signals, the input-side twins of `bytesWritten`/`lastDataAt`. 0/0 is an
+    // idle prompt nobody has typed at: the counter never moves, and `now - 0` is far past the
+    // input-settle interval for the harness clock. Tests that want a MOVING input counter build
+    // the session inline with a `get inputSeq()`, exactly as they do for `bytesWritten`.
+    inputSeq: 0,
+    lastInputAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -364,6 +370,10 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
       // Settled (Issue #1573), so the hold this test asserts is attributable to the token
       // moving under the classify — not to an unknown screen age.
       lastDataAt: 0,
+      // Issue #1473: static input signals, so these tests still isolate the OUTPUT half of the
+      // token and the settle they were written for.
+      inputSeq: 0,
+      lastInputAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -594,6 +604,10 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
       // Issue #1573 settle-before-write: epoch 0 against the harness clock is a screen that
       // stopped painting long ago, so this test still exercises the memo and nothing else.
       lastDataAt: 0,
+      // Issue #1473: static input signals, so these tests still isolate the OUTPUT half of the
+      // token and the settle they were written for.
+      inputSeq: 0,
+      lastInputAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -1113,6 +1127,10 @@ describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)',
       // Issue #1573: the repaint that cleared the composer has already settled by the time a
       // drainer tick sees it — ticks are 1.5 s apart, the settle window is 250 ms.
       lastDataAt: 0,
+      // Issue #1473: static input signals, so these tests still isolate the OUTPUT half of the
+      // token and the settle they were written for.
+      inputSeq: 0,
+      lastInputAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],

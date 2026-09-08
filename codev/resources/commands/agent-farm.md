@@ -561,11 +561,17 @@ Sends text to a builder's terminal. Useful for:
 
 - **delivered** — the message was written to the recipient's prompt after a clean render-gate pass (an empty, render-verified prompt).
 - **held** — the prompt was not clear, so the message is persisted in Tower's durable mailbox and **delivers automatically** the moment the recipient's prompt is clean (after a submit, on output quiescence, or a poll backstop). The response carries a **why-held reason** and a mailbox id:
-  - `busy` — a draft, menu, dialog, or wrapper screen occupies the prompt;
+  - `busy` — the prompt is occupied. `afx inbox` qualifies it with the gate's own detail:
+    `busy:user-text` (a draft, menu, dialog, or wrapper screen), `busy:recent-input` (the
+    terminal received input within the last fraction of a second — a keystroke, a click, or an
+    ungated `--interrupt`/`--escape` write — so the composer may be changing under the gate; it
+    clears by itself a moment after the input stops), or
+    `busy:no-region-end` / `busy:no-composer-marker` (the classifier could not verify the
+    composer at all — the one hold class that does NOT clear on its own);
   - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
   - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
 
-A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
+A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a draft the gate can see, and held rows survive Tower restart/shutdown (no shutdown force-flush). Two signals make a draft visible (Issue #1473) — the composer classifier reads it off the rendered screen, and every write that reaches the PTY **through Tower** (browser and VS Code keystrokes, the terminal input API, an ungated `--interrupt`/`--escape`) is observed there — whatever survives the terminal-reply filter bumps an input counter the gate folds into its change token, so even a keystroke the app has not echoed yet holds the message, while a chunk that is nothing but a DA/DSR/CPR answer moves nothing. **`afx attach` is the one exception:** it pipes your keystrokes straight to the shellper socket, never through Tower's `PtySession.write()`, so they move no counter — a draft typed under `afx attach` is seen only once the app has echoed it and the classifier can read it off the screen. See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
 
 **How a body is typed (Issue #1567):** a frame under 4 lines and at most 256 bytes is one write plus
 Enter, as always. Anything longer is written as **one explicit bracketed paste** (`ESC[200~ … ESC[201~`,

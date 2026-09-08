@@ -863,6 +863,18 @@ export class TowerClient {
      * absent reads exactly as `true` always did.
      */
     verified?: boolean;
+    /**
+     * Issue #1473: why a delivered message could not be confirmed. `'input-raced'` — the
+     * terminal received human input while the body was going out, so it may have been truncated
+     * (`^U`/`^W`/`^C`) or submitted early (their Enter); `'no-echo'` — the write completed but
+     * the header never appeared. Absent means confirmed, or not verifiable in the first place.
+     *
+     * Present alongside {@link verified} rather than folded into it, because the raced case
+     * frequently reports `verified: true` — the HEADER landed; it was the tail that was lost —
+     * which is exactly why that case used to reach the sender as an unqualified success. Older
+     * Tower binaries omit it.
+     */
+    unverifiedCause?: 'no-echo' | 'input-raced';
   }> {
     const result = await this.request<{
       ok: boolean;
@@ -879,6 +891,7 @@ export class TowerClient {
       notBefore?: number;
       bodyLength?: number;
       verified?: boolean;
+      unverifiedCause?: 'no-echo' | 'input-raced';
     }>(
       '/api/send',
       {
@@ -919,6 +932,7 @@ export class TowerClient {
       notBefore: result.data!.notBefore,
       bodyLength: result.data!.bodyLength,
       verified: result.data!.verified,
+      unverifiedCause: result.data!.unverifiedCause,
     };
   }
 

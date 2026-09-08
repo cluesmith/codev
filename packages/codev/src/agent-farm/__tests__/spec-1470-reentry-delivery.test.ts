@@ -152,6 +152,8 @@ describe('Spec 1470 — automatic re-entry delivery', () => {
       const session = {
         bytesWritten: 1,
         lastDataAt: 0,
+        inputSeq: 0,
+        lastInputAt: 0,
         info: { cols: 80, rows: 24 },
         command: 'claude',
         launchArgs: [],

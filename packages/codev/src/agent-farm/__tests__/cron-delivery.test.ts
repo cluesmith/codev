@@ -35,6 +35,8 @@ function fakeSession(): DeliverySession {
     id: 'term-1',
     bytesWritten: 0,
     lastDataAt: 0,
+    inputSeq: 0,
+    lastInputAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],

@@ -88,6 +88,9 @@ function harness(overrides: Partial<DeliverySession> = {}): Harness {
     bytesWritten: 42,
     // Quiet for far longer than the settle window unless a test says otherwise.
     lastDataAt: NOW - 10_000,
+    // Issue #1473: no input has reached this fake, so it is input-settled throughout.
+    inputSeq: 0,
+    lastInputAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [] as string[],
@@ -254,7 +257,9 @@ describe('#1573 echo verification before markDelivered', () => {
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out).toEqual({ delivered: [row.id], reason: null, verified: false });
+    // Issue #1473 added `unverifiedCause`, which names WHICH flag this is — here `no-echo`,
+    // distinct from the `input-raced` case where the header did land and the tail did not.
+    expect(out).toEqual({ delivered: [row.id], reason: null, verified: false, unverifiedCause: 'no-echo' });
     // Written exactly once — the property the whole hotfix exists for.
     expect(h.writes).toEqual([FORMATTED]);
     const stored = mailbox.getById(db, row.id);

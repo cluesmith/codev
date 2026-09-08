@@ -5,7 +5,11 @@
  * OCCUPIED (`user-text` — a human is at the line; the hold is correct and clears when they
  * finish) and a composer it CANNOT VERIFY (`no-region-end` / `no-composer-marker` — a drifted
  * profile, a torn frame, or a mirror rendered at dims the real TUI never adopted; the hold is
- * a defect and never clears on its own). Until #1482 that distinction died in memory, and
+ * a defect and never clears on its own). Issue #1473 added a fourth, `recent-input` — the
+ * rendered composer classified EMPTY, but the terminal took input within the settle window, so
+ * the real composer may already have changed under the gate; like `user-text` it clears on its
+ * own. Until #1482 that distinction
+ * died in memory, and
  * every operator surface printed a bare `busy` for both — which is exactly why the dimension
  * divergence this issue is named for stayed latent.
  *
@@ -19,8 +23,8 @@
 /**
  * `reason:detail` when a gate detail is present, else the bare reason.
  *
- * `busy:user-text`, `busy:no-region-end`, `no-live-pty`. `fallback` (default `'held'`) covers
- * a row with no reason recorded yet.
+ * `busy:user-text`, `busy:recent-input`, `busy:no-region-end`, `busy:no-composer-marker`,
+ * `no-live-pty`. `fallback` (default `'held'`) covers a row with no reason recorded yet.
  */
 export function formatVerdict(
   reason: string | null | undefined,
@@ -35,7 +39,8 @@ export function formatVerdict(
  * Is this verdict one the classifier could not resolve (Issue #1482)?
  *
  * True for the defect class — `no-profile` (the app is unrecognized) and the two
- * can't-verify details — and false for `user-text` (a human at the line) and for
+ * can't-verify details — and false for `user-text` (a human at the line), `recent-input`
+ * (Issue #1473 — the terminal took input a moment ago; it settles by itself) and
  * `no-live-pty` (no session at all). This is the "will it clear on its own?" question, and
  * the answer decides which remedy an operator should reach for.
  *

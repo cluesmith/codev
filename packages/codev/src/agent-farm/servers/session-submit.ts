@@ -121,10 +121,13 @@
  * gate's `ringToken`, and the row's own status). That re-check narrows a window; it does not
  * close one, and it should not be described as if it did:
  *
- *   - `ringToken` counts OUTPUT bytes, so input written by an uncovered path (the raw
- *     passthrough, or a human's keystrokes) can sit un-echoed on the line and read as
- *     unchanged. That echo-lag residual survives this change by design — it is #1473's
- *     territory.
+ *   - `ringToken` used to count OUTPUT bytes alone, so input written by an uncovered path (the
+ *     raw passthrough, or a human's keystrokes) could sit un-echoed on the line and read as
+ *     unchanged. Issue #1473 folded a monotone INPUT counter into that token and added an
+ *     input-settle interval beside the output one, so a keystroke landing in the gate→write
+ *     window now moves what the precheck compares. It is a NARROWING, not a closure: input
+ *     older than the settle whose echo is still delayed, input in flight from the client at
+ *     sample time, and an `afx attach` client (which never touches `PtySession`) all survive.
  *   - Its real structural value is that it makes the ACQUISITION POLICY a free choice: were
  *     the delivery ever switched from declining to waiting (e.g. to order an interrupt ahead
  *     of its own body, per #1481), the precheck is what would keep that safe.
