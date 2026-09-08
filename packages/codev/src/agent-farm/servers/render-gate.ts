@@ -307,26 +307,37 @@ function findMarkerRow(
 }
 
 /**
- * Start column of the composer marker's MATCH on its own row — the cell whose colour a
+ * Column of the composer marker's GLYPH on its own row — the cell whose colour a
  * `markerFgPalette` anchor examines.
  *
- * Exists because the anchor's first implementation read `getCell(0)`, a hardcoded column 0.
- * That is correct for every profile whose marker pattern is anchored at the row start
- * (claude `^❯`, codex `^›`, agy `^>`), and silently wrong for the first profile whose marker
- * is not — kimi renders `│ > ` inside a rounded box, so its `>` glyph sits at column 3 and a
- * column-0 read would sample the box edge instead. Latent rather than broken today (kimi sets
- * no palette anchor), but it is a trap laid directly under the one profile that would spring
- * it, so it is generalized here rather than left for the next person.
+ * Not the match's start. Those coincide only for a pattern anchored directly at the glyph
+ * (claude `^❯`, codex `^›`, agy `^>`), and the first profile where they diverge is exactly the
+ * one this function exists for: kimi's marker is `/^\s*│\s*(>)/`, which matches from column 0
+ * while its `>` sits at column 3. Returning `m.index` there samples a leading space — which is
+ * how the first version of this helper "generalized" the anchor off `getCell(0)` and changed
+ * nothing at all (caught in review; the trap it claimed to remove was still armed).
+ *
+ * So the glyph is identified EXPLICITLY, by a **named** group `(?<glyph>…)`. Named rather than
+ * positional for a concrete reason, not tidiness: the first attempt used capture group 1, and
+ * agy's marker `/^>(\s|$)/` already had a group 1 — its trailing SEPARATOR. Every agy fixture
+ * went red at once, because the anchor started sampling the space after the marker instead of the
+ * marker. A positional convention collides with any incidental group; a named one cannot.
+ * Patterns with no `glyph` group keep `m.index`, correct for every marker anchored at its own
+ * glyph. The `d` flag is added on the fly for `indices`, and `g`/`y` stripped so a stateful
+ * profile regex cannot make the answer depend on a previous call's `lastIndex`.
  *
  * The same narrow-glyph argument {@link markerSpanEnd} rests on applies: every shipped marker
- * pattern admits only single-column glyphs before its match, so a string index is a cell
- * column. `0` when the pattern does not match, which cannot happen on a row that already
- * passed the text test.
+ * pattern admits only single-column glyphs before its group, so a string index is a cell column.
+ * `0` when the pattern does not match, which cannot happen on a row that already passed the
+ * text test.
  */
 export function markerSpanStart(line: string, pattern: RegExp): number {
-  const stateless = new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ''));
+  const flags = pattern.flags.replace(/[gy]/g, '');
+  const stateless = new RegExp(pattern.source, flags.includes('d') ? flags : flags + 'd');
   const m = stateless.exec(line);
-  return m ? m.index : 0;
+  if (!m) return 0;
+  const glyph = m.indices?.groups?.glyph;
+  return glyph ? glyph[0] : m.index;
 }
 
 /**

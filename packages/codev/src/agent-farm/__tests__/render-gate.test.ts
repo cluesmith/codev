@@ -233,6 +233,65 @@ describe('render-gate — marker-span exemption is a no-op for claude/codex/agy 
     expect(markerSpanEnd(' │ > ', KIMI_PROFILE.markerPattern)).toBe(4);
   });
 
+  // The test that would have caught the inert first version of markerSpanStart. It returned
+  // `m.index`, which for kimi's anchored `^\s*│\s*(>)` is 0 — so a `markerFgPalette` anchor would
+  // have sampled the leading SPACE, i.e. the column-0 trap the helper was written to remove, still
+  // armed and now with a comment claiming otherwise. Assert the CHARACTER, not the number: an
+  // index is only meaningful against the glyph it is supposed to land on.
+  it.each([
+    ['claude', CLAUDE_PROFILE, '❯ ', '❯'],
+    ['codex', CODEX_PROFILE, '› ', '›'],
+    ['agy', AGY_PROFILE, '> ', '>'],
+    ['agy (bare, no-hint mode)', AGY_PROFILE, '>', '>'],
+    ['kimi (marker at column 3)', KIMI_PROFILE, ' │ > ', '>'],
+  ])('markerSpanStart lands on %s’s actual marker glyph', (_name, profile, line, glyph) => {
+    expect(line[markerSpanStart(line, profile.markerPattern)]).toBe(glyph);
+  });
+
+  // End-to-end proof, not just an index: give kimi a palette anchor and confirm the classifier
+  // still finds its composer. This is the check that distinguishes a working generalization from
+  // the inert one — with `getCell(0)` (or `m.index`, which is also 0 here) the anchor samples the
+  // leading SPACE, the palette test fails, and a perfectly good kimi composer classifies
+  // `no-composer-marker` and holds its mail forever.
+  it('a kimi markerFgPalette anchor samples the `>` glyph, not the box edge', async () => {
+    // Rendered columns: 0 = ' ', 1 = '│', 2 = ' ', 3 = '>' (palette 12, SGR 94).
+    const boxed = [
+      ' ╭──────────────────────╮',
+      ' │ \x1b[94m>\x1b[0m',
+      ' ╰──────────────────────╯',
+    ].map((l) => l + '\r\n').join('');
+    const anchored: GateProfile = { ...KIMI_PROFILE, markerFgPalette: 12 };
+    expect(await classifyScreen(snapshotFromRaw(boxed), anchored))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('that anchor rejects a screen whose glyph renders in the WRONG palette', async () => {
+    // The other half: the anchor must actually discriminate, or the test above would pass for a
+    // helper that ignored colour entirely.
+    const boxed = [
+      ' ╭──────────────────────╮',
+      ' │ \x1b[91m>\x1b[0m',   // palette 9, not 12
+      ' ╰──────────────────────╯',
+    ].map((l) => l + '\r\n').join('');
+    const anchored: GateProfile = { ...KIMI_PROFILE, markerFgPalette: 12 };
+    expect(await classifyScreen(snapshotFromRaw(boxed), anchored))
+      .toMatchObject({ clean: false, detail: 'no-composer-marker' });
+  });
+
+  it('markerSpanStart is unchanged for markers anchored at their own glyph', () => {
+    // No capture group → falls back to the match index, which IS the glyph for these.
+    expect(markerSpanStart('❯ ', CLAUDE_PROFILE.markerPattern)).toBe(0);
+    expect(markerSpanStart('> ', AGY_PROFILE.markerPattern)).toBe(0);
+    // kimi is the one that needed the group.
+    expect(markerSpanStart(' │ > ', KIMI_PROFILE.markerPattern)).toBe(3);
+  });
+
+  it('adding the kimi capture group did not move its span END', () => {
+    // A capture group does not change m[0], so the chrome exemption is untouched — worth
+    // pinning, because the two helpers read the same pattern for different purposes.
+    expect(markerSpanEnd(' │ > ', KIMI_PROFILE.markerPattern)).toBe(4);
+  });
+
   it('does not swallow a 1-char draft sitting in the first exempt-adjacent cell', async () => {
     // claude/codex: the draft's `x` is at col 1, immediately past a span of 1.
     for (const p of [CLAUDE_PROFILE, CODEX_PROFILE]) {

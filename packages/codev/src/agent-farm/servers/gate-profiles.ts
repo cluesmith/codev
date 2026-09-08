@@ -130,8 +130,15 @@ export const AGY_PROFILE: GateProfile = {
  * `` │ > `` — a box edge, then the `>` prompt glyph at column 3, NOT at the row
  * start. An anchored `^>` would never match it. (Measured, Issue #1201; capture
  * harness: `codev/spikes/pir-1201-kimi-gate-measure.mjs`.)
+ *
+ * The `>` sits in the **named group `(?<glyph>…)`** deliberately, and the group is load-bearing
+ * rather than cosmetic: it is how `markerSpanStart` finds the glyph's COLUMN for a
+ * `markerFgPalette` anchor. Without it the match begins at column 0 and such an anchor would
+ * sample the leading space instead of the marker. Any future profile whose glyph is not at its
+ * match start must name it the same way — and it must be NAMED, because agy's pattern already
+ * carries an incidental positional group for its separator.
  */
-const KIMI_MARKER = /^\s*│\s*>/;
+const KIMI_MARKER = /^\s*│\s*(?<glyph>>)/;
 
 /**
  * The rounded box bottom that closes kimi's composer (`` ╰─────╯ ``, indented by
