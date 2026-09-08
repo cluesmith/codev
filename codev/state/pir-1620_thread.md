@@ -226,3 +226,29 @@ the diff: fixing the default touches every harness's write path, and this lane's
 being the thing that broke, not to redesign the mechanism.
 
 Still at plan-approval. `porch approve` not run.
+
+## 2026-09-08 (later still) — owner reverses the PLAIN_CHUNKED proposal; implementing as decided
+
+Owner decision: bracketed paste stays the default for every harness, Kimi included. `#1653` closed
+on the same reasoning. I raised the concern, the owner weighed it and declined, so that is the
+decision and this lane implements it — `writeStrategyForApp` is now **untouched** by this work.
+
+Removed from both plans. What replaced it is a short record of the decision rather than silence,
+because "Kimi is not in the opt-out list" reads identically whether it was considered or missed, and
+the next person deserves to know which. The Test Plan now *asserts* `writeStrategyForApp('kimi') ===
+BRACKETED_PASTE` — pinning the decision so a later edit to that function has to be deliberate about
+Kimi, instead of the absence of a test making it look unconsidered.
+
+One factual note I recorded once and am not relitigating: the owner's rationale is "unhonoured
+markers are harmless stray text", which covers one of the two mechanisms. The other is that
+`framePieces` converts `\n` → `\r` *inside* the bracket — if the mode is not honoured those are
+Enter keypresses, so one message arrives as N submissions, one per line. That is not stray text.
+It does not change the decision (step 8 measures it on a live Kimi either way), but it does change
+what "measure it" means, so both the plan and Mohid's step 8 now ask for the specific symptom —
+"one message or several?" — rather than "does it look right?". A vague question would have come
+back with a vague answer and we would have learned nothing.
+
+Kept, as instructed: the `enterDelayMs` override governing the paste path's Enter, and the bisect
+table.
+
+Still at plan-approval. `porch approve` not run.

@@ -111,7 +111,7 @@ Resolution is **advisory and total**: unreadable worktree, unknown or retired ha
 
 Applied at the mailbox `writeMessage` binding (which covers cron delivery too, since it writes through the same port) and on the `--interrupt` path, which writes body-then-Enter exactly like a gated delivery. Since Issue #1567 a long frame is written as one bracketed paste with the Enter outside it, so the override displaces `PASTE_ENTER_DELAY_MS` (80 ms) on that branch — the exact delay Kimi's bisect showed is swallowed — as well as `SIMPLE_ENTER_DELAY_MS` on the short branch.
 
-Kimi also takes the **`PLAIN_CHUNKED`** write strategy rather than the `BRACKETED_PASTE` default, joining agy as an unmeasured harness. Bracketed paste is measured safe on claude and codex only; if Kimi does not implement the mode, its markers arrive as literal text and `framePieces`' `\n` → `\r` conversion submits every line as a separate message. Fail-safe until measured, then flipped with evidence. **Not** applied to `--escape`, which writes no text: Kimi's swallowed-Enter behaviour is paste detection keyed to a preceding text burst, and pacing it either way is unmeasured, so it stays at the Spec 1273 timing rather than changing on a guess.
+Kimi takes the **default `BRACKETED_PASTE`** write strategy (owner decision, 2026-09-08): only agy opts out, and `writeStrategyForApp` is not modified by this work. Whether Kimi honours the mode is measured on a live CLI rather than assumed either way — see the Test Plan. **Not** applied to `--escape`, which writes no text: Kimi's swallowed-Enter behaviour is paste detection keyed to a preceding text burst, and pacing it either way is unmeasured, so it stays at the Spec 1273 timing rather than changing on a guess.
 
 ### 7. Out of scope, fenced
 

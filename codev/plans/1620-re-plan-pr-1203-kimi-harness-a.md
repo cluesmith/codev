@@ -88,29 +88,23 @@ therefore govern **both** Enter sites, not just the short-frame one it was origi
 The unit test asserts it on both branches; a test that only covered the short frame would pass
 while the feature was broken for every real message.
 
-**2a-bis. Kimi must NOT default to bracketed paste — fail-safe, pending Mohid's measurement.**
-`writeStrategyForApp(app)` returns `PLAIN_CHUNKED` for `'agy'` and `BRACKETED_PASTE` for everything
-else. That default is opt-**out**, so a Kimi profile added today silently inherits bracketed paste
-on a CLI nobody has tested it against. The blast radius if Kimi does not implement bracketed-paste
-mode is not a slow message, it is a corrupt one:
+**2a-bis. Kimi takes the default `BRACKETED_PASTE` strategy — owner decision, 2026-09-08.**
+`writeStrategyForApp` is left exactly as `main` has it: `PLAIN_CHUNKED` for `'agy'`,
+`BRACKETED_PASTE` for everything else, Kimi included. **This lane makes no change to that
+function.**
 
-- the `\x1b[200~` / `\x1b[201~` markers land as literal text in the composer; and
-- `framePieces` converts `\n` → `\r` *inside* the bracket, so an un-honoured paste submits **every
-  line as its own message** — the #584 class, worse than before it was fixed.
+Recorded because it was a decision, not an oversight. This plan previously proposed listing Kimi
+alongside agy as unmeasured. The owner weighed it and declined: an unhonoured paste marker is stray
+text in a composer, the risk is acceptable, and Mohid's checklist **step 8** measures the real
+behaviour on a live Kimi — better evidence than a defensive default that might never have been
+revisited. Issue #1653 (making bracketed paste opt-in per measured app) is closed on the same
+reasoning; nothing here should be read as reopening it.
 
-So `KIMI_PROFILE` joins agy in `PLAIN_CHUNKED` until measured. This is not a new policy, it is the
-policy already written into that function's own doc comment ("a harness that has not been measured
-can opt out"); the only change is making Kimi one of the unmeasured ones, which it is. It is one
-line, reversible the moment evidence exists, and it fails toward the behaviour Mohid's 7/7 demo
-actually validated. Confirming bracketed-paste tolerance is **step 8 on the handoff checklist**; if
-Kimi does honour it, flipping Kimi to `BRACKETED_PASTE` is a follow-up with evidence attached, not
-a guess made now.
-
-**Explicitly NOT in this PR (architect, 2026-09-08):** making bracketed paste opt-*in* per measured
-app, with `PLAIN_CHUNKED` as the default, is a follow-up the architect owns and files. The hazard is
-real — agy is listed only because someone remembered, so the *next* harness inherits bracketed paste
-by silence exactly as Kimi would have — but fixing the default is a change to every harness's write
-path, and this lane's job is to stop being the thing that broke. We list Kimi and stop there.
+One note so that step 8 is diagnostic rather than impressionistic: `framePieces` converts
+`\n` → `\r` *inside* the bracket, so if a TUI does not honour bracketed paste the observable symptom
+is not only stray `[200~` text — it is **one message arriving as N separate submissions**, one per
+line. Step 8 asks for that specifically. If it shows up, the fix is one line
+(`writeStrategyForApp` gains `'kimi'`) with live evidence behind it.
 
 **2b. Delivery port + binding.** `DeliveryPorts.writeMessage` keeps main's current shape — `(session, msg, noEnter, precheck, strategy)`, the strategy resolved in `mailbox-delivery.ts:744` from `writeStrategyForApp(profile.app)`. Pacing is resolved by the *binding* instead, because it is a property of the target session and no unit fake should have to know about it:
 ```ts
@@ -282,10 +276,12 @@ What that changes for *our* work — stated here because it is not free:
      actually arrives. If you can, start it with Tower under load so `codev_queue_task`'s first
      attempt loses the race — the retry should win and the task should still land.
   8. **Does Kimi honour bracketed paste?** New since your PR (#1567 / PR #1644): long `afx send`
-     bodies now go out as one bracketed paste. We have set Kimi to the opt-out `PLAIN_CHUNKED`
-     strategy for safety, because an un-honoured bracket puts literal `\x1b[200~` in the composer
-     and submits every line separately. Send a >4-line message and say which happens; if Kimi
-     handles it, we flip it with your evidence attached.
+     bodies go out as one bracketed paste, and every harness except agy takes that path — Kimi
+     included. The diagnostic symptom if Kimi does *not* honour it is not just stray `[200~` text:
+     `framePieces` turns `\n` into `\r` inside the bracket, so an un-honoured paste arrives as
+     **N separate submissions, one per line**. Send a >4-line message and tell us which you see —
+     one message, or several. Either answer is useful; if it is several, the fix is one line with
+     your evidence behind it.
   7. **Evidence** → `codev/evidence/1620-kimi-measurement/`, committed to the branch: the Kimi
      version, raw captures, the demo driver's full output, and the verified-delivery numbers.
      A PR comment with the headline results is enough for us to finish the review doc.
@@ -359,7 +355,7 @@ Consequences, recorded so that nobody has to reconstruct them later:
 
 | Path | Change |
 |---|---|
-| `packages/codev/src/agent-farm/servers/message-write.ts` | `MessagePacing`; `pacing?` re-derived onto the post-#1567 signatures (6th arg on `writeMessageToSession`, 7th on `submitMessagePaced`), overriding `SIMPLE_ENTER_DELAY_MS` and `PASTE_ENTER_DELAY_MS`; `writeStrategyForApp` returns `PLAIN_CHUNKED` for kimi as well as agy |
+| `packages/codev/src/agent-farm/servers/message-write.ts` | `MessagePacing`; `pacing?` re-derived onto the post-#1567 signatures (6th arg on `writeMessageToSession`, 7th on `submitMessagePaced`), overriding `SIMPLE_ENTER_DELAY_MS` and `PASTE_ENTER_DELAY_MS`. `writeStrategyForApp` is **not** touched — Kimi takes the default bracketed-paste strategy per the 2026-09-08 owner decision |
 | `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` | `resolveHarnessForSession` / `resolvePacingForSession`; pacing threaded into the `writeMessage` binding |
 | `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` | delete `CLASSIFIER_STUCK_DETAILS`; keep main's delegating `isClassifierStuck` |
 | `packages/sdk/src/hold-verdict.ts` | `isUnverifiableVerdict` gains `no-region-start`, `multi-row-draft` |
@@ -408,9 +404,9 @@ Consequences, recorded so that nobody has to reconstruct them later:
   chunked branch, where it must displace `PASTE_ENTER_DELAY_MS` (80 ms, the value Kimi's own bisect
   showed gets swallowed). Still resolves only after the Enter, still reports `written`; `contended`
   and `aborted` are unaffected by pacing.
-- `writeStrategyForApp('kimi')` is `PLAIN_CHUNKED`, and `framePieces` for that strategy emits no
-  paste markers — pinned, because the failure it prevents (literal `\x1b[200~` in the composer, and
-  every line submitted separately) is silent and only visible on a live Kimi.
+- `writeStrategyForApp` is unchanged and still returns `BRACKETED_PASTE` for `'kimi'` — asserted, so
+  the 2026-09-08 owner decision is pinned rather than left to drift, and so a future edit to that
+  function has to be deliberate about Kimi.
 - `resolvePacingForSession` is total: unreadable worktree, unknown harness, retired harness, custom harness → `undefined`, never a throw.
 - `isUnverifiableVerdict` exhaustiveness: every `GateVerdict['detail']` value is classified; `no-region-start` and `multi-row-draft` escalate; `user-text` and `empty` do not.
 - Render gate against the Kimi fixtures: idle → `clean`; single-line draft → `user-text`; newline-then-`>` draft → `multi-row-draft`; box top off-screen → `no-region-start`; trust dialog → `no-composer-marker`; `/` menu and `@` picker → busy. Plus the guardrail pinning `markerSpanEnd` for **every** shipped profile (that number is what "no-op for claude/codex/agy" rests on) and the new `markerSpanStart` palette-anchor test.
