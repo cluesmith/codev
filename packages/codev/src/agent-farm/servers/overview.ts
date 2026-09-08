@@ -859,6 +859,14 @@ function formatResetTime(iso: string): string {
  * did not exist before #1645, and whose absence let every failing poll re-spawn
  * the command. `failures` drives the negative-cache backoff.
  */
+/**
+ * How long a queued fetch waits on the one ahead of it before giving up and
+ * serving what is cached. Just past `executeForgeCommand`'s own 30 s timeout,
+ * so it only fires for a child that outlived that — without it, one hung `gh`
+ * would wedge every later request for that concept behind it.
+ */
+const PREDECESSOR_WAIT_CAP_MS = 35_000;
+
 interface CacheEntry<T> {
   data: T | null;
   fetchedAt: number;
@@ -885,7 +893,7 @@ export class OverviewCache {
    * subsequent poll, and every additional client, start another duplicate
    * batch. Callers arriving mid-flight join the existing promise instead.
    */
-  private inflight = new Map<string, { promise: Promise<unknown>; generation: number }>();
+  private inflight = new Map<string, { promise: Promise<unknown>; generation: number; queued: boolean }>();
   /**
    * Resolved backend per `<workspace>:<concept>` — the executable that concept
    * will actually run (`gh`, `glab`, …). Per concept, not per workspace,
@@ -1246,25 +1254,45 @@ export class OverviewCache {
     }
 
     // Older generation: an invalidate() landed while that one was running, so
-    // its result is stale — but we must not just start a parallel command.
-    // porch fires invalidate after *every* mutating command, so in a busy
-    // workspace parallel flights would pile up per concept per workspace
-    // without bound: the exact fan-out this whole fix exists to stop. Chain
-    // instead — wait for the stale one, then fetch once. Callers arriving
-    // meanwhile join this chained flight, so at most one command runs and at
-    // most one waits behind it, however many invalidations arrive.
+    // its result is stale. Two things must both hold here.
+    //
+    // We must not start a parallel command — porch fires invalidate after
+    // *every* mutating command, so in a busy workspace parallel flights would
+    // pile up per concept per workspace without bound, the exact fan-out this
+    // fix exists to stop. So: chain behind the running one.
+    //
+    // And we must not queue a *new* command per invalidation either, or a burst
+    // of them costs the same as the fan-out, just spread out. So: if a chained
+    // flight is already queued and has not begun its command, join that one
+    // instead of adding another. A burst of any size therefore costs at most
+    // two commands — the one running and the one waiting — and every caller
+    // still gets real data rather than an empty list.
+    if (existing && existing.queued) {
+      return existing.promise as Promise<T | null>;
+    }
     const predecessor = existing
-      ? existing.promise.then(() => undefined, () => undefined)
+      ? Promise.race([
+          existing.promise.then(() => undefined, () => undefined),
+          new Promise<void>(resolve => {
+            const t = setTimeout(resolve, PREDECESSOR_WAIT_CAP_MS);
+            if (typeof t.unref === 'function') t.unref();
+          }),
+        ])
       : Promise.resolve();
 
     // The entry is created first so the cleanup below can compare identity
     // without referencing a promise from inside its own initializer.
-    const entry: { promise: Promise<T | null>; generation: number } =
-      { promise: undefined as unknown as Promise<T | null>, generation };
+    const entry: { promise: Promise<T | null>; generation: number; queued: boolean } =
+      { promise: undefined as unknown as Promise<T | null>, generation, queued: existing !== undefined };
 
     entry.promise = (async () => {
       try {
       await predecessor;
+
+      // The forge may have refused someone else while we waited.
+      if (isForgeSuspended(backend)) return null;
+
+      entry.queued = false; // from here we are the one holding the command
       const data = await fetcher();
       // An invalidate() while this was in flight means the result was fetched
       // under the previous config: return it to this caller, but do not write
@@ -1308,7 +1336,7 @@ export class OverviewCache {
       }
     })();
 
-    this.inflight.set(key, entry as { promise: Promise<unknown>; generation: number });
+    this.inflight.set(key, entry as { promise: Promise<unknown>; generation: number; queued: boolean });
     return entry.promise;
   }
 

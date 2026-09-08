@@ -2089,6 +2089,37 @@ describe('overview', () => {
       }
     });
 
+    it('re-checks the suspension after waiting on a queued fetch (#1645)', async () => {
+      // The suspension is checked when a fetch is dispatched. A queued fetch
+      // can wait 30s behind the one ahead of it, and the forge may start
+      // refusing us in that window — spawning anyway would be the one command
+      // the suspension exists to prevent.
+      let release: (v: unknown) => void = () => {};
+      const gate = new Promise(r => { release = r; });
+      mockFetchPRList.mockImplementationOnce(async () => {
+        await gate;
+        return [];
+      });
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const tick = (): Promise<unknown> => new Promise(r => setTimeout(r, 0));
+
+      const cache = new OverviewCache();
+      const first = cache.getOverview(tmpDir);
+      await tick();          // let the first fetch actually start
+      cache.invalidate();
+      const queued = cache.getOverview(tmpDir);
+      await tick();          // let the queued one reach its wait
+
+      // The forge starts refusing us while the queued fetch is still waiting.
+      noteRateLimited(OVERVIEW_BACKEND, Date.now() + 10 * 60 * 1000);
+      release(null);
+      await Promise.all([first, queued]);
+
+      // Only the first command ran; the queued one saw the suspension.
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+    });
+
     it('bounds concurrency across repeated invalidations (#1645)', async () => {
       // porch fires invalidate() after every mutating command, so in a busy
       // workspace they arrive constantly. Each one must not be licence to start
@@ -2116,6 +2147,11 @@ describe('overview', () => {
       await Promise.all(calls);
 
       expect(maxConcurrent).toBe(1);
+      // And — the part that matters for the API budget — six invalidations do
+      // not buy six commands. One runs, one is queued behind it, and every
+      // later caller joins that queued one. Asserting only `maxConcurrent` hid
+      // six serial executions costing exactly what the fan-out would have.
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
     it('does not hand a post-refresh caller a result fetched before it (#1645)', async () => {

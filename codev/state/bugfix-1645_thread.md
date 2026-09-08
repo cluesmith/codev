@@ -449,3 +449,48 @@ Retrospective check on this PR: every "verified failing with the fix reverted" r
 produced by my own scripted revert→test→restore, each confirmed by a subsequent clean
 `git diff` against HEAD, so none of those results is contaminated. The one anomaly I could
 not explain at the time is now fully accounted for.
+
+## 2026-09-08 — CMAP round 7: gemini + codex REQUEST_CHANGES (same finding)
+
+Both lanes independently found that **round 6's chaining fix did not do what I claimed**.
+It bounded *concurrency* but not *total spend*: six invalidations still ran six commands,
+serially. And my own test hid it by asserting only `maxConcurrent`, so it passed —
+the fourth misleading test in this PR.
+
+Redesigned: a burst of invalidations of any size now costs **at most two commands** — one
+running, one queued behind it, and every later caller joins the queued one (`entry.queued`).
+Verified: `expected 2, got 6` when the join is disabled.
+
+Also from gemini, both real:
+- A queued fetch never re-checked `isForgeSuspended` after its wait. It can wait 30 s behind
+  the command ahead of it, and the forge may start refusing us in that window — spawning
+  anyway would be exactly the command the suspension exists to prevent.
+- `await predecessor` had no cap, so one hung `gh` would wedge every later request for that
+  concept. Now raced against 35 s, just past `executeForgeCommand`'s own timeout.
+
+### My first attempt at this fix was worse than the bug
+
+I initially made a superseded flight **skip its fetch** and return cached data. Instrumenting
+showed it skipped the *original, still-needed* fetch — so any overview request racing an
+invalidate would return empty lists, and porch invalidates constantly. That would have
+flickered the dashboard empty in normal use. Reasoning about the interleaving got me the
+wrong answer twice; a `console.error` in the early-return path got it right immediately.
+
+### I destroyed my own fix with the restore step
+
+Running the vacuity check, I reverted the fix, ran the test, then restored with
+`git checkout -- <path>` — but the fix was **uncommitted**, so checkout restored to HEAD and
+threw it away. The suite then failed with the exact pre-fix numbers and I nearly re-diagnosed
+it as a code bug.
+
+The architect's protocol says commit before running consult. It applies just as much to any
+revert-based check of your own: **`git checkout --` is a restore only if the work is
+committed.** Commit first, always.
+
+### Deferred, documented
+
+Codex's second point — a success from a *different* GitHub host or account can clear the
+limited account's suspension, because the key is the tool (`gh`) rather than the account.
+Errs toward under-suspension in mixed-host setups, which is worse than the over-suspension
+already documented. Left as a documented limitation; the correct key needs per-host
+credential introspection.
