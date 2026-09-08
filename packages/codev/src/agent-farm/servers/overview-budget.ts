@@ -51,6 +51,13 @@ export function negativeTtlMs(failures: number): number {
  * (`recently-closed`, `recently-merged`) per SEARCH_TTL_MS window — 52/h per
  * watched workspace at the current TTLs. The once-an-hour `user-identity` call
  * is REST and charged to a different budget, so it is left out.
+ *
+ * This is a **floor, not a worst case**. It counts TTL-driven refreshes only;
+ * `POST /api/overview/refresh` bypasses the TTLs, and porch fires it after
+ * every mutating command. Actual spend in a busy workspace is higher — bounded
+ * by the single-flight and queue-collapsing in `OverviewCache`, not by this
+ * number. Read it as "the least this will cost", which is what makes it useful
+ * as a warning threshold.
  */
 export function projectHourlyForgeCalls(workspaceCount: number): number {
   const perWorkspace = 2 * (3_600_000 / POSITIVE_TTL_MS) + 2 * (3_600_000 / SEARCH_TTL_MS);

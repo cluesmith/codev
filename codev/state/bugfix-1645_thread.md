@@ -494,3 +494,30 @@ limited account's suspension, because the key is the tool (`gh`) rather than the
 Errs toward under-suspension in mixed-host setups, which is worse than the over-suspension
 already documented. Left as a documented limitation; the correct key needs per-host
 credential introspection.
+
+### Round 7, claude's lane: two more real behavioural bugs
+
+The read-only instruction held — `git status` was clean after the lane finished, which is
+the first round that was true. Of its ten items, three described the tree it reviewed
+(already fixed in `fe48a32d3`); two were real behavioural bugs:
+
+- **`invalidate()` wiped the negative cache**, resetting the non-rate-limit backoff on every
+  refresh. porch fires one after every mutating command, so a plainly broken forge (`gh`
+  missing, not authenticated) would have been re-spawned as fast as invalidations arrived —
+  the original bug wearing a different hat, and untouched by all the rate-limit work because
+  it never involves a rate limit. `invalidate()` now drops only successful entries.
+- **The failure counter could not escalate on a chained flight.** `failures` was read at
+  dispatch and written minutes later, so consecutive failures kept re-writing 1 and the
+  backoff never doubled. Re-read at write time.
+
+And three honesty fixes to the doctor check, all fair:
+
+- `countKnownWorkspaces()` counted the **never-pruned** `known_workspaces` table, so anyone
+  with ≥17 lifetime workspaces got a permanent, unclearable warning. Now counts workspaces
+  launched in the last 7 days. A warning that cannot be cleared is a warning that gets
+  ignored.
+- `projectHourlyForgeCalls` is a **floor, not a worst case** — it counts TTL-driven refreshes
+  only, and `/api/overview/refresh` bypasses the TTLs. Documented as such; the label now
+  reads `≥N calls/h`.
+- The budget line rendered a green `✓` from a reading **this PR's own code documents as
+  unreliable** on an exhausted account. Now labelled `(reported)`.

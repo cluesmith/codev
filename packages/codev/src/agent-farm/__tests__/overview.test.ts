@@ -1956,9 +1956,11 @@ describe('overview', () => {
       // so it keeps succeeding while its GraphQL siblings are refused. A
       // refresh that hits the limit must stay suspended afterwards.
       //
-      // What holds this is `countsAsRecovery`: the identity call runs and
-      // succeeds, and its success is simply not treated as evidence the
-      // GraphQL budget recovered. Deliberately NOT asserted here: that the
+      // Two things hold this, and both matter: `countsAsRecovery` (the identity
+      // call's success is never evidence the GraphQL budget recovered) and the
+      // dispatch-time guard in `noteForgeSuccess` (a command dispatched at or
+      // before the suspension proves nothing). In this test the batch shares a
+      // millisecond, so the timestamp guard is what fires. Deliberately NOT asserted here: that the
       // identity call goes undispatched. An earlier revision did assert that,
       // relying on `fetchCached` re-checking the suspension synchronously
       // before a sibling's fetcher had returned — an artifact of mocks
@@ -2087,6 +2089,45 @@ describe('overview', () => {
       } finally {
         process.off('unhandledRejection', onUnhandled);
       }
+    });
+
+    it('keeps the failure record across a cache refresh (#1645)', async () => {
+      // A refresh means "my data may be stale", never "the forge has
+      // recovered" — and porch fires one after every mutating command. If it
+      // cleared failures too, a plainly broken forge (`gh` missing, not
+      // authenticated) would be re-spawned as fast as invalidations arrive.
+      mockFetchPRList.mockResolvedValue(null);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+
+      cache.invalidate();
+      await cache.getOverview(tmpDir);
+
+      // Still inside the 60s negative window: the refresh did not buy a retry.
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+    });
+
+    it('escalates the backoff even when a failure is written by a queued flight (#1645)', async () => {
+      // The failure count used to be read at dispatch and written minutes
+      // later, so consecutive failures never escalated past the first step.
+      mockFetchPRList.mockResolvedValue(null);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(61_000);       // past window 1 (60s)
+      await cache.getOverview(tmpDir);      // 2nd failure -> window 2 (120s)
+      vi.advanceTimersByTime(61_000);       // inside window 2
+      await cache.getOverview(tmpDir);
+      vi.useRealTimers();
+
+      // Two fetches, not three: the second failure escalated the window.
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
     it('re-checks the suspension after waiting on a queued fetch (#1645)', async () => {

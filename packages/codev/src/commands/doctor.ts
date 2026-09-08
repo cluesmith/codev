@@ -819,13 +819,29 @@ interface WarningInfo {
  * Read-only against the shared global DB — doctor must never create or migrate
  * it. Returns 1 (this workspace) when the DB is absent or unreadable.
  */
+/** Only workspaces launched this recently count toward the spend projection. */
+const ACTIVE_WORKSPACE_DAYS = 7;
+
+/**
+ * Count workspaces Tower has launched recently, for the #1645 forge-spend
+ * projection. Read-only against the shared global DB — doctor must never create
+ * or migrate it. Returns 1 (this workspace) when the DB is absent or unreadable.
+ *
+ * Recent, not lifetime: `known_workspaces` is never pruned, so counting every
+ * row would project spend for workspaces nobody has opened in months and pin
+ * the warning on permanently for anyone with a long history — a warning that
+ * cannot be cleared is a warning that gets ignored.
+ */
 function countKnownWorkspaces(): number {
   try {
     const dbPath = getGlobalDbPath();
     if (!existsSync(dbPath)) return 1;
     const db = new Database(dbPath, { readonly: true });
     try {
-      const row = db.prepare('SELECT COUNT(*) AS n FROM known_workspaces').get() as { n: number } | undefined;
+      const row = db.prepare(
+        `SELECT COUNT(*) AS n FROM known_workspaces
+         WHERE last_launched_at >= datetime('now', ?)`,
+      ).get(`-${ACTIVE_WORKSPACE_DAYS} days`) as { n: number } | undefined;
       return row && row.n > 0 ? row.n : 1;
     } finally {
       db.close();
@@ -1308,7 +1324,10 @@ export async function doctor(): Promise<number> {
       const budget = parseBudget(executeForgeCommandSync('rate-limit', {}, { cwd: workspaceRoot }));
       if (budget) {
         const resetIn = Math.max(0, Math.round((budget.reset * 1000 - Date.now()) / 60_000));
-        const label = `${budget.used}/${budget.limit} used, resets in ${resetIn}m`;
+        // Reported, not measured. `gh api rate_limit` was observed reporting a
+        // fully-exhausted GraphQL budget as untouched (#1645), so a healthy
+        // reading here is weaker evidence than an exhausted one.
+        const label = `${budget.used}/${budget.limit} used (reported), resets in ${resetIn}m`;
         if (budget.remaining === 0) {
           console.log(`  ${chalk.red('✗')} ${'graphql budget'.padEnd(20)} ${chalk.red(label)}`);
           warnings++;
@@ -1329,7 +1348,7 @@ export async function doctor(): Promise<number> {
         const calls = projectHourlyForgeCalls(workspaceCount);
         const projected = projectHourlyGraphqlPoints(workspaceCount);
         const share = Math.round((projected / budget.limit) * 100);
-        const projLabel = `${calls} calls/h for ${workspaceCount} workspace(s) ≈ ${projected} pts/h `
+        const projLabel = `≥${calls} calls/h for ${workspaceCount} recent workspace(s) ≈ ${projected} pts/h `
           + `(@${GRAPHQL_POINTS_PER_CALL} pts/call) — ${share}% of ${budget.limit}/h`;
         if (share > 50) {
           console.log(`  ${chalk.yellow('⚠')} ${'projected spend'.padEnd(20)} ${chalk.yellow(projLabel)}`);

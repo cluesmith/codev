@@ -860,6 +860,22 @@ function formatResetTime(iso: string): string {
  * the command. `failures` drives the negative-cache backoff.
  */
 /**
+ * Drop only the *successful* entries, keeping the failure record.
+ *
+ * A refresh means "my data may be stale", never "the forge has recovered", and
+ * porch fires one after every mutating command. Clearing failures too would
+ * reset the negative-cache backoff on every one of them, so a forge that is
+ * simply broken — `gh` missing, not authenticated — would be re-spawned as
+ * fast as invalidations arrive. That is the original bug wearing a different
+ * hat.
+ */
+function dropSucceeded<T>(cache: Map<string, CacheEntry<T>>): void {
+  for (const [key, entry] of cache) {
+    if (entry.data !== null) cache.delete(key);
+  }
+}
+
+/**
  * How long a queued fetch waits on the one ahead of it before giving up and
  * serving what is cached. Just past `executeForgeCommand`'s own 30 s timeout,
  * so it only fires for a child that outlived that — without it, one hung `gh`
@@ -1166,11 +1182,11 @@ export class OverviewCache {
    * Invalidate all cached data.
    */
   invalidate(): void {
-    this.prCache.clear();
-    this.issueCache.clear();
-    this.closedCache.clear();
-    this.mergedPRCache.clear();
-    this.currentUserCache.clear();
+    dropSucceeded(this.prCache);
+    dropSucceeded(this.issueCache);
+    dropSucceeded(this.closedCache);
+    dropSucceeded(this.mergedPRCache);
+    dropSucceeded(this.currentUserCache);
     this.backendCache.clear();
     // The resolver memoizes across every cache instance and reads concept
     // scripts off disk, so an edited script would survive this invalidation.
@@ -1315,7 +1331,11 @@ export class OverviewCache {
         // recovered — see noteForgeSuccess.
         if (countsAsRecovery) noteForgeSuccess(backend, dispatchedAt);
       } else {
-        cache.set(cwd, { data: null, fetchedAt, failures: (cached?.failures ?? 0) + 1 });
+        // Re-read rather than reusing the dispatch-time snapshot: a chained
+        // flight can be minutes behind its own `cached`, and counting from a
+        // stale value means consecutive failures never escalate the backoff.
+        const priorFailures = cache.get(cwd)?.failures ?? cached?.failures ?? 0;
+        cache.set(cwd, { data: null, fetchedAt, failures: priorFailures + 1 });
         // If that failure was a rate limit, learn when it lifts — once per
         // suspension window, and only where the probe has been enabled.
         void maybeProbeReset(backend, cwd);
