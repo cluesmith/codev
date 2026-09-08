@@ -161,3 +161,50 @@ narrative are the durable correction — which also resolves the decision I had 
 upward. The seven green CI checks and completed reviews stay valid.
 
 All eight seeded files remain unchanged and still hash-match the handoff manifest.
+
+## Final CMAP verdicts (PR #1657)
+
+All three lanes returned. **gemini APPROVE/HIGH**, **codex APPROVE/HIGH**,
+**claude APPROVE/HIGH** (750.4s) — no blocking issues from any lane.
+
+Claude's review was the substantive one. It independently confirmed the root cause, the
+regex (superset of the old pattern, ReDoS-safe, 200-char bound correct), and — the check
+I had not thought to make — that admitting `[` and `]` into a validated identifier opens
+no injection surface: the gemini lane passes the id through `spawn(bin, args)` as an argv
+element with no `shell: true`, and `computePersistentOutputPath` keys on the lane name,
+not the model id, so the suffix never reaches a filename.
+
+It also found something that corrected **my** narrative, which is worth recording:
+
+- I wrote that the mechanism was "verified against the bundled runtime in SDK 0.2.105 and
+  0.2.141". That is wrong for 0.2.141 — **it has no bundled runtime**. 0.2.105 ships the
+  whole thing as `cli.js`; 0.2.141 is a thin client with no `[1m]` logic of its own that
+  delegates to a runtime-resolved native binary from
+  `@anthropic-ai/claude-agent-sdk-<platform>`. I had taken the 0.2.141 half from the
+  handoff's investigation rather than checking it. Verified it myself now: the native
+  binary carries the identical gate `rG(H) = /\[1m\]/i.test(H)`, plus
+  `context-1m-2025-08-07` (4×) and `CLAUDE_CODE_DISABLE_1M_CONTEXT` (2×). The claim was
+  true; my description of *how* it was true was not. PR body corrected.
+- Consequence worth knowing, not a blocker: on 0.2.141+ the `[1m]` semantics live in a
+  runtime-resolved binary this repo does not pin (`^0.2.41` spans the architectural
+  shift). If the lane ever regresses to `Prompt is too long` again, check the installed
+  runtime version before the Codev source.
+
+### Claude's minor items — disposition
+
+1. **"Could not verify the suffix-strip claim."** Already adjudicated by the architect and
+   re-verified by me on *both* runtimes: `UT(q)` in 0.2.105 and `KL(H)` in the 0.2.141
+   native binary, both `replace(/\[(1|2)m\]/gi,"")`, applied at request construction. The
+   reviewer stopped at `X5` normalization, which re-attaches the marker. Not a defect;
+   the PR body now shows the evidence on both runtimes rather than asserting it.
+2. **`CLAUDE_CODE_DISABLE_1M_CONTEXT` nuance** (concrete ids keep the suffix on the wire
+   with no beta header; aliases are stripped). Doc line is incomplete, not wrong. Touching
+   it means editing a seeded doc file — referred to the architect, not done unilaterally.
+3. **Premium >200K pricing exposure.** Added a line to the PR body noting `maxBudgetUsd: 25`
+   still caps each consultation and that the exposure exists only where the lane previously
+   hard-failed. A line in shipped `consult.md` would need a seeded-file edit — referred up.
+4. **`consult stats` splits claude history across two model ids.** Cosmetic; noted, not fixed.
+5. **"25 uncommitted lines in the thread log."** True at review time; committed since in
+   `e339b399f`. Resolved.
+
+CI on head `e339b399f`: **all 7 checks pass**.
