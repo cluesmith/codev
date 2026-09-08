@@ -20,6 +20,8 @@ import {
   validateForgeConfig,
   loadForgeConfig,
   resolveAllConcepts,
+  executeForgeCommandDetailed,
+  resolveForgeBackend,
 } from '../lib/forge.js';
 
 // =============================================================================
@@ -691,5 +693,75 @@ describe('resolveAllConcepts', () => {
     const config = { 'issue-view': './bin/my-forge issue view "$1"' };
     const issueView = resolveAllConcepts(config).find(r => r.concept === 'issue-view');
     expect(issueView?.executable).toBe('./bin/my-forge');
+  });
+});
+
+// =============================================================================
+// #1645: failures keep their stderr/exit code; budgets key by resolved backend
+// =============================================================================
+
+describe('executeForgeCommandDetailed (#1645)', () => {
+  const SCRIPT = join(MOCK_SCRIPTS_DIR, 'rate-limited.sh');
+  beforeAll(() => {
+    writeFileSync(SCRIPT, '#!/bin/sh\necho "gh: API rate limit already exceeded for user ID 1" >&2\nexit 1\n');
+    chmodSync(SCRIPT, 0o755);
+  });
+
+  it('surfaces stderr and the exit code of a failing concept', async () => {
+    const result = await executeForgeCommandDetailed('issue-view', {}, { forgeConfig: { 'issue-view': SCRIPT } });
+    expect(result.data).toBeNull();
+    expect(result.error?.exitCode).toBe(1);
+    expect(result.error?.stderr).toContain('rate limit already exceeded');
+  });
+
+  it('reports a disabled concept as an error without executing', async () => {
+    const result = await executeForgeCommandDetailed('issue-view', {}, { forgeConfig: { 'issue-view': null } });
+    expect(result).toEqual({ data: null, error: { message: expect.stringContaining('disabled'), stderr: '', exitCode: null } });
+  });
+
+  it('reports a malformed .codev/config.json as an error instead of rejecting', async () => {
+    const broken = join(TEST_DIR, 'broken-config');
+    mkdirSync(join(broken, '.codev'), { recursive: true });
+    writeFileSync(join(broken, '.codev', 'config.json'), '{ not json');
+    await expect(executeForgeCommandDetailed('pr-list', {}, { workspaceRoot: broken })).resolves.toMatchObject({ data: null });
+  });
+});
+
+describe('resolveForgeBackend (#1645)', () => {
+  it('keys the github default scripts by their CLI, gh', () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: null })).toBe('gh');
+    expect(resolveForgeBackend('user-identity', { forgeConfig: null })).toBe('gh');
+  });
+
+  it("keys a Linear workspace's pr-list (falls through to github) by gh, and its issue-list by provider", () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { provider: 'linear' } })).toBe('gh');
+    expect(resolveForgeBackend('issue-list', { forgeConfig: { provider: 'linear' } })).toBe('linear');
+  });
+
+  it('keys an absolute CLI path like the bare command, lowercased', () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { 'pr-list': '/usr/local/bin/GH pr list --json number' } })).toBe('gh');
+  });
+
+  it('keys generic transports and custom script paths by provider', () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { provider: 'gitlab', 'pr-list': 'curl -s https://forge.example/prs' } })).toBe('gitlab');
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { 'pr-list': '/home/me/my-forge-script' } })).toBe('github');
+  });
+
+  it('returns null for a disabled concept', () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { 'pr-list': null } })).toBeNull();
+  });
+});
+
+describe('shipped provider scripts declare their executable (#1645)', () => {
+  const BUILTINS = new Set(['set', 'if', 'case', 'echo', 'printf', 'test', '[', 'exit', 'export', 'local', '.', 'source']);
+
+  it('no built-in provider resolves a concept to a shell builtin', () => {
+    for (const provider of getKnownProviders()) {
+      for (const r of resolveAllConcepts({ provider })) {
+        if (r.command === null) continue;
+        expect(r.executable, `${provider}/${r.concept} resolved to '${r.executable}'`).not.toBeNull();
+        expect(BUILTINS.has(r.executable as string), `${provider}/${r.concept} resolved to builtin '${r.executable}'`).toBe(false);
+      }
+    }
   });
 });
