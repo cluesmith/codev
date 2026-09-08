@@ -18,6 +18,7 @@ vi.mock('../db/index.js', async (importOriginal) => {
 });
 
 import { OverviewCache } from '../servers/overview.js';
+import { executeForgeCommandDetailed } from '../../lib/forge.js';
 
 let tmpDir: string;
 let callLog: string;
@@ -72,5 +73,12 @@ describe('Tower gh spawns under a rate-limited gh (#1645)', () => {
     clock += 15 * 60_000 + 1_000;
     await cache.getOverview(workspace);
     expect(spawns()).toHaveLength(9);
+  });
+
+  it("github/pr-list propagates gh's exit status instead of jq's (POSIX sh has no pipefail)", async () => {
+    const result = await executeForgeCommandDetailed('pr-list', {}, { cwd: tmpDir, forgeConfig: null });
+    expect(result.data).toBeNull();
+    expect(result.error?.exitCode).toBe(1);
+    expect(result.error?.stderr).toContain('rate limit already exceeded');
   });
 });

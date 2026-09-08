@@ -105,17 +105,22 @@ describe('OverviewCache spend controls (#1645)', () => {
   it('a REST success does not reset the GraphQL failure backoff', async () => {
     for (const c of LISTS) fake.behaviour[c] = async () => fail('no git remotes found');
     const cache = new OverviewCache({ now });
-    await cache.getOverview(tmpDir);            // window 1: 60 s
+    // t0: lists fail (window 1: 60 s); identity succeeds in the same batch — REST evidence,
+    // which must leave the gh window alone. Were it reset, window 2 would be 60 s, not 120 s.
+    await cache.getOverview(tmpDir);
     clock += 61_000;
-    await cache.getOverview(tmpDir);            // window 2: 120 s (identity served from cache)
+    await cache.getOverview(tmpDir);            // t0+61: window 2 (120 s)
     expect(listCalls()).toBe(8);
-    clock += 3_540_000;                          // identity TTL expires → REST success
+    clock += 3_540_000;                          // t0+3601: identity TTL expires → REST success; window 3 (240 s)
     await cache.getOverview(tmpDir);
     expect(count('user-identity')).toBe(2);
-    expect(listCalls()).toBe(12);               // 1 h later: a fresh window, level keeps climbing
-    clock += 61_000;                             // inside the 240 s window: no retry
+    expect(listCalls()).toBe(12);
+    clock += 121_000;                            // t0+3722: inside window 3 — a reset chain would retry here
     await cache.getOverview(tmpDir);
     expect(listCalls()).toBe(12);
+    clock += 120_000;                            // t0+3842: window 3 elapsed → one retry
+    await cache.getOverview(tmpDir);
+    expect(listCalls()).toBe(16);
   });
 
   it('a REST failure does not suspend the GraphQL backend', async () => {
