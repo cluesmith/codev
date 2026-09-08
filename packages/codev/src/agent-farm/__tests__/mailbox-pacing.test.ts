@@ -19,9 +19,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveHarnessForSession, resolvePacingForSession } from '../servers/mailbox-wiring.js';
+import { resolveHarnessForSession, resolvePacingForSession, makeDeliveryPorts } from '../servers/mailbox-wiring.js';
 import { KIMI_HARNESS, CLAUDE_HARNESS } from '../utils/harness.js';
 import type { DeliverySession } from '../servers/mailbox-delivery.js';
+import { BRACKETED_PASTE } from '../servers/message-write.js';
 
 /** A delivery session with only the fields pacing resolution reads. */
 function session(command: string, cwd: string): DeliverySession {
@@ -126,4 +127,71 @@ describe('mailbox pacing resolution (Issue #1201)', () => {
     expect(resolvePacingForSession(session('constructor', dir))).toBeUndefined();
     expect(resolvePacingForSession(session('toString', dir))).toBeUndefined();
   });
+});
+
+/**
+ * The resolver being correct is not the same as the resolver being WIRED.
+ *
+ * That distinction is not theoretical here: this seam has silently come unwired twice. Issue
+ * #1365 replaced `writeMessagePaced` with `submitMessagePaced` and moved the parameter list;
+ * Issue #1567 then inserted `strategy` into the exact slot pacing had occupied. Both times every
+ * test in the block above kept passing, because they all call `resolvePacingForSession` directly
+ * and none of them go through the port the delivery path actually uses.
+ *
+ * So this exercises the real binding — `makeDeliveryPorts().writeMessage` — and observes the wire,
+ * not an argument. It costs about a second of real time, which is the price of testing a delay.
+ */
+describe('pacing is wired into the delivery port, not merely resolvable', () => {
+  let dir: string;
+
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'pacing-wire-')); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  /** A session that records when each write reached the "PTY". */
+  function recordingSession(cwd: string) {
+    const writes: Array<{ data: string; at: number }> = [];
+    const s = {
+      id: 'terminal-under-test',
+      bytesWritten: 0,
+      info: { cols: 110, rows: 32 },
+      command: '/bin/bash .builder-start.sh',
+      launchArgs: [],
+      cwd,
+      writable: true,
+      lastDataAt: 0,
+      write: (data: string) => { writes.push({ data, at: Date.now() }); return true; },
+    };
+    return { session: s as unknown as DeliverySession, writes };
+  }
+
+  /** Gap between the last body write and the Enter that submits it. */
+  async function enterGapMs(cwd: string): Promise<number> {
+    const { session: sess, writes } = recordingSession(cwd);
+    const ports = makeDeliveryPorts(() => {});
+    // A long frame — the branch a real formatted `afx send` takes, and the one whose Enter
+    // delay (PASTE_ENTER_DELAY_MS = 80) is exactly the value Kimi swallows.
+    const body = 'line one\nline two\nline three\nline four';
+    const result = await ports.writeMessage(sess, body, false, () => null, BRACKETED_PASTE);
+    expect(result).toEqual({ status: 'written' });
+    const enter = writes.at(-1)!;
+    expect(enter.data).toBe('\r');
+    return enter.at - writes[writes.length - 2]!.at;
+  }
+
+  it('a kimi builder gets its ~1s Enter through the real port', async () => {
+    writeFileSync(join(dir, '.builder-start.sh'), '#!/bin/bash\nwhile true; do\n  kimi --yolo\ndone\n', 'utf-8');
+    chmodSync(join(dir, '.builder-start.sh'), '755');
+    const gap = await enterGapMs(dir);
+    // Pinned generously against timer jitter: the point is 1000 vs 80, not the exact value.
+    expect(gap).toBeGreaterThan(500);
+    expect(KIMI_HARNESS.messagePacing?.enterDelayMs).toBe(1000);
+  }, 20_000);
+
+  it('a claude builder is left on the default, so pacing is targeted and not global', async () => {
+    writeFileSync(join(dir, '.builder-start.sh'), '#!/bin/bash\nwhile true; do\n  claude --foo\ndone\n', 'utf-8');
+    chmodSync(join(dir, '.builder-start.sh'), '755');
+    const gap = await enterGapMs(dir);
+    expect(gap).toBeLessThan(400);
+    expect(CLAUDE_HARNESS.messagePacing).toBeUndefined();
+  }, 20_000);
 });
