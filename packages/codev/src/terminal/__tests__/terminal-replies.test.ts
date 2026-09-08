@@ -9,6 +9,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import {
   stripTerminalReplies,
   terminalReplyMatches,
@@ -156,7 +158,21 @@ describe('the reply table is pinned to a specific xterm version', () => {
   // The table above is derived from ONE bundle's emission sites. A version bump can add a
   // newly-answered query (kitty keyboard, XTVERSION), and an unrecognised reply becomes an
   // uncounted-reply hold — so the bump must not pass silently.
-  it('matches the installed @xterm/xterm version', () => {
+  //
+  // BOTH workspaces are pinned, because the one this file resolves by default is NOT the one
+  // that emits (integration review — Codex). `@xterm/xterm` is a devDependency here (the test
+  // harness); the terminal a human actually types into is `apps/web`, which declares its own
+  // copy, and every DA/DSR/CPR reply the filter exists to strip is emitted by THAT bundle. A
+  // bump confined to apps/web would leave the table stale with this suite still green.
+  const repoRoot = fileURLToPath(new URL('../../../../../', import.meta.url));
+
+  it('matches the @xterm/xterm apps/web installs — the bundle that emits the replies', () => {
+    const webRequire = createRequire(path.join(repoRoot, 'apps/web/package.json'));
+    const pkg = webRequire('@xterm/xterm/package.json') as { version: string };
+    expect(pkg.version).toBe(XTERM_REPLY_TABLE_VERSION);
+  });
+
+  it("matches packages/codev's own dev copy, so the two workspaces cannot drift apart", () => {
     const require = createRequire(import.meta.url);
     const pkg = require('@xterm/xterm/package.json') as { version: string };
     expect(pkg.version).toBe(XTERM_REPLY_TABLE_VERSION);
