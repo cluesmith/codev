@@ -155,6 +155,7 @@ export interface GateProfile {
    * measures distance to the status line rather than the composer's height.
    */
   growsWithDraft?: true;
+  /**
    * Optional per-app marker anchor: when true, the marker row must ALSO be the row
    * holding the buffer cursor. `markerPattern` alone is a text test, and a text test
    * cannot tell a composer from any other row an app happens to prefix the same way —

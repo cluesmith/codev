@@ -63,6 +63,23 @@ function screen(...lines: string[]): string {
   return lines.map((l) => l + '\r\n').join('');
 }
 
+/**
+ * A synthetic screen that satisfies agy's #1474 marker ANCHORS, not just its text pattern.
+ *
+ * Since #1474 `AGY_PROFILE` demands two things a plain `screen()` cannot express: the marker
+ * glyph must render in palette 12 (SGR 94 — bright blue), and the marker row must hold the
+ * cursor. So the rows are written normally, then the cursor is parked back on row 1 with an
+ * explicit CUP, because the composer row is ABOVE the rule line that bounds it.
+ *
+ * Without this, a synthetic agy screen classifies `no-composer-marker` for a reason that has
+ * nothing to do with what the test is asking about — which is how the Issue #1201 span
+ * guardrail below silently stopped testing agy at all when #1474 landed.
+ */
+function agyScreen(markerRow: string, cursorCol: number, ...rest: string[]): string {
+  const colored = markerRow.replace(/^>/, '\x1b[94m>\x1b[0m');
+  return [colored, ...rest].map((l) => l + '\r\n').join('') + `\x1b[1;${cursorCol}H`;
+}
+
 const FIXTURE_DIR = fileURLToPath(new URL('./fixtures/gate', import.meta.url));
 
 function profileForFixture(name: string): GateProfile {
@@ -223,9 +240,11 @@ describe('render-gate — marker-span exemption is a no-op for claude/codex/agy 
       const snap = snapshotFromRaw(screen(`${marker}x`, '──────────────────────'));
       expect(await classifyScreen(snap, p)).toMatchObject({ clean: false, detail: 'user-text' });
     }
-    // agy: `x` at col 2, immediately past a span of 2.
+    // agy: `x` at col 2, immediately past a span of 2. Built with the #1474 anchors satisfied
+    // (palette-12 marker glyph, cursor on the composer row) so the assertion is about the SPAN
+    // and not about the anchors rejecting a synthetic screen.
     expect(await classifyScreen(
-      snapshotFromRaw(screen('> x', '──────────────────────')), AGY_PROFILE,
+      snapshotFromRaw(agyScreen('> x', 4, '──────────────────────')), AGY_PROFILE,
     )).toMatchObject({ clean: false, detail: 'user-text' });
   });
 
@@ -234,8 +253,11 @@ describe('render-gate — marker-span exemption is a no-op for claude/codex/agy 
     // composer and is held. The exemption can therefore never reach a typed character:
     // the only way to get span 2 is for cell 1 to BE a space.
     expect(markerSpanEnd('>x', AGY_PROFILE.markerPattern)).toBe(1); // no match → the safe default
+    // Built with the anchors SATISFIED, so the hold can only be the pattern's doing. A plain
+    // synthetic screen would also report `no-composer-marker`, but for the wrong reason — it
+    // would fail the cursor/palette anchors first and never exercise the pattern at all.
     expect(await classifyScreen(
-      snapshotFromRaw(screen('>x', '──────────────────────')), AGY_PROFILE,
+      snapshotFromRaw(agyScreen('>x', 3, '──────────────────────')), AGY_PROFILE,
     )).toMatchObject({ clean: false, detail: 'no-composer-marker' });
   });
 

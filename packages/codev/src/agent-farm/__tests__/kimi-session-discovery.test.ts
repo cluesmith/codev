@@ -225,18 +225,30 @@ describe('kimi session discovery', () => {
       expect(inspectKimiStoreLayout(opts())).toEqual({ status: 'empty' });
     });
 
+    /**
+     * Recency is the session directory's mtime; pin it so the ordering is explicit.
+     *
+     * Every test in this describe MUST use it rather than relying on write order. The probe's
+     * verdict turns on which session is NEWEST, and two `mkdirSync` calls in the same tick may
+     * or may not produce distinguishable mtimes depending on the filesystem's timestamp
+     * granularity — so an implicitly-ordered test passes or fails by platform, not by
+     * behaviour. This one did exactly that: written as two bare `writeSession` calls it passed
+     * wherever the two directories tied and failed 5/5 on APFS, where `mtimeMs` is sub-
+     * millisecond and the bad session was therefore always the newer one.
+     */
+    const touchDir = (dir: string, epochSeconds: number) => utimesSync(dir, epochSeconds, epochSeconds);
+
     it('ok when at least one session carries the load-bearing shape', () => {
-      writeSession('session_ok', { cwd: '/wt' });
-      writeSession('session_bad', '###');
+      // The GOOD session is the newest — the case this test is named for. A store whose newest
+      // session is the broken one is drift, and is the test below.
+      touchDir(writeSession('session_bad', '###'), 1_000);
+      touchDir(writeSession('session_ok', { cwd: '/wt' }), 9_000);
       expect(inspectKimiStoreLayout(opts())).toEqual({ status: 'ok', sampled: 1 });
     });
 
     // The blind spot in "any session matches" (CMAP 2026-08-09, codex #5): after a
     // store migration the pre-migration sessions keep matching forever, so the probe
     // would report healthy through exactly the rename it was built to catch.
-    /** Recency is the session directory's mtime; pin it so the ordering is explicit. */
-    const touchDir = (dir: string, epochSeconds: number) => utimesSync(dir, epochSeconds, epochSeconds);
-
     it('reports drift when the NEWEST session stopped matching but older ones still do', () => {
       touchDir(writeSession('session_old', { cwd: '/wt' }), 1_000);
       touchDir(writeSession('session_new', { someRenamedField: '/wt' }), 9_000);

@@ -16,6 +16,8 @@ import {
   PASTE_BEGIN,
   PASTE_END,
   PASTE_ENTER_DELAY_MS,
+  BRACKETED_PASTE,
+  PLAIN_CHUNKED,
 } from '../servers/message-write.js';
 
 /** The one-piece bracketed form of a short multi-line body (Issue #1567). */
@@ -190,14 +192,22 @@ describe('writeMessageToSession (Bugfix #584)', () => {
   // =========================================================================
 
   describe('per-harness enterDelayMs override (Issue #1201)', () => {
-    it('short message: Enter waits for the overridden delay', () => {
+    // The override exists because Kimi's paste-detection window swallows an Enter sent too
+    // soon after the body: bisected live on 0.27.0, 80 ms and 100 ms never submit; 120 ms+ do.
+    // Both Enter sites are covered on purpose. Issue #1567 moved long frames onto their own
+    // delay (PASTE_ENTER_DELAY_MS = 80) — which is the FIRST ROW of that bisect — and a
+    // formatted `afx send` is almost always >= 4 lines, so the long branch is the one a real
+    // message takes. A suite that only pinned the short branch would stay green while the
+    // feature was broken for every message anyone actually sends.
+
+    it('short frame: Enter waits for the overridden delay, not SIMPLE_ENTER_DELAY_MS', () => {
       const session = makeSession();
       const msg = 'BEGIN';
 
-      const endTime = writeMessageToSession(session, msg, false, 0, { enterDelayMs: 1000 });
+      const endTime = writeMessageToSession(session, msg, false, 0, BRACKETED_PASTE, { enterDelayMs: 1000 });
       expect(endTime).toBe(1000);
 
-      // Default delay elapses — Enter must NOT have fired yet.
+      // The default delay elapses — Enter must NOT have fired yet.
       vi.advanceTimersByTime(50);
       expect(session.writeCalls).toEqual([msg]);
 
@@ -205,31 +215,52 @@ describe('writeMessageToSession (Bugfix #584)', () => {
       expect(session.writeCalls).toEqual([msg, '\r']);
     });
 
-    it('multi-line message: final Enter waits for the overridden delay after the last line', () => {
+    it('long frame (bracketed): the override displaces PASTE_ENTER_DELAY_MS', () => {
       const session = makeSession();
       const msg = 'line1\nline2\nline3\nline4';
 
-      const endTime = writeMessageToSession(session, msg, false, 0, { enterDelayMs: 1000 });
-      // Last line lands at 3 * 10ms; Enter at lastLine + 1000.
+      // Short enough to bracket into a single piece, so the last piece lands at t=0 and the
+      // Enter is the only thing the override moves.
+      const endTime = writeMessageToSession(session, msg, false, 0, BRACKETED_PASTE, { enterDelayMs: 1000 });
+      expect(endTime).toBe(1000);
+
+      // PASTE_ENTER_DELAY_MS is 80 — precisely the delay Kimi eats. Nothing may submit here.
+      vi.advanceTimersByTime(PASTE_ENTER_DELAY_MS);
+      expect(session.writeCalls).toEqual([pasted(msg)]);
+
+      vi.advanceTimersByTime(1000 - PASTE_ENTER_DELAY_MS);
+      expect(session.writeCalls).toEqual([pasted(msg), '\r']);
+    });
+
+    it('long frame (plain-chunked): the override applies on the opted-out strategy too', () => {
+      const session = makeSession();
+      const msg = 'line1\nline2\nline3\nline4';
+
+      // Per-line pacing: four pieces 10 ms apart, so the last lands at 30 ms.
+      const endTime = writeMessageToSession(session, msg, false, 0, PLAIN_CHUNKED, { enterDelayMs: 1000 });
       expect(endTime).toBe(30 + 1000);
 
-      vi.advanceTimersByTime(30 + 80);
+      vi.advanceTimersByTime(30 + PASTE_ENTER_DELAY_MS);
       expect(session.writeCalls).not.toContain('\r');
 
-      vi.advanceTimersByTime(1000 - 80);
+      vi.advanceTimersByTime(1000 - PASTE_ENTER_DELAY_MS);
       expect(session.writeCalls).toContain('\r');
     });
 
-    it('no pacing argument → default delays unchanged (regression)', () => {
+    it('no pacing argument → default delays unchanged, on both branches (regression)', () => {
       const session = makeSession();
       expect(writeMessageToSession(session, 'hi', false)).toBe(50);
+      // Long frame, default bracketed strategy: one piece at t=0, Enter at PASTE_ENTER_DELAY_MS.
       const paced = makeSession();
-      expect(writeMessageToSession(paced, 'a\nb\nc\nd', false)).toBe(30 + 80);
+      expect(writeMessageToSession(paced, 'a\nb\nc\nd', false)).toBe(PASTE_ENTER_DELAY_MS);
+      // And on the opted-out strategy: last of four pieces at 30 ms, then the same delay.
+      const plain = makeSession();
+      expect(writeMessageToSession(plain, 'a\nb\nc\nd', false, 0, PLAIN_CHUNKED)).toBe(30 + PASTE_ENTER_DELAY_MS);
     });
 
     it('noEnter suppresses the Enter even with an override', () => {
       const session = makeSession();
-      writeMessageToSession(session, 'BEGIN', true, 0, { enterDelayMs: 1000 });
+      writeMessageToSession(session, 'BEGIN', true, 0, BRACKETED_PASTE, { enterDelayMs: 1000 });
       vi.advanceTimersByTime(5000);
       expect(session.writeCalls).toEqual(['BEGIN']);
     });
