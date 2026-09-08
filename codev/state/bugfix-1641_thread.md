@@ -208,3 +208,37 @@ It also found something that corrected **my** narrative, which is worth recordin
    `e339b399f`. Resolved.
 
 CI on head `e339b399f`: **all 7 checks pass**.
+
+## Architect disposition of the CMAP advisories (PR #1657 comment 5593577902)
+
+Four of Claude's advisory assertions are false. I verified each before correcting the
+record; the architect was right on all four. **No seeded-file change** — this supersedes
+the two items I had referred upward, both of which rested on false premises.
+
+1. **Disable-context — WITHDRAWN.** The reviewer claimed that with
+   `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` a concrete id keeps `[1m]` on the wire. False:
+   `UT(q) = q.replace(/\[(1|2)m\]/gi,"")` takes no argument but the id, consults neither
+   `ZG()` nor the env var, and its call site is an unguarded
+   `beta.messages.create({...P, model: UT(P.model)})`. The strip is unconditional, so the
+   marker never reaches the wire either way. The shipped doc line needs no fix.
+2. **Pricing — WITHDRAWN.** I had imported "premium >200K input pricing" into the PR body
+   from the review. Anthropic documents standard model pricing for the 1M window. Replaced
+   with the accurate note: longer reviews can consume more total tokens, and the
+   `maxBudgetUsd: 25` per-consultation cap is unchanged.
+3. **`consult stats` split — WITHDRAWN.** `MetricsDB.summary()` groups by `model` (the
+   lane) at `metrics.ts:371`, not `model_id`. Recorded concrete ids change as intended, but
+   lane totals do not split. Verified by reading the query.
+4. **Runtime packaging — CORRECTED.** My own phrasing ("a runtime-resolved binary this repo
+   does not pin") implied an arbitrary, unversioned system CLI. It is not: 0.2.141 pins
+   every `@anthropic-ai/claude-agent-sdk-<platform>` optional dependency to exactly
+   `0.2.141`, and SDK resolution locates that package's binary. The 0.2.105-JS /
+   0.2.141-native layout distinction is real; both are SDK-distributed and version-locked.
+
+The lesson repeats itself in a third variation. I was careful with the seeded patch and the
+SDK internals, then relayed a reviewer's advisory claims into the PR body without applying
+the same standard — the same shortcut that produced the gemini and the 0.2.141 errors. A
+reviewer's summary is evidence, not ground truth, exactly like an issue's prose or a
+plan's claims.
+
+Retaining the corrected PR summary rather than the reviewer's generated PR_SUMMARY, which
+repeats the original overclaims.
