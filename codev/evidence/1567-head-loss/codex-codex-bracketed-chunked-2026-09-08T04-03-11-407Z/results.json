@@ -1,0 +1,64 @@
+{
+  "harness": "codex",
+  "cmd": "codex",
+  "pasteNewline": "lf",
+  "claudeVersion": "codex-cli 0.146.0",
+  "CLAUDE_ARGS": [
+    "--dangerously-bypass-approvals-and-sandbox"
+  ],
+  "COLS": 120,
+  "ROWS": 40,
+  "MODE": "bracketed-chunked",
+  "CHUNK_BYTES": 512,
+  "CHUNK_GAP_MS": 5,
+  "ENTER_DELAY_MS": 80,
+  "TRIALS": 3,
+  "BODY_BYTES": 1000,
+  "LINES": 1,
+  "DELAY_MS": 300,
+  "LABEL": "codex",
+  "results": [
+    {
+      "n": 1,
+      "bodyBytes": 1016,
+      "frameBytes": 1172,
+      "frameLines": 3,
+      "writeStatus": "written",
+      "msSinceTurnEnd": 314,
+      "headRendered": true,
+      "tailRendered": true,
+      "placard": false,
+      "replyToken": null,
+      "verdict": "intact",
+      "excerpt": "[Pasted Content 1168 chars]\u001bM\u001bM\u001bM\u001bM\u001bM\u001bM\u001bM\u001bM\u001bM\u001bM\n› ### [ARCHITECT:main INSTRUCTION → builder-harness-1567 | 2026-09-08T04:03:17.871Z] ###\n  H1567-1-479580 Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge until\n  the regression test is green on main and the review doc is updated. Scope the storage key by user id, keep the\n  widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred\n  gap you listed. The coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on\n  your three items follow, and each one is load-bearing for the next step. Do not merge until the regression test is\n  green on main and the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note\n  the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The\n  coalescing behavior itself is correct and stays; only the re-pin backstop changes. This is an automated delivery\n  test, no action needed. Reply with exactly ZZ followed by the first token of this message. T1567-1-479580\n  ###############################  (reply: afx send architect \"…\")\nFind and fix a bug in @filename•Working(0s • esc to interrupt)›Find and fix a bug in @filenamegpt-5.6-sol high · /private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/bugfix-1567-harness-90240gWWo1•Wor•Work•WorkiWorkin•Working•WorkingWorking•Working•orking•rking•kinging•ng2gWWo3•Wor•WorkWorki•Workin•Working•Working\u001bM\u001bM\n• ZZ###›Find and fix a bug in @filenamegpt-5.6-sol high · /private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/bugfix-1567-harness-90240"
+    },
+    {
+      "n": 2,
+      "bodyBytes": 1016,
+      "frameBytes": 1172,
+      "frameLines": 3,
+      "writeStatus": "written",
+      "msSinceTurnEnd": 304,
+      "headRendered": true,
+      "tailRendered": true,
+      "placard": false,
+      "replyToken": null,
+      "verdict": "intact",
+      "excerpt": "[Pasted Content 1168 chars]\n› ### [ARCHITECT:main INSTRUCTION → builder-harness-1567 | 2026-09-08T04:03:24.720Z] ###\n  H1567-2-5cf1d5 Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge until\n  the regression test is green on main and the review doc is updated. Scope the storage key by user id, keep the\n  widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred\n  gap you listed. The coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on\n  your three items follow, and each one is load-bearing for the next step. Do not merge until the regression test is\n  green on main and the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note\n  the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The\n  coalescing behavior itself is correct and stays; only the re-pin backstop changes. This is an automated delivery\n  test, no action needed. Reply with exactly ZZ followed by the first token of this message. T1567-2-5cf1d5\n  ###############################  (reply: afx send architect \"…\")\nFind and fix a bug in @filename•Working(0s • esc to interrupt)›Find and fix a bug in @filenamegpt-5.6-sol high · /private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/bugfix-1567-harness-90240nggW1Wo•Wor•Work•WorkiWorkin•Working•WorkingWorking•Working•orking•rking•kinging•ng2gW3\u001bM\u001bM\n• ZZ###›Find and fix a bug in @filenamegpt-5.6-sol high · /private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/bugfix-1567-harness-90240"
+    },
+    {
+      "n": 3,
+      "bodyBytes": 1016,
+      "frameBytes": 1172,
+      "frameLines": 3,
+      "writeStatus": "written",
+      "msSinceTurnEnd": 315,
+      "headRendered": true,
+      "tailRendered": true,
+      "placard": false,
+      "replyToken": null,
+      "verdict": "intact",
+      "excerpt": "[Pasted Content 1168 chars]\n› ### [ARCHITECT:main INSTRUCTION → builder-harness-1567 | 2026-09-08T04:03:28.225Z] ###\n  H1567-3-ac7bdd Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge until\n  the regression test is green on main and the review doc is updated. Scope the storage key by user id, keep the\n  widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred\n  gap you listed. The coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on\n  your three items follow, and each one is load-bearing for the next step. Do not merge until the regression test is\n  green on main and the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note\n  the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The\n  coalescing behavior itself is correct and stays; only the re-pin backstop changes. This is an automated delivery\n  test, no action needed. Reply with exactly ZZ followed by the first token of this message. T1567-3-ac7bdd\n  ###############################  (reply: afx send architect \"…\")\nFind and fix a bug in @filename•Working(0s • esc to interrupt)›Find and fix a bug in @filenamegpt-5.6-sol high · /private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/bugfix-1567-harness-90240•WorkingWorking•orking•rking•king•ingngg1WWo•Wor•WorkWorki•Workin•Working•Working2•WorkingWorking•orking•rking•kinging•ngg\u001bM\u001bM\n• ZZ###›Find and fix a bug in @filenamegpt-5.6-sol high · /private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/bugfix-1567-harness-90240"
+    }
+  ]
+}

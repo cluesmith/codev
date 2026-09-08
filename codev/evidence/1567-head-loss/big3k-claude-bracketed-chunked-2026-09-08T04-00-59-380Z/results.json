@@ -1,0 +1,66 @@
+{
+  "harness": "claude",
+  "cmd": "claude",
+  "pasteNewline": "lf",
+  "claudeVersion": "2.1.263 (Claude Code)",
+  "CLAUDE_ARGS": [
+    "--dangerously-skip-permissions",
+    "--model",
+    "haiku"
+  ],
+  "COLS": 120,
+  "ROWS": 40,
+  "MODE": "bracketed-chunked",
+  "CHUNK_BYTES": 512,
+  "CHUNK_GAP_MS": 5,
+  "ENTER_DELAY_MS": 80,
+  "TRIALS": 3,
+  "BODY_BYTES": 3000,
+  "LINES": 1,
+  "DELAY_MS": 300,
+  "LABEL": "big3k",
+  "results": [
+    {
+      "n": 1,
+      "bodyBytes": 3009,
+      "frameBytes": 3165,
+      "frameLines": 3,
+      "writeStatus": "written",
+      "msSinceTurnEnd": 8197,
+      "headRendered": true,
+      "tailRendered": true,
+      "placard": true,
+      "replyToken": null,
+      "verdict": "intact",
+      "excerpt": "\u001b(B\u000f\u001b[<u\u001b[>5u\u001b[>4;2m[Pastedtext#1+2lines]paste again to expand\n❯ [ARCHITECT:main INSTRUCTION → builder-harness-1567 | 2026-09-08T04:01:18.457Z]                                                                                                                                                                  H1567-1-da9525 Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge until   the regression test is green on main and the review doc is updated. Scope the storage key by user id, keep the          widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred\n  gap you listed. The coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on\n  your three items follow, and each one is load-bearing for the next step. Do not merge until the regression test is\n  green on main and the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note\n  the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The\n  coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on your three items\n  follow, and each one is load-bearing for the next step. Do not merge until the regression test is green on main and\n  the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note the adjacent idiom.\n  Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The coalescing behavior itself\n  is correct and stays; only the re-pin backstop changes. Rulings on your three items follow, and each one is\n  load-bearing for the next step. Do not merge until the regression test is green on main and the review doc is\n  updated. Scope the storage key by user id, keep the widening minimal, and note the adjacent idiom. Switch the PR body\n  to Refs and leave the issue open for the deferred gap you listed. The coalescing behavior itself is correct and\n  stays; only the re-pin backstop changes. Rulings on your three items follow, and each one is load-bearing for the\n  next step. Do not merge until the regression test is green on main and the review doc is updated. Scope the storage\n  key by user id, keep the widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the\n  issue open for the deferred gap you listed. The coalescing behavior itself is correct and stays; only the re-pin\n  backstop changes. Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge\n  until the regression test is green on main and the review doc is updated. Scope the storage key by user id, keep the\n  widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred\n  gap you listed. The coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on\n  your three items f"
+    },
+    {
+      "n": 2,
+      "bodyBytes": 3009,
+      "frameBytes": 3165,
+      "frameLines": 3,
+      "writeStatus": "written",
+      "msSinceTurnEnd": 8897,
+      "headRendered": true,
+      "tailRendered": true,
+      "placard": true,
+      "replyToken": null,
+      "verdict": "intact",
+      "excerpt": "\u001b(B\u000f\u001b[<u\u001b[>5u\u001b[>4;2m[Pastedtext#2+2lines]paste again to expand\n❯ [ARCHITECT:main INSTRUCTION → builder-harness-1567 | 2026-09-08T04:01:36.592Z]                                                                                                                                                                  H1567-2-5fd9cf Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge until   the regression test is green on main and the review doc is updated. Scope the storage key by user id, keep the          widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred\n  gap you listed. The coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on\n  your three items follow, and each one is load-bearing for the next step. Do not merge until the regression test is\n  green on main and the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note\n  the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The\n  coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on your three items\n  follow, and each one is load-bearing for the next step. Do not merge until the regression test is green on main and\n  the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note the adjacent idiom.\n  Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The coalescing behavior itself\n  is correct and stays; only the re-pin backstop changes. Rulings on your three items follow, and each one is\n  load-bearing for the next step. Do not merge until the regression test is green on main and the review doc is\n  updated. Scope the storage key by user id, keep the widening minimal, and note the adjacent idiom. Switch the PR body\n  to Refs and leave the issue open for the deferred gap you listed. The coalescing behavior itself is correct and\n  stays; only the re-pin backstop changes. Rulings on your three items follow, and each one is load-bearing for the\n  next step. Do not merge until the regression test is green on main and the review doc is updated. Scope the storage\n  key by user id, keep the widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the\n  issue open for the deferred gap you listed. The coalescing behavior itself is correct and stays; only the re-pin\n  backstop changes. Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge\n  until the regression test is green on main and the review doc is updated. Scope the storage key by user id, keep the\n  widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred\n  gap you listed. The coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on\n  your three items f"
+    },
+    {
+      "n": 3,
+      "bodyBytes": 3009,
+      "frameBytes": 3165,
+      "frameLines": 3,
+      "writeStatus": "written",
+      "msSinceTurnEnd": 10100,
+      "headRendered": true,
+      "tailRendered": true,
+      "placard": true,
+      "replyToken": null,
+      "verdict": "intact",
+      "excerpt": "\u001b(B\u000f\u001b[<u\u001b[>5u\u001b[>4;2m[Pastedtext#3+2lines]paste again to expand\n❯ [ARCHITECT:main INSTRUCTION → builder-harness-1567 | 2026-09-08T04:01:54.729Z]                                                                                                                                                                  H1567-3-5876e5 Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge until   the regression test is green on main and the review doc is updated. Scope the storage key by user id, keep the          widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred\n  gap you listed. The coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on\n  your three items follow, and each one is load-bearing for the next step. Do not merge until the regression test is\n  green on main and the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note\n  the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The\n  coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on your three items\n  follow, and each one is load-bearing for the next step. Do not merge until the regression test is green on main and\n  the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note the adjacent idiom.\n  Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The coalescing behavior itself\n  is correct and stays; only the re-pin backstop changes. Rulings on your three items follow, and each one is\n  load-bearing for the next step. Do not merge until the regression test is green on main and the review doc is\n  updated. Scope the storage key by user id, keep the widening minimal, and note the adjacent idiom. Switch the PR body\n  to Refs and leave the issue open for the deferred gap you listed. The coalescing behavior itself is correct and\n  stays; only the re-pin backstop changes. Rulings on your three items follow, and each one is load-bearing for the\n  next step. Do not merge until the regression test is green on main and the review doc is updated. Scope the storage\n  key by user id, keep the widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the\n  issue open for the deferred gap you listed. The coalescing behavior itself is correct and stays; only the re-pin\n  backstop changes. Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge\n  until the regression test is green on main and the review doc is updated. Scope the storage key by user id, keep the\n  widening minimal, and note the adjacent idiom. Switch the PR body to Refs and leave the issue open for the deferred\n  gap you listed. The coalescing behavior itself is correct and stays; only the re-pin backstop changes. Rulings on\n  your three items f"
+    }
+  ]
+}

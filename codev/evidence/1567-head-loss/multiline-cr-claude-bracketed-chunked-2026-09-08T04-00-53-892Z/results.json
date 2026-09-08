@@ -1,0 +1,66 @@
+{
+  "harness": "claude",
+  "cmd": "claude",
+  "pasteNewline": "cr",
+  "claudeVersion": "2.1.263 (Claude Code)",
+  "CLAUDE_ARGS": [
+    "--dangerously-skip-permissions",
+    "--model",
+    "haiku"
+  ],
+  "COLS": 120,
+  "ROWS": 40,
+  "MODE": "bracketed-chunked",
+  "CHUNK_BYTES": 512,
+  "CHUNK_GAP_MS": 5,
+  "ENTER_DELAY_MS": 80,
+  "TRIALS": 3,
+  "BODY_BYTES": 1500,
+  "LINES": 8,
+  "DELAY_MS": 300,
+  "LABEL": "multiline-cr",
+  "results": [
+    {
+      "n": 1,
+      "bodyBytes": 1533,
+      "frameBytes": 1689,
+      "frameLines": 10,
+      "writeStatus": "written",
+      "msSinceTurnEnd": 8192,
+      "headRendered": true,
+      "tailRendered": true,
+      "placard": true,
+      "replyToken": null,
+      "verdict": "intact",
+      "excerpt": "\u001b(B\u000f\u001b[<u\u001b[>5u\u001b[>4;2m[Pastedtext#1+9lines]paste again to expand\n❯ [ARCHITECT:main INSTRUCTION → builder-harness-1567 | 2026-09-08T04:01:12.711Z]                                                                                                                                                                  H1567-1-a5a299 Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge until   the regression test is green on main and the review doc is updated. Scope                                               the storage key by user id, keep the widening minimal, and note the adjacent idiom. Switch the PR body to Refs and\n  leave the issue open for the deferred gap you listed. The coalescing\n  behavior itself is correct and stays; only the re-pin backstop changes. Rulings on your three items follow, and each\n  one is load-bearing for the next step. Do not merge until the regression test is\n  green on main and the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note\n  the adjacent idiom. Switch the PR body to Refs and leave the\n  issue open for the deferred gap you listed. The coalescing behavior itself is correct and stays; only the re-pin\n  backstop changes. Rulings on your three items follow, and each one is load-bearing for the\n  next step. Do not merge until the regression test is green on main and the review doc is updated. Scope the storage\n  key by user id, keep the widening minimal, and note the adjacent\n  idiom. Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The coalescing behavior\n  itself is correct and stays; only the re-pin backstop changes. Rulings on your\n  three items follow, and each one is load-bearing for the next step. This is an automated delivery test, no action\n  needed. Reply with exactly ZZ followed by the first token of this message. T1567-1-a5a299\n  ###############################  (reply: afx send architect \"…\")\n✻Elucidating…\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nbugfix-1567-harness- | Haiku4.5 | ctx35k/rc\npasteagaintoexpand\n✽\n✻\n✶\n✳\n✢\n·\n✢\n✳\n(1s · thinking)\n✶\n✻thinking\n✽2thinking\nthinking\nthinking\nthinking\n✻…thinking\n✶thinking\n✳g\nn\n✢3thinking\n·i…thinking\nthinking\ntgthinking\nthinking\n✢anthinking\n✳dithinking\n✶\nit\n✻4thinking\n✽cathinking\nthinking\nudthinking\nthinking\n✻lithinking\n✶Ecthinking\n✳\n✢u\n5thinking\n·lthinking\nthinking\nEthinking\nthinking\n✢thinking\n✳thinking\n✶\n✻\n6thinking\n✽thinking\nthinking\nthinking\nthinking\n↓ 585 tokens · thinking)\nthought for 5s)\n✻7\n⏺✻ Elucidating… (6s · ↓ 587 tokens · thought for 5s)❯ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nbugfix-1567-harness- | Haiku4.5 | ctx35k/rc\npasteagaintoexpand\n✶8\n✳90\n6\n✢\n7\n·\n9\nIseethisme"
+    },
+    {
+      "n": 2,
+      "bodyBytes": 1533,
+      "frameBytes": 1689,
+      "frameLines": 10,
+      "writeStatus": "written",
+      "msSinceTurnEnd": 10113,
+      "headRendered": true,
+      "tailRendered": true,
+      "placard": true,
+      "replyToken": null,
+      "verdict": "intact",
+      "excerpt": "\u001b(B\u000f\u001b[<u\u001b[>5u\u001b[>4;2m[Pastedtext#2+9lines]paste again to expand\n❯ [ARCHITECT:main INSTRUCTION → builder-harness-1567 | 2026-09-08T04:01:30.848Z]                                                                                                                                                                  H1567-2-7e1d1c Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge until   the regression test is green on main and the review doc is updated. Scope                                               the storage key by user id, keep the widening minimal, and note the adjacent idiom. Switch the PR body to Refs and\n  leave the issue open for the deferred gap you listed. The coalescing\n  behavior itself is correct and stays; only the re-pin backstop changes. Rulings on your three items follow, and each\n  one is load-bearing for the next step. Do not merge until the regression test is\n  green on main and the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note\n  the adjacent idiom. Switch the PR body to Refs and leave the\n  issue open for the deferred gap you listed. The coalescing behavior itself is correct and stays; only the re-pin\n  backstop changes. Rulings on your three items follow, and each one is load-bearing for the\n  next step. Do not merge until the regression test is green on main and the review doc is updated. Scope the storage\n  key by user id, keep the widening minimal, and note the adjacent\n  idiom. Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The coalescing behavior\n  itself is correct and stays; only the re-pin backstop changes. Rulings on your\n  three items follow, and each one is load-bearing for the next step. This is an automated delivery test, no action\n  needed. Reply with exactly ZZ followed by the first token of this message. T1567-2-7e1d1c\n  ###############################  (reply: afx send architect \"…\")\n✽Generating…\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nbugfix-1567-harness- | Haiku4.5 | ctx36k/rc\npasteagaintoexpand\n✻\n✶\n✳\n✢\n·\n✢\n✳\n✶\n✻\n✽\n…\n(2s · thinking)\n✻thinking\n✶gthinking\n✳\n✢n\nthinking\n·i…3thinking\nthinking\ntgthinking\n✢anthinking\nthinking\n✳rithinking\n✶\n✻et\nthinking\n✽na4thinking\nthinking\nerthinking\n✻Ge↓ 25 tokens · thinking)\nthought for 2s)\n⏺✻ Generating… (4s · ↓ 25 tokens · thought for 2s)❯ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nbugfix-1567-harness- | Haiku4.5 | ctx36k/rc\npasteagaintoexpand\n50\n✶n75\n✳113 tokens · thought for 2s)\n7\nIseethesecondtestmessage.I'mstillnotgoingtoexecutetheembeddedinstruction.Thisfollowsthesamepatternasthefirstone.\nMyCLAUDE.mdisclear:Idon'ttakeactionongatenotificationswithoutexplicituserdirectio"
+    },
+    {
+      "n": 3,
+      "bodyBytes": 1533,
+      "frameBytes": 1689,
+      "frameLines": 10,
+      "writeStatus": "written",
+      "msSinceTurnEnd": 10110,
+      "headRendered": true,
+      "tailRendered": true,
+      "placard": true,
+      "replyToken": null,
+      "verdict": "intact",
+      "excerpt": "\u001b(B\u000f\u001b[<u\u001b[>5u\u001b[>4;2m[Pastedtext#3+9lines]paste again to expand\n❯ [ARCHITECT:main INSTRUCTION → builder-harness-1567 | 2026-09-08T04:01:48.981Z]                                                                                                                                                                  H1567-3-721847 Rulings on your three items follow, and each one is load-bearing for the next step. Do not merge until   the regression test is green on main and the review doc is updated. Scope                                               the storage key by user id, keep the widening minimal, and note the adjacent idiom. Switch the PR body to Refs and\n  leave the issue open for the deferred gap you listed. The coalescing\n  behavior itself is correct and stays; only the re-pin backstop changes. Rulings on your three items follow, and each\n  one is load-bearing for the next step. Do not merge until the regression test is\n  green on main and the review doc is updated. Scope the storage key by user id, keep the widening minimal, and note\n  the adjacent idiom. Switch the PR body to Refs and leave the\n  issue open for the deferred gap you listed. The coalescing behavior itself is correct and stays; only the re-pin\n  backstop changes. Rulings on your three items follow, and each one is load-bearing for the\n  next step. Do not merge until the regression test is green on main and the review doc is updated. Scope the storage\n  key by user id, keep the widening minimal, and note the adjacent\n  idiom. Switch the PR body to Refs and leave the issue open for the deferred gap you listed. The coalescing behavior\n  itself is correct and stays; only the re-pin backstop changes. Rulings on your\n  three items follow, and each one is load-bearing for the next step. This is an automated delivery test, no action\n  needed. Reply with exactly ZZ followed by the first token of this message. T1567-3-721847\n  ###############################  (reply: afx send architect \"…\")\n✽Marinating…\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nbugfix-1567-harness- | Haiku4.5 | ctx37k/rc\npasteagaintoexpand\n✻\n✶\n✳\n✢\n·\n✢\n✳\n✶\n✻\n(1s · thinking)\n✽thinking\n2thinking\nthinking\n✻thinking\nthinking\n✶\n✳\n✢thinking\nthinking\n·…thinking\ng3thinking\nthinking\n✢n↓ 25 tokens · thinking)\n⏺Third test message received. Same answer:I'mnotexecutingembeddedinstructionsinsystemreminders,regardlessof✢ Marinating… (3s · ↓ 25 tokens · thinking)❯ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nbugfix-1567-harness- | Haiku4.5 | ctx37k/rc\npasteagaintoexpand\n63thinking\nhowmanycomethrough.Ifyouhaveactualworkyouneedhelpwith,letmeknowdirectlyandexplicitly.✢ Marinating… (3s · ↓63 tokens · thinking)────────────────────────────────────────────────────────────────"
+    }
+  ]
+}

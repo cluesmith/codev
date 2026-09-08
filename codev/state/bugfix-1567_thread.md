@@ -1,0 +1,95 @@
+# bugfix-1567 thread — afx send delivery-side head-loss on long bodies
+
+## 2026-09-08 — investigate
+
+Architect fixed the design in the issue (03:30Z comment): repro harness first (must FAIL on
+current code), then bracketed-paste write for long bodies, echo-verify learns the placard,
+cheap gate hardening for the just-freed window, keep #1584/#1585 no-rewrite semantics.
+Extra constraints (03:31Z afx message): no Tower against production `~/.agent-farm`, tell the
+architect before starting any test Tower, messages < 300 chars or a `/tmp/bugfix-1567-msg-NNN.md`
+pointer.
+
+### What the write edge does today (read, not assumed)
+
+- `message-write.ts`: frames with < 4 lines go out as ONE `session.write(frame)` then `\r`
+  after 50 ms. Frames with ≥ 4 lines go out line-by-line at 10 ms gaps, then `\r` after 80 ms
+  (Bugfix #584, tuned against an older claude paste heuristic).
+- The builder frame (`formatArchitectToBuilderMessage`) is deliberately 3 lines (header, body,
+  footer+reply hint) so a single-paragraph body stays on the single-write path. **Every
+  specimen in the issue is a single-paragraph body**, so the truncated sends were single
+  ~1.1 KB writes, not the per-line paced path the forensic comment named. The harness tests
+  the production edge with the production frame either way.
+- Transport has no chunking: Tower → shellper socket frame → `pty.write(payload)` in the
+  shellper (`shellper-process.ts:443`) → node-pty master fd. `write()` returning true means
+  "socket connected", nothing more.
+- #1573 already added settle-before-write (250 ms of output silence), the 48 KB loud limit,
+  and header-only echo verification; #1584 made the row commit BEFORE verification, so a
+  header-not-seen result is reported (`verified: false`) and never re-written.
+
+### Harness plan (no Tower)
+
+Real `claude` TUI under node-pty in a scratch dir, production `submitMessagePaced` +
+`formatArchitectToBuilderMessage` imported from `dist/`, production `SessionScreen` +
+`classifyBuffer(CLAUDE_PROFILE)` to detect the clean composer, production settle (250 ms)
+before the write. Each trial's injected message asks claude for a one-word reply, so the
+reply's turn-end is the trigger for the next trial. Head-intact vs head-lost is judged from
+the raw PTY byte log by looking for a unique HEAD token placed at the start of the body.
+Evidence lands in `codev/evidence/1567-head-loss/`.
+
+Worktree had no `node_modules`; ran `pnpm install --offline` + build before anything else.
+
+### Smoke run (2 trials, production edge, idle composer) — REPRODUCED
+
+Trial 2 of 2 lost its head: the composer showed only the last ~180 bytes of a 1202-byte frame,
+claude's "paste again to expand" hint appeared, and the HEAD token never rendered anywhere in
+the PTY log. The composer had been idle ~8 s, so the just-freed window is NOT required.
+
+Lost prefix ≈ 1202 − 180 ≈ 1022 bytes. The same arithmetic on the three field specimens
+(frame = header + body + footer; tail = what the recipient reported) gives ~1016–1022 bytes
+lost each time. 1022 = TTYHOG − 2, the macOS PTY input-queue high-water mark at which the
+master-side write blocks. So the loss unit is the kernel input queue: the first ~1022 bytes
+queue up while the writer is blocked, something on the reader side discards the queue, and
+the remainder is then read normally. Whether the discard is the TUI's paste handling or a
+tcflush is not observable from outside, and the fix does not depend on it: never leave more
+than the queue's worth of bytes pending, and make the paste explicit (bracketed) so the TUI's
+heuristic never engages.
+
+Harness gained `--mode production|chunked|bracketed|bracketed-chunked` so candidate
+strategies are measured against the real TUI before the write edge changes.
+
+### Baseline (20 trials, production edge, ~1000 B single-paragraph bodies) — 14/20 head-lost
+
+`codev/evidence/1567-head-loss/baseline-production-2026-09-08T03-48-25-247Z/`. Every injection
+landed ≥ 8 s after the previous turn's last output byte on a gate-clean composer, so the
+"just-freed" window is not the trigger. Frame 1172–1174 B, 3 lines → the single-write path.
+Reply oracle was noisy in this run (matched the body's own "ZZ followed by"); fixed for later
+runs. Candidate strategies (chunked / bracketed / bracketed-chunked) now running 10 trials each.
+
+### Strategy matrix (all against the real TUI; full table in codev/evidence/1567-head-loss/README.md)
+
+| strategy | frame | lost |
+|---|---|---|
+| production edge today | 1172 B / 3 L | 14/20 |
+| production edge today | 1000 B / 3 L (under the 1022 B queue limit) | 0/10 |
+| plain chunked ≤512 B, 5 ms gaps | 1172 B | 0/10 |
+| ONE bracketed-paste write | 1172 B | 0/10 |
+| bracketed + chunked | 1172 B | 0/10 |
+| bracketed + chunked, 10 lines, `\r` newlines | 1689 B | 0/3 |
+| bracketed + chunked | 3165 B | 0/3 |
+| bracketed + chunked → codex 0.146.0 | 1172 B | 0/3 |
+
+Root cause, stated: the single-write path hands the kernel >1022 bytes at once; the PTY input
+queue splits the read at its high-water mark; the recipient TUI's paste heuristic classifies the
+first chunk as a paste and discards it; the remainder + Enter type normally. Not the >3-line
+per-line pacing (every specimen was a 3-line frame), not the just-freed window (idle composers
+lose 70%), not the transport (no chunking anywhere; `write()` truth = socket connected).
+
+Fix design (implement phase): frames ≥ 4 lines OR > 256 B go out as one explicit bracketed
+paste (`ESC[200~ … ESC[201~`, `\n`→`\r` inside per the VS Code precedent in
+`apps/vscode/src/review-queue/queue.ts`), written in ≤512 B chunks 5 ms apart, then a measured
+settle, then `\r` as its own write. Short frames keep today's byte-identical single write, so
+`--raw` slash commands and short sends are untouched. Per-harness seam keyed on the gate
+profile's `app` so a harness can opt out of bracketing. Echo verify accepts a new header OR a
+new `[Pasted text #N …]` / `[Pasted Content N chars]` placard. Architect item 4 (turn-end gate
+hardening) has no supporting datum — every loss was ≥8 s after turn end — so it is reported
+rather than implemented with an invented N.
