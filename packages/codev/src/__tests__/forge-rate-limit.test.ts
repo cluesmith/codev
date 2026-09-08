@@ -170,7 +170,7 @@ describe('forge rate-limit awareness (#1645)', () => {
       expect(isForgeSuspended(DEFAULT_PROVIDER, dispatchedAt + 20)).toBe(true);
     });
 
-    it('clears outright on an explicit refresh', () => {
+    it('clears outright when asked (no product caller — see the docstring)', () => {
       noteRateLimited(DEFAULT_PROVIDER, Date.now() + 60_000);
       expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(true);
       clearForgeSuspension();
@@ -221,6 +221,23 @@ describe('every overview concept resolves to the same backend (#1645)', () => {
       .toBe('gh');
     expect(resolveConceptBackend('issue-list', { 'issue-list': 'gh issue list' }))
       .toBe('gh');
+  });
+
+  it('keys a generic transport by provider, not by the transport', () => {
+    // Linear's concepts run `curl`, which names a protocol rather than an
+    // account — and would collide with any future curl-based provider. Its
+    // healthy resolve and its fallback must both key `linear`.
+    expect(resolveConceptBackend('issue-list', { provider: 'linear' })).toBe('linear');
+    expect(resolveConceptBackend('issue-list', { provider: 'linear', 'issue-list': '/nope/missing.sh' }))
+      .toBe('linear');
+  });
+
+  it('does not key an extensionless script override by its own filename', () => {
+    // `/opt/forge/issue-list` is a script we cannot introspect, not a tool
+    // called `issue-list`. Keying on its filename would give every concept a
+    // backend of its own and fragment one account across all of them.
+    expect(resolveConceptBackend('issue-list', { 'issue-list': '/opt/forge/issue-list' }))
+      .toBe(resolveConceptBackend('issue-list', null));
   });
 
   it('keys the unreadable-script fallback in the same namespace as a healthy resolve', () => {

@@ -31,6 +31,7 @@ import {
   noteRateLimited,
   resetForgeRateLimit,
   isForgeSuspended,
+  getForgeRateLimit,
 } from '../../lib/forge-rate-limit.js';
 import { resolveConceptBackend } from '../../lib/forge.js';
 
@@ -2000,6 +2001,69 @@ describe('overview', () => {
       await all;
 
       expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not let the REST identity call reset the escalating backoff (#1645)', async () => {
+      // `user-identity` is `gh api user` — REST, a budget separate from the
+      // GraphQL one the lists spend, but resolving to the same `gh` backend
+      // key. Its success must not clear the suspension, or every window that
+      // expires after its 1h TTL also expires would reset the doubling backoff
+      // to its first step and it would never escalate.
+      mockFetchPRList.mockResolvedValue(null);
+      mockFetchIssueList.mockResolvedValue(null);
+      mockFetchRecentlyClosed.mockResolvedValue(null);
+      mockFetchMergedPRs.mockResolvedValue(null);
+      mockFetchCurrentUser.mockResolvedValue('octocat');
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);           // identity fetched, nothing suspended yet
+      noteRateLimited(OVERVIEW_BACKEND, null);   // first hit -> 60s window
+
+      vi.useFakeTimers();
+      // Past both the suspension window and the identity call's 1h TTL, so the
+      // identity call actually re-runs and succeeds.
+      vi.advanceTimersByTime(61 * 60_000);
+      await cache.getOverview(tmpDir);
+      expect(mockFetchCurrentUser).toHaveBeenCalledTimes(2); // it really did re-run
+
+      noteRateLimited(OVERVIEW_BACKEND, null);   // second hit
+      const windowMs = new Date(getForgeRateLimit(OVERVIEW_BACKEND).resetAt!).getTime() - Date.now();
+      vi.useRealTimers();
+
+      // Escalated to the second step. Without the guard the identity success
+      // would have reset the counter and this would still be the first.
+      expect(windowMs).toBeGreaterThan(60_000);
+    });
+
+    it('keeps coalescing after an invalidate (#1645)', async () => {
+      // invalidate() clears the join table, so a newer flight is registered
+      // while an older one is still settling. The older one's cleanup must not
+      // delete the newer entry — a caller arriving after that would start yet
+      // another fetch, the fan-out single-flight exists to prevent.
+      let releaseA: (v: unknown) => void = () => {};
+      let releaseB: (v: unknown) => void = () => {};
+      const gateA = new Promise(r => { releaseA = r; });
+      const gateB = new Promise(r => { releaseB = r; });
+      mockFetchPRList
+        .mockImplementationOnce(async () => { await gateA; return []; })
+        .mockImplementation(async () => { await gateB; return []; });
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      const first = cache.getOverview(tmpDir);   // flight A
+      cache.invalidate();                        // clears the join table
+      const second = cache.getOverview(tmpDir);  // flight B registers
+
+      // Let A settle and its cleanup run, while B is still in flight.
+      releaseA(null);
+      await first;
+      await new Promise(r => setTimeout(r, 0));
+
+      const third = cache.getOverview(tmpDir);   // must JOIN B, not start C
+      releaseB(null);
+      await Promise.all([second, third]);
+
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
     it('does not hand a post-refresh caller a result fetched before it (#1645)', async () => {

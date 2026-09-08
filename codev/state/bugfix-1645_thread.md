@@ -337,3 +337,45 @@ fixed with `# forge-executable:` declarations plus a test asserting no built-in 
 resolves to a shell builtin. Flagged to the architect as scope-adjacent.
 
 Full suite 5,785 green.
+
+## 2026-09-07 — CMAP round 5: gemini APPROVE, codex + claude REQUEST_CHANGES
+
+Five more real bugs, two of them introduced by round 4's own fixes.
+
+- **A stale flight could unregister the live one.** My `inflight.clear()` in `invalidate()`
+  created it: an older flight's `.finally` deleted the *newer* join-table entry, so the
+  next caller started a duplicate batch — the exact fan-out single-flight exists to
+  prevent. Both lanes found it independently; claude measured 3 `pr-list` spawns where 2
+  are correct. Fixed by deleting only when the registered promise is still this one.
+- **The REST identity call was resetting the escalating backoff.** `user-identity` is
+  `gh api user` — separate budget, same `gh` backend key. Once its own 1h TTL expired
+  alongside a suspension window, its success cleared the state and reset
+  `consecutiveHits`, so the 60 s→15 min escalation would frequently never escalate. Fixed
+  with a `countsAsRecovery` flag; only the four list concepts count as evidence.
+- **Linear keyed `curl` healthy vs `linear` on fallback** — the fragmentation the alias map
+  was meant to remove. Generic transports (`curl`, `wget`, `sh`, …) now key by provider,
+  which also removes a latent collision with any future curl-based provider.
+- **An extensionless script override** (`/opt/forge/issue-list`) keyed by its own filename,
+  re-fragmenting one account across concepts.
+- **`api.ts` still told SDK consumers** that `POST /api/overview/refresh` clears the
+  suspension — false since the previous commit.
+
+### Both tests I added in round 4 were vacuous
+
+They passed with the fix **and** with the fix reverted. The escalation test never re-ran
+the identity call (1h TTL kept it cached), and the coalescing test had every caller join
+before the stale cleanup fired. Rewritten to genuinely exercise the guards, and verified
+failing without them: `expected 60000 to be greater than 60000`, and
+`called 2 times, but got 3`.
+
+Second time in this PR that green tests meant nothing. The habit that caught it — revert
+the fix, confirm the new test goes red, restore — is the only reason either was found.
+Worth doing for **every** regression test, not just the ones that look risky.
+
+### Deliberately not done
+
+Removing the suspension-clear from `invalidate()` leaves the round-1 gap — no way to end a
+wait early — unaddressed. The dashboard's own refresh button is distinguishable from
+porch/VSCode/cleanup and could carry an explicit opt-in, but that is an API parameter, an
+SDK argument and a web change on a PR already five rounds deep, and the wait is bounded at
+15 min (or the forge's true reset). Raised with the architect; documented in `api.ts`.

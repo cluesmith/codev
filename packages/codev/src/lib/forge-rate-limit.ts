@@ -87,6 +87,18 @@ interface ProviderState {
 /**
  * Suspension state **keyed by resolved backend**, not process-global.
  *
+ * Known limitation: the key is the *tool*, not the account. Two workspaces
+ * pointed at different GitHub hosts or accounts both resolve to `gh`, so one's
+ * limit suspends the other. That errs toward over-suspension — conservative,
+ * never a runaway — and the alternative needs per-host credential
+ * introspection, which is out of scope here. Conversely a concept wrapped in a
+ * differently-named script keys separately from a bare `gh`, costing one extra
+ * batch before it suspends itself.
+ */
+
+/**
+ * Per-backend state.
+ *
  * A rate limit is charged to one forge's account. Suspending every backend on
  * a GitHub limit would blank a GitLab or Gitea workspace's Work view for the
  * whole backoff window over an outage that has nothing to do with it.
@@ -198,9 +210,17 @@ export function noteForgeSuccess(
 }
 
 /**
- * Drop a suspension outright. For an explicit human action — a dashboard
- * Refresh — which should not have to wait out a backoff window after the forge
- * has recovered. Omit `provider` to clear every provider.
+ * Drop a suspension outright, skipping the remaining backoff.
+ *
+ * **Nothing in the product calls this**, deliberately. It was wired to
+ * `OverviewCache.invalidate()` on the theory that `POST /api/overview/refresh`
+ * means a human asked; it does not — porch, VSCode and cleanup all fire that
+ * route automatically, so clearing here reset the escalating backoff
+ * continuously in a busy workspace. A suspension is time-bounded anyway
+ * (≤ 15 minutes, or the probe's true reset instant).
+ *
+ * Kept for tests and for a future genuinely-human signal, if one ever exists.
+ * Omit `backend` to clear every backend.
  */
 export function clearForgeSuspension(backend?: string): void {
   if (backend === undefined) {

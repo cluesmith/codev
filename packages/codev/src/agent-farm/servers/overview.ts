@@ -1215,6 +1215,16 @@ export class OverviewCache {
     cwd: string,
     ttl: number,
     fetcher: () => Promise<T | null>,
+    /**
+     * Whether this concept succeeding is evidence the backend has recovered.
+     *
+     * False for `user-identity`: it is `gh api user`, REST, charged to a budget
+     * separate from the GraphQL one the lists spend, but resolving to the same
+     * `gh` backend key. Letting it clear the suspension would reset the
+     * escalating backoff every time a window expired — the doubling would never
+     * get past its first step, however hard the forge was refusing us.
+     */
+    countsAsRecovery = true,
   ): Promise<T | null> {
     const dispatchedAt = Date.now();
     const cached = cache.get(cwd);
@@ -1253,7 +1263,7 @@ export class OverviewCache {
         // `dispatchedAt`, not `fetchedAt`: a command dispatched before the
         // current suspension began proves nothing about the forge having
         // recovered — see noteForgeSuccess.
-        noteForgeSuccess(backend, dispatchedAt);
+        if (countsAsRecovery) noteForgeSuccess(backend, dispatchedAt);
       } else {
         cache.set(cwd, { data: null, fetchedAt, failures: (cached?.failures ?? 0) + 1 });
         // If that failure was a rate limit, learn when it lifts — once per
@@ -1261,8 +1271,14 @@ export class OverviewCache {
         void maybeProbeReset(backend, cwd);
       }
       return data;
-    })().finally(() => {
-      this.inflight.delete(key);
+    })();
+    // Delete only if *this* flight is still the registered one. `invalidate()`
+    // clears the join table, so a newer flight can already be registered under
+    // this key by the time an older one settles — and deleting that entry would
+    // let the next caller start yet another fetch, the fan-out single-flight
+    // exists to prevent.
+    void flight.finally(() => {
+      if (this.inflight.get(key) === flight) this.inflight.delete(key);
     });
 
     this.inflight.set(key, flight);
@@ -1322,7 +1338,10 @@ export class OverviewCache {
    * Long TTL — identity is stable for the lifetime of a Tower session.
    */
   private fetchCurrentUserCached(cwd: string): Promise<string | null> {
-    return this.fetchCached('user-identity', this.currentUserCache, cwd, this.USER_TTL, () => fetchCurrentUser(cwd));
+    return this.fetchCached(
+      'user-identity', this.currentUserCache, cwd, this.USER_TTL, () => fetchCurrentUser(cwd),
+      false, // REST — its success says nothing about the GraphQL budget
+    );
   }
 
   private fetchRecentlyClosedCached(cwd: string): Promise<ForgeIssueListItem[] | null> {

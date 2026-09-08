@@ -362,9 +362,14 @@ export interface OverviewData {
   /**
    * Issue 1645: ISO instant the rate-limit suspension lifts. Present only while
    * `forgeStatus === 'rate-limited'`, so the UI can say "retrying at 14:05"
-   * instead of leaving the user staring at an empty backlog. A human can end
-   * the wait early with `POST /api/overview/refresh`, which clears the
-   * suspension along with the cache.
+   * instead of leaving the user staring at an empty backlog.
+   *
+   * There is deliberately **no way to end the wait early**. The obvious
+   * candidate, `POST /api/overview/refresh`, is not a human signal: porch fires
+   * it after every mutating command, VSCode on every review-queue mutation, and
+   * cleanup too, so honouring it would reset the escalating backoff
+   * continuously in a busy workspace. The wait is bounded at 15 minutes, and is
+   * the forge's own reset instant whenever that could be read.
    */
   forgeResetAt?: string;
   /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */

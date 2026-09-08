@@ -61,6 +61,17 @@ const PROVIDER_EXECUTABLES: Record<string, string> = {
   gitea: 'tea',
 };
 
+/**
+ * Tools that identify a transport rather than a forge account.
+ *
+ * Linear's concepts run `curl` against its GraphQL API, so `curl` says nothing
+ * about *whose* budget was spent — and any future curl-based provider would
+ * collide with it. For these, the configured provider is the better key, which
+ * also keeps Linear's healthy resolve (`curl`) and its fallback (`linear`) from
+ * becoming two suspension states for one account.
+ */
+const GENERIC_TRANSPORTS = new Set(['curl', 'wget', 'http', 'https', 'sh', 'bash', 'jq', 'python', 'python3', 'node']);
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -363,22 +374,33 @@ export function resolveConceptBackend(
   const cached = _backendCache.get(key);
   if (cached !== undefined) return cached;
 
-  // Two different path shapes come back from `extractExecutable`, and they mean
-  // opposite things:
+  // Three shapes come back from `extractExecutable`, and they mean different
+  // things:
   //
-  // - `/usr/local/bin/gh` — a real executable given by absolute path. Its
-  //   basename is the backend: an override spelling `gh` in full must key the
-  //   same as one spelling it bare, or the two fragment the suspension.
-  // - `/…/scripts/forge/github/pr-list.sh` — the command returned verbatim
-  //   because the concept script could not be read. That names no tool at all,
-  //   and keying on it would give every concept a backend of its own, so fall
-  //   back to the configured provider: less precise, but it keeps concepts that
-  //   share an account sharing a key.
+  // - `gh`, or `/usr/local/bin/gh` from `"/usr/local/bin/gh issue list"` — a
+  //   real executable. Its basename is the backend: an override spelling the
+  //   tool in full must key the same as one spelling it bare.
+  // - the command echoed back, because it is a bare path to a script that could
+  //   not be read (`…/pr-list.sh`, or an extensionless `/opt/forge/issue-list`).
+  //   That names no tool, and keying on it would give every concept a backend of
+  //   its own — so fall back to the configured provider instead. Less precise,
+  //   but it keeps concepts that share an account sharing a key.
+  // - a generic transport (`curl`), which names a protocol rather than an
+  //   account. The provider is the better key. See GENERIC_TRANSPORTS.
+  const trimmed = command.trim();
   const executable = extractExecutable(command);
   const basename = executable?.split('/').pop() || null;
-  const unreadableScript = basename === null || basename.endsWith('.sh');
+  // A bare path with no arguments is a script reference; if the extractor just
+  // handed it back, it read nothing useful out of the file.
+  const bareScriptRef = !/\s/.test(trimmed) && (trimmed.includes('/') || trimmed.endsWith('.sh'));
+  const unknownTool =
+    basename === null
+    || basename.endsWith('.sh')
+    || (bareScriptRef && basename === trimmed.split('/').pop());
   const fallback = PROVIDER_EXECUTABLES[provider.toLowerCase()] ?? provider;
-  const backend = (unreadableScript ? fallback : basename).toLowerCase();
+  const backend = (
+    unknownTool || GENERIC_TRANSPORTS.has(basename!.toLowerCase()) ? fallback : basename!
+  ).toLowerCase();
   _backendCache.set(key, backend);
   return backend;
 }
