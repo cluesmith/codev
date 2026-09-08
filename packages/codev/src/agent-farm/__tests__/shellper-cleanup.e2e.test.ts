@@ -14,6 +14,7 @@ import {
   startTower,
   cleanupAllTerminals,
   cleanupTestDb,
+  removeIsolatedAgentFarmDir,
 } from './helpers/tower-test-utils.js';
 
 // Use a short cleanup interval for testing (2 seconds)
@@ -179,5 +180,9 @@ describe('Spec 0116: Tower graceful shutdown', () => {
       const { rmSync } = await import('node:fs');
       rmSync(handle.socketDir, { recursive: true, force: true });
     } catch { /* ignore */ }
+    // #1515: this tower is killed directly rather than via handle.stop(), so
+    // its isolated agent-farm dir — which holds a copy of the shared local key
+    // — has to be removed here too.
+    removeIsolatedAgentFarmDir(handle.agentFarmDir);
   }, 20_000);
 });

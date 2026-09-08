@@ -1,5 +1,5 @@
 {
-  "$schema": "../../protocol-schema.json",
+  "$schema": "../protocol-schema.json",
   "name": "bugfix",
   "version": "1.2.0",
   "description": "Lightweight protocol for minor bugfixes using GitHub Issues",

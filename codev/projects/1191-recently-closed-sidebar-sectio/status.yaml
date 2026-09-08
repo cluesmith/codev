@@ -1,0 +1,30 @@
+id: '1191'
+title: recently-closed-sidebar-sectio
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-12T11:05:25.127Z'
+    approved_at: '2026-08-12T11:08:32.823Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-12T11:10:48.472Z'
+    approved_at: '2026-08-12T11:14:14.432Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-12T11:17:47.062Z'
+    approved_at: '2026-08-12T11:19:54.133Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-12T11:03:50.931Z'
+updated_at: '2026-08-12T11:20:20.093Z'
+pr_history:
+  - phase: review
+    pr_number: 1427
+    branch: builder/pir-1191
+    created_at: '2026-08-12T11:15:06.405Z'
+pr_ready_for_human: false

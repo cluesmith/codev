@@ -4,7 +4,7 @@
  * Migration v12 adds the per-architect conversation `session_id` column so Tower
  * can resume each architect's prior agent conversation after a restart. These tests
  * instantiate the prior (post-v11) architect schema by hand, then drive a faithful
- * replica of `db/index.ts`'s v12 block and assert the resulting shape — matching the
+ * replica of the retired state.db's v12 block and assert the resulting shape — matching the
  * inline-replication convention of `spec-755-migration.test.ts` / `bugfix-826-migration.test.ts`.
  * Migrations are forward-only by project convention; there is no reverse SQL to test.
  */
@@ -56,7 +56,12 @@ describe('PIR #832 — architect session_id migration (v12)', () => {
     }
   }
 
-  /** Faithful replica of the v12 block in db/index.ts (idempotent ALTER + marker). */
+  /**
+   * Faithful replica of the retired per-workspace state.db's v12 block (idempotent
+   * ALTER + marker). Issue #1476: this is NOT global.db's v12 (`terminal_sessions.cwd`,
+   * in `db/migrations.ts`) — state.db numbers its migrations in its own space and has
+   * no production runner left to call, so the replica stays.
+   */
   function runV12Migration(): void {
     const v12 = db.prepare('SELECT version FROM _migrations WHERE version = 12').get();
     if (!v12) {

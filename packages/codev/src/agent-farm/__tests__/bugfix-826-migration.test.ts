@@ -84,9 +84,10 @@ describe('Bugfix #826 — Migration v11 (workspace-scoped architect schema)', ()
   }
 
   /**
-   * Run the v11 migration in isolation against the test DBs. Mirrors the
-   * production code in `db/index.ts` (the v11 block). Kept verbatim so the
-   * test fails loudly if production drifts from the expected shape.
+   * Run the v11 migration in isolation against the test DBs. Mirrors the retired
+   * per-workspace state.db's v11 block — a different numbering space from global.db's
+   * v11 (`terminal_sessions.label`, in `db/migrations.ts`), with no production runner
+   * left to call. Kept verbatim so the test fails loudly if the shape drifts.
    */
   function runV11Migration() {
     const cols = localDb.prepare('PRAGMA table_info(architect)').all() as Array<{ name: string }>;

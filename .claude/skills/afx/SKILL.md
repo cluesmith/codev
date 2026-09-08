@@ -111,13 +111,13 @@ afx interrupt 0042
 afx send 0042 "That producer died — stop waiting and report."
 ```
 
-## afx reset
+## afx refresh
 
-Resets a builder's context: save working state → `/clear` → re-orient. Use when a builder's context window
+Refreshes a builder's context: save working state → `/clear` → re-orient. Use when a builder's context window
 is exhausted; `afx spawn --resume` reattaches the *same* conversation and does **not** give it a fresh one.
 
 ```
-afx reset <builder>
+afx refresh <builder>
 ```
 
 | Flag | Description |
@@ -133,13 +133,16 @@ afx reset <builder>
 
 Every gate fails safe: if the state file never arrives, carries a stale nonce, is a stub, is still being
 written, or the builder will not go quiet, the command **aborts without clearing** and exits non-zero,
-naming the gate. Requires a harness with in-session reset (Claude Code); others abort loudly.
+naming the gate. Requires a harness with in-session context clearing (Claude Code); others abort loudly.
+
+`afx reset` is a deprecated alias: it still works, prints a one-line notice to stderr, and will be removed
+in a future release.
 
 ```bash
-afx reset 0042 --dry-run                  # inspect first — touches nothing
-afx reset 0042
-afx reset 0042 --note "PR #90 merged while you were mid-phase. Rebase first."
-afx reset 0042 --interrupt-first          # builder is wedged mid-turn
+afx refresh 0042 --dry-run                # inspect first — touches nothing
+afx refresh 0042
+afx refresh 0042 --note "PR #90 merged while you were mid-phase. Rebase first."
+afx refresh 0042 --interrupt-first        # builder is wedged mid-turn
 ```
 
 ## afx cleanup

@@ -11,6 +11,8 @@ import {
   buildSymbolLensDescriptors,
   buildAllLensDescriptors,
   parseHunkRanges,
+  resolveCursorRef,
+  resolveHunkFirstRef,
   type SymbolNode,
 } from '../diff-inject-ref.js';
 
@@ -57,9 +59,9 @@ describe('buildSymbolLensDescriptors', () => {
     ];
     expect(buildSymbolLensDescriptors('a/b.ts', symbols)).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 4, title: 'Forward to Builder (lines 5-10)', refText: 'a/b.ts:L5-L10 ' },
-      { line: 12, title: 'Forward to Builder (lines 13-19)', refText: 'a/b.ts:L13-L19 ' },
-      { line: 20, title: 'Forward to Builder (lines 21-25)', refText: 'a/b.ts:L21-L25 ' },
+      { line: 4, title: 'Forward to Builder (lines 5-10)', refText: 'a/b.ts:L5-L10 ', range: { start: 5, end: 10 } },
+      { line: 12, title: 'Forward to Builder (lines 13-19)', refText: 'a/b.ts:L13-L19 ', range: { start: 13, end: 19 } },
+      { line: 20, title: 'Forward to Builder (lines 21-25)', refText: 'a/b.ts:L21-L25 ', range: { start: 21, end: 25 } },
     ]);
   });
 
@@ -71,9 +73,9 @@ describe('buildSymbolLensDescriptors', () => {
     ]);
     expect(buildSymbolLensDescriptors('a/b.ts', [cls])).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 3, title: 'Forward to Builder (lines 4-41)', refText: 'a/b.ts:L4-L41 ' },   // class
-      { line: 5, title: 'Forward to Builder (lines 6-9)', refText: 'a/b.ts:L6-L9 ' },    // constructor
-      { line: 10, title: 'Forward to Builder (lines 11-21)', refText: 'a/b.ts:L11-L21 ' }, // method
+      { line: 3, title: 'Forward to Builder (lines 4-41)', refText: 'a/b.ts:L4-L41 ', range: { start: 4, end: 41 } },   // class
+      { line: 5, title: 'Forward to Builder (lines 6-9)', refText: 'a/b.ts:L6-L9 ', range: { start: 6, end: 9 } },    // constructor
+      { line: 10, title: 'Forward to Builder (lines 11-21)', refText: 'a/b.ts:L11-L21 ', range: { start: 11, end: 21 } }, // method
     ]);
   });
 
@@ -84,7 +86,7 @@ describe('buildSymbolLensDescriptors', () => {
     ];
     expect(buildSymbolLensDescriptors('a/b.ts', symbols)).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 4, title: 'Forward to Builder (lines 5-13)', refText: 'a/b.ts:L5-L13 ' },
+      { line: 4, title: 'Forward to Builder (lines 5-13)', refText: 'a/b.ts:L5-L13 ', range: { start: 5, end: 13 } },
     ]);
   });
 
@@ -104,7 +106,7 @@ describe('buildSymbolLensDescriptors', () => {
     ]);
     expect(buildSymbolLensDescriptors('a/b.ts', [cls])).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 2, title: 'Forward to Builder (lines 3-51)', refText: 'a/b.ts:L3-L51 ' },
+      { line: 2, title: 'Forward to Builder (lines 3-51)', refText: 'a/b.ts:L3-L51 ', range: { start: 3, end: 51 } },
     ]);
   });
 });
@@ -158,9 +160,9 @@ describe('buildAllLensDescriptors (symbol + change lenses)', () => {
     const ranges = [{ start: 10, end: 12 }, { start: 18, end: 18 }];
     expect(buildAllLensDescriptors('a/b.ts', symbols, ranges)).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 4, title: 'Forward to Builder (lines 5-31)', refText: 'a/b.ts:L5-L31 ' },
-      { line: 9, title: 'Forward to Builder (lines 10-12)', refText: 'a/b.ts:L10-L12 ' },
-      { line: 17, title: 'Forward to Builder (line 18)', refText: 'a/b.ts:L18 ' },
+      { line: 4, title: 'Forward to Builder (lines 5-31)', refText: 'a/b.ts:L5-L31 ', range: { start: 5, end: 31 } },
+      { line: 9, title: 'Forward to Builder (lines 10-12)', refText: 'a/b.ts:L10-L12 ', range: { start: 10, end: 12 } },
+      { line: 17, title: 'Forward to Builder (line 18)', refText: 'a/b.ts:L18 ', range: { start: 18, end: 18 } },
     ]);
   });
 
@@ -169,7 +171,7 @@ describe('buildAllLensDescriptors (symbol + change lenses)', () => {
     const ranges = [{ start: 10, end: 12 }]; // anchor line 9 → collides → skipped
     expect(buildAllLensDescriptors('a/b.ts', symbols, ranges)).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 9, title: 'Forward to Builder (lines 10-31)', refText: 'a/b.ts:L10-L31 ' },
+      { line: 9, title: 'Forward to Builder (lines 10-31)', refText: 'a/b.ts:L10-L31 ', range: { start: 10, end: 31 } },
     ]);
   });
 
@@ -177,5 +179,103 @@ describe('buildAllLensDescriptors (symbol + change lenses)', () => {
     expect(buildAllLensDescriptors('a/b.ts', [], [{ start: 1, end: 17 }])).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
     ]);
+  });
+});
+
+describe('resolveCursorRef (symbol → hunk → file)', () => {
+  it('resolves the cursor to its enclosing top-level symbol', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    // Cursor on the body (line 7, 1-based) → the function range.
+    expect(resolveCursorRef('a/b.ts', symbols, [], 7)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L5-L10 ',
+      range: { start: 5, end: 10 },
+    });
+  });
+
+  it('resolves the declaration line and the body line to the same symbol', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    expect(resolveCursorRef('a/b.ts', symbols, [], 5).refText).toBe('a/b.ts:L5-L10 '); // decl line
+    expect(resolveCursorRef('a/b.ts', symbols, [], 9).refText).toBe('a/b.ts:L5-L10 '); // last line
+  });
+
+  it('picks the most specific symbol: a method inside a class beats the class', () => {
+    const cls = sym(K.Class, 3, 40, [
+      sym(K.Method, 10, 20), // L11-L21
+    ]);
+    // Cursor at line 15 is inside both the class (L4-L41) and the method (L11-L21).
+    expect(resolveCursorRef('a/b.ts', [cls], [], 15)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L11-L21 ',
+      range: { start: 11, end: 21 },
+    });
+    // Cursor at line 5 is in the class but outside the method → the class.
+    expect(resolveCursorRef('a/b.ts', [cls], [], 5).refText).toBe('a/b.ts:L4-L41 ');
+  });
+
+  it('falls back to the containing hunk when no symbol covers the cursor', () => {
+    // No forwardable symbol at the cursor; a changed range does cover it.
+    expect(resolveCursorRef('a/b.ts', [], [{ start: 30, end: 42 }], 35)).toEqual({
+      kind: 'hunk',
+      refText: 'a/b.ts:L30-L42 ',
+      range: { start: 30, end: 42 },
+    });
+  });
+
+  it('prefers the symbol over the hunk when both cover the cursor (order)', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    // A hunk also spans the cursor line, but symbol resolution wins.
+    expect(resolveCursorRef('a/b.ts', symbols, [{ start: 1, end: 20 }], 7)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L5-L10 ',
+      range: { start: 5, end: 10 },
+    });
+  });
+
+  it('falls back to the bare file path when neither a symbol nor a hunk covers the cursor', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    // Cursor on an unchanged context line outside every symbol and hunk.
+    expect(resolveCursorRef('a/b.ts', symbols, [{ start: 30, end: 42 }], 25)).toEqual({
+      kind: 'file',
+      refText: 'a/b.ts ',
+    });
+  });
+
+  it('resolves a symbol on a new-file diff (symbols present, no hunks)', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    expect(resolveCursorRef('a/b.ts', symbols, [], 6)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L5-L10 ',
+      range: { start: 5, end: 10 },
+    });
+  });
+});
+
+describe('resolveHunkFirstRef (hunk → symbol → file — the press verbs)', () => {
+  it('prefers the HUNK over the enclosing symbol when both cover the cursor (the #1534 fix)', () => {
+    const symbols = [sym(K.Function, 3, 20)]; // L4-L21, spans the change
+    // The tight changed range wins, so forward-hunk forwards the hunk, not the whole function.
+    expect(resolveHunkFirstRef('a/b.ts', symbols, [{ start: 7, end: 9 }], 8)).toEqual({
+      kind: 'hunk',
+      refText: 'a/b.ts:L7-L9 ',
+      range: { start: 7, end: 9 },
+    });
+  });
+
+  it('degrades to the enclosing symbol when no hunk covers the cursor (e.g. a deletion-only spot)', () => {
+    const symbols = [sym(K.Function, 3, 20)]; // L4-L21
+    expect(resolveHunkFirstRef('a/b.ts', symbols, [], 8)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L4-L21 ',
+      range: { start: 4, end: 21 },
+    });
+  });
+
+  it('falls back to the bare file path when neither a hunk nor a symbol covers the cursor', () => {
+    const symbols = [sym(K.Function, 3, 20)]; // L4-L21
+    expect(resolveHunkFirstRef('a/b.ts', symbols, [{ start: 30, end: 42 }], 25)).toEqual({
+      kind: 'file',
+      refText: 'a/b.ts ',
+    });
   });
 });

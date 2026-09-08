@@ -191,11 +191,15 @@ describe('tower-tunnel', () => {
     vi.clearAllMocks();
     // Default: no cloud config (unregistered)
     mockReadCloudConfig.mockReturnValue(null);
+    // #1515: disconnect refuses cloud side effects under a test runner. Every
+    // config here is a mock, so this file owns its cloud state and opts in.
+    vi.stubEnv('CODEV_ALLOW_TEST_CLOUD_MUTATION', '1');
   });
 
   afterEach(() => {
     // Always clean up module state between tests
     shutdownTunnel();
+    vi.unstubAllEnvs();
   });
 
   // =========================================================================
@@ -468,6 +472,22 @@ describe('tower-tunnel', () => {
         expect(body()).toContain('Invalid or expired');
       });
 
+      it('registers nothing for an unknown nonce — the nonce gates the public route (#1570)', async () => {
+        // The route is keyless by design (a cross-site browser redirect cannot
+        // carry codev-tower-key), so the single-use nonce is what authenticates
+        // it. Without a valid one the handler must 400 and write no credentials.
+        mockConsumePendingRegistration.mockReturnValue(null);
+
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('GET', { url: '/api/tunnel/connect/callback?token=attacker-tok&nonce=never-minted' });
+        await handleTunnelEndpoint(req, res, 'connect/callback');
+
+        expect(statusCode()).toBe(400);
+        expect(body()).toContain('Invalid or expired');
+        expect(mockRedeemToken).not.toHaveBeenCalled();
+        expect(mockWriteCloudConfig).not.toHaveBeenCalled();
+      });
+
       it('completes registration with valid nonce and token', async () => {
         mockConsumePendingRegistration.mockReturnValue({
           nonce: 'valid-nonce',
@@ -609,6 +629,30 @@ describe('tower-tunnel', () => {
 
         // Local config should still be deleted
         expect(mockDeleteCloudConfig).toHaveBeenCalled();
+      });
+
+      // #1515: the suite must not be able to deregister a real Tower.
+      it('refuses the disconnect entirely when a test has not opted in', async () => {
+        vi.stubEnv('CODEV_ALLOW_TEST_CLOUD_MUTATION', '');
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+          new Response(null, { status: 200 }),
+        );
+
+        try {
+          const { res, body, statusCode } = makeRes();
+          await handleTunnelEndpoint(makeReq('POST'), res, 'disconnect');
+
+          expect(statusCode()).toBe(403);
+          const parsed = JSON.parse(body());
+          expect(parsed.success).toBe(false);
+          expect(parsed.error).toContain('#1515');
+          // Neither irreversible half may have run.
+          expect(fetchSpy).not.toHaveBeenCalled();
+          expect(mockDeleteCloudConfig).not.toHaveBeenCalled();
+        } finally {
+          fetchSpy.mockRestore();
+        }
       });
 
       it('returns error when local config deletion fails', async () => {

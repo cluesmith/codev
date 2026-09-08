@@ -1,0 +1,22 @@
+id: bugfix-1437
+title: stream-deck-silence-the-green-
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-08-13T00:13:53.858Z'
+    approved_at: '2026-08-13T00:35:24.659Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-13T00:08:55.521Z'
+updated_at: '2026-08-13T00:35:56.854Z'
+pr_history:
+  - phase: pr
+    pr_number: 1438
+    branch: builder/bugfix-1437
+    created_at: '2026-08-13T00:13:45.642Z'
+pr_ready_for_human: false

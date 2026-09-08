@@ -17,11 +17,17 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import xtermHeadless from '@xterm/headless';
+import type { Terminal as HeadlessTerminal } from '@xterm/headless';
 import { RingBuffer } from '../../terminal/ring-buffer.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
-import { classifyScreen, classifyBuffer, markerSpanEnd } from '../servers/render-gate.js';
-import type { RingSnapshot, GateProfile } from '../servers/render-gate.js';
+import { classifyScreen, classifyBuffer, markerSpanEnd, markerSpanStart } from '../servers/render-gate.js';
+import type { RingSnapshot, GateProfile, GateVerdict } from '../servers/render-gate.js';
 import { CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE, KIMI_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
+
+// Default-imported for the same CJS-interop reason `render-gate.ts` documents (the named export
+// is not statically analyzable); the negative control below builds its own throwaway terminal.
+const { Terminal } = xtermHeadless;
 
 const COLS = 110;
 const ROWS = 32;
@@ -32,7 +38,18 @@ const INV = '\x1b[7m'; // SGR-7 inverse (claude's software block cursor over the
 const INV_OFF = '\x1b[27m'; // SGR-27 inverse off
 const PAL8 = '\x1b[38;5;8m'; // agy's placeholder gray
 const PAL12 = '\x1b[38;5;12m'; // agy's marker / selected-option bright blue
+const PAL4 = '\x1b[38;5;4m'; // agy's transcript echo of a submitted turn (`> <message>`)
 const FG = '\x1b[39m'; // reset foreground to default
+
+/**
+ * Park the cursor at a 1-based row/col. agy's profile anchors its marker to the cursor
+ * row (#1474), so a synthetic agy screen must place the cursor the way the real TUI does
+ * — on the composer input row. Absolute positioning, so it is independent of how the
+ * `RingBuffer` round-trip rewrites line endings.
+ */
+function cursorAt(row: number, col: number): string {
+  return `\x1b[${row};${col}H`;
+}
 
 /** Production data path: raw PTY bytes → RingBuffer.pushData → getAll().join('\n'). */
 function snapshotFromRaw(raw: string, cols = COLS, rows = ROWS): RingSnapshot {
@@ -58,7 +75,7 @@ function profileForFixture(name: string): GateProfile {
 describe('render-gate — real captured fixtures (Spec 1313)', () => {
   const fixtures = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith('.txt')).sort();
 
-  it('the required states are all captured (claude+codex+kimi idle/draft/menu/picker, agy+kimi trust, kimi multiline, wrapper/boot)', () => {
+  it('the required states are all captured (claude+codex+kimi idle/draft/menu/picker, agy idle/bare-marker/draft/menu/trust/turn-echo/torn, agy+kimi trust, kimi multiline, wrapper/boot)', () => {
     for (const required of [
       'claude-idle.clean',
       'claude-draft.busy',
@@ -71,6 +88,11 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       'agy-idle.clean',
       'agy-draft.busy',
       'agy-trust.busy',
+      // #1474 — the states that pin the tightened agy marker (all real captures).
+      'agy-menu.busy',
+      'agy-baremarker.clean',
+      'agy-turn-echo.clean',
+      'agy-torn-echo.busy',
       'kimi-idle.clean',
       'kimi-draft.busy',
       'kimi-trust.busy',
@@ -101,6 +123,53 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       if (!expectClean) expect(verdict.reason).toBe('busy');
     });
   }
+
+  /**
+   * #1474 — the tightened agy marker, asserted on REAL agy 1.1.13 captures. The filename
+   * loop above already pins each verdict; these pin the *reason*, which is the whole point:
+   * on every one of these screens the old text-only `/^> /` marker selected a row that is
+   * not the composer (or missed the composer entirely), so the region it bounded was the
+   * wrong region. Getting `busy` out of a mis-bounded region is luck, not a guarantee.
+   */
+  describe('agy marker anchors (#1474)', () => {
+    const verdictFor = async (name: string) =>
+      classifyScreen(snapshotFromRaw(readFileSync(`${FIXTURE_DIR}/${name}`, 'utf8')), AGY_PROFILE);
+
+    it('the slash menu: the marker is the composer, NOT the menu selection row below it', async () => {
+      // The menu's selected item renders `> /add-dir …` in palette-12 — the same glyph AND
+      // the same color as the composer marker — and it sits BELOW the composer, so
+      // last-match-wins picked it. Only the cursor row separates them. `user-text` here is
+      // the `/` the user typed into the composer: the right region, counted correctly.
+      expect(await verdictFor('agy-menu.busy.txt')).toMatchObject({ clean: false, detail: 'user-text' });
+    });
+
+    it('the trust dialog: no composer on screen at all ⇒ no-composer-marker', async () => {
+      // Its selected `> Yes, I trust this folder` option is palette-12 too, but the cursor
+      // is parked off that row. Held for the honest reason — there is no composer — rather
+      // than by the incidental absence of a rule line beneath the option.
+      expect(await verdictFor('agy-trust.busy.txt')).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+    });
+
+    it('a torn mid-repaint frame: the palette-4 turn echo is never mistaken for a composer', async () => {
+      // Real bytes, cut mid-repaint (the shape #1361 documents for the adopt seed): the
+      // composer row is gone and the only `> ` row left is agy's echo of the submitted
+      // message. That row must not become a marker — this is the false-CLEAN direction.
+      expect(await verdictFor('agy-torn-echo.busy.txt')).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+    });
+
+    it('a turn echo ABOVE an empty composer does not steal the marker (still clean)', async () => {
+      // The companion to the torn case: when the composer IS on screen, an earlier `> `
+      // echo must not shift the verdict. Guards against over-tightening into a false HOLD.
+      expect(await verdictFor('agy-turn-echo.clean.txt')).toMatchObject({ clean: true, detail: 'empty' });
+    });
+
+    it('the bare `>` composer (no-hint mode) is recognized — closes a pre-existing false HOLD', async () => {
+      // agy renders the empty composer as a bare `>` in its no-hint mode; right-trimmed
+      // that is `">"`, which `/^> /` never matched, so EVERY message to an agy in that mode
+      // was held forever. The marker's separator is now `\s|$`.
+      expect(await verdictFor('agy-baremarker.clean.txt')).toMatchObject({ clean: true, detail: 'empty' });
+    });
+  });
 
   it('a marker-less screen is busy under BOTH profiles (wrapper/boot is app-agnostic)', async () => {
     const raw = readFileSync(`${FIXTURE_DIR}/wrapper-boot.busy.txt`, 'utf8');
@@ -370,10 +439,44 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
   it('agy: `> ` marker + palette-8 (gray) hint → clean; default-fg draft → busy', async () => {
     // agy de-emphasizes its idle hint with a FOREGROUND COLOR (palette-8), not
     // SGR-dim — so the placeholder rule is color-keyed for agy (placeholderFgPalette).
-    const idle = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────'));
-    const draft = snapshotFromRaw(screen(`${PAL12}>${FG} review the mailbox change`, '──────'));
+    // The cursor sits on the composer row, as the real TUI leaves it (#1474).
+    const idle = snapshotFromRaw(
+      screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────') + cursorAt(1, 3)
+    );
+    const draft = snapshotFromRaw(screen(`${PAL12}>${FG} review the mailbox change`, '──────') + cursorAt(1, 28));
     expect((await classifyScreen(idle, AGY_PROFILE)).clean).toBe(true);
     expect((await classifyScreen(draft, AGY_PROFILE)).clean).toBe(false);
+  });
+
+  it('agy: the marker must be the CURSOR row — an identical `> ` row elsewhere is not a composer (#1474)', async () => {
+    // Same bytes as the clean idle screen above, with the cursor parked off the marker row
+    // (a menu selection cursor, a dialog option, a mid-repaint frame). No row qualifies as
+    // the composer, so the gate holds instead of bounding a region around a row that merely
+    // looks like a prompt.
+    const parked = snapshotFromRaw(
+      screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────') + cursorAt(2, 1)
+    );
+    expect(await classifyScreen(parked, AGY_PROFILE)).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+  });
+
+  it('agy: the marker GLYPH must render in the profile palette — a palette-4 turn echo is not a composer (#1474)', async () => {
+    // agy echoes each submitted message into the transcript as `> <message>` in palette-4.
+    // Even with the cursor on that row, the marker's own color rules it out.
+    const echo = snapshotFromRaw(screen(`${PAL4}> deploy the hotfix${FG}`, '──────') + cursorAt(1, 3));
+    expect(await classifyScreen(echo, AGY_PROFILE)).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+  });
+
+  it('agy: a bare `>` composer (no-hint mode) is a marker — the separator is `\\s|$`, not a literal space (#1474)', async () => {
+    const bare = snapshotFromRaw(screen(`${PAL12}>${FG}`, '──────') + cursorAt(1, 3));
+    expect(await classifyScreen(bare, AGY_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('the agy anchors are per-profile data — claude/codex are unchanged by cursor position (#1474)', async () => {
+    // CLAUDE_PROFILE/CODEX_PROFILE set neither anchor, so an idle claude composer stays
+    // clean with the cursor anywhere. Pins that the tightening did not leak into the
+    // profiles measured against the other two TUIs.
+    const parked = snapshotFromRaw(screen(`❯ ${DIM}Try "refactor doctor.ts"${RESET}`, '──────') + cursorAt(2, 1));
+    expect((await classifyScreen(parked, CLAUDE_PROFILE)).clean).toBe(true);
   });
 
   it('agy: only palette-8 is placeholder — a non-gray (palette-12) option still counts (trust-dialog guard)', async () => {
@@ -384,7 +487,12 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
     // bounds the region so the color-counting branch runs and palette-12 is the sole
     // occupancy signal. (Dual protection: a real dialog with NO rule below fails safe
     // the OTHER way — via the no-region-end guard — also busy, never a blind confirm.)
-    const trust = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL12}Yes, I trust this folder${FG}`, '──────'));
+    // The cursor is placed ON the option row deliberately (#1474): that is the one shape
+    // the marker anchors CANNOT reject — the option is palette-12, like the composer marker
+    // — so this pins the layer that still catches it, the occupancy count.
+    const trust = snapshotFromRaw(
+      screen(`${PAL12}>${FG} ${PAL12}Yes, I trust this folder${FG}`, '──────') + cursorAt(1, 3)
+    );
     const v = await classifyScreen(trust, AGY_PROFILE);
     expect(v.clean).toBe(false);
     expect(v.detail).toBe('user-text');
@@ -396,37 +504,23 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
 });
 
 describe('render-gate — whole-ring render at any size (Spec 1313 D2 + over-ceiling removal)', () => {
-  it('renders a realistic large (~4MB) ring WHOLE within a CI-aware budget', async () => {
+  it('renders a realistic large (~4MB) ring WHOLE (no tail slice, no size cap)', async () => {
     // The D2 fix renders the whole coherent ring (no 1MB tail slice). Build ~4MB of
     // newline-free filler so it lands in the ring's unbounded `partial` (the claude
     // full-screen-TUI shape, #1047) rather than being truncated by the 1000-line cap;
     // a busy composer tail follows. The whole ring renders (no slice, no size cap) — the
     // real steady-state path (largest real capture ≈ 3MB).
+    // (This test carried a wall-clock budget until #1471; the classifier's COST is now
+    // pinned deterministically by the op-count suite below, which measures the production
+    // mirror path rather than this transient one. What survives here is the correctness
+    // half: a 4MB ring renders whole and classifies its busy tail.)
     const filler = 'x'.repeat(4 * 1024 * 1024);
     const raw = filler + '\r\n' + screen('❯ occupied prompt tail', '──────');
     const snap = snapshotFromRaw(raw);
     expect(snap.replay.length).toBeGreaterThan(4 * 1024 * 1024);
 
-    // Warm up (JIT + first-parse), then assert the MIN over several runs. The min
-    // strips GC/scheduling outliers, approximating the classifier's steady-state
-    // compute cost. (Spike: 67ms @4MB; this env under vitest ~90ms.)
-    await classifyScreen(snap, CLAUDE_PROFILE); // warm-up (discarded)
-    let best = Infinity;
-    let verdict;
-    for (let i = 0; i < 5; i++) {
-      const t0 = performance.now();
-      verdict = await classifyScreen(snap, CLAUDE_PROFILE);
-      best = Math.min(best, performance.now() - t0);
-    }
-    // eslint-disable-next-line no-console
-    console.log(`[render-gate] whole-render @${Math.round(snap.replay.length / 1024)}KB best-of-5 = ${best.toFixed(1)}ms`);
-    expect(verdict?.clean).toBe(false); // the tail is a busy prompt
-    // CI-aware bound: locally a tight-but-safe bound (the real steady-state signal);
-    // on shared/loaded GitHub runners only a catastrophic-regression ceiling (an order
-    // of magnitude below an O(n²) blow-up at 4MB). Retuned from the old 1MB seed-cap
-    // bound now that the whole ring renders. See review doc "Flaky Tests".
-    const budgetMs = process.env.CI ? 800 : 250;
-    expect(best).toBeLessThan(budgetMs);
+    const verdict = await classifyScreen(snap, CLAUDE_PROFILE);
+    expect(verdict.clean).toBe(false); // the tail is a busy prompt
   });
 
   it('renders a ring ABOVE the old over-ceiling WHOLE and classifies its empty composer CLEAN', async () => {
@@ -528,6 +622,292 @@ describe('render-gate — PRODUCTION data path: capped ring TEARS, persistent mi
       screen.dispose();
     });
   }
+
+  /**
+   * agy path-parity (#1474). The agy anchors are the first classifier input that depends on
+   * CURSOR STATE rather than on cell text/attributes, and the cursor is the one thing the two
+   * gate paths could plausibly disagree about: the transient path renders a replay into a
+   * THROWAWAY terminal, while production reads a LONG-LIVED mirror fed the byte stream
+   * incrementally. Same bytes, same verdict — asserted per fixture, so a future divergence
+   * (a mirror that resizes, reseeds, or scrolls the cursor out of the viewport) fails here
+   * rather than silently in delivery.
+   *
+   * Each fixture is fed twice: once in production-sized chunks, and once in 7-byte chunks that
+   * deliberately SPLIT escape sequences across `feed()` calls — the cursor-positioning CSI
+   * (`ESC[<row>;<col>H`, and the relative `ESC[2A`/`ESC[2C` agy actually emits) is exactly what
+   * a torn chunk boundary would corrupt, and a mis-parsed cursor is now a verdict change.
+   */
+  for (const name of readdirSync(FIXTURE_DIR).filter((f) => f.startsWith('agy') && f.endsWith('.txt')).sort()) {
+    it(`${name}: persistent mirror agrees with the transient path (agy cursor-state parity)`, async () => {
+      const raw = readFileSync(`${FIXTURE_DIR}/${name}`, 'utf8');
+      const expected = await classifyScreen(snapshotFromRaw(raw), AGY_PROFILE);
+      expect(expected.clean).toBe(name.includes('.clean.')); // the transient path is itself correct
+
+      for (const chunkSize of [CHUNK, 7]) {
+        const screen = new SessionScreen(COLS, ROWS);
+        for (let i = 0; i < raw.length; i += chunkSize) screen.feed(raw.slice(i, i + chunkSize));
+        const { term } = await screen.read();
+        expect(classifyBuffer(term, COLS, ROWS, AGY_PROFILE), `chunkSize=${chunkSize}`).toEqual(expected);
+        screen.dispose();
+      }
+    });
+  }
+});
+
+describe('render-gate — the cursor row is viewport-relative, not baseY-relative (#1474 review)', () => {
+  /**
+   * xterm's `cursorY` is relative to `baseY`, while `screenLines`/`markerRow` index from
+   * `viewportY`. Those coincide only while the viewport sits at the bottom of the scrollback,
+   * which is every case the mirror produces today — so reading `cursorY` as if it were
+   * viewport-relative was correct by coincidence, not by contract. Since the agy anchors made
+   * the cursor row the thing that gates delivery, the coincidence became load-bearing.
+   *
+   * This is the failure it permitted, measured rather than argued: scroll the viewport up, and
+   * the unconverted row lands on a STALE composer still sitting in scrollback — an empty one,
+   * with its rule beneath it, so the region bounds and classifies `empty`. CLEAN, on a screen
+   * whose live composer is off-view holding a half-typed draft. That is a delivery onto a busy
+   * terminal, the exact corruption the mailbox-first design exists to rule out.
+   */
+  const STALE_ROW = 18; // where the stale, EMPTY composer sits in history
+  const CURSOR_ROW = 8; // 1-based; the live cursor, parked above the fold
+  const SCROLL_BACK = 4; // viewport lifted off the bottom
+
+  /** Raw PTY bytes for a session whose live composer is busy and whose history holds a stale one. */
+  function scrolledBackMirror(): string {
+    const lines: string[] = [];
+    for (let i = 0; i < 44; i++) lines.push(`transcript line ${i}`);
+    // A stale composer + its rule, scrolled into history: empty, palette-12 marker,
+    // indistinguishable from a live one by text and attributes alone.
+    lines[STALE_ROW] = `${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`;
+    lines[STALE_ROW + 1] = '──────────';
+    // The LIVE composer at the bottom, holding user text — the screen must classify busy.
+    lines.push(`${PAL12}>${FG} half-typed draft`, '──────────');
+    return lines.map((l) => l + '\r\n').join('') + cursorAt(CURSOR_ROW, 3);
+  }
+
+  it('a scrolled-back viewport holds instead of anchoring to a stale composer in scrollback', async () => {
+    const screenMirror = new SessionScreen(COLS, ROWS);
+    screenMirror.feed(scrolledBackMirror());
+    const { term } = await screenMirror.read();
+    term.scrollLines(-SCROLL_BACK);
+    const buf = term.buffer.active;
+
+    // The rigging is only meaningful while the viewport is genuinely off the bottom and the
+    // two conventions disagree — pin that, so a future xterm change fails here loudly rather
+    // than turning the assertion below into a tautology.
+    expect(buf.viewportY).toBeLessThan(buf.baseY);
+    const unconverted = buf.cursorY;
+    const converted = buf.baseY + buf.cursorY - buf.viewportY;
+    expect(converted).not.toBe(unconverted);
+
+    // And the row the OLD reading would have anchored to really is a marker+rule pair — i.e.
+    // this test would have produced a false CLEAN, not merely a different row index.
+    const rowText = (i: number) => buf.getLine(buf.viewportY + i)?.translateToString(true).trimEnd() ?? '';
+    expect(rowText(unconverted)).toMatch(/^> /);
+    expect(rowText(unconverted + 1)).toMatch(/^─/);
+
+    expect(classifyBuffer(term, COLS, ROWS, AGY_PROFILE)).toEqual({
+      clean: false,
+      reason: 'busy',
+      detail: 'no-composer-marker',
+    });
+    screenMirror.dispose();
+  });
+});
+
+describe('render-gate — deterministic op count: one classify is O(viewport), not O(ring size) (#1471)', () => {
+  // Replaces the wall-clock budget this file used to assert on the whole-ring render. A timing
+  // bound measures the MACHINE, not the algorithm: the identical code that best-of-5'd well under
+  // the 250ms local ceiling on an idle box measured 391.7ms pinned to one contended core. So the
+  // bound either flakes on a loaded runner or gets loosened until it no longer catches the
+  // regression it exists for (its history: 75ms → 250 → a CI-aware 800).
+  //
+  // The cost property the gate actually guarantees post round-2 is algorithmic, and it belongs to
+  // the PRODUCTION path: classification reads the session's persistent bounded `SessionScreen`
+  // mirror, so one classify touches a viewport (rows × cols cells) and nothing else, however much
+  // output the session has produced. Counting the classifier's buffer reads pins exactly that — in
+  // integers, which cannot flake.
+
+  const CHUNK = 64 * 1024; // PTY output arrives in chunks; matches the production feed above
+  const GATE_COLS = 139;
+  const GATE_ROWS = 65;
+
+  /** The work one classify does: buffer reads, plus any bytes it parses (it must parse none). */
+  interface OpCounts {
+    lineReads: number;
+    cellReads: number;
+    bytesParsed: number;
+  }
+
+  type MirrorLine = NonNullable<ReturnType<HeadlessTerminal['buffer']['active']['getLine']>>;
+  type MirrorCell = Parameters<MirrorLine['getCell']>[1];
+
+  /** Delegate a property to `target` with `this` bound to it — xterm's are prototype accessors. */
+  function passthrough<T extends object>(target: T, prop: string | symbol): unknown {
+    const value = Reflect.get(target, prop, target);
+    return typeof value === 'function' ? (value as (...args: never[]) => unknown).bind(target) : value;
+  }
+
+  function countingLine(line: MirrorLine, ops: OpCounts): MirrorLine {
+    return new Proxy(line, {
+      get(target, prop) {
+        if (prop !== 'getCell') return passthrough(target, prop);
+        return (col: number, cell?: MirrorCell) => {
+          ops.cellReads++;
+          return target.getCell(col, cell);
+        };
+      },
+    });
+  }
+
+  /**
+   * A read-counting facade over a live terminal. `classifyBuffer` takes the terminal as a parameter
+   * and only READS it, so the test can hand it this proxy and count the work the REAL classifier
+   * does — no production instrumentation, nothing stubbed out from under the code under test.
+   */
+  function countingTerm(term: HeadlessTerminal, ops: OpCounts): HeadlessTerminal {
+    // Resolved per access rather than captured, so the facade follows a normal→alternate buffer
+    // switch the way the classifier's own `term.buffer.active` read does.
+    const countingBuffer = (buffer: HeadlessTerminal['buffer']['active']) =>
+      new Proxy(buffer, {
+        get(target, prop) {
+          if (prop !== 'getLine') return passthrough(target, prop);
+          return (y: number) => {
+            ops.lineReads++;
+            const line = target.getLine(y);
+            return line && countingLine(line, ops);
+          };
+        },
+      });
+    return new Proxy(term, {
+      get(target, prop) {
+        if (prop === 'write') {
+          return (data: string, cb?: () => void) => {
+            ops.bytesParsed += data.length; // a classify re-parsing its input would show up here
+            return target.write(data, cb);
+          };
+        }
+        if (prop !== 'buffer') return passthrough(target, prop);
+        return new Proxy(target.buffer, {
+          get: (bufTarget, bufProp) =>
+            bufProp === 'active' ? countingBuffer(bufTarget.active) : passthrough(bufTarget, bufProp),
+        });
+      },
+    });
+  }
+
+  /** Feed a stream into a persistent mirror exactly as `PtySession.onPtyData` does: chunked. */
+  function mirrorOf(raw: string): SessionScreen {
+    const mirror = new SessionScreen(GATE_COLS, GATE_ROWS);
+    for (let i = 0; i < raw.length; i += CHUNK) mirror.feed(raw.slice(i, i + CHUNK));
+    return mirror;
+  }
+
+  /**
+   * The production classify with its ops counted. This is `classifyAgentScreen`'s body
+   * (`mailbox-wiring.ts`) — `screen.read()` → `classifyBuffer` — inlined because the facade has to
+   * sit between those two calls. So this suite pins the ALGORITHM's cost, not the call-site wiring;
+   * that the gate reads the mirror rather than the ring is covered by the "PRODUCTION data path"
+   * suite above.
+   */
+  async function classifyCounted(mirror: SessionScreen): Promise<{ verdict: GateVerdict; ops: OpCounts }> {
+    const { term, cols, rows } = await mirror.read();
+    const ops: OpCounts = { lineReads: 0, cellReads: 0, bytesParsed: 0 };
+    const verdict = classifyBuffer(countingTerm(term, ops), cols, rows, CLAUDE_PROFILE);
+    return { verdict, ops };
+  }
+
+  // A full repaint (ED2 + cursor home) into an idle claude composer. Both streams below END in
+  // this, so the two mirrors hold the SAME final screen and differ only in the history behind it —
+  // which is the whole point: identical screen ⇒ identical work, whatever the ring did.
+  const IDLE_REPAINT = '\x1b[2J\x1b[H' + screen(`❯ ${DIM}Try "refactor doctor.ts"${RESET}`, '──────────────────────');
+  const HUGE_HISTORY = 'x'.repeat(4 * 1024 * 1024) + '\r\n' + IDLE_REPAINT;
+
+  it('4 MB of history and ~200 bytes of history cost byte-identical work (the wall clock cannot say this)', async () => {
+    const tiny = mirrorOf(IDLE_REPAINT);
+    const huge = mirrorOf(HUGE_HISTORY);
+    try {
+      const small = await classifyCounted(tiny);
+      const big = await classifyCounted(huge);
+
+      expect(small.verdict).toMatchObject({ clean: true, detail: 'empty' });
+      expect(big.verdict).toEqual(small.verdict); // same screen ⇒ same verdict
+      // The replacement assertion: 20000× the history, exactly the same classifier work.
+      expect(big.ops).toEqual(small.ops);
+    } finally {
+      tiny.dispose();
+      huge.dispose();
+    }
+  });
+
+  it('one classify reads at most one viewport and parses nothing', async () => {
+    // The hard geometric bound. `screenLines` reads `rows` lines; the composer scan re-reads only
+    // the region rows and at most `cols` cells each. A regression that walked scrollback or
+    // re-rendered history — the failure the old timing bound was there to catch — blows both.
+    //
+    // Note `cols × rows` is the EXACT worst case (region rows × cols, plus the ghost-tail
+    // look-ahead's second pass over one row), not a loose ceiling: a future second per-cell
+    // look-ahead would trip it with no O(history) regression involved. That is deliberate — such a
+    // change doubles the gate's per-check work and deserves a decision, not a silent pass.
+    const mirror = mirrorOf(HUGE_HISTORY);
+    try {
+      const { verdict, ops } = await classifyCounted(mirror);
+      expect(verdict.clean).toBe(true);
+      expect(ops.lineReads).toBeLessThanOrEqual(GATE_ROWS * 2);
+      expect(ops.cellReads).toBeLessThanOrEqual(GATE_COLS * GATE_ROWS);
+      expect(ops.bytesParsed).toBe(0); // classification READS a parsed screen; it never re-renders
+    } finally {
+      mirror.dispose();
+    }
+  });
+
+  it('repeated classifies of a static screen cost the same each time (no accumulation)', async () => {
+    // The backstop re-checks every held agent on a timer, so per-classify cost must be flat in the
+    // number of checks as well as in ring size. (The delivery path additionally memoizes the
+    // verdict per `ringToken`; this pins the underlying classify, memo or no memo.)
+    const mirror = mirrorOf(HUGE_HISTORY);
+    try {
+      const first = await classifyCounted(mirror);
+      const second = await classifyCounted(mirror);
+      const third = await classifyCounted(mirror);
+      expect(second.ops).toEqual(first.ops);
+      expect(third.ops).toEqual(first.ops);
+    } finally {
+      mirror.dispose();
+    }
+  });
+
+  it('negative control: the retired whole-ring path re-parses the WHOLE ring on EVERY classify', async () => {
+    // Honesty check — the op count above is only meaningful if it can tell the two cost models
+    // apart. Classify the same screen TWICE the pre-round-2 way: a throwaway terminal fed the whole
+    // replay per classify, which is what `classifyScreen` still does for the fixture suite. Same
+    // verdict and the same per-classify cell reads as the mirror, but ~4 MB parsed EVERY time
+    // instead of zero — and that gap is what the wall-clock budget was proxying for, now asserted
+    // directly. Two rounds, not one, so "per classify" is exercised rather than inferred.
+    const mirror = mirrorOf(HUGE_HISTORY);
+    const viaMirror = await classifyCounted(mirror);
+    mirror.dispose();
+
+    const ops: OpCounts = { lineReads: 0, cellReads: 0, bytesParsed: 0 };
+    const ROUNDS = 2;
+    for (let i = 0; i < ROUNDS; i++) {
+      const term = new Terminal({ cols: GATE_COLS, rows: GATE_ROWS, allowProposedApi: true, scrollback: 2000 });
+      try {
+        const counting = countingTerm(term, ops);
+        await new Promise<void>((resolve) => counting.write(HUGE_HISTORY, resolve));
+        expect(classifyBuffer(counting, GATE_COLS, GATE_ROWS, CLAUDE_PROFILE)).toEqual(viaMirror.verdict);
+      } finally {
+        term.dispose();
+      }
+    }
+
+    // The screen work is identical — it is the same screen — so the ONLY difference between the two
+    // cost models is the re-parse, and it scales with the number of classifies, not the viewport.
+    expect(ops.cellReads).toBe(viaMirror.ops.cellReads * ROUNDS);
+    expect(viaMirror.ops.bytesParsed).toBe(0);
+    expect(ops.bytesParsed).toBe(HUGE_HISTORY.length * ROUNDS);
+    expect(ops.bytesParsed).toBeGreaterThan(8 * 1024 * 1024);
+  });
 });
 
 describe('render-gate — claude suggested-command ghost (Spec 1313 render-gate hardening)', () => {
@@ -631,5 +1011,83 @@ describe('resolveProfile — strict, fail-safe app identity (Spec 1313)', () => 
   it('an unmeasured but known harness (gemini/opencode) resolves to null (no profile yet)', () => {
     expect(resolveProfile({ command: 'gemini' })).toBeNull();
     expect(resolveProfile({ command: 'opencode' })).toBeNull();
+  });
+});
+
+/**
+ * Issue #1482 — the classifier IS dimension-sensitive, and that is why the dimensions have to
+ * be right.
+ *
+ * This suite changes no behaviour; it is the executable statement of the premise the rest of
+ * #1482 rests on. The gate renders a byte stream into a headless terminal at a given geometry
+ * and looks for a composer marker with a bounding rule beneath it. Wrap the same bytes at a
+ * different width and the composer's rule lands on a different row — or the marker line is
+ * split — and a screen that classifies CLEAN at its true size classifies BUSY at a size a few
+ * columns off. Nothing recovers from that on its own: the row holds `busy` forever.
+ *
+ * Two things follow, and both are deliberate:
+ *   - The fix is NOT to make the classifier tolerant. Widening the search for a region end is
+ *     how status chrome below the composer gets counted as user text, or worse, how an
+ *     unbounded region returns a false CLEAN — the corruption direction the whole gate exists
+ *     to prevent. Fail-toward-hold stays.
+ *   - The fix is to keep Tower's dimensions equal to the process's, which is what the resize
+ *     and attach-reconciliation changes in this issue do.
+ *
+ * If a future change makes this test fail because the verdicts no longer differ, that is worth
+ * reading carefully: either the classifier became dimension-insensitive (check what it gave up
+ * to get there) or this fixture stopped exercising the boundary.
+ *
+ * Uses the already-committed 6 KB `claude-smallring-idle` capture at its true 139×63 — no new
+ * fixture, and nothing copied out of the (uncommitted, multi-MB) capture rig.
+ */
+describe('render-gate — dimension sensitivity (Issue #1482)', () => {
+  const load = (name: string) => gunzipSync(readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
+  const TRUE_COLS = 139;
+  const TRUE_ROWS = 63;
+
+  it('classifies CLEAN at the geometry it was captured at', async () => {
+    const replay = load('claude-smallring-idle.replay.bin.gz');
+    const verdict = await classifyScreen(
+      { replay, cols: TRUE_COLS, rows: TRUE_ROWS },
+      CLAUDE_PROFILE
+    );
+    expect(verdict.clean).toBe(true);
+    expect(verdict.detail).toBe('empty');
+  });
+
+  it('a FOUR-column disagreement flips the same bytes to an indefinite busy', async () => {
+    // The measured axis in this issue's refinement: today's captures are column-sensitive.
+    // Swept over this fixture at rows 61/63/65 and columns 131/135/139/143 — at the true 63
+    // rows, 139 and 143 classify CLEAN while 135 and 131 both classify `busy:no-region-end`.
+    // Four columns. That is well inside what a dropped resize, or a dimension restored from
+    // the database after a Tower restart, can produce — and `no-region-end` never clears on
+    // its own, so every message to that agent would hold forever.
+    const replay = load('claude-smallring-idle.replay.bin.gz');
+    const narrower = await classifyScreen(
+      { replay, cols: TRUE_COLS - 4, rows: TRUE_ROWS },
+      CLAUDE_PROFILE
+    );
+    expect(narrower.clean).toBe(false);
+    expect(narrower.reason).toBe('busy');
+    expect(narrower.detail).toBe('no-region-end');
+
+    // It fails in the SAFE direction — a geometry the gate cannot trust never yields a false
+    // CLEAN, only a hold. That is the invariant the fix must not trade away.
+    const verdicts = await Promise.all(
+      [TRUE_COLS - 8, TRUE_COLS - 4].map((cols) =>
+        classifyScreen({ replay, cols, rows: TRUE_ROWS }, CLAUDE_PROFILE)
+      )
+    );
+    for (const v of verdicts) expect(v.reason).toBe('busy');
+  });
+
+  it('a badly wrong geometry loses the composer entirely', async () => {
+    // 80x24 is the classic default a session falls back to when nothing negotiated a size.
+    const replay = load('claude-smallring-idle.replay.bin.gz');
+    const verdict = await classifyScreen({ replay, cols: 80, rows: 24 }, CLAUDE_PROFILE);
+    expect(verdict.clean).toBe(false);
+    // Held, and held for a reason a human can now READ off the row — which is what the first
+    // phase of this issue added. Before it, this and a human mid-draft were both just `busy`.
+    expect(['no-composer-marker', 'no-region-end', 'user-text']).toContain(verdict.detail);
   });
 });

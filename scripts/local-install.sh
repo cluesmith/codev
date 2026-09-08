@@ -18,7 +18,11 @@ unset npm_config_prefix
 unset PNPM_CONFIG_PREFIX
 
 # Pack — clear stale tarballs first so the install glob matches exactly one file.
-rm -f packages/core/*.tgz packages/sdk/*.tgz packages/codev/*.tgz
+# codev-types is packed+installed too: codev now imports it at runtime (the
+# request-auth wire constants), so it must be a real installed dependency, not
+# just resolved from the workspace at build time.
+rm -f packages/types/*.tgz packages/core/*.tgz packages/sdk/*.tgz packages/codev/*.tgz
+pnpm --filter @cluesmith/codev-types pack --pack-destination packages/types
 pnpm --filter @cluesmith/codev-core pack --pack-destination packages/core
 pnpm --filter @cluesmith/codev-sdk pack --pack-destination packages/sdk
 pnpm --filter @cluesmith/codev pack --pack-destination packages/codev
@@ -29,10 +33,11 @@ pnpm --filter @cluesmith/codev pack --pack-destination packages/codev
 # previously-installed version, npm's same-version short-circuit can leave
 # stale files on disk even after uninstall+install.
 GLOBAL_ROOT="$(npm root -g)"
-npm uninstall -g @cluesmith/codev @cluesmith/codev-core @cluesmith/codev-sdk 2>/dev/null || true
-rm -rf "$GLOBAL_ROOT/@cluesmith/codev" "$GLOBAL_ROOT/@cluesmith/codev-core" "$GLOBAL_ROOT/@cluesmith/codev-sdk"
+npm uninstall -g @cluesmith/codev @cluesmith/codev-core @cluesmith/codev-sdk @cluesmith/codev-types 2>/dev/null || true
+rm -rf "$GLOBAL_ROOT/@cluesmith/codev" "$GLOBAL_ROOT/@cluesmith/codev-core" "$GLOBAL_ROOT/@cluesmith/codev-sdk" "$GLOBAL_ROOT/@cluesmith/codev-types"
 
 npm install -g \
+  "$REPO_ROOT/packages/types/cluesmith-codev-types-"*.tgz \
   "$REPO_ROOT/packages/core/cluesmith-codev-core-"*.tgz \
   "$REPO_ROOT/packages/sdk/cluesmith-codev-sdk-"*.tgz \
   "$REPO_ROOT/packages/codev/cluesmith-codev-"*.tgz

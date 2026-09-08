@@ -16,7 +16,8 @@ Open the PR, run CMAP review on it, address feedback, and hand off to the archit
 The PR body must carry `Fixes #<N>` for the driving issue — one per issue if several — so GitHub auto-closes it on merge. **Exception:** a PR that only partially addresses the issue uses `Refs #<N>` or `Part of #<N>` instead, leaving it open for the follow-up. Substitute the real number for `<N>`; leave no `{{...}}` tag or `<N>` placeholder in the committed body.
 
 ```bash
-gh pr create --title "Fix #<N>: <brief description>" --body "$(cat <<'EOF'
+export CODEV_PR_TITLE="Fix #<N>: <brief description>"
+export CODEV_PR_BODY="$(cat <<'EOF'
 ## Summary
 
 <1-2 sentence description of the bug and fix>
@@ -38,7 +39,11 @@ Fixes #<N>  <!-- Substitute <N>; use "Refs #<N>" for a partial fix -->
 - [ ] All tests pass
 EOF
 )"
+
+{{pr_create_command}}
 ```
+
+The command above is your forge's `pr-create` concept, substituted by porch (`gh pr create` by default). It takes `CODEV_PR_TITLE` / `CODEV_PR_BODY` — optionally `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO` — from the environment, which is why they are exported rather than prefixed onto the command line: an inline override that spells `--title "$CODEV_PR_TITLE"` needs them set in the calling shell too. It prints `{"number": <int>, "url": "<url>"}`.
 
 ## Run CMAP review
 

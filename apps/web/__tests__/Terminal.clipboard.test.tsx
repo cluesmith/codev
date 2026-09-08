@@ -59,6 +59,7 @@ vi.mock('@xterm/addon-web-links', () => ({
 const mockUploadPasteImage = vi.fn();
 vi.mock('../src/lib/api.js', () => ({
   uploadPasteImage: (...args: unknown[]) => mockUploadPasteImage(...args),
+  getWebKey: () => null,
 }));
 
 // Mock WebSocket as a class

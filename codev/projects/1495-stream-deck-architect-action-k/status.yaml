@@ -1,0 +1,30 @@
+id: '1495'
+title: stream-deck-architect-action-k
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-18T00:55:14.215Z'
+    approved_at: '2026-08-18T01:23:36.137Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-18T01:41:08.218Z'
+    approved_at: '2026-08-18T01:58:51.019Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-18T02:05:59.513Z'
+    approved_at: '2026-08-18T02:13:46.624Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-08-18T00:50:28.125Z'
+updated_at: '2026-08-18T02:14:26.662Z'
+pr_history:
+  - phase: review
+    pr_number: 1499
+    branch: builder/pir-1495
+    created_at: '2026-08-18T02:01:18.539Z'
+pr_ready_for_human: false

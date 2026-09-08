@@ -53,8 +53,33 @@ describe('data-line source mapping', () => {
     expect(doc.querySelector('blockquote')?.getAttribute('data-line')).toBe('7');
   });
 
-  it('stamps data-line on a fenced code block', () => {
-    expect(doc.querySelector('[data-line="9"]')).not.toBeNull();
+  it('stamps data-line on the fence PRE, tabindex on both pre and code (#1396)', () => {
+    // The row identity lives on the top-level element — matching code_block, and making the
+    // `> [data-line]` row rules (position context, gutter) true for fences. The inner code
+    // keeps tabindex: it is the fence's scroll container and must stay keyboard-reachable.
+    const pre = doc.querySelector('pre');
+    expect(pre?.getAttribute('data-line')).toBe('9');
+    expect(pre?.getAttribute('tabindex')).toBe('0');
+    const code = pre?.querySelector('code');
+    expect(code?.getAttribute('data-line')).toBeNull();
+    expect(code?.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('indented code_block keeps its pre-level data-line (parity with fences)', () => {
+    const blockDoc = new DOMParser().parseFromString(
+      renderMarkdown('text\n\n    indented code line'),
+      'text/html',
+    );
+    expect(blockDoc.querySelector('pre')?.getAttribute('data-line')).toBe('2');
+  });
+
+  it('fence with a language info string keeps the language class alongside the row attrs', () => {
+    const langDoc = new DOMParser().parseFromString(
+      renderMarkdown('```js\nconst a = 1;\n```'),
+      'text/html',
+    );
+    expect(langDoc.querySelector('pre')?.getAttribute('data-line')).toBe('0');
+    expect(langDoc.querySelector('pre code')?.className).toContain('language-js');
   });
 
   it('stamps data-line on a table', () => {

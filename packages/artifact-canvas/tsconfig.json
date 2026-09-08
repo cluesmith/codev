@@ -8,5 +8,5 @@
     "types": ["vitest/globals", "node"],
     "noEmit": true
   },
-  "include": ["src", "tsup.config.ts", "vitest.config.ts"]
+  "include": ["src", "tsup.config.ts", "vitest.config.ts", "playwright.config.ts", "playwright"]
 }

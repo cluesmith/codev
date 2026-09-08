@@ -621,7 +621,7 @@ describe('mode resolution for the ad-hoc task lane (Spec 1273 F2)', () => {
   }
 
   it('defaults a no-porch builder to soft instead of hard-erroring', () => {
-    // Before this, `afx reset <task-builder>` could not run at all without an
+    // Before this, `afx refresh <task-builder>` could not run at all without an
     // explicit --mode: task spawns never render the `## Mode:` line.
     const ctx = resolveBuilderContext({
       fs: taskWorktree(),

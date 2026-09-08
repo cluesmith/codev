@@ -76,7 +76,7 @@ scar_rules:
       - CLAUDE.md
 
   - id: tower-restart-permission
-    canonical: "Never restart or stop Tower without explicit human permission — it kills every running builder session."
+    canonical: "Never restart or stop Tower without explicit human permission. Builder sessions survive a restart (detached shellpers), but Tower-mediated messaging, dashboards, and gate delivery drop until it is back."
     must_appear_on:
       - AGENTS.md
       - CLAUDE.md

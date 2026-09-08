@@ -21,6 +21,12 @@ export interface LensDescriptor {
   title: string;
   /** Text typed into the builder terminal — always ends with a space, no Enter. */
   refText: string;
+  /**
+   * 1-based inclusive line range the lens denotes; absent on the file-level
+   * lens (whole file). Comment mode (#1037) anchors its queued comment to this
+   * range; forward mode only needs `refText`.
+   */
+  range?: ChangedRange;
 }
 
 /**
@@ -180,10 +186,18 @@ function rangeLabel(start: number, end: number): string {
  *
  * A symbol lens that would anchor on line 0 is skipped — the file-level lens
  * already occupies that line.
+ *
+ * `label` is the verb rendered in each title — `Forward to Builder` (#789,
+ * default) or `Comment for Builder` (#1037). The anchors are identical in both
+ * modes; only the title and the command the provider attaches differ.
  */
-export function buildSymbolLensDescriptors(relPath: string, symbols: SymbolNode[]): LensDescriptor[] {
+export function buildSymbolLensDescriptors(
+  relPath: string,
+  symbols: SymbolNode[],
+  label = 'Forward to Builder',
+): LensDescriptor[] {
   const lenses: LensDescriptor[] = [
-    { line: 0, title: 'Forward to Builder', refText: buildBuilderFileRef(relPath) },
+    { line: 0, title: label, refText: buildBuilderFileRef(relPath) },
   ];
 
   const addLens = (s: SymbolNode): void => {
@@ -193,8 +207,9 @@ export function buildSymbolLensDescriptors(relPath: string, symbols: SymbolNode[
     const end = s.endLine + 1;
     lenses.push({
       line,
-      title: `Forward to Builder ${rangeLabel(start, end)}`,
+      title: `${label} ${rangeLabel(start, end)}`,
       refText: buildBuilderRangeRef(relPath, start, end),
+      range: { start, end },
     });
   };
 
@@ -230,8 +245,9 @@ export function buildAllLensDescriptors(
   relPath: string,
   symbols: SymbolNode[],
   ranges: ChangedRange[],
+  label = 'Forward to Builder',
 ): LensDescriptor[] {
-  const lenses = buildSymbolLensDescriptors(relPath, symbols);
+  const lenses = buildSymbolLensDescriptors(relPath, symbols, label);
   const usedLines = new Set(lenses.map(l => l.line));
   for (const r of ranges) {
     const line = Math.max(r.start - 1, 0);
@@ -239,9 +255,115 @@ export function buildAllLensDescriptors(
     usedLines.add(line);
     lenses.push({
       line,
-      title: `Forward to Builder ${rangeLabel(r.start, r.end)}`,
+      title: `${label} ${rangeLabel(r.start, r.end)}`,
       refText: buildBuilderRangeRef(relPath, r.start, r.end),
+      range: { start: r.start, end: r.end },
     });
   }
   return lenses;
+}
+
+/**
+ * The reference resolved for a cursor sitting on a given line — the keyboard
+ * equivalent of clicking a "Forward to Builder" lens (#1073). `kind` records
+ * which resolution step fired so the command handler can surface a status-bar
+ * note on the bare-file fallback.
+ */
+export type CursorRef =
+  | { kind: 'symbol' | 'hunk'; refText: string; range: ChangedRange }
+  | { kind: 'file'; refText: string };
+
+/**
+ * Resolve the reference to forward for a cursor on `cursorLine` (1-based,
+ * new-side). Resolution order (locked by #1073):
+ *
+ *   1. **Symbol** — the most specific *forwardable* symbol whose range contains
+ *      the cursor. "Forwardable" is exactly the symbol set the codelens exposes
+ *      (`buildSymbolLensDescriptors`), so the keyboard lands on the same range a
+ *      lens click would; among overlapping candidates the smallest span wins (a
+ *      method inside a class beats the class).
+ *   2. **Hunk** — the changed range containing the cursor (the registry entry's
+ *      new-side 1-based ranges).
+ *   3. **File** — the bare file path, when neither covers the cursor.
+ */
+export function resolveCursorRef(
+  relPath: string,
+  symbols: SymbolNode[],
+  hunks: ChangedRange[],
+  cursorLine: number,
+): CursorRef {
+  const symbol = smallestEnclosingSymbol(relPath, symbols, cursorLine);
+  if (symbol) {
+    return { kind: 'symbol', refText: buildBuilderRangeRef(relPath, symbol.start, symbol.end), range: symbol };
+  }
+  const hunk = enclosingHunk(hunks, cursorLine);
+  if (hunk) {
+    return { kind: 'hunk', refText: buildBuilderRangeRef(relPath, hunk.start, hunk.end), range: hunk };
+  }
+  return { kind: 'file', refText: buildBuilderFileRef(relPath) };
+}
+
+/**
+ * Resolve the reference for a cursor on `cursorLine`, **hunk first** — the
+ * precedence the "forward the hunk under the cursor" press verbs want (#1534):
+ *
+ *   1. **Hunk** — the changed range containing the cursor. A press named
+ *      "forward-hunk"/"feedback-hunk" forwards the *tight changed lines*, so when
+ *      a change covers the cursor it wins over the enclosing symbol; forwarding
+ *      the whole function on an ordinary in-function edit would silently broaden
+ *      the scope the verb names.
+ *   2. **Symbol** — the smallest forwardable symbol enclosing the cursor, used
+ *      only when no changed range covers it (e.g. a deletion-only spot the dial
+ *      rotation stopped on has no new-side hunk). Degrade instead of erroring.
+ *   3. **File** — the bare path, when neither covers the cursor.
+ *
+ * Contrast `resolveCursorRef` (symbol first), which the Cmd/Ctrl+K H keyboard
+ * verb keeps — that verb is "forward whatever context covers the cursor,
+ * most-specific-symbol-first" by its own design (#1073).
+ */
+export function resolveHunkFirstRef(
+  relPath: string,
+  symbols: SymbolNode[],
+  hunks: ChangedRange[],
+  cursorLine: number,
+): CursorRef {
+  const hunk = enclosingHunk(hunks, cursorLine);
+  if (hunk) {
+    return { kind: 'hunk', refText: buildBuilderRangeRef(relPath, hunk.start, hunk.end), range: hunk };
+  }
+  const symbol = smallestEnclosingSymbol(relPath, symbols, cursorLine);
+  if (symbol) {
+    return { kind: 'symbol', refText: buildBuilderRangeRef(relPath, symbol.start, symbol.end), range: symbol };
+  }
+  return { kind: 'file', refText: buildBuilderFileRef(relPath) };
+}
+
+/** The changed range containing `cursorLine`, if any. */
+function enclosingHunk(hunks: ChangedRange[], cursorLine: number): ChangedRange | undefined {
+  return hunks.find(h => cursorLine >= h.start && cursorLine <= h.end);
+}
+
+/**
+ * The smallest *forwardable* symbol range enclosing `cursorLine`, or undefined.
+ * "Forwardable" is exactly the symbol set the codelens exposes
+ * (`buildSymbolLensDescriptors`), so the keyboard lands on the same range a lens
+ * click would; among overlapping candidates the smallest span wins (a method
+ * inside a class beats the class). `buildSymbolLensDescriptors` skips a symbol
+ * anchored on line 0 (it collides with the file-level lens), so a declaration
+ * starting on file line 1 has no candidate here and falls through — the same
+ * "keyboard == codelens click" gap the lens itself has.
+ */
+function smallestEnclosingSymbol(
+  relPath: string,
+  symbols: SymbolNode[],
+  cursorLine: number,
+): ChangedRange | undefined {
+  let best: ChangedRange | undefined;
+  for (const lens of buildSymbolLensDescriptors(relPath, symbols)) {
+    const range = lens.range;
+    if (!range) { continue; } // the file-level lens has no range
+    if (cursorLine < range.start || cursorLine > range.end) { continue; }
+    if (!best || range.end - range.start < best.end - best.start) { best = range; }
+  }
+  return best;
 }

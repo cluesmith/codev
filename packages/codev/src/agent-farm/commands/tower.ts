@@ -8,12 +8,15 @@ import http from 'node:http';
 import { logger, fatal } from '../utils/logger.js';
 import { spawn } from 'node:child_process';
 import { getConfig } from '../utils/config.js';
-import { execSync } from 'node:child_process';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { ensureLocalKey } from '@cluesmith/codev-core/auth';
+import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { isPortAvailable } from '../utils/shell.js';
 import Database from 'better-sqlite3';
 import { getGlobalDbPath } from '../db/index.js';
 import { activeStateDbPath, planMigration } from '../db/consolidate.js';
+import { sanitizeAgentEnv, findClaudeSessionMarkers } from '../../lib/agent-env.js';
+import { getProcessesOnPort } from '../utils/port.js';
 
 // Log file location
 const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
@@ -109,6 +112,15 @@ async function isPortInUse(port: number): Promise<boolean> {
  */
 async function isServerResponding(port: number): Promise<boolean> {
   return new Promise((resolve) => {
+    // /api/status is a keyed route (advisory GHSA-xvjp-7748-v88v). This readiness
+    // probe is a trusted local caller, so it sends the shared local key like any
+    // other client — otherwise it 401s forever and startup never detects "ready".
+    const headers: Record<string, string> = {};
+    try {
+      headers[TOWER_KEY_HEADER] = ensureLocalKey();
+    } catch {
+      // Key unavailable — fall through unauthenticated (probe will just fail).
+    }
     const req = http.request(
       {
         hostname: '127.0.0.1',
@@ -116,6 +128,7 @@ async function isServerResponding(port: number): Promise<boolean> {
         path: '/api/status',
         method: 'GET',
         timeout: 2000,
+        headers,
       },
       (res) => {
         resolve(res.statusCode === 200);
@@ -146,29 +159,7 @@ async function waitForServer(port: number): Promise<boolean> {
   return false;
 }
 
-/**
- * Get the PID(s) of the process *listening* on a port (the server), not its
- * clients.
- *
- * `-sTCP:LISTEN` is load-bearing (#991): without it, `lsof -ti :PORT` also
- * returns every process holding an *established* client socket to the port —
- * notably the VSCode extension host (its SSE stream + terminal WebSockets) and
- * dashboard browsers. `afx tower stop` SIGTERMs whatever this returns, so the
- * unfiltered form would kill the editor's extension host (and every open
- * terminal with it), not just the Tower server.
- */
-export function getProcessesOnPort(port: number): number[] {
-  try {
-    const result = execSync(`lsof -ti :${port} -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8' });
-    return result
-      .trim()
-      .split('\n')
-      .map((line) => parseInt(line, 10))
-      .filter((pid) => !isNaN(pid));
-  } catch {
-    return [];
-  }
-}
+export { getProcessesOnPort } from '../utils/port.js';
 
 /**
  * Start the tower dashboard
@@ -237,10 +228,20 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
   logToFile(`Starting tower server on port ${port}`);
   logToFile(`Command: ${command} ${args.join(' ')}`);
 
+  // Issue #1219: scrub Claude Code session markers before daemonizing. Starting
+  // Tower from inside a Claude Code session is routine, and the markers it plants
+  // would otherwise bake into the daemon and cascade into every agent it spawns,
+  // silently disabling transcript saving (and therefore resume) for all of them.
+  const inheritedMarkers = findClaudeSessionMarkers(process.env);
+  if (inheritedMarkers.length > 0) {
+    logger.info(`Scrubbed inherited Claude Code session markers: ${inheritedMarkers.join(', ')}`);
+    logToFile(`Scrubbed inherited Claude Code session markers: ${inheritedMarkers.join(', ')}`);
+  }
+
   // Start tower server fully detached - stdio: 'ignore' ensures parent can exit
   const serverProcess = spawn(command, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: sanitizeAgentEnv(process.env),
     detached: true,
     stdio: 'ignore', // Must be 'ignore' for true daemonization
   });

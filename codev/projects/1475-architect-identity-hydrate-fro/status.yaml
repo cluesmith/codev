@@ -1,0 +1,30 @@
+id: '1475'
+title: architect-identity-hydrate-fro
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-18T03:18:33.161Z'
+    approved_at: '2026-08-18T03:34:47.147Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-18T03:47:57.238Z'
+    approved_at: '2026-08-18T04:20:58.696Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-18T04:31:58.998Z'
+    approved_at: '2026-08-18T10:15:27.623Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-18T03:14:15.995Z'
+updated_at: '2026-08-18T10:15:33.343Z'
+pr_history:
+  - phase: review
+    pr_number: 1511
+    branch: builder/pir-1475
+    created_at: '2026-08-18T04:23:28.883Z'
+pr_ready_for_human: false

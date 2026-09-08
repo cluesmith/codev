@@ -91,3 +91,86 @@ export function assertAgyLaneAllowedUnderTest(): void {
     'CODEV_ALLOW_REAL_AGY=1 if this test genuinely means to run the real CLI.',
   );
 }
+
+/**
+ * True when cloud-mutating side effects must be refused because we are running
+ * under a test (#1515).
+ *
+ * "Cloud-mutating" means the two irreversible halves of tunnel disconnect:
+ * the server-side deregister of the tower ID, and the deletion of the local
+ * cloud credentials. Both act on whatever `~/.agent-farm/cloud-config.json`
+ * happens to be visible — which, before the agent-farm dir became isolatable,
+ * was the developer's real one.
+ *
+ * `NODE_ENV` is checked alongside `VITEST` because the tower-test helpers set
+ * `NODE_ENV=test` explicitly on the Towers they spawn, and `VITEST` is checked
+ * alongside `NODE_ENV` because children inherit it through `{ ...process.env }`
+ * even when a suite forgets to set `NODE_ENV`. Either marker is enough.
+ *
+ * `isUnderTestRunner()` above deliberately refuses generic markers, because a
+ * false positive there makes a real consultation *throw*. The trade here runs
+ * the other way, so `NODE_ENV` earns its place: a false positive costs a user
+ * running Tower with `NODE_ENV=test` a 403 that names the override, while a
+ * false negative deregisters their Tower and drops the tunnel until they
+ * notice. Loud and recoverable beats silent and destructive.
+ */
+export function isUnderTest(): boolean {
+  return isUnderTestRunner() || process.env.NODE_ENV === 'test';
+}
+
+/**
+ * Explicit opt-in for a test that genuinely means to exercise the cloud
+ * disconnect path — necessarily one that owns a fake cloud config in an
+ * isolated `CODEV_AGENT_FARM_DIR`. Unset by default, so no suite can deregister
+ * a real Tower by omission.
+ */
+export function cloudMutationOptIn(): boolean {
+  const raw = process.env.CODEV_ALLOW_TEST_CLOUD_MUTATION;
+  return raw === '1' || raw === 'true';
+}
+
+/**
+ * True when a cloud-mutating operation should be refused right now.
+ */
+export function cloudMutationBlocked(): boolean {
+  return isUnderTest() && !cloudMutationOptIn();
+}
+
+/** The `/api/tunnel/` subpaths that mutate cloud state. */
+const TUNNEL_MUTATION_PATH = /^\/api\/tunnel\/(connect|disconnect)(?:[/?#]|$)/;
+
+/**
+ * Guard the *client* half of #1515: refuse to drive tunnel connect/disconnect
+ * against the **default** Tower port from under a test runner.
+ *
+ * The server-side guard cannot cover this case. A developer's real Tower on
+ * :4100 runs with neither `VITEST` nor `NODE_ENV=test`, so it will happily
+ * serve a disconnect — and `vitest-e2e-setup.ts` hands every loopback `fetch`
+ * the real `~/.agent-farm/local-key`, so such a request arrives fully
+ * authenticated. That is how a suite run deregistered a live Tower and left its
+ * tunnel down for hours.
+ *
+ * Scoped as narrowly as it can be: only the two mutating subpaths, only on the
+ * default port. A test that spawns its own Tower talks to an ephemeral port and
+ * is unaffected; `/api/tunnel/status` is a read and stays allowed.
+ */
+export function assertTunnelMutationAllowedUnderTest(
+  path: string,
+  targetsDefaultTowerPort: boolean,
+): void {
+  if (!targetsDefaultTowerPort) return;
+  if (!TUNNEL_MUTATION_PATH.test(path)) return;
+  if (!cloudMutationBlocked()) return;
+
+  const message =
+    `Refusing to POST ${path} to the default Tower port from under a test ` +
+    'runner (#1515). That port is the developer\'s real Tower, and the request ' +
+    'would carry their real local key: a disconnect there deregisters their ' +
+    'Tower server-side and deletes their cloud credentials. Point the client at ' +
+    'a test Tower\'s port, or set CODEV_ALLOW_TEST_CLOUD_MUTATION=1 if this test ' +
+    'genuinely means to mutate real cloud state.';
+  // signalTunnel() swallows its errors, so make sure the reason is visible even
+  // when the throw is caught and discarded.
+  console.error(new Error(message).stack);
+  throw new Error(message);
+}

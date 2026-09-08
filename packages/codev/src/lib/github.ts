@@ -9,10 +9,12 @@
  * @see codev/specs/589-non-github-repository-support.md
  */
 
+import { execFile } from 'node:child_process';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
-import { executeForgeCommand, type ForgeConfig } from './forge.js';
+import { executeForgeCommand, executeForgeCommandDetailed, resolveForgeBackend, type ForgeConfig, type ForgeCommandResult } from './forge.js';
+import type { RateLimitProbeResult } from './forge-rate-limit.js';
 import { getRepoInfo } from './team-github.js';
-import type { IssueViewResult, PrListItem, IssueListItem } from './forge-contracts.js';
+import type { IssueViewResult, PrListItem, PrViewResult, IssueListItem } from './forge-contracts.js';
 
 // =============================================================================
 // Types — re-export forge-contracts types under generic names
@@ -22,6 +24,8 @@ import type { IssueViewResult, PrListItem, IssueListItem } from './forge-contrac
 export type ForgeIssue = IssueViewResult;
 /** A single PR/MR item as returned by the `pr-list` concept command. */
 export type ForgePR = PrListItem;
+/** A single PR/MR as returned by the `pr-view` concept command. */
+export type ForgePRView = PrViewResult;
 /** A single issue item as returned by the `issue-list` concept command. */
 export type ForgeIssueListItem = IssueListItem;
 
@@ -83,6 +87,27 @@ export async function fetchIssueOrThrow(
 export const fetchGitHubIssue = fetchIssue;
 /** @deprecated Use fetchIssueOrThrow instead. */
 export const fetchGitHubIssueOrThrow = fetchIssueOrThrow;
+
+/**
+ * Fetch a single PR by number.
+ * Routes through the `pr-view` concept command.
+ * Returns null if the concept command fails (bad number, forge unavailable).
+ *
+ * @param prId - PR identifier (number or string)
+ * @param options - Optional forge config and cwd
+ */
+export async function fetchPR(
+  prId: string | number,
+  options?: { cwd?: string; forgeConfig?: ForgeConfig | null },
+): Promise<ForgePRView | null> {
+  const result = await executeForgeCommand('pr-view', {
+    CODEV_PR_NUMBER: String(prId),
+  }, {
+    cwd: options?.cwd,
+    forgeConfig: options?.forgeConfig,
+  });
+  return result as ForgePRView | null;
+}
 
 /**
  * Fetch open PRs for the current repo.
@@ -177,20 +202,28 @@ export async function fetchRecentlyClosed(
   // entire sinceDate day, collapsing the 24h window to "since UTC midnight"
   // (≈0h just after 00:00Z) and silently hiding genuinely-recent closures.
   // Seconds precision (no millis) matches GitHub's documented format.
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    .toISOString().replace(/\.\d{3}Z$/, 'Z');
   const result = await executeForgeCommand('recently-closed', {
-    CODEV_SINCE_DATE: since,
+    CODEV_SINCE_DATE: sinceTimestamp24h(),
   }, {
     cwd,
     forgeConfig,
   });
-  if (!result || !Array.isArray(result)) return result as ForgeIssueListItem[] | null;
+  return withinLast24h(result, 'closedAt') as ForgeIssueListItem[] | null;
+}
 
-  // Filter to last 24 hours (concept command may return more)
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return (result as ForgeIssueListItem[]).filter(
-    i => i.closedAt && new Date(i.closedAt).getTime() >= cutoff,
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** ISO-8601 at seconds precision, 24 h ago (GitHub's documented datetime format). */
+function sinceTimestamp24h(): string {
+  return new Date(Date.now() - DAY_MS).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+/** Filter concept output to the last 24 hours (a concept command may return more). */
+function withinLast24h(result: unknown, field: 'closedAt' | 'mergedAt'): unknown {
+  if (!result || !Array.isArray(result)) return result;
+  const cutoff = Date.now() - DAY_MS;
+  return (result as Array<Record<string, string | undefined>>).filter(
+    item => item[field] && new Date(item[field] as string).getTime() >= cutoff,
   );
 }
 
@@ -206,21 +239,62 @@ export async function fetchRecentMergedPRs(
   // Full ISO-8601 timestamp (seconds precision), not a bare date — same
   // GitHub bare-date `>` day-exclusion bug as fetchRecentlyClosed.
   // `merged:>$CODEV_SINCE_DATE` against a precise timestamp is exact.
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    .toISOString().replace(/\.\d{3}Z$/, 'Z');
   const result = await executeForgeCommand('recently-merged', {
-    CODEV_SINCE_DATE: since,
+    CODEV_SINCE_DATE: sinceTimestamp24h(),
   }, {
     cwd,
     forgeConfig,
   });
-  if (!result || !Array.isArray(result)) return result as ForgePR[] | null;
+  return withinLast24h(result, 'mergedAt') as ForgePR[] | null;
+}
 
-  // Filter to last 24 hours (concept command may return more)
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return (result as ForgePR[]).filter(
-    pr => pr.mergedAt && new Date(pr.mergedAt).getTime() >= cutoff,
-  );
+// =============================================================================
+// Overview fetches (#1645) — keep the failure so the cache can tell a rate
+// limit from a missing CLI, and know which backend each concept spends on.
+// =============================================================================
+
+export type OverviewConcept = 'pr-list' | 'issue-list' | 'recently-closed' | 'recently-merged' | 'user-identity';
+
+/** Resolved backend key for an overview concept in `cwd` (see `resolveForgeBackend`). */
+export function overviewBackend(concept: OverviewConcept, cwd: string): string | null {
+  return resolveForgeBackend(concept, { cwd });
+}
+
+/** Run one overview concept, post-processed exactly like its `fetch*` counterpart. */
+export async function fetchForOverview(concept: OverviewConcept, cwd: string): Promise<ForgeCommandResult> {
+  switch (concept) {
+    case 'user-identity': {
+      const r = await executeForgeCommandDetailed(concept, {}, { cwd, raw: true });
+      return { ...r, data: typeof r.data === 'string' && r.data.trim() ? r.data.trim() : null };
+    }
+    case 'recently-closed':
+    case 'recently-merged': {
+      const r = await executeForgeCommandDetailed(concept, { CODEV_SINCE_DATE: sinceTimestamp24h() }, { cwd });
+      return { ...r, data: withinLast24h(r.data, concept === 'recently-closed' ? 'closedAt' : 'mergedAt') };
+    }
+    default:
+      return executeForgeCommandDetailed(concept, {}, { cwd });
+  }
+}
+
+/**
+ * Ask gh for the GraphQL bucket's reset instant. `gh api rate_limit` is free
+ * (it spends no quota) but is known to misreport a healthy bucket, so callers
+ * only trust it when it agrees the budget is gone (`remaining === 0`).
+ */
+export function probeGhGraphqlRateLimit(_backend: string, cwd: string): Promise<RateLimitProbeResult | null> {
+  return new Promise(resolvePromise => {
+    execFile('gh', ['api', 'rate_limit', '--jq', '.resources.graphql'], { cwd, timeout: 15_000 }, (err, stdout) => {
+      if (err) return resolvePromise(null);
+      try {
+        const parsed = JSON.parse(stdout) as { remaining?: unknown; reset?: unknown };
+        if (typeof parsed.remaining !== 'number' || typeof parsed.reset !== 'number') return resolvePromise(null);
+        resolvePromise({ remaining: parsed.remaining, resetAt: parsed.reset * 1000 });
+      } catch {
+        resolvePromise(null);
+      }
+    });
+  });
 }
 
 // =============================================================================

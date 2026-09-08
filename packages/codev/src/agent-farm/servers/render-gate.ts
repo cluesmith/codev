@@ -35,7 +35,10 @@
  * the same capped seed), not a round-2 regression; tracked as #1361.
  *
  * Classifier (fail-toward-not-clean): CLEAN requires
- *   (a) a recognized composer marker on the screen, AND
+ *   (a) a recognized composer marker on the screen — a text match, plus whatever further
+ *       positive evidence the profile demands that the row is the LIVE composer and not
+ *       just a row the app prefixes alike (agy anchors on the cursor row and the marker's
+ *       own palette color; see `markerRequiresCursorRow` / `markerFgPalette`), AND
  *   (b) a positively-bounded composer region (a rule/status line BELOW the
  *       marker — never a scan to the screen bottom), AND
  *   (c) zero normal-intensity (non-dim), non-whitespace, non-chrome cells in that
@@ -152,6 +155,29 @@ export interface GateProfile {
    * measures distance to the status line rather than the composer's height.
    */
   growsWithDraft?: true;
+   * Optional per-app marker anchor: when true, the marker row must ALSO be the row
+   * holding the buffer cursor. `markerPattern` alone is a text test, and a text test
+   * cannot tell a composer from any other row an app happens to prefix the same way —
+   * agy's `> ` matches its slash-menu selection cursor and its per-turn transcript echo
+   * as readily as its composer (measured, #1474). The cursor is the one signal only the
+   * live input row carries, so this converts "a row that looks like a prompt" into "the
+   * row the user would actually type into". Fail-safe: an app whose cursor is parked
+   * elsewhere yields NO marker ⇒ `no-composer-marker` ⇒ hold. Left unset, the marker is
+   * the text match alone (claude/codex behavior is unchanged).
+   */
+  markerRequiresCursorRow?: boolean;
+  /**
+   * Optional per-app marker anchor: the 16-color palette index the marker GLYPH cell must
+   * render in. The color-attribute analogue of {@link markerRequiresCursorRow}, and the
+   * signal that separates agy's composer marker (palette 12, bright blue) from its
+   * transcript echo of a submitted turn (palette 4 — measured, #1474). Left unset, the
+   * marker cell's color is not examined.
+   *
+   * The cell sampled is the one at the marker MATCH's start column ({@link markerSpanStart}),
+   * not column 0 — so this anchor stays correct for a profile whose marker is not at the row
+   * start, which kimi's boxed `│ > ` is (Issue #1201).
+   */
+  markerFgPalette?: number;
   /**
    * Optional per-app placeholder signal: a 16-color palette index whose cells are
    * treated as placeholder/hint chrome (ignored), NOT user text. This is the
@@ -211,13 +237,95 @@ function screenLines(term: HeadlessTerminal, rows: number): string[] {
   return lines;
 }
 
-/** Last row index whose text starts with the profile's composer marker, or -1. */
-function findMarkerRow(lines: string[], markerPattern: RegExp): number {
+/**
+ * Every line the mirror still holds — scrollback AND viewport — right-trimmed (Issue #1573).
+ *
+ * The gate itself deliberately reads only the viewport ({@link screenLines}): a composer lives
+ * at the bottom of the screen, and history is noise for classifying it. Echo verification wants
+ * the opposite reach. A long message pushes its own header off the top while it is still being
+ * typed, so the only place the header survives is scrollback — measured with a 300-line send,
+ * where the header sat at buffer line 6 under a viewport starting at 209.
+ *
+ * Bounded by the mirror's own `SCREEN_SCROLLBACK` (1000 lines), and read once per delivery
+ * rather than per gate check, so the O(history) scan is not on any hot path.
+ */
+export function bufferLines(term: HeadlessTerminal): string[] {
+  const buf = term.buffer.active;
+  const lines: string[] = [];
+  for (let i = 0; i < buf.length; i++) {
+    const line = buf.getLine(i);
+    lines.push(line ? line.translateToString(true).trimEnd() : '');
+  }
+  return lines;
+}
+
+/**
+ * Last row index that is the profile's composer marker, or -1 when no row qualifies.
+ *
+ * The text match (`markerPattern`) is the necessary condition; a profile may demand
+ * further POSITIVE evidence that the row is the live composer and not merely a row the
+ * app prefixes the same way (`markerRequiresCursorRow`, `markerFgPalette` — both measured
+ * per app, see their docs on {@link GateProfile}). Last-match-wins is retained: with the
+ * anchors applied, the qualifying rows are the composer, and the lowest one is it.
+ *
+ * Why the anchors exist (#1474): agy's marker is `> `, which its slash-menu selection
+ * cursor and its per-turn transcript echo also render — and the menu's item rows sit BELOW
+ * the composer, so text-only last-match-wins bounded the wrong region on real screens.
+ * Requiring the cursor row (and the marker's own color) makes the composer the only row
+ * that can qualify. A row that fails the anchors is simply not a marker, so an app that
+ * drifts fails toward `no-composer-marker` ⇒ hold, never toward a false clean.
+ *
+ * `cursorRow` is viewport-relative, matching `lines`' indexing from `viewportY` (the same
+ * convention {@link isGhostCursorCell} uses) — the caller converts it from xterm's
+ * baseY-relative `cursorY`.
+ */
+function findMarkerRow(
+  lines: string[],
+  profile: GateProfile,
+  buf: HeadlessTerminal['buffer']['active'],
+  top: number,
+  cursorRow: number,
+  cell: BufferCell,
+): number {
   let markerRow = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (markerPattern.test(lines[i])) markerRow = i;
+    if (!profile.markerPattern.test(lines[i])) continue;
+    if (profile.markerRequiresCursorRow && i !== cursorRow) continue;
+    if (profile.markerFgPalette !== undefined) {
+      const line = buf.getLine(top + i);
+      if (!line) continue;
+      // The marker GLYPH's own cell, wherever the profile puts it — not column 0. See
+      // {@link markerSpanStart}: a column-0 read is right for every marker anchored at the row
+      // start and wrong for a boxed composer like kimi's, whose `>` is at column 3.
+      line.getCell(markerSpanStart(lines[i], profile.markerPattern), cell);
+      if (!cell.isFgPalette() || cell.getFgColor() !== profile.markerFgPalette) continue;
+    }
+    markerRow = i;
   }
   return markerRow;
+}
+
+/**
+ * Start column of the composer marker's MATCH on its own row — the cell whose colour a
+ * `markerFgPalette` anchor examines.
+ *
+ * Exists because the anchor's first implementation read `getCell(0)`, a hardcoded column 0.
+ * That is correct for every profile whose marker pattern is anchored at the row start
+ * (claude `^❯`, codex `^›`, agy `^>`), and silently wrong for the first profile whose marker
+ * is not — kimi renders `│ > ` inside a rounded box, so its `>` glyph sits at column 3 and a
+ * column-0 read would sample the box edge instead. Latent rather than broken today (kimi sets
+ * no palette anchor), but it is a trap laid directly under the one profile that would spring
+ * it, so it is generalized here rather than left for the next person.
+ *
+ * The same narrow-glyph argument {@link markerSpanEnd} rests on applies: every shipped marker
+ * pattern admits only single-column glyphs before its match, so a string index is a cell
+ * column. `0` when the pattern does not match, which cannot happen on a row that already
+ * passed the text test.
+ */
+export function markerSpanStart(line: string, pattern: RegExp): number {
+  const stateless = new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ''));
+  const m = stateless.exec(line);
+  return m ? m.index : 0;
 }
 
 /**
@@ -391,8 +499,19 @@ export function classifyBuffer(
 ): GateVerdict {
   const buf = term.buffer.active;
   const lines = screenLines(term, rows);
+  const top = buf.viewportY;
+  const cell = buf.getNullCell();
+  const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
+  // Cursor position, made viewport-relative to match `lines`/`row`, which index from
+  // `viewportY`. `cursorY` is baseY-relative, NOT viewport-relative — the two coincide only
+  // while the viewport sits at the bottom of the scrollback, which is the usual case but not
+  // xterm's contract. Converting through baseY costs nothing and removes the assumption; the
+  // marker anchor below compares row indices, so a stale scroll position would otherwise
+  // move the cursor off the composer row and hold forever.
+  const cursorRow = buf.baseY + buf.cursorY - top;
+  const cursorCol = buf.cursorX;
 
-  const markerRow = findMarkerRow(lines, profile.markerPattern);
+  const markerRow = findMarkerRow(lines, profile, buf, top, cursorRow, cell);
   if (markerRow === -1) {
     // No composer marker: a wrapper/boot screen, a full-screen picker with no marker, a
     // mirror that has not yet repainted a coherent frame, or an unrenderable snapshot.
@@ -415,18 +534,12 @@ export function classifyBuffer(
     // continue above. Hold — the same fail-toward-hold call as `no-region-end`.
     return { clean: false, reason: 'busy', detail: 'no-region-start' };
   }
-  const top = buf.viewportY;
   // Re-compiled without g/y for the same reason markerSpanEnd does it: a stateful
   // profile regex must not let one row's match position affect the next row's test.
   const markerTest = new RegExp(
     profile.markerPattern.source,
     profile.markerPattern.flags.replace(/[gy]/g, ''),
   );
-  const cell = buf.getNullCell();
-  const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
-  // Cursor position is viewport-relative (matching `row`, which indexes from `viewportY`).
-  const cursorRow = buf.cursorY;
-  const cursorCol = buf.cursorX;
   let userCells = 0;
 
   for (let row = startRow; row < endRow; row++) {

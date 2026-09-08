@@ -17,8 +17,15 @@ import { loadState } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { TowerClient } from '../lib/tower-client.js';
+import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
+import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
+import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
-const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
+/**
+ * `--file` attachment cap. One constant with the message-body ceiling (Issue #1573): the file's
+ * content is APPENDED to the message, so two independent numbers could only ever disagree.
+ */
+const MAX_FILE_SIZE = MAX_MESSAGE_BYTES;
 
 /**
  * Detect workspace root from CWD by walking up to find .git or .codev/config.json.
@@ -168,6 +175,41 @@ export function detectCurrentBuilderId(): string | null {
 }
 
 /**
+ * The sender identity for a message that does NOT originate in a builder worktree:
+ * the *specific* architect, as the `architect:<name>` address form (issue #1478).
+ *
+ * Collapsing every architect sender to the bare string `architect` discarded the one
+ * fact both attribution surfaces exist to show — `afx inbox`'s FROM → TO column and
+ * the builder's composer header.
+ *
+ * **Why the env is read directly instead of via `currentArchitectName()`** (whose
+ * absent-value default is `main`): Tower injects `CODEV_ARCHITECT_NAME` into EVERY
+ * architect terminal it starts — `main` included (`tower-instances.ts` uses
+ * `DEFAULT_ARCHITECT_NAME`; the shellper-restart path re-injects `role_id || 'main'`).
+ * So a missing value does not mean "the main architect", it means "not an architect
+ * terminal" (a plain shell, a script, CI). Defaulting those to `architect:main` would
+ * turn today's honest ambiguity into a specific FALSE attribution — precisely the
+ * laundering of an unverified identity that #1094 exists to prevent. They keep the bare
+ * `architect` they send today, and every real architect terminal gains its name.
+ *
+ * The name is validated against `ARCHITECT_NAME_PATTERN` before it becomes an identity,
+ * so a malformed env value degrades to `architect` rather than travelling into a
+ * recipient's composer framing.
+ *
+ * The address form is deliberate: it is what Tower already accepts as an architect
+ * address, it stores directly as the mailbox row's `from_agent`, and it stays outside
+ * `looksLikeBuilderId`'s heuristic — so sender-affinity routing and the #1094
+ * anti-spoofing warning behave exactly as they did with the generic string.
+ */
+export function architectSenderId(): string {
+  const name = process.env.CODEV_ARCHITECT_NAME?.trim();
+  if (!name || name.length > MAX_ARCHITECT_NAME_LENGTH || !ARCHITECT_NAME_PATTERN.test(name)) {
+    return 'architect';
+  }
+  return `architect:${name}`;
+}
+
+/**
  * Read file content for --file flag, with size validation.
  */
 function readFileContent(filePath: string): string {
@@ -199,7 +241,7 @@ async function readStdin(): Promise<string> {
  */
 interface SendToAllResults {
   delivered: string[];
-  held: Array<{ id: string; reason?: string; mailboxId?: string }>;
+  held: Array<{ id: string; reason?: string; detail?: string; mailboxId?: string }>;
   /** Spec 1307 `--delay`: accepted for later delivery, not sent now. */
   scheduled: string[];
   failed: string[];
@@ -249,7 +291,12 @@ async function sendToAll(
       if (result.scheduled) {
         results.scheduled.push(builder.id);
       } else if (result.held) {
-        results.held.push({ id: builder.id, reason: result.reason, mailboxId: result.mailboxId });
+        results.held.push({
+          id: builder.id,
+          reason: result.reason,
+          detail: result.detail, // Issue #1482: which kind of hold, not just that it held
+          mailboxId: result.mailboxId,
+        });
       } else {
         results.delivered.push(builder.id);
       }
@@ -303,18 +350,26 @@ export async function send(options: SendOptions): Promise<void> {
     message = message + '\n\nAttached content:\n```\n' + fileContent + '\n```';
   }
 
+  // Mirror Tower's body ceiling here (Issue #1573) so the refusal is local, immediate and
+  // identically worded, instead of a 400 the user has to interpret. Checked AFTER the --file
+  // append because that content travels in the same body and counts against the same limit.
+  const tooLarge = messageLimitError(message);
+  if (tooLarge) fatal(tooLarge);
+
   logger.header('Sending Instruction');
 
   // Detect workspace for target resolution and sender provenance
   const workspace = detectWorkspaceRoot() ?? undefined;
 
-  // Detect sender identity (builder ID if in a worktree, otherwise 'architect').
+  // Detect sender identity: builder ID if in a worktree, otherwise this terminal's
+  // architect — `architect:<name>` when the terminal names one, else the bare
+  // `architect` (issue #1478; see architectSenderId for why it never guesses a name).
   // In a confirmed builder worktree, detectCurrentBuilderId throws when the
   // canonical id can't be verified — abort loudly here rather than send an
   // unverified `from` that Tower would silently route to 'main' (issue #1094).
   let from: string;
   try {
-    from = detectCurrentBuilderId() ?? 'architect';
+    from = detectCurrentBuilderId() ?? architectSenderId();
   } catch (err) {
     fatal(err instanceof Error ? err.message : String(err));
   }
@@ -334,7 +389,9 @@ export async function send(options: SendOptions): Promise<void> {
       logger.success(`Delivered to ${results.delivered.length} builder(s): ${results.delivered.join(', ')}`);
     }
     if (results.held.length > 0) {
-      const detail = results.held.map((h) => `${h.id} (${h.reason ?? 'pending'})`).join(', ');
+      const detail = results.held
+        .map((h) => `${h.id} (${formatVerdict(h.reason, h.detail, 'pending')})`)
+        .join(', ');
       logger.info(
         `Held for ${results.held.length} builder(s): ${detail}. ` +
           `Each delivers automatically when its prompt is clear.`,
@@ -379,12 +436,43 @@ export async function send(options: SendOptions): Promise<void> {
         logger.info('Persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
       } else if (result.held) {
         logger.info(
-          `Message held for ${result.resolvedTo ?? target} (${result.reason ?? 'pending'})` +
+          `Message held for ${result.resolvedTo ?? target} (${formatVerdict(result.reason, result.detail, 'pending')})` +
             `${result.mailboxId ? ` — mailbox id ${result.mailboxId}` : ''}. ` +
             `It delivers automatically when the prompt is clear.`,
         );
+        // Issue #1482: a hold the gate could not classify will NOT clear on its own, so saying
+        // "it delivers automatically" and stopping there would be misleading for exactly the
+        // case that needs a human. Say so, once, only for that case.
+        if (isUnverifiableVerdict(result.reason, result.detail)) {
+          logger.warn(
+            `The render gate could not verify that composer (${result.detail ?? result.reason}), ` +
+              `so this hold will not clear by itself — inspect with 'afx inbox'.`,
+          );
+        }
       } else {
-        logger.success(`Message delivered to ${result.resolvedTo ?? target}`);
+        // Issue #1573: report WHAT was sent, not just that a send happened. The failures this
+        // echo exists for (#1564: a ~1,900-char message arriving as its final ~30) all read as
+        // an unqualified success at the sender.
+        const size = result.bodyLength !== undefined ? ` (${result.bodyLength} bytes)` : '';
+        // Issue #1584: say so when the bytes were accepted but the terminal never showed them.
+        // Tower records that row as delivered and does NOT re-write it — re-writing is what
+        // re-injected one message dozens of times in #1583 — so this line is the only place the
+        // sender learns the delivery was unconfirmed. `verified` absent (older Tower, or a body
+        // with no header worth matching) keeps today's wording.
+        const unverified = result.verified === false ? ' (unverified — header not seen on the terminal)' : '';
+        logger.success(`Message delivered to ${result.resolvedTo ?? target}${size}${unverified}`);
+        // Issue #1365: an interrupt/escape that gave up waiting for the terminal's submission
+        // lock wrote unserialized, so its bytes may have interleaved with the delivery it
+        // skipped. The row is claimed `delivered` before the write (un-claiming would risk a
+        // double delivery), so without this the sender would read an unqualified success for a
+        // possibly-mangled body. Warn rather than fail: the write did happen.
+        if (result.degraded) {
+          logger.warn(
+            `...but it was NOT serialized against a write already in flight on that terminal ` +
+              `(${result.degradedReason ?? 'wait ceiling expired'}), so it may have interleaved. ` +
+              `Check the agent's prompt before assuming it read cleanly.`,
+          );
+        }
       }
     } catch (error) {
       fatal(error instanceof Error ? error.message : String(error));

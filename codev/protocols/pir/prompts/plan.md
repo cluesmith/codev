@@ -114,7 +114,7 @@ Then **stay in the interactive session**. Do not exit. Wait for the user's next 
 ## What NOT to Do
 
 - Don't write code — that's the implement phase
-- Don't run `porch approve` yourself — only the human can approve the gate
+- Don't run `porch approve` on your own initiative — only when the architect relays the human's approval
 - Don't post the plan content as a GitHub issue comment — the plan lives in the file, not the issue thread. A one-line pointer comment on the issue is fine if you think it helps the discussion.
 - Don't exit the interactive session at the gate
 

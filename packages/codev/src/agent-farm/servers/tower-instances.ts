@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import { encodeWorkspacePath } from '../lib/tower-client.js';
 import { loadConfig } from '../../lib/config.js';
+import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 
 const execAsync = promisify(exec);
 import { getGlobalDb } from '../db/index.js';
@@ -30,6 +31,8 @@ import {
   siblingRegistrationIsLive,
   buildArchitectCrashLoopFallback,
   buildArchitectFreshLaunch,
+  persistableCommand,
+  logSessionIdentity,
 } from './tower-utils.js';
 import {
   reconcileArchitectSessionHolder,
@@ -574,16 +577,15 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
           _deps.log('INFO', `Resuming architect '${DEFAULT_ARCHITECT_NAME}' session ${mainSessionId.slice(0, 8)}… in ${workspacePath}`);
         }
 
-        // Build env with CLAUDECODE removed so spawned Claude processes
-        // don't detect a nested session, and merge harness env vars.
-        // Spec 755: inject CODEV_ARCHITECT_NAME so afx spawn invocations
+        // Build env with Claude Code session markers removed so spawned Claude
+        // processes don't detect a nested session (#1219), and merge harness env
+        // vars. Spec 755: inject CODEV_ARCHITECT_NAME so afx spawn invocations
         // from inside this terminal can record the spawning architect.
         const cleanEnv = {
-          ...process.env,
+          ...sanitizeAgentEnv(process.env),
           ...harnessEnv,
           CODEV_ARCHITECT_NAME: DEFAULT_ARCHITECT_NAME,
         } as Record<string, string>;
-        delete cleanEnv['CLAUDECODE'];
 
         // Try shellper first for persistent session with auto-restart
         let shellperCreated = false;
@@ -649,8 +651,14 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
 
             // Spec 755: default architect is named 'main'; role_id stores the name.
             entry.architects.set('main', session.id);
+            // PIR #1475: persist what the session reports. A fresh spawn is the
+            // no-op case — the shellper's WELCOME echoes the `cmd` we just gave
+            // it — but the accessor keeps one rule at every persist site: the row
+            // records what is RUNNING, not what was requested.
+            logSessionIdentity(_deps.log, 'architect-launch', session.id, ptySession, cmd);
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', shellperInfo.pid,
-              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath, cmd);
+              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
+              persistableCommand(ptySession) ?? cmd);
 
             // Spec 755: persist to local state.db (architect table) so afx
             // status / stop see the architect via loadState's scalar shim.
@@ -1107,11 +1115,10 @@ export async function addArchitect(
   // Spec 755: inject CODEV_ARCHITECT_NAME so the new architect terminal's
   // afx spawn invocations tag builders with this architect's name.
   const cleanEnv = {
-    ...process.env,
+    ...sanitizeAgentEnv(process.env),
     ...harnessEnv,
     CODEV_ARCHITECT_NAME: name,
   } as Record<string, string>;
-  delete cleanEnv['CLAUDECODE'];
 
   // Try shellper first; fall back to a non-persistent PTY if shellper is
   // unavailable (matches launchInstance's degradation).
@@ -1167,9 +1174,13 @@ export async function addArchitect(
       }
 
       entry.architects.set(name, session.id);
+      // PIR #1475: hydrated identity wins; a fresh spawn echoes `cmd` (see the
+      // main-architect launch above).
+      logSessionIdentity(_deps.log, 'architect-launch-sibling', session.id, ptySession, cmd);
       _deps.saveTerminalSession(
         session.id, resolvedPath, 'architect', name, shellperInfo.pid,
-        shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath, cmd,
+        shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
+        persistableCommand(ptySession) ?? cmd,
       );
 
       // Spec 755: persist to local state.db so the architect appears in

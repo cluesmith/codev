@@ -495,6 +495,16 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 }
 
 /**
+ * The reply channel, stated in the task-lane spawn prompt (#1574).
+ *
+ * Exported so a test pins the literal a task builder is actually given, rather than
+ * a paraphrase that could drift away from it.
+ */
+export const TASK_REPLY_CHANNEL =
+  'To reply to the architect, run `afx send architect "..."` — typing a reply as ordinary ' +
+  'assistant text in your own terminal reaches nobody.';
+
+/**
  * Spawn builder for an ad-hoc task
  */
 async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
@@ -548,7 +558,11 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
       await initPorchInWorktree(worktreePath, protocol, builderId, worktreeName);
     }
   } else {
-    builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n# Task\n\n${taskDescription}`;
+    // #1574: the task lane gets no porch phase prompts, so nothing else ever tells
+    // it how to reach the architect. A builder that types a reply as assistant text
+    // into its own terminal is talking to nobody, with no feedback (the real defect
+    // behind #1530). State the reply channel once, here.
+    builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n${TASK_REPLY_CHANNEL}\n\n# Task\n\n${taskDescription}`;
   }
 
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');

@@ -9,10 +9,12 @@
 import http from 'node:http';
 import type net from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { WS_CLOSE_SESSION_UNKNOWN } from '../lib/reconnect-backoff.js';
+import { WS_CLOSE_SESSION_UNKNOWN, WS_CLOSE_UNAUTHORIZED } from '../lib/reconnect-backoff.js';
+import { isWebSocketAllowed } from '../utils/server-utils.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import type { PtySession } from '../../terminal/pty-session.js';
-import { getTerminalManager, isStartupReconcileSettled, whenStartupReconcileSettled } from './tower-terminals.js';
+import { attachWithReplay } from '../../terminal/attach-replay.js';
+import { getTerminalManager, isStartupReconcileSettled, whenStartupReconcileSettled, logTerminal } from './tower-terminals.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
 import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { addSubscriber, removeSubscriber } from './tower-messages.js';
@@ -33,8 +35,13 @@ const WS_HIGH_WATER_MARK = 1 * 1024 * 1024; // 1 MB
  * Uses hybrid binary protocol (Spec 0085):
  * - 0x00 prefix: Control frame (JSON)
  * - 0x01 prefix: Data frame (raw PTY bytes)
+ *
+ * Async since PIR #1354: the replay payload is the session mirror's serialized
+ * O(screen) snapshot, whose parser flush awaits. Input/close handlers are
+ * registered BEFORE that await so the client can type during the flush and a
+ * close can never race the registration.
  */
-export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req: http.IncomingMessage): void {
+export async function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req: http.IncomingMessage): Promise<void> {
   // Support resume via header (server-to-server) or query param (browser WebSocket)
   const reqUrl = new URL(req.url || '/', `http://localhost`);
   const resumeSeq = req.headers['x-session-resume'] || reqUrl.searchParams.get('resume');
@@ -50,38 +57,8 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
     },
   };
 
-  // Attach client to session and get replay data
-  let replayLines: string[];
-  if (resumeSeq && typeof resumeSeq === 'string') {
-    replayLines = session.attachResume(client, parseInt(resumeSeq, 10));
-  } else {
-    replayLines = session.attach(client);
-  }
-
-  // Send replay data as binary data frame, bracketed by pause/resume control
-  // frames (#1047). The bracket tells the client "this is the one-shot buffer
-  // snapshot" so it paces the write and excludes it from its live-backpressure
-  // budget. Without it, a client counts a large replay as live overload and
-  // (historically) looped forever reconnecting for the same oversized replay.
-  if (replayLines.length > 0) {
-    const replayData = replayLines.join('\n');
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(encodeControl({ type: 'pause', payload: {} }));
-      ws.send(encodeData(replayData));
-      ws.send(encodeControl({ type: 'resume', payload: {} }));
-    }
-  }
-
-  // Send current sequence number so client can resume from this point (Bugfix #442)
-  const sendSeq = () => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(encodeControl({ type: 'seq', payload: { seq: session.ringBuffer.currentSeq } }));
-    }
-  };
-  sendSeq();
-
-  // Periodic seq heartbeat so client always has a recent sequence number
-  const seqInterval = setInterval(sendSeq, 10_000);
+  // Created only after the replay lands; the close handler must tolerate null.
+  let seqInterval: ReturnType<typeof setInterval> | null = null;
 
   // Handle incoming messages from client (binary protocol)
   ws.on('message', (rawData: Buffer) => {
@@ -100,7 +77,16 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
           const cols = msg.payload.cols as number;
           const rows = msg.payload.rows as number;
           if (typeof cols === 'number' && typeof rows === 'number') {
-            session.resize(cols, rows);
+            // Issue #1482: this is the viewer's geometry, and the render gate classifies the
+            // session's mirror at the geometry Tower believes. A resize that never reached the
+            // process leaves those two disagreeing, which is how mail comes to be held `busy`
+            // indefinitely — so a drop is logged rather than discarded.
+            if (!session.resize(cols, rows)) {
+              console.warn(
+                `[tower-ws] resize dropped for session ${session.id}: ${cols}x${rows} not applied ` +
+                  `(no live process or dropped shellper write) — dimensions unchanged`,
+              );
+            }
           }
         } else if (msg.type === 'ping') {
           if (ws.readyState === WebSocket.OPEN) {
@@ -119,14 +105,57 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
   });
 
   ws.on('close', () => {
-    clearInterval(seqInterval);
+    if (seqInterval) clearInterval(seqInterval);
     session.detach(client);
   });
 
   ws.on('error', () => {
-    clearInterval(seqInterval);
+    if (seqInterval) clearInterval(seqInterval);
     session.detach(client);
   });
+
+  // Attach and compute the replay payload: the O(screen) snapshot, or raw ring
+  // lines on the normal-buffer delta-resume path and on snapshot fallback
+  // (PIR #1354; routing and fallback logging live in attachWithReplay).
+  let sinceSeq: number | null = null;
+  if (resumeSeq && typeof resumeSeq === 'string') {
+    sinceSeq = parseInt(resumeSeq, 10);
+  }
+  const replay = await attachWithReplay(session, client, sinceSeq, logTerminal);
+
+  if (ws.readyState !== WebSocket.OPEN) {
+    // Closed while the snapshot flushed — undo the attach registration.
+    session.detach(client);
+    return;
+  }
+
+  // Send replay as a binary data frame, bracketed by pause/resume control
+  // frames (#1047). The bracket tells the client "this is the one-shot buffer
+  // snapshot" so it paces the write and excludes it from its live-backpressure
+  // budget. Without it, a client counts a large replay as live overload and
+  // (historically) looped forever reconnecting for the same oversized replay.
+  let replayData = '';
+  if (replay.kind === 'snapshot') {
+    replayData = replay.data;
+  } else if (replay.lines.length > 0) {
+    replayData = replay.lines.join('\n');
+  }
+  if (replayData.length > 0) {
+    ws.send(encodeControl({ type: 'pause', payload: {} }));
+    ws.send(encodeData(replayData));
+    ws.send(encodeControl({ type: 'resume', payload: {} }));
+  }
+
+  // Send current sequence number so client can resume from this point (Bugfix #442)
+  const sendSeq = () => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(encodeControl({ type: 'seq', payload: { seq: session.ringBuffer.currentSeq } }));
+    }
+  };
+  sendSeq();
+
+  // Periodic seq heartbeat so client always has a recent sequence number
+  seqInterval = setInterval(sendSeq, 10_000);
 }
 
 // ============================================================================
@@ -168,6 +197,31 @@ function rejectUnknownSession(
 }
 
 /**
+ * Reject an upgrade that failed request authentication (advisory
+ * GHSA-xvjp-7748-v88v). Mirrors {@link rejectUnknownSession}'s two client
+ * shapes: a browser (has `Origin`, can't read a failed upgrade's HTTP status)
+ * gets an accepted-then-closed handshake with {@link WS_CLOSE_UNAUTHORIZED};
+ * a Node `ws` client gets the HTTP-stage `401`. This runs BEFORE any session
+ * lookup and is independent of `Origin`, so a missing `Origin` cannot degrade
+ * into an auth bypass.
+ */
+function rejectUnauthorized(
+  req: http.IncomingMessage,
+  socket: net.Socket,
+  head: Buffer,
+  wss: WebSocketServer,
+): void {
+  if (req.headers.origin) {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.close(WS_CLOSE_UNAUTHORIZED, 'unauthorized');
+    });
+    return;
+  }
+  socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+  socket.destroy();
+}
+
+/**
  * Set up the WebSocket upgrade handler on the HTTP server.
  * Parses upgrade requests and routes them to the appropriate terminal session:
  * - Direct route: /ws/terminal/:id
@@ -180,6 +234,15 @@ export function setupUpgradeHandler(
 ): void {
   server.on('upgrade', async (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     const reqUrl = new URL(req.url || '/', `http://localhost:${port}`);
+
+    // Request authentication (advisory GHSA-xvjp-7748-v88v): validate the key at
+    // the handshake, before any session lookup or PTY attach, for every WS route.
+    // Independent of the Origin header so a missing Origin cannot bypass auth.
+    if (!isWebSocketAllowed(req)) {
+      logTerminal('WARN', `WS upgrade 401 ${reqUrl.pathname} — disallowed Host or missing/invalid key`);
+      rejectUnauthorized(req, socket, head, wss);
+      return;
+    }
 
     // Phase 2: Handle /ws/terminal/:id routes directly
     const terminalMatch = reqUrl.pathname.match(/^\/ws\/terminal\/([^/]+)$/);
@@ -199,7 +262,10 @@ export function setupUpgradeHandler(
       }
 
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleTerminalWebSocket(ws, session, req);
+        handleTerminalWebSocket(ws, session, req).catch((err) => {
+          logTerminal('ERROR', `terminal WS handler failed for ${terminalId}: ${String(err)}`);
+          ws.close();
+        });
       });
       return;
     }
@@ -273,7 +339,10 @@ export function setupUpgradeHandler(
       }
 
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleTerminalWebSocket(ws, session, req);
+        handleTerminalWebSocket(ws, session, req).catch((err) => {
+          logTerminal('ERROR', `terminal WS handler failed for ${terminalId}: ${String(err)}`);
+          ws.close();
+        });
       });
       return;
     }

@@ -1361,3 +1361,44 @@ the gh seat authors the commits and GitHub refuses self-approval.
 
 Per the architect's standing instruction I did NOT use --admin; reported back so architect main can
 admin-merge on Waleed's word. Nothing else outstanding on my side.
+
+## MERGED — Spec 1280 complete (2026-08-08)
+
+**PR #1362 merged into main** at 2026-08-08T20:24:33Z (admin-merge on Waleed's word, regular merge,
+merge commit `7cd5a432`). **Issue #1280 auto-closed** by the `Closes #1280` keyword.
+
+### Final delivery
+
+Ten implement phases rewriting Codev's always-on prompt surface from rules to judgment (P1–P7):
+CLAUDE/AGENTS + skills, three roles, protocol.md ×10, builder-prompt.md ×9, all phase prompts, all
+templates, all consult-types, the scar registry, and the dead-tree deletion.
+
+- **Always-on builder surface 34,231 → 18,233 words (−47%)**; architect −66%; total authored
+  153,205 → 106,032 (−31%). Relocation proven (M0c): skills grew 42→46 files while everything else shrank.
+- **M5: zero capabilities lost** against the frozen Phase-0 inventory.
+- **Six retirements (R1–R6)**, each human/architect-approved with a mutation-verified replacement
+  guard; the class pre-approval (invariant-gated) unblocked phases 7–9 without per-item waits.
+- **Scar rules**: 8 canonicals kept verbatim, registry rebuilt with re-derived `must_appear_on`, T4 enforcing.
+- Final suite: **4,563 passed / 48 skipped**; CI all 6 required checks green.
+
+### Post-merge state — STRANDED RECORDS (1286/1307 lesson)
+
+`porch done` auto-committed **and pushed** `e235ba45` (`build_complete: false → true`) to the builder
+branch **after** the merge → **not in main** (verified: not an ancestor of origin/main). This is the
+exact stranding the architect flagged. Reported to architect for shipping to main the way #1345/#1369 were.
+
+**Protocol not marked complete**: porch still reads `implement`/`phase_10_integration` because phases
+were advanced by authorized hand-edit rather than `porch done`, and completion now requires the
+`verify-approval` **human gate** — which I will not self-approve. Left for the architect/Waleed to
+decide: ship the state records to main, and/or drive the completion.
+
+### Deferred by ruling (run at integration/local-install)
+
+**T9** live spawn probe and **full T10** rollback rehearsal — a worktree structurally cannot run
+either (spawn-nesting scar rule; destructive multi-commit git). Ruled acceptable; scheduled alongside
+1307's verify probes before any release ships this.
+
+### Follow-ups filed
+
+`release/protocol.md` staleness (`bats tests/e2e/`); maintain/templates two-tree divergence;
+the measurement-script per-file `python3` spawn cost (~28s CI tax) — Waleed's call on issue-vs-task.

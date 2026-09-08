@@ -10,6 +10,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { PtySession } from './pty-session.js';
 import type { PtySessionConfig, PtySessionInfo } from './pty-session.js';
 import { decodeFrame, encodeControl, encodeData } from './ws-protocol.js';
+import { attachWithReplay } from './attach-replay.js';
 import { defaultSessionOptions, DEFAULT_DISK_LOG_MAX_BYTES } from './index.js';
 
 export interface TerminalManagerConfig {
@@ -147,11 +148,15 @@ export class TerminalManager {
       // the session to its classifier profile (claude/codex) so `afx send` can
       // deliver. Threaded from the creation/reconnect sites for shellper-backed
       // agent sessions; '' for sessions without a known agent (plain shells).
-      // `args` is CREATION-ONLY: it is NOT persisted on the session row and is NOT
-      // read by `resolveProfile` today. A reconnected session gets `[]`. Do not make
-      // args a resolution input (e.g. to support `env codex` / `npx claude`) without
-      // adding matching persistence, or fresh and post-restart sessions will classify
-      // differently.
+      // `args` is CREATION-ONLY *here*: it is NOT persisted on the session row and
+      // is NOT read by `resolveProfile` today. Since PIR #1475 a reconnected
+      // shellper-backed session no longer gets `[]` — `PtySession.launchArgs` reads
+      // through to the argv the shellper reports in its WELCOME frame, which is
+      // real across reconnects and SPAWN relaunches. The rule still stands for this
+      // config value: do not make args a resolution input (e.g. to support
+      // `env codex` / `npx claude`) on the strength of what is threaded in here, or
+      // fresh and post-restart sessions will classify differently. WELCOME
+      // hydration — not this field — is the seam that can satisfy that invariant.
       command: opts.command ?? '',
       args: opts.args ?? [],
       cols,
@@ -231,11 +236,20 @@ export class TerminalManager {
     return true;
   }
 
-  /** Resize a session. */
+  /**
+   * Resize a session. Returns its info, or `null` when the resize did not happen.
+   *
+   * `null` now covers two cases (Issue #1482): no such session, and a session whose resize was
+   * DROPPED — a dead shellper socket, or no live process. Both are "the geometry you asked for
+   * is not the geometry in effect", and returning `session.info` for the second would hand the
+   * caller back dimensions the process never adopted, which is exactly the false belief this
+   * issue exists to remove. Callers distinguish the two by whether the session exists, if they
+   * need to; the REST route's message does.
+   */
   resizeSession(id: string, cols: number, rows: number): PtySessionInfo | null {
     const session = this.sessions.get(id);
     if (!session) return null;
-    session.resize(cols, rows);
+    if (!session.resize(cols, rows)) return null;
     return session.info;
   }
 
@@ -277,12 +291,16 @@ export class TerminalManager {
       }
 
       this.wss!.handleUpgrade(req, socket, head, (ws) => {
-        this.handleTerminalConnection(ws, session, req);
+        this.handleTerminalConnection(ws, session, req).catch(() => {
+          ws.close();
+        });
       });
     });
   }
 
-  private handleTerminalConnection(ws: WebSocket, session: PtySession, req: http.IncomingMessage): void {
+  // Async since PIR #1354 (snapshot replay awaits the mirror's parser flush);
+  // handlers are registered before the await so input works during the flush.
+  private async handleTerminalConnection(ws: WebSocket, session: PtySession, req: http.IncomingMessage): Promise<void> {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     const resumeSeq = req.headers['x-session-resume'];
 
@@ -294,22 +312,6 @@ export class TerminalManager {
         }
       },
     };
-
-    // Attach and replay buffer
-    let replayLines: string[];
-    if (resumeSeq && typeof resumeSeq === 'string') {
-      replayLines = session.attachResume(client, parseInt(resumeSeq, 10));
-    } else {
-      replayLines = session.attach(client);
-    }
-
-    // Send replay data
-    if (replayLines.length > 0) {
-      const replayData = replayLines.join('\n');
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(encodeData(replayData));
-      }
-    }
 
     // Handle incoming messages from client
     ws.on('message', (rawData: Buffer) => {
@@ -336,6 +338,35 @@ export class TerminalManager {
     ws.on('error', () => {
       session.detach(client);
     });
+
+    // Attach and compute the replay payload: O(screen) snapshot or raw ring
+    // lines (delta resume / fallback) — same routing as the Tower WS handler.
+    let sinceSeq: number | null = null;
+    if (resumeSeq && typeof resumeSeq === 'string') {
+      sinceSeq = parseInt(resumeSeq, 10);
+    }
+    // Forward only WARN lines to the console: those are the AC-4 desync
+    // detection signal (replay-snapshot-fallback), which must not be silently
+    // dropped on the standalone path; INFO here is routine per-attach chatter.
+    const replay = await attachWithReplay(session, client, sinceSeq, (level, msg) => {
+      if (level === 'WARN') console.warn(`[terminal] ${msg}`);
+    });
+
+    if (ws.readyState !== WebSocket.OPEN) {
+      // Closed while the snapshot flushed — undo the attach registration.
+      session.detach(client);
+      return;
+    }
+
+    let replayData = '';
+    if (replay.kind === 'snapshot') {
+      replayData = replay.data;
+    } else if (replay.lines.length > 0) {
+      replayData = replay.lines.join('\n');
+    }
+    if (replayData.length > 0) {
+      ws.send(encodeData(replayData));
+    }
   }
 
   private handleControlMessage(
@@ -348,7 +379,15 @@ export class TerminalManager {
         const cols = msg.payload.cols as number;
         const rows = msg.payload.rows as number;
         if (typeof cols === 'number' && typeof rows === 'number') {
-          session.resize(cols, rows);
+          // Issue #1482: a dropped resize leaves Tower and the process disagreeing about the
+          // geometry, and the render gate classifies at the geometry Tower believes — so this
+          // is a diagnosable event, not a silent no-op.
+          if (!session.resize(cols, rows)) {
+            console.warn(
+              `[pty-manager] resize dropped for session ${session.id}: ${cols}x${rows} not applied ` +
+                `(no live process or dropped shellper write) — dimensions unchanged`,
+            );
+          }
         }
         break;
       }
@@ -457,7 +496,20 @@ export class TerminalManager {
       }
       const info = this.resizeSession(id, body.cols, body.rows);
       if (!info) {
-        this.sendError(res, 404, 'NOT_FOUND', `Session ${id} not found`);
+        // Issue #1482: separate "no such session" from "the session exists but the resize did
+        // not reach its process". Answering 404 for the second would tell the caller the
+        // terminal is gone when it is very much alive — and, worse, the old code answered 200
+        // with the requested dimensions echoed back, which is how a divergence became invisible.
+        if (!this.getSession(id)) {
+          this.sendError(res, 404, 'NOT_FOUND', `Session ${id} not found`);
+        } else {
+          this.sendError(
+            res,
+            409,
+            'RESIZE_DROPPED',
+            `Session ${id} did not accept the resize (no live process or dropped shellper write); dimensions unchanged`,
+          );
+        }
         return;
       }
       this.sendJson(res, 200, info);

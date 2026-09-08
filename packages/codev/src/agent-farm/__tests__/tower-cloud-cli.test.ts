@@ -5,15 +5,30 @@
  * with mocked readline, browser, and HTTP interactions.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 
-// Redirect homedir to temp dir
-const TEST_DIR = vi.hoisted(() => {
+// Redirect homedir to temp dir. The vitest harness also pins
+// CODEV_AGENT_FARM_DIR into its per-run sandbox (#1597), and core's
+// AGENT_FARM_DIR reads that env var BEFORE consulting homedir — so the
+// homedir mock alone no longer redirects it. Re-pin the env to this suite's
+// dir before the module graph evaluates; afterAll restores the harness value.
+const { TEST_DIR, PREV_AGENT_FARM_DIR_ENV } = vi.hoisted(() => {
   const { resolve } = require('node:path');
   const { tmpdir } = require('node:os');
   const { randomBytes } = require('node:crypto');
-  return resolve(tmpdir(), `tower-cli-test-${randomBytes(4).toString('hex')}`);
+  const testDir = resolve(tmpdir(), `tower-cli-test-${randomBytes(4).toString('hex')}`);
+  const prevEnv = process.env.CODEV_AGENT_FARM_DIR;
+  process.env.CODEV_AGENT_FARM_DIR = resolve(testDir, '.agent-farm');
+  return { TEST_DIR: testDir, PREV_AGENT_FARM_DIR_ENV: prevEnv };
+});
+
+afterAll(() => {
+  if (PREV_AGENT_FARM_DIR_ENV === undefined) {
+    delete process.env.CODEV_AGENT_FARM_DIR;
+  } else {
+    process.env.CODEV_AGENT_FARM_DIR = PREV_AGENT_FARM_DIR_ENV;
+  }
 });
 
 // Queue of answers for readline prompts (shifted one at a time)
@@ -65,6 +80,14 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 import { towerRegister, towerDeregister } from '../commands/tower-cloud.js';
+
+/**
+ * #1515: both commands signal the running Tower daemon, and with no port they
+ * signal the *default* one — the developer's live Tower. That is how this file
+ * repeatedly deregistered a real Tower from Codev Cloud and dropped its tunnel.
+ * Nothing listens here, so the signal fails harmlessly.
+ */
+const UNUSED_TOWER_PORT = 14099;
 import {
   readCloudConfig,
   writeCloudConfig,
@@ -105,7 +128,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
     it('registers a new tower via browser callback flow', async () => {
       readlineAnswers.push('my-test-tower'); // tower name prompt
 
-      await towerRegister();
+      await towerRegister({ port: UNUSED_TOWER_PORT });
 
       const config = readCloudConfig();
       expect(config).not.toBeNull();
@@ -133,7 +156,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
 
       readlineAnswers.push('y', 'new-tower'); // confirm + tower name
 
-      await towerRegister();
+      await towerRegister({ port: UNUSED_TOWER_PORT });
 
       const config = readCloudConfig();
       expect(config!.tower_id).toBe('tower-mock-id');
@@ -151,7 +174,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
 
       readlineAnswers.push('n'); // decline
 
-      await towerRegister();
+      await towerRegister({ port: UNUSED_TOWER_PORT });
 
       const config = readCloudConfig();
       expect(config!.tower_id).toBe('old-id'); // unchanged
@@ -161,7 +184,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
     it('uses --service URL for registration and browser flow', async () => {
       readlineAnswers.push('staging-tower'); // tower name prompt
 
-      await towerRegister({ serviceUrl: 'https://staging.codevos.ai' });
+      await towerRegister({ serviceUrl: 'https://staging.codevos.ai', port: UNUSED_TOWER_PORT });
 
       const config = readCloudConfig();
       expect(config).not.toBeNull();
@@ -190,7 +213,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
 
       // No readline answers — reauth skips confirmation and name prompt
 
-      await towerRegister({ reauth: true });
+      await towerRegister({ reauth: true, port: UNUSED_TOWER_PORT });
 
       const config = readCloudConfig();
       expect(config!.tower_name).toBe('keep-this-name');
@@ -212,7 +235,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
         server_url: 'https://codevos.ai',
       });
 
-      await towerDeregister();
+      await towerDeregister({ port: UNUSED_TOWER_PORT });
 
       expect(readCloudConfig()).toBeNull();
       expect(fetchSpy).toHaveBeenCalledWith(

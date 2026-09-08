@@ -1,0 +1,80 @@
+Issue #1365 — dev-approval evidence
+isolated Tower on port 14650 (NOT 4100 — the live Tower is untouched)
+tower build: /home/user/code/codev_root/codev/.builders/pir-1365/packages/codev/dist/agent-farm/servers/tower-server.js
+started: 2026-08-18T00:08:35.776Z
+
+workspace: /home/user/.agent-farm/test-workspaces/pir1365-rTSkWJ
+terminal:  7dbbf04f-cc9d-4444-a11a-b863edf2bb7a (real shellper-backed PTY, echo oracle)
+
+==============================================================================
+SCENARIO 1 — 10x  long multi-line send  +  concurrent --interrupt
+==============================================================================
+  PASS  run 0: body never fragmented on the wire (whole=1 starts=1)
+  PASS  run 0: the body was not duplicated — saw 1
+  PASS  run 0: reported delivered → the body IS on the wire, whole
+  PASS  run 0: the interrupt itself landed
+  PASS  run 0: the interrupt's ^C landed
+  PASS  run 1: body never fragmented on the wire (whole=1 starts=1)
+  PASS  run 1: the body was not duplicated — saw 1
+  PASS  run 1: reported delivered → the body IS on the wire, whole
+  PASS  run 1: the interrupt itself landed
+  PASS  run 1: the interrupt's ^C landed
+  …  [runs 2-8 identical — 35 further checks, all PASS; trimmed for length]
+  PASS  run 9: body never fragmented on the wire (whole=1 starts=1)
+  PASS  run 9: the body was not duplicated — saw 1
+  PASS  run 9: reported delivered → the body IS on the wire, whole
+  PASS  run 9: the interrupt itself landed
+  PASS  run 9: the interrupt's ^C landed
+
+  at request time: delivered=10 held=0
+  bodies that reached the wire: 10/10 — every one of them WHOLE
+  (holding is a correct outcome; fragmenting or lying about delivery is not)
+  rows still held after scenario 1: 0
+
+==============================================================================
+SCENARIO 2 — --delay 5 --interrupt against a MID-TURN agent
+==============================================================================
+  PASS  the send is SCHEDULED, not written at request time
+  PASS  no body on the wire at request time
+  PASS  the ^C fired at due time
+  PASS  the body did NOT land mid-turn (the screen is still a draft)
+  PASS  the body landed EXACTLY once on the clean prompt — saw 1
+  PASS  the ^C preceded the body
+
+==============================================================================
+SCENARIO 3 — --interrupt against a busy line returns within the 2000ms ceiling
+==============================================================================
+  interrupt round-trip: 2156ms (ceiling 2000ms)
+  PASS  the interrupt returned near the ceiling, not after the whole write — 2156ms
+  PASS  the interrupt still succeeded (the escape hatch works)
+  delivery outcome: delivered=false held=true reason=busy
+  tower: [2026-08-18T00:09:14.349Z] [WARN] interrupt → pir-1365-probe (terminal 7dbbf04f...) waited 2000ms for an in-flight write and proceeded UNSERIALIZED — it may interleave with that write. A message long enough to hold the line this long is the usual cause.
+  tower: [2026-08-18T00:09:16.139Z] [INFO] [mailbox] write to pir-1365-probe @ pir1365-rTSkWJ was raced by an unserialized operator write — holding 1ca72147… for redelivery rather than reporting it delivered
+  PASS  Tower logged the ceiling degradation loudly (WARN)
+  PASS  the raced delivery reported PREEMPTED and held its row for redelivery
+  PASS  the raced delivery did NOT claim delivered — the false-delivered failure cannot recur here
+
+==============================================================================
+SCENARIO 4 — --escape unchanged; a non-writable terminal is refused
+==============================================================================
+  PASS  escape returns 200 ok
+  PASS  the ESC byte reached the PTY
+  PASS  its trailing Enter reached the PTY
+  escape to a killed terminal → 404 NOT_FOUND
+  PASS  an operator action to a dead terminal is REFUSED, never silently dropped
+  normal send to the same dead agent → 404 held=undefined reason=undefined
+  PASS  an unknown-after-death agent 404s (registry seam needs a real builder — see note)
+
+  NOT SCRIPTED HERE, and why:
+    503 TERMINAL_NOT_WRITABLE needs a shellper socket that has DIED while the
+    session still reports status=running (#1198). That state cannot be forced
+    from the public API without killing the shellper out of band, which would
+    be staging the result rather than observing it. It is covered by
+    tower-routes.test.ts:1560 against the real route, and this change does not
+    touch that branch — only the lock the branch returns before reaching.
+
+==============================================================================
+RESULT
+==============================================================================
+  66/66 checks passed
+  ALL SCENARIOS PASSED

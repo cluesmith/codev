@@ -13,13 +13,16 @@
  * and had to be discovered under pressure.
  *
  * Addressing, workspace detection and sender identity are reused verbatim from
- * `afx send` — there is exactly one address resolver.
+ * `afx send` — there is exactly one address resolver. "Verbatim" is literal: the
+ * sender comes from `detectCurrentBuilderId()` / `architectSenderId()`, the same two
+ * functions `afx send` calls, so one actor has one `from_agent` form across all three
+ * commands (issue #1478).
  */
 
 import type { InterruptOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { TowerClient } from '../lib/tower-client.js';
-import { detectWorkspaceRoot, detectCurrentBuilderId } from './send.js';
+import { detectWorkspaceRoot, detectCurrentBuilderId, architectSenderId } from './send.js';
 
 export async function interrupt(options: InterruptOptions): Promise<void> {
   const target = options.builder;
@@ -37,7 +40,7 @@ export async function interrupt(options: InterruptOptions): Promise<void> {
   // sender, which Tower would silently route to 'main' (issue #1094).
   let from: string;
   try {
-    from = detectCurrentBuilderId() ?? 'architect';
+    from = detectCurrentBuilderId() ?? architectSenderId();
   } catch (err) {
     fatal(err instanceof Error ? err.message : String(err));
   }

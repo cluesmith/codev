@@ -1,0 +1,30 @@
+id: '1501'
+title: stream-deck-the-scroll-dial-ca
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-18T04:25:25.853Z'
+    approved_at: '2026-08-18T04:28:06.905Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-18T04:58:50.467Z'
+    approved_at: '2026-08-18T05:20:24.397Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-18T05:32:55.340Z'
+    approved_at: '2026-08-18T05:42:43.495Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-18T04:19:24.670Z'
+updated_at: '2026-08-18T05:42:43.497Z'
+pr_history:
+  - phase: review
+    pr_number: 1513
+    branch: builder/pir-1501
+    created_at: '2026-08-18T05:27:33.502Z'
+pr_ready_for_human: false

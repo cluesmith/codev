@@ -13,15 +13,29 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { BuilderFileChange } from '../views/builder-diff-cache.js';
 
 // `diff-nav.ts` imports `vscode` and pulls in `diff-inject-codelens`, which
-// instantiates an `EventEmitter` at module load. The pure helpers under test
-// touch none of it — this minimal mock just lets the import chain resolve.
+// instantiates an `EventEmitter` at module load. The pure helpers touch none of
+// it; the `navigateBuilderDiffToFirst` glue (#1414) needs `window.setStatusBarMessage`
+// (the flash) and reads no editor state on the seeded path — so this mock stays small.
+const setStatusBarMessage = vi.fn();
 vi.mock('vscode', () => ({
   EventEmitter: class {
     event = (): { dispose(): void } => ({ dispose() {} });
     fire(): void {}
     dispose(): void {}
   },
+  window: {
+    get activeTextEditor() { return undefined; },
+    setStatusBarMessage: (...args: unknown[]) => setStatusBarMessage(...args),
+  },
 }));
+
+// The builder-scoped first-file open resolves the worktree + changed-file list and
+// opens file 0. Mock those seams so the glue is testable without a live workspace:
+// `openBuilderFileDiff` is the open we assert on / assert absent, `builderWithWorktree`
+// the worktree lookup, `readBuildersFileViewAsTree` the flat/tree toggle.
+vi.mock('../commands/view-diff.js', () => ({ openBuilderFileDiff: vi.fn() }));
+vi.mock('../builder-lookup.js', () => ({ builderWithWorktree: vi.fn() }));
+vi.mock('../builders-config.js', () => ({ readBuildersFileViewAsTree: vi.fn(() => false) }));
 
 const {
   orderedRelPaths,
@@ -31,7 +45,10 @@ const {
   recordDiffNavPosition,
   peekDiffNavPosition,
   resetDiffNavState,
+  navigateBuilderDiffToFirst,
 } = await import('../commands/diff-nav.js');
+const { openBuilderFileDiff } = await import('../commands/view-diff.js');
+const { builderWithWorktree } = await import('../builder-lookup.js');
 
 /** Minimal `BuilderFileChange` — the helpers only read `plan.resourcePath`. */
 function mk(relPath: string): BuilderFileChange {
@@ -183,5 +200,71 @@ describe('nav position anchor (recordDiffNavPosition / peek / reset)', () => {
     recordDiffNavPosition('b1', 'a.ts');
     resetDiffNavState();
     expect(peekDiffNavPosition()).toBeUndefined();
+  });
+});
+
+describe('navigateBuilderDiffToFirst (#1414: builder-id-scoped first-file open)', () => {
+  const openMock = vi.mocked(openBuilderFileDiff);
+  const worktreeMock = vi.mocked(builderWithWorktree);
+  // Deps the glue reads: `context` is opaque (forwarded to the mocked open),
+  // `overviewCache.getData` feeds the (mocked) worktree lookup, `diffCache.getDiff`
+  // yields the changed-file list.
+  const getDiff = vi.fn();
+  const deps = {
+    context: {} as never,
+    overviewCache: { getData: () => ({}) } as never,
+    diffCache: { getDiff } as never,
+  };
+
+  beforeEach(() => {
+    resetDiffNavState();
+    openMock.mockReset();
+    worktreeMock.mockReset();
+    getDiff.mockReset();
+    setStatusBarMessage.mockClear();
+  });
+
+  it('opens file 1 in per-file mode and seeds the dial anchor (happy path)', async () => {
+    worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
+    getDiff.mockResolvedValue({ error: undefined, baseRef: 'base-sha', files: [mk('a.ts'), mk('b.ts')] });
+
+    await navigateBuilderDiffToFirst('pir-x', deps);
+
+    // Opened the FIRST file (index 0) as a reused preview tab...
+    expect(openMock).toHaveBeenCalledTimes(1);
+    const [, args, showOptions] = openMock.mock.calls[0]!;
+    expect(args.builderId).toBe('pir-x');
+    expect(args.plan.resourcePath).toBe('a.ts');
+    expect(showOptions).toEqual({ preview: true });
+    // ...and seeded the nav anchor there, so the dials step forward from file 1.
+    expect(peekDiffNavPosition()).toEqual({ builderId: 'pir-x', relPath: 'a.ts' });
+  });
+
+  it('flashes and opens nothing when the builder has zero changed files (defined outcome)', async () => {
+    worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
+    getDiff.mockResolvedValue({ error: undefined, baseRef: 'base-sha', files: [] });
+
+    await navigateBuilderDiffToFirst('pir-x', deps);
+
+    expect(openMock).not.toHaveBeenCalled();
+    expect(setStatusBarMessage).toHaveBeenCalledWith('Codev: no changed files to navigate', expect.anything());
+  });
+
+  it('flashes and opens nothing when the builder has no worktree on record', async () => {
+    worktreeMock.mockReturnValue(undefined as never);
+
+    await navigateBuilderDiffToFirst('pir-x', deps);
+
+    expect(getDiff).not.toHaveBeenCalled();
+    expect(openMock).not.toHaveBeenCalled();
+    expect(setStatusBarMessage).toHaveBeenCalledWith('Codev: no worktree on record for pir-x', expect.anything());
+  });
+
+  it('flashes and opens nothing (no throw) for a missing builder id', async () => {
+    await navigateBuilderDiffToFirst(undefined, deps);
+
+    expect(worktreeMock).not.toHaveBeenCalled();
+    expect(openMock).not.toHaveBeenCalled();
+    expect(setStatusBarMessage).toHaveBeenCalledWith('Codev: no builder to open a diff for', expect.anything());
   });
 });

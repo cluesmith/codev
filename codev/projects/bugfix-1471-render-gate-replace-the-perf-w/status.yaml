@@ -1,0 +1,22 @@
+id: bugfix-1471
+title: render-gate-replace-the-perf-w
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-08-17T23:45:28.418Z'
+    approved_at: '2026-08-17T23:48:29.208Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-17T23:26:16.744Z'
+updated_at: '2026-08-17T23:48:50.512Z'
+pr_ready_for_human: false
+pr_history:
+  - phase: verified
+    pr_number: 1487
+    branch: builder/bugfix-1471
+    created_at: '2026-08-17T23:48:50.512Z'

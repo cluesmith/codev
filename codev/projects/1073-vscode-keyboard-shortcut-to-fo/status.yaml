@@ -1,0 +1,30 @@
+id: '1073'
+title: vscode-keyboard-shortcut-to-fo
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-13T00:23:37.036Z'
+    approved_at: '2026-08-13T01:32:22.880Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-13T01:36:07.563Z'
+    approved_at: '2026-08-13T07:28:20.870Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-13T07:34:36.229Z'
+    approved_at: '2026-08-13T07:42:12.577Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-08-13T00:20:25.415Z'
+updated_at: '2026-08-13T07:42:12.578Z'
+pr_history:
+  - phase: review
+    pr_number: 1447
+    branch: builder/pir-1073
+    created_at: '2026-08-13T07:29:28.503Z'
+pr_ready_for_human: false

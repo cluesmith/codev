@@ -53,9 +53,11 @@ bats tests/e2e/
 
 ### 4. Update Version and Tag
 
-**Normal releases — use lockstep bump.** Run `pnpm bump-version` from the repo root to set every version-aligned package (`@cluesmith/codev`, `@cluesmith/codev-core`, `@cluesmith/codev-sdk`, `@cluesmith/codev-types`, `@cluesmith/codev-artifact-canvas`, and the VS Code extension) to the same version in one shot. This keeps every workspace package on the same version, preventing the class of drift bug where a release ships pointing at outdated internal dependencies and end users hit runtime API mismatches. (`@cluesmith/codev-artifact-canvas` is version-aligned for consistency but is consumed by hosts via `workspace:*` and bundled by them — **not independently npm-published in v1** per spec-945, so it appears in the bump/commit steps below but not in the `pnpm publish` step.)
+**Normal releases — use lockstep bump.** Run `pnpm bump-version` from the repo root to set every version-aligned package (`@cluesmith/codev`, `@cluesmith/codev-core`, `@cluesmith/codev-sdk`, `@cluesmith/codev-types`, `@cluesmith/codev-artifact-canvas`, the VS Code extension, and the Stream Deck plugin) to the same version in one shot. This keeps every workspace package on the same version, preventing the class of drift bug where a release ships pointing at outdated internal dependencies and end users hit runtime API mismatches. (`@cluesmith/codev-artifact-canvas` is version-aligned for consistency but is consumed by hosts via `workspace:*` and bundled by them — **not independently npm-published in v1** per spec-945, so it appears in the bump/commit steps below but not in the `pnpm publish` step.)
 
 For VS Code stable releases the script delegates to `scripts/bump-vscode.sh` (also exposed as `pnpm bump-vscode-version` for standalone use), which bumps the extension manifest **and** renames `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` in `apps/vscode/CHANGELOG.md` so the Marketplace listing reflects the new version. No fresh `[Unreleased]` heading is inserted — the next PR with notes adds one back. Skipped for pre-release versions (vscode is skipped entirely then). Use `pnpm bump-vscode-version` directly when shipping a vscode-only patch outside the lockstep cadence.
+
+For the Stream Deck plugin (`apps/streamdeck`), the lockstep bump rewrites both `package.json` and the Elgato manifest's four-part `Version` (`{version}.0`); like vscode, both are skipped for pre-releases (Elgato versions are numeric-only), and `apps/streamdeck/src/__tests__/version-sync.test.ts` pins the pair together. The `.sdPlugin` Marketplace bundle is packed on demand (`pnpm --filter @cluesmith/codev-streamdeck run package` → `apps/streamdeck/dist/*.streamDeckPlugin`) and is **not yet Marketplace-distributed** — the initial Elgato Maker Console submission is a tracked follow-up, and until it lands no release step uploads anything to Elgato (mirroring the artifact-canvas "version-aligned but not independently published" pattern).
 
 The script anchors on the root `package.json`'s current version (Vue/Babel pattern) and accepts several invocation forms:
 
@@ -73,7 +75,7 @@ Replace `X.Y.Z` below with the version the script just wrote (it prints it as `B
 pnpm bump-version            # or: pnpm bump-version minor / major / 3.1.0-rc.1
 
 # Commit and tag (root package.json is the version anchor — Vue/Babel pattern)
-git add package.json packages/codev/package.json packages/core/package.json packages/sdk/package.json packages/types/package.json packages/artifact-canvas/package.json apps/vscode/package.json pnpm-lock.yaml
+git add package.json packages/codev/package.json packages/core/package.json packages/sdk/package.json packages/types/package.json packages/artifact-canvas/package.json apps/vscode/package.json apps/streamdeck/package.json apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json pnpm-lock.yaml
 git commit -m "Release @cluesmith/codev@X.Y.Z (Codename)"
 git tag -a vX.Y.Z -m "vX.Y.Z Codename - Brief description"
 git push && git push origin vX.Y.Z
@@ -155,6 +157,8 @@ cd packages/codev && pnpm publish --no-git-checks            # stable → tag la
 cd packages/codev && pnpm publish --tag next --no-git-checks # RC → tag next
 ```
 
+**One-time, on the sdk's first npm publish:** enable the published-SDK canary's schedule — uncomment the `schedule:` block in `.github/workflows/sdk-canary.yml` (it ships `workflow_dispatch`-only because the canary has nothing to test against until `@cluesmith/codev-sdk` exists on the registry).
+
 **When to bump workspace dep versions:** unnecessary if step 4 used `pnpm bump-version` (lockstep already bumped core, sdk, and types). If you took the backport path and `packages/core/src/**`, `packages/sdk/src/**`, or `packages/types/src/**` changed since the last release, bump that package's version (`pnpm --filter @cluesmith/codev-core version patch`) before publishing — otherwise the publish step will skip it (existing version) and consumers will get the old code.
 
 **Verification:** the `Post-Release E2E Verification` GitHub Actions workflow (triggered automatically on release) installs the published tarball on macOS and Ubuntu. If it fails with E404 on a `@cluesmith/*` package, that workspace dep is missing from npm — publish it and re-run the workflow with `gh workflow run "Post-Release E2E Verification" -f version=X.Y.Z`.
@@ -234,7 +238,7 @@ Starting with v1.7.0, minor releases use a release candidate workflow for testin
 # codev, core, sdk, types, and artifact-canvas are bumped here. vscode catches up at RC → stable.
 pnpm bump-version 1.7.0-rc.1
 
-# Commit and tag (note: no apps/vscode/package.json — it wasn't bumped)
+# Commit and tag (note: no apps/vscode or apps/streamdeck files — pre-releases skip both)
 git add package.json packages/codev/package.json packages/core/package.json packages/sdk/package.json packages/types/package.json packages/artifact-canvas/package.json pnpm-lock.yaml
 git commit -m "v1.7.0-rc.1"
 git tag -a v1.7.0-rc.1 -m "v1.7.0-rc.1 - Release candidate"

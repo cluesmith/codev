@@ -2,14 +2,24 @@
  * Regression test for Bugfix #584: afx send multi-line messages (>3 lines)
  * treated as paste, final Enter swallowed.
  *
- * Verifies that writeMessageToSession paces multi-line output line-by-line
- * with delays to prevent paste detection, while short messages are still
- * written in a single call. Also tests delayOffset serialization to prevent
- * interleaved writes when multiple messages flush to the same session.
+ * The #584 property is that the Enter is never swallowed: it is always a SEPARATE write
+ * after the body has landed. How the body itself travels changed in Issue #1567 — a frame
+ * of 4+ lines is now one explicit bracketed paste (newlines as `\r` inside) rather than
+ * line-by-line writes — so the multi-line cases here pin that shape; the short-message
+ * single write is unchanged. Also tests delayOffset serialization to prevent interleaved
+ * writes when multiple messages flush to the same session.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeMessageToSession } from '../servers/message-write.js';
+import {
+  writeMessageToSession,
+  PASTE_BEGIN,
+  PASTE_END,
+  PASTE_ENTER_DELAY_MS,
+} from '../servers/message-write.js';
+
+/** The one-piece bracketed form of a short multi-line body (Issue #1567). */
+const pasted = (body: string) => PASTE_BEGIN + body.replace(/\n/g, '\r') + PASTE_END;
 import type { PtySession } from '../../terminal/pty-session.js';
 
 function makeSession(): PtySession & { writeCalls: string[] } {
@@ -44,29 +54,22 @@ describe('writeMessageToSession (Bugfix #584)', () => {
     expect(endTime).toBe(50);
   });
 
-  it('paces multi-line messages (>3 lines) line-by-line with delays', () => {
+  it('sends multi-line messages (>3 lines) as one bracketed paste, Enter separate', () => {
     const session = makeSession();
     const msg = 'line1\nline2\nline3\nline4';
 
     const endTime = writeMessageToSession(session, msg, false);
 
-    // First line written immediately
-    expect(session.writeCalls).toEqual(['line1\n']);
+    // The whole body goes out as ONE bracketed piece (it is well under the chunk size)…
+    expect(session.writeCalls).toEqual([pasted(msg)]);
 
-    // Lines 2-4 arrive with 10ms, 20ms, 30ms delays
-    vi.advanceTimersByTime(10);
-    expect(session.writeCalls).toEqual(['line1\n', 'line2\n']);
-
-    vi.advanceTimersByTime(10);
-    expect(session.writeCalls).toEqual(['line1\n', 'line2\n', 'line3\n']);
-
-    vi.advanceTimersByTime(10);
-    expect(session.writeCalls).toEqual(['line1\n', 'line2\n', 'line3\n', 'line4']);
-
-    // Enter arrives after totalPacing (30ms) + 80ms = 110ms from start
-    vi.advanceTimersByTime(80);
-    expect(session.writeCalls).toEqual(['line1\n', 'line2\n', 'line3\n', 'line4', '\r']);
-    expect(endTime).toBe(110);
+    // …and the Enter is a separate write after the settle — never inside the paste, so a
+    // TUI that treats the burst as a paste cannot swallow it (the #584 failure).
+    vi.advanceTimersByTime(PASTE_ENTER_DELAY_MS - 1);
+    expect(session.writeCalls).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(session.writeCalls).toEqual([pasted(msg), '\r']);
+    expect(endTime).toBe(PASTE_ENTER_DELAY_MS);
   });
 
   it('respects noEnter=true for short messages', () => {
@@ -85,9 +88,9 @@ describe('writeMessageToSession (Bugfix #584)', () => {
     const endTime = writeMessageToSession(session, msg, true);
     vi.advanceTimersByTime(500);
 
-    // All lines written, but no \r
-    expect(session.writeCalls).toEqual(['l1\n', 'l2\n', 'l3\n', 'l4\n', 'l5']);
-    expect(endTime).toBe(40); // (5-1) * 10 = 40ms for last line
+    // The paste went out, but no \r
+    expect(session.writeCalls).toEqual([pasted(msg)]);
+    expect(endTime).toBe(0); // one piece, written synchronously
   });
 
   it('handles formatted architect message (realistic multi-line)', () => {
@@ -97,17 +100,14 @@ describe('writeMessageToSession (Bugfix #584)', () => {
 
     const endTime = writeMessageToSession(session, msg, false);
 
-    // First line immediately
-    expect(session.writeCalls[0]).toBe('### [ARCHITECT INSTRUCTION | 2026-04-04T00:00:00.000Z] ###\n');
+    // The header opens the paste, immediately
+    expect(session.writeCalls[0]).toBe(pasted(msg));
+    expect(session.writeCalls[0].startsWith(PASTE_BEGIN + '### [ARCHITECT INSTRUCTION')).toBe(true);
 
-    // All lines delivered after enough time
-    vi.advanceTimersByTime(30);
-    expect(session.writeCalls).toHaveLength(4);
-
-    // Enter delivered after pacing + 80ms
-    vi.advanceTimersByTime(80);
+    // Enter delivered after the settle
+    vi.advanceTimersByTime(PASTE_ENTER_DELAY_MS);
     expect(session.writeCalls[session.writeCalls.length - 1]).toBe('\r');
-    expect(endTime).toBe(110); // 30ms pacing + 80ms enter
+    expect(endTime).toBe(PASTE_ENTER_DELAY_MS);
   });
 
   it('single-line message written in one shot without pacing', () => {
@@ -138,7 +138,7 @@ describe('writeMessageToSession (Bugfix #584)', () => {
       expect(endTime).toBe(150);
     });
 
-    it('multi-line message with delayOffset defers all lines', () => {
+    it('multi-line message with delayOffset defers the paste', () => {
       const session = makeSession();
       const msg = 'a\nb\nc\nd';
       const endTime = writeMessageToSession(session, msg, false, 200);
@@ -146,18 +146,14 @@ describe('writeMessageToSession (Bugfix #584)', () => {
       // Nothing written before offset
       expect(session.writeCalls).toEqual([]);
 
-      // First line at 200ms
+      // The paste at 200ms
       vi.advanceTimersByTime(200);
-      expect(session.writeCalls).toEqual(['a\n']);
+      expect(session.writeCalls).toEqual([pasted(msg)]);
 
-      // Remaining lines at 210, 220, 230ms
-      vi.advanceTimersByTime(30);
-      expect(session.writeCalls).toEqual(['a\n', 'b\n', 'c\n', 'd']);
-
-      // Enter at 230 + 80 = 310ms from start
-      vi.advanceTimersByTime(80);
-      expect(session.writeCalls).toEqual(['a\n', 'b\n', 'c\n', 'd', '\r']);
-      expect(endTime).toBe(310);
+      // Enter at 200 + 80 = 280ms from start
+      vi.advanceTimersByTime(PASTE_ENTER_DELAY_MS);
+      expect(session.writeCalls).toEqual([pasted(msg), '\r']);
+      expect(endTime).toBe(200 + PASTE_ENTER_DELAY_MS);
     });
 
     it('two multi-line messages in sequence do not interleave', () => {
@@ -172,14 +168,14 @@ describe('writeMessageToSession (Bugfix #584)', () => {
       // Advance through all timers
       vi.advanceTimersByTime(end2 + 100);
 
-      // Verify message 1 lines come before message 2 lines
+      // Verify message 1's paste and Enter come before message 2's paste
       const writes = session.writeCalls;
-      const a4Idx = writes.indexOf('A4');
+      const aIdx = writes.indexOf(pasted(msg1));
       const enterAfterA = writes.indexOf('\r');
-      const b1Idx = writes.indexOf('B1\n');
+      const bIdx = writes.indexOf(pasted(msg2));
 
-      expect(a4Idx).toBeLessThan(enterAfterA);
-      expect(enterAfterA).toBeLessThan(b1Idx);
+      expect(aIdx).toBeLessThan(enterAfterA);
+      expect(enterAfterA).toBeLessThan(bIdx);
 
       // Both messages fully delivered with their own Enters
       const enterCount = writes.filter(w => w === '\r').length;

@@ -4,6 +4,7 @@ import { wireCommandProvider } from './command-relay.js';
 import { fireActivity, setActivityHooks } from './activity-hooks.js';
 import { loadActivityHooks } from './load-activity-hooks.js';
 import { TerminalManager } from './terminal-manager.js';
+import { openResolvedArchitect } from './open-architect.js';
 import { OverviewCache } from './views/overview-data.js';
 import { spawnBuilder } from './commands/spawn.js';
 import { sendMessage } from './commands/send.js';
@@ -11,14 +12,15 @@ import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
-import { navigateDiff, navigateDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
+import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
 import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
 import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
+import { resolvePressCursorRef, resolveCursorContextRef } from './commands/press-cursor-ref.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
-import { stopDev, restartDev, switchDevTarget, showCodevSidebar, hideCodevSidebar } from './commands/dev-actions.js';
+import { stopDev, restartDev, switchDevTarget } from './commands/dev-actions.js';
 import { openDevUrl } from './commands/open-dev-url.js';
 import { pasteImage } from './commands/paste-image.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
@@ -28,6 +30,7 @@ import { activateIssueView, viewBacklogIssue } from './commands/view-issue.js';
 import { BacklogSearchPanel } from './webviews/backlog-search-panel.js';
 import { searchBacklog } from './commands/search-backlog.js';
 import { openIssueById } from './commands/open-issue-by-id.js';
+import { openPRById } from './commands/open-pr-by-id.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
@@ -36,9 +39,21 @@ import { activateMailboxEscalationToasts } from './notifications/mailbox-escalat
 import { composeStatusBarText, composeActivityBadge } from './mailbox-indicators.js';
 import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
+import { activateBuilderReviewComments } from './comments/builder-review.js';
+import { ReviewQueueStore } from './review-queue/store.js';
+import { submitReview, discardReviewComments } from './review-queue/submit.js';
+import { feedbackFile, feedbackHunk, feedbackSelection } from './review-queue/feedback.js';
+import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
+import { activateOverviewNudge } from './review-queue/overview-nudge.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
+import {
+  steppedFontSize,
+  resolveWriteScope,
+  type FontSizeDirection,
+  type ConfigScope,
+} from './markdown-preview/font-size-control.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
-import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider } from './terminal-link-provider.js';
+import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider, IssueRefTerminalLinkProvider } from './terminal-link-provider.js';
 import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-terminals.js';
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
@@ -50,8 +65,7 @@ import { visibleBacklogCount, formatBacklogTitle } from './views/backlog-filter.
 import { RecentlyClosedProvider } from './views/recently-closed.js';
 import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
-import { PanelPlaceholderProvider } from './views/panel-placeholder.js';
-import { DevTreeProvider } from './views/dev.js';
+import { ContextualPanelProvider } from './contextual-panel/panel-provider.js';
 import { formatTargetName } from './views/dev-format.js';
 import { WorkspaceProvider } from './views/workspace.js';
 import { displayArchitectName, sortArchitectsForPicker } from './views/architect-display.js';
@@ -139,6 +153,32 @@ function extractIssueTitle(arg: IssueCommandArg): string | undefined {
 		return arg.issueTitle || undefined;
 	}
 	return undefined;
+}
+
+/** Map the pure `ConfigScope` onto the VS Code `ConfigurationTarget` enum (#1070). */
+function configTargetFor(scope: ConfigScope): vscode.ConfigurationTarget {
+	if (scope === 'workspaceFolder') {
+		return vscode.ConfigurationTarget.WorkspaceFolder;
+	}
+	if (scope === 'workspace') {
+		return vscode.ConfigurationTarget.Workspace;
+	}
+	return vscode.ConfigurationTarget.Global;
+}
+
+/**
+ * Step `codev.markdownPreview.fontSize` one click and persist it back (#1070). Writes to the scope
+ * the value already lives in (`resolveWriteScope`) so a workspace override cannot silently swallow
+ * the click. The provider's `onDidChangeConfiguration` re-render reflows the open preview.
+ *
+ * `getConfiguration` is called without a resource, so `inspect()` never surfaces a
+ * workspace-FOLDER value — the effective scopes here are global and workspace. `resolveWriteScope`
+ * still handles the folder case (unit-tested) as defensive cover if a resource is ever threaded in.
+ */
+async function stepMarkdownPreviewFontSize(direction: FontSizeDirection): Promise<void> {
+	const cfg = vscode.workspace.getConfiguration('codev.markdownPreview');
+	const next = steppedFontSize(cfg.get<number>('fontSize', 0), direction);
+	await cfg.update('fontSize', next, configTargetFor(resolveWriteScope(cfg.inspect('fontSize') ?? {})));
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -248,6 +288,17 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Terminal Manager
 	terminalManager = new TerminalManager(connectionManager, outputChannel, context.extensionUri, overviewCache);
 	context.subscriptions.push({ dispose: () => terminalManager?.dispose() });
+
+	// Per-builder pending review-comment queues (#1037). The watcher root is
+	// this window's workspace folder — in the main checkout that covers every
+	// `.builders/<id>/` queue file for cross-window sync.
+	const reviewQueueStore = new ReviewQueueStore(
+		vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+	);
+	context.subscriptions.push(reviewQueueStore);
+	// Load persisted queues so the palette Submit Review and the status-bar
+	// counter see them right after a reload, before any diff is opened.
+	reviewQueueStore.preloadFromDisk();
 
 	// Drive the `codev.terminalFocused` context key so the Cmd/Ctrl+V image
 	// paste binding (#736) only applies when a Codev terminal is focused —
@@ -512,11 +563,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	const workspaceProvider = new WorkspaceProvider(connectionManager, terminalManager!);
 	// Holds the CLI preflight row (#791); it self-refreshes on `onPreflightChange`.
 	const statusProvider = new StatusProvider(connectionManager);
-	// Codev Dev panel tab (#921) — the first real view in #812's codevPanel.
-	// createTreeView (not registerTreeDataProvider) so we hold the handle and can
-	// set TreeView.badge — the activity dot the plan calls for while a dev runs.
-	const devProvider = new DevTreeProvider(connectionManager, terminalManager!);
-	const devView = vscode.window.createTreeView('codev.dev', { treeDataProvider: devProvider });
+	// Contextual bottom-panel view (#1049) — the sole view in #812's codevPanel. Resolves the active
+	// surface and posts a ModeDescriptor to its webview. Takes the terminal manager for the
+	// builder-terminal surface (getActiveBuilderId). (#921's Codev Dev panel view was removed —
+	// its status is carried by the status-bar chip below.)
+	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!, overviewCache);
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,
@@ -525,26 +576,23 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerTreeDataProvider('codev.workspace', workspaceProvider),
 		vscode.window.registerTreeDataProvider('codev.team', teamProvider),
 		vscode.window.registerTreeDataProvider('codev.status', statusProvider),
-		vscode.window.registerTreeDataProvider('codev.placeholder', new PanelPlaceholderProvider()),
-		devView,
-		{ dispose: () => devProvider.dispose() },
+		vscode.window.registerWebviewViewProvider(
+			ContextualPanelProvider.viewType,
+			contextualPanelProvider,
+			{ webviewOptions: { retainContextWhenHidden: true } },
+		),
+		{ dispose: () => contextualPanelProvider.dispose() },
 	);
 
-	// Panel container (#812) ships a placeholder signpost gated by
-	// `codev.panelContainerEmpty`. codev.dev (#921) is a real, always-present
-	// panel view, so the container is never empty — flip the key false to hide the
-	// signpost. (Sibling tabs #813/#814/#815 set the same key; idempotent.)
-	vscode.commands.executeCommand('setContext', 'codev.panelContainerEmpty', false);
-
-	// Status-bar chip + title-bar gating for the dev surface (#921). Both derive
-	// from the single dev-terminal source of truth, so the chip, the Codev Dev
-	// tab, and the title-bar Stop/Restart actions stay in lockstep on every
-	// start/stop/swap. One subscription, named handler (no duplicate listeners).
+	// Status-bar chip for the dev surface (#921) — the always-visible "a dev is running" indicator,
+	// driven off the single dev-terminal source of truth. (#1049 removed the Codev Dev panel view;
+	// the chip is display-only now — there is no panel to focus.)
 	const updateDevChip = (target: string | null): void => {
 		if (target) {
 			if (!devChipItem) {
 				devChipItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
-				devChipItem.command = 'codev.dev.focus'; // VSCode's auto view-focus command
+				// #1049 removed the Codev Dev panel; the chip reveals the running dev PTY's terminal tab.
+				devChipItem.command = 'codev.dev.reveal';
 			}
 			// server-process (a running dev), not zap — $(zap) reads as AI/sparkle in VSCode.
 			devChipItem.text = `$(server-process) Dev: ${target}`;
@@ -552,7 +600,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			// (VSCode API constraint), so the "prominent, not alarming" look
 			// (#921 design call #4) is applied via the foreground instead.
 			devChipItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
-			devChipItem.tooltip = `Codev dev running for ${target}. Click to focus Codev Dev panel`;
+			devChipItem.tooltip = `Codev dev running for ${target}. Click to show the dev terminal`;
 			devChipItem.show();
 		} else if (devChipItem) {
 			devChipItem.dispose();
@@ -564,11 +612,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		const target = builderId ? formatTargetName(builderId) : null;
 		updateDevChip(target);
 		vscode.commands.executeCommand('setContext', 'codev.devRunning', target !== null);
-		// Activity dot on the Codev Dev tab while a dev runs — visible when the
-		// user is on another codevPanel tab (plan's tab-badge requirement).
-		devView.badge = target
-			? { value: 1, tooltip: `Dev running for ${target}` }
-			: undefined;
 	};
 	context.subscriptions.push(
 		terminalManager.onDidChangeDevTerminals(refreshDevSurface),
@@ -867,15 +910,16 @@ export async function activate(context: vscode.ExtensionContext) {
 					}
 				}
 
-				const match = architects.find(a => a.name === targetName);
-				const fallback = targetName === 'main' ? architects[0] : undefined;
-				const target = match ?? fallback;
-				if (target?.terminalId) {
-					await terminalManager?.openArchitect(target.terminalId, targetName, true);
-					return targetName;
-				}
-				vscode.window.showWarningMessage(`Codev: No '${targetName}' architect found — is the workspace activated?`);
-				return undefined;
+				// Issue 1497: resolve by exact name and open under the resolved
+				// architect's OWN name. A non-live `main` refuses with the existing
+				// warning rather than substituting `architects[0]` while presenting
+				// as `main` (which would cache the wrong architect under
+				// `architect:main` and capture text injected at `main`).
+				return await openResolvedArchitect(architects, targetName, {
+					openArchitect: (terminalId, name, focus) =>
+						terminalManager?.openArchitect(terminalId, name, focus) ?? Promise.resolve(),
+					warn: message => { vscode.window.showWarningMessage(message); },
+				});
 			} catch {
 				vscode.window.showErrorMessage('Codev: Failed to get workspace state');
 				return undefined;
@@ -1082,8 +1126,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			viewBacklogIssue(connectionManager!, extractIssueId(arg))),
 		reg('codev.openBacklogSearch', () =>
 			BacklogSearchPanel.createOrShow(connectionManager!, overviewCache, context.extensionUri)),
-		reg('codev.searchBacklog', () => searchBacklog(overviewCache)),
+		reg('codev.searchBacklog', () => searchBacklog(connectionManager!, overviewCache)),
 		reg('codev.openIssueById', () => openIssueById(connectionManager!)),
+		reg('codev.openPRById', () => openPRById(connectionManager!)),
 		reg('codev.openMarkdownPreview', async () => {
 			const uri = vscode.window.activeTextEditor?.document.uri;
 			if (!uri) {
@@ -1095,6 +1140,22 @@ export async function activate(context: vscode.ExtensionContext) {
 			await vscode.commands.executeCommand(
 				'vscode.openWith', uri, MarkdownPreviewProvider.viewType, vscode.ViewColumn.Beside,
 			);
+		}),
+		// In-preview typography zoom (#1070). These step `codev.markdownPreview.fontSize` and write
+		// it back, so the title-bar buttons and the Settings editor stay one source of truth; the
+		// provider's `onDidChangeConfiguration` re-render reflows the open preview live. Surfaced as
+		// `editor/title` buttons gated on `activeCustomEditorId == codev.markdownPreview` (no
+		// keybindings in v1 — that key tracks the active editor, not focus, and would shadow
+		// workbench zoom from the terminal/sidebar; see plan #1070).
+		reg('codev.markdownPreview.increaseFontSize', () => stepMarkdownPreviewFontSize('increase')),
+		reg('codev.markdownPreview.decreaseFontSize', () => stepMarkdownPreviewFontSize('decrease')),
+		reg('codev.markdownPreview.resetFontSize', async () => {
+			// Reset restores the documented `0` sentinel ("use the built-in default") for BOTH
+			// typography knobs, so a user who tuned font size or line-height in Settings gets back to
+			// baseline from the surface. Written to the scope each value currently lives in.
+			const cfg = vscode.workspace.getConfiguration('codev.markdownPreview');
+			await cfg.update('fontSize', 0, configTargetFor(resolveWriteScope(cfg.inspect('fontSize') ?? {})));
+			await cfg.update('lineHeight', 0, configTargetFor(resolveWriteScope(cfg.inspect('lineHeight') ?? {})));
 		}),
 		regCli('codev.referenceIssueInArchitect', async (arg: IssueCommandArg) => {
 			// Inline-button action on a backlog row: open + focus the architect
@@ -1156,25 +1217,59 @@ export async function activate(context: vscode.ExtensionContext) {
 		// selected range when symbol/file lenses aren't granular enough. Unlike
 		// the CodeLens, a context-menu action works inside the multi-file View
 		// Diff editor too. Scoped via the `codev.activeEditorIsBuilderFile`
-		// context key + the built-in `editorHasSelection` in its `when` clause.
+		// context key. With no selection it forwards the cursor line (#1037: the
+		// context menu shows this action unconditionally so the forward flow is
+		// always one right-click away in comment mode; the Cmd/Ctrl+K B
+		// keybinding keeps its original `editorHasSelection` guard).
 		reg('codev.forwardSelectionToBuilder', async () => {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) { return; }
 			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
 			if (!entry) { return; }
 			const sel = editor.selection;
-			if (sel.isEmpty) { return; }
-			const start = sel.start.line + 1;
-			// A selection ending at column 0 of a line doesn't include that line.
-			const end = sel.end.character === 0 && sel.end.line > sel.start.line
-				? sel.end.line
-				: sel.end.line + 1;
+			let start = sel.start.line + 1;
+			let end = sel.end.line + 1;
+			if (sel.isEmpty) {
+				start = sel.active.line + 1;
+				end = start;
+			} else if (sel.end.character === 0 && sel.end.line > sel.start.line) {
+				// A selection ending at column 0 of a line doesn't include that line.
+				end = sel.end.line;
+			}
 			const text = buildBuilderRangeRef(entry.relPath, start, end);
 			const resolvedId = await terminalManager?.openBuilderByRoleOrId(entry.builderId, true);
 			if (resolvedId && !terminalManager?.injectBuilderText(resolvedId, text)) {
 				vscode.window.showWarningMessage('Codev: Builder terminal not available');
 			}
 		}),
+		// Submit Review + Discard (#1037): flush / drop the per-builder pending
+		// comment queue. Builder resolution: active diff's owner → sole pending
+		// builder → QuickPick.
+		// The status-bar button invokes this with no arg (resolves the target
+		// builder itself); the deck's Send Fb key relays `send-queue [builderId]`,
+		// so an explicit id string flushes exactly that builder's queue (#1410).
+		reg('codev.submitReview', (builderId?: unknown) =>
+			submitReview(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
+		reg('codev.discardReviewComments', () =>
+			discardReviewComments({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		// Mode-neutral review feedback (#1410, #1552): the deck diff/scroll dials
+		// press these; each opens the native comment reply box at the anchor so the
+		// reviewer authors the comment, which Submit then forwards or enqueues per
+		// `codev.diffCodelensMode` (see review-queue/feedback.ts). No promptless path.
+		reg('codev.feedbackCurrentFileToBuilder', () => feedbackFile()),
+		reg('codev.feedbackCurrentHunkToBuilder', () => feedbackHunk()),
+		reg('codev.feedbackSelectionToBuilder', () => feedbackSelection()),
+		// Diff codelens mode toggle (#1037): a single title-bar button per mode
+		// (VS Code toolbar buttons have no pressed state — same pattern as the
+		// Agents group-by cycle above); each command shows the mode clicking
+		// switches TO and persists the choice per workspace.
+		reg('codev.diffCodelensUseForward', () =>
+			vscode.workspace.getConfiguration('codev').update('diffCodelensMode', 'forward', vscode.ConfigurationTarget.Workspace)),
+		reg('codev.diffCodelensUseComment', () =>
+			vscode.workspace.getConfiguration('codev').update('diffCodelensMode', 'comment', vscode.ConfigurationTarget.Workspace)),
 		// Forward the whole active diff file as a reference (the Forward File action).
 		reg('codev.forwardCurrentFileToBuilder', async () => {
 			const editor = vscode.window.activeTextEditor;
@@ -1184,21 +1279,49 @@ export async function activate(context: vscode.ExtensionContext) {
 			await vscode.commands.executeCommand(
 				'codev.forwardToBuilder', entry.builderId, buildBuilderFileRef(entry.relPath));
 		}),
-		// Forward the changed hunk under the cursor (the Forward Hunk action): the
-		// diff-inject session already carries the new-side hunk ranges (1-based).
+		// Forward the changed hunk under the cursor (the Forward Hunk action).
+		// Resolves through the shared press helper (#1534): a FRESH single-file
+		// re-parse defeats the open-time snapshot staleness, and hunk-first
+		// resolution keeps the tight changed range when a hunk covers the cursor,
+		// degrading hunk → symbol → file only when none does — so a cursor on a
+		// deletion-only change or outside any recorded range forwards the enclosing
+		// symbol / whole file with an honest note, instead of the old (and, when the
+		// cursor was visibly in green, misleading) error.
 		reg('codev.forwardCurrentHunkToBuilder', async () => {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) { return; }
 			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
 			if (!entry) { return; }
-			const line = editor.selection.active.line + 1;
-			const hunk = entry.hunks.find(h => line >= h.start && line <= h.end);
-			if (!hunk) {
-				vscode.window.setStatusBarMessage('Codev: place the cursor in a changed hunk', 3000);
-				return;
+			const cursorLine = editor.selection.active.line + 1; // 1-based new-side
+			const resolved = await resolvePressCursorRef(entry, editor.document.uri, cursorLine);
+			if (resolved.kind === 'file') {
+				vscode.window.setStatusBarMessage(
+					'Codev: no changed lines at the cursor — forwarded the whole file (reopen the diff if it looks stale)', 3000);
 			}
-			await vscode.commands.executeCommand(
-				'codev.forwardToBuilder', entry.builderId, buildBuilderRangeRef(entry.relPath, hunk.start, hunk.end));
+			await vscode.commands.executeCommand('codev.forwardToBuilder', entry.builderId, resolved.refText);
+		}),
+		// Keyboard equivalent of a codelens click (#1073): forward whatever covers
+		// the cursor — the most specific enclosing symbol first, else the changed
+		// hunk, else the bare file path. Bound to Cmd/Ctrl+K H; `when` scopes it to
+		// builder-diff files with `editorTextFocus` (cursor only, no selection).
+		// Resolution + the fresh single-file re-parse live in `resolveCursorContextRef`
+		// (#1073, #1534) — SYMBOL-first (this verb forwards the most-specific enclosing
+		// symbol), distinct from the deck press verbs' hunk-first `resolvePressCursorRef`.
+		// Both share the fresh re-parse, so the keyboard path also resolves against live
+		// hunks (it too read the stale snapshot; its file fallback merely hid it). This
+		// handler reuses the shared `forwardToBuilder` inject path (no Enter, focus stays
+		// on the diff editor).
+		reg('codev.forwardCursorContextToBuilder', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) { return; }
+			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
+			if (!entry) { return; }
+			const cursorLine = editor.selection.active.line + 1; // 1-based new-side
+			const resolved = await resolveCursorContextRef(entry, editor.document.uri, cursorLine);
+			if (resolved.kind === 'file') {
+				vscode.window.setStatusBarMessage('Codev: forwarded file path (no symbol or hunk at cursor)', 3000);
+			}
+			await vscode.commands.executeCommand('codev.forwardToBuilder', entry.builderId, resolved.refText);
 		}),
 		reg('codev.openBuilderFileDiff', async (arg: unknown) => {
 			if (!(arg instanceof BuilderFileTreeItem)) { return; }
@@ -1225,6 +1348,11 @@ export async function activate(context: vscode.ExtensionContext) {
 		// first file in the list / the first hunk of the active diff.
 		reg('codev.diffFirstFile', () =>
 			navigateDiffToFirst({ context, overviewCache, diffCache: builderDiffCache })),
+		// Builder-id-scoped "open first file diff" (#1414): the SD+ Automatic diff
+		// press relays `open-diff-first` here with the target builder id, so it lands
+		// on file 1 in per-file mode (dials seeded) instead of the aggregate editor.
+		reg('codev.openBuilderDiffFirstFile', (arg: vscode.TreeItem | string | undefined) =>
+			navigateBuilderDiffToFirst(extractBuilderId(arg), { context, overviewCache, diffCache: builderDiffCache })),
 		reg('codev.diffFirstHunk', () => diffFirstHunk()),
 		regCli('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
@@ -1240,10 +1368,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			restartDev(connectionManager!, terminalManager!)),
 		regCli('codev.dev.switchTarget', () =>
 			switchDevTarget(connectionManager!, terminalManager!)),
-		reg('codev.dev.showSidebar', () =>
-			showCodevSidebar()),
-		reg('codev.dev.hideSidebar', () =>
-			hideCodevSidebar()),
+		// The dev status-bar chip's click target (#1049 removed the Codev Dev panel it used to focus).
+		reg('codev.dev.reveal', () =>
+			terminalManager!.revealDevTerminal()),
 		reg('codev.openDevUrl', (urlArg?: unknown) =>
 			openDevUrl(connectionManager!, typeof urlArg === 'string' ? urlArg : undefined)),
 		reg('codev.pasteImage', () =>
@@ -1346,15 +1473,35 @@ export async function activate(context: vscode.ExtensionContext) {
 	// format produced by `codev.addReviewComment` and review.json snippet.
 	activateReviewComments(context, overviewCache);
 
+	// Builder review comments (#1037): inline threads on builder-diff files
+	// feeding the per-builder pending queue, plus the status-bar Submit Review
+	// counter. The batched submit itself is `codev.submitReview` above.
+	activateBuilderReviewComments(context, reviewQueueStore, overviewCache);
+	activateSubmitReviewStatusBar(context, reviewQueueStore);
+	// #1410: nudge Tower to rebuild + rebroadcast the overview on a queue mutation
+	// or a feedback-mode change, so the deck's Send Fb badge + dial mode-label
+	// update promptly (Tower has no watcher on the queue files / settings.json).
+	context.subscriptions.push(activateOverviewNudge(reviewQueueStore, connectionManager!));
+
 	// Codev Markdown Preview (#859): a read-only custom editor that renders a
 	// spec/plan/review in the shared artifact-canvas and adds review comments
 	// from the rendered surface. Opt-in via "Reopen With…" or
 	// `codev.openMarkdownPreview`; `priority: "option"` keeps the default `.md`
 	// editor and built-in preview untouched.
+	// Held in a local so the provider itself joins `subscriptions`: on deactivate it releases the
+	// canvas-view registrations of any still-open panels, which VS Code does not dispose
+	// individually (spec 1401). Without that, those views linger in Tower until their lease lapses.
+	const markdownPreviewProvider = new MarkdownPreviewProvider(
+		context.extensionUri,
+		overviewCache,
+		context.globalState,
+		connectionManager,
+	);
+	context.subscriptions.push(markdownPreviewProvider);
 	context.subscriptions.push(
 		vscode.window.registerCustomEditorProvider(
 			MarkdownPreviewProvider.viewType,
-			new MarkdownPreviewProvider(context.extensionUri, overviewCache),
+			markdownPreviewProvider,
 			{
 				webviewOptions: { retainContextWhenHidden: true },
 				supportsMultipleEditorsPerDocument: false,
@@ -1369,7 +1516,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Spec 1313 Phase 8: toast when a held message crosses the escalation age
 	// (the `mailbox-escalation` SSE event). Visibility only — read/dismiss via
 	// `afx inbox`. Respects `codev.mailboxEscalationToasts.enabled`.
-	activateMailboxEscalationToasts(context, connectionManager);
+	activateMailboxEscalationToasts(context, connectionManager, overviewCache);
 
 	// Auto-open builder terminals on Tower spawn events
 	const builderSpawnHandler = new BuilderSpawnHandler(connectionManager, terminalManager, outputChannel);
@@ -1392,6 +1539,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.registerTerminalLinkProvider(
 			new ReconnectTerminalLinkProvider(terminalManager),
+		),
+	);
+
+	// Make #N / PR #N references clickable in any terminal output (#1412)
+	context.subscriptions.push(
+		vscode.window.registerTerminalLinkProvider(
+			new IssueRefTerminalLinkProvider(connectionManager),
 		),
 	);
 

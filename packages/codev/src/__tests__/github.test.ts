@@ -402,6 +402,29 @@ describe('forge concept routing', () => {
       const result = await fetchGitHubIssue(99);
       expect(result).toBeNull();
     });
+
+    it('surfaces author, createdAt, assignees, labels, and milestone unchanged (#1592)', async () => {
+      const { fetchGitHubIssue } = await import('../lib/github.js');
+      const mockIssue = {
+        title: 'Test',
+        body: 'Body',
+        state: 'open',
+        url: 'https://forge/issue/42',
+        author: { login: 'amrmelsayed' },
+        createdAt: '2026-09-02T22:51:59Z',
+        assignees: [{ login: 'alice' }],
+        labels: [{ name: 'area/cross-cutting' }],
+        milestone: { title: 'v3.4.0' },
+        comments: [],
+      };
+      executeForgeCommandMock.mockResolvedValue(mockIssue);
+
+      const result = await fetchGitHubIssue(42, { cwd: '/tmp' });
+
+      // Tower's GET /api/issue serializes this result verbatim, so nothing on
+      // the fetch path may strip the new fields before they reach the wire.
+      expect(result).toEqual(mockIssue);
+    });
   });
 
   describe('fetchGitHubIssueOrThrow', () => {

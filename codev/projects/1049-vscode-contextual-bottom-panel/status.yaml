@@ -1,0 +1,162 @@
+id: '1049'
+title: vscode-contextual-bottom-panel
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Mode resolver + contract types
+    status: complete
+  - id: phase_2
+    title: Panel surface + placeholder retirement
+    status: complete
+  - id: phase_3
+    title: Context adapter + contextual mode switching
+    status: complete
+  - id: phase_4
+    title: Transient navigation + minimum summary stubs
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-08-12T12:24:58.634Z'
+    approved_at: '2026-08-24T21:44:21.919Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-24T21:56:47.413Z'
+    approved_at: '2026-08-24T22:07:59.863Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-25T00:14:15.927Z'
+    approved_at: '2026-08-25T02:06:40.601Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_1-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_2-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_3-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_3-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_3-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_3-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_3-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_3-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_3-iter3-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_3-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_3-iter3-claude.txt
+  - iteration: 1
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_4-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_4-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_4-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_4-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_4-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1049/codev/projects/1049-vscode-contextual-bottom-panel/1049-phase_4-iter2-claude.txt
+started_at: '2026-08-12T12:09:59.640Z'
+updated_at: '2026-08-25T02:06:40.602Z'
+force_advanced:
+  phase: phase_3
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1049-phase_3-iter3-rebuttals.md
+  at: '2026-08-24T23:28:49.812Z'
+pr_history:
+  - phase: review
+    pr_number: 1551
+    branch: builder/spir-1049
+    created_at: '2026-08-25T00:03:48.168Z'
+pr_ready_for_human: false

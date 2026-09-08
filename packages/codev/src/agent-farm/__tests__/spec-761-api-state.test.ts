@@ -83,7 +83,8 @@ vi.mock('../servers/tower-utils.js', () => ({
   serveStaticFile: vi.fn(() => false),
 }));
 
-vi.mock('../utils/server-utils.js', () => ({
+vi.mock('../utils/server-utils.js', async (importActual) => ({
+  ...(await importActual<typeof import('../utils/server-utils.js')>()),
   isRequestAllowed: vi.fn(() => true),
   parseJsonBody: vi.fn(async () => ({})),
 }));

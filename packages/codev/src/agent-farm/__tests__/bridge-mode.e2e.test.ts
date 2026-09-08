@@ -10,7 +10,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 
-import { startTower, cleanupTestDb } from "./helpers/tower-test-utils.js";
+import {
+  startTower,
+  cleanupTestDb,
+  createIsolatedAgentFarmDir,
+  removeIsolatedAgentFarmDir,
+} from "./helpers/tower-test-utils.js";
 
 const PORT_DEFAULT = 14900;
 const PORT_BRIDGE_ALL = 14901;
@@ -61,6 +66,7 @@ describe("Bridge Mode", () => {
     );
 
     const socketDir = mkdtempSync("/tmp/codev-sock-invalid-");
+    const invalidAgentFarmDir = createIsolatedAgentFarmDir();
     invalidProcess = spawn("node", [towerServerPath, String(PORT_INVALID)], {
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
@@ -69,6 +75,7 @@ describe("Bridge Mode", () => {
         NODE_ENV: "test",
         AF_TEST_DB: `test-${PORT_INVALID}.db`,
         SHELLPER_SOCKET_DIR: socketDir,
+        CODEV_AGENT_FARM_DIR: invalidAgentFarmDir,
         BRIDGE_MODE: "1",
         BRIDGE_TOWER_HOST: "not-a-valid-host",
       },
@@ -83,6 +90,8 @@ describe("Bridge Mode", () => {
     });
 
     try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    // #1515: holds a copy of the shared local key — don't leave it behind.
+    removeIsolatedAgentFarmDir(invalidAgentFarmDir);
   }, 30000);
 
   afterAll(async () => {

@@ -70,7 +70,7 @@ export interface PtySessionInfo {
    *
    * Serialised alongside `status` because the two disagree in the case that
    * matters: a session whose shellper connection died reports status 'running'
-   * until teardown while every write to it is dropped (#1198). `afx reset`
+   * until teardown while every write to it is dropped (#1198). `afx refresh`
    * preflights on this so it refuses a terminal it cannot write to BEFORE
    * touching anything, rather than discovering it on the first send.
    */
@@ -81,7 +81,7 @@ export interface PtySessionInfo {
    * Serialised by `GET /api/terminals/:id`, which makes output quiescence
    * *measurable* by a client: an agent mid-turn emits continuously (spinner
    * frames, streamed tokens), so a stretch with no advance means the turn ended.
-   * `afx reset` uses this to avoid typing into a terminal that is still working.
+   * `afx refresh` uses this to avoid typing into a terminal that is still working.
    */
   lastDataAt: number;
 }
@@ -93,6 +93,26 @@ export interface PtySessionInfo {
  * successful recovery always lands before the teardown fires.
  */
 export const SHELLPER_CLOSE_GRACE_MS = 15_000;
+
+/**
+ * Bound on {@link PtySession.replaySnapshot}'s flush-until-quiescent loop. Each retry
+ * means output arrived during the previous parser flush; three consecutive busy flushes
+ * (each typically <100ms even for MB-scale backlogs) indicate a pathologically streaming
+ * session, for which the raw-tail fallback (whose correctness the client nudge already
+ * recovers) is the right answer rather than an unbounded wait (PIR #1354).
+ */
+export const REPLAY_FLUSH_ATTEMPTS = 3;
+
+/**
+ * Outcome of {@link PtySession.replaySnapshot} (PIR #1354). On `ok`, `data` is the
+ * serialized O(screen) replay payload and `token` is the `bytesWritten` value the
+ * snapshot is provably current to — the caller re-checks it (and attaches the client)
+ * with NO intervening await, so no output byte can fall between snapshot and live
+ * stream. On failure, `reason` feeds the attach path's fallback log line.
+ */
+export type ReplaySnapshotResult =
+  | { ok: true; data: string; token: number }
+  | { ok: false; reason: 'no-mirror' | 'flush-timeout' | 'serialize-error' | 'empty-snapshot'; error?: unknown };
 
 export class PtySession extends EventEmitter {
   readonly id: string;
@@ -118,8 +138,26 @@ export class PtySession extends EventEmitter {
   // SessionManager's in-place reconnect delivers a replacement client.
   private _closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private shellperPid = -1;
+  // APPLIED geometry (Issue #1482): the dimensions a resize actually reached the process with.
+  // Everything that must agree with the real TUI reads these — `info`, and above all the gate
+  // mirror, whose classification is only valid if it wraps the way the app's own layout does.
+  // They move in `resize()` ONLY after the underlying resize is confirmed; see that method.
   private cols: number;
   private rows: number;
+  // REQUESTED geometry (Issue #1482): the last dimensions anyone ASKED for, applied or not.
+  // Kept separately so a resize that arrives before the process exists — or one dropped by a
+  // disconnected shellper — is not simply lost: `spawn()` starts the process at the requested
+  // size, and the attach path re-sends it once a connection is back. Without this pair, the
+  // fix for a dropped resize (don't commit dims) would regress the pre-spawn resize, which
+  // used to work precisely because the assignment was unconditional.
+  private requestedCols: number;
+  private requestedRows: number;
+  // Is `requested` an OUTSTANDING request — one somebody made that could not be applied?
+  // (Issue #1482.) Set when a resize is dropped, cleared when one lands. The attach path needs
+  // exactly this distinction: re-sending on "requested !== applied" alone would also re-send
+  // the constructor's own defaults, which would immediately overwrite the geometry just
+  // adopted from the shellper — trading a measurement back for the memory it corrected.
+  private resizePending = false;
   private exitCode: number | undefined;
   private logFd: number | null = null;
   private logBytes: number = 0;
@@ -141,6 +179,8 @@ export class PtySession extends EventEmitter {
     this.label = config.label;
     this.cols = config.cols;
     this.rows = config.rows;
+    this.requestedCols = config.cols;
+    this.requestedRows = config.rows;
     this.createdAt = new Date().toISOString();
     this.ringBuffer = new RingBuffer(config.ringBufferLines ?? 1000);
     this.diskLogEnabled = config.diskLogEnabled ?? true;
@@ -160,6 +200,13 @@ export class PtySession extends EventEmitter {
       this.logFd = fs.openSync(this.logPath, 'a');
     }
 
+    // Spawn at the REQUESTED geometry (Issue #1482): a viewer that resized before the process
+    // existed had its resize dropped by the `status === 'running'` guard in `resize()`, and the
+    // request is honoured here instead. Applied and requested are equal for a session nobody
+    // resized, so this is a no-op in the common case.
+    this.cols = this.requestedCols;
+    this.rows = this.requestedRows;
+    this.resizePending = false;
     this.pty = nodePty.spawn(this.config.command, this.config.args, {
       name: 'xterm-256color',
       cols: this.cols,
@@ -183,8 +230,17 @@ export class PtySession extends EventEmitter {
    * Attach a shellper client as the I/O backend instead of node-pty.
    * Data flows: shellper → ring buffer → WebSocket clients.
    * User input flows: WebSocket → write() → shellper.
+   *
+   * `mirrorSeed` (PIR #1354): the UNCAPPED replay for the screen mirror, when the
+   * caller capped `replayData` for the ring (`capRingSeed`). The two seeds diverge
+   * deliberately — ring contents are shipped raw to clients only on the fallback
+   * path, so the 1 MiB client-payload cap stays; the mirror folds its seed into a
+   * fixed-size grid, so feeding it the full (wire-capped, ≤8 MB) history costs
+   * bounded parse time and shrinks the #1361 born-torn window from 1 MiB to the
+   * shellper's whole retention. Omitted → the mirror gets `replayData`, i.e. the
+   * pre-#1354 behavior (fresh spawns, whose replay is never capped).
    */
-  attachShellper(client: IShellperClient, replayData: Buffer, shellperPid: number, shellperSessionId?: string): void {
+  attachShellper(client: IShellperClient, replayData: Buffer, shellperPid: number, shellperSessionId?: string, mirrorSeed?: Buffer): void {
     // Idempotent re-attach (Issue #1047 Fix E): if a previous client is still
     // attached, drop our listeners on it before subscribing to the new one so
     // a re-attach can't double the per-byte data fan-out (each leaked 'data'
@@ -219,15 +275,71 @@ export class PtySession extends EventEmitter {
       this.logFd = fs.openSync(this.logPath, 'a');
     }
 
-    // Populate ring buffer with replay data from shellper, and seed the gate mirror with
-    // the SAME bytes (Spec 1313 render-gate round 2) so it reflects the session's history
-    // from the moment Tower (re)attaches — a mirror seeded only from live output after this
-    // point would be born torn. Fed through the shared feedGateScreen so it and
-    // `ringBuffer.bytesWritten` (the gate's change token) advance together.
+    // Reconcile our geometry against the PROCESS before seeding anything (Issue #1482).
+    //
+    // The render gate classifies the mirror seeded just below, and its verdict is only valid
+    // if that mirror wraps the way the real TUI does. Until now the seed was rendered at
+    // whatever Tower believed — which after a restart is a value read back out of the
+    // database, and after a dropped resize was never true at all. The shellper, meanwhile,
+    // has always reported the geometry it actually applied to the kernel winsize in its
+    // WELCOME frame, and Tower has always thrown it away. Adopt it: a measurement beats a
+    // memory, and this is the only measurement available.
+    //
+    // Adoption is not the last word — a live viewer's geometry still wins. It is re-sent
+    // immediately below, and only takes effect (per `resize`) if it reaches the process.
+    const reportedCols = client.welcomeCols ?? null;
+    const reportedRows = client.welcomeRows ?? null;
+    if (reportedCols && reportedRows && (reportedCols !== this.cols || reportedRows !== this.rows)) {
+      // This log line is the one that would have made #1482 self-evident in the field: it
+      // names both geometries at the moment they are known to disagree.
+      console.warn(
+        `[pty-session ${this.id}] dimension divergence on attach: Tower believed ` +
+          `${this.cols}x${this.rows}, shellper reports ${reportedCols}x${reportedRows} — ` +
+          `adopting the shellper's (the render gate classifies at these dimensions)`,
+      );
+      this.cols = reportedCols;
+      this.rows = reportedRows;
+      // Adoption re-bases the REQUEST too, unless one is genuinely outstanding. Without this
+      // the constructor's defaults would count as a request to undo the correction we just
+      // made — see `resizePending`.
+      if (!this.resizePending) {
+        this.requestedCols = reportedCols;
+        this.requestedRows = reportedRows;
+      }
+      // A mirror that outlived a disconnect was built at the stale geometry; re-wrap it now,
+      // BEFORE the seed below is fed into it. A null mirror is created at the corrected dims.
+      this._gateScreen?.resize(reportedCols, reportedRows);
+    }
+
+    // Populate the ring buffer and seed the screen mirror so both reflect the session's
+    // history from the moment Tower (re)attaches — a mirror seeded only from live output
+    // after this point would be born torn (Spec 1313 render-gate round 2). The mirror may
+    // receive a LONGER seed than the ring (see `mirrorSeed` above); that superset is safe
+    // for the `bytesWritten` token protocol, which only ever compares the token against
+    // itself across a flush — every LIVE byte after this point still feeds both in
+    // lockstep via onPtyData.
     if (replayData.length > 0) {
-      const replay = replayData.toString('utf-8');
-      this.ringBuffer.pushData(replay);
-      this.feedGateScreen(replay);
+      this.ringBuffer.pushData(replayData.toString('utf-8'));
+    }
+    const screenSeed = mirrorSeed ?? replayData;
+    if (screenSeed.length > 0) {
+      this.feedGateScreen(screenSeed.toString('utf-8'));
+    }
+
+    // Re-assert an OUTSTANDING resize now that a connection exists (Issue #1482). A viewer's
+    // size is the one Tower should be driving toward; adopting the shellper's above only fixed
+    // our BELIEF, and a resize dropped while the socket was down was never delivered at all.
+    // Gated on `resizePending` rather than on "requested !== applied": the latter is also true
+    // for a session whose constructor defaults simply differ from the running geometry, and
+    // re-sending THOSE would undo the adoption above. Routed through `resize`, so it commits
+    // only if it lands and cannot re-introduce the divergence it exists to close.
+    if (this.resizePending && (this.requestedCols !== this.cols || this.requestedRows !== this.rows)) {
+      if (!this.resize(this.requestedCols, this.requestedRows)) {
+        console.warn(
+          `[pty-session ${this.id}] could not re-apply requested ${this.requestedCols}x${this.requestedRows} ` +
+            `on attach; running at ${this.cols}x${this.rows}`,
+        );
+      }
     }
 
     // Forward shellper data to ring buffer + WebSocket clients
@@ -440,16 +552,16 @@ export class PtySession extends EventEmitter {
 
   /**
    * Fold one output chunk into the persistent gate mirror (Spec 1313 render-gate round 2),
-   * creating it lazily on the first byte. Called at EVERY point the ring buffer is fed —
-   * `onPtyData` (live output) and the `attachShellper` replay seed — with the SAME bytes, so
+   * creating it lazily on the first byte. Called at EVERY point the mirror is fed —
+   * `onPtyData` (live output, in lockstep with the ring) and the `attachShellper` seed — so
    * the mirror's rendered screen and `ringBuffer.bytesWritten` (the gate's monotone change
-   * token) can never drift apart. Creating it on the first byte (not at construction) means a
-   * session that never emits output costs nothing, while any session that does is mirrored from its
-   * very first LIVE byte. NOTE: the `attachShellper` seed is the reconnect/adopt REPLAY, which
-   * `tower-terminals.ts` caps to the last 1 MiB (`capRingSeed`); a long-lived alt-screen frame whose
-   * coherent start predates that tail is seeded born-torn → the gate HOLDS (fail-safe) until the next
-   * repaint/viewer nudge heals it. Pre-existing, not a round-2 regression (the pre-round-2 whole-ring
-   * gate classified that same capped seed); tracked as a fast-follow, #1361.
+   * token) can never drift apart on the live path. Creating it on the first byte (not at
+   * construction) means a session that never emits output costs nothing, while any session
+   * that does is mirrored from its very first LIVE byte. On adopt/reconnect the seed is the
+   * FULL shellper replay (≤8 MB wire cap), not the ring's 1 MiB `capRingSeed` tail
+   * (PIR #1354) — so a long-lived alt-screen frame is only born torn when its coherent
+   * start predates the shellper's whole retention (#1361's residual case); the gate then
+   * HOLDS (fail-safe) until the next repaint heals it.
    */
   private feedGateScreen(data: string): void {
     if (!this._gateScreen) this._gateScreen = new SessionScreen(this.cols, this.rows);
@@ -530,24 +642,52 @@ export class PtySession extends EventEmitter {
   /**
    * Resize the PTY or shellper.
    * Returns false when the resize was dropped (#1198).
+   *
+   * COMMIT-ON-SUCCESS (Issue #1482). This used to assign `this.cols`/`this.rows` and resize the
+   * gate mirror on entry, BEFORE finding out whether the resize could reach the process. When
+   * it could not — a dropped shellper write, or no live process at all — Tower's dimensions and
+   * the classification mirror moved while the kernel winsize, and therefore the TUI's own
+   * layout, did not. The render gate then classified a screen re-wrapped at a geometry the app
+   * never adopted: the composer's bounding rule lands on a different row, `findRegionEnd`
+   * returns -1, and every message to that agent holds `busy`/`no-region-end` FOREVER. That is
+   * the indefinite false-busy this issue is named for, and it starts with a boolean nobody read.
+   *
+   * So: record the request, attempt the resize, and move the applied geometry only if it
+   * landed. The request survives in `requestedCols`/`requestedRows` for `spawn()` and for the
+   * re-send on re-attach, so nothing is lost by declining to commit — only the false belief is.
+   *
+   * Callers must not ignore the return value; a dropped resize means Tower and the process now
+   * disagree about the geometry until something re-sends it.
    */
   resize(cols: number, rows: number): boolean {
+    // The request stands whether or not it lands — see the field comments.
+    this.requestedCols = cols;
+    this.requestedRows = rows;
+
+    let applied = false;
+    if (this._shellperBacked) {
+      applied = this.shellperClient !== null && this.status === 'running'
+        ? this.shellperClient.resize(cols, rows)
+        : false;
+    } else if (this.pty && this.status === 'running') {
+      this.pty.resize(cols, rows);
+      applied = true;
+    }
+    if (!applied) {
+      this.resizePending = true;
+      return false;
+    }
+
+    this.resizePending = false;
     this.cols = cols;
     this.rows = rows;
     // Keep the gate mirror at the live geometry (Spec 1313) so the classified screen wraps
-    // identically to what the user sees; no-op before the mirror's first output / after teardown.
+    // identically to what the user sees; no-op before the mirror's first output / after
+    // teardown. Safe to do after the process resize rather than before it: the app's repaint
+    // arrives as output on a later tick, so the mirror is always re-sized before the first byte
+    // drawn at the new geometry reaches it.
     this._gateScreen?.resize(cols, rows);
-    if (this._shellperBacked) {
-      if (this.shellperClient && this.status === 'running') {
-        return this.shellperClient.resize(cols, rows);
-      }
-      return false;
-    }
-    if (this.pty && this.status === 'running') {
-      this.pty.resize(cols, rows);
-      return true;
-    }
-    return false;
+    return true;
   }
 
   /** Kill the PTY process or send signal to shellper. */
@@ -573,24 +713,91 @@ export class PtySession extends EventEmitter {
     this.cleanup();
   }
 
-  /** Attach a WebSocket client. Returns ring buffer contents for replay. */
-  attach(client: { send: (data: Buffer | string) => void }): string[] {
+  /**
+   * Register a live client for output broadcast without producing any replay.
+   * The replay-payload decision (snapshot vs raw lines) belongs to the attach
+   * path (PIR #1354); this is the shared registration step every variant uses.
+   */
+  addClient(client: { send: (data: Buffer | string) => void }): void {
     this.clients.add(client);
     if (this.disconnectTimer) {
       clearTimeout(this.disconnectTimer);
       this.disconnectTimer = null;
     }
+  }
+
+  /** Attach a WebSocket client. Returns ring buffer contents for replay. */
+  attach(client: { send: (data: Buffer | string) => void }): string[] {
+    this.addClient(client);
     return this.ringBuffer.getAll();
   }
 
   /** Attach with resume from a specific sequence number. */
   attachResume(client: { send: (data: Buffer | string) => void }, sinceSeq: number): string[] {
-    this.clients.add(client);
-    if (this.disconnectTimer) {
-      clearTimeout(this.disconnectTimer);
-      this.disconnectTimer = null;
-    }
+    this.addClient(client);
     return this.ringBuffer.getSince(sinceSeq);
+  }
+
+  /**
+   * Which buffer the session's emulated screen is in: 'alternate' means a
+   * full-screen TUI, the case whose reconnect is unservable from the line ring
+   * (a caught-up client's delta resume returns [] — `ring-buffer.ts` getSince)
+   * and so must be served the snapshot. Null before the first output byte and
+   * after teardown.
+   */
+  get screenBufferType(): 'normal' | 'alternate' | null {
+    if (!this._gateScreen) return null;
+    return this._gateScreen.bufferType;
+  }
+
+  /**
+   * Produce the O(screen) viewer-attach replay payload from the session's mirror
+   * (PIR #1354): the serialized current screen plus bounded scrollback, replacing
+   * the raw ring-tail replay whose truncation the client-side resize nudge papered
+   * over. Does NOT attach the client — the caller must, and the split is what makes
+   * the byte partition airtight:
+   *
+   * The flush loop samples `ringBuffer.bytesWritten` (the same monotone token the
+   * render gate uses), flushes the mirror's parser, and re-checks; an unchanged token
+   * proves every byte ever fed is parsed into the grid. Serialization then happens
+   * synchronously, and the caller's continuation (token re-check + `addClient` +
+   * replay send) runs in a microtask — PTY output only arrives via I/O macrotasks, so
+   * nothing can interleave before the client is attached. Every output byte is
+   * therefore either in the snapshot or broadcast live to the attached client:
+   * no gap, no duplication.
+   *
+   * Failure never degrades availability: callers fall back to the raw-ring replay
+   * (today's behavior, nudge-recovered), logging the `reason`.
+   */
+  async replaySnapshot(): Promise<ReplaySnapshotResult> {
+    const screen = this._gateScreen;
+    if (!screen) {
+      // Lazily created on the first output byte, so no mirror simply means a
+      // session that has never produced output (or was torn down) — benign.
+      return { ok: false, reason: 'no-mirror' };
+    }
+    for (let attempt = 0; attempt < REPLAY_FLUSH_ATTEMPTS; attempt++) {
+      const token = this.ringBuffer.bytesWritten;
+      await screen.read();
+      if (this._gateScreen !== screen) {
+        // Torn down mid-flush; the freed term has no coherent frame.
+        return { ok: false, reason: 'no-mirror' };
+      }
+      if (this.ringBuffer.bytesWritten !== token) continue;
+      let data: string;
+      try {
+        data = screen.serialize();
+      } catch (error) {
+        return { ok: false, reason: 'serialize-error', error };
+      }
+      if (!data) {
+        // A live mirror exists only for sessions that produced output, so an
+        // empty serialization is the desync canary, not an idle session.
+        return { ok: false, reason: 'empty-snapshot' };
+      }
+      return { ok: true, data, token };
+    }
+    return { ok: false, reason: 'flush-timeout' };
   }
 
   /** Detach a WebSocket client. Starts disconnect timer if no clients remain (non-shellper only). */
@@ -613,20 +820,60 @@ export class PtySession extends EventEmitter {
   }
 
   /**
+   * The identity the attached shellper reported for its CURRENT PTY, or null
+   * when there is none to be had — no shellper attached (a local node-pty
+   * session), an older shellper that omits the WELCOME fields, or a payload that
+   * failed validation (PIR #1475).
+   *
+   * Read THROUGH to the live client on every access rather than snapshotted at
+   * `attachShellper`. An ordinary SPAWN relaunch (the #1149 crash-loop fallback,
+   * the #1264 clean-exit rerun) replaces the PTY without a socket reconnect, so
+   * `attachShellper` never runs again — a snapshot would freeze at the
+   * pre-relaunch identity for the rest of the session. `detachShellper` nulls
+   * `shellperClient`, so falling back is automatic with no extra state.
+   *
+   * Command and args are resolved as ONE unit: with no usable command there is
+   * no usable identity, and `config` supplies both. That keeps the atomicity the
+   * client's validation establishes, and lets a legitimately empty argv stay `[]`
+   * instead of silently falling back to the config's args.
+   */
+  private get hydratedIdentity(): { command: string; args: string[] } | null {
+    // Falsy, not `!= null`: interface members are optional, so a test double or
+    // an unhydrated client yields `undefined`, and a rejected payload yields
+    // `null`. Empty string means "unknown" everywhere in this codebase.
+    const command = this.shellperClient?.welcomeCommand;
+    if (!command) return null;
+    return { command, args: this.shellperClient?.welcomeArgs ?? [] };
+  }
+
+  /**
    * Launch command of this session's process (Spec 1313 — render-gate identity seam).
    *
-   * `command` and `args` live in the private `config`; the render-gate's
-   * `resolveProfile` needs an authoritative source to map a session to its
-   * classifier profile (claude/codex/unknown). Exposed as read-only getters so
-   * the gate never guesses app identity from the label alone.
+   * The render-gate's `resolveProfile` needs an authoritative source to map a
+   * session to its classifier profile (claude/codex/agy/unknown). Precedence
+   * (PIR #1475): the shellper's own WELCOME report — what actually got spawned —
+   * then the launch command Tower recorded in `config` (restored from
+   * `terminal_sessions.command` on reconnect, with the Spec 1313 legacy
+   * self-heal behind it). Exposed as read-only getters so the gate never guesses
+   * app identity from the label alone.
    */
   get command(): string {
-    return this.config.command;
+    return this.hydratedIdentity?.command ?? this.config.command;
   }
 
   /** Launch arguments of this session's process (Spec 1313 — paired with `command`). */
   get launchArgs(): string[] {
-    return this.config.args;
+    return this.hydratedIdentity?.args ?? this.config.args;
+  }
+
+  /**
+   * Which source {@link PtySession.command} is currently answering from
+   * (PIR #1475) — `'welcome'` when the shellper stated its own identity,
+   * `'config'` when we fell back to the recorded launch command. Exists so the
+   * fallback is observable in logs and tests rather than inferred.
+   */
+  get identitySource(): 'welcome' | 'config' {
+    return this.hydratedIdentity ? 'welcome' : 'config';
   }
 
   get status(): 'running' | 'exited' {

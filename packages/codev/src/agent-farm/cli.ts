@@ -452,7 +452,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--interrupt', 'Send Ctrl+C first')
     .option('--raw', 'Skip structured message formatting')
     .option('--no-enter', 'Do not send Enter after message')
-    .option('--delay <seconds>', 'Deliver after N seconds (Tower-side; dropped if Tower restarts)')
+    .option('--delay <seconds>', 'Deliver after N seconds (persisted; survives a Tower restart, except a delayed --interrupt ^C nudge)')
     .action(async (builder, message, options) => {
       const { send } = await import('./commands/send.js');
       try {
@@ -508,51 +508,122 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Reset command (Spec 1273) — save-state → /clear → re-orient
+  // Refresh command (Spec 1273; renamed from `reset` by #1489) —
+  // save-state → /clear → re-orient.
+  //
+  // Registered TWICE, canonical name first so `--help` leads with it. Commander's
+  // `.alias()` would hide which spelling the caller typed, and the deprecated
+  // spelling has to announce itself — so the alias is its own registration over
+  // the same builder.
+  const registerRefresh = (name: string, description: string, deprecated: boolean) => {
+    program
+      .command(`${name} [builder]`)
+      .description(description)
+      .option('--note <text>', 'Extra context to append to the re-orientation')
+      .option('--file <path>', 'Append file content to the re-orientation (48KB max)')
+      .option('--dry-run', 'Print what would be sent; write nothing to the builder')
+      .option('--interrupt-first', 'Send ESC before the save request (for a builder wedged mid-turn)')
+      .option('--mode <mode>', 'Override the builder mode (strict|soft) if it cannot be detected')
+      .option('--timeout <seconds>', 'How long to wait for the save-state receipt')
+      .option('--min-bytes <n>', 'Minimum state-file size to accept as substantive')
+      .option('--quiet-window <ms>', 'Terminal silence that counts as turn-ended')
+      .action(async (builder, options) => {
+        const { refresh, warnResetAlias } = await import('./commands/reset.js');
+        if (deprecated) warnResetAlias();
+        try {
+          if (options.mode && options.mode !== 'strict' && options.mode !== 'soft') {
+            logger.error(`--mode must be 'strict' or 'soft', got '${options.mode}'`);
+            process.exit(1);
+          }
+          // Every one of these tunes a SAFETY GATE, so a bad value does not
+          // degrade the run — it disables a protection while still reporting
+          // success. `--quiet-window -1` makes the quiescence check pass
+          // instantly (R4 gone), `--min-bytes -1` accepts any state file however
+          // empty (R2's substance floor gone), and a non-numeric `--timeout`
+          // yields NaN, whose comparisons are all false, so the receipt wait
+          // never expires and the command hangs. Reject at the boundary.
+          const positiveInt = (raw: string | undefined, flag: string): number | undefined => {
+            if (raw === undefined) return undefined;
+            const parsed = Number(raw);
+            if (!Number.isInteger(parsed) || parsed <= 0) {
+              logger.error(`${flag} must be a positive integer, got '${raw}'`);
+              process.exit(1);
+            }
+            return parsed;
+          };
+          await refresh({
+            builder,
+            note: options.note,
+            file: options.file,
+            dryRun: options.dryRun,
+            interruptFirst: options.interruptFirst,
+            mode: options.mode,
+            timeout: positiveInt(options.timeout, '--timeout'),
+            minBytes: positiveInt(options.minBytes, '--min-bytes'),
+            quietWindow: positiveInt(options.quietWindow, '--quiet-window'),
+          });
+        } catch (error) {
+          logger.error(error instanceof Error ? error.message : String(error));
+          process.exit(1);
+        }
+      });
+  };
+
+  registerRefresh(
+    'refresh',
+    'Refresh a builder\'s context: save working state, clear, then re-orient',
+    false,
+  );
+  registerRefresh(
+    'reset',
+    '[deprecated] Alias for \'afx refresh\'; will be removed in a future release',
+    true,
+  );
+
+  // Self-refresh — a builder refreshing its OWN context (Spec 1470).
+  //
+  // No positional argument, deliberately: with nothing to pass there is nothing
+  // to point at another session, so "cannot target another builder" holds by
+  // construction rather than by a validation rule. Identity comes from the
+  // worktree via the #1094 anti-spoofing resolver.
   program
-    .command('reset [builder]')
-    .description('Reset a builder\'s context: save working state, clear, then re-orient')
-    .option('--note <text>', 'Extra context to append to the re-orientation')
-    .option('--file <path>', 'Append file content to the re-orientation (48KB max)')
-    .option('--dry-run', 'Print what would be sent; write nothing to the builder')
-    .option('--interrupt-first', 'Send ESC before the save request (for a builder wedged mid-turn)')
+    .command('self-refresh')
+    .description('Refresh THIS builder\'s own context: verify your saved state, clear, re-orient')
+    // Commander ALLOWS excess arguments by default, so without this
+    // `afx self-refresh <some-builder>` would be accepted and silently ignored.
+    // The safety property would still hold — identity comes from the worktree,
+    // so the argument could not retarget anything — but the command would appear
+    // to accept a target it does not honour, which is worse than refusing: it
+    // invites the belief that targeting works.
+    .allowExcessArguments(false)
+    .option('--begin', 'Issue the challenge and print what to save (step 1 of 2)')
+    .option('--boundary <id>', 'Protocol boundary this refresh is for (e.g. enter:review)')
+    .option('--note <text>', 'Addendum appended to the re-orientation')
+    .option('--dry-run', 'Verify and assemble, but send nothing and clear nothing')
+    .option('--allow-dirty', 'Proceed despite uncommitted tracked changes')
     .option('--mode <mode>', 'Override the builder mode (strict|soft) if it cannot be detected')
-    .option('--timeout <seconds>', 'How long to wait for the save-state receipt')
     .option('--min-bytes <n>', 'Minimum state-file size to accept as substantive')
-    .option('--quiet-window <ms>', 'Terminal silence that counts as turn-ended')
-    .action(async (builder, options) => {
-      const { reset } = await import('./commands/reset.js');
+    .option('--delay <seconds>', 'Seconds Tower holds the re-entry before delivering it')
+    .option('--stability-window <ms>', 'How long the state file must be unchanged')
+    .option('--challenge-max-age <ms>', 'Reject a challenge older than this')
+    .action(async options => {
+      const { selfRefresh } = await import('./commands/self-refresh.js');
       try {
         if (options.mode && options.mode !== 'strict' && options.mode !== 'soft') {
           logger.error(`--mode must be 'strict' or 'soft', got '${options.mode}'`);
           process.exit(1);
         }
-        // Every one of these tunes a SAFETY GATE, so a bad value does not
-        // degrade the run — it disables a protection while still reporting
-        // success. `--quiet-window -1` makes the quiescence check pass
-        // instantly (R4 gone), `--min-bytes -1` accepts any state file however
-        // empty (R2's substance floor gone), and a non-numeric `--timeout`
-        // yields NaN, whose comparisons are all false, so the receipt wait
-        // never expires and the command hangs. Reject at the boundary.
-        const positiveInt = (raw: string | undefined, flag: string): number | undefined => {
-          if (raw === undefined) return undefined;
-          const parsed = Number(raw);
-          if (!Number.isInteger(parsed) || parsed <= 0) {
-            logger.error(`${flag} must be a positive integer, got '${raw}'`);
-            process.exit(1);
-          }
-          return parsed;
-        };
-        await reset({
-          builder,
+        await selfRefresh({
+          begin: options.begin,
+          boundary: options.boundary,
           note: options.note,
-          file: options.file,
           dryRun: options.dryRun,
-          interruptFirst: options.interruptFirst,
+          allowDirty: options.allowDirty,
           mode: options.mode,
-          timeout: positiveInt(options.timeout, '--timeout'),
-          minBytes: positiveInt(options.minBytes, '--min-bytes'),
-          quietWindow: positiveInt(options.quietWindow, '--quiet-window'),
+          minBytes: options.minBytes,
+          delay: options.delay,
+          stabilityWindow: options.stabilityWindow,
+          challengeMaxAge: options.challengeMaxAge,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

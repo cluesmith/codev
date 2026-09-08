@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev-types",
-  "version": "3.3.0",
+  "version": "3.3.3",
   "description": "Shared TypeScript types for Codev — WebSocket protocol, API shapes, SSE events",
   "type": "module",
   "exports": {
@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsc",
     "check-types": "tsc --noEmit",
+    "check-types:tests": "tsc --noEmit -p tsconfig.type-tests.json",
     "prepublishOnly": "pnpm build"
   },
   "devDependencies": {

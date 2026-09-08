@@ -1,0 +1,17 @@
+id: bugfix-1606
+title: streamdeck-review-dials-silent
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-09-04T01:53:53.303Z'
+    approved_at: '2026-09-04T09:18:48.942Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-04T01:36:08.893Z'
+updated_at: '2026-09-04T09:19:35.190Z'
+pr_ready_for_human: false

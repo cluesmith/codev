@@ -107,8 +107,14 @@ guarantee about the clear's completion. If the timing is wrong the re-init arriv
 wrong moment, which costs one manual message (see below) and nothing else. That is the
 whole reason this cycle can be built on a delay rather than on machinery.
 
-Delayed sends are **not persisted** — if Tower restarts inside the window, the message is
-dropped. That is recoverable; see below.
+Delayed sends **are persisted**. The body is written to the durable mailbox at request time
+with a `not_before` timestamp, so Tower keeps no timer for it and a restart inside the window
+does not lose it — the re-init is delivered once the delay passes. The one thing a restart does
+drop is the Ctrl+C nudge of a delayed `--interrupt`, which this cycle does not use.
+
+That removes a failure mode this section used to warn about, but not the need for the recovery
+path below: delivery still waits on an empty prompt, so a re-init can arrive late rather than
+never.
 
 **If this send fails, do not end your turn.** Step 4 queued the `/clear`, but it does not
 take effect until your turn ends — so at this moment you still have your full context and

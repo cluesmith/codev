@@ -41,21 +41,16 @@ export function parseIssueId(input: string): string | undefined {
   return withoutHash;
 }
 
-export async function openIssueById(connectionManager: ConnectionManager): Promise<void> {
-  const input = await vscode.window.showInputBox({
-    title: 'Codev: Open Issue by ID',
-    placeHolder: 'Issue ID, e.g. 1096 or #1096',
-    prompt: 'Opens the issue in your browser — works for open, closed, or archived issues.',
-    validateInput: (value) =>
-      parseIssueId(value) === undefined
-        ? 'Enter a numeric issue id (e.g. 1096 or #1096).'
-        : undefined,
-  });
-  if (input === undefined) { return; }
-
-  const issueId = parseIssueId(input);
-  if (issueId === undefined) { return; }
-
+/**
+ * Fetch `issueId` and open its forge page in the external browser. The
+ * post-InputBox body of `openIssueById`, exported on its own so the backlog
+ * QuickPick's dynamic `View Issue #N` items (issue #1179) share the exact
+ * same fetch → browser → preview-fallback path.
+ */
+export async function openIssueInBrowser(
+  connectionManager: ConnectionManager,
+  issueId: string,
+): Promise<void> {
   const client = connectionManager.getClient();
   const workspacePath = connectionManager.getWorkspacePath();
   if (!client || !workspacePath || connectionManager.getState() !== 'connected') {
@@ -78,4 +73,22 @@ export async function openIssueById(connectionManager: ConnectionManager): Promi
 
   // Forge supplied no URL — degrade to the in-editor preview rather than fail.
   await vscode.commands.executeCommand('codev.viewBacklogIssue', issueId);
+}
+
+export async function openIssueById(connectionManager: ConnectionManager): Promise<void> {
+  const input = await vscode.window.showInputBox({
+    title: 'Codev: Open Issue by ID',
+    placeHolder: 'Issue ID, e.g. 1096 or #1096',
+    prompt: 'Opens the issue in your browser — works for open, closed, or archived issues.',
+    validateInput: (value) =>
+      parseIssueId(value) === undefined
+        ? 'Enter a numeric issue id (e.g. 1096 or #1096).'
+        : undefined,
+  });
+  if (input === undefined) { return; }
+
+  const issueId = parseIssueId(input);
+  if (issueId === undefined) { return; }
+
+  await openIssueInBrowser(connectionManager, issueId);
 }

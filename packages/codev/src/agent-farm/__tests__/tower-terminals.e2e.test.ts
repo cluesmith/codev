@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import WebSocket from 'ws';
 import type { TowerHandle } from './helpers/tower-test-utils.js';
-import { startTower, cleanupAllTerminals, cleanupTestDb } from './helpers/tower-test-utils.js';
+import { startTower, cleanupAllTerminals, cleanupTestDb, towerWsProtocols } from './helpers/tower-test-utils.js';
 
 // Test configuration
 const TEST_TOWER_PORT = 14400;
@@ -142,7 +142,7 @@ describe('Tower Terminal Management (Phase 2)', () => {
       const created = await createRes.json();
 
       // Connect via WebSocket
-      const ws = new WebSocket(`ws://localhost:${TEST_TOWER_PORT}${created.wsPath}`);
+      const ws = new WebSocket(`ws://localhost:${TEST_TOWER_PORT}${created.wsPath}`, towerWsProtocols());
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('WebSocket timeout')), 5000);
@@ -176,7 +176,7 @@ describe('Tower Terminal Management (Phase 2)', () => {
       const created = await createRes.json();
 
       // Connect and wait for output
-      const ws = new WebSocket(`ws://localhost:${TEST_TOWER_PORT}${created.wsPath}`);
+      const ws = new WebSocket(`ws://localhost:${TEST_TOWER_PORT}${created.wsPath}`, towerWsProtocols());
       ws.binaryType = 'arraybuffer';
 
       const receivedData = await new Promise<string>((resolve, reject) => {
@@ -207,7 +207,8 @@ describe('Tower Terminal Management (Phase 2)', () => {
 
     it('returns 404 for non-existent terminal WebSocket', async () => {
       const ws = new WebSocket(
-        `ws://localhost:${TEST_TOWER_PORT}/ws/terminal/nonexistent-id`
+        `ws://localhost:${TEST_TOWER_PORT}/ws/terminal/nonexistent-id`,
+        towerWsProtocols()
       );
 
       await new Promise<void>((resolve) => {

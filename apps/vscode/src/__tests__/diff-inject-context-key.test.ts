@@ -48,6 +48,10 @@ vi.mock('vscode', () => ({
     get activeTextEditor() { return h.state.activeEditor; },
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
   },
+  workspace: {
+    getConfiguration: () => ({ get: () => 'comment' }),
+    onDidChangeConfiguration: () => ({ dispose() {} }),
+  },
 }));
 
 const {
@@ -64,7 +68,7 @@ function lastContext(): { key: string; value: unknown } | undefined {
   return h.state.setContextCalls[h.state.setContextCalls.length - 1];
 }
 
-const ENTRY = { fsPath: '/wt/pkg/src/a.ts', builderId: 'b1', relPath: 'pkg/src/a.ts', hunks: [] };
+const ENTRY = { fsPath: '/wt/pkg/src/a.ts', builderId: 'b1', relPath: 'pkg/src/a.ts', hunks: [], baseRef: 'main', worktreePath: '/wt' };
 
 describe('#789 — activeEditorIsBuilderFile re-syncs on registry change', () => {
   beforeEach(() => {

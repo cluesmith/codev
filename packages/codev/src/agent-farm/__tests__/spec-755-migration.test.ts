@@ -9,7 +9,7 @@
  * These tests instantiate the prior schema by hand, then drive the project's
  * actual `_migrations`-versioned migration code paths and assert the resulting
  * shape. Migration paths are forward-only by project convention (see plan and
- * `db/index.ts` v3/v4 precedent) — there is no reverse SQL to test.
+ * `db/migrations.ts` v3/v4 precedent) — there is no reverse SQL to test.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -68,7 +68,9 @@ describe('Spec 755 — Multi-architect migration', () => {
 
     /**
      * Run the v9 migration block in isolation against the test DB. Mirrors the
-     * production code in `db/index.ts`. Keeping a copy here lets the test
+     * retired per-workspace state.db's v9 block — a different numbering space from
+     * global.db's v9 (`project_path` → `workspace_path`, in `db/migrations.ts`), with
+     * no production runner left to call. Keeping a copy here lets the test
      * assert behavior without importing the full `getDb()` setup (which would
      * pull in workspace config, env detection, etc.).
      */

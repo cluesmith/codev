@@ -1,5 +1,5 @@
 /**
- * Reset orchestrator — the `afx reset` state machine (Spec 1273).
+ * Reset orchestrator — the `afx refresh` state machine (Spec 1273).
  *
  * Composes the verified parts from phases 1–5 into the flow the architect ran by
  * hand on 2026-07-27: request save-state → verify the receipt → wait for the
@@ -141,12 +141,12 @@ export interface TerminalPort {
    * Recent terminal output plus the buffer's total line count, for best-effort
    * clear confirmation. Null when this Tower cannot serve it.
    *
-   * `total` is what makes confirmation trustworthy. Reset writes into this same
-   * terminal — the save request, the re-orientation — so any pattern matched
-   * against the whole buffer eventually collides with reset's OWN text. (It did,
-   * twice: first the echoed `/clear`, then the save request's "CONTEXT RESET
-   * INCOMING" header.) Snapshotting `total` before the clear lets the check read
-   * only what the harness emitted AFTERWARDS.
+   * `total` is what makes confirmation trustworthy. A refresh writes into this
+   * same terminal — the save request, the re-orientation — so any pattern matched
+   * against the whole buffer eventually collides with its OWN text. (It did,
+   * twice: first the echoed `/clear`, then the save request's header, which read
+   * "CONTEXT RESET INCOMING" before #1489.) Snapshotting `total` before the clear
+   * lets the check read only what the harness emitted AFTERWARDS.
    */
   readOutput?(): Promise<{ lines: string[]; total: number } | null>;
 }
@@ -311,7 +311,7 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
   if (!context.harness.supportsContextReset) {
     throw new ResetPreflightError(
       `Builder '${context.builderId}' runs under the '${context.harnessName}' harness, ` +
-        `which has no in-session context reset. Reset is a no-op there — there is no ` +
+        `which has no in-session context reset. Refresh is a no-op there — there is no ` +
         `substitute mechanism. Use the boundary-recycle pattern instead: let the builder ` +
         `finish, then respawn with 'afx spawn <id> --resume'.`,
     );
@@ -320,7 +320,7 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
   const observed = await terminal.observe();
   if (!observed.exists) {
     throw new ResetPreflightError(
-      `Builder '${context.builderId}' has no live terminal. Reset writes to a running ` +
+      `Builder '${context.builderId}' has no live terminal. Refresh writes to a running ` +
         `session; there is nothing to clear. Check 'afx status'.`,
     );
   }
@@ -336,7 +336,7 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
   if (observed.writable === false) {
     throw new ResetPreflightError(
       `Builder '${context.builderId}' has a terminal that is not accepting input ` +
-        `(its process connection is down — #1198). Reset would send a save request that ` +
+        `(its process connection is down — #1198). Refresh would send a save request that ` +
         `is silently dropped. Nothing has been touched. Check Tower logs, or retry once ` +
         `the session reconnects.`,
     );
@@ -363,7 +363,7 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
   } catch (err) {
     if (err instanceof ReorientationAssemblyError) {
       throw new ResetPreflightError(
-        `Refusing to reset: ${err.message} The builder has not been touched.`,
+        `Refusing to refresh: ${err.message} The builder has not been touched.`,
       );
     }
     throw err;
@@ -698,9 +698,9 @@ async function confirmClear(terminal: TerminalPort, totalBeforeClear: number): P
     const output = await terminal.readOutput();
     if (!output) return false;
 
-    // Consider ONLY lines produced after the clear was sent. Everything reset
-    // itself wrote is at or before `totalBeforeClear`, so this excludes reset's
-    // own text by construction rather than by hoping the pattern avoids it.
+    // Consider ONLY lines produced after the clear was sent. Everything the
+    // refresh itself wrote is at or before `totalBeforeClear`, so this excludes
+    // its own text by construction rather than by hoping the pattern avoids it.
     const newLineCount = output.total - totalBeforeClear;
     if (newLineCount <= 0) return false;
     const fresh = output.lines.slice(-newLineCount).join('\n');

@@ -2,7 +2,7 @@
  * Global test harness — sandboxes every user-global side effect a suite can
  * reach (#1323). Wired into all three vitest configs via `setupFiles`.
  *
- * Two escapes motivated this file:
+ * Three escapes motivated this file:
  *
  *  1. Any test that reached the gemini consult lane without pinning
  *     `CODEV_AGY_BIN` resolved the developer's REAL `agy` binary and spawned it.
@@ -11,6 +11,9 @@
  *  2. In-process tests ran under the developer's real `HOME`, so every
  *     `recordMetrics()` call appended junk rows (with temp-dir workspace paths)
  *     to the real `~/.codev/metrics.db`, silently skewing `consult stats`.
+ *  3. Suites reaching core auth read AND created the developer's real
+ *     `~/.agent-farm/local-key` (#1597) — see the `CODEV_AGENT_FARM_DIR` pin
+ *     below.
  *
  * Both are failures of *omission*: safety depended on each test remembering to
  * opt out. This harness inverts that — the sandbox is on by default and a test
@@ -80,6 +83,23 @@ if (!process.env.CODEV_METRICS_DB) {
   const metricsDir = join(sandbox, '.codev');
   mkdirSync(metricsDir, { recursive: true, mode: 0o700 });
   process.env.CODEV_METRICS_DB = join(metricsDir, 'metrics.db');
+}
+
+// Point the whole user-global Agent Farm tree (cloud credentials, `local-key`,
+// `global.db`) into the sandbox (#1597). Without this, `ensureLocalKey()` —
+// reached in-process via the e2e fetch patch and `towerWsProtocols()`, and by
+// any suite touching core auth — read AND created the developer's real
+// `~/.agent-farm/local-key`. Auth stays consistent end-to-end because both
+// sides derive from the same call: `createIsolatedAgentFarmDir()` seeds each
+// spawned test Tower with a copy of whatever key `ensureLocalKey()` resolves
+// here. The env var must be set before `@cluesmith/codev-core` is first
+// imported (its key path is a module-load const); `setupFiles` order guarantees
+// that for `vitest-e2e-setup.ts`. A pre-set value is respected — exporting
+// `CODEV_AGENT_FARM_DIR` is the one named way to point suites elsewhere.
+if (!process.env.CODEV_AGENT_FARM_DIR) {
+  const agentFarmDir = join(sandbox, '.agent-farm');
+  mkdirSync(agentFarmDir, { recursive: true, mode: 0o700 });
+  process.env.CODEV_AGENT_FARM_DIR = agentFarmDir;
 }
 
 if (firstRun) {

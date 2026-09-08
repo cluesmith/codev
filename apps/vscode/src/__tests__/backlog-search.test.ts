@@ -9,7 +9,12 @@
 
 import { describe, it, expect } from 'vitest';
 import type { OverviewBacklogItem, OverviewData } from '@cluesmith/codev-types';
-import { orderForSearch, toQuickPickItems } from '../views/backlog-search.js';
+import {
+  orderForSearch,
+  toQuickPickItems,
+  parseSearchDynamicQuery,
+  toDynamicQuickPickItems,
+} from '../views/backlog-search.js';
 
 function item(
   id: string,
@@ -93,5 +98,76 @@ describe('toQuickPickItems', () => {
       now,
     );
     expect(row.description).toBe('docs · 2h ago · @alice');
+  });
+});
+
+describe('parseSearchDynamicQuery (type-ahead grammar, #1179)', () => {
+  it('offers both targets for a bare number, issue first', () => {
+    expect(parseSearchDynamicQuery('1350')).toEqual([
+      { target: 'issue', id: '1350' },
+      { target: 'pr', id: '1350' },
+    ]);
+  });
+
+  it('tolerates a leading # on the bare form', () => {
+    expect(parseSearchDynamicQuery('#1350')).toEqual([
+      { target: 'issue', id: '1350' },
+      { target: 'pr', id: '1350' },
+    ]);
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(parseSearchDynamicQuery('  1350  ')).toHaveLength(2);
+  });
+
+  it('narrows to issue for "issue N" and "view issue N"', () => {
+    expect(parseSearchDynamicQuery('issue 1350')).toEqual([{ target: 'issue', id: '1350' }]);
+    expect(parseSearchDynamicQuery('view issue 1350')).toEqual([{ target: 'issue', id: '1350' }]);
+  });
+
+  it('narrows to pr for "pr N" and "view pr N"', () => {
+    expect(parseSearchDynamicQuery('pr 1350')).toEqual([{ target: 'pr', id: '1350' }]);
+    expect(parseSearchDynamicQuery('view pr 1350')).toEqual([{ target: 'pr', id: '1350' }]);
+  });
+
+  it('is case-insensitive and tolerates # on the typed form', () => {
+    expect(parseSearchDynamicQuery('ISSUE #1350')).toEqual([{ target: 'issue', id: '1350' }]);
+    expect(parseSearchDynamicQuery('View PR #1350')).toEqual([{ target: 'pr', id: '1350' }]);
+  });
+
+  it('yields nothing for plain text searches', () => {
+    expect(parseSearchDynamicQuery('')).toEqual([]);
+    expect(parseSearchDynamicQuery('tower')).toEqual([]);
+    expect(parseSearchDynamicQuery('12a3')).toEqual([]);
+  });
+
+  it('yields nothing when extra text follows the number', () => {
+    expect(parseSearchDynamicQuery('1350 fix')).toEqual([]);
+    expect(parseSearchDynamicQuery('view pr 1350 now')).toEqual([]);
+  });
+
+  it('yields nothing for a bare keyword without a number', () => {
+    expect(parseSearchDynamicQuery('issue')).toEqual([]);
+    expect(parseSearchDynamicQuery('view pr')).toEqual([]);
+    expect(parseSearchDynamicQuery('#')).toEqual([]);
+  });
+});
+
+describe('toDynamicQuickPickItems', () => {
+  it('labels rows "View Issue #N" / "View PR #N" and always shows them', () => {
+    const rows = toDynamicQuickPickItems('1350');
+    expect(rows.map(r => r.label)).toEqual(['View Issue #1350', 'View PR #1350']);
+    for (const row of rows) {
+      expect(row.alwaysShow).toBe(true);
+      expect(row.description).toBe('Open in browser');
+      expect(row.id).toBe('1350');
+    }
+  });
+
+  it('projects a single row for the typed form', () => {
+    const rows = toDynamicQuickPickItems('view pr 1350');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].label).toBe('View PR #1350');
+    expect(rows[0].target).toBe('pr');
   });
 });

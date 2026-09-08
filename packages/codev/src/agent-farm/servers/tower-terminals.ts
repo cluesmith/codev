@@ -11,6 +11,7 @@ import path from 'node:path';
 import { AGENT_FARM_DIR, encodeWorkspacePath } from '../lib/tower-client.js';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { loadConfig } from '../../lib/config.js';
+import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 import { getGlobalDb } from '../db/index.js';
 import {
   saveFileTab as saveFileTabToDb,
@@ -53,7 +54,12 @@ function extractShellperSessionId(socketPath: string | null): string | null {
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
-import { normalizeWorkspacePath, buildArchitectReconnectRestartOptions } from './tower-utils.js';
+import {
+  normalizeWorkspacePath,
+  buildArchitectReconnectRestartOptions,
+  persistableCommand,
+  logSessionIdentity,
+} from './tower-utils.js';
 import { setArchitectByName } from '../state.js';
 import { isIntentionallyStopping } from './tower-instances.js';
 
@@ -100,6 +106,15 @@ export function initTerminals(deps: TerminalDeps): void {
 /** Check if reconciliation is currently in progress (Bugfix #274) */
 export function isReconciling(): boolean {
   return _reconciling;
+}
+
+/**
+ * Log through the terminal module's injected logger; a no-op before init.
+ * Exists so sibling modules without their own `TerminalDeps` (the WS attach
+ * handler's replay-snapshot fallback line, PIR #1354) share Tower's log sink.
+ */
+export function logTerminal(level: 'INFO' | 'ERROR' | 'WARN', msg: string): void {
+  _deps?.log(level, msg);
 }
 
 // ============================================================================
@@ -321,6 +336,41 @@ export function updateTerminalLabel(terminalId: string, label: string): void {
     db.prepare('UPDATE terminal_sessions SET label = ? WHERE id = ?').run(label, terminalId);
   } catch (err) {
     _deps?.log('WARN', `Failed to update terminal label: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Update the launch command of a terminal session in SQLite (PIR #1475).
+ *
+ * For attach sites that are NOT followed by a row rewrite — currently just the
+ * in-place `session-reconnected` re-attach in `tower-server.ts`, where a freshly
+ * connected client can bring a changed identity to an existing `PtySession` with
+ * no save behind it. Sites that already re-save the row (the two reconcile paths)
+ * must pass the hydrated value into `saveTerminalSession` instead: they DELETE and
+ * re-INSERT the row, which would silently wipe an UPDATE written at attach time.
+ *
+ * No-ops when the value is unchanged, so a steady-state Tower writes at most once
+ * per session.
+ *
+ * Never DOWNGRADES a known row to NULL. `null` here means "this attach produced no
+ * identity" — a legacy shellper, or a WELCOME whose payload failed validation — and
+ * that is an absence of news, not news that the recorded command is wrong. Writing
+ * it through would erase a good row and, worse, hand the Spec 1313 self-heal a
+ * NULL it would then re-heal from config, converting a rejected frame into a
+ * silent identity change. Only a stated identity may rewrite the row.
+ */
+export function updateTerminalCommand(terminalId: string, command: string | null): void {
+  if (command === null) return;
+  try {
+    const db = getGlobalDb();
+    const row = db.prepare('SELECT command FROM terminal_sessions WHERE id = ?').get(terminalId) as
+      | { command: string | null }
+      | undefined;
+    if (!row || row.command === command) return;
+    db.prepare('UPDATE terminal_sessions SET command = ? WHERE id = ?').run(command, terminalId);
+    _deps?.log('INFO', `Terminal ${terminalId} identity updated: ${row.command ?? 'null'} -> ${command ?? 'null'}`);
+  } catch (err) {
+    _deps?.log('WARN', `Failed to update terminal command: ${(err as Error).message}`);
   }
 }
 
@@ -671,8 +721,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
         } catch { /* use default */ }
       }
       const cmdParts = architectCmd.split(/\s+/);
-      const cleanEnv = { ...process.env } as Record<string, string>;
-      delete cleanEnv['CLAUDECODE'];
+      const cleanEnv = sanitizeAgentEnv(process.env);
       // Spec 786 Phase 2: preserve architect identity across shellper auto-
       // restart. Without this, the new claude process would inherit Tower's
       // CODEV_ARCHITECT_NAME (or none), and builders spawned by a restarted
@@ -729,7 +778,9 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
         // sequential loop below (worst case for a mostly-idle, pre-upgrade
         // fleet of shellpers was ~10s serialized; see waitForReplay() for
         // how the per-session cost itself is also bounded for legacy peers).
-        const replayData = capRingSeed(await client.waitForReplay(), task.dbSession.id);
+        // Kept UNCAPPED here; the attach below caps the ring seed and feeds the
+        // mirror the full replay (PIR #1354).
+        const replayData = await client.waitForReplay();
         return { dbSession: task.dbSession, client, replayData, restartOptions: task.restartOptions };
       }),
     );
@@ -770,9 +821,12 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // column existed → `command` NULL): restartOptions.command is cmdParts[0] from
     // the CURRENT config, so an upgraded architect resolves on the first restart
     // rather than staying broken until it is manually relaunched.
+    // PIR #1475: this remains the SEED — the fallback the session reports until
+    // (and unless) the attached shellper states its own identity via WELCOME.
+    const identitySeed = dbSession.command ?? restartOptions?.command ?? null;
     const session = manager.createSessionRaw({
       label, cwd: sessionCwd, id: dbSession.id,
-      command: dbSession.command ?? restartOptions?.command ?? undefined,
+      command: identitySeed ?? undefined,
     });
     const ptySession = manager.getSession(session.id);
     if (ptySession) {
@@ -780,7 +834,18 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       // replayData is only null when client is null (probe batch above),
       // which the `if (!client)` guard already excluded — fall back to
       // empty defensively rather than asserting.
-      ptySession.attachShellper(client, replayData ?? Buffer.alloc(0), dbSession.shellper_pid!, shellperSessId);
+      const fullReplay = replayData ?? Buffer.alloc(0);
+      // Ring seed capped (client fallback payload, 1 MiB); mirror seeded with the
+      // full replay so the snapshot serves the real screen (PIR #1354).
+      ptySession.attachShellper(client, capRingSeed(fullReplay, dbSession.id), dbSession.shellper_pid!, shellperSessId, fullReplay);
+      // Drain this session's seed parse before adopting the next (PIR #1354): the
+      // parse runs in the emulator's own small time slices (never blocking serving),
+      // and sequencing bounds the transient seed backlog to ONE session's replay
+      // instead of the whole fleet's. Skipped for seeds the ring cap wouldn't have
+      // trimmed — for those the mirror work is unchanged from before this feature.
+      if (fullReplay.length > RING_SEED_MAX_BYTES) {
+        await ptySession.gateScreen?.read();
+      }
       // Architect sessions with a live auto-restart config keep WebSocket clients
       // connected on exit. Gate on `restartOptions`: a retired-harness architect
       // (#1338) resolves to `undefined` here, so `reconnectSession` was told NOT to
@@ -807,10 +872,16 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 
     // Refresh the SQLite row. The id is preserved (#991), so this re-saves the
     // session under the same terminal id with its refreshed shellper info.
+    // PIR #1475: persist the identity the session now reports — the shellper's
+    // own WELCOME statement when it made one, else the seed above (persisted
+    // command, then the legacy heal). This is the site's ONE persist mechanism:
+    // the row is deleted and re-inserted here, so an update written back at
+    // attach time would be wiped.
+    logSessionIdentity(_deps.log, 'reconcile-adopt', session.id, ptySession, dbSession.command);
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
     saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
       dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, sessionCwd,
-      dbSession.command ?? restartOptions?.command ?? null);
+      ptySession ? persistableCommand(ptySession) : identitySeed);
     _deps.registerKnownWorkspace(workspacePath);
 
     // Clean up on exit (only fires for permanent death when restartOnExit is set)
@@ -936,8 +1007,7 @@ export async function getTerminalsForWorkspace(
             } catch { /* use default */ }
           }
           const cmdParts = architectCmd.split(/\s+/);
-          const cleanEnv = { ...process.env } as Record<string, string>;
-          delete cleanEnv['CLAUDECODE'];
+          const cleanEnv = sanitizeAgentEnv(process.env);
           // Spec 786 Phase 2: preserve architect identity across shellper auto-
           // restart (see matching block in reconcileTerminalSessionsInner above).
           const architectName = dbSession.role_id || 'main';
@@ -968,21 +1038,28 @@ export async function getTerminalsForWorkspace(
         );
         if (client) {
           // #1198: wait for the REPLAY frame instead of racing it (see the
-          // matching change in the startup adoption pass above).
-          const replayData = capRingSeed(await client.waitForReplay(), dbSession.id);
+          // matching change in the startup adoption pass above). Uncapped —
+          // the ring seed is capped at the attach below, while the mirror
+          // gets the full replay (PIR #1354).
+          const replayData = await client.waitForReplay();
           const label = dbSession.label || (dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || dbSession.id));
           // Reuse the persisted terminal id (#991) so the session keeps its
           // identity across the reconnect — clients holding `/ws/terminal/<id>`
           // stay valid. Use stored cwd (worktree path for builders) instead of
           // workspace_path (Bugfix #506).
+          // PIR #1475: the seed, superseded by the shellper's WELCOME identity
+          // once attached (see the startup reconcile path above).
+          const identitySeed = dbSession.command ?? restartOptions?.command ?? null;
           const newSession = manager.createSessionRaw({
             label, cwd: dbSession.cwd ?? dbSession.workspace_path, id: dbSession.id,
-            command: dbSession.command ?? restartOptions?.command ?? undefined, // Spec 1313: restore/heal identity (see reconcile path)
+            command: identitySeed ?? undefined, // Spec 1313: restore/heal identity (see reconcile path)
           });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
             const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
-            ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, shellperSessId);
+            // Capped ring seed, full mirror seed (PIR #1354) — single-session path,
+            // so no cross-session parse sequencing is needed here.
+            ptySession.attachShellper(client, capRingSeed(replayData, dbSession.id), dbSession.shellper_pid!, shellperSessId, replayData);
             // Gate on `restartOptions` (same rationale as the reconcile path above):
             // a retired-harness architect (#1338) resolves to `undefined`, so holding
             // clients for an auto-restart that was never configured would strand the
@@ -1019,10 +1096,11 @@ export async function getTerminalsForWorkspace(
             });
           }
           // Refresh the SQLite row under the same (preserved) id.
+          logSessionIdentity(_deps.log, 'reconnect-onthefly', newSession.id, ptySession, dbSession.command);
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
             dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, dbSession.cwd,
-            dbSession.command ?? restartOptions?.command ?? null);
+            ptySession ? persistableCommand(ptySession) : identitySeed);
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
           _deps.log('INFO', `On-the-fly reconnect succeeded for ${newSession.id} (id preserved)`);

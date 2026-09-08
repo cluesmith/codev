@@ -69,3 +69,14 @@ export function backoffDelayMs(attempt: number, opts: BackoffOptions = {}): numb
  * (`4000–4999`); the mnemonic `4404` echoes HTTP 404.
  */
 export const WS_CLOSE_SESSION_UNKNOWN = 4404;
+
+/**
+ * Application-range WebSocket close code Tower uses to tell a browser client
+ * that the upgrade was rejected for failing request authentication (advisory
+ * GHSA-xvjp-7748-v88v). Same browser-can't-read-upgrade-status rationale as
+ * {@link WS_CLOSE_SESSION_UNKNOWN}: Tower accepts the upgrade for browser
+ * clients and immediately closes with this code so the client gets a clean,
+ * distinguishable signal instead of a silent `1006`. The mnemonic `4401`
+ * echoes HTTP 401.
+ */
+export const WS_CLOSE_UNAUTHORIZED = 4401;

@@ -16,6 +16,7 @@ Forge concept commands decouple codev from direct `gh` CLI calls. Each GitHub op
 | `user-identity` | — | Get current user's handle (plain text) |
 | `team-activity` | `CODEV_GRAPHQL_QUERY` | Run a batched GraphQL query |
 | `on-it-timestamps` | `CODEV_ISSUE_NUMBERS`, `CODEV_GRAPHQL_QUERY`, `CODEV_REPO_OWNER`, `CODEV_REPO_NAME` | Get "on it" comment timestamps |
+| `pr-create` | `CODEV_PR_TITLE`, `CODEV_PR_BODY`, `CODEV_PR_BASE` (optional), `CODEV_PR_HEAD` (optional), `CODEV_PR_REPO` (optional), `CODEV_PR_DRAFT` (optional) | Open a PR; prints `{"number", "url"}` |
 | `pr-merge` | `CODEV_PR_NUMBER` | Merge a PR |
 | `pr-search` | `CODEV_SEARCH_QUERY` | Search PRs (JSON array) |
 | `pr-view` | `CODEV_PR_NUMBER`, `CODEV_INCLUDE_COMMENTS` (optional) | View PR details (JSON or text) |
@@ -45,6 +46,8 @@ In `.codev/config.json`:
 Built-in presets: `github` (default), `gitlab` (via `glab`), `gitea` (via `tea`).
 
 **Note:** Non-GitHub presets are best-effort. Output schemas may differ from GitHub's JSON contracts. Non-conforming JSON returns `null` — consumers handle this gracefully. Override individual concepts if a preset doesn't match your CLI version.
+
+**`CODEV_REPO` is overloaded.** For `repo-archive` it is an input: the `owner/repo` to download. For the Gitea preset's read concepts (`pr-view`, `pr-list`, `pr-exists`, `issue-view`, `recently-merged`) it is an override — `tea api` needs an explicit `owner/repo` in the endpoint path, which those scripts otherwise derive from the `origin` remote. Set it per invocation, not in your environment: exported globally it retargets every Gitea read at that repo.
 
 ### Disabling concepts
 

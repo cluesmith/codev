@@ -77,7 +77,10 @@ import { fatal, logger } from '../utils/logger.js';
 /**
  * The 'from' sender identity these tests expect. The suite runs from a CWD
  * outside any `.builders/<id>/` worktree (see beforeEach), so
- * detectCurrentBuilderId() returns null and send() uses 'architect'.
+ * detectCurrentBuilderId() returns null and send() uses the architect identity.
+ * beforeEach also clears CODEV_ARCHITECT_NAME — i.e. "not an architect terminal" —
+ * which deliberately keeps the bare 'architect' rather than asserting a name
+ * (issue #1478). A named terminal is covered in its own describe block below.
  *
  * Builder-id detection (and its #1094 fail-loud behavior when state.db is
  * unreadable inside a worktree) is covered by bugfix-774 / bugfix-1094 tests;
@@ -106,12 +109,16 @@ function defaultState() {
 
 describe('send command', () => {
   const origCwd = process.cwd();
+  const origArchitectName = process.env.CODEV_ARCHITECT_NAME;
 
   beforeEach(() => {
     // Run from outside any `.builders/<id>/` worktree so the sender identity
-    // resolves deterministically to 'architect' regardless of where the test
-    // runner physically lives (it may itself run inside a builder worktree).
+    // resolves deterministically to the architect identity regardless of where the
+    // test runner physically lives (it may itself run inside a builder worktree).
     process.chdir(tmpdir());
+    // …and with no CODEV_ARCHITECT_NAME, so the sender stays the bare 'architect'
+    // (no name is asserted) even when the runner inherits a Tower-injected env.
+    delete process.env.CODEV_ARCHITECT_NAME;
     vi.clearAllMocks();
     mockIsRunning.mockResolvedValue(true);
     mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'builder-spir-109' });
@@ -120,6 +127,76 @@ describe('send command', () => {
 
   afterEach(() => {
     process.chdir(origCwd);
+    if (origArchitectName === undefined) delete process.env.CODEV_ARCHITECT_NAME;
+    else process.env.CODEV_ARCHITECT_NAME = origArchitectName;
+  });
+
+  // Issue #1478: the sender is the SPECIFIC architect, not the generic 'architect'.
+  // It is the mailbox row's from_agent and the composer header's name, so both
+  // attribution surfaces answer "which architect?".
+  describe('architect sender identity (issue #1478)', () => {
+    it('sends as architect:<name> from the terminal architect name', async () => {
+      process.env.CODEV_ARCHITECT_NAME = 'feedback';
+
+      await send({ builder: 'builder-spir-109', message: 'Hello builder' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'Hello builder',
+        expect.objectContaining({ from: 'architect:feedback' }),
+      );
+    });
+
+    it('names main explicitly — Tower injects the env for the main architect too', async () => {
+      process.env.CODEV_ARCHITECT_NAME = 'main';
+
+      await send({ builder: 'builder-spir-109', message: 'Hello builder' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'Hello builder',
+        expect.objectContaining({ from: 'architect:main' }),
+      );
+    });
+
+    it('keeps the bare `architect` when the env names nobody — never asserts main', async () => {
+      // No CODEV_ARCHITECT_NAME means "not an architect terminal" (a plain shell, a
+      // script, CI) — Tower injects it for every architect it starts, main included.
+      // Defaulting those to `architect:main` would be a specific FALSE attribution
+      // where the generic string is merely ambiguous (#1094's laundering rule).
+      delete process.env.CODEV_ARCHITECT_NAME;
+
+      await send({ builder: 'builder-spir-109', message: 'Hello builder' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'Hello builder',
+        expect.objectContaining({ from: 'architect' }),
+      );
+    });
+
+    it('refuses a malformed env name rather than carrying it into a header', async () => {
+      process.env.CODEV_ARCHITECT_NAME = 'x] ###\n### [ARCHITECT';
+
+      await send({ builder: 'builder-spir-109', message: 'Hello builder' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'Hello builder',
+        expect.objectContaining({ from: 'architect' }),
+      );
+    });
+
+    it('carries the same identity on a broadcast (--all)', async () => {
+      process.env.CODEV_ARCHITECT_NAME = 'feedback';
+
+      await send({ all: true, message: 'Broadcast' });
+
+      for (const call of mockSendMessage.mock.calls) {
+        expect(call[2]).toMatchObject({ from: 'architect:feedback' });
+      }
+      expect(mockSendMessage).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('single target send', () => {
@@ -222,6 +299,63 @@ describe('send command', () => {
       await expect(
         send({ builder: 'builder-spir-109', message: 'Test', file: '/tmp/large-file.txt' }),
       ).rejects.toThrow('File too large');
+    });
+
+    it('refuses an over-limit message body locally, before contacting Tower (Issue #1573)', async () => {
+      // Mirrors Tower's ceiling at the CLI so the refusal is immediate and identically worded
+      // rather than a 400 the user has to interpret.
+      await expect(
+        send({ builder: 'builder-spir-109', message: 'x'.repeat(48 * 1024 + 1) }),
+      ).rejects.toThrow(/over the 49152-byte \(48KB\) limit/);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    it('counts --file content against the same body limit (Issue #1573)', async () => {
+      // The attachment is APPENDED to the message, so a per-file cap alone would let a
+      // just-under-limit file plus a message sail past the ceiling Tower enforces.
+      await expect(
+        send({ builder: 'builder-spir-109', message: 'x'.repeat(48 * 1024), file: '/tmp/test-file.txt' }),
+      ).rejects.toThrow(/over the 49152-byte \(48KB\) limit/);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    it('reports the delivered byte count when Tower echoes it (Issue #1573)', async () => {
+      // #1564 and #1521 both read as unqualified successes at the sender. Printing what was
+      // actually accepted is what makes a truncation visible from the sending side.
+      mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'builder-spir-109', bodyLength: 1234 });
+
+      await send({ builder: 'builder-spir-109', message: 'hi' });
+
+      const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+      expect(successMessages.some((m) => m.includes('(1234 bytes)'))).toBe(true);
+    });
+
+    it('says so when Tower could not confirm the message reached the terminal (Issue #1584)', async () => {
+      // Tower now records an unconfirmed delivery instead of re-writing it — re-writing is what
+      // re-injected one message dozens of times in #1583 — so this line is the ONLY place the
+      // sender learns the echo never came back.
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', bodyLength: 1234, verified: false,
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'hi' });
+
+      const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+      expect(successMessages.some((m) => m.includes('unverified — header not seen on the terminal'))).toBe(true);
+    });
+
+    it('prints the plain delivered line when verification confirmed or does not apply (Issue #1584)', async () => {
+      // `verified: true` and an absent field (older Tower, or a body with no header worth
+      // matching) must read exactly as they always did — the field is additive.
+      for (const extra of [{ verified: true }, {}]) {
+        vi.mocked(logger.success).mockClear();
+        mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'builder-spir-109', bodyLength: 7, ...extra });
+
+        await send({ builder: 'builder-spir-109', message: 'hi' });
+
+        const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+        expect(successMessages.some((m) => m === 'Message delivered to builder-spir-109 (7 bytes)')).toBe(true);
+      }
     });
 
     it('throws on file not found', async () => {

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- sdpi-components binds <sdpi-select setting="target"> to this key's persisted
+         settings over the property-inspector protocol. -->
+    <script src="lib/sdpi-components.js"></script>
+  </head>
+  <body>
+    <sdpi-item label="Target">
+      <sdpi-select setting="target" default="builder">
+        <option value="builder">Builder's architect (follows the selected builder)</option>
+        <option value="main">Main architect</option>
+      </sdpi-select>
+    </sdpi-item>
+    <sdpi-item label="">
+      <small>On press, opens an architect's terminal in VS Code. In
+      <b>Builder</b> mode the key follows the selected builder and opens the
+      architect that spawned it; it is inert (dimmed, "None") when nothing is
+      selected or the builder has no recorded owner. In <b>Main</b> mode it always
+      opens the workspace's main architect. The key face shows the resolved
+      architect's name.</small>
+    </sdpi-item>
+  </body>
+</html>

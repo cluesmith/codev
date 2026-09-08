@@ -307,6 +307,12 @@ export interface OverviewData {
    * Spec 1313: count of currently-*held* mailbox rows across this workspace (all
    * recipient agents — builders and architects). Drives the dashboard/VSCode
    * held-count indicator. Count only, never message bodies. 0 when nothing is held.
+   *
+   * Issue 1450: this counts ELIGIBLE held rows only — a pre-due `--delay` send is
+   * excluded (`heldSummaryForWorkspace`). `GET /api/inbox` lists ALL held rows,
+   * pre-due ones included, so this number is a LOWER BOUND on that list's length.
+   * See `HeldMessage` for the full explanation; any surface showing both must
+   * render the difference rather than assume they agree.
    */
   heldCount: number;
   /**
@@ -315,8 +321,37 @@ export interface OverviewData {
    * escalation never triggers delivery.
    */
   mailboxEscalated: boolean;
+  /**
+   * Issue 1410: per-builder count of pending review-comments (the queued
+   * feedback in each builder's `.codev/pending-comments.json`), keyed by
+   * `OverviewBuilder.id`. A **map, never a scalar total** — the Stream Deck
+   * badge reads its selected builder's count, and #1049's future Attention
+   * rollup consumes the same field. A builder absent from the map has none
+   * (read as 0); `{}` when nothing is queued anywhere — never `undefined`, so
+   * consumers don't branch.
+   */
+  queuedFeedback: Record<string, number>;
+  /**
+   * Issue 1410: the workspace's current review-feedback delivery mode, projected
+   * from the VSCode `codev.diffCodelensMode` setting (`forward` → `'forward'`,
+   * `comment` → `'queue'`). `'forward'` = a review chunk is sent to the builder
+   * immediately; `'queue'` = it accumulates in the pending-comments queue until
+   * flushed. Lets the deck name the live semantic on the dial touchscreen
+   * (`Files · send` vs `Files · queue`) instead of inferring it. Defaults to
+   * `'forward'` (the setting's own default) when unreadable.
+   */
+  feedbackMode: 'forward' | 'queue';
   /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */
   currentUser?: string;
+  /**
+   * Issue #1645: why forge-backed sections (PRs, backlog, recently closed/merged)
+   * may be stale or empty. `rate-limited` = the backend's budget is exhausted and
+   * Tower has suspended fetches until `forgeResetAt`; `unavailable` = at least one
+   * section could not be fetched for another reason (CLI missing, offline).
+   */
+  forgeStatus?: 'ok' | 'rate-limited' | 'unavailable';
+  /** ISO instant the rate-limit suspension lifts; present only when `forgeStatus` is `rate-limited`. */
+  forgeResetAt?: string;
   errors?: { prs?: string; issues?: string };
 }
 
@@ -401,11 +436,70 @@ export interface IssueView {
    * gracefully when it's absent (e.g. a forge script that doesn't emit it).
    */
   url?: string;
+  /**
+   * Login/handle of the user who opened the issue, when the forge concept
+   * supplies it: GitHub `author.login`, GitLab `author.username`, Gitea
+   * `user.login`, Linear `creator.displayName`. Optional so the contract
+   * stays forge-neutral — a forge/script that omits it degrades gracefully
+   * (the consumer drops the "opened by" attribution).
+   */
+  author?: { login: string };
+  /**
+   * ISO 8601 creation timestamp, when the forge concept supplies it. Optional
+   * for forge-neutral degradation, same as `url`.
+   */
+  createdAt?: string;
+  /**
+   * Assignee logins/handles, when the forge concept supplies them: absent when
+   * the forge doesn't expose them, empty when the issue is unassigned. Optional
+   * per the forge-neutral degradation contract.
+   */
+  assignees?: Array<{ login: string }>;
+  /**
+   * Issue labels, when the forge concept supplies them: absent when the forge
+   * doesn't expose labels, empty when the issue has none. Optional per the
+   * forge-neutral degradation contract.
+   */
+  labels?: Array<{ name: string }>;
+  /**
+   * The issue's milestone, when set. GitHub emits a literal `null` when the
+   * issue has no milestone (hence `| null`, not merely optional); consumers
+   * guard on `milestone?.title`, so both absent and null render nothing.
+   * Optional/nullable per the forge-neutral degradation contract.
+   */
+  milestone?: { title: string } | null;
   comments: Array<{
     body: string;
     createdAt: string;
     author: { login: string };
   }>;
+}
+
+// --- PR view (GET /api/pr) ---
+
+/**
+ * A single PR as returned by the `pr-view` forge concept and surfaced
+ * verbatim by Tower's GET /api/pr. Mirrors the server-side PrViewResult
+ * (packages/codev/src/lib/forge-contracts.ts).
+ */
+export interface PRView {
+  title: string;
+  body: string;
+  state: string;
+  /**
+   * The PR's **browser/web** URL (NOT an API endpoint), when the forge
+   * concept supplies it. Each forge maps its own web-URL field into this:
+   * GitHub `url`, GitLab `web_url`, Gitea `html_url` (Gitea's `url` is the
+   * API endpoint — do not use it). Optional so the contract stays
+   * forge-neutral; consumers that open the PR in a browser degrade
+   * gracefully when it's absent (e.g. a forge script that doesn't emit it).
+   */
+  url?: string;
+  author: { login: string };
+  baseRefName: string;
+  headRefName: string;
+  additions: number;
+  deletions: number;
 }
 
 // --- Issue search (GET /api/issue-search) ---
@@ -533,6 +627,55 @@ export interface ProtocolStats {
   count: number;
   avgWallClockHours: number | null;
   avgAgentTimeHours: number | null;
+}
+
+/**
+ * Issue 1450: one currently-*held* mailbox row as `GET /api/inbox` projects it —
+ * the payload behind `afx inbox` and the dashboard's held-mail popover.
+ *
+ * **Metadata only, never the body** (Spec 1313 redaction rule). The message body
+ * travels only over the live terminal stream on delivery, or through the separate
+ * single-row `GET /api/inbox/:id` that backs `afx inbox show <id>`. Nothing that
+ * consumes this type can leak a body, because no body is here to leak.
+ *
+ * **Held vs scheduled — these rows do NOT all count toward `OverviewData.heldCount`.**
+ * The list comes from `listHeld`, which returns every `status = 'held'` row. The count
+ * comes from `heldSummaryForWorkspace`, which additionally requires
+ * `not_before IS NULL OR not_before <= now` — a pre-due `--delay` send is "scheduled,
+ * not stuck" and deliberately does not inflate the attention count. So
+ * `heldCount <= inbox.length`, always, by design. A UI showing both must group them
+ * (`afx inbox` labels pre-due rows `scheduled`) rather than pretend the numbers match.
+ */
+export interface HeldMessage {
+  /** Mailbox row id — the handle `afx inbox show|dismiss <id>` takes. */
+  id: string;
+  /** Normalized (realpath) workspace root the row was enqueued under. */
+  workspacePath: string;
+  /** Recipient agent (builder roleId or architect name). */
+  toAgent: string;
+  /** Sending agent; `null` for rows with no recorded sender (rendered as `?`). */
+  fromAgent: string | null;
+  /** Why the render gate held it: `'busy' | 'no-profile' | 'no-live-pty'`; `null` if unset. */
+  reason: string | null;
+  /**
+   * The gate's detail behind a `busy` reason (Issue #1482):
+   * `'user-text'` — a draft or menu occupies the composer; a human is at the line and the hold
+   * clears by itself. `'no-region-end'` / `'no-composer-marker'` — the classifier could not
+   * verify the composer at all (a drifted profile, a torn frame, or Tower's dimensions
+   * diverging from the real PTY); this hold does NOT clear on its own.
+   * `null` for a non-gate hold (`no-live-pty`, `no-profile`) and once delivered.
+   */
+  detail: string | null;
+  /** True once the row has crossed the escalation age. A pre-due row never escalates. */
+  escalated: boolean;
+  /** Enqueue time, epoch ms — the basis for the displayed age. */
+  createdAt: number;
+  /**
+   * Due time of a pre-due delayed (`--delay`) send, epoch ms; `null` = deliver ASAP.
+   * `notBefore > now` marks the row SCHEDULED: excluded from `heldCount`, rendered
+   * with a countdown rather than an age.
+   */
+  notBefore: number | null;
 }
 
 export interface AnalyticsResponse {

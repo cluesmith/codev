@@ -15,8 +15,11 @@ import {
 } from '@cluesmith/codev-sdk/tower-client';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
+import { assertTunnelMutationAllowedUnderTest } from '../../lib/test-env.js';
 
 export class TowerClient extends SdkTowerClient {
+  private readonly targetsDefaultTowerPort: boolean;
+
   constructor(portOrOptions?: number | TowerClientOptions) {
     let options: TowerClientOptions;
     if (typeof portOrOptions === 'number') {
@@ -29,6 +32,20 @@ export class TowerClient extends SdkTowerClient {
       host: process.env.BRIDGE_TOWER_HOST,
       ...options,
     });
+    this.targetsDefaultTowerPort = (options.port ?? DEFAULT_TOWER_PORT) === DEFAULT_TOWER_PORT;
+  }
+
+  /**
+   * #1515: every CLI/Tower call funnels through here, which makes it the one
+   * place that can stop a test run from driving tunnel connect/disconnect
+   * against the developer's live Tower.
+   */
+  override async request<T>(
+    path: string,
+    options: RequestInit = {},
+  ): Promise<{ ok: boolean; status: number; data?: T; error?: string }> {
+    assertTunnelMutationAllowedUnderTest(path, this.targetsDefaultTowerPort);
+    return super.request<T>(path, options);
   }
 }
 

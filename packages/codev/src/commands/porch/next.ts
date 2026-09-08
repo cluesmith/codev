@@ -36,6 +36,16 @@ import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
 import { loadCheckOverrides, resolveConsultationModels } from './config.js';
 import { getResolver, type ArtifactResolver } from './artifacts.js';
+import {
+  acknowledgeRefreshes,
+  buildRefreshTask,
+  declaresEnter,
+  declaresPlanPhaseAdvance,
+  enterBoundary,
+  planPhaseBoundary,
+  recordRefresh,
+  shouldRefresh,
+} from './context-refresh.js';
 
 import type {
   ProjectState,
@@ -182,6 +192,39 @@ function buildReviewContext(
  * State is only mutated when completed work is detected (filesystem-as-truth).
  * If called twice without filesystem changes, returns the same output.
  */
+/**
+ * Fold a context-refresh boundary into a pending transition (Spec 1470).
+ *
+ * Called by every transition site AFTER the phase fields are mutated but BEFORE
+ * `writeStateAndCommit`, so the boundary record and the transition land in one
+ * write. That atomicity is the whole at-most-once mechanism: there is no moment
+ * at which the state says "transitioned" but not "refreshed here".
+ *
+ * Returns the response to hand back when a refresh fires, or `null` to continue
+ * the normal path. A firing boundary returns INSTEAD of recursing into `next()`,
+ * so a single `porch next` no longer chains several transitions at once — each
+ * refresh gets its own turn, which is the point.
+ *
+ * Uses `status: 'tasks'` rather than a new status variant: dashboards, the VS Code
+ * tree and any other consumer parse the existing set, and a refresh IS actionable
+ * work, so it needs no new category.
+ */
+function refreshResponse(
+  state: ProjectState,
+  boundary: string,
+  declared: boolean,
+): PorchNextResponse | null {
+  if (!shouldRefresh(state, declared, boundary)) return null;
+  recordRefresh(state, boundary, new Date().toISOString());
+  return {
+    status: 'tasks',
+    phase: state.phase,
+    iteration: state.iteration,
+    plan_phase: state.current_plan_phase || undefined,
+    tasks: [buildRefreshTask(boundary)],
+  };
+}
+
 export async function next(workspaceRoot: string, projectId: string): Promise<PorchNextResponse> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
@@ -267,6 +310,23 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
           state.iteration = 1;
           state.build_complete = false;
           state.history = [];
+          // NO context refresh here, deliberately: a SKIP IS NOT WORK.
+          //
+          // This branch only runs at iteration 1 with `build_complete` false —
+          // i.e. before the builder has done anything in the phase being
+          // skipped. There is no context to refresh, and firing anyway is
+          // actively harmful in this repo's documented default shape ("Approved
+          // specs and plans need frontmatter and must be committed to main
+          // before spawning"): a project whose spec AND plan are both
+          // pre-approved skips two phases on consecutive `porch next` calls, so
+          // firing at each would clear the builder twice back to back with no
+          // work in between. That violates the spec's "never emitted twice in a
+          // row", and at both moments the context is near-empty, so the
+          // >=1000-byte save gate would either be padded or abort.
+          //
+          // The boundary that matters is not lost: whenever the builder
+          // actually writes the plan, `enter:implement` fires from the
+          // gate-approved transition below.
           await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} skip pre-approved ${state.phase}`);
           // Recurse to compute tasks for the new phase
           return next(workspaceRoot, projectId);
@@ -327,12 +387,52 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         }
       }
 
+      // Post-approval, per the spec: the gate outcome is durable in status.yaml
+      // before any refresh fires, so a refreshed builder cannot mistake
+      // "waiting at a gate" for "approved".
+      const gateBoundary = enterBoundary(nextPhase.id);
+      const gateRefresh = refreshResponse(
+        state,
+        gateBoundary,
+        declaresEnter(protocol, nextPhase.id),
+      );
       await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);
+      if (gateRefresh) return gateRefresh;
       return next(workspaceRoot, projectId);
     }
   }
 
   // Handle build_verify / per_plan_phase phases
+  // Reaching here means the builder came back and asked for work — which is the
+  // only evidence porch has that a refresh completed. Record it once per
+  // boundary, so a boundary that is recorded but never acknowledged means
+  // nobody returned. This is the ONLY write on the normal path, and it happens
+  // at most once per refresh rather than once per call.
+  if (acknowledgeRefreshes(state, new Date().toISOString())) {
+    try {
+      await writeStateAndCommit(
+        statusPath,
+        state,
+        `chore(porch): ${state.id} acknowledge context refresh`,
+      );
+    } catch {
+      // Swallowed DELIBERATELY, and this is the only place in `next()` where
+      // that is right.
+      //
+      // `writeStateAndCommit` commits and pushes, and throws on failure. This
+      // acknowledgment is the ONLY write on the normal task-emission path, so
+      // without this catch a network blip during a push would make `porch next`
+      // fail outright — and a builder would be unable to get its next task
+      // because a VISIBILITY record could not be filed. Bookkeeping must never
+      // gate the work it is bookkeeping for.
+      //
+      // Losing it is cheap and self-healing: the boundary stays unacknowledged,
+      // the next `porch next` tries again, and the only cost of a persistent
+      // failure is a stall warning for a builder that is in fact fine — which is
+      // the safe direction for this particular signal.
+    }
+  }
+
   if (isBuildVerify(protocol, state.phase)) {
     return await handleBuildVerify(workspaceRoot, projectId, state, protocol, phaseConfig, statusPath, resolver);
   }
@@ -533,7 +633,7 @@ async function handleBuildVerify(
     // All reviews in — parse verdicts and decide
     if (allApprove(reviews)) {
       // All approve — advance
-      return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
+      return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews, resolver);
     }
 
     // At least one reviewer returned REQUEST_CHANGES (allApprove above
@@ -579,7 +679,7 @@ async function handleBuildVerify(
           state,
           `chore(porch): ${state.id} ${state.phase} force-advance (safety ceiling reached at iter ${state.iteration})`,
         );
-        const response = await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
+        const response = await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews, resolver);
         // Prepend the force-advance notice to whatever the approval path emitted.
         const ceilingNotice =
           `⚠️ FORCE-ADVANCE: REQUEST_CHANGES persisted for ${state.iteration} iterations ` +
@@ -664,6 +764,7 @@ async function handleVerifyApproved(
   protocol: Protocol,
   statusPath: string,
   reviews: ReviewResult[],
+  resolver?: ArtifactResolver,
 ): Promise<PorchNextResponse> {
   const gateName = getPhaseGate(protocol, state.phase);
 
@@ -683,17 +784,47 @@ async function handleVerifyApproved(
       // (plan_phase field on each entry disambiguates iterations)
 
       if (moveToReview) {
-        // All plan phases done — move to review
+        // All plan phases done — move to review.
+        //
+        // This boundary is a QUALITY feature as much as a context one: a builder
+        // that enters review in a fresh context reads its own diff cold, without
+        // the memory of intending the code to be correct.
+        //
+        // NOTE the coupling: the successor phase is hardcoded `'review'` here
+        // (pre-existing), and the boundary id is derived from the same literal.
+        // Record and event therefore cannot disagree — but a protocol whose
+        // per_plan_phase phase transitions to a differently-named successor
+        // would silently mis-target BOTH. Change them together, or derive both
+        // from `getNextPhase`.
         state.phase = 'review';
         state.current_plan_phase = null;
+        const reviewRefresh = refreshResponse(
+          state,
+          enterBoundary('review'),
+          declaresEnter(protocol, 'review'),
+        );
         await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} all plan phases complete → review`);
+        if (reviewRefresh) return reviewRefresh;
         return next(workspaceRoot, projectId);
       }
 
       // Next plan phase
       const newCurrent = getCurrentPlanPhase(state.plan_phases);
       state.current_plan_phase = newCurrent?.id || null;
+      // Fires on ADVANCE BETWEEN plan phases, which excludes the first one by
+      // construction: entering `implement` IS entering plan phase 1, and this
+      // code only runs when a phase completes and hands off to a successor. So
+      // two refresh tasks can never fire back to back at that moment, without a
+      // dedup rule anyone has to remember.
+      const advanceRefresh = state.current_plan_phase
+        ? refreshResponse(
+            state,
+            planPhaseBoundary(state.current_plan_phase),
+            declaresPlanPhaseAdvance(protocol),
+          )
+        : null;
       await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} advance plan phase → ${state.current_plan_phase}`);
+      if (advanceRefresh) return advanceRefresh;
       return next(workspaceRoot, projectId);
     }
   }
@@ -738,7 +869,37 @@ async function handleVerifyApproved(
   state.iteration = 1;
   state.build_complete = false;
   state.history = [];
+
+  // Extract plan phases when entering a per_plan_phase phase.
+  //
+  // PRE-EXISTING BUG, fixed here because Spec 1470 depends on it: the gated
+  // (`next()`) and pre-approved paths both do this, but this ungated path did
+  // not. ASPIR has no spec/plan gates, so plan→implement ALWAYS comes through
+  // here — meaning ASPIR entered `implement` with an empty `plan_phases` and
+  // never reached the per-plan-phase advance branch at all. That silently cost
+  // ASPIR its per-phase iteration long before this project; it surfaces now
+  // because ASPIR's declared `plan-phase:*` refresh boundaries could never fire
+  // without it.
+  if (isPhased(protocol, nextPhase.id)) {
+    const planContent = (resolver ?? getResolver(workspaceRoot)).getPlanContent(state.id, state.title);
+    if (planContent) {
+      state.plan_phases = extractPlanPhases(planContent);
+      if (state.plan_phases.length > 0) {
+        state.current_plan_phase = state.plan_phases[0].id;
+      }
+    }
+  }
+
+  // ASPIR's path: no spec/plan gates, so the transition happens here rather than
+  // on gate approval. Same boundary, same atomicity — and this is the protocol
+  // that runs UNSUPERVISED, which is the case the fail-safes exist for.
+  const directRefresh = refreshResponse(
+    state,
+    enterBoundary(nextPhase.id),
+    declaresEnter(protocol, nextPhase.id),
+  );
   await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);
+  if (directRefresh) return directRefresh;
   return next(workspaceRoot, projectId);
 }
 

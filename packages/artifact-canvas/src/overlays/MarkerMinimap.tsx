@@ -1,11 +1,14 @@
 import * as React from 'react';
-import type { ReviewMarker } from '../types.js';
+import type { ReadingMode, ReviewMarker } from '../types.js';
+import { blockScrollOptions } from '../components/column-geometry.js';
 
 export interface MarkerMinimapProps {
   /** The markers to plot — one dot per marker (#863). */
   markers: ReviewMarker[];
   /** The rendered-body element the dots are positioned against (the canvas scroll content). */
   bodyRef: React.RefObject<HTMLDivElement | null>;
+  /** Reading mode (spec 1380): dot-click jumps are axis-aware. Defaults to vertical. */
+  readingMode?: ReadingMode;
 }
 
 /** First ~80 chars of a marker body, for the hover tooltip (AC: "author + truncated body"). */
@@ -31,7 +34,11 @@ interface Dot {
  * tests therefore assert structure/behavior (dot count, hidden-when-empty, click→scroll, tooltip),
  * and pixel placement is verified on the running worktree at the `dev-approval` gate.
  */
-export function MarkerMinimap({ markers, bodyRef }: MarkerMinimapProps): React.ReactElement | null {
+export function MarkerMinimap({
+  markers,
+  bodyRef,
+  readingMode = 'vertical',
+}: MarkerMinimapProps): React.ReactElement | null {
   const [dots, setDots] = React.useState<Dot[]>([]);
 
   React.useLayoutEffect(() => {
@@ -83,7 +90,7 @@ export function MarkerMinimap({ markers, bodyRef }: MarkerMinimapProps): React.R
             // user's next Tab / jump key then resumes from the block, not from this dot. Focus
             // first with preventScroll so the smooth scroll below stays the only scroller.
             el.focus({ preventScroll: true });
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.scrollIntoView(blockScrollOptions(readingMode)); // axis-aware (spec 1380)
           }}
         />
       ))}

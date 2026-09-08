@@ -1,0 +1,25 @@
+id: '1494'
+title: vscode-approval-gates-should-r
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-18T00:59:05.234Z'
+    approved_at: '2026-08-18T05:46:41.474Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-18T05:56:09.602Z'
+    approved_at: '2026-08-18T11:00:41.890Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-18T11:18:06.111Z'
+    approved_at: '2026-08-18T11:34:01.960Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-08-18T00:54:19.918Z'
+updated_at: '2026-08-18T11:34:01.961Z'
+pr_ready_for_human: false

@@ -105,7 +105,7 @@ export class ReorientationAssemblyError extends Error {
  * silently shipping a frame that is missing it.
  */
 export const REQUIRED_INLINE_MARKERS = [
-  'CONTEXT RESET',
+  'CONTEXT REFRESH',
   'You are a Builder',
   // The spec requires the identity block to name WHICH role document governs
   // the builder, not merely that one does.
@@ -116,6 +116,9 @@ export const REQUIRED_INLINE_MARKERS = [
   'Branch:',
   'State file:',
   'Full re-orientation:',
+  // #1574: the reply channel is load-bearing for a cleared builder, so a frame that
+  // loses it fails assembly rather than reaching one.
+  'Reply channel:',
 ] as const;
 
 /**
@@ -213,7 +216,7 @@ function buildInline(options: AssembleOptions): string {
   const { context: c, statePath, addendum } = options;
 
   const lines: string[] = [
-    '## CONTEXT RESET — re-orientation',
+    '## CONTEXT REFRESH — re-orientation',
     '',
     'Your conversation history was cleared. Everything you knew that was not written',
     'down is gone. Do not try to recall it; read the files below instead.',
@@ -245,6 +248,10 @@ function buildInline(options: AssembleOptions): string {
   lines.push(
     `- Worktree: ${c.worktree}`,
     `- Branch: ${c.branch}`,
+    // #1574: a cleared builder has lost every prompt that taught it `afx send`.
+    // Stated as a channel, not an instruction to reply — an automatic re-entry
+    // frame explicitly says nobody is waiting on one.
+    '- Reply channel: `afx send architect "..."` (assistant text typed in your own terminal reaches nobody)',
     '',
     '### Do this now, in order',
     '',
@@ -381,9 +388,9 @@ function assembleLongFormDocument(options: AssembleOptions, promptBody: string):
   const { context: c, statePath, addendum, buildResumeNotice, issue } = options;
 
   const header = [
-    '<!-- Written by `afx reset` (Spec 1273). Untracked; regenerated on every reset. -->',
+    '<!-- Written by `afx refresh` (Spec 1273). Untracked; regenerated on every refresh. -->',
     '',
-    '# Re-orientation after context reset',
+    '# Re-orientation after context refresh',
     '',
     `Your conversation history was cleared deliberately, to give you a fresh window`,
     `without losing your working state. This file restores the protocol framing a`,

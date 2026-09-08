@@ -3,15 +3,35 @@ import * as React from 'react';
 export interface CommentComposerProps {
   /** 0-based source line this composer targets (for the accessible label). */
   line: number;
-  /** Invoked with the trimmed, non-empty body when the reviewer submits. */
-  onSubmit: (text: string) => void;
-  /** Invoked when the reviewer cancels (Esc / Cancel button) without submitting. */
-  onCancel: () => void;
+  /**
+   * Invoked with the trimmed, non-empty body when the reviewer submits. `viaKeyboard` reports
+   * the modality of the CLOSING action (⌘/Ctrl+Enter vs a Submit click): the canvas restores
+   * focus to the block afterwards, and the focus ring should follow platform convention —
+   * visible for keyboard flows, quiet for pointer flows. (Browsers treat a textarea as always
+   * focus-visible, so without this signal the restoration inherits a ring even for
+   * mouse-only reviewers.)
+   */
+  onSubmit: (text: string, viaKeyboard: boolean) => void;
+  /** Invoked when the reviewer cancels (Esc / Cancel button); same modality contract. */
+  onCancel: (viaKeyboard: boolean) => void;
   /**
    * Prefill body for editing an existing comment (#1055). When present the composer opens seeded
    * with this text and the submit button reads "Save"; when absent it is the empty add composer.
    */
   initialText?: string;
+}
+
+/**
+ * Imperative seam for driving the composer from outside it (spec 1401).
+ *
+ * Submission needs the composer's own draft text, which lives in its state, so a remote
+ * `composer-submit` cannot go through the parent's `onSubmit` directly and must not synthesize a
+ * click on the button. Cancel is deliberately absent: it needs no text, so the parent closes the
+ * composer through its existing cancel path rather than routing back through here.
+ */
+export interface CommentComposerHandle {
+  /** Submit the current draft, exactly as ⌘/Ctrl+Enter does. Empty bodies stay a no-op. */
+  submit(): void;
 }
 
 /**
@@ -30,12 +50,11 @@ export interface CommentComposerProps {
  * It only signals intent via `onSubmit` / `onCancel`; it never writes a marker itself (the host
  * does that, preserving the package's D6 invariant). An empty / whitespace-only body is a no-op.
  */
-export function CommentComposer({
-  line,
-  onSubmit,
-  onCancel,
-  initialText,
-}: CommentComposerProps): React.ReactElement {
+export const CommentComposer = React.forwardRef<CommentComposerHandle, CommentComposerProps>(
+  function CommentComposer(
+    { line, onSubmit, onCancel, initialText }: CommentComposerProps,
+    handleRef,
+  ): React.ReactElement {
   const isEdit = initialText !== undefined;
   const [text, setText] = React.useState(initialText ?? '');
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -50,19 +69,24 @@ export function CommentComposer({
     el.setSelectionRange(end, end);
   }, []);
 
-  const submit = (): void => {
+  const submit = (viaKeyboard: boolean): void => {
     const body = text.trim();
     if (!body) { return; } // mirrors the host's old `if (!text) return;` guard
-    onSubmit(body);
+    onSubmit(body, viaKeyboard);
   };
+
+  // A remote submit reports `viaKeyboard: true` so focus restoration keeps its visible ring: the
+  // reviewer is driving the canvas deliberately and needs to see where focus landed, which is the
+  // same reason the ⌘/Ctrl+Enter path passes true.
+  React.useImperativeHandle(handleRef, () => ({ submit: () => submit(true) }));
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      submit();
+      submit(true);
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      onCancel();
+      onCancel(true);
     }
     // Plain Enter falls through to the textarea's default (insert a newline).
   };
@@ -83,17 +107,19 @@ export function CommentComposer({
         onKeyDown={onKeyDown}
       />
       <div className="codev-canvas-comment-composer-actions">
+        {/* `e.detail === 0` = a click synthesized from keyboard activation (Space/Enter on the
+            focused button) — still a keyboard flow for focus-ring purposes. */}
         <button
           type="button"
           className="codev-canvas-comment-composer-cancel"
-          onClick={onCancel}
+          onClick={(e) => onCancel(e.detail === 0)}
         >
           Cancel
         </button>
         <button
           type="button"
           className="codev-canvas-comment-composer-submit"
-          onClick={submit}
+          onClick={(e) => submit(e.detail === 0)}
           disabled={empty}
         >
           {isEdit ? 'Save' : 'Comment'}
@@ -101,4 +127,5 @@ export function CommentComposer({
       </div>
     </div>
   );
-}
+  },
+);

@@ -59,16 +59,29 @@ function createRealPty(): IShellperPty {
   let ptyInstance: import('node-pty').IPty | null = null;
   let dataCallback: ((data: string) => void) | null = null;
   let exitCallback: ((info: { exitCode: number; signal?: number }) => void) | null = null;
+  // Issue #1482: a resize that arrives while there is no PTY instance used to vanish
+  // (`ptyInstance?.resize(...)`). Hold it and apply it at spawn instead, so the process starts
+  // at the geometry that was last asked for rather than at a stale one. Narrow by design — the
+  // window is small (ShellperProcess creates this adapter and spawns into it back-to-back, and
+  // caches dims across a relaunch itself) — but a silently dropped resize is exactly the class
+  // of bug this issue is about, and a dropped one here would put the kernel winsize out of step
+  // with every layer above it.
+  let pendingResize: { cols: number; rows: number } | null = null;
 
   return {
     spawn(command: string, args: string[], options: PtyOptions): void {
       // Load node-pty at spawn time via createRequire (defined at module level).
       // node-pty is a native CJS module; createRequire handles ESM→CJS interop.
       ptyModule = require('node-pty') as typeof import('node-pty');
+      // A resize that landed before this spawn wins over the spawn options — it is the more
+      // recent statement of the caller's intent (Issue #1482).
+      const cols = pendingResize?.cols ?? options.cols;
+      const rows = pendingResize?.rows ?? options.rows;
+      pendingResize = null;
       ptyInstance = ptyModule.spawn(command, args, {
         name: options.name ?? 'xterm-256color',
-        cols: options.cols,
-        rows: options.rows,
+        cols,
+        rows,
         cwd: options.cwd,
         env: options.env,
       });
@@ -86,7 +99,11 @@ function createRealPty(): IShellperPty {
     },
 
     resize(cols: number, rows: number): void {
-      ptyInstance?.resize(cols, rows);
+      if (!ptyInstance) {
+        pendingResize = { cols, rows };
+        return;
+      }
+      ptyInstance.resize(cols, rows);
     },
 
     kill(signal?: number): void {

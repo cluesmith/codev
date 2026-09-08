@@ -16,6 +16,7 @@ import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
 import type { ArtifactResolver } from './artifacts.js';
 import { fetchIssue } from '../../lib/github.js';
+import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import { resolveCodevFile, resolveCodevIncludes } from '../../lib/skeleton.js';
 import { readHotTierFiles } from '../../lib/managed-block.js';
 
@@ -87,12 +88,30 @@ function loadPromptFile(workspaceRoot: string, protocolName: string, promptFile:
 }
 
 /**
+ * Resolve the `pr-create` concept command for the PR-opening prompts.
+ *
+ * Mirrors the `pr-merge` injection in porch/next.ts. Prompts must not hardcode
+ * `gh pr create`: a project with `forge.provider` set would otherwise shell out
+ * to `gh` at the single most important write in the protocol (#1455).
+ */
+function resolvePrCreateCommand(workspaceRoot: string): string {
+  const command = getForgeCommand('pr-create', loadForgeConfig(workspaceRoot));
+  // The disabled form must FAIL, not comment: a `# …` line is valid shell that
+  // exits 0, so an agent running the block would read "PR opened" from silence.
+  return (
+    command ??
+    "{ echo 'pr-create is disabled for this forge — open the PR manually' >&2; false; }"
+  );
+}
+
+/**
  * Substitute template variables in a prompt.
  */
 function substituteVariables(
   prompt: string,
   state: ProjectState,
   artifactBaseName: string,
+  workspaceRoot: string,
   planPhase?: PlanPhase | null,
   summary?: string | null
 ): string {
@@ -102,6 +121,7 @@ function substituteVariables(
     artifact_name: artifactBaseName,
     current_state: state.phase,
     protocol: state.protocol,
+    pr_create_command: resolvePrCreateCommand(workspaceRoot),
   };
 
   // Add summary/goal if available
@@ -274,7 +294,7 @@ export async function buildPhasePrompt(
 
     const promptContent = loadPromptFile(workspaceRoot, state.protocol, promptFileName);
     if (promptContent) {
-      let result = substituteVariables(promptContent, state, artifactBaseName, currentPlanPhase, summary);
+      let result = substituteVariables(promptContent, state, artifactBaseName, workspaceRoot, currentPlanPhase, summary);
 
       // Add goal/summary header if available
       if (summary) {

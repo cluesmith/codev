@@ -1,0 +1,30 @@
+id: '1428'
+title: stream-deck-builder-action-key
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-12T12:08:57.421Z'
+    approved_at: '2026-08-12T12:40:37.076Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-12T12:46:13.255Z'
+    approved_at: '2026-08-12T21:17:28.353Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-12T21:30:52.992Z'
+    approved_at: '2026-08-12T21:34:22.022Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-08-12T12:05:28.964Z'
+updated_at: '2026-08-12T21:34:30.663Z'
+pr_history:
+  - phase: review
+    pr_number: 1432
+    branch: builder/pir-1428
+    created_at: '2026-08-12T21:20:15.889Z'
+pr_ready_for_human: false

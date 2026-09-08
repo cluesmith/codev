@@ -1,5 +1,5 @@
 /**
- * Builder context resolution for `afx reset` (Spec 1273, phase 4).
+ * Builder context resolution for `afx refresh` (Spec 1273, phase 4).
  *
  * Invariant R3 requires a re-orientation carrying protocol, mode, worktree,
  * branch, project identity and porch re-entry. The first draft of the plan
@@ -27,6 +27,7 @@
  * builder — the exact drift R3 exists to prevent.
  */
 
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseAgentName } from '../../utils/agent-names.js';
 import {
@@ -140,7 +141,7 @@ export class ContextResolutionError extends Error {
  * one project directory. **This repo commits porch history to `main`**, so every
  * worktree inherits every project ever run — 203 of them at the time of writing.
  * The alphabetically-first is `0087-porch-timeout-termination-retries`, whose
- * protocol is `spider`, so `afx reset` resolved protocol "spider" for *every*
+ * protocol is `spider`, so `afx refresh` resolved protocol "spider" for *every*
  * builder and died on `Protocol "spider" has no builder-prompt.md`. It failed
  * loudly, which is why nothing was corrupted — but it failed for every lane.
  *
@@ -247,6 +248,45 @@ function claimStrength(
   // Directory-name fallback applies ONLY when the file states no id at all.
   const dirNorm = normalizeId(dir);
   return wanted.some(c => dirNorm === c || dirNorm.startsWith(`${c}-`)) ? 'weak' : 'none';
+}
+
+/**
+ * The standard real implementation of {@link ContextFsPort}.
+ *
+ * Lives here, beside the interface, because THREE call sites had each hand-rolled
+ * an identical copy — `afx refresh`, `afx self-refresh`, and the mailbox wiring —
+ * and a stub in any one of them silently nulls the porch context for that path.
+ *
+ * That is not hypothetical: `listDirs` was stubbed to `() => []` in the
+ * self-refresh copy, which made `readPorchContext` return null and stripped
+ * project id, phase, plan phase and the resume notice from the re-orientation —
+ * without failing, because `assembleReorientation` requires the porch fields only
+ * `if (context.porch)`. A regression test then pinned a COPY of the fix rather
+ * than the fix, so reverting it would have left the suite green.
+ *
+ * One implementation, imported everywhere, is what makes that regression
+ * observable from a single test.
+ */
+export function buildContextFsPort(): ContextFsPort {
+  return {
+    exists: (p: string) => existsSync(p),
+    read: (p: string) => {
+      try {
+        return readFileSync(p, 'utf-8');
+      } catch {
+        return null;
+      }
+    },
+    listDirs: (p: string) => {
+      try {
+        return readdirSync(p, { withFileTypes: true })
+          .filter(e => e.isDirectory())
+          .map(e => e.name);
+      } catch {
+        return null;
+      }
+    },
+  };
 }
 
 export function readPorchContext(
@@ -577,7 +617,7 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
   }
   if (!mode && isBareTask) {
     // A `--task` spawn writes a bare prompt with no `## Mode:` heading, so this
-    // lane could never auto-detect and every `afx reset <task>` hard-errored.
+    // lane could never auto-detect and every `afx refresh <task>` hard-errored.
     //
     // Defaulting to SOFT is not a guess dressed up as a fact: "strict" means
     // *porch orchestrates this builder*, and a builder with no porch project
@@ -615,7 +655,7 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
   }
   if (!harness.supportsContextReset) {
     throw new ContextResolutionError(
-      `Harness '${harnessName}' has no in-session context reset, so 'afx reset' cannot clear this ` +
+      `Harness '${harnessName}' has no in-session context reset, so 'afx refresh' cannot clear this ` +
         `builder's context. Only the claude harness supports it today. ` +
         `To give this builder a fresh window, stop it and respawn without --resume.`,
     );

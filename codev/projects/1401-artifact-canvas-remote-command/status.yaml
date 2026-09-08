@@ -1,0 +1,183 @@
+id: '1401'
+title: artifact-canvas-remote-command
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Command vocabulary wire contracts
+    status: complete
+  - id: phase_2
+    title: Canvas action registry extraction
+    status: complete
+  - id: phase_3
+    title: Canvas remote command seam
+    status: complete
+  - id: phase_4
+    title: Tower canvas view registry and command route
+    status: complete
+  - id: phase_5
+    title: sdk canvas command and view registration calls
+    status: complete
+  - id: phase_6
+    title: VS Code host wiring and end-to-end review loop
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-08-11T11:16:29.331Z'
+    approved_at: '2026-08-11T11:27:04.259Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-11T11:41:09.935Z'
+    approved_at: '2026-08-11T11:52:27.580Z'
+  pr:
+    status: approved
+    approved_at: '2026-08-12T01:40:49.456Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_1-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_3-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_3-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_3-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_3-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_3-iter2-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_3-iter2-claude.txt
+  - iteration: 1
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_4-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_4-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_4-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_5
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_5-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_5-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_5-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_6-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_6-iter1-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_6-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_6-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_6-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_6-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_6-iter3-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_6-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_6-iter3-claude.txt
+started_at: '2026-08-11T10:57:41.092Z'
+updated_at: '2026-08-12T01:40:49.457Z'
+pr_history:
+  - phase: implement
+    pr_number: 1413
+    branch: builder/spir-1401
+    created_at: '2026-08-11T23:45:31.073Z'
+force_advanced:
+  phase: phase_6
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1401-phase_6-iter3-rebuttals.md
+  at: '2026-08-11T23:48:03.147Z'
+pr_ready_for_human: false

@@ -1,5 +1,5 @@
 {
-  "$schema": "../../protocol-schema.json",
+  "$schema": "../protocol-schema.json",
   "name": "research",
   "version": "1.0.0",
   "description": "Multi-agent research with 3-way investigation, synthesis, and critique",

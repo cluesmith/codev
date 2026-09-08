@@ -35,8 +35,10 @@ describe('Bugfix #506: cwd column in terminal_sessions', () => {
   });
 
   it('migration v12 should add cwd column', () => {
+    // Issue #1476: the migration chain lives in db/migrations.ts (runGlobalMigrations);
+    // spec-1313-migration.test.ts drives it for real, this guard pins the v12 statement.
     const dbSrc = readFileSync(
-      resolve(import.meta.dirname, '../db/index.ts'),
+      resolve(import.meta.dirname, '../db/migrations.ts'),
       'utf-8',
     );
     expect(dbSrc).toContain('Migration v12');

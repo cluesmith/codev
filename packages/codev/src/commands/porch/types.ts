@@ -72,6 +72,44 @@ export interface CheckOverride {
 export type CheckOverrides = Record<string, CheckOverride>;
 
 /**
+ * Context-refresh boundaries a protocol declares (Spec 1470).
+ *
+ * A "boundary" is a moment porch already transitions the state machine, at which
+ * a builder's context can be refreshed without losing anything: the artifacts,
+ * `status.yaml`, the thread narrative and git carry the durable state, so a
+ * refreshed builder re-orients from disk rather than from memory.
+ *
+ * Keyed by porch's OWN transition points rather than by protocol-shaped literal
+ * names (`after-spec`, `before-review`). A literal name has to be mapped onto a
+ * real transition somewhere, and that mapping is exactly what goes stale when a
+ * protocol changes shape — leaving a boundary that can be declared but never
+ * fires. Naming the transition directly removes the translation layer.
+ *
+ * Absent key means no refreshes, which is the default for every protocol that
+ * does not opt in.
+ */
+export interface ContextRefreshConfig {
+  /**
+   * Protocol phase ids to refresh on ENTRY to.
+   *
+   * Entry, not exit: the spec requires the refresh to happen after the gate
+   * outcome and the phase transition are durable in `status.yaml`, so a
+   * refreshed builder cannot mistake "waiting at a gate" for "approved".
+   */
+  on_enter?: string[];
+  /**
+   * Refresh when advancing from one plan phase to the NEXT one.
+   *
+   * "Advance between", not "enter each": entering the `implement` phase IS
+   * entering the first plan phase, so a per-plan-phase boundary that fired on
+   * entry would fire twice in a row at that moment. Defining it as advancement
+   * excludes the first plan phase by construction rather than by a dedup rule
+   * somebody has to remember.
+   */
+  on_plan_phase_advance?: boolean;
+}
+
+/**
  * Protocol definition (loaded from protocol.json)
  */
 export interface Protocol {
@@ -81,6 +119,7 @@ export interface Protocol {
   phases: ProtocolPhase[];
   checks?: Record<string, CheckDef>;           // Check name -> definition
   phase_completion?: Record<string, string>; // Checks run when a plan phase completes (after evaluate)
+  context_refresh?: ContextRefreshConfig;    // Boundaries at which builders refresh context (Spec 1470)
 }
 
 // ============================================================================
@@ -184,6 +223,29 @@ export interface ProjectState {
    * pre-date this field stay parseable.
    */
   pr_ready_for_human?: boolean;
+  /**
+   * Context-refresh boundaries already consumed for this project (Spec 1470).
+   *
+   * Appended in the SAME state write as the transition that triggered the
+   * boundary, which is what makes at-most-once a property of the control flow
+   * rather than a guard. A refresh is destructive (`/clear` has no undo) and
+   * porch transitions can loop — #1408 reset every plan phase to `pending` —
+   * so "already refreshed here" must be a recorded fact, never inferred from
+   * phase or iteration.
+   *
+   * `acknowledged_at` is set by PORCH (never by the builder, which is forbidden
+   * from writing this file) on the first normal-path `porch next` after the
+   * boundary. A boundary recorded but never acknowledged means the builder did
+   * not come back — the unattended-stall signal, which cannot be derived from
+   * `updated_at` because the normal task-emission path writes no state at all.
+   *
+   * Optional so status files predating this field stay parseable.
+   */
+  context_refreshes?: Array<{
+    boundary: string;
+    at: string;
+    acknowledged_at?: string;
+  }>;
   started_at: string;
   updated_at: string;
 }

@@ -377,7 +377,7 @@ describe('spawn-worktree', () => {
       expect(launcherBody(script!, 'entry')).toBe("claude --resume 'abc-1234-uuid'");
       expect(script).not.toContain('--resume,');
       expect(script).toContain('while true');
-      // Resume never rewrites the prompt file: `afx reset` reads the spawn-time
+      // Resume never rewrites the prompt file: `afx refresh` reads the spawn-time
       // `## Mode:` heading out of it, and it cannot be regenerated faithfully.
       const writeCalls = vi.mocked(writeFileSync).mock.calls;
       const promptCall = writeCalls.find(

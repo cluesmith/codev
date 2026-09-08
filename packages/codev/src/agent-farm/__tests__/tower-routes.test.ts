@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { PASTE_BEGIN, PASTE_END } from '../servers/message-write.js';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
@@ -14,6 +15,7 @@ import { handleRequest } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
+import { MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
 // Spec 1313 round 3: the real delayed-send timer registry + per-session submission lock
 // (NOT mocked) so the delayed-`--interrupt` reshape is exercised through the same singletons
@@ -21,7 +23,7 @@ import { SessionScreen } from '../../terminal/session-screen.js';
 // generation); submitToSession lets a test pre-occupy a session's lock to drive the
 // shutdown-during-lock-wait window deterministically.
 import { shutdownDelayedSends } from '../servers/delayed-send.js';
-import { submitToSession, resetSubmissionChains } from '../servers/session-submit.js';
+import { submitToSession, trySubmitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 
 // ============================================================================
 // Mocks
@@ -135,7 +137,11 @@ vi.mock('../servers/tower-utils.js', () => ({
   serveStaticFile: vi.fn(() => false),
 }));
 
-vi.mock('../utils/server-utils.js', () => ({
+// Keep the REAL request-auth helpers (CORS allowlist, key comparison, public-route
+// list) under test; only stub isRequestAllowed so route tests need not thread a
+// valid key, and parseJsonBody so bodies can be injected.
+vi.mock('../utils/server-utils.js', async (importActual) => ({
+  ...(await importActual<typeof import('../utils/server-utils.js')>()),
   isRequestAllowed: vi.fn(() => true),
   parseJsonBody: (...args: unknown[]) => mockParseJsonBody(...args),
 }));
@@ -219,16 +225,27 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
  * requires that proven lower bound, else a bare marker is an indeterminate partial and is held).
  * `bytesWritten` is the monotone change token the delivery path samples.
  */
-function gateSession(mockWrite: (data: string) => void, ring: string, writable = true) {
+function gateSession(mockWrite: (data: string) => void, ring: string, writable = true, id = 'term-001') {
   const raw = `${ring}\r\n${'─'.repeat(20)}\r\n`;
   const gateScreen = new SessionScreen(80, 24);
   gateScreen.feed(raw);
   return {
+    // The per-terminal submission lock's key (Issue #1365). It MUST be a real, distinct id:
+    // this double reaches the live mailbox-wiring binding, and because the port is
+    // structurally typed an omitted `id` would compile and silently key every lock on the
+    // same `undefined` — serialization that looks present and is not. `submitMessagePaced`
+    // throws on a missing id so that mistake fails loudly instead of quietly.
+    id,
     // Model a live PTY: every write lands. The delivery path now threads the write's
     // boolean (Spec 1313 silent-loss fix), so a double whose write returned undefined
     // would read as a DROPPED write and be held. Wrap mockWrite so call-assertions still
     // see it while the write reports success.
-    write: (data: string): boolean => { mockWrite(data); return true; },
+    // Issue #1573: a real terminal ECHOES what is typed into it, and the delivery path now
+    // requires that echo on the session's mirror before it will call a message delivered. The
+    // double models it (input lines are `\n`-separated; a terminal renders them `\r\n`), so a
+    // test asserting a delivery gets one — and a test that wants a terminal which SWALLOWS its
+    // input can hand in a `write` that skips the feed.
+    write: (data: string): boolean => { mockWrite(data); gateScreen.feed(data.replace(/\n/g, '\r\n')); return true; },
     pid: 1234,
     writable,
     isUserIdle: () => true,
@@ -238,6 +255,10 @@ function gateSession(mockWrite: (data: string) => void, ring: string, writable =
     cwd: '/tmp/ws',
     info: { cols: 80, rows: 24 },
     bytesWritten: raw.length,
+    // Issue #1573 settle-before-write: epoch 0 is "this screen stopped painting long ago", the
+    // normal state for a session sitting at an idle prompt. A test modelling a still-repainting
+    // composer overrides it with a recent timestamp.
+    lastDataAt: 0,
     gateScreen,
   };
 }
@@ -273,15 +294,15 @@ describe('tower-routes', () => {
   // =========================================================================
 
   describe('security and CORS', () => {
-    it('returns 403 when isRequestAllowed returns false', async () => {
+    it('returns 401 when isRequestAllowed returns false', async () => {
       const { isRequestAllowed } = await import('../utils/server-utils.js');
       (isRequestAllowed as any).mockReturnValueOnce(false);
 
-      const req = makeReq('GET', '/health');
+      const req = makeReq('GET', '/api/terminals');
       const { res, statusCode } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(statusCode()).toBe(403);
+      expect(statusCode()).toBe(401);
     });
 
     it('sets CORS headers for localhost origin', async () => {
@@ -293,12 +314,12 @@ describe('tower-routes', () => {
       expect(headers()['Access-Control-Allow-Methods']).toBe('GET, POST, PATCH, DELETE, OPTIONS');
     });
 
-    it('sets CORS headers for https origin', async () => {
+    it('does not reflect an arbitrary https origin (allowlist, not reflect-any)', async () => {
       const req = makeReq('GET', '/health', { origin: 'https://example.com' });
       const { res, headers } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(headers()['Access-Control-Allow-Origin']).toBe('https://example.com');
+      expect(headers()['Access-Control-Allow-Origin']).toBeUndefined();
     });
 
     it('does not set CORS origin for non-matching origins', async () => {
@@ -307,6 +328,14 @@ describe('tower-routes', () => {
       await handleRequest(req, res, makeCtx());
 
       expect(headers()['Access-Control-Allow-Origin']).toBeUndefined();
+    });
+
+    it('allows the codev-tower-key header in CORS', async () => {
+      const req = makeReq('GET', '/health', { origin: 'http://localhost:3000' });
+      const { res, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(headers()['Access-Control-Allow-Headers']).toContain('codev-tower-key');
     });
 
     it('handles OPTIONS preflight', async () => {
@@ -1019,7 +1048,7 @@ describe('tower-routes', () => {
 
   describe('GET /api/terminals/:id (Spec 1273 — lastDataAt on the wire)', () => {
     // Testing `session.info` alone would not pin this: the whole point of the
-    // phase is that the field reaches a *client*, so afx reset can measure
+    // phase is that the field reaches a *client*, so afx refresh can measure
     // output quiescence instead of assuming a builder's turn has ended before
     // typing /clear into its terminal. This asserts the serialised response.
     it('serialises lastDataAt as an epoch-ms number', async () => {
@@ -1430,6 +1459,52 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled();
     });
 
+    it('rejects an over-limit body loudly instead of paceing it onto the line (Issue #1573)', async () => {
+      // Nothing between the CLI flag and the PTY bytes bounded message size before this. An
+      // oversized body used to be written a line at a time and reported delivered whatever the
+      // composer made of it — the #1564 shape. Truncating would reproduce that on purpose, so
+      // the only honest answer is a refusal that names the limit.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect',
+        message: 'x'.repeat(48 * 1024 + 1),
+        workspace: '/tmp/ws',
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      const parsed = JSON.parse(body());
+      expect(parsed.error).toBe('MESSAGE_TOO_LARGE');
+      expect(parsed.message).toContain('49153 bytes');
+      expect(parsed.message).toContain('48KB');
+      // The target was never even resolved — nothing reached a terminal.
+      expect(mockResolveTarget).not.toHaveBeenCalled();
+    });
+
+    it('accepts a body exactly at the limit and echoes bodyLength on the response (Issue #1573)', async () => {
+      const message = 'x'.repeat(48 * 1024);
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message, workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(vi.fn(), '❯ '),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      // The sender is told WHAT was sent, not merely that a send happened.
+      expect(JSON.parse(body()).bodyLength).toBe(48 * 1024);
+    });
+
     it('holds (no-live-pty) instead of dropping when the shellper connection is down (#1198, Spec 1313)', async () => {
       // Pre-1313 this returned 503 and dropped the message. Now the send is
       // persisted and held; the backstop redelivers when the connection recovers.
@@ -1474,6 +1549,97 @@ describe('tower-routes', () => {
       expect(typeof parsed.mailboxId).toBe('string');
       // And it is really persisted (drain-order query finds it).
       expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9')).toHaveLength(1);
+    });
+
+    // Issue #1478: the sender's identity must survive into the row both attribution
+    // surfaces read — `from_agent` (what `afx inbox` renders) and `formatted_message`
+    // (the builder's composer header). `formatMessageForTarget`'s any → builder branch
+    // used to discard `from` entirely, so even a corrected sender could not surface.
+    // The registry hold path is the cheapest route that formats AND persists.
+    describe('architect identity in the persisted row (issue #1478)', () => {
+      /** POST /api/send from `from` to an offline-but-known builder → held row. */
+      async function heldRowFrom(from: string | undefined) {
+        mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'ship it', workspace: '/tmp/ws', from });
+        mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+        mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+        const { res, body } = makeRes();
+        await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+        return mailbox.getById(sendDbHolder.db, JSON.parse(body()).mailboxId)!;
+      }
+
+      it('stores the specific architect as from_agent — the identity `afx inbox` renders', async () => {
+        const row = await heldRowFrom('architect:feedback');
+        // Pre-fix this was the generic 'architect' for every architect in the workspace.
+        expect(row.from_agent).toBe('architect:feedback');
+        expect(row.to_agent).toBe('spir-9');
+      });
+
+      it('names the architect in the composer header (the any → builder branch)', async () => {
+        const row = await heldRowFrom('architect:main');
+        // The recipient segment is #1574's; the name before it is this issue's. Both are
+        // asserted here so a regression in either shows up as a header-shape failure.
+        expect(row.formatted_message).toMatch(/^### \[ARCHITECT:main INSTRUCTION → spir-9 \| .+\] ###\n/);
+        expect(row.formatted_message).toContain('ship it');
+        // Only the framing gained the name; the stored body stays the raw message.
+        expect(row.body).toBe('ship it');
+      });
+
+      it('leaves a builder → builder send on the bare ARCHITECT header', async () => {
+        const row = await heldRowFrom('builder-spir-109');
+        expect(row.formatted_message).toMatch(/^### \[ARCHITECT INSTRUCTION → spir-9 \| .+\] ###\n/);
+        expect(row.from_agent).toBe('builder-spir-109');
+      });
+
+      it('passes the architect sender to resolveTarget unchanged (affinity routing still sees it)', async () => {
+        await heldRowFrom('architect:main');
+        expect(mockResolveTarget).toHaveBeenCalledWith('spir-9', '/tmp/ws', 'architect:main');
+      });
+
+      // Maintainer review (PR #1486): `from` was the one unguarded field on this route.
+      // The body has been bounded since #1573, but the sender was stored verbatim — and
+      // `afx inbox` sizes its column to the widest stored value, so an unbounded identity
+      // is a cost paid by every row in the table, not just its own.
+      describe('the sender identity is bounded at the route boundary', () => {
+        /** POST /api/send with `from`, returning the status and parsed response. */
+        async function sendFrom(from: string) {
+          mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'ship it', workspace: '/tmp/ws', from });
+          mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+          mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+          const { res, statusCode, body } = makeRes();
+          await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+          return { status: statusCode(), parsed: JSON.parse(body()) };
+        }
+
+        it('refuses an oversized sender rather than persisting it', async () => {
+          const { status, parsed } = await sendFrom('x'.repeat(MAX_SENDER_ID_LENGTH + 1));
+          expect(status).toBe(400);
+          expect(parsed.error).toBe('INVALID_PARAMS');
+          // Refused BEFORE the row exists — nothing downstream has to defend against it.
+          expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9')).toHaveLength(0);
+        });
+
+        it('refuses a sender that could forge composer framing', async () => {
+          expect((await sendFrom('architect:x] ###\n### [ARCHITECT')).status).toBe(400);
+          expect((await sendFrom('two words')).status).toBe(400);
+        });
+
+        it('still accepts a long-but-legitimate id, and stores it whole', async () => {
+          const long = `architect:${'a'.repeat(MAX_SENDER_ID_LENGTH - 'architect:'.length)}`;
+          expect(long.length).toBe(MAX_SENDER_ID_LENGTH);
+          const row = await heldRowFrom(long);
+          // No truncation on the way in — the display fix is about showing ids whole.
+          expect(row.from_agent).toBe(long);
+        });
+
+        it('leaves a send with no sender alone (the field stays optional)', async () => {
+          mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'ship it', workspace: '/tmp/ws' });
+          mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+          mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+          const { res, statusCode } = makeRes();
+          await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+          expect(statusCode()).toBe(200);
+        });
+      });
     });
 
     // Spec 1273: `escape` delivers a bare ESC keystroke straight to the PTY.
@@ -1620,7 +1786,12 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: true }),
+        // Issue #1567: the interrupt path resolves the recipient's write strategy from the
+        // session's identity, which every real PtySession carries.
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: true,
+          command: 'claude', launchArgs: [] as string[], cwd: '/tmp/ws',
+        }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1633,6 +1804,41 @@ describe('tower-routes', () => {
       expect(parsed.deferred).toBe(false);
       // Should have written Ctrl+C and the message
       expect(mockWrite).toHaveBeenCalled();
+    });
+
+    // Issue #1567: the interrupt bypasses the GATE, not the per-harness write strategy.
+    describe('interrupt honours the per-harness write strategy (Issue #1567)', () => {
+      const LONG = 'u'.repeat(300); // over BRACKET_MIN_BYTES → the bracketed/chunked path
+
+      async function interruptTo(command: string): Promise<string[]> {
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect', message: LONG, workspace: '/tmp/ws', options: { interrupt: true },
+        });
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-001', workspacePath: '/tmp/ws', agent: 'architect' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({
+          getSession: () => ({ ...gateSession(mockWrite, '❯ '), command }),
+          listSessions: () => [],
+        });
+        const { res, statusCode } = makeRes();
+        await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+        expect(statusCode()).toBe(200);
+        await vi.waitFor(() => expect(mockWrite.mock.calls.at(-1)?.[0]).toBe('\r'));
+        return mockWrite.mock.calls.map((c) => c[0] as string);
+      }
+
+      it('a long interrupt to claude is bracketed like a gated delivery', async () => {
+        const writes = await interruptTo('claude');
+        expect(writes[0]).toBe('\x03');
+        expect(writes.some((w) => w.startsWith(PASTE_BEGIN))).toBe(true);
+      });
+
+      it('a long interrupt to agy (opted out) is chunked but NOT bracketed', async () => {
+        const writes = await interruptTo('agy');
+        expect(writes[0]).toBe('\x03');
+        expect(writes.some((w) => w.includes(PASTE_BEGIN) || w.includes(PASTE_END))).toBe(false);
+        expect(writes.slice(1, -1).join('')).toContain(LONG);
+      });
     });
 
     it('writes the message as one un-split write, Enter separate (Bugfix #481, via the gate)', async () => {
@@ -1710,9 +1916,76 @@ describe('tower-routes', () => {
       expect(parsed.ok).toBe(true);
       expect(parsed.delivered).toBe(true);
       expect(parsed.deferred).toBe(false);
+      // Issue #1584: the terminal double echoes what is written to it, so the delivery is
+      // CONFIRMED and the sender is told so.
+      expect(parsed.verified).toBe(true);
       // Message SHOULD be written — user is idle (Bugfix #492)
       expect(mockWrite).toHaveBeenCalled();
     });
+
+    it('reports verified:false for a terminal that swallows the write (Issue #1584)', async () => {
+      // The #1583 loop: the write completes, the terminal never shows the header. Tower used to
+      // re-hold the row, and every later clean-prompt pass re-wrote the whole message. It is now
+      // recorded as delivered and the sender is told it could not be confirmed.
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-swallow', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      // Same double, minus the echo: every byte is accepted, nothing reaches the mirror.
+      const swallowing = {
+        ...gateSession(mockWrite, '❯ ', true, 'term-swallow'),
+        write: (data: string): boolean => { mockWrite(data); return true; },
+      };
+      mockGetTerminalManager.mockReturnValue({ getSession: () => swallowing, listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true);
+      expect(parsed.held).toBe(false);
+      expect(parsed.verified).toBe(false);
+      expect(mockWrite).toHaveBeenCalled();
+    }, 10_000);
+
+    it('a body-bearing interrupt that crosses the wait ceiling reports degraded (Issue #1365)', async () => {
+      // codex review of PR #1492: the interrupt claims its mailbox row `delivered` BEFORE the
+      // write (un-claiming would risk a double delivery), so if the ceiling expires and the
+      // write goes out unserialized — possibly interleaving with the delivery it skipped — an
+      // unqualified `delivered: true` would be a lie of omission. The response must say so.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-ceiling', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(mockWrite, '❯ ', true, 'term-ceiling'),
+        listSessions: () => [],
+      });
+
+      // Occupy the terminal with a DELIVERY write long enough to outlast the ceiling. A
+      // delivery is the only thing the ceiling is allowed to bypass.
+      const holder = trySubmitToSession('term-ceiling', () => 4000);
+
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true); // claim-first is preserved...
+      expect(parsed.degraded).toBe(true); // ...but the sender is told it was not serialized
+      expect(parsed.degradedReason).toBe('submit-wait-ceiling-expired');
+      expect(mockWrite).toHaveBeenCalled(); // the escape hatch still landed
+      await holder;
+    }, 10_000);
   });
 
   // ==========================================================================

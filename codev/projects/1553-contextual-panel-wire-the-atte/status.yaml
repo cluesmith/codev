@@ -1,0 +1,30 @@
+id: '1553'
+title: contextual-panel-wire-the-atte
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-25T08:23:07.537Z'
+    approved_at: '2026-08-25T21:24:11.059Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-25T21:30:29.039Z'
+    approved_at: '2026-08-25T22:04:18.946Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-25T22:16:45.341Z'
+    approved_at: '2026-08-25T22:22:49.579Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-08-25T08:19:49.110Z'
+updated_at: '2026-08-25T22:22:49.581Z'
+pr_history:
+  - phase: review
+    pr_number: 1557
+    branch: builder/pir-1553
+    created_at: '2026-08-25T22:06:20.160Z'
+pr_ready_for_human: false

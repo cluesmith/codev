@@ -33,6 +33,7 @@ import { validateDeviceName } from '../lib/device-name.js';
 import type { WorkspaceTerminals, InstanceStatus } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { escapeHtml, readBody } from '../utils/server-utils.js';
+import { cloudMutationBlocked } from '../../lib/test-env.js';
 
 /** Minimal dependencies required by the tunnel module */
 export interface TunnelDeps {
@@ -521,6 +522,21 @@ export async function handleTunnelEndpoint(
     if (rejectIfProxied(res, source, 'disconnect')) return;
     // Deregisters server-side and deletes local credentials — always attributable.
     _deps?.log('INFO', `Tunnel disconnect requested (${source.text})`);
+
+    // #1515: defence in depth. A Tower spawned by the test helpers should never
+    // see real cloud credentials (its agent-farm dir is isolated), but if one
+    // ever does again, refuse loudly rather than deregister a human's Tower.
+    if (cloudMutationBlocked()) {
+      const error =
+        'Refusing to disconnect: this Tower is running under a test runner ' +
+        '(#1515). Disconnect deregisters the tower server-side and deletes its ' +
+        'cloud credentials. Set CODEV_ALLOW_TEST_CLOUD_MUTATION=1 if this test ' +
+        'owns a fake cloud config in an isolated CODEV_AGENT_FARM_DIR.';
+      _deps?.log('ERROR', error);
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error }));
+      return;
+    }
 
     let warning: string | undefined;
 

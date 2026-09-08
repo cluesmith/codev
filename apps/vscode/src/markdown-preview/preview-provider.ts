@@ -28,6 +28,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 import {
   serializeReviewMarker,
   markerAppendLine,
@@ -37,15 +38,68 @@ import {
 } from '@cluesmith/codev-sdk/review-markers';
 import { renderMarkdownPreviewHtml } from './preview-template.js';
 import type { HostToWebviewMessage, WebviewToHostMessage } from './messages.js';
+import type { ConnectionManager } from '../connection-manager.js';
+import { registerCanvasView } from './canvas-view-registry.js';
+import { builderIdForWorktreeFile } from './canvas-owner.js';
+import { fireActivity } from '../activity-hooks.js';
 import type { OverviewCache } from '../views/overview-data.js';
 
-export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider {
+/** globalState key for the per-user reading-mode preference (spec 1380 D4 — per-USER scope:
+ * reading mode is about the human's display and habits, not the workspace's content). */
+export const READING_MODE_STATE_KEY = 'codev.markdownPreview.readingMode';
+
+/**
+ * Validate an untrusted persisted/message value against the closed mode vocabulary (spec 1380
+ * D4): only known mode names pass; anything else — corrupt storage, a hostile webview message —
+ * yields `undefined`, and the canvas's own coercion lands on vertical. Exported for unit tests.
+ */
+export function sanitizeReadingMode(value: unknown): 'vertical' | 'horizontal' | undefined {
+  if (value === 'vertical' || value === 'horizontal') { return value; }
+  return undefined;
+}
+
+export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
   public static readonly viewType = 'codev.markdownPreview';
+
+  /**
+   * Live canvas-view registrations, one per open panel (spec 1401).
+   *
+   * Panels normally clean up their own registration on dispose. This set exists for the case
+   * they cannot: on extension deactivate the panels are not individually disposed, so without it
+   * every open view would sit in Tower's registry absorbing commands until its lease lapsed.
+   */
+  private readonly canvasViews = new Set<vscode.Disposable>();
+
+  /** Release every live registration. Called when the extension shuts down. */
+  public dispose(): void {
+    for (const view of this.canvasViews) { view.dispose(); }
+    this.canvasViews.clear();
+  }
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly overviewCache: OverviewCache,
+    // Per-user persistence surface for the reading-mode preference (spec 1380 D4). A `Memento`
+    // rather than the whole ExtensionContext: the provider needs exactly this seam.
+    private readonly globalState: vscode.Memento,
+    /**
+     * Tower connection, used to register this panel as a live canvas view and receive the
+     * commands addressed to it (spec 1401). Optional so the preview still works standalone —
+     * without it the canvas is simply not remotely drivable, exactly as before.
+     */
+    private readonly connectionManager?: ConnectionManager,
   ) {}
+
+  /**
+   * The builder whose worktree contains this canvas artifact, or undefined for a
+   * main-repo artifact (which belongs to no builder). Matched against the Tower
+   * overview by worktree-path prefix — `viewPlanFile`/`viewSpecFile`/`viewReviewFile`
+   * open the artifact inside the builder's worktree, so the owning builder is the
+   * one whose `worktreePath` is a path prefix of the file (#1410).
+   */
+  private builderIdForCanvasFile(file: string): string | undefined {
+    return builderIdForWorktreeFile(this.overviewCache.getData()?.builders ?? [], file, path.sep);
+  }
 
   public resolveCustomTextEditor(
     document: vscode.TextDocument,
@@ -85,6 +139,41 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
     });
     panel.onDidDispose(() => changeSub.dispose());
 
+    // Register this panel as a live canvas view so Tower can address commands to it (spec 1401).
+    // Torn down with the panel, so a closed preview stops being a target immediately rather than
+    // lingering until its lease expires.
+    if (this.connectionManager) {
+      const canvasView = registerCanvasView({
+        connectionManager: this.connectionManager,
+        panel,
+        file: document.uri.fsPath,
+      });
+      this.canvasViews.add(canvasView);
+      panel.onDidDispose(() => {
+        this.canvasViews.delete(canvasView);
+        canvasView.dispose();
+      });
+
+      // Canvas focus back-sync (#1410): when this canvas becomes the active panel,
+      // announce its owning builder via the `builder-active` activity hook — the
+      // symmetric counterpart of the diff editor's `announceActiveBuilderFromEditor`,
+      // so a controller (Stream Deck) following that hook re-targets the builder
+      // whose plan/spec/review you focused. Reuses the same event (no new hook to
+      // configure) and is deduped by `fireActivity`'s `lastFiredKey`.
+      const cm = this.connectionManager;
+      const announceActiveBuilder = (): void => {
+        const builderId = this.builderIdForCanvasFile(document.uri.fsPath);
+        if (builderId) {
+          fireActivity(cm.getWorkspacePath() ?? null, 'builder-active', { builder: builderId });
+        }
+      };
+      if (panel.active) { announceActiveBuilder(); }
+      const activeSub = panel.onDidChangeViewState((e) => {
+        if (e.webviewPanel.active) { announceActiveBuilder(); }
+      });
+      panel.onDidDispose(() => activeSub.dispose());
+    }
+
     panel.webview.onDidReceiveMessage((msg: unknown) => {
       if (!msg || typeof msg !== 'object') { return; }
       // Untrusted input from the webview: cast to the protocol union for the discriminant, but still
@@ -112,6 +201,18 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
         typeof m.expectedBodyPrefix === 'string'
       ) {
         deleteReviewMarker(document, m.markerLine, m.expectedAuthor, m.expectedBodyPrefix, pushUpdate);
+        return;
+      }
+      if (m.type === 'readingModeChange') {
+        // Persist per-user (spec 1380 D4). Sanitized: a garbage value from the webview is
+        // dropped rather than stored, so the next mount can never bootstrap from junk. A failed
+        // update degrades to session-only mode (the toggle itself keeps working in the canvas).
+        const mode = sanitizeReadingMode(m.mode);
+        if (mode !== undefined) {
+          this.globalState.update(READING_MODE_STATE_KEY, mode).then(undefined, () => {
+            // Persistence failure is non-fatal by spec: vertical default next session.
+          });
+        }
         return;
       }
     });
@@ -156,6 +257,9 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
       styleUri: asUri('markdown-preview.css'),
       fontSizePx: cfg.get<number>('fontSize', 0),
       lineHeight: cfg.get<number>('lineHeight', 0),
+      // Bootstrap the persisted mode in the initial HTML (spec 1380 D4): the canvas mounts
+      // before the first host message, so a message cannot initialize it.
+      initialReadingMode: sanitizeReadingMode(this.globalState.get(READING_MODE_STATE_KEY)),
     });
   }
 }

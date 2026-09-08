@@ -1,0 +1,4 @@
+# Stream Deck plugin generated outputs (rebuilt by esbuild / runtime)
+com.cluesmith.codev.sdPlugin/bin/
+com.cluesmith.codev.sdPlugin/logs/
+dist/

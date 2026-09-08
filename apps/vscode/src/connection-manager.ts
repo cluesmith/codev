@@ -237,6 +237,7 @@ export class ConnectionManager {
           this.scheduleReconnect();
         }
       },
+      () => this.auth.getKeySync(),
     );
     this.sse.onEvent((type, data) => {
       this.sseEventEmitter.fire({ type, data });

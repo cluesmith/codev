@@ -1,0 +1,233 @@
+/*
+ * Contextual panel webview styles. Theme-aware by construction: every colour is a `--vscode-*`
+ * token, so the panel tracks the reviewer's VS Code theme. Bundled by esbuild to
+ * dist/webview/contextual-panel.css. The panel is purely contextual — a one-line label + a body.
+ */
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-panel-background, var(--vscode-editor-background));
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* One-line context label (which builder / file the panel is showing) */
+.cp-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, transparent);
+}
+
+.cp-context {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.cp-context .cp-builder,
+.cp-context .cp-file {
+  color: var(--vscode-textLink-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* Body region. Placeholder for modes owned by other features; the Attention roll-up (#1553) below. */
+.cp-body {
+  flex: 1;
+  padding: 12px;
+  overflow: auto;
+}
+
+.cp-body-empty {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+/* ---- Attention roll-up (#1553): sections of builder rows fed from the overview cache ---- */
+
+/* The body pads itself for placeholders; the roll-up manages its own section padding, so shed it. */
+.cp-body:has(.cp-section),
+.cp-body:has(.cp-empty) {
+  padding: 4px 0;
+}
+
+.cp-section {
+  padding: 8px 12px 4px;
+}
+
+.cp-section + .cp-section {
+  border-top: 1px solid var(--vscode-panel-border, transparent);
+}
+
+.cp-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.cp-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+.cp-count-pill {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  /* The badge foreground/background pair is contrast-guaranteed by the theme; pairing the count
+     with descriptionForeground left it grey-on-blue and barely legible in light themes. */
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+  border-radius: 999px;
+  padding: 0 6px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.cp-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cp-row {
+  display: grid;
+  grid-template-columns: 2px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.cp-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.cp-stripe {
+  align-self: stretch;
+  border-radius: 1px;
+  background: var(--vscode-descriptionForeground);
+}
+
+.cp-row-gate .cp-stripe {
+  /* The sidebar's Builders tree colors a blocked/at-gate builder with notificationsWarningIcon —
+     the amber bell. Use the SAME token here so the panel's "pending gate" amber matches the sidebar
+     the reviewer sees one pane over, rather than a near-but-different warning yellow. */
+  background: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-charts-yellow));
+}
+
+.cp-row-mail .cp-stripe {
+  background: var(--vscode-editorError-foreground, var(--vscode-charts-red));
+}
+
+.cp-row-waiting .cp-stripe {
+  /* The sidebar colors an idle-waiting builder with notificationsInfoIcon — match it here. */
+  background: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue));
+}
+
+.cp-row-queued .cp-stripe {
+  background: var(--vscode-textLink-foreground);
+}
+
+.cp-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cp-row-id {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  color: var(--vscode-textLink-foreground);
+}
+
+.cp-row-sub {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cp-row-sub .cp-issue {
+  opacity: 0.75;
+}
+
+.cp-row-note {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  padding: 4px 6px;
+}
+
+/* Row badges are text-only labels, not filled chips. The row's left stripe already carries the
+   semantic color, and a filled pale-warning/error background pairs poorly with its own amber/red
+   foreground (washed-out on cream) and with the grey row-hover background. Colored text on the panel
+   (or hover) background keeps contrast in both themes and matches the sidebar's label style. */
+.cp-badge {
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+}
+
+.cp-badge-gate {
+  color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-charts-yellow));
+}
+
+.cp-badge-mail {
+  color: var(--vscode-notificationsErrorIcon-foreground, var(--vscode-charts-red));
+}
+
+.cp-badge-waiting {
+  color: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue));
+}
+
+.cp-badge-queued {
+  color: var(--vscode-textLink-foreground);
+}
+
+.cp-badge-since {
+  color: var(--vscode-descriptionForeground);
+}
+
+.cp-count-num {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Honest empty state — shown when nothing needs attention (and while the cache is still loading) */
+.cp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 120px;
+  padding: 16px;
+  text-align: center;
+}
+
+.cp-empty-msg {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+}
+
+.cp-empty-sub {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}

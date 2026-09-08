@@ -11,16 +11,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import {
-  fetchPRList,
-  fetchIssueList,
-  fetchRecentlyClosed,
-  fetchRecentMergedPRs,
-  fetchCurrentUser,
+  fetchForOverview,
+  overviewBackend,
   parseLinkedIssue,
   parseLabelDefaults,
   parseArea,
 } from '../../lib/github.js';
-import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
+import type { ForgePR, ForgeIssueListItem, OverviewConcept } from '../../lib/github.js';
+import { ForgeRateLimiter, budgetKeyFor, type RateLimitProbe } from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
 import type {
@@ -728,6 +726,67 @@ function scanArtifactDir(dirPath: string): Map<string, string> {
 }
 
 /**
+ * Count a builder's pending review-comments by reading its queue file
+ * (`<worktree>/.codev/pending-comments.json`, the single source of truth the
+ * VSCode ReviewQueueStore owns, #1037). This is a READ of that file, never a
+ * write — the same pattern `discoverBuilders` uses to read worktree state.
+ * Tolerant: a missing / unreadable / corrupt file, or a non-array `comments`,
+ * reads as 0. Returns the count only, never bodies (#1410).
+ */
+export function countQueuedFeedback(worktreePath: string): number {
+  try {
+    const raw = fs.readFileSync(path.join(worktreePath, '.codev', 'pending-comments.json'), 'utf8');
+    const data = JSON.parse(raw) as { comments?: unknown };
+    return Array.isArray(data.comments) ? data.comments.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The workspace's review-feedback delivery mode, read from the VSCode
+ * `codev.diffCodelensMode` workspace setting in `<root>/.vscode/settings.json`
+ * (`comment` → `'queue'`; anything else, or unreadable, → `'forward'`, matching
+ * VSCode's own default). Single-folder workspaces only — a multi-root
+ * `.code-workspace` or a user-level override isn't at this path and reads as the
+ * default. Tolerant of the JSONC (comments / trailing commas) VSCode may leave
+ * in the file: strict parse first, then a comment-stripped retry (#1410).
+ */
+export function readFeedbackMode(workspaceRoot: string): 'forward' | 'queue' {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(workspaceRoot, '.vscode', 'settings.json'), 'utf8');
+  } catch {
+    return 'forward'; // no settings file — the setting is at its default
+  }
+  const value = readSettingValue(raw, 'codev.diffCodelensMode');
+  return value === 'comment' ? 'queue' : 'forward';
+}
+
+/** Parse a settings.json string (strict, then JSONC-tolerant) and return one
+ *  key's value, or `undefined` when the file can't be parsed or lacks the key. */
+function readSettingValue(raw: string, key: string): unknown {
+  for (const candidate of [raw, stripJsonComments(raw)]) {
+    try {
+      const data = JSON.parse(candidate) as Record<string, unknown>;
+      return data[key];
+    } catch {
+      // try the next candidate
+    }
+  }
+  return undefined;
+}
+
+/** Minimal JSONC → JSON: drop block/line comments and trailing commas. Good
+ *  enough for a best-effort settings read (not a general JSONC parser). */
+function stripJsonComments(raw: string): string {
+  return raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')      // block comments
+    .replace(/(^|[^:"])\/\/.*$/gm, '$1')   // line comments (leave `://` in URLs)
+    .replace(/,(\s*[}\]])/g, '$1');        // trailing commas
+}
+
+/**
  * Derive backlog from open GitHub issues cross-referenced with specs and builders.
  */
 export function deriveBacklog(
@@ -775,20 +834,60 @@ export function deriveBacklog(
 // OverviewCache
 // =============================================================================
 
+/** One cached concept result per workspace. `data: null` is a cached failure (#1645). */
+interface CacheEntry<T> { data: T | null; fetchedAt: number; expiresAt: number }
+
+interface FetchOutcome<T> {
+  data: T | null;
+  /** Set when the concept's budget was suspended at read time (data, if any, is stale). */
+  rateLimitedUntil: number | null;
+  backend: string | null;
+}
+
+export interface OverviewCacheOptions {
+  /** Clock, injectable for tests. */
+  now?: () => number;
+  /** Reset probe run once per fresh suspension (Tower passes the gh probe). */
+  probe?: RateLimitProbe;
+}
+
+/** Open lists: what porch/VS Code invalidation refreshes. */
+const LIST_TTL_MS = 180_000;
+/** The two 24 h searches: invalidation never touches these. */
+const SEARCH_TTL_MS = 600_000;
+/** GitHub identity is session-stable. */
+const USER_TTL_MS = 3_600_000;
+/** A list refetches at most once per minute per workspace because of invalidation. */
+const INVALIDATE_DEBOUNCE_MS = 60_000;
+/** Failure window: 60 s, doubling per window (not per failed command) to 15 min. */
+const FAILURE_WINDOW_MIN_MS = 60_000;
+const FAILURE_WINDOW_MAX_MS = 15 * 60_000;
+
 export class OverviewCache {
-  private prCache = new Map<string, { data: ForgePR[]; fetchedAt: number }>();
-  private issueCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
-  private closedCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
-  private mergedPRCache = new Map<string, { data: ForgePR[]; fetchedAt: number }>();
-  private currentUserCache = new Map<string, { data: string; fetchedAt: number }>();
+  private prCache = new Map<string, CacheEntry<ForgePR[]>>();
+  private issueCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
+  private closedCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
+  private mergedPRCache = new Map<string, CacheEntry<ForgePR[]>>();
+  private currentUserCache = new Map<string, CacheEntry<string>>();
+  /** Single-flight per `<workspace>:<concept>` (#1645). */
+  private inflight = new Map<string, Promise<FetchOutcome<unknown>>>();
+  /** Escalating failure window per `<workspace>:<budget>`. */
+  private failureWindows = new Map<string, { level: number; startedAt: number; ttl: number }>();
+  /** Epoch of the last invalidate(); open-list entries fetched before it are stale once debounced. */
+  private invalidatedAt = 0;
+  private readonly limiter: ForgeRateLimiter;
+  private readonly now: () => number;
+
+  constructor(options: OverviewCacheOptions = {}) {
+    this.now = options.now ?? (() => Date.now());
+    this.limiter = new ForgeRateLimiter(options.probe);
+  }
   // Cache of issue-derived builder fields (today: `area`) keyed by worktreePath,
   // so they survive refreshes where the source issue is unreachable rather than
   // snapping back to their default while the builder is still listed (PIR #907).
   // Intentionally NOT cleared by invalidate(): surviving cache invalidation is
   // the whole point. See ResolvedEnrichmentCache.
   private resolvedEnrichment = new ResolvedEnrichmentCache();
-  private readonly TTL = 30_000;
-  private readonly USER_TTL = 3_600_000; // 1h — GitHub identity is session-stable
 
   /**
    * Build the overview response. Aggregates builder state, PRs, and backlog.
@@ -863,18 +962,30 @@ export class OverviewCache {
 
     // 2. Fetch PRs, issues, recently closed, merged PRs, and current user in
     //    parallel (each is independently cached)
-    const [prs, issues, closed, mergedPRs, currentUser] = await Promise.all([
-      this.fetchPRsCached(workspaceRoot),
-      this.fetchIssuesCached(workspaceRoot),
-      this.fetchRecentlyClosedCached(workspaceRoot),
-      this.fetchMergedPRsCached(workspaceRoot),
-      this.fetchCurrentUserCached(workspaceRoot),
+    const [prsOutcome, issuesOutcome, closedOutcome, mergedOutcome, userOutcome] = await Promise.all([
+      this.cachedFetch<ForgePR[]>(this.prCache, workspaceRoot, 'pr-list', LIST_TTL_MS, true),
+      this.cachedFetch<ForgeIssueListItem[]>(this.issueCache, workspaceRoot, 'issue-list', LIST_TTL_MS, true),
+      this.cachedFetch<ForgeIssueListItem[]>(this.closedCache, workspaceRoot, 'recently-closed', SEARCH_TTL_MS, false),
+      this.cachedFetch<ForgePR[]>(this.mergedPRCache, workspaceRoot, 'recently-merged', SEARCH_TTL_MS, false),
+      this.cachedFetch<string>(this.currentUserCache, workspaceRoot, 'user-identity', USER_TTL_MS, false),
     ]);
+    const prs = prsOutcome.data;
+    const issues = issuesOutcome.data;
+    const closed = closedOutcome.data;
+    const mergedPRs = mergedOutcome.data;
+    const currentUser = userOutcome.data;
+    // Every forge-backed section counts, the two searches included (#1645).
+    const sections = [prsOutcome, issuesOutcome, closedOutcome, mergedOutcome];
+    const rateLimited = sections.find(o => o.rateLimitedUntil !== null);
+    const forgeStatus: OverviewData['forgeStatus'] = rateLimited
+      ? 'rate-limited'
+      : sections.some(o => o.data === null) ? 'unavailable' : 'ok';
+    const forgeResetAt = rateLimited ? new Date(rateLimited.rateLimitedUntil as number).toISOString() : undefined;
 
     // 3. Process PRs
     let pendingPRs: OverviewPR[] = [];
     if (prs === null) {
-      errors.prs = 'GitHub CLI unavailable — could not fetch PRs';
+      errors.prs = describeMissing(prsOutcome, 'PRs');
     } else {
       pendingPRs = prs.map(pr => ({
         id: String(pr.number),
@@ -903,7 +1014,7 @@ export class OverviewCache {
       ? new Map(issues.map(i => [String(i.number), parseArea(i.labels)]))
       : null;
     if (issues === null) {
-      errors.issues = 'GitHub CLI unavailable — could not fetch issues';
+      errors.issues = describeMissing(issuesOutcome, 'issues');
     } else {
       backlog = deriveBacklog(issues, workspaceRoot, activeBuilderIssues, prLinkedIssues);
 
@@ -975,13 +1086,36 @@ export class OverviewCache {
         if (reviewFile) item.reviewPath = `codev/reviews/${reviewFile}`;
         return item;
       });
+
+      // Forge search APIs return relevance ("best match") order, not closure
+      // order, so sort most-recently-closed first here: one fix for every
+      // forge, since `closedAt` is present on every item (issue #1191). Parse to
+      // epoch millis rather than compare strings: provider scripts aren't
+      // guaranteed to emit a normalized ISO form, matching the 24h-window filter.
+      recentlyClosed.sort(
+        (a, b) => new Date(b.closedAt).getTime() - new Date(a.closedAt).getTime(),
+      );
     }
+
+    // Per-builder queued-feedback counts (#1410): read each builder's pending
+    // review-comment queue file. Only non-zero entries are carried, so the map
+    // stays `{}` when nothing is queued anywhere; a builder absent from it reads
+    // as 0 on every consumer.
+    const queuedFeedback: Record<string, number> = {};
+    for (const b of builders) {
+      const count = countQueuedFeedback(b.worktreePath);
+      if (count > 0) queuedFeedback[b.id] = count;
+    }
+    const feedbackMode = readFeedbackMode(workspaceRoot);
 
     // `architects` defaults to `[]` here — the filesystem/git-derived overview
     // has no view of the live terminal sessions. `handleOverview` (tower-routes.ts)
     // injects the real architect list via `liveArchitects` before serialization,
     // mirroring how it enriches `lastDataAt`.
-    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated };
+    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, queuedFeedback, feedbackMode, forgeStatus };
+    if (forgeResetAt) {
+      result.forgeResetAt = forgeResetAt;
+    }
     if (currentUser) {
       result.currentUser = currentUser;
     }
@@ -992,14 +1126,14 @@ export class OverviewCache {
   }
 
   /**
-   * Invalidate all cached data.
+   * Mark the open lists (PRs, issues) stale. Porch, cleanup and the VS Code
+   * review queue call this after every mutation, so it is not a human signal
+   * (#1645): it never clears a suspension or a cached failure, never touches
+   * the search or identity caches, and a list is refetched for it at most once
+   * per `INVALIDATE_DEBOUNCE_MS` per workspace.
    */
   invalidate(): void {
-    this.prCache.clear();
-    this.issueCache.clear();
-    this.closedCache.clear();
-    this.mergedPRCache.clear();
-    this.currentUserCache.clear();
+    this.invalidatedAt = this.now();
     // Note: resolvedEnrichment is deliberately NOT cleared here. It must survive
     // invalidation so a cleanup-triggered refresh (which calls invalidate()) can
     // still fall back to a builder's resolved area instead of UNCATEGORIZED
@@ -1007,82 +1141,101 @@ export class OverviewCache {
   }
 
   // ===========================================================================
-  // Private cache helpers
+  // Private cache helpers (#1645)
   // ===========================================================================
 
-  private async fetchPRsCached(cwd: string): Promise<ForgePR[] | null> {
-    const now = Date.now();
-    const cached = this.prCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
-    }
-
-    const data = await fetchPRList(cwd);
-    if (data !== null) {
-      this.prCache.set(cwd, { data, fetchedAt: now });
-    }
-    return data;
-  }
-
-  private async fetchIssuesCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
-    const now = Date.now();
-    const cached = this.issueCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
-    }
-
-    const data = await fetchIssueList(cwd);
-    if (data !== null) {
-      this.issueCache.set(cwd, { data, fetchedAt: now });
-    }
-    return data;
-  }
-
   /**
-   * Resolve the current user's forge login via the `user-identity` concept.
-   * Long TTL — identity is stable for the lifetime of a Tower session.
-   * Only successful resolutions are cached, so a transient failure (gh
-   * logged out, offline) self-heals on the next overview poll.
+   * Serve `concept` for `cwd` from cache, or dispatch exactly one fetch.
+   * `listCache` entries additionally honour invalidate() (debounced).
    */
-  private async fetchCurrentUserCached(cwd: string): Promise<string | null> {
-    const now = Date.now();
-    const cached = this.currentUserCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.USER_TTL) {
-      return cached.data;
+  private cachedFetch<T>(
+    cache: Map<string, CacheEntry<T>>,
+    cwd: string,
+    concept: OverviewConcept,
+    ttl: number,
+    listCache: boolean,
+  ): Promise<FetchOutcome<T>> {
+    const now = this.now();
+    const backend = overviewBackend(concept, cwd);
+    const budget = backend === null ? null : budgetKeyFor(backend, concept);
+    const entry = cache.get(cwd);
+    const withinTtl = entry !== undefined && now < entry.expiresAt;
+    // Only a *positive* entry goes stale on invalidation: a refresh means "my
+    // data may be stale", never "the forge has recovered".
+    const invalidated = listCache && entry !== undefined && entry.data !== null
+      && entry.fetchedAt < this.invalidatedAt && now - entry.fetchedAt >= INVALIDATE_DEBOUNCE_MS;
+    const rateLimitedUntil = budget === null ? null : this.limiter.resetAt(budget, now);
+
+    if (withinTtl && !invalidated) {
+      return Promise.resolve({ data: entry.data, rateLimitedUntil, backend });
+    }
+    if (rateLimitedUntil !== null) {
+      // Suspended: a list still inside its TTL is served stale; an expired one is empty.
+      return Promise.resolve({ data: withinTtl ? entry.data : null, rateLimitedUntil, backend });
+    }
+    if (backend === null || budget === null) {
+      return Promise.resolve({ data: null, rateLimitedUntil: null, backend: null });
     }
 
-    const login = await fetchCurrentUser(cwd);
-    if (login !== null) {
-      this.currentUserCache.set(cwd, { data: login, fetchedAt: now });
-    }
-    return login;
+    const key = `${cwd}:${concept}`;
+    const existing = this.inflight.get(key);
+    if (existing) return existing as Promise<FetchOutcome<T>>;
+    const flight = this.dispatch(cache, cwd, concept, ttl, backend, budget).finally(() => {
+      // Identity check: a settling flight must never unregister a newer one.
+      if (this.inflight.get(key) === flight) this.inflight.delete(key);
+    });
+    this.inflight.set(key, flight as Promise<FetchOutcome<unknown>>);
+    return flight;
   }
 
-  private async fetchRecentlyClosedCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
-    const now = Date.now();
-    const cached = this.closedCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
+  /** Run the concept once and record the outcome. Never rejects. */
+  private async dispatch<T>(
+    cache: Map<string, CacheEntry<T>>,
+    cwd: string,
+    concept: OverviewConcept,
+    ttl: number,
+    backend: string,
+    budget: string,
+  ): Promise<FetchOutcome<T>> {
+    const dispatchedAt = this.now();
+    let data: T | null = null;
+    let errorText: string | null = null;
+    try {
+      const result = await fetchForOverview(concept, cwd);
+      data = result.data as T | null;
+      if (result.error) errorText = `${result.error.stderr}\n${result.error.message}`;
+      else if (data === null) errorText = '';
+    } catch (err) {
+      errorText = err instanceof Error ? err.message : String(err);
     }
-
-    const data = await fetchRecentlyClosed(cwd);
-    if (data !== null) {
-      this.closedCache.set(cwd, { data, fetchedAt: now });
+    const now = this.now();
+    if (errorText !== null) {
+      const suspended = this.limiter.noteFailure(budget, backend, cwd, errorText, now);
+      cache.set(cwd, { data: null, fetchedAt: dispatchedAt, expiresAt: now + this.failureWindow(`${cwd}:${budget}`, now) });
+      return { data: null, rateLimitedUntil: suspended ? this.limiter.resetAt(budget, now) : null, backend };
     }
-    return data;
+    this.limiter.noteSuccess(budget, dispatchedAt);
+    this.failureWindows.delete(`${cwd}:${budget}`);
+    cache.set(cwd, { data, fetchedAt: dispatchedAt, expiresAt: now + ttl });
+    return { data, rateLimitedUntil: null, backend };
   }
 
-  private async fetchMergedPRsCached(cwd: string): Promise<ForgePR[] | null> {
-    const now = Date.now();
-    const cached = this.mergedPRCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
-    }
-
-    const data = await fetchRecentMergedPRs(cwd);
-    if (data !== null) {
-      this.mergedPRCache.set(cwd, { data, fetchedAt: now });
-    }
-    return data;
+  /** Current failure window for a key; escalates once per elapsed window, not per failure. */
+  private failureWindow(key: string, now: number): number {
+    const w = this.failureWindows.get(key);
+    if (w && now < w.startedAt + w.ttl) return w.ttl;
+    const level = w ? w.level + 1 : 0;
+    const ttl = Math.min(FAILURE_WINDOW_MIN_MS * 2 ** level, FAILURE_WINDOW_MAX_MS);
+    this.failureWindows.set(key, { level, startedAt: now, ttl });
+    return ttl;
   }
+}
+
+/** Degraded-mode text naming the real reason and the real backend (never "GitHub" on GitLab). */
+function describeMissing(outcome: FetchOutcome<unknown>, what: string): string {
+  if (outcome.rateLimitedUntil !== null) {
+    return `${outcome.backend} rate limited until ${new Date(outcome.rateLimitedUntil).toISOString()} — ${what} unavailable`;
+  }
+  if (outcome.backend === null) return `forge concept disabled — ${what} unavailable`;
+  return `${outcome.backend} CLI unavailable — could not fetch ${what}`;
 }

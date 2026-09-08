@@ -12,7 +12,7 @@
  * Run: npx playwright test team-tab
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './tower-auth.js';
 import { resolve } from 'node:path';
 
 const TOWER_URL = `http://localhost:${process.env.TOWER_TEST_PORT || '4100'}`;

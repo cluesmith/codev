@@ -1,5 +1,5 @@
 {
-  "$schema": "../../protocol-schema.json",
+  "$schema": "../protocol-schema.json",
   "name": "experiment",
   "version": "1.0.0",
   "description": "Disciplined experimentation with hypothesis testing",

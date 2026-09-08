@@ -19,8 +19,20 @@ import { resolve } from 'node:path';
 
 const LOCAL_KEY_PATH = resolve(homedir(), '.agent-farm', 'local-key');
 
-/** Read the local auth key, or null if Tower has never created it. */
+/**
+ * Read the local auth key, or null if Tower has never created it.
+ *
+ * Honors the `CODEV_TOWER_KEY` environment override: when set, it IS the key this
+ * client presents, so a Node consumer (VS Code host, Stream Deck plugin) can reach
+ * a Tower whose `local-key` file it does not share — a Tower inside a container or
+ * on a non-loopback `BRIDGE_MODE` bind. Set the same value Tower uses. Unset for
+ * same-host loopback, where the file is the source of truth. (The env name is
+ * duplicated here rather than imported: the sdk cannot import `@cluesmith/codev-core`
+ * or `@cluesmith/codev-types` at runtime — server/client isolation, issue #1189.)
+ */
 export function readLocalKey(): string | null {
+  const override = process.env.CODEV_TOWER_KEY?.trim();
+  if (override) return override;
   try {
     return readFileSync(LOCAL_KEY_PATH, 'utf-8').trim() || null;
   } catch {

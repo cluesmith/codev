@@ -894,6 +894,13 @@ body {
 /* Spec 1313 Phase 8: held-mail count indicator in the dashboard header. Count-only,
    read-only; enters an attention state (amber pulse, reusing @keyframes cloud-pulse)
    when a held row has crossed the escalation age. */
+/* Issue 1450: the badge is a disclosure button anchoring a popover. `.header-controls` is a
+   plain flex row with no positioning context, so the wrapper provides one. */
+.held-badge-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
 .held-badge {
   display: inline-flex;
   align-items: center;
@@ -901,11 +908,129 @@ body {
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
+  /* Button reset — this was a <span> until Issue 1450. */
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+  /* The affordance: dotted underline reads as "expands to reveal", not as a link. */
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.held-badge:hover {
+  color: var(--text-primary);
+  text-decoration: underline solid;
+}
+
+.held-badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 
 .held-badge--attention {
   color: var(--status-waiting);
   font-weight: 600;
+}
+
+/* The popover sits at the 1000 tier (with the modal backdrop): xterm's WebGL/canvas panes
+   paint over anything at the lower 20/100 tiers. */
+.held-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1000;
+  min-width: 280px;
+  max-width: 380px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+}
+
+.held-popover-note {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.held-popover-note--error {
+  color: var(--status-error);
+}
+
+.held-group + .held-group {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.held-group-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.held-group-note {
+  margin: -2px 0 6px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.held-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.held-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0;
+}
+
+.held-row + .held-row {
+  border-top: 1px solid var(--border-color);
+}
+
+.held-row-addresses {
+  color: var(--text-primary);
+  font-family: ui-monospace, monospace;
+  word-break: break-word;
+}
+
+.held-row-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.held-row--attention .held-row-meta {
+  color: var(--status-waiting);
+  font-weight: 600;
+}
+
+.held-popover-foot {
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.held-popover-foot code {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
 }
 
 .held-dot {

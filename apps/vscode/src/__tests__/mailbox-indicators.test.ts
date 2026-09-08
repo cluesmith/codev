@@ -20,6 +20,7 @@ function makePayload(overrides: Partial<{
   mailboxId: string;
   ageMs: number;
   reason: string | null;
+  detail: string | null;
 }> = {}) {
   return {
     workspacePath: '/ws',
@@ -27,6 +28,7 @@ function makePayload(overrides: Partial<{
     mailboxId: 'mb1',
     ageMs: 65_000,
     reason: 'busy' as string | null,
+    detail: null as string | null,
     ...overrides,
   };
 }
@@ -149,6 +151,44 @@ describe('escalationToastText', () => {
   it('rounds sub-second/odd ages and never goes negative', () => {
     expect(escalationToastText(makePayload({ ageMs: 60_500 }))).toContain('61s');
     expect(escalationToastText(makePayload({ ageMs: -10 }))).toContain('0s');
+  });
+
+  // ------------------------------------------------------------------ Issue #1482
+  // The detail was already on the wire in MailboxEscalationPayload and simply went
+  // unrendered, so this toast — often the only surface a VS Code operator sees — could not
+  // distinguish a hold that clears itself from one that never will.
+
+  it.each([
+    ['user-text', 'busy:user-text'],
+    ['no-region-end', 'busy:no-region-end'],
+    ['no-composer-marker', 'busy:no-composer-marker'],
+  ])('renders the gate detail %s as a reason:detail sub-code', (detail, expected) => {
+    const text = escalationToastText(makePayload({ reason: 'busy', detail }));
+    expect(text).toContain(`(${expected})`);
+  });
+
+  it('renders the bare reason when there is no detail', () => {
+    const text = escalationToastText(makePayload({ reason: 'no-live-pty', detail: null }));
+    expect(text).toContain('(no-live-pty)');
+    expect(text).not.toContain('no-live-pty:');
+  });
+
+  it('still shows a detail that arrives without a reason', () => {
+    // Defensive: the producer should not emit this, but dropping the one diagnostic the
+    // operator needs would be the wrong failure.
+    expect(escalationToastText(makePayload({ reason: null, detail: 'user-text' }))).toContain('(held:user-text)');
+  });
+
+  it('omits the parens entirely when both reason and detail are absent', () => {
+    expect(escalationToastText(makePayload({ reason: null, detail: null }))).not.toContain('(');
+  });
+
+  it('matches what the CLI renders for the same row — one formatter, not two', () => {
+    // Guards the reason this imports from the sdk rather than re-implementing: if the toast
+    // ever forks its own formatting, `afx inbox` and this toast start describing the same
+    // held row differently.
+    const text = escalationToastText(makePayload({ toAgent: 'b', ageMs: 60_000, reason: 'busy', detail: 'no-region-end' }));
+    expect(text).toBe('Codev: a message to b has been held 60s (busy:no-region-end) — past the escalation age. Review with: afx inbox');
   });
 
   it('carries no message body (redaction — payload has none to leak)', () => {

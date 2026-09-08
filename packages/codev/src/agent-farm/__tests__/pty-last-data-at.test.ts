@@ -100,7 +100,7 @@ describe('PtySession.lastDataAt (Spec 467)', () => {
  * Spec 1273: the tracking above has existed since Spec 467, but only as an
  * in-process getter — it never reached `info`, which is what
  * `GET /api/terminals/:id` serialises. Without it on the wire, a client cannot
- * measure output quiescence and `afx reset` would have to *assume* a builder's
+ * measure output quiescence and `afx refresh` would have to *assume* a builder's
  * turn had ended before typing `/clear` into its terminal. Invariant R4 requires
  * measuring instead of assuming, so these tests pin the field's presence on the
  * serialised shape, not merely on the class.
@@ -161,7 +161,7 @@ describe('PtySession.info.lastDataAt (Spec 1273 — quiescence on the wire)', ()
 /**
  * PtySessionInfo.writable (Spec 1273)
  *
- * `afx reset` preflights on this field so it refuses a terminal it cannot write
+ * `afx refresh` preflights on this field so it refuses a terminal it cannot write
  * to before touching anything. That only works if `writable` is actually
  * SERIALISED — the getter existed since #1198 but never reached `info`, so no
  * client could see it.

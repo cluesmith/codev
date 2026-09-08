@@ -231,7 +231,7 @@ done
 });
 
 describe('PIR #1233 — downstream consumers of the generated script', () => {
-  it('afx reset still identifies the claude harness from the session-aware script', () => {
+  it('afx refresh still identifies the claude harness from the session-aware script', () => {
     const loop = buildLoop('claude');
     const script = `#!/bin/bash\ncd '${dir}'\n${loop}`;
     const fs = {

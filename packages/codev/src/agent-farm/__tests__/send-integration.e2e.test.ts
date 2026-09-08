@@ -18,6 +18,13 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import net from 'node:net';
 import WebSocket from 'ws';
+import {
+  towerWsProtocols,
+  createIsolatedAgentFarmDir,
+  removeIsolatedAgentFarmDir,
+} from './helpers/tower-test-utils.js';
+
+const isolatedAgentFarmDirs: string[] = [];
 
 // Use a unique port to avoid conflicts with other e2e test suites
 // Port 14500 is used by cli-tower-mode.e2e.test.ts — use 14600 here
@@ -55,11 +62,22 @@ async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
   return false;
 }
 
+function newIsolatedAgentFarmDir(): string {
+  const dir = createIsolatedAgentFarmDir();
+  isolatedAgentFarmDirs.push(dir);
+  return dir;
+}
+
 async function startTower(port: number): Promise<ChildProcess> {
   const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      AF_TEST_DB: `test-${port}.db`,
+      CODEV_AGENT_FARM_DIR: newIsolatedAgentFarmDir(),
+    },
   });
 
   let stderr = '';
@@ -244,7 +262,7 @@ function connectMessageBus(
     ? `ws://localhost:${port}/ws/messages?project=${encodeURIComponent(projectFilter)}`
     : `ws://localhost:${port}/ws/messages`;
 
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(url, towerWsProtocols());
   const messageQueue: any[] = [];
   let waitingResolve: ((msg: any) => void) | null = null;
 
@@ -329,11 +347,10 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
 
     await stopServer(towerProcess);
     towerProcess = null;
-    // Clean up test database
-    const dbBase = resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}`);
-    try { rmSync(`${dbBase}.db`, { force: true }); } catch { /* ignore */ }
-    try { rmSync(`${dbBase}.db-wal`, { force: true }); } catch { /* ignore */ }
-    try { rmSync(`${dbBase}.db-shm`, { force: true }); } catch { /* ignore */ }
+    // #1515: the test DB now lives inside the isolated agent-farm dir, so
+    // removing the dir removes it. These dirs also hold a copy of the shared
+    // local key, so they must not be left behind.
+    for (const dir of isolatedAgentFarmDirs.splice(0)) removeIsolatedAgentFarmDir(dir);
     // 120s to match beforeAll — the old explicit 10s override was tighter than
     // the two deactivate calls + stopServer's SIGTERM wait can guarantee on a
     // loaded CI runner, and a slow teardown failed the whole green suite.

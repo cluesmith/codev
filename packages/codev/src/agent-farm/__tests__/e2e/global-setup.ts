@@ -16,6 +16,7 @@
 
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { towerAuthHeaders } from './tower-key.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -25,6 +26,13 @@ const WORKSPACE_PATH = resolve(__dirname, '../../../../../../');
 const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');
 const STATE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`;
 
+// `/api/launch` and `/workspace/<enc>/api/state` are non-public routes, so Tower
+// (advisory GHSA-xvjp-7748-v88v) rejects a keyless request with 401 — which left
+// the workspace un-activated and cascaded into `element(s) not found` failures
+// across the whole Playwright suite (issue #1519). These calls run outside
+// Playwright's request contexts, so they present the key via `towerAuthHeaders()`
+// directly.
+
 /**
  * Tower returns this exact error string while its async `_deps` initialization
  * is still in progress (see `launchInstance` in tower-instances.ts). The HTTP
@@ -32,6 +40,9 @@ const STATE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`;
  * launch failure — the client should retry until Tower is ready.
  */
 const TOWER_STARTING_MARKER = 'Tower is still starting up';
+
+/** How long globalSetup waits for the architect terminal before giving up. */
+const ARCHITECT_READY_TIMEOUT_MS = 30_000;
 
 export interface LaunchResult {
   ok: boolean;
@@ -68,7 +79,7 @@ export async function launchWorkspaceWithRetry(
     const res = await fetchFn(url, {
       method: 'POST',
       body: JSON.stringify({ workspacePath }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...towerAuthHeaders() },
     });
     const body = await res.text();
 
@@ -83,6 +94,45 @@ export async function launchWorkspaceWithRetry(
     }
     await new Promise((r) => setTimeout(r, interval));
   }
+}
+
+/**
+ * Poll GET /api/state (keyed, like every non-public route) until the architect
+ * terminal is present, or the budget is exhausted. Returns true once
+ * `architect.terminalId` appears. A keyless poll would 401 forever — the very
+ * failure this bugfix (#1519) closes — so the key is presented on every request.
+ *
+ * Exported (with an injectable `fetchFn`) for unit testing — see
+ * bugfix-1519-e2e-auth.test.ts.
+ */
+export async function waitForArchitectReady(
+  stateUrl: string,
+  options: {
+    timeout?: number;
+    interval?: number;
+    fetchFn?: typeof fetch;
+  } = {},
+): Promise<boolean> {
+  const timeout = options.timeout ?? ARCHITECT_READY_TIMEOUT_MS;
+  const interval = options.interval ?? 500;
+  const fetchFn = options.fetchFn ?? fetch;
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    try {
+      const stateRes = await fetchFn(stateUrl, { headers: towerAuthHeaders() });
+      if (stateRes.ok) {
+        const state = await stateRes.json();
+        if ((state as { architect?: { terminalId?: string } }).architect?.terminalId) {
+          return true;
+        }
+      }
+    } catch {
+      // Server may not be fully ready yet
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  return false;
 }
 
 export default async function globalSetup() {
@@ -102,30 +152,18 @@ export default async function globalSetup() {
   }
 
   // Step 2: Poll for architect terminal readiness
-  const timeout = 30_000;
-  const interval = 500;
   const start = Date.now();
+  const ready = await waitForArchitectReady(STATE_URL);
 
-  while (Date.now() - start < timeout) {
-    try {
-      const stateRes = await fetch(STATE_URL);
-      if (stateRes.ok) {
-        const state = await stateRes.json();
-        if ((state as { architect?: { terminalId?: string } }).architect?.terminalId) {
-          console.log(`[global-setup] Architect terminal ready (${Date.now() - start}ms)`);
-          return;
-        }
-      }
-    } catch {
-      // Server may not be fully ready yet
-    }
-    await new Promise((r) => setTimeout(r, interval));
+  if (ready) {
+    console.log(`[global-setup] Architect terminal ready (${Date.now() - start}ms)`);
+    return;
   }
 
   // Don't fail hard — some tests don't need the terminal.
   // Terminal-dependent tests will fail on their own with clear timeout errors.
   console.warn(
-    `[global-setup] Architect terminal not ready after ${timeout}ms. ` +
+    `[global-setup] Architect terminal not ready after ${ARCHITECT_READY_TIMEOUT_MS}ms. ` +
       'Terminal-dependent tests will likely fail. ' +
       'In CI, ensure TOWER_ARCHITECT_CMD=bash is set.',
   );

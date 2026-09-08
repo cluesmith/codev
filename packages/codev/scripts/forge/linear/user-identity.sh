@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: user-identity (Linear via GraphQL API)
+# forge-executable: curl
 # Output: plain text display name
 set -e
 

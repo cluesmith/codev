@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import WebSocket from 'ws';
-import { FRAME_CONTROL, FRAME_DATA, type ControlMessage } from '@cluesmith/codev-types';
+import { FRAME_CONTROL, FRAME_DATA, terminalWsProtocols, type ControlMessage } from '@cluesmith/codev-types';
 import { EscapeBuffer } from '@cluesmith/codev-sdk/escape-buffer';
 import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-sdk/reconnect-policy';
 
@@ -180,7 +180,9 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
 
     const url = this.connectUrl();
     this.log('INFO', `Connecting to ${url}`);
-    const socket = new WebSocket(url);
+    // Request authentication (advisory GHSA-xvjp-7748-v88v): the shared key
+    // travels as a Sec-WebSocket-Protocol subprotocol, validated at the upgrade.
+    const socket = new WebSocket(url, terminalWsProtocols(this.authKey));
     this.ws = socket;
     this.ws.binaryType = 'arraybuffer';
 
@@ -194,10 +196,9 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       // Wipe any in-progress retry notice before replayed buffer / normal
       // output resumes, so it doesn't orphan in scrollback (#1001).
       this.clearReconnectNotice();
-      // Send auth via control message (not query param)
-      if (this.authKey) {
-        this.sendControl({ type: 'ping', payload: { auth: this.authKey } });
-      }
+      // Auth is now carried by the Sec-WebSocket-Protocol subprotocol and
+      // validated at the upgrade (advisory GHSA-xvjp-7748-v88v), so no in-band
+      // auth frame is sent here.
       // Sync Tower's PTY to the dimensions VSCode reported. Without this,
       // the PTY stays at node-pty's 80×24 default until a manual resize,
       // which makes Claude Code's TUI render its input box mid-screen and

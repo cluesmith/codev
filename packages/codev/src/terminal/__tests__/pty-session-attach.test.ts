@@ -160,15 +160,15 @@ describe('PtySession.writable (#1198)', () => {
 
 describe('PtySession.attachShellper adopt-path gate seed (Spec 1313 round 2, fail-safe HOLD — #1361)', () => {
   // Counterpart to the render-gate production-path CLEAN test: there the mirror is fed the WHOLE live
-  // stream, so the live-ring tear is gone. Here we pin the ADOPT/reconnect path — tower-terminals
-  // reconcile (:775) and reconnect (:1034) cap the shellper replay to the last 1 MiB via the real
-  // `capRingSeed` BEFORE `attachShellper` seeds the gate mirror with it. A long-lived alt-screen frame
-  // whose coherent start predates that 1 MiB tail is seeded born-torn, so the gate HOLDS (busy) —
-  // fail-safe: mail is delayed, never fused onto a non-empty screen — until the agent's next repaint
-  // or a viewer's post-connect nudge heals the mirror. This is PRE-EXISTING (before round 2 the
-  // whole-ring gate classified this same capped seed), not a round-2 regression; the residual liveness
-  // gap is deferred as #1361. Pin the HOLD so no future change can silently turn a torn adopt seed into
-  // a false-CLEAN misdelivery.
+  // stream, so the live-ring tear is gone. Since PIR #1354 the production adopt/reconnect sites in
+  // tower-terminals pass the FULL shellper replay as the mirror seed (only the RING seed is capped to
+  // the last 1 MiB via `capRingSeed`), so a real adoption seeds a coherent mirror whenever the frame's
+  // start lies within the shellper's whole retention — see the companion CLEAN test below. The torn
+  // case pinned here remains reachable: a mirror seed that is ITSELF a tail-cut (a frame older than
+  // the shellper's ≤8 MB retention — #1361's residual case — or a legacy caller passing only a capped
+  // seed). Then the gate must HOLD (busy) — fail-safe: mail is delayed, never fused onto a non-empty
+  // screen — until the agent's next repaint heals the mirror. Pin the HOLD so no future change can
+  // silently turn a torn seed into a false-CLEAN misdelivery.
   const FIXTURE_DIR = fileURLToPath(new URL('../../agent-farm/__tests__/fixtures/gate', import.meta.url));
   const loadGz = (name: string): string => gunzipSync(fs.readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
 
@@ -198,6 +198,23 @@ describe('PtySession.attachShellper adopt-path gate seed (Spec 1313 round 2, fai
       expect(verdict).toMatchObject({ clean: false, reason: 'busy' });
 
       session.detachShellper(); // disposes the gate mirror (cleanupShellper)
+    });
+
+    it(`${file}: production call shape (capped ring seed + full mirror seed) → coherent mirror → gate CLEAN (PIR #1354)`, async () => {
+      const full = Buffer.from(loadGz(file), 'utf8');
+      const session = makeSessionAt(139, 65);
+      // Exactly what tower-terminals' adopt/reconnect sites now do.
+      session.attachShellper(makeFakeClient(), capRingSeed(full, 'adopt-1'), 1234, undefined, full);
+
+      // These captures are TRUE idle empty-composer screens: with the mirror fed the
+      // full replay, the adopt-path tear (and its delivery HOLD) is gone.
+      const verdict = await classifyAgentScreen(session, CLAUDE_PROFILE);
+      expect(verdict).toMatchObject({ clean: true });
+
+      // And the ring stayed capped — the client fallback payload did not regrow.
+      expect(session.ringBuffer.partialBytes).toBeLessThanOrEqual(2 * 1024 * 1024);
+
+      session.detachShellper();
     });
   }
 });
