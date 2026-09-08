@@ -208,15 +208,22 @@ displacement.
 
 Routed to the **COLD** tier (`codev/resources/lessons-learned.md`):
 
-1. *A test that covers only the cheap branch can stay green while the feature is broken on the one
-   real inputs take.* The pacing suite pinned the short frame; every formatted `afx send` is ≥4 lines
-   and takes the long one.
-2. *A `satisfies` in a test file guarantees nothing if the package excludes tests from `tsc`.* It
-   reads exactly like a compile-time guard and is a comment.
-3. *A test whose outcome depends on two filesystem operations landing in the same timestamp tick is
-   platform-dependent, not flaky.* It passes on one filesystem and fails 5/5 on another.
+1. *A suite that pins only the cheap branch can stay green while the feature is broken on the
+   branch real inputs take.* The pacing suite pinned a short frame; every formatted `afx send` is
+   ≥4 lines and takes the long one, whose Enter delay is exactly the value Kimi swallows.
+2. *A test whose outcome depends on two filesystem operations landing in the same timestamp tick is
+   platform-dependent, not flaky* — it passes on one filesystem and fails 5/5 on another, and the
+   two have different fixes.
 
-No **HOT** tier change: all three are testing-practice reference material, not always-on
+The third finding — that a `satisfies` in a `__tests__` file enforces nothing when the package
+excludes that glob from `tsc` — is **not** a new lesson. #1401 already records it as "a guard is not
+a guard until you have watched it fail", including the variant where a type-test file sits somewhere
+the build never compiles. What was new is only that the same trap survives one directory *inside*
+`src/`, where #1401's "outside src/" heuristic does not catch it, so that entry gained a clause (c)
+rather than a duplicate. Its own rule was followed: the union was widened and `tsc` watched to go
+red before the guard was trusted.
+
+No **HOT** tier change: all of this is testing-practice reference material, not always-on
 cross-cutting rules of the caliber currently occupying the cap.
 
 ## Things to Look At During PR Review

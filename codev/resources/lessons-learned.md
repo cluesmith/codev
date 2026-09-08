@@ -300,6 +300,24 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From #1482] A green typecheck proves less than it looks if the tsconfig excludes the directory. `apps/web`'s `include` is `["src", "vite.config.ts"]`, so a test fixture omitting a newly-required field compiled fine and would have kept compiling until someone widened the include.
 
 - [From #1475] **A suite that builds its own fixtures cannot tell you what the real input looks like.** 4944 unit tests exercised the identity path and all passed while the feature did the opposite of its purpose for every architect session in production — because every fixture's argv was one *I* wrote, and none resembled the multi-KB `--append-system-prompt` a real architect launches with. Scripting the plan's manual steps against a real (isolated, private-port, own-test-DB) server with real subprocesses found it in one run. Two habits follow: capture one **real** input (log the actual argv/payload once) and pin a test to it; and when a protocol's gate is "does it work in production", make the evidence *run the production path* — the unit suite is a claim about your fixtures, not about the world. See `packages/codev/scripts/pir-1475-dev-approval-evidence.mts` and `codev/evidence/1475-dev-approval-transcript.txt` for a reusable shape (spawn the built server on a private port with `NODE_ENV=test` + a scoped test DB, refuse to run against a port you did not bind, assert the shared live instance is untouched before and after).
+- [From #1620] **A suite that pins only the cheap branch can stay green while the feature is broken
+  on the branch real inputs take.** The Kimi Enter-delay override was covered by tests that sent
+  `'BEGIN'` — a short frame. Every formatted `afx send` is ≥4 lines and takes the *long* frame path,
+  which #1567 had since given its own Enter delay (`PASTE_ENTER_DELAY_MS`, 80 ms) — and 80 ms is the
+  exact value Kimi's own bisect showed gets swallowed. So the shipped tests would have passed while
+  every real message to a Kimi builder was typed and never submitted. When a code path forks on
+  input *shape* (short/long, one/many, empty/full), ask which branch production actually takes and
+  pin that one first; a fixture chosen for brevity is usually the branch nobody uses.
+
+- [From #1620] **A test whose outcome depends on two filesystem operations landing in the same
+  timestamp tick is platform-dependent, not flaky — and it will look like neither.** A probe that
+  reports drift when the *newest* record is malformed was tested by writing a good record then a bad
+  one and expecting "ok" — which only holds when both `mkdir`s share an mtime. It passed on the
+  contributor's filesystem and failed 5/5 on APFS, where `mtimeMs` is sub-millisecond. Two habits:
+  when a test's meaning depends on ordering, set the timestamps explicitly (`utimesSync`) rather
+  than relying on write order; and when a failure looks flaky, run it several times before reaching
+  for the flaky label — deterministic-on-this-machine is a different bug with a different fix.
+
 - [From #1049] Split webview/UI logic into a pure, `vscode`-free core and a thin host adapter so the load-bearing logic unit-tests without a VS Code host (mirrors #907/#1497: importing anything that value-imports `vscode` in a node vitest env fails to resolve). The resolver, surface-derivation, pill-model, and message-validation for the contextual panel are pure modules with no `vscode` import; a **source-scan test** (read the file, assert its only imports are the sibling types) keeps them pure — a guard cheaper than a runtime purity harness. The `vscode`-touching reader/provider is then covered by an integration test that mocks `vscode` via `vi.mock`.
 - [From #1497] A vitest unit test that (transitively) value-imports a workspace package needs that package's `dist` built first — vite resolves the runtime `exports.default → ./dist`, not the TS source. Type-only imports are elided, which is why most vscode `__tests__` never hit this and why the pre-existing `terminal-manager.test.ts` retreated to source-string assertions ("constructing a full `TerminalManager` requires heavyweight deps"). But a *behavioural* capture from a class buried behind such imports is viable: importing the real `TerminalManager` (it value-imports `@cluesmith/codev-types` + `codev-sdk` via `terminal-adapter`) worked once `codev-types`/`codev-sdk` were built, letting the test assert real `injectArchitectText` `sendText` routing instead of a source regex. It passes in CI because `test.yml` runs `pnpm build` before vitest; locally, build the deps first. Companion to #907 (esbuild's `default → ./dist` condition needs the package built) — the same dist-before-consume rule, on the vitest side.
 - [From #1401] **A guard is not a guard until you have watched it fail.** Two variants bit in one
@@ -312,6 +330,13 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
   also meant `pnpm build` never compiled it and **no CI job invoked it** — it protected nothing
   while looking like protection. Before trusting any guard, break the thing it guards and watch
   the build go red; then check something in CI actually runs it.
+  (c) [#1620] The same trap one directory in: a `satisfies Record<Union, …>` written in a
+  `__tests__` file, in a package whose tsconfig `exclude` lists the `__tests__` glob. It is
+  *inside* `src/`, so (b)'s "outside src/" heuristic does not catch it, and vitest transpiles
+  without typechecking — so the annotation compiles nowhere and enforces nothing while reading
+  exactly like a compile-time guarantee. Exhaustiveness guards belong in a file the build
+  actually typechecks; the *runtime* assertions can stay in the test. Checked by widening the
+  union and watching `tsc` go red, per this lesson's own rule.
 - [From #1401] Green signals can hide a red one. `check-types` was failing on a newly added
   Playwright spec while the unit and browser suites both passed, because Playwright transpiles
   per file with no project-wide type check. Run `check-types` after the last **file** is added,
