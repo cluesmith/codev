@@ -114,12 +114,19 @@ export function chunkForPty(text: string, max: number = PASTE_CHUNK_BYTES): stri
  * The pieces of a long frame, in write order, for a strategy. Bracketed: the body (newlines
  * as `\r`) chunked, with the opening marker on the first piece and the closing marker on the
  * last — the markers are never split across writes, so no chunk boundary can land inside an
- * escape sequence. Plain: one piece per line (`\n` kept, as #584 wrote it), with any line over
+ * escape sequence, and every piece INCLUDING its marker stays within {@link PASTE_CHUNK_BYTES}.
+ * Plain: one piece per line (`\n` kept, as #584 wrote it), with any line over
  * the chunk size split further.
  */
 export function framePieces(message: string, strategy: WriteStrategy): string[] {
   if (strategy.bracketedPaste) {
-    const pieces = chunkForPty(message.replace(/\r?\n/g, '\r'));
+    // A literal paste marker inside the body (a pasted terminal log, say) would end or restart
+    // the paste mid-frame and let the remainder be typed as keys; strip both so the bracket
+    // we add is the only one the TUI sees.
+    const body = message.replace(/\r?\n/g, '\r').split(PASTE_BEGIN).join('').split(PASTE_END).join('');
+    // Chunk with room for the markers so NO write — first or last piece included — exceeds
+    // PASTE_CHUNK_BYTES on the wire.
+    const pieces = chunkForPty(body, PASTE_CHUNK_BYTES - PASTE_BEGIN.length - PASTE_END.length);
     pieces[0] = PASTE_BEGIN + pieces[0];
     pieces[pieces.length - 1] += PASTE_END;
     return pieces;

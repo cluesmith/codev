@@ -482,17 +482,6 @@ export function normalizeForEcho(text: string): string {
 }
 
 /**
- * The needle {@link DeliveryPorts.watchEcho} opens on: the formatted message's FIRST line,
- * normalized. Returns `''` when it is too short to be distinctive (see
- * {@link MIN_ECHO_NEEDLE_LENGTH}), which the caller reads as "skip verification".
- *
- * The first line and only the first line. A formatted send puts its `### [ARCHITECT
- * INSTRUCTION | <iso timestamp>] ###` header there — long, and unique per message thanks to the
- * timestamp. The TAIL would be the easier thing to find on a scrolled screen and is exactly the
- * wrong choice: #1564's message arrived as its FINAL ~30 characters, so a footer needle would
- * have certified the very corruption this check exists to catch.
- */
-/**
  * The paste placards a TUI renders in place of a long bracketed paste (Issue #1567), in
  * {@link normalizeForEcho} form: claude shows `[Pasted text #N +M lines]`, codex
  * `[Pasted Content N chars]` (both measured, `codev/evidence/1567-head-loss/`). A long frame
@@ -504,6 +493,17 @@ export function normalizeForEcho(text: string): string {
  */
 export const PASTE_PLACARD_NEEDLES: readonly string[] = ['Pastedtext', 'PastedContent'];
 
+/**
+ * The needle {@link DeliveryPorts.watchEcho} opens on: the formatted message's FIRST line,
+ * normalized. Returns `''` when it is too short to be distinctive (see
+ * {@link MIN_ECHO_NEEDLE_LENGTH}), which the caller reads as "skip verification".
+ *
+ * The first line and only the first line. A formatted send puts its `### [ARCHITECT
+ * INSTRUCTION | <iso timestamp>] ###` header there — long, and unique per message thanks to the
+ * timestamp. The TAIL would be the easier thing to find on a scrolled screen and is exactly the
+ * wrong choice: #1564's message arrived as its FINAL ~30 characters, so a footer needle would
+ * have certified the very corruption this check exists to catch.
+ */
 export function echoNeedle(formattedMessage: string): string {
   const needle = normalizeForEcho(formattedMessage.split('\n', 1)[0]);
   return needle.length >= MIN_ECHO_NEEDLE_LENGTH ? needle : '';

@@ -90,7 +90,8 @@ describe('Issue #1567 — the write edge never hands the PTY more than its input
     const pieces = session.writes.slice(0, -1);
     expect(pieces.length).toBeGreaterThan(1);
     for (const piece of pieces) {
-      expect(Buffer.byteLength(piece)).toBeLessThanOrEqual(PASTE_CHUNK_BYTES + PASTE_BEGIN.length + PASTE_END.length);
+      // Markers included: nothing on the wire is ever larger than the chunk size.
+      expect(Buffer.byteLength(piece)).toBeLessThanOrEqual(PASTE_CHUNK_BYTES);
       expect(Buffer.byteLength(piece)).toBeLessThan(PTY_INPUT_QUEUE_BYTES);
     }
     expect(session.writes.at(-1)).toBe('\r');
@@ -141,6 +142,17 @@ describe('Issue #1567 — the write edge never hands the PTY more than its input
       expect(p.includes('�')).toBe(false); // no replacement char from a torn sequence
     }
     expect(pieces.join('')).toBe(arrows);
+  });
+
+  it('a literal paste marker inside the body cannot end the paste early', () => {
+    const body = `${'x'.repeat(300)} ${PASTE_END}rm -rf / ${PASTE_BEGIN} ${'y'.repeat(300)}`;
+    const pieces = framePieces(body, BRACKETED_PASTE);
+    const joined = pieces.join('');
+    expect(joined.split(PASTE_BEGIN)).toHaveLength(2); // exactly one opener…
+    expect(joined.split(PASTE_END)).toHaveLength(2); // …and one closer, both ours
+    expect(joined.startsWith(PASTE_BEGIN)).toBe(true);
+    expect(joined.endsWith(PASTE_END)).toBe(true);
+    expect(joined).toContain('rm -rf /'); // the text itself is kept, only the markers go
   });
 
   it('short frames keep the pre-#1567 single write, byte for byte (raw slash commands included)', () => {

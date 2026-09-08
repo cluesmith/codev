@@ -62,8 +62,8 @@ import {
   MAX_MESSAGE_BYTES,
 } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
-import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
-import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
+import { writeMessageToSession, writeEscapeToSession, writeStrategyForApp } from './message-write.js';
+import { makeDeliveryPorts, getMailboxDrainer, resolveProfileForSession } from './mailbox-wiring.js';
 import { deliverAgentMailSerialized, type DeliveryOutcome, type DeliveryPorts } from './mailbox-delivery.js';
 import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import {
@@ -2197,7 +2197,16 @@ async function handleSend(
       result.terminalId,
       () => {
         session.write('\x03'); // Ctrl+C
-        return writeMessageToSession(session, formattedMessage, noEnter, 100);
+        // Issue #1567: the same per-harness write strategy the gated path uses — an
+        // interrupt to an opted-out harness must not be bracketed just because it bypassed
+        // the gate.
+        return writeMessageToSession(
+          session,
+          formattedMessage,
+          noEnter,
+          100,
+          writeStrategyForApp(resolveProfileForSession(session)?.app),
+        );
       },
       undefined,
       {

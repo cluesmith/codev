@@ -123,3 +123,21 @@ Acceptance: harness `--mode production` through the FIXED edge → **0/20 head-l
 1567-head-loss/fixed-claude-production-2026-09-08T04-10-15-094Z/`, reply oracle H1567-n on every
 trial). Baseline on the pre-fix edge (same harness, same day) remains the reverted-state evidence:
 14/20. Full unit suite: 286 files / 5755 tests green.
+
+## 2026-09-08 — pr
+
+PR #1644. CMAP round 1: gemini APPROVE, claude APPROVE, codex REQUEST_CHANGES. Real findings,
+all addressed in the follow-up commit:
+- `--interrupt` path (`tower-routes.ts`) now resolves the same per-harness strategy as the
+  gated path (agy opt-out was bypassed); two tower-routes tests pin it (claude bracketed, agy
+  not). The Spec 403 interrupt test's minimal session double gained the identity fields every
+  real PtySession has.
+- "No write over 512 B" now holds INCLUDING the bracket markers (body chunked at 512 − 12);
+  the CONTROL test asserts the tighter bound.
+- A literal `ESC[200~`/`ESC[201~` inside a body is stripped so the frame's own bracket is the
+  only one the TUI sees (claude's non-blocking note; one line + a test).
+- Orphaned JSDoc around `PASTE_PLACARD_NEEDLES` fixed; FOOTER comment states the real rule.
+- Evidence trimmed: exploratory runs keep only their summary tables; baseline + fixed keep
+  excerpts and results.json (codex: 6,330 added lines → ~2,400).
+Not taken: codex's remark that the placard is generic evidence — it is count-based against a
+pre-write sample (same doctrine as the header needle); noted, no change.
