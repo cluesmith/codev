@@ -17,6 +17,7 @@ import {
   noteRateLimited,
   noteForgeSuccess,
   clearForgeSuspension,
+  DEFAULT_PROVIDER,
   resetForgeRateLimit,
   isForgeSuspended,
   getForgeRateLimit,
@@ -53,52 +54,75 @@ describe('forge rate-limit awareness (#1645)', () => {
 
   describe('suspension', () => {
     it('is not suspended by default', () => {
-      expect(isForgeSuspended()).toBe(false);
-      expect(getForgeRateLimit()).toEqual({ limited: false, resetAt: null });
+      expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(false);
+      expect(getForgeRateLimit(DEFAULT_PROVIDER)).toEqual({ limited: false, resetAt: null });
+    });
+
+    it('suspends only the provider that was refused', () => {
+      // A GitHub limit says nothing about a GitLab workspace's forge, and
+      // blanking its Work view for the backoff window would be a regression
+      // for a workspace that is not even involved.
+      const now = 1_000_000;
+      noteRateLimited('github', null, now);
+
+      expect(isForgeSuspended('github', now)).toBe(true);
+      expect(isForgeSuspended('gitlab', now)).toBe(false);
+      expect(isForgeSuspended('linear', now)).toBe(false);
+      expect(getForgeRateLimit('gitlab', now)).toEqual({ limited: false, resetAt: null });
+    });
+
+    it('backs each provider off independently', () => {
+      const now = 1_000_000;
+      noteRateLimited('github', null, now);
+      noteRateLimited('gitlab', null, now);
+      noteForgeSuccess('github', now + 1);
+
+      expect(isForgeSuspended('github', now)).toBe(false);
+      expect(isForgeSuspended('gitlab', now)).toBe(true);
     });
 
     it('suspends until a reported reset instant', () => {
       const now = Date.now();
       const reset = now + 5 * 60_000;
-      noteRateLimited(reset, now);
+      noteRateLimited(DEFAULT_PROVIDER, reset, now);
 
-      expect(isForgeSuspended(now)).toBe(true);
-      expect(getForgeRateLimit(now).resetAt).toBe(new Date(reset).toISOString());
-      expect(isForgeSuspended(reset + 1)).toBe(false);
+      expect(isForgeSuspended(DEFAULT_PROVIDER, now)).toBe(true);
+      expect(getForgeRateLimit(DEFAULT_PROVIDER, now).resetAt).toBe(new Date(reset).toISOString());
+      expect(isForgeSuspended(DEFAULT_PROVIDER, reset + 1)).toBe(false);
     });
 
     it('falls back to a doubling backoff when the reset instant is unknown', () => {
       const now = 1_000_000;
-      noteRateLimited(null, now);
-      expect(getForgeRateLimit(now).resetAt).toBe(new Date(now + BACKOFF_BASE_MS).toISOString());
+      noteRateLimited(DEFAULT_PROVIDER, null, now);
+      expect(getForgeRateLimit(DEFAULT_PROVIDER, now).resetAt).toBe(new Date(now + BACKOFF_BASE_MS).toISOString());
 
       // Second hit lands past the first window, so the backoff doubles.
       const later = now + BACKOFF_BASE_MS + 1;
-      noteRateLimited(null, later);
-      expect(getForgeRateLimit(later).resetAt).toBe(new Date(later + BACKOFF_BASE_MS * 2).toISOString());
+      noteRateLimited(DEFAULT_PROVIDER, null, later);
+      expect(getForgeRateLimit(DEFAULT_PROVIDER, later).resetAt).toBe(new Date(later + BACKOFF_BASE_MS * 2).toISOString());
     });
 
     it('caps the backoff at 15 minutes', () => {
       let t = 1_000_000;
       for (let i = 0; i < 12; i++) {
-        noteRateLimited(null, t);
+        noteRateLimited(DEFAULT_PROVIDER, null, t);
         t += BACKOFF_MAX_MS + 1;
       }
-      noteRateLimited(null, t);
-      expect(getForgeRateLimit(t).resetAt).toBe(new Date(t + BACKOFF_MAX_MS).toISOString());
+      noteRateLimited(DEFAULT_PROVIDER, null, t);
+      expect(getForgeRateLimit(DEFAULT_PROVIDER, t).resetAt).toBe(new Date(t + BACKOFF_MAX_MS).toISOString());
     });
 
     it('refuses to trust a reset instant more than an hour out', () => {
       const now = 1_000_000;
-      noteRateLimited(now + 5 * SUSPEND_CAP_MS, now);
-      expect(getForgeRateLimit(now).resetAt).toBe(new Date(now + SUSPEND_CAP_MS).toISOString());
+      noteRateLimited(DEFAULT_PROVIDER, now + 5 * SUSPEND_CAP_MS, now);
+      expect(getForgeRateLimit(DEFAULT_PROVIDER, now).resetAt).toBe(new Date(now + SUSPEND_CAP_MS).toISOString());
     });
 
     it('never shortens a suspension already in force', () => {
       const now = 1_000_000;
-      noteRateLimited(now + 10 * 60_000, now);
-      noteRateLimited(now + 60_000, now);
-      expect(getForgeRateLimit(now).resetAt).toBe(new Date(now + 10 * 60_000).toISOString());
+      noteRateLimited(DEFAULT_PROVIDER, now + 10 * 60_000, now);
+      noteRateLimited(DEFAULT_PROVIDER, now + 60_000, now);
+      expect(getForgeRateLimit(DEFAULT_PROVIDER, now).resetAt).toBe(new Date(now + 10 * 60_000).toISOString());
     });
 
     it('escalates once per window, not once per failed command', () => {
@@ -106,19 +130,19 @@ describe('forge rate-limit awareness (#1645)', () => {
       // fail together. Counting each would jump from 60s straight to 8 minutes
       // on the very first refresh.
       const now = 1_000_000;
-      noteRateLimited(null, now);
-      noteRateLimited(null, now);
-      noteRateLimited(null, now);
-      noteRateLimited(null, now);
-      expect(getForgeRateLimit(now).resetAt).toBe(new Date(now + BACKOFF_BASE_MS).toISOString());
+      noteRateLimited(DEFAULT_PROVIDER, null, now);
+      noteRateLimited(DEFAULT_PROVIDER, null, now);
+      noteRateLimited(DEFAULT_PROVIDER, null, now);
+      noteRateLimited(DEFAULT_PROVIDER, null, now);
+      expect(getForgeRateLimit(DEFAULT_PROVIDER, now).resetAt).toBe(new Date(now + BACKOFF_BASE_MS).toISOString());
     });
 
     it('clears on a forge command dispatched after the suspension began', () => {
       const now = 1_000_000;
-      noteRateLimited(null, now);
-      expect(isForgeSuspended(now)).toBe(true);
-      noteForgeSuccess(now + 1);
-      expect(isForgeSuspended(now)).toBe(false);
+      noteRateLimited(DEFAULT_PROVIDER, null, now);
+      expect(isForgeSuspended(DEFAULT_PROVIDER, now)).toBe(true);
+      noteForgeSuccess(DEFAULT_PROVIDER, now + 1);
+      expect(isForgeSuspended(DEFAULT_PROVIDER, now)).toBe(false);
     });
 
     it('ignores a success from a command dispatched BEFORE the suspension', () => {
@@ -126,16 +150,16 @@ describe('forge rate-limit awareness (#1645)', () => {
       // ones and is charged to a different budget, so it succeeds while they
       // are refused. It must not wipe the suspension they just set.
       const dispatchedAt = 1_000_000;
-      noteRateLimited(null, dispatchedAt + 10);
-      noteForgeSuccess(dispatchedAt);
-      expect(isForgeSuspended(dispatchedAt + 20)).toBe(true);
+      noteRateLimited(DEFAULT_PROVIDER, null, dispatchedAt + 10);
+      noteForgeSuccess(DEFAULT_PROVIDER, dispatchedAt);
+      expect(isForgeSuspended(DEFAULT_PROVIDER, dispatchedAt + 20)).toBe(true);
     });
 
     it('clears outright on an explicit refresh', () => {
-      noteRateLimited(Date.now() + 60_000);
-      expect(isForgeSuspended()).toBe(true);
+      noteRateLimited(DEFAULT_PROVIDER, Date.now() + 60_000);
+      expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(true);
       clearForgeSuspension();
-      expect(isForgeSuspended()).toBe(false);
+      expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(false);
     });
   });
 
@@ -193,10 +217,10 @@ describe('forge failure detail reaches its observers (#1645)', () => {
     installForgeRateLimitWatch();
     const command = script('echo "GraphQL: API rate limit already exceeded for user ID 1." >&2; exit 1');
 
-    expect(isForgeSuspended()).toBe(false);
+    expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(false);
     await executeForgeCommand('issue-list', {}, { forgeConfig: { 'issue-list': command } });
 
-    expect(isForgeSuspended()).toBe(true);
+    expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(true);
   });
 
   it('leaves the forge alone for a non-rate-limit failure', async () => {
@@ -205,7 +229,7 @@ describe('forge failure detail reaches its observers (#1645)', () => {
 
     await executeForgeCommand('issue-list', {}, { forgeConfig: { 'issue-list': command } });
 
-    expect(isForgeSuspended()).toBe(false);
+    expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(false);
   });
 
   it('does not fire for a command that succeeds', async () => {

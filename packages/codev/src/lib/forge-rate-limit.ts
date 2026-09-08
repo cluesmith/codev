@@ -64,35 +64,74 @@ export const BACKOFF_MAX_MS = 900_000;
  */
 export const SUSPEND_CAP_MS = 3_600_000;
 
-let suspendedUntilMs = 0;
-/** When the current suspension began. Guards success/probe races — see below. */
-let suspendedSinceMs = 0;
-let consecutiveHits = 0;
-/** Set while a reset probe is in flight. */
-let probing = false;
-/** `suspendedSinceMs` of the suspension the reset probe has already run for. */
-let probedSuspensionMs = -1;
+/** Per-provider suspension state. */
+interface ProviderState {
+  suspendedUntilMs: number;
+  /** When the current suspension began. Guards the success/probe races below. */
+  suspendedSinceMs: number;
+  consecutiveHits: number;
+  /** `suspendedSinceMs` of the suspension the reset probe has already run for. */
+  probedSuspensionMs: number;
+}
+
+/**
+ * Suspension state **keyed by forge provider**, not process-global.
+ *
+ * A rate limit is charged to one forge's account. Suspending every provider on
+ * a GitHub limit would blank a GitLab, Gitea or Linear workspace's Work view
+ * for the whole backoff window over an outage that has nothing to do with it.
+ */
+const providerStates = new Map<string, ProviderState>();
+
+/**
+ * The provider a forge command resolves to when config names none.
+ *
+ * Every function below takes `provider` as a **required first argument**, with
+ * no default. An earlier revision defaulted it and put it last, which let
+ * `isForgeSuspended(now)` read a timestamp as a provider name and silently
+ * answer about the wrong forge. Required-and-first makes that a type error.
+ */
+export const DEFAULT_PROVIDER = 'github';
+
+function stateFor(provider: string): ProviderState {
+  let state = providerStates.get(provider);
+  if (!state) {
+    state = { suspendedUntilMs: 0, suspendedSinceMs: 0, consecutiveHits: 0, probedSuspensionMs: -1 };
+    providerStates.set(provider, state);
+  }
+  return state;
+}
+
+/** Set while a reset probe is in flight, keyed by provider. */
+const probing = new Set<string>();
 
 export interface ForgeRateLimitState {
-  /** True while forge-backed refreshes are suspended. */
+  /** True while this provider's forge-backed refreshes are suspended. */
   limited: boolean;
   /** ISO instant the suspension lifts, or null when not suspended. */
   resetAt: string | null;
 }
 
-/** Current suspension state. */
-export function getForgeRateLimit(now: number = Date.now()): ForgeRateLimitState {
+/** Current suspension state for one provider. */
+export function getForgeRateLimit(
+  provider: string,
+  now: number = Date.now(),
+): ForgeRateLimitState {
+  const { suspendedUntilMs } = stateFor(provider);
   if (suspendedUntilMs <= now) return { limited: false, resetAt: null };
   return { limited: true, resetAt: new Date(suspendedUntilMs).toISOString() };
 }
 
-/** True while forge-backed refreshes should not be attempted at all. */
-export function isForgeSuspended(now: number = Date.now()): boolean {
-  return suspendedUntilMs > now;
+/** True while this provider's forge-backed refreshes should not be attempted. */
+export function isForgeSuspended(
+  provider: string,
+  now: number = Date.now(),
+): boolean {
+  return stateFor(provider).suspendedUntilMs > now;
 }
 
 /**
- * Record a rate-limit hit and suspend until `resetAtMs`.
+ * Record a rate-limit hit for `provider` and suspend it until `resetAtMs`.
  *
  * With no reset instant the suspension follows a doubling backoff
  * (60 s → 15 min), so a forge that is merely flaky recovers quickly while one
@@ -103,22 +142,27 @@ export function isForgeSuspended(now: number = Date.now()): boolean {
  * four fail together; counting each would jump straight from 60 s to 8 minutes
  * on the very first refresh.
  */
-export function noteRateLimited(resetAtMs: number | null, now: number = Date.now()): void {
-  const alreadySuspended = suspendedUntilMs > now;
+export function noteRateLimited(
+  provider: string,
+  resetAtMs: number | null,
+  now: number = Date.now(),
+): void {
+  const state = stateFor(provider);
+  const alreadySuspended = state.suspendedUntilMs > now;
   if (!alreadySuspended) {
-    consecutiveHits++;
-    suspendedSinceMs = now;
+    state.consecutiveHits++;
+    state.suspendedSinceMs = now;
   }
-  const backoff = Math.min(BACKOFF_BASE_MS * 2 ** (consecutiveHits - 1), BACKOFF_MAX_MS);
+  const backoff = Math.min(BACKOFF_BASE_MS * 2 ** (state.consecutiveHits - 1), BACKOFF_MAX_MS);
   const until = resetAtMs !== null && resetAtMs > now
     ? Math.min(resetAtMs, now + SUSPEND_CAP_MS)
     : now + backoff;
   // Never shorten a suspension already in force.
-  suspendedUntilMs = Math.max(suspendedUntilMs, until);
+  state.suspendedUntilMs = Math.max(state.suspendedUntilMs, until);
 }
 
 /**
- * Clear the suspension after a forge command succeeded.
+ * Clear `provider`'s suspension after one of its commands succeeded.
  *
  * `startedAt` is when that command was dispatched, and it matters: an overview
  * refresh dispatches its forge commands in parallel, and one of them
@@ -128,27 +172,32 @@ export function noteRateLimited(resetAtMs: number | null, now: number = Date.now
  * the hammering would continue. Only a command dispatched *after* the current
  * suspension began is evidence that the forge has actually recovered.
  */
-export function noteForgeSuccess(startedAt: number = Date.now()): void {
-  if (suspendedUntilMs > 0 && startedAt < suspendedSinceMs) return;
-  clearForgeSuspension();
+export function noteForgeSuccess(
+  provider: string,
+  startedAt: number = Date.now(),
+): void {
+  const state = stateFor(provider);
+  if (state.suspendedUntilMs > 0 && startedAt < state.suspendedSinceMs) return;
+  clearForgeSuspension(provider);
 }
 
 /**
- * Drop the suspension outright. For an explicit human action — a dashboard
- * Refresh — which should not have to wait out a backoff window after GitHub
- * has recovered.
+ * Drop a suspension outright. For an explicit human action — a dashboard
+ * Refresh — which should not have to wait out a backoff window after the forge
+ * has recovered. Omit `provider` to clear every provider.
  */
-export function clearForgeSuspension(): void {
-  suspendedUntilMs = 0;
-  suspendedSinceMs = 0;
-  consecutiveHits = 0;
-  probedSuspensionMs = -1;
+export function clearForgeSuspension(provider?: string): void {
+  if (provider === undefined) {
+    providerStates.clear();
+    return;
+  }
+  providerStates.delete(provider);
 }
 
 /** Reset all state. Tests only. */
 export function resetForgeRateLimit(): void {
-  clearForgeSuspension();
-  probing = false;
+  providerStates.clear();
+  probing.clear();
   probeEnabled = false;
 }
 
@@ -204,20 +253,28 @@ export function enableResetProbe(enabled = true): void {
  * Remaining: 0` — so the probe's reset instant is trusted **only when it agrees
  * that the budget is gone**. Otherwise the doubling backoff stands.
  */
-export async function maybeProbeReset(cwd?: string): Promise<void> {
-  if (!probeEnabled || probing || !isForgeSuspended()) return;
-  if (probedSuspensionMs === suspendedSinceMs) return; // already probed this window
-  probedSuspensionMs = suspendedSinceMs;
-  probing = true;
+export async function maybeProbeReset(
+  provider: string,
+  cwd?: string,
+): Promise<void> {
+  // GitHub only: the `rate-limit` concept has no script outside the github
+  // preset, so on any other provider it would fall through to the github
+  // default and shell out to `gh` for a forge that does not use it.
+  if (provider !== DEFAULT_PROVIDER) return;
+  if (!probeEnabled || probing.has(provider) || !isForgeSuspended(provider)) return;
+  const state = stateFor(provider);
+  if (state.probedSuspensionMs === state.suspendedSinceMs) return; // already probed this window
+  state.probedSuspensionMs = state.suspendedSinceMs;
+  probing.add(provider);
   try {
     const budget = await fetchForgeBudget(cwd);
     if (budget && budget.remaining === 0 && budget.reset > 0) {
-      noteRateLimited(budget.reset * 1000);
+      noteRateLimited(provider, budget.reset * 1000);
     }
   } catch {
     // Probe failures are non-events — the backoff already covers us.
   } finally {
-    probing = false;
+    probing.delete(provider);
   }
 }
 
@@ -244,6 +301,8 @@ export function installForgeRateLimitWatch(): void {
   onForgeFailure((failure: ForgeFailure) => {
     if (failure.concept === 'rate-limit') return; // never suspend on the probe itself
     if (!isRateLimitError(failure.message)) return;
-    noteRateLimited(null);
+    // Suspend only the provider that was refused. A GitHub limit says nothing
+    // about a GitLab workspace's forge.
+    noteRateLimited(failure.provider, null);
   });
 }

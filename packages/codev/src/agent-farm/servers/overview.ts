@@ -23,6 +23,7 @@ import {
 import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
 import {
   clearForgeSuspension,
+  DEFAULT_PROVIDER,
   getForgeRateLimit,
   installForgeRateLimitWatch,
   isForgeSuspended,
@@ -30,6 +31,7 @@ import {
   noteForgeSuccess,
 } from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
+import { loadForgeConfig } from '../../lib/forge.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
 import { POSITIVE_TTL_MS, SEARCH_TTL_MS, negativeTtlMs } from './overview-budget.js';
 import type {
@@ -885,6 +887,12 @@ export class OverviewCache {
    * batch. Callers arriving mid-flight join the existing promise instead.
    */
   private inflight = new Map<string, Promise<unknown>>();
+  /**
+   * Resolved forge provider per workspace. Read from `.codev/config.json`,
+   * which the 2.5 s poll should not re-read on every request; cleared by
+   * `invalidate()`, which is what a config change is followed by.
+   */
+  private providerCache = new Map<string, string>();
   private readonly USER_TTL = 3_600_000; // 1h — GitHub identity is session-stable
 
   constructor() {
@@ -979,7 +987,7 @@ export class OverviewCache {
     // install instead of an exhausted API budget. The dashboard already renders
     // these strings (`WorkView`'s `work-unavailable`), so the explanation lands
     // without a UI change.
-    const rateLimit = getForgeRateLimit();
+    const rateLimit = getForgeRateLimit(this.providerFor(workspaceRoot));
     const unavailable = (what: string): string => rateLimit.resetAt
       ? `GitHub API rate limit exhausted — ${what} paused until ${formatResetTime(rateLimit.resetAt)}`
       : `GitHub CLI unavailable — could not fetch ${what}`;
@@ -1144,6 +1152,7 @@ export class OverviewCache {
     this.closedCache.clear();
     this.mergedPRCache.clear();
     this.currentUserCache.clear();
+    this.providerCache.clear();
     // #1645: an explicit human Refresh also lifts a rate-limit suspension.
     // invalidate() is only reached from POST /api/overview/refresh, never from
     // the 2.5s poll, so this cannot reintroduce the hammering — and without it
@@ -1179,15 +1188,16 @@ export class OverviewCache {
     ttl: number,
     fetcher: () => Promise<T | null>,
   ): Promise<T | null> {
-    const now = Date.now();
+    const dispatchedAt = Date.now();
     const cached = cache.get(cwd);
     if (cached) {
-      const age = now - cached.fetchedAt;
+      const age = dispatchedAt - cached.fetchedAt;
       if (cached.data !== null && age < ttl) return Promise.resolve(cached.data);
       if (cached.data === null && age < negativeTtlMs(cached.failures)) return Promise.resolve(null);
     }
 
-    if (isForgeSuspended(now)) return Promise.resolve(null);
+    const provider = this.providerFor(cwd);
+    if (isForgeSuspended(provider, dispatchedAt)) return Promise.resolve(null);
 
     const key = `${concept}:${cwd}`;
     const existing = this.inflight.get(key);
@@ -1195,17 +1205,22 @@ export class OverviewCache {
 
     const flight = (async () => {
       const data = await fetcher();
+      // Stamp the entry with *completion* time, not dispatch time: a forge
+      // command can sit for its full 30 s timeout, and dating the entry from
+      // dispatch would burn half the 60 s negative window before it is even
+      // written.
+      const fetchedAt = Date.now();
       if (data !== null) {
-        cache.set(cwd, { data, fetchedAt: now, failures: 0 });
-        // `now` is when this command was dispatched. A command dispatched
-        // before the current suspension began proves nothing about the forge
-        // having recovered — see noteForgeSuccess.
-        noteForgeSuccess(now);
+        cache.set(cwd, { data, fetchedAt, failures: 0 });
+        // `dispatchedAt`, not `fetchedAt`: a command dispatched before the
+        // current suspension began proves nothing about the forge having
+        // recovered — see noteForgeSuccess.
+        noteForgeSuccess(provider, dispatchedAt);
       } else {
-        cache.set(cwd, { data: null, fetchedAt: now, failures: (cached?.failures ?? 0) + 1 });
+        cache.set(cwd, { data: null, fetchedAt, failures: (cached?.failures ?? 0) + 1 });
         // If that failure was a rate limit, learn when it lifts — once per
         // suspension window, and only where the probe has been enabled.
-        void maybeProbeReset(cwd);
+        void maybeProbeReset(provider, cwd);
       }
       return data;
     })().finally(() => {
@@ -1214,6 +1229,20 @@ export class OverviewCache {
 
     this.inflight.set(key, flight);
     return flight;
+  }
+
+  /** The workspace's forge provider, read once and memoized (#1645). */
+  private providerFor(cwd: string): string {
+    let provider = this.providerCache.get(cwd);
+    if (provider === undefined) {
+      try {
+        provider = loadForgeConfig(cwd)?.provider ?? DEFAULT_PROVIDER;
+      } catch {
+        provider = DEFAULT_PROVIDER;
+      }
+      this.providerCache.set(cwd, provider);
+    }
+    return provider;
   }
 
   private fetchPRsCached(cwd: string): Promise<ForgePR[] | null> {

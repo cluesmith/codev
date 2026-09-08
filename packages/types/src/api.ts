@@ -346,11 +346,12 @@ export interface OverviewData {
    * `recentlyClosed`) may be empty.
    *
    * - `'ok'` — the forge answered.
-   * - `'rate-limited'` — the account's API budget is exhausted and Tower has
-   *   **deliberately suspended** all forge commands until `forgeResetAt`. The
-   *   lists are stale on purpose; retrying would only extend the outage, since
-   *   the budget is charged per account and shared with every other tool on the
-   *   machine.
+   * - `'rate-limited'` — the forge's API budget is exhausted and Tower has
+   *   **deliberately suspended** that provider's commands until `forgeResetAt`.
+   *   The lists come back **empty**, not stale — nothing is fetched at all
+   *   while suspended, because the budget is charged per account and shared
+   *   with every other tool on the machine, so retrying would only extend the
+   *   outage. This field is what tells the UI the emptiness is deliberate.
    * - `'unavailable'` — the commands ran and failed for some other reason
    *   (`gh` missing, not authenticated, offline).
    *
@@ -361,7 +362,9 @@ export interface OverviewData {
   /**
    * Issue 1645: ISO instant the rate-limit suspension lifts. Present only while
    * `forgeStatus === 'rate-limited'`, so the UI can say "retrying at 14:05"
-   * instead of leaving the user staring at an empty backlog.
+   * instead of leaving the user staring at an empty backlog. A human can end
+   * the wait early with `POST /api/overview/refresh`, which clears the
+   * suspension along with the cache.
    */
   forgeResetAt?: string;
   /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */

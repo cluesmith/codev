@@ -31,6 +31,7 @@ import {
   noteRateLimited,
   resetForgeRateLimit,
   isForgeSuspended,
+  DEFAULT_PROVIDER,
 } from '../../lib/forge-rate-limit.js';
 import { projectHourlyGraphqlPoints, GRAPHQL_POINTS_PER_CALL } from '../servers/overview-budget.js';
 
@@ -1891,8 +1892,8 @@ describe('overview', () => {
       mockFetchMergedPRs.mockResolvedValue([]);
       mockFetchCurrentUser.mockResolvedValue('octocat');
 
-      noteRateLimited(Date.now() + 10 * 60 * 1000);
-      expect(isForgeSuspended()).toBe(true);
+      noteRateLimited(DEFAULT_PROVIDER, Date.now() + 10 * 60 * 1000);
+      expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(true);
 
       const cache = new OverviewCache();
       await cache.getOverview(tmpDir);
@@ -1907,7 +1908,7 @@ describe('overview', () => {
 
     it('reports forgeStatus rate-limited with a reset instant (#1645)', async () => {
       const resetAt = Date.now() + 10 * 60 * 1000;
-      noteRateLimited(resetAt);
+      noteRateLimited(DEFAULT_PROVIDER, resetAt);
 
       const cache = new OverviewCache();
       const data = await cache.getOverview(tmpDir);
@@ -1933,7 +1934,7 @@ describe('overview', () => {
       // The dashboard renders errors.prs/errors.issues verbatim (WorkView's
       // `work-unavailable`), so "GitHub CLI unavailable" during a rate limit
       // sent people looking for a broken gh install.
-      noteRateLimited(Date.now() + 10 * 60 * 1000);
+      noteRateLimited(DEFAULT_PROVIDER, Date.now() + 10 * 60 * 1000);
 
       const data = await new OverviewCache().getOverview(tmpDir);
 
@@ -1956,7 +1957,7 @@ describe('overview', () => {
       // in forge-rate-limit.test.ts, since it turns on dispatch ordering this
       // test cannot control.
       mockFetchPRList.mockImplementation(async () => {
-        noteRateLimited(Date.now() + 10 * 60 * 1000);
+        noteRateLimited(DEFAULT_PROVIDER, Date.now() + 10 * 60 * 1000);
         return null;
       });
       mockFetchIssueList.mockResolvedValue(null);
@@ -1967,7 +1968,7 @@ describe('overview', () => {
       const cache = new OverviewCache();
       const data = await cache.getOverview(tmpDir);
 
-      expect(isForgeSuspended()).toBe(true);
+      expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(true);
       expect(data.forgeStatus).toBe('rate-limited');
       expect(mockFetchCurrentUser).not.toHaveBeenCalled();
     });
@@ -1998,13 +1999,13 @@ describe('overview', () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
 
-      noteRateLimited(Date.now() + 10 * 60 * 1000);
+      noteRateLimited(DEFAULT_PROVIDER, Date.now() + 10 * 60 * 1000);
       const cache = new OverviewCache();
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).not.toHaveBeenCalled();
 
       cache.invalidate(); // POST /api/overview/refresh
-      expect(isForgeSuspended()).toBe(false);
+      expect(isForgeSuspended(DEFAULT_PROVIDER)).toBe(false);
 
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(1);
@@ -2024,7 +2025,7 @@ describe('overview', () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
 
-      noteRateLimited(Date.now() + 60_000);
+      noteRateLimited(DEFAULT_PROVIDER, Date.now() + 60_000);
       const cache = new OverviewCache();
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).not.toHaveBeenCalled();

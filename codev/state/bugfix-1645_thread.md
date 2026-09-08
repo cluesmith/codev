@@ -190,3 +190,38 @@ synchronously at dispatch, so `user-identity` is never dispatched once a sibling
 recorded the limit. Verified by removing the guard: the *unit* test in
 forge-rate-limit.test.ts fails, the overview one does not. The integration test now says
 which mechanism it pins and points at the unit test for the other.
+
+## 2026-09-07 — CMAP round 2 (final tree)
+
+| lane | verdict |
+|---|---|
+| gemini | APPROVE (HIGH), no key issues |
+| claude | APPROVE (HIGH), none blocking, 6 observations |
+| codex | REQUEST_CHANGES (HIGH), 2 issues |
+
+Codex's first issue — the PR should not auto-close #1645 "unless the issue's scope and
+acceptance criteria are formally revised" — is satisfied: the architect chose option (a)
+and the amended acceptance is now a comment on #1645 (zero spawns until reset; ≤50 % of
+the GraphQL budget at 13 watched workspaces; single-flight — with the ≤60/h-across-13
+number moving to #1647). Codex reviewed before that comment existed.
+
+Codex's second issue and claude's (a) are **the same finding from two lanes**, so I fixed
+it rather than deferring: the suspension was process-global and provider-blind, so a
+GitHub rate limit blanked a GitLab / Gitea / Linear workspace's Work view for the whole
+backoff window. `ForgeFailure` now carries the resolved `provider`, suspension state is
+keyed per provider, and `OverviewCache` memoizes each workspace's provider (cleared by
+`invalidate()`). The reset probe is GitHub-only — the `rate-limit` concept has no script
+outside the github preset, so on any other provider it would have fallen through to the
+github default and shelled out to `gh` for a forge that does not use it (claude's (d)).
+
+Also fixed from claude's list: entries are now stamped at fetch **completion**, not
+dispatch — a command sitting for its full 30 s timeout was burning half the 60 s negative
+window before the entry was even written (c); and `api.ts` claimed rate-limited lists were
+"stale on purpose" when the suspension branch returns empty (b).
+
+### An API footgun caught by its own test
+
+Making `provider` optional-and-last meant `isForgeSuspended(now)` type-checked while
+reading a timestamp as a provider name, and silently answered about the wrong forge — a
+test caught it, but production code could have hit it just as easily. `provider` is now a
+**required first argument** on all five functions, so a stale call site is a type error.

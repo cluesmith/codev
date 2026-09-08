@@ -320,6 +320,12 @@ export interface ForgeFailure {
   message: string;
   /** Child exit code when Node reported one. */
   exitCode: number | null;
+  /**
+   * The forge provider this command resolved against ('github' when config
+   * names none). A rate limit is charged to one forge's account, so observers
+   * must be able to scope their response to it rather than to every provider.
+   */
+  provider: string;
 }
 
 type ForgeFailureListener = (failure: ForgeFailure) => void;
@@ -343,13 +349,14 @@ export function onForgeFailure(listener: ForgeFailureListener): () => void {
 }
 
 /** Build a ForgeFailure from a child_process rejection and publish it. */
-function notifyFailure(concept: string, err: unknown): void {
+function notifyFailure(concept: string, err: unknown, forgeConfig: ForgeConfig | null): void {
   if (failureListeners.size === 0) return;
   const e = err as { stderr?: unknown; code?: unknown; message?: unknown };
   const stderr = typeof e?.stderr === 'string' ? e.stderr.trim() : '';
   const message = stderr || (err instanceof Error ? err.message : String(err));
   const exitCode = typeof e?.code === 'number' ? e.code : null;
-  const failure: ForgeFailure = { concept, message, exitCode };
+  const provider = forgeConfig?.provider ?? 'github';
+  const failure: ForgeFailure = { concept, message, exitCode, provider };
   for (const listener of failureListeners) {
     try {
       listener(failure);
@@ -399,7 +406,7 @@ export async function executeForgeCommand(
     return parseOutput(stdout, options?.raw);
   } catch (err: unknown) {
     logDebug(concept, err);
-    notifyFailure(concept, err);
+    notifyFailure(concept, err, forgeConfig);
     return null;
   }
 }
@@ -437,7 +444,7 @@ export function executeForgeCommandSync(
     return parseOutput(stdout, options?.raw);
   } catch (err: unknown) {
     logDebug(concept, err, true);
-    notifyFailure(concept, err);
+    notifyFailure(concept, err, forgeConfig);
     return null;
   }
 }
