@@ -1154,13 +1154,54 @@ conversation exists for that worktree — `kimi -c` with nothing to continue
 silently starts a fresh, roleless session, so the probe fails closed to a
 role-carrying fresh launch instead.
 
-Two notes specific to Kimi builders. Spawning pre-records workspace trust for the
-new worktree, because kimi 0.33.0+ opens on a "Trust this folder?" dialog that an
-unattended builder cannot answer (trust gates only whether project-level MCP
-servers load; it does not gate tool execution). And Kimi builders do NOT yet get
-the worktree write-guard Claude builders have (#1018) — kimi does have a
-blocking `PreToolUse` hook seam, so parity is achievable follow-up work rather
-than a permanent limitation.
+#### Workspace trust for Kimi builders (opt-in, default off)
+
+kimi 0.33.0+ opens on a "Trust this folder?" dialog, and a builder worktree is
+always a new folder — so an unattended Kimi builder stalls on a dialog it cannot
+answer. Codev can pre-record trust in kimi's own store, but **only when you ask
+for it**:
+
+```json
+{
+  "harnessOptions": {
+    "kimi": {
+      "autoTrustWorkspace": true
+    }
+  }
+}
+```
+
+**The default is `false`, and it is off for a reason.** Folder trust gates exactly
+one thing: whether kimi loads MCP servers **defined by the folder itself**
+(`.mcp.json`, `.kimi-code/mcp.json`). That is a different boundary from the
+`--yolo` tool auto-approval a Kimi builder already runs with — auto-approving
+tool calls and letting a checkout introduce new tool-providing processes are not
+the same permission. Spawning a builder onto a contributor branch is an ordinary
+workflow, so this decision is yours to make rather than one Codev makes quietly
+on your behalf.
+
+Even with the opt-in set, the pre-write is **refused** for any worktree that
+contains `.mcp.json` or `.kimi-code/mcp.json`. That is the one case where the
+trust decision actually grants something, so it is the one case a human answers.
+The log line names which file caused the refusal.
+
+**Consequence worth planning around:** if your repository ships a root
+`.mcp.json`, every Kimi builder worktree hits that refusal, so unattended Kimi
+spawning will not work until a human trusts each folder once. On any refusal
+nothing is lost — kimi shows its dialog, and the builder's queued task is *held*
+by the render gate (never misdelivered) and surfaces through the mailbox's
+escalation telemetry.
+
+Note `harnessOptions` is a separate key from `harness`, which defines *custom*
+harnesses; settings for built-in harnesses go under `harnessOptions`.
+
+#### No write-guard for Kimi builders yet
+
+Kimi builders do NOT get the worktree write-guard Claude builders have (#1018),
+so a Kimi builder can write into the main checkout. kimi does document a blocking
+`PreToolUse` hook seam, so parity is achievable follow-up work rather than a
+permanent limitation — but it is not in place today, and that is worth weighing
+before running Kimi builders unattended.
 
 Architect use of kimi and opencode is unsupported (claude or codex there).
 

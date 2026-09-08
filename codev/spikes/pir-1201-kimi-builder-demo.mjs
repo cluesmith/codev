@@ -101,9 +101,14 @@ for (const f of KIMI_HARNESS.getWorktreeFiles(ROLE)) {
 }
 const { fragment: roleFragment } = KIMI_HARNESS.buildScriptRoleInjection(ROLE, roleFile);
 
-// The spawn path pre-records folder trust so an unattended builder is not
-// stranded on kimi 0.33.0+'s "Trust this folder?" dialog.
-KIMI_HARNESS.prepareWorkspace?.(worktree);
+// The spawn path pre-records folder trust so an unattended builder is not stranded on kimi
+// 0.33.0+'s "Trust this folder?" dialog.
+//
+// The opt-in is passed EXPLICITLY (Issue #1620). It is off by default now, and the driver has
+// to stand in for an operator who has turned it on in .codev/config.json — without it kimi would
+// open on the dialog, no composer would ever render, and step 1 would hang rather than fail with
+// a useful message. Steps 6b/6c below exercise the refusal paths on their own throwaway dirs.
+KIMI_HARNESS.prepareWorkspace?.(worktree, { autoTrustWorkspace: true });
 
 const scriptPath = join(worktree, '.builder-start.sh');
 writeFileSync(scriptPath, KIMI_HARNESS.buildBuilderLaunchScript({
@@ -277,12 +282,45 @@ try {
     `empty store → exit ${emptyProbe.status} (want non-zero); real store → exit ${liveProbe.status} (want 0)`,
   );
 
-  // Trust pre-record is idempotent: the second call must be a no-op.
+  // --- Step 6: workspace trust — idempotence and both security refusals ---------
+  //
+  // Issue #1620 turned the unconditional pre-write into a gated one, and changed the return
+  // from a boolean to a KimiTrustDecision so the CALLER can log which of four things happened.
+  // All three checks below assert the REASON, not merely that no record appeared: an operator
+  // debugging a builder stalled on the trust dialog has a completely different next move for
+  // "you did not opt in" than for "this worktree ships .mcp.json", and a check that only looked
+  // for absence would pass even if the two were swapped.
+  const optedIn = { autoTrustWorkspace: true };
+
+  // The worktree was trusted during spawn (opted in, no MCP config), so this is the no-op path.
+  const second = ensureKimiWorkspaceTrust(worktree, optedIn);
   record(
     '6. workspace-trust pre-record is idempotent',
-    ensureKimiWorkspaceTrust(worktree) === false,
-    'second ensureKimiWorkspaceTrust() returned false (existing record left alone)',
+    second.wrote === false && second.reason === 'already-trusted',
+    `second ensureKimiWorkspaceTrust() → ${JSON.stringify(second)} (want already-trusted)`,
   );
+
+  // 6b: consent is required. A fresh directory, opted OUT, must get nothing.
+  const untrusted = mkdtempSync(join(tmpdir(), 'kimi-demo-optout-'));
+  const optedOut = ensureKimiWorkspaceTrust(untrusted);
+  record(
+    '6b. no trust record without an explicit opt-in',
+    optedOut.wrote === false && optedOut.reason === 'not-opted-in',
+    `ensureKimiWorkspaceTrust() with no opt-in → ${JSON.stringify(optedOut)} (want not-opted-in)`,
+  );
+  rmSync(untrusted, { recursive: true, force: true });
+
+  // 6c: the security refusal proper. Opted IN, but the worktree ships project-level MCP config —
+  // which is exactly what folder trust gates — so a human must answer the dialog.
+  const withMcp = mkdtempSync(join(tmpdir(), 'kimi-demo-mcp-'));
+  writeFileSync(join(withMcp, '.mcp.json'), '{"mcpServers":{}}');
+  const refused = ensureKimiWorkspaceTrust(withMcp, optedIn);
+  record(
+    '6c. opted-in trust is REFUSED for a worktree carrying project MCP config',
+    refused.wrote === false && refused.reason === 'project-mcp-config',
+    `ensureKimiWorkspaceTrust() on a worktree with .mcp.json → ${JSON.stringify(refused)} (want project-mcp-config)`,
+  );
+  rmSync(withMcp, { recursive: true, force: true });
 } finally {
   try { term.kill(); } catch { /* already dead */ }
 }

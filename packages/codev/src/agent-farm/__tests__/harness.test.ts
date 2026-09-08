@@ -569,6 +569,41 @@ describe('harness', () => {
       const taskCtx = { ...ctxBase, taskFile: '/tmp/wt/.builder-prompt.txt', builderId: 'pir-1201' };
       const bareCtx = { ...ctxBase, roleFragment: '', taskFile: null };
 
+      // Generated shell is the one artifact in this file that no type checker reads. Every
+      // shape gets parsed by a real bash so a stray backtick, an unbalanced quote, or a `${}`
+      // the TypeScript template literal ate cannot ship — the failure would otherwise appear as
+      // a builder terminal that dies instantly at spawn, far from its cause.
+      it.each([
+        ['task-carrying', () => KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx)],
+        ['bare', () => KIMI_HARNESS.buildBuilderLaunchScript!(bareCtx)],
+      ])('%s: the generated script is syntactically valid bash', (_name, build) => {
+        const file = join(mkdtempSync(join(tmpdir(), 'kimi-script-')), 'launch.sh');
+        writeFileSync(file, build(), 'utf-8');
+        const parsed = spawnSync('bash', ['-n', file], { encoding: 'utf-8' });
+        expect(parsed.stderr).toBe('');
+        expect(parsed.status).toBe(0);
+      });
+
+      // Issue #1620. spawn.ts creates this session and only THEN writes the builder's row, while
+      // `afx send` resolves its sender from cwd and THROWS when that row is missing (#1094). Lose
+      // the race and the old single-shot queue warned once and never retried — a builder with a
+      // role and no mission. Only node's startup latency was preventing it.
+      it('task-carrying: retries queueing rather than giving up on the first failure', () => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
+        expect(script).toContain('codev_queue_deadline_secs');
+        expect(script).toMatch(/while :; do[\s\S]*afx send --raw[\s\S]*sleep 2[\s\S]*done/);
+        // The warning must be reachable only AFTER the deadline, never on the first attempt.
+        expect(script).toMatch(/could not queue the builder's task after/);
+      });
+
+      // The sender resolves to the builder's OWN id (this script runs inside its worktree), so
+      // without --raw the opening mission arrives framed as a peer message from itself.
+      it('task-carrying: queues the task raw, so the spawn prompt is not wrapped as a self-send', () => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
+        expect(script).toContain('afx send --raw "$codev_builder_id"');
+        expect(script).not.toMatch(/afx send "\$codev_builder_id"/);
+      });
+
       it('task-carrying: role via --agent-file, task via the mailbox — never a positional prompt', () => {
         const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
         expect(script).toContain(ROLE_FRAGMENT);
@@ -582,7 +617,7 @@ describe('harness', () => {
         // by the recovery hints (CMAP 2026-08-09).
         expect(script).toContain("codev_builder_id='pir-1201'");
         expect(script).toContain("codev_task_file='/tmp/wt/.builder-prompt.txt'");
-        expect(script).toContain('afx send "$codev_builder_id" "$(cat "$codev_task_file")"');
+        expect(script).toContain('afx send --raw "$codev_builder_id" "$(cat "$codev_task_file")"');
         // No interpolated value may appear inside a double-quoted echo/printf line,
         // which is where bash WOULD re-scan it.
         for (const line of script.split('\n').filter((l) => /^\s*(echo|printf)\b/.test(l))) {
@@ -894,6 +929,66 @@ describe('harness', () => {
         expect(runProbe(worktree)).toBe(false);
       });
 
+      it('recovers when the first queue attempt loses the builder-registration race', () => {
+        // Issue #1620, the behaviour rather than the script text. spawn.ts starts this session
+        // and only THEN writes the builder row; `afx send` resolves its sender from cwd and
+        // exits non-zero while that row is missing (#1094). The stub reproduces exactly that:
+        // it fails until a sentinel appears, standing in for upsertBuilder landing.
+        //
+        // Pre-#1620 this warned once and returned, leaving a builder with a role and no
+        // mission. The only thing that made it survive in practice was node's startup latency
+        // beating a local HTTP round-trip — which is not a guarantee, it is a coincidence.
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!({
+          worktreePath: worktree, baseCmd: 'kimi', roleFragment: '--agent-file x',
+          taskFile: join(worktree, '.builder-prompt.txt'), builderId: 'pir-1201',
+        });
+        writeFileSync(join(worktree, '.builder-prompt.txt'), 'THE TASK', 'utf-8');
+        const bin = join(fakeHome, 'bin');
+        mkdirSync(bin, { recursive: true });
+        const calls = join(fakeHome, 'race-calls.log');
+        const registered = join(fakeHome, 'builder-registered');
+        writeFileSync(join(bin, 'afx'), [
+          '#!/bin/bash',
+          // Not yet registered → exit 1, the way the real CLI fatals on an unresolvable sender.
+          `[ -f '${registered}' ] || { touch '${registered}'; exit 1; }`,
+          `echo "\${@: -1}" >> '${calls}'`,
+        ].join('\n'), { mode: 0o755 });
+
+        const harnessFns = script.slice(script.indexOf('codev_builder_id='), script.indexOf('codev_newest_session()'));
+        const res = spawnSync('bash', ['-c', `${harnessFns}\ncodev_queue_task\necho "queued=$codev_task_queued"`], {
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf-8',
+        });
+        expect(res.status).toBe(0);
+        // The retry won: the task is on the mailbox and the flag is set, so a later fresh
+        // relaunch will not enqueue it a second time.
+        expect(readFileSync(calls, 'utf-8').trim().split('\n')).toEqual(['THE TASK']);
+        expect(res.stdout).toContain('queued=1');
+        // And no scary warning, because nothing was actually lost.
+        expect(res.stderr).not.toContain('could not queue');
+      }, 20_000);
+
+      it('gives up loudly, and only after the deadline, when the send never succeeds', () => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!({
+          worktreePath: worktree, baseCmd: 'kimi', roleFragment: '--agent-file x',
+          taskFile: join(worktree, '.builder-prompt.txt'), builderId: 'pir-1201',
+        });
+        writeFileSync(join(worktree, '.builder-prompt.txt'), 'THE TASK', 'utf-8');
+        const bin = join(fakeHome, 'bin');
+        mkdirSync(bin, { recursive: true });
+        writeFileSync(join(bin, 'afx'), '#!/bin/bash\nexit 1\n', { mode: 0o755 });
+
+        const harnessFns = script.slice(script.indexOf('codev_builder_id='), script.indexOf('codev_newest_session()'));
+        // Deadline shortened via the documented env var so the suite does not wait 30 s.
+        const res = spawnSync('bash', ['-c', `${harnessFns}\ncodev_queue_task\necho "queued=$codev_task_queued"`], {
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CODEV_TASK_QUEUE_DEADLINE_SECS: '2' },
+          encoding: 'utf-8',
+        });
+        expect(res.status).toBe(0);            // fail-soft: never aborts the launch
+        expect(res.stdout).toContain('queued=0'); // and never claims success
+        expect(res.stderr).toContain('could not queue');
+        expect(res.stderr).toContain('afx send --raw'); // the recovery command is printed
+      }, 20_000);
+
       it('queues the task ONCE across a crash-restart loop, and again after a clean-exit relaunch', () => {
         // codex #4: codev_launch_fresh queues the task, and a kimi that dies before
         // minting a session sends the loop back through fresh every 2s — so the same
@@ -910,8 +1005,12 @@ describe('harness', () => {
         const bin = join(fakeHome, 'bin');
         mkdirSync(bin, { recursive: true });
         const calls = join(fakeHome, 'afx-calls.log');
-        // `afx send <builder-id> <message>` → $3 is the task body.
-        writeFileSync(join(bin, 'afx'), `#!/bin/bash\necho "$3" >> '${calls}'\n`, { mode: 0o755 });
+        // `afx send --raw <builder-id> <message>` → the body is the LAST argument. Read it as
+        // `${@: -1}` rather than a fixed position, so this stub keeps testing the queueing
+        // state machine rather than breaking every time a flag is added to the send (Issue #1620
+        // added --raw, and a positional stub is how that turned into a red test with nothing
+        // actually wrong).
+        writeFileSync(join(bin, 'afx'), `#!/bin/bash\necho "\${@: -1}" >> '${calls}'\n`, { mode: 0o755 });
         const harnessFns = script.slice(script.indexOf('codev_builder_id='), script.indexOf('codev_newest_session()'));
         const res = spawnSync('bash', ['-c',
           `${harnessFns}\n` +

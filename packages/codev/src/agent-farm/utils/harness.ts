@@ -624,19 +624,43 @@ codev_task_file='${shellEscapeSingleQuote(ctx.taskFile)}'
 # agent that has not started yet — recoverable by reading, unlike the crash-loop
 # direction above, which floods a mailbox no one is draining.
 codev_task_queued=0
+# How long to keep trying to queue the task before giving up and warning (Issue #1620).
+#
+# THE RACE THIS CLOSES. spawn.ts starts this session and only THEN calls upsertBuilder, while
+# 'afx send' resolves its SENDER from cwd via detectCurrentBuilderId(), which THROWS when the
+# builder has no row yet ("Refusing to send with an unverified identity" -- the #1094
+# anti-spoofing guard). Lose that race and afx exits non-zero, the branch below warns once, and
+# nothing retries within this launch: the builder comes up with a role and no mission, and the
+# only trace is a line in this pane. Before this loop, the sole thing preventing that was node's
+# startup latency exceeding one local HTTP round-trip.
+#
+# A retry here rather than reordering the spawn path: the builder row carries terminal_id, which
+# does not exist until the session is created, so hoisting upsertBuilder would mean two upserts
+# on the path EVERY harness shares -- real blast radius for a kimi-only symptom.
+codev_queue_deadline_secs="\${CODEV_TASK_QUEUE_DEADLINE_SECS:-30}"
 codev_queue_task() {
   [ "$codev_task_queued" = 1 ] && return 0
   if ! command -v afx >/dev/null 2>&1; then
     printf '%s\\n' "WARNING: afx is not on PATH — the builder's task was not queued." >&2
-    printf '%s\\n' "         Queue it with: afx send $codev_builder_id \\"\\$(cat $codev_task_file)\\"" >&2
+    printf '%s\\n' "         Queue it with: afx send --raw $codev_builder_id \\"\\$(cat $codev_task_file)\\"" >&2
     return 0
   fi
-  if afx send "$codev_builder_id" "$(cat "$codev_task_file")" >/dev/null 2>&1; then
-    codev_task_queued=1
-    return 0
-  fi
-  printf '%s\\n' "WARNING: could not queue the builder's task (is Tower running?)." >&2
-  printf '%s\\n' "         Retry with: afx send $codev_builder_id \\"\\$(cat $codev_task_file)\\"" >&2
+  codev_waited=0
+  while :; do
+    # --raw: this script runs INSIDE the worktree, so afx resolves the sender as this same
+    # builder id -- a self-send. Without --raw the spawn prompt would arrive wrapped in
+    # "### [BUILDER <id> MESSAGE -> <id>] ###", an opening mission framed as a peer message
+    # from itself. .builder-prompt.txt is already a fully framed prompt; deliver it as itself.
+    if afx send --raw "$codev_builder_id" "$(cat "$codev_task_file")" >/dev/null 2>&1; then
+      codev_task_queued=1
+      return 0
+    fi
+    [ "$codev_waited" -ge "$codev_queue_deadline_secs" ] && break
+    sleep 2
+    codev_waited=$((codev_waited + 2))
+  done
+  printf '%s\\n' "WARNING: could not queue the builder's task after \${codev_queue_deadline_secs}s (is Tower running?)." >&2
+  printf '%s\\n' "         Retry with: afx send --raw $codev_builder_id \\"\\$(cat $codev_task_file)\\"" >&2
 }`;
 
     // Crash restart resumes the conversation (#1233's builder-side contract) via
