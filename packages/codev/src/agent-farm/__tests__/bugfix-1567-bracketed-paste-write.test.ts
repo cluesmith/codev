@@ -155,6 +155,12 @@ describe('Issue #1567 — the write edge never hands the PTY more than its input
     expect(joined).toContain('rm -rf /'); // the text itself is kept, only the markers go
   });
 
+  it('a body made only of paste markers becomes one empty, well-formed paste', () => {
+    const pieces = framePieces(PASTE_END.repeat(60), BRACKETED_PASTE); // >256 B, all markers
+    expect(pieces).toEqual([PASTE_BEGIN + PASTE_END]);
+    expect(pieces.join('')).not.toContain('undefined');
+  });
+
   it('short frames keep the pre-#1567 single write, byte for byte (raw slash commands included)', () => {
     const short = formatArchitectToBuilderMessage('spir-1', 'please review the plan');
     expect(short.split('\n')).toHaveLength(3);

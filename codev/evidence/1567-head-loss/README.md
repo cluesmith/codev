@@ -29,9 +29,10 @@ these is a just-freed-window race.
 | `fixed-r2-claude-production-…` | production edge after the CMAP round-1 fixes (cap includes markers, marker stripping) | 1172–1174 B / 3 lines | 20 | **0** | re-acceptance after the write shape changed |
 | `codex-codex-…` | bracketed-chunked against `codex-cli 0.146.0` | 1172 B / 3 lines | 3 | 0 | codex shows `[Pasted Content 1168 chars]` in its composer, full frame (fences kept) in the transcript |
 
-Each run directory holds `summary.md` (the table plus an ANSI-stripped screen excerpt per trial)
-and `results.json` (machine-readable). The baseline directory also keeps the raw PTY byte log
-(`pty.raw`, not committed) — the same evidence the issue's forensic comment read.
+Each run directory holds `summary.md` (the per-trial table; the baseline run keeps an
+ANSI-stripped screen excerpt for every trial, the first fixed run for three, the others none) and,
+for the baseline and fixed runs, `results.json` (machine-readable per-trial fields, no excerpts).
+Raw PTY byte logs (`pty.raw`) are written by the harness but git-ignored here.
 
 ## What the numbers say
 

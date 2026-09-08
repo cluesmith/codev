@@ -141,3 +141,10 @@ all addressed in the follow-up commit:
   excerpts and results.json (codex: 6,330 added lines → ~2,400).
 Not taken: codex's remark that the placard is generic evidence — it is count-based against a
 pre-write sample (same doctrine as the header needle); noted, no change.
+
+CMAP round 2 (codex, general-mode on the worktree diff because Tower's overview cache burned the
+GitHub GraphQL quota — #1645): REQUEST_CHANGES on two points, both fixed: (a) `pty.raw` captures
+had been tracked by the round-1 `git add <dir>` (contradicting the README) — untracked +
+git-ignored, results.json excerpts dropped, fixed-run excerpts trimmed to 3 trials; tracked
+evidence ~720 KB → ~110 KB. (b) `framePieces` on a body that is nothing but paste markers
+produced the literal text "undefined" — now one empty well-formed paste; test added.

@@ -127,6 +127,9 @@ export function framePieces(message: string, strategy: WriteStrategy): string[] 
     // Chunk with room for the markers so NO write — first or last piece included — exceeds
     // PASTE_CHUNK_BYTES on the wire.
     const pieces = chunkForPty(body, PASTE_CHUNK_BYTES - PASTE_BEGIN.length - PASTE_END.length);
+    // A body that was NOTHING but markers is empty after stripping; still emit one (empty) paste
+    // so the frame is a well-formed no-op rather than the literal text "undefined".
+    if (pieces.length === 0) pieces.push('');
     pieces[0] = PASTE_BEGIN + pieces[0];
     pieces[pieces.length - 1] += PASTE_END;
     return pieces;
