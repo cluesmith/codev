@@ -425,3 +425,27 @@ comment. Recording it rather than guessing. **If you see it again, treat the wor
 untrusted and diff against HEAD before building on it.**
 
 Full suite 5,790 green; e2e still 5 gh calls for 40 polls.
+
+### Provenance of the "VACUITY CHECK" edits — solved
+
+The architect traced it from transcripts: **the consult CLAUDE reviewer lane edited this
+worktree directly.** Its Agent SDK session (started 07:55:18Z) used the Edit tool 5 times
+between 07:00:01 and 07:00:49 to revert my fixes and check whether the tests were vacuous —
+its `allowedTools` list defeated by `permissionMode: bypassPermissions`. Filed as a bug.
+
+So a reviewer was mutating the code under test while I was building on it. Not malicious,
+and its instinct was the right one (it was checking the same vacuity I was), but it means
+**a CMAP lane can silently change your working tree**.
+
+Protocol from round 7 on, per the architect:
+
+1. **Commit everything BEFORE running consult.**
+2. After each lane finishes, run `git status` and `git diff`.
+3. Restore only reviewer-touched files with `git checkout -- <path>` — never a bare
+   `git checkout -- .`, which would take unrelated work with it.
+4. Note the practice in the PR body's verification section.
+
+Retrospective check on this PR: every "verified failing with the fix reverted" result was
+produced by my own scripted revert→test→restore, each confirmed by a subsequent clean
+`git diff` against HEAD, so none of those results is contaminated. The one anomaly I could
+not explain at the time is now fully accounted for.

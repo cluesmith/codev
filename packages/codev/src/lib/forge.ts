@@ -363,8 +363,12 @@ export function resolveConceptBackend(
   forgeConfig?: ForgeConfig | null,
 ): string {
   const provider = forgeConfig?.provider ?? DEFAULT_PROVIDER;
+  const providerBackend = (PROVIDER_EXECUTABLES[provider.toLowerCase()] ?? provider).toLowerCase();
   const command = getForgeCommand(concept, forgeConfig);
-  if (command === null) return provider.toLowerCase();
+  // A disabled concept still has to answer in the same namespace as every
+  // other: returning the bare provider name here was the one place the alias
+  // map was bypassed, so `github` could key separately from `gh`.
+  if (command === null) return providerBackend;
 
   // `provider` belongs in the key, not just `command`: two workspaces can
   // resolve the same default script while naming different providers, and the
@@ -402,10 +406,9 @@ export function resolveConceptBackend(
     // every concept a backend of its own and fragment one account across all
     // of them, arguments or no arguments.
     || basename === concept;
-  const fallback = PROVIDER_EXECUTABLES[provider.toLowerCase()] ?? provider;
   const backend = (
-    unknownTool || GENERIC_TRANSPORTS.has(basename!.toLowerCase()) ? fallback : basename!
-  ).toLowerCase();
+    unknownTool || GENERIC_TRANSPORTS.has(basename!.toLowerCase()) ? providerBackend : basename!.toLowerCase()
+  );
   _backendCache.set(key, backend);
   return backend;
 }

@@ -1257,7 +1257,13 @@ export class OverviewCache {
       ? existing.promise.then(() => undefined, () => undefined)
       : Promise.resolve();
 
-    const flight = (async () => {
+    // The entry is created first so the cleanup below can compare identity
+    // without referencing a promise from inside its own initializer.
+    const entry: { promise: Promise<T | null>; generation: number } =
+      { promise: undefined as unknown as Promise<T | null>, generation };
+
+    entry.promise = (async () => {
+      try {
       await predecessor;
       const data = await fetcher();
       // An invalidate() while this was in flight means the result was fetched
@@ -1287,18 +1293,23 @@ export class OverviewCache {
         void maybeProbeReset(backend, cwd);
       }
       return data;
+      } finally {
+        // Cleanup lives INSIDE the async function, not on a chained
+        // `.finally()`. A chained one returns a derived promise that nobody
+        // awaits, so a rejecting fetcher — reachable, since
+        // `executeForgeCommand` resolves forge config outside its own try and
+        // `loadConfig` fails fast — would surface as an unhandled rejection,
+        // and Tower's handler for those calls `process.exit(1)`.
+        //
+        // Identity check, because a newer entry may already be registered under
+        // this key: deleting that one would let the next caller start yet
+        // another fetch, the fan-out single-flight exists to prevent.
+        if (this.inflight.get(key) === entry) this.inflight.delete(key);
+      }
     })();
-    // Delete only if *this* flight is still the registered one. `invalidate()`
-    // clears the join table, so a newer flight can already be registered under
-    // this key by the time an older one settles — and deleting that entry would
-    // let the next caller start yet another fetch, the fan-out single-flight
-    // exists to prevent.
-    void flight.finally(() => {
-      if (this.inflight.get(key)?.promise === flight) this.inflight.delete(key);
-    });
 
-    this.inflight.set(key, { promise: flight, generation });
-    return flight;
+    this.inflight.set(key, entry as { promise: Promise<unknown>; generation: number });
+    return entry.promise;
   }
 
   /** The backend one concept runs against in this workspace, memoized (#1645). */
@@ -1309,7 +1320,11 @@ export class OverviewCache {
       try {
         backend = resolveConceptBackend(concept, loadForgeConfig(cwd));
       } catch {
-        backend = DEFAULT_PROVIDER;
+        // Resolve with no config rather than falling back to the raw provider
+        // name. `DEFAULT_PROVIDER` is `github`, but every write keys the
+        // *executable* (`gh`) — a workspace whose config load threw would key
+        // `github` and never honour its own suspension.
+        backend = resolveConceptBackend(concept, null);
       }
       this.backendCache.set(key, backend);
     }

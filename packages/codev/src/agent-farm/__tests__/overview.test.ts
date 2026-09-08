@@ -2064,6 +2064,31 @@ describe('overview', () => {
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
+    it('does not orphan a rejection when a fetcher throws (#1645)', async () => {
+      // `executeForgeCommand` resolves forge config OUTSIDE its own try, and
+      // `loadConfig` fails fast, so a fetcher really can reject. A chained
+      // `.finally()` would leave that rejection on a derived promise nobody
+      // awaits — and Tower's `unhandledRejection` handler calls
+      // `process.exit(1)`. The whole cache going down beats a stale PR list,
+      // so this must stay caught.
+      const unhandled: unknown[] = [];
+      const onUnhandled = (r: unknown): void => { unhandled.push(r); };
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        mockFetchPRList.mockRejectedValue(new Error('malformed .codev/config.json'));
+        mockFetchIssueList.mockResolvedValue([]);
+
+        const cache = new OverviewCache();
+        await expect(cache.getOverview(tmpDir)).rejects.toThrow('malformed');
+        // Let any orphaned derived promise surface.
+        await new Promise(r => setTimeout(r, 10));
+
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+    });
+
     it('bounds concurrency across repeated invalidations (#1645)', async () => {
       // porch fires invalidate() after every mutating command, so in a busy
       // workspace they arrive constantly. Each one must not be licence to start
