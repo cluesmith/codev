@@ -343,6 +343,7 @@ afx send [builder] [message] [options]
 - `--raw` - Skip structured message formatting
 - `--no-enter` - Do not send Enter after message
 - `--delay <seconds>` - Deliver after N seconds instead of immediately
+- `--interrupt-after <seconds>` - Try a clean delivery first; FORCE it (Ctrl+C + ungated body) if still held after N seconds (Issue #1481)
 
 **Delayed delivery (`--delay`):**
 
@@ -378,6 +379,58 @@ free to exit in the meantime. That is the point: a session can schedule a messag
 afx send architect:main --delay 15 --raw '/arch-init main'
 ```
 
+**Bounded patience (`--interrupt-after <seconds>`, Issue #1481):**
+
+Between "force now" and "wait forever". The message is sent as an ordinary gated send — it
+delivers the moment the prompt is clean — but if it is *still held* when the budget runs out,
+Tower **forces** it: Ctrl+C, a 100 ms settle, then the message body written **without the render
+gate**, and Enter unless `--no-enter`.
+
+Which flag to reach for:
+
+| flag | meaning | use for |
+|---|---|---|
+| (none) | hold until the prompt is clean, however long that takes | ordinary mail |
+| `--delay <s>` | not deliverable until `<s>` from now, then gated; **never** forces | scheduling |
+| `--interrupt-after <s>` | gated from the start; forces **only if still held** at `<s>` | **time-sensitive** |
+| `--interrupt` | force **now** | **urgent** |
+
+- **This is an opt-in exception to the no-force rule.** The forced body skips the render gate,
+  so it can land in a half-typed draft or a menu, exactly as `--interrupt` can. Ctrl+C ends the
+  turn first, but nothing proves the composer was empty when the body followed.
+- **Bounds:** greater than zero and at most 3600 seconds. **Fractions are allowed** (unlike
+  `--delay`, which takes whole seconds). Rejected at the CLI *and* server boundaries.
+- **The budget bounds when the escalation STARTS, not when the agent reads the message.** At the
+  deadline the force still queues behind any operator writes already waiting on that terminal —
+  an unbounded wait by design, because two operator writes must never interleave. It never
+  promises receipt, and `no-enter` stages a body without submitting it at all.
+- **A clean prompt still wins.** The row is eligible for ordinary delivery for the whole window;
+  a normal delivery that completes first cancels the force with no second body. Dismissing the
+  row (`afx inbox dismiss <id>`) cancels it too.
+- **The force does not survive a Tower restart** — the *message* does. On startup, an armed row
+  that never fired is recorded `skipped-restart` and reverts to ordinary held mail. Force
+  authority is tied to the Tower lifetime that accepted it, so a restart cannot surprise an
+  unrelated turn hours later with an interrupt nobody is still waiting for. Same for a recipient
+  that is offline or whose session was replaced while the deadline waited: `skipped-offline` /
+  `skipped-session-replaced`, body still held.
+- **Not combinable with `--interrupt` (already forcing), `--delay` (a budget over a
+  not-yet-deliverable message has no unambiguous start), or the API's `escape` option (an ESC
+  carries no body to escalate).** Refused with a 400 rather than silently dropping one of them.
+- **`--all` arms one deadline per recipient**, so a single broadcast can interrupt every busy
+  builder at once. The CLI says how many.
+- **Outcomes are audit, never receipt.** `afx inbox show <id>` reports what happened:
+  `armed` (waiting), `claimed` / `claimed-degraded` (the row was claimed — the write may or may
+  not have landed), `written-unverified` / `degraded-written-unverified` (the writer finished; no
+  acknowledgement from the agent), `failed` / `degraded-failed`, or a `skipped-*` reason. A
+  `⚠ a normal write may have already emitted part of this message` line means an earlier ordinary
+  attempt failed *possibly* mid-write, so the forced retry may duplicate part of it — an explicit
+  accepted tradeoff, chosen over abandoning the escalation the operator asked for.
+
+```bash
+# Prefer a clean prompt, but do not wait more than 30 seconds
+afx send 0042 --interrupt-after 30 "Wrap up and open the PR — the release cuts in 10 minutes."
+```
+
 **Description:**
 
 Sends text to a builder's terminal. Useful for:
@@ -395,7 +448,9 @@ Sends text to a builder's terminal. Useful for:
   - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
   - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
 
-A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
+The system **never force-injects a held message on its own**: no timeout, valve, or fallback that Tower decides for you writes onto a busy line, so a body cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`.
+
+Exactly two flags bypass the gate, and both are per-message and chosen by the **sender**: `--interrupt` interrupts the agent and writes immediately without holding (unchanged semantics), and `--interrupt-after <seconds>` holds normally and forces the same way **only if the message is still held** when the deadline passes (Issue #1481 — see the *Bounded patience* section above). Neither is a system-applied force; what you opt into is exactly one forced write for exactly one message.
 
 **Examples:**
 

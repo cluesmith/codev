@@ -113,6 +113,46 @@ export function writeMessageToSession(
 }
 
 /**
+ * Ctrl+C — ends the agent's current turn the way a human's ^C does (Spec 1313 `--interrupt`).
+ */
+export const CTRL_C = '\x03';
+
+/**
+ * How long the interrupt writer waits between the Ctrl+C and the message body.
+ *
+ * A settle, not a proof: it gives the TUI time to process the ^C and repaint before bytes land,
+ * but nothing here verifies that a draft or menu actually went away. That uncertainty is
+ * inherent to every force path and is documented at the flags that opt into one.
+ */
+export const INTERRUPT_SETTLE_MS = 100;
+
+/**
+ * The shared force-delivery write: Ctrl+C, a fixed settle, then the formatted body (and its
+ * Enter unless `noEnter`).
+ *
+ * ONE implementation for both force paths — immediate `--interrupt` (`tower-routes.ts`) and the
+ * timed escalation of `--interrupt-after` (`mailbox-interrupt.ts`, Issue #1481). They must have
+ * identical bytes, pacing and settle, because the whole contract of `--interrupt-after` is "do
+ * exactly what `--interrupt` does, only later"; two copies of this sequence would drift and the
+ * later one would silently become a different feature.
+ *
+ * MUST be invoked inside a per-terminal submission lock acquisition (`session-submit.ts`): the
+ * ^C, the settle window and the body are one critical section, and a concurrent writer landing
+ * in the gap between them is exactly the composer-clearing race that lock exists to close.
+ *
+ * @returns ms from now until the last keystroke has been written — the value
+ *          `submitToSession` needs to hold the lock for the whole sequence.
+ */
+export function writeInterruptToSession(
+  session: WritableSession,
+  formattedMessage: string,
+  noEnter: boolean,
+): number {
+  session.write(CTRL_C);
+  return writeMessageToSession(session, formattedMessage, noEnter, INTERRUPT_SETTLE_MS);
+}
+
+/**
  * Outcome of a {@link submitMessagePaced} attempt. Generic in the caller's own abort
  * vocabulary so this module stays free of mailbox concepts — the delivery layer
  * instantiates `A` with its hold reasons.

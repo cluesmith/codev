@@ -468,6 +468,96 @@ describe('send command', () => {
     });
   });
 
+  // =========================================================================
+  // --interrupt-after (Issue #1481)
+  //
+  // The CLI's two jobs for this flag: forward it on every send route, and tell the
+  // operator the truth about a force that will happen long after this process exits.
+  // =========================================================================
+  describe('--interrupt-after', () => {
+    it('passes interruptAfter through to the client', async () => {
+      await send({ builder: 'builder-spir-109', message: 'wrap up', interruptAfter: 30 });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'wrap up',
+        expect.objectContaining({ interruptAfter: 30 }),
+      );
+    });
+
+    it('omits interruptAfter when the flag is not given', async () => {
+      await send({ builder: 'builder-spir-109', message: 'now' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'now',
+        expect.objectContaining({ interruptAfter: undefined }),
+      );
+    });
+
+    it('arms one deadline per recipient under --all', async () => {
+      // Each builder gets its own row and therefore its own deadline; a broadcast is
+      // where one command turns into N unattended interrupts.
+      await send({ all: true, builder: 'broadcast', interruptAfter: 20 });
+
+      for (const call of mockSendMessage.mock.calls) {
+        expect(call[2]).toEqual(expect.objectContaining({ interruptAfter: 20 }));
+      }
+      expect(mockSendMessage.mock.calls.length).toBeGreaterThan(1);
+    });
+
+    it('never claims a held message was delivered just because a force is armed', async () => {
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', held: true, reason: 'busy-line',
+        interruptAt: Date.now() + 30_000,
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'wrap up', interruptAfter: 30 });
+
+      const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+      expect(successMessages.some((m) => /^Message delivered to/.test(m))).toBe(false);
+      expect(vi.mocked(logger.info).mock.calls.map((c) => String(c[0])).some((m) => /held/i.test(m))).toBe(true);
+    });
+
+    it('warns what the force will actually do, and what it does not promise', async () => {
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', held: true, reason: 'busy-line',
+        interruptAt: Date.now() + 30_000,
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'wrap up', interruptAfter: 30 });
+
+      const warning = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0])).join('\n');
+      expect(warning).toMatch(/Ctrl\+C/);              // what lands on the terminal
+      expect(warning).toMatch(/without the render gate/); // the exception being opted into
+      expect(warning).toMatch(/bounds when that starts/); // not when the agent reads it
+      expect(warning).toMatch(/Tower restart/);        // the force's lifetime boundary
+    });
+
+    it('says nothing about a force when the message delivered immediately', async () => {
+      // No interruptAt came back, so there is no armed escalation to describe. Warning
+      // about one anyway would train operators to ignore the warning that matters.
+      mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'builder-spir-109', delivered: true });
+
+      await send({ builder: 'builder-spir-109', message: 'wrap up', interruptAfter: 30 });
+
+      const warning = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0])).join('\n');
+      expect(warning).not.toMatch(/FORCED/);
+    });
+
+    it('tells a broadcast sender how many turns one command may interrupt', async () => {
+      mockSendMessage.mockResolvedValue({
+        ok: true, held: true, reason: 'busy-line', interruptAt: Date.now() + 20_000,
+      });
+
+      await send({ all: true, builder: 'broadcast', interruptAfter: 20 });
+
+      const warning = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0])).join('\n');
+      expect(warning).toMatch(/FORCED after ~20s/);
+      expect(warning).toMatch(/interrupted turns from this one command/);
+    });
+  });
+
   describe('error handling', () => {
     it('throws when Tower is not running', async () => {
       mockIsRunning.mockResolvedValue(false);
