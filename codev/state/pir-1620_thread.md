@@ -202,3 +202,27 @@ this branch does; noted for the post-merge full-suite run. Item 3 (GraphQL exhau
 and `gh pr view` sparingly; the reads I needed were local.
 
 Still at plan-approval. `porch approve` not run.
+
+## 2026-09-08 (later) — both findings accepted; bisect numbers now in the plans
+
+Architect accepted both: Kimi → `PLAIN_CHUNKED` until measured, and `enterDelayMs` must govern the
+paste path's Enter too. Asked for the bisect numbers to be stated in the plan, which was the right
+correction — I had them as prose ("80 and 100 swallowed") and prose is what gets skimmed.
+
+Both plans now carry the table explicitly: 80 ms and 100 ms **swallowed, never submit**; 120 / 250 /
+500 / 1000 ms submit; threshold ≈ 100–120 ms; pinned at 1000 ms for ~9× margin, re-verified on
+0.34.0. Stated alongside it that `PASTE_ENTER_DELAY_MS = 80` was measured 0/29 losses on claude
+2.1.263 and codex 0.146.0 — sound evidence for those two, and silent about the one CLI whose
+paste-detection window is the reason the seam exists. The point of putting the numbers next to each
+other is that the collision is then unmissable to whoever touches this next.
+
+Also noted in the plan: the unit test must assert the override on **both** frame branches. A test
+covering only the short frame would pass while the feature was broken for every real message —
+which is most of them, since a formatted `afx send` is almost always ≥4 lines.
+
+The opt-out-default hazard is the architect's follow-up, explicitly **not** folded into this PR.
+Recorded as a fenced note in the plan next to 2a-bis so a later reader does not "helpfully" widen
+the diff: fixing the default touches every harness's write path, and this lane's job is to stop
+being the thing that broke, not to redesign the mechanism.
+
+Still at plan-approval. `porch approve` not run.

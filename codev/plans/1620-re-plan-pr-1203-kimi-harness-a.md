@@ -64,10 +64,29 @@ after PR #1644 landed:
   where `PACED_ENTER_DELAY_MS` used to be — **`PASTE_ENTER_DELAY_MS` (80 ms)**, after the paste's
   closing marker.
 
-**And that 80 ms is the whole reason this seam exists.** Kimi's bisect was: 80 ms and 100 ms
-swallowed, 120 ms+ submit. The new long-frame Enter lands at *exactly* the measured failure point,
-so without the override every multi-line message to a Kimi builder is typed and never submitted —
-the original #1201 symptom, reintroduced by a change that had no reason to know about Kimi.
+**And that 80 ms is the whole reason this seam exists.** The numbers, because this is the kind of
+collision that gets re-broken by the next person who does not have them in front of them:
+
+| Enter delay after the body | Kimi 0.27.0 | Source |
+|---|---|---|
+| **80 ms** | **swallowed — never submits** | #1201 live bisect (POC probe-10 method) |
+| **100 ms** | **swallowed — never submits** | same |
+| 120 ms | submits | same |
+| 250 / 500 / 1000 ms | submits | same |
+
+Threshold ≈ 100–120 ms. `KIMI_ENTER_DELAY_MS` is pinned at **1000 ms** for ~9× margin (the only
+cost is submission latency, irrelevant agent-to-agent), and re-verified submitting on 0.34.0 under
+agent-core-v2.
+
+`PASTE_ENTER_DELAY_MS` is **80 ms** — the first row of that table. It was measured at 0/29 losses
+on claude 2.1.263 and codex 0.146.0, which is sound evidence for those two and says nothing about a
+CLI whose paste-detection window is the reason this seam was built. So the new long-frame Enter
+lands on *exactly* Kimi's known failure value: without the override on that branch, every
+multi-line message to a Kimi builder is typed and never submitted — the original #1201 symptom,
+reintroduced by a change that had no reason to know Kimi exists. `MessagePacing.enterDelayMs` must
+therefore govern **both** Enter sites, not just the short-frame one it was originally written for.
+The unit test asserts it on both branches; a test that only covered the short frame would pass
+while the feature was broken for every real message.
 
 **2a-bis. Kimi must NOT default to bracketed paste — fail-safe, pending Mohid's measurement.**
 `writeStrategyForApp(app)` returns `PLAIN_CHUNKED` for `'agy'` and `BRACKETED_PASTE` for everything
@@ -86,6 +105,12 @@ line, reversible the moment evidence exists, and it fails toward the behaviour M
 actually validated. Confirming bracketed-paste tolerance is **step 8 on the handoff checklist**; if
 Kimi does honour it, flipping Kimi to `BRACKETED_PASTE` is a follow-up with evidence attached, not
 a guess made now.
+
+**Explicitly NOT in this PR (architect, 2026-09-08):** making bracketed paste opt-*in* per measured
+app, with `PLAIN_CHUNKED` as the default, is a follow-up the architect owns and files. The hazard is
+real — agy is listed only because someone remembered, so the *next* harness inherits bracketed paste
+by silence exactly as Kimi would have — but fixing the default is a change to every harness's write
+path, and this lane's job is to stop being the thing that broke. We list Kimi and stop there.
 
 **2b. Delivery port + binding.** `DeliveryPorts.writeMessage` keeps main's current shape — `(session, msg, noEnter, precheck, strategy)`, the strategy resolved in `mailbox-delivery.ts:744` from `writeStrategyForApp(profile.app)`. Pacing is resolved by the *binding* instead, because it is a property of the target session and no unit fake should have to know about it:
 ```ts
