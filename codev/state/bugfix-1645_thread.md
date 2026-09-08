@@ -40,3 +40,38 @@ Frozen to the architect's six items (negative cache+backoff, per-backend suspens
 single-flight w/ generation tag, TTLs 180/600/3600 + list-only debounced invalidate,
 forgeStatus/forgeResetAt payload, `# forge-executable:` on the 8 builtin-resolving
 scripts). Doctor check, #1647, #1648, #1650 are out. Estimated production diff ≈ 300 lines.
+
+## 2026-09-08 — fix (commit 92b5881f8, pushed)
+
+Shape, in dependency order (all inside the architect's six-item scope):
+- `lib/forge.ts`: `executeForgeCommandDetailed` keeps `{stderr, exitCode}` and never rejects
+  (config resolution moved inside the try — a malformed `.codev/config.json` used to be
+  reachable as an unhandled rejection, which tower-server turns into `process.exit(1)`).
+  `resolveForgeBackend` keys a concept by its resolved executable basename (`gh`), falling
+  back to the provider for generic transports (`curl`) and custom script paths.
+- `lib/forge-rate-limit.ts` (new): `ForgeRateLimiter` — per-budget suspension, 15 min
+  fallback, one advisory `gh api rate_limit` probe per fresh suspension (trusted only when
+  it reports `remaining === 0`), strict-`>` success clearing. Budget key: `gh` for the four
+  lists, `gh:rest` for `user-identity`/`auth-status`.
+- `servers/overview.ts`: one `cachedFetch` path — TTL 180/600/3600 s, negative entries with
+  a per-`<workspace>:<budget>` window (60 s doubling to 15 min, once per elapsed window),
+  suspension gate before any spawn, single-flight per `<workspace>:<concept>` with an
+  identity-checked cleanup, `invalidate()` = epoch stamp honoured by positive open-list
+  entries only, debounced 60 s per entry (hence per workspace). Payload gains
+  `forgeStatus` + `forgeResetAt`; error text names the real backend.
+- Scripts: `github/pr-list` no longer pipes gh into jq (POSIX sh has no pipefail);
+  `# forge-executable:` on gitlab/issue-search + the 7 linear scripts.
+- Dashboard: WorkView shows a rate-limited banner with the reset time.
+
+Surprise caught by my own Linear pitfall test: a *success* from the same batch that
+triggered the suspension (recently-merged succeeded while pr-list was rate-limited)
+cleared it, because `startedAt <= dispatchedAt` was true in the same millisecond. Pitfall
+B10 in the list is exactly this; comparison is now strict `>`.
+
+Production diff: 448+/125− over 17 files (overview.ts 163+/91−, forge-rate-limit.ts 105,
+forge.ts 76+/11−, github.ts 69+/18−). Tests: 17 new (10 cache-level pitfall tests, 6
+limiter unit tests, 1 real-`gh`-on-PATH harness) + 5 forge tests, 7 existing tests
+re-pinned to the new TTL/debounce semantics with an injected clock.
+
+Full suite first run: 67 failures in 12 files, all "embedded skeleton not found" — the
+worktree had no `dist/` (skeleton bundle). Rebuilding the package and re-running.
