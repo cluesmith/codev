@@ -1,7 +1,7 @@
 id: bugfix-1567
 title: afx-send-delivery-side-silent-
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-08T03:31:22.279Z'
-updated_at: '2026-09-08T04:05:28.351Z'
+updated_at: '2026-09-08T04:17:50.732Z'
