@@ -262,6 +262,82 @@ export class MailboxInterruptCoordinator {
     this.schedule(entry);
   }
 
+  /**
+   * Run one dispatched escalation step behind a boundary that CANNOT reject (CMAP round 5 — Codex).
+   *
+   * Both entry points into the escalation are floating: an OS timer callback and a row-ownership
+   * continuation, neither of which has a caller to await them. `tower-server.ts` exits the process
+   * on `unhandledRejection`, so an unguarded throw here does not fail one escalation — it takes
+   * Tower down and every builder in the fleet loses its terminal. That is a far worse outcome than
+   * the message this force exists to deliver, and the exposed window is real: `attempt()` opens its
+   * own `try` only at the submission, so its `getById`, its dispatch-ceiling branch and `disarm`
+   * all run outside it, and a better-sqlite3 hiccup in that window is enough.
+   *
+   * Every timer- or continuation-dispatched call goes through here. Direct callers that DO have a
+   * caller (the restart sweep, `arm`) are unchanged — their exceptions belong to their caller.
+   */
+  private dispatch(entry: ArmedEntry, run: () => Promise<void>): void {
+    void run().catch((err: unknown) => this.abandon(entry, err));
+  }
+
+  /**
+   * Give up on one escalation from an unknown error state, without throwing again.
+   *
+   * The row is left with a TERMINAL outcome rather than `armed`: nothing is armed for it any more,
+   * and an `armed` row that nothing will ever act on is exactly the false durable state
+   * `skipped-contended` was added to remove — the inbox would promise an escalation for the rest of
+   * this Tower's lifetime. `skipped-error` says what actually happened. The update is guarded on
+   * `armed`, so a row that had already been CLAIMED keeps its claim: claimed is terminal by
+   * construction, and the body may already be on the wire.
+   *
+   * Every step is individually guarded. Whatever threw is most likely the database, which is also
+   * what this path is about to touch, and a recovery path that throws is not a recovery path.
+   */
+  private abandon(entry: ArmedEntry, err: unknown): void {
+    const safely = (fn: () => void): void => {
+      try {
+        fn();
+      } catch {
+        // Deliberately swallowed: this IS the error path, and it must terminate.
+      }
+    };
+    const ports = this.ports;
+    const db = this.db;
+    safely(() =>
+      ports?.log(
+        `[mailbox] --interrupt-after escalation for ${entry.rowId.slice(0, 8)}… → ${entry.toAgent} failed ` +
+          `unexpectedly and was abandoned: ${String(err)}`,
+        'ERROR',
+      ),
+    );
+    let recorded = false;
+    safely(() => {
+      if (db && ports) recorded = skipForcedInterrupt(db, entry.rowId, 'skipped-error', ports.now());
+    });
+    if (recorded && ports) {
+      // The row just stopped suppressing the starvation alarm, and the operator is owed the same
+      // notice any other skip produces. No delivery event: nothing was written. The addressing
+      // comes off the in-memory entry rather than a fresh row read — a read is exactly the kind
+      // of call that may have just failed, and everything needed is already here.
+      let priorPartial = false;
+      safely(() => {
+        if (db) priorPartial = (getById(db, entry.rowId)?.interrupt_prior_partial ?? 0) === 1;
+      });
+      safely(() => ports.onHeldStateChange());
+      safely(() =>
+        ports.onForceOutcome({
+          workspacePath: entry.workspacePath,
+          toAgent: entry.toAgent,
+          mailboxId: entry.rowId,
+          terminalId: null,
+          outcome: 'skipped-error',
+          priorPartial,
+        }),
+      );
+    }
+    safely(() => this.disarm(entry));
+  }
+
   private schedule(entry: ArmedEntry): void {
     const ports = this.ports;
     if (!ports) return;
@@ -272,7 +348,7 @@ export class MailboxInterruptCoordinator {
     const delay = Math.max(0, entry.deadlineAt - ports.now());
     entry.timer = ports.setTimer(() => {
       entry.timer = null;
-      void this.fire(entry);
+      this.dispatch(entry, () => this.fire(entry));
     }, delay);
   }
 
@@ -495,11 +571,11 @@ export class MailboxInterruptCoordinator {
         this.disarm(entry);
         return;
       }
-      void this.attempt(entry);
+      this.dispatch(entry, () => this.attempt(entry));
     };
     // A `false` return means the owner released between our decline and this registration —
     // nothing to wait for, so re-attempt straight away rather than arming a dead continuation.
-    if (!whenRowWriteSettles(entry.rowId, onSettled)) void this.attempt(entry);
+    if (!whenRowWriteSettles(entry.rowId, onSettled)) this.dispatch(entry, () => this.attempt(entry));
   }
 
   /** Record a completed/failed force: audit first, then exactly one of each downstream event. */
@@ -513,22 +589,38 @@ export class MailboxInterruptCoordinator {
     const db = this.db;
     if (!ports || !db) return;
     setForcedInterruptOutcome(db, entry.rowId, outcome, ports.now());
-    const priorPartial = row.interrupt_prior_partial === 1;
+    // Read `interrupt_prior_partial` FRESH (CMAP round 5 — Claude). `row` was snapshotted before
+    // the submission lock, and a gated attempt that entered its own write edge while this force
+    // queued behind it can set the flag in exactly that window. The column and `afx inbox` were
+    // always right; the SSE frame and the operator notification were reporting the older read —
+    // and those are the surfaces a human actually watches. The plan requires a body that may
+    // duplicate effects to be visible, so it has to be visible there too. (The deferred path
+    // re-reads on its way back through `attempt`; only the direct path was stale, which is why
+    // no existing test caught it.)
+    const priorPartial = (getById(db, entry.rowId) ?? row).interrupt_prior_partial === 1;
     // The claim already removed the row from the held set; refresh the indicator ONCE, here,
     // rather than inside the claim→first-byte sequence.
     ports.onHeldStateChange();
     // ONE feed event for this transition, through the same broadcast path the gated delivery
-    // uses. The outcome travels as metadata so the frame can never imply receipt.
-    ports.broadcast({
-      workspacePath: row.workspace_path,
-      toAgent: row.to_agent,
-      fromAgent: row.from_agent,
-      fromWorkspace: row.from_workspace,
-      body: row.body,
-      timestamp: ports.now(),
-      outcome,
-      priorPartial,
-    });
+    // uses — but ONLY when a body actually went out (CMAP round 5 — Codex). A `failed` force had
+    // its write REJECTED by the terminal; broadcasting it through the delivery channel put the
+    // body on the feed, and the outcome rides as OPTIONAL metadata that an existing consumer is
+    // free to ignore, so a force that wrote nothing could render as receipt. The one thing this
+    // whole feature must never do is imply a delivery that did not happen. A failed force is
+    // reported by its outcome notification and its log line, both of which say so explicitly.
+    const wroteBody = outcome !== 'failed' && outcome !== 'degraded-failed';
+    if (wroteBody) {
+      ports.broadcast({
+        workspacePath: row.workspace_path,
+        toAgent: row.to_agent,
+        fromAgent: row.from_agent,
+        fromWorkspace: row.from_workspace,
+        body: row.body,
+        timestamp: ports.now(),
+        outcome,
+        priorPartial,
+      });
+    }
     ports.onForceOutcome({
       workspacePath: row.workspace_path,
       toAgent: row.to_agent,
@@ -566,8 +658,9 @@ export class MailboxInterruptCoordinator {
         toAgent: row.to_agent,
         mailboxId: entry.rowId,
         terminalId,
+        // Fresh, for the same reason as {@link recordCompletion}: `row` predates the lock wait.
+        priorPartial: (getById(db, entry.rowId) ?? row).interrupt_prior_partial === 1,
         outcome,
-        priorPartial: row.interrupt_prior_partial === 1,
       });
       ports.log(
         `[mailbox] --interrupt-after for ${entry.rowId.slice(0, 8)}… → ${row.to_agent} @ ` +

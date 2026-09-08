@@ -894,3 +894,303 @@ describe('Issue #1481 — the force and the ordinary delivery cannot write the s
     expect(mailbox.getById(db, row.id)!.status).toBe('delivered');
   });
 });
+
+/**
+ * CMAP round 5 — failure containment.
+ *
+ * Everything above asks what the escalation does when the world behaves. These ask what it does
+ * when the world does not: the database throws, a port throws, or a fact changes between the
+ * snapshot and the report. Three of the four findings this block covers were invisible to the
+ * suite above because it never made anything fail in the right place.
+ */
+describe('Issue #1481 — failure containment', () => {
+  let db: Database.Database;
+  let clock: ReturnType<typeof fakeClock>;
+  let coordinator: MailboxInterruptCoordinator;
+  let rejections: unknown[];
+  const catchRejection = (err: unknown): void => {
+    rejections.push(err);
+  };
+
+  beforeEach(() => {
+    resetSubmissionChains();
+    resetRowWriteOwnership();
+    db = new Database(':memory:');
+    db.exec(GLOBAL_SCHEMA);
+    clock = fakeClock(1000);
+    coordinator = new MailboxInterruptCoordinator();
+    // The real consequence under test: tower-server.ts calls process.exit on an unhandled
+    // rejection, so a floating promise that rejects here does not fail one escalation — it takes
+    // Tower down and every builder in the fleet loses its terminal.
+    rejections = [];
+    process.on('unhandledRejection', catchRejection);
+  });
+
+  afterEach(() => {
+    process.off('unhandledRejection', catchRejection);
+    coordinator.stop();
+    db.close();
+  });
+
+  const enqueue = (opts: { deadlineIn?: number } = {}) =>
+    mailbox.enqueue(
+      db,
+      {
+        workspacePath: WS,
+        toAgent: AGENT,
+        body: BODY,
+        formattedMessage: BODY,
+        interruptAt: clock.now() + (opts.deadlineIn ?? 1000),
+      },
+      clock.now(),
+    );
+
+  /**
+   * A database whose SELECTs throw on demand. SELECT is the surgical choice: it is what
+   * `attempt()` runs at :306, OUTSIDE its own try, and leaving UPDATE working lets the test
+   * assert that the recovery path still records a terminal outcome rather than merely surviving.
+   */
+  function failingSelects(real: Database.Database): { db: Database.Database; fail: { on: boolean } } {
+    const fail = { on: false };
+    const proxy = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            if (fail.on && /^\s*SELECT/i.test(sql)) throw new Error('database is locked');
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    return { db: proxy, fail };
+  }
+
+  it('contains a database error in the unguarded window instead of taking Tower down', async () => {
+    const c = makeComposer();
+    const { ports, rec } = makePorts(clock, () => c.session);
+    const { db: flaky, fail } = failingSelects(db);
+    coordinator.start(ports, flaky);
+    const row = enqueue();
+    coordinator.arm(row);
+
+    fail.on = true;
+    clock.advance(1000); // fires the timer → attempt() → getById throws before its own try opens
+
+    await waitFor(() => rec.outcomes.length > 0, 'the abandoned outcome');
+    fail.on = false;
+
+    expect(rejections).toEqual([]); // the whole point: nothing escaped to the process
+    // The row does NOT stay `armed`. Nothing is armed for it any more, and an armed row nothing
+    // will act on is a promise the inbox would keep making for this Tower's whole lifetime.
+    expect(mailbox.getById(db, row.id)!.interrupt_outcome).toBe('skipped-error');
+    expect(mailbox.getById(db, row.id)!.status).toBe('held'); // the message itself is not lost
+    expect(rec.outcomes.map((o) => o.outcome)).toEqual(['skipped-error']);
+    expect(rec.outcomes[0]).toMatchObject({ toAgent: AGENT, workspacePath: WS, terminalId: null });
+    expect(rec.broadcasts).toEqual([]); // nothing was written, so nothing reaches the feed
+    expect(coordinator.pending).toEqual([]);
+    expect(c.interrupts).toEqual([]);
+  });
+
+  it('contains an error on the row-ownership continuation path too', async () => {
+    const c = makeComposer();
+    let resolutions = 0;
+    const { ports, rec } = makePorts(clock, () => {
+      resolutions += 1;
+      return c.session;
+    });
+    const { db: flaky, fail } = failingSelects(db);
+    coordinator.start(ports, flaky);
+    const row = enqueue();
+    coordinator.arm(row);
+
+    // An ordinary write owns the row, so the deadline dispatch stands aside and registers a
+    // continuation — the SECOND floating call site, reached only from a released token.
+    const owner = tryAcquireRowWrite(row.id)!;
+    clock.advance(1000);
+    // The second session resolution happens inside the write callback, immediately before the
+    // declined `tryAcquireRowWrite`. Waiting on the ARMED count instead would pass on the first
+    // poll — the entry is armed from `arm()`, long before it defers.
+    await waitFor(() => resolutions >= 2, 'the dispatch reaching its write edge');
+    await sleep(30); // the continuation registers after the submit resolves
+
+    fail.on = true;
+    owner.settle('no-bytes'); // → the continuation re-attempts → throws
+    await waitFor(() => rec.outcomes.length > 0, 'the abandoned outcome');
+    fail.on = false;
+
+    expect(rejections).toEqual([]);
+    expect(mailbox.getById(db, row.id)!.interrupt_outcome).toBe('skipped-error');
+    expect(ownedRowWriteCount()).toBe(0); // and it did not strand the token on the way out
+  });
+
+  it('survives a recovery path that ALSO throws, without a second rejection', async () => {
+    const c = makeComposer();
+    const { ports, rec } = makePorts(clock, () => c.session);
+    // Every port the abandon path touches throws. If any of them were unguarded the recovery
+    // would itself become the unhandled rejection it exists to prevent.
+    ports.log = () => {
+      throw new Error('logger is down');
+    };
+    ports.onHeldStateChange = () => {
+      throw new Error('sse is down');
+    };
+    ports.onForceOutcome = () => {
+      throw new Error('notifier is down');
+    };
+    const { db: flaky, fail } = failingSelects(db);
+    coordinator.start(ports, flaky);
+    const row = enqueue();
+    coordinator.arm(row);
+
+    fail.on = true;
+    clock.advance(1000);
+    await waitFor(() => mailbox.getById(db, row.id)!.interrupt_outcome === 'skipped-error', 'terminal outcome');
+    fail.on = false;
+
+    expect(rejections).toEqual([]);
+    expect(coordinator.pending).toEqual([]); // still disarmed, despite three throwing ports
+    expect(rec.outcomes).toEqual([]);
+  });
+
+  it('reports a prior partial write that landed AFTER the force was dispatched', async () => {
+    // The stale-read bug: `attempt()` snapshots the row before the submission lock, and a gated
+    // attempt can flip `interrupt_prior_partial` while the force is queued behind it. The column
+    // and `afx inbox` were always right; the feed frame and the operator notice — the surfaces a
+    // human actually watches — reported the older value, so a body that may duplicate effects
+    // announced itself as clean.
+    const c = makeComposer();
+    let resolutions = 0;
+    const { ports, rec } = makePorts(clock, () => {
+      resolutions += 1;
+      // The second resolution happens INSIDE the write callback, after the snapshot and before
+      // the claim — exactly the window a real gated attempt would flip the flag in.
+      if (resolutions === 2) mailbox.markInterruptPriorPartial(db, row.id, clock.now());
+      return c.session;
+    });
+    coordinator.start(ports, db);
+    const row = enqueue();
+    expect(mailbox.getById(db, row.id)!.interrupt_prior_partial).toBe(0);
+    coordinator.arm(row);
+
+    clock.advance(1000);
+    await waitFor(() => rec.outcomes.length > 0, 'force outcome');
+
+    expect(mailbox.getById(db, row.id)!.interrupt_prior_partial).toBe(1);
+    expect(rec.outcomes[0].priorPartial).toBe(true);
+    expect(rec.broadcasts[0].priorPartial).toBe(true);
+  });
+
+  it('does NOT put a failed force on the delivery feed', async () => {
+    // A `failed` force had its write REJECTED. Broadcasting it through the delivery channel put
+    // the body on the feed with the outcome riding as OPTIONAL metadata, which an existing
+    // consumer is free to ignore — so a force that wrote nothing could render as receipt.
+    const c = makeComposer();
+    const { ports, rec } = makePorts(clock, () => c.session);
+    coordinator.start(ports, db);
+    const row = enqueue();
+    coordinator.arm(row);
+    c.state.accept = false;
+
+    clock.advance(1000);
+    await waitFor(() => mailbox.getById(db, row.id)!.interrupt_outcome === 'failed', 'failed outcome');
+    await sleep(120);
+
+    expect(rec.broadcasts).toEqual([]);
+    // Still reported — through the two channels that state the outcome in words.
+    expect(rec.outcomes.map((o) => o.outcome)).toEqual(['failed']);
+    expect(rec.logs.join('\n')).toContain('failed');
+    expect(rec.heldChanges).toBe(1);
+  });
+
+  it('still puts a successful force on the delivery feed', async () => {
+    const c = makeComposer();
+    const { ports, rec } = makePorts(clock, () => c.session);
+    coordinator.start(ports, db);
+    const row = enqueue();
+    coordinator.arm(row);
+
+    clock.advance(1000);
+    await waitFor(() => rec.outcomes.length > 0, 'force outcome');
+
+    expect(rec.broadcasts.map((b) => b.outcome)).toEqual(['written-unverified']);
+  });
+
+  it('releases row ownership when the post-write region THROWS', async () => {
+    // `finishRowWrite` is called on every path that RETURNS, which is not every path. A throw
+    // from `markDelivered` (a DB hiccup at the point of no return) used to strand the token:
+    // the waiting force would then defer on every dispatch and end as `skipped-contended` — a
+    // bounded-patience send silently downgraded to nothing by an unrelated database error.
+    const c = makeComposer();
+    const row = mailbox.enqueue(
+      db,
+      { workspacePath: WS, toAgent: AGENT, body: BODY, formattedMessage: BODY },
+      Date.now(),
+    );
+    const armed = { on: false };
+    const flaky = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            if (armed.on && /UPDATE mailbox SET status = 'delivered'/.test(sql)) {
+              throw new Error('database is locked');
+            }
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+
+    armed.on = true;
+    await expect(
+      deliverAgentMail(deliveryPorts(sessionFor(c.session)), flaky, WS, AGENT),
+    ).rejects.toThrow('database is locked');
+    armed.on = false;
+
+    expect(c.submitted).toEqual([BODY]); // the bytes did go out — this is the post-write region
+    expect(mailbox.getById(db, row.id)!.status).toBe('held'); // the transition never committed
+    expect(ownedRowWriteCount()).toBe(0); // and the token did not leak
+  });
+
+  it('lets a waiting force proceed after a gated write threw past its release', async () => {
+    // The consequence of the leak, end to end: with the token stranded the force below would
+    // decline on every dispatch and retire itself as `skipped-contended`.
+    const c = makeComposer();
+    const { ports, rec } = makePorts(clock, () => c.session);
+    coordinator.start(ports, db);
+    const row = enqueue();
+    coordinator.arm(row);
+    const armed = { on: true };
+    const flaky = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            if (armed.on && /UPDATE mailbox SET status = 'delivered'/.test(sql)) {
+              throw new Error('database is locked');
+            }
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+
+    await expect(
+      deliverAgentMail(deliveryPorts(sessionFor(c.session)), flaky, WS, AGENT),
+    ).rejects.toThrow('database is locked');
+    armed.on = false;
+    expect(ownedRowWriteCount()).toBe(0);
+
+    clock.advance(1000);
+    await waitFor(() => rec.outcomes.length > 0, 'the force after a thrown gated write');
+
+    // It forces, and it discloses that the gated attempt may already have put bytes on the line.
+    expect(rec.outcomes[0].outcome).toBe('written-unverified');
+    expect(rec.outcomes[0].priorPartial).toBe(true);
+    expect(mailbox.getById(db, row.id)!.status).toBe('delivered');
+  });
+});

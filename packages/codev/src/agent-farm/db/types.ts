@@ -152,6 +152,7 @@ export type MailboxInterruptOutcome =
   | 'skipped-offline'
   | 'skipped-session-replaced'
   | 'skipped-contended'
+  | 'skipped-error'
   | 'skipped-restart';
 
 /**

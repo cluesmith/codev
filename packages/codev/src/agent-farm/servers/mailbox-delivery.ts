@@ -708,18 +708,22 @@ export async function deliverAgentMail(
   // writes unserialized, and for the SAME row that is not an interleaving, it is the body twice.
   // Claiming last is deliberate: an attempt that was going to abort anyway must never block the
   // other writer. Released in the `finally` below, once this attempt's outcome is committed.
-  let rowWrite: RowWriteHandle | null = null;
+  // Held on an object rather than a `let`: it is assigned inside the `precheck` closure, and
+  // TypeScript's control-flow analysis does not see a closure's assignments — a bare `let` would
+  // narrow to `null` at the `finally` below and refuse the settle. (Same reason as the `state`
+  // object in {@link MailboxInterruptCoordinator.attempt}.)
+  const rowWrite: { handle: RowWriteHandle | null } = { handle: null };
   const precheck = (): WriteAbort | null => {
     if (!session.writable) return { kind: 'hold', reason: 'no-live-pty' };
     if (ringToken(session, profile) !== tokenBefore) return { kind: 'hold', reason: 'busy' };
     if (!settled(ports, session)) return { kind: 'hold', reason: 'busy' };
     const stillHeld = getById(db, row.id);
     if (!stillHeld || stillHeld.status !== 'held') return { kind: 'row-resolved' };
-    rowWrite = tryAcquireRowWrite(row.id);
+    rowWrite.handle = tryAcquireRowWrite(row.id);
     // A force is mid-write on this very row. Write nothing and re-hold: whatever it is doing,
     // it either delivers the row (this pass would have been a duplicate) or leaves it held for
     // the next clean pass.
-    if (!rowWrite) return { kind: 'hold', reason: 'busy' };
+    if (!rowWrite.handle) return { kind: 'hold', reason: 'busy' };
     return null;
   };
 
@@ -732,13 +736,18 @@ export async function deliverAgentMail(
 
   /**
    * Release this attempt's per-row ownership with what actually happened (Issue #1481). Called
-   * on EVERY exit path below, and before echo verification on the success path — verification
-   * reads the screen and writes nothing, so holding the row across it would stall a waiting
-   * force for over a second for no safety gain.
+   * on every path below that RETURNS, and before echo verification on the success path —
+   * verification reads the screen and writes nothing, so holding the row across it would stall a
+   * waiting force for over a second for no safety gain.
+   *
+   * It is NOT the whole release rule, and the earlier version of this comment claiming it was is
+   * what hid an exception hole for a round (CMAP round 5 — Codex): a path that THROWS never
+   * reaches any of these calls. The `finally` at the end of the write region is the backstop that
+   * makes the release total; this is the path that names the precise outcome.
    */
   const finishRowWrite = (outcome: RowWriteOutcome): void => {
-    rowWrite?.settle(outcome);
-    rowWrite = null;
+    rowWrite.handle?.settle(outcome);
+    rowWrite.handle = null;
   };
 
   /**
@@ -765,173 +774,203 @@ export async function deliverAgentMail(
   // Default to a hold so an unobserved result is the SAFE failure mode (hold, never a false
   // delivery); the try either assigns the real result or throws past this point.
   let result: WriteResult = { status: 'aborted', abort: { kind: 'hold', reason: 'busy' } };
+  // EXCEPTION SAFETY FOR THE ROW TOKEN (CMAP round 5 — Codex). `finishRowWrite` is called on
+  // every EXPECTED exit below, which is not the same as every exit: a throw from `markDelivered`,
+  // from `markInterruptPriorPartial` inside `recordPossiblePartial`, or from any port called in
+  // the post-write region would leave this attempt owning the row forever. A waiting force then
+  // defers on each dispatch and ends as `skipped-contended` — a bounded-patience send silently
+  // downgraded to nothing by an unrelated database error. This `finally` is a backstop, not the
+  // release path: `settle` is null-safe and `finishRowWrite` nulls the handle, so on every normal
+  // path it does nothing at all.
   try {
-    result = await ports.writeMessage(session, current.formatted_message, current.no_enter === 1, precheck);
-  } catch (err) {
-    // A throw from the binding is the `dropped` case with less information: its port contract
-    // permits it to fail after some bytes are out. Treat it as uncertain rather than clean, then
-    // rethrow — the callers' existing "a gate/write error leaves the row held" handling stands.
-    recordPossiblePartial();
-    finishRowWrite('uncertain');
-    throw err;
-  } finally {
-    // Invalidate the memo on EVERY write outcome — a clean `true`, a dropped-write `false`, OR a
-    // rejection — and BEFORE the markDelivered/held decisions below (CMAP round 3 moved it above the
-    // guard; round 4 — Codex — made it rejection-safe via this finally). The write is what makes the
-    // cached CLEAN verdict stale (it put the submitted line + a fresh prompt on the wire, or some of
-    // its bytes), regardless of whether the row then transitions, holds, or the write completes
-    // cleanly. Ways a leftover CLEAN would leak, all closed here: (a) a dismiss/supersede lands during
-    // the paced write → markDelivered returns false and we early-return below, bytes already out;
-    // (b) a dropped write reports `false` (Spec 1313 integration review — silent-loss fix) after
-    // putting SOME bytes on the wire, e.g. the text landed but the Enter dropped → we hold below;
-    // (c) writeMessage REJECTS after partial bytes — its port contract (`boolean | Promise<boolean>`)
-    // permits a binding to throw, and a bare throw would skip a delete placed after the await. In
-    // every case a leftover CLEAN would let a follow-up held message memo-hit the SAME token (PTY
-    // INPUT does not advance the ring — only OUTPUT does) and write onto the not-yet-echoed line, so
-    // the memo must die here. The deeper input-echo-lag window — a fresh classify racing the echo — is
-    // the pre-existing gate→write INPUT race in the review's Technical Debt.
-    memo?.delete(cacheKey);
-  }
+    try {
+      result = await ports.writeMessage(session, current.formatted_message, current.no_enter === 1, precheck);
+    } catch (err) {
+      // A throw from the binding is the `dropped` case with less information: its port contract
+      // permits it to fail after some bytes are out. Treat it as uncertain rather than clean, then
+      // rethrow — the callers' existing "a gate/write error leaves the row held" handling stands.
+      recordPossiblePartial();
+      finishRowWrite('uncertain');
+      throw err;
+    } finally {
+      // Invalidate the memo on EVERY write outcome — a clean `true`, a dropped-write `false`, OR a
+      // rejection — and BEFORE the markDelivered/held decisions below (CMAP round 3 moved it above the
+      // guard; round 4 — Codex — made it rejection-safe via this finally). The write is what makes the
+      // cached CLEAN verdict stale (it put the submitted line + a fresh prompt on the wire, or some of
+      // its bytes), regardless of whether the row then transitions, holds, or the write completes
+      // cleanly. Ways a leftover CLEAN would leak, all closed here: (a) a dismiss/supersede lands during
+      // the paced write → markDelivered returns false and we early-return below, bytes already out;
+      // (b) a dropped write reports `false` (Spec 1313 integration review — silent-loss fix) after
+      // putting SOME bytes on the wire, e.g. the text landed but the Enter dropped → we hold below;
+      // (c) writeMessage REJECTS after partial bytes — its port contract (`boolean | Promise<boolean>`)
+      // permits a binding to throw, and a bare throw would skip a delete placed after the await. In
+      // every case a leftover CLEAN would let a follow-up held message memo-hit the SAME token (PTY
+      // INPUT does not advance the ring — only OUTPUT does) and write onto the not-yet-echoed line, so
+      // the memo must die here. The deeper input-echo-lag window — a fresh classify racing the echo — is
+      // the pre-existing gate→write INPUT race in the review's Technical Debt.
+      memo?.delete(cacheKey);
+    }
 
-  // Anything short of a complete submit holds the row — a delivery is marked delivered only when
-  // every byte, Enter included, reached the terminal.
-  //
-  //   • `dropped` — a PTY write was dropped (#1198): zero-or-partial bytes reached the terminal,
-  //     the exact silent loss this spec exists to prevent (Spec 1313 integration review — Codex).
-  //     The t=0 `writable` precheck cannot catch a socket that dies mid-pace (the text/lines/Enter
-  //     fire across setTimeout gaps). Any bytes already on the wire only make the line dirty; the
-  //     render gate then holds on that draft until the session recovers or is torn down.
-  //   • `contended` — another submission (an `--interrupt`/`--escape`, or a delivery to an agent
-  //     sharing this terminal) held the lock, so nothing was written. `busy` is the honest reason:
-  //     the line is occupied. Declining rather than queueing is deliberate — see
-  //     {@link trySubmitToSession}: the drainer walks agents sequentially, so a blocking wait here
-  //     would stall every OTHER agent's delivery behind this one terminal.
-  //   • `aborted` — the in-lock precheck refused, with nothing written. A `hold` abort re-holds for
-  //     the stated reason; `row-resolved` means the row was dismissed/superseded while we waited,
-  //     which is a TERMINAL state and must not be re-held (same handling as the pre-lock check
-  //     above, which this one backstops for the duration of the lock wait).
-  //   • `preempted` — the bytes went out, but an operator submission whose wait ceiling expired
-  //     wrote unserialized while they did, so the composer may have been cleared or truncated
-  //     under them. Hold rather than mark delivered. This trades a possible DUPLICATE (if the
-  //     message did land intact, the gate re-delivers it later) for never reporting a delivery
-  //     that did not happen — the same call the `dropped` branch already makes, and the failure
-  //     this whole issue exists to remove. It is the one hole the ceiling opens, and it is
-  //     detected by counting lock bypasses, not by re-reading the screen.
-  if (result.status === 'dropped') {
-    recordPossiblePartial();
-    finishRowWrite('uncertain');
-    return hold('no-live-pty');
-  }
-  if (result.status === 'preempted') {
-    recordPossiblePartial();
-    finishRowWrite('uncertain');
-    ports.log(
-      `[mailbox] write to ${toAgent} @ ${path.basename(workspacePath)} was raced by an unserialized ` +
-        `operator write — holding ${row.id.slice(0, 8)}… for redelivery rather than reporting it delivered`,
-    );
-    return hold('busy');
-  }
-  // `contended` and `aborted` wrote NOTHING, and neither ever acquired row ownership (the
-  // precheck claims it last, and a contended callback never runs at all) — the settle is a
-  // null-safe no-op that keeps the release rule uniform rather than conditional.
-  if (result.status === 'contended') {
-    finishRowWrite('no-bytes');
-    return hold('busy');
-  }
-  if (result.status === 'aborted') {
-    finishRowWrite('no-bytes');
-    if (result.abort.kind === 'row-resolved') {
-      ports.onHeldStateChange(); // the held set changed under us → refresh the indicator
+    // Anything short of a complete submit holds the row — a delivery is marked delivered only when
+    // every byte, Enter included, reached the terminal.
+    //
+    //   • `dropped` — a PTY write was dropped (#1198): zero-or-partial bytes reached the terminal,
+    //     the exact silent loss this spec exists to prevent (Spec 1313 integration review — Codex).
+    //     The t=0 `writable` precheck cannot catch a socket that dies mid-pace (the text/lines/Enter
+    //     fire across setTimeout gaps). Any bytes already on the wire only make the line dirty; the
+    //     render gate then holds on that draft until the session recovers or is torn down.
+    //   • `contended` — another submission (an `--interrupt`/`--escape`, or a delivery to an agent
+    //     sharing this terminal) held the lock, so nothing was written. `busy` is the honest reason:
+    //     the line is occupied. Declining rather than queueing is deliberate — see
+    //     {@link trySubmitToSession}: the drainer walks agents sequentially, so a blocking wait here
+    //     would stall every OTHER agent's delivery behind this one terminal.
+    //   • `aborted` — the in-lock precheck refused, with nothing written. A `hold` abort re-holds for
+    //     the stated reason; `row-resolved` means the row was dismissed/superseded while we waited,
+    //     which is a TERMINAL state and must not be re-held (same handling as the pre-lock check
+    //     above, which this one backstops for the duration of the lock wait).
+    //   • `preempted` — the bytes went out, but an operator submission whose wait ceiling expired
+    //     wrote unserialized while they did, so the composer may have been cleared or truncated
+    //     under them. Hold rather than mark delivered. This trades a possible DUPLICATE (if the
+    //     message did land intact, the gate re-delivers it later) for never reporting a delivery
+    //     that did not happen — the same call the `dropped` branch already makes, and the failure
+    //     this whole issue exists to remove. It is the one hole the ceiling opens, and it is
+    //     detected by counting lock bypasses, not by re-reading the screen.
+    if (result.status === 'dropped') {
+      recordPossiblePartial();
+      finishRowWrite('uncertain');
+      return hold('no-live-pty');
+    }
+    if (result.status === 'preempted') {
+      recordPossiblePartial();
+      finishRowWrite('uncertain');
+      ports.log(
+        `[mailbox] write to ${toAgent} @ ${path.basename(workspacePath)} was raced by an unserialized ` +
+          `operator write — holding ${row.id.slice(0, 8)}… for redelivery rather than reporting it delivered`,
+      );
+      return hold('busy');
+    }
+    // `contended` and `aborted` wrote NOTHING, and neither ever acquired row ownership (the
+    // precheck claims it last, and a contended callback never runs at all) — the settle is a
+    // null-safe no-op that keeps the release rule uniform rather than conditional.
+    if (result.status === 'contended') {
+      finishRowWrite('no-bytes');
+      return hold('busy');
+    }
+    if (result.status === 'aborted') {
+      finishRowWrite('no-bytes');
+      if (result.abort.kind === 'row-resolved') {
+        ports.onHeldStateChange(); // the held set changed under us → refresh the indicator
+        return { delivered: [], reason: null };
+      }
+      return hold(result.abort.reason);
+    }
+
+    // THE POINT OF NO RETURN (Issue #1584). Past this line the write COMPLETED — every byte,
+    // Enter included, was accepted by the session — so the row is at-least-once delivered and
+    // must NEVER be written again. Nothing below may `hold(...)`: a hold puts the row back in
+    // the drainer's held set, and the next clean-prompt pass re-writes the WHOLE message with
+    // no attempt cap anywhere in this module. That is exactly what #1583 saw in the field —
+    // one `afx send --file` re-injected dozens of times, byte-identical, silently (a `busy`
+    // hold is excluded from {@link isClassifierStuck}, so no streak ever escalates it).
+    //
+    // Only PRE-write prechecks may hold, and every hold above this point is one: the branches
+    // between the write and here wrote NOTHING (`contended`, `aborted`) or produced a write that
+    // cannot be trusted to have landed (`dropped` — bytes lost mid-pace to a dead socket;
+    // `preempted` — an unserialized operator submission may have cleared or truncated the
+    // composer under them). Only `written` reaches this line, and only `written` is the
+    // at-least-once guarantee that forbids a re-write.
+    //
+    // COMMIT THE DELIVERY FIRST, before any further await or fallible call (CMAP round 1 — Codex).
+    // The point of no return is only real if it is DURABLE: while the row still reads `held` in
+    // the database it is re-writable by the next drainer tick, so leaving it held across ~1.2 s of
+    // verification would reopen the loop for any interruption of that window — a Tower crash or
+    // restart, or a `verify()` that rejects instead of answering. `markDelivered` is synchronous
+    // (better-sqlite3), so ordering it here leaves no window at all.
+    //
+    // markDelivered is guarded (held→delivered only). If it did NOT transition, the row was
+    // dismissed/superseded during the paced write — accept that terminal state and do not
+    // broadcast a delivery for it.
+    if (!markDelivered(db, row.id, ports.now())) {
+      // Someone else resolved it while we wrote. Terminal either way — a waiting force must not
+      // write a second body for a row that is no longer held.
+      finishRowWrite('terminal');
+      ports.onHeldStateChange();
       return { delivered: [], reason: null };
     }
-    return hold(result.abort.reason);
-  }
-
-  // THE POINT OF NO RETURN (Issue #1584). Past this line the write COMPLETED — every byte,
-  // Enter included, was accepted by the session — so the row is at-least-once delivered and
-  // must NEVER be written again. Nothing below may `hold(...)`: a hold puts the row back in
-  // the drainer's held set, and the next clean-prompt pass re-writes the WHOLE message with
-  // no attempt cap anywhere in this module. That is exactly what #1583 saw in the field —
-  // one `afx send --file` re-injected dozens of times, byte-identical, silently (a `busy`
-  // hold is excluded from {@link isClassifierStuck}, so no streak ever escalates it).
-  //
-  // Only PRE-write prechecks may hold, and every hold above this point is one: the branches
-  // between the write and here wrote NOTHING (`contended`, `aborted`) or produced a write that
-  // cannot be trusted to have landed (`dropped` — bytes lost mid-pace to a dead socket;
-  // `preempted` — an unserialized operator submission may have cleared or truncated the
-  // composer under them). Only `written` reaches this line, and only `written` is the
-  // at-least-once guarantee that forbids a re-write.
-  //
-  // COMMIT THE DELIVERY FIRST, before any further await or fallible call (CMAP round 1 — Codex).
-  // The point of no return is only real if it is DURABLE: while the row still reads `held` in
-  // the database it is re-writable by the next drainer tick, so leaving it held across ~1.2 s of
-  // verification would reopen the loop for any interruption of that window — a Tower crash or
-  // restart, or a `verify()` that rejects instead of answering. `markDelivered` is synchronous
-  // (better-sqlite3), so ordering it here leaves no window at all.
-  //
-  // markDelivered is guarded (held→delivered only). If it did NOT transition, the row was
-  // dismissed/superseded during the paced write — accept that terminal state and do not
-  // broadcast a delivery for it.
-  if (!markDelivered(db, row.id, ports.now())) {
-    // Someone else resolved it while we wrote. Terminal either way — a waiting force must not
-    // write a second body for a row that is no longer held.
+    // The commit is what makes this write un-repeatable, so ownership can go now: everything
+    // below reads the screen and reports, and a force that wakes up here will find the row
+    // terminal and cancel itself.
     finishRowWrite('terminal');
-    ports.onHeldStateChange();
-    return { delivered: [], reason: null };
-  }
-  // The commit is what makes this write un-repeatable, so ownership can go now: everything
-  // below reads the screen and reports, and a force that wakes up here will find the row
-  // terminal and cancel itself.
-  finishRowWrite('terminal');
-  ports.broadcast(broadcastForRow(current, ports.now()));
-  ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
-  ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
+    ports.broadcast(broadcastForRow(current, ports.now()));
+    ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
+    ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
 
-  // Echo verification (Issue #1573) still runs — it is the only end-to-end evidence the bytes
-  // reached the terminal — but it is now pure REPORTING, downstream of a delivery that is
-  // already committed. `false` means "could not confirm", never "definitely lost".
-  let verified: boolean | undefined;
-  if (echo) {
-    // One bounded RE-verify window before giving up. `verify()` polls to its own deadline and
-    // then answers false; a second call opens a fresh window against the SAME pre-write sample,
-    // so it still requires evidence THIS write produced. It accommodates a slow renderer
-    // without writing a single byte, and the total stays inside the sender's patience (~1.5 s)
-    // because the request path awaits this.
-    //
-    // A REJECTION is unconfirmed, not an error to propagate: the bytes are out and the row is
-    // committed, so throwing here would only deny the sender the `verified` answer and log a
-    // spurious delivery failure.
+    // Echo verification (Issue #1573) still runs — it is the only end-to-end evidence the bytes
+    // reached the terminal — but it is now pure REPORTING, downstream of a delivery that is
+    // already committed. `false` means "could not confirm", never "definitely lost".
+    let verified: boolean | undefined;
+    if (echo) {
+      // One bounded RE-verify window before giving up. `verify()` polls to its own deadline and
+      // then answers false; a second call opens a fresh window against the SAME pre-write sample,
+      // so it still requires evidence THIS write produced. It accommodates a slow renderer
+      // without writing a single byte, and the total stays inside the sender's patience (~1.5 s)
+      // because the request path awaits this.
+      //
+      // A REJECTION is unconfirmed, not an error to propagate: the bytes are out and the row is
+      // committed, so throwing here would only deny the sender the `verified` answer and log a
+      // spurious delivery failure.
+      try {
+        verified = (await echo.verify()) || (await echo.verify());
+      } catch (err) {
+        verified = false;
+        ports.log(`[mailbox] echo verification errored for ${row.id.slice(0, 8)}…: ${String(err)}`, 'WARN');
+      }
+      if (!verified) {
+        // The row is already `delivered`, so this is the delivered-only counterpart of the
+        // drainer's held-only `markEscalated`.
+        markEscalatedDelivered(db, row.id, ports.now());
+        ports.log(
+          `[mailbox] delivered-unverified ${row.id.slice(0, 8)}… → ${toAgent} @ ` +
+            `${path.basename(workspacePath)} (terminal ${session.id}, needle ${needle.length} chars): ` +
+            `the write completed but its header never appeared on the terminal. Recorded as ` +
+            `delivered and flagged — NOT re-written (Issue #1584).`,
+          'WARN',
+        );
+        // Raise it where a human will see it. The sender's `verified: false` covers an
+        // interactive `afx send`, but a cron or backstop delivery has no sender waiting on a
+        // response, and a DELIVERED row is invisible to every held-scoped surface (`afx inbox`,
+        // the held-count indicator) — without this its only trace is a log line (CMAP round 1 —
+        // Codex).
+        ports.onUnverifiedDelivery?.({
+          workspacePath,
+          toAgent,
+          mailboxId: row.id,
+          terminalId: session.id,
+        });
+      }
+    }
+    return { delivered: [row.id], reason: null, ...(verified === undefined ? {} : { verified }) };
+  } catch (err) {
+    // An exception PAST the write edge, on a path no branch below got to classify. The bytes may
+    // have landed in FULL — `markDelivered` throwing after a completed write is exactly that
+    // case — and because the transition never committed, the row is still held and the next
+    // writer (the drainer, or an armed force) will write it again. That duplicate is the
+    // accepted at-least-once tradeoff; an UNDISCLOSED one is not, and this flag is what makes it
+    // visible in `afx inbox` and on the force's own outcome.
     try {
-      verified = (await echo.verify()) || (await echo.verify());
-    } catch (err) {
-      verified = false;
-      ports.log(`[mailbox] echo verification errored for ${row.id.slice(0, 8)}…: ${String(err)}`, 'WARN');
+      if (getById(db, row.id)?.status === 'held') recordPossiblePartial();
+    } catch {
+      // The database is the likely thing that just failed. Losing the disclosure is bad;
+      // replacing the original error with a second one is worse.
     }
-    if (!verified) {
-      // The row is already `delivered`, so this is the delivered-only counterpart of the
-      // drainer's held-only `markEscalated`.
-      markEscalatedDelivered(db, row.id, ports.now());
-      ports.log(
-        `[mailbox] delivered-unverified ${row.id.slice(0, 8)}… → ${toAgent} @ ` +
-          `${path.basename(workspacePath)} (terminal ${session.id}, needle ${needle.length} chars): ` +
-          `the write completed but its header never appeared on the terminal. Recorded as ` +
-          `delivered and flagged — NOT re-written (Issue #1584).`,
-        'WARN',
-      );
-      // Raise it where a human will see it. The sender's `verified: false` covers an
-      // interactive `afx send`, but a cron or backstop delivery has no sender waiting on a
-      // response, and a DELIVERED row is invisible to every held-scoped surface (`afx inbox`,
-      // the held-count indicator) — without this its only trace is a log line (CMAP round 1 —
-      // Codex).
-      ports.onUnverifiedDelivery?.({
-        workspacePath,
-        toAgent,
-        mailboxId: row.id,
-        terminalId: session.id,
-      });
-    }
+    throw err;
+  } finally {
+    // Exceptional exits only: every path that RETURNS has already settled through
+    // `finishRowWrite`, which nulls the handle, so this is a null-safe no-op there. `uncertain`
+    // is the honest answer for a throw — some bytes may be on the wire and the row did not
+    // commit — and it keeps a waiting force armed rather than cancelling it on an error.
+    rowWrite.handle?.settle('uncertain');
   }
-  return { delivered: [row.id], reason: null, ...(verified === undefined ? {} : { verified }) };
 }
 
 /**

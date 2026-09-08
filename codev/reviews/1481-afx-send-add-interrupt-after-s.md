@@ -20,6 +20,7 @@ behind a long paced delivery must not inherit an unbounded wait.
 ## Files Changed
 
 - `.claude/skills/afx/SKILL.md` (+23 / -0)
+- `apps/web/__tests__/HeldCountBadge.test.tsx` (+9 / -3)
 - `.codex/skills/afx/SKILL.md` (+23 / -0)
 - `codev-skeleton/.claude/skills/afx/SKILL.md` (+23 / -0)
 - `codev-skeleton/.codex/skills/afx/SKILL.md` (+23 / -0)
@@ -33,9 +34,9 @@ behind a long paced delivery must not inherit an unbounded wait.
 - `codev/reviews/1481-afx-send-add-interrupt-after-s.md` (+369 / -0)
 - `codev/specs/1481-afx-send-add-interrupt-after-s.md` (+13 / -0)
 - `codev/state/pir-1481_thread.md` (+135 / -0)
-- `packages/codev/src/agent-farm/__tests__/pir-1481-force-wiring.test.ts` (+176 / -0)
+- `packages/codev/src/agent-farm/__tests__/pir-1481-force-wiring.test.ts` (+187 / -0)
 - `packages/codev/src/agent-farm/__tests__/pir-1481-interrupt-after.e2e.test.ts` (+417 / -0)
-- `packages/codev/src/agent-farm/__tests__/pir-1481-interrupt-after.test.ts` (+896 / -0)
+- `packages/codev/src/agent-farm/__tests__/pir-1481-interrupt-after.test.ts` (+1196 / -0)
 - `packages/codev/src/agent-farm/__tests__/pir-1481-migration.test.ts` (+211 / -0)
 - `packages/codev/src/agent-farm/__tests__/pir-1481-owner-wiring.test.ts` (+279 / -0)
 - `packages/codev/src/agent-farm/__tests__/send-architect-identity.test.ts` (+5 / -4)
@@ -44,14 +45,16 @@ behind a long paced delivery must not inherit an unbounded wait.
 - `packages/codev/src/agent-farm/__tests__/spec-1365-serializer-convergence.test.ts` (+227 / -3)
 - `packages/codev/src/agent-farm/__tests__/tower-routes.test.ts` (+192 / -0)
 - `packages/codev/src/agent-farm/cli.ts` (+21 / -0)
-- `packages/codev/src/agent-farm/commands/inbox.ts` (+100 / -0)
+- `packages/codev/src/agent-farm/commands/inbox.ts` (+102 / -0)
 - `packages/codev/src/agent-farm/commands/send.ts` (+32 / -4)
-- `packages/codev/src/agent-farm/db/mailbox.ts` (+204 / -5)
+- `packages/codev/src/agent-farm/db/mailbox.ts` (+209 / -5)
 - `packages/codev/src/agent-farm/db/migrations.ts` (+41 / -1)
 - `packages/codev/src/agent-farm/db/schema.ts` (+4 / -0)
-- `packages/codev/src/agent-farm/db/types.ts` (+53 / -0)
-- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` (+82 / -6)
-- `packages/codev/src/agent-farm/servers/mailbox-interrupt.ts` (+588 / -0)
+- `packages/codev/src/agent-farm/db/types.ts` (+54 / -0)
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` (+250 / -135) — the count is mostly
+  reindentation: round 2 wrapped the whole post-write region in a `try`/`catch`/`finally`, so ~180
+  unchanged lines moved two columns right. `git diff -w` shows the real change.
+- `packages/codev/src/agent-farm/servers/mailbox-interrupt.ts` (+681 / -0)
 - `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` (+138 / -3)
 - `packages/codev/src/agent-farm/servers/message-write.ts` (+40 / -0)
 - `packages/codev/src/agent-farm/servers/row-write-ownership.ts` (+131 / -0)
@@ -149,15 +152,17 @@ escalation clock started at `max(created_at, not_before, interrupt_at)`.
 
 - `pnpm --filter @cluesmith/codev build`: ✓ pass (also green via porch's `build` check at the
   dev-approval gate, 13.8s)
-- `packages/codev` tests: ✓ pass — **288 files / 5814 tests pass, 0 fail** (3 files / 48 tests
-  skipped, all pre-existing skips). Before the consultation fixes: 287 files / 5797 tests.
+- `packages/codev` tests: ✓ pass — **288 files / 5823 tests pass, 0 fail** (3 files / 48 tests
+  skipped, all pre-existing skips). 287/5797 before the first round of consultation fixes,
+  288/5814 after them, 288/5823 after the architect's round-2 CMAP fixes.
 - `packages/sdk` tests: ✓ pass — **11 files / 135 tests pass**
 - `tsc --noEmit`: ✓ clean in both packages
+- `apps/web` tests: ✓ pass — **33 files / 377 tests pass** (1 pre-existing skip)
 - New test files: `pir-1481-migration` (v19 up/idempotence/back-compat), `pir-1481-interrupt-after`
-  (36 — coordinator, claim guard, skips, outcomes, alarm suppression, contention give-up),
-  `pir-1481-owner-wiring` (15 — real drainer against a seeded registry),
-  `pir-1481-force-wiring` (16 — the production feed/notification binding, added for the
-  consultation findings), `pir-1481-interrupt-after.e2e` (4)
+  (44 — coordinator, claim guard, skips, outcomes, alarm suppression, contention give-up, and the
+  round-2 `failure containment` block), `pir-1481-owner-wiring` (15 — real drainer against a
+  seeded registry), `pir-1481-force-wiring` (17 — the production feed/notification binding, added
+  for the consultation findings), `pir-1481-interrupt-after.e2e` (4)
 - Extended: `tower-routes.test.ts` (131 pass — route-level flag boundary and refused combinations),
   `send.test.ts` (40 — CLI forwarding + force warnings), `packages/sdk` wire contract (13),
   `spec-1365-serializer-convergence.test.ts` (35 — the §3 operator chain, including the plan's F1
@@ -299,11 +304,14 @@ PIR runs the consultation **once** (`max_iterations: 1`), so nothing below was i
 re-reviewed after the fixes. Each finding was checked against the actual files before acting on
 it, and the disposition is stated honestly.
 
-- **Gemini** — never ran; no output file exists. The winning protocol tier
-  (`codev/protocols/pir/protocol.json`, with no `.codev/protocols/pir` above it) declares
-  `verify.models: ["gemini", "codex"]`, but porch's runtime asked for **codex and claude** and
-  then kept asking for claude. The list porch actually enforced is not the one that file
-  declares — flagged to the architect as a porch/protocol discrepancy, out of scope for this PR.
+- **Gemini** — never ran in the porch-driven pass; no output file exists. What was observed there:
+  the winning protocol tier (`codev/protocols/pir/protocol.json`, with no `.codev/protocols/pir`
+  above it) declares `verify.models: ["gemini", "codex"]`, but porch's runtime asked for **codex and
+  claude** and then kept asking for claude. That is a porch/protocol discrepancy, flagged to the
+  architect and out of scope for this PR. It is *not* the reason gemini is absent from the
+  architect's later CMAP (round 2 below), where the cause was directly observed and different:
+  `agy` exited 1 and the lane took its non-blocking unauthenticated skip. Two runs, two causes —
+  worth keeping apart.
 - **Codex (`gpt-5.6-sol`) — REQUEST_CHANGES, HIGH confidence.** Five of six findings were real and
   are fixed below; the sixth was an environment limitation, not a defect.
 - **Claude (`claude-opus-5`) — no verdict, after four attempts.** Attempts 1 and 2 aborted with
@@ -366,6 +374,98 @@ constraint on `interrupt_outcome` (deliberate — SQLite cannot `ALTER` one in, 
 would diverge from an upgraded one), so this needed no migration; the value set is enforced in
 TypeScript. A consumer switching exhaustively on the outcome must handle it — `afx inbox` does.
 
+## Consultation Findings (architect CMAP, round 2)
+
+The claude lane never completed against this diff (five attempts; measurements and blast radius in
+issue #1641), so the architect ran the review as `--type integration` outside porch and relayed it
+as a PR comment on #1640. **Two lanes, not three**: Codex `gpt-5.6-sol` REQUEST_CHANGES, Claude
+`claude-opus-5` COMMENT/HIGH; gemini skipped non-blockingly on an unauthenticated `agy`. The
+architect verified all six findings against the files before relaying, and so did I before acting.
+All six were real. Nothing here was architectural — the objections are exception safety, a stale
+read, a type gap, and an over-broad doc sentence.
+
+### What was fixed
+
+1. **An unhandled rejection could take Tower down, fleet-wide.** (Codex) `tower-server.ts` calls
+   `process.exit` on `unhandledRejection`, and the escalation has two floating entry points — the
+   deadline timer and the row-ownership continuation. `attempt()` opens its own `try` only at the
+   submission, so its `getById`, its dispatch-ceiling branch and `disarm` all ran outside it: one
+   transient better-sqlite3 error there and every builder in the fleet loses its terminal. Both
+   entry points now go through `dispatch()`, a boundary that cannot reject, and `abandon()` — every
+   step of it individually guarded, because whatever threw is most likely the database this path is
+   about to touch. The row is left with a **new terminal outcome `skipped-error`** rather than
+   `armed`: nothing is armed for it any more, and an armed row nothing will act on is the same
+   false durable state `skipped-contended` was added to remove.
+2. **Row ownership was not exception-safe after the write edge.** (Codex) `finishRowWrite` is called
+   on every path that *returns*, which is not every path — a throw from `markDelivered` (or from
+   `markInterruptPriorPartial` inside `recordPossiblePartial`) stranded the token. A waiting force
+   then declined on every dispatch and retired itself as `skipped-contended`: a bounded-patience
+   send silently downgraded to nothing by an unrelated database error. The write region now carries
+   an outer `catch`/`finally`; the `finally` settles `uncertain` (null-safe, so it is a no-op on
+   every normal path) and the comment that claimed `finishRowWrite` covered "EVERY exit path" — the
+   thing that made this easy to miss — has been corrected rather than deleted.
+
+   Writing the regression test surfaced a second half of this the review did not name: when
+   `markDelivered` throws, the paced write has already COMPLETED, so the body is fully on the
+   terminal and the row still reads `held`. The next writer duplicates it. That duplicate is the
+   accepted at-least-once tradeoff; an undisclosed one is not, so the new `catch` also records
+   `interrupt_prior_partial` when the row is still held.
+3. **Stale `priorPartial` in force outcome reporting.** (Claude) `attempt()` snapshots the row
+   before the submission lock and `recordCompletion` reported that snapshot, so a gated attempt that
+   flipped the flag while the force queued was invisible on the SSE frame and the operator notice —
+   the surfaces a human actually watches. Both now read the flag fresh. (`recordSkip` had the same
+   staleness and got the same fix.)
+4. **`HeldMessage` gained three required fields and `apps/web` never typechecked its tests.**
+   (Claude) `interruptAt`, `interruptOutcome` and `interruptPriorPartial` are required at
+   `packages/types/src/api.ts:678/685/691`; the `row()` factory in
+   `apps/web/__tests__/HeldCountBadge.test.tsx` stopped at `notBefore`. Latent because that
+   package's tsconfig `include` stops at `src` — and the fixture's own comment, written after
+   #1482 burned it the same way, warned about exactly this. Fields added.
+
+   **I did not widen the `include`, and that is the real fix.** Measured: doing so surfaces **15
+   pre-existing type errors across 8 other fixtures** in that directory, none of them this PR's.
+   The comment now records the measurement so whoever picks it up knows the size, and says plainly
+   that until then the list is maintained by hand.
+5. **A failed force was still broadcast as an ordinary message event.** (Codex) `recordCompletion`
+   broadcast unconditionally, including the `failed` / `degraded-failed` outcomes routed from the
+   catch. The outcome rides as *optional* metadata, so a consumer that ignores it renders the body
+   as delivered — a force that wrote nothing reading as receipt, which is the one thing this
+   feature must never do. Failed outcomes no longer emit the delivery event; they report through
+   the outcome notification and the log, both of which say "REJECTED" in words. The port-level
+   matrix in `pir-1481-force-wiring.test.ts` keeps its `failed` cases on purpose — that is the
+   port's contract if anything ever hands it such a frame, not the coordinator's policy.
+6. **`arch-critical.md` overstated row-token coverage.** (Codex) Line 17 said every message writer
+   takes the per-row token. `tryAcquireRowWrite` has exactly two call sites — verified —
+   and the immediate `--interrupt` writer is not one of them. A hot-tier fact is injected into
+   every agent's context, so an inaccurate one is worse than a missing one. The sentence is now
+   scoped to the two writers that can target the same row, and says why `--interrupt` does not need
+   it (it marks the row delivered *before* writing, so no gated pass can still hold it). The same
+   overstatement in the cold `arch.md` is corrected in both places it appeared.
+
+### Regression coverage
+
+A new `failure containment` block in `pir-1481-interrupt-after.test.ts` (8 tests). Everything in
+that file above it asks what the escalation does when the world behaves; these ask what it does
+when the database throws, a port throws, or a fact changes between the snapshot and the report —
+which is why none of the earlier tests could see three of these four defects. **All 7 of the
+tests written against a defect fail when the fixes are reverted** (verified by neutering the
+fixes and re-running: 7 failed / 37 passed); the eighth pins that a *successful* force still
+reaches the feed, so fix (5) cannot be over-applied.
+
+The containment tests install a `process.on('unhandledRejection')` collector and assert it stays
+empty, and drive the failure through a `Proxy` over a real better-sqlite3 handle that throws on
+SELECT only — so the recovery path's UPDATE still works and the test can assert the row reaches
+`skipped-error` rather than merely that nothing crashed.
+
+### Not taken, and why
+
+- Widening `apps/web`'s tsconfig `include` — finding 4's durable fix, 15 unrelated errors wide.
+  Left as a follow-up with the count measured rather than guessed.
+- Minor 8 (the `degraded` response field on `/api/send --interrupt` now fires only when bytes
+  actually went out): the reviewer's read is right, it is strictly more accurate, and it narrows an
+  existing response contract beyond this feature's scope. Called out here rather than changed —
+  reverting it would put back the false "degraded" that #1365's F1 trace exists to remove.
+
 ## How to Test Locally
 
 - **View diff**: VSCode sidebar → right-click builder `pir-1481` → **Review Diff**
@@ -376,7 +476,8 @@ TypeScript. A consumer switching exhaustively on the outcome must handle it — 
   - The same against an agent that reaches a clean prompt inside the window: the body lands normally
     and **no** `^C` ever fires, even after the deadline passes.
   - `--interrupt-after` combined with `--interrupt` (and the other two refused combinations) is
-    rejected at the CLI and at the route.
+    rejected **server-side**, as a 400 from `/api/send`. The CLI validates only the *value*, not the
+    combination, so this one costs a round trip; the exit status is 1 either way.
   - Non-numeric (`abc`), zero, negative and over-ceiling (`3601`) values are rejected with exit 1
     before any network call. **Fractional seconds are accepted on purpose** — `--interrupt-after 1.5`
     is valid. `validateInterruptAfterSeconds` is deliberately not `validateDelaySeconds`: a patience

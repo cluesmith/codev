@@ -262,3 +262,56 @@ What I measured this time rather than guessed, so the next person does not re-de
 
 Not retrying a sixth time. Reported to the architect and waiting. Standing orders unchanged: not
 maintainers — no merge, no issue closure, no cleanup.
+
+### Round 2: the architect ran CMAP outside porch, and all six findings were real
+
+The claude consult never completed (five attempts, #1641). The architect ran the review as
+`--type integration` instead and posted it as a PR comment on #1640 — Codex REQUEST_CHANGES,
+Claude COMMENT/HIGH, **gemini absent** (`agy` exited 1, unauthenticated, non-blocking skip). Two
+lanes, not three, and the architect said so plainly rather than implying coverage that did not
+exist. They verified all six findings against the files before relaying; I verified them again
+before acting, per the standing lesson. All six held — none were phantom-regression artifacts.
+
+**1 and 4 were the two the architect would not merge without.**
+
+1. *An unhandled rejection could take Tower down fleet-wide.* Both escalation entry points are
+   floating promises and `tower-server.ts` exits the process on `unhandledRejection`;
+   `attempt()`'s own `try` opens only at the submission, leaving its `getById`, ceiling branch and
+   `disarm` bare. One transient SQLite error there and every builder loses its terminal. Now both
+   go through `dispatch()` (cannot reject) and `abandon()` (each step separately guarded, because
+   the thing that failed is probably the database the recovery is about to touch). The row lands on
+   a new terminal outcome `skipped-error` instead of staying `armed`.
+2. *Row ownership was not exception-safe past the write edge.* `finishRowWrite` covers every path
+   that RETURNS — not the ones that throw. A `markDelivered` throw stranded the token, and the
+   waiting force then retired as `skipped-contended`: bounded patience silently downgraded to
+   nothing by an unrelated DB error. Wrapped the write region in `catch`/`finally`.
+3. *Stale `priorPartial`* on the direct path — the SSE frame and the operator notice reported a
+   pre-lock snapshot. Both read fresh now.
+4. *`HeldMessage` gained three required fields and `apps/web` never typechecked its tests.* Fields
+   added. I tried the durable fix (widen the tsconfig `include`) and **backed it out**: measured
+   15 pre-existing type errors across 8 other fixtures, none of them this PR's. Recorded the count
+   in the fixture comment so the follow-up is sized rather than guessed.
+5. *A failed force still went onto the delivery feed* with the outcome as ignorable metadata — a
+   force that wrote nothing could render as receipt. Failed outcomes no longer broadcast.
+6. *`arch-critical.md` overstated the row-token rule.* Two call sites, verified; immediate
+   `--interrupt` is not one. A hot-tier fact is injected into every agent's context, so a wrong one
+   is worse than a missing one. Scoped, in both the hot and cold docs.
+
+**What writing the tests found that the review did not name.** When `markDelivered` throws, the
+paced write has already COMPLETED — the body is fully on the terminal and the row still reads
+`held`, so the next writer duplicates it. The at-least-once duplicate is accepted by design; an
+*undisclosed* one is not. The new `catch` records `interrupt_prior_partial` for a still-held row,
+and the test asserts the later force discloses it. That is finding 2's real second half.
+
+New `failure containment` block (8 tests): an `unhandledRejection` collector asserted empty, and a
+`Proxy` over a real better-sqlite3 handle that throws on SELECT only — so the recovery path's
+UPDATE still works and the test can assert the row reaches `skipped-error` rather than just "did
+not crash". **Verified by reverting: 7 of the 8 fail against the pre-fix source** (the eighth pins
+that a successful force still reaches the feed, so fix 5 cannot be over-applied).
+
+Suite: `packages/codev` **288 files / 5823 tests pass, 0 fail**; `apps/web` **33 / 377 pass**;
+`tsc --noEmit` clean.
+
+Porch is still stuck: `porch next 1481` re-issues the same claude-consult task that has failed five
+times, so the review phase cannot close on its own. Reported to the architect. Standing orders
+unchanged — not maintainers, no merge, no issue closure, no cleanup.

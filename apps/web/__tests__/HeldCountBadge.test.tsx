@@ -13,13 +13,19 @@ function row(over: Partial<HeldMessage> = {}): HeldMessage {
     toAgent: 'cost',
     fromAgent: 'architect',
     reason: 'busy',
-    // Required on HeldMessage (Issue #1482). Defaulted here so the fixture typechecks on its
-    // own terms — apps/web's tsconfig excludes __tests__, so an omission would go unnoticed
-    // until someone widened the include.
+    // Required on HeldMessage: `detail` from Issue #1482, and the three `interrupt*` fields from
+    // Issue #1481. The warning the #1482 version of this comment carried — that an omission here
+    // goes unnoticed because apps/web's tsconfig `include` stops at `src` — came true within one
+    // issue: these three were missing and nothing failed. Widening the include is the real fix and
+    // it is NOT this PR's to make (it surfaces 15 pre-existing errors in 8 other fixtures here),
+    // so until then this list is maintained by hand and this comment is the only guard.
     detail: null,
     escalated: false,
     createdAt: Date.now() - 90_000, // 1m ago
     notBefore: null,
+    interruptAt: null,
+    interruptOutcome: null,
+    interruptPriorPartial: false,
     ...over,
   };
 }

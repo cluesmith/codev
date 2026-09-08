@@ -146,6 +146,8 @@ function describeInterruptOutcome(outcome: string): string {
       return 'the target session was replaced while queued — nothing was written; the message is still held';
     case 'skipped-contended':
       return 'another writer held this row at every attempt — nothing was written; the message is still held';
+    case 'skipped-error':
+      return 'the escalation hit an internal error before it could claim the row — nothing was written; the message is still held';
     case 'skipped-restart':
       return 'a Tower restart retired the force — nothing was written; the message is still held';
     default:

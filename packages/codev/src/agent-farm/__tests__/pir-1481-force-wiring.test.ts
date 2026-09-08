@@ -85,6 +85,11 @@ describe('Issue #1481 — the force audit survives the production feed conversio
     'claimed-degraded',
   ];
 
+  // `failed` and `degraded-failed` are in this list on purpose even though the coordinator no
+  // longer broadcasts them (CMAP round 5 — a body on the delivery feed reads as receipt, and the
+  // outcome rides as optional metadata a consumer may ignore). This is the port's contract, not
+  // the coordinator's policy: if anything ever hands the port a failed frame, it must still carry
+  // its own audit rather than converting into an indistinguishable ordinary delivery.
   for (const outcome of written) {
     it(`carries forcedOutcome '${outcome}' onto the message bus`, () => {
       ports().broadcast(forcedFrame(outcome));
@@ -162,7 +167,13 @@ describe('Issue #1481 — the human-facing notice tells the truth about a failed
     expect(notices[0].body).toContain('effects may be duplicated');
   });
 
-  it.each(['skipped-offline', 'skipped-session-replaced', 'skipped-contended', 'skipped-restart'] as const)(
+  it.each([
+    'skipped-offline',
+    'skipped-session-replaced',
+    'skipped-contended',
+    'skipped-error',
+    'skipped-restart',
+  ] as const)(
     'reports %s as skipped, with the body still held',
     (outcome) => {
       ports().onForceOutcome(outcomeInfo(outcome));
