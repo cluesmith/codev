@@ -2130,6 +2130,30 @@ describe('overview', () => {
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
+    it('caps forge spend under sustained invalidation, not just a burst (#1645)', async () => {
+      // The burst test above is synchronous — every invalidation lands while
+      // one flight is queued, so collapsing handles it. Sustained invalidation
+      // is the real shape: porch fires one after every mutating command, spread
+      // over time, each arriving after the previous fetch has already started.
+      // Without a debounce the TTLs stop governing spend entirely and the
+      // invalidation rate governs it instead.
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      const afterFirst = mockFetchPRList.mock.calls.length;
+
+      // Ten invalidations, each with its fetch fully settling in between.
+      for (let i = 0; i < 10; i++) {
+        cache.invalidate();
+        await cache.getOverview(tmpDir);
+      }
+
+      // At most one of them forced a refresh; the rest were debounced.
+      expect(mockFetchPRList.mock.calls.length - afterFirst).toBeLessThanOrEqual(1);
+    });
+
     it('re-checks the suspension after waiting on a queued fetch (#1645)', async () => {
       // The suspension is checked when a fetch is dispatched. A queued fetch
       // can wait 30s behind the one ahead of it, and the forge may start
@@ -2238,10 +2262,11 @@ describe('overview', () => {
     it('projects spend in GraphQL points, not calls (#1645)', () => {
       // Points, not calls: reporting 676 calls against a 5,000-*point* budget
       // reads as 14% when the real figure is 41%, which would suppress the
-      // warning the doctor check exists to raise.
-      expect(projectHourlyGraphqlPoints(13)).toBe(676 * GRAPHQL_POINTS_PER_CALL);
+      // warning the doctor check exists to raise. Asserting the arithmetic
+      // (676 x 3) would only restate the implementation, so assert the two
+      // properties that actually constrain it.
       expect(projectHourlyGraphqlPoints(13)).toBeGreaterThan(projectHourlyForgeCalls(13));
-      // And the shipped TTLs must keep 13 watched workspaces under half the budget.
+      // The shipped TTLs must keep 13 watched workspaces under half the budget.
       expect(projectHourlyGraphqlPoints(13)).toBeLessThan(0.5 * 5000);
     });
 

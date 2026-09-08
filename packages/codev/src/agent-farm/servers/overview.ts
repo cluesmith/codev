@@ -883,6 +883,24 @@ function dropSucceeded<T>(cache: Map<string, CacheEntry<T>>): void {
  */
 const PREDECESSOR_WAIT_CAP_MS = 35_000;
 
+/**
+ * How often an *invalidation* may actually force a forge refresh.
+ *
+ * `invalidate()` bypasses the TTLs by design — that is what a refresh is. But
+ * `POST /api/overview/refresh` is fired automatically after every mutating
+ * porch command, every VSCode review-queue mutation and every cleanup, so in a
+ * busy workspace the TTLs stopped governing spend at all: the invalidation rate
+ * did. Honouring at most one invalidation per minute keeps a porch action
+ * visible promptly while putting a ceiling back on.
+ *
+ * Note what this does not fix: most of those invalidations cannot have changed
+ * the forge lists at all (a phase transition moves builder state, which is
+ * filesystem-derived and refreshes every poll anyway). Only PR/issue mutations
+ * genuinely need one. Telling those apart needs porch to say which it did —
+ * tracked separately.
+ */
+const INVALIDATION_MIN_INTERVAL_MS = 60_000;
+
 interface CacheEntry<T> {
   data: T | null;
   fetchedAt: number;
@@ -927,6 +945,8 @@ export class OverviewCache {
    * backend the workspace no longer uses.
    */
   private generation = 0;
+  /** When an invalidation last actually forced a forge refresh (debounce). */
+  private lastForcedRefreshAt = 0;
   private readonly USER_TTL = 3_600_000; // 1h — GitHub identity is session-stable
 
   constructor() {
@@ -1182,15 +1202,22 @@ export class OverviewCache {
    * Invalidate all cached data.
    */
   invalidate(): void {
+    this.backendCache.clear();
+    // The resolver memoizes across every cache instance and reads concept
+    // scripts off disk, so an edited script would survive this invalidation.
+    clearForgeBackendCache();
+
+    // Debounced: see INVALIDATION_MIN_INTERVAL_MS. Everything above is local
+    // and free; everything below spends forge commands.
+    const now = Date.now();
+    if (now - this.lastForcedRefreshAt < INVALIDATION_MIN_INTERVAL_MS) return;
+    this.lastForcedRefreshAt = now;
+
     dropSucceeded(this.prCache);
     dropSucceeded(this.issueCache);
     dropSucceeded(this.closedCache);
     dropSucceeded(this.mergedPRCache);
     dropSucceeded(this.currentUserCache);
-    this.backendCache.clear();
-    // The resolver memoizes across every cache instance and reads concept
-    // scripts off disk, so an edited script would survive this invalidation.
-    clearForgeBackendCache();
     // The join table is deliberately NOT cleared. A caller arriving after this
     // point must not be handed a result fetched under the previous config, and
     // the generation bump sees to that: they chain a fresh fetch behind the
