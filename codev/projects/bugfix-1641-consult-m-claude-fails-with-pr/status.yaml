@@ -1,0 +1,14 @@
+id: bugfix-1641
+title: consult-m-claude-fails-with-pr
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-08T23:31:58.758Z'
+updated_at: '2026-09-08T23:31:58.759Z'
