@@ -1,4 +1,5 @@
 #!/bin/sh
+# forge-executable: glab
 # Forge concept: issue-search (GitLab via glab CLI)
 #
 # ⚠️ UNVERIFIED — mirrors gitlab/issue-list.sh (raw `glab ... --output json`,

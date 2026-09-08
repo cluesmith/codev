@@ -275,8 +275,10 @@ export async function maybeProbeReset(
 ): Promise<void> {
   // `gh` only: the `rate-limit` concept has no script outside the github
   // preset, so for any other backend it would fall through to the github
-  // default and shell out to `gh` for a forge that does not use it.
-  if (backendKey(provider) !== 'gh' && backendKey(provider) !== DEFAULT_PROVIDER) return;
+  // default and shell out to `gh` for a forge that does not use it. One name,
+  // not two — `resolveConceptBackend` maps the `github` provider to `gh` so the
+  // readable and unreadable paths cannot key an account twice.
+  if (backendKey(provider) !== 'gh') return;
   if (!probeEnabled || probing.has(provider) || !isForgeSuspended(provider)) return;
   const state = stateFor(provider);
   if (state.probedSuspensionMs === state.suspendedSinceMs) return; // already probed this window

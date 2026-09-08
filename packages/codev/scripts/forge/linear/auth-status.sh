@@ -1,4 +1,5 @@
 #!/bin/sh
+# forge-executable: curl
 # Forge concept: auth-status (Linear via GraphQL API)
 # Output: exit code (0 = authenticated)
 set -e

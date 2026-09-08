@@ -22,7 +22,6 @@ import {
 } from '../../lib/github.js';
 import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
 import {
-  clearForgeSuspension,
   DEFAULT_PROVIDER,
   getForgeRateLimit,
   installForgeRateLimitWatch,
@@ -31,7 +30,7 @@ import {
   noteForgeSuccess,
 } from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
-import { loadForgeConfig, resolveConceptBackend } from '../../lib/forge.js';
+import { clearForgeBackendCache, loadForgeConfig, resolveConceptBackend } from '../../lib/forge.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
 import { POSITIVE_TTL_MS, SEARCH_TTL_MS, negativeTtlMs } from './overview-budget.js';
 import type {
@@ -1165,12 +1164,28 @@ export class OverviewCache {
     this.mergedPRCache.clear();
     this.currentUserCache.clear();
     this.backendCache.clear();
+    // The resolver memoizes across every cache instance and reads concept
+    // scripts off disk, so an edited script would survive this invalidation.
+    clearForgeBackendCache();
+    // Drop in-flight fetches from the join table. They still run — and their
+    // results still reach the callers already awaiting them — but a caller
+    // arriving *after* an explicit Refresh must not be handed a result fetched
+    // under the previous config. The generation bump below stops the old flight
+    // writing anything.
+    this.inflight.clear();
     this.generation++;
-    // #1645: an explicit human Refresh also lifts a rate-limit suspension.
-    // invalidate() is only reached from POST /api/overview/refresh, never from
-    // the 2.5s poll, so this cannot reintroduce the hammering — and without it
-    // Refresh was a no-op for up to 15 minutes after GitHub had recovered.
-    clearForgeSuspension();
+    // Deliberately NOT clearing the rate-limit suspension here.
+    //
+    // An earlier revision did, on the theory that `POST /api/overview/refresh`
+    // means a human asked. It does not: porch calls it after *every* mutating
+    // command (commands/porch/index.ts), VSCode calls it on every review-queue
+    // mutation (review-queue/overview-nudge.ts) and cleanup calls it too. With
+    // a dozen builders running porch, that fires constantly — it would lift the
+    // suspension and reset the escalating backoff to 60s over and over, in
+    // exactly the busy workspace this fix exists for.
+    //
+    // The suspension is time-bounded anyway: at most 15 minutes, and the true
+    // reset instant whenever the probe resolves it.
     // Note: resolvedEnrichment is deliberately NOT cleared here. It must survive
     // invalidation so a cleanup-triggered refresh (which calls invalidate()) can
     // still fall back to a builder's resolved area instead of UNCATEGORIZED
@@ -1222,6 +1237,11 @@ export class OverviewCache {
       // An invalidate() while this was in flight means the result was fetched
       // under the previous config: return it to this caller, but do not write
       // it, and do not credit or blame a backend that may no longer apply.
+      //
+      // A *rate limit* observed by such a flight is still honoured, because the
+      // forge genuinely refused us: that happens in the `onForgeFailure` watch,
+      // outside this guard, and suspending on an observed refusal is correct
+      // however stale the config that prompted it.
       if (generation !== this.generation) return data;
       // Stamp the entry with *completion* time, not dispatch time: a forge
       // command can sit for its full 30 s timeout, and dating the entry from

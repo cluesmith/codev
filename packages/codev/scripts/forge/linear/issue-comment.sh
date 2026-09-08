@@ -1,4 +1,5 @@
 #!/bin/sh
+# forge-executable: curl
 # Forge concept: issue-comment (Linear via GraphQL API)
 # Input: CODEV_ISSUE_ID, CODEV_COMMENT_BODY
 # Output: exit code only

@@ -1,4 +1,5 @@
 #!/bin/sh
+# forge-executable: curl
 # Forge concept: issue-view (Linear via GraphQL API)
 # Input: CODEV_ISSUE_ID (e.g. "ENG-123")
 # Output: JSON {title, body, state, url, author, createdAt, assignees, labels, milestone, comments[]}

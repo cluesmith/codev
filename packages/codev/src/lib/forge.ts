@@ -47,6 +47,20 @@ const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
  */
 export const DEFAULT_PROVIDER = 'github';
 
+/**
+ * The CLI each built-in provider drives.
+ *
+ * Backend keys must live in one namespace: healthy resolution yields the
+ * executable (`gh`), while the unreadable-script fallback yields the provider
+ * (`github`), and without this map one account would hold two independent
+ * suspension states under the two spellings.
+ */
+const PROVIDER_EXECUTABLES: Record<string, string> = {
+  github: 'gh',
+  gitlab: 'glab',
+  gitea: 'tea',
+};
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -312,6 +326,18 @@ export function getForgeCommand(
 const _backendCache = new Map<string, string>();
 
 /**
+ * Drop memoized backend resolutions.
+ *
+ * Resolution reads the concept script off disk, so an edited script — or an
+ * added `# forge-executable:` line — would otherwise not take effect until the
+ * process restarted. Called from `OverviewCache.invalidate()`, which is what a
+ * config or script change is followed by.
+ */
+export function clearForgeBackendCache(): void {
+  _backendCache.clear();
+}
+
+/**
  * The backend a concept will actually run against: the resolved command's
  * executable, lowercased. Falls back to the configured provider, then to
  * `DEFAULT_PROVIDER`.
@@ -337,14 +363,22 @@ export function resolveConceptBackend(
   const cached = _backendCache.get(key);
   if (cached !== undefined) return cached;
 
-  // `extractExecutable` returns the command verbatim when it cannot read the
-  // script — a missing or unreadable concept script yields its own path. Keying
-  // on that would give every concept a *different* backend and fragment the
-  // suspension across them, so fall back to the configured provider instead:
-  // less precise, but it keeps concepts that share an account sharing a key.
+  // Two different path shapes come back from `extractExecutable`, and they mean
+  // opposite things:
+  //
+  // - `/usr/local/bin/gh` — a real executable given by absolute path. Its
+  //   basename is the backend: an override spelling `gh` in full must key the
+  //   same as one spelling it bare, or the two fragment the suspension.
+  // - `/…/scripts/forge/github/pr-list.sh` — the command returned verbatim
+  //   because the concept script could not be read. That names no tool at all,
+  //   and keying on it would give every concept a backend of its own, so fall
+  //   back to the configured provider: less precise, but it keeps concepts that
+  //   share an account sharing a key.
   const executable = extractExecutable(command);
-  const looksLikePath = executable !== null && (executable.includes('/') || executable.endsWith('.sh'));
-  const backend = (looksLikePath || executable === null ? provider : executable).toLowerCase();
+  const basename = executable?.split('/').pop() || null;
+  const unreadableScript = basename === null || basename.endsWith('.sh');
+  const fallback = PROVIDER_EXECUTABLES[provider.toLowerCase()] ?? provider;
+  const backend = (unreadableScript ? fallback : basename).toLowerCase();
   _backendCache.set(key, backend);
   return backend;
 }

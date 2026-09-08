@@ -1,4 +1,5 @@
 #!/bin/sh
+# forge-executable: curl
 # Forge concept: issue-search (Linear via GraphQL API)
 #
 # ⚠️ UNVERIFIED — mirrors linear/issue-list.sh with `description` added to the

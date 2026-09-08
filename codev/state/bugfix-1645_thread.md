@@ -287,3 +287,53 @@ bleed (r4). The negative-caching core has been stable since r1; everything that 
 fixing was code added *in response to a review*. Each layer of hardening introduced its own
 smaller bug. Treat "the reviewers found nothing this time" as the signal to stop, not
 "I've addressed the last round".
+
+## 2026-09-07 — CMAP round 4: all three lanes REQUEST_CHANGES, all three right
+
+### The serious one, and it was mine
+
+I had `invalidate()` clear the rate-limit suspension, on the strength of a code comment I
+wrote asserting *"invalidate() is only reached from POST /api/overview/refresh, never from
+the 2.5s poll, so this cannot reintroduce the hammering."* **I never verified that.** It is
+false. `refreshOverview()` is called automatically by:
+
+- `commands/porch/index.ts:1300` — after every mutating porch command
+- `apps/vscode/src/review-queue/overview-nudge.ts:27` — every review-queue mutation
+- `agent-farm/commands/cleanup.ts:422`
+
+With a dozen builders running porch that fires constantly, so the suspension would be
+lifted and the escalating backoff reset to 60 s over and over — in exactly the busy
+workspace this fix exists for. It would have largely defeated the fix in production with
+every test green.
+
+It was introduced *in response to* claude's round-1 note that a suspension had no manual
+escape. Fixing a minor UX gap created a major correctness bug. The suspension is
+time-bounded anyway (≤15 min, or the probe's true reset), so it is simply not cleared
+there now, and the test asserts the suspension **survives** a refresh.
+
+The lesson is the one already in lessons-critical.md — *verify reviewer/plan claims against
+the actual file* — turned around: verify **your own** claims before writing them into a
+comment that future readers will trust. A one-line grep would have caught it.
+
+### Also fixed
+
+- Absolute executable paths key by basename, so `/usr/local/bin/gh` and `gh` share a
+  suspension (codex).
+- `clearForgeBackendCache()` on invalidate — resolution reads scripts off disk, so an
+  edited script previously needed a process restart (codex).
+- In-flight fetches are dropped from the join table on invalidate, so a post-refresh
+  caller is not handed a result fetched under the old config (codex).
+- Provider→executable alias map, so the unreadable-script fallback (`github`) and a healthy
+  resolve (`gh`) stop being two suspension states for one account (claude).
+- `_backendCache` keyed without the provider (gemini) — fixed in the previous commit.
+
+### A pre-existing gap this surfaced
+
+7 Linear concepts resolved their executable to `echo` (from the API-key guard) and gitlab's
+`issue-search` to `case`. `codev doctor` has therefore been telling Linear users to install
+`echo`, and a missing `curl` would go unreported — the #1455 silent success, still live in
+8 shipped scripts. Not introduced here, but it now also affects rate-limit keying, so it is
+fixed with `# forge-executable:` declarations plus a test asserting no built-in provider
+resolves to a shell builtin. Flagged to the architect as scope-adjacent.
+
+Full suite 5,785 green.

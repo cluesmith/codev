@@ -2002,7 +2002,31 @@ describe('overview', () => {
       expect(mockFetchPRList).toHaveBeenCalledTimes(1);
     });
 
-    it('lets an explicit refresh lift a rate-limit suspension (#1645)', async () => {
+    it('does not hand a post-refresh caller a result fetched before it (#1645)', async () => {
+      // A fetch already in flight was made under the previous config. Callers
+      // already awaiting it still get it, but someone who asked *after* the
+      // Refresh must trigger a fresh fetch rather than join the stale one.
+      let release: (v: unknown) => void = () => {};
+      const gate = new Promise(r => { release = r; });
+      mockFetchPRList.mockImplementationOnce(async () => { await gate; return []; });
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      const before = cache.getOverview(tmpDir);
+      cache.invalidate();
+      const after = cache.getOverview(tmpDir);
+      release(null);
+      await Promise.all([before, after]);
+
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+    });
+
+    it('does NOT let a cache refresh lift a rate-limit suspension (#1645)', async () => {
+      // `POST /api/overview/refresh` is not a human signal: porch fires it after
+      // every mutating command, VSCode on every review-queue mutation, and
+      // cleanup too. With a dozen builders that is constant, and clearing the
+      // suspension here would reset the escalating backoff over and over in
+      // exactly the busy workspace this fix exists for.
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
 
@@ -2011,11 +2035,11 @@ describe('overview', () => {
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).not.toHaveBeenCalled();
 
-      cache.invalidate(); // POST /api/overview/refresh
-      expect(isForgeSuspended(OVERVIEW_BACKEND)).toBe(false);
+      cache.invalidate();
 
+      expect(isForgeSuspended(OVERVIEW_BACKEND)).toBe(true);
       await cache.getOverview(tmpDir);
-      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+      expect(mockFetchPRList).not.toHaveBeenCalled();
     });
 
     it('projects spend in GraphQL points, not calls (#1645)', () => {

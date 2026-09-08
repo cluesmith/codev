@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import {
   executeForgeCommand,
   onForgeFailure,
+  resolveAllConcepts,
   resolveConceptBackend,
   type ForgeFailure,
 } from '../lib/forge.js';
@@ -211,6 +212,36 @@ describe('every overview concept resolves to the same backend (#1645)', () => {
       .not.toBe(resolveConceptBackend('issue-list', { ...unresolvable, provider: 'linear' }));
     // Sanity: a concept both presets disable resolves to each one's own name.
     expect(viaGitlab).not.toBe(viaLinear);
+  });
+
+  it('keys an absolute executable path the same as the bare command', () => {
+    // An override spelling the tool in full must not fragment the suspension
+    // away from a concept that spells it bare — same account, same budget.
+    expect(resolveConceptBackend('issue-list', { 'issue-list': '/usr/local/bin/gh issue list' }))
+      .toBe('gh');
+    expect(resolveConceptBackend('issue-list', { 'issue-list': 'gh issue list' }))
+      .toBe('gh');
+  });
+
+  it('keys the unreadable-script fallback in the same namespace as a healthy resolve', () => {
+    // Healthy resolution yields the executable (`gh`); the fallback yields the
+    // provider. Without the alias map those are two suspension states for one
+    // account.
+    expect(resolveConceptBackend('issue-list', { 'issue-list': '/nonexistent/missing.sh' }))
+      .toBe(resolveConceptBackend('issue-list', null));
+  });
+
+  it('leaves no built-in provider resolving to a shell builtin', () => {
+    // The #1455 heuristic picks the first substantive line, which is `echo` for
+    // Linear's API-key guard and `case` for gitlab's issue-search — so `codev
+    // doctor` told those users to install `echo`, and #1645 would file their
+    // rate limits under it. The `# forge-executable:` declarations fix both.
+    for (const provider of ['github', 'gitlab', 'gitea', 'linear']) {
+      for (const r of resolveAllConcepts({ provider })) {
+        if (r.source === 'disabled' || r.executable === null) continue;
+        expect(['gh', 'glab', 'tea', 'curl']).toContain(r.executable);
+      }
+    }
   });
 
   it('resolves pr-list, issue-list and both searches to gh', () => {
