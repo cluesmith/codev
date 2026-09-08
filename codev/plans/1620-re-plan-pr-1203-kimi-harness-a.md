@@ -51,12 +51,46 @@ Seven work items. **Items 1–4 and 7 are this lane's deliverable and ship in fu
 
 ### 2. Re-derive the delivery path against converged main
 
-**2a. Write edge (`message-write.ts`).** Keep the PR's `MessagePacing` interface and its `writeMessageToSession(..., pacing?)` threading verbatim — that function survived. Add `pacing?: MessagePacing` as the last parameter of `submitMessagePaced` and pass it through to the `writeMessageToSession` call inside `trySubmitToSession`'s callback. The Enter only moves *later*, and `trySubmitToSession` sleeps to the returned `doneMs`, so a slower Enter is awaited, never raced — the completion-chaining contract in the JSDoc still holds and gets a sentence saying so.
+**2a. Write edge (`message-write.ts`) — re-derived twice now (#1365, then #1567/PR #1644).**
+The PR's `MessagePacing` seam survives, but nothing around it does. Verified against `origin/main`
+after PR #1644 landed:
 
-**2b. Delivery port + binding.** `DeliveryPorts.writeMessage` keeps main's 4-arg shape (`session, msg, noEnter, precheck`); pacing is resolved by the *binding*, not the port, because it is a property of the target session and no unit fake should have to know about it:
+- `writeMessageToSession(session, message, noEnter, delayOffset, strategy)` — the 5th parameter is
+  now `strategy: WriteStrategy`, which is exactly where the PR wanted to put `pacing`. Pacing
+  becomes the 6th; on `submitMessagePaced(session, message, noEnter, precheck, clock?, strategy?)`
+  it becomes the 7th.
+- The per-line loop the PR patched is gone. There are still exactly **two** Enter delays to
+  override, so the seam is unchanged in shape: `SIMPLE_ENTER_DELAY_MS` (50 ms, short frames) and —
+  where `PACED_ENTER_DELAY_MS` used to be — **`PASTE_ENTER_DELAY_MS` (80 ms)**, after the paste's
+  closing marker.
+
+**And that 80 ms is the whole reason this seam exists.** Kimi's bisect was: 80 ms and 100 ms
+swallowed, 120 ms+ submit. The new long-frame Enter lands at *exactly* the measured failure point,
+so without the override every multi-line message to a Kimi builder is typed and never submitted —
+the original #1201 symptom, reintroduced by a change that had no reason to know about Kimi.
+
+**2a-bis. Kimi must NOT default to bracketed paste — fail-safe, pending Mohid's measurement.**
+`writeStrategyForApp(app)` returns `PLAIN_CHUNKED` for `'agy'` and `BRACKETED_PASTE` for everything
+else. That default is opt-**out**, so a Kimi profile added today silently inherits bracketed paste
+on a CLI nobody has tested it against. The blast radius if Kimi does not implement bracketed-paste
+mode is not a slow message, it is a corrupt one:
+
+- the `\x1b[200~` / `\x1b[201~` markers land as literal text in the composer; and
+- `framePieces` converts `\n` → `\r` *inside* the bracket, so an un-honoured paste submits **every
+  line as its own message** — the #584 class, worse than before it was fixed.
+
+So `KIMI_PROFILE` joins agy in `PLAIN_CHUNKED` until measured. This is not a new policy, it is the
+policy already written into that function's own doc comment ("a harness that has not been measured
+can opt out"); the only change is making Kimi one of the unmeasured ones, which it is. It is one
+line, reversible the moment evidence exists, and it fails toward the behaviour Mohid's 7/7 demo
+actually validated. Confirming bracketed-paste tolerance is **step 8 on the handoff checklist**; if
+Kimi does honour it, flipping Kimi to `BRACKETED_PASTE` is a follow-up with evidence attached, not
+a guess made now.
+
+**2b. Delivery port + binding.** `DeliveryPorts.writeMessage` keeps main's current shape — `(session, msg, noEnter, precheck, strategy)`, the strategy resolved in `mailbox-delivery.ts:744` from `writeStrategyForApp(profile.app)`. Pacing is resolved by the *binding* instead, because it is a property of the target session and no unit fake should have to know about it:
 ```ts
-writeMessage: (session, msg, noEnter, precheck) =>
-  submitMessagePaced(session, msg, noEnter, precheck, undefined, resolvePacingForSession(session)),
+writeMessage: (session, msg, noEnter, precheck, strategy) =>
+  submitMessagePaced(session, msg, noEnter, precheck, undefined, strategy, resolvePacingForSession(session)),
 ```
 `resolvePacingForSession` and `resolveHarnessForSession` move over from the PR unchanged — they already read the harness out of the generated `.builder-start.sh`, are total (every failure degrades to the defaults), and cover cron delivery for free because `cron-delivery.ts` writes through the same `DeliveryPorts` seam.
 
@@ -222,6 +256,11 @@ What that changes for *our* work — stated here because it is not free:
   6. **Exercise the spawn-race retry** (item 2g): spawn a Kimi builder and confirm the task
      actually arrives. If you can, start it with Tower under load so `codev_queue_task`'s first
      attempt loses the race — the retry should win and the task should still land.
+  8. **Does Kimi honour bracketed paste?** New since your PR (#1567 / PR #1644): long `afx send`
+     bodies now go out as one bracketed paste. We have set Kimi to the opt-out `PLAIN_CHUNKED`
+     strategy for safety, because an un-honoured bracket puts literal `\x1b[200~` in the composer
+     and submits every line separately. Send a >4-line message and say which happens; if Kimi
+     handles it, we flip it with your evidence attached.
   7. **Evidence** → `codev/evidence/1620-kimi-measurement/`, committed to the branch: the Kimi
      version, raw captures, the demo driver's full output, and the verified-delivery numbers.
      A PR comment with the headline results is enough for us to finish the review doc.
@@ -295,7 +334,7 @@ Consequences, recorded so that nobody has to reconstruct them later:
 
 | Path | Change |
 |---|---|
-| `packages/codev/src/agent-farm/servers/message-write.ts` | `MessagePacing`; `pacing?` on `writeMessageToSession` (PR, kept) and on `submitMessagePaced` (new, re-derived) |
+| `packages/codev/src/agent-farm/servers/message-write.ts` | `MessagePacing`; `pacing?` re-derived onto the post-#1567 signatures (6th arg on `writeMessageToSession`, 7th on `submitMessagePaced`), overriding `SIMPLE_ENTER_DELAY_MS` and `PASTE_ENTER_DELAY_MS`; `writeStrategyForApp` returns `PLAIN_CHUNKED` for kimi as well as agy |
 | `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` | `resolveHarnessForSession` / `resolvePacingForSession`; pacing threaded into the `writeMessage` binding |
 | `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` | delete `CLASSIFIER_STUCK_DETAILS`; keep main's delegating `isClassifierStuck` |
 | `packages/sdk/src/hold-verdict.ts` | `isUnverifiableVerdict` gains `no-region-start`, `multi-row-draft` |
@@ -339,7 +378,14 @@ Consequences, recorded so that nobody has to reconstruct them later:
 ## Test Plan
 
 **Unit (vitest):**
-- Pacing survives the lock: `submitMessagePaced` with a Kimi `MessagePacing` schedules Enter at 1000 ms, still resolves only after the Enter, and reports `written`; `contended` and `aborted` are unaffected by pacing.
+- Pacing survives the lock AND the paste path: `submitMessagePaced` with a Kimi `MessagePacing`
+  schedules Enter at 1000 ms on **both** frame shapes — the short single-write branch and the long
+  chunked branch, where it must displace `PASTE_ENTER_DELAY_MS` (80 ms, the value Kimi's own bisect
+  showed gets swallowed). Still resolves only after the Enter, still reports `written`; `contended`
+  and `aborted` are unaffected by pacing.
+- `writeStrategyForApp('kimi')` is `PLAIN_CHUNKED`, and `framePieces` for that strategy emits no
+  paste markers — pinned, because the failure it prevents (literal `\x1b[200~` in the composer, and
+  every line submitted separately) is silent and only visible on a live Kimi.
 - `resolvePacingForSession` is total: unreadable worktree, unknown harness, retired harness, custom harness → `undefined`, never a throw.
 - `isUnverifiableVerdict` exhaustiveness: every `GateVerdict['detail']` value is classified; `no-region-start` and `multi-row-draft` escalate; `user-text` and `empty` do not.
 - Render gate against the Kimi fixtures: idle → `clean`; single-line draft → `user-text`; newline-then-`>` draft → `multi-row-draft`; box top off-screen → `no-region-start`; trust dialog → `no-composer-marker`; `/` menu and `@` picker → busy. Plus the guardrail pinning `markerSpanEnd` for **every** shipped profile (that number is what "no-op for claude/codex/agy" rests on) and the new `markerSpanStart` palette-anchor test.

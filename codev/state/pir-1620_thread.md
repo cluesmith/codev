@@ -166,3 +166,39 @@ opens by owning the delay, states plainly that the live verification is a reques
 assignment, flags step 2 as able to block the merge, says a negative echo result is a good outcome
 rather than a failure, and surfaces the two places we reversed his judgement (`multi-row-draft`
 escalation, the trust refusals) as things to argue with rather than as decisions handed down.
+
+## 2026-09-08 — main moved again mid-gate (#1567/PR #1644); item 2a re-derived a second time
+
+Architect status note (also a long-send field test — replied `long-send intact, 3 items`). Verified
+both landed changes against `origin/main` rather than taking the summary on trust, and item 1 turned
+out to matter more than "re-derive on top of `framePieces()`" suggests.
+
+**The write edge changed under us for the second time.** `writeMessageToSession`'s 5th parameter is
+now `strategy: WriteStrategy` — exactly the slot the PR wanted for `pacing`. Pacing moves to 6th
+there and 7th on `submitMessagePaced`. There are still exactly two Enter delays to override, so the
+seam's shape survives; what changed is which constants.
+
+**And one of them is a trap.** The long-frame Enter is now `PASTE_ENTER_DELAY_MS = 80`, measured
+"0/29 losses" on claude and codex. Kimi's own bisect was: **80 ms and 100 ms swallowed**, 120 ms+
+submit. So the new default lands precisely on Kimi's measured failure point — every multi-line
+message typed and never submitted, the original #1201 symptom reintroduced by a change with no
+reason to know Kimi exists. The `enterDelayMs` seam is now load-bearing on a branch it was never
+written for.
+
+**Worse, and the reason I added a step to the handoff:** `writeStrategyForApp` returns
+`PLAIN_CHUNKED` for `'agy'` and `BRACKETED_PASTE` for everything else. That default is opt-**out**,
+so registering `KIMI_PROFILE` silently opts Kimi into bracketed paste on a CLI nobody has tested it
+against. If Kimi does not implement the mode the failure is not slow, it is corrupt: the
+`\x1b[200~` markers land as literal composer text, and `framePieces` converts `\n` → `\r` inside the
+bracket, so every line submits as its own message — the #584 class, worse than before it was fixed.
+
+So Kimi joins agy in `PLAIN_CHUNKED` until measured. Not a new policy — it is what that function's
+own doc comment already says ("a harness that has not been measured can opt out"); the only change
+is admitting Kimi is one of the unmeasured ones. One line, reversible with evidence, and it fails
+toward the behaviour Mohid's 7/7 actually validated.
+
+Checklist for Mohid is now eight steps. Item 2 of the note (`OverviewCache`/#1652) touches no file
+this branch does; noted for the post-merge full-suite run. Item 3 (GraphQL exhaustion) — used git
+and `gh pr view` sparingly; the reads I needed were local.
+
+Still at plan-approval. `porch approve` not run.
