@@ -252,3 +252,52 @@ Kept, as instructed: the `enterDelayMs` override governing the paste path's Ente
 table.
 
 Still at plan-approval. `porch approve` not run.
+
+## 2026-09-08 — plan APPROVED; merge done, suite green, PR mergeable
+
+Human approved both plans (relayed by the architect). Ran `porch approve 1620 plan-approval
+--a-human-explicitly-approved-this`; now in the implement phase.
+
+**Merged `origin/main` into `builder/pir-1201`** — merge, not rebase; Mohid's 47 commits untouched.
+1,606 commits since the merge base. Seven conflicts, exactly the five semantic files the plan
+predicted plus two test/fixture files. `gh api` now reports **`mergeable: true`** (state `blocked`
+= review required), so the headline acceptance criterion is met.
+
+Resolutions of note:
+
+- **message-write.ts** — the write edge had moved *twice*: #1365 (lock + in-lock precheck) and
+  #1567 (bracketed paste, which took the 5th parameter slot for `strategy`). `MessagePacing`
+  re-homed to 6th/7th and now overrides both Enter sites.
+- **mailbox-delivery.ts** — deleted the branch's local `CLASSIFIER_STUCK_DETAILS` fork; delegation
+  restored. Its exhaustiveness value moves to a test rather than a second copy of the rule.
+- **render-gate.ts** — #1474's anchors and the branch's region bounding are orthogonal; kept both.
+  Generalized `markerFgPalette` off `getCell(0)` as approved.
+
+**Full suite: 5916 passed, 0 failed.** Getting there took three fixes, and the third is worth
+recording:
+
+1. The pacing tests used the old argument order and asserted per-line timings that no longer
+   exist. Rewrote them and **widened** the coverage — the override is now pinned on the
+   long/bracketed branch too. The old short-frame-only coverage would have stayed green while the
+   feature was broken for every real message, since a formatted `afx send` is almost always ≥4
+   lines. That is the exact shape of test that lets a regression ship.
+2. The Issue #1201 span guardrail's synthetic agy screen stopped qualifying as a marker row once
+   #1474 added cursor/palette anchors. Rather than delete the agy case I added an `agyScreen`
+   helper that satisfies the anchors (SGR-94 glyph + explicit CUP to park the cursor on the
+   composer row, which sits *above* its bounding rule). Applied it to the sibling `>x` test as
+   well — that one still *passed*, but for the wrong reason: it would have failed the anchors
+   before ever exercising the pattern it claims to test.
+3. **A pre-existing defect on the branch, not something the merge caused** — verified by diffing
+   both files against the pre-merge commit: unchanged. `inspectKimiStoreLayout`'s "ok when at
+   least one session carries the load-bearing shape" wrote a good session then a bad one and
+   expected `ok`, but the probe *deliberately* reports drift when the newest session is the broken
+   one. It only ever passed where the two `mkdir` mtimes tied — so it was platform-dependent all
+   along, and fails 5/5 on APFS where `mtimeMs` is sub-millisecond. Fixed with the explicit
+   `touchDir` ordering the *very next test in the same describe* already uses; its doc now says
+   why every test in that block must.
+
+Also caught a merge slip of my own: keeping both sides of the `GateProfile` conflict dropped the
+`/**` that opened main's `markerRequiresCursorRow` doc block. The build caught it immediately.
+
+Next: item 3 (trust refusals + config opt-in), item 2g (spawn-race retry), the exhaustiveness test,
+docs, then CMAP.
