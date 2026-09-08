@@ -43,12 +43,18 @@ consult -m codex --model-id gpt-5.6-sol --prompt "Review this design"
 |-------|-------|---------|--------------------------|-------|
 | `gemini` | `pro` | Antigravity CLI (`agy`) | *(agy's own default — no pinned id)* | Agentic file access (`--sandbox --add-dir`), OAuth/subscription login. Skips non-blockingly if `agy` is missing/unauthed. |
 | `codex` | `gpt` | @openai/codex | `gpt-5.6-sol` (medium reasoning effort) | Read-only sandbox, thorough |
-| `claude` | `opus` | Claude Agent SDK | `claude-opus-5` | Balanced analysis with tool use |
+| `claude` | `opus` | Claude Agent SDK | `claude-opus-5[1m]` | 1M context window with tool use |
 | `hermes` | - | hermes CLI (`hermes chat -q`) | *(hermes' own default)* | Uses Hermes agent as consult backend |
 
 > **The codex lane's `-sol` suffix is load-bearing.** Plain `gpt-5.6` and `gpt-5.6-codex` are both
 > rejected by Codex when running on a ChatGPT account (`The '<id>' model is not supported when
 > using Codex with a ChatGPT account.`). Don't "simplify" the id — a unit test pins it.
+
+The Claude default explicitly selects the 1M context window. Older Agent SDK runtimes budget
+the bare `claude-opus-5` id at 200K. Configured model ids are passed unchanged; to request extended
+context in an override, use `"claude-opus-5[1m]"` (quote it in shell commands). See
+[Claude's extended-context documentation](https://code.claude.com/docs/en/model-config#extended-context)
+for model and account availability. `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` still disables 1M context.
 
 ### Cost reporting
 
@@ -78,7 +84,7 @@ either without touching a checked-in file.
 
 | Axis | Key | Answers |
 |------|-----|---------|
-| *Which model* a lane runs | `consult.models` | "run `claude-opus-5` on the claude lane" |
+| *Which model* a lane runs | `consult.models` | "run `claude-opus-5[1m]` on the claude lane" |
 | *Which lanes* run at all | `porch.consultation.*` | "review PIR with two lanes, not three" |
 
 ### `consult.models`
@@ -87,7 +93,7 @@ Per-lane model id. Absent → the shipped default in the [Models](#models) table
 single invocation by [`--model-id`](#model-selection-options).
 
 ```json
-{ "consult": { "models": { "claude": "claude-opus-5", "codex": "gpt-5.6-sol" } } }
+{ "consult": { "models": { "claude": "claude-opus-5[1m]", "codex": "gpt-5.6-sol" } } }
 ```
 
 Valid lanes: `claude`, `codex`, `gemini`. **`hermes` is rejected** — it is invoked as
@@ -207,8 +213,9 @@ offending key and the valid alternatives. Nothing falls back to a default on err
 | `reasoningEffort` | **Codev**, against a closed enum | Config load, before anything runs |
 | Model ids | **The provider** | When the lane runs |
 
-Codev checks a model id's *syntax* only (ASCII alphanumerics plus `. _ : / @ + -`, 1–200 characters,
-no leading punctuation) — never its existence. **There is no allowlist of model ids anywhere in
+Codev checks a model id's *syntax* only (ASCII alphanumerics plus `. _ : / @ + -`, an optional
+Claude `[1m]` suffix, 1–200 characters total, no leading punctuation) — never its existence.
+**There is no allowlist of model ids anywhere in
 Codev, by design**: a new model must work the day the provider ships it, without a Codev release.
 
 So a typo'd model id is not caught at config time. It reaches the backend, which rejects it; that

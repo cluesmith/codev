@@ -415,8 +415,11 @@ export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 /** Shipped default reasoning effort for the codex consult lane. */
 export const DEFAULT_CODEX_REASONING_EFFORT = 'medium' as const;
 
-/** Shipped default model id for the claude consult lane (#1288). */
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5';
+/**
+ * Request the 1M window explicitly: older Agent SDK runtimes budget the bare
+ * Opus 5 id at 200K, causing large reviews to exhaust context (#1641).
+ */
+export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5[1m]';
 
 interface CodexModelPricing {
   inputPer1M: number;
