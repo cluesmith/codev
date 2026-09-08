@@ -2115,6 +2115,30 @@ describe('overview', () => {
       expect(mockFetchPRList).toHaveBeenCalledTimes(1);
     });
 
+    it('caps forge spend under sustained invalidation, not just a burst (#1645)', async () => {
+      // The burst test above is synchronous — every invalidation lands while
+      // one flight is queued, so collapsing handles it. Sustained invalidation
+      // is the real shape: porch fires one after every mutating command, spread
+      // over time, each arriving after the previous fetch has already started.
+      // Without a debounce the TTLs stop governing spend entirely and the
+      // invalidation rate governs it instead.
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      const afterFirst = mockFetchPRList.mock.calls.length;
+
+      // Ten invalidations, each with its fetch fully settling in between.
+      for (let i = 0; i < 10; i++) {
+        cache.invalidate();
+        await cache.getOverview(tmpDir);
+      }
+
+      // At most one of them forced a refresh; the rest were debounced.
+      expect(mockFetchPRList.mock.calls.length - afterFirst).toBeLessThanOrEqual(1);
+    });
+
     it('re-checks the suspension after waiting on a queued fetch (#1645)', async () => {
       // The suspension is checked when a fetch is dispatched. A queued fetch
       // can wait 30s behind the one ahead of it, and the forge may start

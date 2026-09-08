@@ -541,9 +541,12 @@ describe('provider presets', () => {
     // every other concept falls through to gh. Only the two concepts linear
     // genuinely cannot serve are disabled. This fails loudly if anyone disables
     // a PR concept again, rather than only catching pr-create by name.
+    // `rate-limit` joins the disabled list (#1645): it probes GitHub's GraphQL
+    // budget, so leaving it to fall through to the github default made `codev
+    // doctor` tell Linear projects to install `gh`.
     const resolutions = resolveAllConcepts({ provider: 'linear' });
     const disabled = resolutions.filter(r => r.source === 'disabled').map(r => r.concept);
-    expect(disabled.sort()).toEqual(['on-it-timestamps', 'team-activity']);
+    expect(disabled.sort()).toEqual(['on-it-timestamps', 'rate-limit', 'team-activity']);
     expect(resolutions.every(r => r.command !== null)).toBe(false); // the two above
     expect(resolutions.filter(r => r.source !== 'disabled').every(r => r.executable !== null)).toBe(true);
   });

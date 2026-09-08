@@ -161,13 +161,13 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
   if (_providerPresets) return _providerPresets;
   _providerPresets = {
     github: getDefaultCommands(),
-    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps']),
-    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff']),
+    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps', 'rate-limit']),
+    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff', 'rate-limit']),
     // Linear is a hybrid forge (spec 719): it owns *issues*, while every PR
     // concept — pr-create included — deliberately falls through to the github
     // default. Disabling pr-create here would leave Linear the one provider
     // that can merge a PR but not open one.
-    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps']),
+    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps', 'rate-limit']),
   };
   return _providerPresets;
 }

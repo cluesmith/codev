@@ -568,3 +568,37 @@ rather than ship a shell script I cannot execute here, and said so in #1651.
 Nits also fixed: `stateFor` allocated on read (a query grew the map), `probing` was keyed by
 an un-normalized provider, `doctor` could render `Infinity%` on a zero limit, and
 `forgeStatus` was blind to the two search concepts failing.
+
+## 2026-09-08 — CMAP round 9: gemini APPROVE (4th clean), codex REQUEST_CHANGES
+
+Codex found four; three fixed, one folded into #1650.
+
+- **The queued-flight join branch was unreachable.** The 60 s debounce is longer than a forge
+  command's own 30 s timeout, so a flight can never still be queued when the next honoured
+  invalidation lands. Dead code — added in round 7 to solve a problem the round-8 debounce
+  then solved upstream — and its test went green with it removed. **Removed both.** Second
+  time in two rounds that a fix of mine was superseded and left behind as dead code; the
+  reviewers caught it both times.
+- **The REST exemption was applied unconditionally**, but it is a fact about GitHub: `gh api
+  user` is REST, while Linear's `user-identity` is a GraphQL call on Linear's own budget.
+  Exempting it there would let it hammer a forge already refusing us. Now conditional on the
+  resolved backend being `gh`.
+- **`rate-limit` fell through to the github default for every provider**, so `codev doctor`
+  told GitLab/Gitea/Linear projects to install `gh`. Disabled in those presets; the spec-719
+  hybrid guard updated with the reason.
+- **Global invalidation fans out across workspaces** — `invalidate()` clears every workspace's
+  entries, so one workspace's refresh costs 4 commands in each *watched* workspace
+  (13 × 4 × 60/h = 3,120 calls/h at the debounce ceiling). The debounce bounds the rate, not
+  the fan-out. Added to #1650 as a second scoping dimension rather than adding plumbing here
+  that no caller would use.
+
+### I deleted a real test while removing a fake one
+
+Removing the vacuous `escalates the backoff…` test in round 8, I sliced the file between two
+anchors — and `caps forge spend under sustained invalidation` sat between them. It went with
+it, and commit `54258a3d9`'s message claims that test exists. It did not, from that commit
+until now.
+
+Restored from `ae79c220d` and verified meaningful (`expected 10 to be less than or equal to 1`
+without the debounce). **Anchor-to-anchor slicing deletes whatever is in between** — use an
+exact-block match, and diff the test count before and after any test-file surgery.
