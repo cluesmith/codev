@@ -602,3 +602,37 @@ until now.
 Restored from `ae79c220d` and verified meaningful (`expected 10 to be less than or equal to 1`
 without the debounce). **Anchor-to-anchor slicing deletes whatever is in between** — use an
 exact-block match, and diff the test count before and after any test-file surgery.
+
+### Round 9, claude's lane: the debounce was collapsing the long TTLs
+
+The serious one, and it invalidated a number I had been reporting. Every honoured
+invalidation dropped **all five** caches, including the 600 s search windows and the 3600 s
+identity cache — so a refresh forced the two 24 h retrospective queries **ten times** more
+often than their own TTL, and the user's login **sixty times**, for events that cannot have
+changed either. Claude measured **305 calls/h/workspace against the 52 my doctor check was
+projecting**, with the doctor showing green.
+
+Two fixes:
+
+- `invalidate()` drops **only the two open lists** — which is what a refresh means. The
+  long-TTL caches keep their TTLs.
+- `codev doctor` reports a **range and warns on the ceiling**, not the idle floor. Reporting
+  only the floor meant the check would have missed exactly the situation it exists for. That
+  is the second diagnostic in this PR that was itself misleading (the first divided calls by
+  a points budget).
+
+Also replaced the `keeps the suspension when the REST identity call still succeeds` test:
+claude showed it passes with *either* underlying fix reverted **and** its comment
+misattributed which mechanism fires (`noteForgeSuccess` is never called for `user-identity`
+now). Replaced with one that pins the TTL behaviour, verified red (`expected 1, got 2`).
+
+### I lost an uncommitted fix to `git checkout --` again
+
+Second time. The vacuity check reverts the fix, runs the test, then restores with
+`git checkout -- <path>` — which restores to **HEAD**, so any part of the fix that was not yet
+committed is destroyed. The full suite then failed with a symptom that looked like
+cross-test pollution and I started debugging it as one.
+
+The rule I wrote after the first occurrence was "commit before running consult". That was too
+narrow. The rule is: **`git checkout --` is a restore only for committed work — never run a
+revert-based check against a dirty tree.** Commit, then check.

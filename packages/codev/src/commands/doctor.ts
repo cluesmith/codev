@@ -36,8 +36,9 @@ import { parseBudget } from '../lib/forge-rate-limit.js';
 import { getGlobalDbPath } from '../agent-farm/db/index.js';
 import {
   GRAPHQL_POINTS_PER_CALL,
+  INVALIDATION_MIN_INTERVAL_MS,
   projectHourlyForgeCalls,
-  projectHourlyGraphqlPoints,
+  projectHourlyForgeCallsUnderChurn,
 } from '../agent-farm/servers/overview-budget.js';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
@@ -1344,14 +1345,20 @@ export async function doctor(): Promise<number> {
         // GraphQL points, and a forge call costs several (#1645). Dividing
         // calls by the point limit understates spend ~3x and would suppress
         // the warning this check exists to raise.
+        // Report the range and warn on the CEILING. Reporting only the idle
+        // floor showed green while the figure under constant porch churn was
+        // several times higher — the check would have missed the very
+        // situation it exists for.
         const workspaceCount = countKnownWorkspaces();
-        const calls = projectHourlyForgeCalls(workspaceCount);
-        const projected = projectHourlyGraphqlPoints(workspaceCount);
+        const idleCalls = projectHourlyForgeCalls(workspaceCount);
+        const churnCalls = projectHourlyForgeCallsUnderChurn(workspaceCount, INVALIDATION_MIN_INTERVAL_MS);
+        const projected = churnCalls * GRAPHQL_POINTS_PER_CALL;
         // Guard the divisor: a forge reporting `limit: 0` would otherwise
         // render `Infinity%`.
         const share = budget.limit > 0 ? Math.round((projected / budget.limit) * 100) : 0;
-        const projLabel = `≥${calls} calls/h for ${workspaceCount} recent workspace(s) ≈ ${projected} pts/h `
-          + `(@${GRAPHQL_POINTS_PER_CALL} pts/call) — ${share}% of ${budget.limit}/h`;
+        const projLabel = `${idleCalls}-${churnCalls} calls/h for ${workspaceCount} recent workspace(s) `
+          + `≈ ${projected} pts/h under churn (@${GRAPHQL_POINTS_PER_CALL} pts/call) `
+          + `— ${share}% of ${budget.limit}/h`;
         if (share > 50) {
           console.log(`  ${chalk.yellow('⚠')} ${'projected spend'.padEnd(20)} ${chalk.yellow(projLabel)}`);
           warnings++;

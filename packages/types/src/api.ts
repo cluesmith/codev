@@ -348,10 +348,12 @@ export interface OverviewData {
    * - `'ok'` — the forge answered.
    * - `'rate-limited'` — the forge's API budget is exhausted and Tower has
    *   **deliberately suspended** that provider's commands until `forgeResetAt`.
-   *   The lists come back **empty**, not stale — nothing is fetched at all
-   *   while suspended, because the budget is charged per account and shared
-   *   with every other tool on the machine, so retrying would only extend the
-   *   outage. This field is what tells the UI the emptiness is deliberate.
+   *   Nothing is fetched while suspended, because the budget is charged per
+   *   account and shared with every other tool on the machine, so retrying
+   *   would only extend the outage. A list whose cached copy is still within
+   *   its TTL is therefore served **stale**; one whose copy has expired or was
+   *   never fetched comes back **empty**. This field is what tells the UI that
+   *   either is deliberate rather than a bug.
    * - `'unavailable'` — the commands ran and failed for some other reason
    *   (`gh` missing, not authenticated, offline).
    *

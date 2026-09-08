@@ -32,7 +32,12 @@ import {
 import { loadProtocol } from '../../commands/porch/protocol.js';
 import { clearForgeBackendCache, loadForgeConfig, resolveConceptBackend } from '../../lib/forge.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
-import { POSITIVE_TTL_MS, SEARCH_TTL_MS, negativeTtlMs } from './overview-budget.js';
+import {
+  INVALIDATION_MIN_INTERVAL_MS,
+  POSITIVE_TTL_MS,
+  SEARCH_TTL_MS,
+  negativeTtlMs,
+} from './overview-budget.js';
 import type {
   PlanPhase,
   OverviewBuilder,
@@ -883,23 +888,7 @@ function dropSucceeded<T>(cache: Map<string, CacheEntry<T>>): void {
  */
 const PREDECESSOR_WAIT_CAP_MS = 35_000;
 
-/**
- * How often an *invalidation* may actually force a forge refresh.
- *
- * `invalidate()` bypasses the TTLs by design — that is what a refresh is. But
- * `POST /api/overview/refresh` is fired automatically after every mutating
- * porch command, every VSCode review-queue mutation and every cleanup, so in a
- * busy workspace the TTLs stopped governing spend at all: the invalidation rate
- * did. Honouring at most one invalidation per minute keeps a porch action
- * visible promptly while putting a ceiling back on.
- *
- * Note what this does not fix: most of those invalidations cannot have changed
- * the forge lists at all (a phase transition moves builder state, which is
- * filesystem-derived and refreshes every poll anyway). Only PR/issue mutations
- * genuinely need one. Telling those apart needs porch to say which it did —
- * tracked separately.
- */
-const INVALIDATION_MIN_INTERVAL_MS = 60_000;
+
 
 interface CacheEntry<T> {
   data: T | null;
@@ -1217,11 +1206,17 @@ export class OverviewCache {
     if (now - this.lastForcedRefreshAt < INVALIDATION_MIN_INTERVAL_MS) return;
     this.lastForcedRefreshAt = now;
 
+    // Only the two *open* lists. A refresh means "the open PRs or issues may
+    // have changed", which is what a porch action or a merge affects.
+    //
+    // The other three are deliberately left alone. Dropping them let a 60 s
+    // debounce override a 600 s search TTL and a 3600 s identity TTL — forcing
+    // the two 24 h retrospective windows ten times more often than their own
+    // TTL, and the user's login sixty times, for events that cannot have
+    // changed either. Measured at 305 calls/h/workspace against the 52 the
+    // doctor was projecting, with the doctor showing green.
     dropSucceeded(this.prCache);
     dropSucceeded(this.issueCache);
-    dropSucceeded(this.closedCache);
-    dropSucceeded(this.mergedPRCache);
-    dropSucceeded(this.currentUserCache);
     // The join table is deliberately NOT cleared. A caller arriving after this
     // point must not be handed a result fetched under the previous config, and
     // the generation bump sees to that: they chain a fresh fetch behind the

@@ -1956,6 +1956,68 @@ describe('overview', () => {
       expect(data.errors?.prs).not.toContain('GitHub CLI unavailable');
     });
 
+    it('does not force the long TTLs on an invalidation (#1645)', async () => {
+      // A refresh means "the open PRs or issues may have changed". Dropping the
+      // search and identity caches too let a 60s debounce override a 600s and a
+      // 3600s TTL — forcing the 24h retrospective windows ten times more often
+      // than their own TTL, for events that cannot have changed them.
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+      mockFetchRecentlyClosed.mockResolvedValue([]);
+      mockFetchMergedPRs.mockResolvedValue([]);
+      mockFetchCurrentUser.mockResolvedValue('octocat');
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      cache.invalidate();
+      await cache.getOverview(tmpDir);
+
+      // The open lists refresh...
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+      expect(mockFetchIssueList).toHaveBeenCalledTimes(2);
+      // ...the long-TTL ones do not.
+      expect(mockFetchRecentlyClosed).toHaveBeenCalledTimes(1);
+      expect(mockFetchMergedPRs).toHaveBeenCalledTimes(1);
+      expect(mockFetchCurrentUser).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports forgeStatus rate-limited with a reset instant (#1645)', async () => {
+      const resetAt = Date.now() + 10 * 60 * 1000;
+      noteRateLimited(OVERVIEW_BACKEND, resetAt);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.forgeStatus).toBe('rate-limited');
+      expect(data.forgeResetAt).toBe(new Date(resetAt).toISOString());
+    });
+
+    it('reports forgeStatus ok when the forge answers, unavailable when it fails (#1645)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const okData = await new OverviewCache().getOverview(tmpDir);
+      expect(okData.forgeStatus).toBe('ok');
+      expect(okData.forgeResetAt).toBeUndefined();
+
+      mockFetchIssueList.mockResolvedValue(null);
+      const badData = await new OverviewCache().getOverview(tmpDir);
+      expect(badData.forgeStatus).toBe('unavailable');
+    });
+
+    it('says the forge is rate-limited, not that gh is missing (#1645)', async () => {
+      // The dashboard renders errors.prs/errors.issues verbatim (WorkView's
+      // `work-unavailable`), so "GitHub CLI unavailable" during a rate limit
+      // sent people looking for a broken gh install.
+      noteRateLimited(OVERVIEW_BACKEND, Date.now() + 10 * 60 * 1000);
+
+      const data = await new OverviewCache().getOverview(tmpDir);
+
+      expect(data.errors?.prs).toContain('rate limit exhausted');
+      expect(data.errors?.issues).toContain('rate limit exhausted');
+      expect(data.errors?.prs).not.toContain('GitHub CLI unavailable');
+    });
+
     it('keeps the suspension when the REST identity call still succeeds (#1645)', async () => {
       // `user-identity` is REST (`gh api user`), charged to a different budget,
       // so it keeps succeeding while its GraphQL siblings are refused. A

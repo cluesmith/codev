@@ -87,3 +87,39 @@ export const GRAPHQL_POINTS_PER_CALL = 3;
 export function projectHourlyGraphqlPoints(workspaceCount: number): number {
   return projectHourlyForgeCalls(workspaceCount) * GRAPHQL_POINTS_PER_CALL;
 }
+
+/**
+ * How often an *invalidation* may actually force a forge refresh.
+ *
+ * `invalidate()` bypasses the TTLs by design — that is what a refresh is. But
+ * `POST /api/overview/refresh` is fired automatically after every mutating
+ * porch command, every VSCode review-queue mutation and every cleanup, so in a
+ * busy workspace the TTLs stopped governing spend at all: the invalidation rate
+ * did. Honouring at most one invalidation per minute keeps a porch action
+ * visible promptly while putting a ceiling back on.
+ *
+ * Note what this does not fix: most of those invalidations cannot have changed
+ * the forge lists at all (a phase transition moves builder state, which is
+ * filesystem-derived and refreshes every poll anyway). Only PR/issue mutations
+ * genuinely need one. Telling those apart needs porch to say which it did —
+ * tracked separately.
+ */
+export const INVALIDATION_MIN_INTERVAL_MS = 60_000;
+
+/**
+ * Projected calls/hour when invalidations arrive constantly — the ceiling that
+ * matches `projectHourlyForgeCalls`'s floor (#1645).
+ *
+ * `POST /api/overview/refresh` bypasses the TTLs, and porch fires it after
+ * every mutating command, so under churn the two open lists refresh at the
+ * debounce rate rather than their own TTL. The two 24 h search windows are not
+ * dropped by an invalidation, so they stay on SEARCH_TTL_MS.
+ */
+export function projectHourlyForgeCallsUnderChurn(
+  workspaceCount: number,
+  invalidationDebounceMs: number,
+): number {
+  const lists = 2 * (3_600_000 / invalidationDebounceMs);
+  const searches = 2 * (3_600_000 / SEARCH_TTL_MS);
+  return Math.round(workspaceCount * (lists + searches));
+}
