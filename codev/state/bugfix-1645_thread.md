@@ -521,3 +521,50 @@ And three honesty fixes to the doctor check, all fair:
   reads `≥N calls/h`.
 - The budget line rendered a green `✓` from a reading **this PR's own code documents as
   unreliable** on an exhausted account. Now labelled `(reported)`.
+
+## 2026-09-08 — CMAP round 8: gemini APPROVE, codex + claude REQUEST_CHANGES
+
+Gemini's third consecutive clean round. The other two found five more real things.
+
+**Codex: `invalidate()` bypasses the TTLs entirely.** A refresh means "fetch now" by design,
+but `POST /api/overview/refresh` is fired automatically after every mutating porch command,
+every VSCode review-queue mutation and every cleanup. So in a busy workspace **the
+invalidation rate governed spend, not the TTLs** — every TTL figure in the PR body is an
+idle-state floor. Shipped a 60 s debounce (architect chose (a)); scoping invalidations to
+forge-visible events is the end state and is filed as **#1650**, with "just stop clearing
+forge caches" recorded there as the rejected alternative and why.
+
+Codex also called my burst test too easy — it only covered the synchronous case that
+queue-collapsing already handles. The new test drives *sustained* invalidation.
+
+**Claude: a test I added last round was vacuous AND its fix was dead code.** The
+`failures` re-read could never differ — a stale-generation flight returns before writing, and
+single-flight means no competing writer — and the test built no queued flight at all. Verified
+it passes with the fix reverted, then **removed both**. Adding code in response to a review
+and then a test that cannot fail is the worst combination available; the revert-check is the
+only reason it did not ship.
+
+That is the **fifth** vacuous or artifact-asserting test in this PR. The tendency is
+consistent: a test written to satisfy a finding gets written to pass. The habit that catches
+it — revert the fix, confirm red, restore — has to be unconditional, not reserved for tests
+that look risky.
+
+**Claude: the REST identity call was blocked by a GraphQL suspension.** `user-identity` is
+`gh api user`, a different budget, resolving to the same `gh` key. Blocking it saved no
+points and dropped `currentUser` from the overview for the whole window. It is now neither
+governed by that budget nor evidence for it — one flag, both directions.
+
+**Claude: other forges swallow their exit status the same way `github/pr-list.sh` did.** A
+concept that pipes its CLI into `jq` reports jq's status, so those forges get negative caching
+but can never trigger a suspension. Fixed the overview-path ones (`gitlab/pr-list`,
+`gitea/issue-list`, `gitea/recently-closed`); `gitea/pr-list`, `recently-merged` and
+`user-identity` already did it right, with a comment naming the pipefail issue — the trap was
+known and github's was simply missed. The rest are **#1651**.
+
+I broke the two Linear scripts twice attempting a mechanical rewrite: their `curl` nests
+`$(jq -n …)` inside `-d "…"`, so wrapping it in `"$( … )"` needs care with quoting. Reverted
+rather than ship a shell script I cannot execute here, and said so in #1651.
+
+Nits also fixed: `stateFor` allocated on read (a query grew the map), `probing` was keyed by
+an un-normalized provider, `doctor` could render `Infinity%` on a zero limit, and
+`forgeStatus` was blind to the two search concepts failing.

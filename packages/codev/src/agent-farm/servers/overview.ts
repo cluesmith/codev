@@ -1181,9 +1181,13 @@ export class OverviewCache {
     // deliberately not spawning anything until `forgeResetAt`; `unavailable`
     // means the commands ran and failed for some other reason. Without this the
     // dashboard could only show an empty list and a generic "gh unavailable".
+    // `errors` only covers PRs and issues, so a failure confined to the two
+    // 24h search concepts would otherwise report `ok` with an empty
+    // "recently closed" list and no explanation.
+    const anyForgeFailure = Object.keys(errors).length > 0 || closed === null || mergedPRs === null;
     const forgeStatus: OverviewData['forgeStatus'] = rateLimit.limited
       ? 'rate-limited'
-      : Object.keys(errors).length > 0 ? 'unavailable' : 'ok';
+      : anyForgeFailure ? 'unavailable' : 'ok';
 
     const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, queuedFeedback, feedbackMode, forgeStatus };
     if (rateLimit.resetAt) {
@@ -1267,15 +1271,20 @@ export class OverviewCache {
     ttl: number,
     fetcher: () => Promise<T | null>,
     /**
-     * Whether this concept succeeding is evidence the backend has recovered.
+     * Whether this concept shares the budget the suspension is protecting.
      *
      * False for `user-identity`: it is `gh api user`, REST, charged to a budget
-     * separate from the GraphQL one the lists spend, but resolving to the same
-     * `gh` backend key. Letting it clear the suspension would reset the
-     * escalating backoff every time a window expired — the doubling would never
-     * get past its first step, however hard the forge was refusing us.
+     * separate from the GraphQL one the lists spend, while resolving to the
+     * same `gh` backend key. That cuts both ways, and both directions matter:
+     *
+     * - its success is not evidence the GraphQL budget recovered — letting it
+     *   clear the suspension would reset the escalating backoff every time a
+     *   window expired, so the doubling would never get past its first step;
+     * - and it must not be *blocked* by that suspension either. Blocking it
+     *   saves no GraphQL points and costs the UI its `currentUser` for the
+     *   whole window.
      */
-    countsAsRecovery = true,
+    sharesRateLimitedBudget = true,
   ): Promise<T | null> {
     const dispatchedAt = Date.now();
     const cached = cache.get(cwd);
@@ -1286,7 +1295,9 @@ export class OverviewCache {
     }
 
     const backend = this.backendFor(cwd, concept);
-    if (isForgeSuspended(backend, dispatchedAt)) return Promise.resolve(null);
+    if (sharesRateLimitedBudget && isForgeSuspended(backend, dispatchedAt)) {
+      return Promise.resolve(null);
+    }
 
     const key = `${concept}:${cwd}`;
     const generation = this.generation;
@@ -1333,7 +1344,7 @@ export class OverviewCache {
       await predecessor;
 
       // The forge may have refused someone else while we waited.
-      if (isForgeSuspended(backend)) return null;
+      if (sharesRateLimitedBudget && isForgeSuspended(backend)) return null;
 
       entry.queued = false; // from here we are the one holding the command
       const data = await fetcher();
@@ -1356,13 +1367,14 @@ export class OverviewCache {
         // `dispatchedAt`, not `fetchedAt`: a command dispatched before the
         // current suspension began proves nothing about the forge having
         // recovered — see noteForgeSuccess.
-        if (countsAsRecovery) noteForgeSuccess(backend, dispatchedAt);
+        if (sharesRateLimitedBudget) noteForgeSuccess(backend, dispatchedAt);
       } else {
-        // Re-read rather than reusing the dispatch-time snapshot: a chained
-        // flight can be minutes behind its own `cached`, and counting from a
-        // stale value means consecutive failures never escalate the backoff.
-        const priorFailures = cache.get(cwd)?.failures ?? cached?.failures ?? 0;
-        cache.set(cwd, { data: null, fetchedAt, failures: priorFailures + 1 });
+        // `cached` is the dispatch-time snapshot, and that is sound: a flight
+        // from an older generation returns above without writing, and
+        // single-flight means no other writer for this key. A re-read here was
+        // added in review and removed again — it could never differ, and the
+        // test written to justify it passed with it reverted.
+        cache.set(cwd, { data: null, fetchedAt, failures: (cached?.failures ?? 0) + 1 });
         // If that failure was a rate limit, learn when it lifts — once per
         // suspension window, and only where the probe has been enabled.
         void maybeProbeReset(backend, cwd);
@@ -1446,7 +1458,7 @@ export class OverviewCache {
   private fetchCurrentUserCached(cwd: string): Promise<string | null> {
     return this.fetchCached(
       'user-identity', this.currentUserCache, cwd, this.USER_TTL, () => fetchCurrentUser(cwd),
-      false, // REST — its success says nothing about the GraphQL budget
+      false, // REST — a different budget: neither governed by it nor evidence for it
     );
   }
 

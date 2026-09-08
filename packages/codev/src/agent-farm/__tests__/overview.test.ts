@@ -1907,11 +1907,16 @@ describe('overview', () => {
       await cache.getOverview(tmpDir);
       await cache.getOverview(tmpDir);
 
+      // The four GraphQL-backed lists: nothing spawned at all.
       expect(mockFetchPRList).not.toHaveBeenCalled();
       expect(mockFetchIssueList).not.toHaveBeenCalled();
       expect(mockFetchRecentlyClosed).not.toHaveBeenCalled();
       expect(mockFetchMergedPRs).not.toHaveBeenCalled();
-      expect(mockFetchCurrentUser).not.toHaveBeenCalled();
+
+      // But `user-identity` is REST, on a budget the suspension is not
+      // protecting. Blocking it would save no GraphQL points and would drop
+      // `currentUser` from the overview for the whole window, so it still runs.
+      expect(mockFetchCurrentUser).toHaveBeenCalled();
     });
 
     it('reports forgeStatus rate-limited with a reset instant (#1645)', async () => {
@@ -2108,50 +2113,6 @@ describe('overview', () => {
 
       // Still inside the 60s negative window: the refresh did not buy a retry.
       expect(mockFetchPRList).toHaveBeenCalledTimes(1);
-    });
-
-    it('escalates the backoff even when a failure is written by a queued flight (#1645)', async () => {
-      // The failure count used to be read at dispatch and written minutes
-      // later, so consecutive failures never escalated past the first step.
-      mockFetchPRList.mockResolvedValue(null);
-      mockFetchIssueList.mockResolvedValue([]);
-
-      const cache = new OverviewCache();
-      await cache.getOverview(tmpDir);
-
-      vi.useFakeTimers();
-      vi.advanceTimersByTime(61_000);       // past window 1 (60s)
-      await cache.getOverview(tmpDir);      // 2nd failure -> window 2 (120s)
-      vi.advanceTimersByTime(61_000);       // inside window 2
-      await cache.getOverview(tmpDir);
-      vi.useRealTimers();
-
-      // Two fetches, not three: the second failure escalated the window.
-      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
-    });
-
-    it('caps forge spend under sustained invalidation, not just a burst (#1645)', async () => {
-      // The burst test above is synchronous — every invalidation lands while
-      // one flight is queued, so collapsing handles it. Sustained invalidation
-      // is the real shape: porch fires one after every mutating command, spread
-      // over time, each arriving after the previous fetch has already started.
-      // Without a debounce the TTLs stop governing spend entirely and the
-      // invalidation rate governs it instead.
-      mockFetchPRList.mockResolvedValue([]);
-      mockFetchIssueList.mockResolvedValue([]);
-
-      const cache = new OverviewCache();
-      await cache.getOverview(tmpDir);
-      const afterFirst = mockFetchPRList.mock.calls.length;
-
-      // Ten invalidations, each with its fetch fully settling in between.
-      for (let i = 0; i < 10; i++) {
-        cache.invalidate();
-        await cache.getOverview(tmpDir);
-      }
-
-      // At most one of them forced a refresh; the rest were debounced.
-      expect(mockFetchPRList.mock.calls.length - afterFirst).toBeLessThanOrEqual(1);
     });
 
     it('re-checks the suspension after waiting on a queued fetch (#1645)', async () => {

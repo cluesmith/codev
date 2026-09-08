@@ -120,11 +120,20 @@ function backendKey(backend: string): string {
   return backend.trim().toLowerCase();
 }
 
+const FRESH_STATE: Readonly<ProviderState> =
+  { suspendedUntilMs: 0, suspendedSinceMs: 0, consecutiveHits: 0, probedSuspensionMs: -1 };
+
+/** Read-only view. Never allocates — a query must not grow the map (#1645). */
+function readState(backend: string): Readonly<ProviderState> {
+  return providerStates.get(backendKey(backend)) ?? FRESH_STATE;
+}
+
+/** Mutable view, allocating on first write for this backend. */
 function stateFor(backend: string): ProviderState {
   const key = backendKey(backend);
   let state = providerStates.get(key);
   if (!state) {
-    state = { suspendedUntilMs: 0, suspendedSinceMs: 0, consecutiveHits: 0, probedSuspensionMs: -1 };
+    state = { ...FRESH_STATE };
     providerStates.set(key, state);
   }
   return state;
@@ -145,7 +154,7 @@ export function getForgeRateLimit(
   provider: string,
   now: number = Date.now(),
 ): ForgeRateLimitState {
-  const { suspendedUntilMs } = stateFor(provider);
+  const { suspendedUntilMs } = readState(provider);
   if (suspendedUntilMs <= now) return { limited: false, resetAt: null };
   return { limited: true, resetAt: new Date(suspendedUntilMs).toISOString() };
 }
@@ -155,7 +164,7 @@ export function isForgeSuspended(
   provider: string,
   now: number = Date.now(),
 ): boolean {
-  return stateFor(provider).suspendedUntilMs > now;
+  return readState(provider).suspendedUntilMs > now;
 }
 
 /**
@@ -204,7 +213,7 @@ export function noteForgeSuccess(
   provider: string,
   startedAt: number = Date.now(),
 ): void {
-  const state = stateFor(provider);
+  const state = readState(provider);
   // `<=`, not `<`: the overview dispatches its commands in one tick, so they
   // share a millisecond, and a limit recorded in that same millisecond would
   // otherwise let a sibling's success clear it — the exact race this guards.
@@ -302,11 +311,12 @@ export async function maybeProbeReset(
   // not two — `resolveConceptBackend` maps the `github` provider to `gh` so the
   // readable and unreadable paths cannot key an account twice.
   if (backendKey(provider) !== 'gh') return;
-  if (!probeEnabled || probing.has(provider) || !isForgeSuspended(provider)) return;
+  const probeKey = backendKey(provider);
+  if (!probeEnabled || probing.has(probeKey) || !isForgeSuspended(provider)) return;
   const state = stateFor(provider);
   if (state.probedSuspensionMs === state.suspendedSinceMs) return; // already probed this window
   state.probedSuspensionMs = state.suspendedSinceMs;
-  probing.add(provider);
+  probing.add(probeKey);
   try {
     const budget = await fetchForgeBudget(cwd);
     if (budget && budget.remaining === 0 && budget.reset > 0) {
@@ -315,7 +325,7 @@ export async function maybeProbeReset(
   } catch {
     // Probe failures are non-events — the backoff already covers us.
   } finally {
-    probing.delete(provider);
+    probing.delete(probeKey);
   }
 }
 

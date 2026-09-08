@@ -1347,7 +1347,9 @@ export async function doctor(): Promise<number> {
         const workspaceCount = countKnownWorkspaces();
         const calls = projectHourlyForgeCalls(workspaceCount);
         const projected = projectHourlyGraphqlPoints(workspaceCount);
-        const share = Math.round((projected / budget.limit) * 100);
+        // Guard the divisor: a forge reporting `limit: 0` would otherwise
+        // render `Infinity%`.
+        const share = budget.limit > 0 ? Math.round((projected / budget.limit) * 100) : 0;
         const projLabel = `≥${calls} calls/h for ${workspaceCount} recent workspace(s) ≈ ${projected} pts/h `
           + `(@${GRAPHQL_POINTS_PER_CALL} pts/call) — ${share}% of ${budget.limit}/h`;
         if (share > 50) {
