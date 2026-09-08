@@ -6,36 +6,43 @@ Base commit: `c4ad613fcda59ad4c996eb59c66794a80e57e7c2`.
 ## Investigate
 
 Reproduced the failure mechanism from evidence rather than by burning subscription
-quota on another 5-minute review: the two saved failing sessions cited in the
-architect's prior investigation show 29 and 51 tool calls with last-successful
-input of 174,521 and 175,930 tokens respectively, then `Prompt is too long`. That
-is a context-window ceiling at ~200K, not an oversized opening prompt. (The
-opening prompt for `--protocol pir --type impl --project-id 1481` inlines
-spec 2.5K + plan 34K ≈ 10K tokens — nowhere near a limit.)
+quota on another 5-minute review.
+
+**What the five attempts actually show** (corrected after architect review — see below):
+four of the five ended in `Prompt is too long`; the third builder-side attempt hit a
+separate subscription usage limit and is not evidence of this bug. The two saved failing
+sessions show 29 and 51 tool calls with last-successful inputs of 174,521 and 175,930
+tokens before the error. That is accumulated review-context exhaustion surfacing as
+`Prompt is too long` — it does not establish where the request was refused, nor that
+every changed file was read in full. It is not an oversized opening prompt: the opening
+prompt for `--protocol pir --type impl --project-id 1481` inlines spec 2.5K + plan 34K,
+roughly 10K tokens.
 
 Root cause, verified against the actual source and the bundled runtime:
 
 1. `packages/codev/src/commands/consult/index.ts:419` —
    `DEFAULT_CLAUDE_MODEL = 'claude-opus-5'` (a bare id, no context suffix).
-2. The Agent SDK bundles a Claude Code runtime whose context budget is
-   `function jk(q,K){ ... if(ZG(q))return 1e6; ... return qh1}` with
-   `qh1=200000` and `ZG(q)=/\[1m\]/i.test(q)`. A bare `claude-opus-5` is
-   therefore budgeted at **200,000** tokens; `claude-opus-5[1m]` at
-   **1,000,000**. Confirmed by inspecting the bundled `cli.js` in
-   `@anthropic-ai/claude-agent-sdk@0.2.105` (the checkout's locked version);
-   the installed 0.2.141 behaves the same.
+2. The Agent SDK's bundled runtime derives the context budget from the model id. Its
+   window function `jk(q,K)` has four branches — a `DISABLE_COMPACT` +
+   `CLAUDE_CODE_MAX_CONTEXT_TOKENS` env override, `ZG(q)` (the `[1m]` suffix),
+   `K?.includes(jo)&&UT1(q)` (beta header), and `TV8(q)` (gated, requires
+   `sonnet-4-6`) — before falling through to `qh1 = 200000`. So there is **no** universal
+   "1M with a suffix, 200K otherwise" rule. The scoped, verified fact is narrower:
+   under SDK **0.2.105** (this repo's lockfile) and **0.2.141** (the installed build),
+   bare `claude-opus-5` budgets **200,000** and `claude-opus-5[1m]` budgets **1,000,000**.
 3. `runClaudeConsultation` gives the lane `allowedTools: ['Read','Glob','Grep']`
-   and `maxTurns: 200`, so an impl/integration review of a 41-file PR reads
-   dozens of files and accumulates past 200K → the API returns
-   `Prompt is too long`.
+   and `maxTurns: 200`, so a review of a 41-file PR accumulates context until the 200K
+   budget is exhausted.
 4. `packages/codev/src/lib/consult-lanes.ts:77` —
    `MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/` rejects `[` and `]`,
    so **no user could work around it** via `consult.models.claude` or
    `--model-id claude-opus-5[1m]`. That is why the failure was unrecoverable
-   across 5 attempts and 2 callers.
+   across the attempts rather than merely inconvenient.
 
-Why gemini and codex were unaffected: different backends, different context
-budgets — neither routes through the Agent SDK's model-id → window mapping.
+Other lanes against the same target: **codex** completed (239.4s, `REQUEST_CHANGES`).
+**gemini** did *not* review — I opened its 358-byte artifact and it is a non-blocking
+skip notice (`Gemini lane skipped — agy exited with code 1`), so it is no evidence the
+target was reviewable either.
 
 Scope: 8 files, +68/−25. Comfortably inside BUGFIX's ~300 LOC ceiling.
 
@@ -74,3 +81,83 @@ Verification:
 - Only production consumer of `MODEL_ID_RE` is `validateModelId` — blast radius contained.
 
 Fix is 8 files, +68/−25. Well inside BUGFIX's ~300 LOC ceiling.
+
+## PR
+
+PR **#1657** — https://github.com/cluesmith/codev/pull/1657 (branch `builder/bugfix-1641`).
+Recorded with `porch done bugfix-1641 --pr 1657 --branch builder/bugfix-1641`.
+
+Porch's own phase checks passed: build 13.2s, tests 28.6s.
+
+CMAP note: the first dispatch of all three lanes failed identically with
+`Multiple projects found: …` — from a builder worktree `consult` still needs
+`--project-id` when the repo carries many project directories. Re-dispatched as
+`consult -m <lane> --protocol bugfix --type pr --project-id bugfix-1641 --output …`.
+Not a finding against this PR; noting it because the porch PR-phase prompt's
+example omits the flag.
+
+### CMAP verdicts (PR #1657)
+
+- **gemini** — `APPROVE`, confidence HIGH, KEY_ISSUES: None (49.1s). Independently
+  re-derived the regex against every boundary case and reached the same results I did.
+  Noted that `/i` is a no-op on the character class (both cases already listed) and
+  affects only the `\[1m\]` suffix — which is the intent. Not a defect.
+- **codex** — `APPROVE`, confidence HIGH, KEY_ISSUES: None (148.0s). No security or
+  scope concerns; called the validation boundaries and doc sync correct.
+- **claude** — pending. (This run is itself an end-to-end exercise of the fix: it goes
+  through the installed consult, which now carries the `[1m]` default.)
+
+## Narrative corrections (architect review, PR #1657 comment 5593490746)
+
+Three factual corrections to my review record. All three were right; none required a code
+change, and the eight seeded files are untouched. Applied to the PR body and to the
+Investigate section above.
+
+1. **Over-broad framing of the five attempts.** I wrote that the bug hit "any large
+   review" and implied all five attempts were context failures. Four were; the third
+   builder-side attempt was a subscription usage limit. Scoped to the observed repeated
+   failures on PR #1640.
+2. **Over-broad runtime claim.** I wrote that the SDK returns 1M "only when the id carries
+   a `[1m]` suffix, and 200K otherwise." The window function has four branches before the
+   200K fallback, so that is not universal. Rewritten as the narrower claim I actually
+   verified: bare `claude-opus-5` → 200K, `claude-opus-5[1m]` → 1M, under SDK 0.2.105
+   and 0.2.141.
+3. **Over-claimed mechanism.** I wrote that the model "reads its way past 200K and the API
+   rejects the request." The saved sessions establish substantial prior tool activity and
+   accumulated-context exhaustion surfacing as `Prompt is too long` — not a specific
+   client-vs-server rejection point, and not that all 41 files were read in full.
+
+The gemini correction is the one worth keeping: I asserted "gemini completed normally"
+straight from the issue text without opening the artifact. It is a 358-byte skip notice.
+That is exactly the `lessons-critical.md` line about verifying claims against the actual
+file rather than trusting a summary — and I had already applied that discipline to the
+seeded patch while skipping it on the issue's own prose.
+
+**Outstanding:** commit `b73c5d21d`'s message carries corrections 2 and 3 in its original
+wording. Correcting it means an amend + force-push, which would invalidate the seven green
+CI checks and the completed reviews. Flagged to the architect rather than decided here.
+
+## Architect integration review — disposition (PR #1657 comment 5593523517)
+
+Independent Claude integration review: **COMMENT**, 254.0s, no implementation blocker.
+The architect adjudicated its findings against the SDK rather than accepting them:
+
+1. **"`[1m]` reaches the provider as part of the model id" — rejected.** The reviewer
+   stopped at internal normalization (`X5`). I re-verified the architect's counter-evidence
+   in the locked SDK 0.2.105: `UT(q) = q.replace(/\[(1|2)m\]/gi, "")`, applied at
+   `beta.messages.create({...P, model: UT(P.model)})`, at `countTokens`, and on the bedrock
+   path. Internal normalization keeps the marker; request construction strips it. The
+   context budget and the beta header are separate effects. My PR statement was correct.
+2. **Account/provider availability — advisory, not demonstrated breakage.** Added the
+   explicit opt-out to the PR record as asked: `consult.models.claude: "claude-opus-5"`
+   retains the previous selection and 200K budget on the inspected runtimes, alongside
+   `--model-id` and `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`. No automatic fallback and no
+   entitlement-policy change requested or made.
+3. **Version wording / reflow — non-blocking.** No rewrite of the seeded patch.
+
+Direction taken: correct the narrative in a **new commit**; do not amend or force-push
+`b73c5d21d` to revise historical wording. The corrected PR body and this committed
+narrative are the durable correction — which also resolves the decision I had referred
+upward. The seven green CI checks and completed reviews stay valid.
+
+All eight seeded files remain unchanged and still hash-match the handoff manifest.
