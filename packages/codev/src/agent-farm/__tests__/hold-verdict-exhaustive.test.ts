@@ -10,11 +10,17 @@
  * edit away from an escalation policy and an operator-facing remedy disagreeing about the same
  * row.
  *
- * So the copy was deleted and the property it bought is asserted here instead. The shared
- * predicate lives in the SDK and is deliberately typed on `string | null` (the CLI reads these
- * values back out of JSON), so it cannot carry the compile-time exhaustiveness itself. A test
- * can: this file owns the list, and the `satisfies` below fails to compile if the union and the
- * list ever disagree.
+ * So the copy was deleted and the property it bought is split in two. The compile-time half is a
+ * type-level tripwire in `mailbox-delivery.ts` — in SOURCE, because this package's tsconfig
+ * excludes the `__tests__` glob and vitest transpiles without typechecking, so the `satisfies`
+ * below is checked by NOTHING and enforces NOTHING on its own. It is kept purely as documentation
+ * of intent next to the values it annotates; do not mistake it for the guard. The runtime half —
+ * the actual answers — is this file.
+ *
+ * (An earlier draft of this header claimed the `satisfies` "fails to compile if the union and the
+ * list disagree". It does not, for exactly the reason above. Left recorded rather than quietly
+ * corrected, because a comment that overstates a guard is worse than no comment: it stops the
+ * next person from looking for a real one.)
  */
 import { describe, it, expect } from 'vitest';
 import { isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
@@ -24,9 +30,9 @@ import type { MailboxGateDetail } from '../db/types.js';
 /**
  * Every detail the classifier can return, and whether a hold carrying it can clear on its own.
  *
- * `satisfies Record<GateVerdict['detail'], boolean>` is the load-bearing part: widening
- * `GateVerdict['detail']` without adding it here is a TYPE error, which is exactly the guard the
- * deleted `CLASSIFIER_STUCK_DETAILS` provided.
+ * The `satisfies` is documentation, not enforcement (see the file header — tests are excluded
+ * from `tsc` here). The enforcement lives in `mailbox-delivery.ts`; what this table provides is
+ * the ANSWERS, asserted at runtime below.
  */
 const EXPECTED = {
   // Unverifiable — a drifted profile or a torn frame. Never clears on its own; escalates.

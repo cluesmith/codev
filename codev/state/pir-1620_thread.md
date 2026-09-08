@@ -301,3 +301,55 @@ Also caught a merge slip of my own: keeping both sides of the `GateProfile` conf
 
 Next: item 3 (trust refusals + config opt-in), item 2g (spawn-race retry), the exhaustiveness test,
 docs, then CMAP.
+
+## 2026-09-08 — implement phase: merge, security, race, and a CMAP round that caught me
+
+Plan approved and `porch approve` run. Implementation landed across nine commits on top of the
+merge. Full suite **5,965 passed / 0 failed**; PR #1203 reports `mergeable: true`.
+
+**CMAP (gemini / codex / claude, `--type impl`) — all three found something real.** Two false
+starts first: the runner needs `--protocol pir` (the impl template lives under the protocol, not
+`codev/consult-types/`) and `--issue`/`--project-id`, since this worktree carries ~100 project dirs
+and auto-detect refused to guess.
+
+- **gemini (REQUEST_CHANGES)**: `codev/reviews/1201-*.md` was stale in exactly the way the 1201
+  *plan* was — still describing `seed-kick.ts`, `message-pacing.ts`, `.builder-seed.txt`. The issue's
+  scope named only the plan; the same argument obviously applies to the review. Rewritten. A review
+  artifact describing code that is not there is worse than none: it is a confident wrong answer.
+- **codex (REQUEST_CHANGES)**: **`markerSpanStart` was inert.** `KIMI_MARKER` is anchored, so
+  `exec().index` is always 0 — meaning my "generalization" returned precisely what the hardcoded
+  `getCell(0)` returned, and the trap I had *documented as removed* was still armed. Verified with a
+  one-liner before fixing. This is the finding I most needed and least expected: I had written a
+  confident comment about fixing a latent bug and shipped a no-op.
+  - Fixing it produced a second lesson immediately. My first fix used capture group 1 — and agy's
+    `/^>(\s|$)/` already *has* a group 1, its separator. Sixteen agy tests went red at once because
+    the anchor began sampling the space after the marker. Switched to a **named** group
+    `(?<glyph>…)`, which cannot collide with an incidental one. My own new test caught it, which is
+    the first time this session a test I wrote paid for itself within a minute.
+  - Also: review doc missing `Files Changed` / `Commits` / `How to Test Locally`; follow-up issue
+    numbers absent. Both addressed (issues drafted, awaiting approval to file).
+- **claude (REQUEST_CHANGES)**: three tests the plan's own Test Plan mandated and I had not written
+  — `harnessOptions` validator coverage (zero, on a *security* opt-in whose validator throws inside
+  `loadConfig`), `writeStrategyForApp('kimi')` (the owner's bracketed-paste decision was reversible
+  with a green suite), and `markerSpanStart` (imported, unused — dead import). All added. It also
+  caught my `hold-verdict-exhaustive.test.ts` header claiming its `satisfies` "fails to compile",
+  which **contradicts what I had correctly documented in `mailbox-delivery.ts` in the same commit**.
+  Corrected, and the correction left visible in the file rather than quietly reworded — a comment
+  that overstates a guard stops the next person looking for a real one.
+
+**What I added unprompted, and would defend:** a test that pacing is *wired* through
+`makeDeliveryPorts().writeMessage`, not merely resolvable. All eight existing pacing tests call the
+resolver directly, so every one of them stayed green through *both* times this seam silently came
+unwired (#1365 moving the parameter list, #1567 inserting `strategy` into pacing's slot). Verified
+by removing the argument and watching it go red.
+
+**Verification discipline I held to throughout:** every guard was proven by breaking the thing it
+guards — the exhaustiveness tripwire (widened the union), the wiring test (unwired the binding), the
+`markerSpanStart` tests (reverted to the inert version, 3 red). That is lessons-learned #1401's own
+rule, and it is the reason the inert `markerSpanStart` is the *only* thing that got past me: it was
+the one guard I did not test that way before claiming it worked.
+
+**Outward drafts awaiting approval** (nothing posted — standing rule):
+`/tmp/pir-1620-draft-mohid-checklist.md`, `-pr-comment.md`, `-pr-description.md`,
+`-followup-issues.md`. The docs and review currently say the follow-ups are "filed before merge";
+they need real numbers before #1203 merges.

@@ -36,6 +36,72 @@ Our own `dev-approval` was therefore scoped to what *is* verifiable without Kimi
 made **for** Kimi moved nothing **else**. That is the larger risk anyway — `render-gate.ts`,
 `message-write.ts` and `hold-verdict.ts` carry claude, codex and agy delivery for every user.
 
+## Files Changed
+
+`git diff --stat $(git merge-base main HEAD)..HEAD` — **59 files, +8,551 / −83**, of which the
+great majority is @mohidmakhdoomi's original work carried through the merge unchanged. What *this*
+lane touched:
+
+| Path | Change |
+|---|---|
+| `servers/message-write.ts` | `MessagePacing` re-derived onto the post-#1567 signatures; the override now governs `SIMPLE_ENTER_DELAY_MS` **and** `PASTE_ENTER_DELAY_MS` |
+| `servers/mailbox-wiring.ts` | pacing threaded through the `writeMessage` binding (7th arg, after `strategy`) |
+| `servers/mailbox-delivery.ts` | local `CLASSIFIER_STUCK_DETAILS` fork deleted; type-level exhaustiveness tripwire added beside `isClassifierStuck` |
+| `servers/tower-routes.ts` | pacing on the `--interrupt` write; `--escape` left unpaced with the reason |
+| `servers/render-gate.ts` | `markerSpanStart` (named-group glyph lookup) + `markerFgPalette` generalized off `getCell(0)`; region-start work layered onto #1474's anchored `findMarkerRow` |
+| `servers/gate-profiles.ts` | `KIMI_MARKER` glyph wrapped in `(?<glyph>…)` |
+| `sdk/src/hold-verdict.ts` · `db/types.ts` · `db/schema.ts` | `no-region-start` + `multi-row-draft` in all three |
+| `utils/kimi-session-discovery.ts` | `KimiTrustDecision`; the MCP refusal; the opt-in gate |
+| `utils/harness.ts` | `prepareWorkspace` widened; every trust outcome logged; bounded queue retry; `--raw` task send |
+| `commands/spawn-worktree.ts` | consent resolved from config and passed to `prepareWorkspace` |
+| `agent-farm/types.ts` · `lib/config.ts` | the `harnessOptions` namespace, validated at load; `kimiAutoTrustWorkspace` |
+| tests | `hold-verdict-exhaustive.test.ts` (new); extended `harness`, `render-gate`, `spawn-worktree`, `kimi-session-discovery`, `mailbox-pacing`, `bugfix-584-…`, `bugfix-1567-…`, `src/__tests__/config` |
+| docs | `codev/resources/arch.md`; `commands/agent-farm.md` **mirrored into `codev-skeleton/`**; both 1201 artifacts rewritten |
+| `spikes/pir-1201-kimi-builder-demo.mjs` | scenario 6 reshaped, 6b/6c added, spawn opts in explicitly |
+
+## Commits
+
+Merge-only on top of @mohidmakhdoomi's 47; nothing rebased or squashed.
+
+- `26245f2ad` Plan draft · `34886ba44` revised against the raw lane output · `422d9b629` Kimi work
+  handed to the contributor · `acbde9049` no-outward-posts rule
+- `f0eaa98ee` re-derive the pacing seam onto the post-#1567 write edge · `6a80d4f02` state the
+  bisect numbers · `8827b176b` owner decision on bracketed paste
+- **`7e7b5d236` Merge origin/main into builder/pir-1201** · `c80437eb4` fix the five suites the
+  merge broke, and one it exposed
+- `eaf02fdea` gate the trust pre-write · `721182d21` close the task-queue race, `--raw` send, docs
+- `41955b4fd` arch.md · `e5b212c48` review docs (incl. rewriting 1201's stale one) · `d1ff28dc2`
+  lessons
+- `a0c8d26cc` test that pacing is *wired* · `83f921662` fix `markerSpanStart`, which was inert
+
+## How to Test Locally
+
+All of this is **non-Kimi on purpose** — see *What this lane did NOT do*. The Kimi-facing steps are
+the contributor's checklist.
+
+```bash
+gh pr checkout 1203 && pnpm install && pnpm build && pnpm test   # expect 5,951 passed / 0 failed
+```
+
+1. **The measured harnesses are untouched.** Generate a builder launch script for claude and codex
+   before and after this branch and diff them — byte-identical, or the change is wrong. This is the
+   manual mirror of the `markerSpanEnd` guardrail.
+2. **Live delivery to a claude builder still works.** `pnpm -w run local-install`, then from the
+   main workspace root `afx spawn --task "…"`, then `afx send <builder-id>` with a >4-line body: it
+   arrives as one submitted message and the log says `delivered`, not `delivered-unverified`. This
+   is the regression a green suite is least likely to catch, because the #1573 echo path is
+   timing-dependent.
+3. **A held row still reads correctly.** Put a claude builder's composer in a draft state, send to
+   it, and check `afx inbox`: `busy:user-text`, **not** an unverifiable verdict — proving the
+   `isUnverifiableVerdict` edit did not widen the escalation class for existing details.
+4. **Config.** With no `harnessOptions` block, `afx status` / `afx spawn --help` / `codev doctor`
+   behave exactly as before. With `{"harnessOptions":{"kimi":{"autoTrustWorkspace":"yes"}}}` in
+   `.codev/config.json`, the very next command fails loudly and names the key — then remove it.
+5. **`codev doctor` with kimi absent** (the state of this machine) degrades cleanly: reports kimi
+   not installed, does not throw, does not fail the run.
+6. **The generated Kimi script is valid shell even without Kimi installed** —
+   `pnpm vitest run src/agent-farm/__tests__/harness.test.ts` parses every shape with `bash -n`.
+
 ## KEY_ISSUES disposition — 2026-09-04 three-way review
 
 | Lane | KEY_ISSUE | Disposition |
