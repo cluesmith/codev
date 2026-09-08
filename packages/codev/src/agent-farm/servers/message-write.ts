@@ -1,5 +1,5 @@
 /**
- * Paced message writing for PTY sessions (Bugfix #584).
+ * Paced message writing for PTY sessions (Bugfix #584, Issue #1567).
  *
  * Extracted to a shared module to avoid circular imports between
  * tower-routes.ts and tower-cron.ts.
@@ -19,13 +19,124 @@ export interface WritableSession {
   write(data: string): boolean;
 }
 
-// Messages longer than this threshold are written line-by-line with delays
-// to prevent the receiving terminal from classifying the input as a paste
-// and swallowing the final Enter.
-const PACED_WRITE_LINE_THRESHOLD = 4;
-const INTER_LINE_DELAY_MS = 10;
-const PACED_ENTER_DELAY_MS = 80;
 const SIMPLE_ENTER_DELAY_MS = 50;
+
+/**
+ * Issue #1567 — why long frames are no longer handed to the PTY in one write.
+ *
+ * The kernel splits a large master-side write at the slave's input-queue high-water mark
+ * (TTYHOG − 2 = 1022 bytes on macOS). The receiving TUI reads the first ~1 KB as one chunk,
+ * its paste heuristic classifies that chunk as a paste and DISCARDS it, then types the
+ * remainder and the Enter normally — so the agent saw a mid-sentence tail-only fragment
+ * while every `write()` reported success. Measured on claude 2.1.263 (harness in
+ * `scripts/bugfix-1567-head-loss-harness.mts`, evidence in `codev/evidence/1567-head-loss/`):
+ * a 1,172-byte 3-line frame lost its head 14/20 times on an IDLE composer; a 1,000-byte frame
+ * never did. Two independent changes each measured 0 losses, and both are applied:
+ *
+ *   1. **No single write exceeds {@link PASTE_CHUNK_BYTES}** — comfortably under the queue
+ *      limit, so the kernel never splits a read and the reader drains between writes.
+ *   2. **Long frames travel as ONE explicit bracketed paste** (`ESC[200~` … `ESC[201~`), so the
+ *      TUI's paste heuristic never runs on chunk boundaries and newlines inside the body can
+ *      never be read as Enter. The Enter is a separate write OUTSIDE the bracket, after a
+ *      settle. Inside the bracket newlines travel as `\r`, which is what a terminal emulator
+ *      emits on paste (xterm.js) and what claude's composer expects there — the same convention
+ *      `apps/vscode/src/review-queue/queue.ts` already uses to type a review into a builder.
+ *
+ * This replaces the #584-era per-line pacing for frames of {@link BRACKET_MIN_LINES} lines or
+ * more, which was tuned against an older TUI's heuristic. Short frames keep the pre-existing
+ * single write + delayed Enter, byte for byte, so `--raw` slash commands and short sends are
+ * untouched.
+ */
+export const PASTE_CHUNK_BYTES = 512;
+/** Gap between consecutive chunk writes; the reader drains a chunk in well under this. */
+export const PASTE_CHUNK_GAP_MS = 5;
+/** Settle between the paste's closing marker and the Enter that submits it (measured: 0/29 losses). */
+export const PASTE_ENTER_DELAY_MS = 80;
+/**
+ * Frames LONGER than this many bytes, or of {@link BRACKET_MIN_LINES} lines or more, are
+ * bracketed and chunked. Well under the 1,022-byte queue limit where the loss starts: the
+ * field's smallest confirmed truncations were ~500-byte bodies, and a bracketed short paste
+ * costs nothing on the measured harnesses.
+ */
+export const BRACKET_MIN_BYTES = 256;
+/** The #584 threshold, kept: any frame of this many lines or more is never typed line by line. */
+export const BRACKET_MIN_LINES = 4;
+/** Gap between line pieces on the non-bracketed (opt-out) strategy — the #584 pacing. */
+const INTER_LINE_DELAY_MS = 10;
+
+export const PASTE_BEGIN = '\x1b[200~';
+export const PASTE_END = '\x1b[201~';
+
+/**
+ * Per-harness write strategy (Issue #1567). Bracketed paste is measured safe on claude
+ * (2.1.263) and codex (0.146.0); a harness that has not been measured can opt out and gets the
+ * pre-#1567 per-line semantics, still chunked so no write exceeds the PTY input queue.
+ */
+export interface WriteStrategy {
+  /** Wrap long frames in bracketed-paste markers (with `\n` → `\r` inside). */
+  bracketedPaste: boolean;
+}
+
+export const BRACKETED_PASTE: WriteStrategy = { bracketedPaste: true };
+export const PLAIN_CHUNKED: WriteStrategy = { bracketedPaste: false };
+
+/**
+ * The write strategy for a gate profile's `app`. agy is the one modeled harness whose paste
+ * handling was not measurable (unauthenticated), so it keeps the per-line shape; anything
+ * else is bracketed. Unknown apps never reach the write edge (the gate holds `no-profile`).
+ */
+export function writeStrategyForApp(app: string | undefined): WriteStrategy {
+  return app === 'agy' ? PLAIN_CHUNKED : BRACKETED_PASTE;
+}
+
+/** Does this frame take the bracketed/chunked path rather than the single short write? */
+export function isLongFrame(message: string): boolean {
+  return message.split('\n').length >= BRACKET_MIN_LINES || Buffer.byteLength(message, 'utf8') > BRACKET_MIN_BYTES;
+}
+
+/**
+ * Split `text` into pieces of at most `max` bytes, never inside a UTF-8 sequence (a split
+ * continuation byte would reach the TUI as two invalid characters).
+ */
+export function chunkForPty(text: string, max: number = PASTE_CHUNK_BYTES): string[] {
+  const buf = Buffer.from(text, 'utf8');
+  const out: string[] = [];
+  for (let at = 0; at < buf.length; ) {
+    let end = Math.min(buf.length, at + max);
+    while (end < buf.length && end > at && (buf[end] & 0xc0) === 0x80) end--;
+    out.push(buf.subarray(at, end).toString('utf8'));
+    at = end;
+  }
+  return out;
+}
+
+/**
+ * The pieces of a long frame, in write order, for a strategy. Bracketed: the body (newlines
+ * as `\r`) chunked, with the opening marker on the first piece and the closing marker on the
+ * last — the markers are never split across writes, so no chunk boundary can land inside an
+ * escape sequence, and every piece INCLUDING its marker stays within {@link PASTE_CHUNK_BYTES}.
+ * Plain: one piece per line (`\n` kept, as #584 wrote it), with any line over
+ * the chunk size split further.
+ */
+export function framePieces(message: string, strategy: WriteStrategy): string[] {
+  if (strategy.bracketedPaste) {
+    // A literal paste marker inside the body (a pasted terminal log, say) would end or restart
+    // the paste mid-frame and let the remainder be typed as keys; strip both so the bracket
+    // we add is the only one the TUI sees.
+    const body = message.replace(/\r?\n/g, '\r').split(PASTE_BEGIN).join('').split(PASTE_END).join('');
+    // Chunk with room for the markers so NO write — first or last piece included — exceeds
+    // PASTE_CHUNK_BYTES on the wire.
+    const pieces = chunkForPty(body, PASTE_CHUNK_BYTES - PASTE_BEGIN.length - PASTE_END.length);
+    // A body that was NOTHING but markers is empty after stripping; still emit one (empty) paste
+    // so the frame is a well-formed no-op rather than the literal text "undefined".
+    if (pieces.length === 0) pieces.push('');
+    pieces[0] = PASTE_BEGIN + pieces[0];
+    pieces[pieces.length - 1] += PASTE_END;
+    return pieces;
+  }
+  const lines = message.split('\n');
+  return lines.flatMap((line, i) => chunkForPty(i < lines.length - 1 ? line + '\n' : line));
+}
 
 /** ESC keystroke — ends the agent's current turn (Spec 1273). */
 export const ESC = '\x1b';
@@ -60,24 +171,28 @@ export function writeEscapeToSession(session: WritableSession, noEnter: boolean)
 }
 
 /**
- * Write a message to a PTY session, pacing multi-line output to prevent
- * the terminal from treating it as a paste (Bugfix #584).
+ * Write a message to a PTY session (Bugfix #584, Issue #1567).
  *
- * Short messages (≤3 lines): single write + delayed Enter.
- * Long messages (>3 lines): line-by-line writes with 10ms gaps, then Enter
- * after all lines are delivered.
+ * Short frames (under {@link BRACKET_MIN_LINES} lines AND at most {@link BRACKET_MIN_BYTES}
+ * bytes): a single write, then Enter after 50 ms — unchanged since #584.
+ *
+ * Long frames: {@link framePieces} written {@link PASTE_CHUNK_GAP_MS} apart (bracketed by
+ * default; see {@link WriteStrategy}), then Enter as its own write
+ * {@link PASTE_ENTER_DELAY_MS} after the last piece. The Enter is always outside the paste
+ * bracket, so a TUI that collapses the paste into a placard still submits it.
  *
  * @param delayOffset  ms offset for all scheduled writes (used to serialize
  *                     multiple messages to the same session without interleaving)
  * @returns            ms timestamp (from call time) when all writes complete
  */
 export function writeMessageToSession(
-  session: WritableSession, message: string, noEnter: boolean, delayOffset = 0,
+  session: WritableSession,
+  message: string,
+  noEnter: boolean,
+  delayOffset = 0,
+  strategy: WriteStrategy = BRACKETED_PASTE,
 ): number {
-  const lines = message.split('\n');
-
-  if (lines.length < PACED_WRITE_LINE_THRESHOLD) {
-    // Short messages: single write (existing behavior, works fine)
+  if (!isLongFrame(message)) {
     if (delayOffset === 0) {
       session.write(message);
     } else {
@@ -90,26 +205,22 @@ export function writeMessageToSession(
     return enterTime;
   }
 
-  // Multi-line: pace output line-by-line to avoid paste detection.
-  // Writing all lines in a single write() causes the terminal to treat it
-  // as a paste, swallowing the final Enter.
-  for (let i = 0; i < lines.length; i++) {
-    const text = i < lines.length - 1 ? lines[i] + '\n' : lines[i];
-    const lineDelay = delayOffset + i * INTER_LINE_DELAY_MS;
-    if (lineDelay === 0) {
-      session.write(text);
+  const pieces = framePieces(message, strategy);
+  const gap = strategy.bracketedPaste ? PASTE_CHUNK_GAP_MS : INTER_LINE_DELAY_MS;
+  for (let i = 0; i < pieces.length; i++) {
+    const at = delayOffset + i * gap;
+    if (at === 0) {
+      session.write(pieces[i]);
     } else {
-      setTimeout(() => session.write(text), lineDelay);
+      setTimeout(() => session.write(pieces[i]), at);
     }
   }
 
-  const lastLineTime = delayOffset + (lines.length - 1) * INTER_LINE_DELAY_MS;
-  if (!noEnter) {
-    const enterTime = lastLineTime + PACED_ENTER_DELAY_MS;
-    setTimeout(() => session.write('\r'), enterTime);
-    return enterTime;
-  }
-  return lastLineTime;
+  const lastPieceTime = delayOffset + (pieces.length - 1) * gap;
+  if (noEnter) return lastPieceTime;
+  const enterTime = lastPieceTime + PASTE_ENTER_DELAY_MS;
+  setTimeout(() => session.write('\r'), enterTime);
+  return enterTime;
 }
 
 /**
@@ -165,6 +276,7 @@ export async function submitMessagePaced<A>(
   noEnter: boolean,
   precheck: () => A | null,
   clock?: SubmitClock,
+  strategy: WriteStrategy = BRACKETED_PASTE,
 ): Promise<PacedSubmitResult<A>> {
   // Fail LOUD on a missing id rather than keying the lock on `undefined`. Sessions reach
   // this through structurally-typed ports, so a double without an id compiles fine and
@@ -199,7 +311,7 @@ export async function submitMessagePaced<A>(
       () => {
         abort = precheck();
         if (abort !== null) return 0; // refused in-lock: not one byte goes out
-        return writeMessageToSession(tracked, message, noEnter);
+        return writeMessageToSession(tracked, message, noEnter, 0, strategy);
       },
       clock,
     );

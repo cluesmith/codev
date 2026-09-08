@@ -397,6 +397,16 @@ Sends text to a builder's terminal. Useful for:
 
 A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
 
+**How a body is typed (Issue #1567):** a frame under 4 lines and at most 256 bytes is one write plus
+Enter, as always. Anything longer is written as **one explicit bracketed paste** (`ESC[200~ … ESC[201~`,
+in ≤512-byte pieces 5 ms apart) with the Enter as a separate write after a short settle. This is the fix
+for the delivery-side head loss where a >1 KB single write was split by the PTY input queue and the
+recipient's paste heuristic discarded the first chunk (only the tail arrived, with `delivered` at the
+sender). While it sits in the composer, claude shows the paste as `[Pasted text #N +M lines]` and codex
+as `[Pasted Content N chars]`; the echo verification behind the `(unverified — …)` suffix accepts a new
+placard as well as the header, so a correct long delivery is reported verified. agy keeps the older
+line-by-line shape (also chunked) because its paste handling has not been measured.
+
 **Examples:**
 
 ```bash

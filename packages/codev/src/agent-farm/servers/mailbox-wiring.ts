@@ -35,6 +35,7 @@ import path from 'node:path';
 import {
   MailboxDrainer,
   normalizeForEcho,
+  PASTE_PLACARD_NEEDLES,
   type EchoWatch,
   type UnverifiedDeliveryInfo,
   type DeliveryPorts,
@@ -210,7 +211,7 @@ const ECHO_VERIFY_TIMEOUT_MS = 600;
 const ECHO_VERIFY_POLL_MS = 50;
 
 /**
- * How many times `needle` appears in the session's rendered mirror right now.
+ * How many times each of `needles` appears in the session's rendered mirror right now.
  *
  * A COUNT rather than a boolean because presence alone is not evidence (CMAP round 1 — codex):
  * a previous delivery attempt's echo sits in the same scrollback, so "the header is on screen"
@@ -221,20 +222,23 @@ const ECHO_VERIFY_POLL_MS = 50;
  * never disagree about what the terminal shows, and scans its full retained buffer rather than
  * the viewport — a long message scrolls its own header into scrollback while it types.
  */
-async function countEchoOnScreen(screen: SessionScreen, needle: string): Promise<number> {
+async function countEchoOnScreen(screen: SessionScreen, needles: readonly string[]): Promise<number[]> {
   const { term } = await screen.read();
   const text = normalizeForEcho(bufferLines(term).join('\n'));
-  let count = 0;
-  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) count++;
-  return count;
+  return needles.map((needle) => {
+    let count = 0;
+    for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) count++;
+    return count;
+  });
 }
 
 /**
  * Open an echo watch on a session (Issue #1573) — the live binding for
  * {@link DeliveryPorts.watchEcho}.
  *
- * Samples the terminal BEFORE the write, then `verify()` polls until the needle appears MORE
- * often than it did in that sample. New evidence, not mere presence.
+ * Samples the terminal BEFORE the write, then `verify()` polls until the needle — or a paste
+ * placard (Issue #1567, {@link PASTE_PLACARD_NEEDLES}) — appears MORE often than it did in that
+ * sample. New evidence, not mere presence.
  *
  * A session with no mirror has produced no output and therefore cannot echo anything, so its
  * watch verifies `false` rather than passing.
@@ -258,12 +262,16 @@ async function countEchoOnScreen(screen: SessionScreen, needle: string): Promise
 export async function watchEchoOnScreen(session: DeliverySession, needle: string): Promise<EchoWatch> {
   const screen = (session as PtySession).gateScreen;
   if (!screen) return { verify: () => Promise.resolve(false) };
-  const before = await countEchoOnScreen(screen, needle);
+  // Issue #1567: a long frame is a bracketed paste, which the composer shows as a placard
+  // until it is submitted — so a new placard is as much evidence as a new header.
+  const needles = [needle, ...PASTE_PLACARD_NEEDLES];
+  const before = await countEchoOnScreen(screen, needles);
   return {
     verify: async (): Promise<boolean> => {
       const deadline = Date.now() + ECHO_VERIFY_TIMEOUT_MS;
       for (;;) {
-        if (await countEchoOnScreen(screen, needle) > before) return true;
+        const after = await countEchoOnScreen(screen, needles);
+        if (after.some((n, i) => n > before[i])) return true;
         if (Date.now() >= deadline) return false;
         await new Promise((resolve) => setTimeout(resolve, ECHO_VERIFY_POLL_MS));
       }
@@ -298,7 +306,8 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     // LEAF inside the per-agent serializer, so a gated delivery and a concurrent
     // `--interrupt`/`--escape` can no longer interleave. The precheck is the delivery
     // module's, re-run inside that lock.
-    writeMessage: (session, msg, noEnter, precheck) => submitMessagePaced(session, msg, noEnter, precheck),
+    writeMessage: (session, msg, noEnter, precheck, strategy) =>
+      submitMessagePaced(session, msg, noEnter, precheck, undefined, strategy),
     // Issue #1573: the only end-to-end evidence that the bytes reached the terminal — opened
     // before the write. Issue #1584: consulted AFTER the row is marked delivered, because the
     // commit is what makes a completed write un-repeatable; this only decides what we report.
