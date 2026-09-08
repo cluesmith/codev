@@ -93,3 +93,33 @@ profile's `app` so a harness can opt out of bracketing. Echo verify accepts a ne
 new `[Pasted text #N …]` / `[Pasted Content N chars]` placard. Architect item 4 (turn-end gate
 hardening) has no supporting datum — every loss was ≥8 s after turn end — so it is reported
 rather than implemented with an invented N.
+
+## 2026-09-08 — fix
+
+Architect (04:05Z) accepted the investigation and approved both deviations: item 4 dropped
+(no datum), root cause framed as kernel PTY split (>1022 B) + paste heuristic. Field check is
+post-merge via local-install on main; pre-merge acceptance = harness 0/20 through the production
+edge + reverted-fix still failing + full suite.
+
+Implemented (`message-write.ts`, `mailbox-delivery.ts`, `mailbox-wiring.ts`; 4 source files,
++186/−52):
+- `isLongFrame` (≥4 lines OR >256 B) → `framePieces`: bracketed paste (`ESC[200~ … ESC[201~`,
+  `\n`→`\r` inside, ≤512 B UTF-8-safe chunks 5 ms apart, markers never split), Enter as its
+  own write +80 ms. Short frames byte-identical to before.
+- `WriteStrategy` seam: `writeStrategyForApp(profile.app)` — claude/codex bracketed, agy
+  `PLAIN_CHUNKED` (old per-line shape, still chunked). Threaded through
+  `DeliveryPorts.writeMessage` (optional 5th param) and `submitMessagePaced`.
+- Echo watch counts `PASTE_PLACARD_NEEDLES` (`Pastedtext`, `PastedContent`) alongside the
+  header; verify passes on a NEW occurrence of either.
+- Docs: agent-farm.md (both trees), arch.md #1574 clause, formatter/test comments.
+
+Tests: new `bugfix-1567-bracketed-paste-write.test.ts` (15 cases; the CONTROL case fails on the
+HEAD write edge — verified by swapping the old file in: "expected 1 to be greater than 1", i.e.
+one write). Updated 584 / 1313-drop / 1365-serializer tests to the new shape; the 1365 fake
+composer now decodes bracketed paste the way a real TUI does instead of the assertions being
+weakened.
+
+Acceptance: harness `--mode production` through the FIXED edge → **0/20 head-lost** (`codev/evidence/
+1567-head-loss/fixed-claude-production-2026-09-08T04-10-15-094Z/`, reply oracle H1567-n on every
+trial). Baseline on the pre-fix edge (same harness, same day) remains the reverted-state evidence:
+14/20. Full unit suite: 286 files / 5755 tests green.

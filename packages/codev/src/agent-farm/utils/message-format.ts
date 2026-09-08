@@ -174,11 +174,10 @@ export const REPLY_HINT = '(reply: afx send architect "…")';
 /**
  * The closing delimiter. The builder-bound variant carries {@link REPLY_HINT} on
  * this SAME line rather than on a trailing one, and that is load-bearing: a fourth
- * line would push the frame past `PACED_WRITE_LINE_THRESHOLD` in `message-write.ts`,
- * moving every short architect→builder message off the single-write path onto the
- * paced line-by-line one. A formatter change must not widen the delivery-write
- * exposure window (#1521/#1573 family) as a side effect, so the frame stays 3 lines
- * and the write path stays byte-identical.
+ * line would push the frame past `BRACKET_MIN_LINES` in `message-write.ts`, moving
+ * every short architect→builder message off the single-write path onto the bracketed
+ * paste one (#1567). A formatter change must not change how short frames are typed as a
+ * side effect, so the frame stays 3 lines and the short write path stays byte-identical.
  */
 const FOOTER = '###############################';
 

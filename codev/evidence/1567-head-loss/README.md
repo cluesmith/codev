@@ -25,6 +25,7 @@ these is a just-freed-window race.
 | `explore-bracketed-chunked-…` | bracketed AND ≤512 B chunks | 1172 B / 3 lines | 10 | 0 | the belt-and-braces candidate |
 | `multiline-cr-…` | bracketed-chunked, newlines as `\r` inside the bracket | 1689 B / 10 lines | 3 | 0 | placard `[Pasted text #N +9 lines]`; transcript keeps every line break |
 | `big3k-…` | bracketed-chunked | 3165 B / 3 lines | 3 | 0 | placard `[Pasted text #N +2 lines]`; full text in transcript after Enter |
+| `fixed-claude-production-…` | **production edge AFTER the fix** (bracketed paste, ≤512 B chunks, Enter outside) | 1172–1174 B / 3 lines | 20 | **0** | acceptance run; the reply oracle confirms claude received the HEAD token on every trial |
 | `codex-codex-…` | bracketed-chunked against `codex-cli 0.146.0` | 1172 B / 3 lines | 3 | 0 | codex shows `[Pasted Content 1168 chars]` in its composer, full frame (fences kept) in the transcript |
 
 Each run directory holds `summary.md` (the table plus an ANSI-stripped screen excerpt per trial)
