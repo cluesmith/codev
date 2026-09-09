@@ -210,3 +210,23 @@ Two recorded as follow-ups rather than changed here:
   richer port return type for a case that needs classify and peek to disagree persistently.
 - `MAX_COMPOSER_SAMPLE_GAP_MS` (2 s) sits only 500 ms above the 1.5 s backstop — latency-only and
   self-correcting via the retry timer.
+
+## CMAP round 3
+
+gemini **APPROVE** · codex **REQUEST_CHANGES** — and codex's third finding is the one that would
+have reached a human with destructive advice.
+
+`formatOwnerNoticeBody` routed on `if (info.detail || info.reason === 'no-profile')`, so EVERY
+detail except `user-text` landed in the defect arm: *"the render gate CANNOT VERIFY that
+composer… the mail will never deliver on its own… `afx interrupt <agent>`"*. For
+`composer-redraw` that kills the turn of an agent that is merely working.
+
+Checking it, the same branch **already misfires for `recent-input` on main today** — it tells an
+owner to interrupt someone who is simply typing, which is exactly the mistake that function's own
+comment says aggravated #1583. Pre-existing, one detail wide, and on the line this issue was
+touching; fixed rather than left, and called out as a deliberate widening.
+
+Routing now asks `isUnverifiableVerdict`, the predicate every other surface already uses, so a
+detail added later cannot silently default into the destructive arm. Both self-clearing details
+get accurate wording that names no terminal-touching command. Tests bisect: 5 fail with the old
+conditional restored. 6048 tests pass.

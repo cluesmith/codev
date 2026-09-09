@@ -35,7 +35,7 @@ import {
 import { getGlobalDb } from '../db/index.js';
 import { getArchitectByName } from '../state.js';
 import { formatBuilderMessage } from '../utils/message-format.js';
-import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
+import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { supersede as supersedeMailbox, dismissHeldWithKey, NOTICE_SUPERSEDE_PREFIX } from '../db/mailbox.js';
 import path from 'node:path';
 import {
@@ -409,7 +409,38 @@ export function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
       `terminal is the only other thing worth doing.`
     );
   }
-  if (info.detail || info.reason === 'no-profile') {
+  if (!isUnverifiableVerdict(info.reason, info.detail) && info.detail) {
+    // The OTHER self-clearing holds — `recent-input` (Issue #1473) and `composer-redraw`
+    // (Issue #1664). Neither is a draft, so the `user-text` wording above would be wrong; but
+    // both clear by themselves, so the defect wording below is worse than wrong — it tells the
+    // owner the mail will NEVER deliver and hands them `afx interrupt`, which kills the turn of
+    // an agent that is merely working, or wipes the line of someone who is merely typing.
+    //
+    // This branch used to not exist: the test was `if (info.detail || …)`, so every detail but
+    // `user-text` fell into the defect arm. That was already wrong for `recent-input` before
+    // this issue added a second self-clearing value to the same arm (CMAP round 3 — codex). The
+    // routing question is exactly the one `isUnverifiableVerdict` answers, so it is asked here
+    // rather than restated as a list of names that the next detail will silently fall out of.
+    //
+    // Like the `user-text` branch, this one deliberately names NO command that touches the
+    // terminal. A notice headed "delivery is STUCK" reads as an incident, and an operator takes
+    // its remedy line as the instruction (the #1583 loop was aggravated by exactly that).
+    const because =
+      info.detail === 'recent-input'
+        ? `the terminal keeps RECEIVING INPUT — keystrokes, clicks, or an interrupt/escape write ` +
+          `— and delivery pauses for a fraction of a second after each one`
+        : `the composer keeps being REPAINTED — a turn ending, a rotating placeholder, a resize ` +
+          `— and delivery pauses for a fraction of a second after each redraw`;
+    return (
+      `${head} Its composer is EMPTY and the gate can read it fine: ${because}. This clears by ` +
+      `itself, so a hold this old means the activity has been essentially continuous — someone ` +
+      `typing steadily, or something emitting on every repaint. ` +
+      `Remedy: usually none — delivery resumes on its own. 'afx inbox' inspects the queue ` +
+      `(metadata only, never bodies); if it truly never clears, what to look at is whatever ` +
+      `keeps touching that terminal, not the composer.`
+    );
+  }
+  if (isUnverifiableVerdict(info.reason, info.detail)) {
     // The DEFECT class: the gate could not verify the composer at all, so nothing will clear
     // this without intervention.
     return (
