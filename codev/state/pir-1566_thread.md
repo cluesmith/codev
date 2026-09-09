@@ -106,6 +106,46 @@ Written to codev/plans/1566-vscode-tower-sidebar-cross-wor.md. Design summary:
 - NO fenced files touched. Evidence-bar gap: 2nd live workspace + 16px icon visual = owner env.
 Next: commit + push, porch done, porch next → plan-approval gate.
 
+## Phase: IMPLEMENT (started 2026-09-10)
+plan-approval APPROVED by Amr (2026-09-09, via vscode architect; plan head fc70f4149). Both flagged
+recommendations stand approved: current workspace marked IN PLACE (not pinned first); status-bar
+badge DEFERRED. Ran `porch approve 1566 plan-approval` + advanced to implement.
+Also published a VS Code mockup artifact for the gate (icon candidates + flows).
+Rebased onto main twice during the gate wait (main moved ~490 commits total); clean, force-pushed.
+
+Build order (logical commits, fence-safe):
+1. SDK compareAttention (builder-helpers.ts) + order-property tests (main's 4 conditions).
+2. workspace-label.ts disambiguation + tests.
+3. tower-cache.ts TowerFleetCache (fan-out, shared SSE, poll fallback, last-write-wins) + tests.
+4. tower.ts TowerProvider + tests.
+5. commands/switch-workspace.ts (QuickPick + switch/activate/adopt-confirm/429/deactivate) + tests.
+6. package.json (container/views/command/menus) + extension.ts (register, grouped block) + icon + badge.
+7. Parity test updates + changelog (apps/vscode/CHANGELOG.md + docs/releases/UNRELEASED.md).
+CMAP after impl + after tests. dev-approval = Amr's env (2nd live workspace + 16px icon eyeball).
+NOTE: main advanced a lot — re-verify extension.ts/package.json structure before wiring.
+
+### IMPLEMENT progress (2026-09-10)
+Commits 1-6 done, all tests green (SDK 139, vscode app 1012 + new: comparator 24, workspace-label 6,
+tower-cache 7, tower-provider 8, switch-workspace 9, contributes-tower 6). typecheck clean.
+- 1 compareAttention (sdk) — Infinity-safe `ascending`; no-ternary/no-void honored (repo convention).
+- 2 workspace-label.ts (pure disambiguation).
+- 3 tower-cache.ts TowerFleetCache — reuses shared onSSEEvent, always-on 20s poll fallback
+  (REFINEMENT vs plan's "clear-while-connected": refresh() no-ops while disconnected so an always-on
+  self-guarded poll is what actually delivers the SSE-down fallback + catches no-SSE activation changes;
+  cheap on localhost). Per-workspace last-known-good on null fetch.
+- 4 tower.ts TowerProvider — active rows in place (stable sort: label then compareAttention), current
+  marked not pinned, dormant secondary group, expand to attention items.
+- 5 commands/switch-workspace.ts + attention-format.ts (SSOT for row text; refactored tower.ts to use).
+  Injected-deps design → decision tree fully unit-tested (adopt-confirm, 429, switch-vs-activate).
+- 6 package.json (codev-tower container + codev.tower view + 3 commands + menus) + extension.ts grouped
+  block (cache, createTreeView, TreeView.badge, registerTowerCommands, refresh cmd) + icons/tower.svg
+  (stacked-layers, currentColor). Updated contributes-panel parity test + added contributes-tower test.
+FENCE respected: no builders.ts / terminal-manager.ts / command-relay.ts / streamdeck edits.
+CHANGELOG DECISION: NOT adding changelog on builder branch — VS Code changelog is architect-maintained
+on docs/vscode-changelog per the template workflow (branches diverge by design). Flag to architect.
+Build-order gotcha for reviewer: fresh worktree needs `pnpm --filter @cluesmith/codev-types
+--filter @cluesmith/codev-sdk --filter @cluesmith/codev-artifact-canvas build` before app tests/tsc.
+
 ### Investigation (done)
 Launched 3 parallel Explore agents: SDK/types (TowerClient, deriveAttention, AttentionSummary,
 OverviewData, readLocalKey); vscode views/tree/command/SSE plumbing; Tower endpoints + streamdeck
