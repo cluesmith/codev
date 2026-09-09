@@ -60,3 +60,38 @@ Verify-no-shadow at implement; fall back to another ctrl+alt letter pair only on
 (never the diff-nav bracket keys). Plan updated (keybinding section, decision point 1, test bullet).
 Still at plan-approval gate. Reminder: feature is ~80% VS Code (the whole keyboard motion stands
 alone); deck is a thin additive trigger layer.
+
+### IMPLEMENT phase — plan-approval approved by Amr (relayed by main), implemented both phases
+Phase 1 (VS Code, commit 523a1ffc3):
+- builders.ts: `AgentTarget` type + exported pure `partitionArchitectGroups` (shared by
+  architectRootChildren AND agentCycleOrder — #818 single source) + `agentCycleOrder()` (axis-aware
+  flatten: stage/area = builders only; architect = interleaved headers+builders, idle last).
+- terminal-manager.ts: `getActiveArchitectName()` mirroring getActiveBuilderId.
+- extension.ts: `cycleAgentTerminal(direction)` helper + focusNext/PreviousAgentTerminal commands.
+- package.json: command contributions + keybindings ctrl+alt+n / ctrl+alt+p (mac cmd+alt), when
+  codev.hasWorkspace.
+- Tests: new __tests__/agent-cycle-order.test.ts (11 tests, incl. anti-drift vs rendered order).
+- FIXED a brittle pre-existing test (terminal-manager.test.ts) my new method broke: it split the
+  WHOLE file on `type === 'architect'` to find openTerminal's else-branch; scoped it to
+  openTerminal's body. My method is correct; the test heuristic was too broad.
+
+Phase 2 (Stream Deck, commit 22d3107af):
+- command-relay.ts: focus-next-agent / focus-prev-agent verbs (allowlist).
+- actions.ts: FocusNextAgentKey / FocusPrevAgentKey (VerbKey, switch glyph) + AgentNav dial
+  (rotate=next/prev, press=open selected builder). plugin.ts registers all three.
+- manifest.json: 2 Keypad + 1 Encoder action (reuse existing icons/switch, icons/list/switch).
+- README.md documents the keys + dial (deck out of default slots → manifest-palette, like
+  PrNav/SpawnNav; not pre-placed).
+- Tests: +7 in actions.test.ts, +1 in command-relay.test.ts.
+
+Checks: vscode check-types+lint+test:unit (993) green; streamdeck check-types+validate+test (257)
+green. Running root `npm run build` + `npm test` (porch checks) next.
+
+DEVIATION from plan (will flag at gate): SKIPPED the in-PR changelog updates (apps/vscode/CHANGELOG.md
++ docs/releases/UNRELEASED.md). Repo convention — documented in UNRELEASED.md's own template — is
+that VS Code changelog + release notes are accumulated on the docs/vscode-changelog branch
+post-merge by the architect (referencing the PR#), NOT in feature branches. Git log confirms
+(e.g. "docs(changelog): ... (#1592, PR #1616)" landed separately). Adding them here would conflict.
+
+DECK DEFAULTS taken (plan's recommended options, since approved as-is): 2a manifest-only (no profile
+change), builder-centric deck face (DP3 deferred), architects cycle only in Architect grouping (DP4).
