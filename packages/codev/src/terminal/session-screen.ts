@@ -142,6 +142,25 @@ export class SessionScreen {
   }
 
   /**
+   * The live buffer WITHOUT flushing the parser (Issue #1664) — the synchronous counterpart of
+   * {@link read}, for a caller that cannot await.
+   *
+   * The delivery path's in-lock precheck runs inside the per-terminal submission lock,
+   * immediately before the first byte, and is synchronous by contract; it re-reads the composer
+   * region there to confirm the screen it measured is still the screen it is about to write
+   * onto. Awaiting a parse callback in that position is not available to it.
+   *
+   * The cost of not flushing is bounded and known: bytes fed but not yet parsed are not in the
+   * grid, so this can lag the true screen by one parse turn. That is the same class of residual
+   * the input-settle interval BOUNDS rather than closes, and the caller's own stability
+   * requirement — the region unchanged across two samples a settle apart — is what carries the
+   * safety here; this read only has to catch a change that arrived during a lock wait.
+   */
+  peek(): ScreenView {
+    return { term: this.term, cols: this._cols, rows: this._rows };
+  }
+
+  /**
    * Serialize the current screen state (both buffers, colors/attrs, cursor, alt-screen
    * mode, plus up to {@link SCREEN_SCROLLBACK} lines of history) back into a terminal
    * byte stream a client can replay — the O(screen) viewer-attach payload (PIR #1354).

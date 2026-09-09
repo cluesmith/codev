@@ -445,6 +445,18 @@ describe('HeldCountBadge', () => {
     expect((await screen.findByTestId('held-row')).textContent).toContain('busy:user-text');
   });
 
+  it('renders the composer-redraw detail, the hold that names a still-painting composer (Issue #1664)', async () => {
+    render(
+      <HeldCountBadge
+        count={1}
+        escalated={false}
+        loadMessages={() => Promise.resolve([row({ reason: 'busy', detail: 'composer-redraw' })])}
+      />,
+    );
+    await open();
+    expect((await screen.findByTestId('held-row')).textContent).toContain('busy:composer-redraw');
+  });
+
   it.each(['no-region-end', 'no-composer-marker'] as const)(
     'renders the unverifiable detail %s, the class of hold that never clears itself',
     async (detail) => {

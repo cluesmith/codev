@@ -25,7 +25,7 @@ import {
   type DeliverySession,
   type DeliveredBroadcast,
 } from '../servers/mailbox-delivery.js';
-import { classifyBuffer } from '../servers/render-gate.js';
+import { classifyBuffer, composerRegionFingerprint } from '../servers/render-gate.js';
 import { resolveProfile } from '../servers/gate-profiles.js';
 
 const COLS = 110;
@@ -106,6 +106,10 @@ function realGatePorts(
       const { term, cols, rows } = await session.screen.read();
       return classifyBuffer(term, cols, rows, prof);
     },
+    // The REAL composer-stability seam (Issue #1664): the same mirror the classify reads,
+    // fingerprinted synchronously — identical to mailbox-wiring's live binding.
+    composerFingerprint: (_s, prof) =>
+      session ? composerRegionFingerprint(session.screen.peek().term, session.info.cols, session.info.rows, prof) : null,
     writeMessage: (_s, msg, noEnter, precheck) => {
       const abort = precheck();
       if (abort) return { status: 'aborted' as const, abort };

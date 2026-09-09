@@ -31,7 +31,11 @@ import {
   type DeliverySession,
   type DeliveredBroadcast,
 } from '../servers/mailbox-delivery.js';
-import { resolveProfileForSession, classifyAgentScreen } from '../servers/mailbox-wiring.js';
+import {
+  resolveProfileForSession,
+  classifyAgentScreen,
+  composerFingerprintForSession,
+} from '../servers/mailbox-wiring.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 import type { IShellperClient } from '../../terminal/shellper-client.js';
 
@@ -101,6 +105,8 @@ function realSeamPorts(
     // The REAL production classify seam (Spec 1313 round 2): read the session's persistent
     // mirror (seeded here via attachShellper's replay) and classify its viewport.
     classify: (s, prof) => classifyAgentScreen(s, prof),
+    // The REAL production composer-stability seam (Issue #1664) — same mirror as the classify.
+    composerFingerprint: (s, prof) => composerFingerprintForSession(s, prof),
     writeMessage: (s, msg, noEnter, precheck) => {
       const abort = precheck();
       if (abort) return { status: 'aborted' as const, abort };

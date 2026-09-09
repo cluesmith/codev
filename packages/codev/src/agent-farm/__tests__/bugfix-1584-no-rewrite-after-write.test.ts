@@ -99,6 +99,9 @@ function harness(): Harness {
       getSessionForAgent: () => h.session,
       resolveProfile: () => PROFILE,
       classify: () => Promise.resolve(CLEAN),
+      // Issue #1664: a composer that never moves, so these tests keep asserting what they were
+      // written for (the classify verdict, the settle, the lock) rather than region stability.
+      composerFingerprint: () => 'composer',
       writeMessage: (_s, formattedMessage, _noEnter, precheck): WriteResult => {
         const abort: WriteAbort | null = precheck();
         if (abort) return { status: 'aborted', abort };

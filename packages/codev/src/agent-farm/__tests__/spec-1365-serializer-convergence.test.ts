@@ -499,6 +499,9 @@ function livePorts(sessions: Map<string, DeliverySession>, log: string[] = []): 
     getSessionForAgent: (_ws, agent) => sessions.get(agent) ?? null,
     resolveProfile: () => PROFILE,
     classify: () => Promise.resolve(CLEAN),
+    // Issue #1664: a composer that never moves, so these tests keep asserting what they were
+    // written for (the classify verdict, the settle, the lock) rather than region stability.
+    composerFingerprint: () => 'composer',
     writeMessage: (session, msg, noEnter, precheck) => submitMessagePaced(session, msg, noEnter, precheck),
     broadcast: () => {},
     onHeldStateChange: () => {},
@@ -611,22 +614,26 @@ describe('Issue #1365 — a raced delivery is held, never marked delivered', () 
     expect(c.submitted).toHaveLength(0);
   });
 
-  it('a screen that moved inside the lock holds busy', async () => {
+  it('a COMPOSER that moved inside the lock holds busy', async () => {
+    // Issue #1664 scoped the in-lock re-check from "any output landed" to "the composer region
+    // moved" — an agent repainting a spinner above an untouched composer is safe to write to,
+    // and holding for it is the defect that issue removed.
     const c = makeComposer();
-    let bytes = 10;
-    const session: DeliverySession = { ...sessionFor(c.session), get bytesWritten() { return bytes; } };
-    const ports = livePorts(new Map([[AGENT, session]]));
+    let region = 'empty-composer';
+    const ports = livePorts(new Map([[AGENT, sessionFor(c.session)]]));
+    ports.composerFingerprint = () => region;
     const row = enqueue();
 
     ports.writeMessage = (s, msg, noEnter, precheck) =>
       submitMessagePaced(s, msg, noEnter, () => {
-        bytes += 1; // new output landed between the gate and the first byte
+        region = 'the composer repainted'; // the composer moved between the gate and the first byte
         return precheck();
       });
 
     const out = await deliverAgentMail(ports, db, WS, AGENT);
 
     expect(out.reason).toBe('busy');
+    expect(out.detail).toBe('composer-redraw');
     expect(mailbox.getById(db, row.id)?.status).toBe('held');
     expect(c.submitted).toHaveLength(0);
   });

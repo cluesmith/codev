@@ -565,11 +565,20 @@ Sends text to a builder's terminal. Useful for:
     `busy:user-text` (a draft, menu, dialog, or wrapper screen), `busy:recent-input` (the
     terminal received input within the last fraction of a second — a keystroke, a click, or an
     ungated `--interrupt`/`--escape` write — so the composer may be changing under the gate; it
-    clears by itself a moment after the input stops), or
+    clears by itself a moment after the input stops), `busy:composer-redraw` (the composer is
+    empty but its rendered region moved a moment ago — a turn-end redraw, a rotating
+    placeholder, a resize; also self-clearing, about a quarter second after it stops moving), or
     `busy:no-region-end` / `busy:no-composer-marker` (the classifier could not verify the
     composer at all — the one hold class that does NOT clear on its own);
   - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
   - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
+
+**A recipient that is simply TALKING does not hold mail** (Issue #1664). claude and codex accept
+input during a turn and queue it for the next one, so a message written onto their empty composer
+mid-turn is safe and lands as one message when the turn ends — the gate waits only on the
+*composer*, never on the spinner or the streaming transcript above it. Before that, mail queued
+behind whole turns: measured over 24 h, 227 deliveries waited more than 2 s, averaging 54 s and
+peaking at 561 s.
 
 A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a draft the gate can see, and held rows survive Tower restart/shutdown (no shutdown force-flush). Two signals make a draft visible (Issue #1473) — the composer classifier reads it off the rendered screen, and every write that reaches the PTY **through Tower** (browser and VS Code keystrokes, the terminal input API, an ungated `--interrupt`/`--escape`) is observed there — whatever survives the terminal-reply filter bumps an input counter the gate folds into its change token, so even a keystroke the app has not echoed yet holds the message, while a chunk that is nothing but a DA/DSR/CPR answer moves nothing. **`afx attach` is the one exception:** it pipes your keystrokes straight to the shellper socket, never through Tower's `PtySession.write()`, so they move no counter — a draft typed under `afx attach` is seen only once the app has echoed it and the classifier can read it off the screen. See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
 

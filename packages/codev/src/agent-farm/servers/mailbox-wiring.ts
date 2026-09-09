@@ -19,7 +19,13 @@ import type { SessionScreen } from '../../terminal/session-screen.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './tower-messages.js';
 import { submitMessagePaced } from './message-write.js';
-import { bufferLines, classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
+import {
+  bufferLines,
+  classifyBuffer,
+  composerRegionFingerprint,
+  type GateProfile,
+  type GateVerdict,
+} from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import {
   buildContextFsPort,
@@ -192,6 +198,23 @@ export async function classifyAgentScreen(session: DeliverySession, profile: Gat
 }
 
 /**
+ * The live binding for {@link DeliveryPorts.composerFingerprint} (Issue #1664) — the delivery
+ * path's composer-stability signal.
+ *
+ * Reads the SAME `SessionScreen` mirror {@link classifyAgentScreen} classifies, so stability
+ * and emptiness can never be answered about different screens. SYNCHRONOUS, via
+ * `SessionScreen.peek()`: the in-lock precheck that consumes it cannot await (see the port's
+ * contract). A session with no mirror has produced no output and shows no composer, so it
+ * fingerprints `null` — indeterminate, which the delivery path treats as moved.
+ */
+export function composerFingerprintForSession(session: DeliverySession, profile: GateProfile): string | null {
+  const screen = (session as PtySession).gateScreen;
+  if (!screen) return null;
+  const { term, cols, rows } = screen.peek();
+  return composerRegionFingerprint(term, cols, rows, profile);
+}
+
+/**
  * How long {@link watchEchoOnScreen}'s verification waits for a delivered message's header to
  * show up, and how often it re-reads while waiting (Issue #1573).
  *
@@ -302,6 +325,9 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     getSessionForAgent: (ws, agent) => resolveLiveSessionForAgent(ws, agent),
     resolveProfile: (session) => resolveProfileForSession(session),
     classify: (session, profile) => classifyAgentScreen(session, profile),
+    // Issue #1664: the composer-stability signal that replaced whole-screen output quiescence.
+    // Same mirror as `classify`, read synchronously so the in-lock precheck can use it too.
+    composerFingerprint: (session, profile) => composerFingerprintForSession(session, profile),
     // Issue #1365: the write edge takes the session's per-terminal submission lock as a
     // LEAF inside the per-agent serializer, so a gated delivery and a concurrent
     // `--interrupt`/`--escape` can no longer interleave. The precheck is the delivery

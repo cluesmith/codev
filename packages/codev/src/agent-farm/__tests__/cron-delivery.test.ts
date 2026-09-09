@@ -85,6 +85,9 @@ function harness(): Harness {
       getSessionForAgent: () => session,
       resolveProfile: () => profile,
       classify: (_session: DeliverySession, _p: GateProfile): Promise<GateVerdict> => Promise.resolve(verdict),
+      // Issue #1664: a composer that never moves, so these tests keep asserting what they were
+      // written for (the classify verdict, the settle, the lock) rather than region stability.
+      composerFingerprint: () => 'composer',
       writeMessage: (_s, formattedMessage, noEnter, precheck) => {
         // The precheck runs INSIDE the per-terminal lock in the live binding (Issue #1365).
         const abort = precheck();

@@ -319,6 +319,91 @@ function isGhostCursorCell(
 }
 
 /**
+ * Where the composer is on a rendered screen, or why it could not be found. The failure arm
+ * carries the classifier's own detail, so {@link classifyBuffer} does not have to re-derive it.
+ */
+type LocatedRegion =
+  | { lines: string[]; top: number; markerRow: number; endRow: number; cursorRow: number; cursorCol: number }
+  | { detail: 'no-composer-marker' | 'no-region-end' };
+
+/** Narrows {@link LocatedRegion} to the located case. */
+function isLocated(r: LocatedRegion): r is Extract<LocatedRegion, { markerRow: number }> {
+  return 'markerRow' in r;
+}
+
+/**
+ * Locate the composer: the marker row, the row that bounds it from below, and the cursor —
+ * everything both {@link classifyBuffer} and {@link composerRegionFingerprint} need.
+ *
+ * Shared so the two can never disagree about WHICH rows are the composer. The fingerprint is
+ * the delivery path's stability signal, and a fingerprint computed over a different span than
+ * the one the classifier judged would be a stability claim about the wrong rows — the sort of
+ * divergence the render gate's whole design exists to make impossible.
+ */
+function locateComposerRegion(term: HeadlessTerminal, rows: number, profile: GateProfile): LocatedRegion {
+  const buf = term.buffer.active;
+  const lines = screenLines(term, rows);
+  const top = buf.viewportY;
+  // Cursor position, made viewport-relative to match `lines`/`row`, which index from
+  // `viewportY`. `cursorY` is baseY-relative, NOT viewport-relative — the two coincide only
+  // while the viewport sits at the bottom of the scrollback, which is the usual case but not
+  // xterm's contract. Converting through baseY costs nothing and removes the assumption; the
+  // marker anchor below compares row indices, so a stale scroll position would otherwise
+  // move the cursor off the composer row and hold forever.
+  const cursorRow = buf.baseY + buf.cursorY - top;
+  const cursorCol = buf.cursorX;
+  const markerRow = findMarkerRow(lines, profile, buf, top, cursorRow, buf.getNullCell());
+  if (markerRow === -1) return { detail: 'no-composer-marker' };
+  const endRow = findRegionEnd(lines, markerRow, profile.regionEndPatterns);
+  if (endRow === -1) return { detail: 'no-region-end' };
+  return { lines, top, markerRow, endRow, cursorRow, cursorCol };
+}
+
+/**
+ * A fingerprint of the composer REGION as it is rendered right now — the delivery path's
+ * stability signal (Issue #1664), and the replacement for the whole-screen output quiescence
+ * that used to gate every write.
+ *
+ * The render gate answers "is this composer empty?" and nothing else; the delivery path
+ * additionally needs "and has it stopped being PAINTED?", because writing into a composer
+ * mid-repaint is what ate the leading bytes in #1521. That question used to be asked of the
+ * WHOLE SCREEN (`lastDataAt` / `bytesWritten`), which conflates the composer with everything
+ * above it — and everything above it is exactly what a working agent repaints. Measured on a
+ * real streaming claude PTY (#1664 investigation): the screen repainted a median of **8 times
+ * a second** while the composer region stayed byte-identical for runs of 107 s, 60 s, 304 s,
+ * 81 s and 149 s. So the whole-screen signal answered "still painting" for minutes about rows
+ * the message never touches, and mail waited a mean of 54 s (max 561 s) for a turn to end.
+ *
+ * Comparing two of these instead scopes the question back to the rows that matter. It covers:
+ *   - the rendered TEXT of the region, marker row through its bounding rule (a draft appearing,
+ *     a placeholder rotating, a turn-end box redraw — all move it);
+ *   - the region's POSITION, so a composer that slides up or down the screen counts as moved
+ *     even when its text is unchanged;
+ *   - the CURSOR, whose movement inside the composer is the app touching the input row (free:
+ *     measured over 1500 consecutive real frames, including it added no additional churn);
+ *   - the GEOMETRY, so a resize that reflows the same characters is never mistaken for calm.
+ *
+ * Not covered, deliberately: SGR attributes. Emptiness is an attribute question and the
+ * classifier re-answers it on every sample, so a dim→normal flip of the same characters is
+ * caught by {@link classifyBuffer}, not here.
+ *
+ * `null` when no composer region can be located — indeterminate, which every caller must treat
+ * as "moved" (fail-toward-hold), exactly as the classifier treats it as not-clean.
+ */
+export function composerRegionFingerprint(
+  term: HeadlessTerminal,
+  cols: number,
+  rows: number,
+  profile: GateProfile,
+): string | null {
+  const region = locateComposerRegion(term, rows, profile);
+  if (!isLocated(region)) return null;
+  const { lines, markerRow, endRow, cursorRow, cursorCol } = region;
+  const text = lines.slice(markerRow, endRow + 1).join('\n');
+  return `${cols}x${rows}:${markerRow}-${endRow}:${cursorRow},${cursorCol}:${text}`;
+}
+
+/**
  * The classifier CORE (Spec 1313 render-gate round 2): classify an already-rendered
  * headless buffer against a profile. Synchronous — it only READS the live buffer, it never
  * parses — so it is shared, unchanged, by BOTH gate paths: the production persistent-mirror
@@ -341,35 +426,20 @@ export function classifyBuffer(
   profile: GateProfile
 ): GateVerdict {
   const buf = term.buffer.active;
-  const lines = screenLines(term, rows);
-  const top = buf.viewportY;
   const cell = buf.getNullCell();
   const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
-  // Cursor position, made viewport-relative to match `lines`/`row`, which index from
-  // `viewportY`. `cursorY` is baseY-relative, NOT viewport-relative — the two coincide only
-  // while the viewport sits at the bottom of the scrollback, which is the usual case but not
-  // xterm's contract. Converting through baseY costs nothing and removes the assumption; the
-  // marker anchor below compares row indices, so a stale scroll position would otherwise
-  // move the cursor off the composer row and hold forever.
-  const cursorRow = buf.baseY + buf.cursorY - top;
-  const cursorCol = buf.cursorX;
 
-  const markerRow = findMarkerRow(lines, profile, buf, top, cursorRow, cell);
-  if (markerRow === -1) {
-    // No composer marker: a wrapper/boot screen, a full-screen picker with no marker, a
-    // mirror that has not yet repainted a coherent frame, or an unrenderable snapshot.
-    // Never clean — the safe direction.
-    return { clean: false, reason: 'busy', detail: 'no-composer-marker' };
+  const located = locateComposerRegion(term, rows, profile);
+  if (!isLocated(located)) {
+    // `no-composer-marker` — a wrapper/boot screen, a full-screen picker with no marker, a
+    // mirror that has not yet repainted a coherent frame, or an unrenderable snapshot. Or
+    // `no-region-end` — a marker with no rule/status line beneath it (a partial/mid-repaint
+    // frame), whose composer has no proven lower bound: hold rather than scan into the status
+    // chrome below it, which would either miscount chrome as user text or, if it renders
+    // empty/dim, return a false CLEAN. Never clean — the safe direction.
+    return { clean: false, reason: 'busy', detail: located.detail };
   }
-
-  const endRow = findRegionEnd(lines, markerRow, profile.regionEndPatterns);
-  if (endRow === -1) {
-    // A marker with no rule/status line beneath it: a partial/mid-repaint frame. The
-    // composer has no proven lower bound, so hold rather than scan into the status chrome
-    // below it (which would either miscount chrome as user text or, if it renders
-    // empty/dim, return a false CLEAN).
-    return { clean: false, reason: 'busy', detail: 'no-region-end' };
-  }
+  const { top, markerRow, endRow, cursorRow, cursorCol } = located;
   let userCells = 0;
 
   for (let row = markerRow; row < endRow; row++) {

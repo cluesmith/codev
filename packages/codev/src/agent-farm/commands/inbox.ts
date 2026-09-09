@@ -106,8 +106,9 @@ function truncate(text: string, width: number): string {
 /**
  * One line explaining a gate detail, for `afx inbox show` (Issue #1482).
  *
- * The split that matters to an operator is "will this clear by itself?": `user-text` and
- * `recent-input` will (something outside the gate is writing to the terminal, and it stops),
+ * The split that matters to an operator is "will this clear by itself?": `user-text`,
+ * `recent-input` and `composer-redraw` will (something outside the gate is writing to the
+ * terminal, or the composer is mid-repaint, and it stops),
  * the other two will not (the classifier cannot find a bounded composer region at all, so no
  * amount of waiting helps).
  *
@@ -123,6 +124,8 @@ function describeDetail(detail: string): string {
       return 'a draft or menu occupies the composer; a human is at the line and delivery resumes when it clears';
     case 'recent-input':
       return 'the terminal received input moments ago — a keystroke, a click, or an interrupt/escape write; the composer is empty but too recently touched to write onto, and delivery resumes about a third of a second after the input stops';
+    case 'composer-redraw':
+      return 'the composer is empty but its rendered region moved a moment ago — a turn-end redraw, a rotating placeholder, a resize, or an interrupt clearing the line; delivery resumes about a quarter second after it stops moving (the recipient simply producing output is not a hold)';
     case 'no-region-end':
       return 'the composer marker was found but nothing bounds the region below it (a partial frame, or dimensions that do not match the real terminal) — this will not clear on its own';
     case 'no-composer-marker':

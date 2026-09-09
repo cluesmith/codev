@@ -140,8 +140,8 @@ export type WriteAbort =
    *
    * `detail` carries the gate detail when the in-lock refusal has one to give (Issue #1473's
    * `recent-input`); absent/null keeps the detail-nulling behaviour every other refusal wants.
-   * `retryAfterMs` is set only when the refusal was PURELY an input settle — see
-   * {@link DeliveryOutcome.retryAfterMs}.
+   * `retryAfterMs` is set when the refusal clears on a known interval of its own — an input
+   * settle, or a composer redraw — see {@link DeliveryOutcome.retryAfterMs}.
    */
   | { kind: 'hold'; reason: MailboxReason; detail?: MailboxGateDetail | null; retryAfterMs?: number }
   /** The row was dismissed/superseded under us — a terminal state, so it must NOT be re-held. */
@@ -174,6 +174,23 @@ export interface DeliveryPorts {
    * output) classifies not-clean (`no-composer-marker`), exactly as an empty replay always did.
    */
   classify(session: DeliverySession, profile: GateProfile): Promise<GateVerdict>;
+  /**
+   * A fingerprint of the session's composer REGION as rendered right now (Issue #1664) — the
+   * signal that replaced whole-screen output quiescence as the "has it stopped being painted?"
+   * test. See `composerRegionFingerprint` for what it covers; `null` means no composer region
+   * could be located, which every caller here treats as MOVED (fail-toward-hold).
+   *
+   * SYNCHRONOUS, deliberately. Its second consumer is the in-lock precheck, which runs inside
+   * the per-terminal submission lock immediately before the first byte and cannot await. The
+   * live binding therefore reads the gate mirror without flushing its parser; the cost is one
+   * parse turn of lag, and the caller's stability requirement — the region unchanged across two
+   * samples a settle apart — is what carries the safety.
+   *
+   * REQUIRED, not optional, for the reason {@link DeliverySession.inputSeq} is: an optional
+   * port would let production compile a binding that silently answers "the composer never
+   * moves" while presenting as a working gate.
+   */
+  composerFingerprint(session: DeliverySession, profile: GateProfile): string | null;
   /**
    * Write a formatted message (text + Enter, unless `noEnter`) to the session as ONE
    * submission on the session's per-terminal lock, and report what actually happened.
@@ -394,15 +411,18 @@ export interface EscalationInfo {
 
 /**
  * A hold's diagnostic detail as this module reports it: the render gate's own verdict details,
- * plus `'recent-input'` (Issue #1473), which no classifier produces — it is decided by the
- * delivery path from the session's input signals, not from anything on the screen.
+ * plus two the delivery path decides for itself: `'recent-input'` (Issue #1473), read from the
+ * session's input signals rather than from anything on the screen, and `'composer-redraw'`
+ * (Issue #1664), read from the composer region's stability across samples — a property no
+ * single classify can see.
  *
- * Both halves stay inert in {@link isUnverifiableVerdict} by construction: that predicate is an
+ * Both stay inert in {@link isUnverifiableVerdict} by construction: that predicate is an
  * allow-list of the two can't-verify details, so a value it does not name can never escalate.
- * `'recent-input'` must stay outside it — it is the same self-clearing "a human is at the line"
- * class as `user-text`, and escalating it would false-alarm on every ordinary typist.
+ * They must stay outside it — `'recent-input'` is the same self-clearing "a human is at the
+ * line" class as `user-text` and escalating it would false-alarm on every ordinary typist, and
+ * `'composer-redraw'` clears one settle after the composer stops moving.
  */
-export type DeliveryDetail = GateVerdict['detail'] | 'recent-input';
+export type DeliveryDetail = GateVerdict['detail'] | 'recent-input' | 'composer-redraw';
 
 /** Outcome of one delivery pass over an agent's held mail. */
 export interface DeliveryOutcome {
@@ -450,10 +470,12 @@ export interface DeliveryOutcome {
    */
   unverifiedCause?: UnverifiedCause;
   /**
-   * Present only when this pass held SOLELY because the terminal had recent input (Issue #1473)
-   * — the ms after which {@link inputSettled} would pass. The drainer arms one coalesced,
-   * generation-guarded re-drain for it, so the row delivers roughly one settle after the typing
-   * stops rather than on the next 1.5 s backstop tick.
+   * Present when this pass held on a signal that clears by ITSELF after a known interval — the
+   * terminal's recent input (Issue #1473: the ms after which {@link inputSettled} would pass) or
+   * the composer still being repainted (Issue #1664: the ms after which the current region
+   * sample counts as stable). The drainer arms one coalesced, generation-guarded re-drain for
+   * it, so the row delivers roughly one settle after the movement stops rather than on the next
+   * 1.5 s backstop tick. Which of the two it was is in {@link detail}.
    *
    * It is not a speculative optimisation: the `'submit'` fast trigger fires SYNCHRONOUSLY from
    * `stopComposing`, and the drain it schedules runs in a microtask — so at that pass
@@ -541,6 +563,93 @@ export interface EchoWatch {
  */
 function settled(ports: DeliveryPorts, session: DeliverySession): boolean {
   return ports.now() - session.lastDataAt >= SETTLE_BEFORE_WRITE_MS;
+}
+
+/**
+ * One session's last observation of its composer region (Issue #1664) — the second sample the
+ * stability test compares against.
+ *
+ * Keyed by the live session OBJECT in a WeakMap, for the same reason {@link CachedVerdict}
+ * carries a session identity: a replacement `PtySession` for the same agent is a different
+ * object, so it cannot inherit its predecessor's stability claim, and the entry is collected
+ * with the session rather than needing a prune. It is module state rather than a port because
+ * every caller must share it — the request path, the backstop drainer and the cron path all
+ * deliver to the same terminals, and a per-caller record would mean each of them separately
+ * waiting for its own second sample.
+ */
+interface ComposerSample {
+  fingerprint: string;
+  /** When this fingerprint was FIRST observed — the stability clock starts here, not at the last sample. */
+  since: number;
+  /** When it was LAST observed — how the chain of observations is proven to have no long gap. */
+  at: number;
+}
+const composerSamples = new WeakMap<DeliverySession, ComposerSample>();
+
+/**
+ * The longest gap between two observations that can still be treated as ONE continuous run of
+ * the composer holding still (Issue #1664).
+ *
+ * Two equal fingerprints far apart in time prove nothing on their own: between them the
+ * composer could have changed and changed back, which is exactly #1521's turn-end redraw. An
+ * agent with no held mail is not sampled at all, so without this bound a sample taken minutes
+ * ago would authorise an immediate write onto a composer that had just been repainted —
+ * observed in the #1664 acceptance harness, where consecutive trials reused a stale sample and
+ * delivered on their very first pass.
+ *
+ * Set above the drainer's 1.5 s backstop so an ordinary chain of passes always counts as
+ * continuous, and the delivery of a held row never depends on a faster trigger existing. In
+ * practice the gap is far smaller: a `composer-redraw` hold carries a `retryAfterMs`, so the
+ * next observation lands about a settle later.
+ */
+const MAX_COMPOSER_SAMPLE_GAP_MS = 2_000;
+
+/**
+ * Record the composer region as it looks now, and answer whether it has been UNCHANGED for at
+ * least {@link SETTLE_BEFORE_WRITE_MS} (Issue #1664).
+ *
+ * This is the composer-scoped replacement for {@link settled}. The render gate proves the
+ * composer is EMPTY; this proves it has stopped being PAINTED, which is the property #1521
+ * actually needed and #1573 approximated with whole-screen output quiescence. The
+ * approximation is what this issue exists to remove: measured on a real streaming claude PTY,
+ * the screen repainted a median of 8 times a second — so the whole-screen quiet never arrived —
+ * while the composer region sat byte-identical for minutes at a time. Mail waited a mean of
+ * 54 s, and up to 561 s, for a turn to end, and the recipient was safe to write to the whole
+ * time: Claude Code and codex accept input mid-turn and queue it for the next one.
+ *
+ * A `null` fingerprint (no locatable composer) is never stable — the classifier will have held
+ * on the same screen anyway, and an indeterminate region must not start a stability clock.
+ *
+ * Called on every delivery pass, INCLUDING the ones that go on to hold, so the clock advances
+ * across passes rather than restarting each time.
+ */
+function noteComposer(session: DeliverySession, fingerprint: string | null, now: number): boolean {
+  if (fingerprint === null) {
+    composerSamples.delete(session);
+    return false;
+  }
+  const prev = composerSamples.get(session);
+  // A different region, or a gap too long to call one continuous observation, restarts the
+  // clock: both mean we cannot say what the composer did in between.
+  if (!prev || prev.fingerprint !== fingerprint || now - prev.at > MAX_COMPOSER_SAMPLE_GAP_MS) {
+    composerSamples.set(session, { fingerprint, since: now, at: now });
+    return false;
+  }
+  prev.at = now;
+  return now - prev.since >= SETTLE_BEFORE_WRITE_MS;
+}
+
+/**
+ * How long until {@link noteComposer} would report the current sample stable, in ms — what the
+ * drainer arms its one-shot re-drain for (Issue #1664), so a message for a working agent lands
+ * about a settle after the composer stops moving rather than on the next backstop tick.
+ * Clamped at 0, and {@link SETTLE_BEFORE_WRITE_MS} when there is no sample to measure from.
+ */
+function msUntilComposerSettled(session: DeliverySession, now: number): number {
+  const prev = composerSamples.get(session);
+  if (!prev) return SETTLE_BEFORE_WRITE_MS;
+  const remaining = SETTLE_BEFORE_WRITE_MS - (now - prev.since);
+  return Number.isFinite(remaining) && remaining > 0 ? remaining : 0;
 }
 
 /**
@@ -781,12 +890,13 @@ export async function deliverAgentMail(
     retryAfterMs: msUntilInputSettled(ports, session),
   });
 
-  // Sample the ring's change-token BEFORE the (possibly memoized) classify, so we can
-  // re-validate afterward that the screen didn't move under us (below).
+  // Sample the ring's change-token BEFORE the (possibly memoized) classify — the memo's reuse
+  // key (Issue #1664 retired its second job, the post-classify screen re-validation; the
+  // composer fingerprint below does that now, scoped to the rows that matter).
   const tokenBefore = ringToken(session, profile);
-  // …and the input counter alone, so a token that moved can be ATTRIBUTED (Issue #1473). The
-  // token folds output and input together, and a re-hold that blamed a repaint on the human at
-  // the keyboard would put a false `recent-input` on every surface that reads the row.
+  // …and the input counter on its own: it is what catches a human keystroke landing in the
+  // gate→write window, and it is the only signal that can, since PTY input advances nothing on
+  // the screen the classifier read (Issue #1473).
   const inputSeqBefore = session.inputSeq;
 
   // Verdict memo (Spec 1313 render-gate follow-up). The 1.5 s backstop re-checks every held
@@ -795,8 +905,7 @@ export async function deliverAgentMail(
   // advances on ANY new output, so a match means the screen is byte-for-byte what we already
   // classified, and the session guard closes the PTY-respawn aliasing route (a replacement
   // session is a DIFFERENT object); the monotone token closes the old `RingBuffer.clear()` route
-  // (see {@link CachedVerdict}). A memo hit does NO await, so the post-classify re-validation
-  // below (`ringToken(...) !== tokenBefore`) passes trivially: no keystroke can land in a
+  // (see {@link CachedVerdict}). A memo hit does NO await, so no keystroke can land in a
   // classify window that never opened. The memo is owned + bounded by the drainer's backstop
   // {@link MailboxDrainer.tick} (pruned to the held-agent set each tick); every OTHER caller —
   // the request/cron paths and the fast scheduleDrain trigger — passes none and classifies
@@ -827,27 +936,37 @@ export async function deliverAgentMail(
     return { delivered: [], reason, detail: verdict.detail };
   }
 
-  // Re-validate the SCREEN before writing (Spec 1313 render-gate diff review). The classify
-  // above may have awaited (the mirror flushes its parser, and xterm yields between parse
-  // slices); if the screen advanced since we sampled `tokenBefore`, a draft may have started
-  // under us and the clean verdict is now stale. Writing then would fuse the message into that
-  // draft — the exact false-clean the gate prevents. Hold instead; it delivers on the next
-  // clean tick. (On a memo hit no await occurred, so the token is unchanged and this passes
-  // trivially.)
-  // (The token now carries `inputSeq` too, so this same comparison is what catches a HUMAN
-  // KEYSTROKE landing during the classify — Issue #1473. Before that term it caught only the
-  // app's own repaints, and a keystroke moved nothing it compared. The detail names whichever
-  // half actually moved; blaming a repaint on the human would be a false statement on every
-  // surface that reads the row.)
-  if (ringToken(session, profile) !== tokenBefore) {
-    return session.inputSeq !== inputSeqBefore ? hold('busy', 'recent-input') : hold('busy');
+  // Settle-before-write (Issue #1573, rescoped by Issue #1664). A clean verdict says the
+  // composer is EMPTY, not that it has finished being DRAWN, and writing into a composer
+  // mid-repaint is what ate the leading bytes in #1521. The proof used to be whole-screen
+  // output quiescence — which a working agent never offers, because it is repainting a spinner
+  // and a streaming transcript several times a second — so mail queued behind entire turns for
+  // a hazard that lives only in the composer. Ask the composer instead: deliver when its region
+  // has been byte-identical across two samples a settle apart, OR when the whole screen is
+  // quiet (the original proof, kept because it is strictly stronger and lets an IDLE recipient
+  // deliver on the very first pass, with no second sample to wait for).
+  //
+  // Sampled here rather than inside `classify` so it is the FRESHEST reading of the composer:
+  // the classify may have awaited (the mirror flushes its parser, and xterm yields between
+  // parse slices), and this fingerprint is taken after that await returns. So it doubles as the
+  // output half of the gate→write TOCTOU: a draft that appeared during the classify moves the
+  // region, which cannot then be stable, and we hold rather than fusing the message into it.
+  const fingerprint = ports.composerFingerprint(session, profile);
+  const composerStable = noteComposer(session, fingerprint, ports.now());
+  if (fingerprint === null || (!composerStable && !settled(ports, session))) {
+    return {
+      ...hold('busy', 'composer-redraw'),
+      retryAfterMs: msUntilComposerSettled(session, ports.now()),
+    };
   }
 
-  // Settle-before-write (Issue #1573). A clean verdict says the composer is EMPTY, not that it
-  // has finished being drawn. Require a quiet interval since the session's last output byte
-  // before putting anything on the line; see {@link SETTLE_BEFORE_WRITE_MS}. Re-checked inside
-  // the per-terminal lock below, because that is where the last byte before ours can land.
-  if (!settled(ports, session)) return hold('busy');
+  // Re-validate the INPUT half of the change token (Issue #1473). A human keystroke landing
+  // during the classify moves nothing on the screen the classifier read — PTY input does not
+  // advance the ring, and the character may not be echoed yet — so only this counter sees it.
+  // The output half is gone (Issue #1664): it re-held on every repaint above, which is the
+  // whole defect, and the composer fingerprint sampled above is a strictly better answer to
+  // the question it was asking.
+  if (session.inputSeq !== inputSeqBefore) return hold('busy', 'recent-input');
 
   // Input-settle (Issue #1473). The token above sees input that arrived AFTER we sampled it;
   // this sees input that arrived just BEFORE and has not been echoed yet — nothing moved, both
@@ -891,12 +1010,14 @@ export async function deliverAgentMail(
   // `--interrupt`/`--escape` had just cleared. Cheap enough to repeat — a synchronous ring
   // read and one indexed better-sqlite3 lookup.
   //
-  // Issue #1473 narrowed the residual this block used to describe. `ringToken` now carries
-  // `inputSeq` as well as `bytesWritten`, so input from a writer that does NOT take this lock —
-  // the raw `/api/terminals/:id/write` passthrough, a human's keystrokes over the WebSocket, the
-  // delayed `^C` — moves the token even while it sits un-echoed on the line, and the
-  // `inputSettled` check below covers input that landed before we sampled. What SURVIVES, and
-  // must not be claimed closed:
+  // Issue #1473 narrowed the residual this block used to describe. `inputSeq` moves for input
+  // from a writer that does NOT take this lock — the raw `/api/terminals/:id/write` passthrough,
+  // a human's keystrokes over the WebSocket, the delayed `^C` — even while it sits un-echoed on
+  // the line, and the `inputSettled` check below covers input that landed before we sampled.
+  // Issue #1664 replaced the OUTPUT half of that re-check (a whole-screen `bytesWritten`
+  // comparison plus the settle) with the composer-region fingerprint, so a spinner frame landing
+  // during the lock wait no longer aborts a delivery the recipient was never unsafe to receive.
+  // What SURVIVES, and must not be claimed closed:
   //
   //   • input older than the input-settle interval whose echo is still delayed, and input in
   //     flight from the browser at sample time — the settle bounds this window, it does not
@@ -906,16 +1027,29 @@ export async function deliverAgentMail(
   //   • a reply shape `stripTerminalReplies` does not recognise, which counts as input — a
   //     spurious hold, now visible as `busy:recent-input` rather than silent;
   //   • a race DURING the paced write, which is reported (`racedByInput`) rather than prevented,
-  //     because by then the bytes are already out.
+  //     because by then the bytes are already out;
+  //   • (Issue #1664) a composer that redraws and returns to a byte-identical rendering entirely
+  //     inside this lock wait, and bytes fed to the gate mirror but not yet parsed when the
+  //     fingerprint is read — the whole-screen settle this replaced did cover both, at the price
+  //     of never delivering to a working agent at all. `MAX_COMPOSER_SAMPLE_GAP_MS` bounds the
+  //     first; the second is one parse turn wide.
   const precheck = (): WriteAbort | null => {
     if (!session.writable) return { kind: 'hold', reason: 'no-live-pty' };
-    if (ringToken(session, profile) !== tokenBefore) {
-      // Attribute it: `recent-input` only when the INPUT half is what moved (see the sampling
-      // of `inputSeqBefore`); a repaint re-holds with the plain, detail-less `busy`.
-      const detail = session.inputSeq !== inputSeqBefore ? ('recent-input' as const) : null;
-      return { kind: 'hold', reason: 'busy', detail };
+    if (session.inputSeq !== inputSeqBefore) {
+      return { kind: 'hold', reason: 'busy', detail: 'recent-input' };
     }
-    if (!settled(ports, session)) return { kind: 'hold', reason: 'busy' };
+    // Issue #1664: the composer region, not the whole screen. An `--interrupt`/`--escape` that
+    // cleared the line during our lock wait, or a turn-end box redraw, moves this; the spinner
+    // and the streaming transcript above it do not. A `null` fingerprint (no locatable
+    // composer) can never equal the sample, so it holds — the fail-safe direction.
+    if (ports.composerFingerprint(session, profile) !== fingerprint) {
+      return {
+        kind: 'hold',
+        reason: 'busy',
+        detail: 'composer-redraw',
+        retryAfterMs: SETTLE_BEFORE_WRITE_MS,
+      };
+    }
     if (!inputSettled(ports, session)) {
       return {
         kind: 'hold',
@@ -1360,6 +1494,14 @@ export class MailboxDrainer {
       this.consecutiveInputHolds.delete(key);
       return;
     }
+    // The timer serves BOTH self-clearing holds (Issue #1664 added `composer-redraw`), but the
+    // streak diagnostic below is about a human at the keyboard specifically — its warning text
+    // says so — and a repainting composer is not that. Arm the retry, break the input streak.
+    if (outcome.detail !== 'recent-input') {
+      this.consecutiveInputHolds.delete(key);
+      this.armRetryTimer(key, workspacePath, toAgent, outcome.retryAfterMs, gen);
+      return;
+    }
     const now = this.ports?.now() ?? Date.now();
     // `since` is the START of the unbroken run, so the warning measures wall-clock, not passes.
     // `warned` makes it report once at the crossing rather than on every pass past it — the
@@ -1379,12 +1521,28 @@ export class MailboxDrainer {
         'WARN',
       );
     }
+    this.armRetryTimer(key, workspacePath, toAgent, outcome.retryAfterMs, gen);
+  }
+
+  /**
+   * The one-shot re-drain timer shared by both self-clearing holds (Issue #1473's input settle
+   * and Issue #1664's composer redraw). COALESCED — while a timer is pending for an agent, a
+   * later hold does not stack another — and GENERATION-GUARDED, so a timer that survives a
+   * stop()/start() bails instead of driving the new generation's state.
+   */
+  private armRetryTimer(
+    key: string,
+    workspacePath: string,
+    toAgent: string,
+    retryAfterMs: number,
+    gen: number,
+  ): void {
     if (this.inputRetryTimers.has(key)) return; // a retry is already pending for this agent
     const timer = setTimeout(() => {
       this.inputRetryTimers.delete(key);
       if (this.generation !== gen) return; // stop() ran while we waited → old ports/db
       void this.scheduleDrain(workspacePath, toAgent);
-    }, outcome.retryAfterMs + INPUT_RETRY_MARGIN_MS);
+    }, retryAfterMs + INPUT_RETRY_MARGIN_MS);
     if (typeof timer.unref === 'function') timer.unref();
     this.inputRetryTimers.set(key, timer);
   }

@@ -8,7 +8,10 @@
  * a defect and never clears on its own). Issue #1473 added a fourth, `recent-input` — the
  * rendered composer classified EMPTY, but the terminal took input within the settle window, so
  * the real composer may already have changed under the gate; like `user-text` it clears on its
- * own. Until #1482 that distinction
+ * own. Issue #1664 added a fifth on the same self-clearing side, `composer-redraw` — the
+ * composer classified EMPTY but its rendered region moved within the settle window, so it is
+ * still being painted; the recipient producing output ELSEWHERE on its screen is no longer a
+ * hold at all. Until #1482 that distinction
  * died in memory, and
  * every operator surface printed a bare `busy` for both — which is exactly why the dimension
  * divergence this issue is named for stayed latent.
@@ -23,7 +26,8 @@
 /**
  * `reason:detail` when a gate detail is present, else the bare reason.
  *
- * `busy:user-text`, `busy:recent-input`, `busy:no-region-end`, `busy:no-composer-marker`,
+ * `busy:user-text`, `busy:recent-input`, `busy:composer-redraw`, `busy:no-region-end`,
+ * `busy:no-composer-marker`,
  * `no-live-pty`. `fallback` (default `'held'`) covers a row with no reason recorded yet.
  */
 export function formatVerdict(
@@ -40,7 +44,8 @@ export function formatVerdict(
  *
  * True for the defect class — `no-profile` (the app is unrecognized) and the two
  * can't-verify details — and false for `user-text` (a human at the line), `recent-input`
- * (Issue #1473 — the terminal took input a moment ago; it settles by itself) and
+ * (Issue #1473 — the terminal took input a moment ago; it settles by itself), `composer-redraw`
+ * (Issue #1664 — the composer is mid-repaint; it settles by itself too) and
  * `no-live-pty` (no session at all). This is the "will it clear on its own?" question, and
  * the answer decides which remedy an operator should reach for.
  *
