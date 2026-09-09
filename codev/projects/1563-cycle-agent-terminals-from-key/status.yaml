@@ -1,7 +1,7 @@
 id: '1563'
 title: cycle-agent-terminals-from-key
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-27T00:31:33.209Z'
-updated_at: '2026-09-09T22:53:52.921Z'
+updated_at: '2026-09-09T22:53:57.825Z'
