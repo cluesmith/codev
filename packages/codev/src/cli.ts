@@ -243,13 +243,13 @@ program
 // Generate-image command
 program
   .command('generate-image')
-  .description('Generate images using Gemini (Nano Banana Pro), or Atlas Cloud with --provider atlas')
+  .description('Generate images using Gemini (Nano Banana Pro), or an optional async API provider')
   .argument('<prompt>', 'Text prompt or path to .txt file')
   .option('-o, --output <path>', 'Output file path', 'output.png')
   .option('-r, --resolution <res>', 'Resolution: 1K, 2K, or 4K', '1K')
   .option('-a, --aspect <ratio>', 'Aspect ratio: 1:1, 16:9, 9:16, 3:4, 4:3, 3:2, 2:3', '1:1')
   .option('--ref <path...>', 'Reference image(s) for image-to-image generation (up to 14)')
-  .option('-p, --provider <name>', 'Provider: gemini (default) or atlas (Atlas Cloud, same model)', 'gemini')
+  .option('-p, --provider <name>', 'Provider name (default: gemini); MuAPI is available as an async backend', 'gemini')
   .action(async (prompt, options) => {
     try {
       await generateImage(prompt, {
