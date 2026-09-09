@@ -201,3 +201,25 @@ whole diff. Measured against `origin/main`, production changes are 436 lines, of
 the role prose in two trees and 165 are comments — roughly **160 lines of executable
 production code**. The other 876 are tests. Well inside the ceiling; recording the measurement
 rather than the impression.
+
+## CMAP round 3 — gemini APPROVE, codex APPROVE, claude APPROVE
+
+Claude raised six non-blocking nits. Took three:
+
+- **git's stderr was inherited**, so a non-git workspace printed a bare `fatal: not a git
+  repository` over the top of the message the tripwire actually meant to show. It was visible
+  in every test run of mine and I had been reading past it. Now `stdio: ['ignore','pipe','pipe']`.
+- **Submodule-internal edits are invisible** (`git status` reports the submodule as one
+  directory entry) — added to the module's "What it cannot see" block alongside the ignored
+  paths and the byte-for-byte-restore case.
+- **`git fetch` was ambiguous** in `consultant.md`: "read-only commands are fine" doesn't say
+  where fetch falls, and the reviewer says it hit that ambiguity during this very review. Now
+  spelled out, with examples on both sides.
+
+Left alone, with reasons: unbounded full-file hashing (latency only, degrades gracefully — a
+real cost to watch if a monorepo's dirty set gets large, not a correctness issue); and
+`doctor.ts`'s string `systemPrompt` replacing rather than extending the SDK preset, which is
+right for a one-turn probe that should do nothing but answer.
+
+Re-ran the real-SDK acceptance probe after the role edit — still no write calls. Full suite
+5991 passed, 48 skipped, 0 failed; tsc clean; build clean.

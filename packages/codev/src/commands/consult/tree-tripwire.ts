@@ -27,6 +27,15 @@
  * are ignored, which is exactly why consult's own review output does not trip
  * its own wire — but it does mean a lane writing into an ignored path goes
  * unnoticed. Naming the tree under review is the goal here, not sandboxing.
+ *
+ * Edits *inside* a submodule, for the same reason: `git status` reports the
+ * submodule as one directory entry, so a changed file within it moves nothing
+ * this module can see.
+ *
+ * And an edit the lane restores byte-for-byte, which by construction leaves a
+ * before/after comparison nothing to compare. `consultant.md` is the only
+ * control for that case; there is a test asserting this silence, so the limit is
+ * pinned rather than assumed.
  */
 
 import * as fs from 'node:fs';
@@ -89,7 +98,15 @@ export function snapshotTree(workspaceRoot: string): TreeSnapshot {
     raw = execFileSync(
       'git',
       ['status', '--porcelain', '-z', '--untracked-files=all'],
-      { cwd: workspaceRoot, encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024 },
+      {
+        cwd: workspaceRoot,
+        encoding: 'utf-8',
+        maxBuffer: 32 * 1024 * 1024,
+        // Capture git's stderr instead of inheriting it. Otherwise a workspace
+        // that is not a repository prints a bare `fatal: not a git repository`
+        // over the top of the message we actually mean to show.
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
     );
   } catch (err) {
     return UNAVAILABLE(err instanceof Error ? err.message.split('\n')[0] : String(err));

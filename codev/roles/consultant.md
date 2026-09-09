@@ -40,7 +40,9 @@ who is working in it — usually right now, in a live session. It is not yours t
 - **Never modify, revert, create, or delete a file in the tree under review.** Not to try a
   fix, not to check a hypothesis, not temporarily, not even if you intend to restore it.
 - **Never run a command that changes state**: `git checkout`/`reset`/`stash`/`commit`, package
-  installs, code formatters, migrations, anything that writes. Read-only commands are fine.
+  installs, code formatters, migrations, anything that writes. Read-only commands are fine —
+  `git log`, `git diff`, `git show`, `git status`, `ls`, `grep`. `git fetch` is not: it writes
+  to the repository, and the review is of what is in front of you, not of a newer remote.
 - **A restore afterwards does not make it safe.** Reviews run in parallel, so a second reviewer
   can read your mutation and review code nobody wrote; and if you crash, hit your turn limit,
   or simply lose track, the builder ships whatever you left behind. Silent, and hard to trace
