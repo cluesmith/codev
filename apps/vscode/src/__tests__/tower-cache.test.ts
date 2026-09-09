@@ -136,39 +136,57 @@ describe('TowerFleetCache', () => {
     cache.dispose();
   });
 
-  it('drops an out-of-order (superseded) refresh (last-write-wins)', async () => {
-    // The earlier refresh's workspace listing lands slowly; a later refresh overtakes it. The
-    // superseded refresh must not commit — the seq guard drops it right after listWorkspaces.
-    let resolveSlow: (v: TowerWorkspace[]) => void = () => {};
+  it('coalesces a concurrent refresh into a single trailing rerun (single-in-flight)', async () => {
+    let resolveFirst: (v: TowerWorkspace[]) => void = () => {};
     listWorkspaces
-      .mockImplementationOnce(() => new Promise<TowerWorkspace[]>((res) => { resolveSlow = res; }))
-      .mockImplementationOnce(async () => [ws('/ws/a', 'a', true)]);
-    getOverview.mockResolvedValue(quietOverview()); // whatever the winning refresh sees is quiet
+      .mockImplementationOnce(() => new Promise<TowerWorkspace[]>((res) => { resolveFirst = res; }))
+      .mockImplementation(async () => [ws('/ws/a', 'a', true)]);
+    getOverview.mockResolvedValue(quietOverview());
 
     const f = makeFake(listWorkspaces, getOverview);
     const cache = new TowerFleetCache(f.cm);
-    const slow = cache.refresh();
-    const fast = cache.refresh();
-    await fast;
-    resolveSlow([ws('/ws/a', 'a', true), ws('/ws/stale', 'stale', true)]); // slow returns a DIFFERENT list
-    await slow;
+    const first = cache.refresh();       // in-flight, awaiting listWorkspaces
+    const second = cache.refresh();      // coalesced — returns without starting its own fetch
+    const third = cache.refresh();       // also coalesced into the same single rerun
+    await second;
+    await third;
+    expect(listWorkspaces).toHaveBeenCalledTimes(1);
 
-    // The fast (later) refresh wins: one workspace, not the slow refresh's two.
-    expect(cache.getFleet().map((e) => e.workspace.name)).toEqual(['a']);
+    resolveFirst([ws('/ws/a', 'a', true)]);
+    await first;                         // completes, then fires exactly one trailing rerun
+    expect(listWorkspaces).toHaveBeenCalledTimes(2);
     cache.dispose();
   });
 
-  it('refreshes on the shared SSE event and subscribes exactly one SSE listener (no second stream)', async () => {
+  it('does not blank a populated fleet when the list momentarily returns empty', async () => {
+    listWorkspaces.mockResolvedValueOnce([ws('/ws/a', 'a', true)]);
+    getOverview.mockResolvedValue(blockedOverview());
+    const f = makeFake(listWorkspaces, getOverview);
+    const cache = new TowerFleetCache(f.cm);
+    await cache.refresh();
+    expect(cache.getFleet()).toHaveLength(1);
+
+    listWorkspaces.mockResolvedValueOnce([]); // transient list failure surfaces as []
+    await cache.refresh();
+    expect(cache.getFleet()).toHaveLength(1); // last-known-good kept
+    expect(cache.getAttentionCount()).toBe(1);
+    cache.dispose();
+  });
+
+  it('refreshes on the shared SSE event (debounced) and subscribes exactly one SSE listener (no second stream)', async () => {
+    vi.useFakeTimers();
     listWorkspaces.mockResolvedValue([ws('/ws/a', 'a', true)]);
     getOverview.mockResolvedValue(blockedOverview());
     const f = makeFake(listWorkspaces, getOverview);
     const cache = new TowerFleetCache(f.cm);
     expect(f.sseCount()).toBe(1); // one listener on the shared stream, never its own EventSource
 
+    // A burst of events collapses into a single fan-out after the debounce.
     f.fireSse();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(listWorkspaces).toHaveBeenCalled();
+    f.fireSse();
+    f.fireSse();
+    await vi.advanceTimersByTimeAsync(350);
+    expect(listWorkspaces).toHaveBeenCalledTimes(1);
     cache.dispose();
   });
 
@@ -180,7 +198,7 @@ describe('TowerFleetCache', () => {
     const cache = new TowerFleetCache(f.cm);
     listWorkspaces.mockClear();
 
-    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.advanceTimersByTimeAsync(20_000 + 350); // poll tick, then debounce
     expect(listWorkspaces).toHaveBeenCalled();
     cache.dispose();
   });

@@ -868,22 +868,25 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Registered here (after reg/regCli) so its commands route through the CLI-preflight guard.
 	const towerCache = new TowerFleetCache(connectionManager);
 	context.subscriptions.push({ dispose: () => towerCache.dispose() });
+	const towerProvider = new TowerProvider(towerCache, connectionManager);
+	context.subscriptions.push(towerProvider);
 	const towerView = vscode.window.createTreeView('codev.tower', {
-		treeDataProvider: new TowerProvider(towerCache, connectionManager),
+		treeDataProvider: towerProvider,
 	});
 	const updateTowerBadge = (): void => {
 		const count = towerCache.getAttentionCount();
 		if (count > 0) {
-			towerView.badge = { value: count, tooltip: `${count} workspace${count === 1 ? '' : 's'} need attention` };
+			const noun = count === 1 ? 'workspace needs' : 'workspaces need';
+			towerView.badge = { value: count, tooltip: `${count} ${noun} attention` };
 		} else {
 			towerView.badge = undefined;
 		}
 	};
-	towerCache.onDidChange(updateTowerBadge);
 	updateTowerBadge();
 	registerTowerCommands(context, connectionManager, towerCache, regCli);
 	context.subscriptions.push(
 		towerView,
+		towerCache.onDidChange(updateTowerBadge),
 		reg('codev.tower.refresh', () => towerCache.refresh()),
 	);
 	// Populate as soon as Tower is reachable; refreshes thereafter ride the shared SSE + poll.

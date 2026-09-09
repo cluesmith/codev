@@ -41,7 +41,7 @@ vi.mock('vscode', () => {
   };
 });
 
-const { TowerProvider, OPEN_WORKSPACE_COMMAND } = await import('../views/tower.js');
+const { TowerProvider, OPEN_WORKSPACE_COMMAND, toWorkspaceTarget } = await import('../views/tower.js');
 
 function wsRow(path: string, name: string, active: boolean): TowerWorkspace {
   return { path, name, active, proxyUrl: `http://localhost/${name}`, terminals: active ? 1 : 0 };
@@ -154,5 +154,26 @@ describe('TowerProvider', () => {
     expect(item.collapsibleState).toBe(0); // None → nothing to expand
     expect((item.command as { command: string }).command).toBe(OPEN_WORKSPACE_COMMAND);
     expect((item.command as { arguments: Array<{ path: string }> }).arguments[0].path).toBe('/w/quiet');
+  });
+
+  it('does NOT put an open command on an expandable (attention) row — click must expand, not open', () => {
+    const fleet = [entry(wsRow('/w/gate', 'gate', true), blocked('2026-09-01T10:00:00Z'))];
+    const provider = new TowerProvider(fakeCache(fleet), fakeCm(null));
+    const item = provider.getTreeItem(provider.getChildren()[0]);
+    expect(item.collapsibleState).toBe(1); // Collapsed
+    expect(item.command).toBeUndefined(); // opening is on the inline button, not the row click
+  });
+
+  it('normalizes a workspace tree node into a WorkspaceTarget (menu-invoked commands)', () => {
+    const fleet = [entry(wsRow('/w/gate', 'gate', true), blocked('2026-09-01T10:00:00Z'))];
+    const provider = new TowerProvider(fakeCache(fleet), fakeCm('/w/gate'));
+    const node = provider.getChildren()[0]; // the workspace TowerNode a menu button receives
+    expect(toWorkspaceTarget(node)).toEqual({ path: '/w/gate', active: true, name: 'gate', isCurrent: true });
+    // and a plain target passes through unchanged
+    expect(toWorkspaceTarget({ path: '/x', active: false, name: 'x', isCurrent: false }))
+      .toEqual({ path: '/x', active: false, name: 'x', isCurrent: false });
+    // junk yields undefined
+    expect(toWorkspaceTarget(undefined)).toBeUndefined();
+    expect(toWorkspaceTarget({ kind: 'message' })).toBeUndefined();
   });
 });

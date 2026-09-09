@@ -1,18 +1,24 @@
 import * as vscode from 'vscode';
-import { compareAttention } from '@cluesmith/codev-sdk/builder-helpers';
 import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
 import type { ConnectionManager } from '../connection-manager.js';
-import type { FleetEntry, TowerFleetCache } from './tower-cache.js';
-import { disambiguateLabels } from './workspace-label.js';
+import type { TowerFleetCache } from './tower-cache.js';
+import { orderFleet } from './fleet-order.js';
+import type { LabelledEntry } from './fleet-order.js';
 import { ageSince, describeAttention } from './attention-format.js';
 
-/** Command a Tower workspace row runs on click — switch to it, or activate-then-open if dormant. */
+/** Command a Tower workspace row runs — switch to it, or activate-then-open if dormant. */
 export const OPEN_WORKSPACE_COMMAND = 'codev.tower.openWorkspace';
 
-/** A labelled fleet entry, resolved once per render so the tree and its rows agree on the label. */
-interface LabelledEntry {
-  entry: FleetEntry;
-  label: string;
+/**
+ * The workspace a Tower action targets. The open/deactivate commands are invoked two ways — with
+ * this object (a row's `command.arguments`) and with the tree node itself (an inline/context menu
+ * button) — so handlers normalize their argument through `toWorkspaceTarget`.
+ */
+export interface WorkspaceTarget {
+  path: string;
+  active: boolean;
+  name: string;
+  /** True when this is the window's own workspace (opening it would just re-focus this window). */
   isCurrent: boolean;
 }
 
@@ -21,6 +27,27 @@ type TowerNode =
   | { kind: 'workspace'; ws: LabelledEntry }
   | { kind: 'dormant-group'; rows: LabelledEntry[] }
   | { kind: 'attention'; label: string; description: string; icon: string; color?: string };
+
+/** The `WorkspaceTarget` for a labelled row. */
+function targetOf(ws: LabelledEntry): WorkspaceTarget {
+  return { path: ws.entry.workspace.path, active: ws.entry.workspace.active, name: ws.label, isCurrent: ws.isCurrent };
+}
+
+/**
+ * Normalize whatever a Tower command was invoked with into a `WorkspaceTarget`. VS Code passes a
+ * `command.arguments` value straight through (already a target), but a `view/item/context` menu
+ * passes the tree **element** — here a workspace `TowerNode`. Anything else yields `undefined`.
+ */
+export function toWorkspaceTarget(arg: unknown): WorkspaceTarget | undefined {
+  if (arg && typeof arg === 'object') {
+    const node = arg as { kind?: unknown; ws?: LabelledEntry; path?: unknown; active?: unknown; name?: unknown };
+    if (node.kind === 'workspace' && node.ws) { return targetOf(node.ws); }
+    if (typeof node.path === 'string' && typeof node.active === 'boolean' && typeof node.name === 'string') {
+      return arg as WorkspaceTarget;
+    }
+  }
+  return undefined;
+}
 
 /**
  * The Codev Tower tree: every workspace the machine's Tower knows, active ones urgency-ordered so
@@ -38,12 +65,18 @@ type TowerNode =
 export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changeEmitter.event;
+  private readonly cacheSubscription: vscode.Disposable;
 
   constructor(
     private cache: TowerFleetCache,
     private connectionManager: ConnectionManager,
   ) {
-    this.cache.onDidChange(() => this.changeEmitter.fire());
+    this.cacheSubscription = this.cache.onDidChange(() => this.changeEmitter.fire());
+  }
+
+  dispose(): void {
+    this.cacheSubscription.dispose();
+    this.changeEmitter.dispose();
   }
 
   getTreeItem(node: TowerNode): vscode.TreeItem {
@@ -91,23 +124,7 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
       return [{ kind: 'message', text: 'No workspaces registered', icon: 'info' }];
     }
 
-    const currentPath = this.connectionManager.getWorkspacePath();
-    const labels = disambiguateLabels(fleet.map((e) => e.workspace));
-    const label = (entry: FleetEntry): LabelledEntry => ({
-      entry,
-      label: labels.get(entry.workspace.path) ?? entry.workspace.name,
-      isCurrent: entry.workspace.path === currentPath,
-    });
-
-    const active = fleet.filter((e) => e.workspace.active).map(label);
-    const dormant = fleet.filter((e) => !e.workspace.active).map(label);
-
-    // Label order first, then a STABLE sort by urgency: equal-attention workspaces keep label order
-    // (the secondary tie-break compareAttention leaves to the caller).
-    active.sort((a, b) => a.label.localeCompare(b.label));
-    active.sort((a, b) => compareAttention(a.entry.attention, b.entry.attention));
-    dormant.sort((a, b) => a.label.localeCompare(b.label));
-
+    const { active, dormant } = orderFleet(fleet, this.connectionManager.getWorkspacePath());
     const nodes: TowerNode[] = active.map((ws) => ({ kind: 'workspace', ws }));
     if (dormant.length > 0) {
       nodes.push({ kind: 'dormant-group', rows: dormant });
@@ -120,10 +137,9 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
     const state = describeAttention(entry.attention);
     const hasDetail = !entry.attention.isEmpty && entry.workspace.active;
 
-    const item = new vscode.TreeItem(
-      label,
-      hasDetail ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-    );
+    let collapsibleState = vscode.TreeItemCollapsibleState.None;
+    if (hasDetail) { collapsibleState = vscode.TreeItemCollapsibleState.Collapsed; }
+    const item = new vscode.TreeItem(label, collapsibleState);
 
     const descriptionParts: string[] = [];
     if (isCurrent) { descriptionParts.push('current'); }
@@ -140,16 +156,19 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
 
     item.tooltip = `${label}\n${entry.workspace.path}`;
 
-    // contextValue gates the row's inline menu (switch / activate / deactivate) in package.json.
-    const scope = entry.workspace.active ? 'active' : 'dormant';
-    const current = isCurrent ? '-current' : '';
-    item.contextValue = `tower-workspace-${scope}${current}`;
+    // contextValue gates the row's inline menu (open / deactivate) in package.json.
+    let contextValue = 'tower-workspace-dormant';
+    if (entry.workspace.active) {
+      contextValue = 'tower-workspace-active';
+      if (isCurrent) { contextValue = 'tower-workspace-active-current'; }
+    }
+    item.contextValue = contextValue;
 
-    item.command = {
-      command: OPEN_WORKSPACE_COMMAND,
-      title: 'Open Workspace',
-      arguments: [{ path: entry.workspace.path, active: entry.workspace.active, name: label }],
-    };
+    // Click-to-open ONLY on rows with nothing to expand — otherwise a single click that means
+    // "expand this" would also fire openFolder. Expandable rows open via the inline button instead.
+    if (!hasDetail) {
+      item.command = { command: OPEN_WORKSPACE_COMMAND, title: 'Open Workspace', arguments: [targetOf(ws)] };
+    }
     return item;
   }
 }

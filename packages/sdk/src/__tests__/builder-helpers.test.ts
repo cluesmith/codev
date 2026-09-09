@@ -256,6 +256,24 @@ describe('compareAttention — order properties', () => {
     expect(compareAttention(held(3, true), held(3, true))).toBe(0);
   });
 
+  it('stays a total preorder with malformed timestamps (no NaN leak)', () => {
+    const bad = gate('not-a-date');
+    // Reflexive despite the unparseable since (would be NaN if it reached `ascending`).
+    expect(compareAttention(bad, bad)).toBe(0);
+    // A malformed since sorts as +∞ (last within the bucket), so a real gate outranks it.
+    expect(sign(compareAttention(gate('2026-08-25T09:00:00Z'), bad))).toBe(-1);
+    // Antisymmetry still holds against every sample.
+    for (const other of [gate('2026-08-25T09:00:00Z'), waiting('2026-08-25T09:00:00Z'), quiet()]) {
+      expect(sign(compareAttention(bad, other))).toBe(sign(-compareAttention(other, bad)));
+    }
+  });
+
+  it('never buckets a non-empty summary below a quiet one (!isEmpty ⇒ bucket < quiet)', () => {
+    // A held-mail-only summary (heldMail rows present) must outrank quiet even if heldTotal were 0.
+    const heldRowsOnly = summary({ heldMail: [{ ...ref, count: 2 }], heldTotal: 0, isEmpty: false });
+    expect(sign(compareAttention(heldRowsOnly, quiet()))).toBe(-1);
+  });
+
   it('sorts a shuffled fleet into a stable, deterministic total order', () => {
     const sorted = [...samples].sort(compareAttention);
     // Re-sorting the already-sorted list is a no-op (stable + total).

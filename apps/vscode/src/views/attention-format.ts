@@ -29,9 +29,12 @@ export function describeAttention(a: AttentionSummary): AttentionGlance | null {
     if (age) { text = `waiting ${age}`; }
     return { icon: 'clock', text };
   }
-  if (a.heldTotal > 0) {
-    let text = `${a.heldTotal} held`;
-    if (a.heldEscalated) { text = `${a.heldTotal} held · escalated`; }
+  // Mirror `urgencyBucket`'s held predicate (heldTotal OR heldMail rows), so a workspace never
+  // buckets as held-mail yet reads as quiet here.
+  if (a.heldTotal > 0 || a.heldMail.length > 0) {
+    const held = Math.max(a.heldTotal, a.heldMail.length);
+    let text = `${held} held`;
+    if (a.heldEscalated) { text = `${held} held · escalated`; }
     let color: string | undefined;
     if (a.heldEscalated) { color = 'list.errorForeground'; }
     return { icon: 'mail', color, text };

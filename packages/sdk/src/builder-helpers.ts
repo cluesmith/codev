@@ -182,7 +182,8 @@ export function deriveAttention(data: OverviewData | null, now: number = Date.no
  * wire-contracts-only types package) so no client re-invents the order and drifts. A workspace-list
  * view sorts its rows with this; a fleet quick-pick presents them in this order.
  *
- * Semantics (a deterministic **total order**):
+ * Semantics (a deterministic **total preorder** — distinct summaries may tie, and both callers rely
+ * on exactly that, breaking ties with a stable sort):
  *
  * 1. Each summary falls into a single **primary bucket** — the most-urgent signal it carries, in the
  *    order **pending-gate → idle-waiting → held-mail → queued-feedback → quiet**. A summary with both
@@ -227,21 +228,35 @@ function ascending(x: number, y: number): number {
   return 1;
 }
 
-/** Primary urgency bucket: 0 (most urgent) … 4 (quiet). The most-urgent signal present wins. */
+/**
+ * Primary urgency bucket: 0 (most urgent) … 4 (quiet). The most-urgent signal present wins.
+ *
+ * Held mail buckets on `heldTotal > 0` OR `heldMail.length > 0`: the two are equal today
+ * (`heldTotal` is workspace-wide and per-builder rows are a subset), but bucketing on both keeps a
+ * workspace that `deriveAttention` reports as non-empty (whose `isEmpty` also weighs `heldMail`)
+ * from ever bucketing as quiet — the invariant `!isEmpty ⇒ bucket < 4` holds by construction.
+ */
 function urgencyBucket(s: AttentionSummary): number {
   if (s.pendingGates.length > 0) { return 0; }
   if (s.waiting.length > 0) { return 1; }
-  if (s.heldTotal > 0) { return 2; }
+  if (s.heldTotal > 0 || s.heldMail.length > 0) { return 2; }
   if (s.queuedFeedback.length > 0) { return 3; }
   return 4;
 }
 
-/** Earliest `since` (ms) across items; a `null` since counts as +∞, an empty list as +∞. */
+/**
+ * Earliest `since` (ms) across items; a `null` since counts as +∞, an empty list as +∞. A
+ * non-finite parse (a malformed timestamp → `NaN`) is treated as +∞ too, so it sorts last and never
+ * reaches `ascending` as a `NaN` — which would silently break the comparator's antisymmetry.
+ */
 function oldestSince(items: ReadonlyArray<{ since: string | null }>): number {
   let oldest = Infinity;
   for (const item of items) {
     let ms = Infinity;
-    if (item.since !== null) { ms = new Date(item.since).getTime(); }
+    if (item.since !== null) {
+      const parsed = new Date(item.since).getTime();
+      if (Number.isFinite(parsed)) { ms = parsed; }
+    }
     if (ms < oldest) { oldest = ms; }
   }
   return oldest;

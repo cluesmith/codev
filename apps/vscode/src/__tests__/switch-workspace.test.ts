@@ -34,14 +34,21 @@ function stubDeps(over: Partial<WorkspaceActionDeps> = {}): WorkspaceActionDeps 
 describe('openOrActivateWorkspace', () => {
   it('switches to an active workspace via codev.focusWorkspaceWindow, without activating', async () => {
     const deps = stubDeps();
-    await openOrActivateWorkspace(deps, { path: '/w/a', active: true, name: 'a' });
+    await openOrActivateWorkspace(deps, { path: '/w/a', active: true, name: 'a', isCurrent: false });
     expect(deps.runCommand).toHaveBeenCalledWith('codev.focusWorkspaceWindow', '/w/a');
+    expect(deps.activate).not.toHaveBeenCalled();
+  });
+
+  it('no-ops for the current workspace (opening it would just re-focus this window)', async () => {
+    const deps = stubDeps();
+    await openOrActivateWorkspace(deps, { path: '/w/here', active: true, name: 'here', isCurrent: true });
+    expect(deps.runCommand).not.toHaveBeenCalled();
     expect(deps.activate).not.toHaveBeenCalled();
   });
 
   it('activates an already-adopted dormant workspace without an adopt prompt, then opens it', async () => {
     const deps = stubDeps({ isAdopted: vi.fn(() => true) });
-    await openOrActivateWorkspace(deps, { path: '/w/d', active: false, name: 'd' });
+    await openOrActivateWorkspace(deps, { path: '/w/d', active: false, name: 'd', isCurrent: false });
     expect(deps.confirmAdopt).not.toHaveBeenCalled();
     expect(deps.activate).toHaveBeenCalledWith('/w/d');
     expect(deps.refresh).toHaveBeenCalled();
@@ -50,7 +57,7 @@ describe('openOrActivateWorkspace', () => {
 
   it('confirms before adopting a non-Codev directory, and aborts if declined', async () => {
     const deps = stubDeps({ isAdopted: vi.fn(() => false), confirmAdopt: vi.fn(async () => false) });
-    await openOrActivateWorkspace(deps, { path: '/w/new', active: false, name: 'new' });
+    await openOrActivateWorkspace(deps, { path: '/w/new', active: false, name: 'new', isCurrent: false });
     expect(deps.confirmAdopt).toHaveBeenCalled();
     expect(deps.activate).not.toHaveBeenCalled();
     expect(deps.runCommand).not.toHaveBeenCalled();
@@ -58,7 +65,7 @@ describe('openOrActivateWorkspace', () => {
 
   it('activates after an accepted adopt confirmation and reports the adopt', async () => {
     const deps = stubDeps({ isAdopted: vi.fn(() => false), confirmAdopt: vi.fn(async () => true), activate: vi.fn(async () => ({ ok: true, adopted: true })) });
-    await openOrActivateWorkspace(deps, { path: '/w/new', active: false, name: 'new' });
+    await openOrActivateWorkspace(deps, { path: '/w/new', active: false, name: 'new', isCurrent: false });
     expect(deps.activate).toHaveBeenCalledWith('/w/new');
     expect(deps.notify).toHaveBeenCalledWith(expect.stringContaining('new'));
     expect(deps.runCommand).toHaveBeenCalledWith('codev.focusWorkspaceWindow', '/w/new');
@@ -66,7 +73,7 @@ describe('openOrActivateWorkspace', () => {
 
   it('reports a rate-limited activation and does not open a window', async () => {
     const deps = stubDeps({ activate: vi.fn(async () => ({ ok: false, error: 'Too many activations, try again later' })) });
-    await openOrActivateWorkspace(deps, { path: '/w/d', active: false, name: 'd' });
+    await openOrActivateWorkspace(deps, { path: '/w/d', active: false, name: 'd', isCurrent: false });
     expect(deps.notifyError).toHaveBeenCalledWith(expect.stringContaining('Too many'));
     expect(deps.runCommand).not.toHaveBeenCalled();
   });
@@ -114,7 +121,7 @@ describe('buildWorkspacePicks', () => {
     // separator row
     expect(picks.find((p) => p.label === 'Dormant')!.kind).toBe(-1);
     // dormant target carries its path and active:false
-    expect(picks.find((p) => p.label === 'sleepy')!.target).toEqual({ path: '/w/sleepy', active: false, name: 'sleepy' });
+    expect(picks.find((p) => p.label === 'sleepy')!.target).toEqual({ path: '/w/sleepy', active: false, name: 'sleepy', isCurrent: false });
   });
 
   it('omits the dormant separator when every workspace is active', () => {

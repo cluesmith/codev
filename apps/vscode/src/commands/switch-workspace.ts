@@ -1,22 +1,15 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { compareAttention } from '@cluesmith/codev-sdk/builder-helpers';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { FleetEntry, TowerFleetCache } from '../views/tower-cache.js';
-import { OPEN_WORKSPACE_COMMAND } from '../views/tower.js';
-import { disambiguateLabels } from '../views/workspace-label.js';
+import { OPEN_WORKSPACE_COMMAND, toWorkspaceTarget } from '../views/tower.js';
+import type { WorkspaceTarget } from '../views/tower.js';
+import { orderFleet } from '../views/fleet-order.js';
 import { describeAttention } from '../views/attention-format.js';
 
 /** The existing inbound command that re-validates a path and opens/focuses its window. */
 const FOCUS_WORKSPACE_COMMAND = 'codev.focusWorkspaceWindow';
-
-/** A workspace the open/activate action targets. */
-export interface WorkspaceTarget {
-  path: string;
-  active: boolean;
-  name: string;
-}
 
 /**
  * The side-effecting operations the open/activate flow needs, injected so the flow itself is a pure,
@@ -53,6 +46,11 @@ export interface WorkspaceActionDeps {
  */
 export async function openOrActivateWorkspace(deps: WorkspaceActionDeps, target: WorkspaceTarget): Promise<void> {
   if (target.active) {
+    // Opening the window we're already in would just re-focus it — skip the round-trip.
+    if (target.isCurrent) { return; }
+    // If the row's `active` is stale (another window deactivated it within the poll window),
+    // opening the folder still self-heals: the opened window's ConnectionManager.connect()
+    // re-activates its own workspace idempotently. So no pre-activation is needed here.
     await deps.runCommand(FOCUS_WORKSPACE_COMMAND, target.path);
     return;
   }
@@ -76,7 +74,9 @@ export async function openOrActivateWorkspace(deps: WorkspaceActionDeps, target:
 
 /** A human-readable failure message, distinguishing the rate-limit case (requirement 5). */
 export function activationErrorMessage(name: string, error?: string): string {
-  if (error && /rate|too many|429/i.test(error)) {
+  // Anchored to the real 429 body ("Too many activations, try again later") — a bare "rate"
+  // would match ordinary words (sepaRATE, migRATE).
+  if (error && /too many|\b429\b/i.test(error)) {
     return `Too many workspace activations — wait a moment, then try ${name} again.`;
   }
   if (error) {
@@ -96,36 +96,27 @@ export interface WorkspacePickItem extends vscode.QuickPickItem {
  * separator, then dormant workspaces (label order). Pure — no `vscode` runtime needed to test.
  */
 export function buildWorkspacePicks(fleet: ReadonlyArray<FleetEntry>, currentPath: string | null): WorkspacePickItem[] {
-  const labels = disambiguateLabels(fleet.map((e) => e.workspace));
-  const labelOf = (entry: FleetEntry) => labels.get(entry.workspace.path) ?? entry.workspace.name;
-
-  const active = fleet.filter((e) => e.workspace.active);
-  const dormant = fleet.filter((e) => !e.workspace.active);
-  active.sort((a, b) => labelOf(a).localeCompare(labelOf(b)));
-  active.sort((a, b) => compareAttention(a.attention, b.attention));
-  dormant.sort((a, b) => labelOf(a).localeCompare(labelOf(b)));
+  const { active, dormant } = orderFleet(fleet, currentPath);
 
   const items: WorkspacePickItem[] = [];
-  for (const entry of active) {
-    const label = labelOf(entry);
-    const glance = describeAttention(entry.attention);
+  for (const ws of active) {
+    const glance = describeAttention(ws.entry.attention);
     const descriptionParts: string[] = [];
-    if (entry.workspace.path === currentPath) { descriptionParts.push('current'); }
+    if (ws.isCurrent) { descriptionParts.push('current'); }
     if (glance) { descriptionParts.push(glance.text); }
     items.push({
-      label,
+      label: ws.label,
       description: descriptionParts.join(' · '),
-      target: { path: entry.workspace.path, active: true, name: label },
+      target: { path: ws.entry.workspace.path, active: true, name: ws.label, isCurrent: ws.isCurrent },
     });
   }
   if (dormant.length > 0) {
-    items.push({ label: 'Dormant', kind: vscode.QuickPickItemKind.Separator, target: { path: '', active: false, name: '' } });
-    for (const entry of dormant) {
-      const label = labelOf(entry);
+    items.push({ label: 'Dormant', kind: vscode.QuickPickItemKind.Separator, target: { path: '', active: false, name: '', isCurrent: false } });
+    for (const ws of dormant) {
       items.push({
-        label,
+        label: ws.label,
         description: 'activate',
-        target: { path: entry.workspace.path, active: false, name: label },
+        target: { path: ws.entry.workspace.path, active: false, name: ws.label, isCurrent: false },
       });
     }
   }
@@ -157,6 +148,10 @@ export function registerTowerCommands(
       if (!client) { return { ok: false, error: 'Not connected to Tower.' }; }
       return client.activateWorkspace(workspacePath);
     },
+    // Mirrors Tower's own adopt trigger (`launchInstance` adopts iff there's no `codev/` dir). It's
+    // a best-effort client-side check to confirm BEFORE the server writes: a tiny TOCTOU window and
+    // the coupling to the server's condition are the residual. Robustly closing it needs a server
+    // "will adopt?"/confirm flag — a Tower + SDK change, out of scope here (routes to codev:main).
     isAdopted: (workspacePath) => fs.existsSync(path.join(workspacePath, 'codev')),
     confirmAdopt: async (target) => {
       const choice = await vscode.window.showWarningMessage(
@@ -175,7 +170,13 @@ export function registerTowerCommands(
   };
 
   context.subscriptions.push(
-    regCli(OPEN_WORKSPACE_COMMAND, (target: WorkspaceTarget) => openOrActivateWorkspace(deps, target)),
+    // Invoked with a WorkspaceTarget (a row's command) or the tree node (an inline button) —
+    // `toWorkspaceTarget` normalizes both.
+    regCli(OPEN_WORKSPACE_COMMAND, (arg: unknown) => {
+      const target = toWorkspaceTarget(arg);
+      if (target) { return openOrActivateWorkspace(deps, target); }
+      return undefined;
+    }),
     regCli('codev.switchWorkspace', async () => {
       const picks = buildWorkspacePicks(cache.getFleet(), connectionManager.getWorkspacePath());
       if (picks.length === 0) {
@@ -185,7 +186,10 @@ export function registerTowerCommands(
       const chosen = await vscode.window.showQuickPick(picks, { placeHolder: 'Switch workspace — needs-attention first' });
       if (chosen) { await openOrActivateWorkspace(deps, chosen.target); }
     }),
-    regCli('codev.tower.deactivateWorkspace', async (target: WorkspaceTarget) => {
+    // Invoked from the row's inline button, so the argument is the tree node — normalize it.
+    regCli('codev.tower.deactivateWorkspace', async (arg: unknown) => {
+      const target = toWorkspaceTarget(arg);
+      if (!target) { return; }
       const choice = await vscode.window.showWarningMessage(
         `Deactivate “${target.name}”? This stops its architect and any running terminals.`,
         { modal: true },

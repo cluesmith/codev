@@ -64,6 +64,11 @@
         "title": "Codev: Switch Workspace"
       },
       {
+        "command": "codev.tower.openWorkspace",
+        "title": "Codev: Open Workspace",
+        "icon": "$(link-external)"
+      },
+      {
         "command": "codev.tower.deactivateWorkspace",
         "title": "Codev: Deactivate Workspace",
         "icon": "$(debug-stop)"
@@ -496,6 +501,10 @@
           "when": "false"
         },
         {
+          "command": "codev.tower.openWorkspace",
+          "when": "false"
+        },
+        {
           "command": "codev.openMarkdownPreview",
           "when": "resourceLangId == markdown && resourcePath =~ /\\/codev\\/(plans|specs|reviews)\\//"
         },
@@ -670,9 +679,14 @@
       ],
       "view/item/context": [
         {
-          "command": "codev.tower.deactivateWorkspace",
-          "when": "view == codev.tower && viewItem =~ /^tower-workspace-active/",
+          "command": "codev.tower.openWorkspace",
+          "when": "view == codev.tower && viewItem =~ /^tower-workspace-(active|dormant)$/",
           "group": "inline@1"
+        },
+        {
+          "command": "codev.tower.deactivateWorkspace",
+          "when": "view == codev.tower && viewItem == tower-workspace-active",
+          "group": "inline@2"
         },
         {
           "command": "codev.recheckCli",

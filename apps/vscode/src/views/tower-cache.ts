@@ -13,6 +13,9 @@ export interface FleetEntry {
 /** How often the fallback poll re-fetches the fleet when SSE isn't delivering (ms). */
 const POLL_INTERVAL_MS = 20_000;
 
+/** Trailing debounce (ms) collapsing SSE/poll-triggered refreshes so a burst is one fan-out. */
+const REFRESH_DEBOUNCE_MS = 300;
+
 /**
  * Cross-workspace attention cache for the Tower view.
  *
@@ -41,16 +44,34 @@ export class TowerFleetCache {
 
   private readonly subscriptions: vscode.Disposable[] = [];
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private refreshing = false;
+  private rerunQueued = false;
 
   constructor(private connectionManager: ConnectionManager) {
     this.subscriptions.push(
-      connectionManager.onSSEEvent(() => { void this.refresh(); }),
-      connectionManager.onStateChange((state) => { if (state === 'connected') { void this.refresh(); } }),
+      connectionManager.onSSEEvent(() => { this.scheduleRefresh(); }),
+      connectionManager.onStateChange((state) => { if (state === 'connected') { this.scheduleRefresh(); } }),
     );
     // Always-on low-frequency poll: the safety net for SSE gaps and for list changes Tower never
     // pushes (activation/deactivation emit no event). `refresh()` self-guards, so a disconnected
     // tick is a cheap no-op.
-    this.pollTimer = setInterval(() => { void this.refresh(); }, POLL_INTERVAL_MS);
+    this.pollTimer = setInterval(() => { this.scheduleRefresh(); }, POLL_INTERVAL_MS);
+  }
+
+  /**
+   * Coalesce a refresh trigger. Tower broadcasts SSE stream-wide (no workspace scoping) and this
+   * cache runs in every window, so an un-debounced refresh would fan out N per-workspace fetches on
+   * *every* event in *every* window. A short trailing debounce collapses a burst
+   * (`porch done --pr` → `--merged` → cleanup) into a single fan-out. Direct callers (the
+   * activate/deactivate actions) use `refresh()` for an immediate update.
+   */
+  private scheduleRefresh(): void {
+    if (this.debounceTimer !== null) { clearTimeout(this.debounceTimer); }
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      this.refresh();
+    }, REFRESH_DEBOUNCE_MS);
   }
 
   /** Current fleet, in Tower's list order. The Tower view applies label + urgency ordering. */
@@ -73,21 +94,50 @@ export class TowerFleetCache {
   }
 
   /**
-   * Re-fetch the workspace list and fan out per-workspace overviews. Last-write-wins via `latestSeq`:
-   * a call whose sequence is superseded before it commits is discarded, so SSE bursts and out-of-order
-   * landings never install stale data. A not-`connected` state or absent client returns without
-   * touching the cache (keep last-known-good). A dormant workspace contributes an empty summary
-   * without a fetch; an active workspace whose overview fetch fails keeps its previous attention.
+   * Re-fetch the fleet, coalescing concurrent calls. Only one fan-out runs at a time; a call that
+   * arrives while one is in flight schedules exactly one trailing rerun (so a poll tick or action
+   * during a slow ~20s fan-out can't stack parallel fan-outs or invalidate each other).
    */
   async refresh(): Promise<void> {
-    const mySeq = ++this.latestSeq;
+    if (this.refreshing) {
+      this.rerunQueued = true;
+      return;
+    }
+    this.refreshing = true;
+    try {
+      await this.fetchFleet();
+    } finally {
+      this.refreshing = false;
+      if (this.rerunQueued) {
+        this.rerunQueued = false;
+        await this.refresh();
+      }
+    }
+  }
+
+  /**
+   * The fan-out itself. A not-`connected` state or absent client returns without touching the cache
+   * (keep last-known-good). Last-write-wins via `latestSeq` (bumped only past the connection guard):
+   * an out-of-order landing is discarded. A transient list failure — `listWorkspaces()` returns `[]`
+   * for any HTTP/timeout error, indistinguishable from a genuinely empty registry — is not allowed to
+   * blank a populated fleet; only the first load may commit an empty list. A dormant workspace
+   * contributes an empty summary without a fetch; an active workspace whose overview fetch fails
+   * keeps its previous attention.
+   */
+  private async fetchFleet(): Promise<void> {
     const client = this.connectionManager.getClient();
     if (!client || this.connectionManager.getState() !== 'connected') {
       return;
     }
+    const mySeq = ++this.latestSeq;
 
     const workspaces = await client.listWorkspaces();
     if (mySeq !== this.latestSeq) { return; }
+    if (workspaces.length === 0 && this.entries.length > 0) {
+      // Almost certainly a transient list failure (registered workspaces persist across
+      // deactivation), so keep last-known-good rather than flashing "No workspaces".
+      return;
+    }
 
     const entries = await Promise.all(workspaces.map(async (workspace): Promise<FleetEntry> => {
       if (!workspace.active) {
@@ -114,6 +164,10 @@ export class TowerFleetCache {
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
     }
     for (const sub of this.subscriptions) { sub.dispose(); }
     this.changeEmitter.dispose();
