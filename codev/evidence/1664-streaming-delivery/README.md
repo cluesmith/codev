@@ -38,8 +38,9 @@ them but not committed.
 
 | run | scenario | gate | delivered | head-loss | median wait | max wait | waits >2 s |
 |---|---|---|---|---|---|---|---|
-| `fixed-r2-streaming-*` | recipient mid-turn, empty composer | current (**post-CMAP, the shipped code**) | **20/20 intact** | **0/20** | 395 ms | 399 ms | **0/20** |
-| `fixed-streaming-*` | *same*, before the CMAP round-1 fixes | current | 20/20 intact | 0/20 | 397 ms | 400 ms | 0/20 |
+| `fixed-r3-streaming-*` | recipient mid-turn, empty composer | current (**post-CMAP r2, the shipped code**) | **20/20 intact** | **0/20** | 394 ms | 396 ms | **0/20** |
+| `fixed-r2-streaming-*` | *same*, after CMAP round 1 | current | 20/20 intact | 0/20 | 395 ms | 399 ms | 0/20 |
+| `fixed-streaming-*` | *same*, before any CMAP fixes | current | 20/20 intact | 0/20 | 397 ms | 400 ms | 0/20 |
 | `legacy-streaming-legacy-*` | *the same scenario* | **retired** whole-screen settle | 20/20 intact | 0/20 | 2505 ms | 6432 ms | **11/20** |
 | `fixed-draft-*` | recipient mid-turn, human draft on the line | current | **0/20 — 20/20 held `busy:user-text`** | 0/20 | — | — | — |
 | `fixed-turn-end-*` | delivery attempted across a turn end (#1521's window) | current | **20/20 intact** | **0/20** | 393 ms | 404 ms | **0/20** |
@@ -55,6 +56,11 @@ them but not committed.
    the stale-sample reuse codex and claude found could occasionally let a delivery through on its
    very first pass. Closing it made every delivery establish two observations honestly — the
    numbers got *better* by getting stricter.
+
+   The r3 run re-measures after CMAP round 2 made `peek()` refuse a grid with unparsed output.
+   That change can only ADD holds, so it was re-measured rather than assumed: it costs nothing
+   (median 394 ms against 395 ms), because the window in which a fed chunk is still unparsed is
+   far shorter than the interval between delivery passes.
 
 2. **streaming, legacy gate** — the identical scenario measured against the rule this issue
    removes: still 20/20 eventually, but the median wait is **6.3× longer** and **11 of 20 rows

@@ -182,3 +182,31 @@ discarded instead of resetting the stability clock.**
 
 Both fixes verified bisecting: with each revert applied, exactly its own test fails.
 22 cases in the regression file; 6033 tests pass overall.
+
+## CMAP round 2
+
+gemini **APPROVE** · claude **APPROVE** · codex **REQUEST_CHANGES** — codex right again, and on
+the residual I had *documented* rather than closed.
+
+**codex:** `peek()` returned the grid without flushing, and `SessionScreen.feed()` queues an
+asynchronous xterm parse. So output arriving after the stable sample and immediately before the
+in-lock precheck sat in the parse queue, absent from the buffer — the fingerprint compared EQUAL
+and permitted the write, straight into the redraw. The retired `bytesWritten` comparison used to
+catch exactly that. Closed: `feed()` numbers each chunk and its parse callback records the number,
+so `hasUnparsedOutput` answers "is this grid current?" synchronously, and `peek()` returns null
+while it is not. A synchronous caller cannot flush, so the only honest answers are a coherent
+frame or none. Re-measured rather than assumed — the refusal can only add holds — and it costs
+nothing: median 394 ms against 395 ms (`fixed-r3-streaming-*`).
+
+**claude, non-blocking**, two acted on:
+- the `ringToken` docblock still claimed a gate→write TOCTOU consumer this PR retired (corrected);
+- live acceptance was claude-only, so codex's and agy's composer shapes were untested against the
+  new fingerprint — added fixture coverage over their real captures (render-gate suite 70 → 76).
+
+Two recorded as follow-ups rather than changed here:
+- a `null` fingerprint reports the self-clearing `composer-redraw` rather than the
+  classifier-stuck family, so a *systematic* classify/peek divergence would hold without
+  classifier-stuck telemetry (age-based escalation still fires). Distinguishing them means a
+  richer port return type for a case that needs classify and peek to disagree persistently.
+- `MAX_COMPOSER_SAMPLE_GAP_MS` (2 s) sits only 500 ms above the 1.5 s backstop — latency-only and
+  self-correcting via the retry timer.

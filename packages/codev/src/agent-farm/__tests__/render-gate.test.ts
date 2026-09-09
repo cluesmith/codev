@@ -21,7 +21,7 @@ import xtermHeadless from '@xterm/headless';
 import type { Terminal as HeadlessTerminal } from '@xterm/headless';
 import { RingBuffer } from '../../terminal/ring-buffer.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
-import { classifyScreen, classifyBuffer } from '../servers/render-gate.js';
+import { classifyScreen, classifyBuffer, composerRegionFingerprint } from '../servers/render-gate.js';
 import type { RingSnapshot, GateProfile, GateVerdict } from '../servers/render-gate.js';
 import { CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
 
@@ -95,6 +95,49 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       'wrapper-boot.busy',
     ]) {
       expect(fixtures.some((f) => f.startsWith(required))).toBe(true);
+    }
+  });
+
+  // Issue #1664: the composer-region FINGERPRINT is bounded by the same `locateComposerRegion`
+  // the classifier uses, so it must locate a region on exactly the screens the classifier calls
+  // clean — for every profile, not just claude's, whose live TUI is the only one the #1664
+  // acceptance harness drove. codex bounds its composer with a status line and agy with a rule,
+  // so these captures are where those two region shapes are exercised.
+  for (const name of fixtures.filter((f) => f.includes('.clean.'))) {
+    it(`${name} → fingerprints a locatable composer region`, async () => {
+      const raw = readFileSync(`${FIXTURE_DIR}/${name}`, 'utf8');
+      const profile = profileForFixture(name);
+      const snapshot = snapshotFromRaw(raw);
+      const term = new Terminal({ cols: snapshot.cols, rows: snapshot.rows, allowProposedApi: true, scrollback: 2000 });
+      try {
+        await new Promise<void>((resolve) => term.write(snapshot.replay, resolve));
+        const fingerprint = composerRegionFingerprint(term, snapshot.cols, snapshot.rows, profile);
+        // A clean screen always yields one — a null here would hold every message to that app.
+        expect(fingerprint).not.toBeNull();
+        // …and it is a pure function of the rendered screen, so re-reading is identical.
+        expect(composerRegionFingerprint(term, snapshot.cols, snapshot.rows, profile)).toBe(fingerprint);
+      } finally {
+        term.dispose();
+      }
+    });
+  }
+
+  it('a draft moves the fingerprint for every profile that captured one', async () => {
+    for (const name of fixtures.filter((f) => f.includes('-draft.busy.'))) {
+      const profile = profileForFixture(name);
+      const idle = fixtures.find((f) => f.startsWith(name.split('-')[0]) && f.includes('-idle.clean.'));
+      expect(idle).toBeDefined();
+      const fp = async (fixture: string): Promise<string | null> => {
+        const snapshot = snapshotFromRaw(readFileSync(`${FIXTURE_DIR}/${fixture}`, 'utf8'));
+        const term = new Terminal({ cols: snapshot.cols, rows: snapshot.rows, allowProposedApi: true, scrollback: 2000 });
+        try {
+          await new Promise<void>((resolve) => term.write(snapshot.replay, resolve));
+          return composerRegionFingerprint(term, snapshot.cols, snapshot.rows, profile);
+        } finally {
+          term.dispose();
+        }
+      };
+      expect(await fp(name)).not.toBe(await fp(idle as string));
     }
   });
 

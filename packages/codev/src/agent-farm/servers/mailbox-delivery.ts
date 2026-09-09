@@ -765,25 +765,21 @@ export function agentKey(workspacePath: string, toAgent: string): string {
  * (Spec 1313 render-gate round 2 — the fix for the non-monotone `currentSeq:partialBytes`
  * pair, which aliased once #1205's partial trim made `partialBytes` decrease), and the
  * geometry catches a resize that reflows the screen without new output. So two samples that
- * match mean the classified screen is byte-for-byte unchanged. Two consumers rely on that:
- *   1. gate→write TOCTOU re-validation — sampled before the async classify and re-checked
- *      after, so a keystroke landing during the classify holds instead of writing onto the
- *      new draft;
- *   2. the drainer's verdict memo ({@link CachedVerdict}) — a cached verdict is reused only
- *      while this token is unchanged, so a static screen is classified once instead of
- *      re-checked every 1.5 s backstop tick.
+ * match mean the classified screen is byte-for-byte unchanged.
  *
- * `inputSeq` is the INPUT half (Issue #1473), and neither consumer worked without it:
+ * ONE consumer relies on that now — the drainer's verdict memo ({@link CachedVerdict}): a cached
+ * verdict is reused only while this token is unchanged, so a static screen is classified once
+ * instead of re-checked every 1.5 s backstop tick. Issue #1664 retired the second consumer, the
+ * gate→write TOCTOU re-validation, because its OUTPUT half held on every repaint of a working
+ * agent — the defect that issue is named for. That re-validation now compares the composer-region
+ * fingerprint (output side) and `inputSeq` directly (input side); see `noteComposer` and the
+ * in-lock precheck.
  *
- *   - **The memo (this one earns the counter on its own).** A `CachedVerdict` survives across
- *     backstop ticks, so the gap between the cached classify and its reuse is bounded by no
- *     settle at all. Without an input term a CLEAN verdict is reusable ACROSS a keystroke —
- *     PTY input never advances the ring, so the output token is genuinely unchanged. That is
- *     the caveat this module used to admit in a comment and now closes.
- *   - **Unbounded awaits inside the gate→write gap.** `tokenBefore` is sampled before
- *     `ports.classify` AND before `ports.watchEcho`, the latter flushing the mirror parser and
- *     scanning up to 1000 lines. Neither is bounded by the input-settle interval on a loaded
- *     box, so "the settle covers it" is not true.
+ * `inputSeq` stays in this token because the MEMO earns it on its own (Issue #1473). A
+ * `CachedVerdict` survives across backstop ticks, so the gap between the cached classify and its
+ * reuse is bounded by no settle at all. Without an input term a CLEAN verdict would be reusable
+ * ACROSS a keystroke — PTY input never advances the ring, so the output token is genuinely
+ * unchanged.
  *
  * (The delivery's OWN paced write is excluded by construction — it writes with the `'delivery'`
  * origin, which moves no input signal — so folding this in cannot make a delivery block itself.)
