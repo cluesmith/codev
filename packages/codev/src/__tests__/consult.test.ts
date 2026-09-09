@@ -555,6 +555,32 @@ describe('consult command', () => {
       expect(callArgs.options.permissionMode).toBe('bypassPermissions');
     });
 
+    it('passes consultant.md through as the system prompt (#1649)', async () => {
+      // The #1649 fix is an instruction in consultant.md, so the instruction is
+      // only worth anything if the role file actually reaches the model. This
+      // pins the wire: file on disk → `systemPrompt`. The prohibition's wording
+      // is asserted in consult/__tests__/consultant-role.test.ts.
+      vi.resetModules();
+      const { consult } = await import('../commands/consult/index.js');
+
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role\n\nNever modify the tree under review.'
+      );
+
+      mockQueryFn.mockImplementation(() =>
+        (async function* () {
+          yield { type: 'result', subtype: 'success' };
+        })()
+      );
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+      await consult({ model: 'claude', prompt: 'test query' });
+
+      const callArgs = mockQueryFn.mock.calls[0][0];
+      expect(callArgs.options.systemPrompt).toContain('Never modify the tree under review.');
+    });
+
     it('should extract text from assistant messages', async () => {
       vi.resetModules();
       const { consult } = await import('../commands/consult/index.js');
