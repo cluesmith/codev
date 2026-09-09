@@ -44,7 +44,29 @@ import * as crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 /**
- * A point-in-time view of every path git considers changed.
+ * Where the repository itself is pointing.
+ *
+ * The working tree is only half the state a lane can move. `git commit` takes a
+ * dirty tree clean, and `git checkout` between two refs with identical content
+ * changes nothing a file comparison can see — in both cases the snapshot of
+ * *paths* is a poor witness, and in the clean-ref-switch case it is no witness
+ * at all. The reviewer is then reviewing a different commit than the builder
+ * thinks, which is worse than an edited file because it leaves no local trace.
+ *
+ * Either field is `null` when git cannot answer — most usefully in a repository
+ * with no commits yet, where `rev-parse HEAD` fails and the tree is still worth
+ * watching.
+ */
+export interface RepositoryIdentity {
+  /** HEAD's object id. */
+  head: string | null;
+  /** Branch name, or `HEAD` when detached. */
+  branch: string | null;
+}
+
+/**
+ * A point-in-time view of every path git considers changed, plus where the
+ * repository was pointing when it was taken.
  *
  * `available: false` means the tripwire could not run at all — most often
  * because the workspace is not a git repository. Callers say so once on stderr
@@ -56,13 +78,41 @@ export interface TreeSnapshot {
   reason?: string;
   /** Repo-relative path → `"<status code>:<content hash>"`. */
   entries: Map<string, string>;
+  /** HEAD and branch at the moment of the snapshot. */
+  identity: RepositoryIdentity;
 }
+
+const NO_IDENTITY: RepositoryIdentity = { head: null, branch: null };
 
 const UNAVAILABLE = (reason: string): TreeSnapshot => ({
   available: false,
   reason,
   entries: new Map(),
+  identity: NO_IDENTITY,
 });
+
+/**
+ * Read HEAD and the branch name in one `git rev-parse`.
+ *
+ * Failure is not fatal to the snapshot. A freshly `git init`ed repository has no
+ * HEAD to resolve, and the file-level half of the tripwire works there perfectly
+ * well; refusing to watch the tree because the repo has no commits would trade a
+ * real check for a missing one.
+ */
+function readIdentity(workspaceRoot: string): RepositoryIdentity {
+  try {
+    const raw = execFileSync('git', ['rev-parse', 'HEAD', '--abbrev-ref', 'HEAD'], {
+      cwd: workspaceRoot,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    if (typeof raw !== 'string') return NO_IDENTITY;
+    const [head, branch] = raw.trim().split('\n');
+    return { head: head || null, branch: branch || null };
+  } catch {
+    return NO_IDENTITY;
+  }
+}
 
 /**
  * Hash a working-tree file, or mark it absent.
@@ -89,6 +139,9 @@ function hashPath(absolute: string): string {
  * path cannot be handed back to `fs.readFileSync`. `--untracked-files=all` so
  * a newly created file is listed individually instead of being collapsed into
  * a single `?? dir/` entry.
+ *
+ * Records HEAD and the branch alongside the paths, so a lane that commits or
+ * switches refs is caught even when no file ends up looking different.
  */
 export function snapshotTree(workspaceRoot: string): TreeSnapshot {
   // Typed `unknown` rather than `string` so the guard below is a real check and
@@ -140,7 +193,7 @@ export function snapshotTree(workspaceRoot: string): TreeSnapshot {
     }
   }
 
-  return { available: true, entries };
+  return { available: true, entries, identity: readIdentity(workspaceRoot) };
 }
 
 /**
@@ -238,6 +291,80 @@ export function diffTreeSnapshots(
   return [...changed].sort();
 }
 
+/** One field of the repository's identity that moved during a review. */
+export interface IdentityChange {
+  field: 'HEAD' | 'branch';
+  before: string;
+  after: string;
+}
+
+/**
+ * Repository identity fields that differ between two snapshots.
+ *
+ * A field that was unreadable at either end is skipped rather than reported as
+ * a change: "we could not tell" and "it moved" are different claims, and only
+ * one of them is evidence.
+ */
+export function diffRepositoryIdentity(before: TreeSnapshot, after: TreeSnapshot): IdentityChange[] {
+  if (!before.available || !after.available) return [];
+
+  const changes: IdentityChange[] = [];
+  const fields: Array<[IdentityChange['field'], keyof RepositoryIdentity]> = [
+    ['HEAD', 'head'],
+    ['branch', 'branch'],
+  ];
+
+  for (const [label, key] of fields) {
+    const a = before.identity[key];
+    const b = after.identity[key];
+    if (a === null || b === null) continue;
+    if (a !== b) changes.push({ field: label, before: a, after: b });
+  }
+
+  return changes;
+}
+
+/**
+ * Render a string safe to print to a terminal.
+ *
+ * Git path names are bytes, and almost anything that is not `/` or NUL is legal
+ * in one — including newlines and ESC. Printing such a name raw lets it forge
+ * the rest of the banner: a file called `\n  - harmless.ts` adds a line to the
+ * list, and one containing a CSI sequence can repaint or erase what is above it.
+ * The warning exists to be trusted, so nothing it prints gets to move the
+ * cursor. C0, DEL and C1 are escaped; ordinary Unicode is left alone.
+ */
+export function escapeControlChars(value: string): string {
+  const named: Record<string, string> = {
+    '\n': '\\n',
+    '\r': '\\r',
+    '\t': '\\t',
+  };
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\x00-\x1f\x7f-\x9f]/g, ch =>
+    named[ch] ?? `\\x${ch.charCodeAt(0).toString(16).padStart(2, '0')}`,
+  );
+}
+
+/**
+ * The warning for a repository that moved under the reviewer.
+ *
+ * Separate from the changed-files banner because it is a different fact with a
+ * different remedy: no file need look any different, and `git status` will not
+ * show you what happened — `git reflog` will.
+ */
+export function formatRepositoryMovedWarning(model: string, changes: IdentityChange[]): string {
+  return [
+    `REPOSITORY MOVED during the ${model} review (#1649).`,
+    'A consultant reviews the commit in front of it; it must never commit, or switch refs.',
+    ...changes.map(
+      c => `  - ${c.field}: ${escapeControlChars(c.before)} -> ${escapeControlChars(c.after)}`,
+    ),
+    'The files on disk may look untouched and still not be the ones this review describes.',
+    'Check `git reflog` and `git status` before trusting this review or shipping the branch.',
+  ].join('\n');
+}
+
 /** Cap the file list so a lane that touched hundreds of paths stays readable. */
 const MAX_LISTED = 20;
 
@@ -255,7 +382,7 @@ export function formatTreeChangeWarning(model: string, files: string[]): string 
   const lines = [
     `WORKING TREE CHANGED during the ${model} review (#1649).`,
     `A consultant reviews the tree; it must never write to it. ${files.length} path${files.length === 1 ? '' : 's'} changed while this lane was running:`,
-    ...listed.map(f => `  - ${f}`),
+    ...listed.map(f => `  - ${escapeControlChars(f)}`),
   ];
   if (rest > 0) lines.push(`  … and ${rest} more`);
   lines.push(
@@ -279,7 +406,7 @@ export function formatSnapshotLostWarning(model: string, reason?: string): strin
     `WORKING TREE UNREADABLE after the ${model} review (#1649).`,
     'The tree was readable before this lane ran and `git status` fails now, so the tripwire',
     'cannot say whether anything changed. This is not the same as "nothing changed".',
-    `Reason: ${reason ?? 'unknown'}`,
+    `Reason: ${escapeControlChars(reason ?? 'unknown')}`,
     'Check `git status` and `git diff` before trusting this review or shipping the branch.',
   ].join('\n');
 }

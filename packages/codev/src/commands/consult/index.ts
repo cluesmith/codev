@@ -34,8 +34,10 @@ import { assertAgyLaneAllowedUnderTest } from '../../lib/test-env.js';
 import {
   snapshotTree,
   diffTreeSnapshots,
+  diffRepositoryIdentity,
   relativeOutputPath,
   formatTreeChangeWarning,
+  formatRepositoryMovedWarning,
   formatSnapshotLostWarning,
   appendTreeChangeWarningToOutput,
 } from './tree-tripwire.js';
@@ -1321,6 +1323,17 @@ async function runConsultation(
         const changed = diffTreeSnapshots(before, after, own ? [own] : []);
         if (changed.length > 0) {
           const warning = formatTreeChangeWarning(model, changed);
+          console.error(`\n${chalk.red.bold(warning)}\n`);
+          appendTreeChangeWarningToOutput(outputPath, warning);
+        }
+
+        // Reported separately from the file list, and after it, because it is a
+        // different fact: a lane that commits or switches refs can leave every
+        // file byte-identical while the review is of a different commit than the
+        // builder thinks it is.
+        const moved = diffRepositoryIdentity(before, after);
+        if (moved.length > 0) {
+          const warning = formatRepositoryMovedWarning(model, moved);
           console.error(`\n${chalk.red.bold(warning)}\n`);
           appendTreeChangeWarningToOutput(outputPath, warning);
         }

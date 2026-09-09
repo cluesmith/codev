@@ -20,8 +20,11 @@ import { execFileSync } from 'node:child_process';
 import {
   snapshotTree,
   diffTreeSnapshots,
+  diffRepositoryIdentity,
+  escapeControlChars,
   relativeOutputPath,
   formatTreeChangeWarning,
+  formatRepositoryMovedWarning,
   formatSnapshotLostWarning,
   appendTreeChangeWarningToOutput,
 } from '../tree-tripwire.js';
@@ -41,6 +44,9 @@ function write(rel: string, content: string): void {
 beforeEach(() => {
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tripwire-'));
   git('init', '-q');
+  // Pin the branch name rather than inheriting the developer's
+  // init.defaultBranch, which the identity assertions below depend on.
+  git('symbolic-ref', 'HEAD', 'refs/heads/main');
   git('config', 'user.email', 'test@example.com');
   git('config', 'user.name', 'Test');
   write('src/overview.ts', 'export function guard(x: number) {\n  if (x < 0) return false;\n  return true;\n}\n');
@@ -189,9 +195,151 @@ describe('diffTreeSnapshots — the #1649 scenario', () => {
   it('reports nothing when either snapshot is unavailable', () => {
     const before = snapshotTree(repo);
     write('src/overview.ts', 'changed');
-    const unavailable = { available: false as const, entries: new Map<string, string>() };
+    const unavailable = {
+      available: false as const,
+      entries: new Map<string, string>(),
+      identity: { head: null, branch: null },
+    };
     expect(diffTreeSnapshots(unavailable, snapshotTree(repo))).toEqual([]);
     expect(diffTreeSnapshots(before, unavailable)).toEqual([]);
+  });
+});
+
+describe('repository identity — the half a file comparison cannot see', () => {
+  it('catches a commit, which takes a dirty tree clean', () => {
+    write('src/overview.ts', 'export const guard = false;\n');
+    const before = snapshotTree(repo);
+
+    git('add', 'src/overview.ts');
+    git('commit', '-qm', 'a commit the reviewer had no business making');
+
+    const moved = diffRepositoryIdentity(before, snapshotTree(repo));
+    expect(moved.map(c => c.field)).toEqual(['HEAD']);
+    expect(moved[0].before).not.toBe(moved[0].after);
+  });
+
+  it('catches a clean ref switch, where NOTHING on disk changes', () => {
+    // The case that motivated this: two refs with identical content, so both the
+    // porcelain entries and every content hash match, and only the branch moved.
+    git('branch', 'feature');
+    const before = snapshotTree(repo);
+
+    git('checkout', '-q', 'feature');
+
+    const after = snapshotTree(repo);
+    expect(diffTreeSnapshots(before, after)).toEqual([]);
+    expect(before.identity.head).toBe(after.identity.head);
+
+    const moved = diffRepositoryIdentity(before, after);
+    expect(moved.map(c => c.field)).toEqual(['branch']);
+    expect(moved[0]).toMatchObject({ before: 'main', after: 'feature' });
+  });
+
+  it('stays silent when the repository does not move', () => {
+    const before = snapshotTree(repo);
+    write('src/overview.ts', 'edited but not committed\n');
+    expect(diffRepositoryIdentity(before, snapshotTree(repo))).toEqual([]);
+  });
+
+  it('records HEAD and branch on a normal snapshot', () => {
+    const snap = snapshotTree(repo);
+    expect(snap.identity.head).toMatch(/^[0-9a-f]{40}$/);
+    expect(snap.identity.branch).toBe('main');
+  });
+
+  it('still watches the tree in a repository with no commits', () => {
+    // `rev-parse HEAD` fails here. That must cost the identity check, not the
+    // file check — refusing to watch the tree would trade a real check for none.
+    const fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'tripwire-empty-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: fresh });
+      const before = snapshotTree(fresh);
+      expect(before.available).toBe(true);
+      expect(before.identity.head).toBeNull();
+
+      fs.writeFileSync(path.join(fresh, 'new.ts'), 'x');
+      expect(diffTreeSnapshots(before, snapshotTree(fresh))).toEqual(['new.ts']);
+    } finally {
+      fs.rmSync(fresh, { recursive: true, force: true });
+    }
+  });
+
+  it('does not call an unreadable field a change', () => {
+    const known = { available: true as const, entries: new Map(), identity: { head: 'abc', branch: 'main' } };
+    const unknown = { available: true as const, entries: new Map(), identity: { head: null, branch: null } };
+    expect(diffRepositoryIdentity(known, unknown)).toEqual([]);
+    expect(diffRepositoryIdentity(unknown, known)).toEqual([]);
+  });
+});
+
+describe('escapeControlChars — a filename must not be able to forge the banner', () => {
+  it('escapes a newline, so a crafted name cannot add list entries', () => {
+    expect(escapeControlChars('a\n  - innocent.ts')).toBe('a\\n  - innocent.ts');
+  });
+
+  it('escapes ESC, so a name cannot repaint the terminal', () => {
+    expect(escapeControlChars('a\x1b[2Kb')).toBe('a\\x1b[2Kb');
+  });
+
+  it('escapes carriage return, tab, NUL, DEL and C1', () => {
+    expect(escapeControlChars('a\rb')).toBe('a\\rb');
+    expect(escapeControlChars('a\tb')).toBe('a\\tb');
+    expect(escapeControlChars('a\x00b')).toBe('a\\x00b');
+    expect(escapeControlChars('a\x7fb')).toBe('a\\x7fb');
+    expect(escapeControlChars('a\x9bb')).toBe('a\\x9bb');
+  });
+
+  it('leaves ordinary text and non-ASCII alone', () => {
+    expect(escapeControlChars('src/café — naïve.ts')).toBe('src/café — naïve.ts');
+  });
+
+  it('is applied to the file list in the warning', () => {
+    const w = formatTreeChangeWarning('claude', ['evil\x1b[2K\n  - fake.ts']);
+    expect(w).toContain('\\x1b[2K\\n  - fake.ts');
+    // eslint-disable-next-line no-control-regex
+    expect(w).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/);
+  });
+
+  it('is applied to a real filename carrying an escape sequence', () => {
+    const nasty = 'esc\x1b[31mred.ts';
+    const before = snapshotTree(repo);
+    write(nasty, 'x');
+
+    const changed = diffTreeSnapshots(before, snapshotTree(repo));
+    expect(changed).toEqual([nasty]);
+
+    const w = formatTreeChangeWarning('claude', changed);
+    expect(w).toContain('esc\\x1b[31mred.ts');
+    expect(w).not.toContain('\x1b');
+  });
+
+  it('is applied to the unreadable-tree reason', () => {
+    expect(formatSnapshotLostWarning('claude', 'fatal:\x1b[2K gone')).toContain('fatal:\\x1b[2K gone');
+  });
+});
+
+describe('formatRepositoryMovedWarning', () => {
+  it('names each field that moved and points at the reflog', () => {
+    const w = formatRepositoryMovedWarning('claude', [
+      { field: 'HEAD', before: 'aaa', after: 'bbb' },
+      { field: 'branch', before: 'main', after: 'feature' },
+    ]);
+    expect(w).toContain('REPOSITORY MOVED');
+    expect(w).toContain('HEAD: aaa -> bbb');
+    expect(w).toContain('branch: main -> feature');
+    expect(w).toContain('git reflog');
+  });
+
+  it('says the files may look untouched, which is the whole point', () => {
+    const w = formatRepositoryMovedWarning('claude', [{ field: 'HEAD', before: 'a', after: 'b' }]);
+    expect(w).toMatch(/look untouched/);
+  });
+
+  it('carries no VERDICT: line', () => {
+    const w = formatRepositoryMovedWarning('claude', [{ field: 'HEAD', before: 'a', after: 'b' }]);
+    for (const line of w.split('\n')) {
+      expect(line.trim().toUpperCase().startsWith('VERDICT:')).toBe(false);
+    }
   });
 });
 

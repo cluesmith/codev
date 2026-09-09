@@ -223,3 +223,44 @@ right for a one-turn probe that should do nothing but answer.
 
 Re-ran the real-SDK acceptance probe after the role edit — still no write calls. Full suite
 5991 passed, 48 skipped, 0 failed; tsc clean; build clean.
+
+## Architect integration review — two asks, both done
+
+**1. Repository identity in the snapshot.** The file half of the tripwire is a poor witness to
+`git commit` (takes a dirty tree clean, so the lane's own edit vanishes from `git status`) and
+no witness at all to a clean ref switch (two refs with identical content — every path and every
+hash matches). In both cases the review is of a different commit than the builder thinks, and
+the second leaves no local trace whatsoever.
+
+`snapshotTree` now records HEAD and branch alongside the paths, via one extra `git rev-parse
+HEAD --abbrev-ref HEAD`. Reported as a *separate* `REPOSITORY MOVED` banner rather than folded
+into the file list, because it is a different fact with a different remedy — `git reflog`, not
+`git status` — and because the files may look untouched, which is the whole point.
+
+A repository with no commits (`rev-parse HEAD` fails) yields a null identity and keeps the file
+watch: refusing to watch the tree because the repo has no commits would trade a real check for
+a missing one. A field unreadable at either end is skipped rather than reported as a change —
+"we could not tell" and "it moved" are different claims.
+
+Wiring tests for both, through the real `consult()`. **Verified they discriminate** by removing
+the identity block from `runConsultation()`: both fail, the other eight pass. Also confirmed
+live through the built CLI — switched branch mid-review, got the banner naming
+`branch: main -> feature` with no file warning and a one-line `git status` either side.
+
+**2. Control characters in filenames.** A git path is bytes; almost anything but `/` and NUL is
+legal. A file named `\n  - harmless.ts` adds a line to the banner's list, and one carrying a CSI
+sequence can repaint or erase what is above it — so a crafted filename could forge the very
+warning meant to expose it. `escapeControlChars` now covers C0, DEL and C1, applied to the file
+list, the identity values and the unreadable-tree reason. Ordinary Unicode is left alone.
+Tested both synthetically and with a real file whose name contains an ESC sequence.
+
+**3. Review doc + adopter risk.** Wrote `codev/reviews/bugfix-1649-consult-the-claude-reviewer-la.md`
+with an "Adopter Risk" section: the four-tier resolver means an adopter with a local
+`codev/roles/consultant.md` keeps their own copy, so this fix never reaches them — and since the
+tripwire is code rather than a resolved file, they get the *detection* without the *prevention*,
+exactly backwards from the intent. Filed as #1661 (a `codev doctor` check for a local role file
+missing a section the shipped one has). Not folded in here: it is a doctor feature, not this bug.
+
+CI: the Unit Tests failure was the known agy-auth-cache TTL flake; architect re-ran the job.
+
+Suite after all of this: 6009 passed, 48 skipped, 0 failed. tsc clean, build clean.

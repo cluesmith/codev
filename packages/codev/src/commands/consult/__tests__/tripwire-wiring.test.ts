@@ -68,6 +68,8 @@ beforeEach(() => {
   fs.writeFileSync(path.join(repo, 'codev/roles/consultant.md'), '# Role: Consultant\n\nYou review; you do not write.');
   fs.writeFileSync(path.join(repo, 'app.ts'), 'export const answer = 42;\n');
   git('init', '-q');
+  // Pin the branch name rather than inheriting init.defaultBranch.
+  git('symbolic-ref', 'HEAD', 'refs/heads/main');
   git('config', 'user.email', 'test@example.com');
   git('config', 'user.name', 'Test');
   git('add', '-A');
@@ -189,6 +191,43 @@ describe('the tripwire is wired into consult() (#1649)', () => {
     expect(written).toContain('VERDICT: APPROVE');
     expect(written).toContain('WORKING TREE CHANGED');
     expect(written.indexOf('VERDICT: APPROVE')).toBeLessThan(written.indexOf('WORKING TREE CHANGED'));
+  });
+
+  it('fires when the lane COMMITS, which leaves the tree clean', async () => {
+    // A file comparison is a poor witness here: `git commit` takes the dirty
+    // tree clean, so the lane's own edit disappears from `git status`.
+    vi.resetModules();
+    const { consult } = await import('../index.js');
+    mockQueryFn.mockImplementation(
+      laneThatWrites(() => {
+        fs.writeFileSync(path.join(repo, 'app.ts'), 'export const answer = 43;\n');
+        const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf-8' });
+        git('add', 'app.ts');
+        git('commit', '-qm', 'a commit the reviewer had no business making');
+      }),
+    );
+
+    await consult({ model: 'claude', prompt: 'review app.ts' });
+
+    expect(banner()).toContain('REPOSITORY MOVED');
+    expect(banner()).toContain('HEAD:');
+  });
+
+  it('fires on a clean ref switch, where nothing on disk changes at all', async () => {
+    // No file differs, `git status` is identical either side, and the review is
+    // still of a different ref than the builder believes.
+    vi.resetModules();
+    const { consult } = await import('../index.js');
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf-8' });
+    git('branch', 'feature');
+
+    mockQueryFn.mockImplementation(laneThatWrites(() => git('checkout', '-q', 'feature')));
+
+    await consult({ model: 'claude', prompt: 'review app.ts' });
+
+    expect(banner()).not.toContain('WORKING TREE CHANGED');
+    expect(banner()).toContain('REPOSITORY MOVED');
+    expect(banner()).toContain('branch: main -> feature');
   });
 
   it('says so when the tree becomes unreadable, rather than reporting no changes', async () => {
