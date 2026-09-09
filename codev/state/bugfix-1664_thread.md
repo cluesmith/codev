@@ -161,3 +161,24 @@ sample taken minutes earlier could authorise an immediate write onto a composer 
 been repainted — #1521's hazard, reopened. Caught because consecutive harness trials delivered on
 their very first pass. `MAX_COMPOSER_SAMPLE_GAP_MS` (2 s, above the 1.5 s backstop) now restarts
 the stability clock across a gap that long; pinned by a test.
+
+## CMAP round 1 (PR #1666)
+
+gemini **APPROVE** · codex **REQUEST_CHANGES** · claude **REQUEST_CHANGES** — both change requests
+correct, and both the same underlying mistake: **evidence that the composer moved was being
+discarded instead of resetting the stability clock.**
+
+1. **codex** — the delivery's OWN write moves the composer (body → Enter → fresh prompt), but the
+   pre-write sample survived it. A second delivery arriving 250–2000 ms later, finding the same
+   empty-composer fingerprint, was authorised to write immediately into the redraw following our
+   own submit. Inside `MAX_COMPOSER_SAMPLE_GAP_MS`, so the gap bound could not catch it. #1521's
+   window, reopened by our own hand. Fixed by clearing the sample in the same `finally` that
+   already invalidates the verdict memo, for exactly the reason that block documents.
+2. **claude** — a `!verdict.clean` pass is *evidence* the composer moved or cannot be read, but the
+   early return skipped the sample update, so a later clean pass with a coincidentally identical
+   fingerprint claimed the region held still across the interval we watched it change.
+3. **claude, minor** — the stability decision read `ports.now()` twice; now once, so the recorded
+   sample and the retry delay cannot describe different instants.
+
+Both fixes verified bisecting: with each revert applied, exactly its own test fails.
+22 cases in the regression file; 6033 tests pass overall.

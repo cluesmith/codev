@@ -602,7 +602,7 @@ const composerSamples = new WeakMap<DeliverySession, ComposerSample>();
  * practice the gap is far smaller: a `composer-redraw` hold carries a `retryAfterMs`, so the
  * next observation lands about a settle later.
  */
-const MAX_COMPOSER_SAMPLE_GAP_MS = 2_000;
+export const MAX_COMPOSER_SAMPLE_GAP_MS = 2_000;
 
 /**
  * Record the composer region as it looks now, and answer whether it has been UNCHANGED for at
@@ -928,6 +928,13 @@ export async function deliverAgentMail(
     // branch); narrowing it away keeps the persisted set to the three not-clean values the
     // column's type admits.
     const detail = verdict.detail === 'empty' ? null : verdict.detail;
+    // Discard the composer STABILITY sample (Issue #1664, CMAP round 1 — claude). A not-clean
+    // verdict is positive EVIDENCE that the composer moved or cannot be read: a draft appeared,
+    // a dialog opened, a frame arrived mid-repaint. Keeping the previous sample would let a
+    // later clean pass with a coincidentally identical fingerprint claim the region "held still"
+    // across the very interval we watched it move — writing onto a composer we know changed.
+    // Evidence against stability must reset the clock, not be skipped over.
+    composerSamples.delete(session);
     for (const row of held) {
       if (row.reason !== reason || row.detail !== detail) {
         setHeldVerdict(db, row.id, reason, detail, ports.now());
@@ -952,11 +959,15 @@ export async function deliverAgentMail(
   // output half of the gate→write TOCTOU: a draft that appeared during the classify moves the
   // region, which cannot then be stable, and we hold rather than fusing the message into it.
   const fingerprint = ports.composerFingerprint(session, profile);
-  const composerStable = noteComposer(session, fingerprint, ports.now());
+  // One clock reading for the whole decision: `noteComposer` records against it and
+  // `msUntilComposerSettled` measures from it, so the recorded sample and the retry delay can
+  // never describe two different instants.
+  const sampledAt = ports.now();
+  const composerStable = noteComposer(session, fingerprint, sampledAt);
   if (fingerprint === null || (!composerStable && !settled(ports, session))) {
     return {
       ...hold('busy', 'composer-redraw'),
-      retryAfterMs: msUntilComposerSettled(session, ports.now()),
+      retryAfterMs: msUntilComposerSettled(session, sampledAt),
     };
   }
 
@@ -1102,6 +1113,16 @@ export async function deliverAgentMail(
     // interval BOUNDS rather than closes — input older than the settle whose echo is still
     // delayed, and input in flight from the client at sample time.
     memo?.delete(cacheKey);
+    // …and the composer STABILITY sample, for the same reason and in the same breath (Issue
+    // #1664, CMAP round 1 — codex). This delivery's own bytes are a composer change we KNOW
+    // happened: the body lands on the line, the Enter submits it, and the TUI paints a fresh
+    // prompt. Left in place, that pre-write observation is proof of stability for a composer
+    // that has since been rewritten twice — so a second delivery arriving inside
+    // `MAX_COMPOSER_SAMPLE_GAP_MS`, finding the same empty-composer fingerprint, would be
+    // authorised to write IMMEDIATELY into the redraw following our own submit. That is #1521's
+    // window, reopened by our own hand. The gap bound cannot help here (the reuse is well
+    // inside it), and unlike a third-party write this one needs no inference to detect.
+    composerSamples.delete(session);
   }
 
   // Anything short of a complete submit holds the row — a delivery is marked delivered only when

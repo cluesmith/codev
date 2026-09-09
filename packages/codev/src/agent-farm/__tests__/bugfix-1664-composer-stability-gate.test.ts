@@ -32,6 +32,7 @@ import {
   deliverAgentMail,
   MailboxDrainer,
   SETTLE_BEFORE_WRITE_MS,
+  MAX_COMPOSER_SAMPLE_GAP_MS,
   type DeliveryPorts,
   type DeliverySession,
   type DeliveredBroadcast,
@@ -296,6 +297,91 @@ describe('#1664 delivery — a recipient producing output does not hold mail', (
     h.now += SETTLE_BEFORE_WRITE_MS;
     h.lastDataAt = h.now;
     expect((await deliverAgentMail(h.ports, db, WS, AGENT)).delivered).toHaveLength(1);
+  });
+
+  it('does not reuse a pre-write observation for the NEXT delivery — our own write moved the composer', async () => {
+    // CMAP round 1 (codex). A delivery's own bytes are a composer change we know happened: the
+    // body lands on the line, the Enter submits it, the TUI paints a fresh prompt. If the
+    // pre-write sample survives, a second delivery arriving well inside
+    // MAX_COMPOSER_SAMPLE_GAP_MS — and finding the same empty-composer fingerprint — would be
+    // authorised to write immediately into the redraw following our own submit. That is #1521's
+    // window, reopened, and the gap bound cannot catch it because the reuse is inside the gap.
+    const h = harness();
+    enqueue();
+
+    // First delivery: two samples a settle apart, then it writes.
+    await deliverAgentMail(h.ports, db, WS, AGENT);
+    h.now = NOW + SETTLE_BEFORE_WRITE_MS;
+    h.lastDataAt = h.now;
+    expect((await deliverAgentMail(h.ports, db, WS, AGENT)).delivered).toHaveLength(1);
+    expect(h.writes).toHaveLength(1);
+
+    // A second message, well inside the gap window, onto a composer whose fingerprint has
+    // come back to what it was before our write.
+    enqueue();
+    h.now += 400;
+    h.lastDataAt = h.now;
+
+    const out = await deliverAgentMail(h.ports, db, WS, AGENT);
+
+    expect(out.delivered).toEqual([]);
+    expect(out.detail).toBe('composer-redraw');
+    expect(h.writes).toHaveLength(1); // still just the first message
+
+    // It delivers on the next clean pair of observations, as any first-time row does.
+    h.now += SETTLE_BEFORE_WRITE_MS;
+    h.lastDataAt = h.now;
+    expect((await deliverAgentMail(h.ports, db, WS, AGENT)).delivered).toHaveLength(1);
+  });
+
+  it('discards the stability sample when a pass classifies NOT clean — that is evidence of movement', async () => {
+    // CMAP round 1 (claude). clean → not-clean → clean-with-the-same-fingerprint. The middle
+    // pass watched the composer move (a draft, a dialog, a mid-repaint frame); keeping the
+    // first sample would let the third pass claim the region held still across exactly the
+    // interval we saw it change.
+    const h = harness();
+    enqueue();
+
+    await deliverAgentMail(h.ports, db, WS, AGENT); // clean: records the sample
+    const clean = h.ports.classify;
+    h.ports = {
+      ...h.ports,
+      classify: () => Promise.resolve({ clean: false, reason: 'busy', detail: 'no-region-end' }),
+    };
+    h.now = NOW + 100;
+    h.lastDataAt = h.now;
+    expect((await deliverAgentMail(h.ports, db, WS, AGENT)).detail).toBe('no-region-end');
+
+    // Back to clean, same fingerprint, past the settle measured from the FIRST sample.
+    h.ports = { ...h.ports, classify: clean };
+    h.now = NOW + SETTLE_BEFORE_WRITE_MS + 100;
+    h.lastDataAt = h.now;
+
+    const out = await deliverAgentMail(h.ports, db, WS, AGENT);
+
+    expect(out.delivered).toEqual([]);
+    expect(out.detail).toBe('composer-redraw');
+    expect(h.writes).toEqual([]);
+  });
+
+  it('holds at exactly MAX_COMPOSER_SAMPLE_GAP_MS + 1 and delivers at exactly the bound', async () => {
+    // Pins the boundary itself, so the constant cannot drift silently in either direction.
+    for (const [gap, shouldDeliver] of [
+      [MAX_COMPOSER_SAMPLE_GAP_MS, true],
+      [MAX_COMPOSER_SAMPLE_GAP_MS + 1, false],
+    ] as const) {
+      const h = harness();
+      const row = enqueue();
+      await deliverAgentMail(h.ports, db, WS, AGENT); // first observation
+      h.now = NOW + gap;
+      h.lastDataAt = h.now; // still streaming, so only region stability can carry the write
+
+      const out = await deliverAgentMail(h.ports, db, WS, AGENT);
+
+      expect(out.delivered).toEqual(shouldDeliver ? [row.id] : []);
+      if (!shouldDeliver) expect(out.detail).toBe('composer-redraw');
+      mailbox.dismiss(db, row.id);
+    }
   });
 
   it('delivers on the FIRST pass to an idle agent — the whole-screen quiet is still a proof', async () => {
