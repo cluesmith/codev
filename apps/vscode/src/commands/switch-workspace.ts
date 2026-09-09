@@ -132,15 +132,23 @@ export function buildWorkspacePicks(fleet: ReadonlyArray<FleetEntry>, currentPat
   return items;
 }
 
+/** A command registrar (extension.ts's `regCli`) that adds the CLI-preflight guard (#791). */
+export interface CommandRegistrar {
+  <A extends unknown[]>(id: string, handler: (...args: A) => unknown): vscode.Disposable;
+}
+
 /**
  * Register the Tower action commands: the row-click open/activate, the keyboard-first
  * `codev.switchWorkspace` quick-pick, and the row-context deactivate. Thin glue — it builds the
- * real `WorkspaceActionDeps` and delegates the logic to the tested functions above.
+ * real `WorkspaceActionDeps` and delegates the logic to the tested functions above. Registration
+ * goes through the injected `regCli` so Tower commands get the CLI-preflight guard like every other
+ * Tower-dependent command.
  */
 export function registerTowerCommands(
   context: vscode.ExtensionContext,
   connectionManager: ConnectionManager,
   cache: TowerFleetCache,
+  regCli: CommandRegistrar,
 ): void {
   const deps: WorkspaceActionDeps = {
     runCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
@@ -161,14 +169,14 @@ export function registerTowerCommands(
       );
       return choice === 'Activate & adopt';
     },
-    notify: (message) => { void vscode.window.showInformationMessage(message); },
-    notifyError: (message) => { void vscode.window.showErrorMessage(message); },
+    notify: (message) => { vscode.window.showInformationMessage(message); },
+    notifyError: (message) => { vscode.window.showErrorMessage(message); },
     refresh: () => cache.refresh(),
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(OPEN_WORKSPACE_COMMAND, (target: WorkspaceTarget) => openOrActivateWorkspace(deps, target)),
-    vscode.commands.registerCommand('codev.switchWorkspace', async () => {
+    regCli(OPEN_WORKSPACE_COMMAND, (target: WorkspaceTarget) => openOrActivateWorkspace(deps, target)),
+    regCli('codev.switchWorkspace', async () => {
       const picks = buildWorkspacePicks(cache.getFleet(), connectionManager.getWorkspacePath());
       if (picks.length === 0) {
         deps.notify('No Codev workspaces are registered with Tower.');
@@ -177,7 +185,7 @@ export function registerTowerCommands(
       const chosen = await vscode.window.showQuickPick(picks, { placeHolder: 'Switch workspace — needs-attention first' });
       if (chosen) { await openOrActivateWorkspace(deps, chosen.target); }
     }),
-    vscode.commands.registerCommand('codev.tower.deactivateWorkspace', async (target: WorkspaceTarget) => {
+    regCli('codev.tower.deactivateWorkspace', async (target: WorkspaceTarget) => {
       const choice = await vscode.window.showWarningMessage(
         `Deactivate “${target.name}”? This stops its architect and any running terminals.`,
         { modal: true },

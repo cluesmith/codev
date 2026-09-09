@@ -47,7 +47,8 @@ describe('Codev Tower contributions (#1566)', () => {
 
   it('registers the Tower tree view and its title command in extension.ts', () => {
     expect(EXT_SRC).toMatch(/createTreeView\(\s*['"]codev\.tower['"]/);
-    expect(EXT_SRC).toMatch(/registerCommand\(\s*['"]codev\.tower\.refresh['"]/);
+    // Command goes through the reg/regCli helper (#791), not a bare registerCommand.
+    expect(EXT_SRC).toMatch(/reg\(\s*['"]codev\.tower\.refresh['"]/);
     expect(EXT_SRC).toMatch(/registerTowerCommands\(/);
   });
 

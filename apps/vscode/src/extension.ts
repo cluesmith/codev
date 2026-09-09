@@ -588,35 +588,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		{ dispose: () => contextualPanelProvider.dispose() },
 	);
 
-	// --- Codev Tower (#1566): cross-workspace navigation hub -----------------------------------
-	// A separate activity-bar container (machine-scope), distinct from the workspace-scope views
-	// above. Its own cross-workspace cache fans out per-workspace overviews over the SAME shared SSE
-	// (connectionManager.onSSEEvent) — no second EventSource. The container icon's badge carries the
-	// machine-wide needs-attention count (only this container badges — the badge means machine-scope).
-	const towerCache = new TowerFleetCache(connectionManager);
-	context.subscriptions.push({ dispose: () => towerCache.dispose() });
-	const towerView = vscode.window.createTreeView('codev.tower', {
-		treeDataProvider: new TowerProvider(towerCache, connectionManager),
-	});
-	const updateTowerBadge = (): void => {
-		const count = towerCache.getAttentionCount();
-		if (count > 0) {
-			towerView.badge = { value: count, tooltip: `${count} workspace${count === 1 ? '' : 's'} need attention` };
-		} else {
-			towerView.badge = undefined;
-		}
-	};
-	towerCache.onDidChange(updateTowerBadge);
-	updateTowerBadge();
-	registerTowerCommands(context, connectionManager, towerCache);
-	context.subscriptions.push(
-		towerView,
-		vscode.commands.registerCommand('codev.tower.refresh', () => towerCache.refresh()),
-	);
-	// Populate as soon as Tower is reachable; refreshes thereafter ride the shared SSE + poll.
-	towerCache.refresh();
-	// --- end Codev Tower ------------------------------------------------------------------------
-
 	// Status-bar chip for the dev surface (#921) — the always-visible "a dev is running" indicator,
 	// driven off the single dev-terminal source of truth. (#1049 removed the Codev Dev panel view;
 	// the chip is display-only now — there is no panel to focus.)
@@ -888,6 +859,36 @@ export async function activate(context: vscode.ExtensionContext) {
 	// `agentsCycleGroupFrom*` toolbar buttons (one visible at a time).
 	const setGroupBy = (axis: 'stage' | 'area' | 'architect') =>
 		vscode.workspace.getConfiguration('codev').update('buildersGroupBy', axis, vscode.ConfigurationTarget.Global);
+
+	// --- Codev Tower (#1566): cross-workspace navigation hub -----------------------------------
+	// A separate activity-bar container (machine-scope), distinct from the workspace-scope views
+	// above. Its own cross-workspace cache fans out per-workspace overviews over the SAME shared SSE
+	// (connectionManager.onSSEEvent) — no second EventSource. The container icon's badge carries the
+	// machine-wide needs-attention count (only this container badges — the badge means machine-scope).
+	// Registered here (after reg/regCli) so its commands route through the CLI-preflight guard.
+	const towerCache = new TowerFleetCache(connectionManager);
+	context.subscriptions.push({ dispose: () => towerCache.dispose() });
+	const towerView = vscode.window.createTreeView('codev.tower', {
+		treeDataProvider: new TowerProvider(towerCache, connectionManager),
+	});
+	const updateTowerBadge = (): void => {
+		const count = towerCache.getAttentionCount();
+		if (count > 0) {
+			towerView.badge = { value: count, tooltip: `${count} workspace${count === 1 ? '' : 's'} need attention` };
+		} else {
+			towerView.badge = undefined;
+		}
+	};
+	towerCache.onDidChange(updateTowerBadge);
+	updateTowerBadge();
+	registerTowerCommands(context, connectionManager, towerCache, regCli);
+	context.subscriptions.push(
+		towerView,
+		reg('codev.tower.refresh', () => towerCache.refresh()),
+	);
+	// Populate as soon as Tower is reachable; refreshes thereafter ride the shared SSE + poll.
+	towerCache.refresh();
+	// --- end Codev Tower ------------------------------------------------------------------------
 
 	// Commands
 	context.subscriptions.push(
