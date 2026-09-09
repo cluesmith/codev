@@ -73,3 +73,7 @@ packages/codev/coverage/
 # Local MCP config and channel state
 .mcp.json
 .claude/channels/ci/
+
+# Raw PTY byte logs from the acceptance harnesses — tens of MB, and the summary.md /
+# results.json beside them are the evidence that gets committed.
+codev/evidence/**/pty.raw

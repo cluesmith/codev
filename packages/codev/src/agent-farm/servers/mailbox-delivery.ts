@@ -1036,10 +1036,19 @@ export async function deliverAgentMail(
   //   • a race DURING the paced write, which is reported (`racedByInput`) rather than prevented,
   //     because by then the bytes are already out;
   //   • (Issue #1664) a composer that redraws and returns to a byte-identical rendering entirely
-  //     inside this lock wait, and bytes fed to the gate mirror but not yet parsed when the
-  //     fingerprint is read — the whole-screen settle this replaced did cover both, at the price
-  //     of never delivering to a working agent at all. `MAX_COMPOSER_SAMPLE_GAP_MS` bounds the
-  //     first; the second is one parse turn wide.
+  //     inside this lock wait — the whole-screen settle this replaced did cover it, at the price
+  //     of never delivering to a working agent at all; `MAX_COMPOSER_SAMPLE_GAP_MS` bounds it,
+  //     and `SessionScreen.peek()` refuses to answer at all while any fed byte is unparsed, so
+  //     a redraw cannot hide in the parse queue;
+  //   • (Issue #1664, NEW with this change) a turn ending DURING the paced write. The write
+  //     spans ~100 ms across setTimeout gaps and is fingerprint-checked once, at its first byte.
+  //     Under the old settle this could not arise — a delivery only ever wrote to an agent that
+  //     had been silent for 250 ms — whereas a delivery to a WORKING agent can now be overtaken
+  //     by that agent's own turn-end repaint. It is the same class as the input race one bullet
+  //     up, and handled the same way: detected rather than prevented (the echo watch reports
+  //     `verified: false` and the row is flagged, never silently lost), because by then the
+  //     bytes are already out. Measured across 100 delivering trials against a real claude —
+  //     the #1664 streaming, turn-end and re-run acceptance runs — head-loss was 0/100.
   const precheck = (): WriteAbort | null => {
     if (!session.writable) return { kind: 'hold', reason: 'no-live-pty' };
     if (session.inputSeq !== inputSeqBefore) {

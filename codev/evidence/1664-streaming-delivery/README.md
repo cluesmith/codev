@@ -38,7 +38,8 @@ them but not committed.
 
 | run | scenario | gate | delivered | head-loss | median wait | max wait | waits >2 s |
 |---|---|---|---|---|---|---|---|
-| `fixed-r3-streaming-*` | recipient mid-turn, empty composer | current (**post-CMAP r2, the shipped code**) | **20/20 intact** | **0/20** | 394 ms | 396 ms | **0/20** |
+| `fixed-r4-streaming-*` | recipient mid-turn, empty composer | current (**post-CMAP r3, the shipped code**) | **20/20 intact** | **0/20** | 394 ms | 396 ms | **0/20** |
+| `fixed-r3-streaming-*` | *same*, after CMAP round 2 | current | 20/20 intact | 0/20 | 394 ms | 396 ms | 0/20 |
 | `fixed-r2-streaming-*` | *same*, after CMAP round 1 | current | 20/20 intact | 0/20 | 395 ms | 399 ms | 0/20 |
 | `fixed-streaming-*` | *same*, before any CMAP fixes | current | 20/20 intact | 0/20 | 397 ms | 400 ms | 0/20 |
 | `legacy-streaming-legacy-*` | *the same scenario* | **retired** whole-screen settle | 20/20 intact | 0/20 | 2505 ms | 6432 ms | **11/20** |
@@ -60,7 +61,11 @@ them but not committed.
    The r3 run re-measures after CMAP round 2 made `peek()` refuse a grid with unparsed output.
    That change can only ADD holds, so it was re-measured rather than assumed: it costs nothing
    (median 394 ms against 395 ms), because the window in which a fed chunk is still unparsed is
-   far shorter than the interval between delivery passes.
+   far shorter than the interval between delivery passes. The r4 run does the same after CMAP
+   round 3 narrowed the fingerprint to exactly the rows the classifier judges — identical again.
+
+   **Across all four streaming runs plus the turn-end run — 100 delivering trials against a real
+   claude — head-loss is 0/100.**
 
 2. **streaming, legacy gate** — the identical scenario measured against the rule this issue
    removes: still 20/20 eventually, but the median wait is **6.3× longer** and **11 of 20 rows

@@ -375,8 +375,10 @@ function locateComposerRegion(term: HeadlessTerminal, rows: number, profile: Gat
  * the message never touches, and mail waited a mean of 54 s (max 561 s) for a turn to end.
  *
  * Comparing two of these instead scopes the question back to the rows that matter. It covers:
- *   - the rendered TEXT of the region, marker row through its bounding rule (a draft appearing,
- *     a placeholder rotating, a turn-end box redraw — all move it);
+ *   - the rendered TEXT of the region — exactly the rows the classifier judges, marker row up to
+ *     but not including the bounding rule/status line (a draft appearing, a placeholder rotating,
+ *     a turn-end box redraw all move it; the bounding row's own chrome, such as codex's live
+ *     context percentage, deliberately does not);
  *   - the region's POSITION, so a composer that slides up or down the screen counts as moved
  *     even when its text is unchanged;
  *   - the CURSOR, whose movement inside the composer is the app touching the input row (free:
@@ -399,7 +401,14 @@ export function composerRegionFingerprint(
   const region = locateComposerRegion(term, rows, profile);
   if (!isLocated(region)) return null;
   const { lines, markerRow, endRow, cursorRow, cursorCol } = region;
-  const text = lines.slice(markerRow, endRow + 1).join('\n');
+  // EXACTLY the rows {@link classifyBuffer} judges — `markerRow` up to, not including, the
+  // bounding row — so "the two can never disagree about which rows are the composer" is true of
+  // the content as well as the bounds (CMAP round 3 — claude). The bounding row is chrome, and
+  // for codex it is a STATUS line carrying a live context percentage: folding its text in would
+  // make an unchanged composer look like it was repainting every few seconds, and hold that
+  // app's mail for the very reason this issue exists to remove. Its POSITION is still in the
+  // fingerprint below, so a composer whose region grows, shrinks or slides still counts as moved.
+  const text = lines.slice(markerRow, endRow).join('\n');
   return `${cols}x${rows}:${markerRow}-${endRow}:${cursorRow},${cursorCol}:${text}`;
 }
 
