@@ -116,7 +116,22 @@ for (const [k, v] of Object.entries(process.env)) {
 }
 env.TERM = 'xterm-256color';
 
-const PROFILE = HARNESS === 'codex' ? CODEX_PROFILE : CLAUDE_PROFILE;
+/**
+ * `--assume-queues-input`: run the gate as if this app were already MEASURED to queue input
+ * mid-turn (`GateProfile.queuesInputMidTurn`).
+ *
+ * This flag exists because the capability is a chicken-and-egg: the production default for an
+ * unmeasured app is the conservative whole-screen settle, which never fires for a streaming
+ * agent — so with the default in force the harness can never deliver mid-turn, and the very
+ * experiment that would decide the flag cannot run. Passing it grants the licence for the
+ * duration of the measurement; the RESULT decides whether the profile keeps it.
+ *
+ * It must never be the default: a run that quietly assumed the capability would be evidence for
+ * nothing, and the whole point of the flag is that the profile value has to be earned.
+ */
+const ASSUME_QUEUES_INPUT = process.argv.includes('--assume-queues-input');
+const BASE_PROFILE = HARNESS === 'codex' ? CODEX_PROFILE : CLAUDE_PROFILE;
+const PROFILE = ASSUME_QUEUES_INPUT ? { ...BASE_PROFILE, queuesInputMidTurn: true } : BASE_PROFILE;
 /**
  * "The recipient is producing output, so the RETIRED whole-screen settle would refuse to write
  * right now" — the condition the owner's ruling is phrased in, defined to be exactly the
@@ -126,16 +141,25 @@ const PROFILE = HARNESS === 'codex' ? CODEX_PROFILE : CLAUDE_PROFILE;
 const wouldLegacyGateHold = () => Date.now() - lastDataAt < SETTLE_BEFORE_WRITE_MS;
 
 /**
- * "A turn is running", read off the rendered screen: claude's live working line carries a
- * PARENTHESISED elapsed counter (`✽ Bunning… (17m 7s · ↓ 70.5k tokens · thinking some more)`),
- * and its finished counterpart does not (`✻ Sautéed for 15s · done 8:52 AM`).
+ * "A turn is running", read off the rendered screen. The two measured TUIs say it differently:
  *
- * NOT the `esc to interrupt` hint the #1567 harness matches: claude 2.1.266 (measured here)
- * does not render it at all, so that detector reports a working agent as idle — which makes a
- * harness race ahead and stack every prompt in the TUI's queue without a single turn running.
+ *   - **codex 0.153.4** renders `• Working (2s • esc to interrupt)`;
+ *   - **claude 2.1.266** renders no `esc to interrupt` hint AT ALL. Its live working line is
+ *     `✽ Bunning… (17m 7s · ↓ 70.5k tokens · thinking some more)` — a PARENTHESISED elapsed
+ *     counter, which its finished counterpart (`✻ Sautéed for 15s · done 8:52 AM`) does not
+ *     carry. The #1567 harness matches only `esc to interrupt`, so on this claude it reports a
+ *     working agent as idle, which makes a harness race ahead and stack every prompt into the
+ *     TUI's queue without a single turn ever running.
+ *
+ * One alternation covers both, and it is deliberately a UNION rather than a per-app table: a
+ * detector that silently matches nothing is the failure mode here, so the cheap breadth is worth
+ * more than the precision.
  */
-const WORKING_RE = /\((?:\d+m\s+)?\d+s\s+·/;
-/** Claude's composer hint while messages are waiting for the current turn to finish. */
+const WORKING_RE = /esc to interrupt|\((?:\d+m\s+)?\d+s\s+[·•]/i;
+/**
+ * Claude's composer hint while messages wait for the current turn to finish. codex has no known
+ * equivalent, so this is extra safety where it exists rather than a required signal.
+ */
 const QUEUED_RE = /Press up to edit queued messages/;
 
 const pty: IPty = spawnPty(CMD, TUI_ARGS, { name: 'xterm-256color', cols: COLS, rows: ROWS, cwd: CWD, env });
@@ -277,8 +301,28 @@ async function waitIdle(quietMs: number, timeoutMs: number): Promise<void> {
 }
 
 async function acceptDialogs(): Promise<void> {
+  // Only act on a dialog that has finished painting: these TUIs remount their first-run dialogs
+  // during startup, and a keystroke sent into that window is applied to the OLD mount while the
+  // new one comes back with its default option selected.
   if (Date.now() - lastDataAt < 1000) return;
   const text = await viewportText();
+  // codex's update nag preselects "Update now", which npm-installs a new codex and then asks to
+  // be restarted — measured, it eats the harness's first prompt. Choose the Skip option.
+  const skip = /^\s*(\d+)\.\s*Skip/im.exec(text);
+  if (skip && /Update now/i.test(text) && /Press enter to continue/i.test(text)) {
+    pty.write(skip[1]);
+    await sleep(300);
+    pty.write('\r');
+    await sleep(2000);
+    return;
+  }
+  // codex's directory-trust prompt preselects the affirmative option ("1. Yes, continue").
+  if (/Do you trust/i.test(text) && /Press enter to continue/i.test(text)) {
+    pty.write('\r');
+    await sleep(1500);
+    return;
+  }
+  // claude's trust dialog defaults to the NEGATIVE option, so move down before confirming.
   if (/Enter to confirm/i.test(text) && /(trust|accept|proceed)/i.test(text)) {
     if (/❯\s*No\b/i.test(text)) { pty.write('\x1b[B'); await sleep(200); }
     pty.write('\r');
@@ -511,6 +555,7 @@ const summary = [
   '',
   `- harness: \`${CMD}\` ${tuiVersion}, ${COLS}x${ROWS}, ${TRIALS} trials`,
   `- gate: ${LEGACY_GATE ? 'the RETIRED whole-screen output settle (--legacy-gate)' : 'the CURRENT composer-region stability gate'}`,
+  `- \`queuesInputMidTurn\`: ${PROFILE.queuesInputMidTurn === true ? (ASSUME_QUEUES_INPUT ? '**assumed for this measurement** (--assume-queues-input) — the result decides the profile value' : 'from the profile (already measured)') : 'not set, so the whole-screen settle governs'}`,
   `- delivery: the PRODUCTION \`deliverAgentMail\` over a real sqlite mailbox, live gate bindings`,
   `  (\`classifyBuffer\` + \`composerRegionFingerprint\`) and the production write edge`,
   `  (\`submitMessagePaced\`), driven every ${PASS_INTERVAL_MS} ms`,

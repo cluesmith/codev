@@ -960,7 +960,13 @@ export async function deliverAgentMail(
   // never describe two different instants.
   const sampledAt = ports.now();
   const composerStable = noteComposer(session, fingerprint, sampledAt);
-  if (fingerprint === null || (!composerStable && !settled(ports, session))) {
+  // …and composer stability is only a licence to write for an app MEASURED to accept input
+  // mid-turn and queue it (`GateProfile.queuesInputMidTurn`). For any other app the original
+  // whole-screen settle stands: an app that DROPS input arriving mid-turn must only ever be
+  // written to while it is quiet, and the cost of being wrong there is a silently lost message,
+  // not a slow one. The capability is per-app measurement, never inheritance.
+  const mayWriteWhileTalking = profile.queuesInputMidTurn === true && composerStable;
+  if (fingerprint === null || (!mayWriteWhileTalking && !settled(ports, session))) {
     return {
       ...hold('busy', 'composer-redraw'),
       retryAfterMs: msUntilComposerSettled(session, sampledAt),
@@ -1044,15 +1050,32 @@ export async function deliverAgentMail(
   //     spans ~100 ms across setTimeout gaps and is fingerprint-checked once, at its first byte.
   //     Under the old settle this could not arise — a delivery only ever wrote to an agent that
   //     had been silent for 250 ms — whereas a delivery to a WORKING agent can now be overtaken
-  //     by that agent's own turn-end repaint. It is the same class as the input race one bullet
-  //     up, and handled the same way: detected rather than prevented (the echo watch reports
-  //     `verified: false` and the row is flagged, never silently lost), because by then the
-  //     bytes are already out. Measured across 100 delivering trials against a real claude —
-  //     the #1664 streaming, turn-end and re-run acceptance runs — head-loss was 0/100.
+  //     by that agent's own turn-end repaint.
+  //
+  //     NOT fully detected, and the detection it does have must not be overstated: `watchEcho`
+  //     matches the message's HEADER (or a paste placard) and nothing else, so it catches a
+  //     redraw that eats the LEADING bytes (#1521's shape → `verified: false`) and is blind to
+  //     one that truncates the TAIL — the header rendered, so the delivery reports confirmed
+  //     while the body is short. That gap is not new to this issue (the watch has always been
+  //     header-only) but this issue widens the window in which it can be hit, so it is worth
+  //     naming rather than leaving inside a general "detected, not prevented". Tracked as a
+  //     follow-up under #1578; a tail oracle would need the write edge to know what it sent and
+  //     the watch to look for the END of it.
+  //
+  //     Measured across 100 delivering trials against a real claude — the #1664 streaming,
+  //     turn-end and re-run acceptance runs — head-loss was 0/100. Those trials DO check the
+  //     tail: each body carries a unique trailing token and the harness asserts it rendered, so
+  //     the empirical bound covers the case the production watch cannot see.
   const precheck = (): WriteAbort | null => {
     if (!session.writable) return { kind: 'hold', reason: 'no-live-pty' };
     if (session.inputSeq !== inputSeqBefore) {
       return { kind: 'hold', reason: 'busy', detail: 'recent-input' };
+    }
+    // For an app NOT measured to queue input mid-turn, the whole-screen settle is still the
+    // rule, and it is re-checked here exactly as it was before Issue #1664 — that app's delivery
+    // path is unchanged end to end.
+    if (profile.queuesInputMidTurn !== true && !settled(ports, session)) {
+      return { kind: 'hold', reason: 'busy' };
     }
     // Issue #1664: the composer region, not the whole screen. An `--interrupt`/`--escape` that
     // cleared the line during our lock wait, or a turn-end box redraw, moves this; the spinner

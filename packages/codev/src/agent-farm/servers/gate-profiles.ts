@@ -50,18 +50,41 @@ const COMPOSER_MARKER = /^[❯›]/;
  */
 const REGION_END_PATTERNS = [/^[─━╌┄]{5,}/, /^\s{2,}(gpt|high:|~\/)/];
 
-/** claude composer profile (marker ❯, dim placeholder — measured, spike g2). */
+/**
+ * claude composer profile (marker ❯, dim placeholder — measured, spike g2).
+ *
+ * `queuesInputMidTurn` measured for Issue #1664 against claude 2.1.266: a message delivered while
+ * a turn was streaming landed intact and was submitted as one message at the turn's end in 100 of
+ * 100 trials (0 head-loss), and the TUI shows it as `Press up to edit queued messages` in the
+ * meantime. Evidence: `codev/evidence/1664-streaming-delivery/`.
+ */
 export const CLAUDE_PROFILE: GateProfile = {
   app: 'claude',
   markerPattern: COMPOSER_MARKER,
   regionEndPatterns: REGION_END_PATTERNS,
+  queuesInputMidTurn: true,
 };
 
-/** codex composer profile (marker ›, dim placeholder — measured, spike g2). */
+/**
+ * codex composer profile (marker ›, dim placeholder — measured, spike g2).
+ *
+ * `queuesInputMidTurn` measured for Issue #1664 against codex-cli 0.153.4, by the same harness
+ * and the same production delivery path as claude's: 20 of 20 mid-turn deliveries landed intact
+ * and were submitted, 0 head-loss, every one written at an instant the retired whole-screen
+ * settle would have refused. Evidence: `codev/evidence/1664-streaming-delivery/`.
+ *
+ * One measured quirk worth knowing, though it needs no code: codex's composer SLIDES DOWN the
+ * screen as its transcript grows (measured rows 13 → 37 over ~11 s) until it reaches the bottom
+ * and pins. Its row span is part of the fingerprint, so during that phase the region legitimately
+ * counts as moving and mail holds — a fresh codex session's first delivery waits for the screen
+ * to fill. Transient, self-correcting, and not worth special-casing: a long-lived builder's
+ * screen is always full.
+ */
 export const CODEX_PROFILE: GateProfile = {
   app: 'codex',
   markerPattern: COMPOSER_MARKER,
   regionEndPatterns: REGION_END_PATTERNS,
+  queuesInputMidTurn: true,
 };
 
 /**
@@ -120,6 +143,12 @@ export const AGY_PROFILE: GateProfile = {
   placeholderFgPalette: 8,
   markerRequiresCursorRow: true,
   markerFgPalette: 12,
+  // Issue #1664: NOT measured to queue input mid-turn, so it is not claimed to. agy keeps the
+  // original whole-screen output settle — mail to a working agy waits for its turn to end, as it
+  // did before that issue. The capability is a per-app measurement, and the safe default for an
+  // app nobody has driven through the harness is the conservative one: an app that DROPS input
+  // arriving mid-turn would lose messages silently, which is a worse failure than waiting.
+  // Turning this on for agy is a harness run away (`--harness agy`), not a judgement call.
 };
 
 /** Registry keyed by the harness name `detectHarnessFromCommand` returns. */

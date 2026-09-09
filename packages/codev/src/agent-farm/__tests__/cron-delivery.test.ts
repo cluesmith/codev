@@ -22,7 +22,15 @@ import type {
 } from '../servers/mailbox-delivery.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 
-const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
+// Issue #1664: a claude-shaped profile, so it carries claude's measured `queuesInputMidTurn`.
+// Without it the delivery path keeps the whole-screen output settle, which is the branch
+// these files' non-#1664 cases already exercise through `lastDataAt`.
+const PROFILE: GateProfile = {
+  app: 'claude',
+  markerPattern: /^❯/,
+  regionEndPatterns: [],
+  queuesInputMidTurn: true,
+};
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
 const BUSY: GateVerdict = { clean: false, reason: 'busy', detail: 'user-text' };
 

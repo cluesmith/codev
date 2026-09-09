@@ -85,6 +85,24 @@ function claudeFrame(spinner: string, composer = ''): string {
   );
 }
 
+/**
+ * {@link claudeFrame} with the composer row supplied VERBATIM, escape sequences included, so a
+ * test can control the row's SGR attributes as well as its characters.
+ */
+function claudeFrameRaw(composerRow: string): string {
+  const rows = [
+    '⏺ Let me trace how the directive is consumed into the model call.',
+    '',
+    '✽ Bunning… (17m 7s · ↓ 70.5k tokens)',
+    '',
+    RULE,
+    composerRow,
+    RULE,
+    '  agent | builder/spir-1 | LC: 4m ago | Opus 5 | ctx 312k',
+  ];
+  return `${ESC}[H${ESC}[2J` + rows.join('\r\n') + `${ESC}[6;3H`;
+}
+
 async function screenShowing(frame: string): Promise<SessionScreen> {
   const screen = new SessionScreen(COLS, ROWS);
   screen.feed(frame);
@@ -136,6 +154,41 @@ describe('#1664 render gate — the composer region, not the whole screen', () =
 
     screen.resize(COLS - 20, ROWS);
     expect(await fingerprintOf(screen)).not.toBe(before);
+  });
+
+  it('moves the fingerprint on an ATTRIBUTE-ONLY flip: a dim placeholder becoming typed text', async () => {
+    // Architect integration review. The in-lock precheck is synchronous and compares
+    // fingerprints WITHOUT re-classifying, so text alone is not enough: emptiness is an
+    // attribute question (the classifier skips dim placeholder chrome and counts
+    // normal-intensity cells as user text), and a composer whose characters stay identical while
+    // their attributes flip is exactly what a human retyping a suggested command produces.
+    const DIM = '\x1b[2m';
+    const OFF = '\x1b[22m';
+    const ghost = 'edit the config file';
+
+    const placeholder = await screenShowing(claudeFrameRaw(`❯ ${DIM}${ghost}${OFF}`));
+    const typed = await screenShowing(claudeFrameRaw(`❯ ${ghost}`));
+
+    // Same characters on the composer row…
+    const rowOf = async (screen: SessionScreen): Promise<string> => {
+      const { term, rows } = await screen.read();
+      const buf = term.buffer.active;
+      const line = buf.getLine(buf.viewportY + 5);
+      void rows;
+      return line ? line.translateToString(true).trimEnd() : '';
+    };
+    expect(await rowOf(placeholder)).toBe(await rowOf(typed));
+
+    // …but the classifier separates them, and so must the fingerprint the precheck compares.
+    const dimView = await placeholder.read();
+    const typedView = await typed.read();
+    expect(classifyBuffer(dimView.term, dimView.cols, dimView.rows, CLAUDE_PROFILE).clean).toBe(true);
+    expect(classifyBuffer(typedView.term, typedView.cols, typedView.rows, CLAUDE_PROFILE)).toEqual({
+      clean: false,
+      reason: 'busy',
+      detail: 'user-text',
+    });
+    expect(await fingerprintOf(placeholder)).not.toBe(await fingerprintOf(typed));
   });
 
   it('is null when no composer region can be located — indeterminate, never stable', async () => {
@@ -294,6 +347,56 @@ describe('#1664 delivery — a recipient producing output does not hold mail', (
     expect(second.delivered).toEqual([row.id]);
     expect(h.writes).toHaveLength(1);
     expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
+  });
+
+  it('an app NOT measured to queue input mid-turn keeps the whole-screen settle', async () => {
+    // Architect integration review: composer stability is a licence granted per app, by
+    // measurement, never inherited. An app that DROPS input arriving mid-turn must only ever be
+    // written to while it is quiet — the cost of being wrong there is a silently lost message,
+    // which is worse than a slow one. agy is the live instance of this: not measured, so not
+    // claimed.
+    const h = harness();
+    h.ports = { ...h.ports, resolveProfile: () => ({ ...CLAUDE_PROFILE, app: 'agy', queuesInputMidTurn: undefined }) };
+    enqueue();
+
+    // Two stable observations a settle apart — enough for claude, and deliberately not enough
+    // here, because the screen is still producing output.
+    await deliverAgentMail(h.ports, db, WS, AGENT);
+    h.now = NOW + SETTLE_BEFORE_WRITE_MS;
+    h.lastDataAt = h.now;
+    const out = await deliverAgentMail(h.ports, db, WS, AGENT);
+    expect(out.delivered).toEqual([]);
+    expect(out.detail).toBe('composer-redraw');
+    expect(h.writes).toEqual([]);
+
+    // …and it delivers exactly when it used to: once the whole screen has been quiet.
+    h.now += SETTLE_BEFORE_WRITE_MS;
+    expect((await deliverAgentMail(h.ports, db, WS, AGENT)).delivered).toHaveLength(1);
+  });
+
+  it('aborts in the lock for an unmeasured app when output lands during the lock wait', async () => {
+    // The in-lock half of the same rule: for an app without the capability the whole-screen
+    // settle is re-checked at the write instant, exactly as it was before Issue #1664.
+    const h = harness();
+    h.lastDataAt = NOW - SETTLE_BEFORE_WRITE_MS;
+    const row = enqueue();
+    h.ports = {
+      ...h.ports,
+      resolveProfile: () => ({ ...CLAUDE_PROFILE, app: 'agy', queuesInputMidTurn: undefined }),
+      writeMessage: (_s, msg, _noEnter, precheck) => {
+        h.lastDataAt = h.now; // a repaint lands while we hold the lock
+        const abort = precheck();
+        if (abort) return { status: 'aborted', abort };
+        h.writes.push(msg);
+        return { status: 'written' };
+      },
+    };
+
+    const out = await deliverAgentMail(h.ports, db, WS, AGENT);
+
+    expect(out.delivered).toEqual([]);
+    expect(h.writes).toEqual([]);
+    expect(mailbox.getById(db, row.id)?.status).toBe('held');
   });
 
   it('holds for as long as the COMPOSER keeps moving, however quiet the rest of the screen is', async () => {

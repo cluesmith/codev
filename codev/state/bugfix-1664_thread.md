@@ -253,3 +253,45 @@ include a **codex** recipient — the live acceptance drove claude only, though 
 composer shapes now have fixture-level fingerprint coverage.
 
 6048 tests pass. Build clean.
+
+## Architect integration review (2026-09-09)
+
+Three blocking items, all done.
+
+**(1) `GateProfile.queuesInputMidTurn` — per-app capability, measured not inherited.** Composer
+stability is now a licence granted per app; without it the delivery path keeps the #1573
+whole-screen settle end to end, pre-lock and in-lock alike. An app that DROPS input arriving
+mid-turn would lose messages silently, which is worse than waiting, so the default is
+conservative and agy is explicitly *not claimed*.
+
+Measuring codex needed a flag: with the conservative default in force the gate never delivers to
+a streaming agent, so the very experiment that decides the value cannot run. `--assume-queues-input`
+grants the licence for the measurement only, and the result decides the profile — a run that
+quietly assumed it would be evidence for nothing. **codex-cli 0.153.4: 20/20 delivered intact,
+0 head-loss, 20/20 submitted, all 20 at instants the retired settle would have refused.** Flag set,
+then confirmed 5/5 with the real profile value rather than the override.
+
+Two findings from that work:
+- **codex's composer slides down the screen** (rows 13 → 37 over ~11 s) until the transcript fills
+  it and it pins. Its row span is in the fingerprint, so a fresh codex session's first delivery
+  holds until the screen fills. Transient, self-correcting, documented rather than special-cased.
+- **`esc to interrupt` is a codex-only signal.** codex 0.153.4 renders `• Working (2s • esc to
+  interrupt)`; claude 2.1.266 renders no such hint. The harness now matches a union of both.
+
+**(2) SGR attribute digest folded into the fingerprint.** The architect is right and my earlier
+"deliberately not covered" reasoning was wrong for the one place it matters: the in-lock precheck
+is synchronous and compares fingerprints WITHOUT re-classifying, so a dim placeholder becoming
+normal-intensity typed text of the same string — exactly what retyping a suggested command
+produces — would have compared equal. `regionAttributeDigest` (dim / inverse / fg-palette, FNV-1a
+over non-empty cells) closes it; the placeholder→user-text test is verified bisecting.
+
+**(3) The echo-watch claim was an overclaim of mine.** I wrote that the new mid-write turn-end
+race is "detected rather than prevented"; `watchEcho` matches the HEADER (or a paste placard) and
+nothing else, so it catches a lost head (#1521's shape) and is blind to a truncated TAIL — header
+rendered, delivery reports confirmed, body short. Corrected in place, noted as a follow-up under
+**#1578**, with the observation that the harness trials *do* assert a unique trailing token, so
+the 0/100 empirical bound covers what the production watch cannot see.
+
+Non-blocking, both done: the measurement figures moved out of the hot bullet into arch.md (1136 →
+1059 chars, back near its 1029 baseline), and the claim now reads "For an app MEASURED to queue
+input mid-turn … only a HUMAN at the line holds mail".

@@ -3,8 +3,9 @@
 Owner ruling: *"If the AI is producing output it shouldn't wait. It should only wait if the human
 is typing, because of the way queueing works."*
 
-All runs: a REAL Claude Code TUI (`claude 2.1.266`, `--dangerously-skip-permissions --model
-haiku`, 120x40) under node-pty in an empty scratch directory, driven by
+All runs: a REAL TUI under node-pty in an empty scratch directory — `claude 2.1.266`
+(`--dangerously-skip-permissions --model haiku`) except where the table says codex, which is
+`codex-cli 0.153.4` (`--dangerously-bypass-approvals-and-sandbox`) — at 120x40, driven by
 `packages/codev/scripts/bugfix-1664-streaming-delivery-harness.mts`. No Tower, no shellper,
 nothing under `~/.agent-farm` touched.
 
@@ -44,6 +45,7 @@ them but not committed.
 | `legacy-streaming-legacy-*` | *the same scenario* | **retired** whole-screen settle | 20/20 intact | 0/20 | 2505 ms | 6432 ms | **11/20** |
 | `fixed-draft-*` | recipient mid-turn, human draft on the line | current | **0/20 — 20/20 held `busy:user-text`** | — | — | — | — |
 | `fixed-turn-end-*` | delivery attempted across a turn end (#1521's window) | current | **20/20 intact** | **0/20** | 393 ms | 404 ms | **0/20** |
+| `codex-streaming-*` | **codex** recipient mid-turn, empty composer | current | **20/20 intact** | **0/20** | 395 ms | 397 ms | **0/20** |
 
 ### What each run establishes
 
@@ -80,6 +82,20 @@ them but not committed.
    attempted continuously across the end of a turn, so some attempts met a composer mid-redraw:
    those were held (`busy:composer-redraw`) and the message then landed. **0/20 head-loss.**
 
+5. **codex, current gate** — the run that DECIDES `CODEX_PROFILE.queuesInputMidTurn`. Composer
+   stability is a licence granted per app by measurement, and the production default for an
+   unmeasured app is the conservative whole-screen settle — which never fires for a streaming
+   agent, so the experiment cannot run under it. The harness's `--assume-queues-input` grants the
+   licence for the duration of the measurement only; the result then decides the profile value.
+   codex-cli 0.153.4 answered **20/20 intact, 0 head-loss, 20/20 submitted**, every one written
+   at an instant the retired settle would have refused — so the flag is set, on evidence.
+
+   One measured quirk, recorded because it looks like a bug and is not: codex's composer **slides
+   down the screen** as its transcript grows (rows 13 → 37 over ~11 s) before pinning at the
+   bottom. Its row span is part of the fingerprint, so during that phase the region legitimately
+   counts as moving and mail holds — a fresh codex session's first delivery waits for the screen
+   to fill. Transient and self-correcting; a long-lived builder's screen is always full.
+
 The `legacy` run models the pre-#1664 rule — a pass may proceed only once the whole screen has
 been free of output for `SETTLE_BEFORE_WRITE_MS` — so the improvement is a comparison against the
 same TUI rather than an assertion. It is generous to the old behaviour: it omits the
@@ -89,7 +105,11 @@ same TUI rather than an assertion. It is generous to the old behaviour: it omits
 
 `bugfix-1567-head-loss-harness.mts` matches `esc to interrupt` to decide whether a turn is
 running. **claude 2.1.266 does not render that hint at all**, so on this version the detector
-reports a working agent as idle. This harness reads claude's live working line instead (a
-parenthesised elapsed counter, `✽ Bunning… (17m 7s · ↓ 70.5k tokens · …)`, which its finished
-counterpart `✻ Sautéed for 15s · done 8:52 AM` does not carry) and also refuses to call the TUI
-idle while messages sit in its queue.
+reports a working agent as idle — which makes a harness race ahead and stack every prompt into
+the TUI's queue without a single turn ever running. (It is correct for **codex** 0.153.4, which
+does render `• Working (2s • esc to interrupt)`; the two TUIs simply say it differently.) This
+harness matches a union of both — the `esc to interrupt` hint OR a parenthesised elapsed counter,
+`✽ Bunning… (17m 7s · ↓ 70.5k tokens · …)`, which claude's finished line (`✻ Sautéed for 15s ·
+done 8:52 AM`) does not carry — and also refuses to call a TUI idle while messages sit in its
+queue. A detector that silently matches nothing is the failure mode here, so the union is
+deliberate.
