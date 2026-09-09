@@ -123,7 +123,11 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
   }
 
   it('a draft moves the fingerprint for every profile that captured one', async () => {
-    for (const name of fixtures.filter((f) => f.includes('-draft.busy.'))) {
+    const drafts = fixtures.filter((f) => f.includes('-draft.busy.'));
+    // Without this the loop below is vacuous if the fixture naming ever drifts, and a test that
+    // asserts nothing passes loudest.
+    expect(drafts.length).toBeGreaterThanOrEqual(3); // claude, codex, agy
+    for (const name of drafts) {
       const profile = profileForFixture(name);
       const idle = fixtures.find((f) => f.startsWith(name.split('-')[0]) && f.includes('-idle.clean.'));
       expect(idle).toBeDefined();

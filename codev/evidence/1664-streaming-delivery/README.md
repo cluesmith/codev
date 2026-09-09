@@ -23,7 +23,9 @@ measures is what Tower does.
   did. That is #1521/#1567's failure shape.
 - **body left the composer for the transcript** — the composer classified as a verified-empty
   prompt again once the trial settled, so the message was submitted rather than stranded on the
-  line.
+  line. Reported over DELIVERED trials only: with nothing delivered (the `draft` scenario, by
+  design) a clean composer says only that the harness tidied up after itself, and reporting it as
+  20/20 read like a success line for a run whose whole point was zero deliveries.
 
 Two oracles were tried and discarded, and are worth recording so nobody re-derives them:
 counting copies of the body on screen does not measure submissions (a composer repaints its own
@@ -38,12 +40,9 @@ them but not committed.
 
 | run | scenario | gate | delivered | head-loss | median wait | max wait | waits >2 s |
 |---|---|---|---|---|---|---|---|
-| `fixed-r4-streaming-*` | recipient mid-turn, empty composer | current (**post-CMAP r3, the shipped code**) | **20/20 intact** | **0/20** | 394 ms | 396 ms | **0/20** |
-| `fixed-r3-streaming-*` | *same*, after CMAP round 2 | current | 20/20 intact | 0/20 | 394 ms | 396 ms | 0/20 |
-| `fixed-r2-streaming-*` | *same*, after CMAP round 1 | current | 20/20 intact | 0/20 | 395 ms | 399 ms | 0/20 |
-| `fixed-streaming-*` | *same*, before any CMAP fixes | current | 20/20 intact | 0/20 | 397 ms | 400 ms | 0/20 |
+| `fixed-r4-streaming-*` | recipient mid-turn, empty composer | current | **20/20 intact** | **0/20** | 394 ms | 396 ms | **0/20** |
 | `legacy-streaming-legacy-*` | *the same scenario* | **retired** whole-screen settle | 20/20 intact | 0/20 | 2505 ms | 6432 ms | **11/20** |
-| `fixed-draft-*` | recipient mid-turn, human draft on the line | current | **0/20 — 20/20 held `busy:user-text`** | 0/20 | — | — | — |
+| `fixed-draft-*` | recipient mid-turn, human draft on the line | current | **0/20 — 20/20 held `busy:user-text`** | — | — | — | — |
 | `fixed-turn-end-*` | delivery attempted across a turn end (#1521's window) | current | **20/20 intact** | **0/20** | 393 ms | 404 ms | **0/20** |
 
 ### What each run establishes
@@ -53,16 +52,15 @@ them but not committed.
    refused outright, with a turn running in all 20. Median wait 395 ms; nothing waited past
    399 ms. Hold verdicts seen while waiting: `busy:composer-redraw` only.
 
-   The pre-CMAP run of the same scenario scored 18/20 on that column rather than 20/20, because
-   the stale-sample reuse codex and claude found could occasionally let a delivery through on its
-   very first pass. Closing it made every delivery establish two observations honestly — the
-   numbers got *better* by getting stricter.
-
-   The r3 run re-measures after CMAP round 2 made `peek()` refuse a grid with unparsed output.
-   That change can only ADD holds, so it was re-measured rather than assumed: it costs nothing
-   (median 394 ms against 395 ms), because the window in which a fed chunk is still unparsed is
-   far shorter than the interval between delivery passes. The r4 run does the same after CMAP
-   round 3 narrowed the fingerprint to exactly the rows the classifier judges — identical again.
+   This scenario was re-measured after each CMAP round that changed delivery semantics, since a
+   hardening that can only ADD holds must be measured rather than assumed. Only the final run is
+   kept here; the progression was: **18/20** on the "would have refused" column before the round-1
+   stale-sample fixes (a stale sample could occasionally let a delivery through on its first
+   pass — the numbers got *better* by getting stricter), then **20/20** at median 395 ms, 394 ms
+   and 394 ms across rounds 1, 2 and 3 respectively. Round 2 made `peek()` refuse a grid with
+   unparsed output; round 3 narrowed the fingerprint to exactly the rows the classifier judges.
+   Neither cost anything measurable, because the window in which a fed chunk is still unparsed is
+   far shorter than the interval between delivery passes.
 
    **Across all four streaming runs plus the turn-end run — 100 delivering trials against a real
    claude — head-loss is 0/100.**

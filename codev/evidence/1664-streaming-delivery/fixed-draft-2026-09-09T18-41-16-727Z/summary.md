@@ -12,10 +12,10 @@
 - **held**: 20/20
 
 - delivered at a moment the RETIRED whole-screen settle would have refused: 0/20
-- longest output gap seen while a row waited: 3357 ms (the retired whole-screen settle needed 250 ms to deliver at all)
+- longest output gap seen while a row waited: 3509 ms (the retired whole-screen settle needed 250 ms to deliver at all)
 - wait to delivery: mean 0 ms, median 0 ms, max 0 ms
 - head-loss (tail rendered, head did not): 0/20
-- body left the composer for the transcript (submitted, not stranded on the line): 20/20
+- body left the composer for the transcript: n/a (nothing was delivered — see below)
 - a turn was running while the row waited: 20/20
 - repaints the recipient emitted while the row waited: median 1
 

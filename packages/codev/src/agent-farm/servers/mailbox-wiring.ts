@@ -187,8 +187,10 @@ export function resolveProfileForSession(session: DeliverySession): GateProfile 
  * cast is sound. A session that has produced NO output yet has no mirror (`gateScreen` is null);
  * that is not a verified-empty prompt, so it classifies not-clean (`no-composer-marker`), exactly
  * as an empty replay always did. `SessionScreen.read()` flushes the parser, so the buffer the
- * shared {@link classifyBuffer} reads reflects every byte counted by the change token the
- * delivery path sampled — the property its gate→write TOCTOU relies on.
+ * shared {@link classifyBuffer} reads reflects every byte the session had emitted when this was
+ * called — which is what makes the composer fingerprint the delivery path takes immediately
+ * afterwards (with no intervening await) the freshest reading of the composer available to it.
+ * Issue #1664 retired the whole-screen `bytesWritten` TOCTOU this note used to name.
  */
 export async function classifyAgentScreen(session: DeliverySession, profile: GateProfile): Promise<GateVerdict> {
   const screen = (session as PtySession).gateScreen;

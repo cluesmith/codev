@@ -525,7 +525,14 @@ const summary = [
     `(the retired whole-screen settle needed ${SETTLE_BEFORE_WRITE_MS} ms to deliver at all)`,
   `- wait to delivery: mean ${mean} ms, median ${waits.length ? waits[Math.floor(waits.length / 2)] : 0} ms, max ${waits.length ? waits[waits.length - 1] : 0} ms`,
   `- head-loss (tail rendered, head did not): ${results.filter((r) => r.verdict === 'delivered-head-lost').length}/${TRIALS}`,
-  `- body left the composer for the transcript (submitted, not stranded on the line): ${results.filter((r) => r.composerClearedAfter).length}/${TRIALS}`,
+  // Only meaningful for trials that actually WROTE something: with nothing delivered (the
+  // `draft` scenario, by design) a clean composer says only that the harness tidied up after
+  // itself, which read as a 20/20 success line for a run whose whole point was 0 deliveries.
+  delivered.length === 0
+    ? `- body left the composer for the transcript: n/a (nothing was delivered — see below)`
+    : `- body left the composer for the transcript (submitted, not stranded on the line): ${
+        delivered.filter((r) => r.composerClearedAfter).length
+      }/${delivered.length} delivered`,
   `- a turn was running while the row waited: ${results.filter((r) => r.turnRunning).length}/${TRIALS}`,
   `- repaints the recipient emitted while the row waited: median ${
     [...results.map((r) => r.outputChunksDuringWait)].sort((a, b) => a - b)[Math.floor(results.length / 2)] ?? 0

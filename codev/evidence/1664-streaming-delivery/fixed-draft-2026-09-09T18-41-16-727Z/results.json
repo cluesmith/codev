@@ -7,7 +7,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 3357,
+      "longestQuietMs": 3509,
       "verdicts": [
         "busy:user-text"
       ],
@@ -23,7 +23,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2289,
+      "longestQuietMs": 2408,
       "verdicts": [
         "busy:user-text"
       ],
@@ -39,7 +39,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2523,
+      "longestQuietMs": 2462,
       "verdicts": [
         "busy:user-text"
       ],
@@ -55,7 +55,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2494,
+      "longestQuietMs": 2313,
       "verdicts": [
         "busy:user-text"
       ],
@@ -71,7 +71,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2554,
+      "longestQuietMs": 2467,
       "verdicts": [
         "busy:user-text"
       ],
@@ -87,7 +87,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2532,
+      "longestQuietMs": 2512,
       "verdicts": [
         "busy:user-text"
       ],
@@ -103,7 +103,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2496,
+      "longestQuietMs": 2498,
       "verdicts": [
         "busy:user-text"
       ],
@@ -119,7 +119,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2493,
+      "longestQuietMs": 2461,
       "verdicts": [
         "busy:user-text"
       ],
@@ -135,7 +135,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2498,
+      "longestQuietMs": 2438,
       "verdicts": [
         "busy:user-text"
       ],
@@ -151,7 +151,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2514,
+      "longestQuietMs": 2301,
       "verdicts": [
         "busy:user-text"
       ],
@@ -167,7 +167,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2304,
+      "longestQuietMs": 2542,
       "verdicts": [
         "busy:user-text"
       ],
@@ -183,7 +183,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2437,
+      "longestQuietMs": 2489,
       "verdicts": [
         "busy:user-text"
       ],
@@ -199,7 +199,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2544,
+      "longestQuietMs": 2346,
       "verdicts": [
         "busy:user-text"
       ],
@@ -215,7 +215,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2490,
+      "longestQuietMs": 2363,
       "verdicts": [
         "busy:user-text"
       ],
@@ -231,7 +231,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2447,
+      "longestQuietMs": 2382,
       "verdicts": [
         "busy:user-text"
       ],
@@ -247,7 +247,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2496,
+      "longestQuietMs": 2485,
       "verdicts": [
         "busy:user-text"
       ],
@@ -263,7 +263,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2467,
+      "longestQuietMs": 2461,
       "verdicts": [
         "busy:user-text"
       ],
@@ -279,7 +279,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2435,
+      "longestQuietMs": 2356,
       "verdicts": [
         "busy:user-text"
       ],
@@ -295,7 +295,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2461,
+      "longestQuietMs": 2219,
       "verdicts": [
         "busy:user-text"
       ],
@@ -311,7 +311,7 @@
       "scenario": "draft",
       "deliveredAfterMs": null,
       "deliveredWhileWorking": false,
-      "longestQuietMs": 2408,
+      "longestQuietMs": 2348,
       "verdicts": [
         "busy:user-text"
       ],

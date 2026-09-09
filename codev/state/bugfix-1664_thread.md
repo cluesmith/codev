@@ -230,3 +230,26 @@ Routing now asks `isUnverifiableVerdict`, the predicate every other surface alre
 detail added later cannot silently default into the destructive arm. Both self-clearing details
 get accurate wording that names no terminal-touching command. Tests bisect: 5 fail with the old
 conditional restored. 6048 tests pass.
+
+## CMAP round 4
+
+gemini **APPROVE** · claude **APPROVE** · codex **COMMENT** — no blockers. Both round-3 blockers
+confirmed closed.
+
+Acted on the remaining notes:
+- **codex**: the draft run's summary reported "body left the composer… 20/20" for trials where
+  *nothing was delivered* — it was measuring the harness tidying up after itself, and read as a
+  success line for a run whose entire point is zero deliveries. Now computed over delivered
+  trials only, `n/a` when there are none; draft scenario re-run to regenerate it.
+- **codex**: pruned the superseded intermediate evidence runs. Four are kept, one per acceptance
+  claim; the re-measurement progression is recorded as prose in the README instead.
+- **claude**: a loop-inside-`it` test would have passed vacuously if the fixture naming drifted —
+  it now asserts the filter matched all three profiles first.
+- **claude**: `classifyAgentScreen`'s docstring still named the retired whole-screen TOCTOU.
+
+Recorded, not changed: the `composer-redraw` re-drain at ~275 ms is slightly more idle work per
+starving agent than the 1.5 s backstop (claude, non-blocking), and the post-merge verify should
+include a **codex** recipient — the live acceptance drove claude only, though codex's and agy's
+composer shapes now have fixture-level fingerprint coverage.
+
+6048 tests pass. Build clean.
