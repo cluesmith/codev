@@ -59,6 +59,10 @@ import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import { BuildersProvider, AccordionGate } from './views/builders.js';
+// Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
+import { TowerFleetCache } from './views/tower-cache.js';
+import { TowerProvider } from './views/tower.js';
+import { registerTowerCommands } from './commands/switch-workspace.js';
 import { PullRequestsProvider, PullRequestTreeItem } from './views/pull-requests.js';
 import { BacklogProvider } from './views/backlog.js';
 import { visibleBacklogCount, formatBacklogTitle } from './views/backlog-filter.js';
@@ -583,6 +587,35 @@ export async function activate(context: vscode.ExtensionContext) {
 		),
 		{ dispose: () => contextualPanelProvider.dispose() },
 	);
+
+	// --- Codev Tower (#1566): cross-workspace navigation hub -----------------------------------
+	// A separate activity-bar container (machine-scope), distinct from the workspace-scope views
+	// above. Its own cross-workspace cache fans out per-workspace overviews over the SAME shared SSE
+	// (connectionManager.onSSEEvent) — no second EventSource. The container icon's badge carries the
+	// machine-wide needs-attention count (only this container badges — the badge means machine-scope).
+	const towerCache = new TowerFleetCache(connectionManager);
+	context.subscriptions.push({ dispose: () => towerCache.dispose() });
+	const towerView = vscode.window.createTreeView('codev.tower', {
+		treeDataProvider: new TowerProvider(towerCache, connectionManager),
+	});
+	const updateTowerBadge = (): void => {
+		const count = towerCache.getAttentionCount();
+		if (count > 0) {
+			towerView.badge = { value: count, tooltip: `${count} workspace${count === 1 ? '' : 's'} need attention` };
+		} else {
+			towerView.badge = undefined;
+		}
+	};
+	towerCache.onDidChange(updateTowerBadge);
+	updateTowerBadge();
+	registerTowerCommands(context, connectionManager, towerCache);
+	context.subscriptions.push(
+		towerView,
+		vscode.commands.registerCommand('codev.tower.refresh', () => towerCache.refresh()),
+	);
+	// Populate as soon as Tower is reachable; refreshes thereafter ride the shared SSE + poll.
+	towerCache.refresh();
+	// --- end Codev Tower ------------------------------------------------------------------------
 
 	// Status-bar chip for the dev surface (#921) — the always-visible "a dev is running" indicator,
 	// driven off the single dev-terminal source of truth. (#1049 removed the Codev Dev panel view;

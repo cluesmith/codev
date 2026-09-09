@@ -35,10 +35,18 @@ describe('codevPanel viewsContainer (#812)', () => {
     expect(codevPanel!.icon).toBe('icons/codev.svg');
   });
 
-  it('leaves the activitybar container untouched', () => {
+  it('leaves the workspace-scope activitybar container untouched', () => {
     const activitybar = containers.activitybar ?? [];
-    expect(activitybar).toHaveLength(1);
-    expect(activitybar[0]).toMatchObject({ id: 'codev', title: 'Codev', icon: 'icons/codev.svg' });
+    const codev = activitybar.find((c) => c.id === 'codev');
+    expect(codev).toMatchObject({ id: 'codev', title: 'Codev', icon: 'icons/codev.svg' });
+  });
+
+  it('adds the separate machine-scope Codev Tower container (#1566)', () => {
+    const activitybar = containers.activitybar ?? [];
+    const tower = activitybar.find((c) => c.id === 'codev-tower');
+    expect(tower).toMatchObject({ id: 'codev-tower', title: 'Codev Tower', icon: 'icons/tower.svg' });
+    // Distinct icon from the workspace-scope container — the two must be tellable apart.
+    expect(tower!.icon).not.toBe('icons/codev.svg');
   });
 });
 
