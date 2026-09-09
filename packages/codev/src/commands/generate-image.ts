@@ -8,7 +8,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import chalk from 'chalk';
 
 // The model to use for image generation
@@ -23,7 +23,7 @@ const ASPECT_RATIOS = ['1:1', '16:9', '9:16', '3:4', '4:3', '3:2', '2:3'] as con
 type AspectRatio = (typeof ASPECT_RATIOS)[number];
 
 // Providers serving the same model
-const PROVIDERS = ['gemini', 'atlas'] as const;
+const PROVIDERS = ['gemini', 'atlas', 'muapi'] as const;
 type Provider = (typeof PROVIDERS)[number];
 
 // Atlas Cloud serves the same Nano Banana Pro model over its own async REST API
@@ -42,6 +42,17 @@ const ATLAS_IN_PROGRESS_STATUSES = new Set(['processing']);
 // api.atlascloud.ai rejects some clients' default User-Agent with 403 (error
 // code 1010), so every request sends an explicit one.
 const ATLAS_USER_AGENT = 'codev-generate-image/1';
+
+// MuAPI serves Nano Banana Pro through its standard submit -> poll -> download API.
+const MUAPI_BASE_URL = 'https://api.muapi.ai/api/v1';
+const MUAPI_MODEL = 'nano-banana-pro';
+const MUAPI_EDIT_MODEL = 'nano-banana-pro-edit';
+const MUAPI_POLL_INTERVAL_MS = 5000;
+const MUAPI_TIMEOUT_MS = 300_000;
+const MUAPI_REQUEST_TIMEOUT_MS = 30_000;
+const MUAPI_DOWNLOAD_TIMEOUT_MS = 120_000;
+const MUAPI_MAX_REFERENCE_IMAGES = 8;
+const MUAPI_IN_PROGRESS_STATUSES = new Set(['pending', 'queued', 'processing', 'starting', 'in_queue']);
 
 export interface GenerateImageOptions {
   output?: string;
@@ -90,7 +101,7 @@ function readPrompt(promptOrPath: string): string {
  * 200 response carrying an HTML error body must never land in output.png
  * under a green "Image saved". Exits rather than returning on that path.
  */
-function targetPathForImageBytes(output: string, bytes: Buffer): string {
+function targetPathForImageBytes(output: string, bytes: Buffer, provider = 'Atlas'): string {
   const detected =
     bytes.subarray(0, 3).toString('hex') === 'ffd8ff'
       ? 'jpg'
@@ -103,7 +114,7 @@ function targetPathForImageBytes(output: string, bytes: Buffer): string {
   if (!detected) {
     console.error(
       chalk.red('Error:') +
-        ` Atlas returned ${bytes.length} bytes that are not a JPEG, PNG or WebP image` +
+        ` ${provider} returned ${bytes.length} bytes that are not a JPEG, PNG or WebP image` +
         ` (starts with ${bytes.subarray(0, 8).toString('hex') || '<empty>'}).` +
         ' Nothing was written.'
     );
@@ -114,6 +125,262 @@ function targetPathForImageBytes(output: string, bytes: Buffer): string {
   const renamed = output.replace(/\.[^./\\]+$/, '') + '.' + detected;
   console.log(chalk.yellow('Note:') + ` provider returned ${detected.toUpperCase()}; saving as ${renamed}`);
   return renamed;
+}
+
+/**
+ * Make one MuAPI request under a per-request deadline and report failures in
+ * the same CLI style as the existing provider path.
+ */
+async function muapiRequest<T>(
+  url: string,
+  what: string,
+  timeoutMs: number,
+  read: (response: Response) => Promise<T>,
+  init: RequestInit = {}
+): Promise<T> {
+  let outcome: { ok: true; body: T } | { ok: false; detail: string };
+  try {
+    const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    outcome = response.ok
+      ? { ok: true, body: await read(response) }
+      : { ok: false, detail: ` (${response.status}): ${await response.text()}` };
+  } catch (error) {
+    outcome = {
+      ok: false,
+      detail:
+        error instanceof Error && error.name === 'TimeoutError'
+          ? `: no response within ${timeoutMs}ms`
+          : `: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  if (!outcome.ok) {
+    console.error(chalk.red('Error:') + ` MuAPI ${what} failed${outcome.detail}`.trimEnd());
+    process.exit(1);
+  }
+  return outcome.body;
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function asJsonRecord(value: unknown): JsonRecord | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : null;
+}
+
+/** Find a media URL in the result envelopes used by MuAPI model families. */
+function findMuapiMediaUrl(value: unknown, parentKey = ''): string | undefined {
+  if (typeof value === 'string') {
+    const mediaKey = [
+      'image_url',
+      'video',
+      'image',
+      'output_url',
+      'url',
+      'outputs',
+      'images',
+      'output',
+      'output_data',
+    ].includes(parentKey);
+    return mediaKey ? value : undefined;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findMuapiMediaUrl(item, parentKey);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const record = asJsonRecord(value);
+  if (!record) return undefined;
+
+  for (const key of ['image_url', 'video', 'image', 'output_url', 'url', 'outputs', 'images', 'output', 'output_data']) {
+    if (key in record) {
+      const found = findMuapiMediaUrl(record[key], key);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function findMuapiRequestId(value: unknown): string | undefined {
+  const record = asJsonRecord(value);
+  if (!record) return undefined;
+  for (const key of ['request_id', 'id']) {
+    if (typeof record[key] === 'string' && record[key]) return record[key] as string;
+  }
+  return findMuapiRequestId(record.data) || findMuapiRequestId(record.output);
+}
+
+function findMuapiStatus(value: unknown): string | undefined {
+  const record = asJsonRecord(value);
+  if (!record) return undefined;
+  if (typeof record.status === 'string') return record.status;
+  return findMuapiStatus(record.data) || findMuapiStatus(record.output);
+}
+
+function findMuapiError(value: unknown): string | undefined {
+  const record = asJsonRecord(value);
+  if (!record) return undefined;
+  for (const key of ['error', 'message', 'detail']) {
+    if (typeof record[key] === 'string' && record[key]) return record[key] as string;
+  }
+  return findMuapiError(record.data) || findMuapiError(record.output);
+}
+
+function requireHttpsMuapiUrl(value: string, what: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'https:') throw new Error('URL must use HTTPS');
+    return value;
+  } catch (error) {
+    console.error(
+      chalk.red('Error:') +
+        ` MuAPI returned an invalid ${what} URL: ${error instanceof Error ? error.message : String(error)}`
+    );
+    process.exit(1);
+  }
+}
+
+function imageMimeType(path: string): string {
+  const extension = path.toLowerCase().split('.').pop();
+  if (extension === 'png') return 'image/png';
+  if (extension === 'webp') return 'image/webp';
+  if (extension === 'gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
+/** Generate through MuAPI: upload references when present, then poll the result. */
+export async function generateViaMuapi(
+  promptText: string,
+  output: string,
+  aspect: AspectRatio,
+  resolution: Resolution,
+  refs: string[],
+  options: { pollIntervalMs?: number; timeoutMs?: number } = {}
+): Promise<void> {
+  const apiKey = process.env.MUAPI_API_KEY || process.env.MU_API_KEY;
+  if (!apiKey) {
+    console.error(
+      chalk.red('Error:') +
+        ' MUAPI_API_KEY or MU_API_KEY environment variable not set.\n' +
+        'Get an API key at https://muapi.ai/access-keys'
+    );
+    process.exit(1);
+  }
+  if (refs.length > MUAPI_MAX_REFERENCE_IMAGES) {
+    console.error(
+      chalk.red('Error:') +
+        ` MuAPI supports at most ${MUAPI_MAX_REFERENCE_IMAGES} reference images with --provider muapi.`
+    );
+    process.exit(1);
+  }
+
+  const headers = { 'x-api-key': apiKey };
+  const imageUrls: string[] = [];
+  for (const ref of refs) {
+    const refPath = resolve(ref);
+    if (!existsSync(refPath)) {
+      console.error(chalk.red('Error:') + ` Reference image not found: ${ref}`);
+      process.exit(1);
+    }
+    const form = new FormData();
+    const bytes = readFileSync(refPath);
+    form.append(
+      'file',
+      new Blob([Buffer.from(bytes)], { type: imageMimeType(refPath) }),
+      basename(refPath)
+    );
+    const uploaded = await muapiRequest(
+      `${MUAPI_BASE_URL}/upload_file`,
+      'reference upload',
+      MUAPI_REQUEST_TIMEOUT_MS,
+      (response) => response.json() as Promise<unknown>,
+      { method: 'POST', headers, body: form }
+    );
+    const uploadedUrl = findMuapiMediaUrl(uploaded);
+    if (!uploadedUrl) {
+      console.error(chalk.red('Error:') + ' MuAPI reference upload did not return a file URL');
+      process.exit(1);
+    }
+    imageUrls.push(requireHttpsMuapiUrl(uploadedUrl, 'reference upload'));
+  }
+
+  const model = refs.length > 0 ? MUAPI_EDIT_MODEL : MUAPI_MODEL;
+  const payload: Record<string, unknown> = {
+    prompt: promptText,
+    aspect_ratio: aspect,
+    resolution: resolution.toLowerCase(),
+  };
+  if (imageUrls.length > 0) payload.images_list = imageUrls;
+
+  const submitted = await muapiRequest(
+    `${MUAPI_BASE_URL}/${model}`,
+    'submit',
+    MUAPI_REQUEST_TIMEOUT_MS,
+    (response) => response.json() as Promise<unknown>,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+  const predictionId = findMuapiRequestId(submitted);
+  if (!predictionId) {
+    console.error(chalk.red('Error:') + ' MuAPI did not return a prediction id');
+    process.exit(1);
+  }
+
+  const pollIntervalMs = options.pollIntervalMs ?? MUAPI_POLL_INTERVAL_MS;
+  const timeoutMs = options.timeoutMs ?? MUAPI_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await new Promise((done) => setTimeout(done, pollIntervalMs));
+    if (Date.now() >= deadline) {
+      console.error(chalk.red('Error:') + ` MuAPI prediction ${predictionId} timed out after ${timeoutMs}ms`);
+      process.exit(1);
+    }
+    const polled = await muapiRequest(
+      `${MUAPI_BASE_URL}/predictions/${encodeURIComponent(predictionId)}/result`,
+      'poll',
+      MUAPI_REQUEST_TIMEOUT_MS,
+      (response) => response.json() as Promise<unknown>,
+      { headers }
+    );
+    const status = findMuapiStatus(polled);
+    if (status === 'completed' || status === 'succeeded' || status === 'success') {
+      const mediaUrl = findMuapiMediaUrl(polled);
+      if (!mediaUrl) {
+        console.error(chalk.red('Error:') + ' MuAPI completed without an image URL');
+        process.exit(1);
+      }
+      const safeUrl = requireHttpsMuapiUrl(mediaUrl, 'image result');
+      const bytes = Buffer.from(
+        await muapiRequest(safeUrl, 'image download', MUAPI_DOWNLOAD_TIMEOUT_MS, (response) =>
+          response.arrayBuffer()
+        )
+      );
+      const target = targetPathForImageBytes(output, bytes, 'MuAPI');
+      writeFileSync(target, bytes);
+      console.log(chalk.green('Image saved to') + ` ${target}`);
+      return;
+    }
+    if (status === 'failed' || status === 'error' || status === 'cancelled') {
+      console.error(
+        chalk.red('Error:') +
+          ` MuAPI generation failed: ${findMuapiError(polled) || 'unknown error'}`
+      );
+      process.exit(1);
+    }
+    if (typeof status !== 'string' || !MUAPI_IN_PROGRESS_STATUSES.has(status)) {
+      console.error(
+        chalk.red('Error:') +
+          ` MuAPI prediction ${predictionId} reported an unrecognized status: ` +
+          (status === undefined ? '(none)' : status)
+      );
+      process.exit(1);
+    }
+  }
 }
 
 /**
@@ -354,6 +621,12 @@ export async function generateImage(
   if (provider === 'atlas') {
     console.log(chalk.blue('Generating image with') + ` ${ATLAS_MODEL} (Atlas Cloud)...`);
     await generateViaAtlas(promptText, output, aspect, resolution, refs);
+    return;
+  }
+
+  if (provider === 'muapi') {
+    console.log(chalk.blue('Generating image with') + ` ${MUAPI_MODEL} (MuAPI)...`);
+    await generateViaMuapi(promptText, output, aspect, resolution, refs);
     return;
   }
 
