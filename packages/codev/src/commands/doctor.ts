@@ -519,6 +519,15 @@ async function verifyClaudeViaSDK(): Promise<CheckResult> {
     const session = claudeQuery({
       prompt: 'Reply OK',
       options: {
+        // The #1649 audit: this is the second `bypassPermissions` call site in the
+        // package, so it runs with the same unrestricted tool access the consult
+        // lane does. It is an auth probe, not a review — one turn, no tools needed
+        // — but it had nothing telling it so, and it runs in whatever directory the
+        // user typed `codev doctor` in. Say it outright, as consultant.md now does.
+        systemPrompt:
+          'You are a connectivity probe for `codev doctor`. Reply with the requested ' +
+          'text and nothing else. Do not read, create, or modify any file, and do not ' +
+          'run any command — there is no task here beyond answering.',
         allowedTools: [],
         maxTurns: 1,
         permissionMode: 'bypassPermissions',

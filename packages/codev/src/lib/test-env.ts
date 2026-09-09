@@ -93,6 +93,27 @@ export function assertAgyLaneAllowedUnderTest(): void {
 }
 
 /**
+ * Explicit opt-in for a test that drives the REAL Claude Agent SDK (#1649).
+ *
+ * The #1649 acceptance check is behavioural: put a review prompt in front of the
+ * claude lane that tempts it to edit the code under review, and assert the tree
+ * comes back unchanged. Only a real model can answer that — a mock would be
+ * asserting my own stub's manners.
+ *
+ * It is opt-in for two reasons. It costs real tokens on the developer's
+ * subscription, and its outcome is probabilistic in a way the rest of the suite
+ * is not: the lane *may* write, which is the whole point of measuring it. A
+ * probabilistic check cannot gate CI without eventually being ignored, so it
+ * runs on request and its evidence goes in the review:
+ *
+ *   CODEV_ALLOW_REAL_CLAUDE_SDK=1 pnpm --filter @cluesmith/codev test:e2e:cli
+ */
+export function realClaudeSdkOptIn(): boolean {
+  const raw = process.env.CODEV_ALLOW_REAL_CLAUDE_SDK;
+  return raw === '1' || raw === 'true';
+}
+
+/**
  * True when cloud-mutating side effects must be refused because we are running
  * under a test (#1515).
  *

@@ -31,6 +31,12 @@ import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } f
 import { executeForgeCommandSync } from '../../lib/forge.js';
 import { preflightAgyAuth, recordAgyAuthState, type AgyAuthState } from './agy-auth-cache.js';
 import { assertAgyLaneAllowedUnderTest } from '../../lib/test-env.js';
+import {
+  snapshotTree,
+  diffTreeSnapshots,
+  formatTreeChangeWarning,
+  appendTreeChangeWarningToOutput,
+} from './tree-tripwire.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -1263,9 +1269,60 @@ function logResolvedModel(lane: string, id: string, key: string | null, effort?:
 }
 
 /**
- * Run the consultation — dispatches to the correct model runner.
+ * Run one consultation lane, with the working-tree tripwire wrapped around it (#1649).
+ *
+ * A consultant reviews the tree and never writes to it — `consultant.md` says so
+ * outright now. This wrapper is the check on that instruction rather than a
+ * substitute for it: it snapshots the tree either side of the lane and says
+ * loudly, on stderr and in the review file, if anything moved. Nothing is
+ * blocked; a review that ran is still a review, and the reader now knows to
+ * check `git status` before trusting it.
+ *
+ * Wrapping the dispatcher rather than the claude lane covers every lane at once.
+ * The claude lane is the one that can write today, but "which lane is sandboxed"
+ * is a property of three separate SDKs that no one here controls.
  */
 async function runConsultation(
+  model: string,
+  query: string,
+  workspaceRoot: string,
+  role: string,
+  outputPath?: string,
+  metricsCtx?: MetricsContext,
+  generalMode?: boolean,
+  modelIdOverride?: string,
+): Promise<void> {
+  const before = snapshotTree(workspaceRoot);
+  if (!before.available) {
+    console.error(chalk.dim(`[tripwire unavailable: ${before.reason ?? 'not a git repository'}]`));
+  }
+
+  try {
+    await dispatchConsultation(
+      model, query, workspaceRoot, role, outputPath, metricsCtx, generalMode, modelIdOverride,
+    );
+  } finally {
+    // In the `finally` because a lane that threw mid-turn is exactly when an
+    // unrestored edit is most likely to still be sitting in the tree.
+    if (before.available) {
+      const ignore = outputPath?.startsWith(workspaceRoot)
+        ? [path.relative(workspaceRoot, outputPath)]
+        : [];
+      const changed = diffTreeSnapshots(before, snapshotTree(workspaceRoot), ignore);
+      if (changed.length > 0) {
+        const warning = formatTreeChangeWarning(model, changed);
+        console.error(`\n${chalk.red.bold(warning)}\n`);
+        appendTreeChangeWarningToOutput(outputPath, warning);
+      }
+    }
+  }
+}
+
+/**
+ * Dispatch to the correct model runner. The tripwire lives in `runConsultation`
+ * above; this is the lane switch and nothing else.
+ */
+async function dispatchConsultation(
   model: string,
   query: string,
   workspaceRoot: string,
