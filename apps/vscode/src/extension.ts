@@ -856,6 +856,46 @@ export async function activate(context: vscode.ExtensionContext) {
 	const setGroupBy = (axis: 'stage' | 'area' | 'architect') =>
 		vscode.workspace.getConfiguration('codev').update('buildersGroupBy', axis, vscode.ConfigurationTarget.Global);
 
+	// Move focus to the next (+1) or previous (-1) agent terminal in the Agents-view
+	// rendered order (#1563). The roster comes from the tree provider itself
+	// (`agentCycleOrder`), so the cycle mirrors the sidebar exactly and stays
+	// grouping-aware — no second ordering to drift. Opening focuses the terminal,
+	// opening it first if it isn't already open (same as clicking the row), so the
+	// roster is every live agent in the view, not just open tabs. The current
+	// position is the focused agent terminal (builder id, else architect name);
+	// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
+	// last-focused agent. Nothing focused → start at the ends. ≤1 agent → no-op with a
+	// status-bar hint.
+	const cycleAgentTerminal = async (direction: 1 | -1): Promise<void> => {
+		const order = buildersProvider.agentCycleOrder();
+		if (order.length <= 1) {
+			vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
+			return;
+		}
+		const activeBuilderId = terminalManager?.getActiveBuilderId() ?? null;
+		let activeArchitectName: string | null = null;
+		if (!activeBuilderId) {
+			activeArchitectName = terminalManager?.getActiveArchitectName() ?? null;
+		}
+		const currentIndex = order.findIndex(t =>
+			(t.kind === 'builder' && t.id === activeBuilderId) ||
+			(t.kind === 'architect' && t.name === activeArchitectName));
+		let nextIndex: number;
+		if (currentIndex !== -1) {
+			nextIndex = (currentIndex + direction + order.length) % order.length;
+		} else if (direction === 1) {
+			nextIndex = 0;
+		} else {
+			nextIndex = order.length - 1;
+		}
+		const target = order[nextIndex];
+		if (target.kind === 'builder') {
+			await terminalManager?.openBuilderByRoleOrId(target.id, true);
+		} else {
+			await vscode.commands.executeCommand('codev.openArchitectTerminal', target.name);
+		}
+	};
+
 	// Commands
 	context.subscriptions.push(
 		reg('codev.helloWorld', () => {
@@ -1109,6 +1149,8 @@ export async function activate(context: vscode.ExtensionContext) {
 				// Benign if the row is no longer present (e.g. mid-cleanup).
 			}
 		}),
+		reg('codev.focusNextAgentTerminal', () => cycleAgentTerminal(1)),
+		reg('codev.focusPreviousAgentTerminal', () => cycleAgentTerminal(-1)),
 		regCli('codev.spawnBuilder', (arg: vscode.TreeItem | string | undefined) =>
 			spawnBuilder(extractIssueId(arg))),
 		reg('codev.openBacklogIssue', (arg: vscode.TreeItem | undefined) => {

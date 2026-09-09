@@ -475,6 +475,27 @@ export class TerminalManager {
     return null;
   }
 
+  /**
+   * The architect name of the currently-focused VSCode terminal, or null when the
+   * active terminal isn't a Codev *architect* terminal. Recovered from the map key
+   * (`architect:<name>`), the same name `openArchitect` cached it under. The
+   * architect counterpart to `getActiveBuilderId`; together they let the agent-cycle
+   * commands (#1563) resolve which agent terminal currently has focus. VSCode keeps
+   * `activeTerminal` set even when an editor is focused, so this reports the
+   * last-focused architect terminal — the natural resume point for the cycle.
+   */
+  getActiveArchitectName(): string | null {
+    const active = vscode.window.activeTerminal;
+    if (!active) { return null; }
+    const prefix = 'architect:';
+    for (const [mapKey, entry] of this.terminals) {
+      if (entry.terminal === active && entry.type === 'architect' && mapKey.startsWith(prefix)) {
+        return mapKey.slice(prefix.length);
+      }
+    }
+    return null;
+  }
+
   // ── Internal ─────────────────────────────────────────────────
 
   private async openTerminal(
