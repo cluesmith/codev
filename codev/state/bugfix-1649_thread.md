@@ -177,3 +177,27 @@ fire the banner routinely. Inherent to a before/after comparison in a shared wor
 "or you" wording is the mitigation. Worth watching whether it becomes the dominant case.
 
 Suite after fixes: 5984 passed, 48 skipped, 0 failed. tsc clean.
+
+## CMAP round 2 — gemini APPROVE, claude APPROVE, codex REQUEST_CHANGES (branch behind main)
+
+Merged `origin/main` (4 unrelated commits, no overlap), rebuilt, re-ran: 5988 passed. Re-ran
+the codex lane, which found something new and correct on the second look:
+
+**Relative `--output` was resolved against the wrong base.** My `relativeOutputPath` resolved
+against `workspaceRoot`; every lane writes with a bare `fs.writeFileSync(outputPath, …)` and
+`consult` never chdirs, so the file actually lands relative to **cwd**. Run
+`consult -o review.txt` from `repo/subdir` and it writes `subdir/review.txt` while the
+exclusion names `review.txt` — the lane reports its own output. My round-1 fix for this finding
+was right about the resolve and wrong about the base. Now resolves against cwd (injectable, so
+the test doesn't depend on ambient process state), with a wiring test that runs `consult()`
+from a subdirectory.
+
+That test also caught a second-order problem: two of my `relativeOutputPath` unit tests relied
+on the ambient `process.cwd()`, so they passed alone and failed when the wiring suite (which
+chdirs) shared a worker. cwd is now explicit in every one of them.
+
+**On scope** (codex's second point, 1,505 added lines vs BUGFIX's ~300): that count is the
+whole diff. Measured against `origin/main`, production changes are 436 lines, of which 60 are
+the role prose in two trees and 165 are comments — roughly **160 lines of executable
+production code**. The other 876 are tests. Well inside the ceiling; recording the measurement
+rather than the impression.

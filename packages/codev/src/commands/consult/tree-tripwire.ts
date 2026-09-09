@@ -162,14 +162,26 @@ const LANE_REVIEW_FILE = /^codev\/projects\/[^/]+\/[^/]+-iter\d+-[^/]+\.txt$/;
  * outside the workspace.
  *
  * `--output` arrives exactly as the user typed it, which may be relative
- * (`consult -o review.txt`), so a raw `startsWith(workspaceRoot)` test misses
- * it and the lane ends up reporting its own review file. Resolving first also
- * kills the opposite error: a plain prefix test counts `/repo-2/x` as living
- * inside `/repo`.
+ * (`consult -o review.txt`), so a raw `startsWith(workspaceRoot)` test misses it
+ * and the lane ends up reporting its own review file. Resolving first also kills
+ * the opposite error: a plain prefix test counts `/repo-2/x` as living inside
+ * `/repo`.
+ *
+ * The resolution base is **`cwd`, not `workspaceRoot`**, because that is where
+ * the file actually lands: every lane writes with a bare
+ * `fs.writeFileSync(outputPath, …)`, and `consult` never chdirs. Resolving
+ * against the workspace root instead would agree with reality only when the two
+ * happen to coincide — run `consult -o review.txt` from a subdirectory and the
+ * file is written to `<subdir>/review.txt` while the exclusion names
+ * `review.txt`, so the lane reports its own output as a mutation.
  */
-export function relativeOutputPath(workspaceRoot: string, outputPath?: string): string | null {
+export function relativeOutputPath(
+  workspaceRoot: string,
+  outputPath?: string,
+  cwd: string = process.cwd(),
+): string | null {
   if (!outputPath) return null;
-  const rel = path.relative(workspaceRoot, path.resolve(workspaceRoot, outputPath));
+  const rel = path.relative(workspaceRoot, path.resolve(cwd, outputPath));
   if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
   // Snapshot keys come from git, which always uses forward slashes.
   return rel.split(path.sep).join('/');

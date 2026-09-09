@@ -198,20 +198,35 @@ describe('diffTreeSnapshots — the #1649 scenario', () => {
 describe('relativeOutputPath', () => {
   it('resolves a relative --output the user typed', () => {
     // `consult -o review.txt` used to fail a raw startsWith(workspaceRoot)
-    // test, so the lane named its own review file as a mutation.
-    expect(relativeOutputPath('/repo', 'review.txt')).toBe('review.txt');
-    expect(relativeOutputPath('/repo', './codev/reviews/x.txt')).toBe('codev/reviews/x.txt');
+    // test, so the lane named its own review file as a mutation. cwd is passed
+    // explicitly here — the default is ambient process state, which other suites
+    // in the same worker move around.
+    expect(relativeOutputPath('/repo', 'review.txt', '/repo')).toBe('review.txt');
+    expect(relativeOutputPath('/repo', './codev/reviews/x.txt', '/repo')).toBe('codev/reviews/x.txt');
   });
 
   it('accepts an absolute path inside the workspace', () => {
     expect(relativeOutputPath('/repo', '/repo/codev/x.txt')).toBe('codev/x.txt');
   });
 
+  it('resolves relative to the cwd, which is where the lane actually writes it', () => {
+    // Lanes write with a bare fs.writeFileSync and consult never chdirs, so
+    // `consult -o review.txt` from /repo/subdir lands at /repo/subdir/review.txt.
+    // Resolving against workspaceRoot instead would exclude `review.txt` and
+    // leave the lane reporting its own output as a mutation.
+    expect(relativeOutputPath('/repo', 'review.txt', '/repo/subdir')).toBe('subdir/review.txt');
+    expect(relativeOutputPath('/repo', 'review.txt', '/repo')).toBe('review.txt');
+  });
+
+  it('is null when the cwd puts a relative output outside the workspace', () => {
+    expect(relativeOutputPath('/repo', 'review.txt', '/elsewhere')).toBeNull();
+  });
+
   it('rejects a path outside the workspace, including a sibling with a shared prefix', () => {
     // The opposite error a plain prefix test makes: /repo-2 is not inside /repo.
-    expect(relativeOutputPath('/repo', '/repo-2/x.txt')).toBeNull();
-    expect(relativeOutputPath('/repo', '../elsewhere/x.txt')).toBeNull();
-    expect(relativeOutputPath('/repo', '/tmp/x.txt')).toBeNull();
+    expect(relativeOutputPath('/repo', '/repo-2/x.txt', '/repo')).toBeNull();
+    expect(relativeOutputPath('/repo', '../elsewhere/x.txt', '/repo')).toBeNull();
+    expect(relativeOutputPath('/repo', '/tmp/x.txt', '/repo')).toBeNull();
   });
 
   it('is null when no output path was given', () => {

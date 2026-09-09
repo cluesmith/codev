@@ -159,6 +159,23 @@ describe('the tripwire is wired into consult() (#1649)', () => {
     expect(banner()).not.toContain('WORKING TREE CHANGED');
   });
 
+  it('does not name its own --output when run from a subdirectory', async () => {
+    // The case a workspaceRoot-based resolution got wrong: the file lands at
+    // <subdir>/review.txt because lanes write with a bare fs.writeFileSync and
+    // consult never chdirs, but the exclusion named `review.txt`.
+    vi.resetModules();
+    const { consult } = await import('../index.js');
+    mockQueryFn.mockImplementation(laneThatReads());
+
+    fs.mkdirSync(path.join(repo, 'subdir'), { recursive: true });
+    process.chdir(path.join(repo, 'subdir'));
+
+    await consult({ model: 'claude', prompt: 'review app.ts', output: 'review.txt' });
+
+    expect(fs.existsSync(path.join(repo, 'subdir/review.txt'))).toBe(true);
+    expect(banner()).not.toContain('WORKING TREE CHANGED');
+  });
+
   it('appends the warning below the verdict in the review file', async () => {
     vi.resetModules();
     const { consult } = await import('../index.js');
