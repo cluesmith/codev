@@ -349,14 +349,14 @@ describe('#1664 delivery — a recipient producing output does not hold mail', (
     expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
   });
 
-  it('an app NOT measured to queue input mid-turn keeps the whole-screen settle', async () => {
-    // Architect integration review: composer stability is a licence granted per app, by
-    // measurement, never inherited. An app that DROPS input arriving mid-turn must only ever be
-    // written to while it is quiet — the cost of being wrong there is a silently lost message,
-    // which is worse than a slow one. agy is the live instance of this: not measured, so not
-    // claimed.
+  it('an app WITHOUT the queues-input licence keeps the whole-screen settle', async () => {
+    // Composer stability is a licence granted per app rather than a global change of behaviour.
+    // No SHIPPED profile lacks it today — claude and codex are measured, agy is set by owner
+    // ruling (2026-09-09) — so this test drives a synthetic profile rather than naming one of
+    // them. That is the point of keeping it: the field is optional, the branch is live, and the
+    // next app added to `gate-profiles.ts` gets the conservative path until someone grants it.
     const h = harness();
-    h.ports = { ...h.ports, resolveProfile: () => ({ ...CLAUDE_PROFILE, app: 'agy', queuesInputMidTurn: undefined }) };
+    h.ports = { ...h.ports, resolveProfile: () => ({ ...CLAUDE_PROFILE, app: 'unlicensed-tui', queuesInputMidTurn: undefined }) };
     enqueue();
 
     // Two stable observations a settle apart — enough for claude, and deliberately not enough
@@ -374,7 +374,7 @@ describe('#1664 delivery — a recipient producing output does not hold mail', (
     expect((await deliverAgentMail(h.ports, db, WS, AGENT)).delivered).toHaveLength(1);
   });
 
-  it('aborts in the lock for an unmeasured app when output lands during the lock wait', async () => {
+  it('aborts in the lock for an unlicensed app when output lands during the lock wait', async () => {
     // The in-lock half of the same rule: for an app without the capability the whole-screen
     // settle is re-checked at the write instant, exactly as it was before Issue #1664.
     const h = harness();
@@ -382,7 +382,7 @@ describe('#1664 delivery — a recipient producing output does not hold mail', (
     const row = enqueue();
     h.ports = {
       ...h.ports,
-      resolveProfile: () => ({ ...CLAUDE_PROFILE, app: 'agy', queuesInputMidTurn: undefined }),
+      resolveProfile: () => ({ ...CLAUDE_PROFILE, app: 'unlicensed-tui', queuesInputMidTurn: undefined }),
       writeMessage: (_s, msg, _noEnter, precheck) => {
         h.lastDataAt = h.now; // a repaint lands while we hold the lock
         const abort = precheck();

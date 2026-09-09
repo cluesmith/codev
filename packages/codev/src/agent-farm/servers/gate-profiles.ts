@@ -143,12 +143,24 @@ export const AGY_PROFILE: GateProfile = {
   placeholderFgPalette: 8,
   markerRequiresCursorRow: true,
   markerFgPalette: 12,
-  // Issue #1664: NOT measured to queue input mid-turn, so it is not claimed to. agy keeps the
-  // original whole-screen output settle — mail to a working agy waits for its turn to end, as it
-  // did before that issue. The capability is a per-app measurement, and the safe default for an
-  // app nobody has driven through the harness is the conservative one: an app that DROPS input
-  // arriving mid-turn would lose messages silently, which is a worse failure than waiting.
-  // Turning this on for agy is a harness run away (`--harness agy`), not a judgement call.
+  // Issue #1664, set by OWNER RULING (2026-09-09) — **UNMEASURED**. Every other value of this
+  // field on this page came from driving the real TUI through the acceptance harness; this one
+  // did not. The owner's call is that mid-turn delivery is universal and only human input holds
+  // mail, so agy is granted the licence rather than waiting on a measurement.
+  //
+  // What that trades away, stated plainly so a future reader is not misled by the company this
+  // line keeps: if agy DROPS or mishandles input arriving mid-turn, a delivery lands as text in
+  // its composer that is never submitted — the body strands on the line, the classifier then
+  // reads it as `user-text`, and every later message to that agent queues behind it until a
+  // human clears the line. That is a stuck agent with a visible cause, not silent data loss, but
+  // it is a real failure mode and it is not ruled out by anything in this repository.
+  //
+  // Settling it is a harness run, not an argument:
+  //   node --experimental-strip-types scripts/bugfix-1664-streaming-delivery-harness.mts \
+  //     --harness agy --scenario streaming --trials 20 --assume-queues-input
+  // If that reports 20/20 delivered-intact and submitted, replace this comment with the measured
+  // one. If it does not, this line is what needs changing.
+  queuesInputMidTurn: true,
 };
 
 /** Registry keyed by the harness name `detectHarnessFromCommand` returns. */

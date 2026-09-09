@@ -295,3 +295,28 @@ the 0/100 empirical bound covers what the production watch cannot see.
 Non-blocking, both done: the measurement figures moved out of the hot bullet into arch.md (1136 →
 1059 chars, back near its 1029 baseline), and the claim now reads "For an app MEASURED to queue
 input mid-turn … only a HUMAN at the line holds mail".
+
+## Owner ruling: agy gets the licence unmeasured (2026-09-09)
+
+The owner ruled that mid-turn delivery is universal — only human input holds mail — so
+`AGY_PROFILE.queuesInputMidTurn` is `true` by decision rather than measurement. I had defaulted
+it off on the grounds that an unmeasured app should be conservative; that concern was heard and
+the owner decided otherwise, so it is settled and implemented in full.
+
+What I did NOT do: run an agy measurement (explicitly instructed not to). What I did instead is
+make the provenance impossible to lose:
+
+- `AGY_PROFILE`'s comment says **UNMEASURED, owner ruling 2026-09-09**, states the failure mode
+  (a TUI that drops Enter mid-turn strands the body in its composer, the classifier reads it as
+  `user-text`, and later messages queue behind it until a human clears the line), and gives the
+  exact harness invocation that would settle it.
+- A test pins each profile's value *and its basis* — claude/codex measured, agy by ruling — so the
+  values cannot drift silently even though a test cannot verify a ruling.
+- The two tests that used agy as the example of an unlicensed app now drive a synthetic
+  `unlicensed-tui` profile. The branch is still worth pinning: the field is optional, and the next
+  app added to `gate-profiles.ts` gets the conservative path until granted.
+- arch-critical.md, arch.md, the evidence README (which says explicitly that agy has no run here,
+  so the directory is not read as covering it) and the new review doc all carry the distinction.
+
+Also created `codev/reviews/bugfix-1664-mailbox-gate-a-recipient-that-.md` — the BUGFIX review
+deliverable was missing.

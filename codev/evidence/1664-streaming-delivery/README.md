@@ -90,6 +90,13 @@ them but not committed.
    codex-cli 0.153.4 answered **20/20 intact, 0 head-loss, 20/20 submitted**, every one written
    at an instant the retired settle would have refused — so the flag is set, on evidence.
 
+   **agy has no run here, deliberately.** Its `queuesInputMidTurn` was set by owner ruling on
+   2026-09-09 (mid-turn delivery is universal; only human input holds mail) rather than by
+   measurement, so there is no evidence directory to point at and this README must not imply
+   there is. The failure mode that ruling accepts, and the harness invocation that would settle
+   it, are recorded in `AGY_PROFILE`'s comment and in
+   `codev/reviews/bugfix-1664-mailbox-gate-a-recipient-that-.md`.
+
    One measured quirk, recorded because it looks like a bug and is not: codex's composer **slides
    down the screen** as its transcript grows (rows 13 → 37 over ~11 s) before pinning at the
    bottom. Its row span is part of the fingerprint, so during that phase the region legitimately

@@ -813,6 +813,29 @@ describe('render-gate — claude suggested-command ghost (Spec 1313 render-gate 
   });
 });
 
+describe('queuesInputMidTurn — the mid-turn delivery licence (Issue #1664)', () => {
+  // Pins each shipped profile's value and, just as importantly, WHERE it came from. Two of the
+  // three were established by driving the real TUI through the acceptance harness; agy's was set
+  // by owner ruling on 2026-09-09 and is UNMEASURED. A test cannot verify a ruling, but it can
+  // stop the value being changed by accident and keep the provenance next to the assertion.
+
+  it('claude and codex carry it, from measurement', () => {
+    // claude 2.1.266: 100 delivering trials, 0 head-loss. codex-cli 0.153.4: 20/20 intact and
+    // submitted. Evidence: codev/evidence/1664-streaming-delivery/.
+    expect(CLAUDE_PROFILE.queuesInputMidTurn).toBe(true);
+    expect(CODEX_PROFILE.queuesInputMidTurn).toBe(true);
+  });
+
+  it('agy carries it by owner ruling, not measurement', () => {
+    // The owner's call (2026-09-09) is that mid-turn delivery is universal and only human input
+    // holds mail. Nothing in this repository measures agy's behaviour under a mid-turn write; if
+    // it drops such input, a delivery strands in its composer as `user-text` and later messages
+    // queue behind it until a human clears the line. Settling it is a harness run:
+    // `--harness agy --scenario streaming --assume-queues-input`.
+    expect(AGY_PROFILE.queuesInputMidTurn).toBe(true);
+  });
+});
+
 describe('resolveProfile — strict, fail-safe app identity (Spec 1313)', () => {
   it('a claude launch resolves to the claude profile', () => {
     expect(resolveProfile({ command: 'claude', args: ['--dangerously-skip-permissions'] })?.app).toBe('claude');
