@@ -47,3 +47,16 @@ exist in the manifest but are NOT placed in the shipped profile → accepted pat
 models), dial offered; default profile unchanged (option 2a, recommended) unless reviewer picks 2b
 (dedicated Page 3) or 2c (displace a dial). Keyboard commands remain the always-available primary
 path. Decision point 2 rewritten with 2a/2b/2c. Recommitted.
+
+### PLAN gate dialogue (owner) — keybinding LOCKED + deck direction
+Rebased branch onto main (was 280 behind), clean, force-pushed.
+Discussed deck-first-dial reuse: rejected — the Zoom/first dial's selection is builder-only and
+drives the Review dials/diff, so it can't own architects; #1563's cycle must include architects
+(architect grouping), so the deck should be a pure VS Code trigger (VS Code owns the roster).
+Owner leaning key-pair for the deck (not locked; decision point 2 still open: 2a manifest-only rec).
+Keybinding: explored prefix (cmd+k n/p) vs single-modifier; owner wants fewest presses for a repeated
+motion → LOCKED to `ctrl+alt+n` / `ctrl+alt+p` (mac `cmd+alt+n`/`p`), hold-modifier tap-to-repeat.
+Verify-no-shadow at implement; fall back to another ctrl+alt letter pair only on a real conflict
+(never the diff-nav bracket keys). Plan updated (keybinding section, decision point 1, test bullet).
+Still at plan-approval gate. Reminder: feature is ~80% VS Code (the whole keyboard motion stands
+alone); deck is a thin additive trigger layer.

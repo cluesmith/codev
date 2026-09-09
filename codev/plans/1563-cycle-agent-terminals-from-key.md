@@ -119,21 +119,24 @@ in `extension.ts`, both delegating to one `cycleAgentTerminal(direction)` helper
    path). Opening focuses, which fires `onDidChangeActiveTerminal` → the existing `builder-active`
    hook, so the contextual panel (#1049) and any configured deck follow for free (for builders).
 
-**Default keybindings** (decision point 1 — verify-then-ship). Register a chord pair in
-`apps/vscode/package.json` `keybindings`, gated `when: codev.hasWorkspace`. Candidate order,
-verified unbound against VS Code defaults at implement time (both the `cmd+k x` and `cmd+k cmd+x`
-variants per the keybinding lesson):
+**Default keybindings (locked).** Register in `apps/vscode/package.json` `keybindings`, gated
+`when: codev.hasWorkspace`:
 
-- **Primary candidate:** `cmd+k ]` (next) / `cmd+k [` (previous), extending the Cmd+K family. Risk:
-  proximity to the default `cmd+k cmd+]` / `cmd+k cmd+[` fold-recursively chords — must confirm the
-  single-`cmd+k [` form is genuinely free and not shadowed.
-- **Fallback A:** a `ctrl+alt` symbol pair distinct from the diff-nav `ctrl+alt+[` / `ctrl+alt+]`
-  (which are gated to `codev.activeEditorIsBuilderFile`; a global agent-cycle binding needs its own
-  keys), e.g. `ctrl+alt+,` / `ctrl+alt+.`.
-- **Fallback B:** palette-only (command contributions with no default chord; user binds their own).
+- `codev.focusNextAgentTerminal` → `ctrl+alt+n` (mac `cmd+alt+n`)
+- `codev.focusPreviousAgentTerminal` → `ctrl+alt+p` (mac `cmd+alt+p`)
 
-The command is contributed to the palette regardless. Whichever chord survives verification ships;
-if none is clean, Fallback B ships.
+Rationale: a **single held-modifier chord** (hold Ctrl+Alt / Cmd+Alt, tap `n`/`p` repeatedly) is the
+right ergonomics for a repeated "walk across agents" motion — one hop per tap — versus a two-key
+prefix chord (`cmd+k n`) which cannot hold-and-repeat. `n`/`p` is the near-universal next/previous
+idiom, and `ctrl+alt+*` matches the extension's existing family (`r`, `s`, `v`, `c`, and the
+`ctrl+alt+[`/`]` diff-nav pair). The diff-nav bracket keys are deliberately **not** reused (they are
+gated to `codev.activeEditorIsBuilderFile`; overloading the same physical keys with a
+context-dependent second meaning would confuse).
+
+**Verify at implement (does not change the choice, only confirms no shadow):** in the running
+editor, confirm `ctrl+alt+n` / `ctrl+alt+p` and their mac `cmd+alt+*` forms are unbound in VS Code
+defaults. If a genuine conflict surfaces, fall back to another `ctrl+alt` letter pair (not the
+bracket keys) and note it in the review. The commands are contributed to the palette regardless.
 
 **Unit tests** (Phase 1): `agentCycleOrder()` order for each grouping axis (stage, area,
 architect incl. `main`-first, populated-then-idle, interleaved builders, lone-`Uncategorized`
@@ -263,8 +266,9 @@ Manual (dev-approval gate, run the worktree extension):
 - Zero/one agent: Next/Prev no-ops with the status-bar hint.
 - Dev PTY tab open (`Codev: <name> (dev)`) and a shell: neither joins the cycle.
 - Contextual bottom panel (#1049) follows each hop for free.
-- Keybinding: the chosen chord triggers Next/Prev; verify from an editor and from within an agent
-  terminal.
+- Keybinding: `ctrl+alt+n` / `ctrl+alt+p` (mac `cmd+alt+n` / `cmd+alt+p`) trigger Next/Prev; verify
+  from an editor and from within an agent terminal, and that holding the modifier + tapping `n`/`n`
+  walks forward one agent per tap.
 
 Manual (Stream Deck, if a deck is available at the gate) — drag the new actions onto a free slot
 first (no default-profile slot is free):
@@ -282,8 +286,9 @@ PR opened during/after Phase 2 (or earlier if the architect wants to review the 
 
 ## Decision points for the reviewer
 
-1. **Keybinding chord:** confirm the `cmd+k ]` / `cmd+k [` primary (pending verification) vs the
-   `ctrl+alt` fallback vs palette-only.
+1. **Keybinding chord:** LOCKED to `ctrl+alt+n` / `ctrl+alt+p` (mac `cmd+alt+n` / `cmd+alt+p`),
+   single held-modifier hold-to-repeat. Implement-time verification confirms no shadow; a genuine
+   conflict falls back to another `ctrl+alt` letter pair.
 2. **Deck surface / placement (all 4 dials + all 8 keys in the default profile are full):**
    (2a) manifest-only, default profile unchanged, user places the keys/dial — recommended, matches
    the unplaced PrNav/SpawnNav dials; (2b) add a dedicated agent-nav Page 3 reached by a
