@@ -131,6 +131,24 @@ export interface GateProfile {
    */
   markerFgPalette?: number;
   /**
+   * Does this app ACCEPT input while a turn is running, and queue it for the next one
+   * (Issue #1664)?
+   *
+   * This is the capability the composer-stability gate rests on. When true, a message written
+   * onto an empty composer mid-turn is safe: the TUI takes the bytes, shows them as queued, and
+   * submits them when the turn ends — so the delivery path may write as soon as the COMPOSER
+   * REGION has held still, and the recipient's own output is not a reason to wait. When false or
+   * unset, the delivery path keeps the original whole-screen output settle (Issue #1573): an app
+   * that DROPS input arriving mid-turn must only ever be written to while it is quiet, and
+   * inheriting a capability by default is how a silently-lossy app would be created.
+   *
+   * MEASURED PER APP, never assumed — the acceptance harness
+   * (`scripts/bugfix-1664-streaming-delivery-harness.mts --scenario streaming`) drives a live TUI
+   * through the production delivery path and reports whether mid-turn deliveries land intact and
+   * are submitted. Evidence lives in `codev/evidence/1664-streaming-delivery/`.
+   */
+  queuesInputMidTurn?: boolean;
+  /**
    * Optional per-app placeholder signal: a 16-color palette index whose cells are
    * treated as placeholder/hint chrome (ignored), NOT user text. This is the
    * color-attribute analogue of the universal dim-placeholder skip. claude/codex
@@ -319,6 +337,151 @@ function isGhostCursorCell(
 }
 
 /**
+ * Where the composer is on a rendered screen, or why it could not be found. The failure arm
+ * carries the classifier's own detail, so {@link classifyBuffer} does not have to re-derive it.
+ */
+type LocatedRegion =
+  | { lines: string[]; top: number; markerRow: number; endRow: number; cursorRow: number; cursorCol: number }
+  | { detail: 'no-composer-marker' | 'no-region-end' };
+
+/** Narrows {@link LocatedRegion} to the located case. */
+function isLocated(r: LocatedRegion): r is Extract<LocatedRegion, { markerRow: number }> {
+  return 'markerRow' in r;
+}
+
+/**
+ * Locate the composer: the marker row, the row that bounds it from below, and the cursor —
+ * everything both {@link classifyBuffer} and {@link composerRegionFingerprint} need.
+ *
+ * Shared so the two can never disagree about WHICH rows are the composer. The fingerprint is
+ * the delivery path's stability signal, and a fingerprint computed over a different span than
+ * the one the classifier judged would be a stability claim about the wrong rows — the sort of
+ * divergence the render gate's whole design exists to make impossible.
+ */
+function locateComposerRegion(term: HeadlessTerminal, rows: number, profile: GateProfile): LocatedRegion {
+  const buf = term.buffer.active;
+  const lines = screenLines(term, rows);
+  const top = buf.viewportY;
+  // Cursor position, made viewport-relative to match `lines`/`row`, which index from
+  // `viewportY`. `cursorY` is baseY-relative, NOT viewport-relative — the two coincide only
+  // while the viewport sits at the bottom of the scrollback, which is the usual case but not
+  // xterm's contract. Converting through baseY costs nothing and removes the assumption; the
+  // marker anchor below compares row indices, so a stale scroll position would otherwise
+  // move the cursor off the composer row and hold forever.
+  const cursorRow = buf.baseY + buf.cursorY - top;
+  const cursorCol = buf.cursorX;
+  const markerRow = findMarkerRow(lines, profile, buf, top, cursorRow, buf.getNullCell());
+  if (markerRow === -1) return { detail: 'no-composer-marker' };
+  const endRow = findRegionEnd(lines, markerRow, profile.regionEndPatterns);
+  if (endRow === -1) return { detail: 'no-region-end' };
+  return { lines, top, markerRow, endRow, cursorRow, cursorCol };
+}
+
+/**
+ * FNV-1a step. A non-cryptographic rolling hash is the right tool here: this digest only ever
+ * answers "did these cells change?", it is recomputed from scratch every call, and it is on the
+ * in-lock path where a crypto hash's cost would be paid per delivery for no benefit.
+ */
+function fnv1a(h: number, byte: number): number {
+  return Math.imul(h ^ byte, 0x01000193) >>> 0;
+}
+
+/**
+ * A digest of the composer region's per-cell SGR ATTRIBUTES — dim, inverse, and the foreground
+ * palette index (Issue #1664, architect integration review).
+ *
+ * The rendered TEXT alone is not enough for the in-lock precheck, and this is the one place it
+ * matters. Everywhere else the classifier re-runs beside the fingerprint, and emptiness IS an
+ * attribute question — {@link classifyBuffer} skips dim placeholder chrome and counts
+ * normal-intensity cells as user text. But the precheck is SYNCHRONOUS and compares fingerprints
+ * only: it never re-classifies. So a composer whose characters stay identical while their
+ * attributes flip — a dim placeholder becoming normal-intensity typed text of the same string,
+ * which is exactly what a human retyping a suggestion produces — would compare EQUAL and let the
+ * write through onto a draft. Folding the attributes in closes that by construction, at the cost
+ * of one bounded scan over a region that is a handful of rows tall.
+ *
+ * Empty cells are skipped: they carry no visible attribute, and their SGR state is whatever the
+ * app last left set, which drifts without anything on screen changing.
+ */
+function regionAttributeDigest(
+  buf: HeadlessTerminal['buffer']['active'],
+  top: number,
+  markerRow: number,
+  endRow: number,
+  cols: number,
+  cell: BufferCell,
+): string {
+  let h = 0x811c9dc5;
+  for (let row = markerRow; row < endRow; row++) {
+    const line = buf.getLine(top + row);
+    if (!line) continue;
+    for (let col = 0; col < cols; col++) {
+      line.getCell(col, cell);
+      if (!cell.getChars()) continue;
+      h = fnv1a(h, col & 0xff);
+      h = fnv1a(h, (cell.isDim() ? 1 : 0) | (cell.isInverse() ? 2 : 0) | (cell.isFgPalette() ? 4 : 0));
+      h = fnv1a(h, cell.getFgColor() & 0xff);
+    }
+  }
+  return h.toString(36);
+}
+
+/**
+ * A fingerprint of the composer REGION as it is rendered right now — the delivery path's
+ * stability signal (Issue #1664), and the replacement for the whole-screen output quiescence
+ * that used to gate every write.
+ *
+ * The render gate answers "is this composer empty?" and nothing else; the delivery path
+ * additionally needs "and has it stopped being PAINTED?", because writing into a composer
+ * mid-repaint is what ate the leading bytes in #1521. That question used to be asked of the
+ * WHOLE SCREEN (`lastDataAt` / `bytesWritten`), which conflates the composer with everything
+ * above it — and everything above it is exactly what a working agent repaints. Measured on a
+ * real streaming claude PTY (#1664 investigation): the screen repainted a median of **8 times
+ * a second** while the composer region stayed byte-identical for runs of 107 s, 60 s, 304 s,
+ * 81 s and 149 s. So the whole-screen signal answered "still painting" for minutes about rows
+ * the message never touches, and mail waited a mean of 54 s (max 561 s) for a turn to end.
+ *
+ * Comparing two of these instead scopes the question back to the rows that matter. It covers:
+ *   - the rendered TEXT of the region — exactly the rows the classifier judges, marker row up to
+ *     but not including the bounding rule/status line (a draft appearing, a placeholder rotating,
+ *     a turn-end box redraw all move it; the bounding row's own chrome, such as codex's live
+ *     context percentage, deliberately does not);
+ *   - the region's POSITION, so a composer that slides up or down the screen counts as moved
+ *     even when its text is unchanged;
+ *   - the CURSOR, whose movement inside the composer is the app touching the input row (free:
+ *     measured over 1500 consecutive real frames, including it added no additional churn);
+ *   - the GEOMETRY, so a resize that reflows the same characters is never mistaken for calm.
+ *
+ * It also covers the region's per-cell SGR ATTRIBUTES (dim / inverse / fg-palette, via
+ * {@link regionAttributeDigest}), because the in-lock precheck compares fingerprints WITHOUT
+ * re-classifying: a dim placeholder becoming normal-intensity typed text of the same string
+ * would otherwise compare equal and let a write through onto a draft.
+ *
+ * `null` when no composer region can be located — indeterminate, which every caller must treat
+ * as "moved" (fail-toward-hold), exactly as the classifier treats it as not-clean.
+ */
+export function composerRegionFingerprint(
+  term: HeadlessTerminal,
+  cols: number,
+  rows: number,
+  profile: GateProfile,
+): string | null {
+  const region = locateComposerRegion(term, rows, profile);
+  if (!isLocated(region)) return null;
+  const { lines, top, markerRow, endRow, cursorRow, cursorCol } = region;
+  const attrs = regionAttributeDigest(term.buffer.active, top, markerRow, endRow, cols, term.buffer.active.getNullCell());
+  // EXACTLY the rows {@link classifyBuffer} judges — `markerRow` up to, not including, the
+  // bounding row — so "the two can never disagree about which rows are the composer" is true of
+  // the content as well as the bounds (CMAP round 3 — claude). The bounding row is chrome, and
+  // for codex it is a STATUS line carrying a live context percentage: folding its text in would
+  // make an unchanged composer look like it was repainting every few seconds, and hold that
+  // app's mail for the very reason this issue exists to remove. Its POSITION is still in the
+  // fingerprint below, so a composer whose region grows, shrinks or slides still counts as moved.
+  const text = lines.slice(markerRow, endRow).join('\n');
+  return `${cols}x${rows}:${markerRow}-${endRow}:${cursorRow},${cursorCol}:${attrs}:${text}`;
+}
+
+/**
  * The classifier CORE (Spec 1313 render-gate round 2): classify an already-rendered
  * headless buffer against a profile. Synchronous — it only READS the live buffer, it never
  * parses — so it is shared, unchanged, by BOTH gate paths: the production persistent-mirror
@@ -341,35 +504,20 @@ export function classifyBuffer(
   profile: GateProfile
 ): GateVerdict {
   const buf = term.buffer.active;
-  const lines = screenLines(term, rows);
-  const top = buf.viewportY;
   const cell = buf.getNullCell();
   const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
-  // Cursor position, made viewport-relative to match `lines`/`row`, which index from
-  // `viewportY`. `cursorY` is baseY-relative, NOT viewport-relative — the two coincide only
-  // while the viewport sits at the bottom of the scrollback, which is the usual case but not
-  // xterm's contract. Converting through baseY costs nothing and removes the assumption; the
-  // marker anchor below compares row indices, so a stale scroll position would otherwise
-  // move the cursor off the composer row and hold forever.
-  const cursorRow = buf.baseY + buf.cursorY - top;
-  const cursorCol = buf.cursorX;
 
-  const markerRow = findMarkerRow(lines, profile, buf, top, cursorRow, cell);
-  if (markerRow === -1) {
-    // No composer marker: a wrapper/boot screen, a full-screen picker with no marker, a
-    // mirror that has not yet repainted a coherent frame, or an unrenderable snapshot.
-    // Never clean — the safe direction.
-    return { clean: false, reason: 'busy', detail: 'no-composer-marker' };
+  const located = locateComposerRegion(term, rows, profile);
+  if (!isLocated(located)) {
+    // `no-composer-marker` — a wrapper/boot screen, a full-screen picker with no marker, a
+    // mirror that has not yet repainted a coherent frame, or an unrenderable snapshot. Or
+    // `no-region-end` — a marker with no rule/status line beneath it (a partial/mid-repaint
+    // frame), whose composer has no proven lower bound: hold rather than scan into the status
+    // chrome below it, which would either miscount chrome as user text or, if it renders
+    // empty/dim, return a false CLEAN. Never clean — the safe direction.
+    return { clean: false, reason: 'busy', detail: located.detail };
   }
-
-  const endRow = findRegionEnd(lines, markerRow, profile.regionEndPatterns);
-  if (endRow === -1) {
-    // A marker with no rule/status line beneath it: a partial/mid-repaint frame. The
-    // composer has no proven lower bound, so hold rather than scan into the status chrome
-    // below it (which would either miscount chrome as user text or, if it renders
-    // empty/dim, return a false CLEAN).
-    return { clean: false, reason: 'busy', detail: 'no-region-end' };
-  }
+  const { top, markerRow, endRow, cursorRow, cursorCol } = located;
   let userCells = 0;
 
   for (let row = markerRow; row < endRow; row++) {

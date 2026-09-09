@@ -22,7 +22,15 @@ import type {
 } from '../servers/mailbox-delivery.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 
-const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
+// Issue #1664: a claude-shaped profile, so it carries claude's measured `queuesInputMidTurn`.
+// Without it the delivery path keeps the whole-screen output settle, which is the branch
+// these files' non-#1664 cases already exercise through `lastDataAt`.
+const PROFILE: GateProfile = {
+  app: 'claude',
+  markerPattern: /^❯/,
+  regionEndPatterns: [],
+  queuesInputMidTurn: true,
+};
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
 const BUSY: GateVerdict = { clean: false, reason: 'busy', detail: 'user-text' };
 
@@ -85,6 +93,9 @@ function harness(): Harness {
       getSessionForAgent: () => session,
       resolveProfile: () => profile,
       classify: (_session: DeliverySession, _p: GateProfile): Promise<GateVerdict> => Promise.resolve(verdict),
+      // Issue #1664: a composer that never moves, so these tests keep asserting what they were
+      // written for (the classify verdict, the settle, the lock) rather than region stability.
+      composerFingerprint: () => 'composer',
       writeMessage: (_s, formattedMessage, noEnter, precheck) => {
         // The precheck runs INSIDE the per-terminal lock in the live binding (Issue #1365).
         const abort = precheck();

@@ -19,7 +19,13 @@ import type { SessionScreen } from '../../terminal/session-screen.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './tower-messages.js';
 import { submitMessagePaced } from './message-write.js';
-import { bufferLines, classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
+import {
+  bufferLines,
+  classifyBuffer,
+  composerRegionFingerprint,
+  type GateProfile,
+  type GateVerdict,
+} from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import {
   buildContextFsPort,
@@ -29,7 +35,7 @@ import {
 import { getGlobalDb } from '../db/index.js';
 import { getArchitectByName } from '../state.js';
 import { formatBuilderMessage } from '../utils/message-format.js';
-import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
+import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { supersede as supersedeMailbox, dismissHeldWithKey, NOTICE_SUPERSEDE_PREFIX } from '../db/mailbox.js';
 import path from 'node:path';
 import {
@@ -181,14 +187,38 @@ export function resolveProfileForSession(session: DeliverySession): GateProfile 
  * cast is sound. A session that has produced NO output yet has no mirror (`gateScreen` is null);
  * that is not a verified-empty prompt, so it classifies not-clean (`no-composer-marker`), exactly
  * as an empty replay always did. `SessionScreen.read()` flushes the parser, so the buffer the
- * shared {@link classifyBuffer} reads reflects every byte counted by the change token the
- * delivery path sampled — the property its gate→write TOCTOU relies on.
+ * shared {@link classifyBuffer} reads reflects every byte the session had emitted when this was
+ * called — which is what makes the composer fingerprint the delivery path takes immediately
+ * afterwards (with no intervening await) the freshest reading of the composer available to it.
+ * Issue #1664 retired the whole-screen `bytesWritten` TOCTOU this note used to name.
  */
 export async function classifyAgentScreen(session: DeliverySession, profile: GateProfile): Promise<GateVerdict> {
   const screen = (session as PtySession).gateScreen;
   if (!screen) return { clean: false, reason: 'busy', detail: 'no-composer-marker' };
   const { term, cols, rows } = await screen.read();
   return classifyBuffer(term, cols, rows, profile);
+}
+
+/**
+ * The live binding for {@link DeliveryPorts.composerFingerprint} (Issue #1664) — the delivery
+ * path's composer-stability signal.
+ *
+ * Reads the SAME `SessionScreen` mirror {@link classifyAgentScreen} classifies, so stability
+ * and emptiness can never be answered about different screens. SYNCHRONOUS, via
+ * `SessionScreen.peek()`: the in-lock precheck that consumes it cannot await (see the port's
+ * contract). A session with no mirror has produced no output and shows no composer, so it
+ * fingerprints `null` — indeterminate, which the delivery path treats as moved.
+ */
+export function composerFingerprintForSession(session: DeliverySession, profile: GateProfile): string | null {
+  const screen = (session as PtySession).gateScreen;
+  if (!screen) return null;
+  // `peek()` answers `null` while any fed byte is still unparsed (CMAP round 2 — codex): a grid
+  // that is missing the very redraw we are checking for would compare EQUAL and permit the
+  // write. Pass the refusal straight through — the delivery path reads `null` as "the composer
+  // moved" and holds, which self-clears a parse turn later.
+  const view = screen.peek();
+  if (!view) return null;
+  return composerRegionFingerprint(view.term, view.cols, view.rows, profile);
 }
 
 /**
@@ -302,6 +332,9 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     getSessionForAgent: (ws, agent) => resolveLiveSessionForAgent(ws, agent),
     resolveProfile: (session) => resolveProfileForSession(session),
     classify: (session, profile) => classifyAgentScreen(session, profile),
+    // Issue #1664: the composer-stability signal that replaced whole-screen output quiescence.
+    // Same mirror as `classify`, read synchronously so the in-lock precheck can use it too.
+    composerFingerprint: (session, profile) => composerFingerprintForSession(session, profile),
     // Issue #1365: the write edge takes the session's per-terminal submission lock as a
     // LEAF inside the per-agent serializer, so a gated delivery and a concurrent
     // `--interrupt`/`--escape` can no longer interleave. The precheck is the delivery
@@ -378,7 +411,38 @@ export function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
       `terminal is the only other thing worth doing.`
     );
   }
-  if (info.detail || info.reason === 'no-profile') {
+  if (!isUnverifiableVerdict(info.reason, info.detail) && info.detail) {
+    // The OTHER self-clearing holds — `recent-input` (Issue #1473) and `composer-redraw`
+    // (Issue #1664). Neither is a draft, so the `user-text` wording above would be wrong; but
+    // both clear by themselves, so the defect wording below is worse than wrong — it tells the
+    // owner the mail will NEVER deliver and hands them `afx interrupt`, which kills the turn of
+    // an agent that is merely working, or wipes the line of someone who is merely typing.
+    //
+    // This branch used to not exist: the test was `if (info.detail || …)`, so every detail but
+    // `user-text` fell into the defect arm. That was already wrong for `recent-input` before
+    // this issue added a second self-clearing value to the same arm (CMAP round 3 — codex). The
+    // routing question is exactly the one `isUnverifiableVerdict` answers, so it is asked here
+    // rather than restated as a list of names that the next detail will silently fall out of.
+    //
+    // Like the `user-text` branch, this one deliberately names NO command that touches the
+    // terminal. A notice headed "delivery is STUCK" reads as an incident, and an operator takes
+    // its remedy line as the instruction (the #1583 loop was aggravated by exactly that).
+    const because =
+      info.detail === 'recent-input'
+        ? `the terminal keeps RECEIVING INPUT — keystrokes, clicks, or an interrupt/escape write ` +
+          `— and delivery pauses for a fraction of a second after each one`
+        : `the composer keeps being REPAINTED — a turn ending, a rotating placeholder, a resize ` +
+          `— and delivery pauses for a fraction of a second after each redraw`;
+    return (
+      `${head} Its composer is EMPTY and the gate can read it fine: ${because}. This clears by ` +
+      `itself, so a hold this old means the activity has been essentially continuous — someone ` +
+      `typing steadily, or something emitting on every repaint. ` +
+      `Remedy: usually none — delivery resumes on its own. 'afx inbox' inspects the queue ` +
+      `(metadata only, never bodies); if it truly never clears, what to look at is whatever ` +
+      `keeps touching that terminal, not the composer.`
+    );
+  }
+  if (isUnverifiableVerdict(info.reason, info.detail)) {
     // The DEFECT class: the gate could not verify the composer at all, so nothing will clear
     // this without intervention.
     return (

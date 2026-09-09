@@ -166,6 +166,9 @@ describe('Spec 1470 — automatic re-entry delivery', () => {
         getSessionForAgent: () => session,
         resolveProfile: () => ({ markerPattern: /›/, regionEndPatterns: [] }) as never,
         classify: async () => verdict,
+        // Issue #1664: a composer that never moves, so these tests keep asserting what they were
+        // written for (the classify verdict, the settle, the lock) rather than region stability.
+        composerFingerprint: () => 'composer',
         writeMessage: (_s, formatted) => {
           writes.push(formatted);
           return true;

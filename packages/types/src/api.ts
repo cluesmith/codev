@@ -663,7 +663,10 @@ export interface HeldMessage {
    * clears by itself. `'recent-input'` (Issue #1473) — the composer is EMPTY but input landed
    * within the input-settle window (a keystroke, a click, or an ungated `--interrupt`/
    * `--escape` write); also self-clearing, and distinct from `user-text` in that no draft
-   * exists to be corrupted. `'no-region-end'` /
+   * exists to be corrupted. `'composer-redraw'` (Issue #1664) — the composer is EMPTY but its
+   * rendered region moved within the settle window (a turn-end redraw, a rotating placeholder,
+   * a resize); also self-clearing, and NOT raised for the recipient merely producing output
+   * elsewhere on the screen, which is safe to write onto. `'no-region-end'` /
    * `'no-composer-marker'` — the classifier could not verify the composer at all (a drifted
    * profile, a torn frame, or Tower's dimensions diverging from the real PTY); this hold does
    * NOT clear on its own.

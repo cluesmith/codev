@@ -50,18 +50,41 @@ const COMPOSER_MARKER = /^[❯›]/;
  */
 const REGION_END_PATTERNS = [/^[─━╌┄]{5,}/, /^\s{2,}(gpt|high:|~\/)/];
 
-/** claude composer profile (marker ❯, dim placeholder — measured, spike g2). */
+/**
+ * claude composer profile (marker ❯, dim placeholder — measured, spike g2).
+ *
+ * `queuesInputMidTurn` measured for Issue #1664 against claude 2.1.266: a message delivered while
+ * a turn was streaming landed intact and was submitted as one message at the turn's end in 100 of
+ * 100 trials (0 head-loss), and the TUI shows it as `Press up to edit queued messages` in the
+ * meantime. Evidence: `codev/evidence/1664-streaming-delivery/`.
+ */
 export const CLAUDE_PROFILE: GateProfile = {
   app: 'claude',
   markerPattern: COMPOSER_MARKER,
   regionEndPatterns: REGION_END_PATTERNS,
+  queuesInputMidTurn: true,
 };
 
-/** codex composer profile (marker ›, dim placeholder — measured, spike g2). */
+/**
+ * codex composer profile (marker ›, dim placeholder — measured, spike g2).
+ *
+ * `queuesInputMidTurn` measured for Issue #1664 against codex-cli 0.153.4, by the same harness
+ * and the same production delivery path as claude's: 20 of 20 mid-turn deliveries landed intact
+ * and were submitted, 0 head-loss, every one written at an instant the retired whole-screen
+ * settle would have refused. Evidence: `codev/evidence/1664-streaming-delivery/`.
+ *
+ * One measured quirk worth knowing, though it needs no code: codex's composer SLIDES DOWN the
+ * screen as its transcript grows (measured rows 13 → 37 over ~11 s) until it reaches the bottom
+ * and pins. Its row span is part of the fingerprint, so during that phase the region legitimately
+ * counts as moving and mail holds — a fresh codex session's first delivery waits for the screen
+ * to fill. Transient, self-correcting, and not worth special-casing: a long-lived builder's
+ * screen is always full.
+ */
 export const CODEX_PROFILE: GateProfile = {
   app: 'codex',
   markerPattern: COMPOSER_MARKER,
   regionEndPatterns: REGION_END_PATTERNS,
+  queuesInputMidTurn: true,
 };
 
 /**
@@ -120,6 +143,24 @@ export const AGY_PROFILE: GateProfile = {
   placeholderFgPalette: 8,
   markerRequiresCursorRow: true,
   markerFgPalette: 12,
+  // Issue #1664, set by OWNER RULING (2026-09-09) — **UNMEASURED**. Every other value of this
+  // field on this page came from driving the real TUI through the acceptance harness; this one
+  // did not. The owner's call is that mid-turn delivery is universal and only human input holds
+  // mail, so agy is granted the licence rather than waiting on a measurement.
+  //
+  // What that trades away, stated plainly so a future reader is not misled by the company this
+  // line keeps: if agy DROPS or mishandles input arriving mid-turn, a delivery lands as text in
+  // its composer that is never submitted — the body strands on the line, the classifier then
+  // reads it as `user-text`, and every later message to that agent queues behind it until a
+  // human clears the line. That is a stuck agent with a visible cause, not silent data loss, but
+  // it is a real failure mode and it is not ruled out by anything in this repository.
+  //
+  // Settling it is a harness run, not an argument:
+  //   node --experimental-strip-types scripts/bugfix-1664-streaming-delivery-harness.mts \
+  //     --harness agy --scenario streaming --trials 20 --assume-queues-input
+  // If that reports 20/20 delivered-intact and submitted, replace this comment with the measured
+  // one. If it does not, this line is what needs changing.
+  queuesInputMidTurn: true,
 };
 
 /** Registry keyed by the harness name `detectHarnessFromCommand` returns. */

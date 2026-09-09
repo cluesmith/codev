@@ -81,6 +81,10 @@ export class SessionScreen {
   // parses asynchronously and processes writes FIFO, so awaiting the LATEST write's
   // callback guarantees every earlier write is parsed too — the flush {@link read} needs.
   private pending: Promise<void> = Promise.resolve();
+  // Chunk counters backing {@link hasUnparsedOutput}: `feed` numbers each chunk, its parse
+  // callback records the number. Equal means the grid shows every byte fed so far.
+  private fedSeq = 0;
+  private parsedSeq = 0;
   private disposed = false;
 
   constructor(cols: number, rows: number) {
@@ -103,7 +107,23 @@ export class SessionScreen {
    */
   feed(data: string): void {
     if (this.disposed) return;
-    this.pending = new Promise<void>((resolve) => this.term.write(data, () => resolve()));
+    // Number every chunk and record the number its parse callback completes, so a synchronous
+    // caller can tell whether the grid is CURRENT (Issue #1664, CMAP round 2 — codex). xterm
+    // parses asynchronously and FIFO, so `parsedSeq !== fedSeq` means bytes have been fed that
+    // the grid does not show yet — and a composer redraw hiding in them is invisible to
+    // {@link peek}.
+    const seq = ++this.fedSeq;
+    this.pending = new Promise<void>((resolve) =>
+      this.term.write(data, () => {
+        this.parsedSeq = seq;
+        resolve();
+      }),
+    );
+  }
+
+  /** Have bytes been fed that the grid has not parsed yet? See {@link feed} and {@link peek}. */
+  get hasUnparsedOutput(): boolean {
+    return this.parsedSeq !== this.fedSeq;
   }
 
   /**
@@ -124,11 +144,14 @@ export class SessionScreen {
    * `await this.pending` drains every byte fed up to this call into the grid, so the returned
    * buffer reflects AT LEAST the output counted by `ringBuffer.bytesWritten` at the moment the
    * caller sampled its change-token (xterm parses writes FIFO but may run ahead into later queued
-   * writes, so the buffer can reflect *more* — never less). That lower bound is the property the
-   * delivery path's token-before/after TOCTOU relies on: the caller MUST read the returned buffer
-   * with no intervening `await` (the classifier is synchronous), so no `feed` can interleave the
-   * read; any output that landed during THIS flush already advanced `bytesWritten`, so the caller's
-   * post-classify token re-check trips (→ hold) and nothing is delivered onto it.
+   * writes, so the buffer can reflect *more* — never less). The caller MUST read the returned
+   * buffer with no intervening `await` (the classifier is synchronous), so no `feed` can
+   * interleave the read.
+   *
+   * Issue #1664 retired the `bytesWritten` re-check this note used to point at — the delivery
+   * path no longer holds on whole-screen output, because a working agent always has some. What
+   * covers output landing after the flush is now {@link peek}, which refuses to answer at all
+   * while any fed byte is still unparsed.
    *
    * After {@link dispose} the term is freed and its parse callback may never fire, so this returns
    * the current view WITHOUT awaiting `pending` — a disposed screen has no coherent frame, the
@@ -138,6 +161,32 @@ export class SessionScreen {
   async read(): Promise<ScreenView> {
     if (this.disposed) return { term: this.term, cols: this._cols, rows: this._rows };
     await this.pending;
+    return { term: this.term, cols: this._cols, rows: this._rows };
+  }
+
+  /**
+   * The live buffer WITHOUT flushing the parser (Issue #1664) — the synchronous counterpart of
+   * {@link read}, for a caller that cannot await.
+   *
+   * The delivery path's in-lock precheck runs inside the per-terminal submission lock,
+   * immediately before the first byte, and is synchronous by contract; it re-reads the composer
+   * region there to confirm the screen it measured is still the screen it is about to write
+   * onto. Awaiting a parse callback in that position is not available to it.
+   *
+   * `null` when the grid is not CURRENT — any byte fed but not yet parsed, or a disposed mirror
+   * (CMAP round 2 — codex). Without that, this would hand back a grid missing exactly the
+   * composer redraw the caller is checking for: output arriving after the stable sample and
+   * immediately before the in-lock precheck is queued for parsing, absent from the buffer, and
+   * the fingerprint would compare EQUAL and permit the write — the corruption race #1521 is
+   * about, which the retired `bytesWritten` comparison used to catch. Refusing to answer is the
+   * fail-safe direction: every caller treats `null` as "the composer moved" and holds, and the
+   * hold is self-clearing on the next pass a parse-turn later.
+   *
+   * This is why `peek()` is not simply "read without awaiting": a synchronous caller cannot
+   * flush, so the only honest answers are a coherent frame or none.
+   */
+  peek(): ScreenView | null {
+    if (this.disposed || this.hasUnparsedOutput) return null;
     return { term: this.term, cols: this._cols, rows: this._rows };
   }
 

@@ -114,12 +114,21 @@ export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
  *                             is a SAFE hold that clears on its own — the same someone-else-is-
  *                             writing class, caught one beat earlier, before the TUI has echoed
  *                             anything for the classifier to see.
+ *   - `composer-redraw`     — the composer is EMPTY but its rendered region changed within the
+ *                             settle window (Issue #1664): a turn-end box redraw, a rotating
+ *                             placeholder, a resize, or an interrupt clearing the line. The
+ *                             recipient's own output ELSEWHERE on the screen — a spinner, a
+ *                             streaming transcript — is deliberately NOT this: writing onto an
+ *                             empty composer while the agent talks is safe and intended, since
+ *                             claude/codex queue input received mid-turn. Self-clearing, like
+ *                             `user-text` and `recent-input`; it resolves about a settle after
+ *                             the composer stops moving.
  * The two can't-verify values are the DEFECT class: the classifier could not verify anything,
  * so the mail will not deliver on its own. `GateVerdict.detail`'s fourth value, `empty`, is
  * never persisted — a clean verdict delivers the row (and delivery nulls both columns).
  *
- * `recent-input` is deliberately NOT part of {@link isUnverifiableVerdict}'s set: escalating it
- * would false-alarm on every ordinary typist. That predicate is an allow-list, so the value is
+ * `recent-input` and `composer-redraw` are deliberately NOT part of {@link isUnverifiableVerdict}'s
+ * set: escalating either would false-alarm on every ordinary typist and every ordinary repaint. That predicate is an allow-list, so the value is
  * correctly inert there by construction rather than by an edit.
  *
  * Null for every non-gate hold (`no-live-pty`, `no-profile`) and for the post-classify
@@ -128,7 +137,12 @@ export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
  * The DB column carries NO CHECK constraint (see `GLOBAL_SCHEMA` / migration v18); this type
  * is the enforcement.
  */
-export type MailboxGateDetail = 'user-text' | 'no-region-end' | 'no-composer-marker' | 'recent-input';
+export type MailboxGateDetail =
+  | 'user-text'
+  | 'no-region-end'
+  | 'no-composer-marker'
+  | 'recent-input'
+  | 'composer-redraw';
 
 /**
  * Database row type for the mailbox table (Spec 1313).

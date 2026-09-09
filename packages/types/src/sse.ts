@@ -46,15 +46,17 @@ export interface MailboxEscalationPayload {
    * The render gate's detail behind a `busy` reason (Issue #1482):
    * `'user-text'` (a draft/menu occupies the composer — a human is at the line, and the hold
    * clears when they finish) | `'recent-input'` (Issue #1473 — the composer is EMPTY but was
-   * touched within the input-settle window; also self-clearing) | `'no-region-end'` |
+   * touched within the input-settle window; also self-clearing) | `'composer-redraw'` (Issue
+   * #1664 — the composer is EMPTY but its rendered region moved within the settle window; also
+   * self-clearing) | `'no-region-end'` |
    * `'no-composer-marker'` (the classifier could not verify the composer at all — a drifted
    * profile, a torn frame, or Tower's dimensions diverging from the real PTY; this hold does
    * NOT clear on its own).
    * `null` for a non-gate hold.
    *
-   * `recent-input` DOES reach this payload: escalation is age-based, so a row held long enough
-   * escalates whatever the detail says, and a consumer switching on the older three-value
-   * vocabulary would meet a fourth.
+   * `recent-input` and `composer-redraw` DO reach this payload: escalation is age-based, so a
+   * row held long enough escalates whatever the detail says, and a consumer switching on the
+   * older three-value vocabulary would meet a fourth and a fifth.
    *
    * REQUIRED, matching `HeldMessage.detail` and this payload's own `reason` (maintainer
    * review, PR #1604). Optionality here would have governed the PRODUCER's obligation, not a

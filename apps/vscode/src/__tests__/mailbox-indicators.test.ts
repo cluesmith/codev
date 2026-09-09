@@ -162,6 +162,9 @@ describe('escalationToastText', () => {
     ['user-text', 'busy:user-text'],
     ['no-region-end', 'busy:no-region-end'],
     ['no-composer-marker', 'busy:no-composer-marker'],
+    // Issue #1664: the composer is empty but still being repainted — self-clearing, like
+    // user-text, and the detail the whole-screen settle used to swallow into a bare `busy`.
+    ['composer-redraw', 'busy:composer-redraw'],
   ])('renders the gate detail %s as a reason:detail sub-code', (detail, expected) => {
     const text = escalationToastText(makePayload({ reason: 'busy', detail }));
     expect(text).toContain(`(${expected})`);

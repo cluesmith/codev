@@ -36,7 +36,15 @@ import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 
 const WS = '/ws/a';
 const AGENT = 'spir-1';
-const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
+// Issue #1664: a claude-shaped profile, so it carries claude's measured `queuesInputMidTurn`.
+// Without it the delivery path keeps the whole-screen output settle, which is the branch
+// these files' non-#1664 cases already exercise through `lastDataAt`.
+const PROFILE: GateProfile = {
+  app: 'claude',
+  markerPattern: /^❯/,
+  regionEndPatterns: [],
+  queuesInputMidTurn: true,
+};
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
 const NOW = 1_000_000;
 
@@ -118,6 +126,9 @@ function harness(): Harness {
         h.duringClassify?.();
         return CLEAN;
       },
+      // Issue #1664: this file is about the INPUT half of the gate, so the composer never moves
+      // here — every hold it asserts stays attributable to the input signals it drives.
+      composerFingerprint: () => 'composer',
       writeMessage: (_s, msg, _noEnter, precheck) => {
         h.beforePrecheck?.();
         const abort = precheck();
@@ -211,18 +222,23 @@ describe('Issue #1473 — the gate→write input race', () => {
       expect(h.writes).toHaveLength(0);
     });
 
-    it('attributes a token move to OUTPUT when only output moved — not to the human', async () => {
-      // The token folds both counters. Blaming a repaint on somebody at the keyboard would put
-      // a false `recent-input` on `afx inbox` and the send response.
+    it('does NOT blame the human when only OUTPUT moved — and no longer holds for it either (Issue #1664)', async () => {
+      // Before #1664 this asserted a detail-less `busy` hold: the change token folded
+      // `bytesWritten`, so a repaint during the classify re-held, and blaming it on somebody at
+      // the keyboard would have put a false `recent-input` on `afx inbox` and the send
+      // response. #1664 removed the output half outright — a recipient repainting its screen
+      // while its composer sits empty is exactly who `afx send` is for. The attribution
+      // property this test guards survives as the `recent-input` cases above: output moving
+      // must never be reported as a human at the line, and now it is not reported at all.
       const h = harness();
       const row = enqueue();
       h.duringClassify = () => { h.session.bytes += 40; };
 
       const out = await deliverAgentMail(h.ports, db, WS, AGENT);
 
-      expect(out.reason).toBe('busy');
-      expect(out.detail).toBeUndefined();
-      expect(mailbox.getById(db, row.id)?.detail).toBeNull();
+      expect(out.delivered).toEqual([row.id]);
+      expect(out.reason).toBeNull();
+      expect(h.writes).toHaveLength(1);
     });
 
     it('does not reuse a memoized CLEAN verdict across a keystroke', async () => {

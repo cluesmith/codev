@@ -29,7 +29,15 @@ import {
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 import { formatArchitectToBuilderMessage } from '../utils/message-format.js';
 
-const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
+// Issue #1664: a claude-shaped profile, so it carries claude's measured `queuesInputMidTurn`.
+// Without it the delivery path keeps the whole-screen output settle, which is the branch
+// these files' non-#1664 cases already exercise through `lastDataAt`.
+const PROFILE: GateProfile = {
+  app: 'claude',
+  markerPattern: /^❯/,
+  regionEndPatterns: [],
+  queuesInputMidTurn: true,
+};
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
 const BUSY: GateVerdict = { clean: false, reason: 'busy', detail: 'user-text' };
 
@@ -88,6 +96,8 @@ interface Harness {
   setProfile(p: GateProfile | null): void;
   setVerdict(v: GateVerdict): void;
   setClassify(fn: ((session: DeliverySession, p: GateProfile) => Promise<GateVerdict>) | null): void;
+  /** Issue #1664: drive the composer-region fingerprint the delivery path samples. */
+  setComposerFingerprint(fn: (() => string | null) | null): void;
   now: number;
   /**
    * Result the fake `writeMessage` port returns (Spec 1313 silent-loss test). Default true
@@ -108,6 +118,7 @@ function harness(): Harness {
   let profile: GateProfile | null = PROFILE;
   let verdict: GateVerdict = CLEAN;
   let classifyOverride: ((session: DeliverySession, p: GateProfile) => Promise<GateVerdict>) | null = null;
+  let fingerprintOverride: (() => string | null) | null = null;
   const broadcasts: DeliveredBroadcast[] = [];
   const writes: Array<{ formattedMessage: string; noEnter: boolean }> = [];
   const logs: string[] = [];
@@ -133,11 +144,18 @@ function harness(): Harness {
     setClassify: (fn) => {
       classifyOverride = fn;
     },
+    setComposerFingerprint: (fn) => {
+      fingerprintOverride = fn;
+    },
     ports: {
       getSessionForAgent: (_ws, agent) => sessions.get(agent) ?? null,
       resolveProfile: () => profile,
       classify: (session: DeliverySession, p: GateProfile): Promise<GateVerdict> =>
         classifyOverride ? classifyOverride(session, p) : Promise.resolve(verdict),
+      // Issue #1664: the composer-stability seam. Default is a composer that never moves, so
+      // every test written before this issue keeps asserting what it was written for; tests
+      // about stability drive it with `setComposerFingerprint`.
+      composerFingerprint: () => (fingerprintOverride ? fingerprintOverride() : 'composer'),
       writeMessage: (_s, formattedMessage, noEnter, precheck) => {
         // Mirror the live binding's ordering: the precheck runs INSIDE the lock, before the
         // first byte (Issue #1365), so an abort must record no write at all.
@@ -355,45 +373,31 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     expect(h.writes).toHaveLength(1); // not re-delivered
   });
 
-  it('re-validates the SCREEN after the classify: a keystroke landing during the classify → holds, never writes (Spec 1313 render-gate hardening)', async () => {
-    // The classify awaits (the mirror flushes its parser); if the user starts typing during
-    // it, the clean verdict is for a screen that no longer exists. The delivery path samples
-    // the monotone bytesWritten token before the classify and re-checks it after — a change
-    // means "screen moved under us" → hold, never write the message onto the now-present draft
-    // (the false-clean the gate exists to prevent).
-    let bytes = 0;
-    const session: DeliverySession = {
-      id: 'term-moving',
-      get bytesWritten() {
-        return bytes;
-      },
-      // Settled (Issue #1573), so the hold this test asserts is attributable to the token
-      // moving under the classify — not to an unknown screen age.
-      lastDataAt: 0,
-      // Issue #1473: static input signals, so these tests still isolate the OUTPUT half of the
-      // token and the settle they were written for.
-      inputSeq: 0,
-      lastInputAt: 0,
-      info: { cols: 110, rows: 32 },
-      command: 'claude',
-      launchArgs: [],
-      cwd: '/ws/a',
-      writable: true,
-      write: () => true,
-    };
+  it('re-validates the COMPOSER after the classify: a draft appearing during the classify → holds, never writes (Spec 1313 render-gate hardening; Issue #1664)', async () => {
+    // The classify awaits (the mirror flushes its parser); if a draft appears during it, the
+    // clean verdict is for a screen that no longer exists. The delivery path fingerprints the
+    // composer region AFTER that await, so a region that moved cannot be stable → hold, never
+    // write the message onto the now-present draft (the false-clean the gate exists to
+    // prevent). Issue #1664 scoped the re-validation from the whole screen to this region: an
+    // agent repainting a spinner has not touched the composer and must not hold.
     const h = harness();
-    h.setSession('spir-1', session);
-    // Model the keystroke: new output advances the token *during* the classify, which still
-    // returns CLEAN for the (now stale) screen it was handed.
+    // NOT settled: the screen is being painted, so the verdict rests on region stability alone
+    // rather than falling through to the whole-screen quiet fast path.
+    h.setSession('spir-1', fakeSession({ lastDataAt: 1000 }));
+    let region = 'empty-composer';
+    h.setComposerFingerprint(() => region);
+    // Model the draft: the composer region changes *during* the classify, which still returns
+    // CLEAN for the (now stale) screen it was handed.
     h.setClassify(async () => {
-      bytes++;
+      region = 'a draft the human started';
       return CLEAN;
     });
     const row = enqueue();
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
     expect(out.delivered).toEqual([]);
-    expect(out.reason).toBe('busy'); // held: the screen moved under the gate
+    expect(out.reason).toBe('busy'); // held: the composer moved under the gate
+    expect(out.detail).toBe('composer-redraw');
     expect(h.writes).toHaveLength(0); // never wrote onto the draft that appeared
     expect(mailbox.getById(db, row.id)?.status).toBe('held');
   });

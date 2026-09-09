@@ -306,6 +306,7 @@ describe('inboxShow', () => {
   it.each([
     ['user-text', /human is at the line/],
     ['recent-input', /interrupt\/escape write/],
+    ['composer-redraw', /rendered region moved/],
     ['no-region-end', /will not clear on its own/],
     ['no-composer-marker', /will not clear on its own/],
   ])('explains the %s gate detail', async (detail, expected) => {

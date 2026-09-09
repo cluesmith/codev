@@ -64,6 +64,51 @@ describe('Issue #1482 — owner starvation notice: the user-text branch never su
   });
 });
 
+describe('Issues #1473/#1664 — the OTHER self-clearing holds get safe guidance too', () => {
+  // CMAP round 3 (codex). The branch test was `if (info.detail || …)`, so EVERY detail except
+  // `user-text` landed in the defect arm — "the render gate CANNOT VERIFY that composer", "the
+  // mail will never deliver on its own", "afx interrupt <agent>". That is a false statement and
+  // a destructive instruction for both self-clearing details: `recent-input` means a person is
+  // typing (so the interrupt wipes their line — already wrong before this issue), and
+  // `composer-redraw` means the agent is working (so it kills their turn).
+  //
+  // The routing now asks `isUnverifiableVerdict`, the same predicate every other surface uses,
+  // so a detail added later cannot silently fall into the destructive arm by default.
+
+  it.each(['recent-input', 'composer-redraw'] as const)(
+    'never suggests interrupting for detail=%s',
+    (detail) => {
+      const body = formatOwnerNoticeBody(notice({ detail }));
+      expect(body.toLowerCase()).not.toContain('afx interrupt');
+    },
+  );
+
+  it.each(['recent-input', 'composer-redraw'] as const)(
+    'does not claim the mail will never deliver for detail=%s',
+    (detail) => {
+      const body = formatOwnerNoticeBody(notice({ detail }));
+      expect(body).not.toContain('CANNOT VERIFY');
+      expect(body).not.toContain('never deliver');
+      expect(body).toMatch(/clears by itself|resumes on its own/i);
+    },
+  );
+
+  it('names the actual cause rather than the draft wording, which would be wrong here', () => {
+    expect(formatOwnerNoticeBody(notice({ detail: 'recent-input' }))).toContain('RECEIVING INPUT');
+    expect(formatOwnerNoticeBody(notice({ detail: 'composer-redraw' }))).toContain('REPAINTED');
+  });
+
+  it('still offers the read-only inspection surface', () => {
+    for (const detail of ['recent-input', 'composer-redraw'] as const) {
+      expect(formatOwnerNoticeBody(notice({ detail }))).toContain('afx inbox');
+    }
+  });
+
+  it('still reports the compound verdict', () => {
+    expect(formatOwnerNoticeBody(notice({ detail: 'composer-redraw' }))).toContain('busy:composer-redraw');
+  });
+});
+
 describe('Issue #1482 — owner starvation notice: the DEFECT branches still do suggest it', () => {
   // The counterpart assertion. Removing the suggestion everywhere would be the opposite
   // failure: for these verdicts nothing clears the hold on its own, and there is no human at

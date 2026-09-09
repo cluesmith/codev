@@ -42,7 +42,15 @@ import { SessionScreen } from '../../terminal/session-screen.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 import { formatArchitectToBuilderMessage } from '../utils/message-format.js';
 
-const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
+// Issue #1664: a claude-shaped profile, so it carries claude's measured `queuesInputMidTurn`.
+// Without it the delivery path keeps the whole-screen output settle, which is the branch
+// these files' non-#1664 cases already exercise through `lastDataAt`.
+const PROFILE: GateProfile = {
+  app: 'claude',
+  markerPattern: /^❯/,
+  regionEndPatterns: [],
+  queuesInputMidTurn: true,
+};
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
 
 /**
@@ -75,6 +83,8 @@ interface Harness {
   order: string[];
   /** Set by a test to run just before the in-lock precheck (models a race under the lock). */
   beforePrecheck: (() => void) | null;
+  /** Issue #1664: the composer region's fingerprint, as the delivery path reads it. */
+  composerFingerprint: string;
   now: number;
 }
 
@@ -112,11 +122,16 @@ function harness(overrides: Partial<DeliverySession> = {}): Harness {
     needles: [],
     order: [],
     beforePrecheck: null,
+    composerFingerprint: 'composer',
     now: NOW,
     ports: {
       getSessionForAgent: () => h.session,
       resolveProfile: () => PROFILE,
       classify: () => Promise.resolve(CLEAN),
+      // Issue #1664: the composer-stability seam. Default is a composer that never moves, so
+      // these tests keep asserting what they were written for (the classify verdict, the
+      // settle, the lock); the in-lock re-check test drives it.
+      composerFingerprint: () => h.composerFingerprint,
       writeMessage: (_s, formattedMessage, _noEnter, precheck): WriteResult => {
         h.order.push('write');
         h.beforePrecheck?.();
@@ -171,12 +186,20 @@ describe('#1573 settle-before-write', () => {
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out).toEqual({ delivered: [], reason: 'busy' });
+    // Issue #1664 named this hold instead of leaving it detail-less, and arms the drainer's
+    // one-shot re-drain for it — it clears one settle after the composer stops moving.
+    expect(out).toEqual({
+      delivered: [],
+      reason: 'busy',
+      detail: 'composer-redraw',
+      retryAfterMs: SETTLE_BEFORE_WRITE_MS,
+    });
     expect(h.writes).toEqual([]);
     expect(h.session.writes).toEqual([]);
     const stored = mailbox.getById(db, row.id);
     expect(stored?.status).toBe('held');
     expect(stored?.reason).toBe('busy');
+    expect(stored?.detail).toBe('composer-redraw');
   });
 
   it('delivers once the screen has been quiet for the full settle window', async () => {
@@ -190,14 +213,36 @@ describe('#1573 settle-before-write', () => {
     expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
   });
 
-  it('re-checks inside the per-terminal lock: output landing while the lock is waited on aborts the write', async () => {
+  it('re-checks inside the per-terminal lock: a COMPOSER redraw while the lock is waited on aborts the write', async () => {
     // The pre-lock check happens before the submission lock is acquired. A delivery that waited
-    // behind another submission would otherwise write onto a screen that started painting while
-    // it queued — the same race #1365 closed for lock-taking writers, applied to freshness.
+    // behind another submission would otherwise write onto a composer that started painting
+    // while it queued — the same race #1365 closed for lock-taking writers, applied to
+    // freshness. Issue #1664 scoped the in-lock re-check from "any output landed" to "the
+    // composer region moved", which is the thing #1521 was actually about.
     const h = harness();
     const row = enqueue();
-    // Mutate the SAME session object the delivery captured — the in-lock precheck closes over
-    // it, so replacing the harness's reference would prove nothing.
+    h.beforePrecheck = () => {
+      h.composerFingerprint = 'the composer repainted while we queued';
+    };
+
+    const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(out).toEqual({
+      delivered: [],
+      reason: 'busy',
+      detail: 'composer-redraw',
+      retryAfterMs: SETTLE_BEFORE_WRITE_MS,
+    });
+    expect(h.writes).toEqual([]);
+    expect(mailbox.getById(db, row.id)?.status).toBe('held');
+  });
+
+  it('delivers when only output landed while the lock was waited on — the composer never moved (Issue #1664)', async () => {
+    // The counterpart of the test above, and the defect this issue is named for: the recipient
+    // painting a spinner and a streaming transcript above an untouched composer is safe to
+    // write to, and used to abort the write at exactly this point.
+    const h = harness();
+    const row = enqueue();
     let lastDataAt = NOW - 10_000;
     Object.defineProperty(h.session, 'lastDataAt', { get: () => lastDataAt });
     h.beforePrecheck = () => {
@@ -206,9 +251,9 @@ describe('#1573 settle-before-write', () => {
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out).toEqual({ delivered: [], reason: 'busy' });
-    expect(h.writes).toEqual([]);
-    expect(mailbox.getById(db, row.id)?.status).toBe('held');
+    expect(out.delivered).toEqual([row.id]);
+    expect(h.writes).toEqual([FORMATTED]);
+    expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
   });
 
   it('holds when the session carries no usable output timestamp rather than writing blind', async () => {
@@ -219,7 +264,12 @@ describe('#1573 settle-before-write', () => {
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out).toEqual({ delivered: [], reason: 'busy' });
+    expect(out).toEqual({
+      delivered: [],
+      reason: 'busy',
+      detail: 'composer-redraw',
+      retryAfterMs: SETTLE_BEFORE_WRITE_MS,
+    });
     expect(h.writes).toEqual([]);
   });
 });
