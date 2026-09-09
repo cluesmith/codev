@@ -4,6 +4,7 @@ import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { FleetEntry, TowerFleetCache } from './tower-cache.js';
 import { disambiguateLabels } from './workspace-label.js';
+import { ageSince, describeAttention } from './attention-format.js';
 
 /** Command a Tower workspace row runs on click — switch to it, or activate-then-open if dormant. */
 export const OPEN_WORKSPACE_COMMAND = 'codev.tower.openWorkspace';
@@ -116,7 +117,7 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
 
   private workspaceItem(ws: LabelledEntry): vscode.TreeItem {
     const { entry, label, isCurrent } = ws;
-    const state = primaryState(entry.attention);
+    const state = describeAttention(entry.attention);
     const hasDetail = !entry.attention.isEmpty && entry.workspace.active;
 
     const item = new vscode.TreeItem(
@@ -153,35 +154,6 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
   }
 }
 
-/** The primary (highest-urgency) signal a workspace carries, for its row icon and description. */
-function primaryState(a: AttentionSummary): { icon: string; color?: string; text: string } | null {
-  if (a.pendingGates.length > 0) {
-    const gate = a.pendingGates[0];
-    const age = ageSince(gate.since);
-    let text = gate.gate;
-    if (age) { text = `${gate.gate} · ${age}`; }
-    return { icon: 'warning', color: 'list.warningForeground', text };
-  }
-  if (a.waiting.length > 0) {
-    const age = ageSince(a.waiting[0].since);
-    let text = 'waiting';
-    if (age) { text = `waiting ${age}`; }
-    return { icon: 'clock', text };
-  }
-  if (a.heldTotal > 0) {
-    let text = `${a.heldTotal} held`;
-    if (a.heldEscalated) { text = `${a.heldTotal} held · escalated`; }
-    let color: string | undefined;
-    if (a.heldEscalated) { color = 'list.errorForeground'; }
-    return { icon: 'mail', color, text };
-  }
-  const queued = totalQueued(a);
-  if (queued > 0) {
-    return { icon: 'comment', text: `${queued} queued` };
-  }
-  return null;
-}
-
 /** The expanded per-workspace attention rows, in the summary's own order. */
 function attentionRows(a: AttentionSummary): TowerNode[] {
   const rows: TowerNode[] = [];
@@ -214,27 +186,8 @@ function builderLabel(ref: { builderId: string; issueTitle: string | null }): st
   return ref.builderId;
 }
 
-function totalQueued(a: AttentionSummary): number {
-  let total = 0;
-  for (const item of a.queuedFeedback) { total += item.count; }
-  return total;
-}
-
 /** A `ThemeIcon`, optionally tinted with a `ThemeColor` id. */
 function iconFor(icon: string, color?: string): vscode.ThemeIcon {
   if (color) { return new vscode.ThemeIcon(icon, new vscode.ThemeColor(color)); }
   return new vscode.ThemeIcon(icon);
-}
-
-/** Compact relative age ("6m", "2h", "3d") from an ISO timestamp; `null` when absent or in the future. */
-function ageSince(iso: string | null, now: number = Date.now()): string | null {
-  if (!iso) { return null; }
-  const ms = now - new Date(iso).getTime();
-  if (ms < 0) { return null; }
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 1) { return 'just now'; }
-  if (minutes < 60) { return `${minutes}m`; }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) { return `${hours}h`; }
-  return `${Math.floor(hours / 24)}d`;
 }
