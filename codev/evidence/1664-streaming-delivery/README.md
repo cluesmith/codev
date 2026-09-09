@@ -38,17 +38,23 @@ them but not committed.
 
 | run | scenario | gate | delivered | head-loss | median wait | max wait | waits >2 s |
 |---|---|---|---|---|---|---|---|
-| `fixed-streaming-*` | recipient mid-turn, empty composer | current | **20/20 intact** | **0/20** | 397 ms | 400 ms | **0/20** |
+| `fixed-r2-streaming-*` | recipient mid-turn, empty composer | current (**post-CMAP, the shipped code**) | **20/20 intact** | **0/20** | 395 ms | 399 ms | **0/20** |
+| `fixed-streaming-*` | *same*, before the CMAP round-1 fixes | current | 20/20 intact | 0/20 | 397 ms | 400 ms | 0/20 |
 | `legacy-streaming-legacy-*` | *the same scenario* | **retired** whole-screen settle | 20/20 intact | 0/20 | 2505 ms | 6432 ms | **11/20** |
 | `fixed-draft-*` | recipient mid-turn, human draft on the line | current | **0/20 — 20/20 held `busy:user-text`** | 0/20 | — | — | — |
 | `fixed-turn-end-*` | delivery attempted across a turn end (#1521's window) | current | **20/20 intact** | **0/20** | 393 ms | 404 ms | **0/20** |
 
 ### What each run establishes
 
-1. **streaming, current gate** — 20/20 landed intact and were submitted, and **18/20 were written
+1. **streaming, current gate** — 20/20 landed intact and were submitted, and **20/20 were written
    at a moment when `now - lastDataAt < 250 ms`**, i.e. at an instant the retired gate would have
-   refused outright. Median wait 397 ms; nothing waited past 400 ms. Hold verdicts seen while
-   waiting: `busy:composer-redraw` only.
+   refused outright, with a turn running in all 20. Median wait 395 ms; nothing waited past
+   399 ms. Hold verdicts seen while waiting: `busy:composer-redraw` only.
+
+   The pre-CMAP run of the same scenario scored 18/20 on that column rather than 20/20, because
+   the stale-sample reuse codex and claude found could occasionally let a delivery through on its
+   very first pass. Closing it made every delivery establish two observations honestly — the
+   numbers got *better* by getting stricter.
 
 2. **streaming, legacy gate** — the identical scenario measured against the rule this issue
    removes: still 20/20 eventually, but the median wait is **6.3× longer** and **11 of 20 rows
