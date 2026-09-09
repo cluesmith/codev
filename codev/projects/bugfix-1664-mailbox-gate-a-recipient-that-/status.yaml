@@ -1,7 +1,7 @@
 id: bugfix-1664
 title: mailbox-gate-a-recipient-that-
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-09T15:25:33.770Z'
-updated_at: '2026-09-09T15:37:45.660Z'
+updated_at: '2026-09-09T17:22:09.493Z'
