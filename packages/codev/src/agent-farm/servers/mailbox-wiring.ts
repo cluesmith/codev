@@ -210,8 +210,13 @@ export async function classifyAgentScreen(session: DeliverySession, profile: Gat
 export function composerFingerprintForSession(session: DeliverySession, profile: GateProfile): string | null {
   const screen = (session as PtySession).gateScreen;
   if (!screen) return null;
-  const { term, cols, rows } = screen.peek();
-  return composerRegionFingerprint(term, cols, rows, profile);
+  // `peek()` answers `null` while any fed byte is still unparsed (CMAP round 2 — codex): a grid
+  // that is missing the very redraw we are checking for would compare EQUAL and permit the
+  // write. Pass the refusal straight through — the delivery path reads `null` as "the composer
+  // moved" and holds, which self-clears a parse turn later.
+  const view = screen.peek();
+  if (!view) return null;
+  return composerRegionFingerprint(view.term, view.cols, view.rows, profile);
 }
 
 /**

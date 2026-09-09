@@ -108,8 +108,10 @@ function realGatePorts(
     },
     // The REAL composer-stability seam (Issue #1664): the same mirror the classify reads,
     // fingerprinted synchronously — identical to mailbox-wiring's live binding.
-    composerFingerprint: (_s, prof) =>
-      session ? composerRegionFingerprint(session.screen.peek().term, session.info.cols, session.info.rows, prof) : null,
+    composerFingerprint: (_s, prof) => {
+      const view = session?.screen.peek();
+      return view ? composerRegionFingerprint(view.term, view.cols, view.rows, prof) : null;
+    },
     writeMessage: (_s, msg, noEnter, precheck) => {
       const abort = precheck();
       if (abort) return { status: 'aborted' as const, abort };

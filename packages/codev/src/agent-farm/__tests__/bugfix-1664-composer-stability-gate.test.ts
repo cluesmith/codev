@@ -40,6 +40,7 @@ import {
 import { classifyBuffer, composerRegionFingerprint, type GateProfile } from '../servers/render-gate.js';
 import { CLAUDE_PROFILE } from '../servers/gate-profiles.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
+import { composerFingerprintForSession } from '../servers/mailbox-wiring.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import type { MailboxGateDetail } from '../db/types.js';
 
@@ -145,8 +146,46 @@ describe('#1664 render gate — the composer region, not the whole screen', () =
   it('peek() reads the same region read() does, so the in-lock precheck cannot disagree with the gate', async () => {
     const screen = await screenShowing(claudeFrame('Bunning… (17m 7s)'));
     const flushed = await fingerprintOf(screen);
-    const peeked = composerRegionFingerprint(screen.peek().term, COLS, ROWS, CLAUDE_PROFILE);
+    const view = screen.peek();
+    expect(view).not.toBeNull();
+    const peeked = composerRegionFingerprint(view!.term, COLS, ROWS, CLAUDE_PROFILE);
     expect(peeked).toBe(flushed);
+  });
+
+  it('peek() REFUSES a grid that has unparsed output — a redraw must not hide in the parse queue', async () => {
+    // CMAP round 2 (codex). `feed()` queues an asynchronous xterm parse. Output arriving after
+    // the stable sample and immediately before the in-lock precheck is therefore in the queue
+    // and NOT in the grid — so a fingerprint taken from that grid would compare EQUAL to the
+    // pre-write sample and permit the write, straight into the redraw. That is the corruption
+    // race the retired `bytesWritten` comparison used to catch, and refusing to answer while
+    // any byte is unparsed is what replaces it.
+    const screen = await screenShowing(claudeFrame('Bunning… (17m 7s)'));
+    const stable = await fingerprintOf(screen);
+    expect(stable).not.toBeNull();
+
+    // A composer-changing frame lands. Deliberately NOT awaited — this models the precheck
+    // running in the same tick the bytes arrived.
+    screen.feed(claudeFrame('Bunning… (17m 8s)', 'a draft the human started'));
+
+    expect(screen.hasUnparsedOutput).toBe(true);
+    expect(screen.peek()).toBeNull();
+
+    // Once parsed, it answers again — and says the composer moved.
+    await screen.read();
+    expect(screen.hasUnparsedOutput).toBe(false);
+    expect(await fingerprintOf(screen)).not.toBe(stable);
+  });
+
+  it('the production fingerprint binding passes that refusal through as null (→ hold)', async () => {
+    // The delivery path never sees a SessionScreen; it sees this port. A `null` here is what
+    // makes the refusal a HOLD rather than a silently stale comparison.
+    const screen = await screenShowing(claudeFrame('Bunning… (17m 7s)'));
+    const session = { gateScreen: screen } as unknown as DeliverySession;
+    expect(composerFingerprintForSession(session, CLAUDE_PROFILE)).not.toBeNull();
+
+    screen.feed(claudeFrame('Bunning… (17m 8s)', 'a draft the human started'));
+
+    expect(composerFingerprintForSession(session, CLAUDE_PROFILE)).toBeNull();
   });
 });
 
