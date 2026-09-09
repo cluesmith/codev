@@ -146,6 +146,32 @@ on docs/vscode-changelog per the template workflow (branches diverge by design).
 Build-order gotcha for reviewer: fresh worktree needs `pnpm --filter @cluesmith/codev-types
 --filter @cluesmith/codev-sdk --filter @cluesmith/codev-artifact-canvas build` before app tests/tsc.
 
+### CMAP (3-way, general-mode over the diff) — done + addressed (2026-09-10)
+Templated `--type impl` isn't wired for standalone builder invocation (only integration-review.md in
+codev/consult-types; PIR runs templated CMAP in review phase). Ran general-mode 3-way instead.
+FIXED (commit "Address CMAP…"):
+- CRIT deactivate handler got the tree NODE not a WorkspaceTarget → dead action. Added
+  toWorkspaceTarget() normalizer (tower.ts), handlers normalize; moved WorkspaceTarget to tower.ts.
+- CRIT transient listWorkspaces()=[] blanked the hub → blank-guard (keep last-known-good when a
+  non-empty fleet would be replaced by empty).
+- HIGH click on a collapsible attention row also opened a window → row command ONLY on childless
+  rows; added inline open button (codev.tower.openWorkspace) for expandable rows.
+- HIGH fan-out amplification / overlapping refreshes → 300ms debounce on SSE/poll triggers +
+  single-in-flight with one trailing rerun. seq bump moved AFTER connection guard (#12).
+- current-row open no-op; deactivate no longer offered on current row (when anchored to exact
+  tower-workspace-active); rate regex anchored (too many|\b429\b); badge tooltip grammar;
+  held-mail bucket predicate hardened (heldTotal||heldMail) + describeAttention mirror + property
+  test (!isEmpty ⇒ bucket<quiet); comparator NaN-timestamp guard + "total preorder" doc; leaked
+  provider subscription now disposed; extracted orderFleet (SSOT for tree+quickpick order, #9).
+DOCUMENTED RESIDUALS (comments in code, for review phase / follow-up):
+- adopt TOCTOU: client-side confirm is best-effort; robust close needs a server willAdopt/confirm
+  flag = Tower+SDK change, OUT OF SCOPE (routes to codev:main).
+- stale-active row: opening self-heals via ConnectionManager idempotent re-activate (per plan).
+- lastAttention never expires on a persistently-failing overview (badge stays lit) — low risk given
+  poll+reconnect; candidate follow-up (consecutive-failure decay). NOT fixed.
+- disambiguateLabels dup labels only for trailing-sep/empty-segment paths; Tower realpaths, so N/A.
+Tests: SDK 141, vscode app 1022, compile (types+lint+esbuild) clean.
+
 ### Investigation (done)
 Launched 3 parallel Explore agents: SDK/types (TowerClient, deriveAttention, AttentionSummary,
 OverviewData, readLocalKey); vscode views/tree/command/SSE plumbing; Tower endpoints + streamdeck
