@@ -140,6 +140,42 @@ export function snapshotTree(workspaceRoot: string): TreeSnapshot {
 const CONSULT_OWNED_PREFIXES = ['.consult/'];
 
 /**
+ * Review files written by consultation lanes, which are not evidence either.
+ *
+ * `computePersistentOutputPath()` here and `getReviewFilePath()` in porch share
+ * one naming convention — `<project>/<id>-<phase>-iter<N>-<lane>.txt` under
+ * `codev/projects/` — and porch's verify step runs all three lanes in parallel
+ * against the same worktree. Each lane can only exclude its *own* output path,
+ * so without this every cmap round would have each lane reporting its two
+ * siblings' review files as mutations.
+ *
+ * Invisible in this repo, again, because `.gitignore` here carries
+ * `codev/projects/*​/*.txt` — but `CODEV_GITIGNORE_ENTRIES` does not ship that
+ * rule, so every adopter would have got a red banner on every cmap round. Same
+ * shape as the `.consult/history.log` false positive, and the reason this is a
+ * rule in code rather than a line in someone's `.gitignore`.
+ */
+const LANE_REVIEW_FILE = /^codev\/projects\/[^/]+\/[^/]+-iter\d+-[^/]+\.txt$/;
+
+/**
+ * Resolve a lane's `--output` to a repo-relative path, or null if it lands
+ * outside the workspace.
+ *
+ * `--output` arrives exactly as the user typed it, which may be relative
+ * (`consult -o review.txt`), so a raw `startsWith(workspaceRoot)` test misses
+ * it and the lane ends up reporting its own review file. Resolving first also
+ * kills the opposite error: a plain prefix test counts `/repo-2/x` as living
+ * inside `/repo`.
+ */
+export function relativeOutputPath(workspaceRoot: string, outputPath?: string): string | null {
+  if (!outputPath) return null;
+  const rel = path.relative(workspaceRoot, path.resolve(workspaceRoot, outputPath));
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  // Snapshot keys come from git, which always uses forward slashes.
+  return rel.split(path.sep).join('/');
+}
+
+/**
  * Repo-relative paths that differ between two snapshots, sorted.
  *
  * `ignore` takes the extra paths this particular run owns — the lane's review
@@ -155,7 +191,9 @@ export function diffTreeSnapshots(
 
   const ignored = new Set(ignore);
   const isOurs = (rel: string) =>
-    ignored.has(rel) || CONSULT_OWNED_PREFIXES.some(prefix => rel.startsWith(prefix));
+    ignored.has(rel) ||
+    CONSULT_OWNED_PREFIXES.some(prefix => rel.startsWith(prefix)) ||
+    LANE_REVIEW_FILE.test(rel);
 
   const changed = new Set<string>();
 
@@ -197,6 +235,24 @@ export function formatTreeChangeWarning(model: string, files: string[]): string 
     'may be the writer. This warning names what moved, not who moved it.',
   );
   return lines.join('\n');
+}
+
+/**
+ * The warning for a post-review snapshot that could not be taken at all.
+ *
+ * Distinct from "the tree changed" because the failure is different in kind: we
+ * know something happened, and we cannot say what. Reported rather than
+ * swallowed — a comparison that silently returns "no changes" when it could not
+ * look is the failure mode this whole module exists to avoid.
+ */
+export function formatSnapshotLostWarning(model: string, reason?: string): string {
+  return [
+    `WORKING TREE UNREADABLE after the ${model} review (#1649).`,
+    'The tree was readable before this lane ran and `git status` fails now, so the tripwire',
+    'cannot say whether anything changed. This is not the same as "nothing changed".',
+    `Reason: ${reason ?? 'unknown'}`,
+    'Check `git status` and `git diff` before trusting this review or shipping the branch.',
+  ].join('\n');
 }
 
 /**

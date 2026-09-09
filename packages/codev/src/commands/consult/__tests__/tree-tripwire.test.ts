@@ -20,7 +20,9 @@ import { execFileSync } from 'node:child_process';
 import {
   snapshotTree,
   diffTreeSnapshots,
+  relativeOutputPath,
   formatTreeChangeWarning,
+  formatSnapshotLostWarning,
   appendTreeChangeWarningToOutput,
 } from '../tree-tripwire.js';
 
@@ -162,12 +164,67 @@ describe('diffTreeSnapshots — the #1649 scenario', () => {
     expect(diffTreeSnapshots(before, snapshotTree(repo), ['reviews/claude.txt'])).toEqual([]);
   });
 
+  it('ignores the OTHER lanes\' review files during a cmap round', () => {
+    // porch's verify step runs three `consult --output
+    // codev/projects/<id>/<id>-<phase>-iter<N>-<model>.txt` lanes in parallel
+    // against one worktree. A lane can only pass its own path as `ignore`, so
+    // without a rule for the shared naming convention each lane would report its
+    // two siblings. Hidden in this repo by a .gitignore line that
+    // CODEV_GITIGNORE_ENTRIES does not ship, so every adopter would have seen it.
+    const before = snapshotTree(repo);
+    write('codev/projects/bugfix-1649-x/bugfix-1649-fix-iter1-codex.txt', 'codex review');
+    write('codev/projects/bugfix-1649-x/bugfix-1649-fix-iter1-gemini.txt', 'gemini review');
+    expect(diffTreeSnapshots(before, snapshotTree(repo))).toEqual([]);
+  });
+
+  it('still reports a non-review file written into a project directory', () => {
+    // The exclusion is the lanes' review artifacts, not a blanket amnesty on
+    // codev/projects/.
+    const before = snapshotTree(repo);
+    write('codev/projects/bugfix-1649-x/notes.md', 'a lane wrote this');
+    expect(diffTreeSnapshots(before, snapshotTree(repo)))
+      .toEqual(['codev/projects/bugfix-1649-x/notes.md']);
+  });
+
   it('reports nothing when either snapshot is unavailable', () => {
     const before = snapshotTree(repo);
     write('src/overview.ts', 'changed');
     const unavailable = { available: false as const, entries: new Map<string, string>() };
     expect(diffTreeSnapshots(unavailable, snapshotTree(repo))).toEqual([]);
     expect(diffTreeSnapshots(before, unavailable)).toEqual([]);
+  });
+});
+
+describe('relativeOutputPath', () => {
+  it('resolves a relative --output the user typed', () => {
+    // `consult -o review.txt` used to fail a raw startsWith(workspaceRoot)
+    // test, so the lane named its own review file as a mutation.
+    expect(relativeOutputPath('/repo', 'review.txt')).toBe('review.txt');
+    expect(relativeOutputPath('/repo', './codev/reviews/x.txt')).toBe('codev/reviews/x.txt');
+  });
+
+  it('accepts an absolute path inside the workspace', () => {
+    expect(relativeOutputPath('/repo', '/repo/codev/x.txt')).toBe('codev/x.txt');
+  });
+
+  it('rejects a path outside the workspace, including a sibling with a shared prefix', () => {
+    // The opposite error a plain prefix test makes: /repo-2 is not inside /repo.
+    expect(relativeOutputPath('/repo', '/repo-2/x.txt')).toBeNull();
+    expect(relativeOutputPath('/repo', '../elsewhere/x.txt')).toBeNull();
+    expect(relativeOutputPath('/repo', '/tmp/x.txt')).toBeNull();
+  });
+
+  it('is null when no output path was given', () => {
+    expect(relativeOutputPath('/repo', undefined)).toBeNull();
+  });
+});
+
+describe('formatSnapshotLostWarning', () => {
+  it('distinguishes "cannot tell" from "nothing changed"', () => {
+    const w = formatSnapshotLostWarning('claude', 'not a git repository');
+    expect(w).toContain('WORKING TREE UNREADABLE');
+    expect(w).toContain('not the same as "nothing changed"');
+    expect(w).toContain('not a git repository');
   });
 });
 

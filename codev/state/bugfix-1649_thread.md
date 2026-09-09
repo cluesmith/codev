@@ -132,3 +132,48 @@ load-bearing and the test says so.
   moved, not who moved it. Wording is deliberate and tested.
 - Gitignored paths are invisible to it. Deliberate — that is what keeps consult's own output
   from tripping it — but a lane writing into an ignored path goes unnoticed.
+
+## CMAP round 1 — PR #1659
+
+gemini=APPROVE, codex=REQUEST_CHANGES, claude=REQUEST_CHANGES.
+
+Four findings, all verified against source before acting, all real, all fixed.
+
+**1. Sibling-lane review files would false-positive on every adopter cmap round** (claude,
+blocking). porch's verify step (`porch/next.ts:585`) runs three `consult --output
+codev/projects/<id>/<id>-<phase>-iter<N>-<model>.txt` lanes *in parallel against one worktree*.
+Each lane could only exclude its own path, so each would report its two siblings. Invisible
+here because this repo's `.gitignore` carries `codev/projects/*/*.txt` — and
+`CODEV_GITIGNORE_ENTRIES` (`lib/gitignore.ts`) does **not** ship that rule. Verified both
+claims by reading the files. This is the same shape as the `.consult/history.log` bug I'd
+already hit, and it would have trained the warning into noise by week one. Now a rule in code:
+a regex on the naming convention that `computePersistentOutputPath` and porch's
+`getReviewFilePath` share.
+
+**2. Relative `--output` bypassed the exclusion** (claude). `options.output` is passed through
+raw and the guard was `outputPath?.startsWith(workspaceRoot)` — so `consult -o review.txt` from
+the repo root failed the string test and the lane named its own file. The same raw prefix test
+had the opposite bug too: `/repo` matches `/repo-2/x`. Replaced with a real
+resolve-and-relativise (`relativeOutputPath`), tested both directions.
+
+**3. The tripwire failed open on an unavailable post-snapshot** (codex). I reported an
+unavailable *before* snapshot but let `diffTreeSnapshots` return `[]` for an unavailable
+*after* — so a lane that damaged `.git` produced silence, which is precisely the failure mode
+this module exists to prevent. Now a distinct `WORKING TREE UNREADABLE` warning that says
+"cannot tell" rather than "nothing changed".
+
+**4. Nothing tested the wiring** (both). Every tripwire test called the exported functions
+directly, so deleting the wrapper from `runConsultation()` left all 5969 tests green — the
+issue's "the tripwire fires when a write is simulated" clause was carried only by unit tests
+and my manual CLI run. Exactly the vacuity failure this PR is about, in my own work. Added
+`tripwire-wiring.test.ts`: real `consult()`, stubbed SDK that writes mid-review, real git repo.
+**Verified it discriminates** by bypassing the wrapper and re-running — 5 of 7 fail (the two
+that pass are the negative controls, correctly).
+
+Also pinned doctor's new probe instruction (claude, non-blocking #4).
+
+Not acted on: claude's non-blocking #3 — background cmap while the author keeps working will
+fire the banner routinely. Inherent to a before/after comparison in a shared worktree; the
+"or you" wording is the mitigation. Worth watching whether it becomes the dominant case.
+
+Suite after fixes: 5984 passed, 48 skipped, 0 failed. tsc clean.

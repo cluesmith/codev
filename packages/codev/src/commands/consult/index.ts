@@ -34,7 +34,9 @@ import { assertAgyLaneAllowedUnderTest } from '../../lib/test-env.js';
 import {
   snapshotTree,
   diffTreeSnapshots,
+  relativeOutputPath,
   formatTreeChangeWarning,
+  formatSnapshotLostWarning,
   appendTreeChangeWarningToOutput,
 } from './tree-tripwire.js';
 
@@ -1305,14 +1307,23 @@ async function runConsultation(
     // In the `finally` because a lane that threw mid-turn is exactly when an
     // unrestored edit is most likely to still be sitting in the tree.
     if (before.available) {
-      const ignore = outputPath?.startsWith(workspaceRoot)
-        ? [path.relative(workspaceRoot, outputPath)]
-        : [];
-      const changed = diffTreeSnapshots(before, snapshotTree(workspaceRoot), ignore);
-      if (changed.length > 0) {
-        const warning = formatTreeChangeWarning(model, changed);
+      const after = snapshotTree(workspaceRoot);
+      if (!after.available) {
+        // Not "no changes". A second `git status` that fails after the first one
+        // worked means something happened to the repository during the review,
+        // which is more alarming than the mutation this is watching for — and
+        // `diffTreeSnapshots` would otherwise report `[]` and say nothing.
+        const warning = formatSnapshotLostWarning(model, after.reason);
         console.error(`\n${chalk.red.bold(warning)}\n`);
         appendTreeChangeWarningToOutput(outputPath, warning);
+      } else {
+        const own = relativeOutputPath(workspaceRoot, outputPath);
+        const changed = diffTreeSnapshots(before, after, own ? [own] : []);
+        if (changed.length > 0) {
+          const warning = formatTreeChangeWarning(model, changed);
+          console.error(`\n${chalk.red.bold(warning)}\n`);
+          appendTreeChangeWarningToOutput(outputPath, warning);
+        }
       }
     }
   }

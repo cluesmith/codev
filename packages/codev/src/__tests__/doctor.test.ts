@@ -1181,4 +1181,22 @@ describe('doctor command', () => {
       expect(hasOperational).toBe(true);
     });
   });
+
+  describe('Claude SDK auth probe (#1649 audit)', () => {
+    it('tells the probe not to touch anything', async () => {
+      // The package's second `bypassPermissions` call site. It is one turn with
+      // no tools needed, but it had no system prompt at all and runs in whatever
+      // directory the user typed `codev doctor` in. The #1649 fix is instruction
+      // rather than restriction, so the instruction is the thing to pin.
+      vi.resetModules();
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      const call = mockDoctorQueryFn.mock.calls.at(-1)?.[0];
+      expect(call?.options?.systemPrompt).toMatch(/do not read, create, or modify any file/i);
+      expect(call?.options?.systemPrompt).toMatch(/do not[\s\S]*run any command/i);
+    });
+  });
 });
