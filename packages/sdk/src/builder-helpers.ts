@@ -174,3 +174,88 @@ export function deriveAttention(data: OverviewData | null, now: number = Date.no
     isEmpty,
   };
 }
+
+/**
+ * The **canonical cross-client urgency order** over two `AttentionSummary` values: a comparator
+ * that ranks "what needs a human MOST" first. This is `deriveAttention`'s policy one level up —
+ * it lives here, beside it, for the same reason (attention is shared UI policy, kept out of the
+ * wire-contracts-only types package) so no client re-invents the order and drifts. A workspace-list
+ * view sorts its rows with this; a fleet quick-pick presents them in this order.
+ *
+ * Semantics (a deterministic **total order**):
+ *
+ * 1. Each summary falls into a single **primary bucket** — the most-urgent signal it carries, in the
+ *    order **pending-gate → idle-waiting → held-mail → queued-feedback → quiet**. A summary with both
+ *    a pending gate and held mail is a pending-gate workspace; the lower-urgency signals don't lower
+ *    its rank. Lower bucket sorts first.
+ * 2. Within a bucket, the tie-break matches the bucket's meaning:
+ *    - **pending-gate** and **idle-waiting**: the *oldest* item first (longest-waiting; a `null`
+ *      `since` — e.g. the PR-ready signal — sorts as +∞, i.e. last within the bucket).
+ *    - **held-mail**: an escalated workspace before a merely-held one; then a higher held total first.
+ *    - **queued-feedback**: a higher queued total first.
+ * 3. Equal summaries compare `0`. `compareAttention` never breaks a tie on anything outside the
+ *    summary (it cannot see the workspace's path or label), so callers that want a stable secondary
+ *    order (e.g. by disambiguated label) must **pre-order by that key and use a stable sort**.
+ *
+ * Pure and dependency-free (reads only the two arguments); `Array.prototype.sort` in every engine
+ * Codev targets is stable, so the caller-stable-sort contract in (3) is safe to rely on.
+ */
+export function compareAttention(a: AttentionSummary, b: AttentionSummary): number {
+  const rankA = urgencyBucket(a);
+  const rankB = urgencyBucket(b);
+  if (rankA !== rankB) { return rankA - rankB; }
+
+  switch (rankA) {
+    case 0: // pending gates — oldest gate first
+      return ascending(oldestSince(a.pendingGates), oldestSince(b.pendingGates));
+    case 1: // idle-waiting — oldest wait first
+      return ascending(oldestSince(a.waiting), oldestSince(b.waiting));
+    case 2: // held mail — escalated first, then higher held total
+      if (a.heldEscalated !== b.heldEscalated) { return escalationRank(b) - escalationRank(a); }
+      return b.heldTotal - a.heldTotal;
+    case 3: // queued feedback — higher total first
+      return queuedTotal(b) - queuedTotal(a);
+    default: // quiet — nothing to order on
+      return 0;
+  }
+}
+
+/** Ascending numeric compare that is safe for `Infinity`: equal values (incl. `∞ === ∞`) give 0. */
+function ascending(x: number, y: number): number {
+  if (x === y) { return 0; }
+  if (x < y) { return -1; }
+  return 1;
+}
+
+/** Primary urgency bucket: 0 (most urgent) … 4 (quiet). The most-urgent signal present wins. */
+function urgencyBucket(s: AttentionSummary): number {
+  if (s.pendingGates.length > 0) { return 0; }
+  if (s.waiting.length > 0) { return 1; }
+  if (s.heldTotal > 0) { return 2; }
+  if (s.queuedFeedback.length > 0) { return 3; }
+  return 4;
+}
+
+/** Earliest `since` (ms) across items; a `null` since counts as +∞, an empty list as +∞. */
+function oldestSince(items: ReadonlyArray<{ since: string | null }>): number {
+  let oldest = Infinity;
+  for (const item of items) {
+    let ms = Infinity;
+    if (item.since !== null) { ms = new Date(item.since).getTime(); }
+    if (ms < oldest) { oldest = ms; }
+  }
+  return oldest;
+}
+
+/** 1 when a summary's held mail has escalated, else 0 — the escalated-first ordering key. */
+function escalationRank(s: AttentionSummary): number {
+  if (s.heldEscalated) { return 1; }
+  return 0;
+}
+
+/** Total queued review comments across a summary's per-builder counts. */
+function queuedTotal(s: AttentionSummary): number {
+  let total = 0;
+  for (const item of s.queuedFeedback) { total += item.count; }
+  return total;
+}

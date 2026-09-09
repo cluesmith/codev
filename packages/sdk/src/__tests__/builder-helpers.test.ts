@@ -5,7 +5,8 @@
 
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';
-import { deriveAttention, isIdleWaiting, IDLE_WAITING_THRESHOLD_MS } from '../builder-helpers.js';
+import { compareAttention, deriveAttention, isIdleWaiting, IDLE_WAITING_THRESHOLD_MS } from '../builder-helpers.js';
+import type { AttentionSummary } from '../builder-helpers.js';
 
 const NOW = Date.parse('2026-08-25T12:00:00Z');
 const STALE = new Date(NOW - IDLE_WAITING_THRESHOLD_MS - 60_000).toISOString(); // 6 min ago → idle
@@ -147,3 +148,125 @@ describe('deriveAttention', () => {
     expect(first).not.toBe(second);
   });
 });
+
+// --- compareAttention: the canonical cross-client urgency order ---
+
+const ref = { builderId: 'b', issueId: null, issueTitle: null };
+
+/** An `AttentionSummary` with only the fields under test set; the rest empty/quiet. */
+function summary(over: Partial<AttentionSummary>): AttentionSummary {
+  return {
+    pendingGates: [],
+    waiting: [],
+    heldTotal: 0,
+    heldEscalated: false,
+    heldMail: [],
+    queuedFeedback: [],
+    isEmpty: true,
+    ...over,
+  };
+}
+
+const gate = (since: string | null) => summary({ pendingGates: [{ ...ref, gate: 'plan review', since }], isEmpty: false });
+const waiting = (since: string | null) => summary({ waiting: [{ ...ref, since }], isEmpty: false });
+const held = (heldTotal: number, heldEscalated = false) => summary({ heldTotal, heldEscalated, heldMail: [{ ...ref, count: heldTotal }], isEmpty: false });
+const queued = (count: number) => summary({ queuedFeedback: [{ ...ref, count }], isEmpty: false });
+const quiet = () => summary({});
+
+function sign(n: number): number {
+  if (n < 0) { return -1; }
+  if (n > 0) { return 1; }
+  return 0;
+}
+
+describe('compareAttention — bucket precedence', () => {
+  // Ordered most-urgent → least-urgent.
+  const ladder: Array<[string, AttentionSummary]> = [
+    ['pending-gate', gate('2026-08-25T10:00:00Z')],
+    ['idle-waiting', waiting('2026-08-25T10:00:00Z')],
+    ['held-mail', held(2)],
+    ['queued-feedback', queued(2)],
+    ['quiet', quiet()],
+  ];
+
+  it('ranks pending-gate > waiting > held-mail > queued-feedback > quiet', () => {
+    for (let i = 0; i < ladder.length - 1; i++) {
+      const [na, a] = ladder[i];
+      const [nb, b] = ladder[i + 1];
+      expect(`${na}<${nb}:${sign(compareAttention(a, b))}`).toBe(`${na}<${nb}:-1`);
+    }
+  });
+
+  it('uses the MOST-urgent signal present as the bucket (a gate+held summary is a gate)', () => {
+    const gateAndHeld = summary({ pendingGates: [{ ...ref, gate: 'plan review', since: '2026-08-25T10:00:00Z' }], heldTotal: 9, heldMail: [{ ...ref, count: 9 }], isEmpty: false });
+    expect(sign(compareAttention(gateAndHeld, held(9)))).toBe(-1); // gate wins over pure held
+  });
+});
+
+describe('compareAttention — within-bucket tie-breaks', () => {
+  it('pending-gate & waiting: oldest since first, null since last', () => {
+    expect(sign(compareAttention(gate('2026-08-25T09:00:00Z'), gate('2026-08-25T11:00:00Z')))).toBe(-1);
+    expect(sign(compareAttention(gate('2026-08-25T09:00:00Z'), gate(null)))).toBe(-1); // PR-ready (null) sorts last
+    expect(sign(compareAttention(waiting('2026-08-25T09:00:00Z'), waiting('2026-08-25T11:00:00Z')))).toBe(-1);
+  });
+  it('held-mail: escalated before plain, then higher total first', () => {
+    expect(sign(compareAttention(held(1, true), held(9, false)))).toBe(-1); // escalation beats volume
+    expect(sign(compareAttention(held(5), held(2)))).toBe(-1); // higher total first
+  });
+  it('queued-feedback: higher total first', () => {
+    expect(sign(compareAttention(queued(5), queued(2)))).toBe(-1);
+  });
+});
+
+describe('compareAttention — order properties', () => {
+  const samples: AttentionSummary[] = [
+    gate('2026-08-25T09:00:00Z'), gate('2026-08-25T11:00:00Z'), gate(null),
+    waiting('2026-08-25T08:00:00Z'), waiting('2026-08-25T12:00:00Z'),
+    held(1, true), held(9, false), held(3, false),
+    queued(5), queued(1), quiet(),
+  ];
+
+  it('is antisymmetric: sgn(cmp(a,b)) === sgn(-cmp(b,a)) for every pair', () => {
+    for (const a of samples) {
+      for (const b of samples) {
+        expect(sign(compareAttention(a, b))).toBe(sign(-compareAttention(b, a)));
+      }
+    }
+  });
+
+  it('is reflexive: every summary compares equal to itself', () => {
+    for (const a of samples) { expect(compareAttention(a, a)).toBe(0); }
+  });
+
+  it('is transitive across every ordered triple', () => {
+    for (const a of samples) {
+      for (const b of samples) {
+        for (const c of samples) {
+          if (compareAttention(a, b) <= 0 && compareAttention(b, c) <= 0) {
+            expect(compareAttention(a, c)).toBeLessThanOrEqual(0);
+          }
+        }
+      }
+    }
+  });
+
+  it('equal summaries compare 0 (caller supplies any label tie-break via a stable sort)', () => {
+    expect(compareAttention(gate('2026-08-25T10:00:00Z'), gate('2026-08-25T10:00:00Z'))).toBe(0);
+    expect(compareAttention(quiet(), quiet())).toBe(0);
+    expect(compareAttention(held(3, true), held(3, true))).toBe(0);
+  });
+
+  it('sorts a shuffled fleet into a stable, deterministic total order', () => {
+    const sorted = [...samples].sort(compareAttention);
+    // Re-sorting the already-sorted list is a no-op (stable + total).
+    expect([...sorted].sort(compareAttention)).toEqual(sorted);
+    // First is the oldest gate, last is quiet.
+    expect(sorted[0]).toBe(samples[0]); // gate @ 09:00
+    expect(sorted[sorted.length - 1]).toBe(quietRef(sorted));
+  });
+});
+
+/** The quiet summary instance in a sorted array (there is exactly one in `samples`). */
+function quietRef(sorted: AttentionSummary[]): AttentionSummary {
+  return sorted.find((s) => s.isEmpty)!;
+}
