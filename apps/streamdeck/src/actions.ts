@@ -426,6 +426,36 @@ export class OpenTerminalAction extends VerbKey {
   }
 }
 
+/**
+ * Cycle to the NEXT agent terminal in the sidebar Agents order (#1563), via the
+ * `focus-next-agent` verb. VSCode owns the roster and its order (grouping-aware,
+ * architects included in the Architect grouping), so this key is a pure trigger and
+ * carries no builder arg. The key form works on EVERY Stream Deck model (only the +
+ * has dials) and is the primary deck surface for this motion; a dial (`AgentNav`) is
+ * offered for decks that free one.
+ */
+export class FocusNextAgentKey extends VerbKey {
+  override readonly manifestId = 'com.cluesmith.codev.focus-next-agent';
+  protected readonly defaultVerb = 'focus-next-agent';
+  override onWillAppear(ev: WillAppearEvent<VerbSettings>): void {
+    if (!ev.action.isKey()) return;
+    void ev.action.setImage(svgToDataUri(labelFaceSvg('switch', 'Next Agent', '#a9a9b2')));
+    void ev.action.setTitle('');
+  }
+}
+
+/** Cycle to the PREVIOUS agent terminal (`focus-prev-agent`); the mirror of
+ *  `FocusNextAgentKey`. Pure trigger, no arg — VSCode holds the cursor. */
+export class FocusPrevAgentKey extends VerbKey {
+  override readonly manifestId = 'com.cluesmith.codev.focus-prev-agent';
+  protected readonly defaultVerb = 'focus-prev-agent';
+  override onWillAppear(ev: WillAppearEvent<VerbSettings>): void {
+    if (!ev.action.isKey()) return;
+    void ev.action.setImage(svgToDataUri(labelFaceSvg('switch', 'Prev Agent', '#a9a9b2')));
+    void ev.action.setTitle('');
+  }
+}
+
 /** PI setting for the Open Architect key: which architect a press targets. */
 type ArchitectTarget = 'builder' | 'main';
 type ArchitectSettings = { target?: ArchitectTarget };
@@ -1189,5 +1219,55 @@ export class ScrollNav extends SingletonAction {
       title: `Scroll · ${qualifier}`,
       value: this.status ?? selectedBuilderLine(this.store),
     });
+  }
+}
+
+/**
+ * Agent-terminal navigator dial (#1563): rotate cycles to the next / previous agent
+ * terminal in the sidebar Agents order; press opens/focuses the currently selected
+ * builder. VSCode owns the roster and its order (grouping-aware, architects included),
+ * so this dial is a PURE trigger — it computes no ordering of its own, matching the key
+ * pair. The default profile's four dials are already occupied, so like `PrNav`/`SpawnNav`
+ * this action ships in the manifest palette but is NOT placed in the shipped profile; the
+ * key pair (`FocusNext/PrevAgentKey`) is the primary surface. The face names the current
+ * agent from the deck's selection, which follows VSCode focus — builder-centric today
+ * (#1563), so it shows the current builder or `No builder`.
+ */
+export class AgentNav extends SingletonAction {
+  override readonly manifestId = 'com.cluesmith.codev.agent-nav';
+  private current?: DialAction;
+  constructor(private readonly store: CodevStore) {
+    super();
+    this.store.onChange(() => this.render());
+  }
+  override onWillAppear(ev: WillAppearEvent): void {
+    if (ev.action.isDial()) {
+      this.current = ev.action;
+      this.renderTo(ev.action);
+    }
+  }
+  override onWillDisappear(): void {
+    this.current = undefined;
+  }
+  override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    // One hop per rotate event: forward → next agent, back → previous. VSCode holds the
+    // authoritative cursor and picks the target, so there is no arg and no ordering here.
+    const verb = dir(ev) >= 0 ? 'focus-next-agent' : 'focus-prev-agent';
+    await this.store.client.sendCommand(verb, [], this.store.selectedWorkspacePath());
+  }
+  override async onDialDown(): Promise<void> {
+    // Press = jump to the currently selected builder's terminal; inert when nothing is
+    // selected (a silent no-op, like the review/scroll dials in their empty state).
+    const b = this.store.selectedBuilder();
+    if (!b) return;
+    await this.store.client.sendCommand('open-terminal', [b.id], this.store.selectedWorkspacePath());
+  }
+  private render(): void {
+    if (this.current) this.renderTo(this.current);
+  }
+  /** Line 1 names the motion; line 2 is the current agent — the selected builder the deck
+   *  follows from VSCode focus, or `No builder`. */
+  private renderTo(action: DialAction): void {
+    void action.setFeedback({ title: 'Agents', value: selectedBuilderLine(this.store) });
   }
 }
