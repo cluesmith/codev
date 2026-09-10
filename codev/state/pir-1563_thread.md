@@ -95,3 +95,22 @@ post-merge by the architect (referencing the PR#), NOT in feature branches. Git 
 
 DECK DEFAULTS taken (plan's recommended options, since approved as-is): 2a manifest-only (no profile
 change), builder-centric deck face (DP3 deferred), architects cycle only in Architect grouping (DP4).
+
+### dev-approval gate — deviation RATIFIED by architect (main), 2026-09-09
+main ratified the changelog-skip as an architect ruling: skipping in-PR changelog edits IS the
+documented convention (per-PR accumulation on docs/vscode-changelog post-merge; UNRELEASED.md's
+template says exactly that); the plan's mention was stale. TODO for REVIEW phase: record this
+deviation + ratification in codev/reviews/1563-*.md per protocol. Holding at dev-approval; Amr's
+word comes next (do NOT run porch approve until Amr's approval is relayed).
+
+### dev-approval — BUG found by Amr in testing, FIXED (commit f393b5a47)
+Symptom: cycle only moved main <-> #3816 (main's builder), never reached app/#1330/idle architects.
+Root cause: id-space mismatch. agentCycleOrder builds builder targets from OverviewBuilder.id (bare,
+e.g. '3816'); getActiveBuilderId() returns Tower's CANONICAL id (e.g. 'bugfix-3816'). My matcher used
+plain ===, so focus on any builder → currentIndex -1 → next snapped to index 0 (main). Everything past
+the first builder was unreachable. My earlier unit tests covered agentCycleOrder (the roster) but NOT
+the cycleAgentTerminal matching — that's the gap that let it ship.
+Fix: (1) extracted pure agentTargetIsFocused() using resolveAgentName tail-match (both directions),
+the same resolver the open path uses; (2) made the walk skip-on-failure (unopenable entry can't wedge
+the cycle); (3) 5 regression tests pinning bare-vs-canonical id. vscode suite 998 green, VSIX rebuilt.
+Still holding at dev-approval; Amr re-testing.
