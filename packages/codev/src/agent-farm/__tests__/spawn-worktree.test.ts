@@ -699,6 +699,17 @@ describe('spawn-worktree', () => {
       expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
     });
 
+    it('treats a blank state as open (gitlab pr-search leaves it empty) (#1637)', async () => {
+      // gitlab/pr-search.sh maps a missing glab state to "" via jq; the guard must
+      // treat that the same as absent — conservatively counting it as open.
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([{ number: 99, headRefName: 'fix-42', state: '' }]);
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
+    });
+
     it('warns when issue is already closed', async () => {
       const { existsSync } = await import('node:fs');
       vi.mocked(existsSync).mockReturnValueOnce(false);

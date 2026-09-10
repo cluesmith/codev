@@ -590,16 +590,17 @@ export async function checkBugfixCollisions(
   // 3. Check for open PRs referencing this issue via pr-search concept.
   // pr-search runs `--state all` (#759) so consult can find merged PRs; this guard
   // must ignore merged/closed ones, else it blocks spawns on already-resolved work
-  // (#1637). Filter to state === "OPEN"; treat a missing state (stale pr-search.sh
-  // override predating the field) as unknown → keep counting it, the conservative
-  // pre-#1637 behavior, with --force still available.
+  // (#1637). Filter to state === "OPEN"; treat an absent/empty state (a stale
+  // pr-search.sh override predating the field, or a forge script that leaves it
+  // blank) as unknown → keep counting it, the conservative pre-#1637 behavior,
+  // with --force still available.
   try {
     const result = await executeForgeCommand('pr-search', {
       CODEV_SEARCH_QUERY: `in:body #${issueNumber}`,
     }, { forgeConfig });
     if (result && Array.isArray(result)) {
       const prs = result as Array<{ number: number; title?: string; headRefName?: string; state?: string }>;
-      const openPRs = prs.filter((pr) => pr.state === undefined || pr.state === 'OPEN');
+      const openPRs = prs.filter((pr) => !pr.state || pr.state === 'OPEN');
       if (openPRs.length > 0) {
         if (!force) {
           const prList = openPRs.slice(0, 5).map((pr) =>

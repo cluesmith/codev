@@ -154,7 +154,8 @@ export interface PrSearchItem {
    * `CLOSED`. Because `pr-search` runs `--state all` (#759), consumers that
    * only want open PRs must filter on this — the spawn collision guard ignores
    * non-open results (#1637). Optional: a stale project-local override of
-   * `pr-search.sh` may predate this field, so consumers treat its absence as
+   * `pr-search.sh` may predate this field (and the gitlab script leaves it
+   * blank when glab omits it), so consumers treat an absent or empty value as
    * "unknown" rather than assuming a state.
    */
   state?: string;
