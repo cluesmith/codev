@@ -60,7 +60,7 @@ vi.mock('vscode', () => {
 });
 
 const { BuildersProvider, partitionArchitectGroups, agentTargetIsFocused } = await import('../views/builders.js');
-const { BuilderGroupTreeItem, IdleArchitectsGroupTreeItem } = await import('../views/builder-tree-item.js');
+const { BuilderGroupTreeItem, IdleArchitectsGroupTreeItem, BuilderTreeItem } = await import('../views/builder-tree-item.js');
 import type { AgentTarget } from '../views/builders.js';
 import type { BuilderGroup } from '../views/builder-grouping.js';
 
@@ -228,6 +228,41 @@ describe('agentTargetIsFocused — bridging the builder id spaces (Issue 1563 re
     expect(agentTargetIsFocused(a('app'), null, 'app')).toBe(true);
     expect(agentTargetIsFocused(a('app'), null, 'main')).toBe(false);
     expect(agentTargetIsFocused(a('app'), 'bugfix-3816', null)).toBe(false);
+  });
+});
+
+describe('revealTargetForAgent — sidebar selection follows the cycle (Issue 1563)', () => {
+  it('a builder target yields the builder row (matches the rendered row for reveal)', async () => {
+    await withAxis(
+      'architect',
+      [builder({ id: 'm', spawnedByArchitect: 'main' })],
+      [architect('main')],
+      (provider) => {
+        const item = provider.revealTargetForAgent({ kind: 'builder', id: 'm' });
+        expect(item).toBeInstanceOf(BuilderTreeItem);
+        expect((item as InstanceType<typeof BuilderTreeItem>).builderId).toBe('m');
+        expect(item!.id).toBeTruthy(); // a versioned id, so reveal can match it
+      },
+    );
+  });
+
+  it('an architect target yields a header carrying the stable builder-group id', async () => {
+    await withAxis(
+      'architect',
+      [],
+      [architect('main'), architect('app')],
+      (provider) => {
+        const item = provider.revealTargetForAgent({ kind: 'architect', name: 'app' });
+        expect(item).toBeInstanceOf(BuilderGroupTreeItem);
+        expect(item!.id).toBe('builder-group:app'); // matches the rendered header's id
+      },
+    );
+  });
+
+  it('returns undefined for a builder no longer in the cache', async () => {
+    await withAxis('stage', [], [architect('main')], (provider) => {
+      expect(provider.revealTargetForAgent({ kind: 'builder', id: 'gone' })).toBeUndefined();
+    });
   });
 });
 

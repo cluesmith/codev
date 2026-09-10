@@ -899,7 +899,20 @@ export async function activate(context: vscode.ExtensionContext) {
 			} else {
 				index = (index + direction + order.length) % order.length;
 			}
-			if (await openAgentTarget(order[index])) { return; }
+			if (await openAgentTarget(order[index])) {
+				// Mirror a row click: select the agent's sidebar row so the tree
+				// highlight follows the focused terminal (#1563). `focus: false`
+				// keeps the terminal focused, not the tree.
+				const item = buildersProvider.revealTargetForAgent(order[index]);
+				if (item) {
+					try {
+						await buildersView?.reveal(item, { select: true, focus: false });
+					} catch {
+						// Benign: the row may have changed between open and reveal.
+					}
+				}
+				return;
+			}
 		}
 	};
 

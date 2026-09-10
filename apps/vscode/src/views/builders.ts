@@ -455,6 +455,32 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
   }
 
   /**
+   * The tree item to `reveal({ select: true })` so the sidebar selection follows the
+   * agent-cycle commands (#1563) the same way a row click highlights the clicked row.
+   * Returns `undefined` when the agent is no longer in the cache.
+   *
+   *  - **builder**: the same versioned row `makeBuilderRow` renders, so `reveal` matches
+   *    it by id and expands its group ancestor to bring it into view.
+   *  - **architect**: a header carrying the stable `builder-group:<name>` id, which
+   *    matches the rendered top-level architect header. An idle-sibling architect folded
+   *    into the collapsed "Idle Architects" container can't be selected while collapsed
+   *    (it isn't rendered) — the terminal still opens; only the highlight is skipped.
+   */
+  revealTargetForAgent(target: AgentTarget): vscode.TreeItem | undefined {
+    const data = this.cache.getData();
+    if (!data) { return undefined; }
+    if (target.kind === 'builder') {
+      const builder = data.builders.find(b => b.id === target.id);
+      if (!builder) { return undefined; }
+      return this.makeBuilderRow(builder, Date.now());
+    }
+    // Architect header: only the id is consulted by `reveal`, so the count / state
+    // passed here are placeholders — they never render.
+    return new BuilderGroupTreeItem(
+      target.name, 0, vscode.TreeItemCollapsibleState.None, { blocked: 0, idle: 0, active: 0 });
+  }
+
+  /**
    * The individual idle-sibling architect rows shown when the "Idle Architects"
    * container is expanded (Issue 1182). Each is a childless
    * `BuilderGroupTreeItem` — the same leaf-like `(0)` row #1174 renders at top
