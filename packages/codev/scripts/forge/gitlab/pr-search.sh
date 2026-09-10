@@ -7,5 +7,9 @@
 # The spawn collision guard keys off state === "OPEN" to ignore merged MRs (#1637).
 # Not `glab … | jq`: POSIX sh has no pipefail, so the caller would see jq's exit
 # status and a failed glab would look like a successful empty list (#1645).
+# The capture-then-pipe shape hides `glab` from extractExecutable's first-line
+# heuristic (it lands on the `printf` builtin), so declare the backend explicitly
+# — same as github/pr-list.sh (#1645).
+# forge-executable: glab
 out="$(glab mr list --all --search "$CODEV_SEARCH_QUERY" --output json)" || exit 1
 printf '%s' "$out" | jq 'map(. + {state: (if ((.state // "") | ascii_downcase) == "opened" then "OPEN" else ((.state // "") | ascii_upcase) end)})'
