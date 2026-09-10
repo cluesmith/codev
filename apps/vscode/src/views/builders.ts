@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
+import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import type { OverviewCache } from './overview-data.js';
 import { builderWithWorktree, type OverviewBuilderWithWorktree } from '../builder-lookup.js';
@@ -70,6 +71,31 @@ export function orderForDisplay(builders: OverviewBuilder[], now: number = Date.
 export type AgentTarget =
   | { kind: 'architect'; name: string }
   | { kind: 'builder'; id: string };
+
+/**
+ * Does a cycle entry address the currently-focused agent terminal (#1563)? The
+ * agent-cycle commands use this to find their starting position in the roster.
+ *
+ * Architect names compare directly. Builder ids need a TOLERANT match: the roster
+ * carries the sidebar's bare `OverviewBuilder.id`, while `TerminalManager` reports
+ * the terminal's Tower-canonical id (`getActiveBuilderId`) — the two id spaces
+ * `resolveAgentName` bridges via a tail-match. A plain `===` never matches those, so
+ * the cycle would collapse to index 0 the moment focus sat on any builder (the bug
+ * this guards). Tried both directions so it holds whichever id is the canonical
+ * (longer) one.
+ */
+export function agentTargetIsFocused(
+  t: AgentTarget,
+  activeBuilderId: string | null,
+  activeArchitectName: string | null,
+): boolean {
+  if (t.kind === 'architect') {
+    return activeArchitectName !== null && t.name === activeArchitectName;
+  }
+  if (!activeBuilderId) { return false; }
+  return resolveAgentName(t.id, [{ id: activeBuilderId }]).builder !== null
+    || resolveAgentName(activeBuilderId, [{ id: t.id }]).builder !== null;
+}
 
 /**
  * Split architect-axis groups into the top-level rows and the idle siblings, in

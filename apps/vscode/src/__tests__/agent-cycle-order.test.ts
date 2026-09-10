@@ -59,7 +59,7 @@ vi.mock('vscode', () => {
   };
 });
 
-const { BuildersProvider, partitionArchitectGroups } = await import('../views/builders.js');
+const { BuildersProvider, partitionArchitectGroups, agentTargetIsFocused } = await import('../views/builders.js');
 const { BuilderGroupTreeItem, IdleArchitectsGroupTreeItem } = await import('../views/builder-tree-item.js');
 import type { AgentTarget } from '../views/builders.js';
 import type { BuilderGroup } from '../views/builder-grouping.js';
@@ -198,6 +198,36 @@ describe('agentCycleOrder (Issue 1563)', () => {
     );
     // main (+ its builder) first; the two idle siblings (0 builders) come last, alphabetical.
     expect(order.map(label)).toEqual(['A:main', 'B:m', 'A:demos', 'A:reviewer']);
+  });
+});
+
+describe('agentTargetIsFocused — bridging the builder id spaces (Issue 1563 regression)', () => {
+  const b = (id: string): AgentTarget => ({ kind: 'builder', id });
+  const a = (name: string): AgentTarget => ({ kind: 'architect', name });
+
+  it('matches the sidebar bare id against the terminal canonical id (the cycle-collapse bug)', () => {
+    // Roster carries OverviewBuilder.id ('3816'); getActiveBuilderId reports Tower's
+    // canonical id ('bugfix-3816'). A plain === misses, collapsing the cycle to index 0.
+    expect(agentTargetIsFocused(b('3816'), 'bugfix-3816', null)).toBe(true);
+  });
+
+  it('matches the reverse direction (canonical roster id vs bare active id)', () => {
+    expect(agentTargetIsFocused(b('bugfix-3816'), '3816', null)).toBe(true);
+  });
+
+  it('matches an exact id and rejects a different builder', () => {
+    expect(agentTargetIsFocused(b('pir-1563'), 'pir-1563', null)).toBe(true);
+    expect(agentTargetIsFocused(b('3816'), 'bugfix-1330', null)).toBe(false);
+  });
+
+  it('a builder target never matches when no builder terminal is focused', () => {
+    expect(agentTargetIsFocused(b('3816'), null, 'main')).toBe(false);
+  });
+
+  it('architect targets match by exact name, and never against a null focus', () => {
+    expect(agentTargetIsFocused(a('app'), null, 'app')).toBe(true);
+    expect(agentTargetIsFocused(a('app'), null, 'main')).toBe(false);
+    expect(agentTargetIsFocused(a('app'), 'bugfix-3816', null)).toBe(false);
   });
 });
 

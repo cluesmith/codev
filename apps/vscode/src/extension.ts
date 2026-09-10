@@ -58,7 +58,7 @@ import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-ter
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
-import { BuildersProvider, AccordionGate } from './views/builders.js';
+import { BuildersProvider, AccordionGate, agentTargetIsFocused, type AgentTarget } from './views/builders.js';
 import { PullRequestsProvider, PullRequestTreeItem } from './views/pull-requests.js';
 import { BacklogProvider } from './views/backlog.js';
 import { visibleBacklogCount, formatBacklogTitle } from './views/backlog-filter.js';
@@ -866,6 +866,16 @@ export async function activate(context: vscode.ExtensionContext) {
 	// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
 	// last-focused agent. Nothing focused → start at the ends. ≤1 agent → no-op with a
 	// status-bar hint.
+	// Open + focus one roster entry; returns true when a terminal was actually opened.
+	const openAgentTarget = async (t: AgentTarget): Promise<boolean> => {
+		if (t.kind === 'builder') {
+			return (await terminalManager?.openBuilderByRoleOrId(t.id, true)) !== undefined;
+		}
+		const opened = await vscode.commands.executeCommand<string | undefined>(
+			'codev.openArchitectTerminal', t.name);
+		return opened !== undefined;
+	};
+
 	const cycleAgentTerminal = async (direction: 1 | -1): Promise<void> => {
 		const order = buildersProvider.agentCycleOrder();
 		if (order.length <= 1) {
@@ -877,22 +887,19 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (!activeBuilderId) {
 			activeArchitectName = terminalManager?.getActiveArchitectName() ?? null;
 		}
-		const currentIndex = order.findIndex(t =>
-			(t.kind === 'builder' && t.id === activeBuilderId) ||
-			(t.kind === 'architect' && t.name === activeArchitectName));
-		let nextIndex: number;
-		if (currentIndex !== -1) {
-			nextIndex = (currentIndex + direction + order.length) % order.length;
-		} else if (direction === 1) {
-			nextIndex = 0;
-		} else {
-			nextIndex = order.length - 1;
-		}
-		const target = order[nextIndex];
-		if (target.kind === 'builder') {
-			await terminalManager?.openBuilderByRoleOrId(target.id, true);
-		} else {
-			await vscode.commands.executeCommand('codev.openArchitectTerminal', target.name);
+		const currentIndex = order.findIndex(
+			t => agentTargetIsFocused(t, activeBuilderId, activeArchitectName));
+
+		// Walk from the current position, skipping any entry that fails to open (a stale
+		// roster row with no live terminal) so one dead agent can never wedge the cycle.
+		let index = currentIndex;
+		for (let steps = 0; steps < order.length; steps++) {
+			if (index === -1) {
+				if (direction === 1) { index = 0; } else { index = order.length - 1; }
+			} else {
+				index = (index + direction + order.length) % order.length;
+			}
+			if (await openAgentTarget(order[index])) { return; }
 		}
 	};
 
