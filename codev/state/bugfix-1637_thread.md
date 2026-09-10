@@ -58,3 +58,20 @@ Implemented exactly the 5-point plan:
 NOTE on running tests: run vitest FROM packages/codev (the vitest-setup.ts sandbox-pin path is
 cwd-relative); a root-level `npx vitest packages/codev` spuriously fails the isolation/metrics
 tests because the setup file doesn't resolve.
+
+## PR (complete)
+
+PR #1673 opened (`Fixes #1637`), recorded with porch. Thread committed.
+
+CMAP (all scoped with `--project-id bugfix-1637`; bare invocation hit "Multiple
+projects found"):
+- gemini = APPROVE (HIGH, no key issues)
+- codex  = APPROVE (HIGH, no key issues)
+- claude = APPROVE (HIGH) — 2 non-blocking nits addressed in commit a3b072ab8:
+  (1) gitlab/pr-search.sh now captures glab output before piping to jq (#1645
+  convention) so a glab failure surfaces; (2) guard predicate broadened to
+  `!pr.state` so gitlab's empty-string state fallback is treated as open
+  (conservative), with a blank-state regression test.
+
+All three APPROVE. Handing off at the pr gate — awaiting architect approval
+before merge (CMAP APPROVE is not merge authorization).
