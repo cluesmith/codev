@@ -114,3 +114,14 @@ Fix: (1) extracted pure agentTargetIsFocused() using resolveAgentName tail-match
 the same resolver the open path uses; (2) made the walk skip-on-failure (unopenable entry can't wedge
 the cycle); (3) 5 regression tests pinning bare-vs-canonical id. vscode suite 998 green, VSIX rebuilt.
 Still holding at dev-approval; Amr re-testing.
+
+### Fix accepted at architect level (main, 2026-09-10)
+main reviewed + accepted the fix shape (tolerant both-direction match + skip-on-failure + regression
+tests). REVIEW-PHASE TODOs for codev/reviews/1563-*.md:
+  1. Deviation + ratification: in-PR changelog SKIP (docs/vscode-changelog convention) — ratified by main.
+  2. LESSON (main asked to name it): OverviewBuilder.id (sidebar/overview bare id) vs Tower-canonical
+     terminal id (getActiveBuilderId / builder-<id> registry key) is a SYSTEMIC SEAM. Any feature that
+     matches "the focused terminal" against "an overview-derived roster" must bridge the two id spaces
+     with resolveAgentName (tail-match), never ===. This one collapsed the whole cycle to index 0 and
+     slipped past unit tests because the roster (agentCycleOrder) was tested but the MATCHING was not —
+     test the focus->roster matching, not just the roster.
