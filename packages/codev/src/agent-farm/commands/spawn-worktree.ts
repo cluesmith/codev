@@ -587,20 +587,28 @@ export async function checkBugfixCollisions(
     }
   }
 
-  // 3. Check for open PRs referencing this issue via pr-search concept
+  // 3. Check for open PRs referencing this issue via pr-search concept.
+  // pr-search runs `--state all` (#759) so consult can find merged PRs; this guard
+  // must ignore merged/closed ones, else it blocks spawns on already-resolved work
+  // (#1637). Filter to state === "OPEN"; treat a missing state (stale pr-search.sh
+  // override predating the field) as unknown → keep counting it, the conservative
+  // pre-#1637 behavior, with --force still available.
   try {
     const result = await executeForgeCommand('pr-search', {
       CODEV_SEARCH_QUERY: `in:body #${issueNumber}`,
     }, { forgeConfig });
-    if (result && Array.isArray(result) && result.length > 0) {
-      const openPRs = result as Array<{ number: number; title?: string; headRefName?: string }>;
-      if (!force) {
-        const prList = openPRs.slice(0, 5).map((pr) =>
-          `  - PR #${pr.number}${pr.title ? `: ${pr.title}` : ''}`,
-        ).join('\n');
-        fatal(`Found ${openPRs.length} open PR(s) referencing issue #${issueNumber}:\n${prList}\nUse --force to proceed anyway.`);
+    if (result && Array.isArray(result)) {
+      const prs = result as Array<{ number: number; title?: string; headRefName?: string; state?: string }>;
+      const openPRs = prs.filter((pr) => pr.state === undefined || pr.state === 'OPEN');
+      if (openPRs.length > 0) {
+        if (!force) {
+          const prList = openPRs.slice(0, 5).map((pr) =>
+            `  - PR #${pr.number}${pr.title ? `: ${pr.title}` : ''}`,
+          ).join('\n');
+          fatal(`Found ${openPRs.length} open PR(s) referencing issue #${issueNumber}:\n${prList}\nUse --force to proceed anyway.`);
+        }
+        logger.warn(`Warning: Found ${openPRs.length} open PR(s) referencing issue - proceeding with --force`);
       }
-      logger.warn(`Warning: Found ${openPRs.length} open PR(s) referencing issue - proceeding with --force`);
     }
   } catch {
     // Non-fatal: continue if PR search concept unavailable

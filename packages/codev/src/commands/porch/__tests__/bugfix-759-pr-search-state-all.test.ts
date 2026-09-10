@@ -32,6 +32,14 @@ describe('pr-search forge scripts', () => {
       const content = fs.readFileSync(scriptPath, 'utf-8');
       expect(content).toContain('--search "$CODEV_SEARCH_QUERY"');
     });
+
+    it('emits state so the spawn guard can filter merged PRs (#1637)', () => {
+      // Paired-consumer contract: --state all keeps merged PRs visible for consult
+      // (#759), while the `state` field lets the spawn collision guard ignore them.
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('--state all');
+      expect(content).toMatch(/--json\s+\S*\bstate\b/);
+    });
   });
 
   describe('gitlab/pr-search.sh', () => {
@@ -49,6 +57,14 @@ describe('pr-search forge scripts', () => {
     it('still searches with the provided query', () => {
       const content = fs.readFileSync(scriptPath, 'utf-8');
       expect(content).toContain('--search "$CODEV_SEARCH_QUERY"');
+    });
+
+    it('normalizes opened MRs to the OPEN state so the guard can filter (#1637)', () => {
+      // glab reports state lowercase; the script maps opened -> OPEN so the spawn
+      // collision guard's state === "OPEN" comparison is forge-agnostic.
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('--all');
+      expect(content).toContain('"OPEN"');
     });
   });
 });
