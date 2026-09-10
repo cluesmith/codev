@@ -75,3 +75,17 @@ projects found"):
 
 All three APPROVE. Handing off at the pr gate — awaiting architect approval
 before merge (CMAP APPROVE is not merge authorization).
+
+## CI fix (post-gate-request)
+
+Architect flagged real CI red on 83756b9c5: `forge.test.ts` #1645 check
+'no built-in provider resolves a concept to a shell builtin'. Cause: my CMAP
+follow-up (a3b072ab8) reshaped gitlab/pr-search.sh to capture-then-pipe, which
+hid `glab` from extractExecutable's first-line heuristic (it skips the `out=`
+assignment, lands on the `printf` builtin). Fix (a834106b1): added explicit
+`# forge-executable: glab` declaration, matching github/pr-list.sh.
+
+Lesson: after changing a forge SCRIPT's shape, re-run forge.test.ts — I only
+re-ran guard+script tests on the CMAP follow-up. Full non-e2e suite now 6060
+passing; forge.test.ts 80 passing. Awaiting CI 7/7 on a834106b1 before
+re-requesting the gate.
