@@ -264,6 +264,44 @@ describe('revealTargetForAgent — sidebar selection follows the cycle (Issue 15
       expect(provider.revealTargetForAgent({ kind: 'builder', id: 'gone' })).toBeUndefined();
     });
   });
+
+  it('an idle-sibling architect (≥2 idle) parents to the "Idle Architects" container so reveal expands it', async () => {
+    await withAxis(
+      'architect',
+      [],
+      [architect('main'), architect('reviewer'), architect('brand')],
+      async (provider) => {
+        const item = provider.revealTargetForAgent({ kind: 'architect', name: 'brand' })!;
+        const parent = await provider.getParent(item);
+        expect(parent).toBeInstanceOf(IdleArchitectsGroupTreeItem);
+        expect((parent as vscode.TreeItem).id).toBe('idle-architects-group'); // matches the rendered container
+      },
+    );
+  });
+
+  it('a top-level architect header has no parent (root)', async () => {
+    await withAxis(
+      'architect',
+      [builder({ id: 'm', spawnedByArchitect: 'main' })],
+      [architect('main')],
+      async (provider) => {
+        const item = provider.revealTargetForAgent({ kind: 'architect', name: 'main' })!;
+        expect(await provider.getParent(item)).toBeUndefined();
+      },
+    );
+  });
+
+  it('a lone idle sibling renders top-level (no container), so it has no parent', async () => {
+    await withAxis(
+      'architect',
+      [builder({ id: 'm', spawnedByArchitect: 'main' })],
+      [architect('main'), architect('reviewer')], // reviewer is the only idle sibling
+      async (provider) => {
+        const item = provider.revealTargetForAgent({ kind: 'architect', name: 'reviewer' })!;
+        expect(await provider.getParent(item)).toBeUndefined();
+      },
+    );
+  });
 });
 
 describe('anti-drift: roster architect order equals the rendered architect order (#818)', () => {

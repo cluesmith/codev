@@ -234,8 +234,37 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     if (element instanceof BuilderFileTreeItem || element instanceof BuilderFolderTreeItem) {
       return this.parentForFileNode(element);
     }
-    // Group rows are roots.
+    if (element instanceof BuilderGroupTreeItem) {
+      // An idle-sibling architect header is rendered INSIDE the collapsed "Idle
+      // Architects" container (#1182), not at root, so return that container as its
+      // parent — otherwise `reveal` treats the header as a root, never expands the
+      // container, and can't select the row (#1563). Top-level headers (main,
+      // populated siblings, a lone idle sibling) have no parent.
+      return this.idleArchitectsContainerParent(element.groupName);
+    }
+    // Other group rows (the container itself, etc.) are roots.
     return undefined;
+  }
+
+  /**
+   * The "Idle Architects" container that renders `architectName` as a child, or
+   * `undefined` when the architect is not a folded idle sibling (wrong axis, fewer
+   * than two idle siblings so it renders top-level, or a populated / `main`
+   * architect). The returned container carries the stable `idle-architects-group`
+   * id, so `reveal` matches the rendered container and expands it (#1563).
+   */
+  private idleArchitectsContainerParent(architectName: string): IdleArchitectsGroupTreeItem | undefined {
+    const data = this.cache.getData();
+    if (!data) { return undefined; }
+    const grouping = this.active();
+    if (grouping.id !== 'architect') { return undefined; }
+    const roster = (data.architects ?? []).map(a => a.name);
+    const groups = grouping.group(orderForDisplay(data.builders, Date.now()), roster);
+    const { idleSiblings } = partitionArchitectGroups(groups);
+    // Fewer than two idle siblings → the lone one renders as its own top-level row.
+    if (idleSiblings.length < 2) { return undefined; }
+    if (!idleSiblings.some(g => g.key === architectName)) { return undefined; }
+    return new IdleArchitectsGroupTreeItem(idleSiblings.length);
   }
 
   /**
