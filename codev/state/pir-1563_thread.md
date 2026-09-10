@@ -125,3 +125,12 @@ tests). REVIEW-PHASE TODOs for codev/reviews/1563-*.md:
      with resolveAgentName (tail-match), never ===. This one collapsed the whole cycle to index 0 and
      slipped past unit tests because the roster (agentCycleOrder) was tested but the MATCHING was not —
      test the focus->roster matching, not just the roster.
+
+### dev-approval — sidebar selection follow-up (Amr, 2026-09-10), commit 62bd85894
+Amr: cycling opened+focused the terminal but the sidebar row stayed on the old agent (click selects
+natively; keyboard path never touched the tree). Added revealTargetForAgent() on the provider +
+buildersView.reveal(item, {select:true, focus:false}) after each open. Builder → the versioned
+BuilderTreeItem (reveal matches by id, expands group ancestor); architect → BuilderGroupTreeItem with
+stable id builder-group:<name>. Known edge: idle architects inside the collapsed "Idle Architects"
+container can't be highlighted while collapsed (row not rendered); terminal still opens. +3 tests,
+1001 vscode unit green, VSIX rebuilt. Still holding at dev-approval.
