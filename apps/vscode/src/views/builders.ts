@@ -476,8 +476,9 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     // container at the bottom). Idle siblings carry zero builders by construction, so
     // the inner loop is simply empty for them — no separate pass needed.
     const { topLevel, idleSiblings } = partitionArchitectGroups(groups);
+    const architectOrder = [...topLevel, ...idleSiblings];
     const targets: AgentTarget[] = [];
-    for (const g of [...topLevel, ...idleSiblings]) {
+    for (const g of architectOrder) {
       targets.push({ kind: 'architect', name: g.key });
       for (const b of g.items) { targets.push({ kind: 'builder', id: b.id }); }
     }
