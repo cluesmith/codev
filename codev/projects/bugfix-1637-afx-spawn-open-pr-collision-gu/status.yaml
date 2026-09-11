@@ -1,7 +1,7 @@
 id: bugfix-1637
 title: afx-spawn-open-pr-collision-gu
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-10T02:24:06.981Z'
-updated_at: '2026-09-11T10:21:55.540Z'
+updated_at: '2026-09-11T10:22:00.571Z'
 pr_history:
   - phase: pr
     pr_number: 1673
