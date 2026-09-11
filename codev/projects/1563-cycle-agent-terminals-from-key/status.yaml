@@ -1,7 +1,7 @@
 id: '1563'
 title: cycle-agent-terminals-from-key
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-08-27T00:31:33.209Z'
-updated_at: '2026-09-11T10:58:56.379Z'
+updated_at: '2026-09-11T10:59:28.640Z'
 pr_history:
   - phase: review
     pr_number: 1676
