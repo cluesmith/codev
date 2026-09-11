@@ -89,3 +89,23 @@ Lesson: after changing a forge SCRIPT's shape, re-run forge.test.ts — I only
 re-ran guard+script tests on the CMAP follow-up. Full non-e2e suite now 6060
 passing; forge.test.ts 80 passing. Awaiting CI 7/7 on a834106b1 before
 re-requesting the gate.
+
+## Provider audit + locked-state safety (owner-requested)
+
+Audited all four forge providers' pr-search resolution (verified empirically via
+resolveAllConcepts):
+- github -> github/pr-search.sh (gh: OPEN/CLOSED/MERGED) ✅
+- gitlab -> gitlab/pr-search.sh (jq normalization) ✅
+- gitea  -> DISABLED in preset; guard never calls pr-search, whole check skipped — no regression
+- linear -> falls through to github/pr-search.sh (Linear PRs live on GitHub) ✅
+
+Owner asked to lock in the gitlab `locked` safety change: `locked` (transient
+merging state) now maps to OPEN alongside `opened`, so the guard errs toward the
+recoverable --force prompt instead of silently skipping a live collision
+(commit 48df843c3).
+
+KNOWN pre-existing gap (NOT introduced here, flag for separate issue): gitlab's
+`glab mr list --output json` returns GitLab-shaped objects (iid/source_branch),
+not the contract's number/headRefName — so the guard's message reads
+`PR #undefined` on gitlab. forge.ts documents non-github presets as best-effort
+/ may-not-conform. State filtering works; field mapping is the older gap.
