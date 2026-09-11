@@ -379,7 +379,7 @@ describe('Agent-terminal cycle (Issue 1563)', () => {
     ctx.store.syncToBuilder('pir-2'); // #102, "Wire the dial"
     const action = { isDial: () => true, setFeedback: vi.fn() };
     new AgentNav(ctx.store).onWillAppear({ action, payload: {} } as never);
-    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Agents', value: '#102 Wire the dial' });
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Agents', value: '#102 Wire the dial', bar: 70 });
   });
 });
 

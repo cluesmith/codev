@@ -222,12 +222,17 @@ export class TerminalManager {
    * be opened. The "Forward to Builder" inject path (#789) uses this to target
    * the same terminal that was opened, even when called with a bare numeric id;
    * other callers ignore the return value.
+   *
+   * `quiet` (#1563): suppress the ambiguity warning and the sticky
+   * "no terminal" recovery prompt, returning `undefined` silently instead. The
+   * agent-cycle walk sets it so a single stale roster row is skipped to the next
+   * agent rather than blocking the walk behind a button-bearing notification.
    */
-  async openBuilderByRoleOrId(roleOrId: string, focus = false): Promise<string | undefined> {
+  async openBuilderByRoleOrId(roleOrId: string, focus = false, quiet = false): Promise<string | undefined> {
     const client = this.connectionManager.getClient();
     const workspacePath = this.connectionManager.getWorkspacePath();
     if (!client || !workspacePath) {
-      vscode.window.showErrorMessage('Codev: Not connected to Tower');
+      if (!quiet) { vscode.window.showErrorMessage('Codev: Not connected to Tower'); }
       return undefined;
     }
     try {
@@ -243,13 +248,15 @@ export class TerminalManager {
         { sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)) },
       );
       if (outcome.kind === 'ambiguous') {
-        vscode.window.showWarningMessage(
-          `Codev: Multiple builders match "${roleOrId}": ${outcome.matches.map(b => b.name).join(', ')}`,
-        );
+        if (!quiet) {
+          vscode.window.showWarningMessage(
+            `Codev: Multiple builders match "${roleOrId}": ${outcome.matches.map(b => b.name).join(', ')}`,
+          );
+        }
         return undefined;
       }
       if (outcome.kind === 'missing') {
-        await this.promptNoTerminalRecovery(roleOrId, workspacePath, focus);
+        if (!quiet) { await this.promptNoTerminalRecovery(roleOrId, workspacePath, focus); }
         return undefined;
       }
       const { builder, terminalId } = outcome;
@@ -257,7 +264,7 @@ export class TerminalManager {
       return builder.id;
     } catch (err) {
       this.log('ERROR', `Failed to open builder ${roleOrId}: ${(err as Error).message}`);
-      vscode.window.showErrorMessage(`Codev: Failed to open ${roleOrId}`);
+      if (!quiet) { vscode.window.showErrorMessage(`Codev: Failed to open ${roleOrId}`); }
       return undefined;
     }
   }

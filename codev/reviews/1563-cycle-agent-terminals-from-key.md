@@ -57,9 +57,9 @@ Routed to **COLD** `codev/resources/lessons-learned.md` → Architecture (a spec
 
 - **`agentCycleOrder()` axis-dependence (`builders.ts`)** — the roster is builders-only on stage/area and interleaves architect headers on the architect axis. This is the deliberate "mirror the sidebar exactly" reading (owner-confirmed): architects only cycle in Architect grouping. The anti-drift test pins that the architect order equals what `architectRootChildren` renders (the #818 shared-function discipline).
 - **The id-space match (`agentTargetIsFocused`)** — the bug found at dev-approval. It uses `resolveAgentName` both directions and is covered by regression tests keyed on the exact `3816` vs `bugfix-3816` collapse. This is the highest-value spot to scrutinize.
-- **Skip-on-failure walk (`cycleAgentTerminal`)** — a target that fails to open is skipped so one stale/dead agent can't wedge the cycle. Bounded by roster length.
+- **Skip-on-failure walk (`agentCycleAttemptOrder` + `cycleAgentTerminal`)** — the walk is a pure `agentCycleAttemptOrder(order, currentIndex, direction)` (unit-tested for wrap-around, ≤1 no-op, and the nothing-focused start) whose entries the command opens in order, taking the first that succeeds. The builder open runs **`quiet`** (new param on `openBuilderByRoleOrId`) so a stale roster row is skipped silently rather than stalling behind the sticky "no terminal" recovery prompt; a rare non-live *architect* still shows a transient warning as it is skipped (its roster is the live-session set, so this is uncommon).
 - **`getParent` change for idle architects (`builders.ts`)** — now returns the Idle-Architects container for a folded idle sibling so `reveal` expands it. Verify it still returns `undefined` (root) for stage/area headers, `main`, populated siblings, and a lone idle sibling (tests cover these).
-- **Deck face limitation** — the deck follows VS Code focus via the builder-only `builder-active` activity hook, so the dial/key faces show the current *builder*, not an architect name (deferred; noted in the plan as decision point 3).
+- **Deck face** — the **dial** (`AgentNav`) face shows the current *builder* (id + progress bar), following VS Code focus via the builder-only `builder-active` activity hook; the **keys** carry static `Next Agent` / `Prev Agent` labels. Neither shows an architect name (deferred; plan decision point 3).
 
 ## How to Test Locally
 
@@ -70,7 +70,22 @@ Routed to **COLD** `codev/resources/lessons-learned.md` → Architecture (a spec
   - Switch grouping (Stage / Area / Architect) — the cycle order follows; architects join only in Architect grouping
   - 0/1 agent → no-op with a status-bar hint; dev/shell tabs never join the cycle
   - The highlighted sidebar row follows the focused terminal; landing on an idle architect expands the Idle-Architects container
+  - Edge: with a stale agent row (in the view but not resolvable by Tower), cycling past it skips to the next agent without a blocking prompt
   - Stream Deck (if available): drag Next/Prev Agent keys (or the Agent Navigator dial) onto a spare slot — no default profile slot is free — and confirm the same motion
+
+## Consultation (3-way, single advisory pass)
+
+Gemini **APPROVE**, Claude **COMMENT**, Codex **REQUEST_CHANGES** — the two non-approvals converged on a consistent, fair set, all addressed in this branch before the pr gate:
+
+- **Skip-on-failure didn't truly prevent a wedge for builders** (Claude, the one real edge defect): `openBuilderByRoleOrId` awaited a *sticky* recovery prompt on a stale row. Fixed by a new `quiet` param that skips the prompt/warning on the cycle path; the review claim above is corrected. (Architect skips still show a rare transient warning — noted honestly.)
+- **The walk had no unit tests** (Codex + Claude): extracted the arithmetic into a pure `agentCycleAttemptOrder` and added wrap-around / ≤1-no-op / nothing-focused-start / skip-order tests.
+- **AgentNav dial missing the progress bar** (Codex): added (matches the Zoom navigator dial and the plan).
+- **Review wording** said keys show the current builder (Codex): corrected — only the dial does; keys are static labels.
+- **Stale comment** in `revealTargetForAgent` contradicting the container-expand fix (Claude): updated.
+- **Ambiguity-guard bypass** in `agentTargetIsFocused` (Claude, minor): documented with a comment.
+- AltGr ≡ Ctrl+Alt on some layouts (Claude, note only): owner-locked chord, consistent with the extension's existing `ctrl+alt+*` family — no change.
+
+Per PIR's single-pass rule the correctness backstop is these fixes + their regression tests + this pr-gate review; there is no automated re-review.
 
 ## Notes for the Record
 

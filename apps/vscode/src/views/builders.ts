@@ -93,8 +93,45 @@ export function agentTargetIsFocused(
     return activeArchitectName !== null && t.name === activeArchitectName;
   }
   if (!activeBuilderId) { return false; }
+  // Each `resolveAgentName` call passes a one-element candidate list, so the helper's
+  // multi-match ambiguity return can't fire here — we only ask "does THIS id tail-match
+  // that one?". `findIndex` then takes the first roster entry that matches, which is
+  // unambiguous for the bare numeric / `<protocol>-<n>` ids builders carry (a `563`
+  // that tail-matches both `pir-1563` and `air-563` doesn't arise in one workspace).
   return resolveAgentName(t.id, [{ id: activeBuilderId }]).builder !== null
     || resolveAgentName(activeBuilderId, [{ id: t.id }]).builder !== null;
+}
+
+/**
+ * The order in which the agent-cycle command (`codev.focusNext/PreviousAgentTerminal`,
+ * #1563) attempts targets: starting from the focused agent's neighbor in `direction`
+ * and walking with wrap-around, each roster entry exactly once. Empty when the roster
+ * has ≤1 agent (nothing to cycle to) — the command shows its status-bar hint then. A
+ * `currentIndex` of −1 (nothing focused) starts at the first entry going forward, the
+ * last going back. The command opens the first attempt that succeeds, so an entry that
+ * fails to open is simply the one tried before the next — the walk can't wedge on it
+ * (the focused agent itself is the final attempt, a no-op re-show if all others fail).
+ * Pure and vscode-free, so the walk arithmetic is unit-testable without the extension.
+ */
+export function agentCycleAttemptOrder(
+  order: readonly AgentTarget[],
+  currentIndex: number,
+  direction: 1 | -1,
+): AgentTarget[] {
+  if (order.length <= 1) { return []; }
+  const attempts: AgentTarget[] = [];
+  let index = currentIndex;
+  for (let step = 0; step < order.length; step++) {
+    if (index !== -1) {
+      index = (index + direction + order.length) % order.length;
+    } else if (direction === 1) {
+      index = 0;
+    } else {
+      index = order.length - 1;
+    }
+    attempts.push(order[index]);
+  }
+  return attempts;
 }
 
 /**
@@ -493,9 +530,10 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
    *  - **builder**: the same versioned row `makeBuilderRow` renders, so `reveal` matches
    *    it by id and expands its group ancestor to bring it into view.
    *  - **architect**: a header carrying the stable `builder-group:<name>` id, which
-   *    matches the rendered top-level architect header. An idle-sibling architect folded
-   *    into the collapsed "Idle Architects" container can't be selected while collapsed
-   *    (it isn't rendered) — the terminal still opens; only the highlight is skipped.
+   *    matches the rendered architect header. For an idle-sibling architect folded into
+   *    the "Idle Architects" container, `getParent` returns that container (via
+   *    `idleArchitectsContainerParent`), so `reveal` expands the container and selects
+   *    the row rather than leaving it hidden.
    */
   revealTargetForAgent(target: AgentTarget): vscode.TreeItem | undefined {
     const data = this.cache.getData();

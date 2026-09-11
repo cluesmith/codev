@@ -1266,8 +1266,14 @@ export class AgentNav extends SingletonAction {
     if (this.current) this.renderTo(this.current);
   }
   /** Line 1 names the motion; line 2 is the current agent — the selected builder the deck
-   *  follows from VSCode focus, or `No builder`. */
+   *  follows from VSCode focus, or `No builder`; the bar is that builder's progress (like the
+   *  Zoom navigator dial), 0 when nothing is selected. */
   private renderTo(action: DialAction): void {
-    void action.setFeedback({ title: 'Agents', value: selectedBuilderLine(this.store) });
+    const b = this.store.selectedBuilder();
+    void action.setFeedback({
+      title: 'Agents',
+      value: selectedBuilderLine(this.store),
+      bar: b ? Math.round(b.progress ?? 0) : 0,
+    });
   }
 }

@@ -143,3 +143,15 @@ Learned Updates, Things to Look At, How to Test, Notes). Recorded BOTH logged TO
 ratification (Notes section) + the id-space seam LESSON (added to COLD lessons-learned.md Architecture
 + referenced in review). Next: open PR, porch done --pr, porch done (triggers single-pass CMAP), then
 hold at pr gate.
+
+### REVIEW phase — CMAP done (Gemini APPROVE, Claude COMMENT, Codex REQUEST_CHANGES), all addressed
+Single-pass 3-way. Non-approvals converged; fixed in-branch before pr gate:
+- (real edge, Claude) skip-on-failure didn't prevent a wedge for builders — openBuilderByRoleOrId
+  awaited a STICKY recovery prompt. Added `quiet` param (skips prompt/warning); cycle passes quiet=true.
+- (Codex+Claude) walk untested → extracted pure agentCycleAttemptOrder(order,current,dir) + 5 tests
+  (wrap-around, <=1 no-op, nothing-focused start, skip order).
+- (Codex) AgentNav dial missing progress bar → added (matches ZoomNav + plan). Updated face test.
+- (Codex) review said keys show current builder → corrected (only dial does; keys static labels).
+- (Claude) stale comment in revealTargetForAgent → updated. (Claude) ambiguity-guard bypass → comment.
+- (Claude) AltGr note → no change (owner-locked, matches existing ctrl+alt+* family).
+vscode 1009 tests, streamdeck 257, types+lint green. Rebuild VSIX + update PR body + porch next → pr gate.

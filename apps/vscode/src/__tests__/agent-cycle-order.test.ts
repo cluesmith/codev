@@ -59,7 +59,7 @@ vi.mock('vscode', () => {
   };
 });
 
-const { BuildersProvider, partitionArchitectGroups, agentTargetIsFocused } = await import('../views/builders.js');
+const { BuildersProvider, partitionArchitectGroups, agentTargetIsFocused, agentCycleAttemptOrder } = await import('../views/builders.js');
 const { BuilderGroupTreeItem, IdleArchitectsGroupTreeItem, BuilderTreeItem } = await import('../views/builder-tree-item.js');
 import type { AgentTarget } from '../views/builders.js';
 import type { BuilderGroup } from '../views/builder-grouping.js';
@@ -228,6 +228,39 @@ describe('agentTargetIsFocused — bridging the builder id spaces (Issue 1563 re
     expect(agentTargetIsFocused(a('app'), null, 'app')).toBe(true);
     expect(agentTargetIsFocused(a('app'), null, 'main')).toBe(false);
     expect(agentTargetIsFocused(a('app'), 'bugfix-3816', null)).toBe(false);
+  });
+});
+
+describe('agentCycleAttemptOrder — the cycle walk (Issue 1563)', () => {
+  // Compact roster of five builders b0..b4 for readable index assertions.
+  const roster: AgentTarget[] = Array.from({ length: 5 }, (_, i) => ({ kind: 'builder', id: `b${i}` }));
+  const ids = (ts: AgentTarget[]) => ts.map(t => (t.kind === 'builder' ? t.id : `A:${t.name}`));
+
+  it('walks forward with wrap-around, visiting every entry once, current last', () => {
+    // From index 2, next: 3,4,0,1, then 2 (self) as the final no-op attempt.
+    expect(ids(agentCycleAttemptOrder(roster, 2, 1))).toEqual(['b3', 'b4', 'b0', 'b1', 'b2']);
+  });
+
+  it('walks backward with wrap-around', () => {
+    expect(ids(agentCycleAttemptOrder(roster, 2, -1))).toEqual(['b1', 'b0', 'b4', 'b3', 'b2']);
+  });
+
+  it('nothing focused (currentIndex -1) starts at the first entry going forward, last going back', () => {
+    expect(ids(agentCycleAttemptOrder(roster, -1, 1))).toEqual(['b0', 'b1', 'b2', 'b3', 'b4']);
+    expect(ids(agentCycleAttemptOrder(roster, -1, -1))).toEqual(['b4', 'b3', 'b2', 'b1', 'b0']);
+  });
+
+  it('a ≤1-agent roster yields no attempts (the command no-ops with a status-bar hint)', () => {
+    expect(agentCycleAttemptOrder([], 0, 1)).toEqual([]);
+    expect(agentCycleAttemptOrder([{ kind: 'builder', id: 'solo' }], 0, 1)).toEqual([]);
+    expect(agentCycleAttemptOrder([{ kind: 'builder', id: 'solo' }], -1, 1)).toEqual([]);
+  });
+
+  it('the attempt list is the skip order: the command opens the first that succeeds', () => {
+    // A dead b3 means the walk from b2 tries b3 (fails), then b4 — b4 is next in the list.
+    const attempts = agentCycleAttemptOrder(roster, 2, 1);
+    expect(attempts[0]).toEqual({ kind: 'builder', id: 'b3' });
+    expect(attempts[1]).toEqual({ kind: 'builder', id: 'b4' });
   });
 });
 

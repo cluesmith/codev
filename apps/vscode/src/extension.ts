@@ -58,7 +58,7 @@ import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-ter
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
-import { BuildersProvider, AccordionGate, agentTargetIsFocused, type AgentTarget } from './views/builders.js';
+import { BuildersProvider, AccordionGate, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
 import { PullRequestsProvider, PullRequestTreeItem } from './views/pull-requests.js';
 import { BacklogProvider } from './views/backlog.js';
 import { visibleBacklogCount, formatBacklogTitle } from './views/backlog-filter.js';
@@ -869,7 +869,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Open + focus one roster entry; returns true when a terminal was actually opened.
 	const openAgentTarget = async (t: AgentTarget): Promise<boolean> => {
 		if (t.kind === 'builder') {
-			return (await terminalManager?.openBuilderByRoleOrId(t.id, true)) !== undefined;
+			// `quiet` (#1563): skip a stale roster row silently instead of the sticky prompt.
+			return (await terminalManager?.openBuilderByRoleOrId(t.id, true, true)) !== undefined;
 		}
 		const opened = await vscode.commands.executeCommand<string | undefined>(
 			'codev.openArchitectTerminal', t.name);
@@ -878,10 +879,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	const cycleAgentTerminal = async (direction: 1 | -1): Promise<void> => {
 		const order = buildersProvider.agentCycleOrder();
-		if (order.length <= 1) {
-			vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
-			return;
-		}
+		// Current position = the focused agent terminal (builder id, else architect name).
+		// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
+		// last-focused agent; nothing focused starts at the ends.
 		const activeBuilderId = terminalManager?.getActiveBuilderId() ?? null;
 		let activeArchitectName: string | null = null;
 		if (!activeBuilderId) {
@@ -890,29 +890,27 @@ export async function activate(context: vscode.ExtensionContext) {
 		const currentIndex = order.findIndex(
 			t => agentTargetIsFocused(t, activeBuilderId, activeArchitectName));
 
-		// Walk from the current position, skipping any entry that fails to open (a stale
-		// roster row with no live terminal) so one dead agent can never wedge the cycle.
-		let index = currentIndex;
-		for (let steps = 0; steps < order.length; steps++) {
-			if (index === -1) {
-				if (direction === 1) { index = 0; } else { index = order.length - 1; }
-			} else {
-				index = (index + direction + order.length) % order.length;
-			}
-			if (await openAgentTarget(order[index])) {
-				// Mirror a row click: select the agent's sidebar row so the tree
-				// highlight follows the focused terminal (#1563). `focus: false`
-				// keeps the terminal focused, not the tree.
-				const item = buildersProvider.revealTargetForAgent(order[index]);
-				if (item) {
-					try {
-						await buildersView?.reveal(item, { select: true, focus: false });
-					} catch {
-						// Benign: the row may have changed between open and reveal.
-					}
+		// Walk with wrap-around, opening the first entry that succeeds and skipping any
+		// that fails so one stale agent can't wedge the cycle. Empty attempts means the
+		// roster has <=1 agent -- a no-op with a status-bar hint.
+		const attempts = agentCycleAttemptOrder(order, currentIndex, direction);
+		if (attempts.length === 0) {
+			vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
+			return;
+		}
+		for (const target of attempts) {
+			if (!(await openAgentTarget(target))) { continue; }
+			// Mirror a row click: select the agent's sidebar row so the tree highlight
+			// follows the focused terminal. `focus: false` keeps the terminal focused.
+			const item = buildersProvider.revealTargetForAgent(target);
+			if (item) {
+				try {
+					await buildersView?.reveal(item, { select: true, focus: false });
+				} catch {
+					// Benign: the row may have changed between open and reveal.
 				}
-				return;
 			}
+			return;
 		}
 	};
 
