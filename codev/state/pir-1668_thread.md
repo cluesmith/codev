@@ -45,3 +45,20 @@ Plan REVISED (Decisions §D1-D5). ALL open questions now resolved by Amr at the 
 - §D1 URL shape (fixed /ide/ + ?folder, single server), §D2 auth (Tower key = whole boundary, no per-folder authz), §D4 PID-by-port — all settled.
 New Files-to-Change: global.db IDE registration store (agent-farm/db/) + a local-only /api/ide register/deregister/status endpoint (blocked from tunnel like /api/tunnel/*). Dropped: lib/ide-record.ts, config.ts/getIdeConfig ide block.
 Nothing blocking from builder side. Recommitting; gate stays pending for Amr's plan-approval.
+
+## IMPLEMENT phase (2026-09-11)
+plan-approval approved (Amr via main; ran porch approve myself per #1494). Advanced to implement. Branch rebased on main (0 behind) before approval.
+
+Implemented per committed plan:
+- lib/ide-record.ts — ~/.agent-farm/ide-server.json record {prefix,port,serverPath,pid,defaultFolder,startedAt} read/write/delete + connection-token; IDE_DEFAULT_PREFIX '/ide/', IDE_DEFAULT_PORT 8200. (No types-pkg change — defaults are policy not wire contract.)
+- servers/ide-forward.ts — matchIdePrefix, buildForwardHeaders (strip x-forwarded-port/x-original-host/tower-key/web-key/tunnel-proxy/host; set loopback host; stamp x-forwarded-host/proto/prefix ONLY when tunnel-borne+authority; preserve Cache-Control/ETag), getPublicAuthority (from cloud-config), forwardIdeHttp, forwardIdeWebSocket (raw pipe).
+- servers/ide-server.ts — spawnIdeServer (Tower spawns detached+unref, waits for port), stopIdeServer (kill by port), ideServerStatus, ensureIdeServerLive (respawn-if-dead, in-flight guard), reconcileIdeServer (boot), handleIdeApi (POST/DELETE/GET /api/ide, local-only).
+- server-utils.ts — isForwardAuthorized (host + codev-tower-key header key check; #1589 swap seam; no per-folder logic).
+- tower-routes.ts — /api/ide dispatch + /ide/ forward branch (post-isRequestAllowed).
+- tower-websocket.ts — IDE WS branch BEFORE generic isWebSocketAllowed, gated by isForwardAuthorized.
+- tower-server.ts — reconcileIdeServer at boot (post-readiness, not awaited).
+- tunnel-client.ts — BLOCKED_PATH_SEGMENT now blocks /api/ide (management, local-only); /ide/ forward NOT blocked.
+- commands/ide.ts + cli.ts — afx ide start|stop|status (thin client over /api/ide).
+
+Build: full `pnpm --filter @cluesmith/codev build` (deps + tsc + assets) exit 0.
+Tests: 4 new files (ide-forward, ide-forward-auth, ide-record, ide-forward-integration). Integration test CAUGHT A REAL BUG: forwardIdeWebSocket used buildForwardHeaders which strips hop-by-hop Connection/Upgrade → upstream WS upgrade failed (got 200). Fixed by re-adding Connection: Upgrade / Upgrade: websocket (as tunnel-client does), forwarding client's Sec-WebSocket-Key so Accept validates. Re-running.
