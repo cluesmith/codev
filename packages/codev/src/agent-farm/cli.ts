@@ -9,6 +9,7 @@ import { Command } from 'commander';
 import { start, stop } from './commands/index.js';
 import { towerStart, towerStop, towerLog } from './commands/tower.js';
 import { towerSweepHusks } from './commands/tower-sweep-husks.js';
+import { ideStart, ideStop, ideStatus } from './commands/ide.js';
 import { towerRegister, towerDeregister, towerCloudStatus } from './commands/tower-cloud.js';
 import { logger } from './utils/logger.js';
 import { setCliOverrides } from './utils/config.js';
@@ -931,6 +932,54 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       const { teamUpdate } = await import('./commands/team-update.js');
       try {
         await teamUpdate({ cwd: process.cwd() });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  // IDE command - manage the local web IDE server Tower forwards `/ide/` to (Issue #1668)
+  const ideCmd = program
+    .command('ide')
+    .description('Manage the local web IDE server Tower forwards the /ide/ prefix to');
+
+  ideCmd
+    .command('start')
+    .description('Ask Tower to spawn the IDE server')
+    .requiredOption('--server-path <path>', 'Path to the codev-ide server-web binary (no default)')
+    .option('-p, --port <port>', 'Port to run on (default: 8200)')
+    .option('--default-folder <path>', 'Folder to open when a URL carries no ?folder=')
+    .action(async (options) => {
+      try {
+        await ideStart({
+          serverPath: options.serverPath,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+          defaultFolder: options.defaultFolder,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  ideCmd
+    .command('stop')
+    .description('Ask Tower to stop the IDE server')
+    .action(async () => {
+      try {
+        await ideStop();
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  ideCmd
+    .command('status')
+    .description('Show the IDE server prefix, port, PID, and liveness')
+    .action(async () => {
+      try {
+        await ideStatus();
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
