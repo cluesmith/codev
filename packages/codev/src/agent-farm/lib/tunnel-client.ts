@@ -61,16 +61,22 @@ const HOP_BY_HOP_HEADERS = new Set([
 const BLOCKED_PATH_PREFIX = '/api/tunnel/';
 
 /**
- * Matches an `api/tunnel/` segment anywhere in a normalized path, not just at
- * the root (#1370).
+ * Matches an `api/tunnel/` or `api/ide` management segment anywhere in a
+ * normalized path, not just at the root (#1370, #1668).
  *
  * A root-anchored prefix check misses the workspace-scoped form the dashboard
  * actually uses — `/workspace/<base64url>/api/tunnel/disconnect` — which
  * `handleWorkspaceRoutes` strips and dispatches to the very same
  * `handleTunnelEndpoint`. That path sailed through this blocklist and
  * deregistered the tower.
+ *
+ * `api/ide` (Issue #1668) is the IDE-server lifecycle endpoint — it spawns and
+ * kills a local process, so it is local-only like the tunnel endpoints. It is
+ * matched with a `(\/|$)` boundary (`/api/ide` and `/api/ide/…`, but not
+ * `/api/ideas`). The `/ide/` *forward* prefix carries no `api/` segment and is
+ * deliberately NOT blocked — it must reach Tower through the tunnel.
  */
-const BLOCKED_PATH_SEGMENT = /(^|\/)api\/tunnel\//;
+const BLOCKED_PATH_SEGMENT = /(^|\/)api\/(tunnel\/|ide(\/|$))/;
 
 /**
  * Header stamped on every request this client proxies in from the cloud (#1370).

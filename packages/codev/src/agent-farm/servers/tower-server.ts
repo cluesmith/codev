@@ -32,6 +32,7 @@ import {
   shutdownTunnel,
 } from './tower-tunnel.js';
 import { initCron, shutdownCron } from './tower-cron.js';
+import { reconcileIdeServer } from './ide-server.js';
 import {
   initInstances,
   shutdownInstances,
@@ -723,6 +724,12 @@ async function bootSequence(): Promise<void> {
   // shellper (1h grace by default), so a session created by an incoming
   // request while the sweep runs can never match it.
   await runHuskSweep();
+
+  // Issue #1668: reconcile the IDE server across a Tower restart — adopt a live
+  // one (no orphan) or respawn a recorded-but-dead one. Post-readiness and
+  // NOT awaited: a respawn's readiness wait must never delay the rest of boot,
+  // and a failure here never affects Tower itself.
+  reconcileIdeServer(log).catch((err) => log('ERROR', `IDE server reconcile failed: ${(err as Error).message}`));
 
   // Issue #1238: PTY session log retention. Session logs are per-session files
   // in ~/.agent-farm/logs that nothing ever deleted, so they accreted forever
