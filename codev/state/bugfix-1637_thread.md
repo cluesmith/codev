@@ -109,3 +109,12 @@ KNOWN pre-existing gap (NOT introduced here, flag for separate issue): gitlab's
 not the contract's number/headRefName — so the guard's message reads
 `PR #undefined` on gitlab. forge.ts documents non-github presets as best-effort
 / may-not-conform. State filtering works; field mapping is the older gap.
+
+## gitlab field-mapping fix (owner-requested "fix it now")
+
+Grounded the gitlab shape against the repo's own authority (gitlab/pr-list.sh
+comment + pr-exists.sh): glab emits iid/source_branch/target_branch, not
+number/headRefName/baseRefName. Fixed pr-search.sh to map all three in the jq
+pass (commit fced6d1a1), so the guard shows the real MR number and consult's
+findPRForIssue can resolve the base branch. Marked UNVERIFIED per #920 (no live
+glab in authoring/CI). CI baseline before this: 7/7 green on e292b1889.
