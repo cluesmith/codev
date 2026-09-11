@@ -155,3 +155,10 @@ Single-pass 3-way. Non-approvals converged; fixed in-branch before pr gate:
 - (Claude) stale comment in revealTargetForAgent → updated. (Claude) ambiguity-guard bypass → comment.
 - (Claude) AltGr note → no change (owner-locked, matches existing ctrl+alt+* family).
 vscode 1009 tests, streamdeck 257, types+lint green. Rebuild VSIX + update PR body + porch next → pr gate.
+
+### pr gate APPROVED by Amr (relayed by main), 2026-09-11 — NOT merging
+Ran `porch approve 1563 pr --a-human-explicitly-approved-this` (checks green). Porch now reports
+status=complete/verified and prompts to merge, BUT main's relay explicitly said: do NOT merge, merge
+execution follows separately on Amr's word via main. Honoring that over porch's generic prompt — I did
+NOT run pr-merge. Holding. When the merge lands (separately), record via porch and notify per protocol.
+PR #1676. Branch builder/pir-1563 at HEAD 6c83b2e18.
