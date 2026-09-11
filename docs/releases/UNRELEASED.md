@@ -33,6 +33,15 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Cycle agents from the keyboard and the Stream Deck (#1563, PR #1676)
+
+Moving between agent terminals no longer means reaching for the sidebar. In VS Code,
+`ctrl+alt+n` / `ctrl+alt+p` cycle focus through the Agents order the sidebar shows,
+skipping any agent whose terminal cannot open so a dead session never wedges the walk.
+The Stream Deck gains matching Next/Prev Agent keys and an Agent Navigator dial (not
+pre-placed, like the PR and Spawn navigators). Both surfaces share one cycle-order
+source with the sidebar renderer, so what you see is what you get.
+
 ## Polish
 
 <!-- Small vscode items as bullets:

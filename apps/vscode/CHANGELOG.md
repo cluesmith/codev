@@ -1,5 +1,11 @@
 # Change Log
 
+## [Unreleased]
+
+### What's new
+
+- **Cycle through agent terminals from the keyboard.** `ctrl+alt+n` / `ctrl+alt+p` move focus through the sidebar's Agents order: architects and builders exactly as the sidebar lists them. An agent whose terminal cannot open is skipped, so a dead session never wedges the cycle.
+
 ## [3.3.3] - 2026-09-05
 
 ### What's new
