@@ -24,4 +24,19 @@
 - Product code in packages/codev (shipped) — NOT a protocol/template file, so no codev-skeleton mirror needed.
 
 ## Status
-- 2026-09-11: PLAN drafted → codev/plans/1668-tower-forward-a-sub-path-to-a-.md. Covers HTTP+WS forward, auth seam (isForwardAuthorized, #1589-swappable), header hygiene + x-forwarded stamping from cloud config, marker integrity (#1674), afx ide lifecycle, config split, test plan (stub loopback + flagged real-server/cloud-e2e needs). 4 open questions for reviewer. Committing + awaiting plan-approval gate.
+- 2026-09-11: PLAN drafted → codev/plans/1668-tower-forward-a-sub-path-to-a-.md. Covers HTTP+WS forward, auth seam (isForwardAuthorized, #1589-swappable), header hygiene + x-forwarded stamping from cloud config, marker integrity (#1674), afx ide lifecycle, config, test plan (stub loopback + flagged real-server/cloud-e2e needs). 4 open questions for reviewer. Committed + awaiting plan-approval gate.
+
+## Gate dialogue (plan-approval) — decisions taken, still open
+Amr feedback in-session:
+- gzip/brotli: INCLUDE in this lane (was under-committed as "optional"; issue itself calls it optional-but-cheap). Move to core forward work.
+- Config: DO NOT split — reuse .codev/config.json with one `ide` block. Runtime PID is NOT config → discover live PID by port (Tower's own pattern via getProcessesOnPort), so the ~/.agent-farm/ide-servers.json record file is DROPPED. `ide` block fields: prefix (default /ide/), port, serverPath (no default), connectionTokenFile (optional, Tower-owned default), autoStart, artifactBaseUrl (reserved/null).
+- Auth seam: proceeding with (a) dedicated isForwardAuthorized reusing HTTP key logic (terminal-WS path untouched) unless objected.
+URL-shape question RESOLVED (codev-ide architect via main, 2026-09-11):
+- FIXED /ide/ + single server; workspace via ?folder=<encodeURIComponent(absPath)> per browser connection. --server-base-path /ide. Keeps bare /t/<tower>/ide/ (codev-cloud live). Do NOT introduce /workspace/<enc>/ide/.
+- Cacheability holds: assets under <base>/<quality>-<commit>/static with Cache-Control public max-age=31536000 + ETag; ~21MB boot caches once per server VERSION; only HTML doc varies per folder; reconnectionToken per-connection UUID never cached. Tower must PRESERVE Cache-Control/ETag on the forward + pass ?folder through.
+- Auth: Tower key check is the WHOLE trust boundary; server has NO per-folder isolation (any authenticated conn reads any path OS user can — same trust as a terminal). Do NOT build per-folder authz. isForwardAuthorized seam (a) confirmed, zero folder logic.
+- Resource: each browser window = own extension host ~100-300MB (doc note in afx ide status).
+- Workspace Trust prompts per folder until codev#1669 — not routing, not my concern.
+
+Plan REVISED accordingly (Decisions §D1-D5 added, recording workspace-scoped shape as REJECTED with the isolation-vs-caching why per main's directive). Settled: URL shape, auth/no-per-folder, single .codev ide block (natural home ~/.codev global layer), PID-by-port (no record file). STILL OPEN at gate: (D5) gzip — Amr leaned include in-session, main recommends defer; presenting both for Amr to rule. (Q2) private-fork real-server verification access.
+Recommitting revised plan; gate stays pending for Amr.
