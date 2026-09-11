@@ -69,5 +69,15 @@ describe('pr-search forge scripts', () => {
       expect(content).toContain('"OPEN"');
       expect(content).toMatch(/"opened"\s+or\s+\$s\s*==\s*"locked"/);
     });
+
+    it('maps glab fields to the PrSearchItem contract (#1637)', () => {
+      // glab emits iid/source_branch/target_branch, not number/headRefName/
+      // baseRefName. Without the mapping the spawn guard prints `PR #undefined`
+      // and consult can't resolve the MR base branch.
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('number: .iid');
+      expect(content).toContain('headRefName: .source_branch');
+      expect(content).toContain('baseRefName: .target_branch');
+    });
   });
 });
