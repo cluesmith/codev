@@ -59,12 +59,15 @@ describe('pr-search forge scripts', () => {
       expect(content).toContain('--search "$CODEV_SEARCH_QUERY"');
     });
 
-    it('normalizes opened MRs to the OPEN state so the guard can filter (#1637)', () => {
+    it('normalizes opened/locked MRs to the OPEN state so the guard can filter (#1637)', () => {
       // glab reports state lowercase; the script maps opened -> OPEN so the spawn
-      // collision guard's state === "OPEN" comparison is forge-agnostic.
+      // collision guard's state === "OPEN" comparison is forge-agnostic. `locked`
+      // (a transient merging state) also maps to OPEN so the guard errs toward the
+      // recoverable --force prompt rather than silently skipping a live collision.
       const content = fs.readFileSync(scriptPath, 'utf-8');
       expect(content).toContain('--all');
       expect(content).toContain('"OPEN"');
+      expect(content).toMatch(/"opened"\s+or\s+\$s\s*==\s*"locked"/);
     });
   });
 });
