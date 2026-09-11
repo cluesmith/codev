@@ -471,14 +471,15 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
       return groups.flatMap(g => g.items.map((b): AgentTarget => ({ kind: 'builder', id: b.id })));
     }
 
+    // Emit each architect header followed by its builders, in render order:
+    // top-level groups first, then the idle siblings last (the "Idle Architects"
+    // container at the bottom). Idle siblings carry zero builders by construction, so
+    // the inner loop is simply empty for them — no separate pass needed.
     const { topLevel, idleSiblings } = partitionArchitectGroups(groups);
     const targets: AgentTarget[] = [];
-    for (const g of topLevel) {
+    for (const g of [...topLevel, ...idleSiblings]) {
       targets.push({ kind: 'architect', name: g.key });
       for (const b of g.items) { targets.push({ kind: 'builder', id: b.id }); }
-    }
-    for (const g of idleSiblings) {
-      targets.push({ kind: 'architect', name: g.key });
     }
     return targets;
   }
