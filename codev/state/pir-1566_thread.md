@@ -172,6 +172,16 @@ DOCUMENTED RESIDUALS (comments in code, for review phase / follow-up):
 - disambiguateLabels dup labels only for trailing-sep/empty-segment paths; Tower realpaths, so N/A.
 Tests: SDK 141, vscode app 1022, compile (types+lint+esbuild) clean.
 
+### Merged origin/main into branch (2026-09-11)
+Owner asked to merge (not rebase). pir-1563 (the fence sibling) has since MERGED to main, so its files
+(builders.ts, terminal-manager.ts, command-relay.ts, streamdeck) are now on main + in my branch — the
+fence is moot; my Tower code never touched them so they coexist. One conflict in extension.ts: both
+lanes added code at the same spot (my Tower block + 1563's agent-cycle helpers) — kept BOTH; also took
+1563's expanded builders.js import. package.json auto-merged (both sides' contributions intact).
+Restored a runtime codev/team/messages.md cron line to avoid a spurious conflict. After merge:
+types+lint clean, vscode app 1050 tests pass. Merge commit c4c5b4295, pushed (fast-forward). Still at
+dev-approval gate (merge doesn't change gate state).
+
 ### Investigation (done)
 Launched 3 parallel Explore agents: SDK/types (TowerClient, deriveAttention, AttentionSummary,
 OverviewData, readLocalKey); vscode views/tree/command/SSE plumbing; Tower endpoints + streamdeck
