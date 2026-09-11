@@ -1,7 +1,7 @@
 id: '1668'
 title: tower-forward-a-sub-path-to-a-
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-11T09:59:52.172Z'
-updated_at: '2026-09-11T11:06:38.555Z'
+updated_at: '2026-09-11T11:06:46.020Z'
