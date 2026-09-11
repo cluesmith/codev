@@ -38,5 +38,10 @@ URL-shape question RESOLVED (codev-ide architect via main, 2026-09-11):
 - Resource: each browser window = own extension host ~100-300MB (doc note in afx ide status).
 - Workspace Trust prompts per folder until codev#1669 — not routing, not my concern.
 
-Plan REVISED accordingly (Decisions §D1-D5 added, recording workspace-scoped shape as REJECTED with the isolation-vs-caching why per main's directive). Settled: URL shape, auth/no-per-folder, single .codev ide block (natural home ~/.codev global layer), PID-by-port (no record file). STILL OPEN at gate: (D5) gzip — Amr leaned include in-session, main recommends defer; presenting both for Amr to rule. (Q2) private-fork real-server verification access.
-Recommitting revised plan; gate stays pending for Amr.
+Plan REVISED (Decisions §D1-D5). ALL open questions now resolved by Amr at the gate:
+- §D3 CONFIG: Amr challenged the config file — DROPPED. No config file at all. `afx ide start --server-path <bin> [--port] [--prefix]` (serverPath required, no default) spawns + REGISTERS {prefix,port,serverPath} with Tower via key-authed local call; Tower persists in global.db (SSOT for runtime state — arch invariant), reconciles/respawns on restart. Rationale: single global server makes per-repo .codev config ambiguous + machine-global file is hand-edited runtime state; global.db is the one state home. Reversal-bait why recorded in §D3.
+- §D5 gzip: DEFERRED (Amr) — matches main's routing-first rec. Not built; core written so it can be added later preserving ETag/Cache-Control.
+- Verification: private fork is LOCALLY accessible (Amr) — dev-approval exercises the REAL server locally; only cloud /t/<tower>/ide/ leg needs Amr's env.
+- §D1 URL shape (fixed /ide/ + ?folder, single server), §D2 auth (Tower key = whole boundary, no per-folder authz), §D4 PID-by-port — all settled.
+New Files-to-Change: global.db IDE registration store (agent-farm/db/) + a local-only /api/ide register/deregister/status endpoint (blocked from tunnel like /api/tunnel/*). Dropped: lib/ide-record.ts, config.ts/getIdeConfig ide block.
+Nothing blocking from builder side. Recommitting; gate stays pending for Amr's plan-approval.
