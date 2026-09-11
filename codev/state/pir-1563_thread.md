@@ -134,3 +134,12 @@ BuilderTreeItem (reveal matches by id, expands group ancestor); architect → Bu
 stable id builder-group:<name>. Known edge: idle architects inside the collapsed "Idle Architects"
 container can't be highlighted while collapsed (row not rendered); terminal still opens. +3 tests,
 1001 vscode unit green, VSIX rebuilt. Still holding at dev-approval.
+
+### REVIEW phase — dev-approval approved by Amr (relayed by main), 2026-09-11
+Rebased onto origin/main (was 19 behind), clean, force-pushed. Set aside an unrelated tower-cron
+append to codev/team/messages.md (not mine) during rebase; reset it to HEAD, not in my PR.
+Wrote codev/reviews/1563-*.md (Summary, Files, Commits, Test Results, Architecture Updates, Lessons
+Learned Updates, Things to Look At, How to Test, Notes). Recorded BOTH logged TODOs: changelog-skip
+ratification (Notes section) + the id-space seam LESSON (added to COLD lessons-learned.md Architecture
++ referenced in review). Next: open PR, porch done --pr, porch done (triggers single-pass CMAP), then
+hold at pr gate.
