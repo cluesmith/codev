@@ -58,7 +58,7 @@ import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-ter
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
-import { BuildersProvider, AccordionGate } from './views/builders.js';
+import { BuildersProvider, AccordionGate, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
 // Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
 import { TowerFleetCache } from './views/tower-cache.js';
 import { TowerProvider } from './views/tower.js';
@@ -893,6 +893,64 @@ export async function activate(context: vscode.ExtensionContext) {
 	towerCache.refresh();
 	// --- end Codev Tower ------------------------------------------------------------------------
 
+	// Move focus to the next (+1) or previous (-1) agent terminal in the Agents-view
+	// rendered order (#1563). The roster comes from the tree provider itself
+	// (`agentCycleOrder`), so the cycle mirrors the sidebar exactly and stays
+	// grouping-aware — no second ordering to drift. Opening focuses the terminal,
+	// opening it first if it isn't already open (same as clicking the row), so the
+	// roster is every live agent in the view, not just open tabs. The current
+	// position is the focused agent terminal (builder id, else architect name);
+	// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
+	// last-focused agent. Nothing focused → start at the ends. ≤1 agent → no-op with a
+	// status-bar hint.
+	// Open + focus one roster entry; returns true when a terminal was actually opened.
+	const openAgentTarget = async (t: AgentTarget): Promise<boolean> => {
+		if (t.kind === 'builder') {
+			// `quiet` (#1563): skip a stale roster row silently instead of the sticky prompt.
+			return (await terminalManager?.openBuilderByRoleOrId(t.id, true, true)) !== undefined;
+		}
+		const opened = await vscode.commands.executeCommand<string | undefined>(
+			'codev.openArchitectTerminal', t.name);
+		return opened !== undefined;
+	};
+
+	const cycleAgentTerminal = async (direction: 1 | -1): Promise<void> => {
+		const order = buildersProvider.agentCycleOrder();
+		// Current position = the focused agent terminal (builder id, else architect name).
+		// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
+		// last-focused agent; nothing focused starts at the ends.
+		const activeBuilderId = terminalManager?.getActiveBuilderId() ?? null;
+		let activeArchitectName: string | null = null;
+		if (!activeBuilderId) {
+			activeArchitectName = terminalManager?.getActiveArchitectName() ?? null;
+		}
+		const currentIndex = order.findIndex(
+			t => agentTargetIsFocused(t, activeBuilderId, activeArchitectName));
+
+		// Walk with wrap-around, opening the first entry that succeeds and skipping any
+		// that fails so one stale agent can't wedge the cycle. Empty attempts means the
+		// roster has <=1 agent -- a no-op with a status-bar hint.
+		const attempts = agentCycleAttemptOrder(order, currentIndex, direction);
+		if (attempts.length === 0) {
+			vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
+			return;
+		}
+		for (const target of attempts) {
+			if (!(await openAgentTarget(target))) { continue; }
+			// Mirror a row click: select the agent's sidebar row so the tree highlight
+			// follows the focused terminal. `focus: false` keeps the terminal focused.
+			const item = buildersProvider.revealTargetForAgent(target);
+			if (item) {
+				try {
+					await buildersView?.reveal(item, { select: true, focus: false });
+				} catch {
+					// Benign: the row may have changed between open and reveal.
+				}
+			}
+			return;
+		}
+	};
+
 	// Commands
 	context.subscriptions.push(
 		reg('codev.helloWorld', () => {
@@ -1146,6 +1204,8 @@ export async function activate(context: vscode.ExtensionContext) {
 				// Benign if the row is no longer present (e.g. mid-cleanup).
 			}
 		}),
+		reg('codev.focusNextAgentTerminal', () => cycleAgentTerminal(1)),
+		reg('codev.focusPreviousAgentTerminal', () => cycleAgentTerminal(-1)),
 		regCli('codev.spawnBuilder', (arg: vscode.TreeItem | string | undefined) =>
 			spawnBuilder(extractIssueId(arg))),
 		reg('codev.openBacklogIssue', (arg: vscode.TreeItem | undefined) => {

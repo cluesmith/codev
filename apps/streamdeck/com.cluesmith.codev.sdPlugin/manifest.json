@@ -95,6 +95,36 @@
       ]
     },
     {
+      "Name": "Next Agent Terminal",
+      "UUID": "com.cluesmith.codev.focus-next-agent",
+      "Tooltip": "Focus the next agent terminal in the Codev sidebar Agents order (wrap-around). Mirrors the sidebar exactly and is grouping-aware; the previous-agent key is its pair.",
+      "Icon": "icons/list/switch",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "icons/switch",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
+      "Name": "Previous Agent Terminal",
+      "UUID": "com.cluesmith.codev.focus-prev-agent",
+      "Tooltip": "Focus the previous agent terminal in the Codev sidebar Agents order (wrap-around). Mirrors the sidebar exactly and is grouping-aware; the next-agent key is its pair.",
+      "Icon": "icons/list/switch",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "icons/switch",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
       "Name": "Codev Action",
       "UUID": "com.cluesmith.codev.action",
       "Tooltip": "Run a Codev command (open terminals, view diff, send, spawn, refresh).",
@@ -284,6 +314,27 @@
       "States": [
         {
           "Image": "icons/scroll"
+        }
+      ]
+    },
+    {
+      "Name": "Agent Navigator",
+      "UUID": "com.cluesmith.codev.agent-nav",
+      "Tooltip": "Rotate to move to the next / previous agent terminal in the Codev sidebar Agents order; press to open the selected builder's terminal.",
+      "Icon": "icons/list/switch",
+      "Controllers": [
+        "Encoder"
+      ],
+      "Encoder": {
+        "layout": "layouts/title-value.json",
+        "TriggerDescription": {
+          "Rotate": "Next / previous agent terminal",
+          "Push": "Open the selected builder's terminal"
+        }
+      },
+      "States": [
+        {
+          "Image": "icons/switch"
         }
       ]
     }

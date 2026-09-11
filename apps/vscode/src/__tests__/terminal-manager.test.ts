@@ -111,8 +111,12 @@ describe('#804 — builder/shell terminals do not force-create a second editor g
   // group on demand, reshaping a single-column user's layout. Source-level per
   // this file's harness rationale (constructing TerminalManager needs heavy
   // vscode mocking).
+  // Scope the extraction to openTerminal's body first: other methods
+  // (e.g. getActiveArchitectName, #1563) also compare `type === 'architect'`,
+  // so splitting the whole file on that literal would grab the wrong region.
+  const openTerminalSrc = TM_SRC.split('private async openTerminal')[1] ?? '';
   const elseBranch =
-    TM_SRC.split("type === 'architect'")[1]?.split('createTerminal')[0] ?? '';
+    openTerminalSrc.split("type === 'architect'")[1]?.split('createTerminal')[0] ?? '';
 
   it('gates the second-group target on existing tab groups', () => {
     expect(elseBranch).toMatch(/vscode\.window\.tabGroups\.all\.length >= 2/);

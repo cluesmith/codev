@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
+import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import type { OverviewCache } from './overview-data.js';
 import { builderWithWorktree, type OverviewBuilderWithWorktree } from '../builder-lookup.js';
@@ -58,6 +59,103 @@ export function orderForDisplay(builders: OverviewBuilder[], now: number = Date.
   const idleWaiting = builders.filter(b => !b.blocked && isIdleWaiting(b, now));
   const active = builders.filter(b => !b.blocked && !isIdleWaiting(b, now));
   return [...blocked, ...idleWaiting, ...active];
+}
+
+/**
+ * One entry in the agent-terminal cycle (`codev.focusNext/PreviousAgentTerminal`,
+ * #1563): either an architect (addressed by name) or a builder (addressed by id) —
+ * the two openable agent kinds the Agents tree renders. Non-agent rows (group
+ * headers on the stage/area axes, changed-file rows) and non-agent terminals (the
+ * dev PTY, shells) are never `AgentTarget`s.
+ */
+export type AgentTarget =
+  | { kind: 'architect'; name: string }
+  | { kind: 'builder'; id: string };
+
+/**
+ * Does a cycle entry address the currently-focused agent terminal (#1563)? The
+ * agent-cycle commands use this to find their starting position in the roster.
+ *
+ * Architect names compare directly. Builder ids need a TOLERANT match: the roster
+ * carries the sidebar's bare `OverviewBuilder.id`, while `TerminalManager` reports
+ * the terminal's Tower-canonical id (`getActiveBuilderId`) — the two id spaces
+ * `resolveAgentName` bridges via a tail-match. A plain `===` never matches those, so
+ * the cycle would collapse to index 0 the moment focus sat on any builder (the bug
+ * this guards). Tried both directions so it holds whichever id is the canonical
+ * (longer) one.
+ */
+export function agentTargetIsFocused(
+  t: AgentTarget,
+  activeBuilderId: string | null,
+  activeArchitectName: string | null,
+): boolean {
+  if (t.kind === 'architect') {
+    return activeArchitectName !== null && t.name === activeArchitectName;
+  }
+  if (!activeBuilderId) { return false; }
+  // Each `resolveAgentName` call passes a one-element candidate list, so the helper's
+  // multi-match ambiguity return can't fire here — we only ask "does THIS id tail-match
+  // that one?". `findIndex` then takes the first roster entry that matches, which is
+  // unambiguous for the bare numeric / `<protocol>-<n>` ids builders carry (a `563`
+  // that tail-matches both `pir-1563` and `air-563` doesn't arise in one workspace).
+  return resolveAgentName(t.id, [{ id: activeBuilderId }]).builder !== null
+    || resolveAgentName(activeBuilderId, [{ id: t.id }]).builder !== null;
+}
+
+/**
+ * The order in which the agent-cycle command (`codev.focusNext/PreviousAgentTerminal`,
+ * #1563) attempts targets: starting from the focused agent's neighbor in `direction`
+ * and walking with wrap-around, each roster entry exactly once. Empty when the roster
+ * has ≤1 agent (nothing to cycle to) — the command shows its status-bar hint then. A
+ * `currentIndex` of −1 (nothing focused) starts at the first entry going forward, the
+ * last going back. The command opens the first attempt that succeeds, so an entry that
+ * fails to open is simply the one tried before the next — the walk can't wedge on it
+ * (the focused agent itself is the final attempt, a no-op re-show if all others fail).
+ * Pure and vscode-free, so the walk arithmetic is unit-testable without the extension.
+ */
+export function agentCycleAttemptOrder(
+  order: readonly AgentTarget[],
+  currentIndex: number,
+  direction: 1 | -1,
+): AgentTarget[] {
+  if (order.length <= 1) { return []; }
+  const attempts: AgentTarget[] = [];
+  let index = currentIndex;
+  for (let step = 0; step < order.length; step++) {
+    if (index !== -1) {
+      index = (index + direction + order.length) % order.length;
+    } else if (direction === 1) {
+      index = 0;
+    } else {
+      index = order.length - 1;
+    }
+    attempts.push(order[index]);
+  }
+  return attempts;
+}
+
+/**
+ * Split architect-axis groups into the top-level rows and the idle siblings, in
+ * render order — the single ordering rule shared by `architectRootChildren` (which
+ * builds tree rows) and `agentCycleOrder` (which builds the cycle roster), so the
+ * two cannot drift (the shared-function lesson, #818). `groups` arrives from
+ * `architectGrouping` already `main`-first then alphabetical; `topLevel` keeps that
+ * order (`main` and every populated sibling), and the idle siblings (zero builders,
+ * not `main`) are peeled off to be rendered/cycled last.
+ */
+export function partitionArchitectGroups(
+  groups: BuilderGroup[],
+): { topLevel: BuilderGroup[]; idleSiblings: BuilderGroup[] } {
+  const topLevel: BuilderGroup[] = [];
+  const idleSiblings: BuilderGroup[] = [];
+  for (const g of groups) {
+    if (g.key !== 'main' && g.items.length === 0) {
+      idleSiblings.push(g);
+    } else {
+      topLevel.push(g);
+    }
+  }
+  return { topLevel, idleSiblings };
 }
 
 /**
@@ -173,8 +271,37 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     if (element instanceof BuilderFileTreeItem || element instanceof BuilderFolderTreeItem) {
       return this.parentForFileNode(element);
     }
-    // Group rows are roots.
+    if (element instanceof BuilderGroupTreeItem) {
+      // An idle-sibling architect header is rendered INSIDE the collapsed "Idle
+      // Architects" container (#1182), not at root, so return that container as its
+      // parent — otherwise `reveal` treats the header as a root, never expands the
+      // container, and can't select the row (#1563). Top-level headers (main,
+      // populated siblings, a lone idle sibling) have no parent.
+      return this.idleArchitectsContainerParent(element.groupName);
+    }
+    // Other group rows (the container itself, etc.) are roots.
     return undefined;
+  }
+
+  /**
+   * The "Idle Architects" container that renders `architectName` as a child, or
+   * `undefined` when the architect is not a folded idle sibling (wrong axis, fewer
+   * than two idle siblings so it renders top-level, or a populated / `main`
+   * architect). The returned container carries the stable `idle-architects-group`
+   * id, so `reveal` matches the rendered container and expands it (#1563).
+   */
+  private idleArchitectsContainerParent(architectName: string): IdleArchitectsGroupTreeItem | undefined {
+    const data = this.cache.getData();
+    if (!data) { return undefined; }
+    const grouping = this.active();
+    if (grouping.id !== 'architect') { return undefined; }
+    const roster = (data.architects ?? []).map(a => a.name);
+    const groups = grouping.group(orderForDisplay(data.builders, Date.now()), roster);
+    const { idleSiblings } = partitionArchitectGroups(groups);
+    // Fewer than two idle siblings → the lone one renders as its own top-level row.
+    if (idleSiblings.length < 2) { return undefined; }
+    if (!idleSiblings.some(g => g.key === architectName)) { return undefined; }
+    return new IdleArchitectsGroupTreeItem(idleSiblings.length);
   }
 
   /**
@@ -338,25 +465,88 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
    * behind a chevron is a bad trade for one row of vertical space.
    */
   private architectRootChildren(groups: BuilderGroup[], now: number): vscode.TreeItem[] {
-    const topLevel: vscode.TreeItem[] = [];
-    const idleSiblings: BuilderGroup[] = [];
-    for (const g of groups) {
-      const isIdleSibling = g.key !== 'main' && g.items.length === 0;
-      if (isIdleSibling) {
-        idleSiblings.push(g);
-      } else {
-        topLevel.push(this.makeGroupRow(g, now, true));
-      }
-    }
+    const { topLevel, idleSiblings } = partitionArchitectGroups(groups);
+    const rows: vscode.TreeItem[] = topLevel.map(g => this.makeGroupRow(g, now, true));
     if (idleSiblings.length >= 2) {
-      topLevel.push(new IdleArchitectsGroupTreeItem(idleSiblings.length));
+      rows.push(new IdleArchitectsGroupTreeItem(idleSiblings.length));
     } else {
       // 0 → nothing; 1 → the lone idle sibling renders as its own top-level row.
       for (const g of idleSiblings) {
-        topLevel.push(this.makeGroupRow(g, now, true));
+        rows.push(this.makeGroupRow(g, now, true));
       }
     }
-    return topLevel;
+    return rows;
+  }
+
+  /**
+   * The agent-terminal cycle roster (#1563), flattened top-to-bottom in the SAME
+   * order the Agents tree renders, so `codev.focusNext/PreviousAgentTerminal` mirror
+   * the sidebar exactly and stay grouping-aware. Built from the same primitives the
+   * renderer uses — `orderForDisplay` + the active grouping strategy — so there is no
+   * parallel ordering to drift (#818).
+   *
+   * The roster is axis-dependent, matching what each axis actually renders:
+   *  - **stage / area** (incl. the lone-`Uncategorized` flatten): only builder rows
+   *    are agents; architects render no rows on these axes, so they are not cycled.
+   *  - **architect**: architect headers are first-class agents (their rows carry the
+   *    open-terminal command), interleaved with their builders in top-level order via
+   *    the shared `partitionArchitectGroups`; idle siblings (zero builders) render —
+   *    and so cycle — last.
+   *
+   * Non-agent terminals (the dev PTY, shells) are never in the roster because only
+   * architects and builders appear here.
+   */
+  agentCycleOrder(): AgentTarget[] {
+    const data = this.cache.getData();
+    if (!data) { return []; }
+    const now = Date.now();
+    const grouping = this.active();
+    const roster = (data.architects ?? []).map(a => a.name);
+    const groups = grouping.group(orderForDisplay(data.builders, now), roster);
+
+    if (grouping.id !== 'architect') {
+      return groups.flatMap(g => g.items.map((b): AgentTarget => ({ kind: 'builder', id: b.id })));
+    }
+
+    // Emit each architect header followed by its builders, in render order:
+    // top-level groups first, then the idle siblings last (the "Idle Architects"
+    // container at the bottom). Idle siblings carry zero builders by construction, so
+    // the inner loop is simply empty for them — no separate pass needed.
+    const { topLevel, idleSiblings } = partitionArchitectGroups(groups);
+    const architectOrder = [...topLevel, ...idleSiblings];
+    const targets: AgentTarget[] = [];
+    for (const g of architectOrder) {
+      targets.push({ kind: 'architect', name: g.key });
+      for (const b of g.items) { targets.push({ kind: 'builder', id: b.id }); }
+    }
+    return targets;
+  }
+
+  /**
+   * The tree item to `reveal({ select: true })` so the sidebar selection follows the
+   * agent-cycle commands (#1563) the same way a row click highlights the clicked row.
+   * Returns `undefined` when the agent is no longer in the cache.
+   *
+   *  - **builder**: the same versioned row `makeBuilderRow` renders, so `reveal` matches
+   *    it by id and expands its group ancestor to bring it into view.
+   *  - **architect**: a header carrying the stable `builder-group:<name>` id, which
+   *    matches the rendered architect header. For an idle-sibling architect folded into
+   *    the "Idle Architects" container, `getParent` returns that container (via
+   *    `idleArchitectsContainerParent`), so `reveal` expands the container and selects
+   *    the row rather than leaving it hidden.
+   */
+  revealTargetForAgent(target: AgentTarget): vscode.TreeItem | undefined {
+    const data = this.cache.getData();
+    if (!data) { return undefined; }
+    if (target.kind === 'builder') {
+      const builder = data.builders.find(b => b.id === target.id);
+      if (!builder) { return undefined; }
+      return this.makeBuilderRow(builder, Date.now());
+    }
+    // Architect header: only the id is consulted by `reveal`, so the count / state
+    // passed here are placeholders — they never render.
+    return new BuilderGroupTreeItem(
+      target.name, 0, vscode.TreeItemCollapsibleState.None, { blocked: 0, idle: 0, active: 0 });
   }
 
   /**

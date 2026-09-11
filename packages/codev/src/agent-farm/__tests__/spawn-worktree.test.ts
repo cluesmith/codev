@@ -650,6 +650,66 @@ describe('spawn-worktree', () => {
       );
     });
 
+    it('ignores merged PRs referencing the issue (#1637)', async () => {
+      // pr-search runs --state all (#759), so merged PRs come back too. The guard
+      // must not count them as open, else it blocks spawns on already-resolved work.
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([
+        { number: 4747, headRefName: 'fix-a', state: 'MERGED' },
+        { number: 4766, headRefName: 'fix-b', state: 'CLOSED' },
+      ]);
+      const { fatal } = await import('../utils/logger.js');
+      await expect(
+        checkBugfixCollisions(4750, '/tmp/wt', baseIssue, false),
+      ).resolves.toBeUndefined();
+      expect(fatal).not.toHaveBeenCalled();
+    });
+
+    it('still fatals for an open PR referencing the issue (#1637)', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([{ number: 99, headRefName: 'fix-42', state: 'OPEN' }]);
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
+    });
+
+    it('counts only the open PRs when results mix open and merged (#1637)', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([
+        { number: 10, headRefName: 'merged', state: 'MERGED' },
+        { number: 11, headRefName: 'open', state: 'OPEN' },
+      ]);
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('Found 1 open PR(s)'));
+    });
+
+    it('treats a missing state as open for stale pr-search overrides (#1637)', async () => {
+      // A project-local pr-search.sh predating the state field returns no state;
+      // the guard keeps the conservative pre-fix behavior rather than silently
+      // dropping the collision check.
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([{ number: 99, headRefName: 'fix-42' }]);
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
+    });
+
+    it('treats a blank state as open (gitlab pr-search leaves it empty) (#1637)', async () => {
+      // gitlab/pr-search.sh maps a missing glab state to "" via jq; the guard must
+      // treat that the same as absent — conservatively counting it as open.
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([{ number: 99, headRefName: 'fix-42', state: '' }]);
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
+    });
+
     it('warns when issue is already closed', async () => {
       const { existsSync } = await import('node:fs');
       vi.mocked(existsSync).mockReturnValueOnce(false);

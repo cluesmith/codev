@@ -139,6 +139,14 @@
         "title": "Codev: Open Builder Terminal..."
       },
       {
+        "command": "codev.focusNextAgentTerminal",
+        "title": "Codev: Focus Next Agent Terminal"
+      },
+      {
+        "command": "codev.focusPreviousAgentTerminal",
+        "title": "Codev: Focus Previous Agent Terminal"
+      },
+      {
         "command": "codev.newShell",
         "title": "Codev: New Shell"
       },
@@ -971,6 +979,18 @@
         "command": "codev.openArchitectTerminal",
         "key": "ctrl+k a",
         "mac": "cmd+k a"
+      },
+      {
+        "command": "codev.focusNextAgentTerminal",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "codev.hasWorkspace"
+      },
+      {
+        "command": "codev.focusPreviousAgentTerminal",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "when": "codev.hasWorkspace"
       },
       {
         "command": "codev.sendMessage",

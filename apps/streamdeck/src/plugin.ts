@@ -9,6 +9,8 @@ import {
   DevServerAction,
   OpenTerminalAction,
   OpenArchitectAction,
+  FocusNextAgentKey,
+  FocusPrevAgentKey,
   ApproveGate,
   SendQueueAction,
   ZoomNav,
@@ -17,6 +19,7 @@ import {
   DiffFileNav,
   DiffHunkNav,
   ScrollNav,
+  AgentNav,
 } from './actions.js';
 
 /**
@@ -44,6 +47,8 @@ const actions = [
   new DevServerAction(store),
   new OpenTerminalAction(store),
   new OpenArchitectAction(store),
+  new FocusNextAgentKey(store),
+  new FocusPrevAgentKey(store),
   new ApproveGate(store),
   new SendQueueAction(store),
   new ZoomNav(store),
@@ -52,6 +57,7 @@ const actions = [
   new DiffFileNav(store),
   new DiffHunkNav(store),
   new ScrollNav(store),
+  new AgentNav(store),
 ];
 for (const action of actions) streamDeck.actions.registerAction(action);
 
