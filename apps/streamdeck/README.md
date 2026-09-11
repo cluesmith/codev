@@ -244,6 +244,14 @@ page 1's review dials.
   (the plugin ships a *switch* icon to put on it). Distinct from **Open Architect
   Terminal**, which resolves a *single* target (the selected builder's owner, or `main`)
   on the main board; this is the full enumeration on its own board.
+- **Next Agent Terminal** / **Previous Agent Terminal** — a key pair that walks the
+  agent terminals in the Codev sidebar's **Agents** order, wrap-around, opening a
+  terminal if it isn't already open. The motion mirrors the sidebar exactly and is
+  grouping-aware (regroup the Agents view and the cycle follows). VSCode owns the
+  roster and order — architects are included in the Architect grouping — so these keys
+  are pure triggers, and unlike the dial they work on **every** Stream Deck model. The
+  same motion is bound in VSCode to `ctrl/cmd+alt+n` / `ctrl/cmd+alt+p`; the keys are
+  the deck complement.
 - **Codev Action** — fires a workspace verb. Choose it in the Property Inspector
   (Open Architect/Builder Terminal, View Diff, Send Message, Spawn Builder,
   Refresh Overview). Defaults to Refresh Overview. (The Open Architect Terminal
@@ -290,6 +298,13 @@ builder (+ its phase and position); PR / Spawn show the item + `i/N`.
   press stays inert on a spec/plan canvas (the dial is half-live there: rotation scrolls,
   press does not). The touch strip names the mode (`Scroll · send` / `Scroll · queue` in diff
   phase, `Scroll · read only` on a canvas).
+- **Agent Navigator** — rotate to move to the **next / previous agent terminal** in the
+  sidebar Agents order (the same motion as the Next/Previous Agent Terminal keys);
+  **push** opens the selected builder's terminal. VSCode owns the roster and order, so the
+  dial is a pure trigger. The default profile's four dials are already occupied, so — like
+  **PR Navigator** and **Spawn from Backlog** — this dial ships in the action list but is not
+  pre-placed; drop it onto a dial you free (or use the key pair). The touch strip names the
+  motion and the current builder (`No builder` when none).
 
 **Dials collect, keys commit.** A diff dial press submits a chunk via a
 **mode-neutral** verb (`feedback-file` / `feedback-hunk` / `feedback-selection`);
