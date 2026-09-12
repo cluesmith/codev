@@ -74,3 +74,27 @@ makes all 3 cases fail (window assertions + deflate negotiated); restored → al
 
 Note: this is `packages/codev` product source, NOT a `codev/`/`codev-skeleton/` template, so the
 skeleton-mirroring rule does not apply.
+
+## CREATE PR (2026-09-12)
+
+PR #1678 opened: https://github.com/cluesmith/codev/pull/1678 (`Fixes #1677`).
+
+3-way CMAP on the PR (`--type pr`), all **APPROVE / HIGH**:
+- gemini: APPROVE — no issues.
+- codex: APPROVE — no issues.
+- claude: APPROVE — 5 minor/non-blocking caveats. Acted on three cheaply (commit c1dbf4733):
+  settle guard on the per-stream window test, reframed the perMessageDeflate comment as
+  defence-in-depth (the relay is the ws *server*, default off — so likely a prod no-op but
+  correct as defence), removed a redundant static assertion. Skipped: the unreachable
+  `setLocalWindowSize` destroyed-session guard (already covered by the `ws !== this.ws` early
+  return; adding it would be dead code).
+
+**Open decision for the architect (claude's caveat #1):** the PR says `Fixes #1677`, which
+auto-closes on merge — but this fixes only the tower *inbound* half; the relay *outbound* half +
+the issue's end-to-end field acceptance signal are out of this repo. Per the architect's lane
+note this is "the ruling on #1677" with cloud-leg verification tracked in #1668 / codev-ide#36,
+so I kept `Fixes`. Architect can switch to `Refs #1677` at the gate if they'd rather keep it
+open pending the relay change. Flagged in the handoff notification.
+
+Handoff: sent architect the PR link + 3 verdicts, then `porch done` to fire the `pr` gate.
+Waiting for `porch approve bugfix-1677 pr` (human) — a CMAP APPROVE is not merge authorization.
