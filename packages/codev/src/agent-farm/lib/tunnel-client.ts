@@ -127,6 +127,29 @@ function stampLocalHeaders(
   if (key) headers[TOWER_KEY_HEADER] = key;
 }
 
+/**
+ * HTTP/2 flow-control windows for the tunnel session (#1677).
+ *
+ * Both browser WebSockets (VS Code *management* and *extension-host*) are
+ * proxied as two streams on ONE relay↔tower H2 session. Node's default 64 KB
+ * per-stream and connection windows let a large transfer on one stream starve
+ * tiny RPCs on the other: with a ~150 ms relay↔tower RTT a 64 KB shared window
+ * caps the session, so a 1.3 MB upload delays a ~100 B management RPC by many
+ * round-trips (measured: a 39 s explorer `resolve`).
+ *
+ * - `STREAM` is advertised via `settings.initialWindowSize` — the per-stream
+ *   receive window the tower offers the relay.
+ * - `SESSION` is applied via `session.setLocalWindowSize(...)` — the
+ *   connection-level receive window. Kept larger than one stream so a big
+ *   transfer can never consume the whole shared window and block a small RPC.
+ *
+ * Both stay under Node's default `maxSessionMemory` (10 MB), so no extra buffer
+ * budget is needed. These raise the tower's *inbound* windows (relay→tower); the
+ * relay's own `http2.connect` must raise its windows for the outbound direction.
+ */
+export const TUNNEL_H2_STREAM_WINDOW_SIZE = 1024 * 1024; // 1 MiB per stream
+export const TUNNEL_H2_SESSION_WINDOW_SIZE = 4 * 1024 * 1024; // 4 MiB connection
+
 /** Heartbeat ping interval — send a WebSocket ping every 30 seconds */
 export const PING_INTERVAL_MS = 30_000;
 
@@ -533,7 +556,14 @@ export class TunnelClient {
     // exists to prevent. URL construction must stay inside the guard.
     let ws: WebSocket;
     try {
-      ws = new WebSocket(buildTunnelWsUrl(this.options.serverUrl));
+      // `perMessageDeflate: false` (#1677): the `ws` client enables it by
+      // default, which CPU-inflates every large H2 DATA frame carried over this
+      // single tunnel on the event loop, delaying the small outbound frames it
+      // must interleave. The H2 payloads are already tunnelled binary, so
+      // tunnel-level compression buys little and starves latency-sensitive RPCs.
+      ws = new WebSocket(buildTunnelWsUrl(this.options.serverUrl), {
+        perMessageDeflate: false,
+      });
     } catch (err) {
       this.consecutiveFailures++;
       this.setState('disconnected', `websocket construction failed: ${(err as Error).message}`);
@@ -702,7 +732,11 @@ export class TunnelClient {
     // Create an HTTP/2 server (plaintext — TLS is handled by the WebSocket layer)
     // Enable extended CONNECT for WebSocket proxying (RFC 8441)
     const h2Server = http2.createServer({
-      settings: { enableConnectProtocol: true },
+      settings: {
+        enableConnectProtocol: true,
+        // Per-stream receive window advertised to the relay (#1677).
+        initialWindowSize: TUNNEL_H2_STREAM_WINDOW_SIZE,
+      },
     });
     this.h2Server = h2Server;
 
@@ -713,6 +747,10 @@ export class TunnelClient {
         return;
       }
       this.h2Session = session;
+      // Raise the connection-level receive window above one stream's window so a
+      // large transfer can't consume the whole session window and starve a small
+      // RPC on the other stream (#1677).
+      session.setLocalWindowSize(TUNNEL_H2_SESSION_WINDOW_SIZE);
       this.setState('connected', 'h2 session established');
       this.startHeartbeat(ws);
     });

@@ -25,6 +25,12 @@ export interface MockTunnelServerOptions {
   forceError?: 'invalid_api_key' | 'rate_limited' | 'internal_error' | 'invalid_auth_frame';
   /** Disconnect after auth (before H2) */
   disconnectAfterAuth?: boolean;
+  /**
+   * Offer per-message deflate on the WebSocket server (default off, matching
+   * `ws`'s server default). Lets a test observe whether the tunnel client
+   * negotiates compression on the shared tunnel (#1677).
+   */
+  perMessageDeflate?: boolean;
 }
 
 export interface MockRequestOptions {
@@ -73,7 +79,10 @@ export class MockTunnelServer {
       res.writeHead(404);
       res.end();
     });
-    this.wss = new WebSocketServer({ noServer: true });
+    this.wss = new WebSocketServer({
+      noServer: true,
+      perMessageDeflate: this.options.perMessageDeflate ?? false,
+    });
 
     this.httpServer.on('upgrade', (req, socket, head) => {
       if (req.url === '/tunnel') {
@@ -206,6 +215,17 @@ export class MockTunnelServer {
   /** Get the number of active H2 sessions */
   getActiveSessionCount(): number {
     return this.h2Sessions.filter((s) => !s.destroyed).length;
+  }
+
+  /** The most recent H2 client session (relay side), for inspecting the tower's advertised flow-control windows */
+  getLatestH2Session(): http2.ClientHttp2Session | undefined {
+    return this.h2Sessions[this.h2Sessions.length - 1];
+  }
+
+  /** WebSocket extensions the most recent tunnel connection negotiated (e.g. `permessage-deflate`) */
+  getLatestNegotiatedExtensions(): string {
+    const ws = this.wsConnections[this.wsConnections.length - 1];
+    return ws ? ws.extensions : '';
   }
 
   /** Last received metadata from the tower (fetched via H2 GET /__tower/metadata) */
