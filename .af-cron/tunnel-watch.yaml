@@ -1,0 +1,15 @@
+name: Tunnel Watch
+schedule: "*/3 * * * *"
+command: >-
+  bash -c 'M=~/.agent-farm/.tunnel-watch-alerted;
+  up() { afx tower status 2>/dev/null | grep -q "Connection: connected"; };
+  if up; then rm -f "$M"; exit 0; fi; sleep 25;
+  if up; then rm -f "$M"; exit 0; fi;
+  if [ -f "$M" ]; then exit 0; fi; touch "$M";
+  grep -E "Tunnel (dis)?connect requested|deregister|Cloud config removed|Tunnel: " ~/.agent-farm/tower.log | tail -10;
+  exit 1'
+condition: "exitCode != 0"
+message: "TUNNEL WATCH: cloud connection is DOWN across two checks 25s apart (sustained outage — this alert fires ONCE per episode; it re-arms automatically when the connection recovers). Determine the cause: via=/ua= lines + deregister = the actor class needing investigation; ENOTFOUND with no actors = DNS/uplink, wait it out. ${output}"
+target: architect
+timeout: 55
+enabled: true
