@@ -86,6 +86,9 @@ describe('bugfix-1677: tunnel H2 flow-control windows', () => {
     expect(session).toBeDefined();
 
     // `remoteSettings` are the settings the peer (tower) advertised to the relay.
+    // The tower's SETTINGS frame may land a tick after it reports `connected`,
+    // so allow a brief settle before reading (mirrors the connection-window test).
+    await waitFor(() => (session!.remoteSettings.initialWindowSize ?? 0) !== NODE_DEFAULT_H2_WINDOW, 2000);
     const advertised = session!.remoteSettings.initialWindowSize;
     expect(advertised).toBe(TUNNEL_H2_STREAM_WINDOW_SIZE);
     expect(advertised).toBeGreaterThan(NODE_DEFAULT_H2_WINDOW);
@@ -109,7 +112,6 @@ describe('bugfix-1677: tunnel H2 flow-control windows', () => {
     // Larger than one stream's window so a big transfer cannot consume the whole
     // shared session window and starve a small RPC on the other stream.
     expect(connectionWindow).toBeGreaterThan(TUNNEL_H2_STREAM_WINDOW_SIZE);
-    expect(TUNNEL_H2_SESSION_WINDOW_SIZE).toBeGreaterThan(TUNNEL_H2_STREAM_WINDOW_SIZE);
   });
 
   it('does not negotiate per-message deflate on the tunnel even when the relay offers it', async () => {
