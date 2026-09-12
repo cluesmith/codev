@@ -1,7 +1,7 @@
 id: bugfix-1677
 title: tower-tunnel-small-rpcs-starve
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-12T06:48:28.830Z'
-updated_at: '2026-09-12T07:04:16.373Z'
+updated_at: '2026-09-12T07:14:58.170Z'
