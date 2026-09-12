@@ -10,6 +10,9 @@ import {
   SendQueueAction,
   OpenTerminalAction,
   OpenArchitectAction,
+  FocusNextAgentKey,
+  FocusPrevAgentKey,
+  AgentNav,
   PrNav,
   SpawnNav,
   DiffFileNav,
@@ -322,6 +325,61 @@ describe('OpenTerminalAction (Row 2 — per-builder, #1410)', () => {
     expect(face).toContain('rect x="3" y="5"'); // the terminal glyph
     expect(face).not.toContain('#102'); // the builder id lives on Row 1's accent, not here
     expect(key.setTitle).toHaveBeenCalledWith(''); // title layer suppressed
+  });
+});
+
+describe('Agent-terminal cycle (Issue 1563)', () => {
+  it('FocusNextAgentKey fires focus-next-agent with no args (pure trigger; VSCode owns the roster)', async () => {
+    const ctx = makeStore();
+    await new FocusNextAgentKey(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'focus-next-agent', args: [], ws: '/work/alpha' });
+  });
+
+  it('FocusPrevAgentKey fires focus-prev-agent with no args', async () => {
+    const ctx = makeStore();
+    await new FocusPrevAgentKey(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'focus-prev-agent', args: [], ws: '/work/alpha' });
+  });
+
+  it('FocusNextAgentKey renders a switch-glyph "Next Agent" label face (not a builder id)', () => {
+    const ctx = makeStore();
+    const key = { isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new FocusNextAgentKey(ctx.store).onWillAppear({ action: key, payload: { settings: {} } } as never);
+    const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    expect(face).toContain('Next Agent');
+    expect(face).toContain('M4 9h13'); // the switch glyph (two opposed arrows)
+    expect(key.setTitle).toHaveBeenCalledWith('');
+  });
+
+  it('AgentNav dial: rotate forward → next, back → previous (no args)', async () => {
+    const ctx = makeStore();
+    const nav = new AgentNav(ctx.store);
+    await nav.onDialRotate(dial(1) as never);
+    await nav.onDialRotate(dial(-1) as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'focus-next-agent', args: [], ws: '/work/alpha' });
+    expect(ctx.sent[1]).toEqual({ verb: 'focus-prev-agent', args: [], ws: '/work/alpha' });
+  });
+
+  it('AgentNav dial: press opens the selected builder’s terminal', async () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2');
+    await new AgentNav(ctx.store).onDialDown();
+    expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
+  });
+
+  it('AgentNav dial: press is inert when no builder is selected', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    await new AgentNav(ctx.store).onDialDown();
+    expect(ctx.sent).toHaveLength(0);
+  });
+
+  it('AgentNav dial: face names the motion and the current builder (builder-centric, #1563)', () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // #102, "Wire the dial"
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new AgentNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Agents', value: '#102 Wire the dial', bar: 70 });
   });
 });
 

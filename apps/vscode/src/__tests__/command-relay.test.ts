@@ -92,6 +92,18 @@ describe('wireCommandProvider', () => {
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.submitReview', 'pir-1');
   });
 
+  it('maps the agent-cycle verbs to their commands with no args (#1563)', async () => {
+    const { mgr, fire } = makeConnMgr();
+    wireCommandProvider(mgr as never);
+
+    fire('command', { verb: 'focus-next-agent', args: [] });
+    fire('command', { verb: 'focus-prev-agent', args: [] });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.focusNextAgentTerminal');
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.focusPreviousAgentTerminal');
+  });
+
   it('ignores a verb that is not in the provider map (the allowlist)', async () => {
     const { mgr, fire } = makeConnMgr();
     wireCommandProvider(mgr as never);

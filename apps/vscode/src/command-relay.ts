@@ -61,6 +61,10 @@ const VERB_COMMANDS: Record<string, string> = {
   'focus-workspace': 'codev.focusWorkspaceWindow',
   'open-architect-terminal': 'codev.openArchitectTerminal',
   'open-builder-terminal': 'codev.openBuilderTerminal',
+  // Cycle agent terminals in the sidebar Agents order (#1563). No args — the
+  // command reads VSCode's own active-terminal cursor; the deck is a pure trigger.
+  'focus-next-agent': 'codev.focusNextAgentTerminal',
+  'focus-prev-agent': 'codev.focusPreviousAgentTerminal',
   'send-message': 'codev.sendMessage',
   'refresh-overview': 'codev.refreshOverview',
   'new-shell': 'codev.newShell',

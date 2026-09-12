@@ -149,6 +149,16 @@ export type RecentlyMergedResult = MergedPrItem[];
 export interface PrSearchItem {
   number: number;
   headRefName: string;
+  /**
+   * PR/MR state, normalized to the GitHub convention: `OPEN` | `MERGED` |
+   * `CLOSED`. Because `pr-search` runs `--state all` (#759), consumers that
+   * only want open PRs must filter on this — the spawn collision guard ignores
+   * non-open results (#1637). Optional: a stale project-local override of
+   * `pr-search.sh` may predate this field (and the gitlab script leaves it
+   * blank when glab omits it), so consumers treat an absent or empty value as
+   * "unknown" rather than assuming a state.
+   */
+  state?: string;
 }
 
 /** Output of the `pr-search` concept command. */
