@@ -98,3 +98,9 @@ open pending the relay change. Flagged in the handoff notification.
 
 Handoff: sent architect the PR link + 3 verdicts, then `porch done` to fire the `pr` gate.
 Waiting for `porch approve bugfix-1677 pr` (human) — a CMAP APPROVE is not merge authorization.
+
+**Gate decision (architect main, 2026-09-12):** switch PR body `Fixes #1677` → `Refs #1677`.
+Rationale: only the inbound half is in-repo; the relay outbound half + the issue's end-to-end
+field re-test remain, so closure follows field verification (verify-before-close discipline).
+Amended PR #1678 body accordingly (now `Refs #1677`, zero auto-close keywords). Still HOLDING at
+the pr gate — Amr's approval comes next; do NOT merge until then.
