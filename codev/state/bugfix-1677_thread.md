@@ -134,3 +134,9 @@ codev-cloud's end.
    large message is in flight.
 This re-measure closes #1677 and unblocks codev#1668's cloud leg (and codev-ide#36).
 Both halves (tower inbound + relay outbound) must be live for the re-test to be valid.
+
+**PR gate APPROVED (Amr, relayed via main, 2026-09-14T23:54Z):** ran
+`porch approve bugfix-1677 pr --a-human-explicitly-approved-this` myself per #1494. porch now
+reports the protocol complete and points to the merge step — but per main's explicit
+instruction I am **NOT merging**: merge execution follows separately on Amr's word via main.
+Holding: no `pr-merge.sh`, no `porch done`, until the merge word arrives.
