@@ -104,3 +104,18 @@ Rationale: only the inbound half is in-repo; the relay outbound half + the issue
 field re-test remain, so closure follows field verification (verify-before-close discipline).
 Amended PR #1678 body accordingly (now `Refs #1677`, zero auto-close keywords). Still HOLDING at
 the pr gate — Amr's approval comes next; do NOT merge until then.
+
+**Cross-end verification (codev-cloud:main, via architect main, 2026-09-14):**
+- perMessageDeflate: the relay's /tunnel ws server runs `ws` defaults (deflate OFF, never
+  negotiated) → my client-side `perMessageDeflate: false` is a **no-op today**. Architect ruling:
+  KEEP it as a documented guard against a future server-side enable; comment must say exactly
+  that. Rewrote the comment to state the verified fact (commit below). Regression test still
+  proves the guard holds (client declines even when the mock relay offers deflate).
+- H2 windows: the relay's `http2.connect` runs Node 64 KiB defaults (no initialWindowSize / no
+  setLocalWindowSize) → confirms the OUTBOUND 39 s trickle is governed by codev-cloud's receive
+  window; tower-side inbound raise is necessary-not-sufficient. codev-cloud is adopting matching
+  1 MiB/4 MiB (same as TUNNEL_H2_* constants), pending Amr, tracked **codev-cloud#12**. This
+  validates the `Refs #1677` ruling: end-to-end field re-test (codev#1668 / codev-ide#36) stays
+  the closure signal for #1677.
+
+Pushed the deflate-comment tweak before the gate; still HOLDING at the pr gate for Amr.

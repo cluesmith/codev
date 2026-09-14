@@ -556,12 +556,16 @@ export class TunnelClient {
     // exists to prevent. URL construction must stay inside the guard.
     let ws: WebSocket;
     try {
-      // `perMessageDeflate: false` (#1677): defence-in-depth against tunnel-level
-      // compression. The `ws` client offers it by default; if the relay ever
-      // accepts, every large H2 DATA frame multiplexed over this single tunnel
-      // is CPU-inflated on the event loop, delaying the small outbound frames it
-      // must interleave. The payloads are already tunnelled binary, so declining
-      // it costs nothing and keeps latency-sensitive RPCs off the deflate path.
+      // `perMessageDeflate: false` (#1677): a documented guard, not an active
+      // fix. The relay's /tunnel WebSocket server currently runs `ws` defaults
+      // (deflate off), verified with codev-cloud 2026-09-14, so the extension is
+      // never negotiated and declining it here is a no-op today. It is kept
+      // deliberately: the `ws` client offers deflate by default, so if the relay
+      // server ever enables it, an accepted offer would CPU-inflate every large
+      // H2 DATA frame multiplexed over this single tunnel on the event loop,
+      // delaying the small outbound frames it must interleave. Declining the
+      // offer means the tower never pays that cost regardless of the relay's
+      // config, and it costs nothing here since the payloads are already binary.
       ws = new WebSocket(buildTunnelWsUrl(this.options.serverUrl), {
         perMessageDeflate: false,
       });
