@@ -119,3 +119,18 @@ the pr gate — Amr's approval comes next; do NOT merge until then.
   the closure signal for #1677.
 
 Pushed the deflate-comment tweak before the gate; still HOLDING at the pr gate for Amr.
+
+**Relay half shipped (codev-cloud, via architect main, 2026-09-14):** codev-cloud pushed their
+matching change (commit `33b9781`) — 1 MiB SETTINGS `initialWindowSize` + 4 MiB
+`setLocalWindowSize` on their H2 client session, an exact match to the tower's `TUNNEL_H2_*`
+constants — and it is deploying. Deflate stays off on their side. Nothing blocks PR #1678 from
+codev-cloud's end.
+
+**Field re-test choreography (closure signal for #1677), once PR #1678 merges:**
+1. Local-install the merged code on THIS Tower (so the tower runs the raised windows).
+2. codev-cloud's deploy (`33b9781`) live on the relay.
+3. Re-measure the original scenario end-to-end: a ~100 B management RPC under a ~1.3 MB drain on
+   the other stream (the 39 s stall). Acceptance = the small RPC completes in ~1 RTT while the
+   large message is in flight.
+This re-measure closes #1677 and unblocks codev#1668's cloud leg (and codev-ide#36).
+Both halves (tower inbound + relay outbound) must be live for the re-test to be valid.
