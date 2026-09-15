@@ -83,6 +83,12 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private readonly backoff = new BackoffController({ maxAttempts: MAX_RECONNECT_ATTEMPTS });
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private gaveUp = false;
+  // Why the adapter gave up, so a wake signal (onWake, #1681) can re-arm ONLY
+  // the transient (budget-exhausted) class and never resurrect the #936
+  // permanent give-up — a 4xx from Tower meaning the session is gone, where
+  // retrying is hopeless and would revive the pre-June retry storm the budget
+  // was added to stop. null while the adapter has not given up.
+  private giveUpKind: 'transient' | 'permanent' | null = null;
   // Tracks whether a wipeable in-progress retry notice currently occupies the
   // terminal's current line (#1001). Set when scheduleReconnect writes a notice;
   // cleared when a successful reconnect wipes it or the give-up state replaces
@@ -94,6 +100,12 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     private wsUrl: string,
     private authKey: string | null,
     private outputChannel: vscode.OutputChannel,
+    // Optional one-shot Tower `/health` probe (#1681). When present, the
+    // exhausted-budget give-up words its banner honestly — "Tower unreachable"
+    // vs "reconnect failed (Tower is up)" — instead of the ambiguous
+    // attempt-count message. Injected by terminal-manager; absent in the unit
+    // tests that don't exercise the wording split.
+    private probeHealth?: () => Promise<boolean>,
   ) {}
 
   open(initialDimensions: vscode.TerminalDimensions | undefined): void {
@@ -193,6 +205,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       // where the previous failure run left off.
       this.backoff.recordSuccess();
       this.gaveUp = false;
+      this.giveUpKind = null;
       // Wipe any in-progress retry notice before replayed buffer / normal
       // output resumes, so it doesn't orphan in scrollback (#1001).
       this.clearReconnectNotice();
@@ -246,7 +259,9 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       // an unknown session ID). The matching `close` fires right after; give up
       // now so the close handler's scheduleReconnect() is a no-op.
       if (this.ws === socket && classifyUpgradeError(err.message) === 'permanent') {
-        this.giveUp('this terminal session no longer exists on Tower');
+        if (this.enterGiveUp('permanent')) {
+          this.renderGiveUpBanner('this terminal session no longer exists on Tower');
+        }
       }
     });
   }
@@ -259,7 +274,9 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private scheduleReconnect(): void {
     if (this.disposed || this.gaveUp || this.reconnectTimer) { return; }
     if (this.backoff.recordFailure() === 'give-up') {
-      this.giveUp(`unable to reconnect after ${MAX_RECONNECT_ATTEMPTS} attempts`);
+      if (this.enterGiveUp('transient')) {
+        void this.renderExhaustedGiveUp();
+      }
       return;
     }
 
@@ -283,17 +300,33 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   }
 
   /**
-   * Enter the terminal failure state: stop auto-retrying and surface a quiet
-   * red notice carrying the clickable reconnect affordance (#936 give-up state;
-   * the affordance itself is wired by ReconnectTerminalLinkProvider, #939).
+   * Enter the terminal failure state: stop auto-retrying. `kind` records WHY —
+   * `transient` (the #936 6-attempt budget was exhausted) can be re-armed by a
+   * later wake signal (onWake, #1681); `permanent` (Tower 4xx'd the upgrade —
+   * the session is gone) must never be, or it would revive the pre-June
+   * retry-storm the budget was added to stop. Returns whether the state was
+   * newly entered (false if already gave up), so the caller only renders a
+   * banner once. Banner rendering is a separate step so the exhausted path can
+   * word it after an async /health probe.
    */
-  private giveUp(reason: string): void {
-    if (this.gaveUp) { return; }
+  private enterGiveUp(kind: 'transient' | 'permanent'): boolean {
+    if (this.gaveUp) { return false; }
     this.gaveUp = true;
+    this.giveUpKind = kind;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    return true;
+  }
+
+  /**
+   * Surface the terminal-failure banner: a quiet red notice carrying the
+   * clickable reconnect affordance (#936 give-up state; the affordance itself
+   * is wired by ReconnectTerminalLinkProvider, #939).
+   */
+  private renderGiveUpBanner(reason: string): void {
+    if (this.disposed) { return; }
     this.log('WARN', `Giving up reconnect: ${reason}`);
     // When reached via the exhausted-budget path, a yellow retry notice is
     // sitting on the current line; overwrite it in place. When reached via the
@@ -305,6 +338,54 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     this.writeEmitter.fire(
       `${prefix}\x1b[31m[Codev: Connection lost. ${reason}. ${RECONNECT_LINK_TEXT}]\x1b[0m\r\n`,
     );
+  }
+
+  /**
+   * Word the exhausted-budget banner honestly (#1681). The common cause of
+   * exhausting the budget is a slept laptop firing all six attempts against a
+   * suspended network stack, not a dead Tower — so probe `/health` once (when a
+   * probe was injected) and distinguish "Tower unreachable" from "reconnect
+   * failed (Tower is up)", the latter pointing the user at the click-to-retry
+   * affordance. The give-up STATE is already set synchronously by enterGiveUp,
+   * so no further retry can schedule while the probe is in flight; a manual
+   * reconnect or wake during the probe clears `gaveUp`, and we then suppress the
+   * now-stale banner rather than paint it over a recovering connection.
+   */
+  private async renderExhaustedGiveUp(): Promise<void> {
+    let reason = `unable to reconnect after ${MAX_RECONNECT_ATTEMPTS} attempts`;
+    if (this.probeHealth) {
+      let towerUp: boolean | null = null;
+      try {
+        towerUp = await this.probeHealth();
+      } catch {
+        towerUp = null;
+      }
+      if (this.disposed || !this.gaveUp) { return; }
+      if (towerUp === true) {
+        reason = 'reconnect failed (Tower is up)';
+      } else if (towerUp === false) {
+        reason = 'Tower unreachable';
+      }
+    }
+    this.renderGiveUpBanner(reason);
+  }
+
+  /**
+   * Re-arm after a wake signal (VSCode window refocus, #1681). Laptop sleep
+   * suspends the network stack, so the six-attempt budget burns instantly and
+   * the tab enters the give-up state while Tower and the detached session are
+   * healthy — a transient OS event wearing a permanent-failure banner. On wake,
+   * reconnect a transiently gave-up adapter (or one still parked mid-backoff),
+   * resetting the budget for a full fresh retry chain. Deliberately a no-op for
+   * the #936 permanent class (session gone on Tower) and for an already-healthy
+   * OPEN connection, so it neither resurrects the retry storm nor drops a live
+   * terminal.
+   */
+  onWake(): void {
+    if (this.disposed) { return; }
+    if (this.giveUpKind === 'permanent') { return; }
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) { return; }
+    this.reconnect();
   }
 
   /**
@@ -359,6 +440,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     }
     this.backoff.reset();
     this.gaveUp = false;
+    this.giveUpKind = null;
     if (this.ws) {
       this.ws.close();
       this.ws = null;

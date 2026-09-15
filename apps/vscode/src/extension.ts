@@ -333,6 +333,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.onDidChangeWindowState((state) => {
 			if (state.focused && !windowFocused) {
+				// Re-arm terminal reconnects on wake (#1681). A refocus is the
+				// extension host's wake signal (the Node host has no DOM
+				// online/visibility events); a slept laptop burns each adapter's
+				// six-attempt reconnect budget against the suspended network stack,
+				// so re-arm unconditionally here — onWake no-ops a healthy or
+				// permanently-gone connection, so it needs no opt-in the way the
+				// repaint below does.
+				terminalManager?.rearmAllOnWake();
 				const enabled = vscode.workspace
 					.getConfiguration('codev')
 					.get<boolean>('terminal.repaintOnRefocus', false);
