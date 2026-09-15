@@ -60,5 +60,10 @@ Implemented per committed plan:
 - tunnel-client.ts — BLOCKED_PATH_SEGMENT now blocks /api/ide (management, local-only); /ide/ forward NOT blocked.
 - commands/ide.ts + cli.ts — afx ide start|stop|status (thin client over /api/ide).
 
+DEV-APPROVAL gate reached (porch build+tests green: 8.5s/33.2s). Sent Amr a dev-run guide via main.
+IMPORTANT auth reality (correction to plan's optimistic "drive the full boot locally"): /ide/ is a KEYED route, so a LOCAL browser can't attach codev-tower-key → 401. Full in-browser workbench boot through Tower is the TUNNEL/cloud leg (TunnelClient stamps the key, #1588). By design (§D2), not a defect. Local verification = forward mechanics + auth + lifecycle via curl + afx ide; optional direct-to-:8200 browser (uses the server's own connection token, bypasses Tower) confirms the binary. Note for review phase / lessons.
+
+DEPENDENCY for REVIEW ARTIFACT (binding note from main, 2026-09-12): cluesmith/codev#1677 — H2 window starvation on the tunnel (measured 39s for a 100B RPC under a 1.3MB drain on the shared H2 session). Ruling: NO change to this lane's plan/code — the starvation is tunnel-client-side; my forward is loopback-only (127.0.0.1). BUT the CLOUD-LEG verification of the forward is to be judged AFTER #1677 lands, or with its effect explicitly accounted — a slow cloud boot must NOT be read as this forward's defect. MUST record this dependency in codev/reviews/1668-*.md when the review phase opens.
+
 Build: full `pnpm --filter @cluesmith/codev build` (deps + tsc + assets) exit 0.
 Tests: 4 new files (ide-forward, ide-forward-auth, ide-record, ide-forward-integration). Integration test CAUGHT A REAL BUG: forwardIdeWebSocket used buildForwardHeaders which strips hop-by-hop Connection/Upgrade → upstream WS upgrade failed (got 200). Fixed by re-adding Connection: Upgrade / Upgrade: websocket (as tunnel-client does), forwarding client's Sec-WebSocket-Key so Accept validates. Re-running.
