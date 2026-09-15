@@ -71,5 +71,9 @@ FIX (main ruling, option a): inject `vscode-tkn=<token>` into the Cookie header 
 OPTION (b) REJECTED (record the reason): `--without-connection-token` would drop the token, leaving an UNAUTHENTICATED any-folder IDE reachable by any local process on 127.0.0.1:8200, bypassing Tower's key entirely. SS2/§D2 makes Tower's key the boundary for the FORWARD path; the connection token guards the DIRECT-to-:8200 path that skips Tower. BOTH boundaries stay.
 Regression tests added: cookie injected on HTTP + WS paths + merge-not-clobber (ide-forward.test.ts unit + ide-forward-integration.test.ts e2e via stub). local remote-authority resolution confirmed fine (codev-ide). Dev-approval RE-OPENS for this fix; codev-ide re-tests through cloud on their Mac; Amr holds merge until their re-test passes.
 
+## CLOUD PASS (2026-09-15, at 5ab46875a) — evidence for PR verification section
+Amr reloaded https://<relay>/t/<tower>/ide/ on the REAL relay: workbench boots; management socket 630ms, ext-host 939ms; explorer populated; owner's words "looking good". Console anomalies all confirmed fork-side/CDN — NONE in the forward. codev-ide accepts #1668 from their side. Cloud-leg latency judged with #1677 accounted (#1677 merged into this branch).
+Protocol from here: Amr's dev-approval word (re-opened gate) → review phase (PR + single-pass CMAP per PIR) → pr gate → merge word. PR verification section drafted (scratchpad ide-pr-verification.md); will paste into PR body at review phase.
+
 Build: full `pnpm --filter @cluesmith/codev build` (deps + tsc + assets) exit 0.
 Tests: 4 new files (ide-forward, ide-forward-auth, ide-record, ide-forward-integration). Integration test CAUGHT A REAL BUG: forwardIdeWebSocket used buildForwardHeaders which strips hop-by-hop Connection/Upgrade → upstream WS upgrade failed (got 200). Fixed by re-adding Connection: Upgrade / Upgrade: websocket (as tunnel-client does), forwarding client's Sec-WebSocket-Key so Accept validates. Re-running.
