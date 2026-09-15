@@ -682,11 +682,25 @@ describe('#1681 — wake signal re-arms the reconnect budget', () => {
 
     expect(WebSocket.instances.length).toBe(socketsBefore);
   });
+
+  it('no-ops before VS Code has open()ed the pty (no orphan socket)', () => {
+    // A wake can land between terminal-manager registering the pty and VS Code
+    // calling open(); re-arming then would leak a socket open()'s connect()
+    // replaces without closing.
+    const pty = new (CodevPseudoterminal as unknown as new (
+      url: string, authKey: string | null, ch: unknown, probeHealth?: () => Promise<boolean>,
+    ) => WakeablePty)('ws://localhost:4100/x', null, fakeOutputChannel());
+    const socketsBefore = WebSocket.instances.length; // no open() yet
+
+    pty.onWake();
+
+    expect(WebSocket.instances.length).toBe(socketsBefore);
+  });
 });
 
 describe('#1681 — exhausted-budget banner is worded honestly via /health', () => {
   it('says "Tower is up" when the probe reports Tower reachable', async () => {
-    const { pty, writes } = makeAdapterWithProbe(async () => true);
+    const { writes } = makeAdapterWithProbe(async () => true);
     burnBudget();
     writes.length = 0;
     currentSocket().emit('close'); // exhaust → probe-gated banner
@@ -696,7 +710,20 @@ describe('#1681 — exhausted-budget banner is worded honestly via /health', () 
     expect(banner).toBeDefined();
     expect(banner).toContain('reconnect failed (Tower is up)');
     expect(banner).toContain('\x1b[31m'); // still the red failure notice
-    void pty;
+  });
+
+  it('falls back to attempt-count wording when the probe blackholes past the cap', async () => {
+    // A never-resolving probe (blackholed network) must not hold the banner for
+    // the SDK's 10s request window — the 2s race resolves it to the fallback.
+    const { writes } = makeAdapterWithProbe(() => new Promise<boolean>(() => {}));
+    burnBudget();
+    writes.length = 0;
+    currentSocket().emit('close');
+    await vi.advanceTimersByTimeAsync(2000); // trip the probe-timeout race
+
+    const banner = writes.find((w) => w.includes(RECONNECT_LINK_TEXT));
+    expect(banner).toBeDefined();
+    expect(banner).toContain('unable to reconnect after 6 attempts');
   });
 
   it('says "Tower unreachable" when the probe reports Tower down', async () => {

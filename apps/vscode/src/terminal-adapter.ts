@@ -22,6 +22,14 @@ const REPLAY_SETTLE_MS = 150;
 // 4s, 8s, 16s, 30s) and surface a terminal failure state.
 const MAX_RECONNECT_ATTEMPTS = 6;
 
+// Cap how long the exhausted-budget banner waits on the `/health` probe (#1681).
+// TowerClient.request uses a 10s request timeout, and a blackholed network — the
+// still-suspended stack this fix targets, or a remote Tower behind a dropped VPN
+// — hangs the probe for that full window while a stale "retrying (6/6)" notice
+// lingers and the clickable give-up banner never appears. Race the probe against
+// this shorter bound and fall back to the plain attempt-count wording.
+const HEALTH_PROBE_TIMEOUT_MS = 2000;
+
 /**
  * The clickable token emitted in the give-up message. Shared with the terminal
  * link provider (#939) so the message text and the matcher cannot drift —
@@ -63,6 +71,11 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private queuedBytes = 0;
   private lastDropWarnAt = 0;
   private disposed = false;
+  // Set once VS Code has called open() (the first connect). A wake signal can
+  // arrive between terminal-manager registering this pty and VS Code opening it;
+  // re-arming then would connect() a socket that open()'s own connect() later
+  // replaces without closing, leaking it. onWake no-ops until this is true.
+  private opened = false;
 
   // Repaint-nudge state (#1047). A freshly-attached terminal can stay blank:
   // the app inside (e.g. Claude's full-screen TUI) only paints after a real
@@ -123,6 +136,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     if (initialDimensions) {
       this.lastDimensions = { cols: initialDimensions.columns, rows: initialDimensions.rows };
     }
+    this.opened = true;
     this.connect();
   }
 
@@ -365,7 +379,12 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     if (this.probeHealth) {
       let towerUp: boolean | null = null;
       try {
-        towerUp = await this.probeHealth();
+        // Race the probe against a short timeout so a blackholed network can't
+        // hold the banner for the SDK's full 10s request window (#1681).
+        towerUp = await Promise.race([
+          this.probeHealth(),
+          new Promise<null>((resolve) => setTimeout(resolve, HEALTH_PROBE_TIMEOUT_MS, null)),
+        ]);
       } catch {
         towerUp = null;
       }
@@ -394,7 +413,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
    * terminal.
    */
   onWake(): void {
-    if (this.disposed) { return; }
+    if (this.disposed || !this.opened) { return; }
     if (this.giveUpKind === 'permanent') { return; }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) { return; }
     this.reconnect();

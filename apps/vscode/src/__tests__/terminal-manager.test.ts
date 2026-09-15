@@ -202,6 +202,39 @@ describe('#1180 — terminal cap is a configurable setting, not a static constan
   });
 });
 
+describe('#1681 — re-arm terminal reconnects on wake', () => {
+  // Source-level guards (heavy TerminalManager / extension harness avoided, per
+  // this file's rationale): the wake path is thin glue. Its behavior is unit-
+  // tested at the adapter (terminal-adapter.test.ts: onWake, the give-up split,
+  // the honest banner) and confirmed by a physical sleep→wake round-trip. These
+  // guards pin the wiring so deleting the manager fan-out, the /health-probe
+  // injection, or the extension focus-handler call is caught (CMAP #1682).
+  const rearmBody = TM_SRC.split('rearmAllOnWake(): void')[1]?.split('buildWsUrl')[0] ?? '';
+  const EXT_SRC = readFileSync(resolve(__dirname, '../extension.ts'), 'utf8');
+
+  it('fans onWake out to every managed terminal', () => {
+    expect(TM_SRC).toMatch(/rearmAllOnWake\(\): void/);
+    expect(rearmBody).toMatch(/for \(const entry of this\.terminals\.values\(\)\)/);
+    expect(rearmBody).toMatch(/entry\.pty\.onWake\(\)/);
+  });
+
+  it('injects the /health probe into every adapter it constructs', () => {
+    expect(TM_SRC).toMatch(/new CodevPseudoterminal\(/);
+    expect(TM_SRC).toMatch(/\(\) => this\.probeTowerHealth\(\)/);
+    expect(TM_SRC).toMatch(/private async probeTowerHealth\(\): Promise<boolean>/);
+    expect(TM_SRC).toMatch(/getClient\(\)[\s\S]*getHealth\(\)\)\s*!==\s*null/);
+  });
+
+  it('extension calls rearmAllOnWake on the window-focus rising edge', () => {
+    // The rising-edge block runs when `state.focused && !windowFocused`; the
+    // re-arm must fire there, unconditionally (not behind repaintOnRefocus).
+    const focusBlock =
+      EXT_SRC.split('state.focused && !windowFocused')[1]
+        ?.split('windowFocused = state.focused')[0] ?? '';
+    expect(focusBlock).toMatch(/terminalManager\?\.rearmAllOnWake\(\)/);
+  });
+});
+
 describe('#1180 — package.json exposes codev.maxTerminals', () => {
   const PKG = JSON.parse(
     readFileSync(resolve(__dirname, '../../package.json'), 'utf8'),
