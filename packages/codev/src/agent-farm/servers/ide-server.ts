@@ -30,10 +30,38 @@ type LogFn = (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
 
 const READY_TIMEOUT_MS = 15_000;
 const READY_POLL_MS = 200;
+const STOP_EXIT_TIMEOUT_MS = 5_000;
+const STOP_POLL_MS = 200;
 
-/** True if some process is listening on the port. */
+/**
+ * True if some process is listening on the port. Uses `lsof` (`getProcessesOnPort`),
+ * which is ~100 ms and synchronous, so it is a **COLD-path only** check — restart
+ * reconcile, `afx ide status`, start-collision detection, and respawn. The request
+ * forward must NEVER call this (Issue #1668): it reads the port from the record and
+ * lets the upstream connect error be the liveness truth-teller.
+ */
 function isPortLive(port: number): boolean {
   return getProcessesOnPort(port).length > 0;
+}
+
+/** True if a PID is alive (cheap, non-blocking). */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The recorded IDE server port, or null if none — the forward's hot-path target
+ * resolution. A plain record read, no port scan (Issue #1668): a dead server
+ * fails the proxy connect immediately, which is the only liveness check the
+ * forward needs.
+ */
+export function getRecordedIdePort(): number | null {
+  return readIdeRecord()?.port ?? null;
 }
 
 /** Poll until a process is listening on `port`, or the timeout elapses. */
@@ -64,6 +92,15 @@ export async function spawnIdeServer(opts: SpawnIdeOptions, log: LogFn): Promise
   }
   if (!existsSync(opts.serverPath)) {
     throw new Error(`IDE server binary not found at ${opts.serverPath}`);
+  }
+
+  // Start-collision: a prior server recorded on a DIFFERENT port would be orphaned
+  // (still running, no longer tracked) if we just overwrote the singleton record.
+  // Stop it first so "start on a new port" never leaves a detached stray (#1668).
+  const existing = readIdeRecord();
+  if (existing && existing.port !== port && isPortLive(existing.port)) {
+    log('WARN', `IDE server already recorded on port ${existing.port}; stopping it before starting on ${port}`);
+    await stopIdeServer(log);
   }
 
   // Already live on the port — idempotent: adopt and record, don't double-spawn.
@@ -127,8 +164,12 @@ export async function spawnIdeServer(opts: SpawnIdeOptions, log: LogFn): Promise
   return record;
 }
 
-/** Stop the IDE server: kill whatever is listening on the recorded port, delete the record. */
-export function stopIdeServer(log: LogFn): { stopped: boolean; port: number | null } {
+/**
+ * Stop the IDE server on the recorded port: SIGTERM, wait for exit, escalate to
+ * SIGKILL for survivors (mirrors `towerStop`, #1668 plan §4), then delete the
+ * record. Cold path — `getProcessesOnPort` is fine here.
+ */
+export async function stopIdeServer(log: LogFn): Promise<{ stopped: boolean; port: number | null }> {
   const record = readIdeRecord();
   if (!record) {
     return { stopped: false, port: null };
@@ -141,8 +182,26 @@ export function stopIdeServer(log: LogFn): { stopped: boolean; port: number | nu
       // already gone
     }
   }
+
+  // Wait for the SIGTERMed processes to actually exit before deleting the record;
+  // escalate any survivors to SIGKILL, so a lingering process can't be re-adopted.
+  const deadline = Date.now() + STOP_EXIT_TIMEOUT_MS;
+  let survivors = pids.filter(isPidAlive);
+  while (survivors.length > 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, STOP_POLL_MS));
+    survivors = survivors.filter(isPidAlive);
+  }
+  for (const pid of survivors) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // exited between the check and the kill
+    }
+  }
+
   deleteIdeRecord();
-  log('INFO', `Stopped IDE server on port ${record.port} (killed ${pids.length} process(es))`);
+  const killedNote = survivors.length > 0 ? `, SIGKILL escalated for ${survivors.length}` : '';
+  log('INFO', `Stopped IDE server on port ${record.port} (${pids.length} process(es)${killedNote})`);
   return { stopped: pids.length > 0, port: record.port };
 }
 
@@ -226,7 +285,7 @@ export async function handleIdeApi(
   }
 
   if (req.method === 'DELETE') {
-    const result = stopIdeServer(log);
+    const result = await stopIdeServer(log);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
     return;

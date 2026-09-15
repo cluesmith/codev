@@ -19,6 +19,7 @@ import {
   unlinkSync,
   existsSync,
   mkdirSync,
+  chmodSync,
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -95,7 +96,10 @@ export function writeIdeRecord(record: IdeServerRecord): void {
   if (!existsSync(AGENT_FARM_DIR)) {
     mkdirSync(AGENT_FARM_DIR, { recursive: true, mode: 0o700 });
   }
-  writeFileSync(getIdeRecordPath(), JSON.stringify(record, null, 2) + '\n', { mode: 0o600 });
+  const path = getIdeRecordPath();
+  writeFileSync(path, JSON.stringify(record, null, 2) + '\n', { mode: 0o600 });
+  // `mode` only applies on creation; enforce 0600 even if the file pre-existed.
+  chmodSync(path, 0o600);
 }
 
 /** Delete the IDE server record. No-op if it does not exist. */
@@ -138,5 +142,6 @@ export function ensureIdeConnectionToken(): string {
   }
   const token = randomBytes(32).toString('hex');
   writeFileSync(path, token + '\n', { mode: 0o600 });
+  chmodSync(path, 0o600); // enforce 0600 even if the file pre-existed
   return token;
 }

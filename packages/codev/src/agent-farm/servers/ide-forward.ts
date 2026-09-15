@@ -20,7 +20,7 @@ import { readCloudConfig } from '../lib/cloud-config.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER } from '@cluesmith/codev-types';
 import { IDE_DEFAULT_PREFIX, readIdeConnectionToken } from '../lib/ide-record.js';
-import { ensureIdeServerLive } from './ide-server.js';
+import { getRecordedIdePort, ensureIdeServerLive } from './ide-server.js';
 
 /** Hop-by-hop headers not forwarded between connections (RFC 7230 §6.1). */
 const HOP_BY_HOP = new Set([
@@ -172,7 +172,9 @@ export async function forwardIdeHttp(
   res: http.ServerResponse,
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void,
 ): Promise<void> {
-  const port = await ensureIdeServerLive();
+  // Hot path: resolve the target port from the record — no port scan. A dead
+  // server fails the connect below, which triggers a respawn (Issue #1668).
+  const port = getRecordedIdePort();
   if (port === null) {
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'IDE server unavailable' }));
@@ -193,6 +195,7 @@ export async function forwardIdeHttp(
 
   proxyReq.on('error', (err) => {
     log('WARN', `IDE HTTP forward error: ${err.message}`);
+    onUpstreamConnectError(err, log);
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Bad Gateway: IDE server unavailable' }));
@@ -203,6 +206,17 @@ export async function forwardIdeHttp(
 
   req.pipe(proxyReq);
   req.on('error', () => proxyReq.destroy());
+}
+
+/**
+ * On a refused/reset upstream connection the recorded server is down. Kick a
+ * respawn off the hot path (fire-and-forget) so the next request lands; this
+ * request still 502s. The respawn (cold path) is where the `lsof` probe lives.
+ */
+function onUpstreamConnectError(err: NodeJS.ErrnoException, log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void): void {
+  if (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET') {
+    ensureIdeServerLive(log).catch(() => {});
+  }
 }
 
 /**
@@ -217,7 +231,7 @@ export async function forwardIdeWebSocket(
   head: Buffer,
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void,
 ): Promise<void> {
-  const port = await ensureIdeServerLive();
+  const port = getRecordedIdePort();
   if (port === null) {
     socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
     socket.destroy();
@@ -265,8 +279,9 @@ export async function forwardIdeWebSocket(
     socket.destroy();
   });
 
-  upstream.on('error', (err) => {
+  upstream.on('error', (err: NodeJS.ErrnoException) => {
     log('WARN', `IDE WS forward error: ${err.message}`);
+    onUpstreamConnectError(err, log);
     if (!socket.destroyed) {
       socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
       socket.destroy();
