@@ -75,5 +75,18 @@ Regression tests added: cookie injected on HTTP + WS paths + merge-not-clobber (
 Amr reloaded https://<relay>/t/<tower>/ide/ on the REAL relay: workbench boots; management socket 630ms, ext-host 939ms; explorer populated; owner's words "looking good". Console anomalies all confirmed fork-side/CDN — NONE in the forward. codev-ide accepts #1668 from their side. Cloud-leg latency judged with #1677 accounted (#1677 merged into this branch).
 Protocol from here: Amr's dev-approval word (re-opened gate) → review phase (PR + single-pass CMAP per PIR) → pr gate → merge word. PR verification section drafted (scratchpad ide-pr-verification.md); will paste into PR body at review phase.
 
+## REVIEW phase (2026-09-15)
+dev-approval approved by Amr (ran porch approve myself per #1494). Wrote codev/reviews/1668-*.md (retrospective + full verification evidence chain). Governance: COLD arch.md (Integration Points → IDE prefix forward subsection) + COLD lessons-learned.md (Security: two-boundary/token-scope; Architecture: WS reverse-proxy hop-by-hop re-add). Nothing HOT (feature-specific; the hot invariant "non-public routes ride the key choke point" already exists and /ide/ conforms). Committed 3c67276a5. Opened PR #1683 (body = review file, Fixes #1668 verified), recorded with porch. Ran porch done → single-pass CMAP.
+
+## CMAP iter 1 + fixes (2026-09-15)
+Verdicts: Gemini APPROVE; Codex + Claude REQUEST_CHANGES (both HIGH, all correct). Rebuttal at codev/projects/1668-.../1668-review-iter1-rebuttals.md. Fixes (44c9b7835 code, 3d2e0cb7b tests, review update):
+- BLOCKER (Claude): forward ran synchronous lsof (~98ms) per /ide/ request via ensureIdeServerLive → event-loop stall during boot. FIXED: getRecordedIdePort() (record read, no scan) on hot path; connect-error (ECONNREFUSED/RESET) is the liveness truth-teller → off-hot-path respawn; lsof now COLD-only. Per main's steer. Corrected my earlier "no non-IDE-user disruption" claim IN THE REVIEW ARTIFACT (main asked).
+- stopIdeServer: SIGTERM→poll→SIGKILL escalation restored (was SIGTERM+immediate delete); now async, handleIdeApi awaits.
+- start-on-different-port orphan closed: spawnIdeServer stops a live server recorded on a different port first.
+- 0600 enforced on existing record + token files (chmodSync, cloud-config pattern).
+- tests: tunnel isBlockedPath (/api/ide blocked, /ide/ NOT, /api/ideas not), isPublicRoute(/ide/,/api/ide)=false (routed-auth), connect-refused→502.
+- review file: per-row evidence attribution corrected (401 via isRequestAllowed+isPublicRoute, not the integration harness); Open-IDE link builder noted deferred.
+Build green; 134 tests across touched suites green. PR #1683 body refreshed. porch done → PR GATE PENDING. Notified main. Holding for Amr's merge word (gh pr merge --merge, never squash).
+
 Build: full `pnpm --filter @cluesmith/codev build` (deps + tsc + assets) exit 0.
 Tests: 4 new files (ide-forward, ide-forward-auth, ide-record, ide-forward-integration). Integration test CAUGHT A REAL BUG: forwardIdeWebSocket used buildForwardHeaders which strips hop-by-hop Connection/Upgrade → upstream WS upgrade failed (got 200). Fixed by re-adding Connection: Upgrade / Upgrade: websocket (as tunnel-client does), forwarding client's Sec-WebSocket-Key so Accept validates. Re-running.
