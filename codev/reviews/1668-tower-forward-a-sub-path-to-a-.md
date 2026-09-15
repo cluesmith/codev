@@ -42,19 +42,32 @@ Tower can now forward a fixed `/ide/` prefix — HTTP and WebSocket — to a sin
 
 **Cloud 403 — root cause & fix.** codev-ide's first cloud run through `/t/<tower>/ide/` returned **403**: Tower spawns the server with `--connection-token-file` but the forward didn't present that token, and the token can't ride the browser's cookie jar through the relay (the server's `Set-Cookie` is `Path=/ide`, which never matches `/t/<tower>/ide/`). Fix: the forward injects `vscode-tkn=<token>` (from `~/.agent-farm/ide-connection-token`) into the `Cookie` header on both HTTP and WS upgrades, merging and never clobbering. The token boundary is kept, not disabled — dropping it would leave an unauthenticated any-folder IDE on direct `127.0.0.1:<port>`, bypassing Tower's key.
 
-**Behavior matrix** (asserted by the integration suite against the real forward code; runnable locally via the stub recipe):
+**Behavior matrix** (how each row is verified is stated per-row — not all are exercised through the full `handleRequest` stack; runnable locally via the stub recipe):
 
-| Request | Result |
-| --- | --- |
-| `GET /ide/` (no key) | 401 (unauth SHOULD fail) |
-| `GET /ide/` (key, no server registered) | 502 |
-| `GET /ide/?folder=…` (key + server) | 200; `?folder` verbatim; `Cache-Control`/`ETag` preserved; `vscode-tkn` injected; Tower key / tunnel marker / `x-forwarded-port` stripped; Host → loopback |
-| `WS /ide/?reconnectionToken=…` (key) | raw bidirectional pipe; `vscode-tkn` injected on the upstream upgrade |
-| `GET /api/ide` (key) | lifecycle status JSON; blocked from the tunnel (local-only) |
+| Request | Result | Verified by |
+| --- | --- | --- |
+| `GET /ide/` (no key) | 401 (unauth SHOULD fail) | `isRequestAllowed` (existing tests) + `isPublicRoute('/ide/') === false` (unit) — `/ide/` rides the key choke point, no public carve-out |
+| `GET /ide/` (key, no server) | 502 | integration test (no record → 502; dead recorded port → 502 on connect-refused) |
+| `GET /ide/?folder=…` (key + server) | 200; `?folder` verbatim; `Cache-Control`/`ETag` preserved; `vscode-tkn` injected; Tower key / tunnel marker / `x-forwarded-port` stripped; Host → loopback | integration test (stub loopback, through `forwardIdeHttp`) |
+| `WS /ide/?reconnectionToken=…` (key) | raw bidirectional pipe; `vscode-tkn` injected on the upstream upgrade | integration test (through `forwardIdeWebSocket`) |
+| `GET /api/ide` (key) | lifecycle status JSON; blocked from the tunnel (local-only) | `isBlockedPath` unit tests (`/api/ide` blocked, `/ide/` not) |
+
+> Note on scope of the integration harness: the stub-loopback tests drive `forwardIdeHttp` / `forwardIdeWebSocket` directly, so they assert the forward's own behavior (header hygiene, cookie, `?folder`, `Cache-Control`/`ETag`, WS pipe, 502). The **401** is a property of `isRequestAllowed` upstream of the forward, asserted via `isPublicRoute` rather than through a full `handleRequest` harness; the end-to-end 401 and the real-relay cache behavior were both confirmed on the cloud run.
 
 **codev-ide local pass (fork side).** Keyed `GET :4100/ide/` + `Cookie: vscode-tkn` → 200; Playwright boot with key+cookie through the forward = full workbench ~5s, explorer populated (25 rows); local (non-tunnel) `remoteAuthority` resolution confirmed fine. codev-ide accepts #1668.
 
 **Cloud pass (real relay, at 5ab46875a).** Amr reloaded `https://<relay>/t/<tower>/ide/` on the production relay: workbench boots; management socket **630 ms**, extension host **939 ms**; explorer populated; owner: "looking good". Remaining console anomalies were all fork-side / CDN — none in the forward. Cloud-leg latency is judged with **#1677** (H2 window starvation on the shared tunnel session) accounted for; #1677 is merged into this branch, and the forward itself is loopback-only and unaffected by that starvation.
+
+## Review-round corrections (CMAP iteration 1)
+
+The 3-way consultation returned APPROVE (Gemini) + two REQUEST_CHANGES (Codex, Claude), all accepted as correct and addressed on the branch:
+
+- **Per-request `lsof` removed from the forward hot path (the leading fix).** `forwardIdeHttp` / `forwardIdeWebSocket` previously called `ensureIdeServerLive()` → `getProcessesOnPort()` (`execSync('lsof …')`, ~98 ms, synchronous) on **every** request, blocking Tower's whole event loop during a workbench boot. **Correcting my own earlier claim to the reviewer that non-IDE users were unaffected: they were** — an IDE boot would stall the dashboard, PTY streaming, and tunnel. The forward now resolves the port from the record (no scan) and lets the upstream connect error be the liveness signal: on `ECONNREFUSED`/`ECONNRESET` it fires an off-hot-path respawn and 502s. `lsof` is now cold-path only (status / reconcile / start-collision).
+- **`stopIdeServer` restored the plan's SIGTERM → poll → SIGKILL escalation** and now deletes the record only after confirming exit (was: SIGTERM + immediate delete, which could leave a survivor to be re-adopted).
+- **Start-on-a-different-port no longer orphans the old server** — `spawnIdeServer` stops a live server recorded on a different port before starting.
+- **`0600` enforced on existing record/token files** via `chmodSync` (the `cloud-config.ts` pattern; `writeFileSync({mode})` only applies on creation).
+- **Tests added**: `isBlockedPath` for `/api/ide` (blocked) vs `/ide/` (not) + the `/api/ideas` lookalike; `isPublicRoute` for `/ide/` and `/api/ide` (routed-auth 401); connect-refused → 502.
+- **Open-IDE link builder**: deferred (the plan permitted it); recorded here as deferred so it isn't mistaken for shipped.
 
 ## Architecture Updates
 
