@@ -10,7 +10,8 @@ import http from 'node:http';
 import type net from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import { WS_CLOSE_SESSION_UNKNOWN, WS_CLOSE_UNAUTHORIZED } from '../lib/reconnect-backoff.js';
-import { isWebSocketAllowed } from '../utils/server-utils.js';
+import { isWebSocketAllowed, isForwardAuthorized } from '../utils/server-utils.js';
+import { matchIdePrefix, forwardIdeWebSocket } from './ide-forward.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { attachWithReplay } from '../../terminal/attach-replay.js';
@@ -234,6 +235,23 @@ export function setupUpgradeHandler(
 ): void {
   server.on('upgrade', async (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     const reqUrl = new URL(req.url || '/', `http://localhost:${port}`);
+
+    // IDE prefix WebSocket forward (Issue #1668). Checked BEFORE the generic
+    // isWebSocketAllowed gate below, which requires the `codev-key` SUBPROTOCOL
+    // that the IDE workbench's vanilla `?reconnectionToken=` sockets never offer.
+    // Authorized instead by isForwardAuthorized (Host guard + the tunnel-stamped
+    // `codev-tower-key` header) — the same whole-boundary key check the HTTP
+    // forward uses, with no per-folder logic (§D2). Then raw-piped to the local
+    // IDE server; Tower never parses the workbench's own protocol.
+    if (matchIdePrefix(reqUrl.pathname)) {
+      if (!isForwardAuthorized(req)) {
+        logTerminal('WARN', `IDE WS upgrade 401 ${reqUrl.pathname} — disallowed Host or missing/invalid key`);
+        rejectUnauthorized(req, socket, head, wss);
+        return;
+      }
+      await forwardIdeWebSocket(req, socket, head, logTerminal);
+      return;
+    }
 
     // Request authentication (advisory GHSA-xvjp-7748-v88v): validate the key at
     // the handshake, before any session lookup or PTY attach, for every WS route.
