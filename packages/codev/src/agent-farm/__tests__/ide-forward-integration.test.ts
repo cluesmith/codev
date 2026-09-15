@@ -139,6 +139,21 @@ describe('IDE HTTP forward (stub loopback)', () => {
     const res = await get('/ide/');
     expect(res.status).toBe(502);
   });
+
+  it('502s when the recorded server is down (connect refused) — no hot-path port scan', async () => {
+    // A port with nothing listening: bind then immediately release it.
+    const deadPort = await new Promise<number>((resolve) => {
+      const s = http.createServer();
+      s.listen(0, '127.0.0.1', () => {
+        const a = s.address();
+        const p = a && typeof a !== 'string' ? a.port : 0;
+        s.close(() => resolve(p));
+      });
+    });
+    writeIdeRecord({ prefix: '/ide/', port: deadPort, serverPath: '/does/not/matter', pid: 0, startedAt: new Date().toISOString() });
+    const res = await get('/ide/', { 'codev-tower-key': 'k' });
+    expect(res.status).toBe(502);
+  });
 });
 
 describe('IDE WebSocket forward (stub loopback)', () => {

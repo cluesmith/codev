@@ -11,6 +11,7 @@ import {
   escapeHtml,
   parseJsonBody,
   validateHost,
+  isPublicRoute,
 } from '../utils/server-utils.js';
 
 describe('Server Utilities', () => {
@@ -70,6 +71,21 @@ describe('Server Utilities', () => {
       const req = createMockRequest(body);
       const result = await parseJsonBody(req, 1000);
       expect(result).toEqual({ ok: true });
+    });
+  });
+
+  describe('isPublicRoute — IDE routes require the key (Issue #1668)', () => {
+    // The /ide/ forward and /api/ide management endpoint must NOT be public:
+    // they ride the key choke point, so isRequestAllowed 401s them without the
+    // key. This pins the routed-auth wiring (no public carve-out for either).
+    it('does not treat the /ide/ forward as a public route', () => {
+      expect(isPublicRoute('GET', '/ide/')).toBe(false);
+      expect(isPublicRoute('GET', '/ide/static/x.js')).toBe(false);
+    });
+
+    it('does not treat the /api/ide management endpoint as public', () => {
+      expect(isPublicRoute('GET', '/api/ide')).toBe(false);
+      expect(isPublicRoute('POST', '/api/ide')).toBe(false);
     });
   });
 
