@@ -93,6 +93,29 @@ Resolution (commit deee898ef):
 - DOCUMENTED as residuals in the PR body (out of BUGFIX scope, follow-ups): the re-arm throttle
   (2), the single wake signal (3), and the manual sleep/wake verification (4).
 
+## PR (open, #1682)
+
+PR #1682 opened with `Fixes #1681`. Branch `builder/bugfix-1681`.
+
+### PR-phase CMAP round 1 (gemini/codex/claude)
+- gemini APPROVE; codex REQUEST_CHANGES (wiring coverage + branch 15 behind main);
+  claude APPROVE (2 real non-blocking: 10s /health probe delays banner; onWake before open()
+  can leak a socket).
+- Addressed (commit 646c3fe0c): race /health probe to 2s cap; guard onWake until open()ed
+  (`opened` flag); source-level wiring guards for the manager fan-out + probe injection +
+  extension focus-handler call (this file's established harness pattern); dropped dead `void pty`.
+  Merged origin/main (clean, no overlap on my 5 files) to clear the staleness flag.
+
+### PR-phase CMAP round 2 (after fixes, head e05bf66d1)
+- gemini APPROVE, codex APPROVE, claude APPROVE. No blocking issues.
+- Residuals (documented, out of scope): re-arm throttle (`lastRearmAt`), the uncleared 2s
+  probe-timeout timer (self-resolving, negligible), the ≤2s yellow-notice lingering, focus-only
+  wake signal, apps/web sibling. Physical sleep→wake is the real end-to-end check (needs human).
+
+Verification at PR head: full vscode unit suite 1022 passed, check-types + lint clean.
+
+Notified architect + fired the `pr` gate. **Holding for human gate approval.**
+
 ## Fences
 terminal-adapter.ts is mine. Not touching views/tower*.ts, workspace-label.ts, fleet-order.ts,
 attention-format.ts, switch-workspace.ts (pir-1566), or views/builders.ts, terminal-manager
