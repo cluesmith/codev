@@ -19,7 +19,7 @@ import { URL } from 'node:url';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER } from '@cluesmith/codev-types';
-import { IDE_DEFAULT_PREFIX } from '../lib/ide-record.js';
+import { IDE_DEFAULT_PREFIX, readIdeConnectionToken } from '../lib/ide-record.js';
 import { ensureIdeServerLive } from './ide-server.js';
 
 /** Hop-by-hop headers not forwarded between connections (RFC 7230 §6.1). */
@@ -65,6 +65,22 @@ function isTunnelBorne(headers: http.IncomingHttpHeaders): boolean {
   return headers[TUNNEL_PROXY_HEADER] === '1';
 }
 
+/** The connection-token cookie name the VS Code server reads. */
+const IDE_TOKEN_COOKIE = 'vscode-tkn';
+
+/**
+ * Merge the IDE connection token into a Cookie header value as `vscode-tkn=…`,
+ * preserving every existing cookie and never clobbering an already-present
+ * `vscode-tkn` (Issue #1668). Exported for testing.
+ */
+export function mergeConnectionTokenCookie(existing: string | string[] | undefined, token: string): string {
+  const current = Array.isArray(existing) ? existing.join('; ') : existing ?? '';
+  // Never clobber: if a vscode-tkn is already present, leave the header as-is.
+  if (new RegExp(`(^|;\\s*)${IDE_TOKEN_COOKIE}=`).test(current)) return current;
+  const pair = `${IDE_TOKEN_COOKIE}=${token}`;
+  return current ? `${current}; ${pair}` : pair;
+}
+
 /**
  * Derive the tunnel's public authority from the cloud config, matching the
  * `accessUrl` Tower advertises (`tower-tunnel.ts`: `${server_url}/t/${tower_name}/`).
@@ -99,6 +115,7 @@ export function buildForwardHeaders(
   incoming: http.IncomingHttpHeaders,
   port: number,
   publicAuthority: PublicAuthority | null,
+  connectionToken: string | null,
 ): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
   for (const [key, value] of Object.entries(incoming)) {
@@ -114,6 +131,15 @@ export function buildForwardHeaders(
     out['x-forwarded-host'] = publicAuthority.host;
     out['x-forwarded-proto'] = publicAuthority.proto;
     out['x-forwarded-prefix'] = publicAuthority.prefix;
+  }
+
+  // Present the IDE server's connection token as a cookie. The server is
+  // spawned with `--connection-token-file` and 403s without it, and it cannot
+  // ride the browser's cookie jar through the relay (Set-Cookie Path=/ide never
+  // matches /t/<tower>/ide/), so Tower injects it here — merging with, never
+  // clobbering, any existing Cookie header (Issue #1668).
+  if (connectionToken) {
+    out['cookie'] = mergeConnectionTokenCookie(incoming.cookie, connectionToken);
   }
   return out;
 }
@@ -153,7 +179,7 @@ export async function forwardIdeHttp(
     return;
   }
 
-  const headers = buildForwardHeaders(req.headers, port, getPublicAuthority());
+  const headers = buildForwardHeaders(req.headers, port, getPublicAuthority(), readIdeConnectionToken());
   const proxyReq = http.request(
     { hostname: '127.0.0.1', port, path: req.url || '/', method: req.method, headers },
     (proxyRes) => {
@@ -203,7 +229,7 @@ export async function forwardIdeWebSocket(
   // `Sec-WebSocket-Key` is preserved by `buildForwardHeaders` and forwarded as-is
   // so the upstream's `Sec-WebSocket-Accept` — relayed back verbatim — validates
   // against the client's own key.
-  const headers = buildForwardHeaders(req.headers, port, getPublicAuthority());
+  const headers = buildForwardHeaders(req.headers, port, getPublicAuthority(), readIdeConnectionToken());
   headers['Connection'] = 'Upgrade';
   headers['Upgrade'] = 'websocket';
   const upstream = http.request({

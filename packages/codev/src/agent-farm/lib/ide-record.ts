@@ -105,6 +105,23 @@ export function deleteIdeRecord(): void {
 }
 
 /**
+ * Read the Tower-owned connection token, or null if it does not exist yet.
+ *
+ * The forward presents this token to the IDE server as a `vscode-tkn` cookie
+ * (Issue #1668): the server is spawned with `--connection-token-file`, so it
+ * 403s any request that does not carry the token. The token cannot ride the
+ * browser's own cookie jar through the relay — the server's `Set-Cookie` is
+ * scoped `Path=/ide`, which never matches the external `/t/<tower>/ide/` — so
+ * Tower injects it at the forward instead.
+ */
+export function readIdeConnectionToken(): string | null {
+  const path = getIdeConnectionTokenPath();
+  if (!existsSync(path)) return null;
+  const token = readFileSync(path, 'utf-8').trim();
+  return token.length > 0 ? token : null;
+}
+
+/**
  * Return the Tower-owned connection token, generating and persisting one (0600)
  * on first use. This token is the IDE server's own inner auth layer (passed via
  * `--connection-token-file`); it is NOT a substitute for Tower's key check on
