@@ -2161,6 +2161,38 @@ The deck is a remote and VSCode is the screen, bound by **one shared selection**
 ### Optional Dependencies (Agent-Farm)
 - **node-pty**: Native PTY sessions for dashboard terminals (compiled during install, may need `npm rebuild node-pty`)
 
+### IDE prefix forward (Issue #1668)
+
+Tower forwards a fixed `/ide/` prefix to a **single** local VS Code server-web process — plain
+HTTP in `tower-routes.ts` and a **raw bidirectional WebSocket pipe** in `tower-websocket.ts`
+(Tower never parses those frames; they are VS Code's own remote protocol, not Tower's PTY
+bridge). The target workspace is chosen per browser connection via `?folder=<abs path>`; one
+server serves any folder. Forwarding code lives in `servers/ide-forward.ts`; lifecycle
+(spawn / stop / status / boot-reconcile / on-demand respawn) in `servers/ide-server.ts`.
+
+- **Auth**: the forward is a *post-auth* handler behind Tower's existing key choke point. HTTP
+  passes `isRequestAllowed`; the WS upgrade calls the swappable seam `isForwardAuthorized`
+  (Host + `codev-tower-key` header — the credential `TunnelClient` stamps on tunnel-borne
+  requests, #1588) because the dashboard's subprotocol-key path doesn't fit a vanilla workbench
+  socket. `/ide/` is **never** a public route. The seam is the #1589 swap point. There is **no
+  per-folder authorization**: the server has no per-folder isolation, so Tower's key is the
+  whole boundary for the forward.
+- **Two auth boundaries, both kept**: Tower's key guards the forward path; the IDE server's
+  **connection token** (`--connection-token-file`, `~/.agent-farm/ide-connection-token`) guards
+  direct `127.0.0.1:<port>` access that skips Tower. The forward injects that token as a
+  `vscode-tkn` cookie (merging, never clobbering) because the server's `Set-Cookie Path=/ide`
+  never matches the external `/t/<tower>/ide/` through the relay.
+- **Header hygiene**: strip `x-forwarded-port` / `x-original-host` and Tower-internal
+  `codev-tower-key` / `codev-web-key` / `x-codev-tunnel-proxy`; rewrite `Host` to loopback;
+  preserve `Cache-Control` / `ETag` (the workbench boot is a large, per-version-cacheable asset
+  set); stamp `x-forwarded-host` / `-proto` / `-prefix` from the cloud config's public authority
+  only when tunnel-borne.
+- **Management API**: `POST/DELETE/GET /api/ide` (driven by `afx ide start|stop|status`) is
+  local-only — blocked from the tunnel like `/api/tunnel/*` because it spawns/kills a process.
+- **State**: a Tower-managed `~/.agent-farm/ide-server.json` record (`{prefix, port, serverPath,
+  pid}`), the `cloud-config.json` pattern — **no config file, no `global.db` change**. Live PID
+  is discovered by port. `codev/` and `codev-skeleton/` are unaffected (this is product code).
+
 ## System-Wide Patterns
 
 Cross-cutting concerns that appear throughout the codebase:
