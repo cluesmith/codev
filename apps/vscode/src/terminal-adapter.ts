@@ -89,6 +89,12 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   // retrying is hopeless and would revive the pre-June retry storm the budget
   // was added to stop. null while the adapter has not given up.
   private giveUpKind: 'transient' | 'permanent' | null = null;
+  // Bumped on every give-up-state transition (enter or clear). The async
+  // exhausted-budget banner (renderExhaustedGiveUp) captures this before it
+  // awaits the /health probe and renders only if it is unchanged — so a probe
+  // that outlives its give-up (a wake reconnects, or the reconnect then hits a
+  // permanent 4xx) can't paint a stale banner over the current state.
+  private giveUpToken = 0;
   // Tracks whether a wipeable in-progress retry notice currently occupies the
   // terminal's current line (#1001). Set when scheduleReconnect writes a notice;
   // cleared when a successful reconnect wipes it or the give-up state replaces
@@ -206,6 +212,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       this.backoff.recordSuccess();
       this.gaveUp = false;
       this.giveUpKind = null;
+      this.giveUpToken++;
       // Wipe any in-progress retry notice before replayed buffer / normal
       // output resumes, so it doesn't orphan in scrollback (#1001).
       this.clearReconnectNotice();
@@ -313,6 +320,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     if (this.gaveUp) { return false; }
     this.gaveUp = true;
     this.giveUpKind = kind;
+    this.giveUpToken++;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -352,6 +360,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
    * now-stale banner rather than paint it over a recovering connection.
    */
   private async renderExhaustedGiveUp(): Promise<void> {
+    const token = this.giveUpToken;
     let reason = `unable to reconnect after ${MAX_RECONNECT_ATTEMPTS} attempts`;
     if (this.probeHealth) {
       let towerUp: boolean | null = null;
@@ -360,7 +369,10 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       } catch {
         towerUp = null;
       }
-      if (this.disposed || !this.gaveUp) { return; }
+      // Any give-up transition since we launched (a wake reconnect, a fresh
+      // give-up, or a permanent 4xx landing on the reconnect) bumps the token;
+      // don't paint this now-stale exhausted-budget banner over it.
+      if (this.disposed || this.giveUpToken !== token) { return; }
       if (towerUp === true) {
         reason = 'reconnect failed (Tower is up)';
       } else if (towerUp === false) {
@@ -441,6 +453,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     this.backoff.reset();
     this.gaveUp = false;
     this.giveUpKind = null;
+    this.giveUpToken++;
     if (this.ws) {
       this.ws.close();
       this.ws = null;

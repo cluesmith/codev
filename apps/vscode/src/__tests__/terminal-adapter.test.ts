@@ -721,5 +721,30 @@ describe('#1681 — exhausted-budget banner is worded honestly via /health', () 
     expect(banner).toBeDefined();
     expect(banner).toContain('unable to reconnect after 6 attempts');
   });
+
+  it('a slow probe never overwrites a permanent give-up that lands mid-probe', async () => {
+    // The give-up-token guard: exhaust the budget (transient), start the probe,
+    // then let a wake reconnect hit a permanent 4xx before the probe resolves.
+    let resolveProbe: (up: boolean) => void = () => {};
+    const probe = () => new Promise<boolean>((r) => { resolveProbe = r; });
+    const { pty, writes } = makeAdapterWithProbe(probe);
+    burnBudget();
+    currentSocket().emit('close'); // transient give-up; /health probe now pending
+
+    pty.onWake();                  // wake re-arms → fresh socket
+    currentSocket().emit('error', new Error('Unexpected server response: 404'));
+    currentSocket().emit('close'); // the reconnect is a permanent 4xx
+    const permanentBanner = writes.find((w) => w.includes('no longer exists'));
+    expect(permanentBanner).toBeDefined();
+
+    writes.length = 0;
+    resolveProbe(true);            // the stale transient probe finally resolves
+    await flushMicrotasks();
+
+    // The now-stale exhausted-budget banner is suppressed — the permanent state
+    // stands, uncontradicted.
+    expect(writes.some((w) => w.includes('Tower is up'))).toBe(false);
+    expect(writes.some((w) => w.includes('unable to reconnect'))).toBe(false);
+  });
 });
 
