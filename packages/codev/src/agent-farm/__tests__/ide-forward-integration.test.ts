@@ -17,9 +17,13 @@ vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
 });
 
 import { forwardIdeHttp, forwardIdeWebSocket } from '../servers/ide-forward.js';
-import { writeIdeRecord, deleteIdeRecord, type IdeServerRecord } from '../lib/ide-record.js';
+import { writeIdeRecord, deleteIdeRecord, ensureIdeConnectionToken, type IdeServerRecord } from '../lib/ide-record.js';
+import type { IncomingHttpHeaders } from 'node:http';
 
 const noopLog = (): void => {};
+
+let token: string;
+let lastWsReqHeaders: IncomingHttpHeaders | null = null;
 
 function listen(server: http.Server): Promise<number> {
   return new Promise((resolve) => {
@@ -53,10 +57,15 @@ beforeAll(async () => {
     res.end(JSON.stringify({ url: req.url, method: req.method, headers: req.headers }));
   });
   stubWss = new WebSocketServer({ server: stub });
-  stubWss.on('connection', (ws) => {
+  stubWss.on('connection', (ws, req) => {
+    lastWsReqHeaders = req.headers;
     ws.on('message', (data) => ws.send(`echo:${data.toString()}`));
   });
   stubPort = await listen(stub);
+
+  // The server is spawned with a connection-token file; the forward must present
+  // it. Create the token in the (temp) AGENT_FARM_DIR so readIdeConnectionToken finds it.
+  token = ensureIdeConnectionToken();
 
   // Tower stand-in: its request/upgrade handlers delegate to the forward.
   tower = http.createServer((req, res) => {
@@ -114,6 +123,16 @@ describe('IDE HTTP forward (stub loopback)', () => {
     expect(echoed.headers['x-forwarded-port']).toBeUndefined();
     // Host rewritten to the loopback target.
     expect(echoed.headers['host']).toBe(`127.0.0.1:${stubPort}`);
+    // Connection token injected as a cookie so the server (spawned with
+    // --connection-token-file) does not 403 (#1668 cloud-run fix).
+    expect(echoed.headers['cookie']).toBe(`vscode-tkn=${token}`);
+  });
+
+  it('merges the token cookie without clobbering an existing Cookie header', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    const res = await get('/ide/', { 'codev-tower-key': 'k', cookie: 'foo=bar' });
+    const echoed = JSON.parse(res.body) as { headers: Record<string, string> };
+    expect(echoed.headers['cookie']).toBe(`foo=bar; vscode-tkn=${token}`);
   });
 
   it('returns 502 when no IDE server is registered', async () => {
@@ -139,5 +158,7 @@ describe('IDE WebSocket forward (stub loopback)', () => {
     });
 
     expect(echoed).toBe('echo:hello');
+    // The upgrade the stub received carried the injected connection-token cookie.
+    expect(lastWsReqHeaders?.['cookie']).toContain(`vscode-tkn=${token}`);
   });
 });
