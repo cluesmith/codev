@@ -13,7 +13,7 @@
  *
  * This module makes the second Tower REFUSE to start instead. The owner record
  * is an exclusive LOCK FILE sitting next to the exact global.db being contended
- * (`<db path>.lock`), so it travels with that file: cross-`CODEV_AGENT_FARM_DIR`
+ * (`<db path>.tower-owner`), so it travels with that file: cross-`CODEV_AGENT_FARM_DIR`
  * isolation is untouched (an isolated DB carries its own lock), and two isolated
  * test Towers on different DB files never share a lock. Acquisition is an atomic
  * `O_EXCL` create — the filesystem itself resolves a race between two starters. A
@@ -55,9 +55,16 @@ export interface TowerOwner {
   bindHost: string;
 }
 
-/** The lock file for the active global.db: the DB path plus `.lock`. */
+/**
+ * The lock file for the active global.db: the DB path plus `.tower-owner`.
+ *
+ * The suffix is deliberately NOT `.lock`: SQLite's `unix-dotfile` VFS (a fallback
+ * on filesystems without POSIX locks) creates `<db>.lock`, which would collide.
+ * `.tower-owner` avoids every SQLite auxiliary name (`-wal`, `-shm`, `-journal`,
+ * `-mj*`, and the dotfile VFS's `.lock`).
+ */
 export function defaultLockFile(): string {
-  return `${getGlobalDbPath()}.lock`;
+  return `${getGlobalDbPath()}.tower-owner`;
 }
 
 /** Serialize an owner record to the lock file's on-disk form. */

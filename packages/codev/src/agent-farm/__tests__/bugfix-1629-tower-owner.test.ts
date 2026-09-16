@@ -86,8 +86,13 @@ const dead = () => false;
 const probeReturns = (v: HealthProbe) => async () => v;
 
 describe('defaultLockFile — sits beside the active global.db', () => {
-  it('is the db path plus .lock', () => {
-    expect(defaultLockFile()).toMatch(/\.lock$/);
+  it('is the db path plus .tower-owner, and never collides with a SQLite aux name', () => {
+    const f = defaultLockFile();
+    expect(f).toMatch(/\.tower-owner$/);
+    // Must not match any SQLite auxiliary file: the -wal/-shm/-journal/-mj family
+    // or the unix-dotfile VFS's <db>.lock.
+    expect(f).not.toMatch(/[-.](wal|shm|journal|lock)$/);
+    expect(f).not.toMatch(/-mj/);
   });
 });
 
@@ -294,13 +299,13 @@ describe('claimGlobalDbOwnership — atomic against a concurrent second Tower', 
   it('the acquire is exclusive and leaves no temp residue (atomic link, no empty window)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'af-1629-dir-'));
     tmpPaths.push(dir);
-    const lockFile = path.join(dir, 'global.db.lock');
+    const lockFile = path.join(dir, 'global.db.tower-owner');
     const res = await claimGlobalDbOwnership({ lockFile, pid: 111, port: 4100, dbDir: '/d' });
     expect(res.ok).toBe(true);
     // The held path rejects a second create...
     expect(() => fs.writeFileSync(lockFile, '{}', { flag: 'wx' })).toThrow();
     // ...and the acquire cleaned up its temp: only the lock file remains.
-    expect(fs.readdirSync(dir)).toEqual(['global.db.lock']);
+    expect(fs.readdirSync(dir)).toEqual(['global.db.tower-owner']);
   });
 
   it('a second contender refuses behind the first live claim (no double-claim)', async () => {

@@ -124,8 +124,9 @@ const bindHost = bridgeMode
   ? validateHost(process.env.BRIDGE_TOWER_HOST || '127.0.0.1')
   : '127.0.0.1';
 
-// Issue #1629: the owner lock file for this global.db (its `.lock` sibling).
-// Resolved once so the boot guard and the graceful-shutdown release use the same path.
+// Issue #1629: the owner lock file for this global.db (its `.tower-owner` sibling;
+// the suffix avoids SQLite's own auxiliary/dotfile-VFS names). Resolved once so the
+// boot guard and the graceful-shutdown release use the same path.
 const towerLockFile = defaultLockFile();
 
 // Request authentication (advisory GHSA-xvjp-7748-v88v): ensure the shared local
