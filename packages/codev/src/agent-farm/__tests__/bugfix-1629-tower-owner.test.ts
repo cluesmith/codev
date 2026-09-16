@@ -102,6 +102,10 @@ describe('resolveProbeHost — wildcard binds probe loopback, specific binds pro
   it('keeps a specific bridge host', () => {
     expect(resolveProbeHost('10.0.0.5')).toBe('10.0.0.5');
   });
+  it('strips brackets from a specific IPv6 literal (http.request rejects brackets)', () => {
+    expect(resolveProbeHost('[::1]')).toBe('::1');
+    expect(resolveProbeHost('[2001:db8::1]')).toBe('2001:db8::1');
+  });
 });
 
 describe('probeTowerHealth — classify the owner port', () => {
@@ -316,6 +320,32 @@ describe('claimGlobalDbOwnership — atomic against a concurrent second Tower', 
     const res = await claimGlobalDbOwnership({ lockFile, pid: 222, port: 4101, dbDir: '/d', deps: { isAlive: dead } });
     expect(res.ok).toBe(true);
     expect(readTowerOwner(lockFile)?.pid).toBe(222);
+  });
+
+  it('does not delete a contender live lock: refuses behind the holder it re-reads', async () => {
+    // The stale-takeover CAS in action: our probe of the observed (stale) holder S
+    // races a contender that replaces the lock with a LIVE owner L. removeStaleLock
+    // re-reads before unlinking, sees L (not S), and does NOT delete it; the next
+    // acquire attempt then re-reads L, finds it live, and refuses behind it.
+    const lockFile = tmpLock();
+    writeTowerOwner(lockFile, owner({ pid: 1, port: 4100, startedAt: 1 })); // S
+    let call = 0;
+    const raceProbe = async (): Promise<HealthProbe> => {
+      call += 1;
+      if (call === 1) {
+        // While we "probe" S, a contender installs a live owner L.
+        writeTowerOwner(lockFile, owner({ pid: 2, port: 4100, startedAt: 2 })); // L
+        return 'gone'; // S looks absent
+      }
+      return 'tower'; // L is live
+    };
+    const res = await claimGlobalDbOwnership({
+      lockFile, pid: 999, port: 5000, dbDir: '/d', deps: { isAlive: alive, probe: raceProbe },
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('unreachable');
+    expect(res.conflict.pid).toBe(2); // refused behind L, not S, never ourselves
+    expect(readTowerOwner(lockFile)?.pid).toBe(2); // L intact — never deleted
   });
 
   it('fails closed under persistent contention instead of forcing the lock', async () => {

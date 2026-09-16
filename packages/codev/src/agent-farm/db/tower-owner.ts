@@ -174,8 +174,10 @@ export function probeTowerHealth(host: string, port: number, timeoutMs = 6000): 
             return;
           }
           if (res.statusCode === 503) {
-            // The readiness gate answers 503 {"error":"STARTING_UP"} while a live
-            // Tower boots — a live owner, not an absent one.
+            // A live Tower can answer 503 {"error":"STARTING_UP"} from its readiness
+            // gate. In practice a mid-boot Tower usually HOLDS /health past this
+            // probe's budget, so that case times out to 'unreachable' (also refused);
+            // this branch covers a 503 returned within budget. Either way, a live owner.
             try {
               resolve((JSON.parse(body) as { error?: string }).error === 'STARTING_UP' ? 'tower' : 'unreachable');
             } catch {
@@ -217,6 +219,11 @@ export function probeTowerHealth(host: string, port: number, timeoutMs = 6000): 
  */
 export function resolveProbeHost(bindHost: string | null | undefined): string {
   if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::' || bindHost === '[::]') return '127.0.0.1';
+  // A specific bracketed IPv6 literal ([::1], [2001:db8::1]): http.request's
+  // `hostname` wants the address WITHOUT brackets, or it rejects it and the probe
+  // is never conclusive. Strip them.
+  const ipv6 = bindHost.match(/^\[(.+)\]$/);
+  if (ipv6) return ipv6[1];
   return bindHost;
 }
 
@@ -287,7 +294,20 @@ function tryAcquire(lockFile: string, owner: TowerOwner): boolean {
     fs.linkSync(tmp, lockFile);
     return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') return false;
+    // Some filesystems don't support hard links (ENOSYS/EPERM, or a cross-device
+    // temp on EXDEV). Fall back to an O_EXCL create — a hair weaker (a brief
+    // empty-file window) but better than failing to boot at all.
+    if (code === 'ENOSYS' || code === 'EPERM' || code === 'EXDEV') {
+      try {
+        fs.writeFileSync(lockFile, serialize(owner), { flag: 'wx' });
+        return true;
+      } catch (fallbackErr) {
+        if ((fallbackErr as NodeJS.ErrnoException).code === 'EEXIST') return false;
+        throw fallbackErr;
+      }
+    }
     throw err;
   } finally {
     try { fs.rmSync(tmp, { force: true }); } catch { /* temp already gone */ }
