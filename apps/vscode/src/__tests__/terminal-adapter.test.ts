@@ -617,10 +617,10 @@ type WakeablePty = {
 
 /** Build an adapter with an optional injected `/health` probe (#1681), exposing
  *  the `onWake` re-arm entry point. */
-function makeAdapterWithProbe(probe?: () => Promise<boolean>) {
+function makeAdapterWithProbe(probe?: () => Promise<boolean | null>) {
   const writes: string[] = [];
   const pty = new (CodevPseudoterminal as unknown as new (
-    url: string, authKey: string | null, ch: unknown, probeHealth?: () => Promise<boolean>,
+    url: string, authKey: string | null, ch: unknown, probeHealth?: () => Promise<boolean | null>,
   ) => WakeablePty)('ws://localhost:4100/x', null, fakeOutputChannel(), probe);
   pty.onDidWrite((s: string) => { if (s) { writes.push(s); } });
   pty.open(undefined);
@@ -754,6 +754,19 @@ describe('#1681 — exhausted-budget banner is worded honestly via /health', () 
     const banner = writes.find((w) => w.includes(RECONNECT_LINK_TEXT));
     expect(banner).toBeDefined();
     expect(banner).toContain('Tower unreachable');
+  });
+
+  it('falls back to attempt-count wording when the probe returns null (reachability unknown)', async () => {
+    const { writes } = makeAdapterWithProbe(async () => null);
+    burnBudget();
+    writes.length = 0;
+    currentSocket().emit('close');
+    await flushMicrotasks();
+
+    const banner = writes.find((w) => w.includes(RECONNECT_LINK_TEXT));
+    expect(banner).toBeDefined();
+    expect(banner).toContain('unable to reconnect after 6 attempts');
+    expect(banner).not.toContain('Tower unreachable');
   });
 
   it('falls back to the plain attempt-count wording when no probe is injected', () => {

@@ -221,7 +221,7 @@ describe('#1681 — re-arm terminal reconnects on wake', () => {
   it('injects the /health probe into every adapter it constructs', () => {
     expect(TM_SRC).toMatch(/new CodevPseudoterminal\(/);
     expect(TM_SRC).toMatch(/\(\) => this\.probeTowerHealth\(\)/);
-    expect(TM_SRC).toMatch(/private async probeTowerHealth\(\): Promise<boolean>/);
+    expect(TM_SRC).toMatch(/private async probeTowerHealth\(\): Promise<boolean \| null>/);
     expect(TM_SRC).toMatch(/getClient\(\)[\s\S]*getHealth\(\)\)\s*!==\s*null/);
   });
 

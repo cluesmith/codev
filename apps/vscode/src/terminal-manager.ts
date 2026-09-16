@@ -640,13 +640,15 @@ export class TerminalManager {
 
   /**
    * One-shot Tower `/health` probe used to word a terminal's exhausted-budget
-   * give-up banner honestly (#1681). Returns true when Tower answers, false
-   * when it is unreachable; `getHealth` already collapses network errors to
-   * `null`, so this never throws.
+   * give-up banner honestly (#1681). Returns true when Tower answers, false when
+   * it is unreachable, and `null` when reachability is unknown (no client yet) —
+   * so the adapter falls back to the neutral attempt-count wording rather than
+   * asserting "Tower unreachable" for what is really an unconfigured client.
+   * `getHealth` already collapses network errors to `null`, so this never throws.
    */
-  private async probeTowerHealth(): Promise<boolean> {
+  private async probeTowerHealth(): Promise<boolean | null> {
     const client = this.connectionManager.getClient();
-    if (!client) { return false; }
+    if (!client) { return null; }
     return (await client.getHealth()) !== null;
   }
 

@@ -122,9 +122,10 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     // Optional one-shot Tower `/health` probe (#1681). When present, the
     // exhausted-budget give-up words its banner honestly — "Tower unreachable"
     // vs "reconnect failed (Tower is up)" — instead of the ambiguous
-    // attempt-count message. Injected by terminal-manager; absent in the unit
-    // tests that don't exercise the wording split.
-    private probeHealth?: () => Promise<boolean>,
+    // attempt-count message. `null` means reachability is unknown (no client
+    // yet), which falls back to the neutral wording. Injected by
+    // terminal-manager; absent in the unit tests that don't exercise the split.
+    private probeHealth?: () => Promise<boolean | null>,
   ) {}
 
   open(initialDimensions: vscode.TerminalDimensions | undefined): void {
@@ -382,15 +383,19 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     let reason = `unable to reconnect after ${MAX_RECONNECT_ATTEMPTS} attempts`;
     if (this.probeHealth) {
       let towerUp: boolean | null = null;
+      // Race the probe against a short timeout so a blackholed network can't
+      // hold the banner for the SDK's full 10s request window (#1681). Clear the
+      // timer when the probe wins so it doesn't outlive the resolved race.
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        // Race the probe against a short timeout so a blackholed network can't
-        // hold the banner for the SDK's full 10s request window (#1681).
         towerUp = await Promise.race([
           this.probeHealth(),
-          new Promise<null>((resolve) => setTimeout(resolve, HEALTH_PROBE_TIMEOUT_MS, null)),
+          new Promise<null>((resolve) => { timer = setTimeout(resolve, HEALTH_PROBE_TIMEOUT_MS, null); }),
         ]);
       } catch {
         towerUp = null;
+      } finally {
+        if (timer) { clearTimeout(timer); }
       }
       // Any give-up transition since we launched (a wake reconnect, a fresh
       // give-up, or a permanent 4xx landing on the reconnect) bumps the token;
