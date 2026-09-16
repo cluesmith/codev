@@ -1,7 +1,7 @@
 id: bugfix-1629
 title: tower-a-second-tower-started-a
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-16T00:56:30.256Z'
-updated_at: '2026-09-16T00:56:30.256Z'
+updated_at: '2026-09-16T01:01:33.485Z'
