@@ -58,6 +58,8 @@ source with the sidebar renderer, so what you see is what you get.
        - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
      Move out to its own ## section if the entry grows past ~3 sentences. -->
 
+- **Terminal tabs reconnect after laptop sleep** (#1681, PR #1682). A window refocus re-arms every tab's reconnect budget, and the exhausted-budget banner now probes Tower so it names the real situation. Ships with the next extension release.
+
 ## Other fixes (dashboard, porch, infrastructure)
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->

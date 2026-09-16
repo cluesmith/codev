@@ -6,6 +6,10 @@
 
 - **Cycle through agent terminals from the keyboard.** `ctrl+alt+n` / `ctrl+alt+p` move focus through the sidebar's Agents order: architects and builders exactly as the sidebar lists them. An agent whose terminal cannot open is skipped, so a dead session never wedges the cycle.
 
+### Fixes
+
+- **Terminals come back after a laptop sleep.** Sleeping the machine used to burn every terminal tab's reconnect budget against the suspended network stack, leaving a permanent "unable to reconnect" banner while Tower was healthy. Refocusing the window now re-arms reconnects for every tab, and a tab that gave up for a transient reason reconnects on its own. When the budget really is exhausted, the banner checks Tower first and says which case you are in: Tower unreachable, or Tower up and a click will retry. A session that no longer exists on Tower still gives up immediately, as before.
+
 ## [3.3.3] - 2026-09-05
 
 ### What's new
@@ -14,7 +18,6 @@
 
 ### Fixes
 
-- **Terminals come back after a laptop sleep.** Sleeping the machine used to burn every terminal tab's reconnect budget against the suspended network stack, leaving a permanent "unable to reconnect" banner while Tower was healthy. Refocusing the window now re-arms reconnects for every tab, and a tab that gave up for a transient reason reconnects on its own. When the budget really is exhausted, the banner checks Tower first and says which case you are in: Tower unreachable, or Tower up and a click will retry. A session that no longer exists on Tower still gives up immediately, as before.
 - **Held-mail toasts say why a message is held.** The mailbox escalation toast now carries the hold reason, distinguishing "a human is typing in that composer" (clears itself) from "the composer could not be verified" (needs attention), instead of a bare busy.
 - **The escalation toast no longer grows memory for the life of the window.** Its already-shown tracking now clears when a workspace's escalations clear, with a hard cap as backstop.
 - **A restored issue preview no longer sticks on "Content unavailable".** When VS Code restored a preview tab on launch before Tower had connected, the tab showed the fallback text and never recovered. It now refreshes as soon as the connection comes up, on tab open, and at activation, so the content self-heals instead of staying blank.
