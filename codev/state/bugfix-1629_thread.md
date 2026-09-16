@@ -220,5 +220,10 @@ and most urgent (today a refused start reads as the generic ~30s timeout from th
 chair, indistinguishable from #1685). Items 2 (shutdown-overlap pid-is-a-tower identity
 check) + 3 (clear-owner/--force hatch) are COUPLED — ship together or not at all, per
 Claude's phantom-pid warning. Recorded the Codex RC + this disposition in the PR #1689 body.
-Holding at the pr gate; Amr's words cover 1687 then 1689. On approval: porch approve … pr →
-gh pr merge 1689 --merge (no --delete-branch) → verify.
+Holding at the pr gate; Amr's words cover 1687 then 1689.
+
+CORRECTED post-approval sequence (merge is NOT mine — standing workspace flow, same as
+1677/1687): on Amr's gate word relayed by main → run `porch approve bugfix-1629 pr` ONLY,
+push bookkeeping, HOLD. Merge execution is main's on Amr's SEPARATE merge word (after green
+on my final head). On main's landed-confirmation → `porch done bugfix-1629 --merged 1689`
+→ enter verify, then hold. I do NOT run gh pr merge.
