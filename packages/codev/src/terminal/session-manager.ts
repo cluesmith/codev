@@ -812,66 +812,87 @@ export class SessionManager extends EventEmitter {
     }
 
     let killed = 0;
-    const sweep = async (): Promise<void> => {
-      const entries = await this.findShellperProcesses();
-      for (const { pid, socketPath } of entries) {
-        if (pid === process.pid) continue;  // Don't kill ourselves
-        if (activePids.has(pid)) continue;  // Known active session
 
-        // Safety: before killing, probe the socket to check if the shellper
-        // is serving a live session that this Tower instance lost track of
-        // (e.g., SQLite was corrupt/empty during reconciliation).
-        if (socketPath) {
-          const isAlive = await this.probeSocket(socketPath);
-          if (isAlive) {
-            this.log(`Orphan pid=${pid} has responsive socket ${socketPath} — skipping kill`);
-            continue;
-          }
-        }
+    // Bugfix #1685: bound the sweep against a wall-clock deadline and cancel
+    // COOPERATIVELY, so it can never keep running (and killing) in the
+    // background past its budget. The `ps` scan hangs on a flooded/wedged
+    // process table (the field trigger) and the per-orphan socket probes are
+    // sequential (up to 2s each), so an unbounded sweep stalls startup for
+    // minutes. The sweep is hygiene, not correctness: once the budget is spent
+    // we stop and return -1, and the next Tower start retries it.
+    const deadline = Date.now() + Math.max(0, timeoutMs);
 
-        this.log(`Killing orphaned shellper process: pid=${pid}`);
-        try {
-          // Kill the process group (shellper + its PTY child) to prevent
-          // orphaned PTY processes. Shellper is spawned with detached:true,
-          // so it's a process group leader.
-          process.kill(-pid, 'SIGTERM');
-          killed++;
-        } catch {
-          // Process already dead or permission error — try individual PID
-          try { process.kill(pid, 'SIGTERM'); killed++; } catch { /* already dead */ }
+    // The `ps` scan is a single await with no inner loop to break out of, so
+    // bound its wait explicitly. It performs no kills, so abandoning it is safe
+    // (and its own execFile timeout reaps the `ps` child).
+    let entries: Array<{ pid: number; socketPath?: string }>;
+    try {
+      const scan = await this.withDeadline(
+        this.findShellperProcesses(deadline - Date.now()),
+        deadline - Date.now(),
+      );
+      if (!scan.ok) return -1;  // process-table scan exceeded the budget
+      entries = scan.value;
+    } catch {
+      // `ps` not available or failed — non-fatal, matching pre-#1685 behavior.
+      return killed;
+    }
+
+    for (const { pid, socketPath } of entries) {
+      // Cooperative cancellation: stop at the deadline rather than continue.
+      // Because we STOP here (no background tail), a bounded sweep never kills
+      // past its budget, so it cannot race a session created after startup.
+      if (Date.now() >= deadline) return -1;
+      if (pid === process.pid) continue;  // Don't kill ourselves
+      if (activePids.has(pid)) continue;  // Known active session
+
+      // Safety: before killing, probe the socket to check if the shellper
+      // is serving a live session that this Tower instance lost track of
+      // (e.g., SQLite was corrupt/empty during reconciliation).
+      if (socketPath) {
+        const isAlive = await this.probeSocket(socketPath);  // self-bounded to 2s
+        if (isAlive) {
+          this.log(`Orphan pid=${pid} has responsive socket ${socketPath} — skipping kill`);
+          continue;
         }
       }
-    };
 
-    // Bugfix #1685: bound the sweep. The `ps` scan and per-orphan socket probes
-    // are unbounded, so on a flooded/wedged process table this stalls for
-    // minutes. The sweep is hygiene, not correctness — past the budget, abandon
-    // it (it keeps running to completion in the background, harmlessly) and
-    // signal -1 so it can never block startup. The next Tower start retries it.
-    let timedOut = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        sweep(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => {
-            timedOut = true;
-            reject(new Error('orphan-sweep-timeout'));
-          }, timeoutMs);
-        }),
-      ]);
-    } catch {
-      // A timeout aborts the wait; any other throw (e.g. `ps` unavailable) is
-      // non-fatal, matching the pre-#1685 behavior — return what was killed.
-      if (timedOut) return -1;
-    } finally {
-      if (timer) clearTimeout(timer);
+      this.log(`Killing orphaned shellper process: pid=${pid}`);
+      try {
+        // Kill the process group (shellper + its PTY child) to prevent
+        // orphaned PTY processes. Shellper is spawned with detached:true,
+        // so it's a process group leader.
+        process.kill(-pid, 'SIGTERM');
+        killed++;
+      } catch {
+        // Process already dead or permission error — try individual PID
+        try { process.kill(pid, 'SIGTERM'); killed++; } catch { /* already dead */ }
+      }
     }
 
     if (killed > 0) {
       this.log(`Killed ${killed} orphaned shellper process(es)`);
     }
     return killed;
+  }
+
+  /**
+   * Await `p`, but give up after `ms` and report `{ ok: false }` rather than
+   * block indefinitely (Bugfix #1685). A rejection from `p` is propagated so the
+   * caller can tell "failed" from "timed out". `p` may still settle later — the
+   * caller must ensure abandoning it is safe.
+   */
+  private withDeadline<T>(p: Promise<T>, ms: number): Promise<{ ok: true; value: T } | { ok: false }> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) { settled = true; resolve({ ok: false }); }
+      }, Math.max(0, ms));
+      p.then(
+        (value) => { if (!settled) { settled = true; clearTimeout(timer); resolve({ ok: true, value }); } },
+        (err) => { if (!settled) { settled = true; clearTimeout(timer); reject(err); } },
+      );
+    });
   }
 
   /**
@@ -883,11 +904,16 @@ export class SessionManager extends EventEmitter {
    *
    * The socketPath is used by killOrphanedShellpers() to probe the socket
    * before killing — if the socket is responsive, the process is spared.
+   *
+   * Bugfix #1685: `ps` can hang on a flooded/wedged process table, so it is
+   * bounded by `timeoutMs` (execFile kills the child on overrun); a timed-out or
+   * failed scan resolves to `[]` and is non-fatal.
    */
-  private findShellperProcesses(): Promise<Array<{ pid: number; socketPath?: string }>> {
+  private findShellperProcesses(timeoutMs = ORPHAN_SWEEP_TIMEOUT_MS): Promise<Array<{ pid: number; socketPath?: string }>> {
     return new Promise((resolve) => {
-      // -ww prevents arg truncation on macOS/Linux
-      execFile('ps', ['-ww', '-eo', 'pid,args'], (err, stdout) => {
+      // -ww prevents arg truncation on macOS/Linux. `timeout: 0` disables the
+      // execFile timeout, so floor it at 1ms to keep the bound meaningful.
+      execFile('ps', ['-ww', '-eo', 'pid,args'], { timeout: Math.max(1, timeoutMs) }, (err, stdout) => {
         if (err || !stdout.trim()) {
           resolve([]);
           return;

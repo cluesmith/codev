@@ -664,6 +664,30 @@ async function bootSequence(): Promise<void> {
   // and deleting the architect terminal's socket file (Bugfix #274).
   await reconcileTerminalSessions();
 
+  // Bugfix #341: Kill orphaned shellper processes not in active sessions. Must
+  // run AFTER reconciliation so reconnected sessions are in the active map and
+  // won't be killed. Catches shellpers from crashed tests or previous Tower
+  // instances that lost their socket files.
+  //
+  // Issue #1685: this sweep used to be unbounded and silent on the zero-orphan
+  // path, so on a flooded/wedged process table its `ps` scan + per-orphan socket
+  // probes stalled here for minutes, tripping the launcher's 30s startup timeout
+  // with no trace in the log. It is now time-bounded (killOrphanedShellpers
+  // abandons past ORPHAN_SWEEP_TIMEOUT_MS, well under the 30s launcher timeout
+  // and the 20s BOOT_READY_TIMEOUT_MS) and logs its entry + duration. It is kept
+  // BEFORE markBootComplete() deliberately: an un-aged sweep must not run once
+  // requests are served, or it could reap a just-spawned session whose shellper
+  // is already in `ps` but not yet registered/socket-listening.
+  const orphanSweepStartMs = Date.now();
+  log('INFO', 'Sweeping for orphaned shellpers…');
+  const orphansKilled = await shellperManager.killOrphanedShellpers();
+  const orphanSweepMs = Date.now() - orphanSweepStartMs;
+  if (orphansKilled < 0) {
+    log('WARN', `Orphan sweep abandoned after ${orphanSweepMs}ms (exceeded ${ORPHAN_SWEEP_TIMEOUT_MS}ms budget); remaining orphans left for the next startup`);
+  } else {
+    log('INFO', `Orphan sweep done in ${orphanSweepMs}ms (${orphansKilled} killed)`);
+  }
+
   // Issue #1261 test hook: widen the pre-wiring window to a known duration so
   // the startup race is deterministic instead of a function of this machine's
   // process table and session-log volume. Never set outside tests.
@@ -707,27 +731,6 @@ async function bootSequence(): Promise<void> {
   // below is maintenance or background service startup: it must not gate the
   // API, and none of it is a prerequisite for a correct response.
   markBootComplete();
-
-  // Bugfix #341 + #1685: reap orphaned shellper processes (crashed tests, dead
-  // prior Tower instances) not in an active session. Must run AFTER
-  // reconciliation so reconnected sessions are registered and spared.
-  //
-  // Issue #1685: moved OFF the readiness-critical path (it used to run before
-  // markBootComplete). On a flooded process table the sweep's `ps` scan and
-  // per-orphan socket probes stall for minutes; sitting before readiness, that
-  // stall tripped the launcher's 30s timeout with no log trace at all. It is
-  // hygiene, not correctness, so it now runs post-readiness, is time-bounded
-  // (killOrphanedShellpers abandons past ORPHAN_SWEEP_TIMEOUT_MS), and logs its
-  // entry + duration so any future stall is visible and attributable.
-  const orphanSweepStartMs = Date.now();
-  log('INFO', 'Sweeping for orphaned shellpers…');
-  const orphansKilled = await shellperManager.killOrphanedShellpers();
-  const orphanSweepMs = Date.now() - orphanSweepStartMs;
-  if (orphansKilled < 0) {
-    log('WARN', `Orphan sweep abandoned after ${orphanSweepMs}ms (exceeded ${ORPHAN_SWEEP_TIMEOUT_MS}ms budget) — hygiene skipped, next startup retries`);
-  } else {
-    log('INFO', `Orphan sweep done in ${orphanSweepMs}ms (${orphansKilled} killed)`);
-  }
 
   // Issue #1227: run the stricter husk sweep once at startup too, same
   // ordering requirement as killOrphanedShellpers (must run after

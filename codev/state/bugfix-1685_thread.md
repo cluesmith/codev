@@ -61,6 +61,40 @@ is the model to follow.
 - e2e: `shellper-husk-sweep.e2e` + `tower-reconnect.e2e` (boot-sequence) — 3 passed.
 - No `codev-skeleton/` twin: this is core Tower product code, not a shipped template.
 
+## PR phase — CMAP iter 1 (PR #1687) + redesign
+Verdicts: **gemini APPROVE**, **codex REQUEST_CHANGES (HIGH)**, **claude REQUEST_CHANGES (HIGH)**.
+Both codex and claude independently caught a real regression I introduced by moving the sweep
+**post-readiness**:
+- `markBootComplete()` releases held requests synchronously; a request-spawned shellper is in
+  `ps` from `cpSpawn` but only enters `this.sessions` after `waitForSocket`/`connect`. In that
+  bind window it's neither in `activePids` nor socket-responsive → the sweep SIGTERMs a live
+  brand-new session. `killOrphanedShellpers` has no age guard (unlike the husk sweep), so it
+  can't safely run post-readiness.
+- `Promise.race` only bounded the caller's *wait*; the sweep kept running and killing in the
+  background → the WARN "hygiene skipped" was inaccurate and extended the race exposure.
+
+Both offered the same minimal fix (claude's fallback #3): **keep the sweep pre-readiness; the
+10s bound alone fixes the reported 30s timeout** (10s « launcher 30s and BOOT_READY 20s).
+
+Redesign (CMAP iter 1 addressed):
+- **Reverted the move** — call is back BEFORE `markBootComplete()` (its #341 location). No
+  request is served during the bounded sweep, so the concurrent-spawn race cannot occur; no
+  age-guard machinery needed. Keeps arch.md §6 boot-order table accurate (no move).
+- **Cooperative cancellation** — replaced `Promise.race` with a wall-clock `deadline` checked
+  at the top of each loop iteration (`return -1`), so the sweep genuinely STOPS at the budget:
+  no background tail that keeps killing.
+- **Bounded the `ps` scan** — `findShellperProcesses(timeoutMs)` passes execFile `{ timeout }`
+  (reaps the `ps` child), and the call is wrapped in `withDeadline` so a wedged scan returns
+  -1 rather than hanging.
+- **Honest WARN** — "abandoned after Nms (exceeded budget); remaining orphans left for the next
+  startup".
+- Tests replaced with two: (A) wedged `ps` scan → returns -1 promptly (not hung); (B) many
+  slow probes → returns -1, kills some-not-all, and **kills nothing after return** (pins
+  cooperative cancellation). Both verified to fail against the unbounded pre-fix.
+
+gemini's APPROVE stands under the redesign (it liked bound+logging+test; it had missed the
+race). Re-running CMAP on the updated PR.
+
 ## Scope decision
 Fits BUGFIX. Focused change in `tower-server.ts` (move + log) + `session-manager.ts` (bound
 the sweep). Well under 300 LOC. Regression test pattern exists: `session-manager.test.ts:384`
