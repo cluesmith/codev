@@ -15,7 +15,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import {
@@ -228,13 +230,28 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
     expect(res.ok).toBe(false);
   });
 
-  it('claims when the recorded owner port equals ours (we already hold the port)', async () => {
+  it('REFUSES a bridge owner on the same port but a different interface', async () => {
+    // A live Tower bound to 0.0.0.0:P coexists with our 127.0.0.1:P bind, so the
+    // same-port shortcut must NOT fire. The probe (loopback resolves the wildcard)
+    // finds the live owner and we refuse. Regression for the CMAP-flagged hijack.
     const db = freshDb();
-    writeTowerOwner(db, owner({ pid: 777, port: 4100 }));
-    // isAlive would say true, but we bound this port ourselves — any prior owner
-    // on it is gone, so no /health probe is needed and we claim.
+    const ownerPort = await startServer(towerHealth()); // reachable on loopback
+    writeTowerOwner(db, owner({ pid: 999, port: ownerPort, bindHost: '0.0.0.0' }));
     const res = await claimGlobalDbOwnership({
-      db, pid: 888, port: 4100, dbDir: '/home/u/.agent-farm',
+      db, pid: 1000, port: ownerPort, dbDir: '/home/u/.agent-farm', bindHost: '127.0.0.1',
+      deps: { isAlive: alive },
+    });
+    expect(res.ok).toBe(false);
+    expect(readTowerOwner(db)?.pid).toBe(999);
+  });
+
+  it('claims when the recorded owner port AND bind interface equal ours', async () => {
+    const db = freshDb();
+    writeTowerOwner(db, owner({ pid: 777, port: 4100, bindHost: '127.0.0.1' }));
+    // We bound this exact interface:port ourselves — an identical bind is exclusive,
+    // so any prior owner on it is gone; no /health probe is needed and we claim.
+    const res = await claimGlobalDbOwnership({
+      db, pid: 888, port: 4100, dbDir: '/home/u/.agent-farm', bindHost: '127.0.0.1',
       deps: { isAlive: alive, probe: async () => { throw new Error('probe must not run'); } },
     });
     expect(res.ok).toBe(true);
@@ -242,30 +259,107 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
   });
 });
 
-describe('ownerIsLive — decision seam', () => {
-  const rec = owner({ pid: 5, port: 4100, hostname: 'h', dbDir: '/d' });
+describe('claimGlobalDbOwnership — atomic against a concurrent second Tower', () => {
+  const files: string[] = [];
+  const conns: Database.Database[] = [];
 
-  it('false when the owner port is ours', async () => {
-    expect(await ownerIsLive(rec, 4100, { isAlive: alive, probe: probeReturns('tower') })).toBe(false);
+  /** A file-backed global.db shared by multiple connections (unlike :memory:). */
+  function sharedDb(): { open: () => Database.Database; file: string } {
+    const file = path.join(os.tmpdir(), `af-1629-${crypto.randomUUID()}.db`);
+    files.push(file);
+    const open = () => {
+      const db = new Database(file);
+      conns.push(db);
+      return db;
+    };
+    // Create the schema once via the first connection.
+    open().exec(GLOBAL_SCHEMA);
+    return { open, file };
+  }
+
+  afterEach(() => {
+    for (const c of conns.splice(0)) { try { c.close(); } catch { /* already closed */ } }
+    for (const f of files.splice(0)) { try { fs.rmSync(f, { force: true }); } catch { /* gone */ } }
+  });
+
+  it('a second contender refuses behind the first live claim (no double-claim)', async () => {
+    const { open } = sharedDb();
+    const a = open();
+    const b = open();
+
+    // Tower A claims the empty DB.
+    const resA = await claimGlobalDbOwnership({ db: a, pid: 111, port: 4100, dbDir: '/d', bindHost: '127.0.0.1' });
+    // Tower B (a different connection to the SAME file) starts against A's live row.
+    const resB = await claimGlobalDbOwnership({
+      db: b, pid: 222, port: 4101, dbDir: '/d', bindHost: '127.0.0.1',
+      deps: { isAlive: alive, probe: probeReturns('tower') },
+    });
+
+    expect(resA.ok).toBe(true);
+    expect(resB.ok).toBe(false);
+    // Exactly one owner remains, and it is A — B never overwrote the live claim.
+    expect(readTowerOwner(b)?.pid).toBe(111);
+  });
+
+  it('rejects a duplicate singleton INSERT — the atomic primitive behind the claim', async () => {
+    const { open } = sharedDb();
+    const a = open();
+    const b = open();
+    await claimGlobalDbOwnership({ db: a, pid: 111, port: 4100, dbDir: '/d', bindHost: '127.0.0.1' });
+    // A raw second INSERT of the singleton row must fail — this is what makes two
+    // cold-start contenders resolve to one winner instead of both overwriting.
+    expect(() =>
+      b.prepare(
+        `INSERT INTO tower_owner (id, pid, port, hostname, started_at, db_dir, bind_host)
+         VALUES (1, 222, 4101, 'h', 1, '/d', '127.0.0.1')`,
+      ).run(),
+    ).toThrow();
+  });
+
+  it('takes over a stale owner via compare-and-set', async () => {
+    const { open } = sharedDb();
+    const a = open();
+    writeTowerOwner(a, owner({ pid: 111, port: 4100, startedAt: 5 }));
+    const res = await claimGlobalDbOwnership({
+      db: open(), pid: 222, port: 4101, dbDir: '/d', bindHost: '127.0.0.1',
+      deps: { isAlive: dead },
+    });
+    expect(res.ok).toBe(true);
+    expect(readTowerOwner(a)?.pid).toBe(222);
+  });
+});
+
+describe('ownerIsLive — decision seam', () => {
+  const rec = owner({ pid: 5, port: 4100, hostname: 'h', dbDir: '/d', bindHost: '127.0.0.1' });
+
+  it('false when the owner port AND bind interface are ours', async () => {
+    expect(await ownerIsLive(rec, 4100, '127.0.0.1', { isAlive: alive, probe: probeReturns('tower') })).toBe(false);
+  });
+  it('does NOT shortcut when the port matches but the bind interface differs', async () => {
+    // A wildcard owner on 0.0.0.0:4100 coexists with our 127.0.0.1:4100 bind, so a
+    // same-port match alone must NOT claim — fall through to the probe, which finds
+    // the live owner. (Regression: the shortcut used to hijack the bridge owner.)
+    const wildcard = owner({ pid: 5, port: 4100, bindHost: '0.0.0.0' });
+    expect(await ownerIsLive(wildcard, 4100, '127.0.0.1', { isAlive: alive, probe: probeReturns('tower') })).toBe(true);
   });
   it('false when the owner pid is dead', async () => {
-    expect(await ownerIsLive(rec, 5000, { isAlive: dead, probe: probeReturns('tower') })).toBe(false);
+    expect(await ownerIsLive(rec, 5000, '127.0.0.1', { isAlive: dead, probe: probeReturns('tower') })).toBe(false);
   });
   it('true when pid alive and a Tower answers /health', async () => {
-    expect(await ownerIsLive(rec, 5000, { isAlive: alive, probe: probeReturns('tower') })).toBe(true);
+    expect(await ownerIsLive(rec, 5000, '127.0.0.1', { isAlive: alive, probe: probeReturns('tower') })).toBe(true);
   });
   it('true when pid alive and the probe is inconclusive (fail closed)', async () => {
-    expect(await ownerIsLive(rec, 5000, { isAlive: alive, probe: probeReturns('unreachable') })).toBe(true);
+    expect(await ownerIsLive(rec, 5000, '127.0.0.1', { isAlive: alive, probe: probeReturns('unreachable') })).toBe(true);
   });
   it('false when pid alive but the port is gone (refused / non-Tower)', async () => {
-    expect(await ownerIsLive(rec, 5000, { isAlive: alive, probe: probeReturns('gone') })).toBe(false);
+    expect(await ownerIsLive(rec, 5000, '127.0.0.1', { isAlive: alive, probe: probeReturns('gone') })).toBe(false);
   });
   it('probes the resolved bind host', async () => {
     const seen: string[] = [];
     const spy = async (host: string) => { seen.push(host); return 'gone' as HealthProbe; };
-    await ownerIsLive(owner({ pid: 5, port: 4100, bindHost: '10.0.0.5' }), 5000, { isAlive: alive, probe: spy });
+    await ownerIsLive(owner({ pid: 5, port: 4100, bindHost: '10.0.0.5' }), 5000, '127.0.0.1', { isAlive: alive, probe: spy });
     expect(seen).toEqual(['10.0.0.5']);
-    await ownerIsLive(owner({ pid: 5, port: 4100, bindHost: '0.0.0.0' }), 5000, { isAlive: alive, probe: spy });
+    await ownerIsLive(owner({ pid: 5, port: 4100, bindHost: '0.0.0.0' }), 5000, '127.0.0.1', { isAlive: alive, probe: spy });
     expect(seen).toEqual(['10.0.0.5', '127.0.0.1']);
   });
 });

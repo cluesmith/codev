@@ -153,4 +153,30 @@ Claude's non-blocking suggestions, deliberately NOT taken (documented for the re
   the named pid; the wedged case (recycled live pid + unreachable port) is rare.
 - conflict message prints dir not file path; shutdown release ordering: negligible.
 
-Focused tests 40/40, tsc clean. Rebuild + full suite pending, then porch done + PR.
+Focused tests 40/40, tsc clean. Full suite green (306/6134). Advanced to PR phase.
+
+## PR phase — PR #1689 + PR-CMAP + fixes
+
+PR #1689 opened (Fixes #1629). PR-CMAP: Gemini APPROVE, Codex REQUEST_CHANGES, Claude
+REQUEST_CHANGES. Both requesters found REAL guard-correctness defects (deeper analysis on
+the full diff), not scope creep — fixed both:
+
+1. Claude: the `owner.port === myPort` shortcut skipped the probe, but a wildcard bind
+   (0.0.0.0:P, a bridge owner) and a loopback bind (127.0.0.1:P, second Tower) COEXIST
+   on the same port — verified empirically (both listen() succeed, libuv). So a bridge
+   owner was hijacked. Fix: the shortcut now also requires `owner.bindHost === myBindHost`
+   (an identical bind is exclusive → proves the prior owner gone); a differing interface
+   falls through to pid+probe, which detects the live wildcard owner.
+2. Codex: the claim was a blind read→probe→upsert (TOCTOU) — two cold-start contenders
+   could both overwrite the singleton and proceed. Fix: acquisition is now atomic — an
+   empty table is claimed with a plain INSERT (singleton PK makes a second inserter lose
+   and re-evaluate), a stale owner is taken over with a compare-and-set guarded on the
+   observed row, and a lost race re-evaluates behind the winner. Invariant preserved:
+   never overwrite a LIVE owner. Added a two-connection (shared file DB) regression:
+   second contender refuses behind the first live claim, duplicate singleton INSERT
+   throws, and CAS take-over of a stale row.
+
+ownerIsLive signature now (owner, myPort, myBindHost, deps). Owner tests 33/33, tsc clean.
+Non-blocking (documented, not fixed): mixed-version Towers (an old binary predating v19
+ignores tower_owner) stay unguarded — unavoidable, note in review. Rebuild + full suite +
+CMAP re-run pending, then the single ready-notification + gate.
