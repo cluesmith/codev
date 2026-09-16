@@ -136,9 +136,10 @@ authorization.
 - Key lesson recorded (also as a memory): iter-1's CMAP catch corrected the architect's OWN
   fix-shape — the issue + architect both recommended moving the sweep post-readiness; CMAP proved
   it unsafe (no age guard), so I reverted the move. "The streak now includes catching the architect."
-- Committed the review doc locally but HOLDING the push: the architect is watching 3848ddfd5
-  settle for the Amr handoff, and a new commit would restart CI. Asked them whether to push the
-  review doc into PR #1687 now or land it after settle.
+- Committed the review doc locally, then architect authorized pushing NOW (one CI cycle covers
+  review-doc + gate bookkeeping; the lesson rides to main with the merge). **Pushed 9b1967c27**;
+  new branch/PR head = 9b1967c27. Holding again — main watches the new head settle, hands Amr the
+  gate at green. Still waiting on Amr's pr-gate approval.
 
 ## Scope decision
 Fits BUGFIX. Focused change in `tower-server.ts` (move + log) + `session-manager.ts` (bound
