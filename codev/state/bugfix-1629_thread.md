@@ -255,6 +255,34 @@ remains. Documented residual: two SIMULTANEOUS cold starts on different ports ag
 STALE lock have an irreducible unlink-race window (no FS compare-and-swap primitive),
 contained by bounded-retry + fail-closed; not the incident shape.
 
-Owner tests 40 (lockfile) + migration convergence back green at v18 + source guard: all
-pass; tsc clean. Rebuild + full suite + re-CMAP pending; then update PR #1689 + re-request
-gate.
+Owner tests (lockfile) + migration convergence back green at v18 + source guard: all pass.
+
+## Lock-file PR-CMAP rounds
+
+Round 1 (lockfile): Gemini APPROVE, Codex RC, Claude RC. Codex found a REAL create-race:
+writeFile({flag:'wx'}) exposes an EMPTY file between create and write, so a contender can
+read it as corrupt, delete it mid-write, and both acquire. Both also flagged the PR body
+was STALE (still described the table/v19 design). Fixed: acquire is now write-temp +
+hard-link (tryAcquire) — the linked inode already has full content, no empty window (also
+kills the corrupt-delete-a-live-holder vector). Rewrote the PR body to the lock-file design
+with accurate counts. Refusal-under-contention now names a real observed contender, never
+our own pid.
+
+Round 2 (temp+link): Gemini APPROVE, Claude APPROVE, Codex RC. Codex's only remaining point
+is the stale-takeover residual: removeStaleLock read-then-unlink is non-atomic, so a
+simultaneous cold-starter can unlink a just-acquired live lock. This is the SAME irreducible
+residual main already ruled acceptable — no dep-free filesystem compare-and-swap exists; the
+genuine fix is a native flock lifetime-lock (a dependency decision for the follow-up). It
+requires two Towers cold-starting SIMULTANEOUSLY on different ports against a STALE lock;
+the incident (a LIVE owner) is refused deterministically. Contained by bounded-retry +
+fail-closed + the compare-guard (added deterministic coverage: a contender's live lock is
+never deleted — we re-read and refuse behind it).
+
+Claude's 3 minors (all applied, non-behavioral): IPv6 bracket strip in resolveProbeHost;
+tryAcquire hardlink fallback (ENOSYS/EPERM/EXDEV → O_EXCL create); honest 503 comment.
+
+State: 2 APPROVE / 1 RC (the accepted residual). Build green, 305 files / 6141 tests, tsc
+clean, PR body current. The minors are not substantial → no 6th CMAP auto-run. Presenting
+to main with the recommendation to proceed per the prior residual ruling; the flock-based
+lifetime lock is the real fix for the residual and belongs in the robustness follow-up
+(needs a native-dep decision). Holding at the gate; merge is main's.
