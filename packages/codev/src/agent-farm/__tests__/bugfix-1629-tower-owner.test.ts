@@ -287,10 +287,16 @@ describe('readTowerOwner / releaseTowerOwnerIfMine', () => {
 });
 
 describe('claimGlobalDbOwnership — atomic against a concurrent second Tower', () => {
-  it('the O_EXCL acquire is exclusive: a second create over a held lock fails', async () => {
-    const lockFile = tmpLock();
-    await claimGlobalDbOwnership({ lockFile, pid: 111, port: 4100, dbDir: '/d' });
+  it('the acquire is exclusive and leaves no temp residue (atomic link, no empty window)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'af-1629-dir-'));
+    tmpPaths.push(dir);
+    const lockFile = path.join(dir, 'global.db.lock');
+    const res = await claimGlobalDbOwnership({ lockFile, pid: 111, port: 4100, dbDir: '/d' });
+    expect(res.ok).toBe(true);
+    // The held path rejects a second create...
     expect(() => fs.writeFileSync(lockFile, '{}', { flag: 'wx' })).toThrow();
+    // ...and the acquire cleaned up its temp: only the lock file remains.
+    expect(fs.readdirSync(dir)).toEqual(['global.db.lock']);
   });
 
   it('a second contender refuses behind the first live claim (no double-claim)', async () => {

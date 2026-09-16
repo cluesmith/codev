@@ -31,6 +31,7 @@ import http from 'node:http';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { getGlobalDbPath } from './index.js';
 
 /** The owner record persisted in the lock file next to global.db. */
@@ -270,6 +271,30 @@ export type ClaimResult =
 const MAX_CLAIM_ATTEMPTS = 5;
 
 /**
+ * Atomically acquire the lock: write the FULL record to a unique temp file, then
+ * hard-link it onto the lock path. `link()` is atomic and fails with EEXIST if
+ * the path is already taken, and — unlike `writeFile({flag:'wx'})` — the linked
+ * file already has its complete content, so a concurrent reader never sees an
+ * empty/partial lock it could misclassify as corrupt and delete mid-write. The
+ * temp is always cleaned up (the hard link keeps the inode alive at the lock path).
+ * Returns whether we won the link.
+ */
+function tryAcquire(lockFile: string, owner: TowerOwner): boolean {
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+  const tmp = `${lockFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  fs.writeFileSync(tmp, serialize(owner));
+  try {
+    fs.linkSync(tmp, lockFile);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw err;
+  } finally {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* temp already gone */ }
+  }
+}
+
+/**
  * Remove a stale lock, but ONLY if it still names the holder we probed (a
  * compare-and-set on pid + startedAt). If a contender rewrote it in between, the
  * content differs and we do NOT remove it — we loop and re-evaluate. Returns
@@ -291,12 +316,13 @@ function removeStaleLock(lockFile: string, observed: TowerOwner): boolean {
  * ownership by writing the lock file. A decision plus a lock write — the caller
  * decides how to fail loudly (log + exit).
  *
- * Acquisition is atomic against a concurrent second Tower: the write is an
- * `O_EXCL` create (`flag: 'wx'`), so the filesystem resolves a two-starter race —
- * one create wins, the other gets EEXIST and re-evaluates. A stale lock (dead /
- * absent owner) is cleared with a compare-and-set on its contents and the create
- * retried; the invariant preserved is "never remove a LIVE owner's lock". Under
- * persistent churn the claim refuses rather than forcing the lock.
+ * Acquisition is atomic against a concurrent second Tower: {@link tryAcquire}
+ * writes a full temp file and hard-links it onto the path, so the filesystem
+ * resolves a two-starter race (one link wins, the other gets EEXIST) with no
+ * empty-file window. A stale lock (dead / absent owner) is cleared with a
+ * compare-and-set on its contents and the link retried; the invariant preserved
+ * is "never remove a LIVE owner's lock". Under persistent churn the claim refuses
+ * rather than forcing the lock.
  */
 export async function claimGlobalDbOwnership(opts: {
   /** Lock file path; defaults to the active global.db's `.lock` sibling. */
@@ -311,39 +337,37 @@ export async function claimGlobalDbOwnership(opts: {
   const lockFile = opts.lockFile ?? defaultLockFile();
   const { pid, port, dbDir, deps } = opts;
   const bindHost = opts.bindHost ?? '127.0.0.1';
+  let lastSeen: TowerOwner | null = null;
 
   for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt++) {
     const mine: TowerOwner = { pid, port, hostname: os.hostname(), startedAt: Date.now(), dbDir, bindHost };
 
-    // Atomic acquire: O_EXCL create fails if the lock already exists.
-    try {
-      fs.mkdirSync(path.dirname(lockFile), { recursive: true });
-      fs.writeFileSync(lockFile, serialize(mine), { flag: 'wx' });
-      return { ok: true };
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    }
+    // Atomic acquire: full-content temp + hard link (see tryAcquire).
+    if (tryAcquire(lockFile, mine)) return { ok: true };
 
     // Lock exists — evaluate the current holder.
     const existing = readTowerOwner(lockFile);
     if (!existing) {
-      // Corrupt or vanished under us — clear it and retry the atomic create.
+      // Corrupt / vanished under us — clear it and retry the atomic acquire.
       try { fs.rmSync(lockFile, { force: true }); } catch { /* already gone */ }
       continue;
     }
+    lastSeen = existing;
     if (await ownerIsLive(existing, port, bindHost, deps)) {
       return { ok: false, conflict: existing };
     }
     // Stale — remove ONLY if the lock still names the holder we probed, then loop
-    // to re-attempt the atomic create (the create is the serialization point). A
+    // to re-attempt the atomic acquire (the link is the serialization point). A
     // failed CAS means a contender rewrote it: loop and re-evaluate, never force.
     removeStaleLock(lockFile, existing);
   }
 
   // Persistent contention: the lock keeps changing under us. Refuse rather than
-  // risk forcing over a live claimant that appeared mid-flight.
-  const final = readTowerOwner(lockFile);
-  const conflict: TowerOwner = final ?? { pid, port, hostname: os.hostname(), startedAt: Date.now(), dbDir, bindHost };
+  // risk forcing over a live claimant that appeared mid-flight. Name a real
+  // contender we observed, never ourselves (Claude CMAP).
+  const conflict: TowerOwner = readTowerOwner(lockFile) ?? lastSeen ?? {
+    pid: -1, port, hostname: 'unknown (lock contended)', startedAt: Date.now(), dbDir, bindHost,
+  };
   return { ok: false, conflict };
 }
 
