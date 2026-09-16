@@ -152,13 +152,20 @@ export function probeTowerHealth(host: string, port: number, timeoutMs = 6000): 
             // The readiness gate answers 503 {"error":"STARTING_UP"} while a live
             // Tower boots — a live owner, not an absent one.
             try {
-              resolve((JSON.parse(body) as { error?: string }).error === 'STARTING_UP' ? 'tower' : 'gone');
+              resolve((JSON.parse(body) as { error?: string }).error === 'STARTING_UP' ? 'tower' : 'unreachable');
             } catch {
-              resolve('gone');
+              resolve('unreachable');
             }
             return;
           }
-          // Some other HTTP status — a process answered, but it is not a Tower.
+          // Any other 5xx: a degraded-but-live server may answer 500 rather than a
+          // clean /health. Treat as inconclusive (fail closed), never as absent.
+          if (res.statusCode && res.statusCode >= 500) {
+            resolve('unreachable');
+            return;
+          }
+          // A non-5xx, non-Tower HTTP response — a process answered, but it is not
+          // a Tower serving /health (a squatter on a recycled port).
           resolve('gone');
         });
       },
@@ -183,7 +190,9 @@ export function probeTowerHealth(host: string, port: number, timeoutMs = 6000): 
  * bridge host is probed directly (probing loopback would falsely read 'gone').
  */
 export function resolveProbeHost(bindHost: string | null | undefined): string {
-  if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::') return '127.0.0.1';
+  // Wildcard binds (IPv4 0.0.0.0, IPv6 :: / [::] as validateHost brackets it)
+  // accept loopback, so probe loopback. A specific host is probed directly.
+  if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::' || bindHost === '[::]') return '127.0.0.1';
   return bindHost;
 }
 
@@ -264,6 +273,15 @@ function takeOverStaleOwner(db: Database.Database, observed: TowerOwner, next: T
  * for a genuinely unowned DB is resolved to exactly one winner, and the loser
  * refuses behind the winner's (booting, hence live) record.
  */
+/**
+ * Bound on the read → liveness → write attempts under contention. Each losing
+ * attempt means another Tower wrote the row between our read and our conditional
+ * write; a handful of retries converges in every realistic case, and exhausting
+ * them means the row is churning between many simultaneous starts — where the
+ * safe answer is to refuse (fail closed), never to blind-overwrite.
+ */
+const MAX_CLAIM_ATTEMPTS = 5;
+
 export async function claimGlobalDbOwnership(opts: {
   db: Database.Database;
   pid: number;
@@ -275,60 +293,41 @@ export async function claimGlobalDbOwnership(opts: {
 }): Promise<ClaimResult> {
   const { db, pid, port, dbDir, deps } = opts;
   const bindHost = opts.bindHost ?? '127.0.0.1';
-  const mine: TowerOwner = { pid, port, hostname: os.hostname(), startedAt: Date.now(), dbDir, bindHost };
 
-  const existing = readTowerOwner(db);
+  for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt++) {
+    // Re-mint the record each attempt so started_at reflects when we actually won.
+    const mine: TowerOwner = { pid, port, hostname: os.hostname(), startedAt: Date.now(), dbDir, bindHost };
+    const existing = readTowerOwner(db);
 
-  if (!existing) {
-    // Empty table: claim with a plain INSERT. If a concurrent contender inserted
-    // first, the singleton PK makes ours throw — fall through to re-evaluate its row.
-    try {
-      db.prepare(
-        `INSERT INTO tower_owner (id, pid, port, hostname, started_at, db_dir, bind_host)
-         VALUES (1, @pid, @port, @hostname, @startedAt, @dbDir, @bindHost)`,
-      ).run(mine);
-      return { ok: true };
-    } catch (err) {
-      if (!isUniqueViolation(err)) throw err;
+    if (!existing) {
+      // Empty table: claim with a plain INSERT. If a concurrent contender inserted
+      // first, the singleton PK makes ours throw — loop to re-evaluate its row.
+      try {
+        db.prepare(
+          `INSERT INTO tower_owner (id, pid, port, hostname, started_at, db_dir, bind_host)
+           VALUES (1, @pid, @port, @hostname, @startedAt, @dbDir, @bindHost)`,
+        ).run(mine);
+        return { ok: true };
+      } catch (err) {
+        if (!isUniqueViolation(err)) throw err;
+        continue; // someone inserted first — re-read and decide
+      }
     }
-    return resolveContendedClaim(db, mine, port, bindHost, deps);
+
+    if (await ownerIsLive(existing, port, bindHost, deps)) {
+      return { ok: false, conflict: existing };
+    }
+    // Stale owner — take over only if the row is STILL the one we probed. A failed
+    // CAS means a contender changed it between our read and write: loop and
+    // re-evaluate (never blind-overwrite — the new writer may be a live owner).
+    if (takeOverStaleOwner(db, existing, mine)) return { ok: true };
   }
 
-  if (await ownerIsLive(existing, port, bindHost, deps)) {
-    return { ok: false, conflict: existing };
-  }
-  // Stale owner — take over only if the row is still the one we probed.
-  if (takeOverStaleOwner(db, existing, mine)) return { ok: true };
-  // A concurrent contender changed the row between our read and write.
-  return resolveContendedClaim(db, mine, port, bindHost, deps);
-}
-
-/**
- * A concurrent contender wrote the owner row between our read and our write.
- * Re-read and decide: refuse behind a live winner, else take it over (or, if the
- * row vanished, re-insert). Both racers claiming a genuinely dead DB is safe —
- * the only invariant is never displacing a LIVE owner.
- */
-async function resolveContendedClaim(
-  db: Database.Database,
-  mine: TowerOwner,
-  port: number,
-  bindHost: string,
-  deps: OwnerLivenessDeps | undefined,
-): Promise<ClaimResult> {
-  const now = readTowerOwner(db);
-  if (now && (await ownerIsLive(now, port, bindHost, deps))) {
-    return { ok: false, conflict: now };
-  }
-  if (now) {
-    if (takeOverStaleOwner(db, now, mine)) return { ok: true };
-    // Yet another writer beat us again; the row is churning between dead
-    // claimants. Last-writer-wins is acceptable here (no live owner is displaced).
-    writeTowerOwner(db, mine);
-    return { ok: true };
-  }
-  writeTowerOwner(db, mine);
-  return { ok: true };
+  // Persistent contention: the row keeps changing under us. Refuse rather than
+  // risk overwriting a live claimant that appeared mid-flight.
+  const final = readTowerOwner(db);
+  const conflict: TowerOwner = final ?? { pid, port, hostname: os.hostname(), startedAt: Date.now(), dbDir, bindHost };
+  return { ok: false, conflict };
 }
 
 /**

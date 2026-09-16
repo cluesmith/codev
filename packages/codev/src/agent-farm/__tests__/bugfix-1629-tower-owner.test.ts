@@ -87,6 +87,14 @@ function garbageHealth(): http.RequestListener {
   };
 }
 
+/** Answers 500 — a degraded-but-live server (must not be read as absent). */
+function degraded(): http.RequestListener {
+  return (_req, res) => {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'boom' }));
+  };
+}
+
 afterEach(async () => {
   await Promise.all(
     servers.splice(0).map((s) => new Promise<void>((resolve) => s.close(() => resolve()))),
@@ -98,9 +106,10 @@ const dead = () => false;
 const probeReturns = (v: HealthProbe) => async () => v;
 
 describe('resolveProbeHost — wildcard binds probe loopback, specific binds probe themselves', () => {
-  it('maps 0.0.0.0 / :: / empty to loopback', () => {
+  it('maps IPv4/IPv6 wildcard and empty binds to loopback', () => {
     expect(resolveProbeHost('0.0.0.0')).toBe('127.0.0.1');
     expect(resolveProbeHost('::')).toBe('127.0.0.1');
+    expect(resolveProbeHost('[::]')).toBe('127.0.0.1'); // validateHost brackets IPv6
     expect(resolveProbeHost('')).toBe('127.0.0.1');
     expect(resolveProbeHost(null)).toBe('127.0.0.1');
   });
@@ -130,6 +139,11 @@ describe('probeTowerHealth — classify the owner port', () => {
     const port = await startServer(towerHealth());
     await new Promise<void>((resolve) => servers.pop()!.close(() => resolve()));
     expect(await probeTowerHealth('127.0.0.1', port, 500)).toBe('gone');
+  });
+
+  it("is 'unreachable' for a degraded 5xx (a live-but-broken owner, fail closed)", async () => {
+    const port = await startServer(degraded());
+    expect(await probeTowerHealth('127.0.0.1', port)).toBe('unreachable');
   });
 });
 
@@ -216,15 +230,12 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
     expect(res.ok).toBe(true);
   });
 
-  it('probes the recorded bridge host, not loopback, for a non-loopback owner', async () => {
-    // A live Tower bound to a specific bridge host answers there; loopback would
-    // refuse. The probe must target the recorded bind host or it falsely claims.
+  it('detects a live owner via its recorded loopback bind host and refuses', async () => {
     const db = freshDb();
     const ownerPort = await startServer(towerHealth()); // listening on 127.0.0.1
     writeTowerOwner(db, owner({ pid: 999, port: ownerPort, bindHost: '127.0.0.1' }));
-    // Sanity: with the recorded loopback host the live owner is detected → refuse.
     const res = await claimGlobalDbOwnership({
-      db, pid: 1000, port: ownerPort + 1, dbDir: '/home/u/.agent-farm',
+      db, pid: 1000, port: ownerPort + 1, dbDir: '/home/u/.agent-farm', bindHost: '127.0.0.1',
       deps: { isAlive: alive },
     });
     expect(res.ok).toBe(false);
@@ -326,6 +337,27 @@ describe('claimGlobalDbOwnership — atomic against a concurrent second Tower', 
     });
     expect(res.ok).toBe(true);
     expect(readTowerOwner(a)?.pid).toBe(222);
+  });
+
+  it('fails closed under persistent contention instead of blind-overwriting', async () => {
+    // Simulate a contender rewriting the row on every attempt: the probe (awaited
+    // inside ownerIsLive) mutates the row to a NEW owner, so our CAS — guarded on
+    // the row we read before probing — never lands. After exhausting retries the
+    // claim must REFUSE, never blind-overwrite (which could displace a live owner).
+    const db = freshDb();
+    writeTowerOwner(db, owner({ pid: 1, port: 4100, startedAt: 1 }));
+    let n = 1;
+    const churn = async (): Promise<HealthProbe> => {
+      n += 1;
+      writeTowerOwner(db, owner({ pid: 100 + n, port: 4100, startedAt: n }));
+      return 'gone';
+    };
+    const res = await claimGlobalDbOwnership({
+      db, pid: 999, port: 5000, dbDir: '/d', bindHost: '127.0.0.1',
+      deps: { isAlive: alive, probe: churn },
+    });
+    expect(res.ok).toBe(false);
+    expect(readTowerOwner(db)?.pid).not.toBe(999); // we never overwrote to ourselves
   });
 });
 
