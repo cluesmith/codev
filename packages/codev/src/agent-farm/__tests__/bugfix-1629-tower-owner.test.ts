@@ -4,23 +4,28 @@
  * A second Tower that opens a live global.db (the #1515 incident: a test Tower
  * whose AGENT_FARM_DIR typo pointed it at production) used to hijack every live
  * shellper and delete the rows. The owner lock makes that second Tower refuse to
- * start. These tests pin the decision matrix and the /health-shaped liveness
- * probe, and prove a dead / stale owner self-clears so the legitimate single
- * Tower restart is never blocked.
+ * start. These tests pin the decision matrix and the tri-state /health liveness
+ * probe, prove the guard fails CLOSED (an inconclusive probe against a live pid
+ * is treated as a live owner, never as a free DB), prove a dead / stale owner
+ * self-clears so the legitimate single Tower restart is never blocked, and pin
+ * the boot ordering so the claim can never run after reconcile.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import {
   claimGlobalDbOwnership,
   ownerIsLive,
   ownershipConflictMessage,
+  probeTowerHealth,
   readTowerOwner,
   releaseTowerOwnerIfMine,
-  towerHealthResponds,
   writeTowerOwner,
+  type HealthProbe,
   type TowerOwner,
 } from '../db/tower-owner.js';
 
@@ -33,7 +38,7 @@ function freshDb(): Database.Database {
 
 const servers: http.Server[] = [];
 
-/** Start a throwaway HTTP server on an ephemeral port with a fixed /health reply. */
+/** Start a throwaway HTTP server on an ephemeral port with a fixed reply. */
 async function startServer(handler: http.RequestListener): Promise<number> {
   const server = http.createServer(handler);
   servers.push(server);
@@ -48,6 +53,14 @@ function towerHealth(): http.RequestListener {
   return (_req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'healthy', ready: true, uptime: 1 }));
+  };
+}
+
+/** Answers 503 exactly like the readiness gate does while a Tower is booting. */
+function startingUp(): http.RequestListener {
+  return (_req, res) => {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'STARTING_UP', message: 'Tower is starting up.' }));
   };
 }
 
@@ -67,23 +80,29 @@ afterEach(async () => {
 
 const alive = () => true;
 const dead = () => false;
+const probeReturns = (v: HealthProbe) => async () => v;
 
-describe('towerHealthResponds — only a Tower-shaped /health counts', () => {
-  it('is true for a real Tower payload', async () => {
+describe('probeTowerHealth — classify the owner port', () => {
+  it("is 'tower' for a real Tower payload", async () => {
     const port = await startServer(towerHealth());
-    expect(await towerHealthResponds(port)).toBe(true);
+    expect(await probeTowerHealth(port)).toBe('tower');
   });
 
-  it('is false for a 200 that is not a Tower payload (recycled-port process)', async () => {
+  it("is 'tower' for a 503 STARTING_UP (a live Tower mid-boot)", async () => {
+    const port = await startServer(startingUp());
+    expect(await probeTowerHealth(port)).toBe('tower');
+  });
+
+  it("is 'gone' for a 200 that is not a Tower payload (recycled-port process)", async () => {
     const port = await startServer(garbageHealth());
-    expect(await towerHealthResponds(port)).toBe(false);
+    expect(await probeTowerHealth(port)).toBe('gone');
   });
 
-  it('is false when nothing is listening on the port', async () => {
-    // An ephemeral port we immediately free — nothing answers.
+  it("is 'gone' when nothing is listening (connection refused)", async () => {
+    // An ephemeral port we immediately free — the connect is refused.
     const port = await startServer(towerHealth());
     await new Promise<void>((resolve) => servers.pop()!.close(() => resolve()));
-    expect(await towerHealthResponds(port, 300)).toBe(false);
+    expect(await probeTowerHealth(port, 500)).toBe('gone');
   });
 });
 
@@ -98,7 +117,7 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
 
   it('REFUSES when a live Tower already owns the DB (the incident)', async () => {
     const db = freshDb();
-    const ownerPort = await startServer(towerHealth()); // the real Tower on 4100
+    const ownerPort = await startServer(towerHealth()); // the real Tower
     writeTowerOwner(db, {
       pid: 999, port: ownerPort, hostname: 'prod', startedAt: Date.now(), dbDir: '/home/u/.agent-farm',
     });
@@ -111,6 +130,22 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
     if (res.ok) throw new Error('unreachable');
     expect(res.conflict.pid).toBe(999);
     // The record is untouched — the refused Tower must NOT overwrite the live owner.
+    expect(readTowerOwner(db)?.pid).toBe(999);
+  });
+
+  it('REFUSES (fails closed) when the owner pid is alive but /health is inconclusive', async () => {
+    // The incident's load: /health shells out to `ps -A` and can miss the probe
+    // budget. A live pid + an unreachable probe must be treated as a live owner,
+    // NOT as a free DB — otherwise the hijack proceeds exactly as before.
+    const db = freshDb();
+    writeTowerOwner(db, {
+      pid: 999, port: 4100, hostname: 'prod', startedAt: 1, dbDir: '/home/u/.agent-farm',
+    });
+    const res = await claimGlobalDbOwnership({
+      db, pid: 1000, port: 5000, dbDir: '/home/u/.agent-farm',
+      deps: { isAlive: alive, probe: probeReturns('unreachable') },
+    });
+    expect(res.ok).toBe(false);
     expect(readTowerOwner(db)?.pid).toBe(999);
   });
 
@@ -143,10 +178,10 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
     expect(readTowerOwner(db)?.pid).toBe(888);
   });
 
-  it('treats a live-but-non-Tower process on the owner port as stale (recycled pid)', async () => {
+  it('treats a non-Tower process on the owner port as stale (recycled pid)', async () => {
     // Owner pid happens to be alive (recycled to an unrelated process) and the
-    // recorded port is held by a non-Tower service. The Tower-shaped /health
-    // check rejects it, so we claim rather than deadlock behind a phantom owner.
+    // recorded port is held by a non-Tower service that answers HTTP. The probe
+    // returns 'gone', so we claim rather than deadlock behind a phantom owner.
     const db = freshDb();
     const ownerPort = await startServer(garbageHealth());
     writeTowerOwner(db, {
@@ -179,16 +214,19 @@ describe('ownerIsLive — decision seam', () => {
   const owner: TowerOwner = { pid: 5, port: 4100, hostname: 'h', startedAt: 1, dbDir: '/d' };
 
   it('false when the owner port is ours', async () => {
-    expect(await ownerIsLive(owner, 4100, { isAlive: alive, probe: async () => true })).toBe(false);
+    expect(await ownerIsLive(owner, 4100, { isAlive: alive, probe: probeReturns('tower') })).toBe(false);
   });
   it('false when the owner pid is dead', async () => {
-    expect(await ownerIsLive(owner, 5000, { isAlive: dead, probe: async () => true })).toBe(false);
+    expect(await ownerIsLive(owner, 5000, { isAlive: dead, probe: probeReturns('tower') })).toBe(false);
   });
   it('true when pid alive and a Tower answers /health', async () => {
-    expect(await ownerIsLive(owner, 5000, { isAlive: alive, probe: async () => true })).toBe(true);
+    expect(await ownerIsLive(owner, 5000, { isAlive: alive, probe: probeReturns('tower') })).toBe(true);
   });
-  it('false when pid alive but /health is not Tower-shaped', async () => {
-    expect(await ownerIsLive(owner, 5000, { isAlive: alive, probe: async () => false })).toBe(false);
+  it('true when pid alive and the probe is inconclusive (fail closed)', async () => {
+    expect(await ownerIsLive(owner, 5000, { isAlive: alive, probe: probeReturns('unreachable') })).toBe(true);
+  });
+  it('false when pid alive but the port is gone (refused / non-Tower)', async () => {
+    expect(await ownerIsLive(owner, 5000, { isAlive: alive, probe: probeReturns('gone') })).toBe(false);
   });
 });
 
@@ -216,5 +254,49 @@ describe('releaseTowerOwnerIfMine — pid-scoped', () => {
 
     releaseTowerOwnerIfMine(db, 100); // ours — cleared
     expect(readTowerOwner(db)).toBeNull();
+  });
+});
+
+describe('readTowerOwner — fails closed on a genuine DB error', () => {
+  it('rethrows anything that is not "no such table"', () => {
+    const db = freshDb();
+    // A malformed prepared read against a closed handle raises a real error, which
+    // must NOT be swallowed into a false "unowned" (that would fail the guard open).
+    db.close();
+    expect(() => readTowerOwner(db)).toThrow();
+  });
+});
+
+describe('boot ordering — the guard runs before anything touches shared state', () => {
+  // The guard is only a backstop if it runs FIRST. A future reorder of
+  // bootSequence() would silently restore the incident, and the wiring is
+  // impractical to drive in isolation, so pin the source order (same technique as
+  // send-architect-identity.test.ts). claimGlobalDbOwnership must precede every
+  // step that touched production state in the incident.
+  const fullSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../servers/tower-server.ts'),
+    'utf-8',
+  );
+  // Scope to the bootSequence() body so comment references to these calls
+  // elsewhere in the file are not mistaken for the call sites.
+  const src = fullSrc.slice(fullSrc.indexOf('async function bootSequence'));
+  // Anchor on the CALL site (`({`), not the import.
+  const claimAt = src.indexOf('claimGlobalDbOwnership({');
+
+  it('claims ownership before reconcileTerminalSessions', () => {
+    expect(claimAt).toBeGreaterThan(-1);
+    expect(claimAt).toBeLessThan(src.indexOf('reconcileTerminalSessions('));
+  });
+  it('claims ownership before runBootConsolidation', () => {
+    expect(claimAt).toBeLessThan(src.indexOf('runBootConsolidation('));
+  });
+  it('claims ownership before killOrphanedShellpers', () => {
+    expect(claimAt).toBeLessThan(src.indexOf('killOrphanedShellpers('));
+  });
+  it('exits the process when ownership is refused', () => {
+    // The refusal must be fatal, not logged-and-continued.
+    const guardBlock = src.slice(claimAt, claimAt + 800);
+    expect(guardBlock).toContain('ownershipConflictMessage');
+    expect(guardBlock).toContain('process.exit(1)');
   });
 });

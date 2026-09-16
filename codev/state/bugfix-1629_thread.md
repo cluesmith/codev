@@ -96,3 +96,38 @@ servers/tower-server.ts, 2 new tests, send-architect-identity.test.ts. No
 codev-skeleton mirror (server code is package-only, not skeleton). No #1685 collision
 avoided beyond tower-server.ts bootSequence top + gracefulShutdown tail — will note to
 architect.
+
+## CMAP iter 1 (impl) + hardening
+
+Verdicts: Gemini APPROVE (no issues); Claude COMMENT; Codex REQUEST_CHANGES. Both
+Codex + Claude (HIGH confidence) converged on ONE real defect: the /health probe
+FAILED OPEN — a 1.5s budget against a /health that shells out to `ps -A` (5s, verified
+process-census.ts:62) + getInstances() would time out under the incident's load (60+
+shellpers) and resolve to "stale, claim it" → hijack proceeds. Same for the owner's
+~20s mid-boot window. Verified both claims against source before acting.
+
+Hardened (guard now fails CLOSED):
+- Replaced boolean `towerHealthResponds` with tri-state `probeTowerHealth` →
+  'tower' | 'gone' | 'unreachable'. Budget 1.5s → 6s (only paid on the conflict path).
+  200-healthy OR 503 STARTING_UP → 'tower' (live, incl. mid-boot). ECONNREFUSED or a
+  non-Tower HTTP response → 'gone' (claim). Timeout / other transport error →
+  'unreachable'.
+- `ownerIsLive`: refuse when probe != 'gone' (i.e. 'tower' OR 'unreachable' = live).
+  Only a positive proof of absence ('gone') claims. Dead pid still short-circuits →
+  legitimate restart unaffected.
+- `readTowerOwner`: rethrow anything but "no such table" (was swallow-all → fail open).
+  bootSequence's catch exits(1) = fail closed on a real DB error.
+- Added boot-order SOURCE guard test (claim precedes reconcile/consolidation/
+  killOrphanedShellpers; refusal calls process.exit(1)) — pattern from
+  send-architect-identity.test.ts; scoped to the bootSequence() slice to skip comment
+  refs. Added 503-STARTING_UP='tower' and unreachable→refuse test cases. Source guard
+  now also asserts Migration v19.
+
+Deferred with rationale (both reviewers ranked minor/low):
+- TOCTOU read→probe→write not atomic: only bites a sub-second SIMULTANEOUS two-Tower
+  start (not the incident shape). Documented.
+- Probe hardcodes 127.0.0.1: covers default loopback + bridge 0.0.0.0 (accepts
+  loopback); a non-loopback-ONLY bind is a rare config. Documented.
+
+Re-verified: build exit 0; focused tests 35/35; tsc clean on my files. Full suite re-run
+after rebuild pending.

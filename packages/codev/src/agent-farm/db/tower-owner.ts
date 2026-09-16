@@ -36,16 +36,21 @@ export interface TowerOwner {
   dbDir: string;
 }
 
-/** Read the singleton owner record, or null if none exists / the read fails. */
+/** Read the singleton owner record, or null if none exists. */
 export function readTowerOwner(db: Database.Database): TowerOwner | null {
   try {
     const row = db
       .prepare('SELECT pid, port, hostname, started_at AS startedAt, db_dir AS dbDir FROM tower_owner WHERE id = 1')
       .get() as TowerOwner | undefined;
     return row ?? null;
-  } catch {
-    // Table may not exist yet (pre-migration) — treat as unowned.
-    return null;
+  } catch (err) {
+    // Only "no such table" (a pre-migration / bare DB) is a legitimate "unowned"
+    // read — and even that is unreachable in production, since ensureGlobalDatabase
+    // always creates tower_owner before getGlobalDb() returns. Any OTHER error
+    // (SQLITE_BUSY, corruption) must NOT be swallowed: this is the one guard that
+    // stops data loss, so it fails CLOSED — the caller's boot catch exits.
+    if ((err as Error).message.includes('no such table')) return null;
+    throw err;
   }
 }
 
@@ -89,22 +94,32 @@ function pidAlive(pid: number): boolean {
 }
 
 /**
- * True iff a genuine Tower answers `GET /health` on 127.0.0.1:`port`. `/health`
- * is unauthenticated (server-utils allowlist), so no shared key is needed. The
- * response must parse as JSON and report `status: 'healthy'` — an unrelated
- * process that happens to hold the port and answer with garbage does NOT count,
- * so a recycled pid whose port was reused never masquerades as a live owner.
+ * The three distinguishable states of the owner's `/health` port.
+ * - `tower`: a live Tower answered — a healthy 200, OR a 503 `STARTING_UP` while
+ *   its readiness gate holds requests mid-boot. Both mean a live Tower owns it.
+ * - `gone`: proof the owner is NOT here — the connection was refused (port free),
+ *   or a non-Tower process answered (a squatter on a recycled port/pid). Claim.
+ * - `unreachable`: inconclusive — a timeout or transport error. A live Tower
+ *   under load (its `/health` shells out to `ps -A`) or mid-boot can miss the
+ *   budget, so this must NOT be read as "gone". The caller treats it as live.
  */
-export function towerHealthResponds(port: number, timeoutMs = 1500): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
+export type HealthProbe = 'tower' | 'gone' | 'unreachable';
+
+/**
+ * Probe `GET /health` on 127.0.0.1:`port` (unauthenticated per server-utils).
+ *
+ * The budget is generous by default: `/health` calls `getInstances()` and shells
+ * out to `ps -A` (a 5s timeout of its own), so under the incident's load — 60+
+ * shellpers, a busy event loop — a tight budget would time out and be misread as
+ * "no Tower here", failing OPEN on the one guard that prevents data loss. Only
+ * paid on the conflict path (a live pid on a different port), so it costs nothing
+ * on the common restart.
+ */
+export function probeTowerHealth(port: number, timeoutMs = 6000): Promise<HealthProbe> {
+  return new Promise<HealthProbe>((resolve) => {
     const req = http.request(
       { hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: timeoutMs },
       (res) => {
-        if (res.statusCode !== 200) {
-          res.resume();
-          resolve(false);
-          return;
-        }
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (chunk) => {
@@ -113,22 +128,42 @@ export function towerHealthResponds(port: number, timeoutMs = 1500): Promise<boo
           // process on the port can't stream unboundedly.
           if (body.length > 64_000) {
             res.destroy();
-            resolve(false);
+            resolve('gone');
           }
         });
         res.on('end', () => {
-          try {
-            resolve((JSON.parse(body) as { status?: string }).status === 'healthy');
-          } catch {
-            resolve(false);
+          if (res.statusCode === 200) {
+            try {
+              resolve((JSON.parse(body) as { status?: string }).status === 'healthy' ? 'tower' : 'gone');
+            } catch {
+              resolve('gone');
+            }
+            return;
           }
+          if (res.statusCode === 503) {
+            // The readiness gate answers 503 {"error":"STARTING_UP"} while a live
+            // Tower boots — a live owner, not an absent one.
+            try {
+              resolve((JSON.parse(body) as { error?: string }).error === 'STARTING_UP' ? 'tower' : 'gone');
+            } catch {
+              resolve('gone');
+            }
+            return;
+          }
+          // Some other HTTP status — a process answered, but it is not a Tower.
+          resolve('gone');
         });
       },
     );
-    req.on('error', () => resolve(false));
+    req.on('error', (err) => {
+      // ECONNREFUSED = nothing is listening on the port, so the recorded owner is
+      // not serving it (a live Tower always holds its port) → gone. Any other
+      // transport error is inconclusive → unreachable (fail closed).
+      resolve((err as NodeJS.ErrnoException).code === 'ECONNREFUSED' ? 'gone' : 'unreachable');
+    });
     req.on('timeout', () => {
       req.destroy();
-      resolve(false);
+      resolve('unreachable');
     });
     req.end();
   });
@@ -137,7 +172,7 @@ export function towerHealthResponds(port: number, timeoutMs = 1500): Promise<boo
 /** Injectable liveness seams — real implementations by default; fakes in tests. */
 export interface OwnerLivenessDeps {
   isAlive?: (pid: number) => boolean;
-  probe?: (port: number) => Promise<boolean>;
+  probe?: (port: number) => Promise<HealthProbe>;
 }
 
 /**
@@ -148,8 +183,11 @@ export interface OwnerLivenessDeps {
  *   owner recorded on it is gone. Claim.
  * - dead owner pid: stale (a crashed Tower / a clean stop that outran the
  *   release). Claim — this is the self-clearing legitimate restart.
- * - live pid + a Tower answering `/health` on the owner's port: a real Tower
- *   owns this DB. Refuse.
+ * - live pid: probe the owner's port. Only a `gone` result (connection refused,
+ *   or a non-Tower response) proves the owner is absent → claim. A `tower`
+ *   response, OR an `unreachable` inconclusive probe against a still-live pid, is
+ *   treated as a live owner → refuse. This fails CLOSED: a loaded or mid-boot
+ *   Tower whose `/health` misses the budget is never mistaken for a free DB.
  */
 export async function ownerIsLive(
   owner: TowerOwner,
@@ -157,10 +195,10 @@ export async function ownerIsLive(
   deps: OwnerLivenessDeps = {},
 ): Promise<boolean> {
   const isAlive = deps.isAlive ?? pidAlive;
-  const probe = deps.probe ?? towerHealthResponds;
+  const probe = deps.probe ?? probeTowerHealth;
   if (owner.port === myPort) return false;
   if (!isAlive(owner.pid)) return false;
-  return probe(owner.port);
+  return (await probe(owner.port)) !== 'gone';
 }
 
 /** Outcome of {@link claimGlobalDbOwnership}. */
