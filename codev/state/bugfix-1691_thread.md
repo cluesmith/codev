@@ -1,0 +1,61 @@
+# bugfix-1691 thread
+
+Issue #1691: `afx tower start` — surface the owner-guard refusal in the CLI instead of the
+generic 30s timeout. Split from #1690 item 1; companion to #1689's owner guard (PR #1689,
+`tower-owner.ts`). Scope is item 1 ONLY (per main's lane context). Items 2+3 (shutdown overlap,
+clear-owner hatch, flock eval) stay in #1690 and are NOT mine.
+
+Commit discipline (main): no closing keywords for #1690 — use `Refs #1690` if referencing;
+`Fix #1691:` is fine. A `Fix #N` commit SUBJECT auto-closes on merge even with a clean PR body
+(#1677 lesson).
+
+## Investigate (done)
+
+Root cause — `packages/codev/src/agent-farm/commands/tower.ts`:
+- `towerStart()` spawns the tower-server daemon detached (`stdio: 'ignore'`, `unref()`), then
+  `waitForServer(port)` (lines 149-160) polls ONLY `/api/status` for up to `STARTUP_TIMEOUT_MS`
+  (30s). It has no awareness of the spawned pid's liveness.
+- When the #1689 owner guard refuses, `bootSequence()` in `tower-server.ts` (lines 526-536) calls
+  `log('ERROR', ownershipConflictMessage(...))` then `process.exit(1)`. The daemon dies within
+  ~1s; the port never comes up.
+- So `waitForServer` loops the full 30s, then prints the generic
+  "Tower server failed to respond within 30000ms" (lines 266-271) — indistinguishable from the
+  #1685 hang class. The teaching error is only in `tower.log`.
+- Daemon log format (`tower-server.ts` `log()`, lines 142-161): `[iso] [ERROR] <message>\n`,
+  first line prefixed, continuation lines (the multi-line `ownershipConflictMessage`) unprefixed.
+
+Fix shape (implement phase):
+1. Detect fast-exit: track the spawned child's `exit` event; the readiness wait stops immediately
+   when the daemon dies before the port responds (no more burning 30s).
+2. Surface verbatim: capture `tower.log` byte offset right before the daemon can write, then on
+   fast-exit read everything appended since and print it (the guard's teaching error, or any
+   other early-boot failure).
+3. Three distinguishable outcomes: `started` / `exited` (refused-with-reason) /
+   `timeout` (timed-out-still-unknown).
+
+Testable seam: extract an injectable `waitForServerOutcome(probe, daemonAlive, opts)` returning
+the discriminated outcome, plus a `readLogSince(offset)` helper. Regression test drives the seam
+with fakes (daemon dies while probe stays false → `exited` well before timeout) and asserts the
+launcher surfaces the teaching error + exits non-zero on fast-exit.
+
+## Fix (done)
+
+Changed one product file: `packages/codev/src/agent-farm/commands/tower.ts` (+89/-11). No
+skeleton twin (the Tower launcher is product code, not a shipped template — confirmed no
+`tower.ts` under `codev-skeleton/`).
+
+- New exported `TowerStartupOutcome = 'started' | 'exited' | 'timeout'` and
+  `waitForServerOutcome(isReady, isDaemonAlive, opts)` replacing the old boolean `waitForServer`.
+  It short-circuits to `exited` the instant the daemon is seen dead (with a final readiness
+  re-probe for the benign same-tick race), so a refusal no longer burns the 30s budget.
+- `towerStart` registers `serverProcess.on('exit')` → `daemonExited`, and captures the tower.log
+  byte offset right after the launcher's pre-spawn writes. On `exited` it reads everything the
+  daemon appended since (`readLogSince`) and prints it verbatim on stderr (the guard's teaching
+  error), then `exit(1)`. Three distinguishable outcomes: started / exited (refused-with-reason)
+  / timeout (still-running, status unknown).
+
+Regression test: `packages/codev/src/agent-farm/__tests__/bugfix-1691-tower-start-surface-refusal.test.ts`
+(6 tests). Unit tests pin the outcome logic incl. the "no 30s burn" timing; two towerStart tests
+(mocked spawn/http/shell) prove the teaching error is surfaced verbatim + exit(1) within seconds,
+and the empty-log fallback. Build clean, `tsc --noEmit` clean, tower-command + 1629 + 1691 suites
+green (46 tests).
