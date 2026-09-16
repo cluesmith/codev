@@ -28,19 +28,26 @@ export interface TowerOwner {
   pid: number;
   /** Port that Tower is listening on (the liveness probe target). */
   port: number;
-  /** Host the owning Tower runs on (diagnostic only). */
+  /** Machine the owning Tower runs on (diagnostic only). */
   hostname: string;
   /** When ownership was claimed (epoch ms). */
   startedAt: number;
   /** Resolved AGENT_FARM_DIR the owner opened — surfaced in the conflict error. */
   dbDir: string;
+  /**
+   * Interface the owner listens on — the liveness probe's target host. Default
+   * `127.0.0.1`; bridge mode may bind a specific non-loopback host, and probing
+   * loopback would then miss it (a false "gone" → hijack). `0.0.0.0`/`::` are
+   * resolved back to loopback for the probe.
+   */
+  bindHost: string;
 }
 
 /** Read the singleton owner record, or null if none exists. */
 export function readTowerOwner(db: Database.Database): TowerOwner | null {
   try {
     const row = db
-      .prepare('SELECT pid, port, hostname, started_at AS startedAt, db_dir AS dbDir FROM tower_owner WHERE id = 1')
+      .prepare('SELECT pid, port, hostname, started_at AS startedAt, db_dir AS dbDir, bind_host AS bindHost FROM tower_owner WHERE id = 1')
       .get() as TowerOwner | undefined;
     return row ?? null;
   } catch (err) {
@@ -57,14 +64,15 @@ export function readTowerOwner(db: Database.Database): TowerOwner | null {
 /** Upsert the singleton owner record to `owner`. */
 export function writeTowerOwner(db: Database.Database, owner: TowerOwner): void {
   db.prepare(
-    `INSERT INTO tower_owner (id, pid, port, hostname, started_at, db_dir)
-     VALUES (1, @pid, @port, @hostname, @startedAt, @dbDir)
+    `INSERT INTO tower_owner (id, pid, port, hostname, started_at, db_dir, bind_host)
+     VALUES (1, @pid, @port, @hostname, @startedAt, @dbDir, @bindHost)
      ON CONFLICT(id) DO UPDATE SET
        pid = excluded.pid,
        port = excluded.port,
        hostname = excluded.hostname,
        started_at = excluded.started_at,
-       db_dir = excluded.db_dir`,
+       db_dir = excluded.db_dir,
+       bind_host = excluded.bind_host`,
   ).run(owner);
 }
 
@@ -115,10 +123,10 @@ export type HealthProbe = 'tower' | 'gone' | 'unreachable';
  * paid on the conflict path (a live pid on a different port), so it costs nothing
  * on the common restart.
  */
-export function probeTowerHealth(port: number, timeoutMs = 6000): Promise<HealthProbe> {
+export function probeTowerHealth(host: string, port: number, timeoutMs = 6000): Promise<HealthProbe> {
   return new Promise<HealthProbe>((resolve) => {
     const req = http.request(
-      { hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: timeoutMs },
+      { hostname: host, port, path: '/health', method: 'GET', timeout: timeoutMs },
       (res) => {
         let body = '';
         res.setEncoding('utf8');
@@ -169,10 +177,20 @@ export function probeTowerHealth(port: number, timeoutMs = 6000): Promise<Health
   });
 }
 
+/**
+ * Resolve the host to probe from the owner's recorded bind interface. A wildcard
+ * bind (`0.0.0.0` / `::`) accepts loopback, so probe `127.0.0.1`; a specific
+ * bridge host is probed directly (probing loopback would falsely read 'gone').
+ */
+export function resolveProbeHost(bindHost: string | null | undefined): string {
+  if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::') return '127.0.0.1';
+  return bindHost;
+}
+
 /** Injectable liveness seams — real implementations by default; fakes in tests. */
 export interface OwnerLivenessDeps {
   isAlive?: (pid: number) => boolean;
-  probe?: (port: number) => Promise<HealthProbe>;
+  probe?: (host: string, port: number) => Promise<HealthProbe>;
 }
 
 /**
@@ -198,7 +216,7 @@ export async function ownerIsLive(
   const probe = deps.probe ?? probeTowerHealth;
   if (owner.port === myPort) return false;
   if (!isAlive(owner.pid)) return false;
-  return (await probe(owner.port)) !== 'gone';
+  return (await probe(resolveProbeHost(owner.bindHost), owner.port)) !== 'gone';
 }
 
 /** Outcome of {@link claimGlobalDbOwnership}. */
@@ -216,14 +234,17 @@ export async function claimGlobalDbOwnership(opts: {
   pid: number;
   port: number;
   dbDir: string;
+  /** Interface this Tower listens on (default `127.0.0.1`); persisted as the probe target. */
+  bindHost?: string;
   deps?: OwnerLivenessDeps;
 }): Promise<ClaimResult> {
   const { db, pid, port, dbDir, deps } = opts;
+  const bindHost = opts.bindHost ?? '127.0.0.1';
   const existing = readTowerOwner(db);
   if (existing && (await ownerIsLive(existing, port, deps))) {
     return { ok: false, conflict: existing };
   }
-  writeTowerOwner(db, { pid, port, hostname: os.hostname(), startedAt: Date.now(), dbDir });
+  writeTowerOwner(db, { pid, port, hostname: os.hostname(), startedAt: Date.now(), dbDir, bindHost });
   return { ok: true };
 }
 

@@ -129,5 +129,28 @@ Deferred with rationale (both reviewers ranked minor/low):
 - Probe hardcodes 127.0.0.1: covers default loopback + bridge 0.0.0.0 (accepts
   loopback); a non-loopback-ONLY bind is a rare config. Documented.
 
-Re-verified: build exit 0; focused tests 35/35; tsc clean on my files. Full suite re-run
-after rebuild pending.
+Re-verified: build exit 0; focused tests 35/35; tsc clean on my files. Full suite green
+(306 files / 6129 tests).
+
+## CMAP iter 2 (impl) + bridge-host fix
+
+Verdicts: Gemini APPROVE, Claude APPROVE, Codex COMMENT (downgraded from REQUEST_CHANGES
+— fail-open blocker resolved). Codex's one remaining point (HIGH): the probe hardcoded
+127.0.0.1, so a Tower bound only to a specific non-loopback BRIDGE_TOWER_HOST would get
+ECONNREFUSED → 'gone' → claim → "permits the original destructive behavior."
+
+Fixed (v19 is unshipped in this PR, so the table was extended in place — no migration
+churn): added `bind_host` to tower_owner (schema + v19), TowerOwner.bindHost, persisted
+from tower-server's bindHost, and a `resolveProbeHost` that probes the recorded bind host
+(wildcard 0.0.0.0/:: → loopback; a specific bridge host is probed directly). Probe
+signature is now (host, port). Added tests: resolveProbeHost mapping, bind-host persist,
+bridge-host detection, and ownerIsLive probes the resolved host.
+
+Claude's non-blocking suggestions, deliberately NOT taken (documented for the reviewer):
+- e2e two-Tower-same-DB test: covered by the source-order guard + decision matrix; a real
+  double-Tower e2e is heavy/flaky — skipped as a suggestion.
+- wedged-owner recovery doc: the conflict message already points at `afx tower stop` and
+  the named pid; the wedged case (recycled live pid + unreachable port) is rare.
+- conflict message prints dir not file path; shutdown release ordering: negligible.
+
+Focused tests 40/40, tsc clean. Rebuild + full suite pending, then porch done + PR.

@@ -291,8 +291,9 @@ CREATE TABLE IF NOT EXISTS tower_owner (
   id INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
   pid INTEGER NOT NULL,                    -- owning Tower process pid
   port INTEGER NOT NULL,                   -- owning Tower's listen port (liveness probe target)
-  hostname TEXT NOT NULL,                  -- owning host (diagnostic)
+  hostname TEXT NOT NULL,                  -- owning machine (diagnostic)
   started_at INTEGER NOT NULL,             -- epoch ms ownership was claimed
-  db_dir TEXT NOT NULL                     -- resolved AGENT_FARM_DIR the owner opened
+  db_dir TEXT NOT NULL,                    -- resolved AGENT_FARM_DIR the owner opened
+  bind_host TEXT NOT NULL DEFAULT '127.0.0.1'  -- interface the owner listens on (probe target; bridge mode may be non-loopback)
 );
 `;

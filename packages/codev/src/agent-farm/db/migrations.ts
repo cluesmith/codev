@@ -584,7 +584,8 @@ export function runGlobalMigrations(
         port INTEGER NOT NULL,
         hostname TEXT NOT NULL,
         started_at INTEGER NOT NULL,
-        db_dir TEXT NOT NULL
+        db_dir TEXT NOT NULL,
+        bind_host TEXT NOT NULL DEFAULT '127.0.0.1'
       );
     `);
     db.prepare('INSERT INTO _migrations (version) VALUES (19)').run();

@@ -521,6 +521,7 @@ async function bootSequence(): Promise<void> {
     pid: process.pid,
     port,
     dbDir: AGENT_FARM_DIR,
+    bindHost,
   });
   if (!ownership.ok) {
     log('ERROR', ownershipConflictMessage(ownership.conflict, AGENT_FARM_DIR));

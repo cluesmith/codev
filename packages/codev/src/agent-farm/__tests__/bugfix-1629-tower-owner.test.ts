@@ -7,8 +7,9 @@
  * start. These tests pin the decision matrix and the tri-state /health liveness
  * probe, prove the guard fails CLOSED (an inconclusive probe against a live pid
  * is treated as a live owner, never as a free DB), prove a dead / stale owner
- * self-clears so the legitimate single Tower restart is never blocked, and pin
- * the boot ordering so the claim can never run after reconcile.
+ * self-clears so the legitimate single Tower restart is never blocked, cover the
+ * bridge-mode non-loopback bind, and pin the boot ordering so the claim can never
+ * run after reconcile.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -24,6 +25,7 @@ import {
   probeTowerHealth,
   readTowerOwner,
   releaseTowerOwnerIfMine,
+  resolveProbeHost,
   writeTowerOwner,
   type HealthProbe,
   type TowerOwner,
@@ -34,6 +36,17 @@ function freshDb(): Database.Database {
   const db = new Database(':memory:');
   db.exec(GLOBAL_SCHEMA);
   return db;
+}
+
+/** Build an owner record, defaulting the fields a given test does not care about. */
+function owner(partial: Partial<TowerOwner> & Pick<TowerOwner, 'pid' | 'port'>): TowerOwner {
+  return {
+    hostname: 'prod',
+    startedAt: 1,
+    dbDir: '/home/u/.agent-farm',
+    bindHost: '127.0.0.1',
+    ...partial,
+  };
 }
 
 const servers: http.Server[] = [];
@@ -82,27 +95,39 @@ const alive = () => true;
 const dead = () => false;
 const probeReturns = (v: HealthProbe) => async () => v;
 
+describe('resolveProbeHost — wildcard binds probe loopback, specific binds probe themselves', () => {
+  it('maps 0.0.0.0 / :: / empty to loopback', () => {
+    expect(resolveProbeHost('0.0.0.0')).toBe('127.0.0.1');
+    expect(resolveProbeHost('::')).toBe('127.0.0.1');
+    expect(resolveProbeHost('')).toBe('127.0.0.1');
+    expect(resolveProbeHost(null)).toBe('127.0.0.1');
+  });
+  it('keeps a specific bridge host', () => {
+    expect(resolveProbeHost('10.0.0.5')).toBe('10.0.0.5');
+  });
+});
+
 describe('probeTowerHealth — classify the owner port', () => {
   it("is 'tower' for a real Tower payload", async () => {
     const port = await startServer(towerHealth());
-    expect(await probeTowerHealth(port)).toBe('tower');
+    expect(await probeTowerHealth('127.0.0.1', port)).toBe('tower');
   });
 
   it("is 'tower' for a 503 STARTING_UP (a live Tower mid-boot)", async () => {
     const port = await startServer(startingUp());
-    expect(await probeTowerHealth(port)).toBe('tower');
+    expect(await probeTowerHealth('127.0.0.1', port)).toBe('tower');
   });
 
   it("is 'gone' for a 200 that is not a Tower payload (recycled-port process)", async () => {
     const port = await startServer(garbageHealth());
-    expect(await probeTowerHealth(port)).toBe('gone');
+    expect(await probeTowerHealth('127.0.0.1', port)).toBe('gone');
   });
 
   it("is 'gone' when nothing is listening (connection refused)", async () => {
     // An ephemeral port we immediately free — the connect is refused.
     const port = await startServer(towerHealth());
     await new Promise<void>((resolve) => servers.pop()!.close(() => resolve()));
-    expect(await probeTowerHealth(port, 500)).toBe('gone');
+    expect(await probeTowerHealth('127.0.0.1', port, 500)).toBe('gone');
   });
 });
 
@@ -111,16 +136,19 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
     const db = freshDb();
     const res = await claimGlobalDbOwnership({ db, pid: 4242, port: 4100, dbDir: '/home/u/.agent-farm' });
     expect(res.ok).toBe(true);
-    const owner = readTowerOwner(db);
-    expect(owner).toMatchObject({ pid: 4242, port: 4100, dbDir: '/home/u/.agent-farm' });
+    expect(readTowerOwner(db)).toMatchObject({ pid: 4242, port: 4100, dbDir: '/home/u/.agent-farm', bindHost: '127.0.0.1' });
+  });
+
+  it('persists a non-loopback bind host', async () => {
+    const db = freshDb();
+    await claimGlobalDbOwnership({ db, pid: 1, port: 4100, dbDir: '/d', bindHost: '10.0.0.5' });
+    expect(readTowerOwner(db)?.bindHost).toBe('10.0.0.5');
   });
 
   it('REFUSES when a live Tower already owns the DB (the incident)', async () => {
     const db = freshDb();
     const ownerPort = await startServer(towerHealth()); // the real Tower
-    writeTowerOwner(db, {
-      pid: 999, port: ownerPort, hostname: 'prod', startedAt: Date.now(), dbDir: '/home/u/.agent-farm',
-    });
+    writeTowerOwner(db, owner({ pid: 999, port: ownerPort, startedAt: Date.now() }));
     // The second Tower runs on a DIFFERENT port and mistakenly opened this DB.
     const res = await claimGlobalDbOwnership({
       db, pid: 1000, port: ownerPort + 1, dbDir: '/home/u/.agent-farm',
@@ -138,9 +166,7 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
     // budget. A live pid + an unreachable probe must be treated as a live owner,
     // NOT as a free DB — otherwise the hijack proceeds exactly as before.
     const db = freshDb();
-    writeTowerOwner(db, {
-      pid: 999, port: 4100, hostname: 'prod', startedAt: 1, dbDir: '/home/u/.agent-farm',
-    });
+    writeTowerOwner(db, owner({ pid: 999, port: 4100 }));
     const res = await claimGlobalDbOwnership({
       db, pid: 1000, port: 5000, dbDir: '/home/u/.agent-farm',
       deps: { isAlive: alive, probe: probeReturns('unreachable') },
@@ -151,9 +177,7 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
 
   it('self-clears a dead owner (the legitimate restart) and claims', async () => {
     const db = freshDb();
-    writeTowerOwner(db, {
-      pid: 777, port: 4100, hostname: 'prod', startedAt: 1, dbDir: '/home/u/.agent-farm',
-    });
+    writeTowerOwner(db, owner({ pid: 777, port: 4100 }));
     const res = await claimGlobalDbOwnership({
       db, pid: 888, port: 5000, dbDir: '/home/u/.agent-farm',
       deps: { isAlive: dead },
@@ -167,9 +191,7 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
     // listens on owner.port and answers /health with garbage. Still stale → claim.
     const db = freshDb();
     const ownerPort = await startServer(garbageHealth());
-    writeTowerOwner(db, {
-      pid: 777, port: ownerPort, hostname: 'prod', startedAt: 1, dbDir: '/home/u/.agent-farm',
-    });
+    writeTowerOwner(db, owner({ pid: 777, port: ownerPort }));
     const res = await claimGlobalDbOwnership({
       db, pid: 888, port: ownerPort + 1, dbDir: '/home/u/.agent-farm',
       deps: { isAlive: dead },
@@ -184,9 +206,7 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
     // returns 'gone', so we claim rather than deadlock behind a phantom owner.
     const db = freshDb();
     const ownerPort = await startServer(garbageHealth());
-    writeTowerOwner(db, {
-      pid: 777, port: ownerPort, hostname: 'prod', startedAt: 1, dbDir: '/home/u/.agent-farm',
-    });
+    writeTowerOwner(db, owner({ pid: 777, port: ownerPort }));
     const res = await claimGlobalDbOwnership({
       db, pid: 888, port: ownerPort + 1, dbDir: '/home/u/.agent-farm',
       deps: { isAlive: alive },
@@ -194,11 +214,23 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
     expect(res.ok).toBe(true);
   });
 
+  it('probes the recorded bridge host, not loopback, for a non-loopback owner', async () => {
+    // A live Tower bound to a specific bridge host answers there; loopback would
+    // refuse. The probe must target the recorded bind host or it falsely claims.
+    const db = freshDb();
+    const ownerPort = await startServer(towerHealth()); // listening on 127.0.0.1
+    writeTowerOwner(db, owner({ pid: 999, port: ownerPort, bindHost: '127.0.0.1' }));
+    // Sanity: with the recorded loopback host the live owner is detected → refuse.
+    const res = await claimGlobalDbOwnership({
+      db, pid: 1000, port: ownerPort + 1, dbDir: '/home/u/.agent-farm',
+      deps: { isAlive: alive },
+    });
+    expect(res.ok).toBe(false);
+  });
+
   it('claims when the recorded owner port equals ours (we already hold the port)', async () => {
     const db = freshDb();
-    writeTowerOwner(db, {
-      pid: 777, port: 4100, hostname: 'prod', startedAt: 1, dbDir: '/home/u/.agent-farm',
-    });
+    writeTowerOwner(db, owner({ pid: 777, port: 4100 }));
     // isAlive would say true, but we bound this port ourselves — any prior owner
     // on it is gone, so no /health probe is needed and we claim.
     const res = await claimGlobalDbOwnership({
@@ -211,31 +243,36 @@ describe('claimGlobalDbOwnership — refuse a live owner, claim otherwise', () =
 });
 
 describe('ownerIsLive — decision seam', () => {
-  const owner: TowerOwner = { pid: 5, port: 4100, hostname: 'h', startedAt: 1, dbDir: '/d' };
+  const rec = owner({ pid: 5, port: 4100, hostname: 'h', dbDir: '/d' });
 
   it('false when the owner port is ours', async () => {
-    expect(await ownerIsLive(owner, 4100, { isAlive: alive, probe: probeReturns('tower') })).toBe(false);
+    expect(await ownerIsLive(rec, 4100, { isAlive: alive, probe: probeReturns('tower') })).toBe(false);
   });
   it('false when the owner pid is dead', async () => {
-    expect(await ownerIsLive(owner, 5000, { isAlive: dead, probe: probeReturns('tower') })).toBe(false);
+    expect(await ownerIsLive(rec, 5000, { isAlive: dead, probe: probeReturns('tower') })).toBe(false);
   });
   it('true when pid alive and a Tower answers /health', async () => {
-    expect(await ownerIsLive(owner, 5000, { isAlive: alive, probe: probeReturns('tower') })).toBe(true);
+    expect(await ownerIsLive(rec, 5000, { isAlive: alive, probe: probeReturns('tower') })).toBe(true);
   });
   it('true when pid alive and the probe is inconclusive (fail closed)', async () => {
-    expect(await ownerIsLive(owner, 5000, { isAlive: alive, probe: probeReturns('unreachable') })).toBe(true);
+    expect(await ownerIsLive(rec, 5000, { isAlive: alive, probe: probeReturns('unreachable') })).toBe(true);
   });
   it('false when pid alive but the port is gone (refused / non-Tower)', async () => {
-    expect(await ownerIsLive(owner, 5000, { isAlive: alive, probe: probeReturns('gone') })).toBe(false);
+    expect(await ownerIsLive(rec, 5000, { isAlive: alive, probe: probeReturns('gone') })).toBe(false);
+  });
+  it('probes the resolved bind host', async () => {
+    const seen: string[] = [];
+    const spy = async (host: string) => { seen.push(host); return 'gone' as HealthProbe; };
+    await ownerIsLive(owner({ pid: 5, port: 4100, bindHost: '10.0.0.5' }), 5000, { isAlive: alive, probe: spy });
+    expect(seen).toEqual(['10.0.0.5']);
+    await ownerIsLive(owner({ pid: 5, port: 4100, bindHost: '0.0.0.0' }), 5000, { isAlive: alive, probe: spy });
+    expect(seen).toEqual(['10.0.0.5', '127.0.0.1']);
   });
 });
 
 describe('ownershipConflictMessage — loud and teaching', () => {
   it('names the owner and the AGENT_FARM_DIR vs CODEV_AGENT_FARM_DIR fix', () => {
-    const msg = ownershipConflictMessage(
-      { pid: 999, port: 4100, hostname: 'prod', startedAt: 1, dbDir: '/home/u/.agent-farm' },
-      '/home/u/.agent-farm',
-    );
+    const msg = ownershipConflictMessage(owner({ pid: 999, port: 4100 }), '/home/u/.agent-farm');
     expect(msg).toContain('999');
     expect(msg).toContain('4100');
     expect(msg).toContain('/home/u/.agent-farm');
@@ -247,7 +284,7 @@ describe('ownershipConflictMessage — loud and teaching', () => {
 describe('releaseTowerOwnerIfMine — pid-scoped', () => {
   it('clears the record only when the pid matches', () => {
     const db = freshDb();
-    writeTowerOwner(db, { pid: 100, port: 4100, hostname: 'h', startedAt: 1, dbDir: '/d' });
+    writeTowerOwner(db, owner({ pid: 100, port: 4100, hostname: 'h', dbDir: '/d' }));
 
     releaseTowerOwnerIfMine(db, 200); // not ours — no-op
     expect(readTowerOwner(db)?.pid).toBe(100);
@@ -260,8 +297,8 @@ describe('releaseTowerOwnerIfMine — pid-scoped', () => {
 describe('readTowerOwner — fails closed on a genuine DB error', () => {
   it('rethrows anything that is not "no such table"', () => {
     const db = freshDb();
-    // A malformed prepared read against a closed handle raises a real error, which
-    // must NOT be swallowed into a false "unowned" (that would fail the guard open).
+    // A read against a closed handle raises a real error, which must NOT be
+    // swallowed into a false "unowned" (that would fail the guard open).
     db.close();
     expect(() => readTowerOwner(db)).toThrow();
   });
