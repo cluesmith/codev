@@ -350,16 +350,20 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private renderGiveUpBanner(reason: string): void {
     if (this.disposed) { return; }
     this.log('WARN', `Giving up reconnect: ${reason}`);
-    // When reached via the exhausted-budget path, a yellow retry notice is
-    // sitting on the current line; overwrite it in place. When reached via the
-    // immediate-4xx path, no notice exists, so don't disturb the current line.
-    // Either way the give-up notice keeps its trailing `\r\n` and is never
-    // wiped — it is the terminal failure state and must stay visible (#1001).
+    // Overwrite the yellow retry notice in place when one is present (exhausted
+    // path); leave the current line alone on the immediate-4xx path. The banner
+    // then OWNS the current line — no trailing `\r\n` — and is tracked as a
+    // wipeable notice (hadReconnectNotice = true). While the terminal stays dead
+    // nothing else writes (retries have stopped), so it remains fully visible;
+    // but a later successful reconnect erases it in place via clearReconnectNotice()
+    // before the replay paints, instead of stranding a half-overwritten remnant
+    // on the recovered composer line (#1681 recovery-render fix — supersedes
+    // #1001's persistent-`\r\n` form, chosen before auto-recovery existed).
     const prefix = this.hadReconnectNotice ? '\r\x1b[2K' : '';
-    this.hadReconnectNotice = false;
     this.writeEmitter.fire(
-      `${prefix}\x1b[31m[Codev: Connection lost. ${reason}. ${RECONNECT_LINK_TEXT}]\x1b[0m\r\n`,
+      `${prefix}\x1b[31m[Codev: Connection lost. ${reason}. ${RECONNECT_LINK_TEXT}]\x1b[0m`,
     );
+    this.hadReconnectNotice = true;
   }
 
   /**

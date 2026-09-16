@@ -320,7 +320,7 @@ describe('PIR #1001 — reconnect notices overwrite in place and clear on succes
     expect(writes).not.toContain(ERASE_LINE);
   });
 
-  it('give-up overwrites the last retry notice but is itself never wiped', () => {
+  it('give-up overwrites the last retry notice and owns the line, then is wiped on recovery (#1681)', () => {
     const { writes } = makeAdapter();
     for (let i = 0; i < 6; i++) { currentSocket().emit('close'); vi.advanceTimersByTime(30000); }
     writes.length = 0;
@@ -331,12 +331,14 @@ describe('PIR #1001 — reconnect notices overwrite in place and clear on succes
     expect(giveUp.startsWith(ERASE_LINE)).toBe(true); // overwrote the last retry notice
     expect(giveUp).toContain(RECONNECT_LINK_TEXT);
     expect(giveUp).toContain('\x1b[31m');             // red terminal-failure state
+    // The banner owns the current line (no trailing newline), so a successful
+    // reconnect can erase it in place rather than leaving a half-overwritten
+    // remnant on the recovered composer line (#1681 recovery-render fix).
+    expect(giveUp.endsWith('\r\n')).toBe(false);
 
-    // A later reconnect must NOT wipe the give-up line: gaveUp blocks the loop,
-    // and the give-up cleared hadReconnectNotice. Manually re-open to be sure.
     writes.length = 0;
-    currentSocket().emit('open');
-    expect(writes).not.toContain(ERASE_LINE);
+    currentSocket().emit('open');    // successful recovery wipes the stale banner
+    expect(writes).toContain(ERASE_LINE);
   });
 
   it('immediate 4xx give-up has no erase prefix (no retry notice to overwrite)', () => {
@@ -681,6 +683,22 @@ describe('#1681 — wake signal re-arms the reconnect budget', () => {
     pty.onWake();
 
     expect(WebSocket.instances.length).toBe(socketsBefore);
+  });
+
+  it('wipes the stale give-up banner when a wake reconnects (recovery-render)', () => {
+    // The user-reported glitch: after auto-recovery a half-overwritten banner
+    // remnant ("…k here to reconnect]") strands on the composer line until the
+    // next keystroke. The banner must be erased in place on the successful
+    // reconnect, before the replay paints.
+    const { pty, writes } = makeAdapterWithProbe(); // no probe → synchronous banner
+    burnBudget();
+    currentSocket().emit('close'); // transient give-up banner owns the line
+    pty.onWake();                  // wake → fresh socket
+    writes.length = 0;
+
+    currentSocket().readyState = WebSocket.OPEN;
+    currentSocket().emit('open');  // successful recovery
+    expect(writes).toContain('\r\x1b[2K'); // banner erased in place, no remnant
   });
 
   it('no-ops before VS Code has open()ed the pty (no orphan socket)', () => {
