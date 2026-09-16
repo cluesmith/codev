@@ -143,6 +143,21 @@ describe('waitForServerOutcome (#1691)', () => {
     expect(outcome).toBe('timeout');
   });
 
+  it('returns "exited" (not "timeout") when the daemon dies as the budget expires', async () => {
+    const { waitForServerOutcome } = await import('../commands/tower.js');
+    let alive = true;
+    // Dies mid-sleep, after the last in-loop check but before the loop condition re-evaluates —
+    // caught only by the post-loop liveness check.
+    setTimeout(() => {
+      alive = false;
+    }, 20);
+    const outcome = await waitForServerOutcome(async () => false, () => alive, {
+      timeoutMs: 15,
+      intervalMs: 40,
+    });
+    expect(outcome).toBe('exited');
+  });
+
   it('prefers "started" when the port answers in the same tick the daemon is seen to exit', async () => {
     const { waitForServerOutcome } = await import('../commands/tower.js');
     let readyCalls = 0;
@@ -172,7 +187,11 @@ describe('towerStart fast-exit surfacing (#1691)', () => {
       child.emit('exit', 1, null);
     }, 30);
 
+    const start = Date.now();
     await expect(towerStart({ wait: true })).rejects.toThrow('process.exit:1');
+    // The whole point of #1691: the CLI reacts to the fast-exit in seconds, not after the 30s
+    // readiness budget. Asserted explicitly rather than left to vitest's default test timeout.
+    expect(Date.now() - start).toBeLessThan(5000);
 
     const stderr = consoleErrorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
     // The teaching error — not a generic timeout — is what the user sees.

@@ -177,11 +177,24 @@ export async function waitForServerOutcome(
       return 'started';
     }
     if (!isDaemonAlive()) {
-      return (await isReady()) ? 'started' : 'exited';
+      // The daemon is gone before the port answered. Re-probe once to close the benign race
+      // where it answered readiness in the same tick it was observed to exit.
+      if (await isReady()) {
+        return 'started';
+      }
+      return 'exited';
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 
+  // Budget exhausted. The daemon may have exited during the final sleep — check once more so a
+  // fast-exit landing on the deadline is reported as `exited`, not a misleading `timeout`.
+  if (!isDaemonAlive()) {
+    if (await isReady()) {
+      return 'started';
+    }
+    return 'exited';
+  }
   return 'timeout';
 }
 

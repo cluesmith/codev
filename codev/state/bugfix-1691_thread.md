@@ -54,8 +54,31 @@ skeleton twin (the Tower launcher is product code, not a shipped template — co
   error), then `exit(1)`. Three distinguishable outcomes: started / exited (refused-with-reason)
   / timeout (still-running, status unknown).
 
-Regression test: `packages/codev/src/agent-farm/__tests__/bugfix-1691-tower-start-surface-refusal.test.ts`
-(6 tests). Unit tests pin the outcome logic incl. the "no 30s burn" timing; two towerStart tests
+Regression test: `packages/codev/src/agent-farm/__tests__/bugfix-1691-tower-start-surface-refusal.test.ts`.
+Unit tests pin the outcome logic incl. the "no 30s burn" timing; two towerStart tests
 (mocked spawn/http/shell) prove the teaching error is surfaced verbatim + exit(1) within seconds,
 and the empty-log fallback. Build clean, `tsc --noEmit` clean, tower-command + 1629 + 1691 suites
-green (46 tests).
+green.
+
+## PR + CMAP (done)
+
+PR #1692 (`Fixes #1691`, `Refs #1690` — non-closing form for #1690 per commit discipline).
+
+CMAP: **claude=APPROVE** (HIGH, verified end-to-end), **codex=COMMENT** (HIGH), **gemini=skipped**
+(agy unauthenticated, non-blocking). Addressed feedback in a second commit:
+- codex #2 (no final liveness check after the wait loop → exit on the deadline misreports as
+  `timeout`): added a post-loop `isDaemonAlive` check. New unit test pins it (asserts `exited`
+  where the old code returned `timeout`).
+- claude #2 (ternary vs project if/else preference): converted the `started/exited` ternary to
+  if/else.
+- claude #1 (implicit timing guarantee): added an explicit `< 5000ms` elapsed assertion to the
+  towerStart fast-exit test so the "no 30s burn" bound is visible, not reliant on vitest's 5s
+  default.
+- codex #1 (capture log offset before spawn): NOT applied. Claude verified the daemon's
+  boot-to-first-log (~100ms+: module load + bootSequence) far exceeds the sub-ms parent window
+  between spawn() and offset capture, so the race is not practically reachable, and it degrades
+  gracefully (the "No output captured" fallback points to the log) if it ever did. Claude
+  explicitly praised the current placement for keeping the surfaced tail daemon-only (no launcher
+  lines echoed at the user). Kept the clean placement over a theoretical hardening.
+
+7 regression tests green; `tsc --noEmit` clean.
