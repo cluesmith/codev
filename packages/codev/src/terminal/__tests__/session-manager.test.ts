@@ -631,6 +631,48 @@ describe('SessionManager', () => {
       const entries = await (manager as any).findShellperProcesses();
       expect(entries).toEqual([]);
     });
+
+    it('abandons the sweep and returns -1 when it exceeds the timeout budget (Bugfix #1685)', async () => {
+      // Field incident on 3.3.3: on a flooded/wedged process table the sweep's
+      // `ps` scan + per-orphan socket probes stalled for minutes, and because it
+      // ran on Tower's readiness-critical path it tripped the launcher's 30s
+      // timeout with no log trace. The sweep must now be bounded: past its
+      // budget it abandons and signals -1 so it can never block startup.
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // One orphan carrying a socketPath, so the sweep reaches the socket probe.
+      vi.spyOn(manager as any, 'findShellperProcesses').mockResolvedValue([
+        { pid: 4242, socketPath: path.join(socketDir, 'wedged.sock') },
+      ]);
+      // Simulate a wedged probe: it never resolves (a real probe caps at 2s, but
+      // with a flooded table of orphans the cumulative wall time is unbounded).
+      // Without the timeout bound, killOrphanedShellpers would hang forever here.
+      vi.spyOn(manager as any, 'probeSocket').mockReturnValue(new Promise<boolean>(() => {}));
+
+      const killed: number[] = [];
+      const originalKill = process.kill;
+      process.kill = ((pid: number) => {
+        killed.push(pid);
+        return true;
+      }) as typeof process.kill;
+
+      try {
+        const startedAt = Date.now();
+        const count = await manager.killOrphanedShellpers(50);
+        const elapsed = Date.now() - startedAt;
+        // Abandoned via the timeout sentinel, promptly — not hung.
+        expect(count).toBe(-1);
+        expect(elapsed).toBeLessThan(2000);
+        // The wedged orphan was never killed (the probe never returned).
+        expect(killed).toEqual([]);
+      } finally {
+        process.kill = originalKill;
+      }
+    });
   });
 
   describe('socket directory permissions', () => {

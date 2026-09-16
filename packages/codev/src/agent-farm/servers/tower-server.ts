@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { WebSocketServer } from 'ws';
-import { SessionManager } from '../../terminal/session-manager.js';
+import { SessionManager, ORPHAN_SWEEP_TIMEOUT_MS } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup, persistableCommand, logSessionIdentity } from './tower-utils.js';
 import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
@@ -664,15 +664,6 @@ async function bootSequence(): Promise<void> {
   // and deleting the architect terminal's socket file (Bugfix #274).
   await reconcileTerminalSessions();
 
-  // Bugfix #341: Kill orphaned shellper processes not in active sessions.
-  // Must run AFTER reconciliation so that reconnected sessions are in the
-  // active map and won't be killed. Catches shellpers from crashed tests
-  // or previous Tower instances that lost their socket files.
-  const orphansKilled = await shellperManager.killOrphanedShellpers();
-  if (orphansKilled > 0) {
-    log('INFO', `Killed ${orphansKilled} orphaned shellper process(es)`);
-  }
-
   // Issue #1261 test hook: widen the pre-wiring window to a known duration so
   // the startup race is deterministic instead of a function of this machine's
   // process table and session-log volume. Never set outside tests.
@@ -716,6 +707,27 @@ async function bootSequence(): Promise<void> {
   // below is maintenance or background service startup: it must not gate the
   // API, and none of it is a prerequisite for a correct response.
   markBootComplete();
+
+  // Bugfix #341 + #1685: reap orphaned shellper processes (crashed tests, dead
+  // prior Tower instances) not in an active session. Must run AFTER
+  // reconciliation so reconnected sessions are registered and spared.
+  //
+  // Issue #1685: moved OFF the readiness-critical path (it used to run before
+  // markBootComplete). On a flooded process table the sweep's `ps` scan and
+  // per-orphan socket probes stall for minutes; sitting before readiness, that
+  // stall tripped the launcher's 30s timeout with no log trace at all. It is
+  // hygiene, not correctness, so it now runs post-readiness, is time-bounded
+  // (killOrphanedShellpers abandons past ORPHAN_SWEEP_TIMEOUT_MS), and logs its
+  // entry + duration so any future stall is visible and attributable.
+  const orphanSweepStartMs = Date.now();
+  log('INFO', 'Sweeping for orphaned shellpers…');
+  const orphansKilled = await shellperManager.killOrphanedShellpers();
+  const orphanSweepMs = Date.now() - orphanSweepStartMs;
+  if (orphansKilled < 0) {
+    log('WARN', `Orphan sweep abandoned after ${orphanSweepMs}ms (exceeded ${ORPHAN_SWEEP_TIMEOUT_MS}ms budget) — hygiene skipped, next startup retries`);
+  } else {
+    log('INFO', `Orphan sweep done in ${orphanSweepMs}ms (${orphansKilled} killed)`);
+  }
 
   // Issue #1227: run the stricter husk sweep once at startup too, same
   // ordering requirement as killOrphanedShellpers (must run after

@@ -136,6 +136,15 @@ export const RECONNECT_STABILITY_MS = 30_000;
 export const MAX_RECOVERY_ROUNDS = 3;
 
 /**
+ * Bugfix #1685: budget for `killOrphanedShellpers`. The sweep runs `ps` over the
+ * whole process table and probes each orphan's socket (up to 2s each,
+ * sequentially), so on a flooded or wedged table it can stall for minutes. It is
+ * hygiene, not correctness — past this budget the sweep is abandoned so it can
+ * never block startup, and the next Tower start retries it.
+ */
+export const ORPHAN_SWEEP_TIMEOUT_MS = 10_000;
+
+/**
  * Issue #1149: true when the recorded failing-exit timestamps amount to a
  * crash loop (>= CRASH_LOOP_THRESHOLD failures inside the trailing
  * CRASH_LOOP_WINDOW_MS ending at `now`). Pure so the policy is testable
@@ -792,16 +801,18 @@ export class SessionManager extends EventEmitter {
    * track of (e.g., SQLite was corrupt/empty during reconciliation). In that
    * case, the shellper is NOT killed — reality (live socket) trumps SQLite.
    *
-   * Returns the number of orphans killed.
+   * Returns the number of orphans killed, or -1 if the sweep was abandoned
+   * because it exceeded `timeoutMs` (Bugfix #1685) — the caller logs a WARN and
+   * proceeds; the next startup retries the sweep.
    */
-  async killOrphanedShellpers(): Promise<number> {
+  async killOrphanedShellpers(timeoutMs = ORPHAN_SWEEP_TIMEOUT_MS): Promise<number> {
     const activePids = new Set<number>();
     for (const session of this.sessions.values()) {
       activePids.add(session.pid);
     }
 
     let killed = 0;
-    try {
+    const sweep = async (): Promise<void> => {
       const entries = await this.findShellperProcesses();
       for (const { pid, socketPath } of entries) {
         if (pid === process.pid) continue;  // Don't kill ourselves
@@ -830,8 +841,31 @@ export class SessionManager extends EventEmitter {
           try { process.kill(pid, 'SIGTERM'); killed++; } catch { /* already dead */ }
         }
       }
+    };
+
+    // Bugfix #1685: bound the sweep. The `ps` scan and per-orphan socket probes
+    // are unbounded, so on a flooded/wedged process table this stalls for
+    // minutes. The sweep is hygiene, not correctness — past the budget, abandon
+    // it (it keeps running to completion in the background, harmlessly) and
+    // signal -1 so it can never block startup. The next Tower start retries it.
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        sweep(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            timedOut = true;
+            reject(new Error('orphan-sweep-timeout'));
+          }, timeoutMs);
+        }),
+      ]);
     } catch {
-      // ps not available or failed — not fatal
+      // A timeout aborts the wait; any other throw (e.g. `ps` unavailable) is
+      // non-fatal, matching the pre-#1685 behavior — return what was killed.
+      if (timedOut) return -1;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
 
     if (killed > 0) {
