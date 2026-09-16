@@ -211,3 +211,14 @@ pid-is-a-tower identity check, (b) a --force/clear-owner escape hatch for a wedg
 owner (Claude), (c) surface the conflict message to the CLI (afx tower start daemonizes, so
 the loud error only lands in tower.log — the operator who caused it never sees it, Claude).
 Handed off at the pr gate for the human decision.
+
+## Architect ruling (gate)
+
+Recommendation ACCEPTED: guard merges as-is on Amr's approval. Robustness triple filed as a
+follow-up (my analysis credited), with a reorder — CLI-surfacing of the refusal is item 1
+and most urgent (today a refused start reads as the generic ~30s timeout from the user's
+chair, indistinguishable from #1685). Items 2 (shutdown-overlap pid-is-a-tower identity
+check) + 3 (clear-owner/--force hatch) are COUPLED — ship together or not at all, per
+Claude's phantom-pid warning. Recorded the Codex RC + this disposition in the PR #1689 body.
+Holding at the pr gate; Amr's words cover 1687 then 1689. On approval: porch approve … pr →
+gh pr merge 1689 --merge (no --delete-branch) → verify.
