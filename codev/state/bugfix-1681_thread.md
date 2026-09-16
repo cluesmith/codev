@@ -129,7 +129,16 @@ wipeable notice, so `clearReconnectNotice()` erases it in place on the next open
 before the replay paints; still fully visible/clickable while dead. +1
 recovery-render regression test; updated the #1001 "never wiped" test to the new
 wipe-on-recovery behavior. Full suite 1023 pass, types+lint clean. PR body updated.
-Re-running PR CMAP (round 3) on the render change.
+### PR CMAP round 3 (render change, head 1cbb6c0ca)
+gemini APPROVE, codex COMMENT (the re-arm throttle — a documented follow-up, not new),
+claude APPROVE. No blocking / no REQUEST_CHANGES. Two trivial net-new minors folded
+(be1b85275): probeTowerHealth returns null (not false) when no client → neutral wording;
+clear the 2s probe-race timer when the probe wins. +1 null-probe fallback test; sentinel regex
+updated (it caught its own drift). Full suite 1024 pass, types+lint clean.
+
+Did NOT run a 4th CMAP round for those two trivial changes (disproportionate; substantive code
+already all-APPROVE). Remaining documented follow-ups (out of BUGFIX scope): re-arm throttle,
+display-sleep-without-focus wake gap, apps/web sibling. Physical sleep→wake still the real check.
 
 **Holding for human gate approval.**
 
