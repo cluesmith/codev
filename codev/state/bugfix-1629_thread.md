@@ -286,3 +286,22 @@ clean, PR body current. The minors are not substantial → no 6th CMAP auto-run.
 to main with the recommendation to proceed per the prior residual ruling; the flock-based
 lifetime lock is the real fix for the residual and belongs in the robustness follow-up
 (needs a native-dep decision). Holding at the gate; merge is main's.
+
+## Post-gate: SQLite collision fix (Amr) + GATE APPROVED
+
+Amr (in-conversation) flagged a real latent risk: my lock was `<db>.lock`, which
+SQLite's unix-dotfile VFS (a fallback on filesystems without POSIX locks) creates as
+`<db>.lock` — a collision. Verified better-sqlite3's WAL path creates only `<db>-wal`/
+`<db>-shm` (no `.lock`), but renamed defensively to `<db>.tower-owner` (avoids
+`-wal`/`-shm`/`-journal`/`-mj*` and the dotfile `.lock`). Added a name-collision test.
+Also answered: the only other lock file in the repo is `agy-auth.lock` (consult
+auth-probe; openSync('wx') + mtime staleness) — no shared helper; mine deliberately uses
+temp+link + pid/health liveness instead. Build green, 305 files / 6141 tests, tsc clean;
+PR body updated to `.tower-owner`.
+
+GATE APPROVED: Amr approved the pr gate (relayed by main 2026-09-16T23:00). Ran
+`porch approve bugfix-1629 pr --a-human-explicitly-approved-this` → "Gate pr approved."
+porch auto-created + pushed `chore(porch): bugfix-1629 pr gate-approved` (HEAD e808d32e9,
+== origin). Per locked sequence I do NOT run porch done / merge — merge is main's on Amr's
+SEPARATE word. Code head under the bookkeeping commit is 0355251e8 (the verified head).
+HOLDING for main's merge; then on landed-confirmation → porch done --merged 1689 → verify.
