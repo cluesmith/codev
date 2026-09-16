@@ -111,6 +111,23 @@ The redesign was confirmed correct by all three ("the code is right"). Remaining
   (c) `return 0` in the ps-failure catch. Worst-case duration is now ~budget (probe bounded),
   resolving claude's ~12s note.
 
+## PR phase — CMAP iter 3: ALL THREE APPROVE (HIGH)
+gemini APPROVE, codex APPROVE, claude APPROVE. All confirmed the code correct, tests
+non-vacuous, PR body accurate. Only non-blocking follow-ups:
+- **claude (recommended, in-scope)**: document in arch.md §6 boot-order why step 6
+  (`killOrphanedShellpers`) must stay BEFORE `markBootComplete()` — the doc gap that produced
+  iter-1's wrong move. → **Applied**: step-6 row + a #1685 "Known ordering bugs" entry. Doc-only,
+  doesn't invalidate the code APPROVEs, so no iter-4.
+- **claude (pre-existing, spin-off for architect)**: `execFile`'s default 1MB `maxBuffer` means a
+  genuinely FLOODED table (huge `ps` output) hits ENOBUFS → `[]` → a false "0 killed" INFO rather
+  than the WARN. Implies the field hang was a WEDGED `ps` (D-state), which this fix bounds; the
+  flooded-volume path is a separate silent-no-op, NOT the reported hang and NOT a regression.
+  Flagging to architect as a follow-up issue candidate; not fixing here (out of BUGFIX scope).
+
+## Handoff
+Notifying architect with all three iter-3 verdicts, then `porch done` to fire the pr gate. Waiting
+for human gate approval (a CMAP APPROVE is not merge authorization).
+
 ## Scope decision
 Fits BUGFIX. Focused change in `tower-server.ts` (move + log) + `session-manager.ts` (bound
 the sweep). Well under 300 LOC. Regression test pattern exists: `session-manager.test.ts:384`
