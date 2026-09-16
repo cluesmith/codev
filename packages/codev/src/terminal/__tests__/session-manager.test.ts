@@ -631,6 +631,122 @@ describe('SessionManager', () => {
       const entries = await (manager as any).findShellperProcesses();
       expect(entries).toEqual([]);
     });
+
+    it('abandons and returns -1 when the process-table scan wedges (Bugfix #1685)', async () => {
+      // Field incident on 3.3.3: the sweep ran an unbounded `ps -ww -eo pid,args`
+      // over a flooded/wedged process table. On the readiness-critical boot path,
+      // that stalled startup past the launcher's 30s timeout with no log trace.
+      // The scan must now be bounded: if it does not return in the budget, the
+      // sweep abandons and signals -1 instead of hanging.
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // A `ps` scan that never returns (a wedged process table). Without the
+      // bound, killOrphanedShellpers would await this forever and never return.
+      vi.spyOn(manager as any, 'findShellperProcesses').mockReturnValue(new Promise(() => {}));
+
+      const killed: number[] = [];
+      const originalKill = process.kill;
+      process.kill = ((pid: number) => {
+        killed.push(pid);
+        return true;
+      }) as typeof process.kill;
+
+      try {
+        const startedAt = Date.now();
+        const count = await manager.killOrphanedShellpers(50);
+        const elapsed = Date.now() - startedAt;
+        // Abandoned promptly via the -1 sentinel — not hung.
+        expect(count).toBe(-1);
+        expect(elapsed).toBeLessThan(2000);
+        expect(killed).toEqual([]);
+      } finally {
+        process.kill = originalKill;
+      }
+    });
+
+    it('stops at the budget and does not keep killing in the background (Bugfix #1685)', async () => {
+      // The bound must CANCEL the sweep, not just abandon the caller's wait: once
+      // the budget is spent, no further orphans may be killed — otherwise a
+      // background tail could reap a session created after the sweep returned.
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Many dead-socket orphans; each socket probe takes ~10ms, so a 300ms
+      // budget clears ~30 of the 50 — some, but not all. Generous margins keep
+      // the timing assertions stable under CI load.
+      const orphans = Array.from({ length: 50 }, (_, i) => ({
+        pid: 5000 + i,
+        socketPath: path.join(socketDir, `orphan-${i}.sock`),
+      }));
+      vi.spyOn(manager as any, 'findShellperProcesses').mockResolvedValue(orphans);
+      vi.spyOn(manager as any, 'probeSocket').mockImplementation(
+        () => new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10)),
+      );
+
+      const killed: number[] = [];
+      const originalKill = process.kill;
+      process.kill = ((pid: number) => {
+        killed.push(pid);
+        return true;
+      }) as typeof process.kill;
+
+      try {
+        const count = await manager.killOrphanedShellpers(300);
+        // Abandoned mid-sweep: some but not all orphans reaped.
+        expect(count).toBe(-1);
+        expect(killed.length).toBeGreaterThan(0);
+        expect(killed.length).toBeLessThan(orphans.length);
+
+        // Cooperative cancellation: after the sweep returns, nothing keeps
+        // killing. Wait well past when the remaining probes would have run.
+        const killedAtReturn = killed.length;
+        await new Promise((r) => setTimeout(r, 500));
+        expect(killed.length).toBe(killedAtReturn);
+      } finally {
+        process.kill = originalKill;
+      }
+    });
+
+    it('abandons without killing when a socket probe outlasts the budget (Bugfix #1685)', async () => {
+      // The budget must bound the socket probes too: a single probe that outlasts
+      // the whole budget must not push a kill past the deadline. The sweep abandons
+      // with -1 and kills nothing rather than returning a count.
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      vi.spyOn(manager as any, 'findShellperProcesses').mockResolvedValue([
+        { pid: 6001, socketPath: path.join(socketDir, 'slow.sock') },
+      ]);
+      // A probe that never resolves within the budget.
+      vi.spyOn(manager as any, 'probeSocket').mockReturnValue(new Promise<boolean>(() => {}));
+
+      const killed: number[] = [];
+      const originalKill = process.kill;
+      process.kill = ((pid: number) => {
+        killed.push(pid);
+        return true;
+      }) as typeof process.kill;
+
+      try {
+        const startedAt = Date.now();
+        const count = await manager.killOrphanedShellpers(50);
+        expect(count).toBe(-1);
+        expect(Date.now() - startedAt).toBeLessThan(2000);
+        expect(killed).toEqual([]);
+      } finally {
+        process.kill = originalKill;
+      }
+    });
   });
 
   describe('socket directory permissions', () => {

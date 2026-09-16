@@ -142,6 +142,24 @@ describe('tunnel-client unit tests', () => {
       expect(isBlockedPath('/api%2Ftunnel/status')).toBe(true);
     });
 
+    // Issue #1668: /api/ide spawns/kills a local process, so it is local-only
+    // like /api/tunnel/*. The /ide/ FORWARD prefix must stay reachable.
+    it('blocks /api/ide (bare) and /api/ide/* — the process-spawning management endpoint', () => {
+      expect(isBlockedPath('/api/ide')).toBe(true);
+      expect(isBlockedPath('/api/ide/start')).toBe(true);
+      expect(isBlockedPath('/workspace/abc/api/ide')).toBe(true);
+    });
+
+    it('does NOT block the /ide/ forward prefix (must traverse the tunnel)', () => {
+      expect(isBlockedPath('/ide/')).toBe(false);
+      expect(isBlockedPath('/ide/static/x.js')).toBe(false);
+      expect(isBlockedPath('/ide/?folder=%2Fx')).toBe(false);
+    });
+
+    it('does not over-block /api/ideas (lookalike)', () => {
+      expect(isBlockedPath('/api/ideas')).toBe(false);
+    });
+
     it('blocks percent-encoded slash bypass: /api%2Ftunnel/connect', () => {
       expect(isBlockedPath('/api%2Ftunnel/connect')).toBe(true);
     });
