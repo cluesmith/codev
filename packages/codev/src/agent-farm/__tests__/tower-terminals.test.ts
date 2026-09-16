@@ -6,7 +6,7 @@
  * getTerminalsForWorkspace, and initTerminals/shutdownTerminals lifecycle.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, onTestFinished, vi } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -820,6 +820,127 @@ describe('tower-terminals', () => {
       expect(maxActiveReplayWaits).toBeGreaterThan(1);
 
       vi.restoreAllMocks();
+    });
+
+    // Bugfix #1686: a shellper row whose reconnect FAILS but whose process is
+    // still alive and whose socket file is still present must survive Phase 2
+    // untouched — never deleted, never signaled. reconnectSession() returns null
+    // for transient reasons (socket connect refused because another Tower client
+    // owns the shellper, or a boot-time socket/fd hiccup), not just for a dead
+    // process; treating that as death SIGTERMed 53 live sessions in the #1629
+    // incident. Fails without the guard (Phase 2 killed session.pid + DELETEd
+    // the row on reconnect failure alone).
+    it('leaves a live-pid + present-socket row untouched when reconnect fails (#1686)', async () => {
+      // onTestFinished so the mocked process.kill (dangerous if leaked into
+      // other tests) is always restored, even if an assertion throws.
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const liveId = 'bugfix-1686-live-session';
+      const socketPath = '/tmp/shellper-bugfix-1686.sock';
+
+      // Reconnect fails (e.g. socket owned by the real Tower — one-client-per-
+      // shellper), the same null this path returns for a genuinely dead process.
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      // process.pid is genuinely alive, so processExists() returns true.
+      mockDbAll.mockReturnValue([{
+        id: liveId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-live',
+        pid: process.pid,
+        shellper_socket: socketPath,
+        shellper_pid: process.pid,
+        shellper_start_time: Date.now(),
+        created_at: new Date().toISOString(),
+      }]);
+
+      // Workspace exists; the shellper socket FILE is present (connect refused,
+      // not file-gone). Config lookups resolve false.
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        if (String(p) === socketPath) return true;
+        return false;
+      });
+
+      // Swallow real SIGTERMs (would kill the test runner if the bug regressed),
+      // but let the liveness probe (signal 0) pass through to the real kill.
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      // Never signaled.
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      // Row left in place — no DELETE run for this session id.
+      expect(mockDbRun).not.toHaveBeenCalledWith(liveId);
+      // Logged WARN for the next-pass retry.
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+    });
+
+    // Bugfix #1686 (sibling site): a row the reconcile guard above preserved
+    // must also survive the on-the-fly reconnect in getTerminalsForWorkspace()
+    // when that reconnect still fails. Before the fold, this path deleted the
+    // row on any null reconnect (no liveness check), so the first /api/state or
+    // /api/overview read after a Tower restart would delete the very row Phase 2
+    // had just preserved — falsifying the "retried next pass" promise. Fails
+    // without the on-the-fly guard (deleteTerminalSession runs DELETE for the id).
+    it('leaves a live-pid + present-socket row untouched when on-the-fly reconnect fails (#1686)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const liveId = 'bugfix-1686-onthefly-session';
+      const socketPath = '/tmp/shellper-bugfix-1686-otf.sock';
+
+      // On-the-fly reconnect still fails (persistent ownership/transient hiccup).
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      // getTerminalSessionsForWorkspace() reads this row; its PtySession is gone
+      // (never created), so getTerminalsForWorkspace takes the on-the-fly path.
+      mockDbAll.mockReturnValue([{
+        id: liveId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-live-otf',
+        pid: process.pid,
+        shellper_socket: socketPath,
+        shellper_pid: process.pid,
+        shellper_start_time: Date.now(),
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        if (String(p) === socketPath) return true;
+        return false;
+      });
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { getTerminalsForWorkspace: getTerms } = await import('../servers/tower-terminals.js');
+      await getTerms('/real/project', 'http://proxy');
+
+      // On-the-fly never signals, but before the fold it DELETEd the row.
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(mockDbRun).not.toHaveBeenCalledWith(liveId);
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
     });
 
     // =========================================================================

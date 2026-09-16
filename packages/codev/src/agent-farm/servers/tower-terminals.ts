@@ -647,6 +647,10 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   let orphanReconnected = 0;
   let killed = 0;
   let cleaned = 0;
+  // Bugfix #1686: rows kept because reconnect failed but death could not be
+  // confirmed (live pid + present socket). Counted so a reconcile that only
+  // preserved rows does not misreport "No terminal sessions to reconcile".
+  let unconfirmed = 0;
 
   // Track matched session IDs across all phases
   const matchedSessionIds = new Set<string>();
@@ -800,8 +804,13 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   // Process probe results sequentially (shared state mutations)
   for (const { dbSession, client, replayData, restartOptions } of probeResults) {
     if (!client) {
-      _deps.log('INFO', `Shellper session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
-      continue; // Will be cleaned up in Phase 2
+      // Bugfix #1686: reconnect returning null does NOT prove death (it also
+      // covers a connect refused by another Tower client, or a transient
+      // socket/fd hiccup). Death is confirmed in the Phase 2 sweep, which keeps
+      // a row whose pid is alive and socket present — so this log defers the
+      // verdict rather than asserting "dead" up front.
+      _deps.log('INFO', `Shellper session ${dbSession.id} reconnect failed — deferring to Phase 2 sweep for death confirmation`);
+      continue; // Phase 2 confirms death before any cleanup
     }
 
     const workspacePath = dbSession.workspace_path;
@@ -923,6 +932,26 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     const existing = manager.getSession(session.id);
     if (existing && existing.status !== 'exited') continue;
 
+    // Bugfix #1686: a shellper-backed row reaches here when Phase 1 failed to
+    // reconnect to it. But reconnectSession() returns null for transient reasons
+    // too — a socket connect refused because another Tower client already owns
+    // the shellper (one-client-per-shellper), or a boot-time socket/fd hiccup —
+    // not just for a genuinely dead process. Treating that failure as death and
+    // SIGTERMing the still-live pid is what destroyed 53 live sessions in the
+    // #1629 incident. Require POSITIVE evidence of death before touching the
+    // process or the row: the shellper pid must be gone AND/OR its socket file
+    // absent. A live pid with a present socket is "could not confirm" — leave the
+    // row in place (WARN) for the next reconcile/adoption pass; never signal it.
+    if (session.shellper_socket) {
+      const shellperAlive = session.shellper_pid != null && processExists(session.shellper_pid);
+      const socketPresent = fs.existsSync(session.shellper_socket);
+      if (shellperAlive && socketPresent) {
+        _deps.log('WARN', `Shellper session ${session.id} failed to reconnect but pid ${session.shellper_pid} is alive and socket ${session.shellper_socket} is present — leaving row untouched, retried next reconcile/adoption pass (${session.type} for ${path.basename(session.workspace_path)})`);
+        unconfirmed++;
+        continue;
+      }
+    }
+
     // Stale row — kill orphaned process if any, then delete
     if (session.pid && processExists(session.pid)) {
       _deps.log('INFO', `Killing orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.workspace_path)})`);
@@ -937,8 +966,8 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   }
 
   const total = shellperReconnected + orphanReconnected;
-  if (total > 0 || killed > 0 || cleaned > 0) {
-    _deps.log('INFO', `Reconciliation complete: ${shellperReconnected} shellper, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned`);
+  if (total > 0 || killed > 0 || cleaned > 0 || unconfirmed > 0) {
+    _deps.log('INFO', `Reconciliation complete: ${shellperReconnected} shellper, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned, ${unconfirmed} unconfirmed (kept)`);
   } else {
     _deps.log('INFO', 'No terminal sessions to reconcile');
   }
@@ -1111,6 +1140,24 @@ export async function getTerminalsForWorkspace(
     }
 
     if (!session) {
+      // Bugfix #1686: the same guard as reconcile Phase 2, applied to this
+      // sibling delete site. The on-the-fly reconnect above returns null for
+      // transient reasons too (socket connect refused because another Tower
+      // client owns the shellper, or a boot-time socket/fd hiccup), not just
+      // for a dead process. Dropping the row on that failure alone is how a row
+      // the Phase 2 guard just preserved would be deleted by the first
+      // /api/state or /api/overview read whose reconnect fails again — making
+      // Phase 2's "retried next reconcile/adoption pass" promise false. Require
+      // positive evidence of death (pid gone AND/OR socket file absent) before
+      // deleting; a live pid with a present socket is kept for a later pass.
+      if (dbSession.shellper_socket) {
+        const shellperAlive = dbSession.shellper_pid != null && processExists(dbSession.shellper_pid);
+        const socketPresent = fs.existsSync(dbSession.shellper_socket);
+        if (shellperAlive && socketPresent) {
+          _deps?.log('WARN', `On-the-fly reconnect for ${dbSession.id} failed but pid ${dbSession.shellper_pid} is alive and socket ${dbSession.shellper_socket} is present — leaving row untouched, retried next reconcile/adoption pass (${dbSession.type})`);
+          continue;
+        }
+      }
       // Stale row, nothing to reconnect — clean up
       deleteTerminalSession(dbSession.id);
       continue;
