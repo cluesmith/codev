@@ -114,7 +114,24 @@ PR #1682 opened with `Fixes #1681`. Branch `builder/bugfix-1681`.
 
 Verification at PR head: full vscode unit suite 1022 passed, check-types + lint clean.
 
-Notified architect + fired the `pr` gate. **Holding for human gate approval.**
+Notified architect + fired the `pr` gate.
+
+### Post-gate: recovery-render glitch reported by human (0e70d5c3f)
+Human tested a real recovery and saw a half-overwritten banner remnant
+(`…k here to reconnect]`) stranded on the composer line, clearing on the next
+keystroke. Root cause: the red give-up banner is client-injected text the
+reconnected agent TUI can't see; it ended with `\r\n` + cleared
+`hadReconnectNotice` (#1001's persistent form, pre-auto-recovery), so a
+successful reconnect never wiped it and the app's repaint covered only the left
+of the row. Auto-recovery made give-up→reconnect frequent, exposing it.
+Fix (human chose fold-into-PR): banner now owns the line (no `\r\n`) and is a
+wipeable notice, so `clearReconnectNotice()` erases it in place on the next open
+before the replay paints; still fully visible/clickable while dead. +1
+recovery-render regression test; updated the #1001 "never wiped" test to the new
+wipe-on-recovery behavior. Full suite 1023 pass, types+lint clean. PR body updated.
+Re-running PR CMAP (round 3) on the render change.
+
+**Holding for human gate approval.**
 
 ## Fences
 terminal-adapter.ts is mine. Not touching views/tower*.ts, workspace-label.ts, fleet-order.ts,
