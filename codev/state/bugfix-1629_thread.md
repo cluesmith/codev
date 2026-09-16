@@ -178,5 +178,36 @@ the full diff), not scope creep — fixed both:
 
 ownerIsLive signature now (owner, myPort, myBindHost, deps). Owner tests 33/33, tsc clean.
 Non-blocking (documented, not fixed): mixed-version Towers (an old binary predating v19
-ignores tower_owner) stay unguarded — unavoidable, note in review. Rebuild + full suite +
-CMAP re-run pending, then the single ready-notification + gate.
+ignores tower_owner) stay unguarded — unavoidable, note in review.
+
+## PR-CMAP iter 2 + 3 (converging), then hand-off at gate
+
+iter 2: Gemini APPROVE, Claude APPROVE, Codex RC (the resolveContendedClaim blind-upsert
+after a lost CAS). Fixed: bounded read→liveness→CAS retry that FAILS CLOSED on persistent
+contention (never blind-overwrites); + probe 5xx→'unreachable'; + resolveProbeHost handles
+IPv6 [::]. Deterministic churning-probe regression added. Pushed (commit 3470b9d3e).
+
+iter 3: Gemini APPROVE, Claude APPROVE, Codex RC — NEW point: the same-address shortcut
+(owner.port==myPort && bindHost match → claim) is unsafe during GRACEFUL SHUTDOWN: the old
+Tower closes its listener (step 1) but stays alive until process.exit (step 9), so a
+same-host:port restart in that window binds OK, hits the shortcut, and claims/reconciles
+while the old Tower is still alive.
+
+WHY THIS IS THE ARCHITECT'S CALL (not a solo fix):
+1. The two reviewers pull OPPOSITE directions on the same-address case. Codex: refuse when
+   same-address pid is alive. Claude (iter 3): that refusal WEDGES on a recycled pid (a
+   "phantom owner") with no --force/clear escape hatch. Resolving BOTH correctly needs a
+   process-identity check (is owner.pid actually a tower-server?) — clear scope growth past
+   the architect's "guard + tests, no scope growth" bound, and it couples db→process census.
+2. SEVERITY is low: during GRACEFUL shutdown the old Tower does NOT delete terminal_sessions
+   rows (explicit code comment), so the overlap is a transient shellper handoff to the new
+   (legitimate) Tower, NOT the data-loss incident. The actual #1629 incident (different-port
+   test Tower vs long-running production Tower serving /health) is fully fixed.
+3. Two HIGH-confidence APPROVEs; Codex's items across rounds have narrowed to edges.
+
+RECOMMENDATION to architect: ship the guard (resolves the incident) and file a follow-up
+"owner-lock robustness" issue for: (a) graceful-shutdown same-address overlap via a
+pid-is-a-tower identity check, (b) a --force/clear-owner escape hatch for a wedged/phantom
+owner (Claude), (c) surface the conflict message to the CLI (afx tower start daemonizes, so
+the loud error only lands in tower.log — the operator who caused it never sees it, Claude).
+Handed off at the pr gate for the human decision.
