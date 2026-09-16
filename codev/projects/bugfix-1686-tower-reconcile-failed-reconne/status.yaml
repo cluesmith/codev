@@ -1,0 +1,14 @@
+id: bugfix-1686
+title: tower-reconcile-failed-reconne
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-16T23:38:45.913Z'
+updated_at: '2026-09-16T23:38:45.914Z'
