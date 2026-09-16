@@ -1804,7 +1804,7 @@ The startup ordering is critical — race conditions have caused real bugs when 
 | 3 | `initTerminals()` | Terminal management module ready |
 | 4 | `startMailboxDrainer()` | Mailbox backstop drainer ready (Spec 1313 — replaced Spec 403's `startSendBuffer()`); shutdown calls `stopMailboxDrainer()` with **no force-flush** |
 | 5 | **`reconcileTerminalSessions()`** | **MUST run before step 7** — reconnects shellper sessions from previous run |
-| 6 | `killOrphanedShellpers()` | **MUST run after step 5** — avoids killing sessions that were just reconnected |
+| 6 | `killOrphanedShellpers()` | **MUST run after step 5** — avoids killing sessions that were just reconnected. **MUST also stay before step 9** (#1685): it has no age guard (unlike step 10's husk sweep), so once requests are served it could reap a just-spawned session that is already in `ps` but not yet registered or socket-listening. It is time-bounded (`ORPHAN_SWEEP_TIMEOUT_MS`, 10s, cooperative cancellation) rather than deferred past readiness |
 | 7 | `initInstances()` | Enables workspace API handlers — triggers dashboard polling |
 | 8 | `initCron()` | Scheduler starts after instances ready |
 | 9 | **`markBootComplete()`** | **Readiness gate opens** — held requests are released and Tower starts serving (#1261) |
@@ -1816,6 +1816,7 @@ The startup ordering is critical — race conditions have caused real bugs when 
 - **Bugfix #274**: `initInstances()` before `reconcileTerminalSessions()` allowed dashboard polls to race with reconciliation, corrupting shellper sessions
 - **Bugfix #341**: Killing orphaned shellpers before reconciliation killed sessions that were about to be reconnected
 - **Bugfix #1261**: `initInstances()` ran last, *after* the two disk-scaling sweeps, so every `_deps`-dependent route was broken for as long as those scans took — `DELETE /api/terminals/:id` 404'd for a terminal that existed. Fixed by moving the sweeps after readiness and holding requests until step 9
+- **Bugfix #1685**: `killOrphanedShellpers()` (step 6) was unbounded and silent on the zero-orphan path, so a wedged process table stalled boot here past the launcher's 30s timeout with no log trace. Bounded with a 10s cooperative-cancellation budget plus entry/duration/WARN logging. Kept at step 6 (pre-readiness) rather than deferred to step 10 with the other sweeps: unlike the husk sweep it has no age guard, so post-readiness it would race just-spawned sessions
 
 **Defense in depth**: During startup, `getTerminalsForWorkspace()` skips on-the-fly shellper reconnection (via `_reconciling` guard) to prevent races through alternate code paths.
 

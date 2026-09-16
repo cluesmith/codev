@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { WebSocketServer } from 'ws';
-import { SessionManager } from '../../terminal/session-manager.js';
+import { SessionManager, ORPHAN_SWEEP_TIMEOUT_MS } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup, persistableCommand, logSessionIdentity } from './tower-utils.js';
 import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
@@ -706,13 +706,28 @@ async function bootSequence(): Promise<void> {
   // and deleting the architect terminal's socket file (Bugfix #274).
   await reconcileTerminalSessions();
 
-  // Bugfix #341: Kill orphaned shellper processes not in active sessions.
-  // Must run AFTER reconciliation so that reconnected sessions are in the
-  // active map and won't be killed. Catches shellpers from crashed tests
-  // or previous Tower instances that lost their socket files.
+  // Bugfix #341: Kill orphaned shellper processes not in active sessions. Must
+  // run AFTER reconciliation so reconnected sessions are in the active map and
+  // won't be killed. Catches shellpers from crashed tests or previous Tower
+  // instances that lost their socket files.
+  //
+  // Issue #1685: this sweep used to be unbounded and silent on the zero-orphan
+  // path, so on a flooded/wedged process table its `ps` scan + per-orphan socket
+  // probes stalled here for minutes, tripping the launcher's 30s startup timeout
+  // with no trace in the log. It is now time-bounded (killOrphanedShellpers
+  // abandons past ORPHAN_SWEEP_TIMEOUT_MS, well under the 30s launcher timeout
+  // and the 20s BOOT_READY_TIMEOUT_MS) and logs its entry + duration. It is kept
+  // BEFORE markBootComplete() deliberately: an un-aged sweep must not run once
+  // requests are served, or it could reap a just-spawned session whose shellper
+  // is already in `ps` but not yet registered/socket-listening.
+  const orphanSweepStartMs = Date.now();
+  log('INFO', 'Sweeping for orphaned shellpers…');
   const orphansKilled = await shellperManager.killOrphanedShellpers();
-  if (orphansKilled > 0) {
-    log('INFO', `Killed ${orphansKilled} orphaned shellper process(es)`);
+  const orphanSweepMs = Date.now() - orphanSweepStartMs;
+  if (orphansKilled < 0) {
+    log('WARN', `Orphan sweep abandoned after ${orphanSweepMs}ms (exceeded ${ORPHAN_SWEEP_TIMEOUT_MS}ms budget); remaining orphans left for the next startup`);
+  } else {
+    log('INFO', `Orphan sweep done in ${orphanSweepMs}ms (${orphansKilled} killed)`);
   }
 
   // Issue #1261 test hook: widen the pre-wiring window to a known duration so
