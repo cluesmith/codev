@@ -320,7 +320,7 @@ describe('PIR #1001 — reconnect notices overwrite in place and clear on succes
     expect(writes).not.toContain(ERASE_LINE);
   });
 
-  it('give-up overwrites the last retry notice but is itself never wiped', () => {
+  it('give-up overwrites the last retry notice and owns the line, then is wiped on recovery (#1681)', () => {
     const { writes } = makeAdapter();
     for (let i = 0; i < 6; i++) { currentSocket().emit('close'); vi.advanceTimersByTime(30000); }
     writes.length = 0;
@@ -331,12 +331,14 @@ describe('PIR #1001 — reconnect notices overwrite in place and clear on succes
     expect(giveUp.startsWith(ERASE_LINE)).toBe(true); // overwrote the last retry notice
     expect(giveUp).toContain(RECONNECT_LINK_TEXT);
     expect(giveUp).toContain('\x1b[31m');             // red terminal-failure state
+    // The banner owns the current line (no trailing newline), so a successful
+    // reconnect can erase it in place rather than leaving a half-overwritten
+    // remnant on the recovered composer line (#1681 recovery-render fix).
+    expect(giveUp.endsWith('\r\n')).toBe(false);
 
-    // A later reconnect must NOT wipe the give-up line: gaveUp blocks the loop,
-    // and the give-up cleared hadReconnectNotice. Manually re-open to be sure.
     writes.length = 0;
-    currentSocket().emit('open');
-    expect(writes).not.toContain(ERASE_LINE);
+    currentSocket().emit('open');    // successful recovery wipes the stale banner
+    expect(writes).toContain(ERASE_LINE);
   });
 
   it('immediate 4xx give-up has no erase prefix (no retry notice to overwrite)', () => {
@@ -595,6 +597,212 @@ describe('PIR #1052 — buffer replay and flush at the settled size', () => {
 
     vi.advanceTimersByTime(REPLAY_SETTLE_MS_TEST);
     expect(writes.join('')).toBe('HISTORY-LIVE');
+  });
+});
+
+// ── #1681: wake re-arm + honest give-up banner ───────────────────────────────
+
+/** Flush the microtask queue so an async give-up banner (probe-gated) settles.
+ *  Independent of fake timers — the probe is a resolved promise, not a timer. */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 5; i++) { await Promise.resolve(); }
+}
+
+type WakeablePty = {
+  open(d: unknown): void;
+  onWake(): void;
+  reconnect(): void;
+  onDidWrite(cb: (s: string) => void): void;
+};
+
+/** Build an adapter with an optional injected `/health` probe (#1681), exposing
+ *  the `onWake` re-arm entry point. */
+function makeAdapterWithProbe(probe?: () => Promise<boolean | null>) {
+  const writes: string[] = [];
+  const pty = new (CodevPseudoterminal as unknown as new (
+    url: string, authKey: string | null, ch: unknown, probeHealth?: () => Promise<boolean | null>,
+  ) => WakeablePty)('ws://localhost:4100/x', null, fakeOutputChannel(), probe);
+  pty.onDidWrite((s: string) => { if (s) { writes.push(s); } });
+  pty.open(undefined);
+  return { pty, writes };
+}
+
+/** Burn the full 6-attempt budget so the next close exhausts it. */
+function burnBudget(): void {
+  for (let i = 0; i < 6; i++) {
+    currentSocket().emit('close');
+    vi.advanceTimersByTime(30000);
+  }
+}
+
+describe('#1681 — wake signal re-arms the reconnect budget', () => {
+  it('reconnects a transiently gave-up adapter on wake (the slept-laptop case)', () => {
+    const { pty } = makeAdapterWithProbe();
+    burnBudget();
+    currentSocket().emit('close'); // 7th close → transient give-up
+    const socketsBefore = WebSocket.instances.length;
+
+    pty.onWake(); // window refocus after wake
+
+    // A fresh socket is opened immediately (budget re-armed), and its open
+    // clears the loop for a full fresh retry chain.
+    expect(WebSocket.instances.length).toBe(socketsBefore + 1);
+    currentSocket().readyState = WebSocket.OPEN;
+    currentSocket().emit('open');
+  });
+
+  it('does NOT resurrect a permanent (4xx session-gone) give-up on wake (#936 guard)', () => {
+    const { pty } = makeAdapterWithProbe();
+    currentSocket().emit('error', new Error('Unexpected server response: 404'));
+    currentSocket().emit('close'); // permanent give-up
+    const socketsBefore = WebSocket.instances.length;
+
+    pty.onWake();
+
+    // The session is gone on Tower — retrying is hopeless, so wake is a no-op.
+    expect(WebSocket.instances.length).toBe(socketsBefore);
+  });
+
+  it('skips the parked backoff wait: wake reconnects immediately mid-chain', () => {
+    const { pty } = makeAdapterWithProbe();
+    currentSocket().emit('close'); // schedules a 1s retry; adapter is parked
+    const socketsBefore = WebSocket.instances.length;
+
+    pty.onWake(); // fire before the 1s timer elapses
+
+    // Reconnected now, without waiting out the backoff delay.
+    expect(WebSocket.instances.length).toBe(socketsBefore + 1);
+  });
+
+  it('no-ops on a healthy OPEN connection (never drops a live terminal)', () => {
+    const { pty } = makeAdapterWithProbe();
+    currentSocket().readyState = WebSocket.OPEN;
+    currentSocket().emit('open');
+    const socketsBefore = WebSocket.instances.length;
+
+    pty.onWake();
+
+    expect(WebSocket.instances.length).toBe(socketsBefore);
+  });
+
+  it('wipes the stale give-up banner when a wake reconnects (recovery-render)', () => {
+    // The user-reported glitch: after auto-recovery a half-overwritten banner
+    // remnant ("…k here to reconnect]") strands on the composer line until the
+    // next keystroke. The banner must be erased in place on the successful
+    // reconnect, before the replay paints.
+    const { pty, writes } = makeAdapterWithProbe(); // no probe → synchronous banner
+    burnBudget();
+    currentSocket().emit('close'); // transient give-up banner owns the line
+    pty.onWake();                  // wake → fresh socket
+    writes.length = 0;
+
+    currentSocket().readyState = WebSocket.OPEN;
+    currentSocket().emit('open');  // successful recovery
+    expect(writes).toContain('\r\x1b[2K'); // banner erased in place, no remnant
+  });
+
+  it('no-ops before VS Code has open()ed the pty (no orphan socket)', () => {
+    // A wake can land between terminal-manager registering the pty and VS Code
+    // calling open(); re-arming then would leak a socket open()'s connect()
+    // replaces without closing.
+    const pty = new (CodevPseudoterminal as unknown as new (
+      url: string, authKey: string | null, ch: unknown, probeHealth?: () => Promise<boolean>,
+    ) => WakeablePty)('ws://localhost:4100/x', null, fakeOutputChannel());
+    const socketsBefore = WebSocket.instances.length; // no open() yet
+
+    pty.onWake();
+
+    expect(WebSocket.instances.length).toBe(socketsBefore);
+  });
+});
+
+describe('#1681 — exhausted-budget banner is worded honestly via /health', () => {
+  it('says "Tower is up" when the probe reports Tower reachable', async () => {
+    const { writes } = makeAdapterWithProbe(async () => true);
+    burnBudget();
+    writes.length = 0;
+    currentSocket().emit('close'); // exhaust → probe-gated banner
+    await flushMicrotasks();
+
+    const banner = writes.find((w) => w.includes(RECONNECT_LINK_TEXT));
+    expect(banner).toBeDefined();
+    expect(banner).toContain('reconnect failed (Tower is up)');
+    expect(banner).toContain('\x1b[31m'); // still the red failure notice
+  });
+
+  it('falls back to attempt-count wording when the probe blackholes past the cap', async () => {
+    // A never-resolving probe (blackholed network) must not hold the banner for
+    // the SDK's 10s request window — the 2s race resolves it to the fallback.
+    const { writes } = makeAdapterWithProbe(() => new Promise<boolean>(() => {}));
+    burnBudget();
+    writes.length = 0;
+    currentSocket().emit('close');
+    await vi.advanceTimersByTimeAsync(2000); // trip the probe-timeout race
+
+    const banner = writes.find((w) => w.includes(RECONNECT_LINK_TEXT));
+    expect(banner).toBeDefined();
+    expect(banner).toContain('unable to reconnect after 6 attempts');
+  });
+
+  it('says "Tower unreachable" when the probe reports Tower down', async () => {
+    const { writes } = makeAdapterWithProbe(async () => false);
+    burnBudget();
+    writes.length = 0;
+    currentSocket().emit('close');
+    await flushMicrotasks();
+
+    const banner = writes.find((w) => w.includes(RECONNECT_LINK_TEXT));
+    expect(banner).toBeDefined();
+    expect(banner).toContain('Tower unreachable');
+  });
+
+  it('falls back to attempt-count wording when the probe returns null (reachability unknown)', async () => {
+    const { writes } = makeAdapterWithProbe(async () => null);
+    burnBudget();
+    writes.length = 0;
+    currentSocket().emit('close');
+    await flushMicrotasks();
+
+    const banner = writes.find((w) => w.includes(RECONNECT_LINK_TEXT));
+    expect(banner).toBeDefined();
+    expect(banner).toContain('unable to reconnect after 6 attempts');
+    expect(banner).not.toContain('Tower unreachable');
+  });
+
+  it('falls back to the plain attempt-count wording when no probe is injected', () => {
+    const { writes } = makeAdapterWithProbe(undefined);
+    burnBudget();
+    writes.length = 0;
+    currentSocket().emit('close'); // no probe → synchronous banner, old wording
+
+    const banner = writes.find((w) => w.includes(RECONNECT_LINK_TEXT));
+    expect(banner).toBeDefined();
+    expect(banner).toContain('unable to reconnect after 6 attempts');
+  });
+
+  it('a slow probe never overwrites a permanent give-up that lands mid-probe', async () => {
+    // The give-up-token guard: exhaust the budget (transient), start the probe,
+    // then let a wake reconnect hit a permanent 4xx before the probe resolves.
+    let resolveProbe: (up: boolean) => void = () => {};
+    const probe = () => new Promise<boolean>((r) => { resolveProbe = r; });
+    const { pty, writes } = makeAdapterWithProbe(probe);
+    burnBudget();
+    currentSocket().emit('close'); // transient give-up; /health probe now pending
+
+    pty.onWake();                  // wake re-arms → fresh socket
+    currentSocket().emit('error', new Error('Unexpected server response: 404'));
+    currentSocket().emit('close'); // the reconnect is a permanent 4xx
+    const permanentBanner = writes.find((w) => w.includes('no longer exists'));
+    expect(permanentBanner).toBeDefined();
+
+    writes.length = 0;
+    resolveProbe(true);            // the stale transient probe finally resolves
+    await flushMicrotasks();
+
+    // The now-stale exhausted-budget banner is suppressed — the permanent state
+    // stands, uncontradicted.
+    expect(writes.some((w) => w.includes('Tower is up'))).toBe(false);
+    expect(writes.some((w) => w.includes('unable to reconnect'))).toBe(false);
   });
 });
 
