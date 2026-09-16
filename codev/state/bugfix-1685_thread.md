@@ -125,8 +125,20 @@ non-vacuous, PR body accurate. Only non-blocking follow-ups:
   Flagging to architect as a follow-up issue candidate; not fixing here (out of BUGFIX scope).
 
 ## Handoff
-Notifying architect with all three iter-3 verdicts, then `porch done` to fire the pr gate. Waiting
-for human gate approval (a CMAP APPROVE is not merge authorization).
+Notified architect with all three iter-3 verdicts; `porch done` + `porch gate` fired the pr gate.
+Architect confirmed: pr-gate request received, maxBuffer residual FILED as **#1688** (my credit),
+CI settling on **3848ddfd5** (porch's gate-requested commit = current branch/PR head, MERGEABLE),
+**gate goes to Amr (human) at green**. Waiting for Amr's approval — a CMAP APPROVE is not merge
+authorization.
+
+## Review artifact + lesson (architect-requested)
+- Wrote `codev/reviews/1685-tower-startup-can-hang-unbound.md` capturing the fix + lessons.
+- Key lesson recorded (also as a memory): iter-1's CMAP catch corrected the architect's OWN
+  fix-shape — the issue + architect both recommended moving the sweep post-readiness; CMAP proved
+  it unsafe (no age guard), so I reverted the move. "The streak now includes catching the architect."
+- Committed the review doc locally but HOLDING the push: the architect is watching 3848ddfd5
+  settle for the Amr handoff, and a new commit would restart CI. Asked them whether to push the
+  review doc into PR #1687 now or land it after settle.
 
 ## Scope decision
 Fits BUGFIX. Focused change in `tower-server.ts` (move + log) + `session-manager.ts` (bound
