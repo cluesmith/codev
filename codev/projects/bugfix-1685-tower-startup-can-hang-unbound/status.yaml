@@ -1,0 +1,14 @@
+id: bugfix-1685
+title: tower-startup-can-hang-unbound
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-16T00:56:04.708Z'
+updated_at: '2026-09-16T00:56:04.709Z'
