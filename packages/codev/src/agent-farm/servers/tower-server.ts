@@ -66,6 +66,7 @@ import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-conf
 import { getGlobalDb } from '../db/index.js';
 import {
   claimGlobalDbOwnership,
+  defaultLockFile,
   ownershipConflictMessage,
   releaseTowerOwnerIfMine,
 } from '../db/tower-owner.js';
@@ -122,6 +123,10 @@ const bridgeMode = process.env.BRIDGE_MODE === '1';
 const bindHost = bridgeMode
   ? validateHost(process.env.BRIDGE_TOWER_HOST || '127.0.0.1')
   : '127.0.0.1';
+
+// Issue #1629: the owner lock file for this global.db (its `.lock` sibling).
+// Resolved once so the boot guard and the graceful-shutdown release use the same path.
+const towerLockFile = defaultLockFile();
 
 // Request authentication (advisory GHSA-xvjp-7748-v88v): ensure the shared local
 // key exists at boot so HTTP/WS enforcement has an expected value to compare
@@ -230,14 +235,14 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // 8. Tear down terminal module (Spec 0105 Phase 4) — shuts down terminal manager
   shutdownTerminals();
 
-  // 9. Issue #1629: release our global.db owner record so the next start sees an
-  // unowned DB. Best-effort and pid-scoped (never clears a record we don't own);
+  // 9. Issue #1629: release our global.db owner lock so the next start sees an
+  // unowned DB. Best-effort and pid-scoped (never removes a lock we don't own);
   // a hard kill skips this, but the boot liveness check self-clears a dead
-  // owner's row anyway.
+  // owner's lock anyway.
   try {
-    releaseTowerOwnerIfMine(getGlobalDb(), process.pid);
+    releaseTowerOwnerIfMine(towerLockFile, process.pid);
   } catch (err) {
-    log('WARN', `Failed to release global.db owner record: ${(err as Error).message}`);
+    log('WARN', `Failed to release global.db owner lock: ${(err as Error).message}`);
   }
 
   log('INFO', 'Graceful shutdown complete');
@@ -514,10 +519,11 @@ async function bootSequence(): Promise<void> {
   // #1515 incident: an AGENT_FARM_DIR typo pointed a test Tower at production).
   // Its reconcile would then hijack every live shellper and delete the rows. So
   // BEFORE anything touches the shared DB rows, sockets, or shellper processes
-  // (consolidation, reconcile, killOrphanedShellpers), claim ownership — and
-  // refuse loudly if a live Tower already owns this DB.
+  // (consolidation, reconcile, killOrphanedShellpers), claim ownership via an
+  // exclusive lock file next to global.db — and refuse loudly if a live Tower
+  // already owns this DB.
   const ownership = await claimGlobalDbOwnership({
-    db: getGlobalDb(),
+    lockFile: towerLockFile,
     pid: process.pid,
     port,
     dbDir: AGENT_FARM_DIR,

@@ -279,21 +279,4 @@ CREATE TABLE IF NOT EXISTS mailbox (
 CREATE INDEX IF NOT EXISTS idx_mailbox_workspace_status ON mailbox(workspace_path, status);
 CREATE INDEX IF NOT EXISTS idx_mailbox_agent_drain ON mailbox(workspace_path, to_agent, status);
 CREATE INDEX IF NOT EXISTS idx_mailbox_supersede ON mailbox(supersede_key);
-
--- Tower owner lock (Issue #1629): a singleton row naming the Tower process that
--- owns THIS global.db. A second Tower reads it at boot, before reconcile, and
--- refuses to start if a live Tower already owns the DB — the backstop for when
--- CODEV_AGENT_FARM_DIR isolation is misconfigured and a stray Tower opens the
--- production database. The record lives in the DB so it travels with the exact
--- file being contended. A dead owner self-clears via the boot liveness check.
--- Additive new table — fresh installs get it here; existing installs from v19.
-CREATE TABLE IF NOT EXISTS tower_owner (
-  id INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
-  pid INTEGER NOT NULL,                    -- owning Tower process pid
-  port INTEGER NOT NULL,                   -- owning Tower's listen port (liveness probe target)
-  hostname TEXT NOT NULL,                  -- owning machine (diagnostic)
-  started_at INTEGER NOT NULL,             -- epoch ms ownership was claimed
-  db_dir TEXT NOT NULL,                    -- resolved AGENT_FARM_DIR the owner opened
-  bind_host TEXT NOT NULL DEFAULT '127.0.0.1'  -- interface the owner listens on (probe target; bridge mode may be non-loopback)
-);
 `;

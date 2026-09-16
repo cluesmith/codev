@@ -5,24 +5,35 @@
  * a DIFFERENT port can still open the same global.db. That is exactly how the
  * incident happened — a test Tower on port 14733 exported `AGENT_FARM_DIR`
  * instead of `CODEV_AGENT_FARM_DIR` (#1515), so it resolved to the production
- * `~/.agent-farm` and opened the live `global.db`. Its startup reconcile then
- * reconnected every live shellper socket (a shellper holds ONE client), stealing
- * them from the real Tower on 4100, and the stale-row sweep deleted the rows.
+ * `~/.agent-farm` and opened the live `global.db` (port and DB path are set by
+ * independent inputs: the port is a CLI arg, the DB comes from AGENT_FARM_DIR).
+ * Its startup reconcile then reconnected every live shellper socket (a shellper
+ * holds ONE client), stealing them from the real Tower on 4100, and the
+ * stale-row sweep deleted the rows.
  *
  * This module makes the second Tower REFUSE to start instead. The owner record
- * is a singleton row IN global.db, so it travels with the exact file being
- * contended: cross-`CODEV_AGENT_FARM_DIR` isolation is untouched (an isolated DB
- * carries no production owner row), and the check needs no side files. A second
- * Tower reads the row at boot, before reconcile; if a live Tower owns the DB it
- * refuses loudly, otherwise it claims ownership. A dead owner self-clears — a
- * crashed Tower's row has a dead pid, so the legitimate restart just reclaims.
+ * is an exclusive LOCK FILE sitting next to the exact global.db being contended
+ * (`<db path>.lock`), so it travels with that file: cross-`CODEV_AGENT_FARM_DIR`
+ * isolation is untouched (an isolated DB carries its own lock), and two isolated
+ * test Towers on different DB files never share a lock. Acquisition is an atomic
+ * `O_EXCL` create — the filesystem itself resolves a race between two starters. A
+ * second Tower reads the lock at boot, before reconcile; if a live Tower owns the
+ * DB it refuses loudly, otherwise it claims. A dead owner self-clears — a crashed
+ * Tower's lock has a dead pid, so the legitimate restart just reclaims.
+ *
+ * The lock is deliberately NOT a table in global.db: ownership is ephemeral
+ * process state (a cleanly-stopped Tower leaves nothing behind), so it needs no
+ * durable schema, no migration, and it sits naturally alongside the other
+ * runtime artifacts in AGENT_FARM_DIR (`tower.log`, `local-key`).
  */
 
 import http from 'node:http';
 import os from 'node:os';
-import type Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import { getGlobalDbPath } from './index.js';
 
-/** The singleton owner record persisted in global.db's `tower_owner` table. */
+/** The owner record persisted in the lock file next to global.db. */
 export interface TowerOwner {
   /** pid of the Tower process that owns this global.db. */
   pid: number;
@@ -30,7 +41,7 @@ export interface TowerOwner {
   port: number;
   /** Machine the owning Tower runs on (diagnostic only). */
   hostname: string;
-  /** When ownership was claimed (epoch ms). */
+  /** When ownership was claimed (epoch ms; also the compare-and-set discriminator). */
   startedAt: number;
   /** Resolved AGENT_FARM_DIR the owner opened — surfaced in the conflict error. */
   dbDir: string;
@@ -43,51 +54,64 @@ export interface TowerOwner {
   bindHost: string;
 }
 
-/** Read the singleton owner record, or null if none exists. */
-export function readTowerOwner(db: Database.Database): TowerOwner | null {
-  try {
-    const row = db
-      .prepare('SELECT pid, port, hostname, started_at AS startedAt, db_dir AS dbDir, bind_host AS bindHost FROM tower_owner WHERE id = 1')
-      .get() as TowerOwner | undefined;
-    return row ?? null;
-  } catch (err) {
-    // Only "no such table" (a pre-migration / bare DB) is a legitimate "unowned"
-    // read — and even that is unreachable in production, since ensureGlobalDatabase
-    // always creates tower_owner before getGlobalDb() returns. Any OTHER error
-    // (SQLITE_BUSY, corruption) must NOT be swallowed: this is the one guard that
-    // stops data loss, so it fails CLOSED — the caller's boot catch exits.
-    if ((err as Error).message.includes('no such table')) return null;
-    throw err;
-  }
+/** The lock file for the active global.db: the DB path plus `.lock`. */
+export function defaultLockFile(): string {
+  return `${getGlobalDbPath()}.lock`;
 }
 
-/** Upsert the singleton owner record to `owner`. */
-export function writeTowerOwner(db: Database.Database, owner: TowerOwner): void {
-  db.prepare(
-    `INSERT INTO tower_owner (id, pid, port, hostname, started_at, db_dir, bind_host)
-     VALUES (1, @pid, @port, @hostname, @startedAt, @dbDir, @bindHost)
-     ON CONFLICT(id) DO UPDATE SET
-       pid = excluded.pid,
-       port = excluded.port,
-       hostname = excluded.hostname,
-       started_at = excluded.started_at,
-       db_dir = excluded.db_dir,
-       bind_host = excluded.bind_host`,
-  ).run(owner);
+/** Serialize an owner record to the lock file's on-disk form. */
+function serialize(owner: TowerOwner): string {
+  return JSON.stringify(owner);
 }
 
 /**
- * Clear the owner record, but ONLY if it is still ours (pid match). Best-effort:
- * a hard kill (SIGKILL) never reaches this, and the dead-pid liveness check
- * self-clears the stale row on the next start regardless. Called on graceful
- * shutdown so the record reflects reality between a clean stop and the next
- * start.
+ * Read the owner record from the lock file, or null if the lock is absent or its
+ * contents are unusable (corrupt / a partial write from a crashed acquire — the
+ * caller clears and reclaims those). A genuine IO error other than "not found"
+ * (permission, EISDIR) is rethrown so the boot guard fails CLOSED.
  */
-export function releaseTowerOwnerIfMine(db: Database.Database, pid: number): void {
+export function readTowerOwner(lockFile: string): TowerOwner | null {
+  let raw: string;
   try {
-    db.prepare('DELETE FROM tower_owner WHERE id = 1 AND pid = ?').run(pid);
+    raw = fs.readFileSync(lockFile, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+  try {
+    const o = JSON.parse(raw) as Partial<TowerOwner>;
+    if (typeof o.pid !== 'number' || typeof o.port !== 'number') return null;
+    return {
+      pid: o.pid,
+      port: o.port,
+      hostname: typeof o.hostname === 'string' ? o.hostname : 'unknown',
+      startedAt: typeof o.startedAt === 'number' ? o.startedAt : 0,
+      dbDir: typeof o.dbDir === 'string' ? o.dbDir : '',
+      bindHost: typeof o.bindHost === 'string' ? o.bindHost : '127.0.0.1',
+    };
   } catch {
-    // Table gone / DB closing — nothing to release.
+    return null; // unparseable → treat as a corrupt lock the caller can clear
+  }
+}
+
+/** Overwrite the lock file with `owner` (non-atomic; for takeover seams / tests). */
+export function writeTowerOwner(lockFile: string, owner: TowerOwner): void {
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+  fs.writeFileSync(lockFile, serialize(owner));
+}
+
+/**
+ * Remove the lock file, but ONLY if it is still ours (pid match). Best-effort: a
+ * hard kill (SIGKILL) never reaches this, and the dead-pid liveness check
+ * self-clears the stale lock on the next start regardless. Called on graceful
+ * shutdown so the lock reflects reality between a clean stop and the next start.
+ */
+export function releaseTowerOwnerIfMine(lockFile: string, pid: number): void {
+  try {
+    const cur = readTowerOwner(lockFile);
+    if (cur && cur.pid === pid) fs.rmSync(lockFile, { force: true });
+  } catch {
+    // Lock gone / unreadable — nothing to release.
   }
 }
 
@@ -114,7 +138,7 @@ function pidAlive(pid: number): boolean {
 export type HealthProbe = 'tower' | 'gone' | 'unreachable';
 
 /**
- * Probe `GET /health` on 127.0.0.1:`port` (unauthenticated per server-utils).
+ * Probe `GET /health` on `host`:`port` (unauthenticated per server-utils).
  *
  * The budget is generous by default: `/health` calls `getInstances()` and shells
  * out to `ps -A` (a 5s timeout of its own), so under the incident's load — 60+
@@ -186,12 +210,11 @@ export function probeTowerHealth(host: string, port: number, timeoutMs = 6000): 
 
 /**
  * Resolve the host to probe from the owner's recorded bind interface. A wildcard
- * bind (`0.0.0.0` / `::`) accepts loopback, so probe `127.0.0.1`; a specific
- * bridge host is probed directly (probing loopback would falsely read 'gone').
+ * bind (`0.0.0.0` / `::` / bracketed `[::]` as validateHost emits) accepts
+ * loopback, so probe `127.0.0.1`; a specific bridge host is probed directly
+ * (probing loopback would falsely read 'gone').
  */
 export function resolveProbeHost(bindHost: string | null | undefined): string {
-  // Wildcard binds (IPv4 0.0.0.0, IPv6 :: / [::] as validateHost brackets it)
-  // accept loopback, so probe loopback. A specific host is probed directly.
   if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::' || bindHost === '[::]') return '127.0.0.1';
   return bindHost;
 }
@@ -209,7 +232,7 @@ export interface OwnerLivenessDeps {
  *   on that exact interface:port, and an identical bind is exclusive, so no other
  *   process holds it — any prior owner recorded there is gone. Claim. The bind
  *   interface must match: a wildcard bind (`0.0.0.0:P`) and a loopback bind
- *   (`127.0.0.1:P`) COEXIST on the same port, so `port` alone succeeding does not
+ *   (`127.0.0.1:P`) COEXIST on the same port, so `port` alone matching does not
  *   prove a differently-bound owner is gone — that path falls through to the probe.
  * - dead owner pid: stale (a crashed Tower / a clean stop that outran the
  *   release). Claim — this is the self-clearing legitimate restart.
@@ -237,53 +260,47 @@ export type ClaimResult =
   | { ok: true }
   | { ok: false; conflict: TowerOwner };
 
-/** True if the message names a SQLite uniqueness/constraint violation. */
-function isUniqueViolation(err: unknown): boolean {
-  const code = (err as { code?: string }).code ?? '';
-  return code.startsWith('SQLITE_CONSTRAINT') || /UNIQUE|constraint/i.test((err as Error).message);
-}
+/**
+ * Bound on the acquire attempts under contention. Each losing attempt means
+ * another Tower held or rewrote the lock between our checks; a handful of retries
+ * converges in every realistic case, and exhausting them means the lock is
+ * churning between many simultaneous starts — where the safe answer is to refuse
+ * (fail closed), never to force the lock.
+ */
+const MAX_CLAIM_ATTEMPTS = 5;
 
 /**
- * Take over a stale owner row with a compare-and-set: the UPDATE only lands if
- * the row STILL matches the `observed` owner we liveness-checked. If a concurrent
- * contender claimed in between, its row differs and 0 rows change — we lost the
- * race and must re-evaluate. Returns whether we won.
+ * Remove a stale lock, but ONLY if it still names the holder we probed (a
+ * compare-and-set on pid + startedAt). If a contender rewrote it in between, the
+ * content differs and we do NOT remove it — we loop and re-evaluate. Returns
+ * whether we removed it.
  */
-function takeOverStaleOwner(db: Database.Database, observed: TowerOwner, next: TowerOwner): boolean {
-  const changed = db
-    .prepare(
-      `UPDATE tower_owner SET pid=@pid, port=@port, hostname=@hostname, started_at=@startedAt,
-         db_dir=@dbDir, bind_host=@bindHost
-       WHERE id = 1 AND pid = @observedPid AND started_at = @observedStartedAt`,
-    )
-    .run({ ...next, observedPid: observed.pid, observedStartedAt: observed.startedAt }).changes;
-  return changed === 1;
+function removeStaleLock(lockFile: string, observed: TowerOwner): boolean {
+  const cur = readTowerOwner(lockFile);
+  if (!cur || cur.pid !== observed.pid || cur.startedAt !== observed.startedAt) return false;
+  try {
+    fs.rmSync(lockFile, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Boot guard: refuse if the DB already has a LIVE owner, otherwise claim
- * ownership by writing this process's record. A decision plus a record write —
- * the caller decides how to fail loudly (log + exit).
+ * ownership by writing the lock file. A decision plus a lock write — the caller
+ * decides how to fail loudly (log + exit).
  *
- * Acquisition is atomic against a concurrent second Tower (Codex CMAP): the write
- * is never a blind upsert. An empty table is claimed with a plain INSERT (the
- * singleton PK makes a second inserter lose and re-evaluate), and a stale owner
- * is taken over with a compare-and-set guarded on the row we actually probed. The
- * invariant preserved is "never overwrite a LIVE owner"; two contenders racing
- * for a genuinely unowned DB is resolved to exactly one winner, and the loser
- * refuses behind the winner's (booting, hence live) record.
+ * Acquisition is atomic against a concurrent second Tower: the write is an
+ * `O_EXCL` create (`flag: 'wx'`), so the filesystem resolves a two-starter race —
+ * one create wins, the other gets EEXIST and re-evaluates. A stale lock (dead /
+ * absent owner) is cleared with a compare-and-set on its contents and the create
+ * retried; the invariant preserved is "never remove a LIVE owner's lock". Under
+ * persistent churn the claim refuses rather than forcing the lock.
  */
-/**
- * Bound on the read → liveness → write attempts under contention. Each losing
- * attempt means another Tower wrote the row between our read and our conditional
- * write; a handful of retries converges in every realistic case, and exhausting
- * them means the row is churning between many simultaneous starts — where the
- * safe answer is to refuse (fail closed), never to blind-overwrite.
- */
-const MAX_CLAIM_ATTEMPTS = 5;
-
 export async function claimGlobalDbOwnership(opts: {
-  db: Database.Database;
+  /** Lock file path; defaults to the active global.db's `.lock` sibling. */
+  lockFile?: string;
   pid: number;
   port: number;
   dbDir: string;
@@ -291,41 +308,41 @@ export async function claimGlobalDbOwnership(opts: {
   bindHost?: string;
   deps?: OwnerLivenessDeps;
 }): Promise<ClaimResult> {
-  const { db, pid, port, dbDir, deps } = opts;
+  const lockFile = opts.lockFile ?? defaultLockFile();
+  const { pid, port, dbDir, deps } = opts;
   const bindHost = opts.bindHost ?? '127.0.0.1';
 
   for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt++) {
-    // Re-mint the record each attempt so started_at reflects when we actually won.
     const mine: TowerOwner = { pid, port, hostname: os.hostname(), startedAt: Date.now(), dbDir, bindHost };
-    const existing = readTowerOwner(db);
 
-    if (!existing) {
-      // Empty table: claim with a plain INSERT. If a concurrent contender inserted
-      // first, the singleton PK makes ours throw — loop to re-evaluate its row.
-      try {
-        db.prepare(
-          `INSERT INTO tower_owner (id, pid, port, hostname, started_at, db_dir, bind_host)
-           VALUES (1, @pid, @port, @hostname, @startedAt, @dbDir, @bindHost)`,
-        ).run(mine);
-        return { ok: true };
-      } catch (err) {
-        if (!isUniqueViolation(err)) throw err;
-        continue; // someone inserted first — re-read and decide
-      }
+    // Atomic acquire: O_EXCL create fails if the lock already exists.
+    try {
+      fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+      fs.writeFileSync(lockFile, serialize(mine), { flag: 'wx' });
+      return { ok: true };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     }
 
+    // Lock exists — evaluate the current holder.
+    const existing = readTowerOwner(lockFile);
+    if (!existing) {
+      // Corrupt or vanished under us — clear it and retry the atomic create.
+      try { fs.rmSync(lockFile, { force: true }); } catch { /* already gone */ }
+      continue;
+    }
     if (await ownerIsLive(existing, port, bindHost, deps)) {
       return { ok: false, conflict: existing };
     }
-    // Stale owner — take over only if the row is STILL the one we probed. A failed
-    // CAS means a contender changed it between our read and write: loop and
-    // re-evaluate (never blind-overwrite — the new writer may be a live owner).
-    if (takeOverStaleOwner(db, existing, mine)) return { ok: true };
+    // Stale — remove ONLY if the lock still names the holder we probed, then loop
+    // to re-attempt the atomic create (the create is the serialization point). A
+    // failed CAS means a contender rewrote it: loop and re-evaluate, never force.
+    removeStaleLock(lockFile, existing);
   }
 
-  // Persistent contention: the row keeps changing under us. Refuse rather than
-  // risk overwriting a live claimant that appeared mid-flight.
-  const final = readTowerOwner(db);
+  // Persistent contention: the lock keeps changing under us. Refuse rather than
+  // risk forcing over a live claimant that appeared mid-flight.
+  const final = readTowerOwner(lockFile);
   const conflict: TowerOwner = final ?? { pid, port, hostname: os.hostname(), startedAt: Date.now(), dbDir, bindHost };
   return { ok: false, conflict };
 }

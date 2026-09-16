@@ -227,3 +227,34 @@ CORRECTED post-approval sequence (merge is NOT mine — standing workspace flow,
 push bookkeeping, HOLD. Merge execution is main's on Amr's SEPARATE merge word (after green
 on my final head). On main's landed-confirmation → `porch done bugfix-1629 --merged 1689`
 → enter verify, then hold. I do NOT run gh pr merge.
+
+## PIVOT: DB table → exclusive lock file (Amr's request at the gate)
+
+Amr: "I'd rather avoid database changes." Confirmed the incident is different-port/same-DB
+(port is a CLI arg, DB path is AGENT_FARM_DIR — independent; same-port is already EADDRINUSE),
+so the lock is still needed; only its STORAGE changed. Main endorsed (lock file was a
+sanctioned candidate; flagging-not-asking correct) and gave the stale-takeover safety order.
+
+Switched storage from a `tower_owner` table to an exclusive LOCK FILE at `<db path>.lock`
+(so `global.db.lock`, `test-<port>.db.lock` — 1:1 with the contended DB file; two isolated
+test Towers on different DBs never share a lock). Contents = the same identity JSON
+(pid/port/bindHost/hostname/startedAt/dbDir). All liveness logic (dead-pid self-clear,
+tri-state /health probe, bindHost handling, fail-closed) carries over UNCHANGED.
+
+Acquisition: atomic O_EXCL create (writeFile flag 'wx'). Stale takeover per main's order:
+on EEXIST → read → probe → if stale, removeStaleLock (re-read + unlink ONLY if content still
+matches the holder just probed — never blind, never rename-replace) → loop; the O_EXCL
+re-create is the serialization point, so a race loser re-reads the LIVE winner and refuses.
+Bounded retry (5), fail-closed on churn. No heartbeat; pid/port identity is the truth.
+Pid-scoped file delete in gracefulShutdown (same spot as the old release). Bonus: the guard
+now runs BEFORE global.db is even opened, so a refused Tower never touches the shared DB.
+
+Removed: tower_owner from GLOBAL_SCHEMA, migration v19, GLOBAL_CURRENT_VERSION back to 18,
+send-architect source guard back to 18, deleted bugfix-1629-migration.test.ts. No DB change
+remains. Documented residual: two SIMULTANEOUS cold starts on different ports against a
+STALE lock have an irreducible unlink-race window (no FS compare-and-swap primitive),
+contained by bounded-retry + fail-closed; not the incident shape.
+
+Owner tests 40 (lockfile) + migration convergence back green at v18 + source guard: all
+pass; tsc clean. Rebuild + full suite + re-CMAP pending; then update PR #1689 + re-request
+gate.
