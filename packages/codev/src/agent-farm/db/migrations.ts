@@ -26,7 +26,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /** Current migration version — bump when adding new migrations. */
-export const GLOBAL_CURRENT_VERSION = 18;
+export const GLOBAL_CURRENT_VERSION = 19;
 
 export interface GlobalMigrationOptions {
   /**
@@ -565,5 +565,29 @@ export function runGlobalMigrations(
     }
     db.prepare('INSERT INTO _migrations (version) VALUES (18)').run();
     log('[info] Added detail column to mailbox (Issue #1482 gate-verdict detail)');
+  }
+
+  // Migration v19: Add tower_owner table (Issue #1629 — global.db owner lock).
+  // A singleton row naming the Tower process that owns this global.db. The boot
+  // guard reads it before reconcile and refuses to start when a live Tower
+  // already owns the DB, so a second Tower (e.g. a test Tower whose
+  // CODEV_AGENT_FARM_DIR isolation was misconfigured) can no longer hijack and
+  // delete production shellper sessions. Additive new table with no rows to
+  // migrate. Idempotent via CREATE TABLE IF NOT EXISTS — a fresh install already
+  // created it from GLOBAL_SCHEMA and reaches this marker as a no-op.
+  const v19 = db.prepare('SELECT version FROM _migrations WHERE version = 19').get();
+  if (!v19) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tower_owner (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        pid INTEGER NOT NULL,
+        port INTEGER NOT NULL,
+        hostname TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        db_dir TEXT NOT NULL
+      );
+    `);
+    db.prepare('INSERT INTO _migrations (version) VALUES (19)').run();
+    log('[info] Created tower_owner table (Issue #1629 global.db owner lock)');
   }
 }
