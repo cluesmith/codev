@@ -95,6 +95,22 @@ Redesign (CMAP iter 1 addressed):
 gemini's APPROVE stands under the redesign (it liked bound+logging+test; it had missed the
 race). Re-running CMAP on the updated PR.
 
+## PR phase — CMAP iter 2
+Verdicts: **gemini APPROVE**, **codex REQUEST_CHANGES (HIGH)**, **claude REQUEST_CHANGES (HIGH)**.
+The redesign was confirmed correct by all three ("the code is right"). Remaining items:
+- **codex**: bound each socket probe by the remaining budget (a probe could cross the deadline
+  and still kill; a slow probe could return a count not -1). → Implemented: probe wrapped in
+  `withDeadline(deadline - now)`; on mid-probe timeout, abandon with -1 WITHOUT killing. Added
+  test C (one probe outlasts the budget → -1, no kill).
+- **claude (blocking)** + gemini + codex: **PR title/body were stale** — still described the
+  reverted iter-1 design (moved post-readiness / Promise.race background tail / one test). →
+  Rewriting PR title + body to match the shipped code.
+- **claude non-blocking, applied**: (a) give the `ps` execFile child ~1s headroom over
+  `withDeadline` so the wrapper wins on a wedged scan and the WARN fires (not a false "0 killed");
+  (b) loosened test B timing (10ms probes / 300ms budget / 500ms post-wait) for CI slack;
+  (c) `return 0` in the ps-failure catch. Worst-case duration is now ~budget (probe bounded),
+  resolving claude's ~12s note.
+
 ## Scope decision
 Fits BUGFIX. Focused change in `tower-server.ts` (move + log) + `session-manager.ts` (bound
 the sweep). Well under 300 LOC. Regression test pattern exists: `session-manager.test.ts:384`

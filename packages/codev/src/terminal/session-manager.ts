@@ -823,19 +823,24 @@ export class SessionManager extends EventEmitter {
     const deadline = Date.now() + Math.max(0, timeoutMs);
 
     // The `ps` scan is a single await with no inner loop to break out of, so
-    // bound its wait explicitly. It performs no kills, so abandoning it is safe
-    // (and its own execFile timeout reaps the `ps` child).
+    // bound its wait explicitly. It performs no kills, so abandoning it is safe.
     let entries: Array<{ pid: number; socketPath?: string }>;
     try {
+      const remaining = deadline - Date.now();
       const scan = await this.withDeadline(
-        this.findShellperProcesses(deadline - Date.now()),
-        deadline - Date.now(),
+        // Give the execFile child ~1s of headroom over `withDeadline` so the
+        // wrapper (not execFile) is what wins on a wedged scan — otherwise a
+        // timed-out `ps` resolves to `[]` and the sweep would log a false
+        // "0 killed" success instead of the WARN. execFile's own timeout then
+        // serves purely to reap the `ps` child.
+        this.findShellperProcesses(remaining + 1_000),
+        remaining,
       );
       if (!scan.ok) return -1;  // process-table scan exceeded the budget
       entries = scan.value;
     } catch {
       // `ps` not available or failed — non-fatal, matching pre-#1685 behavior.
-      return killed;
+      return 0;
     }
 
     for (const { pid, socketPath } of entries) {
@@ -848,10 +853,14 @@ export class SessionManager extends EventEmitter {
 
       // Safety: before killing, probe the socket to check if the shellper
       // is serving a live session that this Tower instance lost track of
-      // (e.g., SQLite was corrupt/empty during reconciliation).
+      // (e.g., SQLite was corrupt/empty during reconciliation). Bound the probe
+      // by the remaining budget so a single slow probe cannot push a kill past
+      // the deadline; if the budget is spent mid-probe, abandon WITHOUT killing
+      // (we can no longer confirm the socket is dead, and we are out of time).
       if (socketPath) {
-        const isAlive = await this.probeSocket(socketPath);  // self-bounded to 2s
-        if (isAlive) {
+        const probe = await this.withDeadline(this.probeSocket(socketPath), deadline - Date.now());
+        if (!probe.ok) return -1;
+        if (probe.value) {
           this.log(`Orphan pid=${pid} has responsive socket ${socketPath} — skipping kill`);
           continue;
         }
