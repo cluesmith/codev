@@ -33,32 +33,11 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
-## The cloud tunnel can serve a browser IDE (#1668, PR #1683)
-
-Tower gains a keyed `/ide/` forward: one local IDE server (a VS Code server-web build),
-registered with `afx ide start|stop|status`, is reachable through the existing cloud
-tunnel at `/t/<tower>/ide/?folder=<path>` — the full workbench boots in a browser with
-no cloud-side changes and no new public routes. The forward rides Tower's existing
-request authentication (the shared local key, stamped by the tunnel), preserves the
-server's asset caching, and blocks the IDE management API from remote access. One
-server serves every workspace folder; the browser picks the folder per connection.
-
-## Cycle agents from the keyboard and the Stream Deck (#1563, PR #1676)
-
-Moving between agent terminals no longer means reaching for the sidebar. In VS Code,
-`ctrl+alt+n` / `ctrl+alt+p` cycle focus through the Agents order the sidebar shows,
-skipping any agent whose terminal cannot open so a dead session never wedges the walk.
-The Stream Deck gains matching Next/Prev Agent keys and an Agent Navigator dial (not
-pre-placed, like the PR and Spawn navigators). Both surfaces share one cycle-order
-source with the sidebar renderer, so what you see is what you get.
-
 ## Polish
 
 <!-- Small vscode items as bullets:
        - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
      Move out to its own ## section if the entry grows past ~3 sentences. -->
-
-- **Terminal tabs reconnect after laptop sleep** (#1681, PR #1682). A window refocus re-arms every tab's reconnect budget, and the exhausted-budget banner now probes Tower so it names the real situation. Ships with the next extension release.
 
 ## Other fixes (dashboard, porch, infrastructure)
 
