@@ -647,8 +647,8 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   let orphanReconnected = 0;
   let killed = 0;
   let cleaned = 0;
-  // Bugfix #1686: rows kept because reconnect failed but death could not be
-  // confirmed (live pid + present socket). Counted so a reconcile that only
+  // Bugfix #1686: rows kept because reconnect failed but death was not proven
+  // (the shellper pid is still alive). Counted so a reconcile that only
   // preserved rows does not misreport "No terminal sessions to reconcile".
   let unconfirmed = 0;
 
@@ -807,8 +807,8 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       // Bugfix #1686: reconnect returning null does NOT prove death (it also
       // covers a connect refused by another Tower client, or a transient
       // socket/fd hiccup). Death is confirmed in the Phase 2 sweep, which keeps
-      // a row whose pid is alive and socket present — so this log defers the
-      // verdict rather than asserting "dead" up front.
+      // a row whose pid is still alive — so this log defers the verdict rather
+      // than asserting "dead" up front.
       _deps.log('INFO', `Shellper session ${dbSession.id} reconnect failed — deferring to Phase 2 sweep for death confirmation`);
       continue; // Phase 2 confirms death before any cleanup
     }

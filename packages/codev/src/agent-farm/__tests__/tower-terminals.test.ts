@@ -1040,6 +1040,48 @@ describe('tower-terminals', () => {
       expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
     });
 
+    // Bugfix #1686 (other direction): the guard must NOT over-preserve. A
+    // shellper row whose pid is genuinely DEAD is still swept — deleted as
+    // before. Without this, an over-broad guard (`if (shellper_socket) continue`)
+    // would pass the rest of the suite unnoticed. Here the guard's shellperAlive
+    // is false (dead pid), so Phase 2 falls through to the DELETE.
+    it('still deletes a shellper row whose pid is dead (#1686)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const deadId = 'bugfix-1686-dead-session';
+      const deadPid = 2147483646; // no such process → processExists() === false
+
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: deadId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-dead',
+        pid: deadPid,
+        shellper_socket: '/tmp/shellper-bugfix-1686-dead.sock',
+        shellper_pid: deadPid,
+        shellper_start_time: Date.now(),
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        return false;
+      });
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      // Dead pid → not preserved → row is deleted (DELETE run with the id).
+      expect(mockDbRun).toHaveBeenCalledWith(deadId);
+    });
+
     // =========================================================================
     // Spec 786 Phase 2 — Identity preservation on shellper auto-restart
     // =========================================================================

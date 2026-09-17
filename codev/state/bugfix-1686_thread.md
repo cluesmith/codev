@@ -127,6 +127,48 @@ edge (PR-body note), pre-existing 5 env-class test failures (PR-body note).
 Next: amend commit, update PR #1693 body, push, re-run --type pr CMAP for codex's answered-in-
 code record, then gate notification with fresh verdicts.
 
+## PR (cont.) — recovery + build-artifact finding
+
+Git recovery: I accidentally `git commit --amend`'d porch's pushed `cba20f67b` "pr
+gate-requested" chore (relabeling it as my Fix commit, swallowing its status.yaml). Recovered
+WITHOUT force-push: `git reset --soft cba20f67b` (remote was at cba20f67b; my bad amend was
+local-only), then committed the ruling delta as a fresh follow-up `6cd7d698c [Bugfix #1686]
+Adopt review ruling ...`. History is append-only and clean: 8707ea008 (fix) → porch chores →
+6cd7d698c (ruling). Lesson: don't blind-amend when porch may have added a chore commit on top;
+check `git log` first. Two "Fix #1686"-family commits is fine (no-squash preserves the
+narrative).
+
+Build-artifact finding: the "5 pre-existing failures" (consolidate/spawn-retirement,
+getRolesDir "Roles directory not found") only occur when vitest runs BEFORE `pnpm build`.
+bundle-assets' copy-skeleton populates skeleton/ which getRolesDir resolves; after `pnpm build`
+the full agent-farm suite is GREEN (176 files / 3683 tests / 0 fail). So they're a
+build-prerequisite test-hygiene artifact, not real failures (CI builds before testing).
+Pre-existing + unrelated; candidate to FILE as a test-hygiene follow-up (tests depending on
+build output). PR body corrected to say this accurately.
+
+## PR (cont.) — re-CMAP r2 (post-ruling) + polish
+
+Re-CMAP --type pr r2: gemini=APPROVE(HIGH), codex=COMMENT(HIGH) (its RC now answered in code),
+claude=APPROVE(HIGH). All non-blocking. Addressed before gate:
+- Stale comments (:650, :810) still said "socket present" — reworded to pid-only (matches the
+  ruling). Flagged by codex+claude.
+- CORRECTED the accepted-residual reaper (claude, verified against code): the retained live
+  socketless row is NOT reaped by husk-sweep #1227 (computeRegisteredShellperPids marks the
+  live pid "registered" → husk-EXEMPT). The real reaper is killOrphanedShellpers at next boot
+  (tower-server.ts:725) — skips responsive-socket shellpers, SIGTERMs socket-dead ones — then
+  next reconcile/read sees shellperAlive=false and deletes the row. PR body fixed. (My ruling
+  commit 6cd7d698c body still says #1227 — left as-is to avoid force-push; PR body is the
+  authoritative correction.)
+- Added a 5th regression test: pid-DEAD row is still swept (bounds the guard against future
+  over-preservation like `if (shellper_socket) continue`). 5/5 #1686 tests, tsc clean.
+- FILE candidates (not fixed, per boundary): (a) test-hygiene — consolidate/spawn-retirement
+  depend on built skeleton; (b) UX — a preserved-but-unreconnectable terminal is absent from
+  /api/state with only a WARN (claude note 4), pre-existing UI behavior.
+- codex noted branch 18 commits behind origin/main (disjoint, merge-tree clean) — leaving to
+  the architect's merge unless they want a freshen.
+
+Gate notification with all three verdicts is next.
+
 PR body must reference: the 5 pre-existing env-class failures (consolidate.test.ts +
 spawn-retirement.test.ts — getRolesDir "Roles directory not found" in worktree test env,
 confirmed identical on clean base), and the shellper_pid===null legacy edge.
