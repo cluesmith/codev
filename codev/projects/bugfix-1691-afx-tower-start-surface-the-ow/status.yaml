@@ -1,0 +1,22 @@
+id: bugfix-1691
+title: afx-tower-start-surface-the-ow
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-09-16T23:58:57.118Z'
+    approved_at: '2026-09-17T01:37:06.595Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-16T23:38:54.218Z'
+updated_at: '2026-09-17T01:37:33.182Z'
+pr_ready_for_human: false
+pr_history:
+  - phase: pr
+    pr_number: 1692
+    branch: builder/bugfix-1691
+    created_at: '2026-09-17T01:37:33.181Z'
