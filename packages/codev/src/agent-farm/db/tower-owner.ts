@@ -403,14 +403,19 @@ export async function claimGlobalDbOwnership(opts: {
  * host) and the shared DB, and — because the misconfiguration that triggered the
  * incident was a mistyped env var — spells out the `AGENT_FARM_DIR` vs
  * `CODEV_AGENT_FARM_DIR` fix.
+ *
+ * This string is user-visible at the CLI (surfaced by the launcher on a fast-exit,
+ * Issue #1691), so it carries no internal issue numbers — the incident context
+ * (#1629's shellper hijack, the #1515 mistyped-env-var trigger) stays here in the
+ * comment, not in the text a user reads.
  */
 export function ownershipConflictMessage(conflict: TowerOwner, dbDir: string): string {
   return [
     `Refusing to start: this global.db is already owned by a live Tower.`,
     `  owner pid ${conflict.pid} on port ${conflict.port} (host ${conflict.hostname})`,
     `  shared database dir: ${dbDir}`,
-    `A second Tower opening a live global.db hijacks and deletes its shellper sessions (Issue #1629).`,
-    `If you meant to run an isolated test Tower, set CODEV_AGENT_FARM_DIR (NOT AGENT_FARM_DIR) to a throwaway directory (#1515).`,
+    `A second Tower opening a live global.db hijacks and deletes its shellper sessions.`,
+    `If you meant to run an isolated test Tower, set CODEV_AGENT_FARM_DIR (NOT AGENT_FARM_DIR) to a throwaway directory.`,
     `Otherwise stop the existing Tower first ('afx tower stop'), or investigate pid ${conflict.pid} if you believe it is stale.`,
   ].join('\n');
 }

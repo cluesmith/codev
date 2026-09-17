@@ -269,7 +269,9 @@ describe('ownershipConflictMessage — loud and teaching', () => {
     expect(msg).toContain('4100');
     expect(msg).toContain('/home/u/.agent-farm');
     expect(msg).toContain('CODEV_AGENT_FARM_DIR');
-    expect(msg).toContain('Issue #1629');
+    // User-visible message: carries the actionable env-var fix, but no internal
+    // issue numbers (they live in the code comment) — Issue #1691.
+    expect(msg).not.toMatch(/#\d+/);
   });
 });
 

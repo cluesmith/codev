@@ -71,12 +71,14 @@ vi.mock('node:child_process', async () => {
 
 const LOG_FILE = path.join(h.agentFarmDir, 'tower.log');
 
+// Mirrors ownershipConflictMessage() — the user-visible teaching error, with no
+// internal issue numbers in the text.
 const TEACHING_ERROR = [
   'Refusing to start: this global.db is already owned by a live Tower.',
   '  owner pid 12345 on port 4100 (host testhost)',
   '  shared database dir: /Users/test/.agent-farm',
-  'A second Tower opening a live global.db hijacks and deletes its shellper sessions (Issue #1629).',
-  'If you meant to run an isolated test Tower, set CODEV_AGENT_FARM_DIR (NOT AGENT_FARM_DIR) to a throwaway directory (#1515).',
+  'A second Tower opening a live global.db hijacks and deletes its shellper sessions.',
+  'If you meant to run an isolated test Tower, set CODEV_AGENT_FARM_DIR (NOT AGENT_FARM_DIR) to a throwaway directory.',
   "Otherwise stop the existing Tower first ('afx tower stop'), or investigate pid 12345 if you believe it is stale.",
 ].join('\n');
 

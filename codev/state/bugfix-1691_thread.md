@@ -82,3 +82,13 @@ CMAP: **claude=APPROVE** (HIGH, verified end-to-end), **codex=COMMENT** (HIGH), 
   lines echoed at the user). Kept the clean placement over a theoretical hardening.
 
 7 regression tests green; `tsc --noEmit` clean.
+
+## Post-gate follow-up (owner-directed)
+
+Owner reviewed the real end-to-end output and flagged that the refusal message references
+internal issue numbers (`#1629`, `#1515`) — fine in comments, not in a user-visible string. This
+is coupled to #1691: my fix is what promotes that message from a `tower.log` line to a CLI
+message the user reads. Stripped `(Issue #1629)` / `(#1515)` from `ownershipConflictMessage`
+(`db/tower-owner.ts`), keeping the actionable `CODEV_AGENT_FARM_DIR (NOT AGENT_FARM_DIR)` guidance;
+moved the incident context into the function's JSDoc. Updated the #1629 test (asserts the message
+now matches no `#\d+`) and my fixture. 46 tests green, tsc clean.
