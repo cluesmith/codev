@@ -938,15 +938,16 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // the shellper (one-client-per-shellper), or a boot-time socket/fd hiccup —
     // not just for a genuinely dead process. Treating that failure as death and
     // SIGTERMing the still-live pid is what destroyed 53 live sessions in the
-    // #1629 incident. Require POSITIVE evidence of death before touching the
-    // process or the row: the shellper pid must be gone AND/OR its socket file
-    // absent. A live pid with a present socket is "could not confirm" — leave the
-    // row in place (WARN) for the next reconcile/adoption pass; never signal it.
+    // #1629 incident. Destroy only what is proven dead, and the sole proof of
+    // death is the pid being down: a live shellper pid is never signaled and its
+    // row is never deleted here, regardless of socket-file state (a transiently
+    // absent socket is the same transient-failure class and must not kill a live
+    // agent). The row is left in place (WARN) and retried on a later
+    // reconcile/adoption pass; a pid-dead row still deletes below as before.
     if (session.shellper_socket) {
       const shellperAlive = session.shellper_pid != null && processExists(session.shellper_pid);
-      const socketPresent = fs.existsSync(session.shellper_socket);
-      if (shellperAlive && socketPresent) {
-        _deps.log('WARN', `Shellper session ${session.id} failed to reconnect but pid ${session.shellper_pid} is alive and socket ${session.shellper_socket} is present — leaving row untouched, retried next reconcile/adoption pass (${session.type} for ${path.basename(session.workspace_path)})`);
+      if (shellperAlive) {
+        _deps.log('WARN', `Shellper session ${session.id} failed to reconnect but pid ${session.shellper_pid} is alive — leaving row untouched (a live pid is never signaled), retried next reconcile/adoption pass (${session.type} for ${path.basename(session.workspace_path)})`);
         unconfirmed++;
         continue;
       }
@@ -1147,14 +1148,13 @@ export async function getTerminalsForWorkspace(
       // for a dead process. Dropping the row on that failure alone is how a row
       // the Phase 2 guard just preserved would be deleted by the first
       // /api/state or /api/overview read whose reconnect fails again — making
-      // Phase 2's "retried next reconcile/adoption pass" promise false. Require
-      // positive evidence of death (pid gone AND/OR socket file absent) before
-      // deleting; a live pid with a present socket is kept for a later pass.
+      // Phase 2's "retried next reconcile/adoption pass" promise false. Destroy
+      // only what is proven dead: a live shellper pid is never deleted here,
+      // regardless of socket-file state; the row is kept for a later pass.
       if (dbSession.shellper_socket) {
         const shellperAlive = dbSession.shellper_pid != null && processExists(dbSession.shellper_pid);
-        const socketPresent = fs.existsSync(dbSession.shellper_socket);
-        if (shellperAlive && socketPresent) {
-          _deps?.log('WARN', `On-the-fly reconnect for ${dbSession.id} failed but pid ${dbSession.shellper_pid} is alive and socket ${dbSession.shellper_socket} is present — leaving row untouched, retried next reconcile/adoption pass (${dbSession.type})`);
+        if (shellperAlive) {
+          _deps?.log('WARN', `On-the-fly reconnect for ${dbSession.id} failed but pid ${dbSession.shellper_pid} is alive — leaving row untouched (a live pid is never signaled), retried next reconcile/adoption pass (${dbSession.type})`);
           continue;
         }
       }

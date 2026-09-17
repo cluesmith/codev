@@ -84,7 +84,48 @@ PR-body residuals to document (claude r2, all accepted-as-is, not changed):
 - shellper_pid===null legacy edge → falls through to SIGTERM of session.pid; ~unreachable given
   saveTerminalSession call sites.
 
-Commit: 35a3bd92b (Fix #1686 ...).
+Commit: 35a3bd92b → amended → 8707ea008 (Fix #1686 ...).
+
+## PR (phase 3) — PR #1693 open, CMAP done, BLOCKED on architect ruling
+
+PR #1693 (https://github.com/cluesmith/codev/pull/1693), Fixes #1686. Branch pushed.
+CMAP --type pr: gemini=APPROVE(HIGH), claude=APPROVE(HIGH), codex=REQUEST_CHANGES(HIGH).
+
+codex RC (issue-grounded): guard preserves only when `shellperAlive && socketPresent`, so a
+LIVE pid with a TRANSIENTLY-absent socket still gets SIGTERMed — violates #1686's explicit
+"a row whose pid is alive is left in place ... never signaled." The issue is internally in
+tension (also says "positive evidence of death: pid dead AND/OR socket absent"); the (live-pid,
+socket-absent) edge is where they disagree. My code took the AND/OR reading; codex wants
+pid-alive→never-signal unconditionally.
+
+Sent architect a ruling request (recommend ADOPTing codex: drop `&& socketPresent`, guard =
+`if (shellperAlive)`, add regression coverage for live-pid+socket-absent at both sites; the
+"asymmetric evidence" residual goes away, "unbounded retention" grows slightly = accepted).
+This changes the guard shape the architect named, so not flipping unilaterally. WAITING.
+
+pr gate is already surfaced (my `porch done --help` fired it — harmless, human-approval-only).
+Will NOT send the gate-ready notification until the RC is resolved.
+
+## PR (cont.) — architect RULING: adopt codex, implemented
+
+Ruling: shellperAlive ALONE gates destruction at both sites; socket-file state contributes
+NOTHING to the kill decision; pid-down is the sole proof of death (pid-dead rows delete as
+before regardless of socket). Implemented: both guards now `if (shellperAlive)` (dropped
+`&& socketPresent`). Added 2 regression cases (live-pid + socket-ABSENT) at both sites,
+verified non-vacuous (fail under the old socketPresent guard). 65/65 in file, tsc clean.
+
+For the REVIEW artifact (architect-directed):
+1. The issue text's internal conflict ("AND/OR socket absent" vs "a live pid is never
+   signaled") was MAIN's loose drafting. This ruling resolves it to the invariant: DESTROY
+   ONLY WHAT IS PROVEN DEAD; proof = pid down.
+2. Accepted residual GROWS: a live socketless orphan now persists until husk-sweep (#1227) or
+   stop reaps it — deliberate "leak a row, not a session". The earlier "asymmetric evidence"
+   residual is GONE (superseded by the ruling).
+Remaining residuals unchanged: PID-reuse (conservative by design), legacy shellper_pid===null
+edge (PR-body note), pre-existing 5 env-class test failures (PR-body note).
+
+Next: amend commit, update PR #1693 body, push, re-run --type pr CMAP for codex's answered-in-
+code record, then gate notification with fresh verdicts.
 
 PR body must reference: the 5 pre-existing env-class failures (consolidate.test.ts +
 spawn-retirement.test.ts — getRolesDir "Roles directory not found" in worktree test env,

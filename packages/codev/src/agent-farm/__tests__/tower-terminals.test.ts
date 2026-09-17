@@ -943,6 +943,103 @@ describe('tower-terminals', () => {
       expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
     });
 
+    // Bugfix #1686 (socket-absent edge, #1693 ruling): the sole proof of death
+    // is the pid being down. A live pid whose socket FILE is absent — the same
+    // transient-failure class (fd pressure / hiccup) that fails the reconnect —
+    // must still be preserved, never signaled. This closes the issue's internal
+    // "AND/OR socket absent" ambiguity in favor of its "a live pid is never
+    // signaled" invariant. Would SIGTERM + delete under the earlier
+    // shellperAlive && socketPresent guard.
+    it('leaves a live-pid row untouched even when its socket file is absent — reconcile (#1686)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const liveId = 'bugfix-1686-socketgone-session';
+      const socketPath = '/tmp/shellper-bugfix-1686-gone.sock';
+
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: liveId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-socketgone',
+        pid: process.pid,
+        shellper_socket: socketPath,
+        shellper_pid: process.pid,
+        shellper_start_time: Date.now(),
+        created_at: new Date().toISOString(),
+      }]);
+
+      // Socket FILE is ABSENT (returns false), but the pid is alive.
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        return false; // socket file gone, config lookups false
+      });
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(mockDbRun).not.toHaveBeenCalledWith(liveId);
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+    });
+
+    // Same socket-absent edge at the on-the-fly sibling site.
+    it('leaves a live-pid row untouched even when its socket file is absent — on-the-fly (#1686)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const liveId = 'bugfix-1686-socketgone-otf';
+      const socketPath = '/tmp/shellper-bugfix-1686-gone-otf.sock';
+
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: liveId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-socketgone-otf',
+        pid: process.pid,
+        shellper_socket: socketPath,
+        shellper_pid: process.pid,
+        shellper_start_time: Date.now(),
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        return false; // socket file gone
+      });
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { getTerminalsForWorkspace: getTerms } = await import('../servers/tower-terminals.js');
+      await getTerms('/real/project', 'http://proxy');
+
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(mockDbRun).not.toHaveBeenCalledWith(liveId);
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+    });
+
     // =========================================================================
     // Spec 786 Phase 2 — Identity preservation on shellper auto-restart
     // =========================================================================
