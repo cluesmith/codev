@@ -233,6 +233,11 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.3.4"
+    name: "Luxor"
+    status: released
+    target_date: "2026-09-17"
+    notes: "Hardening patch driven by the first production 3.3.3 installs. Messaging: long frames travel as one bracketed paste so heads stop being lost (#1567/PR #1644); the gate waits on the composer region, not the recipient's output, killing mid-turn delivery latency (#1664/PR #1666); keystrokes count as input in the gate with terminal replies filtered (#1473/PR #1634). Forge: overview cache stops burning the GitHub GraphQL quota via negative cache + backend suspension + single-flight (#1645/PR #1652). Tower startup safety cluster from the #1515/#1629 incident: global.db owner lock (#1629/PR #1689), proof-of-death-only reconcile (#1686/PR #1693), bounded orphan sweep (#1685/PR #1687), legible refusal in the CLI (#1691/PR #1692). Spawn env sanitization makes Tower-descendant agents resumable (#1219/PR #1626); tunnel H2 windows raised, tower half (#1677/PR #1678, issue open for field re-measure); browser IDE over the tunnel via /ide/ + afx ide (#1668/PR #1683); consult tree tripwire + consultant no-edit rule (#1649/PR #1659); spawn guard counts only open PRs (#1637/PR #1673). Community: MuAPI generate-image provider (PR #1624) by @Anil-matcha. VS Code items (agent cycling #1563/PR #1676, reconnect-on-wake #1681/PR #1682) ship with the next extension publish. Contributors: Amr Elsayed, Waleed Kadous, @mohidmakhdoomi, @Anil-matcha."
   - version: "v3.3.3"
     name: "Luxor"
     status: released
