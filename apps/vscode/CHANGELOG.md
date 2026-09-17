@@ -1,6 +1,6 @@
 # Change Log
 
-## [Unreleased]
+## [3.3.4] - 2026-09-17
 
 ### What's new
 
