@@ -1,7 +1,7 @@
 ---
 name: arch-save
 description: Save an architect's state, clear its context, and re-init automatically — the packaged save→clear→re-init refresh cycle. Use when the owner directs a context refresh, or says "/arch-save", "save and clear", "refresh your context". Runs on the owner's direction; an architect does not invoke it autonomously mid-task. Counterpart to /arch-init, which recovers the state this writes.
-argument-hint: "[name]   (e.g. main; omit to auto-detect via afx whoami)"
+argument-hint: "[name] [next task]   (e.g. main; or: file and spawn that issue)"
 ---
 
 # /arch-save — save state, clear, and come back as yourself
@@ -9,7 +9,18 @@ argument-hint: "[name]   (e.g. main; omit to auto-detect via afx whoami)"
 Long sessions accumulate stale context. This is the deliberate cure: you choose the
 moment, you choose what survives, and a fresh session resumes from what you wrote.
 
-`$ARGUMENTS` is the architect name (e.g. `main`). Omit it to auto-detect.
+`$ARGUMENTS` carries the architect name, a **next task** for the session that comes back,
+or both:
+
+```
+/arch-save                                  save, clear, re-init, then wait
+/arch-save file and spawn that issue        … and start on that first, unprompted
+/arch-save main file and spawn that issue   explicit name, then the next task
+```
+
+The next task is how an owner who already knows what the refreshed session should do first
+says so once, at the moment they direct the refresh, instead of watching for the re-init to
+land and typing it again.
 
 ## When NOT to run this
 
@@ -28,19 +39,35 @@ action. A mid-task snapshot resumes into confusion.
 Do these in order. **The order is the feature** — step 3 must precede step 4, because the
 context that knows what to write is the one about to be destroyed.
 
-### 1. Resolve your name
+### 1. Resolve your name, then split off the next task
 
-If `$ARGUMENTS` is non-empty, that is your name. Otherwise run `afx whoami` and use the
-reported `name` when `type: architect`.
+**Always run `afx whoami` first**, whatever `$ARGUMENTS` holds — the split below cannot
+tell a name from a task until it knows your name. The name rules are unchanged:
 
+- `type: architect` → the reported `name` is yours.
 - `type: builder` → **STOP.** This terminal is a builder. Report the mismatch.
-- Non-zero exit → **STOP** and ask which architect you are. Do **not** guess, and do not
-  default to `main` — writing another architect's state file is the exact failure
-  `/arch-init` exists to prevent (#1094).
+- Non-zero exit → you have no name yet. A single-token `$ARGUMENTS` that validates as a
+  name is still accepted as one; anything else → **STOP** and ask which architect you are.
+  Do **not** guess, and do not default to `main` — writing another architect's state file
+  is the exact failure `/arch-init` exists to prevent (#1094).
 
 **Validate the name before building any path**: `[a-z][a-z0-9-]*`, at most 64 characters.
 Reject slashes, `..`, uppercase, spaces. Never interpolate an unvalidated name into
 `codev/state/<name>.md`.
+
+Then split `$ARGUMENTS`:
+
+1. `$ARGUMENTS` is empty → name from `afx whoami`, and there is no next task.
+2. The **first whitespace-separated token** equals the whoami name (or, when whoami could
+   not resolve one, is a single token that validates as a name) → that token is the name,
+   and the **remainder** is the next-task text, which may be empty.
+3. Otherwise → the **whole** of `$ARGUMENTS` is the next-task text, and the name comes
+   from `afx whoami`.
+
+So `/arch-save` and `/arch-save main` behave exactly as they always have. The one
+ambiguity — a next task whose first word happens to be your own architect name — is
+accepted rather than worked around: lead with the explicit name
+(`/arch-save main main is stalled, look at it`) to disambiguate.
 
 ### 2. Stop your own monitors
 
@@ -74,6 +101,21 @@ first (`cp codev/state/<name>.md codev/state/.<name>.bak.md`) is cheap insurance
 
 **Content guardrails.** No secrets — tokens, keys, credentials. No transcript dumps, no
 raw tool output. Only: current focus, open loops, and what a fresh session needs to resume.
+
+**Write the next task into the banner**, if step 1 produced one. Add a single line to the
+banner block, directly after the `⭐ THIS /clear IS INTENTIONAL` line:
+
+```
+# ⏭ NEXT TASK (owner-directed at save, 2026-09-19T02:10Z): file and spawn that issue
+```
+
+- **Verbatim.** Collapse newlines to spaces; do not paraphrase, expand, or "helpfully"
+  plan it. Those are the owner's words, and the context writing them down is the one about
+  to be destroyed — this is the last moment at which a paraphrase can be caught.
+- **New text replaces** any existing NEXT TASK line.
+- **No new text preserves an existing one.** A NEXT TASK line still in the banner means the
+  previous cycle never came back to pick it up; dropping it silently would lose an owner
+  instruction that nothing else is holding.
 
 Use the template at the end of this document.
 
@@ -160,12 +202,16 @@ literal text on the front of the next message never executes.
 
 The structure below comes from a live run of this cycle. Every element earns its place;
 keep them all, including a `MONITORS:` line even when the answer is "none armed" — an
-omitted monitor list is indistinguishable from a forgotten one.
+omitted monitor list is indistinguishable from a forgotten one. The `NEXT TASK` line is the
+single exception: it appears only when there is one.
 
 ```
 # <lane> architect — state (vNN, <date> ~HH:MM UTC — <milestone>, DELIBERATE /clear cycle)
 # ⭐ THIS /clear IS INTENTIONAL (owner-directed context refresh). On re-init: normal
 # /arch-init flow, then:
+# ⏭ NEXT TASK (owner-directed at save, <ISO timestamp>): <the owner's words, verbatim>
+#    — OPTIONAL; present only when the save carried one. /arch-init starts here before the
+#    agenda below, then deletes this line and logs the pickup.
 # 1. MONITORS: <what to stop if it is still firing, then what to re-arm> — watch target,
 #    cadence, alert pattern. Self-test once before trusting alerts. ("none armed" is a
 #    valid and complete answer.)

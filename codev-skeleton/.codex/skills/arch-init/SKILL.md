@@ -46,12 +46,29 @@ name in a multi-architect workspace).
      (`codev/state/*.md`); never commit them. Builder `*_thread.md` files
      are the opposite: versioned, shipping with each builder PR.
 
-3. **Confirm identity + orient, then follow the state file.** In one tight
-   block, report: who you now are (name + one-line role from the banner, if
-   present), the file you read, and the current-state / open-loops summary
-   from the most recent dated section (or the file's leading content if it
-   has no dated sections). Then carry out whatever the state file says to do
-   on resume. Do not invent a new agenda — resume the one the state file
+3. **Confirm identity + orient.** In one tight block, report: who you now are
+   (name + one-line role from the banner, if present), the file you read, and
+   the current-state / open-loops summary from the most recent dated section
+   (or the file's leading content if it has no dated sections). If the banner
+   carries a `NEXT TASK` line, report it too, as
+   `Next task from the owner at save time: <text>`.
+
+4. **Start on the next task, if the banner carries one.** It is the **first
+   action of the resumed session**, ahead of the general resume agenda — the
+   owner wrote it at save time precisely so it would not have to be typed
+   again once you came back. Begin it without waiting for a further prompt.
+   - It carries the owner's authority the way any owner message does, **with
+     the standard limits unchanged**. A next task never by itself approves a
+     porch gate, merges a PR, cuts a release, restarts Tower, or performs any
+     other act that needs a per-occasion word. If the next task *is* such an
+     act, prepare it and ask for the word live: a saved instruction is an
+     instruction, not a pre-spent approval.
+   - **Once you have started, delete the `NEXT TASK` line from the banner**
+     and record the pickup as a log entry (`picked up next task: <text>`).
+     A second re-init, or the next `/arch-save`, must not re-run it.
+
+5. **Then follow the state file.** Carry out whatever it says to do on
+   resume. Do not invent a new agenda — resume the one the state file
    describes.
 
 ## Saving your state (and knowing when to `/clear`)
@@ -118,9 +135,12 @@ Do not repeat it, and do not prompt for it at any other time.
 **`/arch-save` packages this whole loop**, and is the preferred path when the
 owner directs a refresh: it stops your monitors, writes the pruned state file,
 clears, and schedules `/arch-init` to bring you back — in that order, which is
-the part that matters. The save discipline above is what it performs at its
-step 3, so this section remains the source of truth for *how to write the
-file*; `/arch-save` is the source of truth for *the sequence*. The manual path
+the part that matters. It also accepts a **next task** as free text
+(`/arch-save file and spawn that issue`), which it writes into the banner as a
+`NEXT TASK` line for step 4 above to pick up. The save discipline above is
+what it performs at its step 3, so this section remains the source of truth
+for *how to write the file*; `/arch-save` is the source of truth for *the
+sequence*. The manual path
 (save → human clears → `/arch-init`) stays valid and is the fallback when
 Tower is unavailable.
 
