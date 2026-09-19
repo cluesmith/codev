@@ -92,13 +92,24 @@ describe('AIR 1709 — /arch-save accepts a next task', () => {
     expect(save()).toMatch(/If you had to ask which architect you are, the next task still stands/);
   });
 
+  it('stops when the leading token names a different, existing architect', () => {
+    // The architect's ruling on the CMAP finding: rule 3 would otherwise bury a
+    // real name-override inside next-task text and save to whoami's file, and
+    // whoami can be wrong (#1094). The cost is one clarification for a task that
+    // merely opens with a sibling's name.
+    const t = save();
+    expect(t).toMatch(/differs from the name whoami reported, and\s*\n?`codev\/state\/<token>\.md` exists/);
+    expect(t).toMatch(/\*\*STOP and ask which architect you are\. Write nothing\.\*\*/);
+    expect(t).toMatch(/whoami can be wrong \(#1094\)/);
+  });
+
   it('acknowledges that /arch-init resolves a name by different rules', () => {
     // /arch-init takes no next task, so any argument there is unambiguously a
     // name and overrides whoami outright. Here the first token is weighed
     // *against* whoami — the pair is asymmetric, and the doc says so.
     const t = save();
     expect(t).toMatch(/This is not how `\/arch-init` resolves a name/);
-    expect(t).toMatch(/a whoami that reports the wrong architect cannot be overridden by argument alone/);
+    expect(t).toMatch(/the first token is weighed \*against\* whoami, which is\s+why the guard above exists/);
   });
 });
 

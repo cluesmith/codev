@@ -72,11 +72,17 @@ accepted rather than worked around: lead with the explicit name
 **If you had to ask which architect you are, the next task still stands.** The answer
 supplies the name; `$ARGUMENTS` already supplied the task. Do not make the owner retype it.
 
+**Guard, applied after the split: a leading token that names a *different* architect stops
+you.** If the first token validates as a name, differs from the name whoami reported, and
+`codev/state/<token>.md` exists → **STOP and ask which architect you are. Write nothing.**
+whoami can be wrong (#1094), and rule 3 would otherwise bury a real name-override inside
+next-task text and save to whoami's file; a task that merely opens with a sibling's name is
+the only case this costs, and it costs one clarification.
+
 **This is not how `/arch-init` resolves a name**, and the asymmetry is deliberate:
 `/arch-init` takes no next task, so any non-empty argument there is unambiguously a name
-and overrides whoami outright. Here the first token is weighed *against* whoami, which
-means a whoami that reports the wrong architect cannot be overridden by argument alone —
-if you suspect that, stop and raise it rather than saving into a name you did not verify.
+and overrides whoami outright. Here the first token is weighed *against* whoami, which is
+why the guard above exists — never save into a name you did not verify.
 
 ### 2. Stop your own monitors
 

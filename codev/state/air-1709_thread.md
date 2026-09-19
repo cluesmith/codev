@@ -87,3 +87,26 @@ It is also exactly what the issue prescribed (rules 3 and 4), so it is a baked d
 not mine to reverse. Claude suggested an additive guard costing one sentence: *first token
 validates as a name, differs from whoami's, and `codev/state/<token>.md` exists → stop and
 ask.* Flagged via `afx send`; the architect's call.
+
+## 2026-09-19 — architect ruling: guard added
+
+Architect (main) ruled on the referred finding: **add the guard.** Implemented as directed,
+no other changes.
+
+In `arch-save` step 1, after the split: first token validates as a name **and** differs from
+whoami's **and** `codev/state/<token>.md` exists → STOP and ask which architect you are,
+write nothing. The "why" travels with it — whoami can be wrong (#1094), rule 3 would
+otherwise bury a real name-override inside next-task text and save to whoami's file, and the
+only case this costs is a task whose first word is a sibling's name, which costs one
+clarification.
+
+The existence check is what keeps the guard narrow: an ordinary task opening with a word that
+merely *looks* like a name (`main is stalled, look at it` would hit it, but `merge 1660` or
+`review Amr's PR` would not) only stops when a state file for that name actually exists.
+
+One knock-on: rewriting that paragraph's closing sentence invalidated an assertion added in
+the previous commit ("a whoami that reports the wrong architect cannot be overridden by
+argument alone"), which the new text replaces with a pointer to the guard. Re-pinned to the
+new wording — caught by the test run, not by inspection, which is the test doing its job.
+
+All 8 copies (4 arch-save + 4 arch-init) verified identical by md5.
