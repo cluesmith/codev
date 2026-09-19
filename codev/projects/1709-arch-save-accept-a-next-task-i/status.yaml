@@ -1,0 +1,14 @@
+id: '1709'
+title: arch-save-accept-a-next-task-i
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-19T14:32:33.742Z'
+updated_at: '2026-09-19T14:32:33.743Z'
