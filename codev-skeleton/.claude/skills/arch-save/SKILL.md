@@ -69,6 +69,15 @@ ambiguity — a next task whose first word happens to be your own architect name
 accepted rather than worked around: lead with the explicit name
 (`/arch-save main main is stalled, look at it`) to disambiguate.
 
+**If you had to ask which architect you are, the next task still stands.** The answer
+supplies the name; `$ARGUMENTS` already supplied the task. Do not make the owner retype it.
+
+**This is not how `/arch-init` resolves a name**, and the asymmetry is deliberate:
+`/arch-init` takes no next task, so any non-empty argument there is unambiguously a name
+and overrides whoami outright. Here the first token is weighed *against* whoami, which
+means a whoami that reports the wrong architect cannot be overridden by argument alone —
+if you suspect that, stop and raise it rather than saving into a name you did not verify.
+
 ### 2. Stop your own monitors
 
 Enumerate every monitor, watcher or background task you armed, and stop it.

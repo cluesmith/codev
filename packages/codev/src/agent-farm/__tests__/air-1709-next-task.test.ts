@@ -10,7 +10,9 @@
  *
  * The parity guard is repeated here for `/arch-init` deliberately —
  * `spec-1134-arch-init-skill.test.ts` compares only instance/.claude against
- * skeleton/.claude, so a `.codex` copy left behind passes it silently.
+ * skeleton/.claude, so a `.codex` copy left behind passes it silently. The
+ * `/arch-save` half of that check duplicates `spec-1307-arch-save-skill.test.ts`
+ * and is kept only so the two skills of one feature fail together.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -83,6 +85,21 @@ describe('AIR 1709 — /arch-save accepts a next task', () => {
     expect(t).toMatch(/`\/arch-save` and `\/arch-save main` behave exactly as they always have/);
     expect(t).toMatch(/a next task whose first word happens to be your own architect name/);
   });
+
+  it('keeps the next task when it has to stop and ask for the name', () => {
+    // whoami down + multi-token arguments lands on the STOP branch. The text is
+    // already in hand; making the owner retype it defeats the feature.
+    expect(save()).toMatch(/If you had to ask which architect you are, the next task still stands/);
+  });
+
+  it('acknowledges that /arch-init resolves a name by different rules', () => {
+    // /arch-init takes no next task, so any argument there is unambiguously a
+    // name and overrides whoami outright. Here the first token is weighed
+    // *against* whoami — the pair is asymmetric, and the doc says so.
+    const t = save();
+    expect(t).toMatch(/This is not how `\/arch-init` resolves a name/);
+    expect(t).toMatch(/a whoami that reports the wrong architect cannot be overridden by argument alone/);
+  });
 });
 
 describe('AIR 1709 — /arch-save persists the next task in the banner', () => {
@@ -128,7 +145,7 @@ describe('AIR 1709 — /arch-init picks the next task up', () => {
 
   it('starts on it first, ahead of the general resume agenda', () => {
     const t = init();
-    expect(t).toMatch(/\*\*first\n\s+action of the resumed session\*\*, ahead of the general resume agenda/);
+    expect(t).toMatch(/\*\*first\s+action of the resumed session\*\*, ahead of the general resume agenda/);
     expect(t).toMatch(/Begin it without waiting for a further prompt/);
   });
 

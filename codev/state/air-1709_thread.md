@@ -48,3 +48,42 @@ verbatim rule, replace-vs-preserve, the template line, the orient label, orient�
 ordering, the not-a-pre-spent-approval limits, and the delete + log-the-pickup rule.
 
 Worktree had no `node_modules` on spawn; ran `pnpm install --frozen-lockfile` before testing.
+
+## 2026-09-19 — pr + CMAP
+
+PR #1710. CMAP all three: **gemini=APPROVE, codex=APPROVE, claude=APPROVE**, all HIGH
+confidence. (Note for the architect: the agy/gemini lane produced a clean VERDICT block on
+a `--type pr` review here — the known "agy consult broken for `--type`" issue did not
+reproduce.)
+
+Gemini and codex found nothing. Claude approved with four observations; I verified each
+against the files before acting.
+
+**Applied** (additive doc/test only, no behavior change):
+
+- *Next task survives the STOP branch.* whoami down + multi-token `$ARGUMENTS` falls through
+  rule 2 (not a single token) and rule 3 (no name from whoami) to "stop and ask". The outcome
+  was right but the doc never said the task text is still in hand, so an implementer could
+  reasonably make the owner retype it. One sentence added.
+- *The pair is asymmetric, and now says so.* `/arch-init` takes no next task, so any argument
+  there is unambiguously a name and overrides whoami outright; `/arch-save` weighs the first
+  token *against* whoami. `arch-init`'s frontmatter still advertises "an explicit name
+  argument overrides" and is still correct for itself — the gap was that `arch-save` did not
+  acknowledge the difference. One paragraph added there.
+- *Test nit:* `/\*\*first\n\s+action of the resumed session\*\*/` pinned a hard line wrap; a
+  pure reflow would have failed it with no semantic change. Relaxed to `\s+`.
+- *Parity duplication:* confirmed — `spec-1307-arch-save-skill.test.ts:41` already asserts
+  four-copy parity for `arch-save`. Kept the duplicate so both skills of one feature fail
+  together, and said so in the file header.
+
+**Referred to the architect, not applied:** claude's first finding. The explicit-name
+override is narrower than before — previously *any* non-empty `$ARGUMENTS` was the name, now
+only a first token equal to whoami's (or a lone validating token when whoami fails). The
+uncovered case is whoami answering with the *wrong* architect: `/arch-save tower` from a
+session whoami calls `main` writes to `main`'s file, and the argument cannot override it.
+That is the #1094 failure class, and identity misreport is a scar this repo has taken.
+
+It is also exactly what the issue prescribed (rules 3 and 4), so it is a baked decision and
+not mine to reverse. Claude suggested an additive guard costing one sentence: *first token
+validates as a name, differs from whoami's, and `codev/state/<token>.md` exists → stop and
+ask.* Flagged via `afx send`; the architect's call.
