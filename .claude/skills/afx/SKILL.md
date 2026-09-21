@@ -206,7 +206,22 @@ There is NO `afx tower restart` — use `afx tower stop && afx tower start`.
 ```bash
 afx workspace start             # Start workspace for current project
 afx workspace stop              # Stop workspace processes
+afx workspace add-architect --name <name>   # Add a named sibling architect terminal
+afx workspace remove-architect <name>       # Remove a sibling architect (cannot remove main)
+afx workspace recover           # Revive builders whose shellper died (e.g. after reboot)
 ```
+
+**Recreating a dead architect** (its process died while Tower kept the registration):
+re-add it under the SAME name, then re-init its identity:
+
+```bash
+afx workspace add-architect --name <name>
+afx send architect:<name> "/arch-init <name>"
+```
+
+Builder-to-architect affinity survives the death (builders keep their Owner), so a
+same-name re-add restores routing with no worktree impact and no builder disruption.
+`afx workspace recover` revives builders only, not architects.
 
 `afx dash` is a deprecated alias — use `afx workspace` instead.
 
