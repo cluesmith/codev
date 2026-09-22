@@ -151,7 +151,8 @@ describe('AIR 1709 — /arch-save persists the next task in the banner', () => {
 
 describe('AIR 1709 — /arch-init picks the next task up', () => {
   it('reports it in the orient block under a fixed label', () => {
-    expect(init()).toContain('Next task from the owner at save time: <text>');
+    // #1724 extended the label with the resolved gloss; air-1724 pins the full form.
+    expect(init()).toContain('Next task from the owner at save time: <verbatim>');
   });
 
   it('starts on it first, ahead of the general resume agenda', () => {
@@ -180,8 +181,8 @@ describe('AIR 1709 — /arch-init picks the next task up', () => {
   it('deletes the line and logs the pickup so it cannot run twice', () => {
     const t = init();
     expect(t).toMatch(/\*\*Once you have started, delete the `NEXT TASK` line from the banner\*\*/);
-    expect(t).toContain('picked up next task: <text>');
-    expect(t).toMatch(/A second re-init, or the next `\/arch-save`, must not re-run it/);
+    expect(t).toContain('picked up next task: <verbatim>');
+    expect(t).toMatch(/A second re-init, or the next `\/arch-save`, must\s+not re-run it/);
   });
 
   it('tells the save-side section that /arch-save can carry one', () => {
