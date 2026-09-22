@@ -1,7 +1,7 @@
 id: '1724'
 title: arch-save-next-task-resolve-re
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-22T13:19:13.501Z'
-updated_at: '2026-09-22T16:29:30.045Z'
+updated_at: '2026-09-22T16:29:40.029Z'
 pr_ready_for_human: false
