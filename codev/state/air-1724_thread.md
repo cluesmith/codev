@@ -15,3 +15,14 @@
   sibling test air-1724-next-task-gloss.test.ts.
 - Surprise: fresh worktree needed `pnpm install` + `pnpm build` before the agent-farm suite
   could resolve @cluesmith/codev-sdk / codev-types — not related to this change.
+
+## 2026-09-22 — PR #1725 + CMAP
+
+- CMAP: codex=COMMENT, claude=COMMENT (agy skipped — `--type` lane known broken). Note: `consult
+  --type pr` from a builder needs `--issue 1724`, else it fails on "Multiple projects found".
+- Fixed in-scope: pickup log omits `→ resolved` with no gloss (codex); paused save tells the owner
+  monitors are already down and resumes from the gloss (claude #2); "no gloss pre-approves
+  nothing" stated (claude #3).
+- Raised to architect, not changed: a preserved (never picked up) NEXT TASK line now carries a
+  standing approval across cycles (claude #1); the gloss narrows the CLAUDE.md gate rule without
+  that doc saying so (claude #4). Both are design rulings beyond the issue's prescription.

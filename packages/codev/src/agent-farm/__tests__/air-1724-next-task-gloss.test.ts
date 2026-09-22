@@ -61,6 +61,10 @@ describe('AIR 1724 — /arch-save resolves referents into a gloss', () => {
     expect(t).toMatch(/\*\*Cannot resolve → do not clear\.\*\*/);
     expect(t).toMatch(/\*\*stop before step 4\*\* and ask the owner which items are meant/);
     expect(t).toMatch(/destroys the only context that could have answered/);
+    // A paused save must not look finished: monitors are already down, and the
+    // cycle resumes from the gloss, not from the top.
+    expect(t).toMatch(/Tell the owner your monitors are already stopped \(step 2\)/);
+    expect(t).toMatch(/resume from here: write the gloss, then continue to step 4/);
     // The resolution lives in step 3, so the stop precedes the clear by position too.
     expect(t.indexOf('**Cannot resolve → do not clear.**')).toBeLessThan(t.indexOf('### 4. Clear'));
     expect(t.indexOf('**Cannot resolve → do not clear.**')).toBeGreaterThan(
@@ -95,6 +99,7 @@ describe('AIR 1724 — /arch-init: the gloss carries the word', () => {
     // The #1709 limit still stands, and the gloss rule sits after it.
     expect(t).toMatch(/a saved instruction is an\s+instruction, not a pre-spent approval/);
     expect(t).toMatch(/This narrows the rule above; it does not remove it/);
+    expect(t).toMatch(/a line with no\s+gloss pre-approves nothing/);
     expect(t.indexOf('not a pre-spent approval')).toBeLessThan(t.indexOf('**The gloss carries the word'));
   });
 
@@ -120,7 +125,8 @@ describe('AIR 1724 — /arch-init: the gloss carries the word', () => {
     expect(t).toMatch(/already merged, closed, or changed\s+is reported, not forced/);
   });
 
-  it('logs the pickup with verbatim + gloss', () => {
-    expect(init()).toMatch(/`picked up next task: <verbatim>\s+→ resolved: <gloss>`/);
+  it('logs the pickup with verbatim + gloss, omitting the gloss half when there is none', () => {
+    const t = init();
+    expect(t).toMatch(/`picked up next task: <verbatim>\s+→ resolved: <gloss>`, omitting `→ resolved: …` when there was no gloss/);
   });
 });

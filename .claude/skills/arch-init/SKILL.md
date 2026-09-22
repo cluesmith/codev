@@ -69,7 +69,8 @@ name in a multi-architect workspace).
      the owner's words name: "merge them all [resolved at save: PRs #1710,
      #1712]" means merge #1710 and #1712 without asking again. The owner gave
      the word at save time, and the saving session pinned it to those items.
-     This narrows the rule above; it does not remove it:
+     This narrows the rule above; it does not remove it — and a line with no
+     gloss pre-approves nothing:
      - The act must be the one the owner's words say. **A gloss never widens
        the verb** — "merge" does not also approve a release.
      - **Anything not in the gloss still needs the word live.** A PR that
@@ -83,8 +84,8 @@ name in a multi-architect workspace).
        is reported, not forced.
    - **Once you have started, delete the `NEXT TASK` line from the banner**
      and record the pickup as a log entry (`picked up next task: <verbatim>
-     → resolved: <gloss>`). A second re-init, or the next `/arch-save`, must
-     not re-run it.
+     → resolved: <gloss>`, omitting `→ resolved: …` when there was no gloss).
+     A second re-init, or the next `/arch-save`, must not re-run it.
 
 5. **Then follow the state file.** Carry out whatever it says to do on
    resume. Do not invent a new agenda — resume the one the state file

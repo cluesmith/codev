@@ -152,7 +152,8 @@ line, after the verbatim text, as a `[resolved at save: …]` gloss:
   **stop before step 4** and ask the owner which items are meant. Clearing with an
   unresolved task destroys the only context that could have answered. This is the one
   case where `/arch-save` may pause its own cycle — it is cheap, and the alternative is a
-  wrong merge.
+  wrong merge. Tell the owner your monitors are already stopped (step 2), and on their
+  answer resume from here: write the gloss, then continue to step 4.
 
 The gloss is more than orientation: `/arch-init` treats the items it names as approved for
 the act the owner's words name, so it is how the owner's word survives the clear.
