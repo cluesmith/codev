@@ -82,6 +82,13 @@ name in a multi-architect workspace).
      - Ordinary verification still applies: an approved merge still waits for
        green CI, and a gloss item you find already merged, closed, or changed
        is reported, not forced.
+     - **A line marked `[carried over — …]` is orientation only.** Its gloss
+       was written by an earlier cycle and carries no word: ask for it before
+       any gated act.
+   - **This does not narrow the gate rule.** The human decision was explicit
+     at save time, and the gloss is its record. What the rule forbids —
+     inferring approval from a gate notification, from silence, or from an
+     agent's own judgment — stays forbidden; a gloss is none of those.
    - **Once you have started, delete the `NEXT TASK` line from the banner**
      and record the pickup as a log entry (`picked up next task: <verbatim>
      → resolved: <gloss>`, omitting `→ resolved: …` when there was no gloss).

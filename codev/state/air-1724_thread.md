@@ -26,3 +26,11 @@
 - Raised to architect, not changed: a preserved (never picked up) NEXT TASK line now carries a
   standing approval across cycles (claude #1); the gloss narrows the CLAUDE.md gate rule without
   that doc saying so (claude #4). Both are design rulings beyond the issue's prescription.
+
+## 2026-09-22 — architect rulings applied
+
+- (1) Carried-over line: /arch-save appends `[carried over — gloss orients only; re-confirm before
+  acting]` when preserving an existing NEXT TASK line (once); /arch-init treats a marked line as
+  orientation and asks before any gated act. Decided at write time, no timestamp arithmetic.
+- (2) No CLAUDE.md/lessons-critical change; arch-init step 4 now states the gloss does not narrow
+  the gate rule — it is the record of an explicit save-time decision.

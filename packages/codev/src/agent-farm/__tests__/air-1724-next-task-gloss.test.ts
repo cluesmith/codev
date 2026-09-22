@@ -72,6 +72,14 @@ describe('AIR 1724 — /arch-save resolves referents into a gloss', () => {
     );
   });
 
+  it('marks a preserved line carried over, once, at write time', () => {
+    const t = save();
+    expect(t).toMatch(/\*\*Mark it carried over when you preserve it:\*\*/);
+    expect(t).toContain('`[carried over — gloss orients only; re-confirm before acting]`');
+    expect(t).toMatch(/\(once;\s+a line already marked stays as it is\)/);
+    expect(t).toMatch(/A gloss carries the owner's word only for the\s+cycle that wrote it/);
+  });
+
   it('shows the optional gloss suffix in the state-block template', () => {
     const template = save().slice(save().indexOf('## State block template'));
     expect(template).toMatch(
@@ -123,6 +131,20 @@ describe('AIR 1724 — /arch-init: the gloss carries the word', () => {
     const t = init();
     expect(t).toMatch(/an approved merge still waits for\s+green CI/);
     expect(t).toMatch(/already merged, closed, or changed\s+is reported, not forced/);
+  });
+
+  it('treats a carried-over line as orientation only', () => {
+    // Architect ruling on PR #1725: the gloss carries the word only for the
+    // cycle that wrote it, decided at write time — no timestamp arithmetic.
+    const t = init();
+    expect(t).toMatch(/\*\*A line marked `\[carried over — …\]` is orientation only\.\*\*/);
+    expect(t).toMatch(/carries no word: ask for it before\s+any gated act/);
+  });
+
+  it('records that the gloss does not narrow the gate rule', () => {
+    const t = init();
+    expect(t).toMatch(/\*\*This does not narrow the gate rule\.\*\* The human decision was explicit\s+at save time, and the gloss is its record/);
+    expect(t).toMatch(/inferring approval from a gate notification, from silence, or from an\s+agent's own judgment — stays forbidden; a gloss is none of those/);
   });
 
   it('logs the pickup with verbatim + gloss, omitting the gloss half when there is none', () => {

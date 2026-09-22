@@ -130,7 +130,10 @@ banner block, directly after the `⭐ THIS /clear IS INTENTIONAL` line:
 - **New text replaces** any existing NEXT TASK line.
 - **No new text preserves an existing one.** A NEXT TASK line still in the banner means the
   previous cycle never came back to pick it up; dropping it silently would lose an owner
-  instruction that nothing else is holding.
+  instruction that nothing else is holding. **Mark it carried over when you preserve it:**
+  append `[carried over — gloss orients only; re-confirm before acting]` to the line (once;
+  a line already marked stays as it is). A gloss carries the owner's word only for the
+  cycle that wrote it.
 
 **Then resolve its referents — resolve, don't plan.** After the clear, "them" points at
 nothing; this context is the only one that knows what the owner meant. So pin every
