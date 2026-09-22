@@ -132,6 +132,31 @@ banner block, directly after the `⭐ THIS /clear IS INTENTIONAL` line:
   previous cycle never came back to pick it up; dropping it silently would lose an owner
   instruction that nothing else is holding.
 
+**Then resolve its referents — resolve, don't plan.** After the clear, "them" points at
+nothing; this context is the only one that knows what the owner meant. So pin every
+referent in the owner's words to a concrete, durable identifier, and append it to the same
+line, after the verbatim text, as a `[resolved at save: …]` gloss:
+
+```
+# ⏭ NEXT TASK (owner-directed at save, 2026-09-22T13:40Z): merge them all  [resolved at save: PRs #1710, #1712, #1715]
+```
+
+- **Every referent.** Pronouns and deictics — "them", "that issue", "his PR", "the failing
+  one" — become PR numbers, issue numbers, builder ids, branch names, file paths.
+- **Resolution only.** The gloss names *what*, never *how*: no steps, no ordering, no
+  caveats, no "after CI is green". A gloss that contains a plan has overstepped; the
+  resumed session plans.
+- **No referents → no gloss.** `/arch-save review PR #1712` needs nothing; write the line
+  as above without one. Never add an empty or redundant gloss.
+- **Cannot resolve → do not clear.** If any referent is ambiguous or unknown to you,
+  **stop before step 4** and ask the owner which items are meant. Clearing with an
+  unresolved task destroys the only context that could have answered. This is the one
+  case where `/arch-save` may pause its own cycle — it is cheap, and the alternative is a
+  wrong merge.
+
+The gloss is more than orientation: `/arch-init` treats the items it names as approved for
+the act the owner's words name, so it is how the owner's word survives the clear.
+
 Use the template at the end of this document.
 
 ### 4. Clear
@@ -224,9 +249,10 @@ single exception: it appears only when there is one.
 # <lane> architect — state (vNN, <date> ~HH:MM UTC — <milestone>, DELIBERATE /clear cycle)
 # ⭐ THIS /clear IS INTENTIONAL (owner-directed context refresh). On re-init: normal
 # /arch-init flow, then:
-# ⏭ NEXT TASK (owner-directed at save, <ISO timestamp>): <the owner's words, verbatim>
-#    — OPTIONAL; present only when the save carried one. /arch-init starts here before the
-#    agenda below, then deletes this line and logs the pickup.
+# ⏭ NEXT TASK (owner-directed at save, <ISO timestamp>): <the owner's words, verbatim>  [resolved at save: <referents>]
+#    — OPTIONAL; present only when the save carried one. The `[resolved at save: …]` gloss
+#    is optional too: present only when the words had referents to resolve. /arch-init
+#    starts here before the agenda below, then deletes this line and logs the pickup.
 # 1. MONITORS: <what to stop if it is still firing, then what to re-arm> — watch target,
 #    cadence, alert pattern. Self-test once before trusting alerts. ("none armed" is a
 #    valid and complete answer.)
