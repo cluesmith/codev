@@ -1,7 +1,7 @@
 id: '1709'
 title: arch-save-accept-a-next-task-i
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-19T14:32:33.742Z'
-updated_at: '2026-09-22T04:40:58.305Z'
+updated_at: '2026-09-22T04:41:47.544Z'
 pr_ready_for_human: false
 pr_history:
   - phase: pr
