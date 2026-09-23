@@ -1,7 +1,7 @@
 id: '1727'
 title: vscode-declare-untrustedworksp
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-23T00:49:36.938Z'
-updated_at: '2026-09-23T00:49:36.939Z'
+updated_at: '2026-09-23T00:55:20.522Z'
