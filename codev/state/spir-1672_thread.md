@@ -26,3 +26,11 @@ Verified the three load-bearing corrections against the tree before acting:
 - Forge plane is NOT a GraphQL selection Codev owns; it's per-forge shell scripts (`scripts/forge/{github,gitlab,gitea}/pr-list.sh`, `gh pr list --json`) behind `PrListItem` (forge-contracts.ts:104), with the #1645 capture-then-pipe shape; `gh pr list` is OPEN-only; merged PRs via `MergedPrItem` (:135). CONFIRMED. OQ1 must be restated (CI field on PrListItem, GitHub-first acceptable?).
 - `isIdleWaiting`/`deriveAttention` have live consumers (extension.ts:423/484, views/builders.ts:59/60/628, builder-row.ts:63, contextual-panel:185, streamdeck face.ts note). CONFIRMED. SSOT criterion narrowed: module owns the precedence chain; deriveAttention becomes a projection over it.
 Other consensus fixes folded: AGENT WORKING must not key on terminal output (contradicted STALLED?); add terminal states (DONE/COMPLETE, DEAD/OFFLINE) so completed lanes don't fall to STALLED?; add draft LaneCard interface + timestamped thread-entry grammar (beats/Now ages need provenance; forge age needs a wire fetched-at field = contract surface); security criteria for path-traversal on :id/:ws and ANSI+HTML escaping of authored Now/beat text; lane→PR resolution rule; EXTERNAL fallback (CI-pending only if OQ5 negative); STALLED? default threshold; afx card no-id resolution; fleet sort tie-breaker; watcher-scale risk row.
+
+## 2026-09-29 — spec-approval gate requested
+
+Now: spec-approval gate REQUESTED (head 83d5acc0b); stopped, awaiting the owner's relayed decision via architect:vscode.
+
+- Consultation resolved in one iteration: revised the spec to fold in all consensus fixes, wrote the rebuttal, porch advanced straight to the gate (no iter2 needed).
+- Sent the gate message to architect:vscode with head SHA + what to eyeball + the five contract-surface flags (LaneCard type, sdk module placement + helper-projection disposition, Tower endpoint, OQ1 forge CI field, OQ2 per-source fetchedAt) for routing to main before the plan gate.
+- NOT inferring approval from silence. Will run `porch approve 1672 spec-approval` only on the architect's relayed owner word. Still owe the #1595 re-scope comment (will post on ruling or if asked).
