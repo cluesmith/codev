@@ -60,3 +60,10 @@ Now: reviewed the owner's design canvas artifact and confirmed the spec matches 
 - Spec (2441a0d6d) matches the mock on all six zones, five core ball-owner states + precedence, both CLI renderers, the #1049 strip, and the whole data plane. Mock uses the CI rollup, confirming Approach 1 was always the intent.
 - Three DELIBERATE spec-vs-mock divergences (all reviewed/ratified): (1) AGENT WORKING drops terminal activity (guardrail #4 + CMAP; else STALLED? unreachable); (2) added terminal DONE + OFFLINE (mock has 5; exhaustiveness + #1595 dead); (3) endpoint /api/ prefix (mock omits it; main-confirmed). Everything else mock-only is presentation (chip colors, CODEV tab, glyphs) = renderer-side per main's ruling (1a), so plan detail.
 - Proposed to architect: add the design-canvas link to References + a one-line ball-owner note on the deliberate divergences. Holding for their word; not touching the spec at the live gate without it, not inferring approval from silence.
+
+## 2026-09-29 — design-canvas reconciliation folded into spec
+
+Now: folded the design-canvas reference + divergence note into the spec (head b2666ebaf, pushed) on architect:vscode's word; still holding at the owner's spec gate.
+
+- architect:vscode approved the fold-in (spec content under their seat, NOT the gate). Added: design-canvas link in References + one-line ball-owner note (terminal activity excluded from AGENT WORKING; DONE/OFFLINE added beyond the canvas's five; endpoint carries /api/). One commit, pushed, SHA reported.
+- Spec content SHA is now b2666ebaf. Spec-approval word remains the owner's and is still OUTSTANDING. No plan work until it lands (and main's OQ1/OQ2 already landed). Not inferring approval from silence.
