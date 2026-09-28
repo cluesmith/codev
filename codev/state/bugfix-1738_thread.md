@@ -129,5 +129,39 @@ assertion in `fragment-affordance.spec.ts`) would fail. jsdom can't catch any of
   is hosted inside the top-level `<ul>` (data-row present, data-line null).
 - data-line.test.ts: added data-row assertions on the ol/blockquote wrappers.
 
-Verified: 183/183 unit tests, tsc clean, build clean. Playwright browser suite running to confirm
-the abspos "+" positioning (the browser-only regression). Will push + re-run CMAP.
+Verified: 183/183 unit tests, tsc clean, build clean. Playwright browser suite: 44/44 pass,
+including fragment-affordance.spec.ts:88 (the ul[data-row] fragmented-host "+" test) — the
+browser-only regression is confirmed fixed. Committed (caa7168da) + pushed.
+
+## CMAP round 2
+
+Re-ran on the fixed branch. gemini=SKIPPED (agy unauthenticated, non-blocking), codex=COMMENT
+(HIGH, only stale comments), claude=APPROVE (HIGH, five non-blocking follow-ups). Both blocking
+issues from round 1 resolved.
+
+Addressed the actionable non-blocking feedback (commit 37059a96e):
+- Fixed stale comments in ArtifactCanvas.tsx (containers no longer share data-line; card stack
+  not always a sibling).
+- Corrected the table rationale: verified via the token stream that tables have the SAME
+  asymmetry (table shares its line with the header row; tbody with the first body row). Restated
+  honestly as OUT OF SCOPE (needs a nav-granularity decision + tr/td card DOM) rather than the
+  inaccurate "reviewed as one unit". Recommending a follow-up issue to the architect — NOT
+  expanding this bugfix into tables unilaterally (sibling defect, but with a design question
+  beyond BUGFIX scope + not in the lane brief).
+- Broadened default-theme.test.ts negative assertion; restored item-2 host coverage in
+  full-row-affordance.test.tsx.
+
+Round-2 refinements are comment/test-quality only (no behavior change), so no third CMAP round.
+Updated PR #1741 body (accurate table rationale + documented non-blocking follow-ups).
+
+## PR gate
+
+Three verdicts held: gemini=SKIPPED, codex=COMMENT (nits fixed), claude=APPROVE. Notifying the
+architect and firing the pr gate. Branch frozen pending architect approval — a CMAP APPROVE is
+not merge authorization.
+
+Recommended follow-ups for the architect (all non-blocking, from claude round 2):
+1. Tables: same first-child asymmetry, unaddressed (needs nav-granularity + tr/td card DOM).
+2. insertBelowBlock/placeAffordance can still produce invalid DOM for tr/tbody/ul (pre-existing).
+3. MarkerMinimap dot offsetTop for first list items / blockquote first paragraphs (pre-existing).
+4. Markers-only refresh while composing on a list item remounts the composer (converges, no loop).
