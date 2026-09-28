@@ -1,0 +1,14 @@
+id: bugfix-1738
+title: artifact-canvas-block-navigati
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-28T04:58:39.451Z'
+updated_at: '2026-09-28T04:58:39.452Z'
