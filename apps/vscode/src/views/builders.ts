@@ -109,8 +109,9 @@ export function agentTargetIsFocused(
  * is empty, or when its only agent is the focused one (nothing to cycle to) — the
  * command shows a status-bar hint then. A `currentIndex` of −1 (nothing focused) starts
  * at the first entry going forward, the last going back, whatever the roster size, so
- * a lone agent that isn't focused is opened rather than hinted at (#1748). The command opens the first attempt that succeeds, so an entry that
- * fails to open is simply the one tried before the next — the walk can't wedge on it
+ * a lone agent that isn't focused is opened rather than hinted at (#1748). The command
+ * opens the first attempt that succeeds, so an entry that fails to open is simply the
+ * one tried before the next — the walk can't wedge on it
  * (the focused agent itself is the final attempt, a no-op re-show if all others fail).
  * Pure and vscode-free, so the walk arithmetic is unit-testable without the extension.
  */
