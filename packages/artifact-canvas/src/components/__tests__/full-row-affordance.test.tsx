@@ -102,6 +102,11 @@ describe('full-row "+" affordance (#1343)', () => {
     // The wrapper carries `data-row` (the CSS row hook), not `data-line` — it is a row, not a block.
     expect(ul.getAttribute('data-line')).toBeNull();
     expect(ul.getAttribute('data-row')).toBe('');
+    // Item 2 (line 7) is hosted by the SAME top-level ul row — first and non-first items are alike.
+    const secondItem = document.querySelector<HTMLElement>('li[data-line="7"]') as HTMLElement;
+    fireEvent.mouseOver(secondItem);
+    expect(plusButton(8)).not.toBeNull();
+    expect(affordanceHost()).toBe(ul);
   });
 
   it('dead strips are sticky: hovering body whitespace keeps the current row lit', async () => {

@@ -134,7 +134,9 @@ describe('default-theme.css token vocabulary', () => {
     expect(css).toMatch(
       /\.codev-artifact-canvas-body\s*>\s*:is\(\[data-line\],\s*\[data-row\]\)\s*\{[^}]*padding-left:\s*var\(--codev-canvas-gutter\)/,
     );
-    expect(css).not.toMatch(/\.codev-artifact-canvas-rendered[^{]*>\s*:is\(\[data-line\]/);
+    // The standalone rendered root gets NO row rule in EITHER form (a bare `> [data-line]` or the
+    // `> :is([data-line], …)` the body uses) — row chrome is composed-surface-only.
+    expect(css).not.toMatch(/\.codev-artifact-canvas-rendered[^{]*>\s*(?::is\()?\s*\[data-line\]/);
   });
 
   it('reserves block-local leading space on rows (#1343)', () => {

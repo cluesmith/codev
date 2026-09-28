@@ -34,8 +34,11 @@ const md: MarkdownIt = new MarkdownIt({ html: true, linkify: true });
  * navigation (`collectBlocks`) and marker anchoring — each "first `[data-line]` per line wins" —
  * swallow the first child: the first list item is unreachable and a marker on it decorates the
  * whole list (#1738). We skip them, and the first child re-supplies the identical `data-line`, so
- * no source line is orphaned. Tables are intentionally NOT here: a table is reviewed as one unit,
- * so `table_open` keeps its row identity and stays the navigable/markable block for its line.
+ * no source line is orphaned. Tables are OUT OF SCOPE for #1738 and deliberately left unchanged:
+ * `thead_open`/`tbody_open`/`tr_open` are still stamped, so a table exhibits the same asymmetry
+ * (the `<table>` shares its line with the header row, `<tbody>` with the first body row). Fixing
+ * that needs a table-navigation-granularity decision (row vs cell) plus `<tr>`/`<td>` card-DOM
+ * handling — a larger change than this list/blockquote bugfix, tracked as a separate follow-up.
  *
  * They still get `data-row` instead (no `data-line`, no `tabindex`): a top-level list/blockquote
  * is not navigable, but it stays the top-level ROW that hosts the in-row "+" affordance for its
