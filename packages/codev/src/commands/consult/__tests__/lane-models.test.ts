@@ -112,11 +112,13 @@ describe('configured lane models reach the SDK (scenarios 1, 2)', () => {
     expect(mockStartThreadArgs?.model).toBe('gpt-5.6-sol');
   });
 
-  it('claude runs the configured model id', async () => {
-    writeConfig({ consult: { models: { claude: 'claude-opus-5' } } });
-    await runClaudeConsultation('q', 'role', tmpDir);
-    expect(mockClaudeOptions?.model).toBe('claude-opus-5');
-  });
+  it.each(['claude-opus-5', 'claude-opus-5[1m]', 'sonnet[1m]'])(
+    'claude passes configured model %s unchanged to the SDK', async (model) => {
+      writeConfig({ consult: { models: { claude: model } } });
+      await runClaudeConsultation('q', 'role', tmpDir);
+      expect(mockClaudeOptions?.model).toBe(model);
+    },
+  );
 
   it('codex runs the configured reasoning effort', async () => {
     writeConfig({ consult: { models: { codex: 'gpt-5.6-sol' }, reasoningEffort: { codex: 'high' } } });
@@ -159,7 +161,7 @@ describe('shipped defaults (Layer B — update this test when defaults change)',
     // #1288 landed on main mid-branch and changed both defaults. This is the ONE line the
     // two-layer design exists to make it — every other assertion reads the constants and needed
     // no edit. `default-models.test.ts` (from #1288) is the primary guard; this is the local one.
-    expect(DEFAULT_CLAUDE_MODEL).toBe('claude-opus-5');
+    expect(DEFAULT_CLAUDE_MODEL).toBe('claude-opus-5[1m]');
     expect(DEFAULT_CODEX_MODEL).toBe('gpt-5.6-sol');
     expect(DEFAULT_CODEX_REASONING_EFFORT).toBe('medium');
   });
@@ -180,6 +182,13 @@ describe('--model-id overrides config (scenario 12)', () => {
     const choice = resolveLaneModelChoice(tmpDir, 'claude', DEFAULT_CLAUDE_MODEL, 'claude-from-flag');
     await runClaudeConsultation('q', 'role', tmpDir, undefined, undefined, choice);
     expect(mockClaudeOptions?.model).toBe('claude-from-flag');
+  });
+
+  it('passes an explicit 1M context override to the Claude SDK (#1641)', async () => {
+    writeConfig({ consult: { models: { claude: 'claude-opus-5' } } });
+    const choice = resolveLaneModelChoice(tmpDir, 'claude', DEFAULT_CLAUDE_MODEL, 'claude-opus-5[1m]');
+    await runClaudeConsultation('q', 'role', tmpDir, undefined, undefined, choice);
+    expect(mockClaudeOptions?.model).toBe('claude-opus-5[1m]');
   });
 
   it('applies where no config exists at all', () => {
