@@ -272,11 +272,13 @@ export async function activate(context: vscode.ExtensionContext) {
 				break;
 			case 'reconnecting':
 				statusBarItem.text = '$(sync~spin) Codev: Reconnecting...';
-				statusBarItem.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+				// No warning/error foreground here (#1747): those tokens pair with a
+				// background and default to white, illegible on a light status bar.
+				statusBarItem.color = undefined;
 				break;
 			case 'disconnected':
 				statusBarItem.text = '$(circle-slash) Codev: Offline';
-				statusBarItem.color = new vscode.ThemeColor('statusBarItem.errorForeground');
+				statusBarItem.color = undefined;
 				break;
 		}
 	});
@@ -604,10 +606,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 			// server-process (a running dev), not zap — $(zap) reads as AI/sparkle in VSCode.
 			devChipItem.text = `$(server-process) Dev: ${target}`;
-			// StatusBarItem.backgroundColor only honors error/warning backgrounds
-			// (VSCode API constraint), so the "prominent, not alarming" look
-			// (#921 design call #4) is applied via the foreground instead.
-			devChipItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
+			// Default foreground on purpose (#1747): `statusBarItem.prominentForeground`
+			// pairs with a prominent background the API cannot set (backgroundColor
+			// only honors error/warning), and light themes make it white-on-light.
 			devChipItem.tooltip = `Codev dev running for ${target}. Click to show the dev terminal`;
 			devChipItem.show();
 		} else if (devChipItem) {
