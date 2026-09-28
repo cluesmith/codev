@@ -44,13 +44,19 @@ describe('data-line source mapping', () => {
     expect(doc.querySelector('p')?.getAttribute('data-line')).toBe('2');
   });
 
-  it('stamps data-line on a list and its items', () => {
-    expect(doc.querySelector('ul')?.getAttribute('data-line')).toBe('4');
+  // #1738: the list WRAPPER is deliberately NOT stamped — it would be the outermost element for
+  // its opening line and swallow the first `<li>` from navigation and marker anchoring. The first
+  // item carries `data-line` itself, exactly like items 2..n.
+  it('stamps data-line on list items but NOT the list wrapper (#1738)', () => {
+    expect(doc.querySelector('ul')?.getAttribute('data-line')).toBeNull();
     expect(doc.querySelector('li')?.getAttribute('data-line')).toBe('4');
   });
 
-  it('stamps data-line on a blockquote', () => {
-    expect(doc.querySelector('blockquote')?.getAttribute('data-line')).toBe('7');
+  // #1738: same rule for a blockquote — the wrapper is not stamped, so its first paragraph is the
+  // navigable/markable block for the opening line rather than the whole quote.
+  it('stamps data-line on the blockquote’s paragraph but NOT the blockquote wrapper (#1738)', () => {
+    expect(doc.querySelector('blockquote')?.getAttribute('data-line')).toBeNull();
+    expect(doc.querySelector('blockquote p')?.getAttribute('data-line')).toBe('7');
   });
 
   it('stamps data-line on the fence PRE, tabindex on both pre and code (#1396)', () => {
@@ -95,10 +101,60 @@ describe('data-line source mapping', () => {
   // (or a screen reader) read tabindex before a decoration effect had run. (DOMPurify preserves
   // the standard `tabindex` attribute.)
   it('stamps tabindex="0" on every mapped block at render time (accessibility AC)', () => {
-    for (const sel of ['h1', 'p', 'ul', 'li', 'blockquote']) {
+    // Containers (ul/blockquote) are no longer mapped (#1738), so they are neither data-line'd nor
+    // focusable; their focusable children (li, inner p) carry tabindex instead.
+    for (const sel of ['h1', 'p', 'li']) {
       expect(doc.querySelector(sel)?.getAttribute('tabindex')).toBe('0');
     }
+    expect(doc.querySelector('ul')?.getAttribute('tabindex')).toBeNull();
+    expect(doc.querySelector('blockquote')?.getAttribute('tabindex')).toBeNull();
     expect(doc.querySelector('[data-line="9"]')?.getAttribute('tabindex')).toBe('0');
+  });
+});
+
+/**
+ * #1738 — container open tokens are not stamped, so the first child of every container is
+ * individually navigable/markable instead of being swallowed by its wrapper. A container's source
+ * map always STARTS on its first child's line, so dropping the wrapper never orphans a line: the
+ * first child re-supplies the identical `data-line`.
+ */
+describe('container open tokens are not stamped (#1738)', () => {
+  it('an ordered list gives its FIRST item its own data-line (not the <ol>)', () => {
+    const doc = new DOMParser().parseFromString(
+      renderMarkdown('Intro.\n\n1. first\n2. second\n3. third'),
+      'text/html',
+    );
+    expect(doc.querySelector('ol')?.getAttribute('data-line')).toBeNull();
+    const items = Array.from(doc.querySelectorAll('li'));
+    // first item on its own line (2), then 3, then 4 — no line is exclusive to the <ol>.
+    expect(items.map((li) => li.getAttribute('data-line'))).toEqual(['2', '3', '4']);
+    expect(items[0].textContent).toContain('first');
+  });
+
+  it('a nested list stamps every item, and neither the outer nor the inner <ul>', () => {
+    // 0: - outer
+    // 1:   - nested one
+    // 2:   - nested two
+    const doc = new DOMParser().parseFromString(
+      renderMarkdown('- outer\n  - nested one\n  - nested two'),
+      'text/html',
+    );
+    expect(Array.from(doc.querySelectorAll('ul')).every((ul) => ul.getAttribute('data-line') === null)).toBe(true);
+    const lines = Array.from(doc.querySelectorAll('li')).map((li) => li.getAttribute('data-line'));
+    expect(lines).toEqual(['0', '1', '2']); // outer item, nested one, nested two — each reachable
+  });
+
+  it('a multi-paragraph blockquote stamps each inner paragraph, not the blockquote', () => {
+    // 0: > para one
+    // 1: >
+    // 2: > para two
+    const doc = new DOMParser().parseFromString(
+      renderMarkdown('> para one\n>\n> para two'),
+      'text/html',
+    );
+    expect(doc.querySelector('blockquote')?.getAttribute('data-line')).toBeNull();
+    const paras = Array.from(doc.querySelectorAll('blockquote p')).map((p) => p.getAttribute('data-line'));
+    expect(paras).toEqual(['0', '2']); // first paragraph no longer swallowed by the wrapper
   });
 });
 

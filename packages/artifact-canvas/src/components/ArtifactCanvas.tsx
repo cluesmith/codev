@@ -80,6 +80,27 @@ const isHeadingBlock = (el: HTMLElement): boolean => /^H[1-6]$/.test(el.tagName)
 /** "Any block" turns the generic scan into plain adjacent-block stepping. */
 const anyBlock = (): boolean => true;
 
+// Place an injected in-flow follower (a marker-card stack or the composer host) directly below
+// `block`. A LIST ITEM must CONTAIN its followers: `block.after()` on an `<li>` drops the node
+// under the `<ol>`/`<ul>` as a non-`<li>` child — invalid DOM, and the `ul > ul` the outermost-
+// per-line dedupe used to mask for first items (#1738). Now that a marker on the first item
+// anchors to the `<li>` like items 2..n, we append inside the `<li>` for all of them. Every other
+// block (paragraph, heading, blockquote's inner paragraph, table) takes a following sibling, which
+// is valid flow content there.
+const insertBelowBlock = (block: Element, node: Node): void => {
+  if (block.tagName === 'LI') block.append(node);
+  else block.after(node);
+};
+
+// The marker-card stack belonging to `block`, wherever `insertBelowBlock` placed it: the last child
+// of a list item, else the immediately-following sibling. Null when the block carries no stack.
+const markerCardsOf = (block: Element): HTMLElement | null => {
+  const candidate = block.tagName === 'LI' ? block.lastElementChild : block.nextElementSibling;
+  return candidate instanceof HTMLElement && candidate.classList.contains('codev-canvas-marker-cards')
+    ? candidate
+    : null;
+};
+
 /**
  * Pixels the viewport pans per `viewport-down`/`viewport-up` step (#1501). The canvas has no
  * fixed line height, so exact parity with the text editor's 3-lines/tick is impossible; this
@@ -404,12 +425,12 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     // (tabindex is stamped at render time by the renderer, not here — keeps focusability free of
     // this effect's timing.) This effect only applies marker decoration, which depends on the
     // asynchronously-loaded markers.
-    // The renderer stamps the same `data-line` on multiple nested blocks for one source line
-    // (e.g. both a `ul` and its `li`; see renderer/__tests__/data-line.test.ts). Anchor the card
-    // stack + decoration to the FIRST match per line only — querySelectorAll yields tree order, so
-    // the first match is the outermost block for that line. Without this guard a list/blockquote
-    // marker injects a duplicate stack and, worse, invalid DOM: the stack is itself a `<ul>`, so
-    // `el.after(...)` on the inner `<li>` nests `ul > ul`. (Codex review iter-1.)
+    // The renderer still stamps the same `data-line` on nested blocks for one source line (a
+    // `<li>` and its inner `<p>`; see renderer/__tests__/data-line.test.ts). Anchor the card stack
+    // + decoration to the FIRST match per line only — querySelectorAll yields tree order, so the
+    // first match is the outermost block for that line. Since #1738 that outermost is the `<li>`
+    // (list/blockquote wrappers are no longer stamped), so a first-item marker decorates the item,
+    // consistent with items 2..n. Without this guard a marked line would inject a duplicate stack.
     const decoratedLines = new Set<number>();
     root.querySelectorAll<HTMLElement>('[data-line]').forEach((el) => {
       const line = Number(el.getAttribute('data-line'));
@@ -418,8 +439,9 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       if (ms && ms.length > 0 && !decoratedLines.has(line)) {
         decoratedLines.add(line);
         el.classList.add('codev-canvas-has-marker');
-        // inline-below, in flow (#863); card bodies become focusable scrollers in horizontal
-        el.after(buildMarkerCards(line, ms, canEdit, canDelete, readingMode === 'horizontal'));
+        // inline-below, in flow (#863); card bodies become focusable scrollers in horizontal.
+        // insertBelowBlock keeps the stack INSIDE a list item so it never nests `ul > ul` (#1738).
+        insertBelowBlock(el, buildMarkerCards(line, ms, canEdit, canDelete, readingMode === 'horizontal'));
       } else {
         // Inner siblings that share the line (and genuinely unmarked blocks) get no card and no
         // decoration; any stale class from a prior markers-only re-render is cleared here too.
@@ -506,17 +528,23 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     }
     block.classList.add('codev-canvas-composing');
     // Anchor below the block's marker-card stack when it has one, else directly below the block.
-    let anchor: Element = block;
-    const sib = block.nextElementSibling;
-    if (sib?.classList.contains('codev-canvas-marker-cards')) { anchor = sib; }
-
-    if (composerHost?.isConnected && composerHost.previousElementSibling === anchor) {
+    // Both the stack and the host live INSIDE a list item (insertBelowBlock / cards.after), never
+    // under the `<ol>`/`<ul>` as an invalid non-`<li>` child (#1738).
+    const cards = markerCardsOf(block);
+    // Idempotent: bail if the host already sits in its correct spot, or a setState→re-run loops.
+    let placedRight = false;
+    if (composerHost?.isConnected) {
+      if (cards) placedRight = composerHost.previousElementSibling === cards;
+      else if (block.tagName === 'LI') placedRight = block.lastElementChild === composerHost;
+      else placedRight = block.nextElementSibling === composerHost;
+    }
+    if (placedRight) {
       return; // already placed correctly — nothing to do (avoids an infinite re-run)
     }
     composerHost?.remove();
     const host = document.createElement('div');
     host.className = 'codev-canvas-comment-composer-host';
-    anchor.after(host);
+    if (cards) { cards.after(host); } else { insertBelowBlock(block, host); }
     setComposerHost(host);
   }, [composingLine, html, markers, composerHost]);
 

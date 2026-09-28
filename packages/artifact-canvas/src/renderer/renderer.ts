@@ -15,8 +15,10 @@ import DOMPurify from 'dompurify';
  *   paragraph from splitting it, while `data-line` still reports the **original** source line.
  *   Comments inside fenced code blocks are left intact (they are literal code).
  * - A `data-line` core rule stamps the 0-based original source line onto block-level tokens
- *   (paragraphs, headings, list items, code, blockquotes, tables), plus `tabindex="0"` so every
- *   mapped block is keyboard-focusable at render time (D5 + accessibility AC).
+ *   (paragraphs, headings, list items, code, tables), plus `tabindex="0"` so every mapped block
+ *   is keyboard-focusable at render time (D5 + accessibility AC). Pure container opens (list and
+ *   blockquote wrappers) are skipped so their first child is individually navigable (#1738); see
+ *   `CONTAINER_OPEN_TOKENS`.
  * - Output is sanitized with DOMPurify; `data-*` and `tabindex` survive (DOMPurify default).
  *
  * No host I/O here — the source string is supplied by the caller (a host `FileAdapter` in real
@@ -25,8 +27,21 @@ import DOMPurify from 'dompurify';
 
 const md: MarkdownIt = new MarkdownIt({ html: true, linkify: true });
 
+/**
+ * Pure container open tokens whose source map STARTS on the same line as their first child (a
+ * list shares its opening line with its first `<li>`; a blockquote with its first paragraph).
+ * Stamping `data-line` on these makes the container the outermost element for that line, so both
+ * navigation (`collectBlocks`) and marker anchoring — each "first `[data-line]` per line wins" —
+ * swallow the first child: the first list item is unreachable and a marker on it decorates the
+ * whole list (#1738). We skip them, and the first child re-supplies the identical `data-line`, so
+ * no source line is orphaned. Tables are intentionally NOT here: a table is reviewed as one unit,
+ * so `table_open` keeps its row identity and stays the navigable/markable block for its line.
+ */
+const CONTAINER_OPEN_TOKENS = new Set(['bullet_list_open', 'ordered_list_open', 'blockquote_open']);
+
 /** Block tokens that carry a source map and should receive a `data-line` attribute. */
 function isMappedBlock(tokenType: string): boolean {
+  if (CONTAINER_OPEN_TOKENS.has(tokenType)) return false;
   return tokenType.endsWith('_open') || tokenType === 'fence' || tokenType === 'code_block';
 }
 
