@@ -1202,6 +1202,11 @@
           "default": true,
           "description": "Agents view: when the active builder-diff editor changes (keyboard navigation, a click inside the multi-file View Diff, or a per-file diff), reveal and select the matching file's row in the tree. The Agents-view equivalent of the Explorer's auto-reveal. When off, the sidebar selection only follows an explicit click."
         },
+        "codev.buildersClickExpands": {
+          "type": "boolean",
+          "default": true,
+          "description": "Agents view: a single click on a builder row opens its terminal AND expands the row to show its changed-files list. When off, the click only opens the terminal and leaves the row's expand state untouched; use the chevron to open the file list deliberately."
+        },
         "codev.backlogShowAll": {
           "type": "boolean",
           "default": false,
