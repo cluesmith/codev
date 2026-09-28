@@ -43,6 +43,8 @@ Opening an untrusted folder no longer leaves the Codev sidebar inert until you t
        - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
      Move out to its own ## section if the entry grows past ~3 sentences. -->
 
+- **Builder-row click can leave the row collapsed** (#1743, PR #1744). Turn off `codev.buildersClickExpands` and a click on a builder in the Agents view opens its terminal only; the chevron still opens the file list.
+
 ## Other fixes (dashboard, porch, infrastructure)
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
