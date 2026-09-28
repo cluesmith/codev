@@ -58,7 +58,7 @@ import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-ter
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
-import { BuildersProvider, AccordionGate, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
+import { BuildersProvider, AccordionGate, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
 import { PullRequestsProvider, PullRequestTreeItem } from './views/pull-requests.js';
 import { BacklogProvider } from './views/backlog.js';
 import { visibleBacklogCount, formatBacklogTitle } from './views/backlog-filter.js';
@@ -1162,18 +1162,21 @@ export async function activate(context: vscode.ExtensionContext) {
 			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
 		}),
 		reg('codev.openBuilderRow', async (item: unknown) => {
-			// Builder-row single-click does BOTH: opens the terminal and expands
-			// the row (the file list). Expansion is via reveal(expand:true) which
-			// fires onDidExpandElement — the accordion handler picks that up and
-			// collapses peers when the setting is on. focus:false keeps the
-			// terminal focused, not the tree.
+			// Builder-row single-click opens the terminal, and — when
+			// `codev.buildersClickExpands` is on (the default) — also expands the
+			// row (the file list). Expansion is via reveal(expand:true) which fires
+			// onDidExpandElement — the accordion handler picks that up and collapses
+			// peers when that setting is on. focus:false keeps the terminal focused,
+			// not the tree. The setting is read here at click time (like
+			// buildersAutoReveal) so no restart is needed; the decision core lives
+			// in `runBuilderRowClick`.
 			if (!(item instanceof BuilderTreeItem)) { return; }
-			await terminalManager?.openBuilderByRoleOrId(item.builderId, true);
-			try {
-				await buildersView!.reveal(item, { expand: true, select: false, focus: false });
-			} catch {
-				// Benign if the row is no longer present (e.g. mid-cleanup).
-			}
+			const clickExpands =
+				vscode.workspace.getConfiguration('codev').get<boolean>('buildersClickExpands', true);
+			await runBuilderRowClick(clickExpands, {
+				openTerminal: () => terminalManager?.openBuilderByRoleOrId(item.builderId, true),
+				expandRow: () => buildersView!.reveal(item, { expand: true, select: false, focus: false }),
+			});
 		}),
 		reg('codev.focusNextAgentTerminal', () => cycleAgentTerminal(1)),
 		reg('codev.focusPreviousAgentTerminal', () => cycleAgentTerminal(-1)),
