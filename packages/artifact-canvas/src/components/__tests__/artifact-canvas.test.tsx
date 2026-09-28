@@ -300,25 +300,28 @@ describe('ArtifactCanvas (Phase 3)', () => {
     );
   });
 
-  it('anchors a single card stack to the OUTERMOST block when one line stamps multiple data-line nodes (list/blockquote, Codex iter-1)', async () => {
-    // The renderer stamps the SAME data-line on a `ul` and its `li` (renderer/data-line.test.ts).
-    // A marker on that line must inject exactly ONE stack, after the outermost `ul` — never a
-    // duplicate, and never the invalid `ul > ul` that `el.after()` on the inner `li` would create.
-    const host = makeHost('- item one\n<!-- REVIEW(@bob): fix the list -->'); // marker annotates line 0
+  it('anchors a single card stack INSIDE the first list item, never as an invalid ul > ul (#1738)', async () => {
+    // The renderer stamps `data-line` on the `<li>` and its inner `<p>` (never the `<ul>` wrapper
+    // since #1738). A marker on that line injects exactly ONE stack, and it must live INSIDE the
+    // `<li>` — `el.after()` on the item would drop the stack `<ul>` directly under the list as an
+    // invalid non-`<li>` child (the `ul > ul` the old outermost-per-line dedupe masked for item 1).
+    const host = makeHost('- item one\n<!-- REVIEW(@bob): fix item one -->'); // marker annotates line 0
     render(<ArtifactCanvas uri="x" {...host} onAddComment={vi.fn()} />);
-    const ul = await waitFor(() => {
-      const el = document.querySelector('ul[data-line]');
-      if (!el) throw new Error('no list yet');
+    const li = await waitFor(() => {
+      const el = document.querySelector('li[data-line]');
+      if (!el) throw new Error('no list item yet');
       return el as HTMLElement;
     });
     const stacks = document.querySelectorAll('.codev-canvas-marker-cards');
     expect(stacks.length).toBe(1); // exactly one — not one-per-data-line-node
     const stack = stacks[0];
-    expect(ul.nextElementSibling).toBe(stack); // inline-below the outermost block, in flow
-    expect(stack.parentElement).not.toBe(ul); // NOT nested inside the list (no invalid ul > ul)
-    // Decoration is anchored to the outermost block only; the inner `li` carries no marker class.
-    expect(ul.classList.contains('codev-canvas-has-marker')).toBe(true);
-    expect(document.querySelector('li.codev-canvas-has-marker')).toBeNull();
+    expect(stack.parentElement).toBe(li); // inside the <li>, valid flow content
+    expect(li.lastElementChild).toBe(stack); // appended below the item's content, in flow
+    expect(document.querySelector('ul[data-line]')).toBeNull(); // the wrapper is not a block
+    // The list ITEM carries the marker class; the wrapping `<ul>` does not.
+    expect(li.classList.contains('codev-canvas-has-marker')).toBe(true);
+    expect(li.parentElement?.tagName).toBe('UL');
+    expect(li.parentElement?.classList.contains('codev-canvas-has-marker')).toBe(false);
   });
 
   it('renders marker body as text, never as markup (no innerHTML injection, #863)', async () => {

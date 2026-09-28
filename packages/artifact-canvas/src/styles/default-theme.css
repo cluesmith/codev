@@ -248,29 +248,36 @@
  * marker bar anchor against the row, never the canvas. Nested blocks (an `li`, a `p` inside a
  * blockquote) sit inside their row and must not double-indent, hence the child combinator.
  */
-.codev-artifact-canvas-body > [data-line] {
+/* A top-level list or blockquote is a hover row even though #1738 stopped stamping `data-line`
+   on the container (so its first child is individually navigable). It still hosts the "+" for its
+   items (rowHostOf walks to the direct body child), so it MUST stay a positioning context with a
+   gutter. The renderer marks it `data-row` for exactly this — a CSS row hook with no navigation
+   identity — so the row model keys on `[data-line], [data-row]`. */
+.codev-artifact-canvas-body > :is([data-line], [data-row]) {
   position: relative;
   padding-left: var(--codev-canvas-gutter);
 }
 /* Rows with their own left chrome absorb the gutter into their existing padding so the text
    keeps its x-position; their backgrounds and rules now start at the canvas edge (full-bleed
-   rows, deliberately GitHub-like — the "+" renders on top of the row's own chrome). */
+   rows, deliberately GitHub-like — the "+" renders on top of the row's own chrome). blockquote
+   and list rows carry `data-row`, not `data-line`, since #1738. */
 .codev-artifact-canvas-body > pre[data-line] {
   padding-left: calc(var(--codev-canvas-gutter) + 16px);
 }
-.codev-artifact-canvas-body > blockquote[data-line] {
+.codev-artifact-canvas-body > blockquote[data-row] {
   padding-left: calc(var(--codev-canvas-gutter) + 1em);
 }
-.codev-artifact-canvas-body > :is(ul, ol)[data-line] {
+.codev-artifact-canvas-body > :is(ul, ol)[data-row] {
   padding-left: calc(var(--codev-canvas-gutter) + 2em);
 }
 /* Everything ELSE at the top level aligns via margin instead (#1343, iter-1 consultation):
    unmapped renderer output (`hr`, raw HTML blocks — markdown-it stamps `data-line` only on
    `_open`/fence tokens) and the injected marker-card stacks / composer hosts. Margin, not
-   padding: these aren't hover rows and host no "+". Child combinator is load-bearing — a
-   NESTED stack/host (an li's marker cards) sits inside a row that already carries the gutter,
-   and an unscoped margin would double-indent it. */
-.codev-artifact-canvas-body > :not([data-line]) {
+   padding: these aren't hover rows and host no "+". Rows (`[data-line]` blocks and `[data-row]`
+   list/blockquote containers) are excluded so they take padding, not a double gutter. Child
+   combinator is load-bearing — a NESTED stack/host (an li's marker cards) sits inside a row that
+   already carries the gutter, and an unscoped margin would double-indent it. */
+.codev-artifact-canvas-body > :not([data-line]):not([data-row]) {
   margin-left: var(--codev-canvas-gutter);
 }
 
@@ -572,14 +579,18 @@
    while its composer is open; the chained `break-after: avoid` covers the card stack sitting
    between them. Horizontal-only — vertical has no columns to strand across. */
 .codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing,
-.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards {
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing > .codev-canvas-marker-cards {
   break-after: avoid;
 }
 /* While composing, the block's card stack must be ATOMIC, not merely break-averse: its normal
    between-cards break points are legal escapes the engine will take, keeping the block but
    pushing trailing cards + dialog to the next column — the exact stranding being fixed. Scoped
-   to the composing block's stack only; ordinary stacks keep fragmenting between cards (D1). */
-.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards {
+   to the composing block's stack only; ordinary stacks keep fragmenting between cards (D1). The
+   `>` variant covers a list-item stack, which lives INSIDE the composing `<li>` (#1738) rather
+   than as its next sibling. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing > .codev-canvas-marker-cards {
   break-inside: avoid;
 }
 .codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-host {
