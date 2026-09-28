@@ -250,10 +250,20 @@ describe('agentCycleAttemptOrder — the cycle walk (Issue 1563)', () => {
     expect(ids(agentCycleAttemptOrder(roster, -1, -1))).toEqual(['b4', 'b3', 'b2', 'b1', 'b0']);
   });
 
-  it('a ≤1-agent roster yields no attempts (the command no-ops with a status-bar hint)', () => {
-    expect(agentCycleAttemptOrder([], 0, 1)).toEqual([]);
+  it('an empty roster yields no attempts (the command hints there are no agent terminals)', () => {
+    expect(agentCycleAttemptOrder([], -1, 1)).toEqual([]);
+    expect(agentCycleAttemptOrder([], -1, -1)).toEqual([]);
+  });
+
+  it('a lone agent that is focused yields no attempts (nothing to cycle to)', () => {
     expect(agentCycleAttemptOrder([{ kind: 'builder', id: 'solo' }], 0, 1)).toEqual([]);
-    expect(agentCycleAttemptOrder([{ kind: 'builder', id: 'solo' }], -1, 1)).toEqual([]);
+    expect(agentCycleAttemptOrder([{ kind: 'builder', id: 'solo' }], 0, -1)).toEqual([]);
+  });
+
+  it('a lone agent that is not focused is opened in both directions (Issue 1748)', () => {
+    const solo: AgentTarget[] = [{ kind: 'architect', name: 'main' }];
+    expect(ids(agentCycleAttemptOrder(solo, -1, 1))).toEqual(['A:main']);
+    expect(ids(agentCycleAttemptOrder(solo, -1, -1))).toEqual(['A:main']);
   });
 
   it('the attempt list is the skip order: the command opens the first that succeeds', () => {
