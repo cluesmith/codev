@@ -45,6 +45,19 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Codev works in Restricted Mode. Workspace-provided Tower connection and auto-start settings are ignored until the folder is trusted.",
+      "restrictedConfigurations": [
+        "codev.towerHost",
+        "codev.towerPort",
+        "codev.workspacePath",
+        "codev.autoStartTower"
+      ]
+    }
+  },
   "contributes": {
     "customEditors": [
       {
@@ -1076,17 +1089,20 @@
         "codev.towerHost": {
           "type": "string",
           "default": "localhost",
-          "description": "Tower server host"
+          "description": "Tower server host",
+          "restricted": true
         },
         "codev.towerPort": {
           "type": "number",
           "default": 4100,
-          "description": "Tower server port"
+          "description": "Tower server port",
+          "restricted": true
         },
         "codev.workspacePath": {
           "type": "string",
           "default": "",
-          "description": "Override workspace path for Tower matching (auto-detected if empty)"
+          "description": "Override workspace path for Tower matching (auto-detected if empty)",
+          "restricted": true
         },
         "codev.terminalPosition": {
           "type": "string",
@@ -1134,7 +1150,8 @@
         "codev.autoStartTower": {
           "type": "boolean",
           "default": true,
-          "description": "Auto-start Tower if not running on activation"
+          "description": "Auto-start Tower if not running on activation",
+          "restricted": true
         },
         "codev.cliVersionTimeoutMs": {
           "type": "number",
