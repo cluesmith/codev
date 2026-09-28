@@ -124,7 +124,11 @@ describe('container open tokens are not stamped (#1738)', () => {
       renderMarkdown('Intro.\n\n1. first\n2. second\n3. third'),
       'text/html',
     );
-    expect(doc.querySelector('ol')?.getAttribute('data-line')).toBeNull();
+    const ol = doc.querySelector('ol');
+    expect(ol?.getAttribute('data-line')).toBeNull();
+    // The wrapper is a CSS row (hosts the "+"), so it carries `data-row` but no tabindex.
+    expect(ol?.getAttribute('data-row')).toBe('');
+    expect(ol?.getAttribute('tabindex')).toBeNull();
     const items = Array.from(doc.querySelectorAll('li'));
     // first item on its own line (2), then 3, then 4 — no line is exclusive to the <ol>.
     expect(items.map((li) => li.getAttribute('data-line'))).toEqual(['2', '3', '4']);
@@ -152,7 +156,9 @@ describe('container open tokens are not stamped (#1738)', () => {
       renderMarkdown('> para one\n>\n> para two'),
       'text/html',
     );
-    expect(doc.querySelector('blockquote')?.getAttribute('data-line')).toBeNull();
+    const bq = doc.querySelector('blockquote');
+    expect(bq?.getAttribute('data-line')).toBeNull();
+    expect(bq?.getAttribute('data-row')).toBe(''); // CSS row hook, no navigation identity
     const paras = Array.from(doc.querySelectorAll('blockquote p')).map((p) => p.getAttribute('data-line'));
     expect(paras).toEqual(['0', '2']); // first paragraph no longer swallowed by the wrapper
   });

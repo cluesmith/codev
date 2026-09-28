@@ -101,3 +101,33 @@ under 300 LOC. Fits BUGFIX.
   fail (incl. all 4 nav cases after strengthening nested/blockquote with tagName). Restored.
 
 No apps/streamdeck or apps/vscode changes. Changelog left to architect:vscode per brief.
+
+## PR (PR #1741) + CMAP round 1
+
+Opened PR #1741 (`Fixes #1738`). CMAP: gemini SKIPPED (agy unauthenticated, non-blocking),
+codex=REQUEST_CHANGES (HIGH), claude=REQUEST_CHANGES (HIGH). Both independently caught a real
+regression I missed:
+
+**`data-line` was doing double duty** — navigation/marker identity AND the CSS row-model hook.
+`default-theme.css` keyed `position: relative` + gutter on `.codev-artifact-canvas-body >
+[data-line]`. Removing data-line from top-level `<ul>`/`<ol>`/`<blockquote>` stripped their
+`position: relative`, so the abspos `.codev-canvas-row-affordance` ("+"), appended into the
+container by `rowHostOf`/`placeAffordance`, resolved against the wrong ancestor = misplaced "+"
+on every list/blockquote. Also: containers fell into the `:not([data-line])` margin bucket (dead
+zone reintroduced), and the CI Playwright probe `:scope > ul[data-line]` (a hard, non-skippable
+assertion in `fragment-affordance.spec.ts`) would fail. jsdom can't catch any of this.
+
+**Fix (claude's cleaner approach, adopted):** decouple the two concerns. The renderer stamps
+`data-row=""` (no data-line, no tabindex) on the three container opens — a CSS-only row hook.
+- renderer.ts: container opens get `data-row` instead of nothing.
+- default-theme.css: row model keys on `> :is([data-line], [data-row])`; blockquote/list gutter
+  rules key on `[data-row]`; margin bucket excludes `[data-row]`; keep-together selectors gained
+  a `> .codev-canvas-marker-cards` variant (the stack now lives INSIDE a composing `<li>`).
+- default-theme.test.ts: pinned selectors updated to the data-row reality.
+- fragment-affordance.spec.ts: probe → `:scope > ul[data-row]` (hard assertion kept).
+- full-row-affordance.test.tsx: fixed the vacuous `ul[data-line]`→null test to assert the "+"
+  is hosted inside the top-level `<ul>` (data-row present, data-line null).
+- data-line.test.ts: added data-row assertions on the ol/blockquote wrappers.
+
+Verified: 183/183 unit tests, tsc clean, build clean. Playwright browser suite running to confirm
+the abspos "+" positioning (the browser-only regression). Will push + re-run CMAP.

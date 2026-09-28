@@ -129,29 +129,34 @@ describe('default-theme.css token vocabulary', () => {
     // The gutter is block-local (#1343): the body itself carries NO left padding — each
     // top-level row does, composed surface only (the standalone root gets no row rules).
     expect(css).not.toMatch(/^\.codev-artifact-canvas-body\s*\{[^}]*padding-left/m);
+    // The row model keys on both `[data-line]` (navigable blocks) and `[data-row]` (list/blockquote
+    // wrappers, which since #1738 carry no data-line but still host the "+").
     expect(css).toMatch(
-      /\.codev-artifact-canvas-body\s*>\s*\[data-line\]\s*\{[^}]*padding-left:\s*var\(--codev-canvas-gutter\)/,
+      /\.codev-artifact-canvas-body\s*>\s*:is\(\[data-line\],\s*\[data-row\]\)\s*\{[^}]*padding-left:\s*var\(--codev-canvas-gutter\)/,
     );
-    expect(css).not.toMatch(/\.codev-artifact-canvas-rendered[^{]*>\s*\[data-line\]/);
+    expect(css).not.toMatch(/\.codev-artifact-canvas-rendered[^{]*>\s*:is\(\[data-line\]/);
   });
 
   it('reserves block-local leading space on rows (#1343)', () => {
     expect(tokens.get('--codev-canvas-gutter')).toBe('1.9rem');
-    // Rows are the positioning context for the in-row "+" and the marker bar.
-    expect(css).toMatch(/\.codev-artifact-canvas-body\s*>\s*\[data-line\]\s*\{[^}]*position:\s*relative/);
-    // Chrome rows absorb the gutter into their own padding (text x-position preserved).
+    // Rows are the positioning context for the in-row "+" and the marker bar — both data-line
+    // blocks and the data-row list/blockquote wrappers (#1738).
+    expect(css).toMatch(/\.codev-artifact-canvas-body\s*>\s*:is\(\[data-line\],\s*\[data-row\]\)\s*\{[^}]*position:\s*relative/);
+    // Chrome rows absorb the gutter into their own padding (text x-position preserved). The list
+    // and blockquote wrappers key on `[data-row]` (no data-line since #1738); pre keeps data-line.
     expect(css).toMatch(/pre\[data-line\]\s*\{[^}]*calc\(var\(--codev-canvas-gutter\)\s*\+\s*16px\)/);
-    expect(css).toMatch(/blockquote\[data-line\]\s*\{[^}]*calc\(var\(--codev-canvas-gutter\)\s*\+\s*1em\)/);
-    expect(css).toMatch(/:is\(ul,\s*ol\)\[data-line\]\s*\{[^}]*calc\(var\(--codev-canvas-gutter\)\s*\+\s*2em\)/);
+    expect(css).toMatch(/blockquote\[data-row\]\s*\{[^}]*calc\(var\(--codev-canvas-gutter\)\s*\+\s*1em\)/);
+    expect(css).toMatch(/:is\(ul,\s*ol\)\[data-row\]\s*\{[^}]*calc\(var\(--codev-canvas-gutter\)\s*\+\s*2em\)/);
     // The pre row must not scroll (it hosts the "+"); the inner code element scrolls instead.
     expect(css).not.toMatch(/\)\s+pre\s*\{[^}]*overflow/);
     expect(css).toMatch(/pre\s+code\s*\{[^}]*overflow-x:\s*auto/);
     // Non-row body children (hr / raw HTML blocks, which the renderer never stamps, plus the
     // injected card stacks and composer hosts) align via a margin rule scoped with the child
     // combinator (iter-1 consultation): nested stacks/hosts sit inside a row that already
-    // carries the gutter — an unscoped margin would double-indent them.
+    // carries the gutter — an unscoped margin would double-indent them. Rows carrying `[data-row]`
+    // are excluded alongside `[data-line]` so a list/blockquote wrapper is not double-indented.
     expect(css).toMatch(
-      /\.codev-artifact-canvas-body\s*>\s*:not\(\[data-line\]\)\s*\{[^}]*margin-left:\s*var\(--codev-canvas-gutter\)/,
+      /\.codev-artifact-canvas-body\s*>\s*:not\(\[data-line\]\):not\(\[data-row\]\)\s*\{[^}]*margin-left:\s*var\(--codev-canvas-gutter\)/,
     );
     expect(css).not.toMatch(/^\.codev-canvas-marker-cards\s*\{[^}]*margin-left:\s*var/m);
   });

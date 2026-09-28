@@ -36,6 +36,11 @@ const md: MarkdownIt = new MarkdownIt({ html: true, linkify: true });
  * whole list (#1738). We skip them, and the first child re-supplies the identical `data-line`, so
  * no source line is orphaned. Tables are intentionally NOT here: a table is reviewed as one unit,
  * so `table_open` keeps its row identity and stays the navigable/markable block for its line.
+ *
+ * They still get `data-row` instead (no `data-line`, no `tabindex`): a top-level list/blockquote
+ * is not navigable, but it stays the top-level ROW that hosts the in-row "+" affordance for its
+ * items, and the CSS row model (position:relative + gutter) keys on `[data-line], [data-row]`. So
+ * `data-row` is the CSS row hook, decoupled from the `data-line` navigation/marker identity.
  */
 const CONTAINER_OPEN_TOKENS = new Set(['bullet_list_open', 'ordered_list_open', 'blockquote_open']);
 
@@ -86,15 +91,20 @@ function stripCommentLines(source: string): { text: string; lineMap: number[] } 
 // Core rule: stamp data-line (original source line via env.lineMap) + tabindex on mapped blocks.
 // tabindex is stamped at render time (not via a post-render effect) so focusability is present the
 // instant the block mounts — closing the effect-timing window the comment overlay's keyboard path
-// depends on.
+// depends on. Pure container opens get `data-row` instead: a CSS-only row hook, no data-line/tabindex.
 md.core.ruler.push('codev_data_line', (state) => {
   const lineMap = (state.env && state.env.lineMap) as number[] | undefined;
   for (const token of state.tokens) {
-    if (token.map && isMappedBlock(token.type)) {
+    if (!token.map) continue;
+    if (isMappedBlock(token.type)) {
       const cleanedLine = token.map[0];
       const originalLine = lineMap ? lineMap[cleanedLine] ?? cleanedLine : cleanedLine;
       token.attrSet('data-line', String(originalLine));
       token.attrSet('tabindex', '0');
+    } else if (CONTAINER_OPEN_TOKENS.has(token.type)) {
+      // Not navigable/markable (the first child is, #1738), but still the row that hosts the "+"
+      // for its items: mark it for the CSS row model without a data-line/tabindex (#1738 review).
+      token.attrSet('data-row', '');
     }
   }
   return true;
