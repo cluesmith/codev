@@ -41,6 +41,21 @@ opens the terminal; the chevron still toggles expand/collapse.
 - check-types: clean. lint: clean.
 - Full unit suite: 84 files, 1030 tests passed. New + accordion tests green.
 
+## PR + CMAP
+- PR #1744 opened (review in body). Recorded via porch.
+- CMAP on PR #1744: claude=APPROVE(HIGH), gemini=APPROVE(HIGH), codex=REQUEST_CHANGES(HIGH).
+  - consult --project-id must be `1743` here (worktree sees all 299 projects, auto-detect
+    fails — known reference_consult_project_id_in_codev_repo).
+  - Actionable points (codex + claude nits), both addressed:
+    1. No manifest test binding the config key → added a package.json contribution
+       invariant test (declared boolean, default true) per contributes-review-queue.test.ts.
+    2. Accordion-orthogonality tests were tautological (AccordionGate in isolation) →
+       replaced with the honest seam this feature owns: a disabled click never calls
+       expandRow (no reveal → no onDidExpandElement), an enabled click does. AccordionGate's
+       own coverage stays in builders-accordion.test.ts.
+  - Non-blocking / architect-side: manual EDH click-through before merge; changelog should
+    note the second-order effect (setting off → a row click no longer collapses peers).
+
 ## Status
-Implementation + tests complete and green. Next: commit, porch done, open PR with
-review in the PR body, request pr gate via architect:vscode.
+Test-hardening committed. Reporting to architect:vscode with head SHA + CMAP verdicts + CI.
+pr gate is the owner's — holding for relayed approval, not inferring from silence.
