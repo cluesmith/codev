@@ -872,8 +872,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// roster is every live agent in the view, not just open tabs. The current
 	// position is the focused agent terminal (builder id, else architect name);
 	// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
-	// last-focused agent. Nothing focused → start at the ends. ≤1 agent → no-op with a
-	// status-bar hint.
+	// last-focused agent. Nothing focused → start at the ends, even for a lone agent
+	// (#1748). Empty roster, or a lone agent already focused → no-op with a status-bar hint.
 	// Open + focus one roster entry; returns true when a terminal was actually opened.
 	const openAgentTarget = async (t: AgentTarget): Promise<boolean> => {
 		if (t.kind === 'builder') {
