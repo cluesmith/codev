@@ -72,6 +72,8 @@ First match wins. The chain is exhaustive: a lane always resolves to exactly one
 
 `DONE` and `OFFLINE` are terminal/liveness outcomes evaluated within the same single computation; the table lists all reachable states so no lane is unclassified. Secondary conditions (for example held mail while at a gate) render as small badges beside the primary chip. The display labels above (`WAITING ON YOU`, `STALLED?`, and the rest) are presentation; the wire value is the lowercase-kebab `ballOwner.state` union (`'waiting-on-you'`, `'stalled'` with no question mark, and so on), and the uppercasing and the question mark are added by renderers.
 
+Deliberate divergences from the design canvas (see References): terminal activity is excluded from `AGENT WORKING` (issue guardrail #4: a busy composer proves nothing, and otherwise `STALLED?` is unreachable); the terminal `DONE` and `OFFLINE` states are added beyond the canvas's five (exhaustiveness, and #1595's `dead` lands in `OFFLINE`); and the endpoint carries the `/api/` prefix.
+
 ### One computation, many renderers (disposition of the existing helpers)
 
 The precedence chain lives in exactly one SDK-side module, co-located near where `compareAttention` (#1566) will live (`packages/sdk/src/builder-helpers.ts`), with no import dependency on #1566's unmerged code. The module is **pure data-in / verdict-out**: it takes the fused inputs and returns a verdict, keeping `@cluesmith/codev-sdk` environment-agnostic (zero runtime deps, no `node:*`), so the existing sdk boundary tests stay green. Tower calls it once during assembly and serves the result on `LaneCard`; the CLI and VS Code renderers consume that JSON. The existing `deriveAttention` / `isIdleWaiting` are **not** deleted and their five call sites are **not** rewritten by this lane; they are re-expressed as **projections over the one precedence module** (for example "idle waiting" becomes a view of the module's output) in a way that preserves observable behavior, so the existing `builder-helpers` tests keep passing unmodified. The exact re-expression is a plan concern; the spec's requirement is that the precedence logic exists once and the buckets derive from it.
@@ -289,6 +291,7 @@ The two former Critical questions (the `PrListItem` CI rollup and the per-source
 ## References
 
 - Issue #1672 (amended 2026-09-10) and main's routing comment (2026-09-29): the requirements.
+- Lane Card design canvas (owner's visual design): https://claude.ai/artifact/7ovAzkJbDCMpRBoWSk8dt9 (six artboards: Main, BallStates, CliCard, VSCodePanel, DataFlow). This spec matches it on the six zones, the core ball-owner states and precedence, both CLI renderers, the #1049 strip, and the data plane, with the deliberate divergences noted in the ball-owner section.
 - #1049: the VS Code contextual bottom panel (the VS Code host surface).
 - #1553: the panel's Attention fallback (the card's per-lane refinement host).
 - #1595: attention states (working / needs-input / idle / dead), **absorbed** by this issue; re-scoped at spec time.
