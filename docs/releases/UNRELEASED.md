@@ -49,6 +49,8 @@ Opening an untrusted folder no longer leaves the Codev sidebar inert until you t
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
 
+- **Block navigation on the artifact canvas no longer skips the first item of a list or blockquote** (#1738, PR #1741). Stepping one block at a time (the Stream Deck fine-review dial, or `n`/`p` across marked blocks) used to jump the whole list and land on the second item, and a marker on a first list item decorated the entire list. Every first child is now individually navigable and markable, the same as items two onward. Tables keep their existing behaviour for now.
+
 ## Breaking changes
 
 None.
