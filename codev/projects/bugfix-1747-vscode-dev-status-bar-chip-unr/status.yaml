@@ -1,0 +1,14 @@
+id: bugfix-1747
+title: vscode-dev-status-bar-chip-unr
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-28T23:26:33.170Z'
+updated_at: '2026-09-28T23:26:33.172Z'
