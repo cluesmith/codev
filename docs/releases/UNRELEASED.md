@@ -33,6 +33,10 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Codev works in Restricted Mode
+
+Opening an untrusted folder no longer leaves the Codev sidebar inert until you trust the workspace (#1727, PR #1728). The extension activates immediately in Restricted Mode, and only four workspace-scoped settings that could redirect Tower or launch a process (Tower host and port, workspace path, auto-start) are held back until the folder is trusted. Your user-level values for those settings still apply.
+
 ## Polish
 
 <!-- Small vscode items as bullets:

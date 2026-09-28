@@ -4,6 +4,8 @@
 
 ### What's new
 
+- **Codev now activates in Restricted Mode.** Opening an untrusted folder used to leave the Codev sidebar inert and the status-bar item missing until you trusted the workspace, with Codev listed among the disabled extensions in the trust dialog. The extension now declares limited support for untrusted workspaces and activates immediately. Four settings a cloned repository could use to redirect or launch things (`codev.towerHost`, `codev.towerPort`, `codev.workspacePath`, `codev.autoStartTower`) are marked restricted: their workspace-scope values are ignored until the folder is trusted, and your user-level values apply instead. Everything else works as before.
+
 - **Cycle through agent terminals from the keyboard.** `ctrl+alt+n` / `ctrl+alt+p` move focus through the sidebar's Agents order: architects and builders exactly as the sidebar lists them. An agent whose terminal cannot open is skipped, so a dead session never wedges the cycle.
 
 ### Fixes
