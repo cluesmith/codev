@@ -1,7 +1,7 @@
 id: '1743'
 title: vscode-setting-to-stop-a-build
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-28T20:42:27.189Z'
-updated_at: '2026-09-28T20:42:27.190Z'
+updated_at: '2026-09-28T20:50:09.997Z'
