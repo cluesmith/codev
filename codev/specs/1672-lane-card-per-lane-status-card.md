@@ -70,11 +70,11 @@ First match wins. The chain is exhaustive: a lane always resolves to exactly one
 | T | `DONE` | Phase is a terminal completion state (for example `complete` / `verified` / merged), with no pending gate or held mail. Completed lanes exit here rather than falling to `STALLED?`. |
 | T | `OFFLINE` | The lane's shellper is gone (no live PTY / `lastDataAt` absent past a liveness bound) while the phase is not a completion state. This is the #1595 `dead` state. It is a liveness fact, distinct from `STALLED?` (which is about produced artifacts). |
 
-`DONE` and `OFFLINE` are terminal/liveness outcomes evaluated within the same single computation; the table lists all reachable states so no lane is unclassified. Secondary conditions (for example held mail while at a gate) render as small badges beside the primary chip.
+`DONE` and `OFFLINE` are terminal/liveness outcomes evaluated within the same single computation; the table lists all reachable states so no lane is unclassified. Secondary conditions (for example held mail while at a gate) render as small badges beside the primary chip. The display labels above (`WAITING ON YOU`, `STALLED?`, and the rest) are presentation; the wire value is the lowercase-kebab `ballOwner.state` union (`'waiting-on-you'`, `'stalled'` with no question mark, and so on), and the uppercasing and the question mark are added by renderers.
 
 ### One computation, many renderers (disposition of the existing helpers)
 
-The precedence chain lives in exactly one SDK-side module, near where `compareAttention` (#1566) will live (`packages/sdk/src/builder-helpers.ts`). Tower calls it once during assembly and serves the result on `LaneCard`; the CLI and VS Code renderers consume that JSON. The existing `deriveAttention` / `isIdleWaiting` are **not** deleted and their five call sites are **not** rewritten by this lane; they are re-expressed as **projections over the one precedence module** (for example "idle waiting" becomes a view of the module's output), so there is a single source of the "whose move" answer and no competing computation. The exact re-expression is a plan concern; the spec's requirement is that the precedence logic exists once and the buckets derive from it.
+The precedence chain lives in exactly one SDK-side module, co-located near where `compareAttention` (#1566) will live (`packages/sdk/src/builder-helpers.ts`), with no import dependency on #1566's unmerged code. The module is **pure data-in / verdict-out**: it takes the fused inputs and returns a verdict, keeping `@cluesmith/codev-sdk` environment-agnostic (zero runtime deps, no `node:*`), so the existing sdk boundary tests stay green. Tower calls it once during assembly and serves the result on `LaneCard`; the CLI and VS Code renderers consume that JSON. The existing `deriveAttention` / `isIdleWaiting` are **not** deleted and their five call sites are **not** rewritten by this lane; they are re-expressed as **projections over the one precedence module** (for example "idle waiting" becomes a view of the module's output) in a way that preserves observable behavior, so the existing `builder-helpers` tests keep passing unmodified. The exact re-expression is a plan concern; the spec's requirement is that the precedence logic exists once and the buckets derive from it.
 
 ### Draft `LaneCard` wire shape (contract surface; for main to ratify)
 
@@ -86,7 +86,9 @@ LaneCard {
   protocol: string
   issue: { number: number | null; title: string | null }
   ballOwner: {
-    state: 'WAITING_ON_YOU' | 'HELD' | 'EXTERNAL' | 'AGENT_WORKING' | 'STALLED' | 'DONE' | 'OFFLINE'
+    // Wire value is lowercase kebab; 'stalled' carries no question mark on the wire.
+    // Presentation (uppercase chips, the STALLED? question mark) belongs to renderers.
+    state: 'waiting-on-you' | 'held' | 'external' | 'agent-working' | 'stalled' | 'done' | 'offline'
     reason: string            // e.g. "pr gate", "CI pending"
     sinceMs: number | null    // age of the condition
     badges: string[]          // secondary conditions
@@ -100,7 +102,10 @@ LaneCard {
     merged: boolean
     phaseArtifactDisagreement: boolean   // porch phase vs merged PR, etc.
   }
-  now: { text: string; ageMs: number; selfReported: true } | null
+  // Self-reported fields on this type: `now` and `beats` (documented in the type's
+  // doc comment). Renderers know which fields are self-reported by the field, not by a
+  // per-field flag, so no `selfReported` marker rides the wire.
+  now: { text: string; ageMs: number } | null
   beats: { heading: string; ageMs: number | null }[]
   freshness: {
     forge: { status: 'ok' | 'rate-limited' | 'unavailable'; ageMs: number | null }
@@ -175,18 +180,28 @@ The issue body carries no heading literally named "Baked Decisions", but its **G
 11. **Renderers consume the same JSON**: CLI (`afx card`, attach banner, `afx status --cards`), VS Code (compact strip in the #1049 panel), dashboard/cloud (a later follow-up).
 12. **Lane-brief rulings.** (a) #1672 ships **alone**; #1674 (last-ask capture) is a companion lane and is not folded in; the card must render gracefully with the last-ask field absent, treated as a first-class test from day one. (b) The state module lands near pir-1566's `compareAttention` in `packages/sdk/src/builder-helpers.ts` (branch `builder/pir-1566`, currently unmerged). (c) The card row and a future #1729 park chip must have a defined coexistence rule (design for it; do not build it). (d) Any spec/plan section touching `packages/types`, `packages/sdk`, `packages/core`, or Tower endpoints is main's contract surface and is flagged for routing to main before the plan gate. (e) File fence: pir-1566 owns `apps/vscode` `views/tower*.ts`, `workspace-label.ts`, `fleet-order.ts`, `attention-format.ts`, `switch-workspace.ts`, `icons/tower.svg`; this lane does not edit them. (f) spec-approval and plan-approval are the owner's alone.
 
+### Main's contract-seat rulings (2026-09-29, fixed)
+
+Main ruled on all five contract-surface items and verified the rebuttal's code claims against main. These are settled:
+
+- **(a) `LaneCard` wire shape ratified**, with the amendments already reflected in the draft above: the `ballOwner.state` union is lowercase kebab (`'stalled'`, no question mark; presentation belongs to renderers); no `selfReported` field on the wire (the self-reported set is documented in the type's doc comment); `ci` is non-null with an `'unknown'` state; the reserved optional `lastAsk` (#1674) and `park` (#1729) are approved, absent until their lanes. `LaneCard` lands in `@cluesmith/codev-types`, wire contract only.
+- **(b) SDK module placement ratified**, with the constraints already reflected above: co-located near `compareAttention` with no import dependency on #1566's unmerged code (whichever lane merges second rebases trivially; do not block on #1566); pure data-in / verdict-out so `@cluesmith/codev-sdk` stays environment-agnostic and its boundary tests stay green; projections preserve observable behavior so the existing `builder-helpers` tests pass unmodified and the five live consumer files are untouched by this lane.
+- **(c) Tower endpoint home corrected**: the endpoint and its assembly live in `packages/codev` (`agent-farm/servers/`), which already depends on `@cluesmith/codev-sdk`, so Tower calling the sdk precedence module is legal and precedented there. `packages/core` must **not** import `codev-sdk` (the #1189 mutual exclusion). The path `GET /workspace/:ws/api/lane/:id/card` is confirmed (the `api/` prefix is load-bearing); bounded watchers with an on-demand fallback are approved; `:id` validated against the registered lane set is approved.
+- **(d) OQ1 resolved (CI rollup): approved with bounds.** `PrListItem` gains an **optional** `ci` field; absent means renderers show `'unknown'`, so the GitLab / Gitea / Linear scripts need zero change initially. The GitHub `pr-list.sh` extends `--json` with `statusCheckRollup` and **reduces in-script with `jq`** to the compact rollup matching the wire draft (raw per-check arrays never cross the contract, which bounds the payload hazard to the `gh`-to-`jq` pipe), keeping the capture-then-pipe shape and the `# forge-executable: gh` declaration; `forge.test.ts` is re-run after the shape change (the #1645 builtin test fails otherwise). It rides the existing cached `pr-list` invocation (no new call); any GraphQL point-cost rise surfaces through the #1647 / #1650 telemetry and is watched at review time, not pre-optimized.
+- **(e) OQ2 resolved (per-source freshness): approved with one semantic pin.** `OverviewData` exposes a per-source `fetchedAt` as **epoch ms**; Tower converts it to `ageMs` at card assembly (`ageMs` does not ride `OverviewData`, since it goes stale in transit). `fetchedAt` is when the served data was last successfully fetched; a negative-cache failure window must **not** advance it (failure signal stays on `forgeStatus`), which yields an honest "gh 40s" even during rate-limit windows. The wire change lands in `@cluesmith/codev-types` alongside `LaneCard`.
+
 ### Technical constraints grounded in the current code
 
-- **CI rollup is not in the forge contract today** and the forge is reached through per-forge shell scripts, not a Codev-owned GraphQL query. Showing "CI 7/7" requires adding a status-check rollup field to `PrListItem` (`forge-contracts.ts`) and to the GitHub `pr-list.sh` `--json` selection (preserving the #1645 capture-then-pipe shape), plus a ruling on what non-GitHub presets (GitLab `head_pipeline`, Gitea) emit versus an explicit "GitHub-first, others report unknown" carve-out. This is the central open design choice (see Solution Approaches) and is contract surface for main.
+- **CI reaches the card by extending the forge contract** (per main's ruling (d) above): an optional `ci` on `PrListItem`, GitHub `pr-list.sh` reducing `statusCheckRollup` in-script to the compact rollup. Non-GitHub presets report `'unknown'` until they gain an equivalent.
 - **Merged-PR facts come from `MergedPrItem`**, a separate cached concept from open `pr-list`. The phase/artifact disagreement case reads both.
-- **Precise forge age ("gh 40s") is not on the wire today.** Surfacing it requires exposing a per-source fetched-at through the OverviewCache/`OverviewData` (contract surface); absent that, freshness degrades to `forgeStatus` only.
+- **Precise forge age ("gh 40s") reaches the card via the per-source `fetchedAt`** exposed on `OverviewData` (per main's ruling (e) above), converted to `ageMs` at assembly, honest through rate-limit windows.
 - **The ball-owner / `compareAttention` module does not exist yet.** This spec introduces it. It must supersede #1595's four lifecycle states, including a terminal-liveness `OFFLINE` (#1595 `dead`) state.
 - **The card endpoint is keyed by placing it under the workspace `api/` namespace** (`/workspace/:ws/api/...`); a non-`api/` workspace subpath is public by `isPublicRoute`'s static-asset rule (`packages/codev/src/agent-farm/utils/server-utils.ts`), so the `api/` prefix is load-bearing, not cosmetic.
 - **`@cluesmith/codev-types` is wire-contracts-only.** The ball-owner computation lives in `@cluesmith/codev-sdk`, not in types.
 
 ### EXTERNAL and STALLED? defaults (so criteria are testable)
 
-- **EXTERNAL fallback**: if no existing signal for "consult lanes in flight" is found (Open Question 5), `EXTERNAL` means **CI-pending on the linked PR only**. The card ships with that scope; consult-lane detection is a later enhancement if a signal appears.
+- **EXTERNAL fallback**: if no existing signal for "consult lanes in flight" is found (Open Question 3), `EXTERNAL` means **CI-pending on the linked PR only**. The card ships with that scope; consult-lane detection is a later enhancement if a signal appears.
 - **STALLED? default threshold**: a single default (proposed: no produced-artifact movement for longer than the existing idle waiting threshold, `IDLE_WAITING_THRESHOLD_MS`, currently 5 minutes) so the state is testable at plan time. Protocol-aware tuning (a spec phase produces differently than an implement phase) is a follow-up.
 
 ### Fence (do-not-edit) and cross-lane sequencing
@@ -195,7 +210,7 @@ The issue body carries no heading literally named "Baked Decisions", but its **G
 
 ## Assumptions
 
-- **pir-1566 lands first, or its module home is stable.** The ball-owner module is placed near `compareAttention` in `packages/sdk/src/builder-helpers.ts`. If 1566 has not merged when this lane's plan starts, the plan sequences against it (this lane does not edit 1566-owned files).
+- **No dependency on pir-1566's unmerged code.** The ball-owner module is co-located near `compareAttention` in `packages/sdk/src/builder-helpers.ts` but does not import 1566's unmerged code; whichever of #1566 and #1672 merges second rebases trivially. This lane does not block on #1566 and does not edit 1566-owned files.
 - **The OverviewCache remains the sole forge path.** Any freshness or CI need that requires new fields is met by extending the OverviewCache/contract (flagged to main), never by a new forge call from the card.
 - **Thread entries continue to be builder-authored prose**; the timestamped-heading and `Now:` line are a documented convention, not an enforced schema, and the card tolerates their absence.
 - **#1674 (last-ask) and #1729 (park) are not delivered here**; the `LaneCard` shape reserves optional `lastAsk` and `park` fields so the companion lanes slot in without a re-cut.
@@ -204,7 +219,7 @@ The issue body carries no heading literally named "Baked Decisions", but its **G
 
 The architecture is largely fixed by the Baked Decisions (SDK-side state SSOT, Tower fusion, keyed endpoint, OverviewCache-only forge, CLI-first renderers). The genuinely open space is **how the CI rollup reaches the card**, given that it is not in the forge contract today and the forge is reached through cross-forge shell scripts. This drives whether the v1 card matches the mockup's "CI 7/7" line.
 
-### Approach 1: Extend the forge contract with a CI rollup (recommended, with a fallback)
+### Approach 1: Extend the forge contract with a CI rollup (selected by main)
 
 Add a status-check rollup to `PrListItem` and to the GitHub `pr-list.sh` `--json` selection (preserving the #1645 shape), surfaced through the OverviewCache so CI reaches the card with no new forge call (it rides the existing cached `pr-list` fetch). Non-GitHub presets report the field as `unknown` under an explicit, contract-documented carve-out until they gain an equivalent.
 
@@ -212,7 +227,7 @@ Add a status-check rollup to `PrListItem` and to the GitHub `pr-list.sh` `--json
 - **Cons**: touches the cross-forge `PrListItem` contract and the GitHub script (contract surface + forge-quota and payload sensitive: `statusCheckRollup` is a nested per-check selection across all open PRs, so the real hazard is response/node-limit growth on a large PR list, not an extra request). Needs main's review and a GitLab/Gitea ruling.
 - **Risk/complexity**: moderate, concentrated in the forge-contract change and its cross-forge story.
 
-### Approach 2: Minimal-contract fusion, CI deferred to a follow-up
+### Approach 2: Minimal-contract fusion, CI deferred (documented fallback, no longer needed)
 
 The v1 card renders only fields already in the forge contract (PR number, review decision, branch, commit age, held, phase/gate). CI is a first-class absent field (rendered `unknown`, like the last-ask absent case) and added once the contract extension is agreed.
 
@@ -220,30 +235,27 @@ The v1 card renders only fields already in the forge contract (PR number, review
 - **Cons**: the v1 card does not show CI, so it does not fully match the mockup; introduces a visible `unknown` that must later be filled.
 - **Risk/complexity**: low.
 
-**Recommendation: Approach 1**, because CI rollup is part of "judge the lane by what it produced" and it rides an existing call. Because the change is cross-forge contract surface and payload-sensitive, it is flagged for main at the spec gate, with **Approach 2 as the pre-agreed fallback** if main declines: CI then ships as a first-class `unknown` field and follows later. Everything downstream of the data source (state module, Tower endpoint, renderers) is identical between the two approaches, so the fallback costs no rework.
+**Approach 1 is the selected approach** (ruled by main, 2026-09-29; see Main's contract-seat rulings (d)): CI rollup is part of "judge the lane by what it produced" and it rides the existing cached call, with `statusCheckRollup` reduced in-script so raw per-check arrays never cross the contract. **Approach 2 remains documented as the fallback that is no longer needed**: the two approaches are identical downstream of the data source (state module, Tower endpoint, renderers), so had CI been declined the card would have shipped it as a first-class `'unknown'` field with zero downstream rework.
 
 ## Open Questions
 
-**Critical (blocks progress):**
-
-1. May `PrListItem` gain a CI status-check rollup field, with the GitHub `pr-list.sh` extended (preserving the #1645 shape) and a **GitHub-first, non-GitHub-reports-unknown** carve-out accepted (Approach 1), or is CI deferred (Approach 2)? This is cross-forge contract surface for main and gates the artifact-state zone.
-2. May the OverviewCache/`OverviewData` expose a per-source `fetchedAt` so the card can show a precise forge age ("gh 40s")? If not, freshness degrades to `forgeStatus` only. Contract surface for main.
+The two former Critical questions (the `PrListItem` CI rollup and the per-source `fetchedAt`) were resolved by main on 2026-09-29 and are now recorded under Main's contract-seat rulings (d) and (e) in Constraints.
 
 **Important (shapes design):**
 
-3. Confirm the `STALLED?` default threshold (proposed: `IDLE_WAITING_THRESHOLD_MS`, currently 5 minutes, on produced-artifact movement) and whether it should be protocol-aware in v1 or deferred.
-4. Coexistence of the ball-owner chip and a #1729 park chip in one row: a leading park badge that visually pre-empts the computed chip while preserving the computed value beneath (honoring "disagreement is rendered"), versus park replacing the chip. This spec proposes the former; the plan wires the reserved `park` field only.
-5. Is there any existing signal for "consult lanes in flight" that `EXTERNAL` can use without a new data source? If not, `EXTERNAL` is CI-pending-only (the stated fallback).
-6. How are `OFFLINE` / dead lanes discovered for the fleet view, given that the live overview may filter them out? (The card must be reachable for a lane whose shellper is gone.)
+1. Confirm the `STALLED?` default threshold (proposed: `IDLE_WAITING_THRESHOLD_MS`, currently 5 minutes, on produced-artifact movement) and whether it should be protocol-aware in v1 or deferred.
+2. Coexistence of the ball-owner chip and a #1729 park chip in one row: a leading park badge that visually pre-empts the computed chip while preserving the computed value beneath (honoring "disagreement is rendered"), versus park replacing the chip. This spec proposes the former; the plan wires the reserved `park` field only.
+3. Is there any existing signal for "consult lanes in flight" that `EXTERNAL` can use without a new data source? If not, `EXTERNAL` is CI-pending-only (the stated fallback).
+4. How are `OFFLINE` / dead lanes discovered for the fleet view, given that the live overview may filter them out? (The card must be reachable for a lane whose shellper is gone.)
 
 **Nice-to-know (optimization):**
 
-7. Whether `afx status --cards` eventually becomes the default `afx status` output, or stays behind the flag.
-8. Whether the attach-time banner is shown once on attach or refreshes.
+5. Whether `afx status --cards` eventually becomes the default `afx status` output, or stays behind the flag.
+6. Whether the attach-time banner is shown once on attach or refreshes.
 
 ## Test Scenarios
 
-- **Happy path, CLI**: a live BUGFIX lane at the `pr` gate with an open PR renders all six zones; ball chip is `WAITING ON YOU` with `pr gate <age>`; artifact zone shows PR number, review-requested, and CI (Approach 1) or an explicit CI `unknown` (Approach 2).
+- **Happy path, CLI**: a live BUGFIX lane at the `pr` gate with an open GitHub PR renders all six zones; ball chip is `WAITING ON YOU` with `pr gate <age>`; artifact zone shows PR number, review-requested, and the CI rollup. On a non-GitHub forge (or when the rollup is absent), CI renders as an explicit `unknown`.
 - **Computed-never-authored**: a lane whose latest `Now:` line asserts completion while its `pr` gate is requested-and-unapproved renders `WAITING ON YOU`.
 - **AGENT WORKING vs STALLED? boundary**: a lane whose phase is implementing, whose composer is emitting output (fresh `lastDataAt`), but whose last commit and last thread write are older than the threshold renders `STALLED?`, not `AGENT WORKING`.
 - **Completed lane**: a `verified`/`complete` lane with no pending gate or held mail renders `DONE`, not `STALLED?`.
@@ -264,7 +276,7 @@ The v1 card renders only fields already in the forge contract (PR number, review
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| The forge-contract CI change grows response payload / node limits on large open-PR lists, or is bigger than estimated across forges | Medium | High (quota/perf regression; #1652 lineage) | Confirm with main; measure payload on a large PR list; GitHub-first carve-out; Approach 2 fallback needs no downstream rework |
+| The forge-contract CI change grows response payload / GraphQL point cost on large open-PR lists | Medium | High (quota/perf regression; #1652 lineage) | In-script `jq` reduction so raw per-check arrays never cross the contract (bounds the hazard to the `gh`-to-`jq` pipe); point cost watched via #1647 / #1650 telemetry at review time, not pre-optimized (per main's ruling) |
 | Card endpoint exposed unauthenticated via the wrong route shape | Low | High (leaks lane/forge data) | Route under `/workspace/:ws/api/...` (keyed by `isPublicRoute`); explicit unauthenticated-rejection test |
 | Path traversal / authored-text injection through `:id`, `:ws`, or `Now:`/beat prose | Medium | High | Validate `:id` against the registered lane set; never interpolate into a path; HTML-escape and strip control sequences before render; dedicated tests |
 | A second "whose move" computation creeps in (card vs #1595 vs #1594) | Medium | High (answers disagree within a week) | One SDK-side module owns the precedence chain; existing helpers become projections; review-enforced; #1595 re-scoped, not re-implemented |
