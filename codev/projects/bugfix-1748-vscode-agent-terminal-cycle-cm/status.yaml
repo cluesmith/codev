@@ -1,0 +1,14 @@
+id: bugfix-1748
+title: vscode-agent-terminal-cycle-cm
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-28T23:30:43.780Z'
+updated_at: '2026-09-28T23:30:43.780Z'
