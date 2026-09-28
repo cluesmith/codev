@@ -34,3 +34,12 @@ Now: spec-approval gate REQUESTED (head 83d5acc0b); stopped, awaiting the owner'
 - Consultation resolved in one iteration: revised the spec to fold in all consensus fixes, wrote the rebuttal, porch advanced straight to the gate (no iter2 needed).
 - Sent the gate message to architect:vscode with head SHA + what to eyeball + the five contract-surface flags (LaneCard type, sdk module placement + helper-projection disposition, Tower endpoint, OQ1 forge CI field, OQ2 per-source fetchedAt) for routing to main before the plan gate.
 - NOT inferring approval from silence. Will run `porch approve 1672 spec-approval` only on the architect's relayed owner word. Still owe the #1595 re-scope comment (will post on ruling or if asked).
+
+## 2026-09-29 — spec review fix + #1595 proposal (pre-gate)
+
+Now: applied architect:vscode's one pre-gate fix (head 2441a0d6d, pushed) and posted the #1595 re-scope proposal; waiting on main's OQ1/OQ2 answers + the owner's gate word before starting the plan.
+
+- Architect verified my four load-bearing code claims against main (isPublicRoute api/ rule, private CacheEntry.fetchedAt, IDLE_WAITING_THRESHOLD_MS=5min, gh pr list --json field set). All held.
+- Fix: rebuttal item 10 over-claimed a lane->PR resolution rule the spec text lacked. Added it as its own bullet in "Renderers and endpoint" (linked-issue match against OverviewCache open-PR set; no-match => no-PR zone + ci unknown; merged via MergedPrItem, which also drives the disagreement render). Touched nothing else. Committed + pushed; new head 2441a0d6d.
+- #1595 proposal posted (issuecomment-5878360367), marked "proposal, pending owner ruling". Proposes a SPLIT: #1672 absorbs the single whose-move computation + state enum (satisfies #1595 constraints 2-enum and 4); #1595 narrows to the harness lifecycle-hook DATA SOURCE (Stop/UserPromptSubmit/Notification/PermissionRequest reporter, PID liveness, global.db state rows, HarnessProvider neutrality) which #1672 does NOT build. Avoids double-build without prematurely closing #1595.
+- Architect is routing my five contract-surface items to main now. HARD CONSTRAINT: do not start the plan until BOTH main's OQ1/OQ2 answers land AND the owner's spec-gate word arrives (relayed by architect:vscode). Not inferring approval from silence; I run porch approve on the relayed word.
