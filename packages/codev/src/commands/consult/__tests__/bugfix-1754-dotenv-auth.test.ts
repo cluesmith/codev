@@ -43,6 +43,15 @@ vi.mock('@openai/codex-sdk', () => {
   return { Codex: MockCodex };
 });
 
+let recordedMetrics: Array<Record<string, unknown>> = [];
+
+vi.mock('../metrics.js', () => ({
+  MetricsDB: class {
+    record(row: Record<string, unknown>) { recordedMetrics.push(row); }
+    close() {}
+  },
+}));
+
 const {
   _loadDotenv,
   runClaudeConsultation,
@@ -73,6 +82,7 @@ beforeEach(() => {
   savedEnv = Object.fromEntries(CREDENTIAL_KEYS.map((k) => [k, process.env[k]]));
   for (const k of CREDENTIAL_KEYS) delete process.env[k];
   mockClaudeOptions = undefined;
+  recordedMetrics = [];
   mockClaudeMessages = [
     { type: 'assistant', message: { content: [{ text: 'LGTM' }] } },
     { type: 'result', subtype: 'success', is_error: false, result: 'LGTM' },
@@ -148,7 +158,10 @@ describe('an is_error result fails the claude lane instead of passing as a revie
     // afterwards: consult must fail on the result itself, not on the SDK's exit-code rethrow.
     mockClaudeMessages = [
       { type: 'assistant', error: 'rate_limit', message: { content: [{ text: LIMIT_TEXT }] } },
-      { type: 'result', subtype: 'success', is_error: true, result: LIMIT_TEXT },
+      {
+        type: 'result', subtype: 'success', is_error: true, result: LIMIT_TEXT,
+        total_cost_usd: 0.42, usage: { input_tokens: 1200, output_tokens: 30, cache_read_input_tokens: 800 },
+      },
     ];
   });
 
@@ -160,8 +173,22 @@ describe('an is_error result fails the claude lane instead of passing as a revie
     const run = runClaudeConsultation('q', 'role', tmpDir, outputPath);
 
     await expect(run).rejects.toThrow(LIMIT_TEXT);
-    await expect(run).rejects.toThrow('authenticated with CLAUDE_CODE_OAUTH_TOKEN (from .env)');
+    await expect(run).rejects.toThrow('Credential in use: CLAUDE_CODE_OAUTH_TOKEN (from .env)');
     expect(existsSync(outputPath)).toBe(false);
+  });
+
+  it('records the tokens and cost the failed run spent', async () => {
+    const metricsCtx = {
+      timestamp: '2026-09-29T00:00:00.000Z', model: 'claude', reviewType: 'pr', subcommand: 'pr',
+      protocol: 'bugfix', projectId: 'bugfix-1754', workspacePath: tmpDir,
+    };
+
+    await expect(runClaudeConsultation('q', 'role', tmpDir, undefined, metricsCtx)).rejects.toThrow(LIMIT_TEXT);
+
+    expect(recordedMetrics).toHaveLength(1);
+    expect(recordedMetrics[0]).toMatchObject({
+      exitCode: 1, costUsd: 0.42, inputTokens: 1200, outputTokens: 30, cachedInputTokens: 800,
+    });
   });
 
   it('removes a stale review left by an earlier run of the same iteration', async () => {

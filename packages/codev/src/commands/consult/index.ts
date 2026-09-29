@@ -839,10 +839,12 @@ export async function runClaudeConsultation(
         if (message.subtype === 'success' && message.is_error) {
           // The final assistant message was an API error (usage limit, billing, auth), so its text
           // is the error, not a review. The SDK throws after this only if the subprocess exits
-          // non-zero, so this check doesn't rely on that (#1754).
+          // non-zero, so this check doesn't rely on that (#1754). The run still spent tokens, so
+          // keep the result for the metrics row.
+          sdkResult = message as unknown as SDKResultLike;
           errorMessage = `Claude returned an error instead of a review: ${message.result}`.substring(0, 500);
           exitCode = 1;
-          throw new Error(`${errorMessage}\nThe claude lane authenticated with ${auth}.`);
+          throw new Error(`${errorMessage}\nCredential in use: ${auth}`);
         } else if (message.subtype === 'success') {
           sdkResult = message as unknown as SDKResultLike;
         } else {
