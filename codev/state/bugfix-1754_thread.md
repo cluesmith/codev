@@ -77,3 +77,14 @@ worktree carries many `codev/projects/*` dirs, so the builder needs `--project-i
 Left out of scope (flagged to the architect): `codev/resources/arch.md` (~line 2001) and
 `cloud-instances.md` still list `OPENAI_API_KEY` for codex. The arch.md table is stale overall
 (pre-SDK CLI wiring), which is MAINTAIN territory.
+
+## Integration review (2026-09-29)
+
+Architect verdict COMMENT. Both requested changes are in `c8441cf83`:
+- `sdkResult` is now assigned before the `is_error` throw, so metrics keep the tokens and cost.
+  New test; it fails without that line.
+- The auth sentence is now context, not cause: `Credential in use: <VAR> (from …)`.
+
+Declined the optional change (return the key set from `loadDotenv` instead of a module-global):
+threading it through the dispatcher and both exported runners would be churn only for tests.
+Full suite: 309 files / 6204 tests pass.
