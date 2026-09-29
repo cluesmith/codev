@@ -215,6 +215,13 @@ function resolveProtocolPrompt(workspaceRoot: string, protocol: string | undefin
 }
 
 /**
+ * Keys this process took from `<workspace>/.env` rather than the shell. `process.env` cannot say
+ * where a value came from, and a credential injected from `.env` silently outranks the stored
+ * login — so the lanes' auth lines read this to name the file (#1754).
+ */
+const dotenvKeys = new Set<string>();
+
+/**
  * Load .env file if it exists
  */
 function loadDotenv(workspaceRoot: string): void {
@@ -241,8 +248,14 @@ function loadDotenv(workspaceRoot: string): void {
     // Only set if not already in environment
     if (!(key in process.env)) {
       process.env[key] = value;
+      dotenvKeys.add(key);
     }
   }
+}
+
+/** `KEY (from .env)` or `KEY (from shell)`. */
+function credentialOrigin(key: string, fromDotenv: ReadonlySet<string>): string {
+  return `${key} (from ${fromDotenv.has(key) ? '.env' : 'shell'})`;
 }
 
 /**
@@ -586,6 +599,15 @@ function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice)
 }
 
 /**
+ * Name the credential the codex lane authenticates with. The Codex SDK hands `process.env` to its
+ * subprocess, and `CODEX_API_KEY` there overrides the stored ChatGPT login. `OPENAI_API_KEY` does
+ * not — codex ignores it for auth — so it is deliberately not reported (#1754).
+ */
+export function describeCodexAuth(env: NodeJS.ProcessEnv, fromDotenv: ReadonlySet<string>): string {
+  return env.CODEX_API_KEY ? credentialOrigin('CODEX_API_KEY', fromDotenv) : 'stored codex login (no CODEX_API_KEY)';
+}
+
+/**
  * Run Codex consultation via @openai/codex-sdk.
  * Mirrors runClaudeConsultation() — streams events, captures usage, records metrics.
  */
@@ -609,6 +631,8 @@ export async function runCodexConsultation(
   let usageData: UsageData | null = null;
   let errorMessage: string | null = null;
   let exitCode = 0;
+
+  console.error(`[CODEX] auth: ${describeCodexAuth(process.env, dotenvKeys)}`);
 
   // Write role to temp file — SDK requires file path for instructions
   const tempFile = path.join(tmpdir(), `codev-role-${Date.now()}.md`);
@@ -728,6 +752,28 @@ export function buildClaudeConsultEnv(
   return env;
 }
 
+// Claude Code's authentication precedence, highest first: a cloud-provider switch, then these
+// credential variables, then the stored login (keychain / apiKeyHelper).
+const CLAUDE_PROVIDER_SWITCHES = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY'];
+const CLAUDE_CREDENTIAL_VARS = ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+
+/**
+ * Name the credential the claude lane's subprocess authenticates with, and where it came from.
+ *
+ * Takes the env `buildClaudeConsultEnv` produced — not `process.env` — so an OAuth token that
+ * caused the API key to be stripped is reported as the winner, exactly as the SDK will see it.
+ * Without this line a `.env` token for another org fails as "usage limit" with no hint that the
+ * keychain login was never used (#1754).
+ */
+export function describeClaudeAuth(env: Record<string, string>, fromDotenv: ReadonlySet<string>): string {
+  // Claude Code reads a provider switch as on only for these values.
+  const provider = CLAUDE_PROVIDER_SWITCHES.find(
+    (key) => ['1', 'true', 'yes', 'on'].includes((env[key] ?? '').trim().toLowerCase()),
+  );
+  const credential = provider ?? CLAUDE_CREDENTIAL_VARS.find((key) => env[key]);
+  return credential ? credentialOrigin(credential, fromDotenv) : 'stored claude login (no credential env var)';
+}
+
 /**
  * Run Claude consultation via Agent SDK.
  * Uses the SDK's query() function instead of CLI subprocess.
@@ -757,6 +803,8 @@ export async function runClaudeConsultation(
   delete process.env.CLAUDECODE;
 
   const env = buildClaudeConsultEnv(process.env);
+  const auth = describeClaudeAuth(env, dotenvKeys);
+  console.error(`[CLAUDE] auth: ${auth}`);
 
   try {
     const session = claudeQuery({
@@ -784,7 +832,14 @@ export async function runClaudeConsultation(
         }
       }
       if (message.type === 'result') {
-        if (message.subtype === 'success') {
+        if (message.subtype === 'success' && message.is_error) {
+          // The final assistant message was an API error (usage limit, billing, auth), so its text
+          // is the error, not a review. The SDK throws after this only if the subprocess exits
+          // non-zero, so this check doesn't rely on that (#1754).
+          errorMessage = `Claude returned an error instead of a review: ${message.result}`.substring(0, 500);
+          exitCode = 1;
+          throw new Error(`${errorMessage}\nThe claude lane authenticated with ${auth}.`);
+        } else if (message.subtype === 'success') {
           sdkResult = message as unknown as SDKResultLike;
         } else {
           const errors = 'errors' in message ? (message as { errors: string[] }).errors : [];
@@ -2507,5 +2562,6 @@ export {
   MODEL_CONFIGS as _MODEL_CONFIGS,
   MODEL_ALIASES as _MODEL_ALIASES,
   runAgyConsultation as _runAgyConsultation,
+  loadDotenv as _loadDotenv,
   agySkipContent as _agySkipContent,
 };
