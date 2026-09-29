@@ -752,9 +752,13 @@ export function buildClaudeConsultEnv(
   return env;
 }
 
-// Claude Code's authentication precedence, highest first: a cloud-provider switch, then these
-// credential variables, then the stored login (keychain / apiKeyHelper).
-const CLAUDE_PROVIDER_SWITCHES = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY'];
+// Claude Code's authentication precedence, highest first: a cloud-provider switch (in the order
+// the bundled CLI resolves them), then these credential variables, then the stored login
+// (keychain / apiKeyHelper).
+const CLAUDE_PROVIDER_SWITCHES = [
+  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_ANTHROPIC_AWS',
+  'CLAUDE_CODE_USE_MANTLE', 'CLAUDE_CODE_USE_VERTEX',
+];
 const CLAUDE_CREDENTIAL_VARS = ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
 /**

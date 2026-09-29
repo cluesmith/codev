@@ -53,7 +53,8 @@ const {
 
 const CREDENTIAL_KEYS = [
   'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
-  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY',
+  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_ANTHROPIC_AWS',
+  'CLAUDE_CODE_USE_MANTLE', 'CLAUDE_CODE_USE_VERTEX',
   'CODEX_API_KEY', 'OPENAI_API_KEY',
 ];
 
@@ -113,6 +114,11 @@ describe('the claude lane names its credential source (#1754)', () => {
       .toBe('ANTHROPIC_AUTH_TOKEN (from shell)');
     expect(describeClaudeAuth({ CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_API_KEY: 'k' }, none))
       .toBe('CLAUDE_CODE_USE_BEDROCK (from shell)');
+    // Every provider the bundled CLI recognises, resolved in its order.
+    expect(describeClaudeAuth({ CLAUDE_CODE_USE_MANTLE: 'true', CLAUDE_CODE_OAUTH_TOKEN: 't' }, none))
+      .toBe('CLAUDE_CODE_USE_MANTLE (from shell)');
+    expect(describeClaudeAuth({ CLAUDE_CODE_USE_VERTEX: '1', CLAUDE_CODE_USE_ANTHROPIC_AWS: '1' }, none))
+      .toBe('CLAUDE_CODE_USE_ANTHROPIC_AWS (from shell)');
     // Claude Code reads "0" as off, so it must not be reported as the provider.
     expect(describeClaudeAuth({ CLAUDE_CODE_USE_BEDROCK: '0' }, none)).toBe('stored claude login (no credential env var)');
     expect(describeClaudeAuth({ PATH: '/usr/bin' }, none)).toBe('stored claude login (no credential env var)');
