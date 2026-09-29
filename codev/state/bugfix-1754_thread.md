@@ -60,3 +60,20 @@ E2E on the same scratch workspace (bogus OAuth token in `.env`), unfixed main di
 
 **Surprise:** the ~3-minute duration is the bundled CLI retrying a 401 by itself, not consult.
 My first fixed rerun looked like a hang only because I had capped it at 180s.
+
+## PR (2026-09-29)
+
+PR #1755. CMAP iteration 1:
+- gemini APPROVE.
+- codex COMMENT, non-blocking: the bundled CLI also recognises `CLAUDE_CODE_USE_ANTHROPIC_AWS` and
+  `CLAUDE_CODE_USE_MANTLE`. I verified this against the CLI's provider resolver `iq()`, whose order
+  is BEDROCK > FOUNDRY > ANTHROPIC_AWS > MANTLE > VERTEX. Fixed in `1fda5d9b0`.
+- claude APPROVE. Its tripwire "repository moved" warning was my own codex follow-up commit landing
+  mid-review.
+
+Process snag: the first CMAP launch failed in all three lanes with "Multiple projects found". The
+worktree carries many `codev/projects/*` dirs, so the builder needs `--project-id bugfix-1754`.
+
+Left out of scope (flagged to the architect): `codev/resources/arch.md` (~line 2001) and
+`cloud-instances.md` still list `OPENAI_API_KEY` for codex. The arch.md table is stale overall
+(pre-SDK CLI wiring), which is MAINTAIN territory.
