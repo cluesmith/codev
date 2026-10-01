@@ -12,6 +12,7 @@ import { globSync } from 'glob';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
 import { stalledRefreshes, unacknowledgedRefreshes } from './context-refresh.js';
 import {
+  listAllProjects,
   readState,
   writeStateAndCommit,
   createInitialState,
@@ -1040,34 +1041,47 @@ function getNextAction(state: ProjectState, protocol: Protocol): string {
  * Scans both the local workspace and any builder worktrees under .builders/*.
  */
 /**
- * Decide whether a `pending` gate record is still a live ask.
+ * Decide whether a `pending` gate record is still a live ask (listing filter
+ * for `porch pending`; never changes a record — approval stays a human, named act).
  *
- * Long-lived workspaces accumulate `pending` gate records that nobody will ever
- * approve: the project moved past the gate's phase (older flows merged the PR
- * on an out-of-band approval word and never flipped the record), the protocol
- * finished, or a merged PR is recorded. Listing those as "pending approval"
- * buries the live asks — one workspace showed 810 "pending" gates, none live
- * (cluesmith/codev#1759). This is a LISTING filter only: it never changes a
- * record, and approval stays a human, named act.
+ * Stale when:
+ * - the protocol finished (`verified` / `complete`), for every gate;
+ * - the project has moved past the phase that owns the gate;
+ * - for the `pr` gate only: the LAST `pr_history` entry is merged (#966 reads
+ *   the last entry because a merged checkpoint PR followed by a later open PR
+ *   is a normal shape). Scoped to `pr` because SPIR/ASPIR run verify AFTER the
+ *   merge, so a merged PR must never hide `verify-approval`.
+ *
+ * Fails open: an unknown protocol, a gate the protocol does not declare, or a
+ * current phase the protocol does not list (an upgrade, a custom protocol, a
+ * legacy state) all keep the ask visible.
  */
 export function isStalePendingGate(
   state: ProjectState,
   gateName: string,
   protocol: Protocol | null,
 ): boolean {
-  // Protocol finished — a terminal phase or a merged PR on record.
   if (state.phase === 'verified' || state.phase === 'complete') return true;
-  if (state.pr_history?.some((pr) => pr.merged === true)) return true;
+  if (gateName === 'pr') {
+    const last = state.pr_history?.[state.pr_history.length - 1];
+    if (last?.merged === true) return true;
+  }
   if (!protocol) return false;
-  // The project has moved past the phase that owns this gate.
   const gatePhaseIndex = protocol.phases.findIndex((ph) => ph.gate === gateName);
   const currentIndex = protocol.phases.findIndex((ph) => ph.id === state.phase);
-  if (gatePhaseIndex === -1) return false;
-  // A phase not in the protocol's list means the protocol ran to completion.
-  if (currentIndex === -1) return true;
+  if (gatePhaseIndex === -1 || currentIndex === -1) return false;
   return currentIndex > gatePhaseIndex;
 }
 
+/**
+ * porch pending [--all]
+ * List all projects with gates awaiting human approval.
+ *
+ * Projects come from `listAllProjects()`: builder worktrees first, then the
+ * root copy, one entry per project id (Spec 653 — the root copy of a committed
+ * status.yaml goes stale in multi-PR flows, so the worktree copy wins). Stale
+ * records (see `isStalePendingGate`) are hidden and counted unless `--all`.
+ */
 export async function pending(
   workspaceRoot: string,
   options: { all?: boolean } = {},
@@ -1081,72 +1095,36 @@ export async function pending(
     statusPath: string;
   };
 
-  const seen = new Set<string>(); // dedupe by status.yaml path
-  const seenProjects = new Set<string>(); // dedupe by project id — root copy wins over worktree copies
   const protocols = new Map<string, Protocol | null>();
   const results: PendingGate[] = [];
   let staleHidden = 0;
 
-  // Build the list of project directories to scan: main + every builder worktree.
-  const projectsDirs: string[] = [path.join(workspaceRoot, 'codev', 'projects')];
-  const buildersDir = path.join(workspaceRoot, '.builders');
-  if (fs.existsSync(buildersDir)) {
-    for (const wt of fs.readdirSync(buildersDir, { withFileTypes: true })) {
-      if (!wt.isDirectory()) continue;
-      projectsDirs.push(path.join(buildersDir, wt.name, 'codev', 'projects'));
-    }
-  }
-
-  for (const projectsDir of projectsDirs) {
-    if (!fs.existsSync(projectsDir)) continue;
-    for (const entry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const statusPath = path.join(projectsDir, entry.name, 'status.yaml');
-      if (!fs.existsSync(statusPath)) continue;
-
-      const realPath = fs.realpathSync(statusPath);
-      if (seen.has(realPath)) continue;
-      seen.add(realPath);
-
-      let state: ProjectState;
+  for (const { statusPath, state } of listAllProjects(workspaceRoot)) {
+    if (!protocols.has(state.protocol)) {
+      let protocol: Protocol | null = null;
       try {
-        state = readState(statusPath);
+        protocol = loadProtocol(workspaceRoot, state.protocol);
       } catch {
-        continue; // skip corrupted status files
+        protocol = null; // unknown protocol: terminal-phase and merged rules only
       }
+      protocols.set(state.protocol, protocol);
+    }
+    const protocol = protocols.get(state.protocol) ?? null;
 
-      // The same committed status.yaml exists once per builder worktree; the
-      // root copy (scanned first) is authoritative, a worktree copy only speaks
-      // for a project the root does not know yet.
-      if (seenProjects.has(state.id)) continue;
-      seenProjects.add(state.id);
-
-      if (!protocols.has(state.protocol)) {
-        let protocol: Protocol | null = null;
-        try {
-          protocol = loadProtocol(workspaceRoot, state.protocol);
-        } catch {
-          protocol = null; // unknown protocol: fall back to the phase/merge rules only
+    for (const [gateName, gateStatus] of Object.entries(state.gates)) {
+      if (gateStatus?.status === 'pending' && gateStatus.requested_at) {
+        if (!options.all && isStalePendingGate(state, gateName, protocol)) {
+          staleHidden++;
+          continue;
         }
-        protocols.set(state.protocol, protocol);
-      }
-      const protocol = protocols.get(state.protocol) ?? null;
-
-      for (const [gateName, gateStatus] of Object.entries(state.gates)) {
-        if (gateStatus?.status === 'pending' && gateStatus.requested_at) {
-          if (!options.all && isStalePendingGate(state, gateName, protocol)) {
-            staleHidden++;
-            continue;
-          }
-          results.push({
-            id: state.id,
-            title: state.title,
-            phase: state.phase,
-            gate: gateName,
-            requested_at: gateStatus.requested_at,
-            statusPath,
-          });
-        }
+        results.push({
+          id: state.id,
+          title: state.title,
+          phase: state.phase,
+          gate: gateName,
+          requested_at: gateStatus.requested_at,
+          statusPath,
+        });
       }
     }
   }

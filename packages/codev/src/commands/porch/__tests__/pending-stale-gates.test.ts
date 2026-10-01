@@ -84,17 +84,32 @@ describe('isStalePendingGate', () => {
     expect(isStalePendingGate(makeState({ phase: 'complete' }), 'pr', protocol)).toBe(true);
   });
 
-  it('a recorded merged PR is stale for every gate', () => {
-    const state = makeState({
+  it('a merged LAST pr_history entry stales the pr gate only (#966 last-entry semantics)', () => {
+    const merged = makeState({
       phase: 'review',
       pr_history: [{ phase: 'review', pr_number: 7, branch: 'b', created_at: 'x', merged: true }],
     });
-    expect(isStalePendingGate(state, 'pr', protocol)).toBe(true);
+    expect(isStalePendingGate(merged, 'pr', protocol)).toBe(true);
+    // SPIR/ASPIR verify AFTER the merge: a merged PR never hides verify-approval
+    expect(isStalePendingGate(merged, 'verify-approval', protocol)).toBe(false);
   });
 
-  it('without a protocol only the terminal/merged rules apply', () => {
+  it('a merged checkpoint PR followed by a later open PR keeps the pr gate live', () => {
+    const state = makeState({
+      phase: 'review',
+      pr_history: [
+        { phase: 'plan', pr_number: 7, branch: 'b1', created_at: 'x', merged: true },
+        { phase: 'review', pr_number: 9, branch: 'b2', created_at: 'y' },
+      ],
+    });
+    expect(isStalePendingGate(state, 'pr', protocol)).toBe(false);
+  });
+
+  it('fails open: unknown protocol, undeclared gate, or a phase the protocol does not list', () => {
     expect(isStalePendingGate(makeState({ phase: 'review' }), 'plan-approval', null)).toBe(false);
     expect(isStalePendingGate(makeState({ phase: 'verified' }), 'plan-approval', null)).toBe(true);
+    expect(isStalePendingGate(makeState({ phase: 'review' }), 'custom-gate', protocol)).toBe(false);
+    expect(isStalePendingGate(makeState({ phase: 'mystery' }), 'plan-approval', protocol)).toBe(false);
   });
 });
 
@@ -148,11 +163,15 @@ describe('porch pending hides stale records and dedupes worktree copies', () => 
     expect(out).not.toContain('stale pending record');
   });
 
-  it('counts a project once even when a builder worktree holds a copy of its status.yaml', async () => {
-    const live = makeState({ id: 'pir-1', title: 'live', phase: 'plan', gates: { 'plan-approval': PENDING } });
-    writeProject(root, live);
+  it('counts a project once, and the builder worktree copy wins over a stale root copy (Spec 653)', async () => {
+    // root copy is stale: still at plan with plan-approval pending
+    writeProject(root, makeState({ id: 'pir-1', title: 'live', phase: 'plan', gates: { 'plan-approval': PENDING } }));
+    // worktree copy is fresher: plan approved, now waiting at dev-approval
     const wt = path.join(root, '.builders', 'bugfix-1');
-    writeProject(wt, live);
+    writeProject(wt, makeState({
+      id: 'pir-1', title: 'live', phase: 'implement',
+      gates: { 'plan-approval': { status: 'approved', requested_at: 'x', approved_at: 'y' }, 'dev-approval': PENDING },
+    }));
     // a project only the worktree knows about is still listed
     writeProject(wt, makeState({ id: 'pir-5', title: 'wt-only', phase: 'plan', gates: { 'plan-approval': PENDING } }));
 
@@ -160,6 +179,8 @@ describe('porch pending hides stale records and dedupes worktree copies', () => 
     const out = output();
     expect(out).toContain('2 gates pending approval');
     expect((out.match(/porch approve pir-1 /g) ?? []).length).toBe(1);
+    expect(out).toContain('porch approve pir-1 dev-approval');
+    expect(out).not.toContain('porch approve pir-1 plan-approval');
     expect(out).toContain('pir-5');
   });
 });
