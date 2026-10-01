@@ -1039,7 +1039,39 @@ function getNextAction(state: ProjectState, protocol: Protocol): string {
  * List all projects with gates awaiting human approval.
  * Scans both the local workspace and any builder worktrees under .builders/*.
  */
-export async function pending(workspaceRoot: string): Promise<void> {
+/**
+ * Decide whether a `pending` gate record is still a live ask.
+ *
+ * Long-lived workspaces accumulate `pending` gate records that nobody will ever
+ * approve: the project moved past the gate's phase (older flows merged the PR
+ * on an out-of-band approval word and never flipped the record), the protocol
+ * finished, or a merged PR is recorded. Listing those as "pending approval"
+ * buries the live asks — one workspace showed 810 "pending" gates, none live
+ * (cluesmith/codev#1759). This is a LISTING filter only: it never changes a
+ * record, and approval stays a human, named act.
+ */
+export function isStalePendingGate(
+  state: ProjectState,
+  gateName: string,
+  protocol: Protocol | null,
+): boolean {
+  // Protocol finished — a terminal phase or a merged PR on record.
+  if (state.phase === 'verified' || state.phase === 'complete') return true;
+  if (state.pr_history?.some((pr) => pr.merged === true)) return true;
+  if (!protocol) return false;
+  // The project has moved past the phase that owns this gate.
+  const gatePhaseIndex = protocol.phases.findIndex((ph) => ph.gate === gateName);
+  const currentIndex = protocol.phases.findIndex((ph) => ph.id === state.phase);
+  if (gatePhaseIndex === -1) return false;
+  // A phase not in the protocol's list means the protocol ran to completion.
+  if (currentIndex === -1) return true;
+  return currentIndex > gatePhaseIndex;
+}
+
+export async function pending(
+  workspaceRoot: string,
+  options: { all?: boolean } = {},
+): Promise<void> {
   type PendingGate = {
     id: string;
     title: string;
@@ -1050,7 +1082,10 @@ export async function pending(workspaceRoot: string): Promise<void> {
   };
 
   const seen = new Set<string>(); // dedupe by status.yaml path
+  const seenProjects = new Set<string>(); // dedupe by project id — root copy wins over worktree copies
+  const protocols = new Map<string, Protocol | null>();
   const results: PendingGate[] = [];
+  let staleHidden = 0;
 
   // Build the list of project directories to scan: main + every builder worktree.
   const projectsDirs: string[] = [path.join(workspaceRoot, 'codev', 'projects')];
@@ -1080,8 +1115,29 @@ export async function pending(workspaceRoot: string): Promise<void> {
         continue; // skip corrupted status files
       }
 
+      // The same committed status.yaml exists once per builder worktree; the
+      // root copy (scanned first) is authoritative, a worktree copy only speaks
+      // for a project the root does not know yet.
+      if (seenProjects.has(state.id)) continue;
+      seenProjects.add(state.id);
+
+      if (!protocols.has(state.protocol)) {
+        let protocol: Protocol | null = null;
+        try {
+          protocol = loadProtocol(workspaceRoot, state.protocol);
+        } catch {
+          protocol = null; // unknown protocol: fall back to the phase/merge rules only
+        }
+        protocols.set(state.protocol, protocol);
+      }
+      const protocol = protocols.get(state.protocol) ?? null;
+
       for (const [gateName, gateStatus] of Object.entries(state.gates)) {
         if (gateStatus?.status === 'pending' && gateStatus.requested_at) {
+          if (!options.all && isStalePendingGate(state, gateName, protocol)) {
+            staleHidden++;
+            continue;
+          }
           results.push({
             id: state.id,
             title: state.title,
@@ -1098,6 +1154,9 @@ export async function pending(workspaceRoot: string): Promise<void> {
   console.log('');
   if (results.length === 0) {
     console.log(chalk.dim('No gates pending approval.'));
+    if (staleHidden > 0) {
+      console.log(chalk.dim(`(${staleHidden} stale pending record${staleHidden === 1 ? '' : 's'} on finished or advanced projects hidden; porch pending --all shows them)`));
+    }
     console.log('');
     return;
   }
@@ -1111,6 +1170,10 @@ export async function pending(workspaceRoot: string): Promise<void> {
     console.log(`  ${chalk.cyan(r.id)} ${chalk.dim('—')} ${r.title}`);
     console.log(`    phase: ${r.phase}  gate: ${chalk.yellow(r.gate)}  requested: ${r.requested_at}`);
     console.log(chalk.dim(`    approve: porch approve ${r.id} ${r.gate} --a-human-explicitly-approved-this`));
+    console.log('');
+  }
+  if (staleHidden > 0) {
+    console.log(chalk.dim(`(${staleHidden} stale pending record${staleHidden === 1 ? '' : 's'} on finished or advanced projects hidden; porch pending --all shows them)`));
     console.log('');
   }
 }
@@ -1166,7 +1229,7 @@ export async function cli(args: string[]): Promise<void> {
   try {
     switch (command) {
       case 'pending':
-        await pending(workspaceRoot);
+        await pending(workspaceRoot, { all: args.includes('--all') });
         break;
 
       case 'next': {
@@ -1277,7 +1340,7 @@ export async function cli(args: string[]): Promise<void> {
         console.log('  done [id] --pr N --branch NAME   Record PR creation (no phase advancement)');
         console.log('  done [id] --merged N             Mark PR as merged (no phase advancement)');
         console.log('  gate [id]                Request human approval');
-        console.log('  pending                  List all gates awaiting approval across projects');
+        console.log('  pending [--all]          List gates awaiting approval across projects (--all includes stale records on finished projects)');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
         console.log('  verify <id> --skip "reason"      Skip verification and mark as verified');
         console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
