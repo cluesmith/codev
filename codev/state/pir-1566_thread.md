@@ -182,6 +182,22 @@ Restored a runtime codev/team/messages.md cron line to avoid a spurious conflict
 types+lint clean, vscode app 1050 tests pass. Merge commit c4c5b4295, pushed (fast-forward). Still at
 dev-approval gate (merge doesn't change gate state).
 
+### Owner-requested at dev-approval (2026-10-05)
+- View title fix: "CODEV TOWER: TOWER" stutter → renamed view name to match container ("Codev Tower")
+  so VS Code renders the header once. (be57dfda9)
+- SSOT consolidation (owner chose option 1): the ONLY genuinely-duplicated attention presentation was
+  the relative-age formatter — contextual panel's since() ("0m" for <1min) vs Tower's ageSince()
+  ("just now"). Centralized as `formatAge` in SDK builder-helpers (canonical cross-client, beside
+  deriveAttention/compareAttention). Both the Tower view (attention-format.ts + tower.ts) AND the
+  contextual panel webview (#1553's main.ts) now consume it; deleted both local copies. Canonical
+  wording: "just now" under a minute (replaces the panel's "0m"); absent/invalid/future → omitted.
+  Per-state LABELS left where they are — they legitimately differ by medium (panel section headers vs
+  Tower row summaries), centralizing them would be over-abstraction.
+  Blast radius confirmed small: webview already bundles the SDK (esbuild bundle:true, SDK not external),
+  so the runtime formatAge import bundles cleanly; SDK import-boundary test stays green; no fenced files.
+  VISIBLE CHANGE in the contextual panel (<1min age "0m"→"just now") — webview isn't unit-tested, needs
+  an owner eyeball; flag for architect-side changelog. Tests: SDK 144, app 1050, compile clean.
+
 ### Investigation (done)
 Launched 3 parallel Explore agents: SDK/types (TowerClient, deriveAttention, AttentionSummary,
 OverviewData, readLocalKey); vscode views/tree/command/SSE plumbing; Tower endpoints + streamdeck
