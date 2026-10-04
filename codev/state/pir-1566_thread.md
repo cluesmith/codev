@@ -208,6 +208,17 @@ deps. Green on merged head: vscode check-types (+webview tsc) clean, vscode test
 check-types clean, sdk 144, eslint clean. My lane uses no API beyond 1.105 — verified, nothing moved.
 dev-approval still pending at new head; architect re-presenting to owner with merge noted.
 
+### Tower defaults to the RIGHT (secondary side bar) — now possible post-^1.128 (2026-10-05)
+CORRECTION of my earlier "extension can't default to the right" claim: WRONG — I trusted the stale
+contribution-points doc page (still lists only activitybar+panel). Truth: `viewsContainers.secondarySidebar`
+FINALIZED stable in VS Code 1.106 (Oct 2025); exact key `secondarySidebar` (lowercase b); issue #264346
+closed. At old floor ^1.105 we were 1 below 1.106 so couldn't require it; #1608's ^1.128 bump crossed it.
+Owner said "do both": (a) moved codev-tower from activitybar -> viewsContainers.secondarySidebar in
+package.json (defaults right in marketplace AND fork; user can still drag; TreeView.badge still shows).
+Commit e6074f601; updated contributes-panel test; vscode suite 1086 green, JSON valid. (b) sent CORRECTION
+to codev-ide:architect disregarding my earlier fork-layout recommendation. Placement is a visual change —
+flag for dev-approval eyeball. New head after this: push below.
+
 ### Investigation (done)
 Launched 3 parallel Explore agents: SDK/types (TowerClient, deriveAttention, AttentionSummary,
 OverviewData, readLocalKey); vscode views/tree/command/SSE plumbing; Tower endpoints + streamdeck
