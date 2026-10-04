@@ -22,7 +22,9 @@ describe('Codev Tower contributions (#1566)', () => {
   it('declares the codev.tower view in the codev-tower container', () => {
     const views = PKG.contributes.views as Record<string, View[]>;
     const towerViews = views['codev-tower'] ?? [];
-    expect(towerViews.find((v) => v.id === 'codev.tower')).toMatchObject({ id: 'codev.tower', name: 'Tower' });
+    // The single view's name matches its container title so VS Code renders the sidebar header once
+    // ("CODEV TOWER") rather than stuttering as "Codev Tower: Tower".
+    expect(towerViews.find((v) => v.id === 'codev.tower')).toMatchObject({ id: 'codev.tower', name: 'Codev Tower' });
     // The view lives ONLY in its own container, never merged into the workspace sidebar.
     expect((views.codev ?? []).some((v) => v.id === 'codev.tower')).toBe(false);
   });

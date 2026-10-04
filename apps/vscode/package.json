@@ -1100,7 +1100,7 @@
         { "id": "codev.contextualPanel", "name": "Codev", "type": "webview" }
       ],
       "codev-tower": [
-        { "id": "codev.tower", "name": "Tower" }
+        { "id": "codev.tower", "name": "Codev Tower" }
       ]
     },
     "viewsWelcome": [
