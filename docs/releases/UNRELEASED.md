@@ -55,7 +55,7 @@ Opening an untrusted folder no longer leaves the Codev sidebar inert until you t
 
 ## Breaking changes
 
-None.
+- **Minimum VS Code raised to 1.128** (#1608, PR #1764). Hosts below 1.128 stay on the last 3.3.x release and stop receiving extension updates until the editor rebases. Cursor 3.22 (VS Code 1.128) is supported; Antigravity and Kiro were on 1.107 in May 2026 and were not re-verified.
 
 ## Install
 
