@@ -149,7 +149,9 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
 
     if (entry.workspace.active) {
       if (state) { item.iconPath = iconFor(state.icon, state.color); }
-      else if (isCurrent) { item.iconPath = new vscode.ThemeIcon('location'); }
+      // The current window's workspace is the folder that's open here — an opened folder, distinct
+      // from the plain `folder` other active workspaces use (and not a map-pin).
+      else if (isCurrent) { item.iconPath = new vscode.ThemeIcon('folder-opened'); }
       else { item.iconPath = new vscode.ThemeIcon('folder'); }
     } else {
       item.iconPath = new vscode.ThemeIcon('circle-outline');
