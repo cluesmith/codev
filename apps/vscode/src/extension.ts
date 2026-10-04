@@ -872,8 +872,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// roster is every live agent in the view, not just open tabs. The current
 	// position is the focused agent terminal (builder id, else architect name);
 	// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
-	// last-focused agent. Nothing focused → start at the ends. ≤1 agent → no-op with a
-	// status-bar hint.
+	// last-focused agent. Nothing focused → start at the ends, even for a lone agent
+	// (#1748). Empty roster, or a lone agent already focused → no-op with a status-bar hint.
 	// Open + focus one roster entry; returns true when a terminal was actually opened.
 	const openAgentTarget = async (t: AgentTarget): Promise<boolean> => {
 		if (t.kind === 'builder') {
@@ -899,11 +899,15 @@ export async function activate(context: vscode.ExtensionContext) {
 			t => agentTargetIsFocused(t, activeBuilderId, activeArchitectName));
 
 		// Walk with wrap-around, opening the first entry that succeeds and skipping any
-		// that fails so one stale agent can't wedge the cycle. Empty attempts means the
-		// roster has <=1 agent -- a no-op with a status-bar hint.
+		// that fails so one stale agent can't wedge the cycle. Empty attempts means an
+		// empty roster or a lone agent already focused -- a no-op with a status-bar hint.
 		const attempts = agentCycleAttemptOrder(order, currentIndex, direction);
 		if (attempts.length === 0) {
-			vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
+			if (order.length === 0) {
+				vscode.window.setStatusBarMessage('Codev: no agent terminals', 3000);
+			} else {
+				vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
+			}
 			return;
 		}
 		for (const target of attempts) {
