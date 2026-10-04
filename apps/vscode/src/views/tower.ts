@@ -89,7 +89,7 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
       }
       case 'dormant-group': {
         const item = new vscode.TreeItem(`Dormant (${node.rows.length})`, vscode.TreeItemCollapsibleState.Collapsed);
-        item.iconPath = new vscode.ThemeIcon('archive');
+        item.iconPath = new vscode.ThemeIcon('circle-outline');
         item.contextValue = 'tower-dormant-group';
         return item;
       }
