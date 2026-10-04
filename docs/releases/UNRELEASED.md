@@ -44,6 +44,7 @@ Opening an untrusted folder no longer leaves the Codev sidebar inert until you t
      Move out to its own ## section if the entry grows past ~3 sentences. -->
 
 - **Builder-row click can leave the row collapsed** (#1743, PR #1744). Turn off `codev.buildersClickExpands` and a click on a builder in the Agents view opens its terminal only; the chevron still opens the file list.
+- **Agent-cycle keys launch the first agent** (#1748, PR #1749). With no agent terminal focused, the cycle keys now open the first (or last) agent in sidebar order instead of showing a "nothing to cycle to" hint; the empty-roster hint is now honest.
 
 ## Other fixes (dashboard, porch, infrastructure)
 
