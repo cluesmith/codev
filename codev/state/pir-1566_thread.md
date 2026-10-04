@@ -198,6 +198,16 @@ dev-approval gate (merge doesn't change gate state).
   VISIBLE CHANGE in the contextual panel (<1min age "0m"→"just now") — webview isn't unit-tested, needs
   an owner eyeball; flag for architect-side changelog. Tests: SDK 144, app 1050, compile clean.
 
+### Merged main again — #1608 engine bump (2026-10-04, owner-directed via architect:vscode)
+Merge commit = new head 7340761a8 (0 behind / 22 ahead). engines.vscode ^1.105 -> ^1.128,
+@types/vscode ~1.105 -> ~1.125, version 3.3.4. One conflict (extension.ts imports): main added
+runBuilderRowClick to the builders.js import; kept main's full line + my 3 Tower imports.
+package.json auto-merged (my contributes + main's new capabilities block both intact). NO pnpm-lock
+conflict (my lane adds no deps; lockfile == origin/main). Reinstalled (@types/vscode swap), rebuilt
+deps. Green on merged head: vscode check-types (+webview tsc) clean, vscode tests 1086, sdk
+check-types clean, sdk 144, eslint clean. My lane uses no API beyond 1.105 — verified, nothing moved.
+dev-approval still pending at new head; architect re-presenting to owner with merge noted.
+
 ### Investigation (done)
 Launched 3 parallel Explore agents: SDK/types (TowerClient, deriveAttention, AttentionSummary,
 OverviewData, readLocalKey); vscode views/tree/command/SSE plumbing; Tower endpoints + streamdeck
