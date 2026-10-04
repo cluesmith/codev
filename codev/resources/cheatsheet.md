@@ -137,7 +137,7 @@ Protocol orchestrator. Drives SPIR/ASPIR/TICK/BUGFIX via a state machine. Used b
 | `porch status <id>` | Check project protocol status |
 | `porch run <id>` | Run next protocol phase |
 | `porch approve <id> <gate>` | Approve a human gate (human only) |
-| `porch pending` | List all pending gates |
+| `porch pending` | List live pending gates (`--all` includes stale records) |
 
 ### consult
 

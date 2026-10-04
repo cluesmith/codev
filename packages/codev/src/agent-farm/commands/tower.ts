@@ -3,7 +3,7 @@
  */
 
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, appendFileSync, statSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import { logger, fatal } from '../utils/logger.js';
 import { spawn } from 'node:child_process';
@@ -144,19 +144,81 @@ async function isServerResponding(port: number): Promise<boolean> {
 }
 
 /**
- * Wait for the server to start responding
+ * The three distinguishable outcomes of waiting for a freshly spawned Tower (Issue #1691).
+ * - `started`: the port answered readiness within the budget.
+ * - `exited`: the spawned daemon died before the port answered — a fast-exit refusal (the
+ *   #1629 owner-lock guard) or any early boot failure. The launcher stops waiting the instant
+ *   it observes the exit instead of burning the full timeout on a process already gone.
+ * - `timeout`: the budget elapsed with the daemon still alive but not answering (a real hang).
  */
-async function waitForServer(port: number): Promise<boolean> {
+export type TowerStartupOutcome = 'started' | 'exited' | 'timeout';
+
+/**
+ * Wait for a freshly spawned Tower to become ready, returning which of the three outcomes
+ * occurred. `isReady` is the readiness probe (port answering); `isDaemonAlive` reports whether
+ * the spawned daemon process is still running. Both are injectable so the outcome logic can be
+ * exercised deterministically without spawning a real server.
+ *
+ * The tower-server IS the daemon, so once it exits the port can never come up — hence a dead
+ * daemon short-circuits to `exited`. A final readiness re-probe closes the benign race where the
+ * daemon answered readiness in the same tick it was observed to exit.
+ */
+export async function waitForServerOutcome(
+  isReady: () => Promise<boolean>,
+  isDaemonAlive: () => boolean,
+  opts: { timeoutMs?: number; intervalMs?: number } = {}
+): Promise<TowerStartupOutcome> {
+  const timeoutMs = opts.timeoutMs ?? STARTUP_TIMEOUT_MS;
+  const intervalMs = opts.intervalMs ?? STARTUP_CHECK_INTERVAL_MS;
   const startTime = Date.now();
 
-  while (Date.now() - startTime < STARTUP_TIMEOUT_MS) {
-    if (await isServerResponding(port)) {
-      return true;
+  while (Date.now() - startTime < timeoutMs) {
+    if (await isReady()) {
+      return 'started';
     }
-    await new Promise((r) => setTimeout(r, STARTUP_CHECK_INTERVAL_MS));
+    if (!isDaemonAlive()) {
+      // The daemon is gone before the port answered. Re-probe once to close the benign race
+      // where it answered readiness in the same tick it was observed to exit.
+      if (await isReady()) {
+        return 'started';
+      }
+      return 'exited';
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
 
-  return false;
+  // Budget exhausted. The daemon may have exited during the final sleep — check once more so a
+  // fast-exit landing on the deadline is reported as `exited`, not a misleading `timeout`.
+  if (!isDaemonAlive()) {
+    if (await isReady()) {
+      return 'started';
+    }
+    return 'exited';
+  }
+  return 'timeout';
+}
+
+/** Current byte length of the tower log (0 if absent) — the boundary for {@link readLogSince}. */
+function currentLogOffset(): number {
+  try {
+    return statSync(LOG_FILE).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Read everything appended to the tower log since `offset` bytes. Surfaces a fast-exiting
+ * daemon's own output (e.g. the owner-lock guard's teaching error) verbatim, without dragging in
+ * stale lines from previous runs. Returns '' if the file is gone or nothing new was written.
+ */
+function readLogSince(offset: number): string {
+  try {
+    const buf = readFileSync(LOG_FILE);
+    return buf.subarray(Math.min(offset, buf.length)).toString('utf8').trim();
+  } catch {
+    return '';
+  }
 }
 
 export { getProcessesOnPort } from '../utils/port.js';
@@ -256,16 +318,45 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
 
   logToFile(`Spawned tower server with PID ${serverProcess.pid}`);
 
+  // Issue #1691: track the daemon's liveness and mark where its own log output begins, so the
+  // readiness wait can distinguish a fast-exit (owner-lock refusal, early boot failure) from a
+  // genuine hang — and, on a fast-exit, surface the daemon's teaching error verbatim instead of
+  // a generic timeout. The offset is captured here (after the launcher's own pre-spawn writes)
+  // so readLogSince() returns only what THIS daemon run appended.
+  let daemonExited = false;
+  serverProcess.on('exit', () => {
+    daemonExited = true;
+  });
+  const logOffsetAtSpawn = currentLogOffset();
+
   const dashboardUrl = `http://localhost:${port}`;
 
   if (wait) {
     // Wait for server to actually start responding
     logger.info('Waiting for server to start...');
-    const started = await waitForServer(port);
+    const outcome = await waitForServerOutcome(
+      () => isServerResponding(port),
+      () => !daemonExited
+    );
 
-    if (!started) {
+    if (outcome === 'exited') {
+      // The daemon died before the port came up: a refusal (the #1629 owner-lock guard) or an
+      // early boot failure. Surface its own log output verbatim so the user sees the teaching
+      // error, not a generic timeout indistinguishable from a real hang (Issue #1691).
+      const reason = readLogSince(logOffsetAtSpawn);
+      logToFile('Tower server exited during startup before responding');
+      logger.error('Tower server exited during startup before it became ready:');
+      if (reason) {
+        console.error(`\n${reason}\n`);
+      } else {
+        logger.error(`No output was captured. Check logs at: ${LOG_FILE}`);
+      }
+      process.exit(1);
+    }
+
+    if (outcome === 'timeout') {
       logToFile(`Tower server failed to respond within ${STARTUP_TIMEOUT_MS}ms`);
-      logger.error(`Tower server failed to start within ${STARTUP_TIMEOUT_MS / 1000}s`);
+      logger.error(`Tower server did not respond within ${STARTUP_TIMEOUT_MS / 1000}s and is still running (status unknown).`);
       logger.error(`Check logs at: ${LOG_FILE}`);
       process.exit(1);
     }

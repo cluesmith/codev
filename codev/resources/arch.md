@@ -1804,7 +1804,7 @@ The startup ordering is critical — race conditions have caused real bugs when 
 | 3 | `initTerminals()` | Terminal management module ready |
 | 4 | `startMailboxDrainer()` | Mailbox backstop drainer ready (Spec 1313 — replaced Spec 403's `startSendBuffer()`); shutdown calls `stopMailboxDrainer()` with **no force-flush** |
 | 5 | **`reconcileTerminalSessions()`** | **MUST run before step 7** — reconnects shellper sessions from previous run |
-| 6 | `killOrphanedShellpers()` | **MUST run after step 5** — avoids killing sessions that were just reconnected |
+| 6 | `killOrphanedShellpers()` | **MUST run after step 5** — avoids killing sessions that were just reconnected. **MUST also stay before step 9** (#1685): it has no age guard (unlike step 10's husk sweep), so once requests are served it could reap a just-spawned session that is already in `ps` but not yet registered or socket-listening. It is time-bounded (`ORPHAN_SWEEP_TIMEOUT_MS`, 10s, cooperative cancellation) rather than deferred past readiness |
 | 7 | `initInstances()` | Enables workspace API handlers — triggers dashboard polling |
 | 8 | `initCron()` | Scheduler starts after instances ready |
 | 9 | **`markBootComplete()`** | **Readiness gate opens** — held requests are released and Tower starts serving (#1261) |
@@ -1816,6 +1816,7 @@ The startup ordering is critical — race conditions have caused real bugs when 
 - **Bugfix #274**: `initInstances()` before `reconcileTerminalSessions()` allowed dashboard polls to race with reconciliation, corrupting shellper sessions
 - **Bugfix #341**: Killing orphaned shellpers before reconciliation killed sessions that were about to be reconnected
 - **Bugfix #1261**: `initInstances()` ran last, *after* the two disk-scaling sweeps, so every `_deps`-dependent route was broken for as long as those scans took — `DELETE /api/terminals/:id` 404'd for a terminal that existed. Fixed by moving the sweeps after readiness and holding requests until step 9
+- **Bugfix #1685**: `killOrphanedShellpers()` (step 6) was unbounded and silent on the zero-orphan path, so a wedged process table stalled boot here past the launcher's 30s timeout with no log trace. Bounded with a 10s cooperative-cancellation budget plus entry/duration/WARN logging. Kept at step 6 (pre-readiness) rather than deferred to step 10 with the other sweeps: unlike the husk sweep it has no age guard, so post-readiness it would race just-spawned sessions
 
 **Defense in depth**: During startup, `getTerminalsForWorkspace()` skips on-the-fly shellper reconnection (via `_reconciling` guard) to prevent races through alternate code paths.
 
@@ -2160,6 +2161,38 @@ The deck is a remote and VSCode is the screen, bound by **one shared selection**
 
 ### Optional Dependencies (Agent-Farm)
 - **node-pty**: Native PTY sessions for dashboard terminals (compiled during install, may need `npm rebuild node-pty`)
+
+### IDE prefix forward (Issue #1668)
+
+Tower forwards a fixed `/ide/` prefix to a **single** local VS Code server-web process — plain
+HTTP in `tower-routes.ts` and a **raw bidirectional WebSocket pipe** in `tower-websocket.ts`
+(Tower never parses those frames; they are VS Code's own remote protocol, not Tower's PTY
+bridge). The target workspace is chosen per browser connection via `?folder=<abs path>`; one
+server serves any folder. Forwarding code lives in `servers/ide-forward.ts`; lifecycle
+(spawn / stop / status / boot-reconcile / on-demand respawn) in `servers/ide-server.ts`.
+
+- **Auth**: the forward is a *post-auth* handler behind Tower's existing key choke point. HTTP
+  passes `isRequestAllowed`; the WS upgrade calls the swappable seam `isForwardAuthorized`
+  (Host + `codev-tower-key` header — the credential `TunnelClient` stamps on tunnel-borne
+  requests, #1588) because the dashboard's subprotocol-key path doesn't fit a vanilla workbench
+  socket. `/ide/` is **never** a public route. The seam is the #1589 swap point. There is **no
+  per-folder authorization**: the server has no per-folder isolation, so Tower's key is the
+  whole boundary for the forward.
+- **Two auth boundaries, both kept**: Tower's key guards the forward path; the IDE server's
+  **connection token** (`--connection-token-file`, `~/.agent-farm/ide-connection-token`) guards
+  direct `127.0.0.1:<port>` access that skips Tower. The forward injects that token as a
+  `vscode-tkn` cookie (merging, never clobbering) because the server's `Set-Cookie Path=/ide`
+  never matches the external `/t/<tower>/ide/` through the relay.
+- **Header hygiene**: strip `x-forwarded-port` / `x-original-host` and Tower-internal
+  `codev-tower-key` / `codev-web-key` / `x-codev-tunnel-proxy`; rewrite `Host` to loopback;
+  preserve `Cache-Control` / `ETag` (the workbench boot is a large, per-version-cacheable asset
+  set); stamp `x-forwarded-host` / `-proto` / `-prefix` from the cloud config's public authority
+  only when tunnel-borne.
+- **Management API**: `POST/DELETE/GET /api/ide` (driven by `afx ide start|stop|status`) is
+  local-only — blocked from the tunnel like `/api/tunnel/*` because it spawns/kills a process.
+- **State**: a Tower-managed `~/.agent-farm/ide-server.json` record (`{prefix, port, serverPath,
+  pid}`), the `cloud-config.json` pattern — **no config file, no `global.db` change**. Live PID
+  is discovered by port. `codev/` and `codev-skeleton/` are unaffected (this is product code).
 
 ## System-Wide Patterns
 

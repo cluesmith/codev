@@ -529,7 +529,7 @@ export class TerminalManager {
     }
 
     const authKey = await this.getAuthKey();
-    const pty = new CodevPseudoterminal(wsUrl, authKey, this.outputChannel);
+    const pty = new CodevPseudoterminal(wsUrl, authKey, this.outputChannel, () => this.probeTowerHealth());
     const position = vscode.workspace.getConfiguration('codev').get<string>('terminalPosition', 'editor');
 
     // Dev processes are long-running background logs — always the bottom panel,
@@ -620,6 +620,36 @@ export class TerminalManager {
     for (const entry of this.terminals.values()) {
       entry.pty.forceRepaint();
     }
+  }
+
+  /**
+   * Re-arm every managed terminal's reconnect budget on a wake signal (#1681).
+   * A laptop sleep suspends the network stack, so the adapters' six-attempt
+   * budgets burn instantly and every tab lands on a permanent-looking
+   * "unable to reconnect" banner while Tower and the detached sessions are
+   * healthy. `onWake` reconnects a transiently gave-up (or still-parked)
+   * adapter and no-ops an already-connected one or a #936 permanent give-up, so
+   * this is safe to fire across all terminals unconditionally on every refocus
+   * — unlike repaintAllOnRefocus, which stays behind an opt-in setting.
+   */
+  rearmAllOnWake(): void {
+    for (const entry of this.terminals.values()) {
+      entry.pty.onWake();
+    }
+  }
+
+  /**
+   * One-shot Tower `/health` probe used to word a terminal's exhausted-budget
+   * give-up banner honestly (#1681). Returns true when Tower answers, false when
+   * it is unreachable, and `null` when reachability is unknown (no client yet) —
+   * so the adapter falls back to the neutral attempt-count wording rather than
+   * asserting "Tower unreachable" for what is really an unconfigured client.
+   * `getHealth` already collapses network errors to `null`, so this never throws.
+   */
+  private async probeTowerHealth(): Promise<boolean | null> {
+    const client = this.connectionManager.getClient();
+    if (!client) { return null; }
+    return (await client.getHealth()) !== null;
   }
 
   private buildWsUrl(terminalId: string): string | null {

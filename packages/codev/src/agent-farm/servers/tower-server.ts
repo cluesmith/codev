@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { WebSocketServer } from 'ws';
-import { SessionManager } from '../../terminal/session-manager.js';
+import { SessionManager, ORPHAN_SWEEP_TIMEOUT_MS } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup, persistableCommand, logSessionIdentity } from './tower-utils.js';
 import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
@@ -32,6 +32,7 @@ import {
   shutdownTunnel,
 } from './tower-tunnel.js';
 import { initCron, shutdownCron } from './tower-cron.js';
+import { reconcileIdeServer } from './ide-server.js';
 import {
   initInstances,
   shutdownInstances,
@@ -63,6 +64,12 @@ import { shutdownDelayedSends } from './delayed-send.js';
 import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
 import { getGlobalDb } from '../db/index.js';
+import {
+  claimGlobalDbOwnership,
+  defaultLockFile,
+  ownershipConflictMessage,
+  releaseTowerOwnerIfMine,
+} from '../db/tower-owner.js';
 import { runBootConsolidation } from '../db/consolidate.js';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/server-utils.js';
@@ -116,6 +123,11 @@ const bridgeMode = process.env.BRIDGE_MODE === '1';
 const bindHost = bridgeMode
   ? validateHost(process.env.BRIDGE_TOWER_HOST || '127.0.0.1')
   : '127.0.0.1';
+
+// Issue #1629: the owner lock file for this global.db (its `.tower-owner` sibling;
+// the suffix avoids SQLite's own auxiliary/dotfile-VFS names). Resolved once so the
+// boot guard and the graceful-shutdown release use the same path.
+const towerLockFile = defaultLockFile();
 
 // Request authentication (advisory GHSA-xvjp-7748-v88v): ensure the shared local
 // key exists at boot so HTTP/WS enforcement has an expected value to compare
@@ -223,6 +235,16 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   // 8. Tear down terminal module (Spec 0105 Phase 4) — shuts down terminal manager
   shutdownTerminals();
+
+  // 9. Issue #1629: release our global.db owner lock so the next start sees an
+  // unowned DB. Best-effort and pid-scoped (never removes a lock we don't own);
+  // a hard kill skips this, but the boot liveness check self-clears a dead
+  // owner's lock anyway.
+  try {
+    releaseTowerOwnerIfMine(towerLockFile, process.pid);
+  } catch (err) {
+    log('WARN', `Failed to release global.db owner lock: ${(err as Error).message}`);
+  }
 
   log('INFO', 'Graceful shutdown complete');
   process.exit(0);
@@ -493,6 +515,27 @@ server.listen(port, bindHost, () => {
  * the readiness gate above until it calls markBootComplete().
  */
 async function bootSequence(): Promise<void> {
+  // Issue #1629: global.db owner lock. The port bind above is a SAME-PORT mutex
+  // only — a second Tower on a DIFFERENT port can still open this global.db (the
+  // #1515 incident: an AGENT_FARM_DIR typo pointed a test Tower at production).
+  // Its reconcile would then hijack every live shellper and delete the rows. So
+  // BEFORE anything touches the shared DB rows, sockets, or shellper processes
+  // (consolidation, reconcile, killOrphanedShellpers), claim ownership via an
+  // exclusive lock file next to global.db — and refuse loudly if a live Tower
+  // already owns this DB.
+  const ownership = await claimGlobalDbOwnership({
+    lockFile: towerLockFile,
+    pid: process.pid,
+    port,
+    dbDir: AGENT_FARM_DIR,
+    bindHost,
+  });
+  if (!ownership.ok) {
+    log('ERROR', ownershipConflictMessage(ownership.conflict, AGENT_FARM_DIR));
+    process.exit(1);
+  }
+  log('INFO', `Claimed global.db ownership (pid ${process.pid}, port ${port}) at ${AGENT_FARM_DIR}`);
+
   // Initialize shellper session manager for persistent terminals
   const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.codev', 'run');
   const shellperScript = path.join(__dirname, '..', '..', 'terminal', 'shellper-main.js');
@@ -663,13 +706,28 @@ async function bootSequence(): Promise<void> {
   // and deleting the architect terminal's socket file (Bugfix #274).
   await reconcileTerminalSessions();
 
-  // Bugfix #341: Kill orphaned shellper processes not in active sessions.
-  // Must run AFTER reconciliation so that reconnected sessions are in the
-  // active map and won't be killed. Catches shellpers from crashed tests
-  // or previous Tower instances that lost their socket files.
+  // Bugfix #341: Kill orphaned shellper processes not in active sessions. Must
+  // run AFTER reconciliation so reconnected sessions are in the active map and
+  // won't be killed. Catches shellpers from crashed tests or previous Tower
+  // instances that lost their socket files.
+  //
+  // Issue #1685: this sweep used to be unbounded and silent on the zero-orphan
+  // path, so on a flooded/wedged process table its `ps` scan + per-orphan socket
+  // probes stalled here for minutes, tripping the launcher's 30s startup timeout
+  // with no trace in the log. It is now time-bounded (killOrphanedShellpers
+  // abandons past ORPHAN_SWEEP_TIMEOUT_MS, well under the 30s launcher timeout
+  // and the 20s BOOT_READY_TIMEOUT_MS) and logs its entry + duration. It is kept
+  // BEFORE markBootComplete() deliberately: an un-aged sweep must not run once
+  // requests are served, or it could reap a just-spawned session whose shellper
+  // is already in `ps` but not yet registered/socket-listening.
+  const orphanSweepStartMs = Date.now();
+  log('INFO', 'Sweeping for orphaned shellpers…');
   const orphansKilled = await shellperManager.killOrphanedShellpers();
-  if (orphansKilled > 0) {
-    log('INFO', `Killed ${orphansKilled} orphaned shellper process(es)`);
+  const orphanSweepMs = Date.now() - orphanSweepStartMs;
+  if (orphansKilled < 0) {
+    log('WARN', `Orphan sweep abandoned after ${orphanSweepMs}ms (exceeded ${ORPHAN_SWEEP_TIMEOUT_MS}ms budget); remaining orphans left for the next startup`);
+  } else {
+    log('INFO', `Orphan sweep done in ${orphanSweepMs}ms (${orphansKilled} killed)`);
   }
 
   // Issue #1261 test hook: widen the pre-wiring window to a known duration so
@@ -723,6 +781,12 @@ async function bootSequence(): Promise<void> {
   // shellper (1h grace by default), so a session created by an incoming
   // request while the sweep runs can never match it.
   await runHuskSweep();
+
+  // Issue #1668: reconcile the IDE server across a Tower restart — adopt a live
+  // one (no orphan) or respawn a recorded-but-dead one. Post-readiness and
+  // NOT awaited: a respawn's readiness wait must never delay the rest of boot,
+  // and a failure here never affects Tower itself.
+  reconcileIdeServer(log).catch((err) => log('ERROR', `IDE server reconcile failed: ${(err as Error).message}`));
 
   // Issue #1238: PTY session log retention. Session logs are per-session files
   // in ~/.agent-farm/logs that nothing ever deleted, so they accreted forever

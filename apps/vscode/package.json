@@ -3,7 +3,7 @@
   "publisher": "cluesmith",
   "displayName": "Codev for VS Code",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "3.3.3",
+  "version": "3.3.4",
   "license": "Apache-2.0",
   "icon": "icons/codev.png",
   "pricing": "Free",
@@ -22,7 +22,7 @@
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.105.0"
+    "vscode": "^1.128.0"
   },
   "categories": [
     "AI",
@@ -45,6 +45,19 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Codev works in Restricted Mode. Workspace-provided Tower connection and auto-start settings are ignored until the folder is trusted.",
+      "restrictedConfigurations": [
+        "codev.towerHost",
+        "codev.towerPort",
+        "codev.workspacePath",
+        "codev.autoStartTower"
+      ]
+    }
+  },
   "contributes": {
     "customEditors": [
       {
@@ -1126,17 +1139,20 @@
         "codev.towerHost": {
           "type": "string",
           "default": "localhost",
-          "description": "Tower server host"
+          "description": "Tower server host",
+          "restricted": true
         },
         "codev.towerPort": {
           "type": "number",
           "default": 4100,
-          "description": "Tower server port"
+          "description": "Tower server port",
+          "restricted": true
         },
         "codev.workspacePath": {
           "type": "string",
           "default": "",
-          "description": "Override workspace path for Tower matching (auto-detected if empty)"
+          "description": "Override workspace path for Tower matching (auto-detected if empty)",
+          "restricted": true
         },
         "codev.terminalPosition": {
           "type": "string",
@@ -1184,7 +1200,8 @@
         "codev.autoStartTower": {
           "type": "boolean",
           "default": true,
-          "description": "Auto-start Tower if not running on activation"
+          "description": "Auto-start Tower if not running on activation",
+          "restricted": true
         },
         "codev.cliVersionTimeoutMs": {
           "type": "number",
@@ -1234,6 +1251,11 @@
           "type": "boolean",
           "default": true,
           "description": "Agents view: when the active builder-diff editor changes (keyboard navigation, a click inside the multi-file View Diff, or a per-file diff), reveal and select the matching file's row in the tree. The Agents-view equivalent of the Explorer's auto-reveal. When off, the sidebar selection only follows an explicit click."
+        },
+        "codev.buildersClickExpands": {
+          "type": "boolean",
+          "default": true,
+          "description": "Agents view: a single click on a builder row opens its terminal AND expands the row to show its changed-files list. When off, the click only opens the terminal and leaves the row's expand state untouched; use the chevron to open the file list deliberately."
         },
         "codev.backlogShowAll": {
           "type": "boolean",
@@ -1325,7 +1347,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/vscode": "~1.105.0",
+    "@types/vscode": "~1.125.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/react": "^19.0.0",

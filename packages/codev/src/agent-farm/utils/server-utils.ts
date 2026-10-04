@@ -329,6 +329,43 @@ export function isRequestAllowed(req: http.IncomingMessage): boolean {
 }
 
 /**
+ * Security: decide whether a request may proceed to the IDE prefix forward
+ * (Issue #1668). This is the ONE authorization seam for the forward — both the
+ * HTTP path (which also passes the general `isRequestAllowed` choke point) and
+ * the WebSocket upgrade call it.
+ *
+ * It reuses the exact primitives the HTTP choke point uses: the Host guard plus
+ * a constant-time match of the shared local key from the `codev-tower-key`
+ * header. That header is what `TunnelClient.stampLocalHeaders` stamps on every
+ * tunnel-borne request (HTTP and WS-CONNECT alike, #1588), so a browser
+ * arriving via the cloud proxy authenticates here without offering the WS
+ * subprotocol key that the dashboard's `isWebSocketAllowed` requires (the IDE
+ * workbench's own WebSockets are vanilla `?reconnectionToken=` connections that
+ * offer no subprotocol).
+ *
+ * There is deliberately NO per-folder logic: the IDE server offers no per-folder
+ * isolation — any authenticated connection can open any path its OS user can
+ * read (same trust as a terminal) — so authorization is a whole-boundary key +
+ * Host decision and nothing finer (Issue #1668 §D2).
+ *
+ * This function is the swap point for #1589 (per-session remote credential): its
+ * body can move from the local-key stamp to a per-session credential without
+ * touching the proxying code, which calls it and only then strips/stamps headers.
+ * Fails closed when the expected key is unavailable.
+ */
+export function isForwardAuthorized(req: http.IncomingMessage): boolean {
+  if (!isAllowedHost(req.headers.host)) return false;
+
+  const expected = getExpectedKey();
+  if (!expected) return false;
+
+  const presented = presentedHttpKey(req);
+  if (!presented) return false;
+
+  return keysMatch(presented, expected);
+}
+
+/**
  * Extract the presented key from a WebSocket upgrade's `Sec-WebSocket-Protocol`
  * offer (the `codev-key.<KEY>` token), or null if absent/malformed.
  */

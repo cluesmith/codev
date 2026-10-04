@@ -24,6 +24,15 @@ The `-m` / `--model` flag is **always required** except for `consult stats`.
 | `codex` | `gpt` | Thorough (~200-250s), shell exploration |
 | `claude` | `opus` | Agent SDK with tool use (~60-120s) |
 
+## Credentials and `.env`
+
+`consult` loads `<workspace>/.env` and sets every key the shell does not already define, **credentials included**. Those override your stored login:
+
+- claude: `CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`) beats the keychain login. When an OAuth token is set, the API keys are dropped.
+- codex: `CODEX_API_KEY` beats the ChatGPT login. `OPENAI_API_KEY` is ignored.
+
+Each SDK lane prints what it authenticates with, e.g. `[CLAUDE] auth: CLAUDE_CODE_OAUTH_TOKEN (from .env)`. If a review fails with a usage-limit or auth error while your own login works, check that line first. A key exported in the shell wins over `.env`.
+
 ## All flags
 
 ```

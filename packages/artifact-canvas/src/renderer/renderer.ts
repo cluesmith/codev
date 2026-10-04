@@ -15,8 +15,10 @@ import DOMPurify from 'dompurify';
  *   paragraph from splitting it, while `data-line` still reports the **original** source line.
  *   Comments inside fenced code blocks are left intact (they are literal code).
  * - A `data-line` core rule stamps the 0-based original source line onto block-level tokens
- *   (paragraphs, headings, list items, code, blockquotes, tables), plus `tabindex="0"` so every
- *   mapped block is keyboard-focusable at render time (D5 + accessibility AC).
+ *   (paragraphs, headings, list items, code, tables), plus `tabindex="0"` so every mapped block
+ *   is keyboard-focusable at render time (D5 + accessibility AC). Pure container opens (list and
+ *   blockquote wrappers) are skipped so their first child is individually navigable (#1738); see
+ *   `CONTAINER_OPEN_TOKENS`.
  * - Output is sanitized with DOMPurify; `data-*` and `tabindex` survive (DOMPurify default).
  *
  * No host I/O here — the source string is supplied by the caller (a host `FileAdapter` in real
@@ -25,8 +27,29 @@ import DOMPurify from 'dompurify';
 
 const md: MarkdownIt = new MarkdownIt({ html: true, linkify: true });
 
+/**
+ * Pure container open tokens whose source map STARTS on the same line as their first child (a
+ * list shares its opening line with its first `<li>`; a blockquote with its first paragraph).
+ * Stamping `data-line` on these makes the container the outermost element for that line, so both
+ * navigation (`collectBlocks`) and marker anchoring — each "first `[data-line]` per line wins" —
+ * swallow the first child: the first list item is unreachable and a marker on it decorates the
+ * whole list (#1738). We skip them, and the first child re-supplies the identical `data-line`, so
+ * no source line is orphaned. Tables are OUT OF SCOPE for #1738 and deliberately left unchanged:
+ * `thead_open`/`tbody_open`/`tr_open` are still stamped, so a table exhibits the same asymmetry
+ * (the `<table>` shares its line with the header row, `<tbody>` with the first body row). Fixing
+ * that needs a table-navigation-granularity decision (row vs cell) plus `<tr>`/`<td>` card-DOM
+ * handling — a larger change than this list/blockquote bugfix, tracked as a separate follow-up.
+ *
+ * They still get `data-row` instead (no `data-line`, no `tabindex`): a top-level list/blockquote
+ * is not navigable, but it stays the top-level ROW that hosts the in-row "+" affordance for its
+ * items, and the CSS row model (position:relative + gutter) keys on `[data-line], [data-row]`. So
+ * `data-row` is the CSS row hook, decoupled from the `data-line` navigation/marker identity.
+ */
+const CONTAINER_OPEN_TOKENS = new Set(['bullet_list_open', 'ordered_list_open', 'blockquote_open']);
+
 /** Block tokens that carry a source map and should receive a `data-line` attribute. */
 function isMappedBlock(tokenType: string): boolean {
+  if (CONTAINER_OPEN_TOKENS.has(tokenType)) return false;
   return tokenType.endsWith('_open') || tokenType === 'fence' || tokenType === 'code_block';
 }
 
@@ -71,15 +94,20 @@ function stripCommentLines(source: string): { text: string; lineMap: number[] } 
 // Core rule: stamp data-line (original source line via env.lineMap) + tabindex on mapped blocks.
 // tabindex is stamped at render time (not via a post-render effect) so focusability is present the
 // instant the block mounts — closing the effect-timing window the comment overlay's keyboard path
-// depends on.
+// depends on. Pure container opens get `data-row` instead: a CSS-only row hook, no data-line/tabindex.
 md.core.ruler.push('codev_data_line', (state) => {
   const lineMap = (state.env && state.env.lineMap) as number[] | undefined;
   for (const token of state.tokens) {
-    if (token.map && isMappedBlock(token.type)) {
+    if (!token.map) continue;
+    if (isMappedBlock(token.type)) {
       const cleanedLine = token.map[0];
       const originalLine = lineMap ? lineMap[cleanedLine] ?? cleanedLine : cleanedLine;
       token.attrSet('data-line', String(originalLine));
       token.attrSet('tabindex', '0');
+    } else if (CONTAINER_OPEN_TOKENS.has(token.type)) {
+      // Not navigable/markable (the first child is, #1738), but still the row that hosts the "+"
+      // for its items: mark it for the CSS row model without a data-line/tabindex (#1738 review).
+      token.attrSet('data-row', '');
     }
   }
   return true;

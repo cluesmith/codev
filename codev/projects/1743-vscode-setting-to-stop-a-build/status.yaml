@@ -1,0 +1,22 @@
+id: '1743'
+title: vscode-setting-to-stop-a-build
+protocol: air
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-09-28T21:02:28.964Z'
+    approved_at: '2026-09-28T22:01:59.599Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-28T20:42:27.189Z'
+updated_at: '2026-09-28T22:02:05.347Z'
+pr_history:
+  - phase: pr
+    pr_number: 1744
+    branch: builder/air-1743
+    created_at: '2026-09-28T20:51:27.933Z'
+pr_ready_for_human: false

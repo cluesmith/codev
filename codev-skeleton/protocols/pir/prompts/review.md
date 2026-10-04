@@ -110,7 +110,6 @@ BRANCH="$(git branch --show-current)"
 
 export CODEV_PR_TITLE="$PR_TITLE"
 export CODEV_PR_BODY="$(cat codev/reviews/{{artifact_name}}.md)"
-export CODEV_PR_BASE=main
 export CODEV_PR_HEAD="$BRANCH"
 
 {{pr_create_command}}

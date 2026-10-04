@@ -75,7 +75,7 @@ See [agent-farm.md](agent-farm.md) for full documentation.
 | `porch status <id>` | Show project protocol status |
 | `porch run <id>` | Run the next protocol phase |
 | `porch approve <id> <gate>` | Approve a human gate |
-| `porch pending` | List all pending gates across projects |
+| `porch pending` | List live pending gates across projects (stale records on finished/advanced projects hidden; `--all` shows them) |
 
 Porch drives SPIR, ASPIR, TICK, and BUGFIX protocols via a state machine. It's used automatically by `afx spawn` (strict mode) or manually by builders (soft mode).
 

@@ -46,12 +46,56 @@ name in a multi-architect workspace).
      (`codev/state/*.md`); never commit them. Builder `*_thread.md` files
      are the opposite: versioned, shipping with each builder PR.
 
-3. **Confirm identity + orient, then follow the state file.** In one tight
-   block, report: who you now are (name + one-line role from the banner, if
-   present), the file you read, and the current-state / open-loops summary
-   from the most recent dated section (or the file's leading content if it
-   has no dated sections). Then carry out whatever the state file says to do
-   on resume. Do not invent a new agenda — resume the one the state file
+3. **Confirm identity + orient.** In one tight block, report: who you now are
+   (name + one-line role from the banner, if present), the file you read, and
+   the current-state / open-loops summary from the most recent dated section
+   (or the file's leading content if it has no dated sections). If the banner
+   carries a `NEXT TASK` line, report both halves of it, as
+   `Next task from the owner at save time: <verbatim>  → resolved: <gloss>`
+   (omit `→ resolved: …` when the line carries no `[resolved at save: …]` gloss).
+
+4. **Start on the next task, if the banner carries one.** It is the **first
+   action of the resumed session**, ahead of the general resume agenda — the
+   owner wrote it at save time precisely so it would not have to be typed
+   again once you came back. Begin it without waiting for a further prompt.
+   - It carries the owner's authority the way any owner message does, **with
+     the standard limits unchanged**. A next task never by itself approves a
+     porch gate, merges a PR, cuts a release, restarts Tower, or performs any
+     other act that needs a per-occasion word. If the next task *is* such an
+     act, prepare it and ask for the word live: a saved instruction is an
+     instruction, not a pre-spent approval.
+   - **The gloss carries the word — for the items it names, and only them.**
+     Items named in a `[resolved at save: …]` gloss are approved for the act
+     the owner's words name: "merge them all [resolved at save: PRs #1710,
+     #1712]" means merge #1710 and #1712 without asking again. The owner gave
+     the word at save time, and the saving session pinned it to those items.
+     This narrows the rule above; it does not remove it — and a line with no
+     gloss pre-approves nothing:
+     - The act must be the one the owner's words say. **A gloss never widens
+       the verb** — "merge" does not also approve a release.
+     - **Anything not in the gloss still needs the word live.** A PR that
+       appeared after the save, an item the gloss did not name, a gate the
+       words did not mention → prepare and ask, exactly as above.
+     - Porch gates are still relayed to the builder, never run by you: the
+       gloss lets you *relay* the approval without re-asking; it does not
+       change who runs `porch approve`.
+     - Ordinary verification still applies: an approved merge still waits for
+       green CI, and a gloss item you find already merged, closed, or changed
+       is reported, not forced.
+     - **A line marked `[carried over — …]` is orientation only.** Its gloss
+       was written by an earlier cycle and carries no word: ask for it before
+       any gated act.
+   - **This does not narrow the gate rule.** The human decision was explicit
+     at save time, and the gloss is its record. What the rule forbids —
+     inferring approval from a gate notification, from silence, or from an
+     agent's own judgment — stays forbidden; a gloss is none of those.
+   - **Once you have started, delete the `NEXT TASK` line from the banner**
+     and record the pickup as a log entry (`picked up next task: <verbatim>
+     → resolved: <gloss>`, omitting `→ resolved: …` when there was no gloss).
+     A second re-init, or the next `/arch-save`, must not re-run it.
+
+5. **Then follow the state file.** Carry out whatever it says to do on
+   resume. Do not invent a new agenda — resume the one the state file
    describes.
 
 ## Saving your state (and knowing when to `/clear`)
@@ -118,9 +162,12 @@ Do not repeat it, and do not prompt for it at any other time.
 **`/arch-save` packages this whole loop**, and is the preferred path when the
 owner directs a refresh: it stops your monitors, writes the pruned state file,
 clears, and schedules `/arch-init` to bring you back — in that order, which is
-the part that matters. The save discipline above is what it performs at its
-step 3, so this section remains the source of truth for *how to write the
-file*; `/arch-save` is the source of truth for *the sequence*. The manual path
+the part that matters. It also accepts a **next task** as free text
+(`/arch-save file and spawn that issue`), which it writes into the banner as a
+`NEXT TASK` line for step 4 above to pick up. The save discipline above is
+what it performs at its step 3, so this section remains the source of truth
+for *how to write the file*; `/arch-save` is the source of truth for *the
+sequence*. The manual path
 (save → human clears → `/arch-init`) stays valid and is the fallback when
 Tower is unavailable.
 

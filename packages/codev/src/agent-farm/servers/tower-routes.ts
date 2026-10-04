@@ -45,6 +45,8 @@ import {
   logSessionIdentity,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
+import { handleIdeApi } from './ide-server.js';
+import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
 import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
 import { ensureCodevConfigWatcher } from './codev-config-watcher.js';
 import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
@@ -291,6 +293,20 @@ export async function handleRequest(
     }
 
     // Pattern-based routes (require regex or prefix matching)
+
+    // IDE management endpoint: /api/ide (Issue #1668). Local-only — blocked from
+    // the tunnel in tunnel-client (like /api/tunnel/*) — and reached only after
+    // the isRequestAllowed key check above. Drives the IDE server lifecycle.
+    if (url.pathname === '/api/ide') {
+      return await handleIdeApi(req, res, ctx.log);
+    }
+
+    // IDE prefix forward: /ide/* → local IDE server (Issue #1668). A post-auth
+    // handler: isRequestAllowed above is the whole trust boundary (the forward
+    // adds no per-folder authorization). Path + query forwarded unchanged.
+    if (matchIdePrefix(url.pathname)) {
+      return await forwardIdeHttp(req, res, ctx.log);
+    }
 
     // Tunnel endpoints: /api/tunnel/* (Spec 0097 Phase 4)
     if (url.pathname.startsWith('/api/tunnel/')) {

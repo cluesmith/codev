@@ -58,7 +58,7 @@ import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-ter
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
-import { BuildersProvider, AccordionGate, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
+import { BuildersProvider, AccordionGate, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
 // Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
 import { TowerFleetCache } from './views/tower-cache.js';
 import { TowerProvider } from './views/tower.js';
@@ -276,11 +276,13 @@ export async function activate(context: vscode.ExtensionContext) {
 				break;
 			case 'reconnecting':
 				statusBarItem.text = '$(sync~spin) Codev: Reconnecting...';
-				statusBarItem.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+				// No warning/error foreground here (#1747): those tokens pair with a
+				// background and default to white, illegible on a light status bar.
+				statusBarItem.color = undefined;
 				break;
 			case 'disconnected':
 				statusBarItem.text = '$(circle-slash) Codev: Offline';
-				statusBarItem.color = new vscode.ThemeColor('statusBarItem.errorForeground');
+				statusBarItem.color = undefined;
 				break;
 		}
 	});
@@ -337,6 +339,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.onDidChangeWindowState((state) => {
 			if (state.focused && !windowFocused) {
+				// Re-arm terminal reconnects on wake (#1681). A refocus is the
+				// extension host's wake signal (the Node host has no DOM
+				// online/visibility events); a slept laptop burns each adapter's
+				// six-attempt reconnect budget against the suspended network stack,
+				// so re-arm unconditionally here — onWake no-ops a healthy or
+				// permanently-gone connection, so it needs no opt-in the way the
+				// repaint below does.
+				terminalManager?.rearmAllOnWake();
 				const enabled = vscode.workspace
 					.getConfiguration('codev')
 					.get<boolean>('terminal.repaintOnRefocus', false);
@@ -600,10 +610,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 			// server-process (a running dev), not zap — $(zap) reads as AI/sparkle in VSCode.
 			devChipItem.text = `$(server-process) Dev: ${target}`;
-			// StatusBarItem.backgroundColor only honors error/warning backgrounds
-			// (VSCode API constraint), so the "prominent, not alarming" look
-			// (#921 design call #4) is applied via the foreground instead.
-			devChipItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
+			// Default foreground on purpose (#1747): `statusBarItem.prominentForeground`
+			// pairs with a prominent background the API cannot set (backgroundColor
+			// only honors error/warning), and light themes make it white-on-light.
 			devChipItem.tooltip = `Codev dev running for ${target}. Click to show the dev terminal`;
 			devChipItem.show();
 		} else if (devChipItem) {
@@ -901,8 +910,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// roster is every live agent in the view, not just open tabs. The current
 	// position is the focused agent terminal (builder id, else architect name);
 	// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
-	// last-focused agent. Nothing focused → start at the ends. ≤1 agent → no-op with a
-	// status-bar hint.
+	// last-focused agent. Nothing focused → start at the ends, even for a lone agent
+	// (#1748). Empty roster, or a lone agent already focused → no-op with a status-bar hint.
 	// Open + focus one roster entry; returns true when a terminal was actually opened.
 	const openAgentTarget = async (t: AgentTarget): Promise<boolean> => {
 		if (t.kind === 'builder') {
@@ -928,11 +937,15 @@ export async function activate(context: vscode.ExtensionContext) {
 			t => agentTargetIsFocused(t, activeBuilderId, activeArchitectName));
 
 		// Walk with wrap-around, opening the first entry that succeeds and skipping any
-		// that fails so one stale agent can't wedge the cycle. Empty attempts means the
-		// roster has <=1 agent -- a no-op with a status-bar hint.
+		// that fails so one stale agent can't wedge the cycle. Empty attempts means an
+		// empty roster or a lone agent already focused -- a no-op with a status-bar hint.
 		const attempts = agentCycleAttemptOrder(order, currentIndex, direction);
 		if (attempts.length === 0) {
-			vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
+			if (order.length === 0) {
+				vscode.window.setStatusBarMessage('Codev: no agent terminals', 3000);
+			} else {
+				vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
+			}
 			return;
 		}
 		for (const target of attempts) {
@@ -1191,18 +1204,21 @@ export async function activate(context: vscode.ExtensionContext) {
 			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
 		}),
 		reg('codev.openBuilderRow', async (item: unknown) => {
-			// Builder-row single-click does BOTH: opens the terminal and expands
-			// the row (the file list). Expansion is via reveal(expand:true) which
-			// fires onDidExpandElement — the accordion handler picks that up and
-			// collapses peers when the setting is on. focus:false keeps the
-			// terminal focused, not the tree.
+			// Builder-row single-click opens the terminal, and — when
+			// `codev.buildersClickExpands` is on (the default) — also expands the
+			// row (the file list). Expansion is via reveal(expand:true) which fires
+			// onDidExpandElement — the accordion handler picks that up and collapses
+			// peers when that setting is on. focus:false keeps the terminal focused,
+			// not the tree. The setting is read here at click time (like
+			// buildersAutoReveal) so no restart is needed; the decision core lives
+			// in `runBuilderRowClick`.
 			if (!(item instanceof BuilderTreeItem)) { return; }
-			await terminalManager?.openBuilderByRoleOrId(item.builderId, true);
-			try {
-				await buildersView!.reveal(item, { expand: true, select: false, focus: false });
-			} catch {
-				// Benign if the row is no longer present (e.g. mid-cleanup).
-			}
+			const clickExpands =
+				vscode.workspace.getConfiguration('codev').get<boolean>('buildersClickExpands', true);
+			await runBuilderRowClick(clickExpands, {
+				openTerminal: () => terminalManager?.openBuilderByRoleOrId(item.builderId, true),
+				expandRow: () => buildersView!.reveal(item, { expand: true, select: false, focus: false }),
+			});
 		}),
 		reg('codev.focusNextAgentTerminal', () => cycleAgentTerminal(1)),
 		reg('codev.focusPreviousAgentTerminal', () => cycleAgentTerminal(-1)),
