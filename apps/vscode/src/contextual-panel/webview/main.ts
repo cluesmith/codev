@@ -16,6 +16,7 @@ import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import './styles.css';
 import type { ModeDescriptor, ModeKind } from '../types.js';
+import { formatAge } from '@cluesmith/codev-sdk/builder-helpers';
 import type { AttentionBuilderRef, AttentionSummary, GateItem, WaitingItem, CountItem } from '@cluesmith/codev-sdk/builder-helpers';
 import type { HostToWebviewMessage } from '../messages.js';
 
@@ -71,25 +72,8 @@ function rowMain(item: AttentionBuilderRef): React.ReactNode {
   );
 }
 
-/** Short "6m" / "2h" / "3d" age from an ISO timestamp; empty when unknown/unparseable. */
-function since(iso: string | null): string {
-  if (iso === null) {
-    return '';
-  }
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) {
-    return '';
-  }
-  const mins = Math.max(0, Math.floor((Date.now() - then) / 60000));
-  if (mins < 60) {
-    return `${mins}m`;
-  }
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) {
-    return `${hours}h`;
-  }
-  return `${Math.floor(hours / 24)}d`;
-}
+// Relative age uses the SDK's canonical `formatAge` (shared with the Tower view) so both surfaces
+// read the same — "just now" under a minute, then "6m"/"2h"/"3d", and nothing for an absent age.
 
 function section(title: string, count: number, rows: React.ReactNode): React.ReactNode {
   return h(
@@ -106,12 +90,12 @@ function section(title: string, count: number, rows: React.ReactNode): React.Rea
 }
 
 function gateRow(item: GateItem, index: number): React.ReactElement {
-  const age = since(item.since);
+  const age = formatAge(item.since);
   const badge = h(
     'span',
     { className: 'cp-badge cp-badge-gate' },
     item.gate,
-    age.length > 0 ? h('span', { className: 'cp-badge-since' }, ` · ${age}`) : null,
+    age !== null ? h('span', { className: 'cp-badge-since' }, ` · ${age}`) : null,
   );
   return h(
     'div',
@@ -123,13 +107,13 @@ function gateRow(item: GateItem, index: number): React.ReactElement {
 }
 
 function waitingRow(item: WaitingItem, index: number): React.ReactElement {
-  const age = since(item.since);
+  const age = formatAge(item.since);
   return h(
     'div',
     { className: 'cp-row cp-row-waiting', key: `${item.builderId}:${index}` },
     h('span', { className: 'cp-stripe' }),
     rowMain(item),
-    h('span', { className: 'cp-badge cp-badge-waiting' }, age.length > 0 ? `idle · ${age}` : 'idle'),
+    h('span', { className: 'cp-badge cp-badge-waiting' }, age !== null ? `idle · ${age}` : 'idle'),
   );
 }
 

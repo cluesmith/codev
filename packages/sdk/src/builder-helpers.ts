@@ -274,3 +274,25 @@ function queuedTotal(s: AttentionSummary): number {
   for (const item of s.queuedFeedback) { total += item.count; }
   return total;
 }
+
+/**
+ * The canonical compact relative age for an attention timestamp: `"just now"` under a minute, then
+ * `"6m"` / `"2h"` / `"3d"`. Returns `null` when the timestamp is absent, unparseable, or in the
+ * future, so each client decides how to render its absence. Lives here (not per-client) so every
+ * attention surface — the VS Code Tower tree and the contextual panel today, the dashboard /
+ * Stream Deck tomorrow — shows the same age for the same event rather than one saying `"just now"`
+ * and another `"0m"`. Pure: reads only its arguments.
+ */
+export function formatAge(iso: string | null, now: number = Date.now()): string | null {
+  if (iso === null) { return null; }
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) { return null; }
+  const ms = now - then;
+  if (ms < 0) { return null; }
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) { return 'just now'; }
+  if (minutes < 60) { return `${minutes}m`; }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) { return `${hours}h`; }
+  return `${Math.floor(hours / 24)}d`;
+}

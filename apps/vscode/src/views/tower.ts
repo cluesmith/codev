@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
+import { formatAge } from '@cluesmith/codev-sdk/builder-helpers';
 import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { TowerFleetCache } from './tower-cache.js';
 import { orderFleet } from './fleet-order.js';
 import type { LabelledEntry } from './fleet-order.js';
-import { ageSince, describeAttention } from './attention-format.js';
+import { describeAttention } from './attention-format.js';
 
 /** Command a Tower workspace row runs — switch to it, or activate-then-open if dormant. */
 export const OPEN_WORKSPACE_COMMAND = 'codev.tower.openWorkspace';
@@ -177,7 +178,7 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
 function attentionRows(a: AttentionSummary): TowerNode[] {
   const rows: TowerNode[] = [];
   for (const gate of a.pendingGates) {
-    const age = ageSince(gate.since);
+    const age = formatAge(gate.since);
     let description = gate.gate;
     if (age) { description = `${gate.gate} · ${age}`; }
     let icon = 'warning';
@@ -185,7 +186,7 @@ function attentionRows(a: AttentionSummary): TowerNode[] {
     rows.push({ kind: 'attention', label: builderLabel(gate), description, icon, color: 'list.warningForeground' });
   }
   for (const wait of a.waiting) {
-    const age = ageSince(wait.since);
+    const age = formatAge(wait.since);
     let description = 'waiting';
     if (age) { description = `waiting ${age}`; }
     rows.push({ kind: 'attention', label: builderLabel(wait), description, icon: 'clock' });

@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';
-import { compareAttention, deriveAttention, isIdleWaiting, IDLE_WAITING_THRESHOLD_MS } from '../builder-helpers.js';
+import { compareAttention, deriveAttention, formatAge, isIdleWaiting, IDLE_WAITING_THRESHOLD_MS } from '../builder-helpers.js';
 import type { AttentionSummary } from '../builder-helpers.js';
 
 const NOW = Date.parse('2026-08-25T12:00:00Z');
@@ -288,3 +288,23 @@ describe('compareAttention — order properties', () => {
 function quietRef(sorted: AttentionSummary[]): AttentionSummary {
   return sorted.find((s) => s.isEmpty)!;
 }
+
+describe('formatAge — the canonical cross-client relative age', () => {
+  const now = Date.parse('2026-09-11T12:00:00Z');
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+
+  it('reads "just now" under a minute', () => {
+    expect(formatAge(ago(30_000), now)).toBe('just now');
+    expect(formatAge(ago(0), now)).toBe('just now');
+  });
+  it('reads minutes, hours, then days', () => {
+    expect(formatAge(ago(6 * 60_000), now)).toBe('6m');
+    expect(formatAge(ago(2 * 3_600_000), now)).toBe('2h');
+    expect(formatAge(ago(3 * 86_400_000), now)).toBe('3d');
+  });
+  it('returns null for absent, unparseable, or future timestamps', () => {
+    expect(formatAge(null, now)).toBeNull();
+    expect(formatAge('not-a-date', now)).toBeNull();
+    expect(formatAge(new Date(now + 60_000).toISOString(), now)).toBeNull();
+  });
+});
