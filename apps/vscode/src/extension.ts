@@ -900,6 +900,16 @@ export async function activate(context: vscode.ExtensionContext) {
 	);
 	// Populate as soon as Tower is reachable; refreshes thereafter ride the shared SSE + poll.
 	towerCache.refresh();
+	// The container defaults to the secondary side bar, which VS Code keeps hidden — so a fresh user
+	// wouldn't see Tower at all. Reveal it exactly once (per profile) to open the secondary side bar
+	// for discovery, then respect the user's layout. Gated like the panel reveal (#1144): a dormant
+	// window must not steal focus or consume the one-time flag, so the nudge still fires on the user's
+	// first real Codev window.
+	const TOWER_REVEALED_KEY = 'codev.towerRevealedOnce';
+	if (policy.revealPanelOnce && !context.globalState.get(TOWER_REVEALED_KEY)) {
+		vscode.commands.executeCommand('workbench.view.extension.codev-tower');
+		context.globalState.update(TOWER_REVEALED_KEY, true);
+	}
 	// --- end Codev Tower ------------------------------------------------------------------------
 
 	// Move focus to the next (+1) or previous (-1) agent terminal in the Agents-view

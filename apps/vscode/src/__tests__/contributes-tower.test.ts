@@ -54,6 +54,14 @@ describe('Codev Tower contributions (#1566)', () => {
     expect(EXT_SRC).toMatch(/registerTowerCommands\(/);
   });
 
+  it('reveals the Tower container once on first run, guarded by globalState', () => {
+    // The container defaults to the (hidden-by-default) secondary side bar, so a one-time reveal
+    // opens it for discovery; the globalState flag keeps it a nudge, not an every-launch interruption.
+    expect(EXT_SRC).toMatch(/executeCommand\(['"]workbench\.view\.extension\.codev-tower['"]\)/);
+    expect(EXT_SRC).toMatch(/globalState\.get\(\s*TOWER_REVEALED_KEY\s*\)/);
+    expect(EXT_SRC).toMatch(/globalState\.update\(\s*TOWER_REVEALED_KEY\s*,\s*true\s*\)/);
+  });
+
   it('registers every manifest Tower command somewhere in code', () => {
     const src = EXT_SRC + CMD_SRC;
     for (const command of ['codev.switchWorkspace', 'codev.tower.deactivateWorkspace', 'codev.tower.refresh']) {
