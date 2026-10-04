@@ -1084,7 +1084,9 @@
           "id": "codev",
           "title": "Codev",
           "icon": "icons/codev.svg"
-        },
+        }
+      ],
+      "secondarySidebar": [
         {
           "id": "codev-tower",
           "title": "Codev Tower",

@@ -39,11 +39,15 @@ describe('codevPanel viewsContainer (#812)', () => {
     const activitybar = containers.activitybar ?? [];
     const codev = activitybar.find((c) => c.id === 'codev');
     expect(codev).toMatchObject({ id: 'codev', title: 'Codev', icon: 'icons/codev.svg' });
+    // The machine-scope Tower container is NOT in the activity bar — it defaults to the right.
+    expect(activitybar.some((c) => c.id === 'codev-tower')).toBe(false);
   });
 
-  it('adds the separate machine-scope Codev Tower container (#1566)', () => {
-    const activitybar = containers.activitybar ?? [];
-    const tower = activitybar.find((c) => c.id === 'codev-tower');
+  it('defaults the machine-scope Codev Tower container to the secondary side bar (#1566)', () => {
+    // viewsContainers.secondarySidebar is stable since VS Code 1.106; the extension's engine floor
+    // (^1.128) is well past it, so Tower defaults to the RIGHT instead of the left activity bar.
+    const secondary = containers.secondarySidebar ?? [];
+    const tower = secondary.find((c) => c.id === 'codev-tower');
     expect(tower).toMatchObject({ id: 'codev-tower', title: 'Codev Tower', icon: 'icons/tower.svg' });
     // Distinct icon from the workspace-scope container — the two must be tellable apart.
     expect(tower!.icon).not.toBe('icons/codev.svg');
