@@ -219,6 +219,21 @@ Commit e6074f601; updated contributes-panel test; vscode suite 1086 green, JSON 
 to codev-ide:architect disregarding my earlier fork-layout recommendation. Placement is a visual change —
 flag for dev-approval eyeball. New head after this: push below.
 
+### Secondary-sidebar discoverability + guard + icon (2026-10-05, owner + architect:vscode)
+- Owner hit "where is it?" — secondary side bar is HIDDEN by default, so Tower was invisible until
+  toggled. Owner: "make the secondary sidebar open by default". Added a one-time first-run REVEAL of
+  codev-tower (executeCommand workbench.view.extension.codev-tower), guarded by globalState key
+  TOWER_REVEALED_KEY + policy.revealPanelOnce tier gate — mirrors the #1144 panel reveal. Opens the
+  right bar once for discovery, then respects the user's layout. (commit 0227005cc)
+- architect:vscode ask (#1763 pattern): added tower-engine-guard.test.ts (package.json reads only) —
+  (a) secondarySidebar present => engines.vscode min >= 1.106.0; (b) @types/vscode <= engine floor.
+  Also sent architect the VERBATIM owner directions + git-anchored timestamps (no harness keystroke
+  timestamp exists; channel = direct to pir-1566 session, client undetermined from inside). (commit 0ca55b188)
+- Owner: current-workspace icon 'location' looked like a map/geo pin -> changed to 'folder-opened'
+  (the folder open in this window; distinct from plain 'folder' for other active ws). (commit d94f72b15)
+Head d94f72b15; vscode 1090 tests, sdk 144, check-types + eslint clean. dev-approval stands at d94f72b15.
+Visual eyeball items for owner: right-side placement + first-run reveal + folder-opened current icon.
+
 ### Investigation (done)
 Launched 3 parallel Explore agents: SDK/types (TowerClient, deriveAttention, AttentionSummary,
 OverviewData, readLocalKey); vscode views/tree/command/SSE plumbing; Tower endpoints + streamdeck
