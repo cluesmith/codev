@@ -93,6 +93,14 @@ export function isOpenLocationMessage(message: unknown): message is OpenLocation
     && typeof m.builderId === 'string'
     && m.builderId.length > 0
     && typeof m.relPath === 'string'
-    && m.relPath.length > 0
+    && isRepoRelativePath(m.relPath)
     && (m.line === undefined || (typeof m.line === 'number' && Number.isInteger(m.line) && m.line > 0));
+}
+
+/** A non-empty repo-relative path with no absolute root and no `..` segment (no worktree escape). */
+function isRepoRelativePath(relPath: string): boolean {
+  if (relPath.length === 0 || relPath.startsWith('/') || relPath.startsWith('\\') || /^[A-Za-z]:/.test(relPath)) {
+    return false;
+  }
+  return !relPath.split(/[\\/]/).includes('..');
 }

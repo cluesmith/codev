@@ -687,6 +687,10 @@ describe('ContextualPanelProvider — review-queue body (#1559)', () => {
       fireMessage({ type: 'review-action', action: 'submit' });
       fireMessage({ type: 'open-location', builderId: '1559', relPath: 'src/x.ts', line: 0 });
       fireMessage({ type: 'open-location', builderId: 'other', relPath: 'src/x.ts' });
+      fireMessage({ type: 'open-location', builderId: '1559', relPath: '../../etc/passwd' });
+      fireMessage({ type: 'open-location', builderId: '1559', relPath: 'src/../../escape.ts' });
+      fireMessage({ type: 'open-location', builderId: '1559', relPath: '/etc/passwd' });
+      fireMessage({ type: 'open-location', builderId: '1559', relPath: 'C:\\Windows\\x' });
       expect(hoisted.state.executed).toEqual([]);
 
       hoisted.state.activeTabInput = textTab('/w/src/foo.ts');

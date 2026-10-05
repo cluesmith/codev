@@ -244,7 +244,13 @@ export async function openBuilderDiffLocation(
     flash(`no worktree on record for ${target.builderId}`);
     return;
   }
-  const fsPath = path.join(builder.worktreePath, target.relPath);
+  // The ref comes from the webview (lower trust): only ever open a path inside the worktree.
+  const fsPath = path.resolve(builder.worktreePath, target.relPath);
+  const inside = path.relative(builder.worktreePath, fsPath);
+  if (inside === '' || inside.startsWith('..') || path.isAbsolute(inside)) {
+    flash(`cannot open ${target.relPath}`);
+    return;
+  }
   const result = await deps.diffCache.getDiff(target.builderId, builder.worktreePath);
   const change = result.files.find(f => f.plan.resourcePath === target.relPath);
   let editor: vscode.TextEditor | undefined;
@@ -255,7 +261,14 @@ export async function openBuilderDiffLocation(
       { preview: true },
     );
     recordDiffNavPosition(target.builderId, target.relPath);
-    editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === fsPath);
+    // The per-file diff's modified side is normally the active editor once the open resolves; fall
+    // back to any visible editor showing the file.
+    const active = vscode.window.activeTextEditor;
+    if (active?.document.uri.fsPath === fsPath) {
+      editor = active;
+    } else {
+      editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === fsPath);
+    }
   } else {
     try {
       editor = await vscode.window.showTextDocument(vscode.Uri.file(fsPath), { preview: true });

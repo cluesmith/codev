@@ -356,6 +356,19 @@ describe('openBuilderDiffLocation (#1559: clickable file refs)', () => {
     expect(editor.selection).toBeUndefined();
   });
 
+  it('refuses a ref that escapes the worktree', async () => {
+    worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
+    getDiff.mockResolvedValue({ baseRef: 'base-sha', files: [] });
+
+    await openBuilderDiffLocation({ builderId: 'pir-x', relPath: '../other/secret.ts' }, deps);
+    await openBuilderDiffLocation({ builderId: 'pir-x', relPath: '/etc/passwd' }, deps);
+
+    expect(getDiff).not.toHaveBeenCalled();
+    expect(openMock).not.toHaveBeenCalled();
+    expect(showTextDocument).not.toHaveBeenCalled();
+    expect(setStatusBarMessage).toHaveBeenCalledWith('Codev: cannot open ../other/secret.ts', expect.anything());
+  });
+
   it('flashes when the builder has no worktree, or the file cannot be opened', async () => {
     worktreeMock.mockReturnValue(undefined as never);
     await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'a.ts' }, deps);
