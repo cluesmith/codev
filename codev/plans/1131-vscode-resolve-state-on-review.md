@@ -51,7 +51,7 @@ The deciding constraint is the architect's rescope point 2: *a v2 tag is invisib
 **Grammar:**
 - Inside the parens, `@author` comes first, optionally followed by comma-separated attributes: `REVIEW(@author[, attr]*)`.
 - This issue defines exactly one attribute, the bare flag `resolved`.
-- Unknown attributes are **parsed, preserved on rewrite, and ignored**. That reserves the slot for a future `id=…` *if* a real requirement for out-of-band identity ever appears. No id is minted now.
+- Unknown attributes (bare flags or `key=value`) are **parsed, preserved verbatim in original order on rewrite, and ignored**. The full grammar is pinned in section A (C4). That reserves the slot for a future `id=…` *if* a real requirement for out-of-band identity ever appears. No id is minted now.
 - The author is the first comma-separated token. GitHub logins cannot contain commas or spaces, so the split is unambiguous.
 
 **On "stable identity is now in scope"** (rescope point 1): I examined it and recommend *not* minting ids. Ids are only required when state lives *away* from the marker (option 3) or when something references a marker across files or sessions. Nothing in scope does either. Edit, delete and resolve all act on a marker the user is looking at, and the shipped `markerLine` + author/body-prefix verify already makes those race-safe. If the gate wants ids anyway, the reserved attribute slot makes `id=` additive later without a format break.
@@ -90,22 +90,47 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 
 ## Proposed Change
 
-### A. Codec (`packages/sdk/src/review-markers.ts`) [CONTRACT: sdk]
+### A. Codec (`packages/sdk/src/review-markers.ts`) [CONTRACT: sdk, APPROVED by main with five conditions, folded in below as C1–C5]
 
-- **Regex.** Keep the tag and shape. Capture group 2 (the paren contents) is split into `author` (the first token, `@` stripped) and `attrs` (the remaining trimmed tokens, in order).
-- **`ReviewMarker`** gains `resolved: boolean`: true iff `attrs` includes `resolved`.
-- **`serializeReviewMarker(author, body, indent = '', attrs: string[] = [])`.** With empty `attrs`, the output is byte-identical to today's (unresolved markers stay pure v1).
-- **`rewriteReviewMarkerBody`** preserves `attrs` (and the author, as today).
+- **C4: attribute grammar, pinned in the module doc comment.** The full paren contents are `@author` followed by `(, attr)*`:
+  - **Author:** `@` up to the first comma or the close paren, trimmed. GitHub logins cannot contain a comma, so the first-comma split is safe. Bodies come after the colon, so commas in a body are unaffected.
+  - **Attributes:** the remainder, split on commas and trimmed. Each one is either a bare flag (`resolved`) or `key=value` (the reserved `id=…`).
+  - **Unknown attributes** are preserved **verbatim** and re-emitted in their **original order**, to minimize diffs.
+  - The grammar is defined now, so a later `id=` never needs another format break.
+- **Regex.** Keep the tag and shape. Capture group 2 (the paren contents) is split per C4 into `author` and `attrs: string[]` (the verbatim tokens, in order).
+- **`ReviewMarker`** gains `resolved: boolean`: true iff some attr equals `resolved` (trimmed, case-insensitive). The `author` field is the **parsed** author only.
+- **C3: `serializeReviewMarker(author, body, indent = '', attrs: string[] = [])`.**
+  - The no-attrs path must be **byte-identical to v1**: exactly `<!-- REVIEW(@author): body -->`.
+  - With attrs, the output is `<!-- REVIEW(@author, a1, a2): body -->`.
+- **C2: `rewriteReviewMarkerBody`** carries the parsed author **and every attr** (`resolved` plus unknowns, verbatim, in order) through to `serializeReviewMarker`. A body edit never drops state.
 - **New `setReviewMarkerResolved(lineText, resolved): string | null`.**
-  - Adds or removes the `resolved` attribute while preserving author, indent, other attrs, and the body *verbatim*: no re-normalization, so a hand-authored body is not reflowed by a toggle.
-  - Returns `null` for a non-marker line.
-  - It is idempotent.
-- **`matchesExpectedMarker`** compares against the parsed **author only** (not the attrs). A toggle that races with another toggle still verifies the same marker.
+  - Adds the canonical `resolved` attr (appended after the existing attrs) or removes every `resolved` token.
+  - It preserves the author, indent, other attrs (verbatim, in order) and the body *verbatim*: no re-normalization, so a hand-authored body is not reflowed by a toggle.
+  - It returns `null` for a non-marker line, and it is idempotent.
+- **C1: `matchesExpectedMarker`** compares `expectedAuthor` against the **parsed** author, not the raw paren capture.
+  - Today it does `m[2] !== expectedAuthor`. Once `m[2]` is `amr, resolved`, a new-parser surface passing `expectedAuthor='amr'` would falsely mismatch, refuse the write, and wrongly report the file changed. This is the edit/delete correctness seam.
+- **C5: purity.** `review-markers.ts` stays pure: no new imports, no `node:*`, no DOM. The sdk environment-agnostic boundary tests must stay green.
+- **Lockstep (main's note + architect:vscode's ruling).** The sdk `ReviewMarker` and the artifact-canvas `ReviewMarker` are structurally coupled by convention. Both gain `resolved` **in the same phase and the same commit series** (sections A and D land together, never a phase apart).
+- **Why the same tag degrades safely in both directions on an older parser** (main's reasoning, on record):
+  - The current regex captures `(@[^)]+)` as the author, so an old parser reads `author='amr, resolved'`. That is cosmetic only.
+  - Its edit/delete still work. `matchesExpectedMarker` sees `expectedAuthor='amr, resolved' == m[2]`. `rewriteReviewMarkerBody` reads `author='amr, resolved'` and re-serializes it, so the `resolved` attr **survives an old-parser body edit by construction**.
+  - A separate tag or an out-of-paren attribute would lose either the byte-identical property or this graceful degradation.
 - **Tests:**
-  - Round-trip, plus the old-shape and new-shape fixtures.
-  - Unknown-attribute preservation.
-  - A toggle preserves the body byte-for-byte.
-  - **A pinned "old-host" test** that runs the *pre-change* regex against a resolved marker. It asserts the line still matches as a REVIEW marker, which is the cross-host claim above made executable.
+  - **C1:** a resolved marker edits *and* deletes cleanly through `matchesExpectedMarker` with `expectedAuthor` set to the bare author. A mismatched author still refuses.
+  - **C2:** editing a resolved marker's body leaves it still resolved. Editing a marker that carries an unknown attr (e.g. `id=abc`) retains the attr verbatim and in its original position.
+  - **C3:** parse→serialize of a v1 marker is **byte-identical**. Parse→serialize of a resolved marker is stable and idempotent (serializing twice gives identical bytes).
+  - **C4:** grammar cases:
+    - `@a,resolved` (no space), `@a, resolved, id=x`, and `@a, id=x, resolved` all keep their order.
+    - A body containing commas and parens is unaffected.
+    - Whitespace tolerance.
+  - **C5:** the existing sdk boundary tests stay green, and no import is added.
+  - A toggle preserves the body byte-for-byte and is idempotent. Unresolve removes only the `resolved` token.
+  - **A pinned "old-host" test** runs the *pre-change* regex (copied as a fixture) against a resolved marker. It asserts:
+    - (a) the line still matches as a REVIEW marker;
+    - (b) the old `rewriteReviewMarkerBody` logic preserves `, resolved`;
+    - (c) the old `matchesExpectedMarker` logic accepts `expectedAuthor='amr, resolved'`.
+
+    This makes the cross-host claim executable.
 
 ### B. Editor Comments-API (`apps/vscode/src/comments/plan-review.ts`)
 
@@ -171,7 +196,7 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 ## Files to Change
 
 - `packages/sdk/src/review-markers.ts` (whole module: regex split, `resolved`, attrs, `setReviewMarkerResolved`) **[CONTRACT]**
-- `packages/sdk/src/__tests__/review-markers.test.ts` (new cases, including the pinned old-regex compat test)
+- `packages/sdk/src/__tests__/review-markers.test.ts` (new cases: C1–C5, plus the pinned old-regex compat test)
 - `packages/artifact-canvas/src/types.ts:38-56, 66-126` (`resolved?`, `onToggleResolved?`, amendment note) **[CONTRACT]**
 - `packages/artifact-canvas/src/components/ArtifactCanvas.tsx:133-245` (card class, label, toggle action) and the delegated click handler
 - `packages/artifact-canvas/src/overlays/MarkerMinimap.tsx:75-90` (resolved dot class, tooltip)
@@ -217,7 +242,11 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 ## Test Plan
 
 **Unit / automated (run from the worktree):**
-- `packages/sdk`: codec round-trip; `resolved` parse; attrs preserved through `rewriteReviewMarkerBody` and `setReviewMarkerResolved`; a toggle is idempotent and body-verbatim; unresolved serialization is byte-identical to the pre-change output; **the pre-change regex still matches a resolved marker**; `matchesExpectedMarker` ignores attrs.
+- `packages/sdk`:
+  - Main's conditions C1–C5, as listed in section A's Tests: parsed-author concurrency; attrs survive a body edit; byte-identical v1 round-trip plus idempotent resolved round-trip; grammar cases; purity.
+  - `resolved` parse; toggle idempotent and body-verbatim.
+  - The pinned pre-change-regex compat test.
+  - Lockstep check: the canvas `ReviewMarker` type accepts the sdk `ReviewMarker` (a compile-time assignability assertion in the vscode host, where both meet).
 - `packages/artifact-canvas`: a resolved card gets the dim class + "Resolved" label; the toggle button appears only with `onToggleResolved` + `markerLine`; a click emits the right payload; minimap dots get the resolved class; read-only hosts are unchanged.
 - `apps/vscode`: threads built from the codec carry the correct `state`/`contextValue` and a clean author; the resolve/unresolve commands rewrite the line and refuse a non-marker line; the preview `toggleResolved` race path refreshes instead of writing; the existing `plan-review-edit`, `plan-review-append` and `preview-edit-delete` suites still pass.
 - `pnpm build` + `check-types` across the touched packages, not just vitest.
