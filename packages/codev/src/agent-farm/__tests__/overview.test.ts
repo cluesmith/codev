@@ -20,6 +20,7 @@ import {
   calculateProgress,
   calculateEvenProgress,
   detectBlocked,
+  detectBlockedGate,
   detectBlockedSince,
   computeIdleMs,
   derivePrReady,
@@ -774,6 +775,54 @@ describe('overview', () => {
           'plan-approval': '2026-01-02T00:00:00Z',
         },
       }))).toBe('spec review');
+    });
+
+    // #1777: EXPERIMENT's experiment-complete gate was outside the allowlist,
+    // so a lane held at it surfaced nowhere.
+    it('reports a pending experiment-complete gate parsed from status.yaml (#1777)', () => {
+      const parsed = parseStatusYaml([
+        "id: experiment-1560",
+        "title: spike",
+        "protocol: experiment",
+        "phase: analyze",
+        "gates:",
+        "  experiment-complete:",
+        "    status: pending",
+        "    requested_at: '2026-10-05T00:20:48Z'",
+        "",
+      ].join('\n'));
+      expect(detectBlocked(parsed)).toBe('experiment review');
+      expect(detectBlockedGate(parsed)).toBe('experiment-complete');
+      expect(detectBlockedSince(parsed)).toBe('2026-10-05T00:20:48Z');
+    });
+
+    it.each([
+      ['maintain-complete', 'maintenance review'],
+      ['scope-approval', 'scope review'],
+      ['research-complete', 'research review'],
+    ])('reports bundled protocol gate %s as "%s" (#1777)', (gate, label) => {
+      const parsed = makeParsed({
+        gates: { [gate]: 'pending' },
+        gateRequestedAt: { [gate]: '2026-10-05T00:00:00Z' },
+      });
+      expect(detectBlocked(parsed)).toBe(label);
+      expect(detectBlockedGate(parsed)).toBe(gate);
+    });
+
+    it('reports an unknown future gate with a label derived from its name (#1777)', () => {
+      const parsed = makeParsed({
+        gates: { 'security-approval': 'pending' },
+        gateRequestedAt: { 'security-approval': '2026-10-05T00:00:00Z' },
+      });
+      expect(detectBlocked(parsed)).toBe('security review');
+      expect(detectBlockedGate(parsed)).toBe('security-approval');
+      expect(detectBlockedSince(parsed)).toBe('2026-10-05T00:00:00Z');
+    });
+
+    it('does not report an unknown gate that is pending but not requested (#1777)', () => {
+      expect(detectBlockedGate(makeParsed({
+        gates: { 'experiment-complete': 'pending' },
+      }))).toBeNull();
     });
   });
 
