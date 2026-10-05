@@ -1,0 +1,14 @@
+id: bugfix-1777
+title: tower-vscode-experiment-s-expe
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-05T01:33:58.448Z'
+updated_at: '2026-10-05T01:33:58.449Z'
