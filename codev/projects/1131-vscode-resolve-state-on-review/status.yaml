@@ -1,0 +1,18 @@
+id: '1131'
+title: vscode-resolve-state-on-review
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-05T00:05:38.187Z'
+updated_at: '2026-10-05T00:05:38.188Z'
