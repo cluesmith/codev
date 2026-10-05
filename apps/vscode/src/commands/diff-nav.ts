@@ -261,13 +261,13 @@ export async function openBuilderDiffLocation(
       { preview: true },
     );
     recordDiffNavPosition(target.builderId, target.relPath);
-    // The per-file diff's modified side is normally the active editor once the open resolves; fall
-    // back to any visible editor showing the file.
+    // The per-file diff's modified side is normally the active editor once the open resolves; else
+    // any visible editor showing the worktree file. A file deleted since the comment has no worktree
+    // side, so fall back to whichever side the just-opened diff focused (its original text).
     const active = vscode.window.activeTextEditor;
-    if (active?.document.uri.fsPath === fsPath) {
+    editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === fsPath);
+    if (active?.document.uri.fsPath === fsPath || editor === undefined) {
       editor = active;
-    } else {
-      editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === fsPath);
     }
   } else {
     try {

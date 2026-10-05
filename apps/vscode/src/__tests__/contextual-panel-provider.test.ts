@@ -25,6 +25,7 @@ const hoisted = vi.hoisted(() => {
     sentQueues: {} as Record<string, unknown[]>,
     worktrees: {} as Record<string, string>,
     loads: [] as string[],
+    loadFails: false,
     executed: [] as unknown[][],
     commandResult: Promise.resolve(undefined) as Promise<unknown>,
     listeners: {} as Record<string, (arg?: unknown) => void>,
@@ -164,6 +165,9 @@ function newProvider() {
     },
     load: (builderId: string) => {
       hoisted.state.loads.push(builderId);
+      if (hoisted.state.loadFails) {
+        return Promise.reject(new Error('unreadable'));
+      }
       return Promise.resolve([]);
     },
     onDidChangeQueue: (fn: (builderId: string) => void) => {
@@ -237,6 +241,7 @@ beforeEach(() => {
   hoisted.state.sentQueues = {};
   hoisted.state.worktrees = {};
   hoisted.state.loads = [];
+  hoisted.state.loadFails = false;
   hoisted.state.executed = [];
   hoisted.state.commandResult = Promise.resolve(undefined);
   hoisted.state.listeners = {};
@@ -584,6 +589,19 @@ describe('ContextualPanelProvider — review-queue body (#1559)', () => {
 
       expect(hoisted.state.worktrees['1559']).toBe('/w/.builders/air-1559');
       expect(hoisted.state.loads).toEqual(['1559']);
+    });
+
+    it('retries a failed queue load on the next post', async () => {
+      hoisted.state.loadFails = true;
+      const provider = newProvider();
+      const { view, fireVisibility } = makeView();
+      provider.resolveWebviewView(view);
+      showTerminal('builder-air-1559');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      hoisted.state.loadFails = false;
+      fireVisibility();
+      expect(hoisted.state.loads).toEqual(['1559', '1559']);
     });
 
     it('carries no queue when the terminal id matches no overview builder', () => {

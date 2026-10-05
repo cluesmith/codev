@@ -293,7 +293,10 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       }
       this.reviewQueue.registerWorktree(builderId, worktreePath);
     }
-    this.reviewQueue.load(builderId).catch(() => undefined);
+    // A failed read is retried on the next post rather than remembered as done.
+    this.reviewQueue.load(builderId).catch(() => {
+      this.requestedQueueLoads.delete(builderId);
+    });
   }
 
   private buildHtml(webview: vscode.Webview): string {

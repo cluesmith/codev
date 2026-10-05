@@ -18,7 +18,7 @@ import type { BuilderFileChange } from '../views/builder-diff-cache.js';
 // (the flash) and reads no editor state on the seeded path — so this mock stays small.
 const setStatusBarMessage = vi.fn();
 // `openBuilderDiffLocation` (#1559) also places the caret in the opened editor.
-const editorState = vi.hoisted(() => ({ visible: [] as unknown[], shown: undefined as unknown, showError: false }));
+const editorState = vi.hoisted(() => ({ visible: [] as unknown[], shown: undefined as unknown, showError: false, active: undefined as unknown }));
 const showTextDocument = vi.fn(async () => {
   if (editorState.showError) { throw new Error('missing'); }
   return editorState.shown;
@@ -35,7 +35,7 @@ vi.mock('vscode', () => ({
   Range: class { constructor(public startLine: number, public startChar: number, public endLine: number, public endChar: number) {} },
   TextEditorRevealType: { InCenterIfOutsideViewport: 2 },
   window: {
-    get activeTextEditor() { return undefined; },
+    get activeTextEditor() { return editorState.active; },
     get visibleTextEditors() { return editorState.visible; },
     showTextDocument: (...args: unknown[]) => showTextDocument(...(args as [])),
     setStatusBarMessage: (...args: unknown[]) => setStatusBarMessage(...args),
@@ -311,6 +311,7 @@ describe('openBuilderDiffLocation (#1559: clickable file refs)', () => {
     editorState.visible = [];
     editorState.shown = undefined;
     editorState.showError = false;
+    editorState.active = undefined;
   });
 
   it("opens a changed file's per-file diff and puts the caret on the (1-based) line", async () => {
@@ -329,6 +330,18 @@ describe('openBuilderDiffLocation (#1559: clickable file refs)', () => {
     expect((editor.selection as { anchor: { line: number } }).anchor.line).toBe(41);
     expect(editor.revealRange).toHaveBeenCalledTimes(1);
     expect(showTextDocument).not.toHaveBeenCalled();
+  });
+
+  it("anchors a deleted file's line on the diff's original side (no worktree editor exists)", async () => {
+    worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
+    getDiff.mockResolvedValue({ baseRef: 'base-sha', files: [mk('gone.ts')] });
+    const original = fakeEditor('/git-base/gone.ts', 50);
+    editorState.active = original; // the diff opened focused on its only side
+
+    await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'gone.ts', line: 12 }, deps);
+
+    expect(openMock).toHaveBeenCalledTimes(1);
+    expect((original.selection as { anchor: { line: number } }).anchor.line).toBe(11);
   });
 
   it('opens the worktree file itself when it is not among the changed files, clamping the line', async () => {
