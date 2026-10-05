@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ModeDescriptor } from '../contextual-panel/types.js';
 import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
+import type { CodeReviewSummary } from '../contextual-panel/code-review.js';
 import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';
 
 const hoisted = vi.hoisted(() => {
@@ -20,6 +21,7 @@ const hoisted = vi.hoisted(() => {
     activeBuilderId: null as string | null,
     diffBuilders: {} as Record<string, string>,
     overviewData: null as unknown,
+    queues: {} as Record<string, unknown[]>,
     listeners: {} as Record<string, (arg?: unknown) => void>,
   };
   class TabInputText {
@@ -76,6 +78,12 @@ vi.mock('../diff-inject-codelens.js', () => ({
     }
     return { fsPath, builderId, relPath: '' };
   },
+  getDiffInjectEntries: () =>
+    Object.entries(hoisted.state.diffBuilders).map(([fsPath, builderId]) => ({
+      fsPath,
+      builderId,
+      relPath: fsPath.replace(/^\/w\/\.builders\/[^/]+\//, ''),
+    })),
   onDidChangeDiffInjectRegistry: (fn: () => void) => {
     hoisted.state.listeners['registry'] = fn;
     return { dispose() {} };
@@ -89,6 +97,7 @@ interface RenderMessage {
   type: string;
   descriptor: ModeDescriptor;
   attention?: AttentionSummary;
+  codeReview?: CodeReviewSummary;
 }
 
 function makeView() {
@@ -134,10 +143,18 @@ function newProvider() {
       return { dispose() {} };
     },
   };
+  const reviewQueue = {
+    getComments: (builderId: string) => hoisted.state.queues[builderId] ?? [],
+    onDidChangeQueue: (fn: (builderId: string) => void) => {
+      hoisted.state.listeners['queue'] = fn as (arg?: unknown) => void;
+      return { dispose() {} };
+    },
+  };
   return new ContextualPanelProvider(
     {} as unknown as import('vscode').Uri,
     terminalManager as unknown as import('../terminal-manager.js').TerminalManager,
     overviewCache as unknown as import('../views/overview-data.js').OverviewCache,
+    reviewQueue as unknown as import('../review-queue/store.js').ReviewQueueStore,
   );
 }
 
@@ -195,6 +212,7 @@ beforeEach(() => {
   hoisted.state.activeBuilderId = null;
   hoisted.state.diffBuilders = {};
   hoisted.state.overviewData = null;
+  hoisted.state.queues = {};
   hoisted.state.listeners = {};
 });
 
@@ -429,5 +447,80 @@ describe('ContextualPanelProvider — Attention body from the overview cache (#1
     hoisted.state.overviewData = overview({ builders: [builderRow({ id: 'pir-1553', blocked: 'plan review' })] });
     fireOverviewChange();
     expect(posted).toHaveLength(1); // unchanged — the cache does not drive non-Attention modes
+  });
+});
+
+describe('ContextualPanelProvider — Code Review body from the review queue (#1559)', () => {
+  const diffPath = '/w/.builders/air-1559/src/x.ts';
+
+  function showDiff(): void {
+    hoisted.state.diffBuilders = { [diffPath]: 'air-1559' };
+    hoisted.state.activeTabInput = diffTab(diffPath);
+    hoisted.state.activeEditorFsPath = diffPath;
+  }
+
+  function queued(id: string, body: string): unknown {
+    return { id, createdAt: '2026-10-05T00:00:00Z', file: 'src/x.ts', lineRange: { start: 3, end: 3 }, body };
+  }
+
+  it("carries the shown builder's queue and diff files on a Code Review post", () => {
+    showDiff();
+    hoisted.state.queues = { 'air-1559': [queued('c1', 'rename this')], 'other': [queued('c2', 'not mine')] };
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    expect(posted[0].descriptor.kind).toBe('code-review');
+    expect(posted[0].attention).toBeUndefined();
+    expect(posted[0].codeReview?.comments).toEqual([{ id: 'c1', file: 'src/x.ts', ref: 'src/x.ts:L3', body: 'rename this' }]);
+    expect(posted[0].codeReview?.files).toEqual([{ relPath: 'src/x.ts', commentCount: 1 }]);
+  });
+
+  it('omits the codeReview payload outside Code Review mode', () => {
+    hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted[0].descriptor.kind).toBe('attention');
+    expect(posted[0].codeReview).toBeUndefined();
+  });
+
+  it("re-posts on the shown builder's queue change, and ignores other builders' changes", () => {
+    showDiff();
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted).toHaveLength(1);
+    expect(posted[0].codeReview?.comments).toEqual([]);
+
+    hoisted.state.listeners['queue']?.('other');
+    expect(posted).toHaveLength(1);
+
+    hoisted.state.queues = { 'air-1559': [queued('c1', 'new comment')] };
+    hoisted.state.listeners['queue']?.('air-1559');
+    expect(posted).toHaveLength(2);
+    expect(posted[1].codeReview?.comments.map((c) => c.body)).toEqual(['new comment']);
+  });
+
+  it('does not post on a queue change while not in Code Review mode', () => {
+    hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    hoisted.state.listeners['queue']?.('air-1559');
+    expect(posted).toHaveLength(1);
+  });
+
+  it('re-posts files-to-review when the registry changes on the same Code Review surface', () => {
+    showDiff();
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted).toHaveLength(1);
+
+    hoisted.state.diffBuilders = { [diffPath]: 'air-1559', '/w/.builders/air-1559/src/y.ts': 'air-1559' };
+    hoisted.state.listeners['registry']?.();
+    expect(posted).toHaveLength(2);
+    expect(posted[1].codeReview?.files.map((f) => f.relPath)).toEqual(['src/x.ts', 'src/y.ts']);
   });
 });

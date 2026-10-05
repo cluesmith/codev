@@ -231,3 +231,12 @@ body {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
 }
+
+/* Code Review (#1559): a queued comment's body under its file:line anchor. Pre-wrap keeps the
+   reviewer's line breaks; long prose wraps rather than truncating like the one-line .cp-row-sub. */
+.cp-comment-body {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

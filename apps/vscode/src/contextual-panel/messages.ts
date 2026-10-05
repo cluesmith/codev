@@ -8,6 +8,7 @@
 
 import type { ModeDescriptor } from './types.js';
 import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
+import type { CodeReviewSummary } from './code-review.js';
 
 /** Host -> webview: render this resolved descriptor. */
 export interface RenderMessage {
@@ -19,6 +20,9 @@ export interface RenderMessage {
    * overview data. Absent for every other mode.
    */
   attention?: AttentionSummary;
+  /** The shown builder's pending review queue + files-to-review, present only when
+   *  `descriptor.kind === 'code-review'` (same alongside-the-descriptor rule as `attention`). */
+  codeReview?: CodeReviewSummary;
 }
 
 export type HostToWebviewMessage = RenderMessage;

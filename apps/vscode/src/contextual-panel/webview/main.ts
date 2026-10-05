@@ -1,12 +1,13 @@
 /**
  * Webview entry for the contextual bottom panel.
  *
- * Message-driven and purely contextual: the host posts `{ type: 'render', descriptor, attention? }`
- * after resolving the active surface; this renders a one-line context label and a per-mode body. For
- * the Attention fallback the body is the live roll-up projected from the overview cache (`attention`);
- * every other mode still shows its placeholder (owned by its own participating feature). There is no
- * navigation — no pills, no selection. All host-supplied text (file paths, builder ids, issue titles,
- * gate labels) is rendered through React children (auto-escaped), never `innerHTML`.
+ * Message-driven and purely contextual: the host posts `{ type: 'render', descriptor, attention?,
+ * codeReview? }` after resolving the active surface; this renders a one-line context label and a
+ * per-mode body. For the Attention fallback the body is the live roll-up projected from the overview
+ * cache (`attention`); for Code Review it is the shown builder's pending review queue plus its
+ * files-to-review (`codeReview`, read-only); the remaining modes still show their placeholder (owned
+ * by its own participating feature). There is no navigation — no pills, no selection. All
+ * host-supplied text (file paths, builder ids, issue titles, gate labels, comment bodies) is rendered through React children (auto-escaped), never `innerHTML`.
  *
  * Bundled by esbuild as a browser IIFE (dist/webview/contextual-panel.js); type-checked by
  * tsconfig.webview.json (DOM lib). No JSX (createElement).
@@ -18,6 +19,7 @@ import './styles.css';
 import type { ModeDescriptor, ModeKind } from '../types.js';
 import type { AttentionBuilderRef, AttentionSummary, GateItem, WaitingItem, CountItem } from '@cluesmith/codev-sdk/builder-helpers';
 import type { HostToWebviewMessage } from '../messages.js';
+import type { CodeReviewComment, CodeReviewFile, CodeReviewSummary } from '../code-review.js';
 
 const h = React.createElement;
 
@@ -32,10 +34,9 @@ const MODE_LABELS: Record<ModeKind, string> = {
 };
 
 // Placeholder bodies for the modes whose content is owned by other participating features. Attention
-// is no longer here — #1553 renders it from live cache data below.
-const BODY_PLACEHOLDER: Record<Exclude<ModeKind, 'attention'>, string> = {
+// (#1553) and Code Review (#1559) render live data below.
+const BODY_PLACEHOLDER: Record<Exclude<ModeKind, 'attention' | 'code-review'>, string> = {
   'document-review': 'Review markers for this file will appear here (rendering owned by #859 / #945).',
-  'code-review': "This builder's pending comments and files-to-review will appear here (#1037).",
   'builder-inspector': "This builder's phase, gate, activity, and message input will appear here.",
 };
 
@@ -197,7 +198,59 @@ function attentionBody(summary: AttentionSummary): React.ReactNode {
   return sections;
 }
 
-function body(descriptor: ModeDescriptor, attention: AttentionSummary | undefined): React.ReactNode {
+function commentRow(item: CodeReviewComment): React.ReactElement {
+  return h(
+    'div',
+    { className: 'cp-row cp-row-queued', key: item.id },
+    h('span', { className: 'cp-stripe' }),
+    h(
+      'span',
+      { className: 'cp-row-main' },
+      h('span', { className: 'cp-row-id' }, item.ref),
+      h('span', { className: 'cp-comment-body' }, item.body),
+    ),
+    null,
+  );
+}
+
+function fileRow(item: CodeReviewFile): React.ReactElement {
+  const plural = item.commentCount === 1 ? 'comment' : 'comments';
+  const badge = item.commentCount > 0
+    ? h('span', { className: 'cp-badge cp-badge-queued' }, h('span', { className: 'cp-count-num' }, String(item.commentCount)), ` ${plural}`)
+    : null;
+  return h(
+    'div',
+    { className: 'cp-row', key: item.relPath },
+    h('span', { className: 'cp-stripe' }),
+    h('span', { className: 'cp-row-main' }, h('span', { className: 'cp-row-id' }, item.relPath)),
+    badge,
+  );
+}
+
+function codeReviewBody(summary: CodeReviewSummary): React.ReactNode {
+  if (summary.isEmpty) {
+    return h(
+      'div',
+      { className: 'cp-empty' },
+      h('div', { className: 'cp-empty-msg' }, 'No pending review comments'),
+      h('div', { className: 'cp-empty-sub' }, "Comments you queue on this builder's diff appear here until you submit the review."),
+    );
+  }
+  const comments = summary.comments.length > 0
+    ? summary.comments.map((item) => commentRow(item))
+    : h('div', { className: 'cp-row-note' }, 'No pending comments yet; queue one from the diff.');
+  const sections: React.ReactNode[] = [
+    h(React.Fragment, { key: 'comments' }, section('Pending comments', summary.comments.length, comments)),
+  ];
+  if (summary.files.length > 0) {
+    sections.push(
+      h(React.Fragment, { key: 'files' }, section('Files to review', summary.files.length, summary.files.map((item) => fileRow(item)))),
+    );
+  }
+  return sections;
+}
+
+function body(descriptor: ModeDescriptor, attention: AttentionSummary | undefined, codeReview: CodeReviewSummary | undefined): React.ReactNode {
   if (descriptor.kind === 'attention') {
     if (attention === undefined) {
       // No payload attached yet — the provider always sends one in Attention mode, so this is only
@@ -207,11 +260,24 @@ function body(descriptor: ModeDescriptor, attention: AttentionSummary | undefine
     }
     return attentionBody(attention);
   }
+  if (descriptor.kind === 'code-review') {
+    if (codeReview === undefined) {
+      // Same transient pre-first-post frame as Attention: never claim "no comments" before data arrives.
+      return h('div', { className: 'cp-body-empty' }, 'Loading…');
+    }
+    return codeReviewBody(codeReview);
+  }
   return h('div', { className: 'cp-body-empty' }, BODY_PLACEHOLDER[descriptor.kind]);
 }
 
-function Panel(props: { descriptor: ModeDescriptor | undefined; attention: AttentionSummary | undefined }): React.ReactElement {
-  const { descriptor, attention } = props;
+interface PanelProps {
+  descriptor: ModeDescriptor | undefined;
+  attention: AttentionSummary | undefined;
+  codeReview: CodeReviewSummary | undefined;
+}
+
+function Panel(props: PanelProps): React.ReactElement {
+  const { descriptor, attention, codeReview } = props;
   if (descriptor === undefined) {
     return h('div', { className: 'cp-body' }, h('div', { className: 'cp-body-empty' }, 'Loading…'));
   }
@@ -225,12 +291,12 @@ function Panel(props: { descriptor: ModeDescriptor | undefined; attention: Atten
     React.Fragment,
     null,
     header,
-    h('div', { className: 'cp-body' }, body(descriptor, attention)),
+    h('div', { className: 'cp-body' }, body(descriptor, attention, codeReview)),
   );
 }
 
 let root: Root | undefined;
-function render(descriptor: ModeDescriptor | undefined, attention: AttentionSummary | undefined): void {
+function render(props: PanelProps): void {
   const rootElement = document.getElementById('root');
   if (rootElement === null) {
     return;
@@ -238,15 +304,15 @@ function render(descriptor: ModeDescriptor | undefined, attention: AttentionSumm
   if (root === undefined) {
     root = createRoot(rootElement);
   }
-  root.render(h(Panel, { descriptor, attention }));
+  root.render(h(Panel, props));
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
   const message = event.data as HostToWebviewMessage | undefined;
   if (message !== undefined && message.type === 'render') {
-    render(message.descriptor, message.attention);
+    render({ descriptor: message.descriptor, attention: message.attention, codeReview: message.codeReview });
   }
 });
 
-render(undefined, undefined);
+render({ descriptor: undefined, attention: undefined, codeReview: undefined });
 vscodeApi.postMessage({ type: 'ready' });

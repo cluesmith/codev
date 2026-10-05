@@ -21,11 +21,13 @@
 import * as vscode from 'vscode';
 import type { TerminalManager } from '../terminal-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
-import { onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
+import type { ReviewQueueStore } from '../review-queue/store.js';
+import { getDiffInjectEntries, onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
 import { resolveMode } from './resolver.js';
 import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
 import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
+import { deriveCodeReview, type CodeReviewSummary } from './code-review.js';
 import { isReadyMessage, type HostToWebviewMessage } from './messages.js';
 import type { ModeDescriptor } from './types.js';
 
@@ -44,6 +46,7 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     terminalManager: TerminalManager,
     private readonly overviewCache: OverviewCache,
+    private readonly reviewQueue: ReviewQueueStore,
   ) {
     this.reader = new SurfaceContextReader(() => terminalManager.getActiveBuilderId());
     this.disposables.push(
@@ -52,6 +55,13 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       // the cache, so this posts nothing extra for them.
       this.overviewCache.onDidChange(() => {
         if (this.lastDescriptor?.kind === 'attention') {
+          this.repost();
+        }
+      }),
+      // Code Review is fed by the shown builder's queue: re-post when THAT builder's queue changes
+      // (own mutation or another window's write), and only while a Code Review surface is showing.
+      this.reviewQueue.onDidChangeQueue((builderId) => {
+        if (this.lastDescriptor?.kind === 'code-review' && this.lastDescriptor.context.builderId === builderId) {
           this.repost();
         }
       }),
@@ -85,7 +95,13 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       }),
       vscode.window.tabGroups.onDidChangeTabs(() => this.onTabEvent()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.onTabEvent()),
-      onDidChangeDiffInjectRegistry(() => this.refresh()),
+      // A registry change can resolve a new surface (refresh) or, on the same Code Review surface,
+      // change its files-to-review — which the surface-keyed dedup would not post, so re-post it.
+      onDidChangeDiffInjectRegistry(() => {
+        if (!this.refresh() && this.lastDescriptor?.kind === 'code-review') {
+          this.repost();
+        }
+      }),
     );
   }
 
@@ -158,8 +174,9 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Re-resolve the active surface and post only if the render (surface key + descriptor) changed. */
-  private refresh(): void {
+  /** Re-resolve the active surface and post only if the render (surface key + descriptor) changed.
+   *  Returns whether it posted. */
+  private refresh(): boolean {
     const { context, key } = this.reader.read();
     const descriptor = resolveMode(context);
     this.lastDescriptor = descriptor;
@@ -167,7 +184,9 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     if (postId !== this.lastPostId) {
       this.lastPostId = postId;
       this.post(descriptor);
+      return true;
     }
+    return false;
   }
 
   private repost(): void {
@@ -183,8 +202,20 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     // re-post (visibility restore, or an SSE-driven refresh) always reflects current state.
     const attention =
       descriptor.kind === 'attention' ? deriveAttention(this.overviewCache.getData()) : undefined;
-    const message: HostToWebviewMessage = { type: 'render', descriptor, attention };
+    const codeReview = descriptor.kind === 'code-review' ? this.codeReview(descriptor.context.builderId) : undefined;
+    const message: HostToWebviewMessage = { type: 'render', descriptor, attention, codeReview };
     this.view?.webview.postMessage(message);
+  }
+
+  /** Project the shown builder's queue (read-only from the store's cache) + its diff-session files. */
+  private codeReview(builderId: string | undefined): CodeReviewSummary {
+    if (builderId === undefined) {
+      return deriveCodeReview([], []);
+    }
+    const files = getDiffInjectEntries()
+      .filter((entry) => entry.builderId === builderId)
+      .map((entry) => entry.relPath);
+    return deriveCodeReview(this.reviewQueue.getComments(builderId), files);
   }
 
   private buildHtml(webview: vscode.Webview): string {
