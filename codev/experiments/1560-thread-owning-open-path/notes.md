@@ -57,9 +57,11 @@ Routes probed:
 
 - macOS 26 (Darwin 25.5), VS Code 1.140.0, Codev.app 1.138.0. `@vscode/test-electron` from
   `apps/vscode/node_modules`.
-- From the worktree root:
+- The probe is not in the tree (experiment code stays off `main`). Restore it from history, then
+  run from the repo root:
 
   ```bash
+  git checkout 077949ac4 -- codev/experiments/1560-thread-owning-open-path/probe
   P=codev/experiments/1560-thread-owning-open-path/probe
   node $P/run.js "/Applications/Visual Studio Code.app/Contents/MacOS/Code" out.json --proposed
   node $P/run.js "/Applications/Visual Studio Code.app/Contents/MacOS/Code" out.json   # proposal OFF
@@ -72,6 +74,9 @@ Routes probed:
 - Each run opens a short-lived EDH window (fresh `--user-data-dir`, `--disable-extensions`).
 
 ## Code
+
+The probe lived at `probe/` in commit `077949ac4` and was removed from the tree afterwards. The
+results it produced stay here in `results/`.
 
 - `probe/ext/package.json`: probe manifest. It declares `enabledApiProposals: ["commentReveal"]` and
   the thread-level (reply) and comment-level (edit) inline menu actions.
@@ -188,7 +193,7 @@ range-less thread (`range === undefined` at submit, matching the shipped file-co
 
 - **Answer to #1560: the hypothesis as posed is NO (final).** A thread-owning open path *is*
   achievable, by Recipe B (stable) or Recipe A (Codev.app-only).
-- Follow-up implementation issue draft: `followup-issue-draft.md` (for the architect to file). It
+- Follow-up implementation issue: filed as **#1775** from `followup-issue-draft.md`. It
   recommends Recipe B behind an owner look-and-feel check, with Recipe A as the alternative if B's
   edit-mode presentation is rejected.
 - Out of scope, surfaced for the architect: the Escape → dial-submit delivery on the **shipped**

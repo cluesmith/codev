@@ -39,3 +39,10 @@ equivalent of the deck gestures).
 
 Deliverables: notes.md (findings), followup-issue-draft.md (recipe B + A as alternative), probe/ +
 results/. Shipped open path untouched.
+
+## 2026-10-05 — gate approved, findings landing
+
+Owner approved experiment-complete (relayed by architect:vscode); porch protocol complete. Owner's
+word "preserve the findings": the probe is removed from the tree (history keeps 077949ac4, and notes.md
+says how to restore it). A docs-only PR lands notes, the follow-up draft, results and this thread.
+Implementation issue filed as #1775 (not spawned).
