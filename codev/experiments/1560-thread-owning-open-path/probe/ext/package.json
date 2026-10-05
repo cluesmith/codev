@@ -1,0 +1,23 @@
+{
+  "name": "probe-1560",
+  "publisher": "codev-probe",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.100.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "enabledApiProposals": ["commentReveal"],
+  "contributes": {
+    "commands": [
+      { "command": "probe1560.submit", "title": "Probe Submit" },
+      { "command": "probe1560.saveDraft", "title": "Probe Save Draft" }
+    ],
+    "menus": {
+      "comments/commentThread/context": [
+        { "command": "probe1560.submit", "group": "inline@1", "when": "commentController == probe-1560" }
+      ],
+      "comments/comment/context": [
+        { "command": "probe1560.saveDraft", "group": "inline@1", "when": "commentController == probe-1560 && comment == draft" }
+      ]
+    }
+  }
+}
