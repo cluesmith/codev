@@ -95,7 +95,8 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       }),
       vscode.window.tabGroups.onDidChangeTabs(() => this.onTabEvent()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.onTabEvent()),
-      // A registry change can resolve a new surface (refresh) or, on the same Code Review surface,
+      // Fires on a registry change (and on a codelens-mode toggle, an idempotent extra re-post). A
+      // registry change can resolve a new surface (refresh) or, on the same Code Review surface,
       // change its files-to-review — which the surface-keyed dedup would not post, so re-post it.
       onDidChangeDiffInjectRegistry(() => {
         if (!this.refresh() && this.lastDescriptor?.kind === 'code-review') {

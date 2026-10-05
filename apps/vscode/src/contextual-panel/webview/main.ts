@@ -7,7 +7,8 @@
  * cache (`attention`); for Code Review it is the shown builder's pending review queue plus its
  * files-to-review (`codeReview`, read-only); the remaining modes still show their placeholder (owned
  * by its own participating feature). There is no navigation — no pills, no selection. All
- * host-supplied text (file paths, builder ids, issue titles, gate labels, comment bodies) is rendered through React children (auto-escaped), never `innerHTML`.
+ * host-supplied text (file paths, builder ids, issue titles, gate labels, comment bodies) is rendered
+ * through React children (auto-escaped), never `innerHTML`.
  *
  * Bundled by esbuild as a browser IIFE (dist/webview/contextual-panel.js); type-checked by
  * tsconfig.webview.json (DOM lib). No JSX (createElement).
@@ -209,7 +210,6 @@ function commentRow(item: CodeReviewComment): React.ReactElement {
       h('span', { className: 'cp-row-id' }, item.ref),
       h('span', { className: 'cp-comment-body' }, item.body),
     ),
-    null,
   );
 }
 
