@@ -358,7 +358,7 @@ const GATE_LABELS: Record<string, string> = {
 
 /** Display label for a gate: the mapped label, else derived from its name. */
 function gateLabel(gate: string): string {
-  return GATE_LABELS[gate] ?? `${gate.replace(/-(approval|complete)$/, '').replace(/-/g, ' ')} review`;
+  return GATE_LABELS[gate] ?? `${gate.replace(/-(approval|complete|review)$/, '').replace(/-/g, ' ')} review`;
 }
 
 /**

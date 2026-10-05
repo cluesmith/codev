@@ -819,6 +819,24 @@ describe('overview', () => {
       expect(detectBlockedSince(parsed)).toBe('2026-10-05T00:00:00Z');
     });
 
+    it('prefers a known gate over an unknown one when both are pending (#1777)', () => {
+      const parsed = makeParsed({
+        gates: { 'security-approval': 'pending', 'pr': 'pending' },
+        gateRequestedAt: {
+          'security-approval': '2026-10-05T00:00:00Z',
+          'pr': '2026-10-05T01:00:00Z',
+        },
+      });
+      expect(detectBlockedGate(parsed)).toBe('pr');
+    });
+
+    it('does not double "review" in a derived label (#1777)', () => {
+      expect(detectBlocked(makeParsed({
+        gates: { 'code-review': 'pending' },
+        gateRequestedAt: { 'code-review': '2026-10-05T00:00:00Z' },
+      }))).toBe('code review');
+    });
+
     it('does not report an unknown gate that is pending but not requested (#1777)', () => {
       expect(detectBlockedGate(makeParsed({
         gates: { 'experiment-complete': 'pending' },
