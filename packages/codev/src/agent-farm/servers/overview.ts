@@ -560,6 +560,15 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
   const pirMatch = dirName.match(/^pir-(\d+)/);
   if (pirMatch) return pirMatch[1];
 
+  // task-NAvW, worktree-foIg → null (soft mode). Checked before the generic
+  // case below because a short id can be all digits (task-1234).
+  if (/^(task|worktree)-/.test(dirName)) return null;
+
+  // Any other numbered protocol spawn (experiment/maintain/research, #1777):
+  // experiment-1560 → "1560" (porch project dir is 1560-slug, like SPIR).
+  const genericMatch = dirName.match(/^[a-z]+-(\d+)(?:-|$)/);
+  if (genericMatch) return genericMatch[1];
+
   // Legacy numeric: 0110 or 0110-slug → "0110"
   const numericMatch = dirName.match(/^(\d+)(?:-|$)/);
   if (numericMatch) return numericMatch[1];

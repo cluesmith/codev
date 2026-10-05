@@ -1181,8 +1181,21 @@ describe('overview', () => {
       expect(extractProjectIdFromWorktreeName('worktree-foIg')).toBeNull();
     });
 
-    it('returns null for unknown prefixes', () => {
-      expect(extractProjectIdFromWorktreeName('unknown-123-slug')).toBeNull();
+    it('returns null for an unnumbered protocol-mode worktree', () => {
+      expect(extractProjectIdFromWorktreeName('experiment-AbCd')).toBeNull();
+    });
+
+    it.each([
+      ['experiment-1560', '1560'],
+      ['maintain-42-slug', '42'],
+      ['research-7', '7'],
+    ])('extracts bare numeric ID from other numbered protocol worktree %s (#1777)', (dir, id) => {
+      expect(extractProjectIdFromWorktreeName(dir)).toBe(id);
+    });
+
+    it('keeps all-digit task/worktree short ids in soft mode (#1777)', () => {
+      expect(extractProjectIdFromWorktreeName('task-1234')).toBeNull();
+      expect(extractProjectIdFromWorktreeName('worktree-1234')).toBeNull();
     });
   });
 
@@ -1280,6 +1293,39 @@ describe('overview', () => {
       expect(builders[0].planPhases).toEqual([]);
       expect(builders[0].progress).toBe(0);
       expect(builders[0].blocked).toBeNull();
+    });
+
+    // #1777: experiment-/maintain-/research- worktrees had no project-id case,
+    // so they fell to soft mode and status.yaml (and its gates) was never read.
+    it('discovers a strict experiment builder blocked on experiment-complete (#1777)', () => {
+      createBuilderWorktree(tmpDir, 'experiment-1560', [
+        "id: '1560'",
+        'title: spike-thread-owning-open-path-',
+        'protocol: experiment',
+        'phase: analyze',
+        'gates:',
+        '  experiment-complete:',
+        '    status: pending',
+        "    requested_at: '2026-10-05T00:20:48.976Z'",
+      ].join('\n'), '1560-spike-thread-owning-open-path-');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].mode).toBe('strict');
+      expect(builders[0].issueId).toBe('1560');
+      expect(builders[0].protocolPhase).toBe('analyze');
+      expect(builders[0].blocked).toBe('experiment review');
+      expect(builders[0].blockedGate).toBe('experiment-complete');
+      expect(builders[0].blockedSince).toBe('2026-10-05T00:20:48.976Z');
+    });
+
+    it('keeps an all-digit task worktree in soft mode (#1777)', () => {
+      createBuilderWorktree(tmpDir, 'task-123');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].mode).toBe('soft');
+      expect(builders[0].issueId).toBeNull();
     });
 
     it('populates progress and blocked from status.yaml', () => {
