@@ -67,8 +67,8 @@ const GATE_ICONS: Record<string, GlyphKey> = {
  * Glyph → inner SVG markup, drawn in a 24×24 box and stroked/filled in the caller's colour. The
  * shapes are modelled on the matching VS Code codicons (book / checklist / code / git-pull-request
  * / verified / beaker / tools / search / library / bell); the codicon font isn't vendored, so these
- * are drawn in-plugin — which also keeps the bundle dependency-free. The bolt is filled (the plugin's identity mark); the rest are
- * line glyphs like the codicons.
+ * are drawn in-plugin — which also keeps the bundle dependency-free. The bolt is filled (the
+ * plugin's identity mark); the rest are line glyphs like the codicons.
  */
 const GLYPHS: Record<GlyphKey, (color: string) => string> = {
   bolt: (c) => `<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="${c}"/>`,

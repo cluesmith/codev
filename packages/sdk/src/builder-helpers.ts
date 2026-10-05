@@ -55,8 +55,9 @@ export interface GateItem extends AttentionBuilderRef {
   /** Display gate label (e.g. "plan review", or "PR review" for a pending PR). */
   gate: string;
   /** Canonical porch gate id (e.g. `plan-approval`; `pr` for a pending PR) — the key a UI maps to
-   *  an icon. `null` when Tower reported a blocked label without its gate id. */
-  gateId: string | null;
+   *  an icon. `null` when Tower reported a blocked label without its gate id. Optional so existing
+   *  code constructing a `GateItem` keeps compiling; `deriveAttention` always sets it. */
+  gateId?: string | null;
   /** ISO timestamp the builder became blocked, when known (`null` for the PR-ready signal). */
   since: string | null;
 }
