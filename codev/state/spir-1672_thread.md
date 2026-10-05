@@ -74,3 +74,12 @@ Now: holding at the owner's spec gate (spec head b2666ebaf); pir-1566 is on main
 
 - compareAttention (~204) and formatAge (~286) now on main in packages/sdk/src/builder-helpers.ts. Placement ruling unchanged: co-locate, no import dependency.
 - Plan-phase TODOs (architect:vscode ruling): merge current main into the branch first; refresh the spec's three "unmerged" references to 1566 (Baked Decision 12(b), Assumptions, main's ruling (b)) in the plan-phase commit. Do NOT touch the spec wording before the owner's word; it lands on b2666ebaf.
+
+## 2026-10-05: merged main; VS Code host corrected to Builder Inspector
+
+Now: spec amended (head 991b037e3) to put the card in the panel's Builder Inspector mode; architect:vscode re-presents the owner's gate on that head.
+
+- Merged main c229e453c (head 93cce0fd0). The contextual panel moved since my base: #1559 filled the Code Review body + review-queue sections (also shown in Builder Inspector), #1566 put formatAge in the SDK.
+- Finding: the spec named the wrong host (Attention). A focused builder terminal resolves to builder-inspector, whose body is still an unclaimed placeholder ("phase, gate, activity, and message input"). Amended: card = Inspector body lane section above the review queue; optional laneCard on RenderMessage, no new mode; lane id via queueBuilderIdFor tail-match (two id spaces); message input out of scope.
+- New owner decision at the gate: does #1672 claim the Builder Inspector body as its #1049 participating feature? Recommendation (architect + me): yes.
+- Thread commit kept local (unpushed) so the remote head stays on the gate SHA.
