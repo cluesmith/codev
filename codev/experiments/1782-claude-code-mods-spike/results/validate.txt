@@ -1,0 +1,15 @@
+Validating plugin manifest: codev/experiments/1782-claude-code-mods-spike/mod/.claude-plugin/plugin.json
+
+  ❯ types ./types/index.d.ts declares on $: nothing (no EngineInterface member)
+  ❯ types ./types/index.d.ts declares state: codev-spike.context, codev-spike.refs, codev-spike.titles, codev-spike.peek
+
+Validating hooks: codev/experiments/1782-claude-code-mods-spike/mod/hooks/hooks.json
+
+  ❯ ./register.tsx hooks: tool.call{tool=Bash}, attribution.text, session.measure, session.start, turn.complete, prompt.submit, command.run{command=issue}, command.run{command=codev-spike-fetch}, command.run{command=codev-spike-timings}, ui.render{component=AbovePrompt}, ui.render{component=Pane, requestId=issue-peek}, classic.SessionStart{source=clear}
+  ❯ ./register.tsx calls: $.clock.after (via showRefs), $.clock.now, $.command.register, $.env.get, $.fs.read (via towerIssue), $.http.fetch (via towerIssue), $.prompt.submit, $.session.cwd (via towerIssue), $.state.get, $.state.set, $.store.delete, $.store.get, $.store.set (via getIssue, record), $.ui.ask, $.ui.copy, $.ui.log, $.ui.open (via openPeek), $.ui.resolve
+  ❯ ./register.tsx env writes: nothing
+  ❯ ./register.tsx env reads: CODEV_SPIKE_ARCH_INIT_NAME, HOME
+  ❯ ./register.tsx state writes: codev-spike.context, codev-spike.peek, codev-spike.refs, codev-spike.titles
+  ❯ ./register.tsx state reads: codev-spike.context, codev-spike.peek, codev-spike.refs, codev-spike.titles
+
+✔ Validation passed

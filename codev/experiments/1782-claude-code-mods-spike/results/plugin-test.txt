@@ -1,0 +1,33 @@
+
+tests/attribution.test.ts:
+(pass) commit and PR attribution are scrubbed at the source [35.68ms]
+guard timings (own ms):
+tool.call:guard:deny: n=20 median=0ms max=1ms
+tool.call:guard:pass: n=20 median=0ms max=0ms
+tool.call:guard:hold-approved: n=10 median=0ms max=0ms
+tool.call:guard:catch: n=10 median=0ms max=0ms
+band/peek/scrub timings (own ms):
+session.measure: n=20 median=0ms max=0ms
+turn.complete: n=20 median=0ms max=1ms
+prompt.submit: n=20 median=0ms max=1ms
+command.run:issue: n=20 median=0ms max=1ms
+attribution.text: n=20 median=0ms max=1ms
+
+tests/band-peek.test.tsx:
+(pass) the band shows context percent and the save mark after session.measure [41.71ms]
+(pass) a reply naming issues grows one chip per reference; pressing one opens the peek pane [27.92ms]
+(pass) /issue N opens the same pane, and an unknown issue shows the error [21.63ms]
+(pass) a typed prompt naming an issue grows a chip too, and is passed on unchanged [14.98ms]
+(pass) own time of the band, peek and scrub hooks stays inside the 10 s budget [95.72ms]
+
+tests/guard.test.ts:
+(pass) denies every irreversible act, and none of them reaches the shell [38.15ms]
+(pass) lets ordinary commands through [16.67ms]
+(pass) porch approve is held behind the question, answered "Yes, relayed verbatim" [13.04ms]
+(pass) porch approve is held behind the question, answered "No" [12.19ms]
+(pass) fails closed: a hold that throws (dismissed, or -p) is answered by .catch with a deny [11.05ms]
+(pass) own time of every guard path stays inside its budget [37.64ms]
+
+ 12 pass
+ 0 fail
+Ran 12 tests across 3 files. [0.38s]
