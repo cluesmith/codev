@@ -4,9 +4,10 @@
  * Message-driven and purely contextual: the host posts `{ type: 'render', descriptor, attention?,
  * codeReview? }` after resolving the active surface; this renders a one-line context label and a
  * per-mode body. For the Attention fallback the body is the live roll-up projected from the overview
- * cache (`attention`); for Code Review it is the shown builder's pending and sent-unconfirmed review
- * comments plus its files-to-review (`codeReview`), with Submit Review / Discard buttons that ask the
- * host to run the existing commands. The remaining modes still show their placeholder (owned by
+ * cache (`attention`); for Code Review (and below Builder Inspector's placeholder) it is the shown
+ * builder's pending and sent-unconfirmed review comments plus the commented files (`codeReview`),
+ * with Submit Review / Discard / Re-send / Mark Delivered buttons and clickable file refs that ask
+ * the host to run the existing commands. The remaining modes still show their placeholder (owned by
  * their own participating feature). There is no navigation — no pills, no selection. All
  * host-supplied text (file paths, builder ids, issue titles, gate labels, comment bodies) is rendered
  * through React children (auto-escaped), never `innerHTML`.
@@ -21,7 +22,7 @@ import './styles.css';
 import type { ModeDescriptor, ModeKind } from '../types.js';
 import { formatAge } from '@cluesmith/codev-sdk/builder-helpers';
 import type { AttentionBuilderRef, AttentionSummary, GateItem, WaitingItem, CountItem } from '@cluesmith/codev-sdk/builder-helpers';
-import type { HostToWebviewMessage, ReviewAction, WebviewToHostMessage } from '../messages.js';
+import type { HostToWebviewMessage, OpenLocationMessage, ReviewAction, WebviewToHostMessage } from '../messages.js';
 import type { CodeReviewComment, CodeReviewFile, CodeReviewSentComment, CodeReviewSummary } from '../code-review.js';
 
 const h = React.createElement;
@@ -184,47 +185,53 @@ function attentionBody(summary: AttentionSummary): React.ReactNode {
   return sections;
 }
 
-function commentRow(item: CodeReviewComment): React.ReactElement {
+/** A file reference that opens its location (the builder's per-file diff, at the line). */
+function refLink(builderId: string, relPath: string, line: number | null, text: string): React.ReactElement {
+  const message: OpenLocationMessage = { type: 'open-location', builderId, relPath };
+  if (line !== null) {
+    message.line = line;
+  }
+  return h(
+    'button',
+    { type: 'button', className: 'cp-link cp-row-id', title: `Open ${text}`, onClick: () => vscodeApi.postMessage(message) },
+    text,
+  );
+}
+
+function commentRow(builderId: string, item: CodeReviewComment, variant: 'queued' | 'sent'): React.ReactElement {
+  let badge: React.ReactNode = null;
+  if (variant === 'sent') {
+    const age = formatAge((item as CodeReviewSentComment).sentAt);
+    badge = h('span', { className: 'cp-badge' }, age !== null ? `sent · ${age}` : 'sent');
+  }
   return h(
     'div',
-    { className: 'cp-row cp-row-queued', key: item.id },
+    { className: `cp-row cp-row-${variant}`, key: item.id },
     h('span', { className: 'cp-stripe' }),
     h(
       'span',
       { className: 'cp-row-main' },
-      h('span', { className: 'cp-row-id' }, item.ref),
+      refLink(builderId, item.file, item.line, item.ref),
       h('span', { className: 'cp-comment-body' }, item.body),
     ),
-  );
-}
-
-function fileRow(item: CodeReviewFile): React.ReactElement {
-  const plural = item.commentCount === 1 ? 'comment' : 'comments';
-  const badge = item.commentCount > 0
-    ? h('span', { className: 'cp-badge cp-badge-queued' }, h('span', { className: 'cp-count-num' }, String(item.commentCount)), ` ${plural}`)
-    : null;
-  return h(
-    'div',
-    { className: 'cp-row', key: item.relPath },
-    h('span', { className: 'cp-stripe' }),
-    h('span', { className: 'cp-row-main' }, h('span', { className: 'cp-row-id' }, item.relPath)),
     badge,
   );
 }
 
-function sentRow(item: CodeReviewSentComment): React.ReactElement {
-  const age = formatAge(item.sentAt);
+function fileRow(builderId: string, item: CodeReviewFile): React.ReactElement {
+  const counts: string[] = [];
+  if (item.pendingCount > 0) {
+    counts.push(`${item.pendingCount} pending`);
+  }
+  if (item.sentCount > 0) {
+    counts.push(`${item.sentCount} sent`);
+  }
   return h(
     'div',
-    { className: 'cp-row cp-row-sent', key: item.id },
+    { className: 'cp-row', key: item.relPath },
     h('span', { className: 'cp-stripe' }),
-    h(
-      'span',
-      { className: 'cp-row-main' },
-      h('span', { className: 'cp-row-id' }, item.ref),
-      h('span', { className: 'cp-comment-body' }, item.body),
-    ),
-    h('span', { className: 'cp-badge' }, age !== null ? `sent · ${age}` : 'sent'),
+    h('span', { className: 'cp-row-main' }, refLink(builderId, item.relPath, null, item.relPath)),
+    h('span', { className: 'cp-badge cp-badge-queued' }, counts.join(' · ')),
   );
 }
 
@@ -242,28 +249,63 @@ function actionButton(builderId: string, action: ReviewAction, text: string, sec
 }
 
 /**
- * Submit Review + Discard for the shown builder (#1559; formerly the status-bar counter). Submit runs
- * the existing command, which also asks whether to Re-send or Mark Delivered any sent-unconfirmed
- * comments (#1562), so it shows whenever either list is non-empty. Discard drops pending comments only.
+ * The queue's actions for the shown builder (#1559; formerly the status-bar counter). Pending
+ * comments: Submit Review (sends only the pending ones) and Discard. Sent-unconfirmed comments
+ * (#1562): Re-send and Mark Delivered, as their own buttons rather than a combined prompt.
  */
 function reviewActions(builderId: string, summary: CodeReviewSummary): React.ReactNode {
   const pending = summary.comments.length;
   const sent = summary.sent.length;
-  if (pending === 0 && sent === 0) {
-    return null;
-  }
   const buttons: React.ReactElement[] = [];
   if (pending > 0) {
     buttons.push(actionButton(builderId, 'submit', `Submit Review (${pending})`, false));
     buttons.push(actionButton(builderId, 'discard', 'Discard', true));
-  } else {
-    buttons.push(actionButton(builderId, 'submit', `Re-send / Mark Delivered (${sent})`, false));
+  }
+  if (sent > 0) {
+    buttons.push(actionButton(builderId, 'resend', `Re-send (${sent})`, pending > 0));
+    buttons.push(actionButton(builderId, 'markDelivered', 'Mark Delivered', true));
+  }
+  if (buttons.length === 0) {
+    return null;
   }
   return h('div', { className: 'cp-actions', key: 'actions' }, buttons);
 }
 
+/** The queue sections (actions, pending, sent, commented files) for one builder. */
+function reviewQueueSections(builderId: string, summary: CodeReviewSummary): React.ReactNode[] {
+  const sections: React.ReactNode[] = [reviewActions(builderId, summary)];
+  if (summary.comments.length > 0) {
+    sections.push(
+      h(
+        React.Fragment,
+        { key: 'comments' },
+        section('Pending comments', summary.comments.length, summary.comments.map((item) => commentRow(builderId, item, 'queued'))),
+      ),
+    );
+  }
+  if (summary.sent.length > 0) {
+    sections.push(
+      h(
+        React.Fragment,
+        { key: 'sent' },
+        section('Sent · awaiting confirmation', summary.sent.length, summary.sent.map((item) => commentRow(builderId, item, 'sent'))),
+      ),
+    );
+  }
+  if (summary.files.length > 0) {
+    sections.push(
+      h(
+        React.Fragment,
+        { key: 'files' },
+        section('Commented files', summary.files.length, summary.files.map((item) => fileRow(builderId, item))),
+      ),
+    );
+  }
+  return sections;
+}
+
 function codeReviewBody(builderId: string | undefined, summary: CodeReviewSummary): React.ReactNode {
-  if (summary.isEmpty) {
+  if (summary.isEmpty || builderId === undefined) {
     return h(
       'div',
       { className: 'cp-empty' },
@@ -271,32 +313,21 @@ function codeReviewBody(builderId: string | undefined, summary: CodeReviewSummar
       h('div', { className: 'cp-empty-sub' }, "Comments you queue on this builder's diff appear here until you submit the review."),
     );
   }
-  const comments = summary.comments.length > 0
-    ? summary.comments.map((item) => commentRow(item))
-    : h('div', { className: 'cp-row-note' }, 'No pending comments yet; queue one from the diff.');
-  const sections: React.ReactNode[] = [];
-  if (builderId !== undefined) {
-    sections.push(reviewActions(builderId, summary));
-  }
-  sections.push(h(React.Fragment, { key: 'comments' }, section('Pending comments', summary.comments.length, comments)));
-  if (summary.sent.length > 0) {
-    sections.push(
-      h(
-        React.Fragment,
-        { key: 'sent' },
-        section('Sent · awaiting confirmation', summary.sent.length, summary.sent.map((item) => sentRow(item))),
-      ),
-    );
-  }
-  if (summary.files.length > 0) {
-    sections.push(
-      h(React.Fragment, { key: 'files' }, section('Files to review', summary.files.length, summary.files.map((item) => fileRow(item)))),
-    );
-  }
-  return sections;
+  return reviewQueueSections(builderId, summary);
 }
 
-function body(descriptor: ModeDescriptor, attention: AttentionSummary | undefined, codeReview: CodeReviewSummary | undefined): React.ReactNode {
+/** Builder Inspector: its placeholder (owned by another participating feature), then this
+ *  builder's review queue when it has one, so the queue follows the builder's terminal too. */
+function builderInspectorBody(builderId: string | undefined, summary: CodeReviewSummary | undefined): React.ReactNode {
+  const placeholder = h('div', { className: 'cp-body-empty', key: 'placeholder' }, BODY_PLACEHOLDER['builder-inspector']);
+  if (builderId === undefined || summary === undefined || summary.isEmpty) {
+    return placeholder;
+  }
+  return [...reviewQueueSections(builderId, summary), placeholder];
+}
+
+function body(props: PanelProps & { descriptor: ModeDescriptor }): React.ReactNode {
+  const { descriptor, attention, codeReview, reviewBuilderId } = props;
   if (descriptor.kind === 'attention') {
     if (attention === undefined) {
       // No payload attached yet — the provider always sends one in Attention mode, so this is only
@@ -311,7 +342,10 @@ function body(descriptor: ModeDescriptor, attention: AttentionSummary | undefine
       // Same transient pre-first-post frame as Attention: never claim "no comments" before data arrives.
       return h('div', { className: 'cp-body-empty' }, 'Loading…');
     }
-    return codeReviewBody(descriptor.context.builderId, codeReview);
+    return codeReviewBody(reviewBuilderId, codeReview);
+  }
+  if (descriptor.kind === 'builder-inspector') {
+    return builderInspectorBody(reviewBuilderId, codeReview);
   }
   return h('div', { className: 'cp-body-empty' }, BODY_PLACEHOLDER[descriptor.kind]);
 }
@@ -320,10 +354,11 @@ interface PanelProps {
   descriptor: ModeDescriptor | undefined;
   attention: AttentionSummary | undefined;
   codeReview: CodeReviewSummary | undefined;
+  reviewBuilderId: string | undefined;
 }
 
 function Panel(props: PanelProps): React.ReactElement {
-  const { descriptor, attention, codeReview } = props;
+  const { descriptor } = props;
   if (descriptor === undefined) {
     return h('div', { className: 'cp-body' }, h('div', { className: 'cp-body-empty' }, 'Loading…'));
   }
@@ -337,7 +372,7 @@ function Panel(props: PanelProps): React.ReactElement {
     React.Fragment,
     null,
     header,
-    h('div', { className: 'cp-body' }, body(descriptor, attention, codeReview)),
+    h('div', { className: 'cp-body' }, body({ ...props, descriptor })),
   );
 }
 
@@ -356,9 +391,14 @@ function render(props: PanelProps): void {
 window.addEventListener('message', (event: MessageEvent) => {
   const message = event.data as HostToWebviewMessage | undefined;
   if (message !== undefined && message.type === 'render') {
-    render({ descriptor: message.descriptor, attention: message.attention, codeReview: message.codeReview });
+    render({
+      descriptor: message.descriptor,
+      attention: message.attention,
+      codeReview: message.codeReview,
+      reviewBuilderId: message.reviewBuilderId,
+    });
   }
 });
 
-render({ descriptor: undefined, attention: undefined, codeReview: undefined });
+render({ descriptor: undefined, attention: undefined, codeReview: undefined, reviewBuilderId: undefined });
 vscodeApi.postMessage({ type: 'ready' });

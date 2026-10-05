@@ -23,6 +23,8 @@ const hoisted = vi.hoisted(() => {
     overviewData: null as unknown,
     queues: {} as Record<string, unknown[]>,
     sentQueues: {} as Record<string, unknown[]>,
+    worktrees: {} as Record<string, string>,
+    loads: [] as string[],
     executed: [] as unknown[][],
     commandResult: Promise.resolve(undefined) as Promise<unknown>,
     listeners: {} as Record<string, (arg?: unknown) => void>,
@@ -107,6 +109,7 @@ interface RenderMessage {
   descriptor: ModeDescriptor;
   attention?: AttentionSummary;
   codeReview?: CodeReviewSummary;
+  reviewBuilderId?: string;
 }
 
 function makeView() {
@@ -155,6 +158,14 @@ function newProvider() {
   const reviewQueue = {
     getComments: (builderId: string) => hoisted.state.queues[builderId] ?? [],
     getSent: (builderId: string) => hoisted.state.sentQueues[builderId] ?? [],
+    getWorktreePath: (builderId: string) => hoisted.state.worktrees[builderId],
+    registerWorktree: (builderId: string, worktreePath: string) => {
+      hoisted.state.worktrees[builderId] = worktreePath;
+    },
+    load: (builderId: string) => {
+      hoisted.state.loads.push(builderId);
+      return Promise.resolve([]);
+    },
     onDidChangeQueue: (fn: (builderId: string) => void) => {
       hoisted.state.listeners['queue'] = fn as (arg?: unknown) => void;
       return { dispose() {} };
@@ -224,6 +235,8 @@ beforeEach(() => {
   hoisted.state.overviewData = null;
   hoisted.state.queues = {};
   hoisted.state.sentQueues = {};
+  hoisted.state.worktrees = {};
+  hoisted.state.loads = [];
   hoisted.state.executed = [];
   hoisted.state.commandResult = Promise.resolve(undefined);
   hoisted.state.listeners = {};
@@ -463,39 +476,57 @@ describe('ContextualPanelProvider — Attention body from the overview cache (#1
   });
 });
 
-describe('ContextualPanelProvider — Code Review body from the review queue (#1559)', () => {
+describe('ContextualPanelProvider — review-queue body (#1559)', () => {
   const diffPath = '/w/.builders/air-1559/src/x.ts';
 
   function showDiff(): void {
-    hoisted.state.diffBuilders = { [diffPath]: 'air-1559' };
+    hoisted.state.diffBuilders = { [diffPath]: '1559' };
     hoisted.state.activeTabInput = diffTab(diffPath);
     hoisted.state.activeEditorFsPath = diffPath;
+  }
+
+  /** Focus the builder terminal whose Tower-canonical id is `terminalId`. */
+  function showTerminal(terminalId: string): void {
+    hoisted.state.activeBuilderId = terminalId;
+    hoisted.state.listeners['terminal']?.({});
   }
 
   function queued(id: string, body: string): unknown {
     return { id, createdAt: '2026-10-05T00:00:00Z', file: 'src/x.ts', lineRange: { start: 3, end: 3 }, body };
   }
 
-  it("carries the shown builder's queue and diff files on a Code Review post", () => {
+  it("carries the shown builder's queue and its commented files on a Code Review post", () => {
     showDiff();
-    hoisted.state.queues = { 'air-1559': [queued('c1', 'rename this')], 'other': [queued('c2', 'not mine')] };
+    hoisted.state.queues = { '1559': [queued('c1', 'rename this')], other: [queued('c2', 'not mine')] };
     const provider = newProvider();
     const { view, posted } = makeView();
     provider.resolveWebviewView(view);
 
     expect(posted[0].descriptor.kind).toBe('code-review');
     expect(posted[0].attention).toBeUndefined();
-    expect(posted[0].codeReview?.comments).toEqual([{ id: 'c1', file: 'src/x.ts', ref: 'src/x.ts:L3', body: 'rename this' }]);
-    expect(posted[0].codeReview?.files).toEqual([{ relPath: 'src/x.ts', commentCount: 1 }]);
+    expect(posted[0].reviewBuilderId).toBe('1559');
+    expect(posted[0].codeReview?.comments).toEqual([{ id: 'c1', file: 'src/x.ts', line: 3, ref: 'src/x.ts:L3', body: 'rename this' }]);
+    expect(posted[0].codeReview?.files).toEqual([{ relPath: 'src/x.ts', pendingCount: 1, sentCount: 0 }]);
   });
 
-  it('omits the codeReview payload outside Code Review mode', () => {
+  it('carries sent-unconfirmed comments alongside pending ones', () => {
+    showDiff();
+    hoisted.state.sentQueues = { '1559': [{ ...(queued('s1', 'sent earlier') as object), sentAt: '2026-10-05T01:00:00Z' }] };
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted[0].codeReview?.sent.map((c) => c.id)).toEqual(['s1']);
+    expect(posted[0].codeReview?.isEmpty).toBe(false);
+  });
+
+  it('omits the queue payload in Attention / Document Review', () => {
     hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
     const provider = newProvider();
     const { view, posted } = makeView();
     provider.resolveWebviewView(view);
     expect(posted[0].descriptor.kind).toBe('attention');
     expect(posted[0].codeReview).toBeUndefined();
+    expect(posted[0].reviewBuilderId).toBeUndefined();
   });
 
   it("re-posts on the shown builder's queue change, and ignores other builders' changes", () => {
@@ -504,98 +535,165 @@ describe('ContextualPanelProvider — Code Review body from the review queue (#1
     const { view, posted } = makeView();
     provider.resolveWebviewView(view);
     expect(posted).toHaveLength(1);
-    expect(posted[0].codeReview?.comments).toEqual([]);
 
     hoisted.state.listeners['queue']?.('other');
     expect(posted).toHaveLength(1);
 
-    hoisted.state.queues = { 'air-1559': [queued('c1', 'new comment')] };
-    hoisted.state.listeners['queue']?.('air-1559');
+    hoisted.state.queues = { '1559': [queued('c1', 'new comment')] };
+    hoisted.state.listeners['queue']?.('1559');
     expect(posted).toHaveLength(2);
     expect(posted[1].codeReview?.comments.map((c) => c.body)).toEqual(['new comment']);
   });
 
-  it('does not post on a queue change while not in Code Review mode', () => {
+  it('does not post on a queue change while no queue is shown', () => {
     hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
     const provider = newProvider();
     const { view, posted } = makeView();
     provider.resolveWebviewView(view);
-    hoisted.state.listeners['queue']?.('air-1559');
+    hoisted.state.listeners['queue']?.('1559');
     expect(posted).toHaveLength(1);
   });
 
-  it('re-posts files-to-review when the registry changes on the same Code Review surface', () => {
-    showDiff();
-    const provider = newProvider();
-    const { view, posted } = makeView();
-    provider.resolveWebviewView(view);
-    expect(posted).toHaveLength(1);
-
-    hoisted.state.diffBuilders = { [diffPath]: 'air-1559', '/w/.builders/air-1559/src/y.ts': 'air-1559' };
-    hoisted.state.listeners['registry']?.();
-    expect(posted).toHaveLength(2);
-    expect(posted[1].codeReview?.files.map((f) => f.relPath)).toEqual(['src/x.ts', 'src/y.ts']);
-  });
-
-  it('carries sent-unconfirmed comments alongside pending ones', () => {
-    showDiff();
-    hoisted.state.sentQueues = { 'air-1559': [{ ...(queued('s1', 'sent earlier') as object), sentAt: '2026-10-05T01:00:00Z' }] };
-    const provider = newProvider();
-    const { view, posted } = makeView();
-    provider.resolveWebviewView(view);
-    expect(posted[0].codeReview?.sent.map((c) => c.id)).toEqual(['s1']);
-    expect(posted[0].codeReview?.isEmpty).toBe(false);
-  });
-
-  it('runs the review-queue command for the shown builder on a review-action message', () => {
-    showDiff();
-    const provider = newProvider();
-    const { view, fireMessage } = makeView();
-    provider.resolveWebviewView(view);
-
-    fireMessage({ type: 'review-action', action: 'submit', builderId: 'air-1559' });
-    expect(hoisted.state.executed).toEqual([['codev.submitReview', 'air-1559']]);
-  });
-
-  it('drops repeat clicks while an action is running, then accepts the next one', async () => {
-    showDiff();
-    let finish: () => void = () => {};
-    hoisted.state.commandResult = new Promise<void>((resolve) => {
-      finish = resolve;
+  describe('Builder Inspector (the queue follows the builder terminal)', () => {
+    beforeEach(() => {
+      hoisted.state.overviewData = overview({
+        builders: [builderRow({ id: '1559', roleId: 'builder-air-1559', worktreePath: '/w/.builders/air-1559' })],
+      });
     });
-    const provider = newProvider();
-    const { view, fireMessage } = makeView();
-    provider.resolveWebviewView(view);
 
-    fireMessage({ type: 'review-action', action: 'submit', builderId: 'air-1559' });
-    fireMessage({ type: 'review-action', action: 'submit', builderId: 'air-1559' }); // double click
-    expect(hoisted.state.executed).toHaveLength(1);
+    it('maps the terminal id to the queue key and carries that queue', () => {
+      hoisted.state.queues = { '1559': [queued('c1', 'from the diff')] };
+      const provider = newProvider();
+      const { view, posted } = makeView();
+      provider.resolveWebviewView(view);
+      showTerminal('builder-air-1559');
 
-    finish();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    hoisted.state.commandResult = Promise.resolve(undefined);
-    fireMessage({ type: 'review-action', action: 'discard', builderId: 'air-1559' });
-    expect(hoisted.state.executed).toEqual([
-      ['codev.submitReview', 'air-1559'],
-      ['codev.discardReviewComments', 'air-1559'],
-    ]);
+      const message = last(posted);
+      expect(message.descriptor.kind).toBe('builder-inspector');
+      expect(message.descriptor.context.builderId).toBe('builder-air-1559');
+      expect(message.reviewBuilderId).toBe('1559');
+      expect(message.codeReview?.comments.map((c) => c.id)).toEqual(['c1']);
+    });
+
+    it("registers the builder's worktree from the overview and loads its queue once", () => {
+      const provider = newProvider();
+      const { view } = makeView();
+      provider.resolveWebviewView(view);
+      showTerminal('builder-air-1559');
+      hoisted.state.listeners['queue']?.('1559'); // the load landing re-posts; must not reload
+
+      expect(hoisted.state.worktrees['1559']).toBe('/w/.builders/air-1559');
+      expect(hoisted.state.loads).toEqual(['1559']);
+    });
+
+    it('carries no queue when the terminal id matches no overview builder', () => {
+      const provider = newProvider();
+      const { view, posted } = makeView();
+      provider.resolveWebviewView(view);
+      showTerminal('builder-spir-9999');
+      expect(last(posted).descriptor.kind).toBe('builder-inspector');
+      expect(last(posted).reviewBuilderId).toBeUndefined();
+      expect(last(posted).codeReview).toBeUndefined();
+    });
+
+    it('re-posts on an overview change so a late-arriving mapping resolves', () => {
+      hoisted.state.overviewData = overview({ builders: [] });
+      const provider = newProvider();
+      const { view, posted } = makeView();
+      provider.resolveWebviewView(view);
+      showTerminal('builder-air-1559');
+      expect(last(posted).reviewBuilderId).toBeUndefined();
+
+      hoisted.state.overviewData = overview({ builders: [builderRow({ id: '1559', roleId: 'builder-air-1559' })] });
+      fireOverviewChange();
+      expect(last(posted).reviewBuilderId).toBe('1559');
+    });
+
+    it('honors review actions addressed to the mapped queue key', () => {
+      const provider = newProvider();
+      const { view, fireMessage } = makeView();
+      provider.resolveWebviewView(view);
+      showTerminal('builder-air-1559');
+
+      fireMessage({ type: 'review-action', action: 'markDelivered', builderId: 'builder-air-1559' }); // terminal id: wrong space
+      expect(hoisted.state.executed).toEqual([]);
+      fireMessage({ type: 'review-action', action: 'markDelivered', builderId: '1559' });
+      expect(hoisted.state.executed).toEqual([['codev.markReviewDelivered', '1559']]);
+    });
   });
 
-  it('ignores a review-action for another builder, an unknown action, or outside Code Review mode', () => {
-    showDiff();
-    const provider = newProvider();
-    const { view, fireMessage } = makeView();
-    provider.resolveWebviewView(view);
+  describe('inbound messages', () => {
+    it('maps each review action to its command; Submit sends pending only', async () => {
+      showDiff();
+      const provider = newProvider();
+      const { view, fireMessage } = makeView();
+      provider.resolveWebviewView(view);
 
-    fireMessage({ type: 'review-action', action: 'submit', builderId: 'other' });
-    fireMessage({ type: 'review-action', action: 'toString', builderId: 'air-1559' });
-    fireMessage({ type: 'review-action', action: 'submit' });
-    expect(hoisted.state.executed).toEqual([]);
+      for (const action of ['submit', 'discard', 'resend', 'markDelivered']) {
+        fireMessage({ type: 'review-action', action, builderId: '1559' });
+        await new Promise((resolve) => setTimeout(resolve, 0)); // let the in-flight guard clear
+      }
+      expect(hoisted.state.executed).toEqual([
+        ['codev.submitReview', '1559', { pendingOnly: true }],
+        ['codev.discardReviewComments', '1559'],
+        ['codev.resendReview', '1559'],
+        ['codev.markReviewDelivered', '1559'],
+      ]);
+    });
 
-    hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
-    hoisted.state.activeEditorFsPath = '/w/src/foo.ts';
-    fireSelection(); // → attention
-    fireMessage({ type: 'review-action', action: 'submit', builderId: 'air-1559' });
-    expect(hoisted.state.executed).toEqual([]);
+    it('drops repeat clicks while an action is running, then accepts the next one', async () => {
+      showDiff();
+      let finish: () => void = () => {};
+      hoisted.state.commandResult = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const provider = newProvider();
+      const { view, fireMessage } = makeView();
+      provider.resolveWebviewView(view);
+
+      fireMessage({ type: 'review-action', action: 'submit', builderId: '1559' });
+      fireMessage({ type: 'review-action', action: 'submit', builderId: '1559' }); // double click
+      expect(hoisted.state.executed).toHaveLength(1);
+
+      finish();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      hoisted.state.commandResult = Promise.resolve(undefined);
+      fireMessage({ type: 'review-action', action: 'discard', builderId: '1559' });
+      expect(hoisted.state.executed).toHaveLength(2);
+    });
+
+    it('opens a file ref at its line for the shown builder', () => {
+      showDiff();
+      const provider = newProvider();
+      const { view, fireMessage } = makeView();
+      provider.resolveWebviewView(view);
+
+      fireMessage({ type: 'open-location', builderId: '1559', relPath: 'src/x.ts', line: 3 });
+      fireMessage({ type: 'open-location', builderId: '1559', relPath: 'README.md' });
+      expect(hoisted.state.executed).toEqual([
+        ['codev.openBuilderFileLocation', { builderId: '1559', relPath: 'src/x.ts', line: 3 }],
+        ['codev.openBuilderFileLocation', { builderId: '1559', relPath: 'README.md', line: undefined }],
+      ]);
+    });
+
+    it('ignores malformed messages, another builder, or a surface showing no queue', () => {
+      showDiff();
+      const provider = newProvider();
+      const { view, fireMessage } = makeView();
+      provider.resolveWebviewView(view);
+
+      fireMessage({ type: 'review-action', action: 'submit', builderId: 'other' });
+      fireMessage({ type: 'review-action', action: 'toString', builderId: '1559' });
+      fireMessage({ type: 'review-action', action: 'submit' });
+      fireMessage({ type: 'open-location', builderId: '1559', relPath: 'src/x.ts', line: 0 });
+      fireMessage({ type: 'open-location', builderId: 'other', relPath: 'src/x.ts' });
+      expect(hoisted.state.executed).toEqual([]);
+
+      hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
+      hoisted.state.activeEditorFsPath = '/w/src/foo.ts';
+      fireSelection(); // → attention
+      fireMessage({ type: 'review-action', action: 'submit', builderId: '1559' });
+      expect(hoisted.state.executed).toEqual([]);
+    });
   });
 });

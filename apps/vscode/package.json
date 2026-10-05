@@ -458,6 +458,18 @@
         "title": "Codev: Discard Review Comments"
       },
       {
+        "command": "codev.resendReview",
+        "title": "Codev: Re-send Review"
+      },
+      {
+        "command": "codev.markReviewDelivered",
+        "title": "Codev: Mark Review Delivered"
+      },
+      {
+        "command": "codev.openBuilderFileLocation",
+        "title": "Codev: Open Builder File Location"
+      },
+      {
         "command": "codev.submitBuilderComment",
         "title": "Queue Comment for Builder",
         "enablement": "!commentIsEmpty"
@@ -527,6 +539,10 @@
       "commandPalette": [
         {
           "command": "codev.tower.deactivateWorkspace",
+          "when": "false"
+        },
+        {
+          "command": "codev.openBuilderFileLocation",
           "when": "false"
         },
         {

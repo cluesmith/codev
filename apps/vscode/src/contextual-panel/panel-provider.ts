@@ -22,13 +22,20 @@ import * as vscode from 'vscode';
 import type { TerminalManager } from '../terminal-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
 import type { ReviewQueueStore } from '../review-queue/store.js';
-import { getDiffInjectEntries, onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
+import { builderById } from '../builder-lookup.js';
+import { onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
 import { resolveMode } from './resolver.js';
 import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
 import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
-import { deriveCodeReview, type CodeReviewSummary } from './code-review.js';
-import { isReadyMessage, isReviewActionMessage, REVIEW_ACTION_COMMANDS, type HostToWebviewMessage } from './messages.js';
+import { deriveCodeReview, queueBuilderIdFor } from './code-review.js';
+import {
+  isOpenLocationMessage,
+  isReadyMessage,
+  isReviewActionMessage,
+  REVIEW_ACTION_COMMANDS,
+  type HostToWebviewMessage,
+} from './messages.js';
 import type { ModeDescriptor } from './types.js';
 
 export class ContextualPanelProvider implements vscode.WebviewViewProvider {
@@ -38,8 +45,11 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   private lastDescriptor: ModeDescriptor | undefined;
   private lastPostId: string | undefined;
   private lastTabResource: string | undefined;
-  /** A Code Review action is running (its modal / terminal open is async): drop repeat clicks. */
+  /** A review action is running (its modal / terminal open is async): drop repeat clicks. */
   private reviewActionInFlight = false;
+  /** Queue keys this provider has asked the store to load (Builder Inspector can show a builder
+   *  whose diff was never opened, so nothing else has loaded its queue file yet). */
+  private readonly requestedQueueLoads = new Set<string>();
   private readonly reader: SurfaceContextReader;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly viewDisposables: vscode.Disposable[] = [];
@@ -55,15 +65,17 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       // Attention is fed by the overview cache; when it refreshes (SSE tick) re-post so the body
       // tracks live state. Only while the panel is actually showing Attention — other modes ignore
       // the cache, so this posts nothing extra for them.
+      // Builder Inspector also reads it: the terminal-id -> queue-key mapping comes from the overview.
       this.overviewCache.onDidChange(() => {
-        if (this.lastDescriptor?.kind === 'attention') {
+        const kind = this.lastDescriptor?.kind;
+        if (kind === 'attention' || kind === 'builder-inspector') {
           this.repost();
         }
       }),
-      // Code Review is fed by the shown builder's queue: re-post when THAT builder's queue changes
-      // (own mutation or another window's write), and only while a Code Review surface is showing.
+      // The review-queue body (Code Review and Builder Inspector) is fed by the shown builder's
+      // queue: re-post when THAT builder's queue changes (own mutation or another window's write).
       this.reviewQueue.onDidChangeQueue((builderId) => {
-        if (this.lastDescriptor?.kind === 'code-review' && this.lastDescriptor.context.builderId === builderId) {
+        if (this.lastDescriptor !== undefined && this.reviewBuilderId(this.lastDescriptor) === builderId) {
           this.repost();
         }
       }),
@@ -97,14 +109,7 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       }),
       vscode.window.tabGroups.onDidChangeTabs(() => this.onTabEvent()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.onTabEvent()),
-      // Fires on a registry change (and on a codelens-mode toggle, an idempotent extra re-post). A
-      // registry change can resolve a new surface (refresh) or, on the same Code Review surface,
-      // change its files-to-review — which the surface-keyed dedup would not post, so re-post it.
-      onDidChangeDiffInjectRegistry(() => {
-        if (!this.refresh() && this.lastDescriptor?.kind === 'code-review') {
-          this.repost();
-        }
-      }),
+      onDidChangeDiffInjectRegistry(() => this.refresh()),
     );
   }
 
@@ -175,28 +180,41 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       this.repost();
       return;
     }
-    // A Code Review button: run the existing review-queue command (which owns confirmation, the
-    // re-send / mark-delivered choice, and the queue writes). Honored only for the builder the panel
-    // is showing in Code Review mode, so a stale or forged message cannot act on another builder.
-    // One action at a time: a double click must not inject the review into the prompt twice.
-    if (
-      isReviewActionMessage(message)
-      && !this.reviewActionInFlight
-      && this.lastDescriptor?.kind === 'code-review'
-      && this.lastDescriptor.context.builderId === message.builderId
-    ) {
+    // Review buttons and file refs are honored only for the queue the panel is showing, so a stale or
+    // forged message cannot act on another builder.
+    const shown = this.lastDescriptor === undefined ? undefined : this.reviewBuilderId(this.lastDescriptor);
+    if (shown === undefined) {
+      return;
+    }
+    // A review button runs the existing review-queue command (which owns confirmation and the queue
+    // writes). One action at a time: a double click must not inject the review into the prompt twice.
+    if (isReviewActionMessage(message) && message.builderId === shown && !this.reviewActionInFlight) {
       this.reviewActionInFlight = true;
-      Promise.resolve(vscode.commands.executeCommand(REVIEW_ACTION_COMMANDS[message.action], message.builderId))
+      const command = REVIEW_ACTION_COMMANDS[message.action];
+      let run: Thenable<unknown>;
+      if (message.action === 'submit') {
+        run = vscode.commands.executeCommand(command, shown, { pendingOnly: true });
+      } else {
+        run = vscode.commands.executeCommand(command, shown);
+      }
+      Promise.resolve(run)
         .catch(() => undefined)
         .finally(() => {
           this.reviewActionInFlight = false;
         });
+      return;
+    }
+    if (isOpenLocationMessage(message) && message.builderId === shown) {
+      vscode.commands.executeCommand('codev.openBuilderFileLocation', {
+        builderId: shown,
+        relPath: message.relPath,
+        line: message.line,
+      });
     }
   }
 
-  /** Re-resolve the active surface and post only if the render (surface key + descriptor) changed.
-   *  Returns whether it posted. */
-  private refresh(): boolean {
+  /** Re-resolve the active surface and post only if the render (surface key + descriptor) changed. */
+  private refresh(): void {
     const { context, key } = this.reader.read();
     const descriptor = resolveMode(context);
     this.lastDescriptor = descriptor;
@@ -204,9 +222,7 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     if (postId !== this.lastPostId) {
       this.lastPostId = postId;
       this.post(descriptor);
-      return true;
     }
-    return false;
   }
 
   private repost(): void {
@@ -222,23 +238,62 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     // re-post (visibility restore, or an SSE-driven refresh) always reflects current state.
     const attention =
       descriptor.kind === 'attention' ? deriveAttention(this.overviewCache.getData()) : undefined;
-    const codeReview = descriptor.kind === 'code-review' ? this.codeReview(descriptor.context.builderId) : undefined;
-    const message: HostToWebviewMessage = { type: 'render', descriptor, attention, codeReview };
+    // The review queue rides along in Code Review (a builder diff) and Builder Inspector (that
+    // builder's terminal), read from the store's cache for the queue key the surface maps to.
+    let codeReview: HostToWebviewMessage['codeReview'];
+    const reviewBuilderId = this.reviewBuilderId(descriptor);
+    if (reviewBuilderId !== undefined) {
+      this.requestQueueLoad(reviewBuilderId);
+      codeReview = deriveCodeReview({
+        comments: this.reviewQueue.getComments(reviewBuilderId),
+        sent: this.reviewQueue.getSent(reviewBuilderId),
+      });
+    } else if (descriptor.kind === 'code-review') {
+      codeReview = deriveCodeReview({ comments: [], sent: [] });
+    }
+    const message: HostToWebviewMessage = { type: 'render', descriptor, attention, codeReview, reviewBuilderId };
     this.view?.webview.postMessage(message);
   }
 
-  /** Project the shown builder's queue (read-only from the store's cache) + its diff-session files. */
-  private codeReview(builderId: string | undefined): CodeReviewSummary {
-    if (builderId === undefined) {
-      return deriveCodeReview({ comments: [], sent: [] }, []);
+  /**
+   * The review-queue key for the surface, or undefined when it shows no queue. A builder diff already
+   * carries the overview builder id (the diff-inject registry's id, which the store uses). A builder
+   * terminal carries the Tower-canonical terminal id, a different id space, so it is mapped through
+   * the overview by tail-match (`queueBuilderIdFor`).
+   */
+  private reviewBuilderId(descriptor: ModeDescriptor): string | undefined {
+    const shownId = descriptor.context.builderId;
+    if (shownId === undefined) {
+      return undefined;
     }
-    const files = getDiffInjectEntries()
-      .filter((entry) => entry.builderId === builderId)
-      .map((entry) => entry.relPath);
-    return deriveCodeReview(
-      { comments: this.reviewQueue.getComments(builderId), sent: this.reviewQueue.getSent(builderId) },
-      files,
-    );
+    if (descriptor.kind === 'code-review') {
+      return shownId;
+    }
+    if (descriptor.kind === 'builder-inspector') {
+      return queueBuilderIdFor(shownId, this.overviewCache.getData()?.builders ?? []);
+    }
+    return undefined;
+  }
+
+  /**
+   * Make sure the store has read this builder's queue file once. A builder diff's open path already
+   * does this; Builder Inspector can show a builder whose diff was never opened. The worktree comes
+   * from the overview (authoritative), and the store's change event re-posts once the load lands.
+   */
+  private requestQueueLoad(builderId: string): void {
+    if (this.requestedQueueLoads.has(builderId)) {
+      return;
+    }
+    this.requestedQueueLoads.add(builderId);
+    if (this.reviewQueue.getWorktreePath(builderId) === undefined) {
+      const worktreePath = builderById(this.overviewCache.getData(), builderId)?.worktreePath;
+      if (!worktreePath) {
+        this.requestedQueueLoads.delete(builderId);
+        return;
+      }
+      this.reviewQueue.registerWorktree(builderId, worktreePath);
+    }
+    this.reviewQueue.load(builderId).catch(() => undefined);
   }
 
   private buildHtml(webview: vscode.Webview): string {

@@ -17,14 +17,27 @@ import type { BuilderFileChange } from '../views/builder-diff-cache.js';
 // it; the `navigateBuilderDiffToFirst` glue (#1414) needs `window.setStatusBarMessage`
 // (the flash) and reads no editor state on the seeded path — so this mock stays small.
 const setStatusBarMessage = vi.fn();
+// `openBuilderDiffLocation` (#1559) also places the caret in the opened editor.
+const editorState = vi.hoisted(() => ({ visible: [] as unknown[], shown: undefined as unknown, showError: false }));
+const showTextDocument = vi.fn(async () => {
+  if (editorState.showError) { throw new Error('missing'); }
+  return editorState.shown;
+});
 vi.mock('vscode', () => ({
   EventEmitter: class {
     event = (): { dispose(): void } => ({ dispose() {} });
     fire(): void {}
     dispose(): void {}
   },
+  Uri: { file: (fsPath: string) => ({ fsPath }) },
+  Position: class { constructor(public line: number, public character: number) {} },
+  Selection: class { constructor(public anchor: unknown, public active: unknown) {} },
+  Range: class { constructor(public startLine: number, public startChar: number, public endLine: number, public endChar: number) {} },
+  TextEditorRevealType: { InCenterIfOutsideViewport: 2 },
   window: {
     get activeTextEditor() { return undefined; },
+    get visibleTextEditors() { return editorState.visible; },
+    showTextDocument: (...args: unknown[]) => showTextDocument(...(args as [])),
     setStatusBarMessage: (...args: unknown[]) => setStatusBarMessage(...args),
   },
 }));
@@ -46,6 +59,7 @@ const {
   peekDiffNavPosition,
   resetDiffNavState,
   navigateBuilderDiffToFirst,
+  openBuilderDiffLocation,
 } = await import('../commands/diff-nav.js');
 const { openBuilderFileDiff } = await import('../commands/view-diff.js');
 const { builderWithWorktree } = await import('../builder-lookup.js');
@@ -266,5 +280,91 @@ describe('navigateBuilderDiffToFirst (#1414: builder-id-scoped first-file open)'
     expect(worktreeMock).not.toHaveBeenCalled();
     expect(openMock).not.toHaveBeenCalled();
     expect(setStatusBarMessage).toHaveBeenCalledWith('Codev: no builder to open a diff for', expect.anything());
+  });
+});
+
+describe('openBuilderDiffLocation (#1559: clickable file refs)', () => {
+  const openMock = vi.mocked(openBuilderFileDiff);
+  const worktreeMock = vi.mocked(builderWithWorktree);
+  const getDiff = vi.fn();
+  const deps = {
+    context: {} as never,
+    overviewCache: { getData: () => ({}) } as never,
+    diffCache: { getDiff } as never,
+  };
+
+  function fakeEditor(fsPath: string, lineCount: number) {
+    return {
+      document: { uri: { fsPath }, lineCount },
+      selection: undefined as unknown,
+      revealRange: vi.fn(),
+    };
+  }
+
+  beforeEach(() => {
+    resetDiffNavState();
+    openMock.mockReset();
+    worktreeMock.mockReset();
+    getDiff.mockReset();
+    showTextDocument.mockClear();
+    setStatusBarMessage.mockClear();
+    editorState.visible = [];
+    editorState.shown = undefined;
+    editorState.showError = false;
+  });
+
+  it("opens a changed file's per-file diff and puts the caret on the (1-based) line", async () => {
+    worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
+    getDiff.mockResolvedValue({ baseRef: 'base-sha', files: [mk('a.ts'), mk('b.ts')] });
+    const editor = fakeEditor('/wt/b.ts', 100);
+    editorState.visible = [editor];
+
+    await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'b.ts', line: 42 }, deps);
+
+    const [, args, showOptions] = openMock.mock.calls[0]!;
+    expect(args.plan.resourcePath).toBe('b.ts');
+    expect(args.baseRef).toBe('base-sha');
+    expect(showOptions).toEqual({ preview: true });
+    expect(peekDiffNavPosition()).toEqual({ builderId: 'pir-x', relPath: 'b.ts' });
+    expect((editor.selection as { anchor: { line: number } }).anchor.line).toBe(41);
+    expect(editor.revealRange).toHaveBeenCalledTimes(1);
+    expect(showTextDocument).not.toHaveBeenCalled();
+  });
+
+  it('opens the worktree file itself when it is not among the changed files, clamping the line', async () => {
+    worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
+    getDiff.mockResolvedValue({ baseRef: 'base-sha', files: [mk('a.ts')] });
+    const editor = fakeEditor('/wt/notes.md', 5);
+    editorState.shown = editor;
+
+    await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'notes.md', line: 99 }, deps);
+
+    expect(openMock).not.toHaveBeenCalled();
+    expect(showTextDocument).toHaveBeenCalledWith({ fsPath: '/wt/notes.md' }, { preview: true });
+    expect((editor.selection as { anchor: { line: number } }).anchor.line).toBe(4);
+  });
+
+  it('leaves the caret alone for a whole-file reference (no line)', async () => {
+    worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
+    getDiff.mockResolvedValue({ baseRef: 'base-sha', files: [mk('a.ts')] });
+    const editor = fakeEditor('/wt/a.ts', 10);
+    editorState.visible = [editor];
+
+    await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'a.ts' }, deps);
+
+    expect(openMock).toHaveBeenCalledTimes(1);
+    expect(editor.selection).toBeUndefined();
+  });
+
+  it('flashes when the builder has no worktree, or the file cannot be opened', async () => {
+    worktreeMock.mockReturnValue(undefined as never);
+    await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'a.ts' }, deps);
+    expect(setStatusBarMessage).toHaveBeenCalledWith('Codev: no worktree on record for pir-x', expect.anything());
+
+    worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
+    getDiff.mockResolvedValue({ baseRef: 'base-sha', files: [] });
+    editorState.showError = true;
+    await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'gone.ts', line: 1 }, deps);
+    expect(setStatusBarMessage).toHaveBeenCalledWith('Codev: cannot open gone.ts', expect.anything());
   });
 });

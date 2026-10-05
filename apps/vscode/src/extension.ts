@@ -12,7 +12,7 @@ import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
-import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, diffStepHunk, recordDiffNavPosition } from './commands/diff-nav.js';
+import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, diffStepHunk, recordDiffNavPosition, openBuilderDiffLocation } from './commands/diff-nav.js';
 import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
 import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
@@ -41,7 +41,7 @@ import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
 import { activateBuilderReviewComments } from './comments/builder-review.js';
 import { ReviewQueueStore } from './review-queue/store.js';
-import { submitReview, discardReviewComments } from './review-queue/submit.js';
+import { submitReview, discardReviewComments, resendReview, markReviewDelivered } from './review-queue/submit.js';
 import { feedbackFile, feedbackHunk, feedbackSelection } from './review-queue/feedback.js';
 import { activateOverviewNudge } from './review-queue/overview-nudge.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
@@ -1372,13 +1372,26 @@ export async function activate(context: vscode.ExtensionContext) {
 		// themselves); the contextual panel's Code Review buttons (#1559) and the
 		// deck's Send Fb key (`send-queue [builderId]`, #1410) pass an explicit id
 		// string, which acts on exactly that builder's queue.
-		reg('codev.submitReview', (builderId?: unknown) =>
+		reg('codev.submitReview', (builderId?: unknown, options?: unknown) =>
 			submitReview(
 				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
 				typeof builderId === 'string' ? builderId : undefined,
+				{ pendingOnly: (options as { pendingOnly?: unknown } | undefined)?.pendingOnly === true },
 			)),
 		reg('codev.discardReviewComments', (builderId?: unknown) =>
 			discardReviewComments(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
+		// The sent-unconfirmed record's two explicit actions (#1559): re-send it to
+		// the prompt, or confirm delivery and drop it.
+		reg('codev.resendReview', (builderId?: unknown) =>
+			resendReview(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
+		reg('codev.markReviewDelivered', (builderId?: unknown) =>
+			markReviewDelivered(
 				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
 				typeof builderId === 'string' ? builderId : undefined,
 			)),
@@ -1467,6 +1480,19 @@ export async function activate(context: vscode.ExtensionContext) {
 		// builder's changed-file list top-to-bottom (next) / bottom-to-top (prev),
 		// opening each file's per-file diff. CLI-independent — operates on editor
 		// state + the shared diff cache, not Tower.
+		// Contextual panel file refs (#1559): open a builder file at a line, in its
+		// per-file diff when the file is one of the builder's changes. Internal
+		// (hidden from the palette); the panel passes a validated target.
+		reg('codev.openBuilderFileLocation', (target?: unknown) => {
+			const t = target as { builderId?: unknown; relPath?: unknown; line?: unknown } | undefined;
+			if (typeof t?.builderId !== 'string' || typeof t.relPath !== 'string') { return; }
+			let line: number | undefined;
+			if (typeof t.line === 'number') { line = t.line; }
+			return openBuilderDiffLocation(
+				{ builderId: t.builderId, relPath: t.relPath, line },
+				{ context, overviewCache, diffCache: builderDiffCache },
+			);
+		}),
 		reg('codev.diffNextFile', () =>
 			navigateDiff(1, { context, overviewCache, diffCache: builderDiffCache })),
 		reg('codev.diffPreviousFile', () =>

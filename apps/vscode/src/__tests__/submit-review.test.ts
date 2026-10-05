@@ -49,7 +49,7 @@ vi.mock('vscode', () => ({
   CodeLens: class {},
 }));
 
-const { submitReview, resolveTargetBuilder } = await import('../review-queue/submit.js');
+const { submitReview, resendReview, markReviewDelivered, resolveTargetBuilder } = await import('../review-queue/submit.js');
 const { setDiffInjectSession, upsertDiffInjectEntry } = await import('../diff-inject-codelens.js');
 const { wrapBracketedPaste, buildSubmitMessage } = await import('../review-queue/queue.js');
 
@@ -237,5 +237,68 @@ describe('submitReview', () => {
     await submitReview({ store, terminalManager: tm, overviewCache } as never, 'pir-1');
     expect(tm.calls).toEqual([]);
     expect(h.state.statusMessages.some(m => m.includes('No pending comments for pir-1'))).toBe(true);
+  });
+});
+
+describe('panel actions (#1559): pending-only submit, explicit Re-send / Mark Delivered', () => {
+  it('pendingOnly submits just the pending comments, without the prompt, leaving the sent record', async () => {
+    const pending = [makeComment('c2')];
+    const store = makeStore({ 'pir-1': pending }, { 'pir-1': [makeComment('c1')] });
+    const tm = makeTerminalManager();
+
+    await submitReview({ store, terminalManager: tm, overviewCache } as never, 'pir-1', { pendingOnly: true });
+
+    expect(h.state.warnings).toEqual([]);
+    expect(tm.calls[1]!.args[1]).toBe(wrapBracketedPaste(buildSubmitMessage(pending)));
+    expect(store.markedSent).toEqual([{ builderId: 'pir-1', ids: ['c2'] }]);
+    expect(store.clearedSent).toEqual([]);
+  });
+
+  it('pendingOnly with only sent comments reports nothing pending', async () => {
+    const store = makeStore({ 'pir-1': [] }, { 'pir-1': [makeComment('c1')] });
+    const tm = makeTerminalManager();
+    await submitReview({ store, terminalManager: tm, overviewCache } as never, 'pir-1', { pendingOnly: true });
+    expect(tm.calls).toEqual([]);
+    expect(h.state.statusMessages.some(m => m.includes('No pending comments for pir-1'))).toBe(true);
+  });
+
+  it('resendReview re-injects only the sent comments and keeps them in the sent record', async () => {
+    const sent = [makeComment('c1')];
+    const store = makeStore({ 'pir-1': [makeComment('c2')] }, { 'pir-1': sent });
+    const tm = makeTerminalManager();
+
+    await resendReview({ store, terminalManager: tm, overviewCache } as never, 'pir-1');
+
+    expect(tm.calls[1]!.args[1]).toBe(wrapBracketedPaste(buildSubmitMessage(sent)));
+    expect(store.markedSent).toEqual([]);
+    expect(store.clearedSent).toEqual([]);
+  });
+
+  it('resendReview reports when there is nothing sent', async () => {
+    const store = makeStore({ 'pir-1': [makeComment('c2')] });
+    const tm = makeTerminalManager();
+    await resendReview({ store, terminalManager: tm, overviewCache } as never, 'pir-1');
+    expect(tm.calls).toEqual([]);
+    expect(h.state.statusMessages.some(m => m.includes('No sent review comments to re-send'))).toBe(true);
+  });
+
+  it('markReviewDelivered drops the sent record without touching the terminal or pending comments', async () => {
+    const store = makeStore({ 'pir-1': [makeComment('c2')] }, { 'pir-1': [makeComment('c1')] });
+    const tm = makeTerminalManager();
+
+    await markReviewDelivered({ store, terminalManager: tm, overviewCache } as never, 'pir-1');
+
+    expect(store.clearedSent).toEqual(['pir-1']);
+    expect(tm.calls).toEqual([]);
+    expect(store.markedSent).toEqual([]);
+    expect(h.state.statusMessages.some(m => m.includes('marked delivered'))).toBe(true);
+  });
+
+  it('markReviewDelivered reports when there is nothing sent', async () => {
+    const store = makeStore({ 'pir-1': [] });
+    const tm = makeTerminalManager();
+    await markReviewDelivered({ store, terminalManager: tm, overviewCache } as never, 'pir-1');
+    expect(store.clearedSent).toEqual([]);
+    expect(h.state.statusMessages.some(m => m.includes('No sent review comments to confirm'))).toBe(true);
   });
 });

@@ -24,6 +24,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 import type { OverviewCache } from '../views/overview-data.js';
 import type { BuilderDiffCache, BuilderFileChange } from '../views/builder-diff-cache.js';
 import { getDiffInjectEntry } from '../diff-inject-codelens.js';
@@ -225,6 +226,49 @@ export async function navigateBuilderDiffToFirst(
   const ctx = await resolveDiffContext(deps, { builderId });
   if (!ctx) { return; }
   await openDiffAt(deps, ctx, 0);
+}
+
+/**
+ * Open a review-comment / file reference at its location (#1559, the contextual
+ * panel's clickable refs): the builder's per-file diff when the file is among
+ * its changed files (anchoring navigation there), otherwise the worktree file
+ * itself. `line` is 1-based; omitted means the top of the file. Flashes when
+ * the builder has no worktree on record.
+ */
+export async function openBuilderDiffLocation(
+  target: { builderId: string; relPath: string; line?: number },
+  deps: NavDeps,
+): Promise<void> {
+  const builder = builderWithWorktree(deps.overviewCache.getData(), target.builderId);
+  if (!builder) {
+    flash(`no worktree on record for ${target.builderId}`);
+    return;
+  }
+  const fsPath = path.join(builder.worktreePath, target.relPath);
+  const result = await deps.diffCache.getDiff(target.builderId, builder.worktreePath);
+  const change = result.files.find(f => f.plan.resourcePath === target.relPath);
+  let editor: vscode.TextEditor | undefined;
+  if (change) {
+    await openBuilderFileDiff(
+      deps.context,
+      { worktreePath: builder.worktreePath, baseRef: result.baseRef, builderId: target.builderId, plan: change.plan },
+      { preview: true },
+    );
+    recordDiffNavPosition(target.builderId, target.relPath);
+    editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === fsPath);
+  } else {
+    try {
+      editor = await vscode.window.showTextDocument(vscode.Uri.file(fsPath), { preview: true });
+    } catch {
+      flash(`cannot open ${target.relPath}`);
+      return;
+    }
+  }
+  if (editor && target.line !== undefined) {
+    const line = Math.max(0, Math.min(target.line - 1, editor.document.lineCount - 1));
+    placeCaret(editor, line);
+    editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  }
 }
 
 // ── Hunk navigation (VS Code's built-in compare-editor change stepping) ─────

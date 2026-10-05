@@ -22,3 +22,10 @@
 - #1562's real shape is a separate `sent` array (`store.getSent`), not a per-entry status, so I removed the `status` filter. The projection now takes `{comments, sent}`, and the panel shows a "Sent · awaiting confirmation" section.
 - The buttons send a validated `review-action` webview→host message. The host runs the existing `codev.submitReview` / `codev.discardReviewComments` for the SHOWN builder only. Submit already offers Re-send / Mark Delivered; with only sent entries the button reads "Re-send / Mark Delivered (N)". `codev.discardReviewComments` now accepts a builder id, mirroring submit.
 - Deleted review-queue/status-bar.ts and its activation. Updated arch.md (#1037 and contextual-panel paragraphs) and the stale extension.ts comments. No tests referenced the status-bar item.
+
+## Owner-directed round 3 (2026-10-05)
+- Owner: Re-send and Mark Delivered are two different actions, not one bundled button. I added `resendReview` / `markReviewDelivered` (+ commands) to submit.ts. The panel's Submit passes `pendingOnly` so it never shows #1562's combined prompt; the palette keeps that prompt.
+- Owner: the review queue should also show when the builder's terminal is focused. It renders in the Builder Inspector body, below its placeholder; the header is untouched for #1672. The terminal id is Tower-canonical (`builder-spir-5189`) while the queue key is the bare overview id (`5189`), so `queueBuilderIdFor` uses the sdk `resolveAgentName` over `OverviewBuilder.roleId`. An ambiguous match shows no queue; the architect asked for a two-workspace test, which is included.
+- Owner: "Files to review" should list only files with comments. It is renamed "Commented files", with pending/sent counts, and the diff-registry dependency is gone.
+- Owner: all file refs are clickable. `codev.openBuilderFileLocation` (hidden from the palette) opens the per-file diff at the line via diff-nav's `openBuilderDiffLocation`, or the worktree file when it is not a changed file.
+- The owner chose to keep all of this in one PR despite it exceeding AIR's ~300 LOC; the architect agreed.
