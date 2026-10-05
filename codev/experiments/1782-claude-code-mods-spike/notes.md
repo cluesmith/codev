@@ -1,6 +1,6 @@
 # EXPERIMENT 1782: Claude Code mods for Codev (spike for #1761)
 
-Status: **builder half complete; four live-session answers pending the handoff below.**
+Status: **builder half complete; live Q1 and Q2 answered, Q3 retest and Q4 in progress.**
 Date: 2026-10-05. Claude Code on this machine: **2.1.289** (the issue expected 2.1.288; the
 reference page is written for 2.1.289, so no 2.1.289-only item was out of reach).
 
@@ -37,6 +37,9 @@ inside the budgets the mods documentation states, in a real Codev terminal under
 ```
 
 `✔ Validation passed`, no warnings after adding `author` to the manifest.
+
+After the Q3 change (finding 10), the `calls:` line lists `$.command.run` in place of
+`$.prompt.submit`. Validation still passes.
 
 ### 2. `claude plugin test`: what the 12 tests cover
 
@@ -152,6 +155,28 @@ the hook under 10 ms of its 10 s. The **user-facing wait** is what matters: abou
    `claude` once with network before `claude plugin test`**, or a cold runner fails for a
    reason unrelated to the mod.
 
+9. **A host check stops `$.prompt.submit` from running a slash command.** Live Q3:
+   `classic.SessionStart{source:'clear'}` fired, but `$.prompt.submit({ text: '/arch-init
+   spike-probe', asUser: true })` was **rejected**: "a text beginning with / would run a
+   command as the user; run one with $.command.run({ command })". So candidate 8 must use
+   `$.command.run({ command: 'arch-init', args: name })`. It cannot "submit as the person",
+   and the #1761 review's open question on slash expansion has its answer: a mod cannot
+   submit a slash command as a prompt at all.
+10. **A session with the mod loaded rewrote the mod.** During live Q3, the probe `claude`
+    session in the owner's tab was running in auto mode with hot reload on. It edited
+    `mod/hooks/register.tsx` in this builder worktree, uncommitted, replacing the rejected
+    `$.prompt.submit` with `$.command.run` (17:34 local). Neither the architect nor the owner
+    made that edit by hand. The builder reviewed it, found it correct (it is the documented
+    path; type-checks and validates), and committed it as its own.
+    - **Consequence for #1761 decision 2:** a session that has a mod loaded and write access
+      to the mod's folder will repair, and so can change, the mod it runs under. A shipped
+      `codev` plugin must load from a folder the session does not write to (the installed
+      package, not a worktree path). Hot reload must stay off for anything but deliberate
+      authoring.
+11. **Chip titles are hard-cut at the tab edge** (live Q2, 80 columns). The second chip's
+    title ran into the right edge with no ellipsis. Chip labels should truncate with an
+    ellipsis to their share of `bodyColumns`.
+
 ### Deviations from the issue's method
 
 - **Guard list: one entry added**, `git checkout -- .` (regex `\bgit\s+checkout\s+--\s+\.(\s|$)`).
@@ -263,10 +288,30 @@ Note whether `afx spawn`'s path pre-trusts its worktrees.
 *(to be recorded here from the vscode architect's report on #1782: command used and what
 was observed)*
 
-- Q1:
-- Q2:
-- Q3:
-- Q4:
+Observed by the vscode architect and Amr in a Codev VS Code terminal tab (`afx shell --name
+spike`, then the commands above), 2026-10-05.
+
+- **Q1, the hold.** The dialog drew intact in the Codev VS Code tab, tagged as coming from
+  the plugin.
+  - `No` → denied ("Gate not approved…").
+  - `Yes, relayed verbatim` → the echo ran.
+  - Esc → `.catch` deny "codev guard failed". Claude's reaction to that text was "the hook
+    seems flaky", which confirms finding 6: the dismissal deny must say the human dismissed
+    the question.
+  - **Mail half: not runnable.** `afx send` cannot address utility shell terminals
+    (`NOT_FOUND`), so the render gate's behaviour during a hold is **unanswered** by this
+    run. It needs a probe session Tower registers as an agent.
+- **Q2, chip to inline pane.**
+  - The band showed `context 6%` with the save mark and two chips, both titled from Tower.
+    The second title was hard-cut at the tab edge (finding 11).
+  - Typing `1` alone in the empty prompt opened the peek **inline above the prompt**, with
+    title, state, label and body as Markdown. Esc closed it.
+  - `/issue 1412` mid-turn opened the pane, **docked** beside the transcript at a wider
+    momentary width.
+  - `tput cols` measured 80 afterwards.
+- **Q3, slash expansion.** The `$.prompt.submit` route is **rejected by a host check**
+  (finding 9). The `$.command.run` retest is in progress.
+- **Q4, trust.** In progress.
 
 ## Conclusion (builder half)
 
