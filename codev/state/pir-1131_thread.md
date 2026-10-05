@@ -7,3 +7,13 @@
 - No stable ids minted: state lives on the marker, so the positional `markerLine` + verify is enough. The attribute slot is reserved for a future `id=`.
 - #860 (summary) is unbuilt, so the "unresolved only" filter is deferred.
 - Contract surfaces flagged for main: the sdk codec, plus the artifact-canvas `types.ts` additions.
+
+## 2026-10-05 plan revisions
+- Listed every skeleton twin by path (architect:vscode).
+- Main approved the sdk section (same-tag format) with five conditions, all folded into section A and the Test Plan:
+  - C1: matchesExpectedMarker compares the parsed author.
+  - C2: rewrite keeps attrs.
+  - C3: v1 output stays byte-identical.
+  - C4: attribute grammar pinned: author up to the first comma, then bare-flag or key=value attrs, unknown ones kept verbatim and in order.
+  - C5: the codec stays pure.
+- Lockstep: the sdk and canvas ReviewMarker types gain `resolved` in the same phase.
