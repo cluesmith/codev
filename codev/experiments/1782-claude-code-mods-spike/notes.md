@@ -144,6 +144,14 @@ the hook under 10 ms of its 10 s. The **user-facing wait** is what matters: abou
 7. **`claude -p "/cmd" --plugin-dir <mod>` runs a mod command with no model turn.** This is a
    cheap real-engine probe that CI could run beside `claude plugin test`.
 
+8. **`claude plugin test` can refuse outright on a machine whose rollout switch is stale.**
+   This was reported by the vscode architect when re-verifying on 2.1.289. Their first run
+   failed with "hooks modules are turned off in this process: the rollout switch was saved
+   off by an earlier session and is not refreshed yet". One headless `claude -p` run with
+   network access refreshed the switch, and the suite then ran 12/12. **Phase-2 CI must start
+   `claude` once with network before `claude plugin test`**, or a cold runner fails for a
+   reason unrelated to the mod.
+
 ### Deviations from the issue's method
 
 - **Guard list: one entry added**, `git checkout -- .` (regex `\bgit\s+checkout\s+--\s+\.(\s|$)`).
@@ -162,7 +170,13 @@ the hook under 10 ms of its 10 s. The **user-facing wait** is what matters: abou
 - **Two measurement-only commands**, `/codev-spike-fetch` and `/codev-spike-timings`. They
   exist to produce the numbers above and are not candidates.
 
-## Live-session handoff (for the vscode architect)
+## Live-session handoff (runbook posted on #1782 for Amr)
+
+The vscode architect re-verified the builder half on 2.1.289: validate passes and the plugin
+tests run 12/12. The four questions need a person watching a rendered dialog and pane. An
+architect's shell cannot observe a TUI, and Tower has no screen-snapshot API. The runbook is
+on #1782 and is run by Amr, starting with `afx shell --name spike` and then the commands
+below.
 
 Builders do not load mods into their own sessions (#1761 decision 2), so these four
 questions are answered by the vscode architect in a Tower terminal. Everything below starts
