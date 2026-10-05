@@ -60,6 +60,8 @@ Opening an untrusted folder no longer leaves the Codev sidebar inert until you t
 - **Review-queue submit no longer deletes comments before they are delivered** (#1562, PR #1768). Submitted comments move to a sent list; the next submit asks Mark Delivered (default), Re-send, or cancel. Sent-versus-actioned tracking follows in #1771.
 - **Review comments no longer open the Comments panel** (#1773, PR #1774). The extension defaults `comments.openView` to `never`; an explicit user setting still wins.
 
+- **Gates from every protocol surface as blocked** (#1777, PR #1778). A builder held at an EXPERIMENT, MAINTAIN or RESEARCH gate showed as working everywhere, because Tower only recognised the five SPIR-family gate names and did not map those protocols' worktrees to their porch project. Any pending gate now surfaces on the Agents view, toast, status bar, dashboard and Tower hub, with icons for the four new gates and a derived label for any gate Tower has not seen before.
+
 ## Other fixes (dashboard, porch, infrastructure)
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
