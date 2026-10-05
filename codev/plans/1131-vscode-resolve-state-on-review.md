@@ -85,7 +85,7 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 ## Contract-surface sections (flag for routing to main before the gate)
 
 - **[CONTRACT: sdk] `packages/sdk/src/review-markers.ts`** is the shared on-disk codec and the canonical marker parser. The lane brief calls it "codev-core's marker parser"; it now lives in `@cluesmith/codev-sdk`.
-- **[CONTRACT: artifact-canvas public API] `packages/artifact-canvas/src/types.ts`**: an additive spec-945 contract amendment. It adds an optional `resolved` field to `ReviewMarker` and an optional `onToggleResolved` prop.
+- **[artifact-canvas public API, architect:vscode's surface, not main's] `packages/artifact-canvas/src/types.ts`**: an additive spec-945 contract amendment. It adds an optional `resolved` field to `ReviewMarker` and an optional `onToggleResolved` prop.
 - **No `codev-types` change.**
 
 ## Proposed Change
@@ -183,10 +183,14 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 - `apps/vscode/src/markdown-preview/webview/main.ts` (wire `onToggleResolved`)
 - `apps/vscode/package.json` (two commands, `comments/commentThread/title` menu items, `when`-clause regex)
 - `apps/vscode/src/__tests__/plan-review-resolve.test.ts` (new), `apps/vscode/src/__tests__/preview-edit-delete.test.ts` (extend with toggle + race)
-- `codev/roles/builder.md`, `codev-skeleton/roles/builder.md` (new "Review markers" section)
-- `codev/roles/architect.md`, `codev-skeleton/roles/architect.md` (one line, optional per Decision 4)
-- `codev/protocols/pir/prompts/{plan,implement}.md` + skeleton twins
-- `codev/protocols/{spir,aspir,air}/prompts/implement.md` + skeleton twins
+- `codev/roles/builder.md` and `codev-skeleton/roles/builder.md` (new "Review markers" section, byte-identical)
+- `codev/roles/architect.md` and `codev-skeleton/roles/architect.md` (one line, optional per Decision 4, byte-identical)
+- Protocol prompts. Each pair is edited byte-identically, and the twins are verified with `diff -q` before commit:
+  - `codev/protocols/pir/prompts/plan.md` and `codev-skeleton/protocols/pir/prompts/plan.md`
+  - `codev/protocols/pir/prompts/implement.md` and `codev-skeleton/protocols/pir/prompts/implement.md`
+  - `codev/protocols/spir/prompts/implement.md` and `codev-skeleton/protocols/spir/prompts/implement.md`
+  - `codev/protocols/aspir/prompts/implement.md` and `codev-skeleton/protocols/aspir/prompts/implement.md`
+  - `codev/protocols/air/prompts/implement.md` and `codev-skeleton/protocols/air/prompts/implement.md`
 - `apps/vscode/README.md:201`, `packages/artifact-canvas/README.md`, `codev/resources/arch.md` (#859 entry)
 - `codev/state/pir-1131_thread.md` (builder thread)
 
