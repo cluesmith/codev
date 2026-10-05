@@ -30,7 +30,7 @@ The facts a re-orienting human needs are already computed and served, but scatte
 - **Forge freshness is coarse.** Staleness is expressed on the wire only through `forgeStatus` (`ok` / `rate-limited` / `unavailable`) and `forgeResetAt`. The cache's per-entry `fetchedAt` is private and is not on `OverviewData` today, so a precise "gh 40s" age is not derivable from the current wire contract without exposing it.
 - **Held messages** live in `~/.agent-farm/global.db` (`db/mailbox.ts`), summarized per workspace and attached to a builder as `heldCount`. **Terminal liveness** is `lastDataAt` (last data frame from the shellper), injected into the overview by Tower.
 - **The thread narrative** (`codev/state/<id>_thread.md`) is freeform builder-authored prose. There is no writer helper that appends entries at porch task boundaries; entries are ordinary file edits, and headings today are date-level (for example a `## 2026-09-29 ...` heading), not per-entry timestamped. A file carries one filesystem `mtime`, so per-beat ages are not derivable from the current format.
-- **"Whose move is it" is not computed as one model.** The SDK exposes `deriveAttention(OverviewData)` and `isIdleWaiting(...)` in `packages/sdk/src/builder-helpers.ts`, which bucket attention into rows rather than resolving a single per-lane state. These already have live consumers: `apps/vscode/src/extension.ts`, `apps/vscode/src/views/builders.ts`, `apps/vscode/src/views/builder-row.ts`, `apps/vscode/src/contextual-panel/panel-provider.ts`, and a noted future need in `apps/streamdeck/src/face.ts`. The harness-lifecycle states named by #1595 (working / needs-input / idle / dead) are **not** yet a computed model, and `compareAttention` (#1566) does not exist in the tree yet.
+- **"Whose move is it" is not computed as one model.** The SDK exposes `deriveAttention(OverviewData)` and `isIdleWaiting(...)` in `packages/sdk/src/builder-helpers.ts`, which bucket attention into rows rather than resolving a single per-lane state. These already have live consumers: `apps/vscode/src/extension.ts`, `apps/vscode/src/views/builders.ts`, `apps/vscode/src/views/builder-row.ts`, `apps/vscode/src/contextual-panel/panel-provider.ts`, and a noted future need in `apps/streamdeck/src/face.ts`. The harness-lifecycle states named by #1595 (working / needs-input / idle / blocked / dead) are **not** yet served; #1595 is ruled to ship before this lane (owner, 2026-10-05) and will serve them as a codev-types wire contract. `compareAttention` (#1566) does not exist in the tree yet.
 
 The limitation: a fused, at-a-glance answer requires the human to be the fusion engine, every hop.
 
@@ -56,7 +56,7 @@ The card has six zones (illustrative layout, not a fixed width):
 5. **Recent beats**: the last roughly three thread-entry headings, with ages (see grammar).
 6. **Freshness and links**: per-source data age, held-message count, and deep links (issue, PR, thread file, porch status).
 
-### Ball-owner precedence (the absorbed #1595 model)
+### Ball-owner precedence (consumes #1595's served agent state)
 
 First match wins. The chain is exhaustive: a lane always resolves to exactly one state.
 
@@ -68,11 +68,13 @@ First match wins. The chain is exhaustive: a lane always resolves to exactly one
 | 4 | `AGENT WORKING` | Phase is active **and** a produced artifact (a commit, a thread-entry write, or a PR-state change) is within the freshness threshold. Terminal `lastDataAt` does **not** qualify a lane as working. |
 | 5 | `STALLED?` | Phase says working but no produced artifact has moved within the threshold. Rendered as a question, never a hard "dead". |
 | T | `DONE` | Phase is a terminal completion state (for example `complete` / `verified` / merged), with no pending gate or held mail. Completed lanes exit here rather than falling to `STALLED?`. |
-| T | `OFFLINE` | The lane's shellper is gone (no live PTY / `lastDataAt` absent past a liveness bound) while the phase is not a completion state. This is the #1595 `dead` state. It is a liveness fact, distinct from `STALLED?` (which is about produced artifacts). |
+| T | `OFFLINE` | The lane's shellper is gone (no live PTY / `lastDataAt` absent past a liveness bound) while the phase is not a completion state. Its input is #1595's served `dead` state. It is a liveness fact, distinct from `STALLED?` (which is about produced artifacts). |
 
 `DONE` and `OFFLINE` are terminal/liveness outcomes evaluated within the same single computation; the table lists all reachable states so no lane is unclassified. Secondary conditions (for example held mail while at a gate) render as small badges beside the primary chip. The display labels above (`WAITING ON YOU`, `STALLED?`, and the rest) are presentation; the wire value is the lowercase-kebab `ballOwner.state` union (`'waiting-on-you'`, `'stalled'` with no question mark, and so on), and the uppercasing and the question mark are added by renderers.
 
-Deliberate divergences from the design canvas (see References): terminal activity is excluded from `AGENT WORKING` (issue guardrail #4: a busy composer proves nothing, and otherwise `STALLED?` is unreachable); the terminal `DONE` and `OFFLINE` states are added beyond the canvas's five (exhaustiveness, and #1595's `dead` lands in `OFFLINE`); and the endpoint carries the `/api/` prefix.
+**Input from #1595.** The card's `ballOwner.state` union is the card's own presentation vocabulary; its agent-liveness input is #1595's served enum (working / needs-input / idle / blocked / dead). The mapping, final once #1595's enum is ratified: `dead` maps to `OFFLINE`; `blocked` is the same porch-gate fact that already drives `WAITING ON YOU`; `working` and `idle` are liveness inputs only and never by themselves produce `AGENT WORKING` or suppress `STALLED?`, which stay artifact-derived per guardrail #4; where `needs-input` lands is an open question for the owner (see Open Questions).
+
+Deliberate divergences from the design canvas (see References): terminal activity is excluded from `AGENT WORKING` (issue guardrail #4: a busy composer proves nothing, and otherwise `STALLED?` is unreachable); the terminal `DONE` and `OFFLINE` states are added beyond the canvas's five (exhaustiveness, and #1595's served `dead` maps to `OFFLINE`); and the endpoint carries the `/api/` prefix.
 
 ### One computation, many renderers (disposition of the existing helpers)
 
@@ -165,7 +167,7 @@ The card renders gracefully in every degraded case: forge stale or unavailable, 
 - [ ] `STALLED?` uses a concrete default threshold (see Open Questions) so the criterion is testable at plan time; protocol-aware tuning is deferred.
 - [ ] The card row and a future #1729 park chip have a defined coexistence rule (design only; #1729 is not built here).
 - [ ] The `Now:` line and timestamped-heading convention are documented in protocol/thread wording in **both** `codev/` and `codev-skeleton/`.
-- [ ] A re-scope proposal for #1595 is posted (comment on #1595) for the owner's ruling.
+- [x] The #1595 relationship is settled: the owner ruled on 2026-10-05 that #1595 ships first and #1672 consumes its served agent state (#1595 issuecomment-5988808107). No #1595 re-scope work remains in this lane.
 
 ## Constraints
 
@@ -180,7 +182,7 @@ The issue body carries no heading literally named "Baked Decisions", but its **G
 5. **Every field carries source and age.** Self-reported versus derived is always visible.
 6. **Disagreement is rendered, not hidden.** When porch phase and the artifact disagree, the card shows both rather than picking one.
 7. **The card endpoint is a keyed route**, never on the public allowlist.
-8. **One state SSOT, shared with #1595.** The ball-owner precedence chain is a superset of #1595's agent-attention states and overlaps #1594's held indicator. This issue **absorbs #1595**: the state computation lives in exactly one place, SDK-side, near where #1566 puts `compareAttention`. Tower remains the fusion and serving layer. #1595 is re-scoped at spec time (a comment proposing the re-scope; the owner posts the ruling).
+8. **One state SSOT, shared with #1595 (amended by the owner's 2026-10-05 ordering ruling).** The issue originally directed this lane to absorb #1595; the owner ruled that #1595 ships first, so #1672 **consumes** #1595's served agent state rather than absorbing it. The agent-state enum (working / needs-input / idle / blocked / dead) and its row shape are #1595's wire contract in codev-types. The ball-owner precedence logic still lives in exactly one place, SDK-side, co-located with `compareAttention`, and maps onto #1595's enum instead of defining it; the precedence chain also overlaps #1594's held indicator. Tower remains the fusion and serving layer.
 9. **`LaneCard` type in `@cluesmith/codev-types`** (wire contract only; no implementation or policy there).
 10. **Assembly in Tower**: one endpoint, fusing the sources with file-watch on status.yaml and thread files, forge data via the OverviewCache.
 11. **Renderers consume the same JSON**: CLI (`afx card`, attach banner, `afx status --cards`), VS Code (compact strip in the #1049 panel), dashboard/cloud (a later follow-up).
@@ -201,13 +203,13 @@ Main ruled on all five contract-surface items and verified the rebuttal's code c
 - **CI reaches the card by extending the forge contract** (per main's ruling (d) above): an optional `ci` on `PrListItem`, GitHub `pr-list.sh` reducing `statusCheckRollup` in-script to the compact rollup. Non-GitHub presets report `'unknown'` until they gain an equivalent.
 - **Merged-PR facts come from `MergedPrItem`**, a separate cached concept from open `pr-list`. The phase/artifact disagreement case reads both.
 - **Precise forge age ("gh 40s") reaches the card via the per-source `fetchedAt`** exposed on `OverviewData` (per main's ruling (e) above), converted to `ageMs` at assembly, honest through rate-limit windows.
-- **The ball-owner / `compareAttention` module does not exist yet.** This spec introduces it. It must supersede #1595's four lifecycle states, including a terminal-liveness `OFFLINE` (#1595 `dead`) state.
+- **The ball-owner precedence module does not exist yet.** This spec introduces it. It takes #1595's served agent-state enum as an input and maps it into the precedence chain (for example `dead` to `OFFLINE`); it does not define that enum.
 - **The card endpoint is keyed by placing it under the workspace `api/` namespace** (`/workspace/:ws/api/...`); a non-`api/` workspace subpath is public by `isPublicRoute`'s static-asset rule (`packages/codev/src/agent-farm/utils/server-utils.ts`), so the `api/` prefix is load-bearing, not cosmetic.
 - **`@cluesmith/codev-types` is wire-contracts-only.** The ball-owner computation lives in `@cluesmith/codev-sdk`, not in types.
 
 ### EXTERNAL and STALLED? defaults (so criteria are testable)
 
-- **EXTERNAL fallback**: if no existing signal for "consult lanes in flight" is found (Open Question 3), `EXTERNAL` means **CI-pending on the linked PR only**. The card ships with that scope; consult-lane detection is a later enhancement if a signal appears.
+- **EXTERNAL fallback**: if no existing signal for "consult lanes in flight" is found (Open Question 4), `EXTERNAL` means **CI-pending on the linked PR only**. The card ships with that scope; consult-lane detection is a later enhancement if a signal appears.
 - **STALLED? default threshold**: a single default (proposed: no produced-artifact movement for longer than the existing idle waiting threshold, `IDLE_WAITING_THRESHOLD_MS`, currently 5 minutes) so the state is testable at plan time. Protocol-aware tuning (a spec phase produces differently than an implement phase) is a follow-up.
 
 ### Fence (do-not-edit) and cross-lane sequencing
@@ -216,6 +218,7 @@ Main ruled on all five contract-surface items and verified the rebuttal's code c
 
 ## Assumptions
 
+- **#1595 ships first and its enum is ratified before this lane's plan.** The owner ruled the ordering on 2026-10-05; the agent-state enum and row shape are #1595's codev-types contract, routed to main before #1595's plan gate. This lane's precedence module consumes that served state and does not define it.
 - **No dependency on pir-1566's unmerged code.** The ball-owner module is co-located near `compareAttention` in `packages/sdk/src/builder-helpers.ts` but does not import 1566's unmerged code; whichever of #1566 and #1672 merges second rebases trivially. This lane does not block on #1566 and does not edit 1566-owned files.
 - **The OverviewCache remains the sole forge path.** Any freshness or CI need that requires new fields is met by extending the OverviewCache/contract (flagged to main), never by a new forge call from the card.
 - **Thread entries continue to be builder-authored prose**; the timestamped-heading and `Now:` line are a documented convention, not an enforced schema, and the card tolerates their absence.
@@ -251,15 +254,16 @@ The two former Critical questions (the `PrListItem` CI rollup and the per-source
 
 **Important (shapes design):**
 
-1. Confirm the `STALLED?` default threshold (proposed: `IDLE_WAITING_THRESHOLD_MS`, currently 5 minutes, on produced-artifact movement) and whether it should be protocol-aware in v1 or deferred.
-2. Coexistence of the ball-owner chip and a #1729 park chip in one row: a leading park badge that visually pre-empts the computed chip while preserving the computed value beneath (honoring "disagreement is rendered"), versus park replacing the chip. This spec proposes the former; the plan wires the reserved `park` field only.
-3. Is there any existing signal for "consult lanes in flight" that `EXTERNAL` can use without a new data source? If not, `EXTERNAL` is CI-pending-only (the stated fallback).
-4. How are `OFFLINE` / dead lanes discovered for the fleet view, given that the live overview may filter them out? (The card must be reachable for a lane whose shellper is gone.)
+1. Where does #1595's `needs-input` land in the ball-owner chain? It is a harness-reported fact, not agent self-report, so it could feed `WAITING ON YOU`; but the issue lists "a structured 'builder needs a human answer' flag feeding the ball-owner chip" as out of scope. Options: (a) feed `WAITING ON YOU` (re-opens that out-of-scope item); (b) render it as a secondary badge only; (c) ignore it in v1. Owner's call; this spec leans (b).
+2. Confirm the `STALLED?` default threshold (proposed: `IDLE_WAITING_THRESHOLD_MS`, currently 5 minutes, on produced-artifact movement) and whether it should be protocol-aware in v1 or deferred.
+3. Coexistence of the ball-owner chip and a #1729 park chip in one row: a leading park badge that visually pre-empts the computed chip while preserving the computed value beneath (honoring "disagreement is rendered"), versus park replacing the chip. This spec proposes the former; the plan wires the reserved `park` field only.
+4. Is there any existing signal for "consult lanes in flight" that `EXTERNAL` can use without a new data source? If not, `EXTERNAL` is CI-pending-only (the stated fallback).
+5. How are `OFFLINE` / dead lanes discovered for the fleet view, given that the live overview may filter them out? (The card must be reachable for a lane whose shellper is gone.)
 
 **Nice-to-know (optimization):**
 
-5. Whether `afx status --cards` eventually becomes the default `afx status` output, or stays behind the flag.
-6. Whether the attach-time banner is shown once on attach or refreshes.
+6. Whether `afx status --cards` eventually becomes the default `afx status` output, or stays behind the flag.
+7. Whether the attach-time banner is shown once on attach or refreshes.
 
 ## Test Scenarios
 
@@ -287,7 +291,7 @@ The two former Critical questions (the `PrListItem` CI rollup and the per-source
 | The forge-contract CI change grows response payload / GraphQL point cost on large open-PR lists | Medium | High (quota/perf regression; #1652 lineage) | In-script `jq` reduction so raw per-check arrays never cross the contract (bounds the hazard to the `gh`-to-`jq` pipe); point cost watched via #1647 / #1650 telemetry at review time, not pre-optimized (per main's ruling) |
 | Card endpoint exposed unauthenticated via the wrong route shape | Low | High (leaks lane/forge data) | Route under `/workspace/:ws/api/...` (keyed by `isPublicRoute`); explicit unauthenticated-rejection test |
 | Path traversal / authored-text injection through `:id`, `:ws`, or `Now:`/beat prose | Medium | High | Validate `:id` against the registered lane set; never interpolate into a path; HTML-escape and strip control sequences before render; dedicated tests |
-| A second "whose move" computation creeps in (card vs #1595 vs #1594) | Medium | High (answers disagree within a week) | One SDK-side module owns the precedence chain; existing helpers become projections; review-enforced; #1595 re-scoped, not re-implemented |
+| A second "whose move" computation creeps in (card vs #1595 vs #1594) | Medium | High (answers disagree within a week) | #1595 serves the agent state (its enum); one SDK-side module owns the precedence chain and maps onto that enum; existing helpers become projections; review-enforced |
 | Contract-surface changes (types/sdk/core/Tower) collide with main or pir-1566 | Medium | Medium | Flag every contract-surface section at the spec gate for main to route; respect the pir-1566 file fence; sequence merges in the plan |
 | File-watching status.yaml + thread files across every lane in every workspace exhausts fd/watch ceilings | Medium | Medium | Bound watchers (per active lane, shared where possible); fall back to on-demand read + debounce; measure at fleet scale |
 | `STALLED?` misfires (false stall on a slow phase, or misses a real stall) | Medium | Medium | Produced-artifact derivation with a documented default threshold; render as a question, never a hard "dead"; surface underlying ages |
@@ -301,7 +305,7 @@ The two former Critical questions (the `PrListItem` CI rollup and the per-source
 - #1049: the VS Code contextual bottom panel; its `builder-inspector` mode is the card's VS Code host.
 - #1553: the panel's Attention fallback (the no-builder view; fed by the ball-owner module as a projection).
 - #1559: the panel's Code Review body and the review-queue sections the card renders above in Builder Inspector; source of the terminal-id to overview-id mapping (`queueBuilderIdFor`).
-- #1595: attention states (working / needs-input / idle / dead), **absorbed** by this issue; re-scoped at spec time.
+- #1595: harness-native agent states (working / needs-input / idle / blocked / dead), ruled to ship **before** this lane (owner, 2026-10-05, #1595 issuecomment-5988808107); #1672 consumes its served state and its codev-types enum.
 - #1594: held-indicator overlap.
 - #1566: `compareAttention` home (SDK-side), where the state module lands (`packages/sdk/src/builder-helpers.ts`, branch `builder/pir-1566`).
 - Spec 1313: the mailbox, source of the `HELD` state.
