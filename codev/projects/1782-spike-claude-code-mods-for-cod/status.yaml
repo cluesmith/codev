@@ -1,0 +1,14 @@
+id: '1782'
+title: spike-claude-code-mods-for-cod
+protocol: experiment
+phase: hypothesis
+plan_phases: []
+current_plan_phase: null
+gates:
+  experiment-complete:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-05T05:46:46.698Z'
+updated_at: '2026-10-05T05:46:46.698Z'
