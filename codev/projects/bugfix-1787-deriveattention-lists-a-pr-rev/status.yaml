@@ -1,7 +1,7 @@
 id: bugfix-1787
 title: deriveattention-lists-a-pr-rev
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-05T07:06:32.345Z'
-updated_at: '2026-10-05T07:06:58.633Z'
+updated_at: '2026-10-05T07:08:36.987Z'
