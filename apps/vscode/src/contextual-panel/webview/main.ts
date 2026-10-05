@@ -251,7 +251,8 @@ function actionButton(builderId: string, action: ReviewAction, text: string, sec
 /**
  * The queue's actions for the shown builder (#1559; formerly the status-bar counter). Pending
  * comments: Submit Review (sends only the pending ones) and Discard. Sent-unconfirmed comments
- * (#1562): Re-send and Mark Delivered, as their own buttons rather than a combined prompt.
+ * (#1562): Mark Delivered (the default) and Re-send, as their own buttons rather than a combined
+ * prompt.
  */
 function reviewActions(builderId: string, summary: CodeReviewSummary): React.ReactNode {
   const pending = summary.comments.length;
@@ -262,8 +263,10 @@ function reviewActions(builderId: string, summary: CodeReviewSummary): React.Rea
     buttons.push(actionButton(builderId, 'discard', 'Discard', true));
   }
   if (sent > 0) {
-    buttons.push(actionButton(builderId, 'resend', `Re-send (${sent})`, pending > 0));
-    buttons.push(actionButton(builderId, 'markDelivered', 'Mark Delivered', true));
+    // Mark Delivered is the default (confirming delivery is the normal case); Re-send is the
+    // recovery fallback, so it is always the secondary button. Matches #1562's prompt ordering.
+    buttons.push(actionButton(builderId, 'markDelivered', `Mark Delivered (${sent})`, pending > 0));
+    buttons.push(actionButton(builderId, 'resend', 'Re-send', true));
   }
   if (buttons.length === 0) {
     return null;
