@@ -69,6 +69,8 @@ afx send 0042 "PR approved, please merge"
 afx send 0585 "check the test output" --file /tmp/test-results.txt
 ```
 
+**From a builder:** run `afx send` from your own worktree; don't `cd` to the main workspace root first. Your identity decides where plain `architect` routes (your spawning architect, not `main`). Builders also carry it in `CODEV_BUILDER_WORKTREE`, so it resolves from any cwd once spawned or resumed on a version with #1783.
+
 ## afx interrupt
 
 Sends an ESC keystroke to a builder's PTY — the only thing that reaches it **mid-turn**.

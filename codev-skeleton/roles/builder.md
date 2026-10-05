@@ -56,6 +56,9 @@ They are not watching. Send a message at each of these:
 | PR merged | `afx send architect "Project <id> complete. Entering verify phase."` |
 | Blocked | `afx send architect "Blocked on X — need guidance"` |
 
+Run `afx send` from your own worktree. Don't `cd` to the main workspace root first: your identity
+decides where `architect` routes, and resolved from the main root it can land on `main` instead of your owner.
+
 When blocked, state the problem and the options you see, then wait. Don't guess past a decision
 that isn't yours.
 

@@ -102,6 +102,11 @@ if (!process.env.CODEV_AGENT_FARM_DIR) {
   process.env.CODEV_AGENT_FARM_DIR = agentFarmDir;
 }
 
+// A suite run from inside a builder session inherits that builder's identity
+// (`CODEV_BUILDER_WORKTREE`, Issue #1783), which would override every cwd the
+// identity tests set up. Tests that exercise it set it themselves.
+delete process.env.CODEV_BUILDER_WORKTREE;
+
 if (firstRun) {
   process.on('exit', () => {
     try {

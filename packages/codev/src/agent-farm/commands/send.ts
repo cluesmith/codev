@@ -16,6 +16,7 @@ import { logger, fatal } from '../utils/logger.js';
 import { loadState } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
+import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
@@ -28,14 +29,32 @@ import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-
 const MAX_FILE_SIZE = MAX_MESSAGE_BYTES;
 
 /**
+ * The path a builder's identity is read from: the spawn-time `CODEV_BUILDER_WORKTREE`
+ * when it names a builder worktree, else the cwd (Issue #1783).
+ *
+ * The env var wins because identity is where the builder was spawned, not where its
+ * shell happens to be: a builder that runs `cd <workspace root> && afx send architect`
+ * (as the "run afx from the main root" rule tells it to) used to resolve as a
+ * non-builder, so plain `architect` routed to `main` instead of its owner and the
+ * `architect:<name>` spoofing guard was skipped. The value is still only a path —
+ * `detectCurrentBuilderId` verifies it against global.db exactly as it does a cwd.
+ */
+function identityPath(): string {
+  const worktree = process.env[BUILDER_WORKTREE_ENV]?.trim();
+  if (worktree && /\/\.builders\/[^/]+/.test(worktree)) return worktree;
+  return process.cwd();
+}
+
+/**
  * Detect workspace root from CWD by walking up to find .git or .codev/config.json.
- * Builder worktrees are at .builders/<id>/ which is inside the workspace root.
+ * Builder worktrees are at .builders/<id>/ which is inside the workspace root;
+ * a builder's spawn-time worktree (see `identityPath`) takes precedence over the cwd.
  *
  * Note: checks for .codev/config.json (not just .codev/) to avoid false
  * positives from ~/.codev/ which exists for global config.
  */
 export function detectWorkspaceRoot(): string | null {
-  let dir = process.cwd();
+  let dir = identityPath();
   // If inside .builders/<id>/, the workspace root is the prefix before the
   // LAST `/.builders/`. Greedy `.+` (not lazy `.+?`) so a nested worktree path
   // like `<repo>/.builders/a/.builders/b` resolves the inner builder's
@@ -94,7 +113,7 @@ export function describeStateDbOpenFailure(dbPath: string, worktreeDirName: stri
 }
 
 /**
- * Detect the current builder ID from the worktree path.
+ * Detect the current builder ID from the worktree path (`identityPath`: spawn env, else cwd).
  *
  * Issue #1118: builders live in the single shared `global.db`, scoped by
  * `workspace_path` (per-workspace `state.db` is retired). This resolves the
@@ -116,10 +135,10 @@ export function describeStateDbOpenFailure(dbPath: string, worktreeDirName: stri
  *     unverified id silently misroutes `afx send architect` to `main` (#1094).
  */
 export function detectCurrentBuilderId(): string | null {
-  const cwd = process.cwd();
+  const path = identityPath();
   // Builder worktrees are at .builders/<dir-name>/. Greedy `.+` (not lazy `.+?`)
   // so a nested worktree resolves the INNER builder (the LAST `/.builders/`).
-  const match = cwd.match(/^(.+)\/\.builders\/([^/]+)/);
+  const match = path.match(/^(.+)\/\.builders\/([^/]+)/);
   if (!match) return null;
 
   const workspacePath = match[1];
