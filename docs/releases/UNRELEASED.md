@@ -64,6 +64,8 @@ Opening an untrusted folder no longer leaves the Codev sidebar inert until you t
 
 - **Non-core gates get their own icons on every surface** (#1779, PR #1780). The Stream Deck face draws a beaker, tools, search or library glyph for the experiment, maintenance, scope and research gates instead of a bell; the dashboard's attention list styles them with one neutral colour instead of the plan colour, and any gate it has never seen gets the same neutral treatment; and the Tower view's attention rows share the Agents view's icon per gate instead of a warning triangle.
 
+- **PR-review lanes no longer appear twice** (#1787, PR #1788). A builder at the PR review gate was pushed into the attention summary once for the porch gate and once for the open PR, so the Tower view and Agents view showed two rows and urgency counted it twice. The shared SDK now emits one row, the one carrying the waiting time.
+
 ## Other fixes (dashboard, porch, infrastructure)
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
