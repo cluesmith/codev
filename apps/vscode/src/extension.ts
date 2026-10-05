@@ -12,7 +12,7 @@ import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
-import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, diffStepHunk, recordDiffNavPosition } from './commands/diff-nav.js';
+import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, diffStepHunk, recordDiffNavPosition, openBuilderDiffLocation } from './commands/diff-nav.js';
 import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
 import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
@@ -41,9 +41,8 @@ import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
 import { activateBuilderReviewComments } from './comments/builder-review.js';
 import { ReviewQueueStore } from './review-queue/store.js';
-import { submitReview, discardReviewComments } from './review-queue/submit.js';
+import { submitReview, discardReviewComments, resendReview, markReviewDelivered } from './review-queue/submit.js';
 import { feedbackFile, feedbackHunk, feedbackSelection } from './review-queue/feedback.js';
-import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
 import { activateOverviewNudge } from './review-queue/overview-nudge.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
 import {
@@ -302,8 +301,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
 	);
 	context.subscriptions.push(reviewQueueStore);
-	// Load persisted queues so the palette Submit Review and the status-bar
-	// counter see them right after a reload, before any diff is opened.
+	// Load persisted queues so the palette Submit Review and the contextual
+	// panel's Code Review body see them right after a reload, before any diff
+	// is opened.
 	reviewQueueStore.preloadFromDisk();
 
 	// Drive the `codev.terminalFocused` context key so the Cmd/Ctrl+V image
@@ -581,7 +581,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// surface and posts a ModeDescriptor to its webview. Takes the terminal manager for the
 	// builder-terminal surface (getActiveBuilderId). (#921's Codev Dev panel view was removed —
 	// its status is carried by the status-bar chip below.)
-	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!, overviewCache);
+	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!, overviewCache, reviewQueueStore);
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,
@@ -1368,16 +1368,33 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Submit Review + Discard (#1037): flush / drop the per-builder pending
 		// comment queue. Builder resolution: active diff's owner → sole pending
 		// builder → QuickPick.
-		// The status-bar button invokes this with no arg (resolves the target
-		// builder itself); the deck's Send Fb key relays `send-queue [builderId]`,
-		// so an explicit id string flushes exactly that builder's queue (#1410).
-		reg('codev.submitReview', (builderId?: unknown) =>
+		// The palette invokes these with no arg (they resolve the target builder
+		// themselves); the contextual panel's Code Review buttons (#1559) and the
+		// deck's Send Fb key (`send-queue [builderId]`, #1410) pass an explicit id
+		// string, which acts on exactly that builder's queue.
+		reg('codev.submitReview', (builderId?: unknown, options?: unknown) =>
 			submitReview(
 				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
 				typeof builderId === 'string' ? builderId : undefined,
+				{ pendingOnly: (options as { pendingOnly?: unknown } | undefined)?.pendingOnly === true },
 			)),
-		reg('codev.discardReviewComments', () =>
-			discardReviewComments({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		reg('codev.discardReviewComments', (builderId?: unknown) =>
+			discardReviewComments(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
+		// The sent-unconfirmed record's two explicit actions (#1559): re-send it to
+		// the prompt, or confirm delivery and drop it.
+		reg('codev.resendReview', (builderId?: unknown) =>
+			resendReview(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
+		reg('codev.markReviewDelivered', (builderId?: unknown) =>
+			markReviewDelivered(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
 		// Mode-neutral review feedback (#1410, #1552): the deck diff/scroll dials
 		// press these; each opens the native comment reply box at the anchor so the
 		// reviewer authors the comment, which Submit then forwards or enqueues per
@@ -1463,6 +1480,19 @@ export async function activate(context: vscode.ExtensionContext) {
 		// builder's changed-file list top-to-bottom (next) / bottom-to-top (prev),
 		// opening each file's per-file diff. CLI-independent — operates on editor
 		// state + the shared diff cache, not Tower.
+		// Contextual panel file refs (#1559): open a builder file at a line, in its
+		// per-file diff when the file is one of the builder's changes. Internal
+		// (hidden from the palette); the panel passes a validated target.
+		reg('codev.openBuilderFileLocation', (target?: unknown) => {
+			const t = target as { builderId?: unknown; relPath?: unknown; line?: unknown } | undefined;
+			if (typeof t?.builderId !== 'string' || typeof t.relPath !== 'string') { return; }
+			let line: number | undefined;
+			if (typeof t.line === 'number') { line = t.line; }
+			return openBuilderDiffLocation(
+				{ builderId: t.builderId, relPath: t.relPath, line },
+				{ context, overviewCache, diffCache: builderDiffCache },
+			);
+		}),
 		reg('codev.diffNextFile', () =>
 			navigateDiff(1, { context, overviewCache, diffCache: builderDiffCache })),
 		reg('codev.diffPreviousFile', () =>
@@ -1601,10 +1631,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	activateReviewComments(context, overviewCache);
 
 	// Builder review comments (#1037): inline threads on builder-diff files
-	// feeding the per-builder pending queue, plus the status-bar Submit Review
-	// counter. The batched submit itself is `codev.submitReview` above.
+	// feeding the per-builder pending queue. The batched submit itself is
+	// `codev.submitReview` above, surfaced in the contextual panel's Code Review
+	// body (#1559).
 	activateBuilderReviewComments(context, reviewQueueStore, overviewCache);
-	activateSubmitReviewStatusBar(context, reviewQueueStore);
 	// #1410: nudge Tower to rebuild + rebroadcast the overview on a queue mutation
 	// or a feedback-mode change, so the deck's Send Fb badge + dial mode-label
 	// update promptly (Tower has no watcher on the queue files / settings.json).
