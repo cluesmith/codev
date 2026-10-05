@@ -139,7 +139,9 @@ This wording lands in the SPIR/protocol thread guidance in **both** `codev/` and
 - `afx status --cards` prints a fleet twin: one compact row per lane (id, ball chip, now line, age). Sort: your-court (`WAITING ON YOU`) first, then `HELD`, then the rest by descending age of the ball-owner condition, with lane id as the stable tie-breaker.
 - Tower serves the assembled `LaneCard` JSON from one **keyed** endpoint under the workspace API namespace: `GET /workspace/:ws/api/lane/:id/card` (the `api/` prefix is required; a non-`api/` workspace subpath is treated as a public static asset by `isPublicRoute`). It fuses the sources with file-watch on status.yaml and thread files, and takes forge data only from the OverviewCache. The lane `:id` is validated against the registered lane set and never interpolated into a filesystem path unvalidated.
 - **Lane to PR resolution**: the artifact zone is populated by mapping the lane to its PR through the lane's linked issue number against the OverviewCache open-PR set (`pr-list` / `OverviewPR`). On no match (no open PR for the linked issue, or the linked issue is unparseable) the card renders the no-PR zone (branch and last-commit age only, CI `unknown`) rather than fabricating a PR. The merged case is read from the separate `MergedPrItem` cache, which is also what drives the phase/artifact disagreement rendering when porch phase says active but the PR has merged.
-- The VS Code contextual panel (#1049) shows a compact card strip as the header of its builder view, re-resolving as terminal focus changes, with the full card on click. The panel's Attention fallback (#1553) is the host. Builder-authored text (`Now:` line, beat headings) is escaped before it enters the webview HTML and sanitized of terminal control sequences before ANSI rendering.
+- **VS Code host: the Builder Inspector mode of the #1049 contextual panel.** Focusing a builder terminal resolves the panel to its `builder-inspector` mode; the card is that mode's body lane section, rendered above the #1559 review-queue sections, and re-resolves as terminal focus moves to another builder. The panel's four modes are fixed by #1049, so the card adds **no new mode**: it rides the existing host-to-webview `RenderMessage` as an optional `laneCard` payload, posted only for `builder-inspector`, the same alongside-the-descriptor pattern `attention` and `codeReview` already use. The Attention view (#1553) remains the no-builder fallback; its roll-up is fed by the ball-owner module as a projection, not by the card. The Inspector's message-input slot stays out of scope for this lane.
+- **Lane id resolution in VS Code**: the `builder-inspector` descriptor carries the Tower terminal id, a different id space from the overview builder id. The lane is resolved through the same tail-match mapping #1559's review queue uses (`queueBuilderIdFor`), never by `===` (a known seam between the two id spaces).
+- Builder-authored text (`Now:` line, beat headings) is escaped before it enters the webview and sanitized of terminal control sequences before ANSI rendering. On the VS Code surface the panel already renders all host text as auto-escaped React children and narrows every webview-to-host message with strict validators, so the escaping and deep-link criteria are met by following that existing pattern (the card's deep links get validated message types in the same style; plan detail).
 
 The card renders gracefully in every degraded case: forge stale or unavailable, no PR yet, no thread file, the last-ask field absent (#1674), a parked lane (#1729).
 
@@ -150,6 +152,8 @@ The card renders gracefully in every degraded case: forge stale or unavailable, 
 - [ ] Tower serves `LaneCard` JSON from `GET /workspace/:ws/api/lane/:id/card`; an unauthenticated request is rejected (the path is under the `api/` namespace, not the public static-asset rule).
 - [ ] The endpoint validates `:id` against the registered lane set; a path-traversal or unknown-lane `:id`/`:ws` yields a 4xx and never reads outside the lane's own status.yaml / thread file / worktree.
 - [ ] Builder-authored `Now:` and beat text is HTML-escaped before entering the VS Code webview and stripped of terminal control sequences before ANSI rendering (no injection via authored prose).
+- [ ] Focusing a builder terminal in VS Code shows that lane's card as the Builder Inspector body's lane section, above the #1559 review-queue sections, delivered as an optional `laneCard` payload with no new panel mode; focusing another builder's terminal re-resolves it; the Attention fallback is unchanged in behavior.
+- [ ] The VS Code lane id is resolved from the terminal id through the same tail-match mapping the #1559 review queue uses, so a Tower terminal id and an overview builder id for the same lane always reach the same card.
 - [ ] The ball-owner precedence chain is computed in exactly one SDK-side module; the card, the VS Code attention surface, and any dashboard surface consume it, and `deriveAttention` / `isIdleWaiting` are projections over it rather than a second computation (verified by review: one module owns the chain).
 - [ ] Ball owner is derived only from porch gate rows, forge review-request state, held-mailbox rows, and produced artifacts. A lane whose `Now:` line says "done" while its `pr` gate is requested-and-unapproved still shows `WAITING ON YOU`.
 - [ ] `AGENT WORKING` requires an active phase plus a produced-artifact write within the threshold; a lane with fresh terminal `lastDataAt` but stale artifacts resolves to `STALLED?`, not `AGENT WORKING`.
@@ -241,6 +245,8 @@ The v1 card renders only fields already in the forge contract (PR number, review
 
 ## Open Questions
 
+**Decision for the owner at the gate:** does #1672 **claim the Builder Inspector body** (phase / gate / activity) as its participating feature of #1049? The #1049 spec leaves each mode's content to a participating issue; #1553 took Attention and #1559 took Code Review, and the Inspector body is still a placeholder ("This builder's phase, gate, activity, and message input will appear here"). Phase, gate and activity are exactly the card's content. The Inspector's message-input slot is not claimed and stays open (for #807 or a follow-up). Recommendation from architect:vscode and this lane: **yes**.
+
 The two former Critical questions (the `PrListItem` CI rollup and the per-source `fetchedAt`) were resolved by main on 2026-09-29 and are now recorded under Main's contract-seat rulings (d) and (e) in Constraints.
 
 **Important (shapes design):**
@@ -291,9 +297,10 @@ The two former Critical questions (the `PrListItem` CI rollup and the per-source
 ## References
 
 - Issue #1672 (amended 2026-09-10) and main's routing comment (2026-09-29): the requirements.
-- Lane Card design canvas (owner's visual design): https://claude.ai/artifact/7ovAzkJbDCMpRBoWSk8dt9 (six artboards: Main, BallStates, CliCard, VSCodePanel, DataFlow). This spec matches it on the six zones, the core ball-owner states and precedence, both CLI renderers, the #1049 strip, and the data plane, with the deliberate divergences noted in the ball-owner section.
-- #1049: the VS Code contextual bottom panel (the VS Code host surface).
-- #1553: the panel's Attention fallback (the card's per-lane refinement host).
+- Lane Card design canvas (owner's visual design): https://claude.ai/artifact/7ovAzkJbDCMpRBoWSk8dt9 (six artboards: Main, BallStates, CliCard, VSCodePanel, DataFlow). This spec matches it on the six zones, the core ball-owner states and precedence, both CLI renderers, the #1049 Builder Inspector placement, and the data plane, with the deliberate divergences noted in the ball-owner section.
+- #1049: the VS Code contextual bottom panel; its `builder-inspector` mode is the card's VS Code host.
+- #1553: the panel's Attention fallback (the no-builder view; fed by the ball-owner module as a projection).
+- #1559: the panel's Code Review body and the review-queue sections the card renders above in Builder Inspector; source of the terminal-id to overview-id mapping (`queueBuilderIdFor`).
 - #1595: attention states (working / needs-input / idle / dead), **absorbed** by this issue; re-scoped at spec time.
 - #1594: held-indicator overlap.
 - #1566: `compareAttention` home (SDK-side), where the state module lands (`packages/sdk/src/builder-helpers.ts`, branch `builder/pir-1566`).
