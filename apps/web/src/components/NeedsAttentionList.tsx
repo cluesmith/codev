@@ -27,6 +27,10 @@ function gateKindClass(blocked: string): string {
     case 'dev review': return 'attention-kind--dev';
     case 'PR review': return 'attention-kind--pr';
     case 'verify review': return 'attention-kind--verify';
+    case 'experiment review':
+    case 'maintenance review':
+    case 'scope review':
+    case 'research review': return 'attention-kind--other';
     default: return 'attention-kind--plan';
   }
 }

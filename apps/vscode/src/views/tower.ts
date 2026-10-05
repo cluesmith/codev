@@ -6,6 +6,7 @@ import type { TowerFleetCache } from './tower-cache.js';
 import { orderFleet } from './fleet-order.js';
 import type { LabelledEntry } from './fleet-order.js';
 import { describeAttention } from './attention-format.js';
+import { gateIconFor } from './builder-row.js';
 
 /** Command a Tower workspace row runs — switch to it, or activate-then-open if dormant. */
 export const OPEN_WORKSPACE_COMMAND = 'codev.tower.openWorkspace';
@@ -183,8 +184,10 @@ function attentionRows(a: AttentionSummary): TowerNode[] {
     const age = formatAge(gate.since);
     let description = gate.gate;
     if (age) { description = `${gate.gate} · ${age}`; }
+    // Same per-gate shape as the Agents view's blocked row (`bell` for an unmapped id); `warning`
+    // only when Tower sent no gate id at all.
     let icon = 'warning';
-    if (gate.gate === 'PR review') { icon = 'git-pull-request'; }
+    if (gate.gateId) { icon = gateIconFor(gate.gateId); }
     rows.push({ kind: 'attention', label: builderLabel(gate), description, icon, color: 'list.warningForeground' });
   }
   for (const wait of a.waiting) {

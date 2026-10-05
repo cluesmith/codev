@@ -422,7 +422,7 @@ describe('ContextualPanelProvider — Attention body from the overview cache (#1
     expect(posted[0].descriptor.kind).toBe('attention');
     expect(posted[0].attention?.isEmpty).toBe(false);
     expect(posted[0].attention?.pendingGates).toEqual([
-      { builderId: 'pir-1553', issueId: '#1553', issueTitle: null, gate: 'plan review', since: '2026-08-25T00:00:00Z' },
+      { builderId: 'pir-1553', issueId: '#1553', issueTitle: null, gate: 'plan review', gateId: null, since: '2026-08-25T00:00:00Z' },
     ]);
   });
 

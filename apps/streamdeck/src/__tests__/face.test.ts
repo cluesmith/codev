@@ -63,6 +63,24 @@ describe('faceForBuilder', () => {
     expect(faceForBuilder(builder({ blockedGate: 'spec-approval' })).icon).toBe('book');
     expect(faceForBuilder(builder({ blockedGate: 'verify-approval' })).icon).toBe('verified');
   });
+  it('maps the four non-core gates to their own glyphs, not the bell fallback (#1779)', () => {
+    expect(faceForBuilder(builder({ blockedGate: 'experiment-complete' })).icon).toBe('beaker');
+    expect(faceForBuilder(builder({ blockedGate: 'maintain-complete' })).icon).toBe('tools');
+    expect(faceForBuilder(builder({ blockedGate: 'scope-approval' })).icon).toBe('search');
+    expect(faceForBuilder(builder({ blockedGate: 'research-complete' })).icon).toBe('library');
+  });
+  it('labels the four non-core gates by their first token (#1779)', () => {
+    expect(stateLabel(builder({ blockedGate: 'experiment-complete', protocolPhase: 'experiment' }))).toBe('Experiment');
+    expect(stateLabel(builder({ blockedGate: 'maintain-complete' }))).toBe('Maintain');
+    expect(stateLabel(builder({ blockedGate: 'scope-approval' }))).toBe('Scope');
+    expect(stateLabel(builder({ blockedGate: 'research-complete' }))).toBe('Research');
+  });
+  it('draws each non-core gate glyph into the key face (#1779)', () => {
+    const beaker = builderFaceSvg(faceForBuilder(builder({ blockedGate: 'experiment-complete' })));
+    const bell = builderFaceSvg(faceForBuilder(builder({ blockedGate: 'future-gate' })));
+    expect(beaker).not.toBe(bell);
+    expect(beaker).toContain('#cca700');
+  });
   it('falls back to bell for a blocked-but-unmapped gate', () => {
     expect(faceForBuilder(builder({ blocked: 'huh', blockedGate: 'future-gate' })).icon).toBe('bell');
   });
