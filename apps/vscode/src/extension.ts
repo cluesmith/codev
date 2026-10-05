@@ -43,7 +43,6 @@ import { activateBuilderReviewComments } from './comments/builder-review.js';
 import { ReviewQueueStore } from './review-queue/store.js';
 import { submitReview, discardReviewComments } from './review-queue/submit.js';
 import { feedbackFile, feedbackHunk, feedbackSelection } from './review-queue/feedback.js';
-import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
 import { activateOverviewNudge } from './review-queue/overview-nudge.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
 import {
@@ -302,8 +301,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
 	);
 	context.subscriptions.push(reviewQueueStore);
-	// Load persisted queues so the palette Submit Review and the status-bar
-	// counter see them right after a reload, before any diff is opened.
+	// Load persisted queues so the palette Submit Review and the contextual
+	// panel's Code Review body see them right after a reload, before any diff
+	// is opened.
 	reviewQueueStore.preloadFromDisk();
 
 	// Drive the `codev.terminalFocused` context key so the Cmd/Ctrl+V image
@@ -1368,16 +1368,20 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Submit Review + Discard (#1037): flush / drop the per-builder pending
 		// comment queue. Builder resolution: active diff's owner → sole pending
 		// builder → QuickPick.
-		// The status-bar button invokes this with no arg (resolves the target
-		// builder itself); the deck's Send Fb key relays `send-queue [builderId]`,
-		// so an explicit id string flushes exactly that builder's queue (#1410).
+		// The palette invokes these with no arg (they resolve the target builder
+		// themselves); the contextual panel's Code Review buttons (#1559) and the
+		// deck's Send Fb key (`send-queue [builderId]`, #1410) pass an explicit id
+		// string, which acts on exactly that builder's queue.
 		reg('codev.submitReview', (builderId?: unknown) =>
 			submitReview(
 				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
 				typeof builderId === 'string' ? builderId : undefined,
 			)),
-		reg('codev.discardReviewComments', () =>
-			discardReviewComments({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		reg('codev.discardReviewComments', (builderId?: unknown) =>
+			discardReviewComments(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
 		// Mode-neutral review feedback (#1410, #1552): the deck diff/scroll dials
 		// press these; each opens the native comment reply box at the anchor so the
 		// reviewer authors the comment, which Submit then forwards or enqueues per
@@ -1601,10 +1605,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	activateReviewComments(context, overviewCache);
 
 	// Builder review comments (#1037): inline threads on builder-diff files
-	// feeding the per-builder pending queue, plus the status-bar Submit Review
-	// counter. The batched submit itself is `codev.submitReview` above.
+	// feeding the per-builder pending queue. The batched submit itself is
+	// `codev.submitReview` above, surfaced in the contextual panel's Code Review
+	// body (#1559).
 	activateBuilderReviewComments(context, reviewQueueStore, overviewCache);
-	activateSubmitReviewStatusBar(context, reviewQueueStore);
 	// #1410: nudge Tower to rebuild + rebroadcast the overview on a queue mutation
 	// or a feedback-mode change, so the deck's Send Fb badge + dial mode-label
 	// update promptly (Tower has no watcher on the queue files / settings.json).

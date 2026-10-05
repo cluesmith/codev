@@ -28,7 +28,7 @@ import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
 import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
 import { deriveCodeReview, type CodeReviewSummary } from './code-review.js';
-import { isReadyMessage, type HostToWebviewMessage } from './messages.js';
+import { isReadyMessage, isReviewActionMessage, REVIEW_ACTION_COMMANDS, type HostToWebviewMessage } from './messages.js';
 import type { ModeDescriptor } from './types.js';
 
 export class ContextualPanelProvider implements vscode.WebviewViewProvider {
@@ -168,10 +168,20 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private onMessage(message: unknown): void {
-    // The webview mounts and asks for the current descriptor. (There are no other inbound messages —
-    // the panel has no navigation.)
+    // The webview mounts and asks for the current descriptor.
     if (isReadyMessage(message)) {
       this.repost();
+      return;
+    }
+    // A Code Review button: run the existing review-queue command (which owns confirmation, the
+    // re-send / mark-delivered choice, and the queue writes). Honored only for the builder the panel
+    // is showing in Code Review mode, so a stale or forged message cannot act on another builder.
+    if (
+      isReviewActionMessage(message)
+      && this.lastDescriptor?.kind === 'code-review'
+      && this.lastDescriptor.context.builderId === message.builderId
+    ) {
+      vscode.commands.executeCommand(REVIEW_ACTION_COMMANDS[message.action], message.builderId);
     }
   }
 
@@ -211,12 +221,15 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   /** Project the shown builder's queue (read-only from the store's cache) + its diff-session files. */
   private codeReview(builderId: string | undefined): CodeReviewSummary {
     if (builderId === undefined) {
-      return deriveCodeReview([], []);
+      return deriveCodeReview({ comments: [], sent: [] }, []);
     }
     const files = getDiffInjectEntries()
       .filter((entry) => entry.builderId === builderId)
       .map((entry) => entry.relPath);
-    return deriveCodeReview(this.reviewQueue.getComments(builderId), files);
+    return deriveCodeReview(
+      { comments: this.reviewQueue.getComments(builderId), sent: this.reviewQueue.getSent(builderId) },
+      files,
+    );
   }
 
   private buildHtml(webview: vscode.Webview): string {

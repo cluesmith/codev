@@ -22,6 +22,8 @@ const hoisted = vi.hoisted(() => {
     diffBuilders: {} as Record<string, string>,
     overviewData: null as unknown,
     queues: {} as Record<string, unknown[]>,
+    sentQueues: {} as Record<string, unknown[]>,
+    executed: [] as unknown[][],
     listeners: {} as Record<string, (arg?: unknown) => void>,
   };
   class TabInputText {
@@ -49,6 +51,12 @@ vi.mock('vscode', () => {
     TabInputCustom,
     TabInputTerminal,
     Uri: { joinPath: () => ({ toString: () => 'asset-uri' }) },
+    commands: {
+      executeCommand: (...args: unknown[]) => {
+        state.executed.push(args);
+        return Promise.resolve(undefined);
+      },
+    },
     window: {
       get activeTextEditor() {
         if (state.activeEditorFsPath === undefined) {
@@ -145,6 +153,7 @@ function newProvider() {
   };
   const reviewQueue = {
     getComments: (builderId: string) => hoisted.state.queues[builderId] ?? [],
+    getSent: (builderId: string) => hoisted.state.sentQueues[builderId] ?? [],
     onDidChangeQueue: (fn: (builderId: string) => void) => {
       hoisted.state.listeners['queue'] = fn as (arg?: unknown) => void;
       return { dispose() {} };
@@ -213,6 +222,8 @@ beforeEach(() => {
   hoisted.state.diffBuilders = {};
   hoisted.state.overviewData = null;
   hoisted.state.queues = {};
+  hoisted.state.sentQueues = {};
+  hoisted.state.executed = [];
   hoisted.state.listeners = {};
 });
 
@@ -522,5 +533,47 @@ describe('ContextualPanelProvider — Code Review body from the review queue (#1
     hoisted.state.listeners['registry']?.();
     expect(posted).toHaveLength(2);
     expect(posted[1].codeReview?.files.map((f) => f.relPath)).toEqual(['src/x.ts', 'src/y.ts']);
+  });
+
+  it('carries sent-unconfirmed comments alongside pending ones', () => {
+    showDiff();
+    hoisted.state.sentQueues = { 'air-1559': [{ ...(queued('s1', 'sent earlier') as object), sentAt: '2026-10-05T01:00:00Z' }] };
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted[0].codeReview?.sent.map((c) => c.id)).toEqual(['s1']);
+    expect(posted[0].codeReview?.isEmpty).toBe(false);
+  });
+
+  it('runs the review-queue command for the shown builder on a review-action message', () => {
+    showDiff();
+    const provider = newProvider();
+    const { view, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+
+    fireMessage({ type: 'review-action', action: 'submit', builderId: 'air-1559' });
+    fireMessage({ type: 'review-action', action: 'discard', builderId: 'air-1559' });
+    expect(hoisted.state.executed).toEqual([
+      ['codev.submitReview', 'air-1559'],
+      ['codev.discardReviewComments', 'air-1559'],
+    ]);
+  });
+
+  it('ignores a review-action for another builder, an unknown action, or outside Code Review mode', () => {
+    showDiff();
+    const provider = newProvider();
+    const { view, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+
+    fireMessage({ type: 'review-action', action: 'submit', builderId: 'other' });
+    fireMessage({ type: 'review-action', action: 'toString', builderId: 'air-1559' });
+    fireMessage({ type: 'review-action', action: 'submit' });
+    expect(hoisted.state.executed).toEqual([]);
+
+    hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
+    hoisted.state.activeEditorFsPath = '/w/src/foo.ts';
+    fireSelection(); // → attention
+    fireMessage({ type: 'review-action', action: 'submit', builderId: 'air-1559' });
+    expect(hoisted.state.executed).toEqual([]);
   });
 });

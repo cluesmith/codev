@@ -2,8 +2,9 @@
  * Host <-> webview message contract for the contextual panel.
  *
  * EXTENSION-LOCAL (see `types.ts`): this crosses only the panel's own `postMessage` boundary. The
- * panel is purely contextual, so the only messages are the host pushing a render and the webview
- * announcing it has mounted — there is no navigation.
+ * panel is purely contextual: the host pushes renders, the webview announces it has mounted, and the
+ * Code Review body asks the host to run the existing review-queue commands (#1559). There is no
+ * navigation.
  */
 
 import type { ModeDescriptor } from './types.js';
@@ -32,9 +33,37 @@ export interface ReadyMessage {
   type: 'ready';
 }
 
-export type WebviewToHostMessage = ReadyMessage;
+/** The review-queue commands the Code Review body can trigger, mapped to their command ids. */
+export const REVIEW_ACTION_COMMANDS = {
+  submit: 'codev.submitReview',
+  discard: 'codev.discardReviewComments',
+} as const;
+
+export type ReviewAction = keyof typeof REVIEW_ACTION_COMMANDS;
+
+/** Webview -> host: run a review-queue action for the builder the Code Review body shows. */
+export interface ReviewActionMessage {
+  type: 'review-action';
+  action: ReviewAction;
+  builderId: string;
+}
+
+export type WebviewToHostMessage = ReadyMessage | ReviewActionMessage;
 
 /** Narrow an untrusted inbound message to `ReadyMessage` (webview->host is lower-trust). */
 export function isReadyMessage(message: unknown): message is ReadyMessage {
   return typeof message === 'object' && message !== null && (message as { type?: unknown }).type === 'ready';
+}
+
+/** Narrow an untrusted inbound message to a well-formed `ReviewActionMessage`. */
+export function isReviewActionMessage(message: unknown): message is ReviewActionMessage {
+  if (typeof message !== 'object' || message === null) {
+    return false;
+  }
+  const m = message as { type?: unknown; action?: unknown; builderId?: unknown };
+  return m.type === 'review-action'
+    && typeof m.action === 'string'
+    && Object.prototype.hasOwnProperty.call(REVIEW_ACTION_COMMANDS, m.action)
+    && typeof m.builderId === 'string'
+    && m.builderId.length > 0;
 }

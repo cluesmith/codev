@@ -16,3 +16,9 @@
   files-to-review change, so `refresh()` now returns whether it posted, and the registry listener re-posts.
 - Verified the real webview bundle in Chromium (stubbed host): populated + empty states; HTML in a
   comment body renders as text.
+
+## Owner-directed scope widening (2026-10-05)
+- The owner, in this session, said to move the status-bar "Submit Review" button into the panel, include a Discard button, and first merge "develop". There's no origin/develop; the described changes are #1562, which is on main, so I merged origin/main (6acb82be5). The vscode architect confirmed "main" and that status-bar.ts fences no live lane.
+- #1562's real shape is a separate `sent` array (`store.getSent`), not a per-entry status, so I removed the `status` filter. The projection now takes `{comments, sent}`, and the panel shows a "Sent · awaiting confirmation" section.
+- The buttons send a validated `review-action` webview→host message. The host runs the existing `codev.submitReview` / `codev.discardReviewComments` for the SHOWN builder only. Submit already offers Re-send / Mark Delivered; with only sent entries the button reads "Re-send / Mark Delivered (N)". `codev.discardReviewComments` now accepts a builder id, mirroring submit.
+- Deleted review-queue/status-bar.ts and its activation. Updated arch.md (#1037 and contextual-panel paragraphs) and the stale extension.ts comments. No tests referenced the status-bar item.

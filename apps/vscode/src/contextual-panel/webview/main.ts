@@ -4,9 +4,10 @@
  * Message-driven and purely contextual: the host posts `{ type: 'render', descriptor, attention?,
  * codeReview? }` after resolving the active surface; this renders a one-line context label and a
  * per-mode body. For the Attention fallback the body is the live roll-up projected from the overview
- * cache (`attention`); for Code Review it is the shown builder's pending review queue plus its
- * files-to-review (`codeReview`, read-only); the remaining modes still show their placeholder (owned
- * by its own participating feature). There is no navigation — no pills, no selection. All
+ * cache (`attention`); for Code Review it is the shown builder's pending and sent-unconfirmed review
+ * comments plus its files-to-review (`codeReview`), with Submit Review / Discard buttons that ask the
+ * host to run the existing commands. The remaining modes still show their placeholder (owned by
+ * their own participating feature). There is no navigation — no pills, no selection. All
  * host-supplied text (file paths, builder ids, issue titles, gate labels, comment bodies) is rendered
  * through React children (auto-escaped), never `innerHTML`.
  *
@@ -20,12 +21,12 @@ import './styles.css';
 import type { ModeDescriptor, ModeKind } from '../types.js';
 import { formatAge } from '@cluesmith/codev-sdk/builder-helpers';
 import type { AttentionBuilderRef, AttentionSummary, GateItem, WaitingItem, CountItem } from '@cluesmith/codev-sdk/builder-helpers';
-import type { HostToWebviewMessage } from '../messages.js';
-import type { CodeReviewComment, CodeReviewFile, CodeReviewSummary } from '../code-review.js';
+import type { HostToWebviewMessage, ReviewAction, WebviewToHostMessage } from '../messages.js';
+import type { CodeReviewComment, CodeReviewFile, CodeReviewSentComment, CodeReviewSummary } from '../code-review.js';
 
 const h = React.createElement;
 
-declare function acquireVsCodeApi(): { postMessage(message: { type: 'ready' }): void };
+declare function acquireVsCodeApi(): { postMessage(message: WebviewToHostMessage): void };
 const vscodeApi = acquireVsCodeApi();
 
 const MODE_LABELS: Record<ModeKind, string> = {
@@ -211,7 +212,57 @@ function fileRow(item: CodeReviewFile): React.ReactElement {
   );
 }
 
-function codeReviewBody(summary: CodeReviewSummary): React.ReactNode {
+function sentRow(item: CodeReviewSentComment): React.ReactElement {
+  const age = formatAge(item.sentAt);
+  return h(
+    'div',
+    { className: 'cp-row cp-row-sent', key: item.id },
+    h('span', { className: 'cp-stripe' }),
+    h(
+      'span',
+      { className: 'cp-row-main' },
+      h('span', { className: 'cp-row-id' }, item.ref),
+      h('span', { className: 'cp-comment-body' }, item.body),
+    ),
+    h('span', { className: 'cp-badge' }, age !== null ? `sent · ${age}` : 'sent'),
+  );
+}
+
+function actionButton(builderId: string, action: ReviewAction, text: string, secondary: boolean): React.ReactElement {
+  return h(
+    'button',
+    {
+      key: action,
+      type: 'button',
+      className: secondary ? 'cp-button cp-button-secondary' : 'cp-button',
+      onClick: () => vscodeApi.postMessage({ type: 'review-action', action, builderId }),
+    },
+    text,
+  );
+}
+
+/**
+ * Submit Review + Discard for the shown builder (#1559; formerly the status-bar counter). Submit runs
+ * the existing command, which also asks whether to Re-send or Mark Delivered any sent-unconfirmed
+ * comments (#1562), so it shows whenever either list is non-empty. Discard drops pending comments only.
+ */
+function reviewActions(builderId: string, summary: CodeReviewSummary): React.ReactNode {
+  const pending = summary.comments.length;
+  const sent = summary.sent.length;
+  if (pending === 0 && sent === 0) {
+    return null;
+  }
+  const buttons: React.ReactElement[] = [];
+  if (pending > 0) {
+    buttons.push(actionButton(builderId, 'submit', `Submit Review (${pending})`, false));
+    buttons.push(actionButton(builderId, 'discard', 'Discard', true));
+  } else {
+    buttons.push(actionButton(builderId, 'submit', `Re-send / Mark Delivered (${sent})`, false));
+  }
+  return h('div', { className: 'cp-actions', key: 'actions' }, buttons);
+}
+
+function codeReviewBody(builderId: string | undefined, summary: CodeReviewSummary): React.ReactNode {
   if (summary.isEmpty) {
     return h(
       'div',
@@ -223,9 +274,20 @@ function codeReviewBody(summary: CodeReviewSummary): React.ReactNode {
   const comments = summary.comments.length > 0
     ? summary.comments.map((item) => commentRow(item))
     : h('div', { className: 'cp-row-note' }, 'No pending comments yet; queue one from the diff.');
-  const sections: React.ReactNode[] = [
-    h(React.Fragment, { key: 'comments' }, section('Pending comments', summary.comments.length, comments)),
-  ];
+  const sections: React.ReactNode[] = [];
+  if (builderId !== undefined) {
+    sections.push(reviewActions(builderId, summary));
+  }
+  sections.push(h(React.Fragment, { key: 'comments' }, section('Pending comments', summary.comments.length, comments)));
+  if (summary.sent.length > 0) {
+    sections.push(
+      h(
+        React.Fragment,
+        { key: 'sent' },
+        section('Sent · awaiting confirmation', summary.sent.length, summary.sent.map((item) => sentRow(item))),
+      ),
+    );
+  }
   if (summary.files.length > 0) {
     sections.push(
       h(React.Fragment, { key: 'files' }, section('Files to review', summary.files.length, summary.files.map((item) => fileRow(item)))),
@@ -249,7 +311,7 @@ function body(descriptor: ModeDescriptor, attention: AttentionSummary | undefine
       // Same transient pre-first-post frame as Attention: never claim "no comments" before data arrives.
       return h('div', { className: 'cp-body-empty' }, 'Loading…');
     }
-    return codeReviewBody(codeReview);
+    return codeReviewBody(descriptor.context.builderId, codeReview);
   }
   return h('div', { className: 'cp-body-empty' }, BODY_PLACEHOLDER[descriptor.kind]);
 }

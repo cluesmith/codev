@@ -240,3 +240,47 @@ body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.cp-row-sent .cp-stripe {
+  background: var(--vscode-descriptionForeground);
+}
+
+.cp-row-sent .cp-comment-body {
+  color: var(--vscode-descriptionForeground);
+}
+
+/* Submit Review / Discard (#1559): the standard VS Code button pair, primary + secondary tokens. */
+.cp-actions {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0 8px;
+}
+
+.cp-button {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+
+.cp-button:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.cp-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.cp-button-secondary {
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+
+.cp-button-secondary:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
