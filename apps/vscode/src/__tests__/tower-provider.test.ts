@@ -56,6 +56,10 @@ function held(count: number): OverviewData {
 function quiet(): OverviewData {
   return { builders: [], backlog: [], pendingPRs: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' } as unknown as OverviewData;
 }
+/** Held mail not attributed to any builder (e.g. architect-held): heldCount>0 with no per-builder held rows. */
+function workspaceHeld(count: number): OverviewData {
+  return { builders: [], backlog: [], pendingPRs: [], recentlyClosed: [], architects: [], heldCount: count, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' } as unknown as OverviewData;
+}
 
 function entry(ws: TowerWorkspace, overview: OverviewData | null): FleetEntry {
   return { workspace: ws, attention: deriveAttention(overview) };
@@ -154,6 +158,19 @@ describe('TowerProvider', () => {
     expect(item.collapsibleState).toBe(0); // None → nothing to expand
     expect((item.command as { command: string }).command).toBe(OPEN_WORKSPACE_COMMAND);
     expect((item.command as { arguments: Array<{ path: string }> }).arguments[0].path).toBe('/w/quiet');
+  });
+
+  it('expands a workspace-held-only workspace to a workspace-level held row (no empty expansion)', () => {
+    // heldTotal>0 with no per-builder held rows (architect-held): the row is expandable via hasDetail,
+    // so getChildren must yield a child — not an empty expansion. (codex review, iter 1)
+    const fleet = [entry(wsRow('/w/held', 'held', true), workspaceHeld(3))];
+    const provider = new TowerProvider(fakeCache(fleet), fakeCm(null));
+    const wsNode = provider.getChildren()[0];
+    expect(provider.getTreeItem(wsNode).collapsibleState).toBe(1); // expandable
+    const children = provider.getChildren(wsNode).map((n) => provider.getTreeItem(n));
+    expect(children.length).toBeGreaterThan(0);
+    expect(children[0].label).toBe('Held mail');
+    expect(children[0].description).toContain('3 held');
   });
 
   it('does NOT put an open command on an expandable (attention) row — click must expand, not open', () => {

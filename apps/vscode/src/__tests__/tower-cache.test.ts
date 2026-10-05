@@ -64,6 +64,7 @@ function makeFake(listWorkspaces: ReturnType<typeof vi.fn>, getOverview: ReturnT
       onStateChange: (l: (s: ConnectionState) => void) => { stateListeners.push(l); return { dispose() {} }; },
     } as unknown as import('../connection-manager.js').ConnectionManager,
     setState: (s: ConnectionState) => { state = s; },
+    fireState: (s: ConnectionState) => { state = s; stateListeners.forEach((l) => l(s)); },
     fireSse: () => sseListeners.forEach((l) => l()),
     sseCount: () => sseListeners.length,
   };
@@ -187,6 +188,27 @@ describe('TowerFleetCache', () => {
     f.fireSse();
     await vi.advanceTimersByTimeAsync(350);
     expect(listWorkspaces).toHaveBeenCalledTimes(1);
+    cache.dispose();
+  });
+
+  it('does not fetch while disconnected, then re-fetches on reconnect (SSE-drop recovery)', async () => {
+    vi.useFakeTimers();
+    listWorkspaces.mockResolvedValue([ws('/ws/a', 'a', true)]);
+    getOverview.mockResolvedValue(blockedOverview());
+    const f = makeFake(listWorkspaces, getOverview);
+    const cache = new TowerFleetCache(f.cm);
+    await cache.refresh(); // initial connected fetch
+    listWorkspaces.mockClear();
+
+    // SSE drop flips state to disconnected; poll ticks are cheap no-ops (Tower unreachable).
+    f.fireState('disconnected');
+    await vi.advanceTimersByTimeAsync(20_000 + 350);
+    expect(listWorkspaces).not.toHaveBeenCalled();
+
+    // Reconnect (health-checked) returns to connected → the fleet re-fetches.
+    f.fireState('connected');
+    await vi.advanceTimersByTimeAsync(350); // debounce
+    expect(listWorkspaces).toHaveBeenCalled();
     cache.dispose();
   });
 

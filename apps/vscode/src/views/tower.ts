@@ -196,6 +196,14 @@ function attentionRows(a: AttentionSummary): TowerNode[] {
   for (const held of a.heldMail) {
     rows.push({ kind: 'attention', label: builderLabel(held), description: `${held.count} held`, icon: 'mail' });
   }
+  // Held mail that isn't attributed to any builder (e.g. architect-held) shows as a workspace-wide
+  // heldTotal with no per-builder rows. Without this, such a workspace is expandable (hasDetail true
+  // via heldTotal>0) but would expand to nothing. Mirror the contextual panel's workspace-level note.
+  if (a.heldMail.length === 0 && a.heldTotal > 0) {
+    let description = `${a.heldTotal} held`;
+    if (a.heldEscalated) { description = `${a.heldTotal} held · escalated`; }
+    rows.push({ kind: 'attention', label: 'Held mail', description, icon: 'mail' });
+  }
   for (const queued of a.queuedFeedback) {
     rows.push({ kind: 'attention', label: builderLabel(queued), description: `${queued.count} queued`, icon: 'comment' });
   }

@@ -51,11 +51,16 @@ export class TowerFleetCache {
   constructor(private connectionManager: ConnectionManager) {
     this.subscriptions.push(
       connectionManager.onSSEEvent(() => { this.scheduleRefresh(); }),
+      // Recovery from a dropped connection is reconnect-driven: an SSE drop flips the state to
+      // disconnected/reconnecting (connection-manager.ts), and the return to `connected` after the
+      // health-checked reconnect re-fetches the fleet here. (Fetching *while* disconnected is a
+      // deliberate no-op — Tower is unreachable, so it would only fail into last-known-good.)
       connectionManager.onStateChange((state) => { if (state === 'connected') { this.scheduleRefresh(); } }),
     );
-    // Always-on low-frequency poll: the safety net for SSE gaps and for list changes Tower never
-    // pushes (activation/deactivation emit no event). `refresh()` self-guards, so a disconnected
-    // tick is a cheap no-op.
+    // Low-frequency poll for the two cases SSE events don't cover while the connection is up: list
+    // changes Tower never pushes (activation/deactivation emit no event) and a silently-stalled
+    // stream. `fetchFleet()` self-guards on `connected`, so a tick while disconnected is a cheap
+    // no-op (that window is the reconnect path's job, above).
     this.pollTimer = setInterval(() => { this.scheduleRefresh(); }, POLL_INTERVAL_MS);
   }
 

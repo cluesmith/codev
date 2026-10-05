@@ -106,6 +106,26 @@ drove this builder session directly). Listed so reviewers can separate plan scop
 Also folded in while integrating main: the view-title stutter fix ("Codev Tower: Tower" → "Codev
 Tower", `be57dfda9`) and the `formatAge` SSOT consolidation (`3bb544900`).
 
+## 3-Way Consultation (iter 1) — verdicts + disposition
+
+Gemini **APPROVE**, Claude **APPROVE**, Codex **REQUEST_CHANGES** (2 findings). PIR is single-pass
+(no automated re-review), so the fixes below + the human's pr-gate review are the backstop:
+
+1. **Empty expansion for workspace-held-only workspaces** (`tower.ts`) — a workspace with
+   `heldTotal > 0` but no per-builder `heldMail` (e.g. architect-held mail) was marked expandable yet
+   `attentionRows()` yielded no children. **Real bug — fixed**: `attentionRows` now renders a
+   workspace-level "Held mail · N" child in that case (mirrors the contextual panel's fallback).
+   Regression test: `tower-provider.test.ts` "expands a workspace-held-only workspace…".
+2. **Poll fallback "ineffective while disconnected"** (`tower-cache.ts`) — **partially valid; addressed
+   as test + comment, not a correctness change.** Verified: an SSE drop flips the connection to
+   `disconnected`/`reconnecting` (connection-manager.ts:234-237), so fetching while disconnected would
+   only hit an unreachable Tower — a deliberate no-op. Recovery is **reconnect-driven**: the return to
+   `connected` re-fetches (`onStateChange('connected')`). A *silently-stalled* SSE (still `connected`)
+   is caught by the connected poll. So the view does recover across all three cases; the gap Codex
+   correctly identified was the missing test + a comment that over-sold the poll as the SSE-down path.
+   Fixed: added `tower-cache.test.ts` "does not fetch while disconnected, then re-fetches on reconnect",
+   and rewrote the constructor comment to state the real recovery model. No behavior change.
+
 ## Things to Look At During PR Review
 
 - **`compareAttention` total order** (`builder-helpers.ts`) — a total *preorder* (equal summaries
