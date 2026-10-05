@@ -33,6 +33,10 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Review queue in the Codev panel
+
+The Codev bottom panel's Code Review body (#1559, PR #1769) now renders the shown builder's pending review comments and a commented-files list, and hosts the queue's actions: Submit Review, Discard, and separate Re-send and Mark Delivered buttons when sent comments exist. The queue also appears in the Builder Inspector body when a builder terminal is focused, and every file reference opens the per-file diff at the line. The status-bar Submit Review item is retired in favour of the panel; the palette command stays.
+
 ## Codev Tower: the fleet in your sidebar
 
 A new Tower view (#1566, PR #1767) lists every workspace your local Tower knows about, urgency-ordered so the one that needs you is on top, with an attention badge on its icon, a current-workspace marker, and switch and activate actions plus a `Codev: Switch Workspace` quick pick. Expanding a workspace shows what is waiting there, including held mail. It reads the one Tower event stream the extension already holds, so it adds no load.
