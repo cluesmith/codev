@@ -1,7 +1,7 @@
 id: '1546'
 title: vscode-next-prev-hunk-ignores-
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-05T00:05:17.278Z'
-updated_at: '2026-10-05T00:05:17.279Z'
+updated_at: '2026-10-05T00:09:59.985Z'
