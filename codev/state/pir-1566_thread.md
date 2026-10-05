@@ -234,6 +234,26 @@ flag for dev-approval eyeball. New head after this: push below.
 Head d94f72b15; vscode 1090 tests, sdk 144, check-types + eslint clean. dev-approval stands at d94f72b15.
 Visual eyeball items for owner: right-side placement + first-run reveal + folder-opened current icon.
 
+## Phase: REVIEW (2026-10-05)
+dev-approval APPROVED by owner (via vscode architect, covers head 9b2a4ead9). Wrote review retrospective
+(codev/reviews/1566-*.md) with an Owner-Directed Additions section listing all 4 in-review tweaks +
+verbatim directions. Routed COLD governance: arch.md (Tower hub architecture entry) + lessons-learned.md
+(formatAge-drift SSOT lesson; stale-VS-Code-docs/verify-against-release-notes lesson). Opened PR #1767
+(base main, Fixes #1566), recorded with porch.
+3-WAY CONSULTATION (porch-orchestrated, iter1, single-pass): gemini=APPROVE, claude=APPROVE,
+codex=REQUEST_CHANGES (2 findings). Addressed (commit 8e4d6a230 + rebuttal f3fc94fd6):
+  1. REAL BUG fixed: heldTotal>0 + empty heldMail (architect-held) = expandable row with empty
+     expansion. Fix: workspace-level "Held mail · N" child in attentionRows. Regression test added.
+  2. Partially valid: poll "ineffective while disconnected". Verified SSE-drop flips state to
+     disconnected (conn-mgr:234-237) => fetching while disconnected is a deliberate no-op (Tower
+     unreachable); recovery is reconnect-driven (onStateChange connected -> refresh) + connected-poll
+     catches silent SSE stalls. Added reconnect-recovery test + fixed misleading comment. No behavior
+     change. Full rebuttal: codev/projects/1566-*/1566-review-iter1-rebuttals.md.
+Suite green on fix: vscode 1092, sdk 144, compile clean. PR gate PENDING (owner's). Notified architect
+leading with the REQUEST_CHANGES + disposition. Branch head f3fc94fd6 (+ this thread commit). CI: 7
+required jobs pending on the latest push. WAITING at pr gate for porch gate-approved wake-up — do NOT
+merge on pane prose, only on porch gate_status: approved.
+
 ### Investigation (done)
 Launched 3 parallel Explore agents: SDK/types (TowerClient, deriveAttention, AttentionSummary,
 OverviewData, readLocalKey); vscode views/tree/command/SSE plumbing; Tower endpoints + streamdeck
