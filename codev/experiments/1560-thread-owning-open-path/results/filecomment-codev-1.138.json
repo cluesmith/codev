@@ -1,0 +1,37 @@
+{
+  "host": {
+    "appName": "Codev",
+    "version": "1.138.0"
+  },
+  "routes": {
+    "FB-file-draft-expanded": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159526230.md"
+      },
+      "arrivals": [
+        {
+          "kind": "saveDraft",
+          "text": "FB",
+          "onOwnedThread": true,
+          "onOwnedComment": true
+        }
+      ],
+      "rangeAtSubmit": "undefined"
+    },
+    "FA-file-reveal-focusReply": {
+      "error": null,
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-83b25b41-de6e-43e6-896f-186d2f40aaa2-1.md"
+      },
+      "arrivals": [
+        {
+          "kind": "submit",
+          "text": "FA",
+          "onOwnedThread": true
+        }
+      ]
+    }
+  }
+}
