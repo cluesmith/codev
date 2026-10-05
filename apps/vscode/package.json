@@ -73,6 +73,25 @@
     ],
     "commands": [
       {
+        "command": "codev.switchWorkspace",
+        "title": "Codev: Switch Workspace"
+      },
+      {
+        "command": "codev.tower.openWorkspace",
+        "title": "Codev: Open Workspace",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "codev.tower.deactivateWorkspace",
+        "title": "Codev: Deactivate Workspace",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "codev.tower.refresh",
+        "title": "Codev: Refresh Tower",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "codev.helloWorld",
         "title": "Codev: Show Connection State"
       },
@@ -499,6 +518,14 @@
       ],
       "commandPalette": [
         {
+          "command": "codev.tower.deactivateWorkspace",
+          "when": "false"
+        },
+        {
+          "command": "codev.tower.openWorkspace",
+          "when": "false"
+        },
+        {
           "command": "codev.openMarkdownPreview",
           "when": "resourceLangId == markdown && resourcePath =~ /\\/codev\\/(plans|specs|reviews)\\//"
         },
@@ -673,6 +700,16 @@
       ],
       "view/item/context": [
         {
+          "command": "codev.tower.openWorkspace",
+          "when": "view == codev.tower && viewItem =~ /^tower-workspace-(active|dormant)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "codev.tower.deactivateWorkspace",
+          "when": "view == codev.tower && viewItem == tower-workspace-active",
+          "group": "inline@2"
+        },
+        {
           "command": "codev.recheckCli",
           "when": "view == codev.status && viewItem =~ /^codev-cli-(missing|outdated)$/",
           "group": "inline@1"
@@ -789,6 +826,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "codev.tower.refresh",
+          "when": "view == codev.tower",
+          "group": "navigation@1"
+        },
         {
           "command": "codev.refreshOverview",
           "when": "view == codev.agents",
@@ -1044,6 +1086,13 @@
           "icon": "icons/codev.svg"
         }
       ],
+      "secondarySidebar": [
+        {
+          "id": "codev-tower",
+          "title": "Codev Tower",
+          "icon": "icons/tower.svg"
+        }
+      ],
       "panel": [
         {
           "id": "codevPanel",
@@ -1064,6 +1113,9 @@
       ],
       "codevPanel": [
         { "id": "codev.contextualPanel", "name": "Codev", "type": "webview" }
+      ],
+      "codev-tower": [
+        { "id": "codev.tower", "name": "Codev Tower" }
       ]
     },
     "viewsWelcome": [
