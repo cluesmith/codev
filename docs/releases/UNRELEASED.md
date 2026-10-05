@@ -39,6 +39,10 @@ A new Tower view (#1566, PR #1767) lists every workspace your local Tower knows 
 
 The Tower container opens in the secondary side bar (right) by default and reveals itself once on first run. Drag it anywhere; VS Code keeps your placement. Under the hood the attention ordering and relative-age wording moved into the shared SDK so the Tower view and the contextual panel can never disagree.
 
+## Review queue in the contextual panel
+
+The contextual panel's Code Review body is wired to the builder's review queue (#1559, PR #1769). It lists pending comments, sent-but-unconfirmed comments, and the commented files with their counts, and the same body appears in the Builder Inspector when a builder's terminal has focus. Submit Review sends only the pending comments, Discard confirms first, Mark Delivered is the default action for sent comments, and Re-send is separate. File references open the builder's diff at the line, or the worktree file when the file was not changed. The status-bar "Submit Review" item is retired in favour of the panel.
+
 ## Codev works in Restricted Mode
 
 Opening an untrusted folder no longer leaves the Codev sidebar inert until you trust the workspace (#1727, PR #1728). The extension activates immediately in Restricted Mode, and only four workspace-scoped settings that could redirect Tower or launch a process (Tower host and port, workspace path, auto-start) are held back until the folder is trusted. Your user-level values for those settings still apply.
