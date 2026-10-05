@@ -1,7 +1,7 @@
 id: bugfix-1783
 title: afx-send-a-builder-running-fro
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-05T05:51:47.678Z'
-updated_at: '2026-10-05T05:52:52.513Z'
+updated_at: '2026-10-05T05:56:46.059Z'
