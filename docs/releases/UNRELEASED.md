@@ -62,6 +62,8 @@ Opening an untrusted folder no longer leaves the Codev sidebar inert until you t
 
 - **Gates from every protocol surface as blocked** (#1777, PR #1778). A builder held at an EXPERIMENT, MAINTAIN or RESEARCH gate showed as working everywhere, because Tower only recognised the five SPIR-family gate names and did not map those protocols' worktrees to their porch project. Any pending gate now surfaces on the Agents view, toast, status bar, dashboard and Tower hub, with icons for the four new gates and a derived label for any gate Tower has not seen before.
 
+- **Non-core gates get their own icons on every surface** (#1779, PR #1780). The Stream Deck face draws a beaker, tools, search or library glyph for the experiment, maintenance, scope and research gates instead of a bell; the dashboard's attention list styles them with one neutral colour instead of the plan colour, and any gate it has never seen gets the same neutral treatment; and the Tower view's attention rows share the Agents view's icon per gate instead of a warning triangle.
+
 ## Other fixes (dashboard, porch, infrastructure)
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
