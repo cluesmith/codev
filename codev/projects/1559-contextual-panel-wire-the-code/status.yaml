@@ -1,0 +1,14 @@
+id: '1559'
+title: contextual-panel-wire-the-code
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-05T00:05:29.887Z'
+updated_at: '2026-10-05T00:05:29.888Z'
