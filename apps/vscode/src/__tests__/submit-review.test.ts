@@ -161,6 +161,10 @@ describe('submitReview', () => {
     await submitReview({ store, terminalManager: tm, overviewCache } as never, 'pir-1');
 
     expect(h.state.warnings.some(w => w.includes('not confirmed as delivered'))).toBe(true);
+    // Mark Delivered is the default (first) button; Re-send is the fallback.
+    const vscode = await import('vscode');
+    const call = vi.mocked(vscode.window.showWarningMessage).mock.calls.at(-1)!;
+    expect(call.slice(2)).toEqual(['Mark Delivered', 'Re-send']);
     expect(tm.calls).toEqual([]);
     expect(store.markedSent).toEqual([]);
     expect(store.clearedSent).toEqual([]);

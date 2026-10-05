@@ -86,8 +86,10 @@ export async function submitReview(deps: SubmitDeps, builderIdArg?: string): Pro
       `${sent.length} review comment(s) submitted to ${builderId} earlier are not confirmed as delivered. ` +
         'Re-send them, or mark them delivered?',
       { modal: true },
-      RESEND,
+      // First item is the modal's default button: confirming delivery is the
+      // normal case; re-sending is the recovery fallback.
       MARK_DELIVERED,
+      RESEND,
     );
     if (choice === undefined) { return; }
     resend = choice === RESEND;
