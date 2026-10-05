@@ -30,12 +30,15 @@ import { promisify } from 'node:util';
 import {
   addComment,
   editComment,
-  parseQueueFile,
+  markSent,
+  parseQueueState,
   QUEUE_FILE_RELPATH,
   removeComments,
   serializeQueueFile,
   mergeExcludeBlock,
   type PendingComment,
+  type QueueState,
+  type SentComment,
 } from './queue.js';
 
 const execFileAsync = promisify(execFile);
@@ -50,6 +53,8 @@ export class ReviewQueueStore implements vscode.Disposable {
   private readonly worktreeById = new Map<string, string>();
   /** In-memory queue cache, keyed by builderId; refreshed on external events. */
   private readonly cache = new Map<string, PendingComment[]>();
+  /** Sent-but-unconfirmed comments per builder (#1562), loaded alongside `cache`. */
+  private readonly sentCache = new Map<string, SentComment[]>();
   /** Last serialized bytes written per queue path — the watcher echo filter. */
   private readonly lastWritten = new Map<string, string>();
   /** Worktrees whose info/exclude has been ensured this session. */
@@ -109,13 +114,22 @@ export class ReviewQueueStore implements vscode.Disposable {
     return this.worktreeById.get(builderId);
   }
 
-  /** All builder ids with at least one pending comment loaded this session. */
+  /**
+   * All builder ids with at least one pending OR sent-unconfirmed comment
+   * loaded this session — a builder with only sent entries stays targetable so
+   * Submit Review can re-send feedback lost from its prompt (#1562).
+   */
   buildersWithPending(): string[] {
     const ids: string[] = [];
     for (const [id, comments] of this.cache) {
-      if (comments.length > 0) { ids.push(id); }
+      if (comments.length > 0 || this.getSent(id).length > 0) { ids.push(id); }
     }
     return ids;
+  }
+
+  /** Comments Submit Review placed in the prompt whose delivery is unconfirmed. */
+  getSent(builderId: string): SentComment[] {
+    return this.sentCache.get(builderId) ?? [];
   }
 
   /** Cached queue for a builder (empty until `load` has run for it). */
@@ -133,36 +147,49 @@ export class ReviewQueueStore implements vscode.Disposable {
    * event only when the loaded content differs from the cache.
    */
   async load(builderId: string): Promise<PendingComment[]> {
+    return (await this.loadState(builderId)).comments;
+  }
+
+  /** `load`, returning the sent-unconfirmed list too. */
+  async loadState(builderId: string): Promise<QueueState> {
     const filePath = this.queuePath(builderId);
-    if (!filePath) { return []; }
-    let comments: PendingComment[] = [];
+    if (!filePath) { return { comments: [], sent: [] }; }
+    let state: QueueState = { comments: [], sent: [] };
     try {
-      comments = parseQueueFile(await fs.readFile(filePath, 'utf8'));
+      state = parseQueueState(await fs.readFile(filePath, 'utf8'));
     } catch {
       // Missing file or unreadable — an empty queue, not an error.
     }
-    const before = JSON.stringify(this.cache.get(builderId) ?? []);
-    this.cache.set(builderId, comments);
-    if (JSON.stringify(comments) !== before) {
-      this.changeEmitter.fire(builderId);
-    }
-    return comments;
+    this.setCached(builderId, state);
+    return state;
   }
 
   async add(builderId: string, comment: PendingComment): Promise<void> {
-    await this.mutate(builderId, comments => addComment(comments, comment));
+    await this.mutate(builderId, s => ({ ...s, comments: addComment(s.comments, comment) }));
   }
 
   async edit(builderId: string, id: string, body: string): Promise<void> {
-    await this.mutate(builderId, comments => editComment(comments, id, body));
+    await this.mutate(builderId, s => ({ ...s, comments: editComment(s.comments, id, body) }));
   }
 
   async remove(builderId: string, ids: readonly string[]): Promise<void> {
-    await this.mutate(builderId, comments => removeComments(comments, ids));
+    await this.mutate(builderId, s => ({ ...s, comments: removeComments(s.comments, ids) }));
   }
 
+  /** Discard the pending comments; sent-unconfirmed ones are left alone. */
   async clear(builderId: string): Promise<void> {
-    await this.mutate(builderId, () => []);
+    await this.mutate(builderId, s => ({ ...s, comments: [] }));
+  }
+
+  /** Move submitted pending ids to the sent list instead of deleting them (#1562). */
+  async markSent(builderId: string, ids: readonly string[]): Promise<void> {
+    const sentAt = new Date().toISOString();
+    await this.mutate(builderId, s => markSent(s, ids, sentAt));
+  }
+
+  /** Drop the sent-unconfirmed record once the reviewer confirms delivery. */
+  async clearSent(builderId: string): Promise<void> {
+    await this.mutate(builderId, s => ({ ...s, sent: [] }));
   }
 
   private queuePath(builderId: string): string | undefined {
@@ -177,19 +204,20 @@ export class ReviewQueueStore implements vscode.Disposable {
    */
   private async mutate(
     builderId: string,
-    fn: (comments: PendingComment[]) => PendingComment[],
+    fn: (state: QueueState) => QueueState,
   ): Promise<void> {
     const filePath = this.queuePath(builderId);
     if (!filePath) {
       throw new Error(`No worktree registered for builder "${builderId}"`);
     }
-    const current = await this.load(builderId);
+    const current = await this.loadState(builderId);
     const next = fn(current);
-    const serialized = serializeQueueFile(builderId, next);
+    const serialized = serializeQueueFile(builderId, next.comments, next.sent);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, serialized, 'utf8');
     this.lastWritten.set(filePath, serialized);
-    this.cache.set(builderId, next);
+    this.cache.set(builderId, next.comments);
+    this.sentCache.set(builderId, next.sent);
     await this.ensureExclude(this.worktreeById.get(builderId)!);
     this.changeEmitter.fire(builderId);
   }
@@ -247,11 +275,17 @@ export class ReviewQueueStore implements vscode.Disposable {
     if (content !== null && content === this.lastWritten.get(filePath)) {
       return; // Echo of our own write.
     }
-    let comments: PendingComment[] = [];
-    if (content !== null) { comments = parseQueueFile(content); }
-    const before = JSON.stringify(this.cache.get(builderId) ?? []);
-    this.cache.set(builderId, comments);
-    if (JSON.stringify(comments) !== before) {
+    let state: QueueState = { comments: [], sent: [] };
+    if (content !== null) { state = parseQueueState(content); }
+    this.setCached(builderId, state);
+  }
+
+  /** Update both caches, firing the change event only when either differs. */
+  private setCached(builderId: string, state: QueueState): void {
+    const before = JSON.stringify([this.getComments(builderId), this.getSent(builderId)]);
+    this.cache.set(builderId, state.comments);
+    this.sentCache.set(builderId, state.sent);
+    if (JSON.stringify([state.comments, state.sent]) !== before) {
       this.changeEmitter.fire(builderId);
     }
   }
