@@ -84,6 +84,15 @@ describe('deriveAttention', () => {
     expect(summary.pendingGates.map((g) => g.gate)).toEqual(['dev review', 'PR review']);
   });
 
+  it('emits one row for a lane at the porch pr gate whose PR is open (porch row wins, keeps since) (#1787)', () => {
+    const summary = deriveAttention(overview({
+      builders: [builderRow({ id: 'bugfix-15', blocked: 'PR review', blockedGate: 'pr', blockedSince: '2026-10-05T09:00:00Z', prReady: true })],
+    }), NOW);
+    expect(summary.pendingGates).toEqual([
+      { builderId: 'bugfix-15', issueId: null, issueTitle: null, gate: 'PR review', gateId: 'pr', since: '2026-10-05T09:00:00Z' },
+    ]);
+  });
+
   it('projects an idle-waiting builder into the waiting list with its lastDataAt', () => {
     const summary = deriveAttention(overview({ builders: [builderRow({ id: 'air-1108', lastDataAt: STALE })] }), NOW);
     expect(summary.waiting).toEqual([{ builderId: 'air-1108', issueId: null, issueTitle: null, since: STALE }]);
