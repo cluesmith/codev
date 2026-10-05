@@ -1311,6 +1311,9 @@
         }
       }
     },
+    "configurationDefaults": {
+      "comments.openView": "never"
+    },
     "walkthroughs": [
       {
         "id": "codevGettingStarted",
