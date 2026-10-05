@@ -33,11 +33,32 @@ export interface PendingComment {
   body: string;
 }
 
-/** On-disk shape of `<worktree>/.codev/pending-comments.json`. */
+/**
+ * A comment Submit Review has placed in the builder's prompt (#1562). Injection
+ * is not delivery (the final Enter is the human's), so the store keeps it until
+ * the reviewer confirms delivery instead of deleting it at submit time.
+ */
+export interface SentComment extends PendingComment {
+  /** ISO timestamp of the submit that placed it in the prompt. */
+  sentAt: string;
+}
+
+/** Both halves of a builder's queue file: still-pending and sent-unconfirmed. */
+export interface QueueState {
+  comments: PendingComment[];
+  sent: SentComment[];
+}
+
+/**
+ * On-disk shape of `<worktree>/.codev/pending-comments.json`. `sent` is
+ * optional and omitted when empty, so readers that only count `comments`
+ * (Tower's queued-feedback badge) are unaffected by it.
+ */
 export interface PendingCommentsFile {
   version: 1;
   builderId: string;
   comments: PendingComment[];
+  sent?: SentComment[];
 }
 
 /** Queue file path relative to the builder's worktree root. */
@@ -52,16 +73,27 @@ export const QUEUE_FILE_RELPATH = '.codev/pending-comments.json';
  * mutation writes, so bad bytes are preserved for inspection until then.
  */
 export function parseQueueFile(raw: string): PendingComment[] {
+  return parseQueueState(raw).comments;
+}
+
+/** Parse both the pending and the sent lists, with the same tolerance. */
+export function parseQueueState(raw: string): QueueState {
   let data: unknown;
   try {
     data = JSON.parse(raw);
   } catch {
-    return [];
+    return { comments: [], sent: [] };
   }
-  if (typeof data !== 'object' || data === null) { return []; }
-  const comments = (data as { comments?: unknown }).comments;
-  if (!Array.isArray(comments)) { return []; }
-  return comments.filter(isValidComment);
+  if (typeof data !== 'object' || data === null) { return { comments: [], sent: [] }; }
+  const { comments, sent } = data as { comments?: unknown; sent?: unknown };
+  let state: QueueState = { comments: [], sent: [] };
+  if (Array.isArray(comments)) { state = { ...state, comments: comments.filter(isValidComment) }; }
+  if (Array.isArray(sent)) { state = { ...state, sent: sent.filter(isValidSentComment) }; }
+  return state;
+}
+
+function isValidSentComment(value: unknown): value is SentComment {
+  return isValidComment(value) && typeof (value as { sentAt?: unknown }).sentAt === 'string';
 }
 
 function isValidComment(value: unknown): value is PendingComment {
@@ -76,8 +108,13 @@ function isValidComment(value: unknown): value is PendingComment {
   return typeof r.start === 'number' && typeof r.end === 'number';
 }
 
-export function serializeQueueFile(builderId: string, comments: PendingComment[]): string {
+export function serializeQueueFile(
+  builderId: string,
+  comments: PendingComment[],
+  sent: SentComment[] = [],
+): string {
   const file: PendingCommentsFile = { version: 1, builderId, comments };
+  if (sent.length > 0) { file.sent = sent; }
   return JSON.stringify(file, null, 2) + '\n';
 }
 
@@ -97,6 +134,21 @@ export function editComment(comments: PendingComment[], id: string, body: string
 export function removeComments(comments: PendingComment[], ids: readonly string[]): PendingComment[] {
   const gone = new Set(ids);
   return comments.filter(c => !gone.has(c.id));
+}
+
+/**
+ * Move the given pending ids into the sent list, stamped `sentAt` (#1562).
+ * Ids already in `sent` (a re-send) keep their entry; unknown ids are ignored.
+ */
+export function markSent(state: QueueState, ids: readonly string[], sentAt: string): QueueState {
+  const moving = new Set(ids);
+  const moved = state.comments
+    .filter(c => moving.has(c.id))
+    .map(c => ({ ...c, sentAt }));
+  return {
+    comments: state.comments.filter(c => !moving.has(c.id)),
+    sent: [...state.sent, ...moved],
+  };
 }
 
 // ── Submit packaging ────────────────────────────────────────────────────

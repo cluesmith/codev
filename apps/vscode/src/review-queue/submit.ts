@@ -10,9 +10,13 @@
  * bracketed-paste escapes because the PTY receives `sendText` bytes raw: an
  * unwrapped `\n` would act as Enter and submit the prompt mid-message.
  *
- * Only the ids that were packaged are removed on success, so a comment queued
- * while the message sits unsent in the prompt buffer survives to the next
- * cycle rather than being silently flushed.
+ * Injection is not delivery: until the reviewer presses Enter the comments
+ * exist only as editable prompt text, which a cleared prompt or a dead session
+ * loses. So on success the packaged ids are MOVED to the queue file's `sent`
+ * list, not deleted (#1562). A comment queued while the message sits unsent in
+ * the prompt buffer stays pending for the next cycle. The next submit that
+ * finds sent entries asks explicitly whether to re-send them (the recovery
+ * path) or mark them delivered (drop the record), never silently either.
  */
 
 import * as vscode from 'vscode';
@@ -21,6 +25,10 @@ import { getDiffInjectEntry } from '../diff-inject-codelens.js';
 import type { ReviewQueueStore } from './store.js';
 import type { TerminalManager } from '../terminal-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
+
+/** Choices offered when sent-but-unconfirmed comments exist at submit time. */
+const RESEND = 'Re-send';
+const MARK_DELIVERED = 'Mark Delivered';
 
 export interface SubmitDeps {
   store: ReviewQueueStore;
@@ -59,21 +67,40 @@ export async function submitReview(deps: SubmitDeps, builderIdArg?: string): Pro
   if (!builderId) { return; }
 
   registerWorktreeFromOverview(deps, builderId);
-  const comments = await deps.store.load(builderId);
-  if (comments.length === 0) {
+  const { comments, sent } = await deps.store.loadState(builderId);
+  if (comments.length === 0 && sent.length === 0) {
     vscode.window.setStatusBarMessage(`Codev: No pending comments for ${builderId}`, 3000);
     return;
   }
 
-  const message = buildSubmitMessage(comments);
+  let resend = false;
+  if (sent.length > 0) {
+    const choice = await vscode.window.showWarningMessage(
+      `${sent.length} review comment(s) submitted to ${builderId} earlier are not confirmed as delivered. ` +
+        'Re-send them, or mark them delivered?',
+      { modal: true },
+      RESEND,
+      MARK_DELIVERED,
+    );
+    if (choice === undefined) { return; }
+    resend = choice === RESEND;
+    if (!resend) {
+      await deps.store.clearSent(builderId);
+      if (comments.length === 0) { return; }
+    }
+  }
+
+  let packaged = comments;
+  if (resend) { packaged = [...sent, ...comments]; }
+  const message = buildSubmitMessage(packaged);
   const resolvedId = await deps.terminalManager.openBuilderByRoleOrId(builderId, true);
   if (!resolvedId || !deps.terminalManager.injectBuilderText(resolvedId, wrapBracketedPaste(message))) {
     vscode.window.showWarningMessage('Codev: Builder terminal not available — review comments kept in the queue');
     return;
   }
-  await deps.store.remove(builderId, comments.map(c => c.id));
+  await deps.store.markSent(builderId, comments.map(c => c.id));
   vscode.window.setStatusBarMessage(
-    `Codev: ${comments.length} review comment(s) placed in ${builderId}'s prompt — press Enter there to send`,
+    `Codev: ${packaged.length} review comment(s) placed in ${builderId}'s prompt — press Enter there to send`,
     5000,
   );
 }
