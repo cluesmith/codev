@@ -99,6 +99,16 @@ From the system:
 10. State lives in `~/.agent-farm/global.db` via the versioned migration runner; never written by hand.
 11. Tower's `afx send` mailbox and render gate are untouched by this project.
 
+From the main architect seat's Contract Surface ruling (2026-10-05, issue #1595; binding on the plan):
+
+12. **Types are wire-only.** `AgentState`, `AgentActivity`, `NeedsInputDetail`, the served `agentState` row and `AgentLifecycleEvent` are shapes with doc comments in `codev-types`. The projection (blocked, then dead, then reported activity, then null) is codev-core; the `working` staleness rule and the waiting predicate are sdk. No helper, default or derivation ships in types.
+13. **Compatible row.** `agentState` is optional and nullable on `OverviewBuilder` and `ArchitectState`; `ArchitectState.lastDataAt` likewise. Consumers treat absent and `null` identically. Existing `OverviewBuilder` attention and timing fields are untouched.
+14. **One definition of blocked, one place for liveness.** `state === 'blocked'` comes from the same predicate the overview already uses for `blocked` (`detectBlocked` / `findBlockedGate`, generic over any pending and requested gate since #1777), with no second gate allowlist and no second parse of `status.yaml`. `dead` is never derivable from a lifecycle report; liveness is computed in exactly one place in Tower, and the plan names it.
+15. **Canonical identity, injected.** `agentId` is the Tower-canonical registered id (terminal-id space for builders, registered name for architects), injected at launch, never the bare issue id and never cwd-derived. Unknown-agent reports are rejected. The event type is named `AgentLifecycleEvent`, with the five neutral event names.
+16. **One write-only route.** One POST under local-key auth with strict validation and the 8 KB cap; empty 2xx; no read route; served on the existing overview and announced with `overview-changed`; the table goes in `global.db` via the migration path; the route writes agent-state rows and nothing else.
+17. **Role-named optional provider capability** (for example `buildLifecycleReporterInjection`) covering both launch shapes (`{args, env}` and `{fragment, env}`), so every launch path, including `afx spawn --resume` and `afx workspace recover`, carries the reporter. Codex and OpenCode omit it.
+18. **Single attention derivation and sequencing.** The separate `architects` list is accepted; `deriveAttention` stays the single derivation, with `isEmpty` and `compareAttention` (#1566) accounting for architect items in the waiting bucket. The plan is written from `main` only after PR #1788 (#1787, dedupe of PR-gated lanes in `deriveAttention`) has merged.
+
 ## Assumptions
 
 **Verified empirically on Claude Code 2.1.289 (2026-10-05, live interactive session in tmux, every hook `async: true`):**
@@ -131,7 +141,7 @@ The design has three independent choices: how events leave the harness (transpor
 
 ### Approach 1 (recommended transport): generated reporter script as an async command hook, posting a harness-neutral event to a Tower ingestion endpoint
 
-The Claude provider generates a small dependency-free Node script (same shape as the write-guard script). Each configured hook invokes it with `async: true` and a short `timeout`. The script reads the hook payload from stdin, translates it to a neutral event (`session-started`, `turn-started`, `tool-activity`, `needs-input`, `turn-ended`), stamps it with the time the hook ran, reads the local key, POSTs once to Tower with a sub-second deadline, and exits 0 with no stdout regardless of outcome. Agent identity (workspace path and agent id) is baked into the hook command at spawn, as the guard bakes `CODEV_WORKTREE_ROOT`; the harness session id comes from the payload.
+The Claude provider generates a small dependency-free Node script (same shape as the write-guard script). Each configured hook invokes it with `async: true` and a short `timeout`. The script reads the hook payload from stdin, translates it to a neutral event (`session-started`, `turn-started`, `tool-activity`, `needs-input`, `turn-ended`), stamps it with the time the hook ran, reads the local key, POSTs once to Tower with a sub-second deadline, and exits 0 with no stdout regardless of outcome. Agent identity (workspace path and the Tower-canonical registered agent id) is injected at launch, never derived from the working directory (Constraint 15); the harness session id comes from the payload.
 
 - **Pros:** fail-open by construction (async; Tower down is an immediate refused connection; no stdout means no permission decision); the key is never written into settings or exported into the agent environment; translation lives inside the provider, so Tower stays harness-neutral; proven seam (#1018).
 - **Cons:** one short-lived Node process per reported event. `PostToolUse` must fire for every tool (it is the only resume signal after an approval), so tool-heavy turns spawn one async process per tool call. Mitigated from the start: `PreToolUse` is matched to the question tool only, and Tower ignores reports that do not change the served state.
@@ -181,7 +191,7 @@ Fix the shallow-merge writer to deep-merge `hooks` arrays, then add the reporter
 
 **Served state (projection, policy in core).** Computed at serve time, first match wins:
 
-1. `blocked`: porch reports a requested, pending gate (unchanged logic).
+1. `blocked`: porch reports a requested, pending gate, computed by the same predicate the overview already uses for `blocked` (Constraint 14).
 2. `dead`: the agent is not alive and the builder is not `complete` or `verified`. A complete or verified builder whose agent has exited is the normal end of a lane, not an alert (SC14).
 3. The reported activity: `needs-input`, `working` or `idle`.
 4. Otherwise `null` (unknown).
@@ -202,20 +212,22 @@ A pending gate is the human's move whatever the process state, and existing gate
 
 Approach 1 (async command-hook reporter, neutral events, Tower ingestion endpoint), with Approach A (`--settings` through `HarnessProvider`, builders and architects) and the state computation above. Codex and OpenCode providers do not implement the reporter capability. They get Tower-side dead detection and the PTY fallback for everything else.
 
-## Contract Surface (for main architect review before the plan gate)
+## Contract Surface (approved by the main architect seat, 2026-10-05, with conditions)
 
-Declared in `@cluesmith/codev-types`. Shapes are normative in meaning; exact identifier spelling is settled with main.
+Main approved the meaning of this section as written, subject to seven binding conditions (recorded under Constraints, items 12 to 18; the authoritative text is main's ruling comment on issue #1595). The shapes below already incorporate them.
+
+Declared in `@cluesmith/codev-types` as **shapes with doc comments only**. No helper, default or derivation ships in types. The projection is core; the staleness rule and waiting predicate are sdk.
 
 - **`AgentState`** = `'working' | 'needs-input' | 'idle' | 'blocked' | 'dead'`.
 - **`AgentActivity`** (the reported subset) = `'working' | 'needs-input' | 'idle'`.
-- **`NeedsInputDetail`** = `{ kind: 'permission' | 'question' | 'other'; tool?: string; summary?: string }`. Limits: `tool` at most 64 characters; `summary` at most 200 characters, single line, control characters removed, built by the reporter from the tool's primary argument (for example a command's text or a file path). No secret redaction is attempted; the summary is in the same local-key trust domain as the terminal output Tower already streams. It is held only for the current needs-input episode and cleared when the activity changes. Surfaces render it as plain text (SC19).
-- **Served row**, on `OverviewBuilder` and on `ArchitectState`:
-  `agentState: { state: AgentState; since: string /* ISO */; source: 'harness' | 'tower'; alive: boolean | null; activity: AgentActivity | null; activityAt: string | null /* hook time of the latest accepted report */; backgroundWork: boolean; needsInput?: NeedsInputDetail } | null`.
-  `source: 'harness'` means `state` came from a lifecycle report. `'tower'` means it came from porch or liveness. `null` means unknown, and consumers use the PTY fallback. `alive: null` means liveness could not be determined. Existing fields (`blocked`, `blockedGate`, `blockedSince`, `lastDataAt`) are unchanged. `ArchitectState` additionally needs `lastDataAt` for the staleness rule.
-- **Ingestion event** (reporter to Tower): `{ workspacePath: string; agentId: string; sessionId: string; event: 'session-started' | 'turn-started' | 'tool-activity' | 'needs-input' | 'turn-ended'; at: number /* epoch ms when the hook ran */; needsInput?: NeedsInputDetail; backgroundWork?: boolean }`. Limits: `agentId` and `sessionId` at most 128 characters, `workspacePath` at most 4096, request body at most 8 KB. Harness-neutral: no Claude hook names cross the wire.
-- **Tower API:** one authenticated POST ingestion route accepting the event above (local-key auth, strict validation, known-agent binding, 2xx with an empty body; the reporter ignores the response). No new read route; the state is served on the existing overview responses, and changes are announced with the existing `overview-changed` SSE event.
-- **`HarnessProvider`:** one new optional capability through which a provider contributes lifecycle-reporter launch injection to builder, architect and resume launches. Providers that omit it get the fallback.
-- **`AttentionSummary`:** `WaitingItem` gains an optional `state` so surfaces render needs-input, idle and dead distinctly. A new `architects` list carries architect attention items, `{ architect: string; state: 'needs-input' | 'dead'; since: string | null }`. A separate list is used because the existing item types are builder-shaped (builder id, issue id and title). `isEmpty` and the urgency ordering account for it, with architect items in the same bucket as waiting builders.
+- **`NeedsInputDetail`** = `{ kind: 'permission' | 'question' | 'other'; tool?: string; summary?: string }`. Limits: `tool` at most 64 characters; `summary` at most 200 characters, single line, control characters removed, built by the reporter from the tool's primary argument (for example a command's text or a file path). No secret redaction is attempted; the summary is in the same local-key trust domain as the terminal output Tower already streams. It is held only for the current needs-input episode and cleared when the activity changes. Every surface renders it as plain text, never as markup (SC19).
+- **Served row**, field name `agentState`, declared **optional and nullable** on both `OverviewBuilder` and `ArchitectState` (matching the `gateId?` / `heldCount?` precedent), so an older Tower paired with a newer extension, or the reverse, keeps working:
+  `agentState?: { state: AgentState; since: string /* ISO */; source: 'harness' | 'tower'; alive: boolean | null; activity: AgentActivity | null; activityAt: string | null /* hook time of the latest accepted report */; backgroundWork: boolean; needsInput?: NeedsInputDetail } | null`.
+  Consumers treat absent and `null` identically: unknown, so the PTY fallback applies. `source: 'harness'` means `state` came from a lifecycle report; `'tower'` means it came from porch or liveness. `alive: null` means liveness could not be determined. `ArchitectState` also gains `lastDataAt?: string | null` (optional and nullable the same way) for the staleness rule. `blocked`, `blockedGate`, `blockedSince` and `lastDataAt` on `OverviewBuilder` are untouched.
+- **`AgentLifecycleEvent`** (reporter to Tower): `{ workspacePath: string; agentId: string; sessionId: string; event: 'session-started' | 'turn-started' | 'tool-activity' | 'needs-input' | 'turn-ended'; at: number /* epoch ms when the hook ran */; needsInput?: NeedsInputDetail; backgroundWork?: boolean }`. `agentId` is the **Tower-canonical registered id**: the terminal-id space for builders (for example `builder-bugfix-1787`), or the architect's registered name. It is never the bare issue id and never derived from the reporter's working directory; the reporter receives it by injection at launch, because identity is where the agent was spawned, not where its shell is (the #1783 lesson). Limits: `agentId` and `sessionId` at most 128 characters, `workspacePath` at most 4096, request body at most 8 KB. The five neutral event names are fixed, and no harness hook names cross the wire.
+- **Tower API:** exactly one POST ingestion route accepting `AgentLifecycleEvent`, under the existing local-key auth, with strict validation (the limits above), known-agent binding, and an empty 2xx (the reporter ignores the response). The route writes agent-state rows and **nothing else**: no PTY write, no mailbox. There is no read route; state is served on the existing overview responses and announced with the existing `overview-changed` SSE event. The table lives in the single user-global `global.db` through the existing migration path.
+- **`HarnessProvider`:** one new **optional** capability, named for its role rather than its mechanism (for example `buildLifecycleReporterInjection`; never `settings` or `hooks` in the identifier). Absence means unsupported, the `afx refresh` precedent. It covers the same two launch shapes the existing role injection covers: `{args, env}` for `spawn()` sites (architect launch, resume) and `{fragment, env}` for the generated builder script. Every launch path carries the reporter, including `afx spawn --resume` and `afx workspace recover`. Codex and OpenCode omit it.
+- **`AttentionSummary`:** `WaitingItem` gains an optional `state` so surfaces render needs-input, idle and dead distinctly. A new `architects` list carries architect attention items, `{ architect: string; state: 'needs-input' | 'dead'; since: string | null }`; a separate list is used because the existing item types are builder-shaped (builder id, issue id and title). `deriveAttention` remains the single derivation, `isEmpty` and `compareAttention` account for architect items in the waiting bucket, and no surface derives attention locally.
 
 Claude hook to neutral event mapping (internal to the Claude provider, listed for review):
 
@@ -244,7 +256,7 @@ The spec adopts these defaults. SC4, SC13 and the predicate are written to them,
 
 **Critical (blocks progress)**
 
-- **Contract sign-off by the main architect seat.** The Contract Surface section goes to main before the plan gate (owner ruling). Identifier names may change; the meaning should not.
+- None. The main architect seat approved the Contract Surface on 2026-10-05 with seven binding conditions (Constraints 12 to 18), which are folded into this spec. The spec gate itself and the three owner decisions remain the owner's.
 
 **Important (shapes design)**
 

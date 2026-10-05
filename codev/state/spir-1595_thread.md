@@ -17,3 +17,5 @@
   - A message queued mid-turn fires UserPromptSubmit.
   - Foreground tool running: TUI repaints elapsed counter every second (PTY fresh while working). Permission prompt pane is static.
   - Esc-interrupt and /clear could not be exercised reliably (vim-mode composer ate keys) -> verify in implementation.
+- Spec gate reached after CMAP iter1 + rebuttal; notified vscode, asked it to forward Contract Surface to main. Waiting.
+- Main ruled on Contract Surface (issue #1595 comment 2026-10-05): approved with 7 binding conditions, folded into spec as Constraints 12-18 + Contract Surface. Notable: agentState optional+nullable; agentId = Tower-canonical registered id injected at launch; event type AgentLifecycleEvent; capability role-named (buildLifecycleReporterInjection) covering resume + workspace recover; plan only after PR #1788 merges. Spec gate + 3 owner defaults still Amr's.
