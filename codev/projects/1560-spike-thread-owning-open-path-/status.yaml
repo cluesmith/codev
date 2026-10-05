@@ -1,7 +1,7 @@
 id: '1560'
 title: spike-thread-owning-open-path-
 protocol: experiment
-phase: execute
+phase: analyze
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-05T00:05:23.509Z'
-updated_at: '2026-10-05T00:20:43.311Z'
+updated_at: '2026-10-05T00:20:45.452Z'
