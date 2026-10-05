@@ -1,6 +1,7 @@
 # EXPERIMENT 1782: Claude Code mods for Codev (spike for #1761)
 
-Status: **builder half complete; live Q1 and Q2 answered, Q3 retest and Q4 in progress.**
+Status: **complete.** Builder half and all four live questions answered. One sub-question
+(mail during the hold) could not be run, and is recorded as such.
 Date: 2026-10-05. Claude Code on this machine: **2.1.289** (the issue expected 2.1.288; the
 reference page is written for 2.1.289, so no 2.1.289-only item was out of reach).
 
@@ -24,24 +25,24 @@ inside the budgets the mods documentation states, in a real Codev terminal under
 | # | Criterion | Result |
 |---|---|---|
 | 1 | `claude plugin validate` passes; `hooks:`/`calls:` lines recorded verbatim | **Pass.** Lines below; full output in `results/validate.txt` |
-| 2 | `claude plugin test` passes with the listed cases | **Pass, 12/12** (`results/plugin-test.txt`) |
-| 3 | Each hook's own time measured against the 10 s budget; `.catch` against 1 s | **Pass.** Every hook 0–1 ms in the kit, 7–9 ms for the fetch-heavy hook in a real engine |
+| 2 | `claude plugin test` passes with the listed cases | **Pass, 16/16** (`results/plugin-test.txt`; 12 at handoff, plus 4 for the post-live fixes) |
+| 3 | Each hook's own time measured against the 10 s budget; `.catch` against 1 s | **Pass.** Every hook 0–1 ms in the kit, `.catch` 0–1 ms (n=20, real faults), 7–9 ms for the fetch-heavy hook in a real engine |
 | 4 | Issue lookup round trip through Tower's `getIssue` path, cached and uncached; record which design the numbers forced | **Measured.** Uncached 0.93–1.18 s wall, cached 0–1 ms; budget never at risk (see design note) |
-| 5 | Four live-session questions answered with command + observation | **Pending handoff** (commands below) |
+| 5 | Four live-session questions answered with command + observation | **Answered**, except Q1's mail half: `afx send` cannot address a utility shell (see Live-session answers) |
 
 ### 1. `claude plugin validate`, verbatim
 
 ```
   ❯ ./register.tsx hooks: tool.call{tool=Bash}, attribution.text, session.measure, session.start, turn.complete, prompt.submit, command.run{command=issue}, command.run{command=codev-spike-fetch}, command.run{command=codev-spike-timings}, ui.render{component=AbovePrompt}, ui.render{component=Pane, requestId=issue-peek}, classic.SessionStart{source=clear}
-  ❯ ./register.tsx calls: $.clock.after (via showRefs), $.clock.now, $.command.register, $.env.get, $.fs.read (via towerIssue), $.http.fetch (via towerIssue), $.prompt.submit, $.session.cwd (via towerIssue), $.state.get, $.state.set, $.store.delete, $.store.get, $.store.set (via getIssue, record), $.ui.ask, $.ui.copy, $.ui.log, $.ui.open (via openPeek), $.ui.resolve
+  ❯ ./register.tsx calls: $.clock.after (via showRefs), $.clock.now, $.command.register, $.command.run, $.env.get, $.fs.read (via towerIssue), $.http.fetch (via towerIssue), $.session.cwd (via towerIssue), $.state.get, $.state.set, $.store.delete, $.store.get, $.store.set (via getIssue, record), $.ui.ask, $.ui.copy, $.ui.log, $.ui.open (via openPeek), $.ui.resolve
 ```
 
 `✔ Validation passed`, no warnings after adding `author` to the manifest.
 
-After the Q3 change (finding 10), the `calls:` line lists `$.command.run` in place of
-`$.prompt.submit`. Validation still passes.
+These lines are from the final mod. At handoff, the `calls:` line listed `$.prompt.submit`
+where it now lists `$.command.run`: the Q3 change, findings 9 and 10.
 
-### 2. `claude plugin test`: what the 12 tests cover
+### 2. `claude plugin test`: what the 16 tests cover
 
 - **Guard** (`tests/guard.test.ts`). A test hook beneath the plugin stands for the shell and
   records every command that reaches it.
@@ -54,16 +55,25 @@ After the Q3 change (finding 10), the `calls:` line lists `$.command.run` in pla
   - **`porch approve` hold:** an `AskUserQuestion` stub answers both ways. The question is
     asked exactly once each time. `Yes, relayed verbatim` lets the command run, and `No`
     denies with "Gate not approved…".
-  - **`.catch`:** when the stub throws (standing for a dismissal, or a `-p` run with no one
-    to ask), the hook fails and `.catch` answers `{ deny: 'codev guard failed…' }`. The
-    command never runs.
+  - **Dismissed hold:** when the stub throws (a dismissal, or a `-p` run with no one to
+    ask), the guard denies with "The human dismissed the gate question…", not "guard failed"
+    (finding 6, fixed after live Q1).
+  - **`.catch`:** a store whose writes fail makes the hook itself fault before the command
+    runs. `.catch` answers `{ deny: 'codev guard failed…' }` for a plain command, a
+    forbidden one, and `porch approve`, and none of them reaches the shell.
+  - **`.catch` cannot fail open:** with **every** write failing, the handler's own
+    bookkeeping fails too and it still denies (finding 12).
 - **Attribution** (`tests/attribution.test.ts`). `commit` and `pr` come back `''`. `remedy`
   (the commit gate's own sentence) passes through unchanged.
 - **Band and peek** (`tests/band-peek.test.tsx`). Mounted on **both `terminal` and
   `desktop`**:
   - The band shows `context 75% · save at 70%`, coloured yellow once over the mark.
   - A reply naming `#1672`, `PR #1131` and `#1672` again yields two chips, hotkeys `1` and
-    `2`. The first is titled from a prefetch (`#1672 Lane Card: per-lane status card`).
+    `2`. The first is titled from a prefetch and fitted to its 33-cell share of a 76-cell
+    band: `#1672 Lane Card: per-lane status…`.
+  - Chip titles are cut with an ellipsis to their share of the band, and the number always
+    stays whole. At 60 cells beside the context line, each chip gets 12 (finding 11, fixed
+    after live Q2).
   - **Pressing the chip by key** asks for pane `issue-peek`. The mounted pane shows the
     title, `open · area/vscode`, the body as `Markdown`, and the newest comment first.
   - Tower is hit **once** for `#1672`; every later read comes from `$.store`.
@@ -82,7 +92,8 @@ each path, against the real engine (`results/plugin-test.txt`).
 | `tool.call` guard, deny | 20 | 0 ms | 0–1 ms | 10 000 ms |
 | `tool.call` guard, pass | 20 | 0 ms | 0 ms | 10 000 ms |
 | `tool.call` guard, hold approved (ask wait excluded) | 10 | 0 ms | 0–1 ms | 10 000 ms |
-| `tool.call` guard `.catch` handler | 10 | 0 ms | 0–1 ms | **1 000 ms** |
+| `tool.call` guard, hold dismissed (ask wait excluded) | 10 | 0 ms | 0 ms | 10 000 ms |
+| `tool.call` guard `.catch` handler (real faults, flaky store) | 20 | 0 ms | 1 ms | **1 000 ms** |
 | `attribution.text` | 20 | 0 ms | 0 ms | 10 000 ms |
 | `session.measure` | 20 | 0 ms | 0 ms | 10 000 ms |
 | `turn.complete` (ref scan + state write) | 20 | 0 ms | 1 ms | 10 000 ms |
@@ -140,10 +151,11 @@ the hook under 10 ms of its 10 s. The **user-facing wait** is what matters: abou
 5. **The test kit cannot type a digit into the composer.** It presses a band `Button` by key
    (`press`, "as a click or its hotkey does") and checks `hotkey: '1'`. Whether a bare digit
    in a real empty prompt reaches the chip is live question 2.
-6. **A dismissed hold reads as a guard failure.** `$.ui.ask` rejects on dismissal, which
-   lands in `.catch` with "codev guard failed". The result is correct (fail closed) but the
-   reason is misleading. A shipped guard should `try`/`catch` around the ask and deny with
-   "Gate question dismissed; not approved", keeping `.catch` for real faults.
+6. **A dismissed hold read as a guard failure.** `$.ui.ask` rejects on dismissal, which
+   landed in `.catch` with "codev guard failed". The result was correct (fail closed) but
+   the reason misled: live Q1 showed Claude reading it as "the hook seems flaky".
+   **Fixed:** a `try`/`catch` around the ask now denies with "The human dismissed the gate
+   question, so porch approve was not run…", and `.catch` is left for real faults.
 7. **`claude -p "/cmd" --plugin-dir <mod>` runs a mod command with no model turn.** This is a
    cheap real-engine probe that CI could run beside `claude plugin test`.
 
@@ -173,9 +185,38 @@ the hook under 10 ms of its 10 s. The **user-facing wait** is what matters: abou
       `codev` plugin must load from a folder the session does not write to (the installed
       package, not a worktree path). Hot reload must stay off for anything but deliberate
       authoring.
-11. **Chip titles are hard-cut at the tab edge** (live Q2, 80 columns). The second chip's
-    title ran into the right edge with no ellipsis. Chip labels should truncate with an
-    ellipsis to their share of `bodyColumns`.
+11. **Chip titles were hard-cut at the tab edge** (live Q2, 80 columns). The second chip's
+    title ran into the right edge with no ellipsis. **Fixed:** each chip's label is fitted to
+    an even share of `bodyColumns` (less the context line, the `1: ` hotkey and the gap),
+    with the title cut by an ellipsis and the number kept whole. `Button` takes no `wrap`
+    prop, so the mod fits the label itself.
+12. **A `.catch` handler that throws makes the guard fail OPEN.** The docs: past its grace,
+    or on a throw, "the hook is absent as if it had no handler", and `next(e)` runs on its
+    behalf, so the command runs. The worked example's `.catch` only returns a deny and is
+    safe. The spike's first `.catch`, though, also wrote its timing to `$.store`, and a
+    failing store would have let the command through. Fixed in two ways:
+    - the handler's own bookkeeping is wrapped and never throws;
+    - the hook records **before** calling `next`, so a bookkeeping fault fails closed rather
+      than denying a command that already ran.
+
+    Rule for the shipped guard: a `.catch` handler does nothing that can fail, and the hook
+    does all its fallible work before `next`.
+13. **Trust, from Codev's code: `afx spawn` does not pre-trust builder worktrees.**
+    - No Codev code writes Claude Code trust state. A search of `packages/codev/src` finds no
+      `hasTrustDialogAccepted` and no write to `~/.claude.json`. The only trust-related code
+      is `gate-profiles.ts` treating agy's trust dialog as busy.
+    - This builder nevertheless started with no trust prompt. `~/.claude.json` holds a
+      trusted entry for the **main checkout**, which contains `.builders/`, and **none** for
+      this worktree's own path.
+    - Builders here also launch with `--dangerously-skip-permissions`. This repo's
+      `.codev/config.json` sets it; `codev init`/`adopt` set it only when skip-permissions is
+      chosen.
+    - So the worktree is covered either by the trusted parent checkout or by the
+      skip-permissions flag. Codev's code cannot say which: that decision is Claude Code's.
+    - With Q4 (decline exits; accept loads the mod with no reload), the practical answer:
+      adopters whose builders run without that flag and outside a trusted parent will see
+      the modal trust prompt at spawn, and the plugin loads once it is accepted. Phase 2
+      should check that case directly before relying on the plugin in builders.
 
 ### Deviations from the issue's method
 
@@ -238,7 +279,8 @@ run this way rather than routing mail at another session.
    - Does it land on top of the dialog or in it, or wait for the prompt?
 4. Answer `No`. Expect a deny reading "Gate not approved…". Does the held mail then deliver?
 5. Repeat and answer `Yes, relayed verbatim`. Expect the echo to run.
-6. Repeat and press Esc on the dialog. Expect "codev guard failed…" (finding 6).
+6. Repeat and press Esc on the dialog. Expect "codev guard failed…" (as run; finding 6
+   since changed this to a dismissal deny).
 
 **Q2. Digit-hotkey chip to an inline pane in a VS Code terminal tab, at its real width.**
 
@@ -285,9 +327,6 @@ Note whether `afx spawn`'s path pre-trusts its worktrees.
 
 ### Live-session answers
 
-*(to be recorded here from the vscode architect's report on #1782: command used and what
-was observed)*
-
 Observed by the vscode architect and Amr in a Codev VS Code terminal tab (`afx shell --name
 spike`, then the commands above), 2026-10-05.
 
@@ -309,43 +348,92 @@ spike`, then the commands above), 2026-10-05.
   - `/issue 1412` mid-turn opened the pane, **docked** beside the transcript at a wider
     momentary width.
   - `tput cols` measured 80 afterwards.
-- **Q3, slash expansion.** The `$.prompt.submit` route is **rejected by a host check**
-  (finding 9). The `$.command.run` retest is in progress.
-- **Q4, trust.** In progress.
+- **Q3, slash expansion.**
+  - `classic.SessionStart{source:'clear'}` fired.
+  - The `$.prompt.submit` route is **rejected by a host check** (finding 9).
+  - Retested with `$.command.run({ command: 'arch-init', args: 'spike-probe' })` (the change
+    finding 10 describes). The arch-init **skill ran exactly as written**: it found no state
+    file for `spike-probe`, listed the architect state files, asked the human, and adopted
+    nothing.
+  - **Candidate 8 is proven on the `$.command.run` path, and only on that path.**
+- **Q4, trust.** Run in a fresh `mktemp -d` git repo with `claude --plugin-dir "$MOD"`.
+  - The trust prompt is **modal** (No, exit / Yes, trust). Nothing can be typed before it
+    is answered, so no mod surface is reachable.
+  - **Declining exits the process.**
+  - After accepting, `/issue` was listed at once. **No `/reload-plugins` was needed.**
+  - In short, trust gates the session, not the mod separately. For builders, see finding 13:
+    Codev does not pre-trust worktrees.
 
-## Conclusion (builder half)
+## Conclusion
 
-The hypothesis holds for everything a session-less run can show:
+**The hypothesis holds.** It was tested in a real Codev VS Code terminal tab under Tower and
+in the engine's own test kit. One sub-question could not be run with the tools available.
 
-- All four mods validate, type-check and pass 12 engine-backed tests on both drawing
-  surfaces.
-- Every hook's own time is two to four orders of magnitude inside its budget.
-- The guard fails closed through `.catch`.
+- **Guard.**
+  - Denies every listed irreversible act with a reason Claude acts on.
+  - Holds `porch approve` behind a dialog that draws intact in a Codev tab.
+  - Fails closed through `.catch`: proven with real faults, including the handler's own
+    failure.
+  - The live run surfaced two wording and fail-open details, now fixed: findings 6 and 12.
+- **Attribution scrub.** Empty commit and PR attribution, with the engine's own gate
+  sentences left alone.
+- **Context band.** Live in the tab (`context 6%` with the save mark), updated from
+  `session.measure`.
+- **Issue peek.**
+  - A digit typed alone opens a user-opened pane inline above the prompt in an 80-column
+    VS Code tab, and Esc closes it.
+  - `/issue N` works mid-turn.
+  - Titles come from Tower's `getIssue` path. Their cost is a ~1 s user wait on a cold
+    issue (Tower keeps no cache), not a budget risk, and the `$.store` prefetch hides it for
+    anything Claude has named.
+- **Budgets.**
+  - Every hook's own time is 0–1 ms against 10 s, and the fetch command's 7–9 ms in a real
+    engine.
+  - `.catch` takes 0–1 ms against 1 s.
+- **Not answered: how the render gate treats mail while the hold is up.** `afx send` cannot
+  address a utility shell. It needs a probe session Tower registers as an agent, which no
+  current afx command starts with a `--plugin-dir`. Candidate 7 (mailbox delivery) inherits
+  this question.
 
-The issue peek's one real cost is Tower's uncached ~1 s forge round trip. That is a
-user-wait problem, not a budget problem, and a `$.store`-backed prefetch removes it for
-anything Claude has already named.
+Things the docs and the #1761 review did not predict:
+- `$.prompt.submit` cannot run a slash command; only `$.command.run` can (finding 9).
+- A session with a mod loaded rewrote that mod in a builder's worktree (finding 10).
+- The `.catch` fail-open trap (finding 12).
+- Tower needs the local key, and a repo workspace (findings 1 and 2).
+- CI must warm `claude` before `claude plugin test` (finding 8).
 
-The open risks sit in the four live questions: the hold under the render gate, the
-digit-to-chip path at real tab width, slash expansion, and trust.
+## Recommendation on #1761 decisions 1 and 2
 
-## Recommendation on #1761 decisions 1 and 2 (provisional until the handoff answers land)
-
-- **Decision 1 (ship a `codev` plugin): yes, conditionally.**
-  - Ship it once Q2 (inline pane in a VS Code tab) and Q4 (trust) come back clean.
-  - The guard and the attribution scrub carry no live-session risk. They could ship first,
-    behind the existing shell hook as the floor.
-  - Carry findings 1, 2 and 6 into the phase-2 design:
-    - a key-reading Tower client;
-    - a workspace-root parameter;
-    - a dismissal-specific deny.
-  - Add the `claude -p` command probe (finding 7) to CI beside `claude plugin test`.
-- **Decision 2 (builders neither install nor author mods; the spawn path is the only
-  loader): yes.**
-  - This spike shows how little stands between a session and a mod: a folder, a flag and
-    one `register`.
-  - A mod at the same tier ahead of the guard could `allow` what it denies.
-  - The spike itself ran entirely without loading a mod into a builder session (validate,
-    test, and a headless child process), so the rule costs authoring nothing.
-  - Q4's answer decides whether the spawn path must pre-trust builder worktrees for the
-    plugin to load at all.
+- **Decision 1, ship a `codev` Claude Code plugin from the package: yes.** The live questions
+  that gated it came back clean: the inline pane in a VS Code tab (Q2), and trust (Q4: trust
+  gates the session, and the mod loads on accept with no reload). Ship in this order and
+  shape:
+  1. **Guard and attribution scrub first.** They carry no drawing risk. Keep the shell write
+     guard as the cross-harness floor, and route both through one mod so the shell hook is
+     never silently skipped (the ordering rule in #1761).
+  2. **Context band and issue peek next.**
+     - Fit labels to `bodyColumns` (finding 11).
+     - Send Tower the workspace root rather than the session cwd (finding 2).
+     - Add a small Tower-side issue cache, or keep the mod's `$.store` prefetch, to remove
+       the ~1 s cold wait.
+  3. **The plugin loads from the installed package folder, never a path a session writes**
+     (finding 10). Hot reload stays off outside deliberate authoring.
+  4. **CI:**
+     - warm `claude` with one networked run (finding 8);
+     - run `claude plugin test`;
+     - add a `claude -p "/<cmd>" --plugin-dir` probe (finding 7).
+  5. **Candidate 8 (arch-init on clear) is viable**, through `$.command.run` only (findings
+     9 and Q3). Gate it on `afx whoami` naming an architect.
+  6. **Before relying on the plugin in builders,** check the spawn case finding 13 leaves
+     open: a builder launched without `--dangerously-skip-permissions`, in a worktree
+     outside a trusted parent.
+- **Decision 2, builders neither install nor author mods, and the spawn path is the only
+  loader: yes, and the spike strengthens it.**
+  - Finding 10 is the case the decision anticipated, observed live: a session with a mod
+    loaded and write access to the mod's folder changed the mod it runs under, unasked.
+    The change happened to be correct; the next one need not be.
+  - Write the rule into the builder role. The shipped plugin's folder must not be one a
+    builder session writes to.
+  - The spike shows the rule costs authoring nothing. All of the builder's work was done
+    without loading a mod into its session: validate, plugin test, headless `claude -p`
+    probes. The live questions went to a human-watched session.
