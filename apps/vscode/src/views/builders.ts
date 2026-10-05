@@ -106,10 +106,12 @@ export function agentTargetIsFocused(
  * The order in which the agent-cycle command (`codev.focusNext/PreviousAgentTerminal`,
  * #1563) attempts targets: starting from the focused agent's neighbor in `direction`
  * and walking with wrap-around, each roster entry exactly once. Empty when the roster
- * has ≤1 agent (nothing to cycle to) — the command shows its status-bar hint then. A
- * `currentIndex` of −1 (nothing focused) starts at the first entry going forward, the
- * last going back. The command opens the first attempt that succeeds, so an entry that
- * fails to open is simply the one tried before the next — the walk can't wedge on it
+ * is empty, or when its only agent is the focused one (nothing to cycle to) — the
+ * command shows a status-bar hint then. A `currentIndex` of −1 (nothing focused) starts
+ * at the first entry going forward, the last going back, whatever the roster size, so
+ * a lone agent that isn't focused is opened rather than hinted at (#1748). The command
+ * opens the first attempt that succeeds, so an entry that fails to open is simply the
+ * one tried before the next — the walk can't wedge on it
  * (the focused agent itself is the final attempt, a no-op re-show if all others fail).
  * Pure and vscode-free, so the walk arithmetic is unit-testable without the extension.
  */
@@ -118,7 +120,8 @@ export function agentCycleAttemptOrder(
   currentIndex: number,
   direction: 1 | -1,
 ): AgentTarget[] {
-  if (order.length <= 1) { return []; }
+  if (order.length === 0) { return []; }
+  if (order.length === 1 && currentIndex !== -1) { return []; }
   const attempts: AgentTarget[] = [];
   let index = currentIndex;
   for (let step = 0; step < order.length; step++) {
@@ -665,10 +668,10 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     const iconName = isBlocked ? gateIconFor(b.blockedGate) : icon;
     item.iconPath = new vscode.ThemeIcon(iconName, new vscode.ThemeColor(color));
     // The row click runs `codev.openBuilderRow` — a wrapper that opens the
-    // builder terminal AND expands the row (so single-click matches what
-    // most users expect). Pass the item itself so the handler can call
-    // `buildersView.reveal(...)` against this row. Other callers
-    // (terminal-link clicks, etc.) still use `codev.openBuilderById`
+    // builder terminal and, when `codev.buildersClickExpands` is on (the
+    // default), also expands the row (the file list). Pass the item itself so
+    // the handler can call `buildersView.reveal(...)` against this row. Other
+    // callers (terminal-link clicks, etc.) still use `codev.openBuilderById`
     // directly with just the id and don't trigger expansion.
     item.command = {
       command: 'codev.openBuilderRow',
@@ -867,6 +870,39 @@ export class AccordionGate {
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     this.openBuilderId = undefined;
+  }
+}
+
+/**
+ * Injected effects for {@link runBuilderRowClick}, so the on/off branch is
+ * unit-testable without a live terminal manager or tree view.
+ */
+export interface BuilderRowClickEffects {
+  /** Open (or focus) the builder's terminal. Always runs on a row click. */
+  openTerminal: () => unknown;
+  /** Expand + reveal the row in the tree. Runs only when the setting is on. */
+  expandRow: () => PromiseLike<unknown>;
+}
+
+/**
+ * A single click on a builder row (#1743): always open the terminal, and expand
+ * the row only when `codev.buildersClickExpands` is on (the default — behavior
+ * unchanged). When off, the row's expand state is left untouched and only the
+ * chevron toggles it. The expand runs via `reveal({expand:true})`, which fires
+ * `onDidExpandElement` and lets the accordion collapse peers; the click setting
+ * does not touch that chevron path. `expandRow` errors are swallowed — benign
+ * when the row is gone mid-cleanup.
+ */
+export async function runBuilderRowClick(
+  clickExpands: boolean,
+  effects: BuilderRowClickEffects,
+): Promise<void> {
+  await effects.openTerminal();
+  if (!clickExpands) { return; }
+  try {
+    await effects.expandRow();
+  } catch {
+    // Benign if the row is no longer present (e.g. mid-cleanup).
   }
 }
 

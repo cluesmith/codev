@@ -1,0 +1,17 @@
+id: bugfix-1754
+title: consult-workspace-env-silently
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-09-29T20:26:52.500Z'
+    approved_at: '2026-10-01T18:57:29.103Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-29T19:58:21.199Z'
+updated_at: '2026-10-01T18:57:29.103Z'
+pr_ready_for_human: false

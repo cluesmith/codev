@@ -366,8 +366,8 @@ agy   # run once and sign in (OAuth / Google subscription)
 ```
 
 Configure auth:
-- Claude: `ANTHROPIC_API_KEY`
-- Codex: `OPENAI_API_KEY`
+- Claude: the stored `claude` login, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`
+- Codex: the stored `codex login`, or `CODEX_API_KEY` (codex ignores `OPENAI_API_KEY`)
 - Gemini (`agy`): **OAuth / subscription** — run `agy` once and sign in (no API key). If `agy`
   is missing or unauthenticated, the gemini lane skips non-blockingly (the run proceeds without it).
 
@@ -433,6 +433,13 @@ authenticates against the **subscription** rather than the **metered Opus API**.
 The Agent SDK otherwise prioritizes `ANTHROPIC_API_KEY`, which silently routes
 CMAP/review traffic to the metered API (issue #985). When no OAuth token is set,
 the API key is used as before so CI / key-only environments keep working.
+
+**Workspace `.env` (issue #1754).** `consult` loads `<workspace>/.env` and sets every key the
+shell does not already define, credentials included. So a `CLAUDE_CODE_OAUTH_TOKEN` there
+overrides your stored login and, via the strip above, displaces the API key too; `CODEX_API_KEY`
+does the same for codex. Each SDK lane logs what it authenticates with, e.g.
+`[CLAUDE] auth: CLAUDE_CODE_OAUTH_TOKEN (from .env)`. A result the SDK flags as an error (usage
+limit, billing, auth) fails the run with no output file, and the error names that credential.
 
 > **Caveat:** dedicated Agent-SDK subscription credit starts **2026-06-15**.
 > Before that date, subscription auth draws from the interactive Max quota.

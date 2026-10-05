@@ -12,7 +12,7 @@ import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
-import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
+import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, diffStepHunk, recordDiffNavPosition, openBuilderDiffLocation } from './commands/diff-nav.js';
 import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
 import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
@@ -41,9 +41,8 @@ import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
 import { activateBuilderReviewComments } from './comments/builder-review.js';
 import { ReviewQueueStore } from './review-queue/store.js';
-import { submitReview, discardReviewComments } from './review-queue/submit.js';
+import { submitReview, discardReviewComments, resendReview, markReviewDelivered } from './review-queue/submit.js';
 import { feedbackFile, feedbackHunk, feedbackSelection } from './review-queue/feedback.js';
-import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
 import { activateOverviewNudge } from './review-queue/overview-nudge.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
 import {
@@ -58,7 +57,11 @@ import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-ter
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
-import { BuildersProvider, AccordionGate, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
+import { BuildersProvider, AccordionGate, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
+// Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
+import { TowerFleetCache } from './views/tower-cache.js';
+import { TowerProvider } from './views/tower.js';
+import { registerTowerCommands } from './commands/switch-workspace.js';
 import { PullRequestsProvider, PullRequestTreeItem } from './views/pull-requests.js';
 import { BacklogProvider } from './views/backlog.js';
 import { visibleBacklogCount, formatBacklogTitle } from './views/backlog-filter.js';
@@ -272,11 +275,13 @@ export async function activate(context: vscode.ExtensionContext) {
 				break;
 			case 'reconnecting':
 				statusBarItem.text = '$(sync~spin) Codev: Reconnecting...';
-				statusBarItem.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+				// No warning/error foreground here (#1747): those tokens pair with a
+				// background and default to white, illegible on a light status bar.
+				statusBarItem.color = undefined;
 				break;
 			case 'disconnected':
 				statusBarItem.text = '$(circle-slash) Codev: Offline';
-				statusBarItem.color = new vscode.ThemeColor('statusBarItem.errorForeground');
+				statusBarItem.color = undefined;
 				break;
 		}
 	});
@@ -296,8 +301,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
 	);
 	context.subscriptions.push(reviewQueueStore);
-	// Load persisted queues so the palette Submit Review and the status-bar
-	// counter see them right after a reload, before any diff is opened.
+	// Load persisted queues so the palette Submit Review and the contextual
+	// panel's Code Review body see them right after a reload, before any diff
+	// is opened.
 	reviewQueueStore.preloadFromDisk();
 
 	// Drive the `codev.terminalFocused` context key so the Cmd/Ctrl+V image
@@ -575,7 +581,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// surface and posts a ModeDescriptor to its webview. Takes the terminal manager for the
 	// builder-terminal surface (getActiveBuilderId). (#921's Codev Dev panel view was removed —
 	// its status is carried by the status-bar chip below.)
-	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!, overviewCache);
+	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!, overviewCache, reviewQueueStore);
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,
@@ -604,10 +610,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 			// server-process (a running dev), not zap — $(zap) reads as AI/sparkle in VSCode.
 			devChipItem.text = `$(server-process) Dev: ${target}`;
-			// StatusBarItem.backgroundColor only honors error/warning backgrounds
-			// (VSCode API constraint), so the "prominent, not alarming" look
-			// (#921 design call #4) is applied via the foreground instead.
-			devChipItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
+			// Default foreground on purpose (#1747): `statusBarItem.prominentForeground`
+			// pairs with a prominent background the API cannot set (backgroundColor
+			// only honors error/warning), and light themes make it white-on-light.
 			devChipItem.tooltip = `Codev dev running for ${target}. Click to show the dev terminal`;
 			devChipItem.show();
 		} else if (devChipItem) {
@@ -864,6 +869,49 @@ export async function activate(context: vscode.ExtensionContext) {
 	const setGroupBy = (axis: 'stage' | 'area' | 'architect') =>
 		vscode.workspace.getConfiguration('codev').update('buildersGroupBy', axis, vscode.ConfigurationTarget.Global);
 
+	// --- Codev Tower (#1566): cross-workspace navigation hub -----------------------------------
+	// A separate activity-bar container (machine-scope), distinct from the workspace-scope views
+	// above. Its own cross-workspace cache fans out per-workspace overviews over the SAME shared SSE
+	// (connectionManager.onSSEEvent) — no second EventSource. The container icon's badge carries the
+	// machine-wide needs-attention count (only this container badges — the badge means machine-scope).
+	// Registered here (after reg/regCli) so its commands route through the CLI-preflight guard.
+	const towerCache = new TowerFleetCache(connectionManager);
+	context.subscriptions.push({ dispose: () => towerCache.dispose() });
+	const towerProvider = new TowerProvider(towerCache, connectionManager);
+	context.subscriptions.push(towerProvider);
+	const towerView = vscode.window.createTreeView('codev.tower', {
+		treeDataProvider: towerProvider,
+	});
+	const updateTowerBadge = (): void => {
+		const count = towerCache.getAttentionCount();
+		if (count > 0) {
+			const noun = count === 1 ? 'workspace needs' : 'workspaces need';
+			towerView.badge = { value: count, tooltip: `${count} ${noun} attention` };
+		} else {
+			towerView.badge = undefined;
+		}
+	};
+	updateTowerBadge();
+	registerTowerCommands(context, connectionManager, towerCache, regCli);
+	context.subscriptions.push(
+		towerView,
+		towerCache.onDidChange(updateTowerBadge),
+		reg('codev.tower.refresh', () => towerCache.refresh()),
+	);
+	// Populate as soon as Tower is reachable; refreshes thereafter ride the shared SSE + poll.
+	towerCache.refresh();
+	// The container defaults to the secondary side bar, which VS Code keeps hidden — so a fresh user
+	// wouldn't see Tower at all. Reveal it exactly once (per profile) to open the secondary side bar
+	// for discovery, then respect the user's layout. Gated like the panel reveal (#1144): a dormant
+	// window must not steal focus or consume the one-time flag, so the nudge still fires on the user's
+	// first real Codev window.
+	const TOWER_REVEALED_KEY = 'codev.towerRevealedOnce';
+	if (policy.revealPanelOnce && !context.globalState.get(TOWER_REVEALED_KEY)) {
+		vscode.commands.executeCommand('workbench.view.extension.codev-tower');
+		context.globalState.update(TOWER_REVEALED_KEY, true);
+	}
+	// --- end Codev Tower ------------------------------------------------------------------------
+
 	// Move focus to the next (+1) or previous (-1) agent terminal in the Agents-view
 	// rendered order (#1563). The roster comes from the tree provider itself
 	// (`agentCycleOrder`), so the cycle mirrors the sidebar exactly and stays
@@ -872,8 +920,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// roster is every live agent in the view, not just open tabs. The current
 	// position is the focused agent terminal (builder id, else architect name);
 	// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
-	// last-focused agent. Nothing focused → start at the ends. ≤1 agent → no-op with a
-	// status-bar hint.
+	// last-focused agent. Nothing focused → start at the ends, even for a lone agent
+	// (#1748). Empty roster, or a lone agent already focused → no-op with a status-bar hint.
 	// Open + focus one roster entry; returns true when a terminal was actually opened.
 	const openAgentTarget = async (t: AgentTarget): Promise<boolean> => {
 		if (t.kind === 'builder') {
@@ -899,11 +947,15 @@ export async function activate(context: vscode.ExtensionContext) {
 			t => agentTargetIsFocused(t, activeBuilderId, activeArchitectName));
 
 		// Walk with wrap-around, opening the first entry that succeeds and skipping any
-		// that fails so one stale agent can't wedge the cycle. Empty attempts means the
-		// roster has <=1 agent -- a no-op with a status-bar hint.
+		// that fails so one stale agent can't wedge the cycle. Empty attempts means an
+		// empty roster or a lone agent already focused -- a no-op with a status-bar hint.
 		const attempts = agentCycleAttemptOrder(order, currentIndex, direction);
 		if (attempts.length === 0) {
-			vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
+			if (order.length === 0) {
+				vscode.window.setStatusBarMessage('Codev: no agent terminals', 3000);
+			} else {
+				vscode.window.setStatusBarMessage('Codev: no other agent terminal to cycle to', 3000);
+			}
 			return;
 		}
 		for (const target of attempts) {
@@ -1162,18 +1214,21 @@ export async function activate(context: vscode.ExtensionContext) {
 			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
 		}),
 		reg('codev.openBuilderRow', async (item: unknown) => {
-			// Builder-row single-click does BOTH: opens the terminal and expands
-			// the row (the file list). Expansion is via reveal(expand:true) which
-			// fires onDidExpandElement — the accordion handler picks that up and
-			// collapses peers when the setting is on. focus:false keeps the
-			// terminal focused, not the tree.
+			// Builder-row single-click opens the terminal, and — when
+			// `codev.buildersClickExpands` is on (the default) — also expands the
+			// row (the file list). Expansion is via reveal(expand:true) which fires
+			// onDidExpandElement — the accordion handler picks that up and collapses
+			// peers when that setting is on. focus:false keeps the terminal focused,
+			// not the tree. The setting is read here at click time (like
+			// buildersAutoReveal) so no restart is needed; the decision core lives
+			// in `runBuilderRowClick`.
 			if (!(item instanceof BuilderTreeItem)) { return; }
-			await terminalManager?.openBuilderByRoleOrId(item.builderId, true);
-			try {
-				await buildersView!.reveal(item, { expand: true, select: false, focus: false });
-			} catch {
-				// Benign if the row is no longer present (e.g. mid-cleanup).
-			}
+			const clickExpands =
+				vscode.workspace.getConfiguration('codev').get<boolean>('buildersClickExpands', true);
+			await runBuilderRowClick(clickExpands, {
+				openTerminal: () => terminalManager?.openBuilderByRoleOrId(item.builderId, true),
+				expandRow: () => buildersView!.reveal(item, { expand: true, select: false, focus: false }),
+			});
 		}),
 		reg('codev.focusNextAgentTerminal', () => cycleAgentTerminal(1)),
 		reg('codev.focusPreviousAgentTerminal', () => cycleAgentTerminal(-1)),
@@ -1313,16 +1368,33 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Submit Review + Discard (#1037): flush / drop the per-builder pending
 		// comment queue. Builder resolution: active diff's owner → sole pending
 		// builder → QuickPick.
-		// The status-bar button invokes this with no arg (resolves the target
-		// builder itself); the deck's Send Fb key relays `send-queue [builderId]`,
-		// so an explicit id string flushes exactly that builder's queue (#1410).
-		reg('codev.submitReview', (builderId?: unknown) =>
+		// The palette invokes these with no arg (they resolve the target builder
+		// themselves); the contextual panel's Code Review buttons (#1559) and the
+		// deck's Send Fb key (`send-queue [builderId]`, #1410) pass an explicit id
+		// string, which acts on exactly that builder's queue.
+		reg('codev.submitReview', (builderId?: unknown, options?: unknown) =>
 			submitReview(
 				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
 				typeof builderId === 'string' ? builderId : undefined,
+				{ pendingOnly: (options as { pendingOnly?: unknown } | undefined)?.pendingOnly === true },
 			)),
-		reg('codev.discardReviewComments', () =>
-			discardReviewComments({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		reg('codev.discardReviewComments', (builderId?: unknown) =>
+			discardReviewComments(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
+		// The sent-unconfirmed record's two explicit actions (#1559): re-send it to
+		// the prompt, or confirm delivery and drop it.
+		reg('codev.resendReview', (builderId?: unknown) =>
+			resendReview(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
+		reg('codev.markReviewDelivered', (builderId?: unknown) =>
+			markReviewDelivered(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
 		// Mode-neutral review feedback (#1410, #1552): the deck diff/scroll dials
 		// press these; each opens the native comment reply box at the anchor so the
 		// reviewer authors the comment, which Submit then forwards or enqueues per
@@ -1408,6 +1480,19 @@ export async function activate(context: vscode.ExtensionContext) {
 		// builder's changed-file list top-to-bottom (next) / bottom-to-top (prev),
 		// opening each file's per-file diff. CLI-independent — operates on editor
 		// state + the shared diff cache, not Tower.
+		// Contextual panel file refs (#1559): open a builder file at a line, in its
+		// per-file diff when the file is one of the builder's changes. Internal
+		// (hidden from the palette); the panel passes a validated target.
+		reg('codev.openBuilderFileLocation', (target?: unknown) => {
+			const t = target as { builderId?: unknown; relPath?: unknown; line?: unknown } | undefined;
+			if (typeof t?.builderId !== 'string' || typeof t.relPath !== 'string') { return; }
+			let line: number | undefined;
+			if (typeof t.line === 'number') { line = t.line; }
+			return openBuilderDiffLocation(
+				{ builderId: t.builderId, relPath: t.relPath, line },
+				{ context, overviewCache, diffCache: builderDiffCache },
+			);
+		}),
 		reg('codev.diffNextFile', () =>
 			navigateDiff(1, { context, overviewCache, diffCache: builderDiffCache })),
 		reg('codev.diffPreviousFile', () =>
@@ -1422,6 +1507,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		reg('codev.openBuilderDiffFirstFile', (arg: vscode.TreeItem | string | undefined) =>
 			navigateBuilderDiffToFirst(extractBuilderId(arg), { context, overviewCache, diffCache: builderDiffCache })),
 		reg('codev.diffFirstHunk', () => diffFirstHunk()),
+		// Next/previous change, continuing from the viewport when the reviewer
+		// scrolled away from the cursor (#1546).
+		reg('codev.diffNextHunk', () => diffStepHunk(1)),
+		reg('codev.diffPrevHunk', () => diffStepHunk(-1)),
 		regCli('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
 		regCli('codev.stopWorktreeDev', () =>
@@ -1542,10 +1631,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	activateReviewComments(context, overviewCache);
 
 	// Builder review comments (#1037): inline threads on builder-diff files
-	// feeding the per-builder pending queue, plus the status-bar Submit Review
-	// counter. The batched submit itself is `codev.submitReview` above.
+	// feeding the per-builder pending queue. The batched submit itself is
+	// `codev.submitReview` above, surfaced in the contextual panel's Code Review
+	// body (#1559).
 	activateBuilderReviewComments(context, reviewQueueStore, overviewCache);
-	activateSubmitReviewStatusBar(context, reviewQueueStore);
 	// #1410: nudge Tower to rebuild + rebroadcast the overview on a queue mutation
 	// or a feedback-mode change, so the deck's Send Fb badge + dial mode-label
 	// update promptly (Tower has no watcher on the queue files / settings.json).

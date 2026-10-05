@@ -45,6 +45,7 @@ porch approve 42 pr --a-human-explicitly-approved-this
 
 ```bash
 porch pending                  # List all gates waiting for approval
+porch pending --all            # Include stale records on finished/advanced projects (hidden by default)
 ```
 
 ## Critical rules

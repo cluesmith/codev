@@ -3,8 +3,28 @@ import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-libra
 import * as React from 'react';
 import { ArtifactCanvas } from '../ArtifactCanvas.js';
 import type { ReviewMarker } from '../../types.js';
+import type { CommandAdapter, CanvasCommandInvocation } from '../../adapters/CommandAdapter.js';
 
 afterEach(cleanup);
+
+/**
+ * A test double for the remote-command channel (spec 1401): captures the canvas's subscriber so a
+ * test can drive `block-next`/`block-prev` — the Stream Deck fine-review dial's walk — directly,
+ * the same `anyBlock` stepping the keyboard has no key for.
+ */
+function makeCommandAdapter(): { adapter: CommandAdapter; send: (command: CanvasCommandInvocation['command'], count?: number) => void } {
+  let onCommand: ((inv: CanvasCommandInvocation) => void) | null = null;
+  const adapter: CommandAdapter = {
+    subscribe: (cb) => {
+      onCommand = cb;
+      return { dispose: vi.fn(() => { onCommand = null; }) };
+    },
+  };
+  const send = (command: CanvasCommandInvocation['command'], count?: number): void => {
+    act(() => onCommand?.({ command, count }));
+  };
+  return { adapter, send };
+}
 
 // focusBlock() scroll-follows every jump; jsdom has no scrollIntoView, so install one for the file.
 const scrollSpy = vi.fn();
@@ -131,15 +151,23 @@ describe('jump navigation (#1237)', () => {
     expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
   });
 
-  it('n lands on the OUTERMOST element when nested blocks share the line (list dedupe)', async () => {
-    await mount('# Title\n\n- item one\n<!-- REVIEW(@bob): fix the list -->');
+  // #1738: a marker on the FIRST list item lands on — and decorates — the <li>, not the whole
+  // <ul>. (Before the fix the container shared the item's line and won the outermost-per-line
+  // dedupe, so `n` landed on the UL and the list itself carried the marker class.)
+  it('n lands on the first LIST ITEM, and the marker decorates the <li> not the list (#1738)', async () => {
+    await mount('# Title\n\n- item one\n<!-- REVIEW(@bob): fix item one -->');
     await waitFor(() =>
       expect(document.querySelector('.codev-canvas-has-marker')).not.toBeNull(),
     );
     act(() => block(0).focus());
     press('n');
-    expect((document.activeElement as HTMLElement).tagName).toBe('UL');
-    expect((document.activeElement as HTMLElement).classList.contains('codev-canvas-has-marker')).toBe(true);
+    const active = document.activeElement as HTMLElement;
+    expect(active.tagName).toBe('LI');
+    expect(active.classList.contains('codev-canvas-has-marker')).toBe(true);
+    // The wrapper is neither navigable nor decorated.
+    const ul = document.querySelector('.codev-artifact-canvas-body ul') as HTMLElement;
+    expect(ul.getAttribute('data-line')).toBeNull();
+    expect(ul.classList.contains('codev-canvas-has-marker')).toBe(false);
   });
 
   it('keys inside the composer are never intercepted (typing "n" stays in the textarea)', async () => {
@@ -212,6 +240,65 @@ describe('focus management across the post-write rebuild (#1237)', () => {
       expect(block(4)).toBeNull(); // the commented block is gone
       expect(document.activeElement).toBe(block(2)); // nearest preceding block, not document.body
     });
+  });
+});
+
+// The exact user path from #1738: stepping one block at a time (the fine-review dial's
+// `block-next`) must visit the FIRST child of every container, not jump the whole container and
+// land on child #2. Before the fix the container shared its first child's line and won the
+// outermost-per-line dedupe, so item 1 had no slot of its own.
+describe('block stepping visits the first child of every container (#1738)', () => {
+  it('block-next steps paragraph → item 1 → item 2 → item 3 (no first item skipped)', async () => {
+    const { adapter, send } = makeCommandAdapter();
+    await mount('Intro.\n\n1. first\n2. second\n3. third', { commandAdapter: adapter });
+    act(() => block(0).focus()); // the intro paragraph
+    send('block-next');
+    let active = document.activeElement as HTMLElement;
+    expect(active.tagName).toBe('LI');
+    expect(active.getAttribute('data-line')).toBe('2');
+    expect(active.textContent).toContain('first');
+    send('block-next');
+    active = document.activeElement as HTMLElement;
+    expect(active.getAttribute('data-line')).toBe('3');
+    expect(active.textContent).toContain('second');
+    send('block-next');
+    expect((document.activeElement as HTMLElement).getAttribute('data-line')).toBe('4');
+  });
+
+  it('block-next descends a nested list item by item (not the wrapping <ul>s)', async () => {
+    const { adapter, send } = makeCommandAdapter();
+    await mount('Intro.\n\n- outer\n  - nested one\n  - nested two', { commandAdapter: adapter });
+    act(() => block(0).focus());
+    send('block-next');
+    let active = document.activeElement as HTMLElement;
+    expect(active.tagName).toBe('LI'); // the outer ITEM, not the whole outer <ul> (the pre-#1738 bug)
+    expect(active.getAttribute('data-line')).toBe('2');
+    send('block-next');
+    active = document.activeElement as HTMLElement;
+    expect(active.tagName).toBe('LI'); // the first NESTED item, not the nested <ul>
+    expect(active.getAttribute('data-line')).toBe('3');
+    send('block-next');
+    active = document.activeElement as HTMLElement;
+    expect(active.tagName).toBe('LI');
+    expect(active.getAttribute('data-line')).toBe('4'); // nested two
+  });
+
+  it('block-next visits both paragraphs of a blockquote — the first no longer swallowed by the quote', async () => {
+    const { adapter, send } = makeCommandAdapter();
+    await mount('Intro.\n\n> para one\n>\n> para two', { commandAdapter: adapter });
+    act(() => block(0).focus());
+    send('block-next');
+    let active = document.activeElement as HTMLElement;
+    // The inner paragraph, not the <blockquote> wrapper (which pre-#1738 owned this line).
+    expect(active.tagName).toBe('P');
+    expect(active.closest('blockquote')).not.toBeNull();
+    expect(active.getAttribute('data-line')).toBe('2');
+    expect(active.textContent).toContain('para one');
+    send('block-next');
+    active = document.activeElement as HTMLElement;
+    expect(active.tagName).toBe('P');
+    expect(active.getAttribute('data-line')).toBe('4');
+    expect(active.textContent).toContain('para two');
   });
 });
 

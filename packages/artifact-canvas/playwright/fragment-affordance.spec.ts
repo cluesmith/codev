@@ -90,7 +90,9 @@ test('nested block inside a FRAGMENTED host row anchors in the hovered column (p
   // The filler lists are multi-item ULs; find one whose UL fragments across columns so an li
   // sits in a continuation fragment of its own host row.
   const probe = await body.evaluate((el) => {
-    const uls = Array.from(el.querySelectorAll(':scope > ul[data-line]'));
+    // Top-level list wrappers carry `data-row`, not `data-line`, since #1738 (their items are the
+    // navigable blocks); the wrapper is still the fragmenting host row this probe needs.
+    const uls = Array.from(el.querySelectorAll(':scope > ul[data-row]'));
     for (const ul of uls) {
       const ulRects = Array.from(ul.getClientRects());
       if (ulRects.length < 2) continue;

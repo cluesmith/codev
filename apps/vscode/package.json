@@ -22,7 +22,7 @@
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.105.0"
+    "vscode": "^1.128.0"
   },
   "categories": [
     "AI",
@@ -45,6 +45,19 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Codev works in Restricted Mode. Workspace-provided Tower connection and auto-start settings are ignored until the folder is trusted.",
+      "restrictedConfigurations": [
+        "codev.towerHost",
+        "codev.towerPort",
+        "codev.workspacePath",
+        "codev.autoStartTower"
+      ]
+    }
+  },
   "contributes": {
     "customEditors": [
       {
@@ -59,6 +72,25 @@
       }
     ],
     "commands": [
+      {
+        "command": "codev.switchWorkspace",
+        "title": "Codev: Switch Workspace"
+      },
+      {
+        "command": "codev.tower.openWorkspace",
+        "title": "Codev: Open Workspace",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "codev.tower.deactivateWorkspace",
+        "title": "Codev: Deactivate Workspace",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "codev.tower.refresh",
+        "title": "Codev: Refresh Tower",
+        "icon": "$(refresh)"
+      },
       {
         "command": "codev.helloWorld",
         "title": "Codev: Show Connection State"
@@ -275,6 +307,14 @@
         "title": "Codev: Go to First Change in Diff"
       },
       {
+        "command": "codev.diffNextHunk",
+        "title": "Codev: Go to Next Change in Diff (from Viewport)"
+      },
+      {
+        "command": "codev.diffPrevHunk",
+        "title": "Codev: Go to Previous Change in Diff (from Viewport)"
+      },
+      {
         "command": "codev.openWorktreeWindow",
         "title": "Codev: Open Worktree in New Window"
       },
@@ -418,6 +458,18 @@
         "title": "Codev: Discard Review Comments"
       },
       {
+        "command": "codev.resendReview",
+        "title": "Codev: Re-send Review"
+      },
+      {
+        "command": "codev.markReviewDelivered",
+        "title": "Codev: Mark Review Delivered"
+      },
+      {
+        "command": "codev.openBuilderFileLocation",
+        "title": "Codev: Open Builder File Location"
+      },
+      {
         "command": "codev.submitBuilderComment",
         "title": "Queue Comment for Builder",
         "enablement": "!commentIsEmpty"
@@ -485,6 +537,18 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "codev.tower.deactivateWorkspace",
+          "when": "false"
+        },
+        {
+          "command": "codev.openBuilderFileLocation",
+          "when": "false"
+        },
+        {
+          "command": "codev.tower.openWorkspace",
+          "when": "false"
+        },
         {
           "command": "codev.openMarkdownPreview",
           "when": "resourceLangId == markdown && resourcePath =~ /\\/codev\\/(plans|specs|reviews)\\//"
@@ -660,6 +724,16 @@
       ],
       "view/item/context": [
         {
+          "command": "codev.tower.openWorkspace",
+          "when": "view == codev.tower && viewItem =~ /^tower-workspace-(active|dormant)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "codev.tower.deactivateWorkspace",
+          "when": "view == codev.tower && viewItem == tower-workspace-active",
+          "group": "inline@2"
+        },
+        {
           "command": "codev.recheckCli",
           "when": "view == codev.status && viewItem =~ /^codev-cli-(missing|outdated)$/",
           "group": "inline@1"
@@ -776,6 +850,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "codev.tower.refresh",
+          "when": "view == codev.tower",
+          "group": "navigation@1"
+        },
         {
           "command": "codev.refreshOverview",
           "when": "view == codev.agents",
@@ -993,6 +1072,16 @@
         "when": "codev.activeEditorIsBuilderFile"
       },
       {
+        "command": "codev.diffNextHunk",
+        "key": "alt+f5",
+        "when": "textCompareEditorVisible && codev.activeTabIsBuilderDiff"
+      },
+      {
+        "command": "codev.diffPrevHunk",
+        "key": "shift+alt+f5",
+        "when": "textCompareEditorVisible && codev.activeTabIsBuilderDiff"
+      },
+      {
         "command": "workbench.view.extension.codev",
         "key": "ctrl+alt+c",
         "mac": "cmd+alt+c",
@@ -1031,6 +1120,13 @@
           "icon": "icons/codev.svg"
         }
       ],
+      "secondarySidebar": [
+        {
+          "id": "codev-tower",
+          "title": "Codev Tower",
+          "icon": "icons/tower.svg"
+        }
+      ],
       "panel": [
         {
           "id": "codevPanel",
@@ -1051,6 +1147,9 @@
       ],
       "codevPanel": [
         { "id": "codev.contextualPanel", "name": "Codev", "type": "webview" }
+      ],
+      "codev-tower": [
+        { "id": "codev.tower", "name": "Codev Tower" }
       ]
     },
     "viewsWelcome": [
@@ -1076,17 +1175,20 @@
         "codev.towerHost": {
           "type": "string",
           "default": "localhost",
-          "description": "Tower server host"
+          "description": "Tower server host",
+          "restricted": true
         },
         "codev.towerPort": {
           "type": "number",
           "default": 4100,
-          "description": "Tower server port"
+          "description": "Tower server port",
+          "restricted": true
         },
         "codev.workspacePath": {
           "type": "string",
           "default": "",
-          "description": "Override workspace path for Tower matching (auto-detected if empty)"
+          "description": "Override workspace path for Tower matching (auto-detected if empty)",
+          "restricted": true
         },
         "codev.terminalPosition": {
           "type": "string",
@@ -1134,7 +1236,8 @@
         "codev.autoStartTower": {
           "type": "boolean",
           "default": true,
-          "description": "Auto-start Tower if not running on activation"
+          "description": "Auto-start Tower if not running on activation",
+          "restricted": true
         },
         "codev.cliVersionTimeoutMs": {
           "type": "number",
@@ -1185,6 +1288,11 @@
           "default": true,
           "description": "Agents view: when the active builder-diff editor changes (keyboard navigation, a click inside the multi-file View Diff, or a per-file diff), reveal and select the matching file's row in the tree. The Agents-view equivalent of the Explorer's auto-reveal. When off, the sidebar selection only follows an explicit click."
         },
+        "codev.buildersClickExpands": {
+          "type": "boolean",
+          "default": true,
+          "description": "Agents view: a single click on a builder row opens its terminal AND expands the row to show its changed-files list. When off, the click only opens the terminal and leaves the row's expand state untouched; use the chevron to open the file list deliberately."
+        },
         "codev.backlogShowAll": {
           "type": "boolean",
           "default": false,
@@ -1218,6 +1326,9 @@
           "description": "Prose line-height (unitless multiplier) for the Codev Markdown Preview. 0 uses the built-in default (1.5, the github-markdown-css baseline)."
         }
       }
+    },
+    "configurationDefaults": {
+      "comments.openView": "never"
     },
     "walkthroughs": [
       {
@@ -1275,7 +1386,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/vscode": "~1.105.0",
+    "@types/vscode": "~1.125.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/react": "^19.0.0",
