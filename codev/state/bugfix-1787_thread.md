@@ -7,3 +7,7 @@
 
 ## Fix
 - One guard in deriveAttention: `prReady && blockedGate !== 'pr'`. Regression tests: sdk deriveAttention double-signal lane (verified failing on the pre-fix source) + Tower hub one-row test. sdk 146/146, vscode 1174/1174 (needed `pnpm --filter @cluesmith/codev-types build` first in a fresh worktree).
+
+## PR #1788 / CMAP
+- codex APPROVE, claude APPROVE, gemini skipped (agy produced no output; first run hit a no-PR-found race).
+- Took claude hardening: guard is `blocked !== null && blockedGate === pr` so a wire skew cannot drop the lane to zero rows; test added. Agents view never read pendingGates (hub + contextual panel only); PR body corrected.

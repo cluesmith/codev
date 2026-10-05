@@ -141,7 +141,8 @@ export function deriveAttention(data: OverviewData | null, now: number = Date.no
     if (builder.blocked !== null) {
       pendingGates.push({ ...ref, gate: builder.blocked, gateId: builder.blockedGate ?? null, since: builder.blockedSince });
     }
-    if (builder.prReady && builder.blockedGate !== 'pr') {
+    const porchRowCoversPr = builder.blocked !== null && builder.blockedGate === 'pr';
+    if (builder.prReady && !porchRowCoversPr) {
       pendingGates.push({ ...ref, gate: 'PR review', gateId: 'pr', since: null });
     }
 
