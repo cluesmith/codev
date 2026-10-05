@@ -134,12 +134,15 @@ export function deriveAttention(data: OverviewData | null, now: number = Date.no
 
     // A blocked porch gate (plan / dev review, etc). `blocked` is the display label; `blockedSince`
     // dates it. `prReady` is the separate, uniform "PR waiting on a reviewer" gate signal — a builder
-    // can present either, so both are checked independently.
+    // can present either, so both are checked independently. A lane parked at the porch `pr` gate
+    // with its PR open presents both for the same gate (#1787): keep only the porch row, which
+    // carries `since`. A different porch gate plus `prReady` is a real two-row case.
     const atGate = builder.blocked !== null || builder.prReady;
     if (builder.blocked !== null) {
       pendingGates.push({ ...ref, gate: builder.blocked, gateId: builder.blockedGate ?? null, since: builder.blockedSince });
     }
-    if (builder.prReady) {
+    const porchRowCoversPr = builder.blocked !== null && builder.blockedGate === 'pr';
+    if (builder.prReady && !porchRowCoversPr) {
       pendingGates.push({ ...ref, gate: 'PR review', gateId: 'pr', since: null });
     }
 

@@ -177,6 +177,14 @@ describe('TowerProvider', () => {
     expect(icons).toEqual(['checklist', 'git-pull-request']);
   });
 
+  it('shows a lane at the porch pr gate with its PR open as one hub row, not two (#1787)', () => {
+    const fleet = [entry(wsRow('/w/gate', 'gate', true), gated('PR review', 'pr', true))];
+    const provider = new TowerProvider(fakeCache(fleet), fakeCm(null));
+    const children = provider.getChildren(provider.getChildren()[0]).map((n) => provider.getTreeItem(n));
+    expect(children).toHaveLength(1);
+    expect((children[0].iconPath as { id: string }).id).toBe('git-pull-request');
+  });
+
   it('gives a quiet workspace no expansion and a plain row command', () => {
     const fleet = [entry(wsRow('/w/quiet', 'quiet', true), quiet())];
     const provider = new TowerProvider(fakeCache(fleet), fakeCm(null));
