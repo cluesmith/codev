@@ -33,6 +33,12 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Codev Tower: the fleet in your sidebar
+
+A new Tower view (#1566, PR #1767) lists every workspace your local Tower knows about, urgency-ordered so the one that needs you is on top, with an attention badge on its icon, a current-workspace marker, and switch and activate actions plus a `Codev: Switch Workspace` quick pick. Expanding a workspace shows what is waiting there, including held mail. It reads the one Tower event stream the extension already holds, so it adds no load.
+
+The Tower container opens in the secondary side bar (right) by default and reveals itself once on first run. Drag it anywhere; VS Code keeps your placement. Under the hood the attention ordering and relative-age wording moved into the shared SDK so the Tower view and the contextual panel can never disagree.
+
 ## Codev works in Restricted Mode
 
 Opening an untrusted folder no longer leaves the Codev sidebar inert until you trust the workspace (#1727, PR #1728). The extension activates immediately in Restricted Mode, and only four workspace-scoped settings that could redirect Tower or launch a process (Tower host and port, workspace path, auto-start) are held back until the folder is trusted. Your user-level values for those settings still apply.
