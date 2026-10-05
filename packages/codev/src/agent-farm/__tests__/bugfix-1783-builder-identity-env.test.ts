@@ -82,8 +82,11 @@ describe('builder identity from the spawn environment — issue #1783', () => {
     expect(detectCurrentBuilderId()).toBe('builder-experiment-1782');
   });
 
-  it('ignores an env value that does not name a builder worktree', () => {
-    process.env[BUILDER_WORKTREE_ENV] = workspacePath;
+  it.each([
+    ['the workspace root', () => workspacePath],
+    ['a relative path', () => 'workspace/.builders/experiment-1782'],
+  ])('ignores an env value that is %s, falling back to the cwd', (_label, value) => {
+    process.env[BUILDER_WORKTREE_ENV] = value();
     process.chdir(worktreePath);
     expect(detectCurrentBuilderId()).toBe('builder-experiment-1782');
   });

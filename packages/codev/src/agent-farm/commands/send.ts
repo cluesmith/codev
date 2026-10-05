@@ -41,7 +41,7 @@ const MAX_FILE_SIZE = MAX_MESSAGE_BYTES;
  */
 function identityPath(): string {
   const worktree = process.env[BUILDER_WORKTREE_ENV]?.trim();
-  if (worktree && /\/\.builders\/[^/]+/.test(worktree)) return worktree;
+  if (worktree && /^\/.+\/\.builders\/[^/]+/.test(worktree)) return worktree;
   return process.cwd();
 }
 

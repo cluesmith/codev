@@ -62,7 +62,7 @@ scar_rules:
       - codev/roles/builder.md
 
   - id: afx-from-root
-    canonical: "Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace."
+    canonical: "Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace. The exception is a builder's own `afx send`: run it from your own worktree so your identity resolves and plain `architect` reaches your spawning architect, not `main`."
     must_appear_on:
       - AGENTS.md
       - CLAUDE.md
