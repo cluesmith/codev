@@ -67,3 +67,10 @@ Now: folded the design-canvas reference + divergence note into the spec (head b2
 
 - architect:vscode approved the fold-in (spec content under their seat, NOT the gate). Added: design-canvas link in References + one-line ball-owner note (terminal activity excluded from AGENT WORKING; DONE/OFFLINE added beyond the canvas's five; endpoint carries /api/). One commit, pushed, SHA reported.
 - Spec content SHA is now b2666ebaf. Spec-approval word remains the owner's and is still OUTSTANDING. No plan work until it lands (and main's OQ1/OQ2 already landed). Not inferring approval from silence.
+
+## 2026-10-05 — pir-1566 merged; plan-phase reminders
+
+Now: holding at the owner's spec gate (spec head b2666ebaf); pir-1566 is on main at 5cb86ee51.
+
+- compareAttention (~204) and formatAge (~286) now on main in packages/sdk/src/builder-helpers.ts. Placement ruling unchanged: co-locate, no import dependency.
+- Plan-phase TODOs (architect:vscode ruling): merge current main into the branch first; refresh the spec's three "unmerged" references to 1566 (Baked Decision 12(b), Assumptions, main's ruling (b)) in the plan-phase commit. Do NOT touch the spec wording before the owner's word; it lands on b2666ebaf.
