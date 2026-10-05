@@ -43,6 +43,8 @@ const FORBIDDEN = [
 
 const HOLD_QUESTION = 'porch approve records a human gate. Did the human give the word for this gate?'
 const HOLD_YES = 'Yes, relayed verbatim'
+const HOLD_DISMISSED =
+  'The human dismissed the gate question, so porch approve was not run. Not approved: wait for the human to give the word; never retry to get the question again.'
 
 // ---------------------------------------------------------------------------
 // Measurement: a hook's own time, as the engine meters it (next and $ calls
@@ -194,16 +196,45 @@ export function summarize(all: Record<string, number[]>): string {
   return lines.join('\n')
 }
 
-function chipLabel(ref: IssueRef, title: string | undefined): string {
+export function ellipsize(text: string, max: number): string {
+  if (text.length <= max) {
+    return text
+  }
+  if (max <= 1) {
+    return '…'
+  }
+
+  return `${text.slice(0, max - 1).trimEnd()}…`
+}
+
+// One chip's label, fitted to `max` cells: the number always whole, the title
+// cut with an ellipsis (live Q2: a title ran hard into the tab's edge).
+export function chipLabel(ref: IssueRef, title: string | undefined, max: number): string {
   let label = `#${ref.number}`
   if (ref.isPR) {
     label = `PR ${label}`
   }
-  if (title !== undefined && title !== '') {
-    label = `${label} ${title.slice(0, 32)}`
+  const room = max - label.length - 1
+  if (title !== undefined && title !== '' && room >= 2) {
+    label = `${label} ${ellipsize(title, room)}`
   }
 
   return label
+}
+
+const CHIP_GAP = 2
+const HOTKEY_CELLS = 3 // "1: " a plain Button draws before its label
+
+// Cells each chip's label may take: the band's body less the context line,
+// shared evenly, less each chip's hotkey and the gap after it.
+export function chipRoom(bodyColumns: number, contextCells: number, chips: number): number {
+  let free = bodyColumns
+  if (contextCells > 0) {
+    free -= contextCells + CHIP_GAP
+  }
+  const share = Math.floor(free / Math.max(1, chips)) - HOTKEY_CELLS - CHIP_GAP
+
+  return Math.max(6, share)
 }
 
 function contextLine(fill: ContextFill): string {
@@ -237,6 +268,8 @@ function clip(text: string, max: number): string {
 export const register: Register = on => {
   // --- 1. Guard ------------------------------------------------------------
 
+  // Bookkeeping (record) runs BEFORE the command does, so a fault in it fails
+  // closed through .catch and never denies a command that already ran.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const hit = FORBIDDEN.find(f => f.re.test(e.command))
     if (hit) {
@@ -244,23 +277,33 @@ export const register: Register = on => {
       return { deny: 'codev guard: ' + hit.why }
     }
     if (/\bporch\s+approve\b/.test(e.command)) {
-      const answer = await $.ui.ask(HOLD_QUESTION, [HOLD_YES, 'No'])
+      let answer: string
+      try {
+        answer = await $.ui.ask(HOLD_QUESTION, [HOLD_YES, 'No'])
+      } catch {
+        // $.ui.ask rejects when the person dismisses the question, or when no one
+        // can be asked (-p). Say so, rather than letting it read as a guard fault.
+        await record($, 'tool.call:guard:hold-dismissed', ownMs(next.budget))
+        return { deny: HOLD_DISMISSED }
+      }
       if (answer !== HOLD_YES) {
         await record($, 'tool.call:guard:hold-refused', ownMs(next.budget))
         return { deny: 'Gate not approved. Wait for the human; never infer approval from silence.' }
       }
-      const held = ownMs(next.budget)
-      const approved = await next(e)
-      await record($, 'tool.call:guard:hold-approved', held)
-      return approved
+      await record($, 'tool.call:guard:hold-approved', ownMs(next.budget))
+      return next(e)
     }
-    const spent = ownMs(next.budget)
-    const ran = await next(e)
-    await record($, 'tool.call:guard:pass', spent)
+    await record($, 'tool.call:guard:pass', ownMs(next.budget))
 
-    return ran
+    return next(e)
   }).catch(async ($, e, next) => {
-    await record($, 'tool.call:guard:catch', ownMs(next.budget))
+    // A .catch that throws leaves the hook absent and the command RUNS, so
+    // nothing here may throw: the measurement is best effort.
+    try {
+      await record($, 'tool.call:guard:catch', ownMs(next.budget))
+    } catch {
+      // fall through to the deny
+    }
     return { deny: 'codev guard failed, so this command was not run.' }
   })
 
@@ -377,6 +420,11 @@ export const register: Register = on => {
       return next(e)
     }
     const { Box, Button, Text } = $.ui.resolve(e)
+    let contextCells = 0
+    if (fill !== null) {
+      contextCells = contextLine(fill).length
+    }
+    const room = chipRoom(e.props.bodyColumns, contextCells, list.length)
     const isOver = fill?.percent !== undefined && fill.percent >= SAVE_AT_PERCENT
     let contextColor = 'green'
     if (isOver) {
@@ -384,7 +432,7 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
+      <Box flexDirection="row" flexWrap="wrap" columnGap={CHIP_GAP}>
         {fill !== null && (
           <Box key="context"><Text color={contextColor}>
             {contextLine(fill)}
@@ -395,7 +443,7 @@ export const register: Register = on => {
             key={`chip-${ref.number}`}
             plain
             hotkey={String(index + 1)}
-            label={chipLabel(ref, known[ref.number])}
+            label={chipLabel(ref, known[ref.number], room)}
             onPress={() => openPeek($, ref.number)}
           />
         ))}

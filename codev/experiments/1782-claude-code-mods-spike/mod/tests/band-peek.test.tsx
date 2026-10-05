@@ -109,7 +109,8 @@ test('a reply naming issues grows one chip per reference; pressing one opens the
     const first = await band.find({ key: 'chip-1672' })
     const second = await band.find({ key: 'chip-1131' })
     expect(first?.props.hotkey).toBe('1')
-    expect(first?.text).toBe('#1672 Lane Card: per-lane status card')
+    // 76 cells shared by 2 chips, less hotkey and gap: 33 cells, so the title is cut.
+    expect(first?.text).toBe('#1672 Lane Card: per-lane status…')
     expect(second?.props.hotkey).toBe('2')
     expect(second?.text).toBe('PR #1131')
 
@@ -194,5 +195,28 @@ test('own time of the band, peek and scrub hooks stays inside the 10 s budget', 
   for (const line of text.split('\n')) {
     const max = Number(/max=(\d+(?:\.\d+)?)ms/.exec(line)?.[1] ?? 'NaN')
     expect(max, line).toBeLessThan(10_000)
+  }
+})
+
+test('chip titles are cut with an ellipsis to their share of the band, numbers kept whole', async ($, on) => {
+  const fetched: string[] = []
+  tower(on, fetched)
+  const clock = mock.clock(on, { now: 40_000 })
+  await $.session.measure({ context: { tokens: 12_000, window: 200_000, percent: 6 }, rateLimits: [], changed: ['context'] })
+  await completeTurn($, 'See #1672 and #1761.')
+  await clock.advance(1)
+
+  // 1761 is unknown to the fake Tower: give it a long title through the cache.
+  await $.command.run({ command: 'issue', args: '1672', ...RUN })
+  for (const surface of SURFACES) {
+    const band = await $.ui.mount({ plugin: 'codev-spike', surface, ...BAND, props: { ...BAND.props, bodyColumns: 60 } })
+    const chip = await band.find({ key: 'chip-1672' })
+    const label = String(chip?.props.label)
+    // 60 cells, less the context line (24) and a gap, shared by 2 chips, less hotkey and gap: 12.
+    expect(label.length).toBeLessThanOrEqual(12)
+    expect(label.startsWith('#1672')).toBe(true)
+    expect(label.endsWith('…')).toBe(true)
+    expect(String((await band.find({ key: 'chip-1761' }))?.props.label)).toBe('#1761')
+    await band.unmount()
   }
 })
