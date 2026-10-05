@@ -442,8 +442,10 @@ export const register: Register = on => {
   on('classic.SessionStart', { source: 'clear' }, async ($, e, next) => {
     const name = await $.env.get('CODEV_SPIKE_ARCH_INIT_NAME')
     if (name !== undefined && /^[a-z0-9-]+$/.test(name)) {
-      $.prompt.submit({ text: `/arch-init ${name}`, asUser: true }).catch(error => {
-        $.ui.log(`arch-init probe: submit rejected: ${String(error)}`)
+      // $.prompt.submit refuses text beginning with / (host check); a slash
+      // command, skills included, runs through $.command.run instead.
+      $.command.run({ command: 'arch-init', args: name }).catch(error => {
+        $.ui.log(`arch-init probe: command.run rejected: ${String(error)}`)
       })
     }
 
