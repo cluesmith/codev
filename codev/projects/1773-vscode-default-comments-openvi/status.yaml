@@ -1,7 +1,7 @@
 id: '1773'
 title: vscode-default-comments-openvi
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-05T00:59:20.254Z'
-updated_at: '2026-10-05T00:59:20.255Z'
+updated_at: '2026-10-05T01:05:38.501Z'
