@@ -24,15 +24,20 @@ const h = vi.hoisted(() => {
     }
     dispose(): void {}
   }
+  class TabInputTextDiff {
+    constructor(public original: { fsPath: string }, public modified: { fsPath: string }) {}
+  }
   const state = {
     activeEditor: undefined as unknown,
+    activeTabInput: undefined as unknown,
     setContextCalls: [] as Array<{ key: string; value: unknown }>,
   };
-  return { EventEmitter, state };
+  return { EventEmitter, TabInputTextDiff, state };
 });
 
 vi.mock('vscode', () => ({
   EventEmitter: h.EventEmitter,
+  TabInputTextDiff: h.TabInputTextDiff,
   Range: class {},
   CodeLens: class {},
   languages: { registerCodeLensProvider: () => ({ dispose() {} }) },
@@ -46,6 +51,7 @@ vi.mock('vscode', () => ({
   },
   window: {
     get activeTextEditor() { return h.state.activeEditor; },
+    tabGroups: { get activeTabGroup() { return { activeTab: { input: h.state.activeTabInput } }; } },
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
   },
   workspace: {
@@ -59,6 +65,7 @@ const {
   setDiffInjectSession,
   upsertDiffInjectEntry,
   BUILDER_FILE_CONTEXT_KEY,
+  BUILDER_DIFF_CONTEXT_KEY,
 } = await import('../diff-inject-codelens.js');
 
 function editorFor(fsPath: string): unknown {
@@ -73,6 +80,7 @@ const ENTRY = { fsPath: '/wt/pkg/src/a.ts', builderId: 'b1', relPath: 'pkg/src/a
 describe('#789 — activeEditorIsBuilderFile re-syncs on registry change', () => {
   beforeEach(() => {
     h.state.activeEditor = undefined;
+    h.state.activeTabInput = undefined;
     setDiffInjectSession([]); // clear the singleton registry
     h.state.setContextCalls.length = 0;
   });
@@ -99,5 +107,48 @@ describe('#789 — activeEditorIsBuilderFile re-syncs on registry change', () =>
 
     setDiffInjectSession([]); // e.g. a fresh viewDiff run without this file
     expect(lastContext()?.value).toBe(false);
+  });
+});
+
+describe('#1546 — activeTabIsBuilderDiff holds on either side of a builder diff', () => {
+  function lastFor(key: string): unknown {
+    const calls = h.state.setContextCalls.filter(c => c.key === key);
+    return calls[calls.length - 1]?.value;
+  }
+
+  beforeEach(() => {
+    h.state.activeEditor = undefined;
+    h.state.activeTabInput = undefined;
+    setDiffInjectSession([]);
+    h.state.setContextCalls.length = 0;
+  });
+
+  it('is true with the ORIGINAL side focused (where activeEditorIsBuilderFile is false)', () => {
+    h.state.activeEditor = { document: { uri: { fsPath: '/pkg/src/a.ts', toString: () => 'codev-diff:/pkg/src/a.ts' } } };
+    h.state.activeTabInput = new h.TabInputTextDiff({ fsPath: '/pkg/src/a.ts' }, { fsPath: ENTRY.fsPath });
+    activateDiffInjectCodeLens({ subscriptions: [] } as never);
+    upsertDiffInjectEntry(ENTRY);
+    expect(lastFor(BUILDER_FILE_CONTEXT_KEY)).toBe(false);
+    expect(lastFor(BUILDER_DIFF_CONTEXT_KEY)).toBe(true);
+  });
+
+  it('is true with the modified side focused', () => {
+    h.state.activeEditor = editorFor(ENTRY.fsPath);
+    h.state.activeTabInput = new h.TabInputTextDiff({ fsPath: '/pkg/src/a.ts' }, { fsPath: ENTRY.fsPath });
+    activateDiffInjectCodeLens({ subscriptions: [] } as never);
+    upsertDiffInjectEntry(ENTRY);
+    expect(lastFor(BUILDER_DIFF_CONTEXT_KEY)).toBe(true);
+  });
+
+  it('is false for an untracked diff and for a plain tab', () => {
+    h.state.activeEditor = editorFor('/other/b.ts');
+    h.state.activeTabInput = new h.TabInputTextDiff({ fsPath: '/other/b.ts' }, { fsPath: '/other/b.ts' });
+    activateDiffInjectCodeLens({ subscriptions: [] } as never);
+    upsertDiffInjectEntry(ENTRY);
+    expect(lastFor(BUILDER_DIFF_CONTEXT_KEY)).toBe(false);
+
+    h.state.activeTabInput = { uri: { fsPath: '/other/b.ts' } };
+    setDiffInjectSession([ENTRY]);
+    expect(lastFor(BUILDER_DIFF_CONTEXT_KEY)).toBe(false);
   });
 });
