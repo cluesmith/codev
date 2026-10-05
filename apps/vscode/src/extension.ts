@@ -12,7 +12,7 @@ import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
-import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
+import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, diffStepHunk, recordDiffNavPosition } from './commands/diff-nav.js';
 import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
 import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
@@ -1477,6 +1477,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		reg('codev.openBuilderDiffFirstFile', (arg: vscode.TreeItem | string | undefined) =>
 			navigateBuilderDiffToFirst(extractBuilderId(arg), { context, overviewCache, diffCache: builderDiffCache })),
 		reg('codev.diffFirstHunk', () => diffFirstHunk()),
+		// Next/previous change, continuing from the viewport when the reviewer
+		// scrolled away from the cursor (#1546).
+		reg('codev.diffNextHunk', () => diffStepHunk(1)),
+		reg('codev.diffPrevHunk', () => diffStepHunk(-1)),
 		regCli('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
 		regCli('codev.stopWorktreeDev', () =>

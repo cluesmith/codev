@@ -307,6 +307,14 @@
         "title": "Codev: Go to First Change in Diff"
       },
       {
+        "command": "codev.diffNextHunk",
+        "title": "Codev: Go to Next Change in Diff (from Viewport)"
+      },
+      {
+        "command": "codev.diffPrevHunk",
+        "title": "Codev: Go to Previous Change in Diff (from Viewport)"
+      },
+      {
         "command": "codev.openWorktreeWindow",
         "title": "Codev: Open Worktree in New Window"
       },
@@ -1046,6 +1054,16 @@
         "command": "codev.diffPreviousFile",
         "key": "ctrl+alt+[",
         "when": "codev.activeEditorIsBuilderFile"
+      },
+      {
+        "command": "codev.diffNextHunk",
+        "key": "alt+f5",
+        "when": "textCompareEditorVisible && codev.activeTabIsBuilderDiff"
+      },
+      {
+        "command": "codev.diffPrevHunk",
+        "key": "shift+alt+f5",
+        "when": "textCompareEditorVisible && codev.activeTabIsBuilderDiff"
       },
       {
         "command": "workbench.view.extension.codev",

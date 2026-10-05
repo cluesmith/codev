@@ -72,6 +72,23 @@ describe('package.json contributes.commands', () => {
     }
   });
 
+  it('declares the viewport-anchored hunk-step wrappers, bound over the built-in keys in builder diffs (#1546)', () => {
+    const keybindings: Array<{ command: string; key?: string; when?: string }> =
+      PKG.contributes.keybindings ?? [];
+    const expectedKey: Record<string, string> = {
+      'codev.diffNextHunk': 'alt+f5',
+      'codev.diffPrevHunk': 'shift+alt+f5',
+    };
+    for (const [command, key] of Object.entries(expectedKey)) {
+      expect(titleByCommand.get(command), `${command} missing title`).toBeTruthy();
+      const binding = keybindings.find((k) => k.command === command);
+      expect(binding, `${command} missing keybinding`).toBeDefined();
+      expect(binding!.key).toBe(key);
+      // A diff-level key, so the override holds with either side focused.
+      expect(binding!.when).toBe('textCompareEditorVisible && codev.activeTabIsBuilderDiff');
+    }
+  });
+
   it('does not label a command "(internal)" if it is exposed in view/item/context', () => {
     const offenders = viewContextCommands
       .filter((cmd) => /\(internal\)/i.test(titleByCommand.get(cmd) ?? ''))
