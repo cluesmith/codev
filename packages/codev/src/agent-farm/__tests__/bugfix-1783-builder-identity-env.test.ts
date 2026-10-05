@@ -97,6 +97,17 @@ describe('builder identity from the spawn environment — issue #1783', () => {
     expect(() => detectCurrentBuilderId()).toThrow(BuilderIdResolutionError);
   });
 
+  it('an env-named worktree that no longer exists (cleaned up: dir and row gone) throws — not a non-builder', () => {
+    const db = new Database(dbState.globalDbPath);
+    db.prepare('DELETE FROM builders WHERE id = ?').run('builder-experiment-1782');
+    db.close();
+    rmSync(worktreePath, { recursive: true, force: true });
+    process.env[BUILDER_WORKTREE_ENV] = worktreePath;
+    process.chdir(workspacePath);
+    expect(() => detectCurrentBuilderId()).toThrow(BuilderIdResolutionError);
+    expect(() => detectCurrentBuilderId()).toThrow(/experiment-1782/);
+  });
+
   it('sanitizeAgentEnv strips the builder identity so a Tower started from a builder shell cannot leak it', () => {
     const out = sanitizeAgentEnv({ [BUILDER_WORKTREE_ENV]: worktreePath, PATH: '/bin' });
     expect(out).toEqual({ PATH: '/bin' });
