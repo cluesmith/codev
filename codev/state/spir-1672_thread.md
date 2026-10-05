@@ -83,3 +83,11 @@ Now: spec amended (head 991b037e3) to put the card in the panel's Builder Inspec
 - Finding: the spec named the wrong host (Attention). A focused builder terminal resolves to builder-inspector, whose body is still an unclaimed placeholder ("phase, gate, activity, and message input"). Amended: card = Inspector body lane section above the review queue; optional laneCard on RenderMessage, no new mode; lane id via queueBuilderIdFor tail-match (two id spaces); message input out of scope.
 - New owner decision at the gate: does #1672 claim the Builder Inspector body as its #1049 participating feature? Recommendation (architect + me): yes.
 - Thread commit kept local (unpushed) so the remote head stays on the gate SHA.
+
+## 2026-10-05: owner ruling, #1595 ships before #1672
+
+Now: spec aligned so #1672 consumes #1595's served state (head 824154fcf); holding for Amr's spec word.
+
+- Owner ruled #1595 ships first (issuecomment-5988808107); #1595 spawned as builder-spir-1595. "Absorb #1595" superseded: #1595 owns the agent-state enum (working/needs-input/idle/blocked/dead) + row shape in codev-types; my precedence module maps onto it. Re-scope criterion marked done.
+- Mapping in the spec: dead -> OFFLINE; blocked = the gate fact behind WAITING ON YOU; working/idle are liveness inputs only (artifacts still decide AGENT WORKING vs STALLED?). New owner question (OQ1): where needs-input lands; spec leans secondary badge, since a needs-human-answer flag on the chip is out of scope in the issue.
+- Plan dependency: #1595's enum must be ratified (main's contract seat) before this plan; sequence after builder-spir-1595.
