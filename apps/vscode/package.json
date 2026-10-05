@@ -1016,12 +1016,12 @@
       {
         "command": "codev.diffNextHunk",
         "key": "alt+f5",
-        "when": "codev.activeEditorIsBuilderFile && textCompareEditorVisible"
+        "when": "textCompareEditorVisible && (codev.activeEditorIsBuilderFile || resourceScheme == 'codev-diff')"
       },
       {
         "command": "codev.diffPrevHunk",
         "key": "shift+alt+f5",
-        "when": "codev.activeEditorIsBuilderFile && textCompareEditorVisible"
+        "when": "textCompareEditorVisible && (codev.activeEditorIsBuilderFile || resourceScheme == 'codev-diff')"
       },
       {
         "command": "workbench.view.extension.codev",

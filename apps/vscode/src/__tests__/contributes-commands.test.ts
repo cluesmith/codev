@@ -84,7 +84,9 @@ describe('package.json contributes.commands', () => {
       const binding = keybindings.find((k) => k.command === command);
       expect(binding, `${command} missing keybinding`).toBeDefined();
       expect(binding!.key).toBe(key);
-      expect(binding!.when).toBe('codev.activeEditorIsBuilderFile && textCompareEditorVisible');
+      // Either side of a builder diff: the modified side is the registered
+      // worktree file; the original side is the codev-diff base document.
+      expect(binding!.when).toBe("textCompareEditorVisible && (codev.activeEditorIsBuilderFile || resourceScheme == 'codev-diff')");
     }
   });
 
