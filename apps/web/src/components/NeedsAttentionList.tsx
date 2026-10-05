@@ -17,8 +17,11 @@ interface AttentionItem {
 
 /**
  * Map an OverviewBuilder.blocked label to a CSS class. The labels come from
- * `detectBlocked` in packages/codev/src/agent-farm/servers/overview.ts.
- * Unknown kinds fall back to the plan styling so the row still renders.
+ * `detectBlocked` in packages/codev/src/agent-farm/servers/overview.ts. The five
+ * core gates each get their own colour; the non-core protocol gates (experiment /
+ * maintain / scope / research, #1779) and any unknown gate Tower reports (it
+ * surfaces every pending gate since #1777) share the neutral `--other` styling,
+ * so an unrecognised gate never masquerades as a plan review.
  */
 function gateKindClass(blocked: string): string {
   switch (blocked) {
@@ -31,7 +34,7 @@ function gateKindClass(blocked: string): string {
     case 'maintenance review':
     case 'scope review':
     case 'research review': return 'attention-kind--other';
-    default: return 'attention-kind--plan';
+    default: return 'attention-kind--other';
   }
 }
 

@@ -329,7 +329,7 @@ describe('NeedsAttentionList buildItems — non-core gates (#1779)', () => {
     ['maintenance review', 'maintain-complete'],
     ['scope review', 'scope-approval'],
     ['research review', 'research-complete'],
-  ])('styles a %s row with the neutral --other class, not the plan fallback', (blocked, blockedGate) => {
+  ])('styles a %s row with the neutral --other class, not the plan colour', (blocked, blockedGate) => {
     const blockedSince = new Date('2026-01-06T08:00:00Z').toISOString();
     const builders = [makeBuilder({ id: 'b-1', blocked, blockedGate, blockedSince })];
 
@@ -337,6 +337,17 @@ describe('NeedsAttentionList buildItems — non-core gates (#1779)', () => {
 
     expect(row).toBeDefined();
     expect(row!.kind).toBe(blocked);
+    expect(row!.kindClass).toBe('attention-kind--other');
+  });
+
+  it('styles an unknown gate label neutrally, never as the plan gate', () => {
+    const blockedSince = new Date('2026-01-06T08:00:00Z').toISOString();
+    const builders = [makeBuilder({ id: 'b-9', blocked: 'security review', blockedGate: 'security-approval', blockedSince })];
+
+    const row = buildItems([], builders).find(i => i.key === 'gate-b-9');
+
+    expect(row).toBeDefined();
+    expect(row!.kind).toBe('security review');
     expect(row!.kindClass).toBe('attention-kind--other');
   });
 });
