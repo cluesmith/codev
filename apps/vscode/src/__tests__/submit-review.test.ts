@@ -75,6 +75,7 @@ function makeStore(queues: Record<string, Comment[]>, sentQueues: Record<string,
     load: async (id: string) => queues[id] ?? [],
     loadState: async (id: string) => ({ comments: queues[id] ?? [], sent: sentQueues[id] ?? [] }),
     getComments: (id: string) => queues[id] ?? [],
+    getSent: (id: string) => sentQueues[id] ?? [],
     remove: async (builderId: string, ids: readonly string[]) => { removed.push({ builderId, ids }); },
     markSent: async (builderId: string, ids: readonly string[]) => { markedSent.push({ builderId, ids }); },
     clearSent: async (builderId: string) => { clearedSent.push(builderId); },
@@ -212,6 +213,7 @@ describe('submitReview', () => {
 
     expect(store.clearedSent).toEqual(['pir-1']);
     expect(tm.calls).toEqual([]);
+    expect(h.state.statusMessages.some(m => m.includes('marked delivered'))).toBe(true);
   });
 
   it('keeps the queue intact when the terminal injection fails', async () => {

@@ -55,10 +55,17 @@ export async function resolveTargetBuilder(store: ReviewQueueStore): Promise<str
   }
   if (pending.length === 1) { return pending[0]; }
   const picked = await vscode.window.showQuickPick(
-    pending.map(id => ({ label: id, description: `${store.count(id)} pending` })),
+    pending.map(id => ({ label: id, description: queueSummary(store, id) })),
     { placeHolder: 'Select the builder whose review to act on' },
   );
   return picked?.label;
+}
+
+/** QuickPick description: the pending count, plus any sent-unconfirmed count. */
+function queueSummary(store: ReviewQueueStore, builderId: string): string {
+  const sent = store.getSent(builderId).length;
+  if (sent === 0) { return `${store.count(builderId)} pending`; }
+  return `${store.count(builderId)} pending, ${sent} sent unconfirmed`;
 }
 
 export async function submitReview(deps: SubmitDeps, builderIdArg?: string): Promise<void> {
@@ -86,7 +93,10 @@ export async function submitReview(deps: SubmitDeps, builderIdArg?: string): Pro
     resend = choice === RESEND;
     if (!resend) {
       await deps.store.clearSent(builderId);
-      if (comments.length === 0) { return; }
+      if (comments.length === 0) {
+        vscode.window.setStatusBarMessage(`Codev: ${sent.length} review comment(s) for ${builderId} marked delivered`, 3000);
+        return;
+      }
     }
   }
 

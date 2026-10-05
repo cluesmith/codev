@@ -19,3 +19,9 @@
 - Regression: submit-review.test.ts asserts `markSent`, not `remove`, after injection; 6 tests fail
   against the pre-fix submit.ts. vscode check-types, lint and the full vitest run (1054) are green
   after building the workspace packages (the worktree needed `pnpm -r build` for the codev-sdk types).
+
+## PR #1768
+- CMAP iter1: gemini=APPROVE, codex=APPROVE, claude=COMMENT. Applied Claude's polish: the QuickPick shows the
+  sent-unconfirmed count, and Mark Delivered with nothing pending now confirms. Left as-is: Discard on a
+  sent-only builder reports "No pending comments" (accurate; Discard is pending-only).
+- Open for the architect: `Fixes #1562` will close the issue while Stage 2 has no follow-up issue yet.
