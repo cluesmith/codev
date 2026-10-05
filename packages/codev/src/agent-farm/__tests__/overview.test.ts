@@ -20,6 +20,7 @@ import {
   calculateProgress,
   calculateEvenProgress,
   detectBlocked,
+  detectBlockedGate,
   detectBlockedSince,
   computeIdleMs,
   derivePrReady,
@@ -775,6 +776,72 @@ describe('overview', () => {
         },
       }))).toBe('spec review');
     });
+
+    // #1777: EXPERIMENT's experiment-complete gate was outside the allowlist,
+    // so a lane held at it surfaced nowhere.
+    it('reports a pending experiment-complete gate parsed from status.yaml (#1777)', () => {
+      const parsed = parseStatusYaml([
+        "id: experiment-1560",
+        "title: spike",
+        "protocol: experiment",
+        "phase: analyze",
+        "gates:",
+        "  experiment-complete:",
+        "    status: pending",
+        "    requested_at: '2026-10-05T00:20:48Z'",
+        "",
+      ].join('\n'));
+      expect(detectBlocked(parsed)).toBe('experiment review');
+      expect(detectBlockedGate(parsed)).toBe('experiment-complete');
+      expect(detectBlockedSince(parsed)).toBe('2026-10-05T00:20:48Z');
+    });
+
+    it.each([
+      ['maintain-complete', 'maintenance review'],
+      ['scope-approval', 'scope review'],
+      ['research-complete', 'research review'],
+    ])('reports bundled protocol gate %s as "%s" (#1777)', (gate, label) => {
+      const parsed = makeParsed({
+        gates: { [gate]: 'pending' },
+        gateRequestedAt: { [gate]: '2026-10-05T00:00:00Z' },
+      });
+      expect(detectBlocked(parsed)).toBe(label);
+      expect(detectBlockedGate(parsed)).toBe(gate);
+    });
+
+    it('reports an unknown future gate with a label derived from its name (#1777)', () => {
+      const parsed = makeParsed({
+        gates: { 'security-approval': 'pending' },
+        gateRequestedAt: { 'security-approval': '2026-10-05T00:00:00Z' },
+      });
+      expect(detectBlocked(parsed)).toBe('security review');
+      expect(detectBlockedGate(parsed)).toBe('security-approval');
+      expect(detectBlockedSince(parsed)).toBe('2026-10-05T00:00:00Z');
+    });
+
+    it('prefers a known gate over an unknown one when both are pending (#1777)', () => {
+      const parsed = makeParsed({
+        gates: { 'security-approval': 'pending', 'pr': 'pending' },
+        gateRequestedAt: {
+          'security-approval': '2026-10-05T00:00:00Z',
+          'pr': '2026-10-05T01:00:00Z',
+        },
+      });
+      expect(detectBlockedGate(parsed)).toBe('pr');
+    });
+
+    it('does not double "review" in a derived label (#1777)', () => {
+      expect(detectBlocked(makeParsed({
+        gates: { 'code-review': 'pending' },
+        gateRequestedAt: { 'code-review': '2026-10-05T00:00:00Z' },
+      }))).toBe('code review');
+    });
+
+    it('does not report an unknown gate that is pending but not requested (#1777)', () => {
+      expect(detectBlockedGate(makeParsed({
+        gates: { 'experiment-complete': 'pending' },
+      }))).toBeNull();
+    });
   });
 
   // ==========================================================================
@@ -1114,8 +1181,21 @@ describe('overview', () => {
       expect(extractProjectIdFromWorktreeName('worktree-foIg')).toBeNull();
     });
 
-    it('returns null for unknown prefixes', () => {
-      expect(extractProjectIdFromWorktreeName('unknown-123-slug')).toBeNull();
+    it('returns null for an unnumbered protocol-mode worktree', () => {
+      expect(extractProjectIdFromWorktreeName('experiment-AbCd')).toBeNull();
+    });
+
+    it.each([
+      ['experiment-1560', '1560'],
+      ['maintain-42-slug', '42'],
+      ['research-7', '7'],
+    ])('extracts bare numeric ID from other numbered protocol worktree %s (#1777)', (dir, id) => {
+      expect(extractProjectIdFromWorktreeName(dir)).toBe(id);
+    });
+
+    it('keeps all-digit task/worktree short ids in soft mode (#1777)', () => {
+      expect(extractProjectIdFromWorktreeName('task-1234')).toBeNull();
+      expect(extractProjectIdFromWorktreeName('worktree-1234')).toBeNull();
     });
   });
 
@@ -1213,6 +1293,39 @@ describe('overview', () => {
       expect(builders[0].planPhases).toEqual([]);
       expect(builders[0].progress).toBe(0);
       expect(builders[0].blocked).toBeNull();
+    });
+
+    // #1777: experiment-/maintain-/research- worktrees had no project-id case,
+    // so they fell to soft mode and status.yaml (and its gates) was never read.
+    it('discovers a strict experiment builder blocked on experiment-complete (#1777)', () => {
+      createBuilderWorktree(tmpDir, 'experiment-1560', [
+        "id: '1560'",
+        'title: spike-thread-owning-open-path-',
+        'protocol: experiment',
+        'phase: analyze',
+        'gates:',
+        '  experiment-complete:',
+        '    status: pending',
+        "    requested_at: '2026-10-05T00:20:48.976Z'",
+      ].join('\n'), '1560-spike-thread-owning-open-path-');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].mode).toBe('strict');
+      expect(builders[0].issueId).toBe('1560');
+      expect(builders[0].protocolPhase).toBe('analyze');
+      expect(builders[0].blocked).toBe('experiment review');
+      expect(builders[0].blockedGate).toBe('experiment-complete');
+      expect(builders[0].blockedSince).toBe('2026-10-05T00:20:48.976Z');
+    });
+
+    it('keeps an all-digit task worktree in soft mode (#1777)', () => {
+      createBuilderWorktree(tmpDir, 'task-123');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].mode).toBe('soft');
+      expect(builders[0].issueId).toBeNull();
     });
 
     it('populates progress and blocked from status.yaml', () => {

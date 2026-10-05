@@ -327,13 +327,17 @@ function loadProtocolPhases(workspaceRoot: string, protocolName: string): string
 
 /**
  * Detect if a builder is blocked on a gate (requested but not approved).
- * Returns a human-readable label or null.
  *
- * The allowlist mirrors the gates emitted by the bundled protocols (SPIR,
- * ASPIR, BUGFIX, AIR, PIR). New protocols that introduce new gate names must
- * register them here, otherwise their gate-pending state is invisible to
- * `OverviewBuilder.blocked` and downstream UIs (VSCode Needs Attention tree,
- * VSCode toast, dashboard NeedsAttentionList, status bar counter).
+ * Generic over gate names (#1777): ANY gate in `status.yaml` with
+ * `status: pending` and a `requested_at` timestamp is a human gate porch is
+ * holding the lane at, so it surfaces on `OverviewBuilder.blocked` and the
+ * downstream UIs (VSCode Agents tree/toast/status bar, dashboard
+ * NeedsAttentionList, Tower hub attention rows) whatever protocol emitted it.
+ * The earlier allowlist made EXPERIMENT's `experiment-complete` (and
+ * MAINTAIN/RESEARCH's gates) invisible.
+ *
+ * `GATE_LABELS` supplies display labels and the scan priority for the bundled
+ * gates; an unlisted gate is still detected, labelled from its own name.
  */
 const GATE_LABELS: Record<string, string> = {
   'spec-approval': 'spec review',
@@ -346,15 +350,37 @@ const GATE_LABELS: Record<string, string> = {
   // bar). The `pr` gate stays mapped here too (VSCode depends on it); the
   // dashboard alone excludes `pr` from its gate rows since it renders PR rows.
   'verify-approval': 'verify review',
+  'experiment-complete': 'experiment review',
+  'maintain-complete': 'maintenance review',
+  'scope-approval': 'scope review',
+  'research-complete': 'research review',
 };
 
-export function detectBlocked(parsed: ParsedStatus): string | null {
-  for (const [gate, label] of Object.entries(GATE_LABELS)) {
+/** Display label for a gate: the mapped label, else derived from its name. */
+function gateLabel(gate: string): string {
+  return GATE_LABELS[gate] ?? `${gate.replace(/-(approval|complete|review)$/, '').replace(/-/g, ' ')} review`;
+}
+
+/**
+ * Canonical name of the gate the builder is blocked on, or null. Known gates
+ * are scanned first (preserving their priority order), then any other gate in
+ * `status.yaml` order.
+ */
+function findBlockedGate(parsed: ParsedStatus): string | null {
+  const gates = new Set([...Object.keys(GATE_LABELS), ...Object.keys(parsed.gates)]);
+  for (const gate of gates) {
     if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
-      return label;
+      return gate;
     }
   }
   return null;
+}
+
+/** Human-readable label for the gate the builder is blocked on, or null. */
+export function detectBlocked(parsed: ParsedStatus): string | null {
+  const gate = findBlockedGate(parsed);
+  if (!gate) return null;
+  return gateLabel(gate);
 }
 
 /**
@@ -363,29 +389,21 @@ export function detectBlocked(parsed: ParsedStatus): string | null {
  * Returns null if the builder isn't blocked.
  */
 export function detectBlockedGate(parsed: ParsedStatus): string | null {
-  for (const gate of Object.keys(GATE_LABELS)) {
-    if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
-      return gate;
-    }
-  }
-  return null;
+  return findBlockedGate(parsed);
 }
 
 /**
  * Detect when the current blocked gate was first requested.
  * Returns the ISO timestamp string or null if not blocked.
  *
- * Iterates `GATE_LABELS` so the gate set lives in exactly one place — sibling
- * to `detectBlocked` / `detectBlockedGate` (#927 removed this function's
- * previously-separate hardcoded array, which was a silent drift hazard).
+ * Shares `findBlockedGate` with `detectBlocked` / `detectBlockedGate` so the
+ * gate set lives in exactly one place (#927 removed a previously-separate
+ * hardcoded array, which was a silent drift hazard).
  */
 export function detectBlockedSince(parsed: ParsedStatus): string | null {
-  for (const gate of Object.keys(GATE_LABELS)) {
-    if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
-      return parsed.gateRequestedAt[gate];
-    }
-  }
-  return null;
+  const gate = findBlockedGate(parsed);
+  if (!gate) return null;
+  return parsed.gateRequestedAt[gate];
 }
 
 /**
@@ -541,6 +559,15 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
   // Worktree dir keeps the `pir-` prefix for namespace separation.
   const pirMatch = dirName.match(/^pir-(\d+)/);
   if (pirMatch) return pirMatch[1];
+
+  // task-NAvW, worktree-foIg → null (soft mode). Checked before the generic
+  // case below because a short id can be all digits (task-1234).
+  if (/^(task|worktree)-/.test(dirName)) return null;
+
+  // Any other numbered protocol spawn (experiment/maintain/research, #1777):
+  // experiment-1560 → "1560" (porch project dir is 1560-slug, like SPIR).
+  const genericMatch = dirName.match(/^[a-z]+-(\d+)(?:-|$)/);
+  if (genericMatch) return genericMatch[1];
 
   // Legacy numeric: 0110 or 0110-slug → "0110"
   const numericMatch = dirName.match(/^(\d+)(?:-|$)/);
