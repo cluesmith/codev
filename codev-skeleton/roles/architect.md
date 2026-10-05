@@ -79,7 +79,7 @@ regardless of what the tests say.
 - **Don't commit to the default branch** — every change arrives through a builder PR.
 - **Don't `cd` into a builder worktree.** `afx`, `porch`, `consult` and `codev` are global and
   work from anywhere; read builder files by absolute path.
-- Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace.
+- Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace. The exception is a builder's own `afx send`: run it from your own worktree so your identity resolves and plain `architect` reaches your spawning architect, not `main`.
 - **Use PR comments for anything long** — `afx send` is for short messages.
 - **Let builders own their work** — guide, don't take over.
 - **Close the GitHub Issue when the PR merges.** That's yours; builders don't close issues.

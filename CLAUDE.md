@@ -66,7 +66,7 @@ a human decision.
 - Never run `git reset --hard`, `git checkout -- .`, `git clean -fd`, or `git stash` without explicit human permission — they destroy uncommitted work.
 - Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
 - Never hand-edit `status.yaml` — only porch commands modify project state.
-- Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace.
+- Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace. The exception is a builder's own `afx send`: run it from your own worktree so your identity resolves and plain `architect` reaches your spawning architect, not `main`.
 - Never kill a shellper process without verifying it is an orphan (match each PID to its workspace via Tower) — an 'extra' shellper may be a live architect session.
 - Never restart or stop Tower without explicit human permission. Builder sessions survive a restart (detached shellpers), but Tower-mediated messaging, dashboards, and gate delivery drop until it is back.
 

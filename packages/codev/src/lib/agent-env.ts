@@ -106,7 +106,17 @@ export function isClaudeSessionMarker(name: string): boolean {
 }
 
 /**
- * Copy `env` with Claude Code session markers removed.
+ * Codev's own per-session identity: the worktree of the builder a process belongs
+ * to (Issue #1783). Exported by `.builder-start.sh`, so every process a builder
+ * runs inherits it and `afx send` / `afx whoami` resolve the builder from any
+ * cwd. Stripped below for the same reason as the Claude markers: a Tower started
+ * from a builder's shell must not hand that builder's identity to every terminal
+ * it spawns.
+ */
+export const BUILDER_WORKTREE_ENV = 'CODEV_BUILDER_WORKTREE';
+
+/**
+ * Copy `env` with Claude Code session markers (and the builder identity) removed.
  *
  * Returns a plain `Record<string, string>` — `undefined`-valued entries (which
  * `NodeJS.ProcessEnv` permits and node-pty rejects) are dropped — so callers can
@@ -119,6 +129,7 @@ export function sanitizeAgentEnv(
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) continue;
     if (isClaudeSessionMarker(key)) continue;
+    if (key === BUILDER_WORKTREE_ENV) continue;
     out[key] = value;
   }
   return out;

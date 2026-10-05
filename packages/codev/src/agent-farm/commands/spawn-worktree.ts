@@ -34,6 +34,7 @@ import { run, runStreaming, commandExists } from '../utils/shell.js';
 import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
 import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
+import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
 
 // =============================================================================
 // Dependency Checks
@@ -1028,6 +1029,16 @@ done
 }
 
 /**
+ * Export the builder's worktree as its identity (Issue #1783), so `afx send` /
+ * `afx whoami` resolve this builder from any cwd — including the workspace root a
+ * builder `cd`s to before running `afx`. Both launch scripts carry it, and a
+ * `--resume` regenerates the script, so a resumed builder gains it too.
+ */
+function builderIdentityExport(worktreePath: string): string {
+  return `export ${BUILDER_WORKTREE_ENV}='${shellEscapeSingleQuote(worktreePath)}'\n`;
+}
+
+/**
  * Start a terminal session for a builder.
  *
  * When `resume` is provided, the launch script *enters* on the harness's resume
@@ -1138,7 +1149,7 @@ export async function startBuilderSession(
 
   const scriptContent = `#!/bin/bash
 cd "${worktreePath}"
-${envBlock}${loop}`;
+${builderIdentityExport(worktreePath)}${envBlock}${loop}`;
 
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
@@ -1229,5 +1240,5 @@ export function buildWorktreeLaunchScript(
 
   return `#!/bin/bash
 cd "${worktreePath}"
-${envBlock}${loop}`;
+${builderIdentityExport(worktreePath)}${envBlock}${loop}`;
 }
