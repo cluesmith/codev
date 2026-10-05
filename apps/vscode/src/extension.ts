@@ -59,6 +59,10 @@ import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import { BuildersProvider, AccordionGate, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
+// Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
+import { TowerFleetCache } from './views/tower-cache.js';
+import { TowerProvider } from './views/tower.js';
+import { registerTowerCommands } from './commands/switch-workspace.js';
 import { PullRequestsProvider, PullRequestTreeItem } from './views/pull-requests.js';
 import { BacklogProvider } from './views/backlog.js';
 import { visibleBacklogCount, formatBacklogTitle } from './views/backlog-filter.js';
@@ -864,6 +868,49 @@ export async function activate(context: vscode.ExtensionContext) {
 	// `agentsCycleGroupFrom*` toolbar buttons (one visible at a time).
 	const setGroupBy = (axis: 'stage' | 'area' | 'architect') =>
 		vscode.workspace.getConfiguration('codev').update('buildersGroupBy', axis, vscode.ConfigurationTarget.Global);
+
+	// --- Codev Tower (#1566): cross-workspace navigation hub -----------------------------------
+	// A separate activity-bar container (machine-scope), distinct from the workspace-scope views
+	// above. Its own cross-workspace cache fans out per-workspace overviews over the SAME shared SSE
+	// (connectionManager.onSSEEvent) — no second EventSource. The container icon's badge carries the
+	// machine-wide needs-attention count (only this container badges — the badge means machine-scope).
+	// Registered here (after reg/regCli) so its commands route through the CLI-preflight guard.
+	const towerCache = new TowerFleetCache(connectionManager);
+	context.subscriptions.push({ dispose: () => towerCache.dispose() });
+	const towerProvider = new TowerProvider(towerCache, connectionManager);
+	context.subscriptions.push(towerProvider);
+	const towerView = vscode.window.createTreeView('codev.tower', {
+		treeDataProvider: towerProvider,
+	});
+	const updateTowerBadge = (): void => {
+		const count = towerCache.getAttentionCount();
+		if (count > 0) {
+			const noun = count === 1 ? 'workspace needs' : 'workspaces need';
+			towerView.badge = { value: count, tooltip: `${count} ${noun} attention` };
+		} else {
+			towerView.badge = undefined;
+		}
+	};
+	updateTowerBadge();
+	registerTowerCommands(context, connectionManager, towerCache, regCli);
+	context.subscriptions.push(
+		towerView,
+		towerCache.onDidChange(updateTowerBadge),
+		reg('codev.tower.refresh', () => towerCache.refresh()),
+	);
+	// Populate as soon as Tower is reachable; refreshes thereafter ride the shared SSE + poll.
+	towerCache.refresh();
+	// The container defaults to the secondary side bar, which VS Code keeps hidden — so a fresh user
+	// wouldn't see Tower at all. Reveal it exactly once (per profile) to open the secondary side bar
+	// for discovery, then respect the user's layout. Gated like the panel reveal (#1144): a dormant
+	// window must not steal focus or consume the one-time flag, so the nudge still fires on the user's
+	// first real Codev window.
+	const TOWER_REVEALED_KEY = 'codev.towerRevealedOnce';
+	if (policy.revealPanelOnce && !context.globalState.get(TOWER_REVEALED_KEY)) {
+		vscode.commands.executeCommand('workbench.view.extension.codev-tower');
+		context.globalState.update(TOWER_REVEALED_KEY, true);
+	}
+	// --- end Codev Tower ------------------------------------------------------------------------
 
 	// Move focus to the next (+1) or previous (-1) agent terminal in the Agents-view
 	// rendered order (#1563). The roster comes from the tree provider itself
