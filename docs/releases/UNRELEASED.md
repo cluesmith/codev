@@ -53,6 +53,7 @@ Opening an untrusted folder no longer leaves the Codev sidebar inert until you t
 - **Agent-cycle keys launch the first agent** (#1748, PR #1749). With no agent terminal focused, the cycle keys now open the first (or last) agent in sidebar order instead of showing a "nothing to cycle to" hint; the empty-roster hint is now honest.
 - **Status-bar items readable in light themes** (#1747, PR #1750). The dev chip and the Reconnecting and Offline states no longer render near-white on a light status bar.
 - **Hunk stepping follows the viewport** (#1546, PR #1770). Next and previous change in a builder diff now continue from what you are looking at after a scroll, instead of from a stale cursor; alt+F5 and shift+alt+F5, the new hunk commands, and the Stream Deck changes dial all use it.
+- **Review-queue submit no longer deletes comments before they are delivered** (#1562, PR #1768). Submitted comments move to a sent list; the next submit asks Mark Delivered (default), Re-send, or cancel. Sent-versus-actioned tracking follows in #1771.
 
 ## Other fixes (dashboard, porch, infrastructure)
 
