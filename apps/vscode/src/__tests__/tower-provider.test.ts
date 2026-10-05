@@ -50,6 +50,9 @@ function wsRow(path: string, name: string, active: boolean): TowerWorkspace {
 function blocked(since: string): OverviewData {
   return { builders: [{ id: 'b0', issueId: null, issueTitle: null, phase: 'plan', blocked: 'plan review', blockedGate: 'plan-approval', blockedSince: since, prReady: false, lastDataAt: null }], backlog: [], pendingPRs: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' } as unknown as OverviewData;
 }
+function gated(blockedLabel: string, blockedGate: string | null, prReady = false): OverviewData {
+  return { builders: [{ id: 'b0', issueId: null, issueTitle: null, phase: 'implement', blocked: blockedLabel, blockedGate, blockedSince: null, prReady, lastDataAt: null }], backlog: [], pendingPRs: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' } as unknown as OverviewData;
+}
 function held(count: number): OverviewData {
   return { builders: [{ id: 'b0', issueId: null, issueTitle: null, phase: 'implement', blocked: null, blockedGate: null, blockedSince: null, prReady: false, lastDataAt: null, heldCount: count }], backlog: [], pendingPRs: [], recentlyClosed: [], architects: [], heldCount: count, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' } as unknown as OverviewData;
 }
@@ -148,6 +151,30 @@ describe('TowerProvider', () => {
     const children = provider.getChildren(wsNode).map((n) => provider.getTreeItem(n));
     expect(children).toHaveLength(1);
     expect(children[0].description).toContain('plan review');
+  });
+
+  it.each([
+    ['experiment review', 'experiment-complete', 'beaker'],
+    ['maintenance review', 'maintain-complete', 'tools'],
+    ['scope review', 'scope-approval', 'search'],
+    ['research review', 'research-complete', 'library'],
+    ['plan review', 'plan-approval', 'checklist'],
+    ['PR review', 'pr', 'git-pull-request'],
+    ['future review', 'future-gate', 'bell'],
+    ['plan review', null, 'warning'],
+  ])('keys a %s gate row (%s) on the Agents-view gate icon → %s (#1779)', (label, gateId, icon) => {
+    const fleet = [entry(wsRow('/w/gate', 'gate', true), gated(label, gateId))];
+    const provider = new TowerProvider(fakeCache(fleet), fakeCm(null));
+    const children = provider.getChildren(provider.getChildren()[0]).map((n) => provider.getTreeItem(n));
+    expect((children[0].iconPath as { id: string }).id).toBe(icon);
+  });
+
+  it('gives a prReady PR-review row the pull-request icon', () => {
+    const data = gated('plan review', 'plan-approval', true);
+    const fleet = [entry(wsRow('/w/gate', 'gate', true), data)];
+    const provider = new TowerProvider(fakeCache(fleet), fakeCm(null));
+    const icons = provider.getChildren(provider.getChildren()[0]).map((n) => (provider.getTreeItem(n).iconPath as { id: string }).id);
+    expect(icons).toEqual(['checklist', 'git-pull-request']);
   });
 
   it('gives a quiet workspace no expansion and a plain row command', () => {

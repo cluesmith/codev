@@ -54,6 +54,10 @@ export interface AttentionBuilderRef {
 export interface GateItem extends AttentionBuilderRef {
   /** Display gate label (e.g. "plan review", or "PR review" for a pending PR). */
   gate: string;
+  /** Canonical porch gate id (e.g. `plan-approval`; `pr` for a pending PR) — the key a UI maps to
+   *  an icon. `null` when Tower reported a blocked label without its gate id. Optional so existing
+   *  code constructing a `GateItem` keeps compiling; `deriveAttention` always sets it. */
+  gateId?: string | null;
   /** ISO timestamp the builder became blocked, when known (`null` for the PR-ready signal). */
   since: string | null;
 }
@@ -133,10 +137,10 @@ export function deriveAttention(data: OverviewData | null, now: number = Date.no
     // can present either, so both are checked independently.
     const atGate = builder.blocked !== null || builder.prReady;
     if (builder.blocked !== null) {
-      pendingGates.push({ ...ref, gate: builder.blocked, since: builder.blockedSince });
+      pendingGates.push({ ...ref, gate: builder.blocked, gateId: builder.blockedGate ?? null, since: builder.blockedSince });
     }
     if (builder.prReady) {
-      pendingGates.push({ ...ref, gate: 'PR review', since: null });
+      pendingGates.push({ ...ref, gate: 'PR review', gateId: 'pr', since: null });
     }
 
     // Idle-waiting is the canonical "needs me" state alongside `blocked`. Surface it only when the

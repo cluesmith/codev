@@ -52,18 +52,28 @@ describe('isIdleWaiting', () => {
 describe('deriveAttention', () => {
   it('projects a blocked builder into a pending-gate row with its label and timestamp', () => {
     const summary = deriveAttention(overview({
-      builders: [builderRow({ id: 'pir-1553', issueId: '#1553', issueTitle: 'Attention body', blocked: 'plan review', blockedSince: '2026-08-25T10:00:00Z' })],
+      builders: [builderRow({ id: 'pir-1553', issueId: '#1553', issueTitle: 'Attention body', blocked: 'plan review', blockedGate: 'plan-approval', blockedSince: '2026-08-25T10:00:00Z' })],
     }), NOW);
     expect(summary.pendingGates).toEqual([
-      { builderId: 'pir-1553', issueId: '#1553', issueTitle: 'Attention body', gate: 'plan review', since: '2026-08-25T10:00:00Z' },
+      { builderId: 'pir-1553', issueId: '#1553', issueTitle: 'Attention body', gate: 'plan review', gateId: 'plan-approval', since: '2026-08-25T10:00:00Z' },
     ]);
     expect(summary.isEmpty).toBe(false);
+  });
+
+  it('carries a non-core gate id through, and a null id when Tower omits it (#1779)', () => {
+    const summary = deriveAttention(overview({
+      builders: [
+        builderRow({ id: 'experiment-1', blocked: 'experiment review', blockedGate: 'experiment-complete' }),
+        builderRow({ id: 'legacy', blocked: 'plan review', blockedGate: undefined as unknown as null }),
+      ],
+    }), NOW);
+    expect(summary.pendingGates.map((g) => g.gateId)).toEqual(['experiment-complete', null]);
   });
 
   it('projects prReady into a "PR review" gate row (no timestamp)', () => {
     const summary = deriveAttention(overview({ builders: [builderRow({ id: 'pir-1552', prReady: true })] }), NOW);
     expect(summary.pendingGates).toEqual([
-      { builderId: 'pir-1552', issueId: null, issueTitle: null, gate: 'PR review', since: null },
+      { builderId: 'pir-1552', issueId: null, issueTitle: null, gate: 'PR review', gateId: 'pr', since: null },
     ]);
   });
 
@@ -142,7 +152,7 @@ describe('deriveAttention', () => {
 
   it('returns a fresh empty summary each call (no shared mutable singleton)', () => {
     const first = deriveAttention(null, NOW);
-    first.pendingGates.push({ builderId: 'x', issueId: null, issueTitle: null, gate: 'plan review', since: null });
+    first.pendingGates.push({ builderId: 'x', issueId: null, issueTitle: null, gate: 'plan review', gateId: 'plan-approval', since: null });
     const second = deriveAttention(null, NOW);
     expect(second.pendingGates).toEqual([]);
     expect(first).not.toBe(second);
@@ -167,7 +177,7 @@ function summary(over: Partial<AttentionSummary>): AttentionSummary {
   };
 }
 
-const gate = (since: string | null) => summary({ pendingGates: [{ ...ref, gate: 'plan review', since }], isEmpty: false });
+const gate = (since: string | null) => summary({ pendingGates: [{ ...ref, gate: 'plan review', gateId: 'plan-approval', since }], isEmpty: false });
 const waiting = (since: string | null) => summary({ waiting: [{ ...ref, since }], isEmpty: false });
 const held = (heldTotal: number, heldEscalated = false) => summary({ heldTotal, heldEscalated, heldMail: [{ ...ref, count: heldTotal }], isEmpty: false });
 const queued = (count: number) => summary({ queuedFeedback: [{ ...ref, count }], isEmpty: false });
@@ -198,7 +208,7 @@ describe('compareAttention — bucket precedence', () => {
   });
 
   it('uses the MOST-urgent signal present as the bucket (a gate+held summary is a gate)', () => {
-    const gateAndHeld = summary({ pendingGates: [{ ...ref, gate: 'plan review', since: '2026-08-25T10:00:00Z' }], heldTotal: 9, heldMail: [{ ...ref, count: 9 }], isEmpty: false });
+    const gateAndHeld = summary({ pendingGates: [{ ...ref, gate: 'plan review', gateId: 'plan-approval', since: '2026-08-25T10:00:00Z' }], heldTotal: 9, heldMail: [{ ...ref, count: 9 }], isEmpty: false });
     expect(sign(compareAttention(gateAndHeld, held(9)))).toBe(-1); // gate wins over pure held
   });
 });
