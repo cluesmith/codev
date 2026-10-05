@@ -1,7 +1,7 @@
 id: bugfix-1562
 title: vscode-review-queue-submit-del
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-05T00:05:11.132Z'
-updated_at: '2026-10-05T00:06:05.158Z'
+updated_at: '2026-10-05T00:09:17.130Z'
