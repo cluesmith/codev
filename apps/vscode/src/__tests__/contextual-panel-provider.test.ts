@@ -24,6 +24,7 @@ const hoisted = vi.hoisted(() => {
     queues: {} as Record<string, unknown[]>,
     sentQueues: {} as Record<string, unknown[]>,
     executed: [] as unknown[][],
+    commandResult: Promise.resolve(undefined) as Promise<unknown>,
     listeners: {} as Record<string, (arg?: unknown) => void>,
   };
   class TabInputText {
@@ -54,7 +55,7 @@ vi.mock('vscode', () => {
     commands: {
       executeCommand: (...args: unknown[]) => {
         state.executed.push(args);
-        return Promise.resolve(undefined);
+        return state.commandResult;
       },
     },
     window: {
@@ -224,6 +225,7 @@ beforeEach(() => {
   hoisted.state.queues = {};
   hoisted.state.sentQueues = {};
   hoisted.state.executed = [];
+  hoisted.state.commandResult = Promise.resolve(undefined);
   hoisted.state.listeners = {};
 });
 
@@ -552,6 +554,26 @@ describe('ContextualPanelProvider — Code Review body from the review queue (#1
     provider.resolveWebviewView(view);
 
     fireMessage({ type: 'review-action', action: 'submit', builderId: 'air-1559' });
+    expect(hoisted.state.executed).toEqual([['codev.submitReview', 'air-1559']]);
+  });
+
+  it('drops repeat clicks while an action is running, then accepts the next one', async () => {
+    showDiff();
+    let finish: () => void = () => {};
+    hoisted.state.commandResult = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const provider = newProvider();
+    const { view, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+
+    fireMessage({ type: 'review-action', action: 'submit', builderId: 'air-1559' });
+    fireMessage({ type: 'review-action', action: 'submit', builderId: 'air-1559' }); // double click
+    expect(hoisted.state.executed).toHaveLength(1);
+
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    hoisted.state.commandResult = Promise.resolve(undefined);
     fireMessage({ type: 'review-action', action: 'discard', builderId: 'air-1559' });
     expect(hoisted.state.executed).toEqual([
       ['codev.submitReview', 'air-1559'],

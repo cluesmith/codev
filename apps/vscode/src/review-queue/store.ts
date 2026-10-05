@@ -82,8 +82,8 @@ export class ReviewQueueStore implements vscode.Disposable {
    * workspace root: register each worktree (dir basename = builder id, the
    * same fallback the watcher path uses) and load its queue into the cache.
    * Called fire-and-forget at activation so the palette Submit Review and the
-   * status-bar counter see persisted queues after a window reload, before any
-   * diff has been opened. Best-effort: a missing `.builders/` dir or an
+   * contextual panel's Code Review body see persisted queues after a window
+   * reload, before any diff has been opened. Best-effort: a missing `.builders/` dir or an
    * unreadable file reads as empty, never throws.
    */
   async preloadFromDisk(): Promise<void> {

@@ -38,6 +38,8 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   private lastDescriptor: ModeDescriptor | undefined;
   private lastPostId: string | undefined;
   private lastTabResource: string | undefined;
+  /** A Code Review action is running (its modal / terminal open is async): drop repeat clicks. */
+  private reviewActionInFlight = false;
   private readonly reader: SurfaceContextReader;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly viewDisposables: vscode.Disposable[] = [];
@@ -176,12 +178,19 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     // A Code Review button: run the existing review-queue command (which owns confirmation, the
     // re-send / mark-delivered choice, and the queue writes). Honored only for the builder the panel
     // is showing in Code Review mode, so a stale or forged message cannot act on another builder.
+    // One action at a time: a double click must not inject the review into the prompt twice.
     if (
       isReviewActionMessage(message)
+      && !this.reviewActionInFlight
       && this.lastDescriptor?.kind === 'code-review'
       && this.lastDescriptor.context.builderId === message.builderId
     ) {
-      vscode.commands.executeCommand(REVIEW_ACTION_COMMANDS[message.action], message.builderId);
+      this.reviewActionInFlight = true;
+      Promise.resolve(vscode.commands.executeCommand(REVIEW_ACTION_COMMANDS[message.action], message.builderId))
+        .catch(() => undefined)
+        .finally(() => {
+          this.reviewActionInFlight = false;
+        });
     }
   }
 
