@@ -66,7 +66,7 @@ After `npm i -g @cluesmith/codev @cluesmith/codev-ide`:
 - [ ] `--server-path <bin>` overrides discovery and keeps today's clear error for a nonexistent path.
 
 **Version handshake (in Tower, on every spawn path)**
-- [ ] Before any spawn, Tower runs `<server> --version` with a bounded timeout and parses the first line as a semver version.
+- [ ] Before any spawn, Tower runs `<server> --version` with a bounded timeout and parses **line 1 only** (the VS Code base version, e.g. `1.138.0`; line 2 is the commit, line 3 the arch) as a semver version, compared against the floor. The npm *package* version may carry a suffix (e.g. `1.138.0-codev.1`); it is never read or compared, so a package suffix has no effect on the check.
   - It refuses a version below the floor, or a command that fails, times out, or prints unparseable output.
   - When it refuses, nothing is spawned and no record is written. The error names the installed version (or the failure) and the floor.
 - [ ] The floor is a single constant declared by Tower. A unit test asserts that the floor is at least the minimum of the embedded sidebar's `engines.vscode` range, so the sidebar can never be paired with a server too old to activate it.
@@ -144,7 +144,7 @@ These come from Issue #1789, "Target shape (decided with the owner)", and are no
 ## Assumptions
 
 - The IDE repository publishes `@cluesmith/codev-ide` in the shape above, with a `codev-ide-server` bin that forwards the standard VS Code server CLI. Building and publishing those packages is out of scope.
-- The npm-published server's `--version` reports the VS Code base version on its first line, as the local build does (verified). If the IDE repo changes that, the floor semantics are revisited.
+- The npm-published server's `--version` reports the VS Code base version on line 1, then the commit, then the arch (confirmed by the IDE side; the first published server reports `1.138.0`). The npm package version may differ by a suffix (e.g. `1.138.0-codev.1`) and is not what Tower checks.
 - `@cluesmith/codev` and `apps/vscode` (`codev-vscode`) are versioned in lockstep (both 3.3.4 today), so "the vsix for this codev version" is well defined.
 - An `npm i -g` places `@cluesmith/codev` and `@cluesmith/codev-ide` as siblings under the same global `node_modules/@cluesmith/`. The `codev-ide-server` bin link lands in the same global `bin` directory as `afx`.
 - The `codev-ide-server` bin link may resolve to a script that needs `node` or `bash` from `PATH`. Tower's spawn environment provides Node, as required above.
@@ -200,7 +200,7 @@ The CLI runs `codev-ide-server --install-extension` before calling Tower.
 - **Embedding the vsix.** The codev package build produces the vsix from `apps/vscode` and copies it to a fixed package-relative directory listed in `files`. Tower finds it relative to its own install, as it already does for `dashboard-dist` and `skeleton`.
   - *Rejected:* downloading the vsix from Open VSX at start time. That needs network access, breaks offline installs, and decouples the sidebar version from the codev version, which is exactly the coupling we want.
 - **Idempotency.** "Installed" means the extensions directory's own index lists `cluesmith.codev-vscode` at exactly the embedded vsix's version. Any other version, older or newer, triggers `--install-extension --force`, so a codev downgrade also downgrades the sidebar (verified that `--force` is needed). Only the codev sidebar is touched.
-- **Floor source.** Tower declares the floor as one constant. A test ties it to the embedded sidebar's `engines.vscode` minimum (`^1.128.0` today), so that bumping the sidebar's engine without bumping the floor fails CI. The initial floor is therefore `1.128.0` unless the architect names a higher one (Open Question 1).
+- **Floor source.** Tower declares the floor as one constant. A test ties it to the embedded sidebar's `engines.vscode` minimum (`^1.128.0` today), so that bumping the sidebar's engine without bumping the floor fails CI. The initial floor is `1.128.0` (confirmed acceptable by the IDE side: every server CLI flag Tower relies on, `--extensions-dir`, `--install-extension`, `--connection-token-file`, `--server-base-path`, predates it). The first published server (`1.138.0`) clears it.
 - **Live server.** Never killed implicitly: it may have open browser sessions. Tower installs and the CLI hints at a restart (see Success Criteria).
 - **Install failure.** Refuse to spawn. A server that runs without its sidebar looks broken in confusing ways, while a clear error points at the cause.
 - **Missing vsix.** Warn and spawn, because only source checkouts hit this.
@@ -215,14 +215,15 @@ N/A: the original critical question (what `--version` reports) is answered by ve
 
 ### Important (shapes design)
 
-1. **Initial floor value.** The default is `1.128.0` (the sidebar's `engines.vscode` minimum). Does the owner want the floor pinned higher, for example to the first published `@cluesmith/codev-ide` base version, because of IDE-side features Tower depends on? This is a one-constant change, so it does not block the plan.
-2. **IDE repo built-in exclusion.** Confirm that the npm-published server tree excludes `extensions/codev-vscode`. If the first published server still bundles it, the install step fails by design (with a clear error) until the IDE repo drops it.
+N/A: both resolved by the IDE side (recorded on #1789):
+- **Floor:** `1.128.0` is acceptable (see Decided sub-points).
+- **Built-in exclusion:** confirmed. The published server packages do not bundle `extensions/codev-vscode`; this is an explicit requirement of the IDE-side publish lane, whose PoC ran with the built-in removed and the sidebar installed via `--install-extension`. The pre-npm `pr43` tree tested above is the counter-example, not the shipped shape.
 
 ### Nice-to-know
 
-3. Should the extensions directory be overridable? The default answer is no: it is a fixed Tower-owned path, shown in status.
-4. A vsix rebuilt locally without a version bump is skipped by the version-only check. That is acceptable for releases; a developer can delete the directory.
-5. The release could reuse one packaged vsix for both the npm embed and the Open VSX upload. That would be nice, but it is not required (see Constraints).
+1. Should the extensions directory be overridable? The default answer is no: it is a fixed Tower-owned path, shown in status.
+2. A vsix rebuilt locally without a version bump is skipped by the version-only check. That is acceptable for releases; a developer can delete the directory.
+3. The release could reuse one packaged vsix for both the npm embed and the Open VSX upload. That would be nice, but it is not required (see Constraints).
 
 ## Test Scenarios
 
@@ -276,7 +277,7 @@ N/A: the original critical question (what `--version` reports) is answered by ve
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | Tower's daemon `PATH` lacks the npm global bin and `node` (the nvm case) | High | High | Discovery runs in the CLI with the user's `PATH` (Approach 1). Tower spawns with `dirname(process.execPath)` added to the spawned `PATH` (a success criterion). These are one condition with two mitigations. |
-| The npm server bundles `codev-vscode` as a built-in, so the install is refused | Medium | High | Recorded as a requirement on the IDE repo (Open Question 2). Tower's failure message names the cause. |
+| The npm server bundles `codev-vscode` as a built-in, so the install is refused | Low | High | Confirmed IDE-side requirement (published packages exclude it). Tower's install-failure message names the cause if a stray build bundles it. |
 | A version-only idempotency check misses a same-version, different-bytes vsix | Low | Low | Release versions always bump. Developers can clear the directory. |
 | The npm-embedded and Open VSX vsix drift apart | Low | Medium | Both come from the same commit, command and version at release. Byte identity is not required. |
 | The sidebar's `engines.vscode` exceeds the server's base version, so the sidebar does not activate | Medium | High | The floor is test-tied to the sidebar's engine minimum. |

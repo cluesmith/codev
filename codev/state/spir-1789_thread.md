@@ -14,3 +14,6 @@
 - Resolved in spec: floor = Tower constant test-tied to sidebar engines.vscode min (1.128.0); install failure refuses spawn;
   missing vsix warns; live server never killed (hint restart); afx ide install in scope; transactional preflight;
   serialized spawns; optional record fields; 0700/non-symlink ext dir; Tower adds dirname(process.execPath) to spawn PATH.
+
+## 2026-10-06 spec questions answered by IDE side (via main)
+- Floor 1.128.0 accepted; published server excludes built-in codev-vscode (pr43 is the counter-example); first published server reports 1.138.0; parse --version line 1 only, ignore npm package suffix (e.g. 1.138.0-codev.1). Folded into spec.
