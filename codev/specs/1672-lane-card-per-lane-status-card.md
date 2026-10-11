@@ -62,7 +62,7 @@ First match wins. The chain is exhaustive: a lane always resolves to exactly one
 
 | Order | State | Derived from (source of truth) |
 |------|-------|--------------------------------|
-| 1 | `WAITING ON YOU` | A porch gate requested and unapproved (`gates[g]==='pending' && gateRequestedAt[g]`), or forge review requested from the user. Never from agent self-report. |
+| 1 | `WAITING ON YOU` | A porch gate requested and unapproved (`gates[g]==='pending' && gateRequestedAt[g]`), forge review requested from the user, or #1595 serving `needs-input` for the lane's agent (a harness-reported permission prompt or question). Never from agent self-report. |
 | 2 | `HELD` | One or more messages held in the lane's mailbox (`heldCount > 0`, global.db). |
 | 3 | `EXTERNAL` | Something outside the lane owes the next move: CI pending on the linked PR. ("Consult lanes in flight" folds in only if a signal exists; see Open Questions and the EXTERNAL fallback below.) |
 | 4 | `AGENT WORKING` | Phase is active **and** a produced artifact (a commit, a thread-entry write, or a PR-state change) is within the freshness threshold. Terminal `lastDataAt` does **not** qualify a lane as working. |
@@ -72,7 +72,9 @@ First match wins. The chain is exhaustive: a lane always resolves to exactly one
 
 `DONE` and `OFFLINE` are terminal/liveness outcomes evaluated within the same single computation; the table lists all reachable states so no lane is unclassified. Secondary conditions (for example held mail while at a gate) render as small badges beside the primary chip. The display labels above (`WAITING ON YOU`, `STALLED?`, and the rest) are presentation; the wire value is the lowercase-kebab `ballOwner.state` union (`'waiting-on-you'`, `'stalled'` with no question mark, and so on), and the uppercasing and the question mark are added by renderers.
 
-**Input from #1595.** The card's `ballOwner.state` union is the card's own presentation vocabulary; its agent-liveness input is #1595's served enum (working / needs-input / idle / blocked / dead). The mapping, final once #1595's enum is ratified: `dead` maps to `OFFLINE`; `blocked` is the same porch-gate fact that already drives `WAITING ON YOU`; `working` and `idle` are liveness inputs only and never by themselves produce `AGENT WORKING` or suppress `STALLED?`, which stay artifact-derived per guardrail #4; where `needs-input` lands is an open question for the owner (see Open Questions).
+**Input from #1595.** The card's `ballOwner.state` union is the card's own presentation vocabulary; its agent-liveness input is #1595's served enum (working / needs-input / idle / blocked / dead). The mapping, final once #1595's enum is ratified: `dead` maps to `OFFLINE`; `blocked` is the same porch-gate fact that already drives `WAITING ON YOU`; `needs-input` maps to `WAITING ON YOU` (owner decision, 2026-10-12); `working` and `idle` are liveness inputs only and never by themselves produce `AGENT WORKING` or suppress `STALLED?`, which stay artifact-derived per guardrail #4.
+
+**`needs-input` adds a trigger, not a state.** The `ballOwner.state` union is unchanged; `needs-input` is a third input to `WAITING ON YOU`, alongside a requested gate and a requested review. The chip's reason comes from #1595's `NeedsInputDetail` (kind, tool, one-line summary), for example `permission: Bash(git push …)` or `question`, so the reason text distinguishes it from a gate. When a lane is both `needs-input` and at a requested gate, `needs-input` is the primary reason (the agent is stopped mid-turn) and the gate renders as a secondary badge. The summary renders as plain text on every surface, matching #1595's rendering-safety rule and this spec's escaping criterion. This satisfies computed-never-authored: `needs-input` is a harness hook fact, in the same class as a gate row, not agent self-report. It also supersedes the issue's out-of-scope item "a structured 'builder needs a human answer' flag feeding the ball-owner chip": that item was out of scope because no such source existed ("today such questions only exist in scrollback"), and #1595 now provides one; leaving it off the chip would also make the card disagree with #1595's own attention counts (status bar, badge, Attention view).
 
 Deliberate divergences from the design canvas (see References): terminal activity is excluded from `AGENT WORKING` (issue guardrail #4: a busy composer proves nothing, and otherwise `STALLED?` is unreachable); the terminal `DONE` and `OFFLINE` states are added beyond the canvas's five (exhaustiveness, and #1595's served `dead` maps to `OFFLINE`); and the endpoint carries the `/api/` prefix.
 
@@ -158,6 +160,7 @@ The card renders gracefully in every degraded case: forge stale or unavailable, 
 - [ ] The VS Code lane id is resolved from the terminal id through the same tail-match mapping the #1559 review queue uses, so a Tower terminal id and an overview builder id for the same lane always reach the same card.
 - [ ] The ball-owner precedence chain is computed in exactly one SDK-side module; the card, the VS Code attention surface, and any dashboard surface consume it, and `deriveAttention` / `isIdleWaiting` are projections over it rather than a second computation (verified by review: one module owns the chain).
 - [ ] Ball owner is derived only from porch gate rows, forge review-request state, held-mailbox rows, and produced artifacts. A lane whose `Now:` line says "done" while its `pr` gate is requested-and-unapproved still shows `WAITING ON YOU`.
+- [ ] When #1595 serves `needs-input` for a lane's agent, the card shows `WAITING ON YOU` with a reason from the needs-input detail (`permission: <tool> …` or `question`), the `ballOwner.state` union is unchanged, and the summary renders as plain text.
 - [ ] `AGENT WORKING` requires an active phase plus a produced-artifact write within the threshold; a lane with fresh terminal `lastDataAt` but stale artifacts resolves to `STALLED?`, not `AGENT WORKING`.
 - [ ] A completed/verified lane resolves to `DONE` (not `STALLED?`); a lane whose shellper is gone resolves to `OFFLINE`.
 - [ ] Rendering the card, at any frequency, spawns **zero** new forge invocations; all forge facts come from the OverviewCache (verified by asserting the card path invokes no `pr-list` / `recently-merged` fetch beyond the cache read).
@@ -209,7 +212,7 @@ Main ruled on all five contract-surface items and verified the rebuttal's code c
 
 ### EXTERNAL and STALLED? defaults (so criteria are testable)
 
-- **EXTERNAL fallback**: if no existing signal for "consult lanes in flight" is found (Open Question 4), `EXTERNAL` means **CI-pending on the linked PR only**. The card ships with that scope; consult-lane detection is a later enhancement if a signal appears.
+- **EXTERNAL fallback**: if no existing signal for "consult lanes in flight" is found (Open Question 3), `EXTERNAL` means **CI-pending on the linked PR only**. The card ships with that scope; consult-lane detection is a later enhancement if a signal appears.
 - **STALLED? default threshold**: a single default (proposed: no produced-artifact movement for longer than the existing idle waiting threshold, `IDLE_WAITING_THRESHOLD_MS`, currently 5 minutes) so the state is testable at plan time. Protocol-aware tuning (a spec phase produces differently than an implement phase) is a follow-up.
 
 ### Fence (do-not-edit) and cross-lane sequencing
@@ -250,20 +253,21 @@ The v1 card renders only fields already in the forge contract (PR number, review
 
 **Decision for the owner at the gate:** does #1672 **claim the Builder Inspector body** (phase / gate / activity) as its participating feature of #1049? The #1049 spec leaves each mode's content to a participating issue; #1553 took Attention and #1559 took Code Review, and the Inspector body is still a placeholder ("This builder's phase, gate, activity, and message input will appear here"). Phase, gate and activity are exactly the card's content. The Inspector's message-input slot is not claimed and stays open (for #807 or a follow-up). Recommendation from architect:vscode and this lane: **yes**.
 
+**Decided by the owner, 2026-10-12:** #1595's `needs-input` maps to `WAITING ON YOU` as an added trigger, with no new ball-owner state (see the precedence section).
+
 The two former Critical questions (the `PrListItem` CI rollup and the per-source `fetchedAt`) were resolved by main on 2026-09-29 and are now recorded under Main's contract-seat rulings (d) and (e) in Constraints.
 
 **Important (shapes design):**
 
-1. Where does #1595's `needs-input` land in the ball-owner chain? It is a harness-reported fact, not agent self-report, so it could feed `WAITING ON YOU`; but the issue lists "a structured 'builder needs a human answer' flag feeding the ball-owner chip" as out of scope. Options: (a) feed `WAITING ON YOU` (re-opens that out-of-scope item); (b) render it as a secondary badge only; (c) ignore it in v1. Owner's call; this spec leans (b).
-2. Confirm the `STALLED?` default threshold (proposed: `IDLE_WAITING_THRESHOLD_MS`, currently 5 minutes, on produced-artifact movement) and whether it should be protocol-aware in v1 or deferred.
-3. Coexistence of the ball-owner chip and a #1729 park chip in one row: a leading park badge that visually pre-empts the computed chip while preserving the computed value beneath (honoring "disagreement is rendered"), versus park replacing the chip. This spec proposes the former; the plan wires the reserved `park` field only.
-4. Is there any existing signal for "consult lanes in flight" that `EXTERNAL` can use without a new data source? If not, `EXTERNAL` is CI-pending-only (the stated fallback).
-5. How are `OFFLINE` / dead lanes discovered for the fleet view, given that the live overview may filter them out? (The card must be reachable for a lane whose shellper is gone.)
+1. Confirm the `STALLED?` default threshold (proposed: `IDLE_WAITING_THRESHOLD_MS`, currently 5 minutes, on produced-artifact movement) and whether it should be protocol-aware in v1 or deferred.
+2. Coexistence of the ball-owner chip and a #1729 park chip in one row: a leading park badge that visually pre-empts the computed chip while preserving the computed value beneath (honoring "disagreement is rendered"), versus park replacing the chip. This spec proposes the former; the plan wires the reserved `park` field only.
+3. Is there any existing signal for "consult lanes in flight" that `EXTERNAL` can use without a new data source? If not, `EXTERNAL` is CI-pending-only (the stated fallback).
+4. How are `OFFLINE` / dead lanes discovered for the fleet view, given that the live overview may filter them out? (The card must be reachable for a lane whose shellper is gone.)
 
 **Nice-to-know (optimization):**
 
-6. Whether `afx status --cards` eventually becomes the default `afx status` output, or stays behind the flag.
-7. Whether the attach-time banner is shown once on attach or refreshes.
+5. Whether `afx status --cards` eventually becomes the default `afx status` output, or stays behind the flag.
+6. Whether the attach-time banner is shown once on attach or refreshes.
 
 ## Test Scenarios
 
@@ -275,6 +279,7 @@ The two former Critical questions (the `PrListItem` CI rollup and the per-source
 - **Disagreement rendered**: porch phase `review` while the linked PR (via `MergedPrItem`) is merged; the card sets `phaseArtifactDisagreement` and shows both.
 - **Forge degraded**: with `forgeStatus` `rate-limited` (and `unavailable`), the card renders from cached/local facts, shows the degraded freshness, and never triggers a fetch.
 - **Absent fields (first-class)**: last-ask absent (#1674); no thread file (no `Now:` line, no beats, coarse `mtime` age); no PR yet (artifact zone shows branch and commit age only). Each renders cleanly with no crash and no fabricated value.
+- **needs-input**: a lane whose agent is stopped at a permission prompt renders `WAITING ON YOU` with `permission: <tool> <summary>`; a question renders `WAITING ON YOU` with `question`; approving the prompt returns the lane to the artifact-derived states. A lane at both a needs-input prompt and a requested gate shows needs-input as the primary reason and the gate as a badge. A summary containing markup or control characters renders inert.
 - **Held state and precedence**: a lane with held rows renders `HELD`; a lane with both a pending gate and held rows renders `WAITING ON YOU` with held as a secondary badge.
 - **Fleet twin sort**: `afx status --cards` places `WAITING ON YOU` lanes first, then `HELD`, then the rest by descending condition age, lane id tie-break.
 - **`afx card` no-id**: with `id` omitted, resolves to the focused/cwd lane, or errors with candidates.
