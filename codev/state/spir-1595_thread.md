@@ -22,3 +22,4 @@
 - PR #1788 merged on main as 9cd860729. After spec word: merge main into branch BEFORE any plan work.
 - 2026-10-12 owner asked about harness-neutral approach; codex updated to 0.162.1. Codex hooks (docs + live exec test): mirror Claude's set plus an Interrupt hook, no Notification; `-c hooks.<Event>=[...]` per-launch works; env var reaches hook; untrusted hooks skipped silently (hash-based trust); --dangerously-bypass-hook-trust needed otherwise. Spec: identity now via launch env (stable hook command for hash trust); Codex reporter recommended as follow-up (owner's call).
 - Owner decision 2026-10-12: Codex reporter = option (a), follow-up issue, not this build. Asked vscode to file it.
+- vscode filed Codex follow-up as #1796.

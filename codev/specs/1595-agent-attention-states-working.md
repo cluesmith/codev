@@ -133,7 +133,7 @@ From the main architect seat's Contract Surface ruling (2026-10-05, issue #1595;
 - Codex has a lifecycle-hook system that closely mirrors Claude's: `SessionStart` (sources `startup`, `resume`, `clear`, `compact`), `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SubagentStart`, `SubagentStop`, `Stop`, and an **`Interrupt`** hook that fires when the user interrupts a turn (Claude has no equivalent). It has no `Notification` / idle event. Payloads carry the same core fields (`session_id`, `cwd`, `hook_event_name`, `tool_name`, `tool_input`, `last_assistant_message`). Command handlers support `async: true`.
 - **Verified live:** hooks supplied per launch with `-c hooks.<Event>=[...]` config overrides fire (the Codex analogue of Claude's `--settings`), and an environment variable set at launch reaches the hook process.
 - **Verified live:** non-managed hooks must be trusted before they run, recorded against the hook's content hash; an untrusted hook is skipped silently (fail-safe: the session falls back). `--dangerously-bypass-hook-trust` runs them for one invocation but bypasses trust for every enabled hook, including the user's own, so codev must not use it without an owner decision. In `exec` mode Codex printed a `hook: Stop Completed` status line, so TUI noise must be checked before shipping a Codex reporter.
-- Consequence: a Codex reporter is a small second implementation behind the same capability and contract (Constraint 7), and Codex is now better positioned than Claude for the interrupt case. It stays out of this build per the main seat's ruling (Constraint 17) and the owner's 2026-10-12 decision; a follow-up issue carries it.
+- Consequence: a Codex reporter is a small second implementation behind the same capability and contract (Constraint 7), and Codex is now better positioned than Claude for the interrupt case. It stays out of this build per the main seat's ruling (Constraint 17) and the owner's 2026-10-12 decision; follow-up #1796 carries it.
 
 **System facts (verified in the tree):**
 
@@ -267,7 +267,7 @@ The spec adopts these defaults. SC4, SC13 and the predicate are written to them,
 
 **Important (shapes design)**
 
-- **Codex reporter: resolved (owner, 2026-10-12): follow-up, not this build.** This build ships the Claude reporter only. A separate follow-up issue adds the Codex reporter behind the same capability and contract; its first task is the trust question (codev-generated hooks trusted without `--dangerously-bypass-hook-trust`, for example a one-time `/hooks` trust of the stable reporter command) plus a TUI-noise check.
+- **Codex reporter: resolved (owner, 2026-10-12): follow-up, not this build.** This build ships the Claude reporter only. Follow-up issue #1796 adds the Codex reporter behind the same capability and contract; its first task is the trust question (codev-generated hooks trusted without `--dangerously-bypass-hook-trust`, for example a one-time `/hooks` trust of the stable reporter command) plus a TUI-noise check.
 - No other design questions remain. The spike resolved the Claude event semantics. Reporter script location and upgrade behavior are plan-level choices bounded by SC15 (it must be codev-owned, and a missing script must fail silently).
 
 **Nice-to-know**
