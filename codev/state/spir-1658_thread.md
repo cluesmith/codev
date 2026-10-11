@@ -15,4 +15,11 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Windows CI leg: recommended non-required → required; owner confirms at spec gate.
 
 ## Progress
-- [in progress] Specify — auditing codebase (transport/lifecycle, launchers/residue) to ground the spec.
+- [done] Specify — codebase audit (~145 POSIX sites; key blockers: UDS shellper transport,
+  start-time PID-reuse guard null on win32 => every reconnect fails, process-group kills,
+  ps/pgrep/lsof, /bin/bash launchers). Spec drafted; CMAP iter1: claude+codex REQUEST_CHANGES,
+  gemini COMMENT — all accepted (census must carry creation time; pre-kill descendant snapshot;
+  kill-on-close job => relaunch-outside or refuse, not warn; worktree removal vs open handles;
+  MAX_PATH; agent vs human-shell terminal split; no toolchain fallback).
+- [gate] spec-approval pending. Owner decisions at gate: OQ1 CI leg + promotion N, OQ2 census
+  provider (PowerShell CIM vs bundled binary), OQ3 kill-on-close behavior, OQ10 ruling-4 reading.
