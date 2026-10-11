@@ -128,6 +128,13 @@ From the main architect seat's Contract Surface ruling (2026-10-05, issue #1595;
 - `SessionStart` fires with a `source` of `startup`, `resume`, `clear` or `compact`, giving a new session id on context reset. `SessionEnd` also fires on `/clear`, which is why `SessionEnd` is not used as a death signal.
 - Hook payloads carry `session_id`, `cwd`, `hook_event_name`, and for tool events `tool_name` and `tool_input`; Notification carries `notification_type`.
 
+**Codex (codex-cli 0.162.1, 2026-10-12; docs plus a live `codex exec` test):**
+
+- Codex has a lifecycle-hook system that closely mirrors Claude's: `SessionStart` (sources `startup`, `resume`, `clear`, `compact`), `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SubagentStart`, `SubagentStop`, `Stop`, and an **`Interrupt`** hook that fires when the user interrupts a turn (Claude has no equivalent). It has no `Notification` / idle event. Payloads carry the same core fields (`session_id`, `cwd`, `hook_event_name`, `tool_name`, `tool_input`, `last_assistant_message`). Command handlers support `async: true`.
+- **Verified live:** hooks supplied per launch with `-c hooks.<Event>=[...]` config overrides fire (the Codex analogue of Claude's `--settings`), and an environment variable set at launch reaches the hook process.
+- **Verified live:** non-managed hooks must be trusted before they run, recorded against the hook's content hash; an untrusted hook is skipped silently (fail-safe: the session falls back). `--dangerously-bypass-hook-trust` runs them for one invocation but bypasses trust for every enabled hook, including the user's own, so codev must not use it without an owner decision. In `exec` mode Codex printed a `hook: Stop Completed` status line, so TUI noise must be checked before shipping a Codex reporter.
+- Consequence: a Codex reporter is a small second implementation behind the same capability and contract (Constraint 7), and Codex is now better positioned than Claude for the interrupt case. It stays out of this build per the main seat's ruling (Constraint 17); see Open Questions.
+
 **System facts (verified in the tree):**
 
 - A builder's PTY child is codev's generated bash launch loop, not the agent. When the agent exits cleanly, the loop waits at a "Press Enter to relaunch" prompt, so the PTY does not exit and Tower sees no EXIT frame. Liveness of the **agent** therefore requires looking at the process tree under the session, which has in-repo precedent (descendant collection in `afx tower`). An architect's PTY child is the agent itself, so its exit is observed by the existing exit and restart-wait path.
@@ -141,7 +148,7 @@ The design has three independent choices: how events leave the harness (transpor
 
 ### Approach 1 (recommended transport): generated reporter script as an async command hook, posting a harness-neutral event to a Tower ingestion endpoint
 
-The Claude provider generates a small dependency-free Node script (same shape as the write-guard script). Each configured hook invokes it with `async: true` and a short `timeout`. The script reads the hook payload from stdin, translates it to a neutral event (`session-started`, `turn-started`, `tool-activity`, `needs-input`, `turn-ended`), stamps it with the time the hook ran, reads the local key, POSTs once to Tower with a sub-second deadline, and exits 0 with no stdout regardless of outcome. Agent identity (workspace path and the Tower-canonical registered agent id) is injected at launch, never derived from the working directory (Constraint 15); the harness session id comes from the payload.
+The Claude provider generates a small dependency-free Node script (same shape as the write-guard script). Each configured hook invokes it with `async: true` and a short `timeout`. The script reads the hook payload from stdin, translates it to a neutral event (`session-started`, `turn-started`, `tool-activity`, `needs-input`, `turn-ended`), stamps it with the time the hook ran, reads the local key, POSTs once to Tower with a sub-second deadline, and exits 0 with no stdout regardless of outcome. Agent identity (workspace path and the Tower-canonical registered agent id) is injected at launch through the launch environment, never derived from the working directory (Constraint 15). The hook command itself is identical for every agent, which keeps it stable for harnesses that trust hooks by content hash (Codex does); the harness session id comes from the payload.
 
 - **Pros:** fail-open by construction (async; Tower down is an immediate refused connection; no stdout means no permission decision); the key is never written into settings or exported into the agent environment; translation lives inside the provider, so Tower stays harness-neutral; proven seam (#1018).
 - **Cons:** one short-lived Node process per reported event. `PostToolUse` must fire for every tool (it is the only resume signal after an approval), so tool-heavy turns spawn one async process per tool call. Mitigated from the start: `PreToolUse` is matched to the question tool only, and Tower ignores reports that do not change the served state.
@@ -260,12 +267,13 @@ The spec adopts these defaults. SC4, SC13 and the predicate are written to them,
 
 **Important (shapes design)**
 
-- None remaining. The spike resolved the event semantics. Reporter script location and upgrade behavior are plan-level choices bounded by SC15 (it must be codev-owned, and a missing script must fail silently).
+- **Codex reporter: follow-up or this build?** Codex 0.162.1's hooks make a Codex reporter cheap (see Assumptions), but the main seat ruled that Codex omits the capability in this build. Recommendation: ship Claude-only here, and file a follow-up for the Codex reporter whose first task is the trust question (how codev-generated hooks become trusted without the dangerous bypass flag, for example a one-time `/hooks` trust of the stable reporter command) and a TUI-noise check. Owner's call.
+- No other design questions remain. The spike resolved the Claude event semantics. Reporter script location and upgrade behavior are plan-level choices bounded by SC15 (it must be codev-owned, and a missing script must fail silently).
 
 **Nice-to-know**
 
 - Whether per-tool `PostToolUse` reporting is measurable on very tool-heavy turns. If it is, the reporter can skip a POST when its session's previous report was already `working`, using a small marker file.
-- Whether the Codex turn-complete notification can become a second reporter later. That is out of scope, and the seam allows it.
+- OpenCode's plugin event system as a possible third reporter (not installed here; unverified).
 
 ## Test Scenarios
 
