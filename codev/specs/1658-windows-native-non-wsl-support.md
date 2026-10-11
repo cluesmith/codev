@@ -87,7 +87,8 @@ Linux user, under two prerequisites: Git for Windows and jq.
 - Forge concepts (all providers), porch, consult, `afx dev`, runnable worktrees and the VS Code
   extension work.
 - Shell roles are split:
-  - **PowerShell** is the interactive shell a human types into (architect and shell terminals).
+  - **PowerShell** is the interactive shell a human types into (shell terminals). Agent
+    terminals run their harness directly, as on POSIX.
   - **Git Bash** is the only plumbing shell: forge concepts, the builder launch script,
     `postSpawn`, and `devCommand`.
 - `codev doctor` on Windows checks the Windows prerequisites and explains anything missing.
@@ -121,8 +122,14 @@ disabled, unless it says otherwise.
 - [ ] The root cause of the 2026-09-09 `afx tower start` hang is identified and recorded in the
   review. `afx tower start` reaches ready, and `afx tower stop` stops it. Both work without
   `lsof`/`pgrep`.
-- [ ] Architect and shell terminals open in PowerShell by default. Typing, resize, scrollback,
-  and exit all behave correctly in the dashboard and the VS Code extension.
+- [ ] Terminal roles are distinct:
+  - **Agent terminals** (architect, builder) run the configured harness command (`claude` by
+    default) directly, as on POSIX, with `.cmd`/`.exe` shims resolved.
+  - **Human shell terminals** (`afx shell`, the dashboard's "new shell", and any terminal that
+    needs a host shell) open in PowerShell by default.
+
+  Typing, resize, scrollback, and exit all behave correctly in the dashboard and the VS Code
+  extension.
 - [ ] `afx send` delivers onto a Windows architect or builder: it is held while the recipient is
   mid-turn or a human is typing, and delivered at an empty prompt. This rests on render-gate
   validation captures from real ConPTY sessions of each supported harness (at minimum claude and
@@ -136,10 +143,23 @@ disabled, unless it says otherwise.
   too.
 - [ ] Killing a builder, a dev PTY, or `afx cleanup` leaves **no descendant processes** of the
   killed session: the whole tree is gone, including `node`, `bash.exe` and harness children.
-- [ ] Orphaned and husk shellpers are detected and reaped on Windows, as on POSIX.
-- [ ] Shellper endpoints are not connectable or readable by other non-admin local users.
+  This holds even when an intermediate process exited before teardown and its children were
+  re-parented, and when the session root is already dead.
+- [ ] `afx cleanup` actually removes the worktree directory on Windows despite transient open
+  handles (antivirus, indexer, a just-killed process's cwd), or fails with a clear error naming
+  the blocking path. Removal deletes junction/link entries without traversing into or deleting
+  their targets.
+- [ ] Orphaned and husk shellpers are detected and reaped on Windows, as on POSIX, including the
+  process-age race guard the POSIX sweep uses.
+- [ ] Other non-admin local users cannot **read session data from, or control,** a shellper. An
+  unauthenticated connection receives zero bytes, and every frame it sends is ignored before the
+  connection is dropped. Whether OS-level *non-connectability* is also required is Open
+  Question 6.
 
 **Launchers and forge**
+- [ ] Paths flow correctly in both directions across the Git Bash boundary: Windows paths passed
+  into bash (`cwd`, arguments) and MSYS-form paths emitted by bash/git (`/c/Users/...`) parsed
+  back into native paths before Node uses them.
 - [ ] Every forge concept for every shipped provider runs on Windows through Git Bash (GitHub
   exercised live; others via the same launcher plus unit coverage). This includes concepts whose
   arguments are paths or slash-prefixed strings, which MSYS path conversion would otherwise
@@ -150,12 +170,20 @@ disabled, unless it says otherwise.
   teardown leaves no orphaned dev-server process.
 - [ ] Runnable-worktree links work without Developer Mode, through a documented fallback for
   files and directories. When Developer Mode is on, real symlinks are used.
+- [ ] A workspace at a typical depth (for example `C:\Users\<name>\src\<repo>`) supports builder
+  worktrees and their dependency trees without the admin-only `LongPathsEnabled` setting. Doctor
+  reports when the workspace root is deep enough to risk MAX_PATH overruns, and whether Git's
+  per-user `core.longpaths` is set.
 
 **Breadth**
 - [ ] `consult` (all three reviewers, with non-blocking skip semantics intact), porch checks,
   `afx open`, and `afx attach` work on Windows.
 - [ ] The local auth key and other owner-only files are protected on Windows by an equivalent of
   the POSIX `0600` modes, not silently left world-readable.
+- [ ] On a supported Node version (≥ 20, x64), `npm install -g @cluesmith/codev` succeeds on
+  Windows without a C/C++ toolchain. If a native dependency lacks a Windows prebuild for the
+  user's Node version, install or first run fails with a message naming the supported Node
+  versions. It never silently falls back to a source build.
 
 **Non-regression and CI**
 - [ ] The macOS and Linux unit, integration, CLI e2e and post-release e2e suites pass unchanged.
@@ -237,13 +265,14 @@ The ruling also named known items the spec must address:
 ## Assumptions
 
 - node-pty ^1.1 and better-sqlite3 ^12 ship Windows x64 prebuilt binaries for the supported
-  Node versions. If they don't, the docs add Visual Studio Build Tools as a prerequisite. This is
-  verified in the audit phase.
+  Node versions. This is verified in the audit phase. The supported Windows Node versions are
+  defined as those with prebuilds; a compiler toolchain is never a prerequisite, because that
+  contradicts the locked-down target.
 - Node's `net` module supports Windows named pipes (`\\.\pipe\...`) for both server and client,
   and the shellper HELLO/WELCOME framing is transport-agnostic.
 - Git for Windows ships `bash`, `sed`, `grep`, `head`, `tail`, `sort`, `date`, `curl` and `git`,
-  which covers every external tool the forge scripts use except `jq`, `gh` and `glab`. `gh` and
-  `glab` are separate installs on every platform already.
+  which covers every external tool the forge scripts use except `jq` and the provider CLIs `gh`,
+  `glab` and `tea`. The provider CLIs are separate installs on every platform already.
 - Windows 10 1809+ (ConPTY) is the floor. Windows 10 22H2 and Windows 11 x64 are the tested
   targets. Windows on ARM is not a tested target in this project (see Open Questions).
 - The VS Code extension already branches for Windows where it touches the OS (for example
@@ -252,6 +281,16 @@ The ruling also named known items the spec must address:
   Git Bash path users have.
 - Claude Code honors `CLAUDE_CODE_GIT_BASH_PATH` on Windows, so a builder's own Bash tool uses
   the same Git Bash Codev resolved.
+- Windows' 260-character MAX_PATH limit can only be lifted machine-wide with admin rights
+  (`LongPathsEnabled`), so the target machines are assumed to have it **off**. Node's own `fs`
+  handles long paths internally. Git needs the per-user (no-admin) `core.longpaths=true`. Other
+  tools in the chain (npm installs inside a worktree, some harness CLIs) may not cope, so worktree
+  depth must stay within MAX_PATH by construction or be diagnosed.
+- Ruling 4's "PowerShell is the default interactive shell for architect and shell terminals" is
+  read as follows. The `.codev/config.json` *shell* role defaults to PowerShell on Windows. Agent
+  terminals still run their configured harness command directly (`shell.architect: claude`), as
+  they do on POSIX. A terminal that needs a host shell uses PowerShell. This is confirmed at the
+  spec gate (Open Question 10).
 
 ## Solution Approaches
 
@@ -271,6 +310,8 @@ fallback**. Each has competing approaches below.
   - "Wait for socket file" becomes "connect-probe until ready".
   - `isSocket()` checks become endpoint probes.
   - Stale cleanup is a no-op, because pipes vanish with their server.
+  - Every place that derives identity from the endpoint string, such as parsing the session id
+    out of the `shellper-<id>.sock` basename, reads it from a platform-neutral source instead.
   - The attach fallback scan enumerates `\\.\pipe\` or relies on the DB registry, which is
     already the primary mechanism.
 - **Logs.** The per-session log moves to a real file path decoupled from the endpoint, since
@@ -278,14 +319,17 @@ fallback**. Each has competing approaches below.
 - **Access control.** The pipe must not be readable or connectable by other users. Two options:
   1. Restrict the pipe's DACL to the current user. This needs native interop, because Node does
      not expose pipe security attributes.
-  2. Gate every connection on a per-session secret in HELLO. Tower generates the secret; it is
-     never on argv (argv is visible to other users) and is persisted in the user-private global
-     DB. The shellper sends nothing to an unauthenticated client.
+  2. Gate every connection on a per-session secret in HELLO. Tower generates the secret and
+     passes it to the shellper through its environment or stdin, never on argv (argv is visible
+     to other users through process queries). It is persisted in the user-private global DB for
+     reconnects. The shellper sends nothing to an unauthenticated client.
 
   We recommend option 2. It needs no native code, and it also defends against an
   already-connected read-only client, because the server writes nothing before HELLO is
   verified. Name squatting is mitigated by unguessable UUID names and by the client verifying the
-  WELCOME (session id and pid).
+  WELCOME (session id and pid). Under the secret gate another user *can* open a handle to the
+  pipe but gets nothing from it. True non-connectability needs a restrictive DACL (Open
+  Question 6).
 - **Pros:** smallest conceptual change; one framing; reuses the existing persistence model.
 - **Cons:** each file-based assumption needs a platform branch.
 - **Risk:** medium.
@@ -309,10 +353,17 @@ tree, at every process-group kill site (recommended for teardown).**
 - **Graceful paths.** Where a graceful step matters, Windows uses an explicit protocol message
   instead of a signal, because SIGTERM is a hard kill there. Two examples:
   - shellper shutdown (an existing wire message);
-  - Tower stop, which needs an HTTP shutdown request so the owner lock is released.
+  - Tower stop, through an HTTP shutdown request so the daemon can clean up. The owner lock
+    already self-clears on a dead PID at the next start, so the hard-kill fallback degrades
+    safely and needs no extra machinery.
 - **Pros:** no native code.
 - **Cons:** `taskkill /T` walks parent links, so a process whose parent already exited (a
-  re-parented grandchild) can escape.
+  re-parented grandchild) can escape. If the root itself is already dead, `taskkill /T` fails
+  outright and walks nothing.
+- **Closing the gap.** Teardown takes a descendant snapshot from the census (pid/ppid/creation
+  time) *before* killing. It then kills each recorded descendant explicitly, using creation time
+  to avoid killing a reused PID. So "no descendants survive" does not rest on `taskkill`'s walk
+  alone. The orphan/husk sweep is the backstop for anything spawned after the snapshot.
 - **Risk:** medium.
 
 **B2: Job Objects per session.**
@@ -321,20 +372,24 @@ tree, at every process-group kill site (recommended for teardown).**
   the no-toolchain constraint and adds a binary that AppLocker may block on locked-down machines.
 - **Risk:** high.
 
-**Recommendation:** B1, with the escape case covered by the orphan/husk sweep (Area C). B2 is
-the fallback if CI proves leaks that the sweep cannot catch.
+**Recommendation:** B1 plus a census snapshot. B2 is the fallback if CI proves leaks the snapshot
+and sweep cannot catch.
 
 **Detached survival.** Shellpers are spawned detached so they outlive Tower. On Windows, a
 detached child still outlives its parent, **unless** Tower itself runs inside a job with
 kill-on-close (some terminal hosts and IDEs do this). Then the shellpers die with it, because
 Node cannot request job breakaway. The spec requires the following:
-- **Prove survival** under the documented launch paths:
+- **Survival is required, not best-effort**, on every documented launch path:
   - `afx tower start` from PowerShell / Windows Terminal;
   - from the VS Code extension;
   - from CI.
-- **Detect** the kill-on-close-job case at Tower start and warn in doctor.
-
-Solving breakaway outright needs native interop (see Open Questions).
+- **If Tower detects it is inside a kill-on-close job**, that launch context cannot keep the
+  persistence guarantee. A warning alone is not parity. The two candidate behaviors are Open
+  Question 3:
+  1. **Relaunch outside the job.** A process created through WMI's `Win32_Process.Create` or a
+     one-shot scheduled task is parented outside the caller's job, with no native code.
+  2. **Refuse.** Refuse to start Tower in that context, with an actionable error naming a
+     supported launch path.
 
 ### Area C: Process introspection (census, start time, port owner)
 
@@ -348,8 +403,15 @@ census (pid, ppid, cmdline), process start time, the port-to-PID owner, and live
   reconnect does not need process start time. This is stronger than a start-time comparison.
 - **Tower PID.** Tower stop and start learn Tower's PID from the owner lock and from the
   `/api/status` response, not from port-ownership lookups.
-- **Sweeps.** The remaining census needs (orphan and husk sweeps, fleet RSS, doctor) use a
-  single Windows census provider.
+- **Sweeps.** The remaining census needs (orphan and husk sweeps, the teardown snapshot in Area
+  B, fleet RSS, doctor) use a single Windows census provider. The provider must return **pid,
+  ppid, command line, and creation time**. The POSIX husk sweep and the registered-PID set both
+  *skip* any process whose start time cannot be read, so a provider without creation time makes
+  the Windows sweep a silent no-op. CIM's `Win32_Process` supplies all four fields.
+- **No degraded mode at parity.** The census provider is load-bearing for the "no descendants"
+  and "orphans reaped" criteria. If it is unavailable (for example blocked by policy), that is a
+  reported failure: doctor flags it, and Tower logs that sweeps are disabled. It is not a
+  supported configuration.
 - **Pros:** the load-bearing guarantee (reconnect) has no external-tool dependency.
 - **Cons:** two identity mechanisms (start time on POSIX, handshake on Windows).
 - **Risk:** low to medium.
@@ -361,7 +423,7 @@ census (pid, ppid, cmdline), process start time, the port-to-PID owner, and live
 - **Risk:** medium.
 
 **The census provider itself** has two options, and the choice is an open question for the
-owner:
+owner. Both must satisfy the field requirements above.
 1. A `powershell.exe -NoProfile -NonInteractive -Command` CIM query. Inline commands are not
    governed by script execution policy, but Constrained Language Mode or AppLocker may still
    apply.
@@ -388,7 +450,12 @@ Every plumbing launch site routes through one resolved Git Bash binary:
   variables, where arguments must pass through unmangled (for example slash-prefixed API paths
   or `/repos/...` strings given to `gh api`).
 
-**Executable shims.** The `.cmd`/`.exe` shims that commands like `claude` and `afx` become on
+**Output paths.** Paths that bash or git print in MSYS form (`/c/...`) are converted back to
+native form before Node consumes them. Otherwise Node reads `/c/...` as a drive-relative
+`C:\c\...`.
+
+**Executable shims.** ConPTY spawns through `CreateProcess`, which cannot execute a `.cmd`/`.bat`
+file directly. The `.cmd`/`.exe` shims that commands like `claude` and `afx` become on
 Windows are resolved through `PATHEXT` before spawn, both for PTY commands and for the VS Code
 extension's `afx` calls.
 
@@ -402,6 +469,10 @@ a shared resolver. That spreads the System32-WSL trap across every site.
 - **Files:** use a hard link when on the same volume, otherwise copy.
 - Real symlinks are used when the probe shows they are allowed (Developer Mode or admin).
 - A copy is reported in spawn output, because it does not track later edits to the source.
+- Worktree removal deletes the link entries themselves and never recurses through a junction
+  into its target.
+- Worktree removal on Windows retries with backoff on EBUSY/EPERM from transient handles after
+  the session tree is killed, and reports the blocking path if it still fails.
 
 **E2: Require Developer Mode.**
 - Violates the locked-down-machine target. Rejected.
@@ -424,16 +495,19 @@ launch WSL.
    Does the owner confirm `windows-latest` on unit, CLI e2e, and post-release e2e, introduced
    non-required and promoted to required after stabilization? What is the promotion criterion?
    We propose N consecutive green runs on main without a Windows-only flake.
-2. **Process census provider (Area C).** Ruling 4 makes Git Bash "the only plumbing shell" for
-   scripts. Is an inline `powershell.exe -Command` CIM query, used only for the sweep census and
-   not as a script, acceptable under that ruling? Or does the owner prefer a bundled census
-   binary, or a degraded mode where Windows sweeps rely only on DB-registered PIDs plus tree
-   kill? The recommended C1 keeps this off the reconnect hot path either way.
+2. **Process census provider (Area C).** The provider must return pid, ppid, command line *and
+   creation time*, or the Windows husk sweep and teardown snapshot become no-ops (see Area C).
+   Ruling 4 makes Git Bash "the only plumbing shell" for scripts. Is an inline
+   `powershell.exe -Command` CIM query, used only for the census and not as a script, acceptable
+   under that ruling? Or does the owner prefer a bundled census binary? A third option, "DB-registered PIDs plus `taskkill` only", **forfeits** the husk sweep
+   and the re-parented-descendant guarantee, so it does not meet full parity. The recommended C1
+   keeps the census off the reconnect hot path either way.
 
 **Important (shapes the design)**
-3. **Job breakaway.** If the documented launch paths show Tower running inside a kill-on-close
-   job (so shellpers die with Tower), is detect-and-warn enough, or must the project ship native
-   interop (a CREATE_BREAKAWAY_FROM_JOB launcher) to keep the parity guarantee there?
+3. **Kill-on-close job context.** If Tower is launched inside a kill-on-close job (so shellpers
+   would die with it), should Codev relaunch Tower outside the job (WMI `Win32_Process.Create`
+   or a one-shot scheduled task, both without native code but each subject to policy), or refuse
+   to start with an actionable error? Detect-and-warn alone does not meet parity.
 4. **PowerShell flavor.** Should we prefer `pwsh` 7 when present and fall back to Windows
    PowerShell 5.1, or always use 5.1 for predictability? (Proposed: prefer `pwsh`.)
 5. **Windows on ARM64.** Out of scope for this project (documented as untested), or a supported
@@ -445,10 +519,15 @@ launch WSL.
    is already private to the user on default installs) acceptable, documented as such?
 
 **Nice-to-know**
-8. Should doctor also report Developer Mode, long-path support, and `core.autocrlf`, so the user
-   knows ahead of time which link mode and line-ending behavior they will get?
+8. Should doctor also report Developer Mode and `core.autocrlf`, so the user knows ahead of time
+   which link mode and line-ending behavior they will get? (Long paths are now a success
+   criterion.)
 9. Should `afx tower start` on Windows hide the daemon console window (`windowsHide`), which
    matters for UX in the VS Code extension and the CLI?
+
+**Important (confirm at the spec gate)**
+10. **Ruling 4 interpretation.** Is the reading in Assumptions right? Agent terminals run the
+    harness directly; the *shell* role and any host-shell need default to PowerShell.
 
 ## Test Scenarios
 
@@ -458,8 +537,8 @@ launch WSL.
    project.
 2. Doctor with jq missing, and doctor with only System32 `bash.exe` present: each gives a clear
    failure naming the missing prerequisite. The WSL launcher is not accepted.
-3. `afx tower start` reaches ready; the dashboard loads; the architect terminal is PowerShell
-   (or Claude, per config) and accepts input; resize reflows; `afx tower stop` exits cleanly and
+3. `afx tower start` reaches ready; the dashboard loads; the architect terminal runs the
+   configured harness and accepts input; `afx shell` opens PowerShell; resize reflows; `afx tower stop` exits cleanly and
    releases the owner lock.
 4. **Persistence:**
    - Spawn a builder.
@@ -470,7 +549,14 @@ launch WSL.
 5. **PID reuse:** make a registered shellper's PID belong to a different process, or put a stale
    DB row in place. Reconnect must refuse, and the row must be cleaned.
 6. **Teardown:** kill a builder; `afx cleanup` a builder; stop `afx dev` on a dev server that
-   spawns children. In each case, no descendant processes survive.
+   spawns children. In each case, no descendant processes survive. Also: an intermediate
+   process exits first (re-parenting its children), and the session root is already dead when
+   teardown runs. No descendants survive in either case.
+6a. **Worktree removal:** `afx cleanup` succeeds while a just-killed process briefly holds a
+    handle in the worktree. A worktree containing junction links is removed without touching the
+    junction targets.
+6b. **Long paths:** a workspace under `C:\Users\<name>\src\<repo>` with `LongPathsEnabled` off
+    spawns a builder whose worktree runs `npm install`.
 7. **Orphan sweep:** an unregistered shellper (for example after a Tower crash) is detected and
    reaped at the next start.
 8. **Forge:** run every GitHub concept live, including ones passing `/repos/...`-style arguments.
@@ -489,8 +575,8 @@ launch WSL.
     - while a human is typing in the composer: held.
 13. **Consult:** a 3-way consult runs from a Windows builder; an unauthenticated agy skips
     without blocking.
-14. **Access control:** a second local non-admin user cannot connect to, or read from, a
-    shellper pipe.
+14. **Access control:** a second local non-admin user who opens a shellper pipe receives zero
+    bytes, and frames it sends have no effect.
 15. **VS Code extension:** start Tower, spawn a builder, open its terminal, and reveal a file,
     all on Windows.
 
@@ -505,14 +591,17 @@ launch WSL.
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| Shellpers die with Tower when Tower runs inside a kill-on-close job (terminal host or IDE) | Medium | High (breaks the persistence guarantee) | Prove survival on each documented launch path; detect the job at start and warn; native breakaway launcher held in reserve (OQ 3) |
-| `taskkill /T` misses re-parented descendants, leaking processes | Medium | Medium | Orphan/husk sweep on Windows; teardown tests assert no survivors; Job Objects as fallback (Area B2) |
+| Shellpers die with Tower when Tower runs inside a kill-on-close job (terminal host or IDE) | Medium | High (breaks the persistence guarantee) | Survival required on each documented launch path; detect the job at start and relaunch outside it or refuse (OQ 3); never a silent warning |
+| `taskkill /T` misses re-parented descendants, or walks nothing when the root is already dead | Medium | Medium | Pre-kill census snapshot with explicit per-PID kills; orphan/husk sweep as backstop; teardown tests assert no survivors; Job Objects as fallback (Area B2) |
 | ConPTY timing differs from POSIX PTYs, so the render gate misclassifies (lost or force-held mail) | High | High | Assume nothing (#1567 lesson): capture real ConPTY sessions per harness, replay them as fixtures, adjust gate profiles from the data |
 | MSYS path conversion mangles forge arguments | High | Medium | Per-call opt-out of automatic conversion; explicit translation helper; concept-by-concept tests with slash-prefixed arguments |
 | System32 `bash.exe` invoked by accident, launching WSL or failing on WSL-blocked machines | Medium | High | Single resolver; never bare `bash`; doctor rejects System32; config `shell: bash` maps to Git Bash on Windows |
 | Locked-down policy (AppLocker, Constrained Language Mode) blocks the census provider or a bundled binary | Medium | Medium | Keep introspection off the reconnect hot path (C1); sweeps degrade to DB-registered PIDs if the provider fails |
 | Pipe readable or connectable by other local users | Low | High | Per-session HELLO secret, kept off argv; server sends nothing pre-auth; UUID pipe names; client verifies WELCOME |
-| Native deps lack Windows prebuilds for a Node version | Low | Medium | Verify in the audit phase; document the toolchain fallback; CI leg catches regressions |
+| Native deps lack Windows prebuilds for a Node version | Low | Medium | Verify in the audit phase; supported Node versions are defined as those with prebuilds; clear failure otherwise (no toolchain fallback); CI leg catches regressions |
+| Worktree removal fails on open handles (antivirus, indexer, lingering cwd) | High | Medium | Kill the session tree first; retry with backoff; report the blocking path; never recurse through junctions |
+| MAX_PATH overruns in nested `.builders/<id>/` plus dependency trees (raising the limit needs admin) | Medium | High | Doctor depth check and `core.longpaths` check; docs recommend a short workspace root; keep Codev-generated paths short |
+| `.cmd` shims cannot be spawned directly under ConPTY | High | High | Resolve shims through `PATHEXT` and launch them through `%COMSPEC% /c` or the underlying Node entry point |
 | Windows CI leg is flaky or slow, so it gets ignored and support rots | High | High | Non-required during stabilization with an explicit promotion criterion; flaky tests annotated per protocol; required check after promotion |
 | A platform branch changes POSIX behavior | Low | High | POSIX implementations stay today's code; full macOS/Linux suites gate every phase |
 | CRLF line endings (Git `autocrlf`) break bash scripts or output parsing | Medium | Medium | `.gitattributes` `eol=lf` for shipped `.sh` scripts; CRLF-tolerant output parsing; doctor CRLF warning for user scripts |
