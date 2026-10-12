@@ -73,6 +73,40 @@ describe('ide-record', () => {
     expect(readIdeRecord()).toBeNull();
   });
 
+  it('round-trips the Spec 1789 fields', () => {
+    const record: IdeServerRecord = {
+      ...SAMPLE,
+      serverVersion: '1.135.0',
+      extensionsDir: '/home/dev/.agent-farm/ide-extensions',
+      sidebarVersion: '3.3.4',
+    };
+    writeIdeRecord(record);
+    expect(readIdeRecord()).toEqual(record);
+  });
+
+  it('parses a legacy (pre-#1789) record without the new fields', () => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    writeFileSync(getIdeRecordPath(), JSON.stringify(SAMPLE));
+    const parsed = readIdeRecord();
+    expect(parsed).toMatchObject(SAMPLE);
+    expect(parsed?.serverVersion).toBeUndefined();
+    expect(parsed?.extensionsDir).toBeUndefined();
+    expect(parsed?.sidebarVersion).toBeUndefined();
+  });
+
+  it('drops new fields that are not strings, keeping the record', () => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    writeFileSync(
+      getIdeRecordPath(),
+      JSON.stringify({ ...SAMPLE, serverVersion: 1135, extensionsDir: null, sidebarVersion: ['3.3.4'] }),
+    );
+    const parsed = readIdeRecord();
+    expect(parsed).toMatchObject(SAMPLE);
+    expect(parsed?.serverVersion).toBeUndefined();
+    expect(parsed?.extensionsDir).toBeUndefined();
+    expect(parsed?.sidebarVersion).toBeUndefined();
+  });
+
   it('generates and persists a connection token, returning the same value on reuse', () => {
     const first = ensureIdeConnectionToken();
     expect(first).toMatch(/^[0-9a-f]{64}$/);

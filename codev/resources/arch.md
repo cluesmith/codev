@@ -2193,8 +2193,37 @@ server serves any folder. Forwarding code lives in `servers/ide-forward.ts`; lif
 - **Management API**: `POST/DELETE/GET /api/ide` (driven by `afx ide start|stop|status`) is
   local-only — blocked from the tunnel like `/api/tunnel/*` because it spawns/kills a process.
 - **State**: a Tower-managed `~/.agent-farm/ide-server.json` record (`{prefix, port, serverPath,
-  pid}`), the `cloud-config.json` pattern — **no config file, no `global.db` change**. Live PID
-  is discovered by port. `codev/` and `codev-skeleton/` are unaffected (this is product code).
+  pid}`, plus optional `defaultFolder`, `serverVersion`, `extensionsDir`, `sidebarVersion` from
+  Spec 1789; legacy records without them still parse), the `cloud-config.json` pattern — **no
+  config file, no `global.db` change**. Live PID is discovered by port. `codev/` and
+  `codev-skeleton/` are unaffected (this is product code).
+- **npm distribution (Spec 1789)**: the server ships as `@cluesmith/codev-ide` (bin
+  `codev-ide-server`, per-platform `optionalDependencies`); `@cluesmith/codev` embeds the sidebar
+  vsix (`ide-extension/{codev-vscode.vsix,manifest.json}`, built from `apps/vscode` by the codev
+  build). No npm dependency in either direction; the server tree ships no copy of the sidebar.
+- **CLI-side discovery**: `afx ide start` resolves the server in the user's shell (`--server-path`,
+  then `PATH`, then the sibling `@cluesmith/codev-ide` of the running codev install, then
+  `npm root -g`) and sends the path to Tower, because the daemon's environment can predate the
+  install. It returns the bin link, not its realpath, so an in-place `npm i -g` upgrade lands on
+  the next respawn. `afx ide install` runs npm in the CLI too; Tower never exposes it.
+- **Preflight (`spawnIdeServer`)**: before touching a running server, Tower checks
+  `--version` line 1 against `IDE_SERVER_MIN_VERSION` (`lib/ide-version.ts`), then installs the
+  embedded vsix into the Tower-owned `~/.agent-farm/ide-extensions` (0700, non-symlink, owned by
+  the user) with the server's own `--install-extension --force --extensions-dir`, skipped when
+  `extensions.json` already lists that version. Only then does it stop (on a port change) or
+  adopt, and it spawns with `--extensions-dir` and an env whose `PATH` includes Tower's Node
+  directory. A failure refuses the start transactionally; a missing embedded vsix only warns.
+  Adopting a live server never kills it; `restartRequired` flags a server that predates the
+  current binary, sidebar, or extensions dir, and the CLI prints the restart hint. Subprocess
+  bounds live beside the floor, and the CLI's request timeout (`IDE_START_BUDGET_MS`) is derived
+  from them.
+- **Serialization**: one non-reentrant promise-chain lock (`withIdeLock`) wraps only the entry
+  points (the `/api/ide` POST and DELETE, and the respawn body of `ensureIdeServerLive`, which
+  boot reconcile reaches). Inner unlocked bodies call each other freely, so spawn-calls-stop and
+  respawn-calls-spawn cannot deadlock.
+- **Floor coupling**: `IDE_SERVER_MIN_VERSION` is test-tied to the sidebar's `engines.vscode`
+  minimum, which follows its own policy (it tracks the VS Code base Cursor bundles), so an
+  engines bump forces a floor bump and can retire older published servers.
 
 ## System-Wide Patterns
 

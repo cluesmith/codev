@@ -1,0 +1,122 @@
+id: '1789'
+title: tower-managed-codev-ide-server
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Embedded sidebar vsix in the codev package
+    status: complete
+  - id: phase_2
+    title: Server version handshake and spawn environment
+    status: complete
+  - id: phase_3
+    title: Tower-owned extensions directory and idempotent sidebar install
+    status: complete
+  - id: phase_4
+    title: Transactional, serialized spawn preflight on all spawn paths
+    status: complete
+  - id: phase_5
+    title: CLI discovery, afx ide install, and richer status
+    status: complete
+  - id: phase_6
+    title: Documentation and end-to-end verification
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-10-06T01:13:32.192Z'
+    approved_at: '2026-10-12T20:22:33.265Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-10-12T20:34:18.421Z'
+    approved_at: '2026-10-12T21:12:16.125Z'
+  pr:
+    status: pending
+    requested_at: '2026-10-12T23:22:54.156Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_1-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_2-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: COMMENT
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_4-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_4-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_4-iter1-claude.txt
+started_at: '2026-10-06T01:04:39.827Z'
+updated_at: '2026-10-12T23:22:54.156Z'
+context_refreshes:
+  - boundary: enter:plan
+    at: '2026-10-12T20:22:35.464Z'
+    acknowledged_at: '2026-10-12T20:23:16.908Z'
+  - boundary: enter:implement
+    at: '2026-10-12T21:12:18.290Z'
+    acknowledged_at: '2026-10-12T21:13:02.346Z'
+  - boundary: plan-phase:phase_2
+    at: '2026-10-12T21:43:15.596Z'
+    acknowledged_at: '2026-10-12T21:43:22.951Z'
+  - boundary: plan-phase:phase_3
+    at: '2026-10-12T22:17:08.518Z'
+    acknowledged_at: '2026-10-12T22:17:14.217Z'
+  - boundary: plan-phase:phase_4
+    at: '2026-10-12T22:28:01.683Z'
+    acknowledged_at: '2026-10-12T22:28:45.312Z'
+  - boundary: plan-phase:phase_5
+    at: '2026-10-12T22:46:33.656Z'
+    acknowledged_at: '2026-10-12T22:46:38.861Z'
+  - boundary: plan-phase:phase_6
+    at: '2026-10-12T22:57:21.894Z'
+    acknowledged_at: '2026-10-12T22:58:04.341Z'
+  - boundary: enter:review
+    at: '2026-10-12T23:10:22.591Z'
+    acknowledged_at: '2026-10-12T23:11:09.988Z'
+pr_history:
+  - phase: review
+    pr_number: 1806
+    branch: builder/spir-1789
+    created_at: '2026-10-12T23:13:25.215Z'
+pr_ready_for_human: true

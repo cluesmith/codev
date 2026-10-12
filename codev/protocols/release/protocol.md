@@ -31,6 +31,8 @@ grep -E "status: (implementing|implemented|committed)" codev/projectlist.md
 
 **Stop if**: There are uncommitted changes, running builders, or incomplete projects.
 
+**IDE server floor:** if this release raises `engines.vscode` in `apps/vscode/package.json`, confirm `@cluesmith/codev-ide` has already published a server at that VS Code base (`npm view @cluesmith/codev-ide versions`). Raising the engine raises Tower's minimum IDE server version (`IDE_SERVER_MIN_VERSION`, tied to it by a test), and Tower refuses to start an older installed server. **Stop if** no such server is published.
+
 ### 2. Run MAINTAIN Cycle
 
 Execute the MAINTAIN protocol to ensure:

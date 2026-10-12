@@ -46,6 +46,8 @@ test-results/
 
 # Dashboard build output (copied into codev for publishing)
 packages/codev/dashboard-dist/
+# Embedded sidebar vsix + manifest (built by scripts/build-ide-extension.mjs, Spec 1789)
+packages/codev/ide-extension/
 apps/web/dist/
 
 # three.js vendored at build time from the `three` devDependency (copy-three.mjs);
