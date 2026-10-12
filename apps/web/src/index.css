@@ -1570,6 +1570,13 @@ a.attention-row {
   color: var(--status-waiting);
 }
 
+/* The non-core protocol gates (experiment / maintain / scope / research, #1779) and any
+   unknown gate: one neutral colour rather than four more, so they read as gates without
+   competing with the core spec → plan → dev → PR → verify progression. */
+.attention-kind--other {
+  color: var(--text-secondary);
+}
+
 .attention-row-age {
   font-size: 13px;
   color: var(--text-muted);

@@ -44,7 +44,7 @@ const STATE_COLOR: Record<BuilderState, string> = {
 };
 
 /** The glyphs the face can draw: a gate shape when blocked, the bolt otherwise. */
-export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment' | 'terminal' | 'play' | 'architect' | 'switch';
+export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'beaker' | 'tools' | 'search' | 'library' | 'bell' | 'comment' | 'terminal' | 'play' | 'architect' | 'switch';
 
 /**
  * Gate id → glyph. The streamdeck twin of `gateIconFor` in `apps/vscode/src/views/builder-row.ts`
@@ -57,14 +57,18 @@ const GATE_ICONS: Record<string, GlyphKey> = {
   'dev-approval': 'code',
   pr: 'pull-request',
   'verify-approval': 'verified',
+  'experiment-complete': 'beaker',
+  'maintain-complete': 'tools',
+  'scope-approval': 'search',
+  'research-complete': 'library',
 };
 
 /**
  * Glyph → inner SVG markup, drawn in a 24×24 box and stroked/filled in the caller's colour. The
  * shapes are modelled on the matching VS Code codicons (book / checklist / code / git-pull-request
- * / verified / bell); the codicon font isn't vendored, so these are drawn in-plugin — which also
- * keeps the bundle dependency-free. The bolt is filled (the plugin's identity mark); the rest are
- * line glyphs like the codicons.
+ * / verified / beaker / tools / search / library / bell); the codicon font isn't vendored, so these
+ * are drawn in-plugin — which also keeps the bundle dependency-free. The bolt is filled (the
+ * plugin's identity mark); the rest are line glyphs like the codicons.
  */
 const GLYPHS: Record<GlyphKey, (color: string) => string> = {
   bolt: (c) => `<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="${c}"/>`,
@@ -74,6 +78,10 @@ const GLYPHS: Record<GlyphKey, (color: string) => string> = {
   'pull-request': (c) =>
     stroked(c, '<circle cx="7" cy="6" r="2.3"/><circle cx="7" cy="18" r="2.3"/><circle cx="17" cy="18" r="2.3"/><path d="M7 8.3v7.4"/><path d="M17 15.7V12a3 3 0 0 0-3-3h-3.5"/>'),
   verified: (c) => stroked(c, '<path d="M12 3l7 3v5c0 4.5-3 7.6-7 9.2C8 18.6 5 15.5 5 11V6z"/><path d="M8.6 12l2.3 2.3 4.6-4.6"/>'),
+  beaker: (c) => stroked(c, '<path d="M9 3h6"/><path d="M10 3v6l-5 10a1.2 1.2 0 0 0 1 2h12a1.2 1.2 0 0 0 1-2l-5-10V3"/><path d="M7.5 14h9"/>'),
+  tools: (c) => stroked(c, '<path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5a4 4 0 0 0-2-2z"/><path d="M4 4l5 5"/><path d="M3 7l4-4"/>'),
+  search: (c) => stroked(c, '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/>'),
+  library: (c) => stroked(c, '<path d="M4 4v16"/><path d="M8.5 4v16"/><path d="M13 5l4.5 15"/><path d="M3 20h18"/>'),
   bell: (c) => stroked(c, '<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10.5 20a1.6 1.6 0 0 0 3 0"/>'),
   comment: (c) => stroked(c, '<path d="M4 5h16v11H10l-4 4v-4H4z"/>'),
   terminal: (c) => stroked(c, '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M7 10l3 2.5-3 2.5"/><path d="M12.5 15h4"/>'),

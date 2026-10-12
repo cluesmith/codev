@@ -1,0 +1,30 @@
+id: '1566'
+title: vscode-tower-sidebar-cross-wor
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-31T02:52:53.502Z'
+    approved_at: '2026-09-09T22:54:35.348Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-09-09T23:40:53.932Z'
+    approved_at: '2026-10-04T23:52:20.333Z'
+  pr:
+    status: approved
+    requested_at: '2026-10-05T00:05:35.812Z'
+    approved_at: '2026-10-05T00:41:56.759Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-08-31T02:42:34.645Z'
+updated_at: '2026-10-05T00:41:56.761Z'
+pr_history:
+  - phase: review
+    pr_number: 1767
+    branch: builder/pir-1566
+    created_at: '2026-10-04T23:55:59.855Z'
+pr_ready_for_human: false

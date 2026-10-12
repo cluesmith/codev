@@ -57,8 +57,10 @@ vi.mock('vscode', () => ({
       return Promise.resolve(undefined);
     },
   },
+  TabInputTextDiff: class {},
   window: {
     activeTextEditor: undefined,
+    tabGroups: { activeTabGroup: { activeTab: undefined } },
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
   },
   workspace: {

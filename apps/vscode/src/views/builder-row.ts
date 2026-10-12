@@ -21,7 +21,8 @@ import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
  * constant "needs your attention" signal.
  *
  * To add a new gate: add one entry here, keeping the key in sync with
- * `GATE_LABELS` in `overview.ts` (the source of gate names). Unknown / future
+ * `GATE_LABELS` in `overview.ts` (the bundled protocols' gate names; Tower
+ * reports any pending gate, listed or not, since #1777). Unknown / future
  * gates fall back to `bell` so new protocols never render without an icon.
  */
 const GATE_ICONS: Record<string, string> = {
@@ -30,6 +31,10 @@ const GATE_ICONS: Record<string, string> = {
   'dev-approval': 'code',
   'pr': 'git-pull-request',
   'verify-approval': 'verified',
+  'experiment-complete': 'beaker',
+  'maintain-complete': 'tools',
+  'scope-approval': 'search',
+  'research-complete': 'library',
 };
 
 /** Codicon name for a blocked builder's gate, with a `bell` fallback. */

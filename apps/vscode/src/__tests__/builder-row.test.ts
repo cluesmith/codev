@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
 import { builderRowLabel, gateIconFor, rollupGroupState, worstBuilderState } from '../views/builder-row.js';
+import { areaGrouping } from '../views/builder-grouping.js';
 
 // A fixed clock so elapsed-time suffixes are deterministic.
 const NOW = new Date('2026-05-30T12:00:00Z').getTime();
@@ -73,6 +74,23 @@ describe('builderRowLabel', () => {
     );
   });
 
+  it('experiment-complete-blocked builder: [analyze] prefix + "blocked on experiment review" (#1777)', () => {
+    const b = builder({
+      id: 'experiment-1560',
+      issueId: '1560',
+      issueTitle: 'spike',
+      protocol: 'experiment',
+      protocolPhase: 'analyze',
+      blocked: 'experiment review',
+      blockedGate: 'experiment-complete',
+      blockedSince: TWELVE_MIN_AGO,
+    });
+    expect(builderRowLabel(b, false, NOW, areaGrouping().rowPrefix(b))).toBe(
+      '[analyze] #1560 spike blocked on experiment review [12m]',
+    );
+    expect(gateIconFor(b.blockedGate)).toBe('beaker');
+  });
+
   it('idle builder: prefix + trailing "waiting on input [<elapsed> silent]"', () => {
     const b = builder({
       issueId: '794',
@@ -98,6 +116,11 @@ describe('gateIconFor', () => {
     expect(gateIconFor('dev-approval')).toBe('code');
     expect(gateIconFor('pr')).toBe('git-pull-request');
     expect(gateIconFor('verify-approval')).toBe('verified');
+    // #1777: EXPERIMENT / MAINTAIN / RESEARCH gates.
+    expect(gateIconFor('experiment-complete')).toBe('beaker');
+    expect(gateIconFor('maintain-complete')).toBe('tools');
+    expect(gateIconFor('scope-approval')).toBe('search');
+    expect(gateIconFor('research-complete')).toBe('library');
   });
 
   it('falls back to bell for unknown / future gates', () => {

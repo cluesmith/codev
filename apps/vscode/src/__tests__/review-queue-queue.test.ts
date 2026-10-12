@@ -14,6 +14,8 @@ import {
   formatCommentRef,
   mergeExcludeBlock,
   parseQueueFile,
+  parseQueueState,
+  markSent,
   QUEUE_FILE_RELPATH,
   removeComments,
   serializeQueueFile,
@@ -37,6 +39,21 @@ describe('parse/serialize round-trip', () => {
     const comments = [comment(), comment({ id: 'id-2', lineRange: null, body: 'whole-file note' })];
     const raw = serializeQueueFile('pir-859', comments);
     expect(parseQueueFile(raw)).toEqual(comments);
+  });
+
+  it('round-trips the sent list and omits it when empty (#1562)', () => {
+    const sent = [{ ...comment({ id: 'id-s' }), sentAt: '2026-10-05T00:00:00Z' }];
+    const raw = serializeQueueFile('pir-859', [comment()], sent);
+    expect(parseQueueState(raw)).toEqual({ comments: [comment()], sent });
+    expect(parseQueueFile(raw)).toEqual([comment()]);
+    expect(JSON.parse(serializeQueueFile('pir-859', [])).sent).toBeUndefined();
+  });
+
+  it('markSent moves only the given ids, stamped with sentAt', () => {
+    const state = { comments: [comment({ id: 'a' }), comment({ id: 'b' })], sent: [] };
+    const next = markSent(state, ['a', 'zzz'], 'T');
+    expect(next.comments.map(c => c.id)).toEqual(['b']);
+    expect(next.sent).toEqual([{ ...comment({ id: 'a' }), sentAt: 'T' }]);
   });
 
   it('records version and builderId in the on-disk shape', () => {

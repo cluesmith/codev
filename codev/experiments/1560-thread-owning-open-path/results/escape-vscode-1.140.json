@@ -1,0 +1,35 @@
+{
+  "host": {
+    "appName": "Visual Studio Code",
+    "version": "1.140.0"
+  },
+  "routes": {
+    "ECTRL-shipped-escape-then-submit": {
+      "afterEscape": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-e5679251-0b20-474e-92c7-b286e91bb685-1.md"
+      },
+      "submitAfterEscape": [
+        "+ECTRLescaped"
+      ]
+    },
+    "EA-reveal-escape-then-submit": {
+      "afterEscape": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-e19208b0-ac80-44c3-a96e-c1d3e1a16cde-2.md"
+      },
+      "submitAfterEscape": [
+        "+EAescaped"
+      ]
+    },
+    "EB2-draft-escape-then-submit-text": {
+      "afterEscape": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159483335.md"
+      },
+      "submitAfterEscape": [
+        "+EBescaped"
+      ]
+    }
+  }
+}

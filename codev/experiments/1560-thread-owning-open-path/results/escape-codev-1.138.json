@@ -1,0 +1,35 @@
+{
+  "host": {
+    "appName": "Codev",
+    "version": "1.138.0"
+  },
+  "routes": {
+    "ECTRL-shipped-escape-then-submit": {
+      "afterEscape": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-e4659030-fe9e-44c9-a6e6-f3693dd43e4d-1.md"
+      },
+      "submitAfterEscape": [
+        "+ECTRLescaped"
+      ]
+    },
+    "EA-reveal-escape-then-submit": {
+      "afterEscape": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-8c30f54e-38b2-450f-ae56-0eb0dcdbcc79-2.md"
+      },
+      "submitAfterEscape": [
+        "+EAescaped"
+      ]
+    },
+    "EB2-draft-escape-then-submit-text": {
+      "afterEscape": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159494353.md"
+      },
+      "submitAfterEscape": [
+        "+EBescaped"
+      ]
+    }
+  }
+}

@@ -1,0 +1,217 @@
+{
+  "host": {
+    "appName": "Visual Studio Code",
+    "version": "1.140.0"
+  },
+  "routes": {
+    "DA-diff-reveal-focusReply": {
+      "error": "Extension 'codev-probe.probe-1560' CANNOT use API proposal: commentReveal.\nIts package.json#enabledApiProposals-property declares:  but NOT commentReveal.\n The missing proposal MUST be added and you must start in extension development mode or use the following command line switch: --enable-proposed-api codev-probe.probe-1560",
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "DB-diff-draft-expanded": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159266274.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "saveDraft",
+          "text": "DB",
+          "onOwnedThread": true,
+          "onOwnedComment": true
+        }
+      ],
+      "tabsBefore": 1,
+      "tabsAfter": 1
+    },
+    "DH0-diff-create-then-addComment": {
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample3.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "RB-draft-expanded-x5-short-wait": [
+      {
+        "focused": true,
+        "ok": true
+      },
+      {
+        "focused": true,
+        "ok": true
+      },
+      {
+        "focused": true,
+        "ok": true
+      },
+      {
+        "focused": true,
+        "ok": true
+      },
+      {
+        "focused": true,
+        "ok": true
+      }
+    ],
+    "RA-reveal-x5-no-wait": [
+      {
+        "error": "Extension 'codev-probe.probe-1560' CANNOT use API proposal: commentReveal.\nIts package.json#enabledApiProposals-property declares:  but NOT commentReveal.\n The missing proposal MUST be added and you must start in extension development mode or use the following command line switch: --enable-proposed-api codev-probe.probe-1560",
+        "focused": false,
+        "ok": false
+      },
+      {
+        "error": "Extension 'codev-probe.probe-1560' CANNOT use API proposal: commentReveal.\nIts package.json#enabledApiProposals-property declares:  but NOT commentReveal.\n The missing proposal MUST be added and you must start in extension development mode or use the following command line switch: --enable-proposed-api codev-probe.probe-1560",
+        "focused": false,
+        "ok": false
+      },
+      {
+        "error": "Extension 'codev-probe.probe-1560' CANNOT use API proposal: commentReveal.\nIts package.json#enabledApiProposals-property declares:  but NOT commentReveal.\n The missing proposal MUST be added and you must start in extension development mode or use the following command line switch: --enable-proposed-api codev-probe.probe-1560",
+        "focused": false,
+        "ok": false
+      },
+      {
+        "error": "Extension 'codev-probe.probe-1560' CANNOT use API proposal: commentReveal.\nIts package.json#enabledApiProposals-property declares:  but NOT commentReveal.\n The missing proposal MUST be added and you must start in extension development mode or use the following command line switch: --enable-proposed-api codev-probe.probe-1560",
+        "focused": false,
+        "ok": false
+      },
+      {
+        "error": "Extension 'codev-probe.probe-1560' CANNOT use API proposal: commentReveal.\nIts package.json#enabledApiProposals-property declares:  but NOT commentReveal.\n The missing proposal MUST be added and you must start in extension development mode or use the following command line switch: --enable-proposed-api codev-probe.probe-1560",
+        "focused": false,
+        "ok": false
+      }
+    ],
+    "EB-draft-escape-then-dispose": {
+      "afterEscape": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159291935.md"
+      },
+      "submitAfterEscapeArrivals": 1,
+      "discard": {
+        "tabsBefore": 1,
+        "tabsAfter": 1,
+        "hostStillOpen": true,
+        "activeAfter": "file"
+      }
+    },
+    "H0a-create-expanded-then-addComment-immediately": {
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample7.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "H0b-create-expanded-wait-mount-then-addComment": {
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "H0c-create-collapsed-wait-mount-then-addComment": {
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample2.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "CTRL-shipped-addComment-only": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-1444a488-ab2b-4c81-b915-36111173dbec-12.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "submit",
+          "text": "CTRL",
+          "onOwnedThread": false
+        }
+      ]
+    },
+    "C-create-then-focusCommentOnCurrentLine": {
+      "error": null,
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample4.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "A1-create-then-reveal-focusReply": {
+      "error": "Extension 'codev-probe.probe-1560' CANNOT use API proposal: commentReveal.\nIts package.json#enabledApiProposals-property declares:  but NOT commentReveal.\n The missing proposal MUST be added and you must start in extension development mode or use the following command line switch: --enable-proposed-api codev-probe.probe-1560",
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample5.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "A1-discard": {
+      "error": "Extension 'codev-probe.probe-1560' CANNOT use API proposal: commentReveal.\nIts package.json#enabledApiProposals-property declares:  but NOT commentReveal.\n The missing proposal MUST be added and you must start in extension development mode or use the following command line switch: --enable-proposed-api codev-probe.probe-1560",
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample6.txt"
+      },
+      "discard": {
+        "tabsBefore": 1,
+        "tabsAfter": 1,
+        "hostStillOpen": true,
+        "activeAfter": "file"
+      },
+      "postDisposeSubmitArrivals": 0
+    },
+    "B1-draft-collapsed-wait-then-expand": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159313864.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "saveDraft",
+          "text": "B1",
+          "onOwnedThread": true,
+          "onOwnedComment": true
+        }
+      ]
+    },
+    "B2-draft-created-expanded": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159316993.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "saveDraft",
+          "text": "B2",
+          "onOwnedThread": true,
+          "onOwnedComment": true
+        }
+      ]
+    },
+    "B1-discard": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159319536.md"
+      },
+      "discard": {
+        "tabsBefore": 1,
+        "tabsAfter": 1,
+        "hostStillOpen": true,
+        "activeAfter": "file"
+      },
+      "postDisposeSubmitArrivals": 0
+    }
+  }
+}

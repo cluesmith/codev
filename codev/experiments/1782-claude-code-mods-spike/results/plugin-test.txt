@@ -1,0 +1,38 @@
+
+tests/attribution.test.ts:
+(pass) commit and PR attribution are scrubbed at the source [30.44ms]
+guard timings (own ms):
+tool.call:guard:deny: n=20 median=0ms max=0ms
+tool.call:guard:pass: n=20 median=0ms max=0ms
+tool.call:guard:hold-approved: n=10 median=0ms max=0ms
+tool.call:guard:hold-dismissed: n=10 median=0ms max=0ms
+guard .catch timings (own ms): n=20 max=0ms
+band/peek/scrub timings (own ms):
+session.measure: n=20 median=0ms max=0ms
+turn.complete: n=20 median=0ms max=1ms
+prompt.submit: n=20 median=0ms max=1ms
+command.run:issue: n=20 median=0ms max=0ms
+attribution.text: n=20 median=0ms max=0ms
+
+tests/band-peek.test.tsx:
+(pass) the band shows context percent and the save mark after session.measure [33.12ms]
+(pass) a reply naming issues grows one chip per reference; pressing one opens the peek pane [26.89ms]
+(pass) /issue N opens the same pane, and an unknown issue shows the error [21.52ms]
+(pass) a typed prompt naming an issue grows a chip too, and is passed on unchanged [15.22ms]
+(pass) own time of the band, peek and scrub hooks stays inside the 10 s budget [99.43ms]
+(pass) chip titles are cut with an ellipsis to their share of the band, numbers kept whole [17.50ms]
+
+tests/guard.test.ts:
+(pass) denies every irreversible act, and none of them reaches the shell [32.73ms]
+(pass) lets ordinary commands through [15.22ms]
+(pass) porch approve is held behind the question, answered "Yes, relayed verbatim" [12.57ms]
+(pass) porch approve is held behind the question, answered "No" [11.09ms]
+(pass) a dismissed hold (or -p, no one to ask) is denied, saying the human dismissed it [10.34ms]
+(pass) fails closed: a fault inside the hook is answered by .catch with a deny, and the command never runs [12.27ms]
+(pass) the .catch handler cannot itself fail open: with every write failing it still denies [10.73ms]
+(pass) own time of every guard path stays inside its budget [35.69ms]
+(pass) own time of the .catch handler stays inside its 1 s grace [27.77ms]
+
+ 16 pass
+ 0 fail
+Ran 16 tests across 3 files. [0.38s]

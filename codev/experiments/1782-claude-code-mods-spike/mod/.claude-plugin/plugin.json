@@ -1,0 +1,9 @@
+{
+  "name": "codev-spike",
+  "version": "0.1.0",
+  "description": "EXPERIMENT #1782 spike: Codev guard, attribution scrub, context band and issue peek. Never installed; loaded only by an explicit --plugin-dir.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Codev"
+  }
+}

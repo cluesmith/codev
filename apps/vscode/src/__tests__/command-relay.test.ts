@@ -92,6 +92,19 @@ describe('wireCommandProvider', () => {
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.submitReview', 'pir-1');
   });
 
+  it('maps the hunk-step verbs to the viewport-anchored wrappers, not the built-ins (#1546)', async () => {
+    const { mgr, fire } = makeConnMgr();
+    wireCommandProvider(mgr as never);
+
+    fire('command', { verb: 'diff-next-hunk', args: [] });
+    fire('command', { verb: 'diff-prev-hunk', args: [] });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.diffNextHunk');
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.diffPrevHunk');
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('workbench.action.compareEditor.nextChange');
+  });
+
   it('maps the agent-cycle verbs to their commands with no args (#1563)', async () => {
     const { mgr, fire } = makeConnMgr();
     wireCommandProvider(mgr as never);
