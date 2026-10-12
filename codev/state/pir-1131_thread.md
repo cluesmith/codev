@@ -26,3 +26,4 @@
   - No sent ledger: the comments stay in the file until resolved, so the file is the record.
 - Protocol prompt edits dropped; builder.md keeps a short rule for non-button paths.
 - contextual-panel/* fence: asked architect:vscode to confirm it is lifted now that #1559 has merged.
+- 2026-10-12: architect:vscode lifted the contextual-panel/* fence; #1131 now owns the Document Review body (#1049 participating feature). Folded in their asks: drop the stale #859/#945 placeholder citation, keep the builder.md rule byte-identical in both trees.

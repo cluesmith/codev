@@ -191,7 +191,7 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 
 The Send message (Decision 6) carries the comments and the resolve instruction, so the protocol prompts no longer need edits. The role doc still gets a short section so behaviour holds when comments arrive any other way: you type "see my comments" in the terminal, a builder resumes and re-reads a plan that already carries comments, or someone without the extension leaves them by hand.
 
-- **`roles/builder.md`:** new section **"Review comments"** (~10 lines):
+- **`roles/builder.md`:** new section **"Review comments"** (~10 lines), byte-identical in `codev/` and `codev-skeleton/` (verified with `diff -q` before commit):
   - Reviewers leave `<!-- REVIEW(@who): … -->` lines in your spec, plan and review files. When you are told about them, or re-read a file that has them, address each one.
   - When one is addressed, mark it resolved by changing `REVIEW(@who)` to `REVIEW(@who, resolved)`. Never delete a reviewer's comment and never edit its body.
   - If you can't or won't address one, leave it open and say why in your thread and your gate message.
@@ -220,7 +220,8 @@ This mirrors the #1559 Code Review body structure exactly.
   - It sends with the existing mechanics, imported read-only: `terminalManager.openBuilderByRoleOrId(builderId, true)` + `injectBuilderText(id, wrapBracketedPaste(msg))`. No Enter is pressed, and on failure there is a warning toast.
   - It is also in the command palette, targeting the active artifact.
   - It is registered from the panel's activation, so `extension.ts` gets no new hunk, or at most one line if the panel's registration point requires it.
-- **Fence:** `contextual-panel/*` was #1559's lane, and #1559 has merged. I am asking architect:vscode to confirm the fence is lifted before implementing. No `review-queue/*` file is modified.
+- **Placeholder text:** the Document Review placeholder string (`webview/main.ts:43`, "…(rendering owned by #859 / #945)") is removed along with its stale `#859 / #945` ownership citation. Only the empty state remains, worded without issue references.
+- **Fence:** LIFTED by architect:vscode (2026-10-12). #1131 is now the owning issue for the panel's Document Review body, as a #1049 participating feature. `review-queue/*` stays read-only (imported, never modified).
 
 ### F. Docs
 
@@ -254,7 +255,7 @@ This mirrors the #1559 Code Review body structure exactly.
 - `apps/vscode/README.md:201`, `packages/artifact-canvas/README.md`, `codev/resources/arch.md` (#859 entry)
 - `codev/state/pir-1131_thread.md` (builder thread)
 
-**Not touched (lane fences):** `review-queue/*` (imported read-only, never modified), `comments/builder-review.ts` (#1560), `command-relay.ts`/`commands/diff-nav.ts` (#1546), and pir-1566's views/`viewsContainers`. `contextual-panel/*` is touched pending architect:vscode's confirmation that #1559's fence is lifted. `extension.ts` needs no change, or at most one line.
+**Not touched (lane fences):** `review-queue/*` (imported read-only, never modified), `comments/builder-review.ts` (#1560), `command-relay.ts`/`commands/diff-nav.ts` (#1546), and pir-1566's views/`viewsContainers`. `contextual-panel/*` is touched with architect:vscode's fence lift (2026-10-12). `extension.ts` needs no change, or at most one line.
 
 ## Risks & Alternatives Considered
 
