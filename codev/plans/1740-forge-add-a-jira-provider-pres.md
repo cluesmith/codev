@@ -23,6 +23,8 @@ There are two halves to the work.
 
 **B. Non-numeric ids end to end (ruling item 9).** I re-verified the path rather than assuming spec 719 covered it. Spec 719 only widened the `afx spawn` parse and the types. Every site that later *recovers* an id from a worktree directory name, cwd, artifact filename, commit or PR text still assumes digits. Linear's `ENG-123` hits all of the same gaps today. For `afx spawn PROJ-123 --protocol pir`:
 
+**Why this is first noticed with Jira rather than Linear.** Linear ids (`ENG-123`) have exactly the same shape and hit every gap listed here. They were never noticed because the Linear preset has not been run end to end through a builder lifecycle: its scripts carry `⚠️ UNVERIFIED` notes (no Linear credentials in the authoring environment, #920), and its acceptance criterion was only that `afx spawn ENG-123` parses (spec 719). Spawn parsing is the one site that works; everything that recovers the id afterwards is broken. Jira is the first tracker with a live site and a real project behind it, so these fixes repair Linear at the same time.
+
 - Spawn, the worktree `.builders/pir-PROJ-123`, the branch `builder/pir-PROJ-123`, porch state `codev/projects/PROJ-123-*`, `CODEV_ISSUE_ID` and an explicit `porch next PROJ-123` all **work**.
 - These sites **break**. Each was checked against source:
   - `agent-farm/servers/overview.ts:491-526` `worktreeNameToRoleId`: the generic branch yields `builder-pir-proj`, but the real id is `builder-pir-proj-123`. The overview loses the builder's terminal.
@@ -50,29 +52,49 @@ Delivered as one PR with one commit per step.
 
 There are seven POSIX `sh` scripts, styled like the Linear ones. Each sets `set -e`, declares `# forge-executable: acli`, pipes acli's `--json` through `jq` into the `forge-contracts.ts` shapes, and puts `number: .key` (a string) in `IssueListItem.number`.
 
-| Concept | acli call (subject to `--help` verification, see below) | Mapping |
+#### Live findings (acli 1.3.39-stable, against a live Jira Cloud site, read-only)
+
+These were verified on 2026-10-12 with an installed, logged-in acli. Only reads were run. Several findings overturn assumptions in the first draft.
+
+1. **`acli jira auth status` makes a real round trip.** It exits 0 with `✓ Authenticated / Site: <host> / Email: <addr> / Authentication Type: oauth`. With the network blackholed it exits 1 with `failed to retrieve authenticated status`. So it is a valid `auth-status` as is. It has no `--json` flag, so the text is parsed.
+2. **The comment subcommand is `comment create`.** The docs' bare `comment --key …` example is a help-text artifact. Flags are `--key`, `--body`, `--body-file` ("plain text or ADF") and `--json`.
+3. **`workitem search --fields` is allow-listed.** It accepts only `key, summary, status, labels, creator, reporter, assignee, description, issuetype, priority`. Dates (`created`, `resolutiondate`, `statuscategorychangedate`, `updated`), `fixVersions`, `comment`, `project` and the `*all` / `*navigable` wildcards are rejected (`field 'created' is not allowed`). **Search cannot return any timestamp.**
+4. **`--fields key` on its own returns an array of `null`s.** Every search must also request at least one real field.
+5. **`workitem view <key> --fields … --json` returns everything.** That includes `created`, `statuscategorychangedate`, `resolutiondate`, `fixVersions`, and `comment.comments[]`, each comment with `author{displayName,emailAddress}`, `body` (ADF) and `created`. View takes exactly **one** key (a comma or space list fails), and costs about 1.2 s per call.
+6. **Search is slow.** 200 items took about 10 s. The forge exec timeout is 30 s (`forge.ts:370, 446`).
+7. **The REST `self` link points at an internal host** (an Atlassian infrastructure host, not `<site>.atlassian.net`), **not the site.** The browse URL cannot be derived from `self`. It must come from `CODEV_JIRA_SITE`, or else from the `Site:` line of `auth status`.
+8. **Unbounded JQL is rejected** ("Unbounded JQL queries are not allowed here"). Every query needs a restriction. `statusCategory != Done`, `= Done` and `is not EMPTY` all qualify.
+9. **Done-category JQL works**: `statusCategory = Done … ORDER BY statusCategoryChangedDate DESC`. JQL date literals must be `yyyy-mm-dd [hh:mm]` (ISO `…T…Z` and `-36500d` are rejected), and they are interpreted in the user's Jira time zone.
+10. **Other users' `emailAddress` is often hidden** (a profile privacy setting). `displayName` is always present.
+11. **Real project keys can contain digits** (the `[A-Z][A-Z0-9_]+` grammar), which confirms that the spawn grammar must widen past `[A-Z]+`.
+
+#### Revised concept mapping
+
+| Concept | acli call | Mapping |
 |---|---|---|
-| `auth-status` | `acli jira auth status` | Must make an authenticated round trip. If `status` only reads local config, use a minimal authenticated read instead, e.g. a 1-item `workitem search`. When `CODEV_JIRA_SITE` is set, also fail if acli's active site differs, so doctor never reports "authenticated" against the wrong tenant. Exit code only. |
-| `user-identity` | `acli jira auth status` (account line) | Plain text: the account's display name or email, whichever acli exposes. |
-| `issue-view` | `acli jira workitem view "$CODEV_ISSUE_ID" --fields summary,description,status,creator,reporter,assignee,labels,created,comment,fixVersions --json` | `title←summary`, `body←ADF→text(description)`, `state←status.name`, `url←<site>/browse/<key>`, `author←creator/reporter.displayName`, `assignees←[assignee]`, `labels←labels[]` (Jira labels are plain strings), `milestone←first fixVersion` (the Linear-project analogue, optional), `comments←comment.comments[]` (ADF→text). If `view` doesn't inline comments, use a second `comment list --key … --json` call. |
-| `issue-list` | `acli jira workitem search --jql "<scope> statusCategory != Done ORDER BY created DESC" --limit 200 --json` | The `IssueListItem` shape, without `body`. |
-| `issue-search` | Same, with `CODEV_ISSUE_STATE` open/closed/all mapped to `statusCategory != Done` / `= Done` / no clause. Adds `description` to the fields. | `IssueListItem` plus `body`. |
-| `recently-closed` | `--jql "<scope> statusCategory = Done [AND statusCategoryChangedDate >= \"$CODEV_SINCE_DATE\"] ORDER BY statusCategoryChangedDate DESC" --limit 1000` | `closedAt←statuscategorychangedate` (fallback `resolutiondate`). Done-category only, never status names (ruling 5). |
-| `issue-comment` | `acli jira workitem comment create --key "$CODEV_ISSUE_ID" --body-file <tmpfile>` | The body is written to a `mktemp` file, which avoids shell quoting and argv length limits. The docs say `--body` / `--body-file` accept "plain text or ADF", so plain text goes through as is. If that turns out to be false in practice, wrap it as ADF paragraphs split on blank lines (ruling 7). Exit code only. |
+| `auth-status` | `acli jira auth status` | Exit code, plus a check that the `Site:` line matches `CODEV_JIRA_SITE` when that is set, so doctor never reports "authenticated" against the wrong tenant. |
+| `user-identity` | `acli jira auth status` → `Email:` line | Plain text email. acli exposes no display name or account id for the current user. See the `assignees` row below for why email is the right key. |
+| `issue-view` | `acli jira workitem view "$CODEV_ISSUE_ID" --fields summary,description,status,creator,reporter,assignee,labels,created,comment,fixVersions --json` | One call; comments are inline (finding 5), so no `comment list` call is needed. `title←summary`, `body←ADF→text(description)` (`null`→`""`), `state←status.name`, `url←<site>/browse/<key>`, `author←creator//reporter`, `createdAt←created`, `assignees←[assignee]`, `labels←labels[]`, `milestone←fixVersions[0]`, `comments←comment.comments[]` with ADF→text bodies. |
+| `issue-list` | `search --jql "<scope> statusCategory != Done ORDER BY created DESC" --fields summary,status,labels,creator,assignee --limit 100 --json` | No dates are available (finding 3), so **`createdAt` is omitted**. The VS Code age sort and "new in 24h" marker already treat a missing date as unknown (`backlog-filter.ts:171`, `backlog-recency.ts:31`). The order still comes from JQL `ORDER BY created DESC`, so items arrive newest first. The limit is 100 rather than 200 to stay well inside the 30 s timeout (finding 6). |
+| `issue-search` | Same, plus `description`. `CODEV_ISSUE_STATE` open/closed/all → `statusCategory != Done` / `= Done` / `is not EMPTY` (the last keeps the query bounded, per finding 8). | `IssueListItem` plus `body` (ADF→text). `createdAt` is omitted, as above. |
+| `recently-closed` | `search --jql "<scope> statusCategory = Done AND statusCategoryChangedDate >= \"<since−1d, yyyy-mm-dd>\" ORDER BY statusCategoryChangedDate DESC" --fields summary,status,labels --limit 25`, then one `view <key> --fields created,statuscategorychangedate,resolutiondate --json` per hit, run with bounded parallelism (`xargs -P 6`). | `closedAt` is **mandatory**: `withinLast24h` (`github.ts:222`) drops any item without it. The one-day-earlier date-only bound is a superset that absorbs JQL's time-zone interpretation, and the consumer's exact 24 h filter trims it. `closedAt←statuscategorychangedate // resolutiondate`, `createdAt←created`. The window is 24 h, so the hit count is small. The cap of 25 bounds the worst case to about 2 rounds of parallel views. |
+| `issue-comment` | `acli jira workitem comment create --key "$CODEV_ISSUE_ID" --body-file <mktemp>` | Plain text body via a temp file, which avoids quoting and argv limits. The temp file is removed by `trap`. **This is not exercised live:** posting a comment is a write to a real site, which I won't make without explicit permission. The dev-gate run confirms it, along with the line-break fidelity of plain text (ruling 7). If plain text renders badly, fall back to ADF paragraphs. |
 
 Shared details:
 
-- `<scope>` is `project = "$CODEV_JIRA_PROJECT" AND`, only when it is set. Otherwise the JQL is unscoped, the same way Linear handles an unset team. All JQL values pass through `jq -n --arg` to build the string, so a key can never inject JQL.
-- The browse URL comes from `CODEV_JIRA_SITE` if set (`https://acme.atlassian.net`). Otherwise it is derived from the scheme and host of the issue's REST `self` link. It is never the API URL (the `IssueViewResult.url` contract).
-- The ADF→text flattener is a small `jq` `def` that joins text nodes per block and separates blocks with blank lines. It is inlined in `issue-view` and `issue-search`, the only two consumers. No markdown fidelity is attempted.
-- Config plumbing needs no new code. `buildForgeEnv` (`forge.ts:466-473`) already maps `forge.jira-site` → `CODEV_JIRA_SITE` and `forge.jira-project` → `CODEV_JIRA_PROJECT`.
+- **Identity key: email, falling back to displayName.** The VS Code "mine" filter compares each item's `assignees[].login` against `user-identity`, lower-cased (`backlog-filter.ts:52-54`). `user-identity` can only be the email (finding 1), so `login ← emailAddress // displayName` for assignees, creators and comment authors. A user's own email is visible to themselves, so "mine" matches. Other users with hidden emails degrade to their display name, which is still readable. To be confirmed at the dev gate on an item assigned to the tester.
+- **Site.** `CODEV_JIRA_SITE` from `forge.jira-site` takes precedence. Otherwise each URL-emitting script reads the `Site:` line of `acli jira auth status`. That adds one extra call (about 0.5 s), so the docs recommend setting `jira-site`.
+- **Scope and injection safety.** `<scope>` is `project = "<KEY>" AND`, only when `CODEV_JIRA_PROJECT` is set. The key is **validated** against `^[A-Z][A-Z0-9_]+$`, and the script exits non-zero otherwise. That is stricter and simpler than escaping, because JQL string escaping is error-prone (probe: an embedded `"` breaks the parse). The issue-id inputs are passed as acli arguments, never spliced into JQL.
+- **ADF→text** is a small `jq` `def`:
+  - concatenate `text` nodes;
+  - `hardBreak` → `\n`;
+  - block nodes (`paragraph`, `heading`, `listItem`, `codeBlock`, `blockquote`) separated by blank lines;
+  - `mention` / `emoji` / `inlineCard` use their `attrs.text` / `attrs.url`;
+  - media is dropped.
 
-**Verification before coding.** acli is not installed in this environment, and the official reference contradicts itself (`comment create` vs `comment` in its own examples; the `--json` wording on `view`). In the implement phase I will:
-
-1. Install it with `brew tap atlassian/homebrew-acli && brew install acli`.
-2. Confirm every subcommand and flag via `acli jira … --help` (ruling 2).
-
-The *JSON shape* of acli's output can only be confirmed against a live, logged-in Cloud site, which I don't have. I'll code to the documented Jira REST v3 issue shape that acli wraps, mark each script's mapping as `⚠️ UNVERIFIED against a live site` exactly as Linear did (#920), and make the dev-gate live run the confirmation. **If the architect can provide a sandbox Jira Cloud site + login, I'll verify there before the dev gate instead.**
+  It is inlined in `issue-view` and `issue-search`.
+- **Config plumbing needs no new code.** `buildForgeEnv` (`forge.ts:466-473`) maps `forge.jira-site` → `CODEV_JIRA_SITE` and `forge.jira-project` → `CODEV_JIRA_PROJECT`.
+- **Fixtures for the unit tests** come from the live JSON captured above, **reduced to structure with synthetic values**. No site data is committed.
 
 ### Step 2: register the preset (`packages/codev/src/lib/forge.ts:126-135`)
 
@@ -147,8 +169,9 @@ Deliberately untouched:
 
 ## Risks & Alternatives Considered
 
-- **Risk: acli's real JSON differs from the REST v3 shape.** Consumers already treat non-conforming output as null, so a wrong mapping degrades to "unavailable" rather than crashing. Each script is marked unverified, and the dev-gate live run (or a sandbox site, if provided) is the confirmation. jq field access uses `//` fallbacks throughout.
-- **Risk: `acli jira auth status` doesn't hit the server.** I would then use a 1-item authenticated read instead. Which one ships is decided by the `--help` / behavior check in implement.
+- **Risk: acli's output shape drifts between versions.** The shape was captured live from acli 1.3.39-stable. Consumers already treat non-conforming output as null, and jq field access uses `//` fallbacks throughout. The docs note the acli version the preset was verified against.
+- **Risk: `issue-list` has no `createdAt`** (search refuses date fields). That is a deliberate degradation: VS Code age sort and the new-item marker treat it as unknown, and the order comes from JQL. Alternative rejected: one `view` per item (about 1.2 s × 100 exceeds the 30 s exec timeout).
+- **Risk: `recently-closed` costs N+1 calls.** This is bounded by the 24 h window, the cap of 25 and parallel views. If it ever nears the timeout, lower the cap.
 - **Risk: uppercase canonicalization changes behavior for existing lowercase Linear spawns** (`eng-123` → `ENG-123`). Lowercase Linear ids currently produce exactly the case-split bug, and Linear identifiers are uppercase, so this is a fix. Existing numeric ids are untouched.
 - **Risk: the worktree-name key branch misreads a protocol name plus a numeric slug** (e.g. `experiment-1560-slug`). This is mitigated by requiring the key to start with a letter *after* the protocol prefix and to be immediately followed by `-<digits>`. Regression tests cover every existing numeric form.
 - **Risk: scope.** Step 4 touches about ten sites. All of them are the same root-cause defect (digit-only id recovery), and ruling 9 explicitly puts the path in scope. Each site gets a focused test.
