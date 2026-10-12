@@ -17,3 +17,12 @@
   - C4: attribute grammar pinned: author up to the first comma, then bare-flag or key=value attrs, unknown ones kept verbatim and in order.
   - C5: the codec stays pure.
 - Lockstep: the sdk and canvas ReviewMarker types gain `resolved` in the same phase.
+
+## 2026-10-13 owner discussion: delivery half added
+- The owner asked how plan/spec comments reach the builder. Nothing delivers them today; an idle builder at a gate does not watch files.
+- Merged origin/main (132 behind). #1559 (panel Code Review body, PR #1769) and #1562 (sent record, PR #1768) have both landed.
+- Revised the plan:
+  - New Decision 6 + section G: fill in the panel Document Review body (list, open/resolved counts, resolve toggles) and add an explicit "Send N open comments to <builder>" button. It reuses the Submit Review mechanics (open the terminal, bracketed paste, no Enter). The message is self-describing.
+  - No sent ledger: the comments stay in the file until resolved, so the file is the record.
+- Protocol prompt edits dropped; builder.md keeps a short rule for non-button paths.
+- contextual-panel/* fence: asked architect:vscode to confirm it is lifted now that #1559 has merged.

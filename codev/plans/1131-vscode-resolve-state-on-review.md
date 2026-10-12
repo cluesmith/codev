@@ -2,10 +2,11 @@
 
 ## Understanding
 
-Two halves, one loop: *architect adds an unresolved comment → builder addresses it and marks it resolved → architect verifies at the gate.*
+One loop: *architect adds comments → architect sends them to the builder → builder addresses each and marks it resolved → architect sees what is still open and verifies at the gate.*
 
 1. **Mechanic (vscode + shared codec).** A `REVIEW` marker needs a `resolved` state that both authoring surfaces (editor Comments-API threads and the markdown-preview canvas cards) can show and toggle. The state has to live somewhere on disk, so this issue owns the format decision.
-2. **Workflow (protocol docs).** Today no builder-facing doc tells a builder that `<!-- REVIEW(@…): … -->` markers exist, let alone to address them or signal it. Verified: `grep REVIEW codev/roles/builder.md codev-skeleton/protocols/*/prompts/*.md` finds only the phase-name headings of `review.md`. Builders handle markers today only because Claude happens to notice them.
+2. **Delivery (vscode, contextual panel).** Nothing today tells a builder that new plan/spec comments exist. A builder waiting at a gate is idle and does not watch files, so saving comments does not wake it. Diff comments already have an explicit send step (Submit Review); plan/spec comments have none. This half adds the matching send step to the Codev panel's **Document Review** body, which is still a placeholder.
+3. **Workflow (role doc).** Today no builder-facing doc tells a builder that `<!-- REVIEW(@…): … -->` markers exist, let alone to address them or signal it. Verified: `grep REVIEW codev/roles/builder.md codev-skeleton/protocols/*/prompts/*.md` finds only the phase-name headings of `review.md`. Builders handle markers today only because Claude happens to notice them.
 
 ### Where things stand (verified against the tree, not the issue text)
 
@@ -24,6 +25,13 @@ The architect's 2026-08-14 rescope is correct: #1055 (PR #1132) shipped edit + p
   - Canvas cards: `ArtifactCanvas.tsx:133-229` (`buildMarkerCards`, with edit/delete actions via `data-action`).
   - Minimap: `overlays/MarkerMinimap.tsx` (#863, closed/shipped).
   - **#860 (summary view) is still OPEN and unbuilt.** There is no summary to add an "unresolved only" filter to, so that bullet is out of scope here (see Deferred).
+- **How diff (code-review) comments reach a builder today**, the pattern this plan mirrors (verified on main after merging #1559/PR #1769 and #1562/PR #1768):
+  - Inline diff comments queue in the worktree's `.codev/pending-comments.json` (`review-queue/store.ts`).
+  - **Submit Review** (`codev.submitReview`, `review-queue/submit.ts`) packages them into one message via `buildSubmitMessage` (`review-queue/queue.ts`): `Review feedback (N comments):`, then `### file:line` and the body for each.
+  - It opens the builder terminal (`terminalManager.openBuilderByRoleOrId`) and pastes the message into the prompt **without pressing Enter** (`injectBuilderText` + `wrapBracketedPaste`). The human presses Enter.
+  - Since #1562, the sent comments move to a `sent` record until they are confirmed delivered, so a cleared prompt cannot lose them. Re-send and Mark Delivered act on that record.
+  - The Codev bottom panel (`contextual-panel/*`) resolves its mode from the active surface. On a builder diff, the **Code Review** body (#1559, `contextual-panel/code-review.ts`) lists pending and sent comments with Submit / Re-send / Mark Delivered buttons that run those commands.
+  - On a `codev/{specs,plans,reviews}` file, the panel shows **Document Review · <file>**. Its body is still the placeholder "Review markers for this file will appear here" (`contextual-panel/webview/main.ts:43`), and it has no open owning issue.
 - **Builder docs:**
   - Role doc: `codev/roles/builder.md` (117 lines).
   - Implement prompts: `codev/protocols/{pir,spir,aspir,air}/prompts/implement.md`.
@@ -75,12 +83,22 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 
 `resolved` is a **claim, not a proof**.
 - The builder role doc says verification is expected.
-- The gate prompts say to list the markers you resolved in the gate summary, so the architect can spot-check each against the diff.
+- The role doc (and the Send message) say to list the resolved comments in the gate message, so the architect can spot-check each against the diff.
 - One line in `codev/roles/architect.md` (both trees) tells the architect to spot-check resolved markers at plan/dev/pr gates. Flagged as a small optional addition; drop it if the gate prefers builder-docs only.
 
 ### Decision 5: One resolve model for diff comments too? (proposal only, per lane brief)
 
-#1562 owns the diff-comment queue (`review-queue/*`), and I do not touch it. *Proposal for the architect:* if diff comments later want a resolved state, they should reuse the same vocabulary (a boolean `resolved`, builder-can-resolve, architect verifies at the gate) so builders learn one rule. Nothing in this plan depends on that.
+#1562 owned the diff-comment queue (`review-queue/*`), and it has merged. I import two of its helpers read-only (section G) and modify none of its files. *Proposal for the architect:* if diff comments later want a resolved state, they should reuse the same vocabulary (a boolean `resolved`, builder-can-resolve, architect verifies at the gate) so builders learn one rule. Nothing in this plan depends on that.
+
+### Decision 6: How comments reach the builder: an explicit Send from the Codev panel (added after owner discussion)
+
+**Recommendation:** fill in the panel's Document Review body, and give it a **"Send N open comments to <builder>"** button that reuses the Submit Review mechanics. It opens the builder terminal, pastes one self-describing message, and does not press Enter: you read it and press Enter, as on the diff side.
+- **Why explicit rather than automatic:** an automatic send (on save, debounced) cannot know when you have finished. A half-done review would wake the builder, which might then edit the plan under you, or pull a mid-task builder onto partial feedback. An explicit send matches the code-review flow you already use.
+- **The message carries the comments.** It lists each open comment (`### L42 (@amr)` and the body), followed by two lines of instruction: how to mark one resolved (`REVIEW(@x)` → `REVIEW(@x, resolved)`), and to explain any left open in the gate message. The builder needs no other instruction to act on it.
+- **No sent/delivered ledger.** #1562 needs one because diff comments live only in the queue and the prompt. Plan/spec comments stay in the file until resolved, so a lost prompt loses nothing: open comments are still open, and Send can simply be pressed again. The file's resolved state *is* the delivery confirmation.
+- **Only offered for a builder's artifact.** The button appears only when the file lives in a builder worktree and has open comments. A main-repo artifact gets the list without the button.
+
+*Alternative:* automatic send as an opt-in setting later, if the explicit button proves to be friction. Not in this issue.
 
 ## Contract-surface sections (flag for routing to main before the gate)
 
@@ -171,20 +189,38 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 
 ### E. Builder workflow docs (both `codev/` and `codev-skeleton/`, kept byte-identical)
 
-- **`roles/builder.md`:** new section **"Review markers"** (~12 lines):
-  - Reviewers leave `<!-- REVIEW(@who): … -->` lines in your spec, plan and review files, and occasionally in code.
-  - Find them with `grep -rn "REVIEW(@" codev/specs/<id>* codev/plans/<id>* codev/reviews/<id>*`.
-  - Address each marker. When it is addressed, mark it resolved by changing `REVIEW(@who)` to `REVIEW(@who, resolved)`. Never delete a reviewer's marker, and never edit its body.
-  - If you can't or won't address one, leave it unresolved and say why in your thread and in your gate message.
-  - Resolved is a claim the architect verifies at the gate, so list what you resolved.
-- **`protocols/pir/prompts/plan.md`** ("Handling Feedback"): add a step to check the plan file for REVIEW markers, address them, and resolve or explain each.
-- **`protocols/pir/prompts/implement.md`:**
-  - Resumption step 2 "Check for feedback": add a REVIEW-marker grep.
-  - Process §1 "Re-Read the Plan": address outstanding markers on the plan and spec.
-  - §7 gate summary: list the resolved markers and any left unresolved.
-- **`protocols/{spir,aspir}/prompts/implement.md`, `protocols/air/prompts/implement.md`:** the same one-step addition in their re-read or feedback step.
-- **`roles/architect.md`:** one line on spot-checking resolved markers at gates (Decision 4, optional).
-- Because the role doc covers *how to resolve*, the prompts stay short and point back to it. This is inlined content, not an instruction to fetch a path.
+The Send message (Decision 6) carries the comments and the resolve instruction, so the protocol prompts no longer need edits. The role doc still gets a short section so behaviour holds when comments arrive any other way: you type "see my comments" in the terminal, a builder resumes and re-reads a plan that already carries comments, or someone without the extension leaves them by hand.
+
+- **`roles/builder.md`:** new section **"Review comments"** (~10 lines):
+  - Reviewers leave `<!-- REVIEW(@who): … -->` lines in your spec, plan and review files. When you are told about them, or re-read a file that has them, address each one.
+  - When one is addressed, mark it resolved by changing `REVIEW(@who)` to `REVIEW(@who, resolved)`. Never delete a reviewer's comment and never edit its body.
+  - If you can't or won't address one, leave it open and say why in your thread and your gate message.
+  - Resolved is a claim the architect verifies at the gate, so list what you resolved in the gate message.
+- **`roles/architect.md`:** one line on spot-checking resolved comments at gates (Decision 4, optional).
+- **Dropped from the earlier draft:** the edits to `protocols/{pir,spir,aspir,air}/prompts/*.md`. *Alternative:* if the gate wants belt-and-braces, add one line to each implement/plan prompt pointing at the role-doc rule (both trees). That is cheap, but it duplicates what the message already says.
+
+### G. Codev panel: Document Review body + Send to builder (`apps/vscode/src/contextual-panel/*`)
+
+This mirrors the #1559 Code Review body structure exactly.
+- **`contextual-panel/document-review.ts` (new):** a pure projection, `deriveDocumentReview(text)`, built on `parseReviewMarkers`. It returns the open and resolved counts, plus each comment's marker line, annotated line, author, body and resolved flag, with open comments first. No `vscode` import, so it is unit-tested directly.
+- **`panel-provider.ts`:**
+  - When `descriptor.kind === 'document-review'`, read the file's current text (from the open `TextDocument` if one exists, else from disk) and attach a `documentReview` payload alongside the descriptor. This is the same alongside-the-descriptor rule as `attention` and `codeReview`, so the resolver stays pure.
+  - Re-post on `onDidChangeTextDocument` for the shown file only, while Document Review is showing.
+  - Resolve the owning builder with `builderIdForWorktreeFile` (overview `worktreePath` prefix match, the same helper the preview uses) and attach it as `reviewBuilderId`.
+- **`messages.ts`:** `documentReview?` on `RenderMessage`, plus new webview→host messages, each validated like the existing ones and honoured only for the file and builder the panel is showing:
+  - `document-review-action`: `{ action: 'send', builderId, resourcePath }`.
+  - `document-toggle-resolved`: `{ markerLine, expectedAuthor, expectedBodyPrefix, resolved }`. It reuses the preview's verify-then-write path (`verifyReviewMarker` + `setReviewMarkerResolved`).
+  - `open-location` for jumping to a comment's line.
+- **`webview/main.ts` + `styles.css`:** replace the Document Review placeholder with:
+  - a header showing the "N open · M resolved" counts and the **Send N open comments to <builder>** button (hidden for main-repo files and when nothing is open);
+  - a list of comments: open first, resolved dimmed with a "Resolved" label, each with a resolve/unresolve control, and clicking a row jumps to it;
+  - an honest empty state.
+- **Send command, `codev.sendDocumentReview` (new, `contextual-panel/document-review-send.ts`):**
+  - It builds the message (`buildDocumentReviewMessage`, pure, in `document-review.ts`): `Review comments on <repo-relative path> (N open):`, then `### L<line> (@author)` and the body for each open comment, then the two instruction lines.
+  - It sends with the existing mechanics, imported read-only: `terminalManager.openBuilderByRoleOrId(builderId, true)` + `injectBuilderText(id, wrapBracketedPaste(msg))`. No Enter is pressed, and on failure there is a warning toast.
+  - It is also in the command palette, targeting the active artifact.
+  - It is registered from the panel's activation, so `extension.ts` gets no new hunk, or at most one line if the panel's registration point requires it.
+- **Fence:** `contextual-panel/*` was #1559's lane, and #1559 has merged. I am asking architect:vscode to confirm the fence is lifted before implementing. No `review-queue/*` file is modified.
 
 ### F. Docs
 
@@ -208,18 +244,17 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 - `apps/vscode/src/markdown-preview/webview/main.ts` (wire `onToggleResolved`)
 - `apps/vscode/package.json` (two commands, `comments/commentThread/title` menu items, `when`-clause regex)
 - `apps/vscode/src/__tests__/plan-review-resolve.test.ts` (new), `apps/vscode/src/__tests__/preview-edit-delete.test.ts` (extend with toggle + race)
-- `codev/roles/builder.md` and `codev-skeleton/roles/builder.md` (new "Review markers" section, byte-identical)
+- `apps/vscode/src/contextual-panel/document-review.ts` (new: projection + message builder), `document-review-send.ts` (new: send command)
+- `apps/vscode/src/contextual-panel/panel-provider.ts`, `messages.ts`, `webview/main.ts`, `webview/styles.css` (Document Review body, payload, actions)
+- `apps/vscode/src/__tests__/contextual-panel-document-review.test.ts` (new: projection, message, action validation, send wiring)
+- `apps/vscode/package.json` (also: the `codev.sendDocumentReview` command)
+- `codev/roles/builder.md` and `codev-skeleton/roles/builder.md` (new "Review comments" section, byte-identical)
 - `codev/roles/architect.md` and `codev-skeleton/roles/architect.md` (one line, optional per Decision 4, byte-identical)
-- Protocol prompts. Each pair is edited byte-identically, and the twins are verified with `diff -q` before commit:
-  - `codev/protocols/pir/prompts/plan.md` and `codev-skeleton/protocols/pir/prompts/plan.md`
-  - `codev/protocols/pir/prompts/implement.md` and `codev-skeleton/protocols/pir/prompts/implement.md`
-  - `codev/protocols/spir/prompts/implement.md` and `codev-skeleton/protocols/spir/prompts/implement.md`
-  - `codev/protocols/aspir/prompts/implement.md` and `codev-skeleton/protocols/aspir/prompts/implement.md`
-  - `codev/protocols/air/prompts/implement.md` and `codev-skeleton/protocols/air/prompts/implement.md`
+- Protocol prompts: **no change** (dropped; see section E for the alternative).
 - `apps/vscode/README.md:201`, `packages/artifact-canvas/README.md`, `codev/resources/arch.md` (#859 entry)
 - `codev/state/pir-1131_thread.md` (builder thread)
 
-**Not touched (lane fences):** `review-queue/*` (#1562/#1559), `comments/builder-review.ts` (#1560), `command-relay.ts`/`commands/diff-nav.ts` (#1546), and pir-1566's views/`viewsContainers`. `extension.ts` needs no change.
+**Not touched (lane fences):** `review-queue/*` (imported read-only, never modified), `comments/builder-review.ts` (#1560), `command-relay.ts`/`commands/diff-nav.ts` (#1546), and pir-1566's views/`viewsContainers`. `contextual-panel/*` is touched pending architect:vscode's confirmation that #1559's fence is lifted. `extension.ts` needs no change, or at most one line.
 
 ## Risks & Alternatives Considered
 
@@ -229,6 +264,9 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 - **Risk: a builder over-claims resolved.** Decision 4: the role doc says it is a claim, the gate summary lists the claims, and the architect spot-checks them.
 - **Risk: an extension.ts or package.json merge with sibling lanes.** No `extension.ts` hunk; the `package.json` edits are confined to command and comment-menu entries. I will merge main before the PR.
 - **Risk: switching the editor path to the codec changes thread anchoring.** `markerLine` is the same physical line the old regex anchored at (`positionAt(match.index)` on a single-line marker), so behavior is equivalent. The existing `plan-review-*` tests must stay green unchanged.
+- **Risk: Send pastes into a builder that is mid-task.** It never presses Enter. You see the message in the prompt and choose when to submit, which is the same safeguard as Submit Review.
+- **Risk: the panel re-reads the document on every keystroke.** The re-post is scoped to the shown file, and the projection is a single linear parse. If profiling shows churn, debounce it like the queue store's change event.
+- **Risk: the artifact's builder cannot be resolved** (Tower is down, or the overview is not loaded). The Send button is hidden; the list and the resolve toggles still work.
 - Alternatives 1, 2 and 3 are analyzed in Decision 1's table.
 - **Alternative: summary "unresolved only" filter.** Deferred, because #860 is unbuilt. When #860 lands it reads `marker.resolved` from the same codec at no extra cost.
 
@@ -249,6 +287,7 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
   - Lockstep check: the canvas `ReviewMarker` type accepts the sdk `ReviewMarker` (a compile-time assignability assertion in the vscode host, where both meet).
 - `packages/artifact-canvas`: a resolved card gets the dim class + "Resolved" label; the toggle button appears only with `onToggleResolved` + `markerLine`; a click emits the right payload; minimap dots get the resolved class; read-only hosts are unchanged.
 - `apps/vscode`: threads built from the codec carry the correct `state`/`contextValue` and a clean author; the resolve/unresolve commands rewrite the line and refuse a non-marker line; the preview `toggleResolved` race path refreshes instead of writing; the existing `plan-review-edit`, `plan-review-append` and `preview-edit-delete` suites still pass.
+- `apps/vscode` contextual panel: `deriveDocumentReview` counts, orders and flags correctly; `buildDocumentReviewMessage` lists only open comments, with repo-relative paths and 1-based lines plus the instruction lines; forged or mismatched panel messages (another builder, another file, a bad marker line) are ignored; the send command calls `openBuilderByRoleOrId` + `injectBuilderText` with a bracketed-paste payload and warns on failure.
 - `pnpm build` + `check-types` across the touched packages, not just vitest.
 
 **Manual (dev-approval gate, the full loop):**
@@ -256,5 +295,7 @@ The builder flips `resolved` when it has addressed the feedback. The architect v
 2. Click **Resolve** in the thread title. The line becomes `<!-- REVIEW(@you, resolved): … -->`, and VS Code shows the thread as Resolved. Click **Unresolve** to revert it.
 3. "Reopen With… Codev Markdown Preview". The resolved card renders dimmed with a "Resolved" label, and its minimap dot is dimmed. Toggle from the card and watch the editor thread follow.
 4. Race: edit the marker line by hand in the editor, then click toggle on the stale card. You get the "changed since you opened it" refresh, with no write.
-5. Workflow: in a scratch PIR builder (or by reading the rendered prompt via `porch next`), confirm the plan/implement prompts and the role doc instruct finding, resolving and explaining markers, and that a builder's resolve edit (`, resolved`) renders as resolved.
-6. Cross-host spot check: open a file with a resolved marker in the **currently released** extension. The comment still renders, with the author shown as `you, resolved`, and edit/delete still work.
+5. Codev panel: with this worktree's plan focused, the bottom **Codev** tab shows **Document Review · <file>**: "N open · M resolved", the list, and **Send N open comments to pir-1131**. Toggle a row and watch the file, the editor thread and the preview card follow.
+6. Full loop: click **Send**. The builder terminal opens with the packaged message in its prompt and Enter not pressed. Press Enter. The builder addresses the comments and edits them to `, resolved`. The panel's open count drops, and the gate message lists what was resolved.
+7. Workflow without the button: type "address the comments on the plan" in a builder terminal, and confirm the role-doc rule produces the same behaviour.
+8. Cross-host spot check: open a file with a resolved marker in the **currently released** extension. The comment still renders, with the author shown as `you, resolved`, and edit/delete still work.
