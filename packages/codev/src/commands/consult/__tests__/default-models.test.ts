@@ -18,8 +18,8 @@ import {
  * CI-safe: no network, no model CLIs, no API calls.
  */
 describe('shipped consult lane defaults', () => {
-  it('pins the claude lane to claude-opus-5', () => {
-    expect(DEFAULT_CLAUDE_MODEL).toBe('claude-opus-5');
+  it('pins the claude lane to Opus 5 with the 1M context window (#1641)', () => {
+    expect(DEFAULT_CLAUDE_MODEL).toBe('claude-opus-5[1m]');
   });
 
   it('pins the codex lane to gpt-5.6-sol at medium reasoning effort', () => {

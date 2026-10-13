@@ -63,8 +63,8 @@ export const VALID_LANE_NAMES = ['gemini', 'codex', 'claude', 'hermes'];
 export const SPECIAL_MODES = ['none', 'parent'] as const;
 
 /**
- * Model-id syntax. Deliberately permissive: ASCII alphanumerics plus `. _ : / @ + -`, 1–200 chars,
- * not starting with `-`.
+ * Model-id syntax. Deliberately permissive: ASCII alphanumerics plus `. _ : / @ + -`,
+ * with an optional Claude `[1m]` context suffix. 1–200 chars total, not starting with `-`.
  *
  * Covers the id conventions in use across providers — dotted/namespaced
  * (`us.anthropic.claude-opus-5`), vendor-prefixed (`openai/gpt-5.6`), tagged (`gpt-5.6:latest`),
@@ -74,7 +74,7 @@ export const SPECIAL_MODES = ['none', 'parent'] as const;
  * If a provider ever adopts a character outside this set, widen the class. That is a change to
  * SYNTAX (slow, safe) rather than to a catalog of IDS (stale immediately).
  */
-export const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/;
+export const MODEL_ID_RE = /^(?=.{1,200}$)[A-Za-z0-9][A-Za-z0-9._:/@+-]*(?:\[1m\])?$/i;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -136,7 +136,8 @@ export function validateModelId(id: unknown, key: string): asserts id is string 
   if (!MODEL_ID_RE.test(id)) {
     fail(
       `Invalid model id ${JSON.stringify(id)} for ${key}${location}.\n` +
-      `Model ids must be 1-200 characters of letters, digits, and ". _ : / @ + -", ` +
+      `Model ids must be 1-200 characters total: letters, digits, and ". _ : / @ + -", ` +
+      `optionally followed by the Claude "[1m]" context suffix, ` +
       `and must not start with "-".\n` +
       `Note: Codev does not check whether a model exists — the provider does. This is a syntax error.`
     );

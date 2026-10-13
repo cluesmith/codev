@@ -72,6 +72,10 @@ describe('model id syntax (scenario 10)', () => {
   const accepted = [
     'claude-opus-4-6',
     'claude-opus-5',
+    'claude-opus-5[1m]',            // #1641: explicit extended context
+    'claude-opus-5[1M]',            // Claude treats the suffix case-insensitively
+    'opus[1m]',
+    'us.anthropic.claude-opus-5[1m]',
     'gpt-5.4',
     'gpt-5.6-sol',                  // #1288: the -sol suffix is load-bearing
     'us.anthropic.claude-opus-5',   // namespaced
@@ -110,6 +114,18 @@ describe('model id syntax (scenario 10)', () => {
     // The whole point: Codev never asserts a model does not exist.
     expect(() => validateModelId('totally-made-up-model-2099', 'consult.models.claude')).not.toThrow();
   });
+
+  it('counts the context suffix toward the 200-character limit (#1641)', () => {
+    expect(() => validateModelId('a'.repeat(200), 'consult.models.claude')).not.toThrow();
+    expect(() => validateModelId('a'.repeat(196) + '[1m]', 'consult.models.claude')).not.toThrow();
+    expect(() => validateModelId('a'.repeat(197) + '[1m]', 'consult.models.claude')).toThrow();
+  });
+
+  it.each(['[1m]', 'opus[1m]extra', 'opus[1m][1m]', 'opus[2m]', 'opus[', 'opus\n'])(
+    'rejects malformed context model id %j', (id) => {
+      expect(() => validateModelId(id, 'consult.models.claude')).toThrow();
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
