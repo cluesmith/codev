@@ -21,10 +21,10 @@ import * as path from 'node:path';
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 
 /**
- * Skills touched by Spec 1280. Adding a skill to this list is a deliberate act: it asserts
- * the project now owns that skill's four-tree consistency.
+ * Skills touched by Spec 1280 (and `update-arch-docs`, by Spec 1797). Adding a skill to this
+ * list is a deliberate act: it asserts the project now owns that skill's four-tree consistency.
  */
-const TOUCHED_SKILLS = ['runnable-worktrees', 'codev'] as const;
+const TOUCHED_SKILLS = ['runnable-worktrees', 'codev', 'update-arch-docs'] as const;
 
 const TREES = [
   '.claude/skills',

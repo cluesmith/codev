@@ -43,6 +43,7 @@ This installs all three commands globally: `codev`, `afx`, and `consult`.
 |---------|-------------|
 | `codev init [name]` | Create a new codev project |
 | `codev adopt` | Add codev to an existing project |
+| `codev bootstrap-docs` | Draft the governance docs from an existing codebase |
 | `codev doctor` | Check system dependencies |
 | `codev update` | Update codev templates and protocols |
 | `codev import <source>` | AI-assisted protocol import from other projects |

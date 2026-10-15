@@ -17,14 +17,21 @@ vi.mock('node:readline', () => ({
   })),
 }));
 
-// Mock child_process spawn to avoid launching Claude
-vi.mock('node:child_process', () => ({
-  spawn: vi.fn(() => ({
-    on: vi.fn(),
-    stdout: null,
-    stderr: null,
-  })),
-}));
+// Mock child_process spawn to avoid launching Claude. adopt awaits the merge session, so the
+// fake child exits right away; execFileSync stays real for the repository checks.
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawn: vi.fn(() => ({
+      on: vi.fn((event: string, handler: (code: number, signal: null) => void) => {
+        if (event === 'exit') queueMicrotask(() => handler(0, null));
+      }),
+      stdout: null,
+      stderr: null,
+    })),
+  };
+});
 
 // Mock chalk for cleaner test output
 vi.mock('chalk', () => ({
@@ -218,6 +225,176 @@ describe('adopt command', () => {
 
       // .codev-new should be created for merge
       expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md.codev-new'))).toBe(true);
+    });
+  });
+
+  // Spec 1797: the governance-doc bootstrap offer at the end of adopt.
+  describe('bootstrap offer', () => {
+    const DRAFT_QUESTION = 'Draft the governance docs from this codebase now?';
+    const CURATED: Record<string, string> = {
+      'arch-critical.md': '# Critical facts\n\n- The API talks to the queue only.\n',
+      'lessons-critical.md': '# Critical lessons\n\n- Never retry a payment.\n',
+      'arch.md': '# Architecture\n\n## Services\n\nThe API and the worker.\n',
+      'lessons-learned.md': '# Lessons\n\n## Payments\n\nNever retry a payment.\n',
+    };
+
+    let output: string[];
+
+    beforeEach(() => {
+      output = [];
+      vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+        output.push(args.join(' '));
+      });
+      vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        output.push(args.join(' '));
+      });
+    });
+
+    function makeProject(name: string, files: Record<string, string> = { 'package.json': '{}' }): string {
+      const projectDir = path.join(testBaseDir, name);
+      fs.mkdirSync(projectDir, { recursive: true });
+      for (const [rel, content] of Object.entries(files)) {
+        fs.writeFileSync(path.join(projectDir, rel), content);
+      }
+      process.chdir(projectDir);
+      return process.cwd();
+    }
+
+    function writeCuratedDocs(root: string): void {
+      for (const [name, content] of Object.entries(CURATED)) {
+        fs.writeFileSync(path.join(root, 'codev', 'resources', name), content);
+      }
+    }
+
+    function hintPrinted(): boolean {
+      return output.some(line => line.includes('codev bootstrap-docs'));
+    }
+
+    it('-y never launches the pass and lists the command on a non-empty repo', async () => {
+      makeProject('bootstrap-yes');
+      const confirm = vi.fn(async () => true);
+      const runBootstrap = vi.fn(async () => 0);
+
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({ yes: true }, { confirm, runBootstrap });
+
+      expect(confirm).not.toHaveBeenCalled();
+      expect(runBootstrap).not.toHaveBeenCalled();
+      expect(hintPrinted()).toBe(true);
+    });
+
+    it('an empty repo gets neither the offer nor the hint', async () => {
+      makeProject('bootstrap-empty', {});
+      const confirm = vi.fn(async () => true);
+      const runBootstrap = vi.fn(async () => 0);
+
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({}, { confirm, runBootstrap });
+
+      expect(confirm.mock.calls.map(call => call[0])).not.toContain(DRAFT_QUESTION);
+      expect(runBootstrap).not.toHaveBeenCalled();
+      expect(hintPrinted()).toBe(false);
+    });
+
+    it('-y on an empty repo prints no hint', async () => {
+      makeProject('bootstrap-empty-yes', {});
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({ yes: true }, { runBootstrap: vi.fn(async () => 0) });
+      expect(hintPrinted()).toBe(false);
+    });
+
+    it('declining the offer launches nothing and lists the command', async () => {
+      makeProject('bootstrap-decline');
+      const confirm = vi.fn(async (question: string) => question !== DRAFT_QUESTION);
+      const runBootstrap = vi.fn(async () => 0);
+
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({}, { confirm, runBootstrap });
+
+      expect(confirm).toHaveBeenCalledWith(DRAFT_QUESTION, false);
+      expect(runBootstrap).not.toHaveBeenCalled();
+      expect(hintPrinted()).toBe(true);
+    });
+
+    it('accepting runs the pass and drops the hint once the docs are drafted; a failing pass does not fail adopt', async () => {
+      const root = makeProject('bootstrap-accept');
+      const confirm = vi.fn(async () => true);
+      const runBootstrap = vi.fn(async (at: string) => {
+        writeCuratedDocs(at);
+        return 1;
+      });
+
+      const { adopt } = await import('../commands/adopt.js');
+      const exitCodeBefore = process.exitCode;
+      await expect(adopt({}, { confirm, runBootstrap })).resolves.toBeUndefined();
+
+      expect(runBootstrap).toHaveBeenCalledWith(root);
+      // Adoption succeeded: the pass's non-zero exit is reported, not propagated.
+      expect(process.exitCode).toBe(exitCodeBefore);
+      expect(output.some(line => line.includes('Codev is adopted. The bootstrap pass reported problems'))).toBe(true);
+      expect(hintPrinted()).toBe(false);
+      // Next steps come last, after the pass.
+      const nextSteps = output.findIndex(line => line.includes('Next steps:'));
+      expect(nextSteps).toBeGreaterThan(-1);
+      expect(output.slice(nextSteps).some(line => line.includes('afx spawn'))).toBe(true);
+    });
+
+    it('with a CLAUDE.md conflict, the offer comes only after the merge session has exited', async () => {
+      const root = makeProject('bootstrap-conflict', { 'package.json': '{}', 'CLAUDE.md': '# Mine' });
+      const events: string[] = [];
+      const confirm = vi.fn(async (question: string) => {
+        events.push(`confirm:${question}`);
+        return question !== 'Allow AI agents to run commands without confirmation prompts?';
+      });
+      const runMergeSession = vi.fn(async (_prompt: string, cwd: string) => {
+        events.push(`merge-start:${cwd === root}`);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        events.push('merge-exit');
+        return { code: 0, signal: null };
+      });
+      const runBootstrap = vi.fn(async () => {
+        events.push('bootstrap');
+        return 0;
+      });
+
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({}, { confirm, runMergeSession, runBootstrap });
+
+      expect(events.indexOf('merge-start:true')).toBeGreaterThan(-1);
+      expect(events.indexOf('merge-exit')).toBeLessThan(events.indexOf(`confirm:${DRAFT_QUESTION}`));
+      expect(events.indexOf(`confirm:${DRAFT_QUESTION}`)).toBeLessThan(events.indexOf('bootstrap'));
+    });
+
+    it('-y with a conflict does not wait on the merge session, which launches after Next steps', async () => {
+      makeProject('bootstrap-conflict-yes', { 'package.json': '{}', 'CLAUDE.md': '# Mine' });
+      let mergeStartedAt = -1;
+      let finishMerge: (() => void) | undefined;
+      const runMergeSession = vi.fn(() => {
+        mergeStartedAt = output.length;
+        return new Promise<{ code: number; signal: null }>(resolve => {
+          finishMerge = () => resolve({ code: 0, signal: null });
+        });
+      });
+
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({ yes: true }, { runMergeSession, runBootstrap: vi.fn(async () => 0) });
+
+      expect(runMergeSession).toHaveBeenCalledTimes(1);
+      expect(output.findIndex(line => line.includes('Next steps:'))).toBeLessThan(mergeStartedAt);
+      finishMerge?.();
+    });
+
+    it('a merge session that cannot launch prints the manual merge steps and still offers the pass', async () => {
+      makeProject('bootstrap-merge-error', { 'package.json': '{}', 'CLAUDE.md': '# Mine' });
+      const confirm = vi.fn(async (question: string) => question !== DRAFT_QUESTION);
+      const runMergeSession = vi.fn(async () => ({ code: null, signal: null, error: 'spawn claude ENOENT' }));
+
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({}, { confirm, runMergeSession, runBootstrap: vi.fn(async () => 0) });
+
+      expect(output.some(line => line.includes('spawn claude ENOENT'))).toBe(true);
+      expect(output.some(line => line.includes('CLAUDE.md ← CLAUDE.md.codev-new'))).toBe(true);
+      expect(confirm).toHaveBeenCalledWith(DRAFT_QUESTION, false);
     });
   });
 });

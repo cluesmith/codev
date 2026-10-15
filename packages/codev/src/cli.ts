@@ -89,6 +89,22 @@ program
     }
   });
 
+// Bootstrap-docs command (Spec 1797). Deliberately no -y: it always confirms before
+// launching an agent.
+program
+  .command('bootstrap-docs')
+  .description('Draft the governance docs (arch/lessons, hot + cold) from this codebase')
+  .option('-n, --dry-run', 'Report which files are eligible and what would launch, without launching')
+  .action(async (options) => {
+    try {
+      const { bootstrapDocs } = await import('./commands/bootstrap-docs.js');
+      process.exitCode = await bootstrapDocs({ dryRun: options.dryRun });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
 // Update command
 program
   .command('update')
@@ -122,6 +138,7 @@ program
               ? 'For each conflict, merge the .codev-new file into the original. Preserve user customizations and incorporate new sections from .codev-new. Delete the .codev-new file after merging.'
               : null,
             commit: `Stage and commit all changed files with message: '[Maintenance] Update codev to v${version}'`,
+            bootstrapDocs: result.bootstrapDocsHint ?? null,
           },
           ...(result.error ? { error: result.error } : {}),
         };

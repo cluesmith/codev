@@ -27,6 +27,7 @@
     "copy-dashboard": "rm -rf dashboard-dist && cp -r ../../apps/web/dist dashboard-dist",
     "dev:dashboard": "cd ../../apps/web && pnpm dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
+    "generate-skill-hashes": "tsx scripts/generate-shipped-skill-hashes.mts",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest",
