@@ -1,7 +1,7 @@
 id: '1840'
 title: afx-decisions-init-one-command
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-19T17:21:36.050Z'
-updated_at: '2026-10-19T18:33:06.295Z'
+updated_at: '2026-10-19T18:33:14.554Z'
 pr_ready_for_human: false
 pr_history:
   - phase: pr
