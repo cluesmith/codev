@@ -1,7 +1,7 @@
 id: '1826'
 title: skeleton-ship-the-owner-decisi
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-18T23:05:06.935Z'
-updated_at: '2026-10-19T01:04:46.829Z'
+updated_at: '2026-10-19T01:04:48.898Z'
 pr_history:
   - phase: pr
     pr_number: 1832
