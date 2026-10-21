@@ -414,6 +414,18 @@ describe('tower-routes', () => {
       expect(requestShutdown).not.toHaveBeenCalled();
     });
 
+    it('refuses a tunnel-borne request even with loopback and the key (the proxy stamps both)', async () => {
+      const requestShutdown = vi.fn();
+      const log = vi.fn();
+      const req = makeReq('POST', '/api/shutdown', { 'x-codev-tunnel-proxy': '1' });
+      (req.socket as any).remoteAddress = '127.0.0.1';
+      const { res, statusCode } = shutdownRes();
+      await handleRequest(req, res, makeCtx({ requestShutdown, log }));
+      expect(statusCode()).toBe(403);
+      expect(requestShutdown).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('arrived via tunnel proxy'));
+    });
+
     it('is 501 where no shutdown hook is wired', async () => {
       const { res, statusCode } = shutdownRes();
       await handleRequest(makeReq('POST', '/api/shutdown'), res, makeCtx());

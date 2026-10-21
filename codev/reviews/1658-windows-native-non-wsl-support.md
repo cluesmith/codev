@@ -107,7 +107,14 @@ Two fixes the Windows runs forced along the way:
 - `Win32_ProcessStartup.EnvironmentVariables` take precedence over, but are merged with, the
   user's and the system's environment. A CIM-created Tower can therefore carry variables from
   the user/system environment that the launcher had unset. The marker and the Claude session
-  markers are not in those scopes, so the checks that matter hold.
+  markers are not in those scopes, so the checks that matter hold. A user-scope `CODEV_*`
+  variable (for example `CODEV_TOWER_PORT`) reaches a CIM-created Tower as it reaches any
+  process, so there is no behaviour difference there.
+- `POST /api/shutdown` is accepted only keyed, from loopback, and not tunnel-borne. The tunnel
+  client runs inside Tower and forwards cloud requests over loopback with the real key, so the
+  first two alone let a cloud-side actor stop Tower (found by the architect in review). The
+  route refuses the tunnel proxy marker, and the proxy blocks the path too. It is registered on
+  every platform: the conditions are the same everywhere.
 - Owner-machine launcher checks (Windows Terminal, PowerShell console, VS Code terminal,
   extension host) are part of the PR-gate manual pass.
 

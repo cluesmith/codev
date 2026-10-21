@@ -160,6 +160,19 @@ describe('tunnel-client unit tests', () => {
       expect(isBlockedPath('/api/ideas')).toBe(false);
     });
 
+    // Spec 1658 Phase 4: /api/shutdown stops Tower, so it never leaves the proxy.
+    it('blocks /api/shutdown, workspace-scoped and encoded forms included', () => {
+      expect(isBlockedPath('/api/shutdown')).toBe(true);
+      expect(isBlockedPath('/api/shutdown/')).toBe(true);
+      expect(isBlockedPath('/workspace/L1VzZXJzL21l/api/shutdown')).toBe(true);
+      expect(isBlockedPath('/api%2Fshutdown')).toBe(true);
+      expect(isBlockedPath('/x/../api/shutdown')).toBe(true);
+    });
+
+    it('does not over-block a /api/shutdown lookalike', () => {
+      expect(isBlockedPath('/api/shutdowns')).toBe(false);
+    });
+
     it('blocks percent-encoded slash bypass: /api%2Ftunnel/connect', () => {
       expect(isBlockedPath('/api%2Ftunnel/connect')).toBe(true);
     });

@@ -48,6 +48,7 @@ import {
   logSessionIdentity,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
+import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 import { handleIdeApi } from './ide-server.js';
 import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
 import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
@@ -582,13 +583,34 @@ export function isLoopbackAddress(address: string | undefined): boolean {
 
 /**
  * POST /api/shutdown (Spec 1658 Phase 4): the graceful stop `afx tower stop`
- * uses on Windows. Keyed like every route, and loopback-only on top: a bridge
- * or tunnel client holding the key still cannot stop Tower. Answers with the
- * pid before shutting down, so the caller waits on the right process.
+ * uses on Windows. Accepted only when all three hold:
+ *
+ * 1. keyed, like every route (the shared choke point above);
+ * 2. not tunnel-borne: the tunnel client runs inside Tower and forwards cloud
+ *    requests over loopback with the real key, so loopback and the key alone
+ *    would let a cloud-side actor stop Tower; its proxy marker
+ *    (TUNNEL_PROXY_HEADER, which it strips from inbound requests so it cannot
+ *    be forged or suppressed) is refused here, and the proxy also blocks the
+ *    path (`isBlockedPath`);
+ * 3. from a loopback peer, so a bridge-mode client holding the key cannot.
+ *
+ * Registered on every platform, not only Windows: the conditions are the same
+ * everywhere, and POSIX keeps it testable; POSIX `tower stop` still uses SIGTERM.
+ * Answers with the pid before shutting down, so the caller waits on the right
+ * process.
  */
 function handleShutdown(req: http.IncomingMessage, res: http.ServerResponse, ctx: RouteContext): void {
+  const remote = req.socket.remoteAddress ?? 'unknown';
+  const ua = String(req.headers['user-agent'] ?? 'none').slice(0, 120);
+  const sourceText = `remote=${remote} ua="${ua}"`;
+  if (req.headers[TUNNEL_PROXY_HEADER] !== undefined) {
+    ctx.log('WARN', `Shutdown request REJECTED — arrived via tunnel proxy (${sourceText} via=tunnel)`);
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'shutdown is local-only' }));
+    return;
+  }
   if (!isLoopbackAddress(req.socket.remoteAddress)) {
-    ctx.log('WARN', `Refused shutdown request from non-loopback peer ${req.socket.remoteAddress ?? 'unknown'}`);
+    ctx.log('WARN', `Shutdown request REJECTED — non-loopback peer (${sourceText})`);
     res.writeHead(403, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'shutdown is accepted from loopback only' }));
     return;

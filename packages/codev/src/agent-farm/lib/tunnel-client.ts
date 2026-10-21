@@ -75,8 +75,12 @@ const BLOCKED_PATH_PREFIX = '/api/tunnel/';
  * matched with a `(\/|$)` boundary (`/api/ide` and `/api/ide/…`, but not
  * `/api/ideas`). The `/ide/` *forward* prefix carries no `api/` segment and is
  * deliberately NOT blocked — it must reach Tower through the tunnel.
+ *
+ * `api/shutdown` (Spec 1658) stops Tower itself, so it is local-only too, with
+ * the same `(\/|$)` boundary. Tower refuses a tunnel-borne one as well; this
+ * keeps it from leaving the proxy at all.
  */
-const BLOCKED_PATH_SEGMENT = /(^|\/)api\/(tunnel\/|ide(\/|$))/;
+const BLOCKED_PATH_SEGMENT = /(^|\/)api\/(tunnel\/|ide(\/|$)|shutdown(\/|$))/;
 
 /**
  * Header stamped on every request this client proxies in from the cloud (#1370).
