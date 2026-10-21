@@ -41,3 +41,8 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Audit at plan time: #1789 (PR #1806) still OPEN; IDE server spawn/forward from #1668 already on main. #1595/#1672 not seen on main yet; re-audit at Phases 5/8/9.
 - Key ask for the plan gate: land the dispatch-only windows.yml skeleton on main early (GitHub dispatches only workflows present on the default branch), so each phase can run Windows checks on the branch.
 - IDE joint check: formal at verify (SPIR has no dev-approval gate); optional dry run before the pr gate.
+
+## 2026-10-21 plan CMAP iter1 → plan-approval gate
+- CMAP: gemini APPROVE, codex + claude REQUEST_CHANGES. All points verified against code and accepted; rebuttal in codev/projects/1658-*/1658-plan-iter1-rebuttals.md.
+- Plan now 11 phases (old Phase 3 split into census/teardown and Tower lifecycle). Reconnect identity moved into Phase 2; CIM census gets TTL+single-flight (it sits on /health, which sizes the owner-lock probe budget); executable resolver lives in codev-sdk/node (shared with apps/vscode); native-dep install guard added.
+- Two items for the architect at the gate: (1) early landing of dispatch-only windows.yml on main; (2) Git Bash order as literally ruled makes the override a last resort.
