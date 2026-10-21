@@ -1186,24 +1186,44 @@ export class SessionManager extends EventEmitter {
         fail('Timed out reading shellper info from stdout');
       }, 10_000);
 
+      const parseInfo = (): { pid: number; startTime: number } | null => {
+        try {
+          const info = JSON.parse(data) as { pid: number; startTime: number };
+          if (typeof info.pid !== 'number' || typeof info.startTime !== 'number') {
+            return null;
+          }
+          return info;
+        } catch {
+          return null;
+        }
+      };
+
+      // Resolve as soon as the complete info object has arrived rather than on
+      // EOF. On Windows the shellper's `closeSync(1)` does not close the pipe
+      // Tower reads (libuv keeps its own handle), so 'end' never fires there
+      // (Spec 1658). Our end of the pipe is released once the info is in.
       child.stdout!.on('data', (chunk: Buffer) => {
         data += chunk.toString();
+        if (settled) return;
+        const info = parseInfo();
+        if (info) {
+          settled = true;
+          clearTimeout(timeout);
+          child.stdout!.destroy();
+          resolve(info);
+        }
       });
 
       child.stdout!.on('end', () => {
         if (settled) return;
-        try {
-          const info = JSON.parse(data) as { pid: number; startTime: number };
-          if (typeof info.pid !== 'number' || typeof info.startTime !== 'number') {
-            fail('Invalid shellper info JSON');
-            return;
-          }
-          settled = true;
-          clearTimeout(timeout);
-          resolve(info);
-        } catch {
+        const info = parseInfo();
+        if (!info) {
           fail('Invalid shellper info JSON');
+          return;
         }
+        settled = true;
+        clearTimeout(timeout);
+        resolve(info);
       });
 
       child.on('error', (err) => {
