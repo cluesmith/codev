@@ -8,7 +8,7 @@
  * drawn into, so no scroll offsets are involved.
  */
 
-import type { HoverHighlightStyle, ReadingCursor } from '../types.js';
+import type { AnnotationEntry, HighlightLine, HoverHighlightStyle, ReadingCursor } from '../types.js';
 
 /** A client-coordinate rectangle (left, top, width, height). */
 export interface Box {
@@ -33,6 +33,8 @@ const HIGHLIGHT_STYLES: readonly HoverHighlightStyle[] = [
   'lineParagraph',
 ];
 const READING_CURSORS: readonly ReadingCursor[] = ['arrow', 'iBeam', 'hand'];
+const HIGHLIGHT_LINES: readonly HighlightLine[] = ['underPointer', 'abovePointer'];
+const ANNOTATION_ENTRIES: readonly AnnotationEntry[] = ['gutterButton', 'clickParagraph'];
 
 /** Default highlight style (owner ruling at the dev gate, #1802): line band plus paragraph tint. */
 export const DEFAULT_HIGHLIGHT_STYLE: HoverHighlightStyle = 'lineParagraph';
@@ -47,6 +49,10 @@ export function shapesOf(style: HoverHighlightStyle): { word: boolean; line: boo
 }
 /** Default cursor: the arrow, keeping #1232's `cursor: default`. */
 export const DEFAULT_READING_CURSOR: ReadingCursor = 'arrow';
+/** Default band line (#1850): the pointer's own line, today's behavior. */
+export const DEFAULT_HIGHLIGHT_LINE: HighlightLine = 'underPointer';
+/** Default annotation entry (#1850): the in-row "+", today's behavior. */
+export const DEFAULT_ANNOTATION_ENTRY: AnnotationEntry = 'gutterButton';
 
 /** Case-insensitive match against a closed vocabulary; null when nothing matches. */
 function matchVocabulary<T extends string>(value: unknown, vocabulary: readonly T[]): T | null {
@@ -70,6 +76,16 @@ export function parseHighlightStyle(value: unknown): HoverHighlightStyle {
 /** Coerce an untrusted cursor value (case-insensitive, so `ibeam` is `iBeam`); unknown → arrow. */
 export function parseReadingCursor(value: unknown): ReadingCursor {
   return matchVocabulary(value, READING_CURSORS) ?? DEFAULT_READING_CURSOR;
+}
+
+/** Coerce an untrusted band-line value (case-insensitive); unknown → `underPointer`. */
+export function parseHighlightLine(value: unknown): HighlightLine {
+  return matchVocabulary(value, HIGHLIGHT_LINES) ?? DEFAULT_HIGHLIGHT_LINE;
+}
+
+/** Coerce an untrusted annotation-entry value (case-insensitive); unknown → `gutterButton`. */
+export function parseAnnotationEntry(value: unknown): AnnotationEntry {
+  return matchVocabulary(value, ANNOTATION_ENTRIES) ?? DEFAULT_ANNOTATION_ENTRY;
 }
 
 /** Word-character fallback for engines without `Intl.Segmenter`. */
@@ -176,6 +192,13 @@ export function caretAt(doc: Document, x: number, y: number): Caret | null {
  */
 export const EXCLUDED_SELECTOR =
   'pre, .codev-canvas-marker-cards, .codev-canvas-comment-composer-host, .codev-canvas-row-affordance';
+
+/**
+ * Targets a click-to-annotate click (#1850) never opens the composer from: everything the hover
+ * aid skips, plus links, inline code, images, form controls, and the card edit/delete buttons
+ * (the card-action seam, `data-action`).
+ */
+export const CLICK_EXCLUDED_SELECTOR = `${EXCLUDED_SELECTOR}, a, code, img, button, input, textarea, select, [data-action]`;
 
 /**
  * True for text inside an inline code chip. The chip paints its own opaque background, which
@@ -324,4 +347,117 @@ export function paragraphBlocks(fragments: readonly Box[], insets: Insets, m: Te
     });
   }
   return out;
+}
+
+/**
+ * The visual rows of a block (#1850): its inline-content rects grouped by line (vertical centres
+ * within half a line-height of each other, so a taller inline-code chip joins its row), keeping
+ * only rects in `column` when given. Each row is the union of its rects, ordered top to bottom.
+ */
+export function rowsInColumn(lineRects: readonly Box[], column: Box | null, m: TextMetrics): Box[] {
+  const kept = lineRects.filter((r) => {
+    if (r.width <= 0 || r.height <= 0) return false;
+    if (column && (r.left + r.width < column.left || r.left > column.left + column.width)) return false;
+    return true;
+  });
+  kept.sort((a, b) => a.top + a.height / 2 - (b.top + b.height / 2));
+  const rows: Box[] = [];
+  let rowCentre = Number.NEGATIVE_INFINITY;
+  for (const r of kept) {
+    const centre = r.top + r.height / 2;
+    const last = rows[rows.length - 1];
+    if (last && Math.abs(centre - rowCentre) <= m.lineHeight / 2) {
+      const left = Math.min(last.left, r.left);
+      const top = Math.min(last.top, r.top);
+      const right = Math.max(last.left + last.width, r.left + r.width);
+      const bottom = Math.max(last.top + last.height, r.top + r.height);
+      rows[rows.length - 1] = { left, top, width: right - left, height: bottom - top };
+      continue;
+    }
+    rows.push({ ...r });
+    rowCentre = centre;
+  }
+  return rows;
+}
+
+function centreY(b: Box): number {
+  return b.top + b.height / 2;
+}
+
+/** The row directly above `pointerRow` (centre above its top edge), or null on the top row. */
+export function rowAbove(rows: readonly Box[], pointerRow: Box): Box | null {
+  let best: Box | null = null;
+  for (const r of rows) {
+    if (centreY(r) >= pointerRow.top) continue;
+    if (best === null || centreY(r) > centreY(best)) best = r;
+  }
+  return best;
+}
+
+/** The lowest row, or null when there are none. */
+export function lastRow(rows: readonly Box[]): Box | null {
+  let best: Box | null = null;
+  for (const r of rows) {
+    if (best === null || centreY(r) > centreY(best)) best = r;
+  }
+  return best;
+}
+
+/** The band for one row: the same padding and minimum height as `lineBand`. */
+export function bandForRow(row: Box, m: TextMetrics): Box {
+  const padX = m.fontSize * 0.45;
+  const height = Math.max(m.lineHeight, row.height);
+  return { left: row.left - padX, top: centreY(row) - height / 2, width: row.width + 2 * padX, height };
+}
+
+/**
+ * True when the point rests in the gap just below `row` (#1850): horizontally within the block's
+ * text extent (`rows`' union, so the gutter never counts) and within one line-height below the
+ * row's line box.
+ */
+export function inGapBelow(row: Box, rows: readonly Box[], x: number, y: number, m: TextMetrics): boolean {
+  let left = row.left;
+  let right = row.left + row.width;
+  for (const r of rows) {
+    left = Math.min(left, r.left);
+    right = Math.max(right, r.left + r.width);
+  }
+  if (x < left || x > right) return false;
+  const lineBottom = centreY(row) + Math.max(m.lineHeight, row.height) / 2;
+  return y > lineBottom && y <= lineBottom + m.lineHeight;
+}
+
+/** Content a "line above" never jumps over: a code block, a comment-card stack, the composer. */
+const BARRIER_SELECTOR = 'pre, .codev-canvas-marker-cards, .codev-canvas-comment-composer-host';
+const AFFORDANCE_SELECTOR = '.codev-canvas-row-affordance';
+
+/** The element before `el` in document order (deepest last descendant of its previous sibling). */
+function previousInOrder(el: Element): Element | null {
+  let prev = el.previousElementSibling;
+  if (!prev) return el.parentElement;
+  while (prev.lastElementChild) prev = prev.lastElementChild;
+  return prev;
+}
+
+/**
+ * The block above `block` for a "line above" that crosses blocks (#1850): the nearest preceding
+ * paragraph-level block in document order that is not an ancestor of `block`. Null at the top of
+ * `body`, or when the content immediately above is a barrier (code block, comment cards, the
+ * composer), so the band never jumps over it to an unrelated paragraph. The "+" wrapper, which
+ * lives inside the row above, is skipped.
+ */
+export function previousBlock(block: Element, body: Element): Element | null {
+  let el = previousInOrder(block);
+  while (el && el !== body && body.contains(el)) {
+    const affordance = el.closest(AFFORDANCE_SELECTOR);
+    if (affordance && body.contains(affordance)) {
+      el = previousInOrder(affordance);
+      continue;
+    }
+    const barrier = el.closest(BARRIER_SELECTOR);
+    if (barrier && body.contains(barrier)) return null;
+    if (!el.contains(block) && el.matches(BLOCK_SELECTOR)) return el;
+    el = previousInOrder(el);
+  }
+  return null;
 }

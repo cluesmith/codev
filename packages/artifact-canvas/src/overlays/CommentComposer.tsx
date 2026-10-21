@@ -32,6 +32,8 @@ export interface CommentComposerProps {
 export interface CommentComposerHandle {
   /** Submit the current draft, exactly as ⌘/Ctrl+Enter does. Empty bodies stay a no-op. */
   submit(): void;
+  /** True when the box holds non-whitespace text (#1850: a drafted composer ignores stray clicks). */
+  hasDraft(): boolean;
 }
 
 /**
@@ -78,7 +80,10 @@ export const CommentComposer = React.forwardRef<CommentComposerHandle, CommentCo
   // A remote submit reports `viaKeyboard: true` so focus restoration keeps its visible ring: the
   // reviewer is driving the canvas deliberately and needs to see where focus landed, which is the
   // same reason the ⌘/Ctrl+Enter path passes true.
-  React.useImperativeHandle(handleRef, () => ({ submit: () => submit(true) }));
+  React.useImperativeHandle(handleRef, () => ({
+    submit: () => submit(true),
+    hasDraft: () => text.trim() !== '',
+  }));
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {

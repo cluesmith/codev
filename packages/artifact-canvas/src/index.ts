@@ -20,10 +20,17 @@ export type {
   ReadingMode,
   HoverHighlightStyle,
   ReadingCursor,
+  HighlightLine,
+  AnnotationEntry,
 } from './types.js';
 
 export { ArtifactCanvas } from './components/ArtifactCanvas.js';
-export { parseHighlightStyle, parseReadingCursor } from './components/hover-word.js';
+export {
+  parseHighlightStyle,
+  parseReadingCursor,
+  parseHighlightLine,
+  parseAnnotationEntry,
+} from './components/hover-word.js';
 
 export { renderMarkdown } from './renderer/renderer.js';
 export { MarkdownView, type MarkdownViewProps } from './renderer/MarkdownView.js';

@@ -19,8 +19,15 @@ import {
   measureColumnGeometry,
   wheelDeltaPx,
 } from './column-geometry.js';
-import { parseHighlightStyle, parseReadingCursor } from './hover-word.js';
-import { useHoverWordHighlight } from './useHoverWordHighlight.js';
+import {
+  CLICK_EXCLUDED_SELECTOR,
+  parseAnnotationEntry,
+  parseHighlightLine,
+  parseHighlightStyle,
+  parseReadingCursor,
+  shapesOf,
+} from './hover-word.js';
+import { type ReadingTarget, useHoverWordHighlight } from './useHoverWordHighlight.js';
 
 /** Coerce an untrusted (host-persisted) mode value to the closed vocabulary (spec 1380 D4). */
 function coerceReadingMode(value: string | undefined): ReadingMode {
@@ -263,9 +270,18 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     commandAdapter,
     hoverHighlight,
     readingCursor,
+    highlightLine,
+    annotationEntry,
   } = props;
   const canEdit = onEditComment !== undefined;
   const canDelete = onDeleteComment !== undefined;
+  // Reading aids (#1802, #1850), coerced here too: JS hosts can pass anything. `aboveActive`: the
+  // band sits on the line above the pointer, and the "+" / click target follow it. Styles with no
+  // band (`none`, `word`) have nothing to follow, so the setting is inert for them.
+  const highlightStyle = parseHighlightStyle(hoverHighlight);
+  const aboveActive = parseHighlightLine(highlightLine) === 'abovePointer' && shapesOf(highlightStyle).line;
+  // Click-to-annotate (#1850): a plain click on prose opens the composer and the "+" never mounts.
+  const clickEntry = parseAnnotationEntry(annotationEntry) === 'clickParagraph';
 
   // Reading mode (spec 1380 D4): uncontrolled after mount, seeded from the host's persisted
   // value coerced to the closed vocabulary. Mode is React state on the root, so it survives
@@ -598,7 +614,10 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // resolved from the current marker list (not read off the DOM), so the payload matches the model.
   const onBodyClick = (e: React.MouseEvent<HTMLDivElement>): void => {
     const btn = (e.target as HTMLElement | null)?.closest?.('[data-action]') as HTMLElement | null;
-    if (!btn) { return; }
+    if (!btn) {
+      if (clickEntry) openComposerFromClick(e);
+      return;
+    }
     const action = btn.dataset.action;
     const markerLine = Number(btn.dataset.markerLine);
     if (Number.isNaN(markerLine)) { return; }
@@ -615,6 +634,49 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       setEditingMarker(marker);
       setComposingLine(marker.line); // portal the composer below this marker's block
     }
+  };
+
+  // Click-to-annotate (#1850). Only a deliberate plain click on prose opens the composer: not one
+  // that ends a drag selection, not one that only dismisses a selection (the browser collapses it
+  // on mousedown, so `selectionAtPressRef` remembers), not a double-click's second click, not a
+  // modified click, and not on links / code / images / cards / the composer. A composer holding a
+  // draft ignores clicks elsewhere so a stray click never discards text; an empty one just moves.
+  // Under `aboveActive` the target is the block whose line was lit (what the reader saw), falling
+  // back to the clicked block when nothing was lit, so a click on prose is never dead.
+  const openComposerFromClick = (e: React.MouseEvent<HTMLDivElement>): void => {
+    if (e.button !== 0 || e.detail !== 1) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (selectionAtPressRef.current) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return;
+    const target = e.target as HTMLElement | null;
+    if (!target?.closest || target.closest(CLICK_EXCLUDED_SELECTOR)) return;
+    const clicked = resolveBlock(target);
+    if (!clicked) return;
+    if (composingLine !== null && composerHandleRef.current?.hasDraft()) return;
+    let line = clicked.line;
+    if (aboveActive) {
+      const lit = readingTargetRef.current?.targetAtLastPress();
+      const litBlock = lit ? resolveBlock(lit.block) : null;
+      if (litBlock) line = litBlock.line;
+    }
+    openComposer(line);
+  };
+
+  // Primary press bookkeeping (#1850): whether a selection existed before the press (read by the
+  // click path above), and that a focus arriving now is pointer-driven (read by
+  // `activateFromFocus`, so a click never drags the "+" off the lit line). The focus a press
+  // causes runs as the press's default action, before the timeout clears the flag.
+  const selectionAtPressRef = React.useRef(false);
+  const pointerPressRef = React.useRef(false);
+  const onBodyMouseDown = (e: React.MouseEvent<HTMLDivElement>): void => {
+    if (e.button !== 0 || (!clickEntry && !aboveActive)) return;
+    const selection = window.getSelection();
+    selectionAtPressRef.current = selection !== null && !selection.isCollapsed;
+    pointerPressRef.current = true;
+    window.setTimeout(() => {
+      pointerPressRef.current = false;
+    }, 0);
   };
 
   // Navigable blocks in tree order, deduped to the FIRST element per line: the renderer stamps the
@@ -1309,6 +1371,10 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     // Every focus path funnels through here, so this is where the navigation cursor is recorded
     // (spec 1401): keyboard jumps, pointer clicks, minimap handoff, and remote commands alike.
     cursorLineRef.current = b.line;
+    // Click-to-annotate has no "+" to place (#1850). Under `aboveActive` a pointer-driven focus
+    // leaves the "+" on the lit line; only keyboard focus re-anchors it to the block's first line.
+    if (clickEntry) return;
+    if (aboveActive && pointerPressRef.current) return;
     setActiveLine(b.line);
     placeAffordance(b.el, null);
   };
@@ -1320,10 +1386,15 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // jump around mid text-selection), and targets outside any block (margins and other dead strips
   // keep the current row lit — sticky — rather than flickering; the "+" sits inside the row it
   // targets, so a lingering affordance can never be attributed to the wrong row).
+  //
+  // Two more (#1850): click-to-annotate renders no "+", and under `aboveActive` the "+" follows
+  // the reading aid's lit line instead (`placeAffordanceOnTarget`), not the pointer's row.
   const activateFromPointer = (e: React.MouseEvent): void => {
+    if (clickEntry) return;
     const target = e.target as HTMLElement | null;
     if (fromAffordance(target)) return;
     if ((e.buttons & 1) !== 0) return;
+    if (aboveActive) return;
     const b = resolveBlock(target);
     if (!b) return;
     setActiveLine(b.line);
@@ -1345,9 +1416,32 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // readout one stable identity per layout-relevant state.
   const progressKey = React.useMemo(() => ({}), [html, markers, composingLine]);
 
-  // Hover reading aid (#1802). Coerced here too: JS hosts can pass anything. The same
-  // layout key as the progress readout re-resolves the word when content shifts under it.
-  useHoverWordHighlight(rootRef, bodyRef, parseHighlightStyle(hoverHighlight), progressKey);
+  // "+" on the line being read (#1850, `aboveActive`): the reading aid reports each newly lit
+  // line and the "+" moves onto it, in that block's own row (which may be the block above the
+  // pointer). Nothing lit leaves the "+" where it is: the gutter has no words, so the pointer can
+  // travel left then up to the "+" without it re-anchoring away (sticky, like the dead strips).
+  const placeAffordanceOnTarget = (target: ReadingTarget | null): void => {
+    if (!target) return;
+    const b = resolveBlock(target.block);
+    if (!b) return;
+    setActiveLine(b.line);
+    placeAffordance(b.el, target.band.top + target.band.height / 2, target.band.left + target.band.width / 2);
+  };
+
+  // Hover reading aid (#1802). The same layout key as the progress readout re-resolves the word
+  // when content shifts under it.
+  let onReadingTarget: ((target: ReadingTarget | null) => void) | undefined;
+  if (aboveActive && !clickEntry) {
+    onReadingTarget = placeAffordanceOnTarget;
+  }
+  const readingTargetRef = useHoverWordHighlight(
+    rootRef,
+    bodyRef,
+    highlightStyle,
+    progressKey,
+    parseHighlightLine(highlightLine),
+    onReadingTarget,
+  );
   // Prose cursor (#1802): arrow carries no attribute, so #1232's `cursor: default` is untouched.
   let readingCursorAttr: string | undefined;
   const cursor = parseReadingCursor(readingCursor);
@@ -1388,6 +1482,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
         onMouseOver={activateFromPointer}
         onMouseMove={activateFromPointer}
         onFocus={(e) => activateFromFocus(e.target)}
+        onMouseDown={onBodyMouseDown}
         onClick={onBodyClick}
         onKeyDown={onBodyKeyDown}
       />

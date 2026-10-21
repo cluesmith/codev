@@ -58,6 +58,21 @@ export type HoverHighlightStyle =
 export type ReadingCursor = 'arrow' | 'iBeam' | 'hand';
 
 /**
+ * Which line the hover band marks (#1850). `underPointer` is the pointer's own line;
+ * `abovePointer` is the line above it, like a finger resting under the line being read. With
+ * `abovePointer` the band (and the paragraph tint, the "+" and the click target with it) may cross
+ * into the block above when the pointer is on a block's first line or in the gap just below a
+ * block. The word pill always stays under the pointer.
+ */
+export type HighlightLine = 'underPointer' | 'abovePointer';
+
+/**
+ * How a new annotation starts (#1850). `gutterButton` is the in-row "+"; `clickParagraph` opens
+ * the inline composer on a plain click on prose and never renders the "+".
+ */
+export type AnnotationEntry = 'gutterButton' | 'clickParagraph';
+
+/**
  * In-memory model of a review marker. The package is serialization-agnostic (spec D3): the
  * host's `MarkerAdapter` owns the on-disk byte form; `raw` preserves the original marker text
  * for lossless round-tripping.
@@ -154,4 +169,14 @@ export interface ArtifactCanvasProps {
    * `arrow`, today's behavior.
    */
   readingCursor?: ReadingCursor;
+  /**
+   * Which line the hover band marks (contract amendment #1850). Optional and additive: omitted
+   * means `underPointer`, today's behavior.
+   */
+  highlightLine?: HighlightLine;
+  /**
+   * How a new annotation starts (contract amendment #1850). Optional and additive: omitted means
+   * `gutterButton`, today's behavior.
+   */
+  annotationEntry?: AnnotationEntry;
 }
