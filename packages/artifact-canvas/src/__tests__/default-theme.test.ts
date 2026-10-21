@@ -173,6 +173,16 @@ describe('default-theme.css token vocabulary', () => {
     expect(css).not.toMatch(/\.codev-artifact-canvas-rendered[^{]*\{[^}]*cursor:\s*default/);
   });
 
+  it('hides the pointer over prose for the Hidden cursor, keeping the excluded regions visible (#1850)', () => {
+    expect(css).toMatch(
+      /\.codev-artifact-canvas\[data-reading-cursor='none'\]\s+\.codev-artifact-canvas-body\s*\{[^}]*cursor:\s*none/,
+    );
+    // The shared rule (any non-arrow cursor) gives code, cards, the composer and the "+" back the arrow.
+    expect(css).toMatch(
+      /\.codev-artifact-canvas\[data-reading-cursor\]\s+\.codev-artifact-canvas-body\s*:is\(pre, \.codev-canvas-marker-cards, \.codev-canvas-comment-composer-host, \.codev-canvas-row-affordance\)\s*\{[^}]*cursor:\s*default/,
+    );
+  });
+
   it('sizes the "+" affordance against the prose, with a 24px hit-target floor (#1236/#1343)', () => {
     // The in-row wrapper pins the canvas typography so the "+" renders identically whatever row
     // hosts it (a pre's monospace/85% must not leak in); the button inherits it explicitly —

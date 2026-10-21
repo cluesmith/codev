@@ -1,11 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /**
- * "Line above the pointer" and click-to-annotate (#1850) in real Chromium: the band, the "+" and
- * the click target follow one reading target, and the "+" stays reachable by mouse (the pointer
- * travels left into the gutter, then up, without the "+" re-anchoring away from it).
+ * Click-to-annotate and the Hidden prose cursor (#1850) in real Chromium: real selection, real
+ * double-click and real computed cursors, none of which jsdom has.
  *
- * Sample doc lines (0-based): 6 "## Requirements", 8/9/10 the three list items. Labels are 1-based.
+ * Sample doc lines (0-based): 8/9/10 are the three list items. Labels are 1-based.
  */
 
 interface Rect {
@@ -40,20 +39,6 @@ async function wordRect(page: Page, selector: string, word: string, nth = 0): Pr
 
 const centre = (r: Rect): { x: number; y: number } => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
 
-async function band(page: Page): Promise<Rect | null> {
-  return page.evaluate(() => {
-    const el = Array.from(document.querySelectorAll<HTMLElement>('.codev-canvas-hover-line')).find((e) => !e.hidden);
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { left: r.left, top: r.top, width: r.width, height: r.height };
-  });
-}
-
-const vCentreInside = (outer: Rect, inner: Rect): boolean => {
-  const c = inner.top + inner.height / 2;
-  return c >= outer.top && c <= outer.top + outer.height;
-};
-
 async function hover(page: Page, selector: string, word: string, nth = 0): Promise<Rect> {
   const r = await wordRect(page, selector, word, nth);
   const c = centre(r);
@@ -68,68 +53,13 @@ async function ready(page: Page, url: string): Promise<void> {
 
 const LI = '.codev-artifact-canvas-body li[data-line]';
 
-test('abovePointer: the band sits on the line above, crossing into the block above', async ({ page }) => {
-  await ready(page, '/?line=abovePointer');
-  // Pointer on the second list item: the band marks the first item's line.
-  const first = await wordRect(page, LI, 'Render');
-  const hovered = await hover(page, LI, 'Surface', 1);
-  await expect.poll(async () => (await band(page)) !== null).toBe(true);
-  let b = (await band(page))!;
-  expect(vCentreInside(b, first)).toBe(true);
-  expect(vCentreInside(b, hovered)).toBe(false);
-
-  // Pointer on the first item: the band marks the heading above it.
-  const heading = await wordRect(page, '.codev-artifact-canvas-body h2', 'Requirements', 1);
-  await hover(page, LI, 'Render');
-  await expect.poll(async () => {
-    const now = await band(page);
-    return now !== null && vCentreInside(now, heading);
-  }).toBe(true);
-  b = (await band(page))!;
-  expect(vCentreInside(b, first)).toBe(false);
-});
-
-test('abovePointer: inside a wrapped paragraph the band is the previous visual line', async ({ page }) => {
-  await page.setViewportSize({ width: 360, height: 800 });
-  await ready(page, '/?line=abovePointer');
-  const p = '.codev-artifact-canvas-body p';
-  const top = await wordRect(page, p, 'This');
-  const lower = await wordRect(page, p, 'render');
-  expect(lower.top).toBeGreaterThan(top.top + top.height); // wrapped onto a later line
-  await page.mouse.move(centre(lower).x, centre(lower).y);
-  await expect.poll(async () => (await band(page)) !== null).toBe(true);
-  const b = (await band(page))!;
-  expect(vCentreInside(b, lower)).toBe(false);
-  expect(b.top + b.height).toBeLessThanOrEqual(lower.top + 1);
-});
-
-test('abovePointer: the "+" is on the banded item and stays reachable by mouse', async ({ page }) => {
-  await ready(page, '/?line=abovePointer');
-  const hovered = await hover(page, LI, 'Surface', 1);
-  const plus = page.getByRole('button', { name: 'Add comment on line 9' });
-  await expect(plus).toBeVisible();
-  const box = (await plus.boundingBox())!;
-  // Travel like a hand would: left into the gutter at the pointer's height, then up to the "+".
-  const start = centre(hovered);
-  const gutterX = box.x + box.width / 2;
-  await page.mouse.move(gutterX, start.y, { steps: 8 });
-  await page.mouse.move(gutterX, box.y + box.height / 2, { steps: 8 });
-  await expect(plus).toBeVisible();
-  const after = (await plus.boundingBox())!;
-  expect(Math.abs(after.y - box.y)).toBeLessThan(1);
-  await page.mouse.down();
-  await page.mouse.up();
-  await expect(page.getByRole('textbox', { name: 'Add comment on line 9' })).toBeVisible();
-});
-
-test('clickParagraph + abovePointer: no "+" at all; a click opens the composer for the banded item', async ({ page }) => {
-  await ready(page, '/?line=abovePointer&entry=clickParagraph');
+test('clickParagraph: no "+" at all; a click on prose opens the composer for that block', async ({ page }) => {
+  await ready(page, '/?entry=clickParagraph');
   const r = await hover(page, LI, 'Surface', 1);
-  await expect.poll(async () => (await band(page)) !== null).toBe(true);
   expect(await page.locator('.codev-canvas-add-comment').count()).toBe(0);
   expect(await page.locator('.codev-canvas-row-affordance').count()).toBe(0);
   await page.mouse.click(centre(r).x, centre(r).y);
-  await expect(page.getByRole('textbox', { name: 'Add comment on line 9' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Add comment on line 10' })).toBeVisible();
 });
 
 test('clickParagraph: drag-select opens nothing; the click that dismisses it opens nothing; the next click does', async ({ page }) => {
@@ -158,4 +88,33 @@ test('clickParagraph: double-clicking a word selects it and opens one composer',
   const r = await wordRect(page, LI, 'Emit', 2);
   await page.mouse.dblclick(centre(r).x, centre(r).y);
   await expect(page.locator('.codev-canvas-comment-composer-input')).toHaveCount(1);
+});
+
+async function cursorAt(page: Page, selector: string): Promise<string> {
+  return page.evaluate((selector) => getComputedStyle(document.querySelector(selector)!).cursor, selector);
+}
+
+test('Hidden cursor: no pointer over prose; code, cards and the "+" keep one', async ({ page }) => {
+  await ready(page, '/?cursor=none');
+  expect(await cursorAt(page, LI)).toBe('none');
+  expect(await cursorAt(page, '.codev-artifact-canvas-body p')).toBe('none');
+  expect(await cursorAt(page, '.codev-artifact-canvas-body pre')).toBe('default');
+  expect(await cursorAt(page, '.codev-canvas-marker-cards')).toBe('default');
+  // The "+" still shows a pointer, and the line band still marks where the hidden pointer is.
+  await hover(page, LI, 'Surface', 1);
+  await expect(page.locator('.codev-canvas-add-comment')).toBeVisible();
+  expect(await cursorAt(page, '.codev-canvas-row-affordance')).toBe('default');
+  await expect.poll(async () => page.locator('.codev-canvas-hover-line:not([hidden])').count()).toBe(1);
+});
+
+test('Hidden cursor: links keep the pointing hand', async ({ page }) => {
+  await ready(page, '/?cursor=none');
+  await page.evaluate(() => {
+    const a = document.createElement('a');
+    a.href = '#x';
+    a.id = 'probe-link';
+    a.textContent = 'link';
+    document.querySelector('.codev-artifact-canvas-body p')!.append(a);
+  });
+  expect(await cursorAt(page, '#probe-link')).toBe('pointer');
 });

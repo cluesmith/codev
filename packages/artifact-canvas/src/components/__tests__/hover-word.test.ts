@@ -1,22 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   CLICK_EXCLUDED_SELECTOR,
-  bandForRow,
   blockOf,
   fragmentContainingX,
-  inGapBelow,
   isExcluded,
   isInlineCode,
-  lastRow,
   lineBand,
   paragraphBlocks,
   parseAnnotationEntry,
-  parseHighlightLine,
   parseHighlightStyle,
   parseReadingCursor,
-  previousBlock,
-  rowAbove,
-  rowsInColumn,
   shapesOf,
   wordBoundsAt,
   wordPills,
@@ -72,6 +65,7 @@ describe('parseHighlightStyle / parseReadingCursor', () => {
     expect(parseHighlightStyle('LINEPARAGRAPH')).toBe('lineParagraph');
     expect(parseReadingCursor('ibeam')).toBe('iBeam');
     expect(parseReadingCursor('hand')).toBe('hand');
+    expect(parseReadingCursor('NONE')).toBe('none'); // Hidden (#1850)
   });
 
   it('falls back to the defaults for unknown or missing values', () => {
@@ -194,115 +188,14 @@ describe('shape geometry', () => {
   });
 });
 
-describe('parseHighlightLine / parseAnnotationEntry (#1850)', () => {
+describe('parseAnnotationEntry (#1850)', () => {
   it('accepts the vocabulary case-insensitively', () => {
-    expect(parseHighlightLine('abovePointer')).toBe('abovePointer');
-    expect(parseHighlightLine(' ABOVEPOINTER ')).toBe('abovePointer');
-    expect(parseHighlightLine('underpointer')).toBe('underPointer');
     expect(parseAnnotationEntry('clickparagraph')).toBe('clickParagraph');
-    expect(parseAnnotationEntry('GutterButton')).toBe('gutterButton');
+    expect(parseAnnotationEntry(' GutterButton ')).toBe('gutterButton');
   });
 
   it("falls back to today's behavior for unknown or missing values", () => {
-    for (const v of [undefined, null, 3, '', 'sideways']) {
-      expect(parseHighlightLine(v)).toBe('underPointer');
-      expect(parseAnnotationEntry(v)).toBe('gutterButton');
-    }
-  });
-});
-
-describe('line-above geometry (#1850)', () => {
-  const m = { fontSize: 16, lineHeight: 24 };
-  // Three 24px lines; glyph boxes 20px tall, starting 2px into each line box.
-  const row = (top: number, left = 20, width = 300): Box => ({ left, top: top + 2, width, height: 20 });
-
-  it('groups inline rects into rows, merging a taller inline-code chip into its line', () => {
-    const rects = [row(0, 20, 100), { left: 130, top: 1, width: 40, height: 22 }, row(24), row(48)];
-    const rows = rowsInColumn(rects, null, m);
-    expect(rows).toHaveLength(3);
-    expect(rows[0]).toEqual({ left: 20, top: 1, width: 150, height: 22 });
-  });
-
-  it('drops rects outside the column and orders rows top to bottom', () => {
-    const column = { left: 0, top: 0, width: 400, height: 200 };
-    const rects = [row(48), row(0, 500), row(0), row(24)];
-    const rows = rowsInColumn(rects, column, m);
-    expect(rows.map((r) => r.top)).toEqual([2, 26, 50]);
-  });
-
-  it('picks the row directly above the pointer row, and none on the top row', () => {
-    const rows = [row(0), row(24), row(48)];
-    const pointerOnThird = lineBand(row(48, 40, 30), rows, null, m);
-    expect(rowAbove(rows, pointerOnThird)).toEqual(rows[1]);
-    const pointerOnFirst = lineBand(row(0, 40, 30), rows, null, m);
-    expect(rowAbove(rows, pointerOnFirst)).toBeNull();
-  });
-
-  it('never takes the line above from the neighbouring column', () => {
-    // Column 2 (left 500) holds the block's continuation; the pointer is on its first line.
-    const column2 = { left: 480, top: 0, width: 400, height: 200 };
-    const rects = [row(0), row(24), row(48), row(0, 500), row(24, 500)];
-    const rows = rowsInColumn(rects, column2, m);
-    const pointer = lineBand(row(0, 520, 30), rows, column2, m);
-    expect(rowAbove(rows, pointer)).toBeNull();
-  });
-
-  it('finds the last row and bands a row like lineBand does', () => {
-    const rows = [row(0), row(24), row(48)];
-    expect(lastRow(rows)).toEqual(rows[2]);
-    expect(lastRow([])).toBeNull();
-    expect(bandForRow(rows[1], m)).toEqual({ left: 20 - 7.2, top: 24, width: 300 + 14.4, height: 24 });
-  });
-
-  it('detects the gap just below a block, inside its text extent only', () => {
-    const rows = [row(0), row(24)];
-    const last = rows[1];
-    // The last line box ends at 48; the gap test covers the next 24px.
-    expect(inGapBelow(last, rows, 100, 50, m)).toBe(true);
-    expect(inGapBelow(last, rows, 100, 72, m)).toBe(true);
-    expect(inGapBelow(last, rows, 100, 73, m)).toBe(false); // too far below
-    expect(inGapBelow(last, rows, 100, 40, m)).toBe(false); // still on the line
-    expect(inGapBelow(last, rows, 5, 50, m)).toBe(false); // the gutter
-  });
-});
-
-describe('previousBlock (#1850)', () => {
-  const build = (html: string): HTMLElement => {
-    const body = document.createElement('div');
-    body.innerHTML = html;
-    return body;
-  };
-
-  it('returns the preceding paragraph, skipping into its last nested block', () => {
-    const body = build('<p id="a">a</p><ul><li id="b"><p id="b1">b1</p><p id="b2">b2</p></li></ul><p id="c">c</p>');
-    expect(previousBlock(body.querySelector('#c')!, body)?.id).toBe('b2');
-    expect(previousBlock(body.querySelector('#b2')!, body)?.id).toBe('b1');
-  });
-
-  it('skips ancestors of the block', () => {
-    const body = build('<p id="a">a</p><blockquote id="q"><p id="q1">q1</p></blockquote>');
-    expect(previousBlock(body.querySelector('#q1')!, body)?.id).toBe('a');
-  });
-
-  it('stops at a code block, a comment-card stack or the composer', () => {
-    const body = build(
-      '<p id="a">a</p><pre><code>x</code></pre><p id="b">b</p>' +
-        '<div class="codev-canvas-marker-cards"><p>card</p></div><p id="c">c</p>' +
-        '<div class="codev-canvas-comment-composer-host"></div><p id="d">d</p>',
-    );
-    expect(previousBlock(body.querySelector('#b')!, body)).toBeNull();
-    expect(previousBlock(body.querySelector('#c')!, body)).toBeNull();
-    expect(previousBlock(body.querySelector('#d')!, body)).toBeNull();
-  });
-
-  it('skips the "+" wrapper hosted inside the row above', () => {
-    const body = build('<p id="a">a<span class="codev-canvas-row-affordance"><button>+</button></span></p><p id="b">b</p>');
-    expect(previousBlock(body.querySelector('#b')!, body)?.id).toBe('a');
-  });
-
-  it('returns null at the top of the body', () => {
-    const body = build('<h1 id="t">t</h1>');
-    expect(previousBlock(body.querySelector('#t')!, body)).toBeNull();
+    for (const v of [undefined, null, 3, '', 'doubleClick']) expect(parseAnnotationEntry(v)).toBe('gutterButton');
   });
 });
 

@@ -12,19 +12,16 @@ import {
   knownAnnotationEntry,
   knownCursor,
   knownHighlight,
-  knownHighlightLine,
   readingAidItems,
 } from '../markdown-preview/reading-aids.js';
 import { renderMarkdownPreviewHtml } from '../markdown-preview/preview-template.js';
 import {
   parseAnnotationEntry,
-  parseHighlightLine,
   parseHighlightStyle,
   parseReadingCursor,
 } from '@cluesmith/codev-artifact-canvas';
 import {
   DEFAULT_ANNOTATION_ENTRY,
-  DEFAULT_HIGHLIGHT_LINE,
   DEFAULT_HOVER_HIGHLIGHT,
   DEFAULT_READING_CURSOR,
 } from '../markdown-preview/reading-aids.js';
@@ -33,7 +30,7 @@ const base = { cspSource: 'vscode-resource:', scriptUri: 's.js', styleUri: 's.cs
 const rootTag = (html: string): string => html.match(/<div id="root"[^>]*>/)![0];
 
 describe('reading aids picker model', () => {
-  it('lists None first, then the five styles, the three cursors, the two band lines, the two entries', () => {
+  it('lists None first, then the five styles, the four cursors, the two entries', () => {
     const rows = readingAidItems(undefined, undefined);
     expect(rows.map((r) => `${r.section}:${r.label}`)).toEqual([
       'Highlight:None',
@@ -45,8 +42,7 @@ describe('reading aids picker model', () => {
       'Cursor:Arrow',
       'Cursor:I-beam',
       'Cursor:Hand',
-      'Highlight line:Line under the pointer',
-      'Highlight line:Line above the pointer',
+      'Cursor:Hidden',
       'Annotation entry:Gutter + button',
       'Annotation entry:Click the paragraph',
     ]);
@@ -54,19 +50,19 @@ describe('reading aids picker model', () => {
 
   it('marks the defaults current when nothing is stored', () => {
     const current = readingAidItems(undefined, undefined).filter((r) => r.current).map((r) => r.value);
-    expect(current).toEqual(['lineParagraph', 'arrow', 'underPointer', 'gutterButton']);
+    expect(current).toEqual(['lineParagraph', 'arrow', 'gutterButton']);
   });
 
   it('marks the stored values current, matching case-insensitively', () => {
-    const current = readingAidItems('none', 'ibeam', 'ABOVEPOINTER', 'clickparagraph')
-      .filter((r) => r.current)
-      .map((r) => r.value);
-    expect(current).toEqual(['none', 'iBeam', 'abovePointer', 'clickParagraph']);
+    const current = readingAidItems('none', 'ibeam', 'clickparagraph').filter((r) => r.current).map((r) => r.value);
+    expect(current).toEqual(['none', 'iBeam', 'clickParagraph']);
+    const hidden = readingAidItems(undefined, 'NONE').filter((r) => r.current).map((r) => r.value);
+    expect(hidden).toEqual(['lineParagraph', 'none', 'gutterButton']);
   });
 
-  it('falls back to the defaults for unknown band-line and entry values', () => {
-    const current = readingAidItems(undefined, undefined, 'sideways', 7).filter((r) => r.current).map((r) => r.value);
-    expect(current).toEqual(['lineParagraph', 'arrow', 'underPointer', 'gutterButton']);
+  it('falls back to the default for an unknown entry value', () => {
+    const current = readingAidItems(undefined, undefined, 7).filter((r) => r.current).map((r) => r.value);
+    expect(current).toEqual(['lineParagraph', 'arrow', 'gutterButton']);
   });
 
   it('names the setting and value each row writes', () => {
@@ -75,8 +71,8 @@ describe('reading aids picker model', () => {
     expect([hand.setting, hand.value]).toEqual(['readingCursor', 'hand']);
     const none = rows.find((r) => r.label === 'None')!;
     expect([none.setting, none.value]).toEqual(['hoverHighlight', 'none']);
-    const above = rows.find((r) => r.label === 'Line above the pointer')!;
-    expect([above.setting, above.value]).toEqual(['highlightLine', 'abovePointer']);
+    const hidden = rows.find((r) => r.label === 'Hidden')!;
+    expect([hidden.setting, hidden.value]).toEqual(['readingCursor', 'none']);
     const click = rows.find((r) => r.label === 'Click the paragraph')!;
     expect([click.setting, click.value]).toEqual(['annotationEntry', 'clickParagraph']);
   });
@@ -84,7 +80,7 @@ describe('reading aids picker model', () => {
   it('opens on the current highlight style, not on None', () => {
     expect(initialActiveRow(readingAidItems(undefined, undefined))?.value).toBe('lineParagraph');
     expect(initialActiveRow(readingAidItems('word', 'hand'))?.value).toBe('word');
-    expect(initialActiveRow(readingAidItems('word', 'hand', 'abovePointer', 'clickParagraph'))?.value).toBe('word');
+    expect(initialActiveRow(readingAidItems('word', 'none', 'clickParagraph'))?.value).toBe('word');
   });
 
   it('labels the filter box', () => {
@@ -95,7 +91,6 @@ describe('reading aids picker model', () => {
     expect(knownHighlight('sparkle')).toBeUndefined();
     expect(knownHighlight(42)).toBeUndefined();
     expect(knownCursor('finger')).toBeUndefined();
-    expect(knownHighlightLine('sideways')).toBeUndefined();
     expect(knownAnnotationEntry('doubleClick')).toBeUndefined();
   });
 });
@@ -107,11 +102,9 @@ describe('reading aids bootstrap attributes', () => {
     expect(tag).toContain('data-reading-cursor="iBeam"');
   });
 
-  it('emits the band-line and entry attributes for known values, in canonical spelling', () => {
-    const tag = rootTag(
-      renderMarkdownPreviewHtml({ ...base, highlightLine: 'abovepointer', annotationEntry: 'CLICKPARAGRAPH' }),
-    );
-    expect(tag).toContain('data-highlight-line="abovePointer"');
+  it('emits the Hidden cursor and the entry attribute for known values, in canonical spelling', () => {
+    const tag = rootTag(renderMarkdownPreviewHtml({ ...base, readingCursor: 'None', annotationEntry: 'CLICKPARAGRAPH' }));
+    expect(tag).toContain('data-reading-cursor="none"');
     expect(tag).toContain('data-annotation-entry="clickParagraph"');
   });
 
@@ -122,8 +115,7 @@ describe('reading aids bootstrap attributes', () => {
         ...base,
         hoverHighlight: '"><script>',
         readingCursor: 'finger',
-        highlightLine: '"><img>',
-        annotationEntry: 'doubleClick',
+        annotationEntry: '"><img>',
       }),
     );
     expect(tag).toBe('<div id="root">');
@@ -158,10 +150,8 @@ describe('reading aids contributions', () => {
       'lineParagraph',
     ]);
     expect(props['codev.markdownPreview.hoverHighlight'].default).toBe('lineParagraph');
-    expect(props['codev.markdownPreview.readingCursor'].enum).toEqual(['arrow', 'iBeam', 'hand']);
+    expect(props['codev.markdownPreview.readingCursor'].enum).toEqual(['arrow', 'iBeam', 'hand', 'none']);
     expect(props['codev.markdownPreview.readingCursor'].default).toBe('arrow');
-    expect(props['codev.markdownPreview.highlightLine'].enum).toEqual(['underPointer', 'abovePointer']);
-    expect(props['codev.markdownPreview.highlightLine'].default).toBe('underPointer');
     expect(props['codev.markdownPreview.annotationEntry'].enum).toEqual(['gutterButton', 'clickParagraph']);
     expect(props['codev.markdownPreview.annotationEntry'].default).toBe('gutterButton');
   });
@@ -172,8 +162,6 @@ describe('reading aids contributions', () => {
     expect(props['codev.markdownPreview.hoverHighlight'].default).toBe(DEFAULT_HOVER_HIGHLIGHT);
     expect(DEFAULT_READING_CURSOR).toBe(parseReadingCursor(undefined));
     expect(props['codev.markdownPreview.readingCursor'].default).toBe(DEFAULT_READING_CURSOR);
-    expect(DEFAULT_HIGHLIGHT_LINE).toBe(parseHighlightLine(undefined));
-    expect(props['codev.markdownPreview.highlightLine'].default).toBe(DEFAULT_HIGHLIGHT_LINE);
     expect(DEFAULT_ANNOTATION_ENTRY).toBe(parseAnnotationEntry(undefined));
     expect(props['codev.markdownPreview.annotationEntry'].default).toBe(DEFAULT_ANNOTATION_ENTRY);
   });
