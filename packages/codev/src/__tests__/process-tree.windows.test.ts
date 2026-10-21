@@ -114,7 +114,7 @@ async function startTree(mode: 'plain' | 'bash' | 'reparent'): Promise<{ rootPid
 
 async function expectAllGone(pids: number[]): Promise<void> {
   await waitFor(() => pids.every((pid) => !alive(pid)), 10_000, `pids ${pids.join(',')} to exit`);
-  const census = await listProcessCensus();
+  const census = await listProcessCensus({ fresh: true });
   expect(census.filter((entry) => pids.includes(entry.pid))).toEqual([]);
 }
 
@@ -192,7 +192,7 @@ describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees
     let children: string[] = [];
     const deadline = Date.now() + 20_000;
     for (;;) {
-      const census = await listProcessCensus();
+      const census = await listProcessCensus({ fresh: true });
       children = census.filter((entry) => entry.ppid === shellperPid).map((entry) => `${entry.pid} ${entry.cmdline}`);
       if (children.length === 0) break;
       if (Date.now() > deadline) throw new Error(`shellper ${shellperPid} still has children: ${children.join(' | ')}`);

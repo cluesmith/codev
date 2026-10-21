@@ -178,12 +178,24 @@ export interface WindowsCensusProviderOptions {
   now?: () => number;
 }
 
+export interface CensusReadOptions {
+  /**
+   * Read the table now, bypassing the Windows TTL cache and any query already
+   * in flight. Teardown needs this: a snapshot must include processes started
+   * a moment ago, and its re-check must see processes that just died.
+   */
+  fresh?: boolean;
+}
+
 /**
  * A Windows census with a short TTL cache and single-flight coalescing: callers
  * arriving while a query is in flight share it, and callers inside the TTL get
- * the last result without spawning PowerShell. A failed query is not cached.
+ * the last result without spawning PowerShell. A `fresh` read always runs its
+ * own query (and refreshes the cache). A failed query is not cached.
  */
-export function createWindowsCensusProvider(opts: WindowsCensusProviderOptions = {}): () => Promise<ProcessCensusEntry[]> {
+export function createWindowsCensusProvider(
+  opts: WindowsCensusProviderOptions = {},
+): (read?: CensusReadOptions) => Promise<ProcessCensusEntry[]> {
   const exec = opts.exec ?? runPowerShell;
   const ttlMs = opts.ttlMs ?? WINDOWS_CENSUS_TTL_MS;
   const timeoutMs = opts.timeoutMs ?? WINDOWS_CENSUS_TIMEOUT_MS;
@@ -191,18 +203,22 @@ export function createWindowsCensusProvider(opts: WindowsCensusProviderOptions =
   let cached: { at: number; entries: ProcessCensusEntry[] } | null = null;
   let inFlight: Promise<ProcessCensusEntry[]> | null = null;
 
-  return () => {
-    if (cached && now() - cached.at < ttlMs) return Promise.resolve(cached.entries);
-    if (inFlight) return inFlight;
+  return (read) => {
+    const fresh = read?.fresh === true;
+    if (!fresh) {
+      if (cached && now() - cached.at < ttlMs) return Promise.resolve(cached.entries);
+      if (inFlight) return inFlight;
+    }
     const query = exec(WINDOWS_CENSUS_QUERY, timeoutMs).then((out) => {
       const entries = parseWindowsCensus(out);
       cached = { at: now(), entries };
       return entries;
     });
-    inFlight = query.finally(() => {
-      inFlight = null;
+    const shared = query.finally(() => {
+      if (inFlight === shared) inFlight = null;
     });
-    return inFlight;
+    inFlight = shared;
+    return shared;
   };
 }
 
@@ -214,7 +230,7 @@ const windowsCensus = createWindowsCensusProvider();
  * for teardown and the sweeps (Spec 1658), so an unreadable process table must
  * surface as an error rather than look like a machine with no processes.
  */
-export function listProcessCensus(): Promise<ProcessCensusEntry[]> {
-  if (isWindows()) return windowsCensus();
+export function listProcessCensus(read?: CensusReadOptions): Promise<ProcessCensusEntry[]> {
+  if (isWindows()) return windowsCensus(read);
   return listPosixCensus();
 }

@@ -118,6 +118,34 @@ describe('createWindowsCensusProvider', () => {
     expect(exec).toHaveBeenCalledTimes(2);
   });
 
+  it('a fresh read bypasses the cache and an in-flight query, and refreshes the cache', async () => {
+    let clock = 1000;
+    const exec = vi.fn(async () => JSON.stringify([SHELLPER_ROW]));
+    const census = createWindowsCensusProvider({ exec, ttlMs: 2000, now: () => clock });
+    await census();
+    await census({ fresh: true });
+    expect(exec).toHaveBeenCalledTimes(2);
+    // Inside the TTL a plain read is served from the cache; a fresh one still queries.
+    await Promise.all([census(), census({ fresh: true })]);
+    expect(exec).toHaveBeenCalledTimes(3);
+    clock += 100;
+    await census();
+    expect(exec).toHaveBeenCalledTimes(3);
+  });
+
+  it('a fresh read does not join a query already in flight', async () => {
+    const resolvers: Array<(out: string) => void> = [];
+    const exec = vi.fn(() => new Promise<string>((resolve) => {
+      resolvers.push(resolve);
+    }));
+    const census = createWindowsCensusProvider({ exec });
+    const plain = census();
+    const fresh = census({ fresh: true });
+    expect(exec).toHaveBeenCalledTimes(2);
+    for (const resolve of resolvers) resolve(JSON.stringify([SHELLPER_ROW]));
+    await Promise.all([plain, fresh]);
+  });
+
   it('does not cache a failure', async () => {
     const exec = vi.fn()
       .mockRejectedValueOnce(new Error('timed out'))

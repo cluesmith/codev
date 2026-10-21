@@ -32,8 +32,7 @@ afterAll(async () => {
   for (const kill of killers) {
     await kill().catch(() => {});
   }
-  // Best effort: killing a shellper does not yet take its PTY tree with it on
-  // Windows (Phase 3's tree teardown), so a lingering child can hold a log open.
+  // Best effort: a process still exiting can briefly hold a log open.
   try {
     fs.rmSync(socketDir, { recursive: true, force: true });
   } catch {

@@ -46,7 +46,7 @@ export interface KillSessionTreeOptions {
   escalateAfterMs?: number;
   /** POSIX: when the group signal fails, signal the root pid alone. */
   fallbackToPid?: boolean;
-  /** Seam: the process census. */
+  /** Seam: the process census (must read the table fresh, never a cached copy). */
   census?: () => Promise<ProcessCensusEntry[]>;
   /** Seam (Windows): `taskkill /T /F /PID <pid>`; must not reject. */
   taskkill?: (pid: number) => Promise<void>;
@@ -64,6 +64,11 @@ const TASKKILL_TIMEOUT_MS = 10_000;
 
 function defaultKill(pid: number, signal: NodeJS.Signals | 0): void {
   process.kill(pid, signal);
+}
+
+/** Teardown reads the table now: a cached copy can miss a just-started child or show a just-killed one. */
+function freshCensus(): Promise<ProcessCensusEntry[]> {
+  return listProcessCensus({ fresh: true });
 }
 
 function runTaskkill(pid: number): Promise<void> {
@@ -183,7 +188,7 @@ function sameProcesses(snapshot: TreeMember[], census: ProcessCensusEntry[]): Tr
 }
 
 async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): Promise<KillSessionTreeResult> {
-  const census = opts.census ?? listProcessCensus;
+  const census = opts.census ?? freshCensus;
   const taskkill = opts.taskkill ?? runTaskkill;
   const kill = opts.kill ?? defaultKill;
 
@@ -216,7 +221,7 @@ export interface WaitForTreeExitOptions {
   pollMs?: number;
   /** Seam: liveness probe (`process.kill(pid, 0)` by default). */
   kill?: (pid: number, signal: 0) => void;
-  /** Seam (Windows): census for the final creation-time check. */
+  /** Seam (Windows): fresh census for the final creation-time check. */
   census?: () => Promise<ProcessCensusEntry[]>;
 }
 
@@ -260,7 +265,7 @@ export async function waitForTreeExit(
   alive = alive.filter((member) => isAliveWith(kill, member.pid));
   if (alive.length === 0) return true;
   try {
-    return sameProcesses(alive, await (opts.census ?? listProcessCensus)()).length === 0;
+    return sameProcesses(alive, await (opts.census ?? freshCensus)()).length === 0;
   } catch {
     return false;
   }
