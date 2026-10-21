@@ -46,6 +46,14 @@ export interface KillSessionTreeOptions {
   escalateAfterMs?: number;
   /** POSIX: when the group signal fails, signal the root pid alone. */
   fallbackToPid?: boolean;
+  /**
+   * Windows: when the root was started (epoch ms), if the caller knows it. A
+   * root found in the census whose creation time differs by more than
+   * ROOT_START_TOLERANCE_MS is a reused pid, and nothing is killed. With the
+   * root already dead, it also anchors which ppid-matching processes count as
+   * the root's children.
+   */
+  rootStartTime?: number;
   /** Seam: the process census (must read the table fresh, never a cached copy). */
   census?: () => Promise<ProcessCensusEntry[]>;
   /** Seam (Windows): `taskkill /T /F /PID <pid>`; must not reject. */
@@ -61,6 +69,13 @@ export interface KillSessionTreeResult {
 }
 
 const TASKKILL_TIMEOUT_MS = 10_000;
+
+/**
+ * How far a caller's recorded start time may sit from the census creation time
+ * and still be the same process. Matches the reconnect PID-reuse tolerance: a
+ * shellper records `Date.now()` after Node boots, a little after creation.
+ */
+export const ROOT_START_TOLERANCE_MS = 2000;
 
 function defaultKill(pid: number, signal: NodeJS.Signals | 0): void {
   process.kill(pid, signal);
@@ -85,9 +100,15 @@ function runTaskkill(pid: number): Promise<void> {
  * Kill `rootPid` and its descendants.
  *
  * POSIX runs synchronously before the returned promise settles, so the signals
- * leave in the same tick as the old inline `process.kill(-pid)` calls. On
- * Windows a census failure still runs `taskkill /T /F` on the root, then
- * rejects so the caller can report that the snapshot pass did not run.
+ * leave in the same tick as the old inline `process.kill(-pid)` calls, and it
+ * trusts the caller's pid exactly as those calls did.
+ *
+ * Windows checks the root's identity first: `taskkill` runs only on a root the
+ * census shows alive (and, given `rootStartTime`, with a matching creation
+ * time), so a reused pid's unrelated tree is never killed. A census failure
+ * leaves nothing to check against; the root then gets `taskkill /T /F` on the
+ * caller's word, as POSIX would signal it, and the call rejects so the caller
+ * can report that the snapshot pass did not run.
  */
 export function killSessionTree(rootPid: number, opts: KillSessionTreeOptions = {}): Promise<KillSessionTreeResult> {
   if (isWindows()) return killWindowsTree(rootPid, opts);
@@ -127,10 +148,11 @@ function killPosixGroup(rootPid: number, opts: KillSessionTreeOptions): KillSess
  * The root (when present in the census) and every process descended from it,
  * following ppid links. A child whose creation time precedes its recorded
  * parent's cannot be that parent's child: Windows keeps a dead parent's pid as
- * the ppid, and that pid may since have been reused. The calling process is
- * never included.
+ * the ppid, and that pid may since have been reused. For a dead root the anchor
+ * is `rootStartTime` when known; without it, ppid-matching processes are taken
+ * as the root's children. The calling process is never included.
  */
-export function collectTree(census: ProcessCensusEntry[], rootPid: number): TreeMember[] {
+export function collectTree(census: ProcessCensusEntry[], rootPid: number, rootStartTime?: number): TreeMember[] {
   const childrenOf = new Map<number, ProcessCensusEntry[]>();
   for (const entry of census) {
     if (entry.pid === entry.ppid) continue;
@@ -149,7 +171,13 @@ export function collectTree(census: ProcessCensusEntry[], rootPid: number): Tree
     members.push({ pid: root.pid, creationTime: root.creationTime ?? null });
   }
 
-  const queue: TreeMember[] = [{ pid: rootPid, creationTime: root?.creationTime ?? null }];
+  // A dead root has no census entry; a caller-known start time still anchors
+  // which ppid-matching processes can be its children.
+  let rootCreated: number | null = root?.creationTime ?? null;
+  if (rootCreated === null && rootStartTime !== undefined) {
+    rootCreated = rootStartTime - ROOT_START_TOLERANCE_MS;
+  }
+  const queue: TreeMember[] = [{ pid: rootPid, creationTime: rootCreated }];
   while (queue.length > 0) {
     const parent = queue.shift()!;
     for (const child of childrenOf.get(parent.pid) ?? []) {
@@ -187,20 +215,33 @@ function sameProcesses(snapshot: TreeMember[], census: ProcessCensusEntry[]): Tr
   });
 }
 
+function isReusedRoot(root: ProcessCensusEntry, rootStartTime: number | undefined): boolean {
+  if (rootStartTime === undefined || root.creationTime === undefined) return false;
+  return Math.abs(root.creationTime - rootStartTime) > ROOT_START_TOLERANCE_MS;
+}
+
 async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): Promise<KillSessionTreeResult> {
   const census = opts.census ?? freshCensus;
   const taskkill = opts.taskkill ?? runTaskkill;
   const kill = opts.kill ?? defaultKill;
 
-  let members: TreeMember[];
+  let snapshotCensus: ProcessCensusEntry[];
   try {
-    members = collectTree(await census(), rootPid);
+    snapshotCensus = await census();
   } catch (err) {
     await taskkill(rootPid);
     throw new Error(`teardown of pid ${rootPid} ran taskkill only, without a descendant snapshot: ${(err as Error).message}`);
   }
 
-  await taskkill(rootPid);
+  const root = snapshotCensus.find((entry) => entry.pid === rootPid);
+  if (root && isReusedRoot(root, opts.rootStartTime)) {
+    return { signaled: false, snapshot: { rootPid, members: [] } };
+  }
+  const members = collectTree(snapshotCensus, rootPid, opts.rootStartTime);
+
+  // A root absent from the census is already dead; `taskkill` on its pid could
+  // only reach a process that reused it since.
+  if (root) await taskkill(rootPid);
 
   const alive = members.filter((member) => isAliveWith(kill, member.pid));
   if (alive.length > 0) {

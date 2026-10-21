@@ -57,6 +57,16 @@ Two fixes the Windows runs forced along the way:
 - ConPTY's `conhost.exe --headless` stays a child of the shellper after the PTY's program exits,
   so the husk predicate no longer counts the console host as a child.
 
+## Windows limitations (collected for the docs, Phase 11)
+
+- Doctor's Tower Environment check is not available on Windows: CIM cannot read another
+  process's environment (Phase 3).
+- The process census, and so teardown snapshots and the sweeps, need `powershell.exe` with CIM
+  access. If it is blocked, doctor reports it and Tower logs it; that is not a supported
+  configuration (Phase 3).
+- Per-session Job Objects need Windows 8+ for nested jobs, and Full Language Mode to bind the
+  Win32 calls; otherwise their absence is reported (Phase 3b).
+
 ## Flaky Tests
 
 - **Unidentified intermittent failure under `porch done` (Phase 1, 2026-10-21).** The porch

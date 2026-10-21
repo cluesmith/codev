@@ -432,7 +432,9 @@ target, stop and report to the architect before building further.
 #### Acceptance Criteria
 
 - [ ] Windows (`targeted`): the pinned scenario 6 re-parented test passes. Its `it.fails` turns
-  red, and `.fails` is removed. A `cmd start /b` orphan in a real shellper session does not
+  red, and `.fails` is removed. Before un-pinning, confirm that the test's own setup (the
+  `cmd start /b` orphan and the wait on the intermediate) still works: `it.fails` also "passes"
+  when setup breaks. A `cmd start /b` orphan in a real shellper session does not
   survive `killSession`. A `detached: true` grandchild does survive (breakaway parity).
 - [ ] Windows (`targeted`): a Tower restart (helper exit) does not kill a running session.
 - [ ] Unit (seam `win32`, injected helper): job assigned before the connect/HELLO; helper failure

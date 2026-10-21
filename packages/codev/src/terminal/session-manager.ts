@@ -40,7 +40,7 @@ import {
 } from './shellper-endpoint.js';
 import { isWindows } from '../lib/platform.js';
 import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
-import { listProcessCensus } from '../agent-farm/servers/process-census.js';
+import { WINDOWS_CENSUS_TIMEOUT_MS, listProcessCensus } from '../agent-farm/servers/process-census.js';
 import { SHELLPER_MARKER, isShellperInScope, readJsonStringField, unquoteWindowsCommandLine } from './shellper-cmdline.js';
 import { isDeliberateExit, type ExitMessage } from './shellper-protocol.js';
 
@@ -190,6 +190,17 @@ export const MAX_RECOVERY_ROUNDS = 3;
  * never block startup, and the next Tower start retries it.
  */
 export const ORPHAN_SWEEP_TIMEOUT_MS = 10_000;
+
+/**
+ * The orphan-sweep budget for this host. On Windows the scan is the PowerShell
+ * census, which carries its own timeout (up to WINDOWS_CENSUS_TIMEOUT_MS, ~4 s
+ * cold measured), so the budget adds that on top of the POSIX budget rather than
+ * letting the scan alone consume it (Spec 1658).
+ */
+export function orphanSweepBudgetMs(): number {
+  if (isWindows()) return WINDOWS_CENSUS_TIMEOUT_MS + ORPHAN_SWEEP_TIMEOUT_MS;
+  return ORPHAN_SWEEP_TIMEOUT_MS;
+}
 
 /**
  * Issue #1149: true when the recorded failing-exit timestamps amount to a
@@ -782,7 +793,7 @@ export class SessionManager extends EventEmitter {
     if (isWindows()) {
       // A Windows SIGTERM is a hard kill, so the shellper never gets to stop
       // its PTY child; tear the whole tree down instead (Spec 1658).
-      await this.killWindowsSessionTree(sessionId, session.pid);
+      await this.killWindowsSessionTree(sessionId, session.pid, session.startTime);
     } else {
       // Send SIGTERM
       try {
@@ -816,9 +827,9 @@ export class SessionManager extends EventEmitter {
   }
 
   /** Windows teardown of a shellper and everything under it, waiting up to 5s. */
-  private async killWindowsSessionTree(sessionId: string, pid: number): Promise<void> {
+  private async killWindowsSessionTree(sessionId: string, pid: number, startTime: number): Promise<void> {
     try {
-      const { snapshot } = await killSessionTree(pid);
+      const { snapshot } = await killSessionTree(pid, { rootStartTime: startTime });
       if (!(await waitForTreeExit(pid, snapshot, 5000))) {
         this.log(`Session ${sessionId}: processes still alive 5s after tree teardown of pid=${pid}`);
       }
@@ -948,7 +959,7 @@ export class SessionManager extends EventEmitter {
    * because it exceeded `timeoutMs` (Bugfix #1685) — the caller logs a WARN and
    * proceeds; the next startup retries the sweep.
    */
-  async killOrphanedShellpers(timeoutMs = ORPHAN_SWEEP_TIMEOUT_MS): Promise<number> {
+  async killOrphanedShellpers(timeoutMs = orphanSweepBudgetMs()): Promise<number> {
     const activePids = new Set<number>();
     for (const session of this.sessions.values()) {
       activePids.add(session.pid);
@@ -967,7 +978,7 @@ export class SessionManager extends EventEmitter {
 
     // The `ps` scan is a single await with no inner loop to break out of, so
     // bound its wait explicitly. It performs no kills, so abandoning it is safe.
-    let entries: Array<{ pid: number; socketPath?: string }>;
+    let entries: Array<{ pid: number; socketPath?: string; creationTime?: number }>;
     try {
       const remaining = deadline - Date.now();
       const scan = await this.withDeadline(
@@ -975,7 +986,9 @@ export class SessionManager extends EventEmitter {
         // wrapper (not execFile) is what wins on a wedged scan — otherwise a
         // timed-out `ps` resolves to `[]` and the sweep would log a false
         // "0 killed" success instead of the WARN. execFile's own timeout then
-        // serves purely to reap the `ps` child.
+        // serves purely to reap the `ps` child. On Windows the census has its
+        // own fixed timeout, shorter than the Windows budget, and a timed-out
+        // census rejects rather than resolving to `[]`, so the same holds there.
         this.findShellperProcesses(remaining + 1_000),
         remaining,
       );
@@ -991,7 +1004,7 @@ export class SessionManager extends EventEmitter {
       return 0;
     }
 
-    for (const { pid, socketPath } of entries) {
+    for (const { pid, socketPath, creationTime } of entries) {
       // Cooperative cancellation: stop at the deadline rather than continue.
       // Because we STOP here (no background tail), a bounded sweep never kills
       // past its budget, so it cannot race a session created after startup.
@@ -1020,11 +1033,10 @@ export class SessionManager extends EventEmitter {
       // is a process group leader; if the group signal fails (already dead or
       // permission error), the individual PID is tried.
       try {
-        const { signaled } = await killSessionTree(pid, { fallbackToPid: true });
+        const { signaled } = await killSessionTree(pid, { fallbackToPid: true, rootStartTime: creationTime });
         if (signaled) killed++;
       } catch (err) {
         this.log(`Orphan pid=${pid}: ${(err as Error).message}`);
-        killed++;
       }
     }
 
@@ -1067,7 +1079,7 @@ export class SessionManager extends EventEmitter {
    * bounded by `timeoutMs` (execFile kills the child on overrun); a timed-out or
    * failed scan resolves to `[]` and is non-fatal.
    */
-  private findShellperProcesses(timeoutMs = ORPHAN_SWEEP_TIMEOUT_MS): Promise<Array<{ pid: number; socketPath?: string }>> {
+  private findShellperProcesses(timeoutMs = ORPHAN_SWEEP_TIMEOUT_MS): Promise<Array<{ pid: number; socketPath?: string; creationTime?: number }>> {
     if (isWindows()) return this.findWindowsShellperProcesses();
     return new Promise((resolve) => {
       // -ww prevents arg truncation on macOS/Linux. `timeout: 0` disables the
@@ -1106,13 +1118,13 @@ export class SessionManager extends EventEmitter {
    * census carries its own timeout, and `killOrphanedShellpers` still bounds
    * the wait with its deadline.
    */
-  private async findWindowsShellperProcesses(): Promise<Array<{ pid: number; socketPath?: string }>> {
-    const results: Array<{ pid: number; socketPath?: string }> = [];
+  private async findWindowsShellperProcesses(): Promise<Array<{ pid: number; socketPath?: string; creationTime?: number }>> {
+    const results: Array<{ pid: number; socketPath?: string; creationTime?: number }> = [];
     for (const entry of await listProcessCensus()) {
       if (!entry.cmdline.includes(SHELLPER_MARKER)) continue;
       if (!isShellperInScope(entry.cmdline, this.config.socketDir)) continue;
       const socketPath = readJsonStringField(unquoteWindowsCommandLine(entry.cmdline), 'socketPath');
-      results.push({ pid: entry.pid, socketPath: socketPath ?? undefined });
+      results.push({ pid: entry.pid, socketPath: socketPath ?? undefined, creationTime: entry.creationTime });
     }
     return results;
   }
@@ -1491,7 +1503,7 @@ export class SessionManager extends EventEmitter {
         // killOrphanedShellpers pass, or immediately for architects via `afx
         // workspace remove-architect`'s identity-matched zombie reap
         // (tower-instances.ts).
-        killSessionTree(session.pid).catch((err: Error) => {
+        killSessionTree(session.pid, { rootStartTime: session.startTime }).catch((err: Error) => {
           this.log(`Session ${sessionId}: ${err.message}`);
         });
         this.emit('session-error', sessionId, new Error(`Max restarts (${maxRestarts}) exceeded`));

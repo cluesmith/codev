@@ -174,15 +174,46 @@ describe('killSessionTree on Windows', () => {
     expect(result.snapshot.members.map((m) => m.pid)).toEqual([10, 11, 12]);
   });
 
-  it('clears the recorded descendants when the root is already dead', async () => {
+  it('clears the recorded descendants when the root is already dead, without taskkill on its pid', async () => {
     setHostPlatformForTests('win32');
     const census = [entry(21, 20, 210), entry(22, 21, 220)];
     const h = windowsHarness({ censuses: [census, census], alive: new Set([21, 22]) });
 
     const result = await killSessionTree(20, { census: h.census, taskkill: h.taskkill, kill: h.kill });
 
-    expect(h.events).toEqual(['census', 'taskkill 20', 'census', 'kill 21', 'kill 22']);
+    expect(h.events).toEqual(['census', 'census', 'kill 21', 'kill 22']);
     expect(result.signaled).toBe(true);
+  });
+
+  it('kills nothing when the root pid was reused (creation time differs from the known start)', async () => {
+    setHostPlatformForTests('win32');
+    const census = [entry(25, 1, 900_000), entry(26, 25, 900_100)];
+    const h = windowsHarness({ censuses: [census], alive: new Set([25, 26]) });
+
+    const result = await killSessionTree(25, { census: h.census, taskkill: h.taskkill, kill: h.kill, rootStartTime: 100_000 });
+
+    expect(h.events).toEqual(['census']);
+    expect(result).toEqual({ signaled: false, snapshot: { rootPid: 25, members: [] } });
+  });
+
+  it('accepts a root whose creation time is within tolerance of the known start', async () => {
+    setHostPlatformForTests('win32');
+    const census = [entry(27, 1, 101_500)];
+    const h = windowsHarness({ censuses: [census], alive: new Set() });
+    await killSessionTree(27, { census: h.census, taskkill: h.taskkill, kill: h.kill, rootStartTime: 100_000 });
+    expect(h.events).toEqual(['census', 'taskkill 27']);
+  });
+
+  it('for a dead root with a known start, skips ppid matches created before it', async () => {
+    setHostPlatformForTests('win32');
+    // 29 predates the root's start: its ppid names an earlier holder of pid 28.
+    const census = [entry(29, 28, 50_000), entry(30, 28, 100_500)];
+    const h = windowsHarness({ censuses: [census, census], alive: new Set([29, 30]) });
+
+    const result = await killSessionTree(28, { census: h.census, taskkill: h.taskkill, kill: h.kill, rootStartTime: 100_000 });
+
+    expect(result.snapshot.members.map((m) => m.pid)).toEqual([30]);
+    expect(h.events).toEqual(['census', 'census', 'kill 30']);
   });
 
   it('spares a recorded pid whose creation time no longer matches (pid reused)', async () => {

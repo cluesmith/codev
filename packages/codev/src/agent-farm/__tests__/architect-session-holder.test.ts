@@ -195,6 +195,23 @@ describe('reapShellpers (Issue #1224)', () => {
   });
 });
 
+describe('reapShellpers with an asynchronous teardown (Spec 1658)', () => {
+  it('waits for each teardown to finish before polling for death', async () => {
+    const order: string[] = [];
+    const kill = vi.fn(async (pid: number, signal: NodeJS.Signals) => {
+      await new Promise((r) => setTimeout(r, 20));
+      order.push(`killed ${pid} ${signal}`);
+    });
+    const isAlive = vi.fn((pid: number) => {
+      order.push(`probe ${pid}`);
+      return false;
+    });
+    await reapShellpers([10, 20], { kill, isAlive, wait: async () => {} });
+    expect(order.slice(0, 2).sort()).toEqual(['killed 10 SIGTERM', 'killed 20 SIGTERM']);
+    expect(order.slice(2).every((step) => step.startsWith('probe'))).toBe(true);
+  });
+});
+
 describe('reconcileArchitectSessionHolder (Issue #1224)', () => {
   const identity = { workspacePath: WS, architectName: 'main' };
 

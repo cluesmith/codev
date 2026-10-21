@@ -135,11 +135,10 @@ async function killWindowsShellperProcesses(worktreePath: string): Promise<numbe
     const cwd = readJsonStringField(unquoteWindowsCommandLine(entry.cmdline), 'cwd');
     if (cwd === null || !sameWindowsPath(cwd, worktreePath)) continue;
     try {
-      const { signaled } = await killSessionTree(entry.pid);
+      const { signaled } = await killSessionTree(entry.pid, { rootStartTime: entry.creationTime });
       if (signaled) killed++;
     } catch (err) {
       logger.warn(`Shellper pid ${entry.pid}: ${(err as Error).message}`);
-      killed++;
     }
   }
   return killed;

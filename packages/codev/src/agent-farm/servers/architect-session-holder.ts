@@ -222,12 +222,16 @@ function pidAlive(pid: number): boolean {
 
 /**
  * Kill a shellper's whole session tree (on POSIX the leader is detached, so its
- * process group; falls back to the single pid), best-effort.
+ * process group; falls back to the single pid), best-effort. Resolves once the
+ * teardown has run: on Windows that includes the census snapshot and taskkill,
+ * which the reap must not outrun.
  */
-function killProcessGroup(pid: number, signal: NodeJS.Signals): void {
-  killSessionTree(pid, { signal, fallbackToPid: true }).catch(() => {
+async function killProcessGroup(pid: number, signal: NodeJS.Signals): Promise<void> {
+  try {
+    await killSessionTree(pid, { signal, fallbackToPid: true });
+  } catch {
     // Snapshot pass did not run; the poll below still sees survivors
-  });
+  }
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -245,7 +249,7 @@ export async function reapShellpers(
   pids: number[],
   opts?: {
     isAlive?: (pid: number) => boolean;
-    kill?: (pid: number, signal: NodeJS.Signals) => void;
+    kill?: (pid: number, signal: NodeJS.Signals) => void | Promise<void>;
     wait?: (ms: number) => Promise<void>;
     graceMs?: number;
     killGraceMs?: number;
@@ -268,12 +272,12 @@ export async function reapShellpers(
     }
   };
 
-  for (const pid of pids) kill(pid, 'SIGTERM');
+  await Promise.all(pids.map((pid) => kill(pid, 'SIGTERM')));
   await pollUntilDead(graceMs);
 
   const survivors = pids.filter((pid) => isAlive(pid));
   if (survivors.length > 0) {
-    for (const pid of survivors) kill(pid, 'SIGKILL');
+    await Promise.all(survivors.map((pid) => kill(pid, 'SIGKILL')));
     // Confirm SIGKILL actually took effect before returning: the caller resumes
     // `claude --resume <id>` next, and a holder still in the kernel's exit path
     // has not yet released the session lock — returning early would re-open the
