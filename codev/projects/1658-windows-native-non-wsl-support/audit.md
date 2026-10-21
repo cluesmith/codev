@@ -176,11 +176,16 @@ second start **does not hang**. It finds the live Tower over HTTP, prints "Tower
 and exits 0 in about 2.3 s. So "a Tower left running by the broken stop" is **ruled out** as the
 hang mechanism, at least with a healthy leftover daemon.
 
-**Conclusion for the review:** the 2026-09-09 hang does not reproduce on the current release, on
-CI (x64 and ARM64) or on the owner's machine, and the leading candidate mechanism is ruled out by
-direct test. The root cause cannot be identified from the current release. How the spec's
+**The 2026-09-09 release itself (run 39562480678).** 3.3.3 was the latest published release on
+2026-09-09 (published 09-05; 3.3.4 followed on 09-17). Installed globally and probed the same
+way, on x64 and ARM64, Node 22 and 24: it reaches ready (3.1-3.5 s) and the restart sequence does
+not hang either. On Node 20, 3.3.3 does not install, like 3.3.5.
+
+**Conclusion for the review:** the 2026-09-09 hang does not reproduce on the release current that
+day (3.3.3) or on the current release (3.3.5), on CI (x64 and ARM64) or on the owner's machine, and
+the leading candidate mechanism is ruled out by direct test. The root cause cannot be identified from the current release. How the spec's
 "root cause identified" criterion is discharged is put to the architect (Phase 1 rebuttal). Candidates
-originally considered:
+originally considered (the first, an older release, is now tested and ruled out):
 - an older release (code since 2026-09-09 has changed the start path);
 - pre-existing `~/.agent-farm` state from an earlier attempt, for example a stale owner lock or
   a Tower that the broken `tower stop` left running and that still holds port 4100;
@@ -188,8 +193,9 @@ originally considered:
 
 The second candidate is now ruled out (above), except for an *unhealthy* leftover daemon (alive but
 not answering HTTP), which the probe cannot construct. Phase 4 removes the `tower stop` defect
-regardless, and its Windows tests cover start → stop → start. The first and third candidates
-cannot be tested without the 2026-09-09 machine and release.
+regardless, and its Windows tests cover start → stop → start. The third candidate (that
+machine's own state: home path, port reservation, antivirus, leftover state from earlier
+attempts) cannot be tested without that machine.
 
 ### 1.7 Repo build on Windows (dev-only, not a user concern)
 
