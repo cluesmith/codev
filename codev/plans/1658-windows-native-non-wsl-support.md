@@ -707,8 +707,19 @@ assumptions (#1567).
 
 #### Acceptance Criteria
 
-- [ ] Replay tests pass for every ConPTY fixture: mid-turn → held, human typing → held
-  (`busy:composer-redraw` or `busy:recent-input`), idle prompt → delivered.
+Amended 2026-10-22 (architect ruling, plan deviation reported to the owner): strict porch cannot
+advance past this phase while it waits on owner-recorded captures, so the phase closes on the
+harness and the fixtures become a PR-gate deliverable.
+
+- [ ] Phase close: replay harness and recorder shipped and proven on macOS against a real agent.
+  The replay test SKIPS with a reason naming the missing fixture directory when no captures are
+  present (never passes vacuously), and that skip path is unit-tested.
+- [ ] PR gate: Windows ConPTY fixtures land in a follow-up commit on this branch before the pr
+  gate is requested. claude fixtures are required. codex fixtures depend on #1858 (codex-cli
+  0.162.1's status line defeats the region-end pattern) and may be absent at the gate.
+- [ ] Replay tests pass for every ConPTY fixture, read the #1664 way (only a human at the line
+  holds mail): mid-turn with an EMPTY composer → delivered; human typing → held (`busy:user-text`,
+  `busy:recent-input` or `busy:composer-redraw`); idle prompt → delivered; resize → delivered.
 - [ ] Existing POSIX gate fixtures and tests pass unchanged.
 - [ ] Owner machine: scenario 12 live.
 

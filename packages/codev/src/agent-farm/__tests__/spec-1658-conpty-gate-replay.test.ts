@@ -16,7 +16,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -24,6 +26,7 @@ import {
   PROBE_WINDOW_MS,
   loadCapture,
   parseCapture,
+  planCaptureFixtures,
   replayProbes,
   serializeCapture,
   type Capture,
@@ -193,32 +196,52 @@ describe('Spec 1658 replay harness: the production delivery path on a capture cl
 // Real ConPTY captures
 // ---------------------------------------------------------------------------
 
-function conptyFixtures(): string[] {
-  if (!existsSync(CONPTY_FIXTURE_DIR)) return [];
-  return readdirSync(CONPTY_FIXTURE_DIR).filter((name) => name.endsWith('.capture.jsonl.gz')).sort();
-}
+describe('Spec 1658 capture fixture plan: absent captures skip with a reason, never pass vacuously', () => {
+  it('a missing directory → skip, and the reason names it', () => {
+    const missing = join(tmpdir(), 'spec-1658-no-such-capture-dir');
+    expect(planCaptureFixtures(missing)).toEqual({ kind: 'skip', reason: expect.stringContaining(missing) });
+  });
+
+  it('a directory with no capture files → skip; one with captures → run exactly those, sorted', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'spec-1658-captures-'));
+    try {
+      writeFileSync(join(dir, 'README.md'), 'not a capture');
+      expect(planCaptureFixtures(dir)).toMatchObject({ kind: 'skip', reason: expect.stringContaining(dir) });
+
+      writeFileSync(join(dir, 'conpty-codex-idle.capture.jsonl.gz'), '');
+      writeFileSync(join(dir, 'conpty-claude-idle.capture.jsonl.gz'), '');
+      expect(planCaptureFixtures(dir)).toEqual({
+        kind: 'run',
+        fixtures: ['conpty-claude-idle.capture.jsonl.gz', 'conpty-codex-idle.capture.jsonl.gz'],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('Spec 1658 ConPTY captures: held/delivered per state, through the production gate', () => {
-  const fixtures = conptyFixtures();
-  if (fixtures.length === 0) {
-    it.todo('ConPTY captures recorded on a Windows machine (owner, scripts/spec-1658-conpty-capture.mts)');
-  }
-  for (const name of fixtures) {
-    it(`${name}`, async () => {
-      const recorded = loadCapture(readFileSync(`${CONPTY_FIXTURE_DIR}/${name}`));
-      expect(recorded.header.platform).toBe('win32');
-      expect(name).toBe(`conpty-${recorded.header.app}-${recorded.header.state}.capture.jsonl.gz`);
+  const plan = planCaptureFixtures(CONPTY_FIXTURE_DIR);
+  if (plan.kind === 'skip') {
+    it.skip(plan.reason, () => {});
+  } else {
+    for (const name of plan.fixtures) {
+      it(`${name}`, async () => {
+        const recorded = loadCapture(readFileSync(`${CONPTY_FIXTURE_DIR}/${name}`));
+        expect(recorded.header.platform).toBe('win32');
+        expect(name).toBe(`conpty-${recorded.header.app}-${recorded.header.state}.capture.jsonl.gz`);
 
-      const profile = resolveProfile({ command: recorded.header.app });
-      expect(profile, `no gate profile for ${recorded.header.app}`).not.toBeNull();
-      if (!profile) return;
+        const profile = resolveProfile({ command: recorded.header.app });
+        expect(profile, `no gate profile for ${recorded.header.app}`).not.toBeNull();
+        if (!profile) return;
 
-      const results = await replayProbes(recorded, profile);
-      if (recorded.header.expect === 'delivered') {
-        expectAllDelivered(results);
-      } else {
-        expectAllHeldByHuman(results);
-      }
-    });
+        const results = await replayProbes(recorded, profile);
+        if (recorded.header.expect === 'delivered') {
+          expectAllDelivered(results);
+        } else {
+          expectAllHeldByHuman(results);
+        }
+      });
+    }
   }
 });

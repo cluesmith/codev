@@ -19,6 +19,7 @@
  * reach on the same bytes at the same moments.
  */
 
+import { existsSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import Database from 'better-sqlite3';
 
@@ -81,6 +82,28 @@ export interface ProbeResult {
  * delivered after the composer-sample gap has been exceeded is a real hold, not a retry interval.
  */
 export const PROBE_WINDOW_MS = MAX_COMPOSER_SAMPLE_GAP_MS;
+
+/** What the fixture suite should do with a capture directory: replay its captures, or skip and say why. */
+export type FixturePlan = { kind: 'run'; fixtures: string[] } | { kind: 'skip'; reason: string };
+
+/**
+ * Plan the real-capture suite. Absent captures are a SKIP with a reason naming the directory, never
+ * an empty suite that passes: the captures are recorded by hand on a Windows machine, and a
+ * missing set must stay visible in every run until it lands.
+ */
+export function planCaptureFixtures(dir: string): FixturePlan {
+  let fixtures: string[] = [];
+  if (existsSync(dir)) {
+    fixtures = readdirSync(dir).filter((name) => name.endsWith('.capture.jsonl.gz')).sort();
+  }
+  if (fixtures.length === 0) {
+    return {
+      kind: 'skip',
+      reason: `no ConPTY captures in ${dir} (recorded on a Windows machine by scripts/spec-1658-conpty-capture.mts)`,
+    };
+  }
+  return { kind: 'run', fixtures };
+}
 
 export function parseCapture(text: string): Capture {
   const lines = text.split('\n').filter((line) => line.trim() !== '');

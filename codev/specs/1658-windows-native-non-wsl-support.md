@@ -652,8 +652,8 @@ None blocking. The owner confirms the above at the spec-approval gate.
     - Developer Mode off: a directory link becomes a junction and a file link becomes a hard
       link or copy (reported).
     - Developer Mode on: real symlinks.
-12. **`afx send`:**
-    - to a busy Windows builder: held;
+12. **`afx send`** (read the #1664 way: only a human at the line holds mail):
+    - to a Windows builder mid-turn with an empty composer: delivered (the agent queues it);
     - at an idle prompt: delivered;
     - while a human is typing in the composer: held.
 13. **Consult:** a 3-way consult runs from a Windows builder; an unauthenticated agy skips

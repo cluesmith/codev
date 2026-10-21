@@ -127,6 +127,43 @@ Two fixes the Windows runs forced along the way:
 - Owner-machine launcher checks (Windows Terminal, PowerShell console, VS Code terminal,
   extension host) are part of the PR-gate manual pass.
 
+## ConPTY render-gate validation (Phase 8)
+
+**Plan deviation (architect ruling, 2026-10-22, reported to the owner for override).** The plan
+made this phase wait on captures the owner records on a Windows machine, and continue with
+Phases 9 and 10 meanwhile; strict porch cannot advance past a phase that is not done, so the two
+could not both hold. The phase closed on the harness: a recorder
+(`scripts/spec-1658-conpty-capture.mts`) and a replay of each capture through the production
+`deliverAgentMail` on the capture's own clock (`__tests__/helpers/conpty-replay.ts`). The Windows
+ConPTY fixtures are a PR-gate deliverable, landing in a follow-up commit on this branch. Until
+they do, the replay suite skips with a reason naming the empty fixture directory (unit-tested),
+rather than passing over nothing.
+
+**Proven on macOS** with real claude 2.1.306 under a POSIX PTY: idle delivered at once, a typed
+draft held `user-text` on every pass, mid-turn with an empty composer delivered after one 250 ms
+composer sample, resize delivered at the new size. The ConPTY question the fixtures answer is
+whether ConPTY's re-rendering keeps the composer region's fingerprint stable while an agent
+streams; if it does not, mid-turn mail holds for the length of a turn.
+
+**"Busy" means a human at the line.** Spec scenario 12 and the phase criteria originally said a
+busy or mid-turn builder holds mail. Since #1664 only a human at the line holds; an agent mid-turn
+with an empty composer is delivered and queues the message. The spec and plan text were amended
+to say so.
+
+**Codex captures are blocked on #1858.** codex-cli 0.162.1 renders its status line as
+`GPT-6.1-Sol default · <cwd>`; the gate's region-end pattern matches only lowercase `gpt` /
+`high:`, so every codex composer classifies `no-region-end` and all mail to a codex agent holds,
+on every platform. Found by the recorder's dry run; filed separately as #1858, not fixed here.
+codex fixtures may be absent at the PR gate; claude fixtures are required.
+
+**Recorder safety.** codex 0.162.1 opens with an update offer whose first option runs an
+installer. The recorder accepts only the folder-trust dialog, confirms only a yes/trust option
+and never one naming update/install, and dismisses the update offer with its own Esc.
+
+**Also in this phase:** `detectHarnessFromCommand` reads a Windows backslash or quoted path by
+its basename (a directory named `claude` no longer decides the harness), and the #1664 delivery
+harness launches through `ptyCommand`, so it runs on Windows for live scenario 12.
+
 ## Flaky Tests
 
 - **Unidentified intermittent failure under `porch done` (Phase 1, 2026-10-21).** The porch
