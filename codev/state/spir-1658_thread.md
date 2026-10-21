@@ -54,3 +54,11 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Audit surprises: forge scripts live in packages/codev/scripts/forge (not skeleton); doctor's ps-eww Tower-env check has no CIM equivalent; builder session-id minting needs uuidgen or /proc uuid inside Git Bash (probe checks); repo build on Windows needs npm_config_script_shell=Git Bash.
 - Env note: worktree needed `pnpm install` after the main merge (artifact-canvas link missing → apps/web tsc failure). Not a code defect.
 - Holding porch done for Phase 1 until #1849 merges + probe facts + owner survival matrix are in.
+
+## 2026-10-21 Phase 1 CI facts (dispatches 39555516317, 39555898877, 39556358109)
+- PR #1849 merged by main; windows.yml dispatchable. Applied main's should-fixes (quote $FILTER; isolate --tower: temp CODEV_AGENT_FARM_DIR + SHELLPER_SOCKET_DIR + free port; the socket-dir part matters because the boot orphan sweep is scoped by socket dir).
+- Node 20 unsupported on Windows: better-sqlite3 12.10.0 has no ABI-115 prebuild → node-gyp → fails; published codev can't install. Node 22/24 fine. ARM64 prebuilds exist for both deps. Cross-platform Node 20 gap reported to main as a spin-off.
+- Hang not reproduced (checkout + published 3.3.5 on Node 22/24 reach ready <1s). Found: `afx tower stop` silently fails on Windows (lsof under cmd) and leaves Tower alive; plausible hang cause.
+- CIM census ~0.5s warm / ~4s cold; Git Bash lacks uuidgen and /proc uuid (builder session id would be empty → mint in Node, Phase 6).
+- Probe lessons: npm ignores npm_config_node_gyp for deps' own `node-gyp rebuild`; --foreground-scripts echoes the script text, so detect node-gyp by its log lines; the workflow's npm_config_script_shell must not leak into user-path install probes.
+- Waiting on owner's launcher survival matrix + their probe runs before porch done / Phase 2.
