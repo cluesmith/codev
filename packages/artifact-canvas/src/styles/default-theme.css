@@ -45,6 +45,8 @@
   --codev-canvas-hover-word-background: color-mix(in srgb, var(--codev-canvas-foreground) 14%, transparent);
   --codev-canvas-hover-line-background: color-mix(in srgb, var(--codev-canvas-foreground) 6%, transparent);
   --codev-canvas-hover-paragraph-background: color-mix(in srgb, var(--codev-canvas-foreground) 3.5%, transparent);
+  /* Hidden cursor's position mark (#1850): the word underline, strong enough to find at a glance. */
+  --codev-canvas-hover-underline-color: color-mix(in srgb, var(--codev-canvas-foreground) 70%, transparent);
 
   /*
    * Typography token tier (#1053 — amends the spec-945 D4 "locked public contract").
@@ -120,7 +122,8 @@
 }
 .codev-canvas-hover-paragraph,
 .codev-canvas-hover-line,
-.codev-canvas-hover-word {
+.codev-canvas-hover-word,
+.codev-canvas-hover-underline {
   position: absolute;
 }
 .codev-canvas-hover-paragraph {
@@ -131,6 +134,9 @@
 }
 .codev-canvas-hover-word {
   background: var(--codev-canvas-hover-word-background);
+}
+.codev-canvas-hover-underline {
+  background: var(--codev-canvas-hover-underline-color);
 }
 
 /* `cursor: default` (#1232): the content is read-only and comments are button-driven (hover →
@@ -151,9 +157,9 @@
 .codev-artifact-canvas[data-reading-cursor='hand'] .codev-artifact-canvas-body {
   cursor: pointer;
 }
-/* Hidden (#1850): no pointer over prose, so it never covers the words being read; the line band
-   (when the highlight style draws one) marks the position. Links (UA rule) and the regions below
-   keep a visible pointer, so everything clickable can still be found. */
+/* Hidden (#1850): no pointer over prose, so it never covers the words being read; the word under
+   the invisible pointer is underlined instead (`.codev-canvas-hover-underline`). Links (UA rule)
+   and the regions below keep a visible pointer, so everything clickable can still be found. */
 .codev-artifact-canvas[data-reading-cursor='none'] .codev-artifact-canvas-body {
   cursor: none;
 }

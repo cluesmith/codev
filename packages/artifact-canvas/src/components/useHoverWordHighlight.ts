@@ -29,14 +29,18 @@ import {
   textMetricsOf,
   wordBoundsAt,
   wordPills,
+  wordUnderlines,
 } from './hover-word.js';
 
 const LAYER_CLASS = 'codev-canvas-hover-word-layer';
 const COMPOSER_HOST_SELECTOR = '.codev-canvas-comment-composer-host';
 
-type ShapeKind = 'paragraph' | 'line' | 'word';
-/** Back-to-front: the paragraph tint under the line band under the word pill. */
-const SHAPE_KINDS: readonly ShapeKind[] = ['paragraph', 'line', 'word'];
+type ShapeKind = 'paragraph' | 'line' | 'word' | 'underline';
+/**
+ * Back-to-front: the paragraph tint under the line band under the word pill, then the Hidden
+ * cursor's word underline (#1850).
+ */
+const SHAPE_KINDS: readonly ShapeKind[] = ['paragraph', 'line', 'word', 'underline'];
 
 interface Pointer {
   x: number;
@@ -79,7 +83,7 @@ class HoverWordController {
   private readonly doc: Document;
   private readonly layer: HTMLDivElement;
   private readonly groups: Record<ShapeKind, HTMLDivElement>;
-  private readonly pools: Record<ShapeKind, HTMLDivElement[]> = { paragraph: [], line: [], word: [] };
+  private readonly pools: Record<ShapeKind, HTMLDivElement[]> = { paragraph: [], line: [], word: [], underline: [] };
   private pointer: Pointer | null = null;
   private frame = 0;
   private forceNext = false;
@@ -89,6 +93,7 @@ class HoverWordController {
     private readonly root: HTMLElement,
     private readonly body: HTMLElement,
     private readonly style: HoverHighlightStyle,
+    private readonly underline: boolean,
   ) {
     this.doc = root.ownerDocument;
     this.layer = this.doc.createElement('div');
@@ -265,9 +270,15 @@ class HoverWordController {
     this.current = { node, start, end, lineBox: band };
 
     const drawn = shapesOf(this.style);
-    const shapes: Record<ShapeKind, Box[]> = { paragraph: [], line: [], word: [] };
+    const shapes: Record<ShapeKind, Box[]> = { paragraph: [], line: [], word: [], underline: [] };
     if (drawn.word && !isInlineCode(node)) {
       shapes.word = wordPills(wordRects, m);
+    }
+    if (this.underline) {
+      let floors: Box[] = [];
+      const chip = node.parentElement?.closest('code');
+      if (chip) floors = toBoxes(chip.getClientRects());
+      shapes.underline = wordUnderlines(wordRects, m, floors);
     }
     if (drawn.line) {
       shapes.line = [band];
@@ -286,6 +297,7 @@ class HoverWordController {
       paragraph: m.fontSize * 0.5,
       line: m.fontSize * 0.35,
       word: m.fontSize * 0.3,
+      underline: m.fontSize * 0.05,
     };
     for (const kind of SHAPE_KINDS) this.paint(kind, shapes[kind], radius[kind]);
   }
@@ -323,29 +335,34 @@ class HoverWordController {
 }
 
 /**
- * Attach the hover reading aid to the canvas. `style: 'none'` attaches nothing. `contentKey`
- * changes whenever the body's layout-relevant content changes (html, cards, composer), which
- * drops the current shapes and re-resolves the word under a still pointer.
+ * Attach the hover reading aid to the canvas. `style: 'none'` attaches nothing unless
+ * `underline` is set. `contentKey` changes whenever the body's layout-relevant content changes
+ * (html, cards, composer), which drops the current shapes and re-resolves the word under a still
+ * pointer.
+ *
+ * `underline` (#1850) is on while the prose cursor is Hidden: the word under the invisible pointer
+ * is underlined, marking its exact spot with any highlight style, `none` included.
  */
 export function useHoverWordHighlight(
   rootRef: React.RefObject<HTMLElement | null>,
   bodyRef: React.RefObject<HTMLElement | null>,
   style: HoverHighlightStyle,
   contentKey: unknown,
+  underline = false,
 ): void {
   const controllerRef = React.useRef<HoverWordController | null>(null);
 
   React.useEffect(() => {
     const root = rootRef.current;
     const body = bodyRef.current;
-    if (style === 'none' || !root || !body) return undefined;
-    const controller = new HoverWordController(root, body, style);
+    if ((style === 'none' && !underline) || !root || !body) return undefined;
+    const controller = new HoverWordController(root, body, style, underline);
     controllerRef.current = controller;
     return () => {
       controller.dispose();
       controllerRef.current = null;
     };
-  }, [rootRef, bodyRef, style]);
+  }, [rootRef, bodyRef, style, underline]);
 
   React.useEffect(() => {
     controllerRef.current?.reset();

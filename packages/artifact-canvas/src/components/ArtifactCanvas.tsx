@@ -1389,12 +1389,13 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // readout one stable identity per layout-relevant state.
   const progressKey = React.useMemo(() => ({}), [html, markers, composingLine]);
 
-  // Hover reading aid (#1802). Coerced here too: JS hosts can pass anything. The same
-  // layout key as the progress readout re-resolves the word when content shifts under it.
-  useHoverWordHighlight(rootRef, bodyRef, parseHighlightStyle(hoverHighlight), progressKey);
   // Prose cursor (#1802): arrow carries no attribute, so #1232's `cursor: default` is untouched.
-  let readingCursorAttr: string | undefined;
   const cursor = parseReadingCursor(readingCursor);
+  // Hover reading aid (#1802). Coerced here too: JS hosts can pass anything. The same
+  // layout key as the progress readout re-resolves the word when content shifts under it. A
+  // Hidden cursor (#1850) underlines the word under the invisible pointer so its spot stays known.
+  useHoverWordHighlight(rootRef, bodyRef, parseHighlightStyle(hoverHighlight), progressKey, cursor === 'none');
+  let readingCursorAttr: string | undefined;
   if (cursor !== 'arrow') {
     readingCursorAttr = cursor;
   }

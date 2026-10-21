@@ -1371,7 +1371,7 @@
             "The standard arrow.",
             "The text (I-beam) cursor.",
             "The pointing hand.",
-            "Hidden over prose, so it never covers the text you're reading. The line highlight shows where the pointer is."
+            "Hidden over prose, so it never covers the text you're reading. The word under the pointer is underlined instead."
           ],
           "default": "arrow",
           "description": "Mouse pointer shape over prose in the Codev Markdown Preview. Code, comment cards and buttons keep their own pointers. Also available from the preview's title-bar menu (Reading Aids…)."

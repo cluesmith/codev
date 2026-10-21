@@ -263,6 +263,25 @@ export function wordPills(wordRects: readonly Box[], m: TextMetrics): Box[] {
   }));
 }
 
+/**
+ * The Hidden cursor's position mark (#1850): a thin underline under each fragment of the word the
+ * hidden pointer is on. `floors` are the bottoms of any box the word sits in that paints its own
+ * background (an inline code chip): the shapes are drawn behind the text, so the underline goes
+ * below such a box, not under the glyphs where the chip would hide it.
+ */
+export function wordUnderlines(wordRects: readonly Box[], m: TextMetrics, floors: readonly Box[] = []): Box[] {
+  const thickness = Math.max(1.5, m.fontSize * 0.1);
+  const gap = m.fontSize * 0.08;
+  return wordRects.map((r) => {
+    let bottom = r.top + r.height;
+    const midX = r.left + r.width / 2;
+    for (const f of floors) {
+      if (midX >= f.left && midX <= f.left + f.width && f.top + f.height > bottom) bottom = f.top + f.height;
+    }
+    return { left: r.left, top: bottom + gap, width: r.width, height: thickness };
+  });
+}
+
 /** True when `x, y` falls inside `box` widened by `pad`. */
 export function containsPoint(box: Box, x: number, y: number, padX = 0, padY = 0): boolean {
   return (
