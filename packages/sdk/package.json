@@ -67,6 +67,10 @@
     "./node": {
       "types": "./dist/node/local-key.d.ts",
       "default": "./dist/node/local-key.js"
+    },
+    "./node/executable": {
+      "types": "./dist/node/executable.d.ts",
+      "default": "./dist/node/executable.js"
     }
   },
   "files": [

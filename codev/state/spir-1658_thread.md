@@ -112,3 +112,10 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Windows run 39658293851: scenarios 3, 4, 5 and the CIM survival test green; CIM Tower lands in the same logon session as the launcher.
 - Phase 4 consult iter1 addressed (codex agent-pid; claude minors); Windows 39660493868 23/23. Architect logSafe nit done d4fd2e7b6.
 - phase_4 iter2 consult addressed (codex bridge-mode stop; claude test tightening); Windows 39662352535 24/24.
+
+## 2026-10-22 Phase 5 (Git Bash, shim, MSYS resolvers + doctor)
+- lib/git-bash.ts: override (`windows.gitBashPath` in .codev/config.json, then CLAUDE_CODE_GIT_BASH_PATH) → %ProgramFiles%\Git → %LocalAppData%\Programs\Git → PATH. "Real Git Bash" is judged by layout (`<root>\bin` or `<root>\usr\bin` beside a git.exe whose --version contains `.windows.`), never by running bash: running System32 bash.exe would start WSL. System32/Sysnative/SysWOW64 and the WindowsApps alias are always rejected; a bad override throws (wsl / missing / not-git), no fallback.
+- codev-sdk/node/executable (new subpath export, `./node` untouched): findExecutable/findAllExecutables (PATHEXT, case-insensitive env on Windows) + resolveSpawnable: .exe → full path; npm .cmd shim → node.exe <entry> (node.exe beside the shim first, as cmd-shim does); other .cmd/.bat → %COMSPEC% /d /s /c with cross-spawn-style ^ escaping and windowsVerbatimArguments. bootstrap-docs uses it.
+- lib/msys-path.ts: drive and UNC both ways; fromMsysPath throws for mount-table paths (/usr, /tmp) instead of guessing; MSYS_PATHCONV_OPT_OUT env.
+- doctor: "Windows Prerequisites" section (isWindows only): Git Bash and jq are required (fail); CRLF postSpawn/devCommand script files warn. POSIX output has no new section (test).
+- .gitattributes: `*.sh` / `*.bash` text eol=lf (all 78 tracked .sh already LF; no churn).

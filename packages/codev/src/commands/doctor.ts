@@ -6,7 +6,7 @@
 
 import { execSync, spawnSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
@@ -34,6 +34,9 @@ import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { isWindows } from '../lib/platform.js';
+import type { CodevConfig } from '../lib/config.js';
+import { resolveGitBash, GitBashError, type GitBash } from '../lib/git-bash.js';
+import { findExecutable } from '@cluesmith/codev-sdk/node/executable';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
 import { WindowsJobHelper } from '../lib/windows-job.js';
 import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING } from '../agent-farm/commands/tower-start-windows.js';
@@ -331,6 +334,150 @@ export function readProcessEnv(pid: number): Record<string, string> | null {
   // health for a process we never actually inspected. Say "unknown" instead.
   if (Object.keys(env).length === 0) return null;
   return env;
+}
+
+/** One line of the Windows prerequisites section (Spec 1658). */
+export interface WindowsPrereqResult {
+  name: string;
+  status: 'ok' | 'warn' | 'fail';
+  version: string;
+  note?: string;
+}
+
+/** Host seams for `checkWindowsPrerequisites`. */
+export interface WindowsPrereqDeps {
+  /** Resolve Git Bash; throws `GitBashError` when there is none or an override is invalid. */
+  resolveGitBash: () => GitBash;
+  /** Full path of `jq.exe` on `PATH` or in the Git install (`gitRoot` when Git Bash resolved), or null. */
+  findJq: (gitRoot: string | null) => string | null;
+  /** `jq --version` output, or null. */
+  jqVersion: (jqPath: string) => string | null;
+  /** Workspace-relative paths of user-authored `postSpawn`/`devCommand` script files with CRLF line endings. */
+  crlfScripts: () => string[];
+}
+
+export const JQ_INSTALL_HINT = 'install jq: winget install jqlang.jq (or choco install jq), then open a new terminal';
+
+/**
+ * The Windows prerequisites: Git for Windows (never the System32 WSL launcher)
+ * and jq are required, each a named failure when missing; a user-authored hook
+ * script with CRLF line endings is a warning, because Git Bash runs it with the
+ * `\r` still on every line.
+ */
+export function checkWindowsPrerequisites(deps: WindowsPrereqDeps): WindowsPrereqResult[] {
+  const results: WindowsPrereqResult[] = [];
+
+  let gitRoot: string | null = null;
+  try {
+    const gitBash = deps.resolveGitBash();
+    gitRoot = gitBash.root;
+    results.push({ name: 'Git Bash', status: 'ok', version: gitBash.gitVersion.replace(/^git version /, ''), note: gitBash.path });
+  } catch (err) {
+    if (!(err instanceof GitBashError)) {
+      throw err;
+    }
+    let version = 'invalid override';
+    if (err.failure === 'not-found') {
+      version = 'not found';
+    }
+    results.push({ name: 'Git Bash', status: 'fail', version, note: err.message });
+  }
+
+  const jq = deps.findJq(gitRoot);
+  if (jq === null) {
+    results.push({ name: 'jq', status: 'fail', version: 'not found', note: `forge scripts need jq; ${JQ_INSTALL_HINT}` });
+  } else {
+    const output = deps.jqVersion(jq);
+    let version = '(version unknown)';
+    if (output !== null) {
+      version = output.replace(/^jq-/, '');
+    }
+    results.push({ name: 'jq', status: 'ok', version, note: jq });
+  }
+
+  for (const script of deps.crlfScripts()) {
+    results.push({
+      name: 'Hook script',
+      status: 'warn',
+      version: `${script} has CRLF line endings`,
+      note: 'Git Bash fails on CRLF scripts; convert it to LF (for example `git add --renormalize` with `*.sh text eol=lf` in .gitattributes)',
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Script files named in `postSpawn`/`devCommand` commands that exist inside
+ * `workspaceRoot` and contain CRLF line endings, as workspace-relative paths.
+ * A token is treated as a file reference when it contains a path separator or
+ * ends in `.sh`/`.bash`; files outside the workspace are not user-authored
+ * hooks and are skipped.
+ */
+export function findCrlfHookScripts(
+  commands: string[],
+  workspaceRoot: string,
+  readFile: (file: string) => string | null = defaultReadText,
+): string[] {
+  const found: string[] = [];
+  for (const command of commands) {
+    for (const rawToken of command.split(/\s+/)) {
+      const token = rawToken.replace(/^['"]|['";&|]+$/g, '');
+      if (token === '' || !(/[\\/]/.test(token) || /\.(sh|bash)$/.test(token))) {
+        continue;
+      }
+      const file = resolve(workspaceRoot, token);
+      const rel = relative(workspaceRoot, file);
+      if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || found.includes(rel)) {
+        continue;
+      }
+      const text = readFile(file);
+      if (text !== null && text.includes('\r\n')) {
+        found.push(rel);
+      }
+    }
+  }
+  return found;
+}
+
+function defaultReadText(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/** The real-host seams for `checkWindowsPrerequisites`. */
+export function windowsPrereqDeps(workspaceRoot: string | null, config: CodevConfig | null): WindowsPrereqDeps {
+  const worktree = (config as { worktree?: { postSpawn?: string[]; devCommand?: string } } | null)?.worktree;
+  return {
+    resolveGitBash: () => resolveGitBash({ configPath: config?.windows?.gitBashPath }),
+    findJq: (gitRoot) => {
+      const onPath = findExecutable('jq', { platform: 'win32' });
+      if (onPath !== null || gitRoot === null) {
+        return onPath;
+      }
+      for (const rel of ['usr\\bin\\jq.exe', 'mingw64\\bin\\jq.exe']) {
+        const candidate = win32.join(gitRoot, rel);
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+      return null;
+    },
+    jqVersion: (jqPath) => runCommand(jqPath, ['--version']),
+    crlfScripts: () => {
+      if (workspaceRoot === null) {
+        return [];
+      }
+      const commands = [...(worktree?.postSpawn ?? [])];
+      if (worktree?.devCommand) {
+        commands.push(worktree.devCommand);
+      }
+      return findCrlfHookScripts(commands, workspaceRoot);
+    },
+  };
 }
 
 /**
@@ -915,6 +1062,32 @@ export async function doctor(): Promise<number> {
   }
 
   console.log('');
+
+  // Native Windows prerequisites (Spec 1658): Git Bash runs every Codev
+  // script, and the forge scripts need jq. Neither ships with Windows.
+  if (isWindows()) {
+    console.log(chalk.bold('Windows Prerequisites') + ' (required on native Windows)');
+    console.log('');
+    const prereqRoot = findWorkspaceRoot();
+    let prereqConfig: CodevConfig | null = null;
+    if (prereqRoot !== null) {
+      try {
+        const { loadConfig } = await import('../lib/config.js');
+        prereqConfig = loadConfig(prereqRoot);
+      } catch {
+        prereqConfig = null;
+      }
+    }
+    for (const result of checkWindowsPrerequisites(windowsPrereqDeps(prereqRoot, prereqConfig))) {
+      printStatus(result.name, result);
+      if (result.status === 'fail') errors++;
+      if (result.status === 'warn') {
+        warnings++;
+        warningDetails.push({ name: result.name, issue: result.version, recommendation: result.note });
+      }
+    }
+    console.log('');
+  }
 
   // Check AI CLI dependencies
   console.log(chalk.bold('AI CLI Dependencies') + ' (at least one required)');

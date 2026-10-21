@@ -1,0 +1,6 @@
+# Shell scripts run under bash, which is Git Bash on native Windows (Spec 1658),
+# and bash fails on CRLF line endings. Pin LF in the working tree whatever the
+# checkout's core.autocrlf, so the forge concept scripts that ship in
+# packages/codev/scripts/forge/ (and every other .sh) stay runnable.
+*.sh text eol=lf
+*.bash text eol=lf

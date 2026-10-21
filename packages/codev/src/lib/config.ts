@@ -102,6 +102,15 @@ export interface CodevConfig {
   terminal?: {
     backend?: 'node-pty';
   };
+  /** Native Windows settings (Spec 1658). Ignored on macOS and Linux. */
+  windows?: {
+    /**
+     * Full path of Git for Windows' `bin\bash.exe`. Overrides the standard
+     * install locations and `PATH`; a path that is not a Git Bash (the System32
+     * WSL launcher included) is an error, never silently skipped.
+     */
+    gitBashPath?: string;
+  };
   /**
    * Mailbox delivery settings (Spec 1313). Tower-global — the drainer prunes
    * terminal rows across all workspaces in the user-global `global.db`, so this is

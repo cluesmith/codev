@@ -176,6 +176,19 @@ describe('doctor command', () => {
       expect(result).toBe(0);
     });
 
+    it('prints no Windows prerequisites section on POSIX (Spec 1658: POSIX output unchanged)', async () => {
+      vi.mocked(execSync).mockImplementation(() => Buffer.from('/usr/bin/command'));
+      vi.mocked(spawnSync).mockImplementation(() => ({
+        status: 0, stdout: 'git version 2.40.0', stderr: '', signal: null, output: [null, 'git version 2.40.0', ''], pid: 0,
+      }));
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+      const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join('\n');
+      expect(printed).toContain('Core Dependencies');
+      expect(printed).not.toContain('Windows Prerequisites');
+      expect(printed).not.toContain('Git Bash');
+    });
+
     it('should return 1 when required dependencies are missing', async () => {
       // Mock node as missing
       vi.mocked(execSync).mockImplementation((cmd: string) => {
