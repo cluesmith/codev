@@ -217,6 +217,8 @@ describe.skipIf(!onWindows || !process.env.CI)('scenario 14: a second local user
         timeout: 30_000,
       });
       const result = JSON.parse(raw.trim()) as { connected: boolean; bytes: number; error: string | null };
+      // Recorded for the audit: whether the default pipe DACL lets the user open it at all.
+      console.log(`[scenario 14] second user probe: ${JSON.stringify(result)}`);
       // Opening may be refused outright by the pipe's default DACL; either way
       // nothing may come back.
       expect(result.bytes).toBe(0);
