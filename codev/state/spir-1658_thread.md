@@ -142,3 +142,10 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Gotcha: Git Bash `$(...)` strips a trailing CR as well as LF (role file is a CRLF checkout on the runner).
 - POSIX 7152/0; Windows 39676695295 36/37 (only the CRLF expectation), then 39677250753 launchers 7/7.
 - Phase 6 consult iter2: codex APPROVE, claude APPROVE (gemini skipped). Carry-forward for the review doc: forge `PATH_INPUTS` is a manual allowlist (only CODEV_OUTPUT_DIR); a future path-valued concept input must be added or it reaches MSYS tools in native form.
+
+## Phase 7: runnable-worktree links and removal
+
+- New `agent-farm/lib/worktree-links.ts`: `createWorktreeLink` (POSIX: the same `symlinkSync` calls; Windows: symlink when the first attempt succeeds, else junction for directories, hard link for files, copy on EXDEV/EPERM/ENOTSUP/EMLINK; probe result remembered per process) and `removeWorktreeDirectory` (lstat every entry, unlink link/junction entries without traversal, rmdir fallback for directory links, chmod+unlink for read-only files, per-entry retry with backoff ~6s on EBUSY/EPERM/ENOTEMPTY/EACCES, final `WorktreeRemovalError` naming the path).
+- spawn-worktree's four link sites call the helper; a copy is a logger.warn ("edits will not write through").
+- cleanup on Windows: shellper tree already killed earlier in cleanupBuilder; removal via the walker instead of `git worktree remove`, then `git worktree prune` BEFORE `git branch -D` (git refuses to delete a branch a registered worktree has checked out). POSIX unchanged.
+- The runner account can create symlinks, so the Windows test forces the probe to `false` (`setSymlinkProbeForTests`) to exercise junction + hard link for real; a second test leaves the probe to the host and logs LINK-METHOD.

@@ -73,7 +73,7 @@ afterEach(() => {
   fs.rmSync(workDir, { recursive: true, force: true });
 });
 
-describe('createWorktreeLink on POSIX', () => {
+describe.skipIf(process.platform === 'win32')('createWorktreeLink on POSIX', () => {
   it('makes the same symlinkSync calls as before Windows support', () => {
     const source = path.join(workDir, 'src.env');
     fs.writeFileSync(source, 'A=1');
@@ -177,10 +177,13 @@ describe('createWorktreeLink on Windows (seam)', () => {
 /** An in-memory tree for removal: directories, files and link entries. */
 type Node = { kind: 'dir'; children: Map<string, Node> } | { kind: 'file' } | { kind: 'link' };
 
+/** Removal joins with the host separator; the in-memory tree records `/` paths. */
+const slashes = (p: string) => p.replace(/\\/g, '/');
+
 function memoryFs(root: Map<string, Node>) {
   const calls: string[] = [];
   const find = (p: string): { parent: Map<string, Node>; name: string; node: Node | undefined } => {
-    const parts = p.split('/').filter(Boolean);
+    const parts = slashes(p).split('/').filter(Boolean);
     let parent = root;
     for (const part of parts.slice(0, -1)) {
       const node = parent.get(part);
@@ -192,30 +195,30 @@ function memoryFs(root: Map<string, Node>) {
   };
   const ops: RemovalFs = {
     async lstat(p) {
-      calls.push(`lstat ${p}`);
+      calls.push(`lstat ${slashes(p)}`);
       const { node } = find(p);
       if (!node) throw errno('ENOENT');
       return { isDirectory: () => node.kind === 'dir', isSymbolicLink: () => node.kind === 'link' };
     },
     async readdir(p) {
-      calls.push(`readdir ${p}`);
+      calls.push(`readdir ${slashes(p)}`);
       const { node } = find(p);
       if (!node || node.kind !== 'dir') throw errno('ENOTDIR');
       return [...node.children.keys()];
     },
     async rmdir(p) {
-      calls.push(`rmdir ${p}`);
+      calls.push(`rmdir ${slashes(p)}`);
       const { parent, name, node } = find(p);
       if (node?.kind === 'dir' && node.children.size > 0) throw errno('ENOTEMPTY');
       parent.delete(name);
     },
     async unlink(p) {
-      calls.push(`unlink ${p}`);
+      calls.push(`unlink ${slashes(p)}`);
       const { parent, name } = find(p);
       parent.delete(name);
     },
     async chmod(p) {
-      calls.push(`chmod ${p}`);
+      calls.push(`chmod ${slashes(p)}`);
     },
   };
   return { ops, calls, find };
@@ -246,8 +249,8 @@ describe('removeWorktreeDirectory (seam win32, injected fs)', () => {
     const { ops, calls } = memoryFs(root);
     const unlink = ops.unlink;
     ops.unlink = async (p) => {
-      if (p === '/wt/data') {
-        calls.push(`unlink ${p}`);
+      if (slashes(p) === '/wt/data') {
+        calls.push(`unlink ${slashes(p)}`);
         throw errno('EPERM');
       }
       return unlink(p);
@@ -298,7 +301,7 @@ describe('removeWorktreeDirectory (seam win32, injected fs)', () => {
     const rmdir = ops.rmdir;
     let pending = 1;
     ops.rmdir = async (p) => {
-      if (p === '/wt' && pending > 0) {
+      if (slashes(p) === '/wt' && pending > 0) {
         pending--;
         throw errno('ENOTEMPTY');
       }
@@ -318,8 +321,10 @@ describe('removeWorktreeDirectory (seam win32, injected fs)', () => {
       retryDelaysMs: [1, 2, 3],
       sleep: async (ms) => { waits.push(ms); },
     });
-    await expect(removal).rejects.toBeInstanceOf(WorktreeRemovalError);
-    await expect(removal).rejects.toThrow('/wt/node_modules/addon.node (EBUSY)');
+    const error = await removal.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(WorktreeRemovalError);
+    expect(slashes((error as WorktreeRemovalError).path)).toBe('/wt/node_modules/addon.node');
+    expect((error as WorktreeRemovalError).code).toBe('EBUSY');
     // The leaf's own retries only: the error is final, not retried by its parents.
     expect(waits).toEqual([1, 2, 3]);
   });
@@ -329,7 +334,9 @@ describe('removeWorktreeDirectory (seam win32, injected fs)', () => {
     const { ops } = memoryFs(root);
     ops.unlink = async () => { throw errno('EIO'); };
     const sleep = vi.fn(async () => undefined);
-    await expect(removeWorktreeDirectory('/wt', { fs: ops, sleep })).rejects.toThrow('/wt/f (EIO)');
+    const error = await removeWorktreeDirectory('/wt', { fs: ops, sleep }).catch((e: unknown) => e);
+    expect(slashes((error as WorktreeRemovalError).path)).toBe('/wt/f');
+    expect((error as WorktreeRemovalError).code).toBe('EIO');
     expect(sleep).not.toHaveBeenCalled();
   });
 
