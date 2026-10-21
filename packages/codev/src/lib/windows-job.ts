@@ -93,40 +93,50 @@ $CURRENT_PROCESS = [IntPtr](-1)
 $BREAKAWAY_OK = 0x0800
 $ERROR_FILE_NOT_FOUND = 2
 $ERROR_ALREADY_EXISTS = 183
-function LastError { [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+# The last Win32 error is read by the statement right after each call, with a
+# direct static call: anything PowerShell runs in between (even invoking a
+# script function) can make its own P/Invoke calls and overwrite it.
+$M = [Runtime.InteropServices.Marshal]
 function Assign($name, $procId) {
   $existing = $K::OpenJobObjectW($JOB_ALL_ACCESS, $false, $name)
   if ($existing -ne [IntPtr]::Zero) { [void]$K::CloseHandle($existing); return @{ ok = $false; error = 'job name already exists'; code = $ERROR_ALREADY_EXISTS } }
   $job = $K::CreateJobObjectW([IntPtr]::Zero, $name)
-  $code = LastError
+  $code = $M::GetLastWin32Error()
   if ($job -eq [IntPtr]::Zero) { return @{ ok = $false; error = 'CreateJobObjectW failed'; code = $code } }
   if ($code -eq $ERROR_ALREADY_EXISTS) { [void]$K::CloseHandle($job); return @{ ok = $false; error = 'job name already exists'; code = $code } }
   try {
     # JOBOBJECT_EXTENDED_LIMIT_INFORMATION: LimitFlags sits at offset 16 on x86 and x64.
     $size = 112
     if ([IntPtr]::Size -eq 8) { $size = 144 }
-    $info = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
+    $info = $M::AllocHGlobal($size)
     try {
-      for ($i = 0; $i -lt $size; $i += 4) { [Runtime.InteropServices.Marshal]::WriteInt32($info, $i, 0) }
-      [Runtime.InteropServices.Marshal]::WriteInt32($info, 16, $BREAKAWAY_OK)
-      if (-not $K::SetInformationJobObject($job, 9, $info, [UInt32]$size)) { return @{ ok = $false; error = 'SetInformationJobObject failed'; code = (LastError) } }
-    } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($info) }
+      for ($i = 0; $i -lt $size; $i += 4) { $M::WriteInt32($info, $i, 0) }
+      $M::WriteInt32($info, 16, $BREAKAWAY_OK)
+      $set = $K::SetInformationJobObject($job, 9, $info, [UInt32]$size)
+      $code = $M::GetLastWin32Error()
+      if (-not $set) { return @{ ok = $false; error = 'SetInformationJobObject failed'; code = $code } }
+    } finally { $M::FreeHGlobal($info) }
     $proc = $K::OpenProcess($PROCESS_ACCESS, $false, [UInt32]$procId)
-    if ($proc -eq [IntPtr]::Zero) { return @{ ok = $false; error = 'OpenProcess failed'; code = (LastError) } }
+    $code = $M::GetLastWin32Error()
+    if ($proc -eq [IntPtr]::Zero) { return @{ ok = $false; error = 'OpenProcess failed'; code = $code } }
     try {
-      if (-not $K::AssignProcessToJobObject($job, $proc)) { return @{ ok = $false; error = 'AssignProcessToJobObject failed'; code = (LastError) } }
+      $assigned = $K::AssignProcessToJobObject($job, $proc)
+      $code = $M::GetLastWin32Error()
+      if (-not $assigned) { return @{ ok = $false; error = 'AssignProcessToJobObject failed'; code = $code } }
       # Only after a successful assign, so a refused assign leaves no handle
       # (and no reserved name) behind. Query access is enough to keep the name.
       $held = [IntPtr]::Zero
-      if (-not $K::DuplicateHandle($CURRENT_PROCESS, $job, $proc, [ref]$held, $JOB_QUERY, $false, [UInt32]0)) { return @{ ok = $false; error = 'DuplicateHandle failed (the process is in a job that cannot be found by name)'; code = (LastError) } }
+      $duplicated = $K::DuplicateHandle($CURRENT_PROCESS, $job, $proc, [ref]$held, $JOB_QUERY, $false, [UInt32]0)
+      $code = $M::GetLastWin32Error()
+      if (-not $duplicated) { return @{ ok = $false; error = 'DuplicateHandle failed (the process is in a job that cannot be found by name)'; code = $code } }
     } finally { [void]$K::CloseHandle($proc) }
     return @{ ok = $true }
   } finally { [void]$K::CloseHandle($job) }
 }
 function Terminate($name, $procId) {
   $job = $K::OpenJobObjectW($JOB_TERMINATE_QUERY, $false, $name)
+  $code = $M::GetLastWin32Error()
   if ($job -eq [IntPtr]::Zero) {
-    $code = LastError
     if ($code -eq $ERROR_FILE_NOT_FOUND) { return @{ ok = $true; found = $false } }
     return @{ ok = $false; error = 'OpenJobObjectW failed'; code = $code }
   }
@@ -138,10 +148,14 @@ function Terminate($name, $procId) {
     if ($proc -eq [IntPtr]::Zero) { return @{ ok = $true; found = $true; member = $false } }
     try {
       $inJob = $false
-      if (-not $K::IsProcessInJob($proc, $job, [ref]$inJob)) { return @{ ok = $false; error = 'IsProcessInJob failed'; code = (LastError) } }
+      $queried = $K::IsProcessInJob($proc, $job, [ref]$inJob)
+      $code = $M::GetLastWin32Error()
+      if (-not $queried) { return @{ ok = $false; error = 'IsProcessInJob failed'; code = $code } }
       if (-not $inJob) { return @{ ok = $true; found = $true; member = $false } }
     } finally { [void]$K::CloseHandle($proc) }
-    if (-not $K::TerminateJobObject($job, [UInt32]1)) { return @{ ok = $false; error = 'TerminateJobObject failed'; code = (LastError) } }
+    $terminated = $K::TerminateJobObject($job, [UInt32]1)
+    $code = $M::GetLastWin32Error()
+    if (-not $terminated) { return @{ ok = $false; error = 'TerminateJobObject failed'; code = $code } }
     return @{ ok = $true; found = $true; member = $true }
   } finally { [void]$K::CloseHandle($job) }
 }
