@@ -36,9 +36,10 @@ const leftovers: number[] = [];
 /**
  * Each process appends its pid to the pid file, then:
  * - root: starts `mid` (through Git Bash in `bash` mode), then idles; in
- *   `reparent` mode it starts a Git Bash that backgrounds `leaf` and exits at
- *   once, so the leaf's parent is dead before teardown (on POSIX the leaf would
- *   still be in the session's process group);
+ *   `reparent` mode it runs `cmd /c start /b` on `leaf`, and cmd exits at once,
+ *   so the leaf's parent is dead before teardown (on POSIX the leaf would still
+ *   be in the session's process group). A Git Bash `&` does not orphan: MSYS
+ *   keeps the backgrounded job's Windows parent alive;
  * - mid: starts `leaf`;
  * - leaf: idles.
  * Children are never `detached`: a detached child leaves the session on both
@@ -56,7 +57,7 @@ if (role === 'root') {
     spawn(${JSON.stringify(GIT_BASH)}, ['-c', '"' + fwd(node) + '" "' + fwd(__filename) + '" mid "' + fwd(pidFile) + '" ' + mode], { stdio: 'ignore' });
   } else if (mode === 'reparent') {
     fs.appendFileSync(pidFile, '0\\n');
-    spawn(${JSON.stringify(GIT_BASH)}, ['-c', '"' + fwd(node) + '" "' + fwd(__filename) + '" leaf "' + fwd(pidFile) + '" ' + mode + ' > /dev/null 2>&1 &'], { stdio: 'ignore' });
+    spawn('cmd.exe', ['/d', '/c', 'start', '""', '/b', node, __filename, 'leaf', pidFile, mode], { stdio: 'ignore', windowsVerbatimArguments: false });
   } else {
     spawn(node, [__filename, 'mid', pidFile, mode], { stdio: 'ignore' });
   }
@@ -148,7 +149,7 @@ describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees
     const census = await listProcessCensus({ fresh: true });
     const leaf = census.find((entry) => entry.pid === leafPid);
     const midPid = leaf?.ppid ?? -1;
-    await waitFor(() => !alive(midPid), 10_000, 'intermediate bash to exit');
+    await waitFor(() => !alive(midPid), 10_000, `intermediate (pid ${midPid}) to exit`);
     expect(alive(leafPid)).toBe(true);
 
     await killSessionTree(rootPid);
