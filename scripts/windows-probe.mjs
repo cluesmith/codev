@@ -23,8 +23,9 @@
  *   detached    a detached grandchild survives its launching process exiting
  *   deps        (--deps) native-dependency install behavior: prebuilt binary or node-gyp source build
  *   tower       (--tower) `afx tower start` from this checkout, with the tower log captured
- *   towerPublished (--tower-published <version|latest>) the same, from a global install of the
- *               published @cluesmith/codev into a throwaway prefix (the path users take)
+ *   towerPublished (--tower-published <version|latest>, repeatable) the same, from a global
+ *               install of the published @cluesmith/codev into a throwaway prefix (the path users
+ *               take). 3.3.3 is the release that was current on 2026-09-09, the field test date.
  *
  * Every section catches its own errors, so one failure never hides the rest; the script still
  * exits non-zero when any section failed, so a dispatch never shows a misleading green.
@@ -59,7 +60,11 @@ async function section(name, fn) {
   const started = Date.now();
   try {
     const result = await fn();
-    return { name, ok: true, ms: Date.now() - started, ...result };
+    // A section that ran but measured a failure (e.g. Tower never became ready) reports it via
+    // `failure`, so the report keeps its data AND the run is not green.
+    let ok = true;
+    if (result && result.failure) ok = false;
+    return { name, ok, ms: Date.now() - started, ...result };
   } catch (err) {
     let error = String(err);
     if (err && err.stack) error = String(err.stack);
@@ -288,8 +293,10 @@ $ok = [J]::QueryInformationJobObject([IntPtr]::Zero, 9, $info, 144, [IntPtr]::Ze
 $flags = if ($ok) { [Runtime.InteropServices.Marshal]::ReadInt32($info, 16) } else { $null }
 @{ languageMode = $ExecutionContext.SessionState.LanguageMode.ToString(); inJob = $in; limitFlags = $flags } | ConvertTo-Json -Compress
 `;
-  // QueryInformationJobObject(NULL, ...) reports the job of the *calling* PowerShell process, which
-  // inherits Node's job, so limitFlags reflects the job this probe runs in.
+  // QueryInformationJobObject(NULL, ...) reports the job of the *calling* PowerShell process. That
+  // is NOT necessarily Node's job: under SILENT_BREAKAWAY_OK a child starts outside its parent's
+  // job. So limitFlags describes the PowerShell child's job, inJob describes Node itself, and only
+  // the empirical --survival test answers whether detached children outlive a launcher.
   const out = JSON.parse(await powershell(script));
   const KILL_ON_JOB_CLOSE = 0x2000;
   const BREAKAWAY_OK = 0x800;
@@ -516,12 +523,21 @@ async function runIsolatedTower(afx, { restart = false } = {}) {
   };
 }
 
+/** Why an isolated Tower run counts as a failure, or null when the first start reached ready. */
+function towerFailure(run) {
+  if (run.start.timedOut) return 'afx tower start did not finish within 120 s (hang)';
+  if (run.start.code !== 0) return `afx tower start exited ${run.start.code}`;
+  if (run.secondStart && run.secondStart.timedOut) return 'second afx tower start did not finish within 120 s (hang)';
+  return null;
+}
+
 /** Tower from this checkout (requires packages/codev built). */
 async function probeTower() {
   if (!existsSync(path.join(repoRoot, 'packages', 'codev', 'dist'))) {
-    return { skipped: 'packages/codev is not built (run pnpm build first)' };
+    return { skipped: 'packages/codev is not built (run pnpm build first)', failure: 'packages/codev is not built' };
   }
-  return runIsolatedTower(path.join(repoRoot, 'packages', 'codev', 'bin', 'afx.js'), { restart: true });
+  const run = await runIsolatedTower(path.join(repoRoot, 'packages', 'codev', 'bin', 'afx.js'), { restart: true });
+  return { ...run, failure: towerFailure(run) };
 }
 
 /**
@@ -554,7 +570,10 @@ async function probeTowerPublished(spec) {
   let tower = null;
   if (r.status === 0) tower = await runIsolatedTower(path.join(pkgDir, 'bin', 'afx.js'), { restart: true });
   try { rmSync(prefix, { recursive: true, force: true }); } catch { /* best effort */ }
-  return { install, version, tower };
+  let failure = null;
+  if (r.status !== 0) failure = `npm install -g @cluesmith/codev@${spec} failed (exit ${r.status})`;
+  else if (tower) failure = towerFailure(tower);
+  return { install, version, tower, failure };
 }
 
 // ---------------------------------------------------------------------------
@@ -616,8 +635,11 @@ async function main() {
   ];
   if (flag('--deps')) sections.push(await section('deps', probeDeps));
   if (flag('--tower')) sections.push(await section('tower', probeTower));
-  const published = option('--tower-published');
-  if (published) sections.push(await section('towerPublished', () => probeTowerPublished(published)));
+  // Repeatable: --tower-published latest --tower-published 3.3.3
+  const publishedSpecs = args.filter((_, i) => i > 0 && args[i - 1] === '--tower-published');
+  for (const spec of publishedSpecs) {
+    sections.push(await section(`towerPublished:${spec}`, () => probeTowerPublished(spec)));
+  }
   const report = { generatedAt: new Date().toISOString(), sections };
   const json = JSON.stringify(report, null, 2);
   const out = option('--out');

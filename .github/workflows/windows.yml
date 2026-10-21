@@ -25,6 +25,10 @@ on:
         type: boolean
         required: false
         default: false
+      published:
+        description: 'Published @cluesmith/codev versions to probe with tower=true (space-separated; 3.3.3 was current on 2026-09-09)'
+        required: false
+        default: 'latest'
 
 defaults:
   run:
@@ -82,7 +86,15 @@ jobs:
 
       - name: Probe Tower start from the published package (global install)
         if: ${{ !cancelled() && inputs.tower }}
-        run: node scripts/windows-probe.mjs --tower-published latest --out "$RUNNER_TEMP/probe-published-${{ matrix.os }}-node${{ matrix.node }}.json"
+        # Node 20 cannot install the package on Windows (no better-sqlite3 prebuild; audit 1.1), so
+        # that leg records the failure without turning the run red.
+        continue-on-error: ${{ matrix.node == '20' }}
+        env:
+          PUBLISHED: ${{ inputs.published }}
+        run: |
+          specs=()
+          for v in $PUBLISHED; do specs+=(--tower-published "$v"); done
+          node scripts/windows-probe.mjs "${specs[@]}" --out "$RUNNER_TEMP/probe-published-${{ matrix.os }}-node${{ matrix.node }}.json"
 
       - name: Upload probe reports
         if: always()
