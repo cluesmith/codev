@@ -16,6 +16,10 @@
   `highlightLine` and all its machinery (reading target, crossing, `+` / click following the band)
   are removed. Its implementation stays in the branch history (`2af31184f`) for reference. Option 2
   (`annotationEntry`) is unchanged.
+- **Second dev-gate revision (owner, 2026-10-21).** "Hidden on its own is confusing": while the
+  cursor is Hidden, **the word under the invisible pointer is underlined**. The owner chose the word,
+  not the whole line, because it marks the pointer's exact spot. The underline appears with every
+  highlight style, `None` included.
 
 ## Understanding
 
@@ -24,10 +28,10 @@
 (arrow, I-beam, hand). Both are chosen from the "Reading Aids…" title-bar picker. #1850 adds:
 
 1. **A Hidden prose cursor**: `readingCursor: "none"`. Over prose the pointer is invisible, so it
-   never sits on top of the words being read. The line band, for the styles that draw one, still
-   marks where the pointer is, so the band effectively becomes the pointer. Code blocks, comment
-   cards, the composer, the `+` and links keep a visible pointer, so everything clickable can still be
-   found.
+   never sits on top of the words being read. Instead, **the word under the invisible pointer gets a
+   thin underline** that moves word to word, so its exact spot is always visible, whatever the
+   highlight style. Code blocks, comment cards, the composer, the `+` and links keep a visible
+   pointer, so everything clickable can still be found.
 2. **`annotationEntry`**: `gutterButton` (today) | `clickParagraph`. With `clickParagraph`, the in-row
    `+` is never mounted, and a plain primary click on prose opens the inline composer for the clicked
    block.
@@ -63,13 +67,23 @@ Both default to today's behaviour: the arrow cursor and the gutter `+`.
 - **CSS** (`default-theme.css`): one rule beside I-beam and Hand:
   `.codev-artifact-canvas[data-reading-cursor='none'] .codev-artifact-canvas-body { cursor: none; }`.
   The existing shared rule already restores the arrow over code, cards, the composer and the `+`.
-  Links keep the hand through the UA rule. There is no JS.
+  Links keep the hand through the UA rule.
+- **Word underline** (the position mark):
+  - The hover controller gains an `underline` shape kind, painted last in its behind-the-text layer.
+  - `useHoverWordHighlight(…, underline)` attaches the controller when the style draws something *or*
+    the cursor is Hidden, so `None` plus Hidden still underlines.
+  - `ArtifactCanvas` passes `cursor === 'none'`.
+  - The geometry is a pure `wordUnderlines(wordRects, m, floors)`: a bar about 0.1em thick (1.5px
+    minimum), a small gap below each word fragment, as wide as the fragment.
+  - For a word in an inline code chip, the bar goes below the chip's box (`floors`). The layer sits
+    behind the text, so the chip's own background would otherwise hide it.
+  - Colour comes from a new token, `--codev-canvas-hover-underline-color` (foreground at 70%), which
+    is added to the locked token snapshot.
+  - It reuses the word hit test and sticky rules, so it clears off text, during a drag, and on leave.
 - **Host:**
   - `CURSOR_CHOICES` gains `{ value: 'none', label: 'Hidden' }`. The exhaustiveness check enforces it.
   - `package.json` `readingCursor` enum gains `none`, described as "Hidden over prose, so it never
-    covers the text you're reading. The line highlight shows where the pointer is."
-- Hidden plus the highlight style `None` gives no position feedback. That is allowed as an explicit
-  choice.
+    covers the text you're reading. The word under the pointer is underlined instead."
 
 ### Click-the-paragraph (unchanged from the approved plan, minus the band-following)
 
@@ -112,8 +126,9 @@ Both default to today's behaviour: the arrow cursor and the gutter `+`.
 
 - `packages/artifact-canvas/src/types.ts`: `ReadingCursor` + `'none'`, `AnnotationEntry`, `annotationEntry` prop
 - `packages/artifact-canvas/src/index.ts`: export `AnnotationEntry`, `parseAnnotationEntry`
-- `packages/artifact-canvas/src/components/hover-word.ts`: `'none'` cursor, `parseAnnotationEntry`, `CLICK_EXCLUDED_SELECTOR`
-- `packages/artifact-canvas/src/styles/default-theme.css`: the Hidden rule
+- `packages/artifact-canvas/src/components/hover-word.ts`: `'none'` cursor, `parseAnnotationEntry`, `CLICK_EXCLUDED_SELECTOR`, `wordUnderlines`
+- `packages/artifact-canvas/src/styles/default-theme.css`: the Hidden rule, the underline token and class
+- `packages/artifact-canvas/src/components/useHoverWordHighlight.ts`: the `underline` shape and option
 - `packages/artifact-canvas/src/components/ArtifactCanvas.tsx`: click-to-annotate, `+` suppression
 - `packages/artifact-canvas/src/overlays/CommentComposer.tsx`: `hasDraft()`
 - `packages/artifact-canvas/examples/main.tsx`: playground selectors
@@ -122,9 +137,12 @@ Both default to today's behaviour: the arrow cursor and the gutter `+`.
 
 ## Risks & Alternatives Considered
 
-- **Losing the pointer entirely.** With Hidden and a band style, the band is the position cue. With
-  highlight `None` there is no cue. That is allowed as an explicit choice, and moving onto a link,
-  code, a card or the `+` brings a pointer back.
+- **Losing the pointer entirely.** This is solved by the word underline (second revision): with Hidden
+  there is always a mark on the word under the pointer, whatever the highlight style. The underline
+  only shows over a word (like the pill), so between words or in margins nothing marks the spot.
+  Moving onto a link, code, a card or the `+` brings a visible pointer back.
+- **Rejected: underline the whole line** (owner ruling). It shows the line, not the spot, and
+  overlaps the line band's job.
 - **The `+` with Hidden.** The `+` wrapper keeps the arrow (shared exclusion rule), so it is visible
   and clickable. Over prose nothing shows, which is the point.
 - **Rejected: hide only while still** (owner ruling). It shows the pointer while it moves along the
@@ -144,10 +162,16 @@ Both default to today's behaviour: the arrow cursor and the gutter `+`.
 
 ### Unit (canvas, vitest + jsdom)
 
-- `hover-word.test.ts`: `parseReadingCursor('NONE')` is `none`; `parseAnnotationEntry` matches the
-  vocabulary and its defaults; `CLICK_EXCLUDED_SELECTOR` coverage.
-- `default-theme.test.ts`: the Hidden rule sets `cursor: none` on the body; the shared rule restores
-  the arrow over code, cards, the composer and the `+`.
+- `hover-word.test.ts`:
+  - `parseReadingCursor('NONE')` is `none`.
+  - `parseAnnotationEntry` matches the vocabulary and its defaults.
+  - `CLICK_EXCLUDED_SELECTOR` coverage.
+  - `wordUnderlines`: the bar is under each fragment, goes below a chip floor, and keeps its minimum
+    thickness.
+- `default-theme.test.ts`:
+  - The Hidden rule sets `cursor: none` on the body; the shared rule restores the arrow over code,
+    cards, the composer and the `+`.
+  - The underline class uses the new token, which is in the locked token snapshot.
 - `annotation-entry.test.tsx`:
   - No `+` on hover or focus.
   - A click opens the composer for the clicked block, and submit emits it.
@@ -164,8 +188,13 @@ Both default to today's behaviour: the arrow cursor and the gutter `+`.
 
 - `clickParagraph`: no `+`, and a click opens the composer. Drag-select opens nothing, the dismissing
   click opens nothing, and the next click opens it. Double-click opens one composer.
-- Hidden cursor: the computed cursor is `none` on prose, `default` on code, cards and the `+`, and
-  `pointer` on links. The `+` and the line band still appear.
+- Hidden cursor:
+  - The computed cursor is `none` on prose, `default` on code, cards and the `+`, and `pointer` on
+    links. The `+` and the line band still appear.
+  - With highlight `None`, exactly one underline is drawn under the hovered word (aligned, just
+    below). It follows the pointer to the next word and clears on leave.
+  - Under an inline code chip, the bar sits below the chip's box.
+  - With a visible cursor there is no underline.
 
 ### Unit (host)
 
@@ -189,11 +218,13 @@ Both default to today's behaviour: the arrow cursor and the gutter `+`.
 4. **`…` → Reading Aids…**: three sections (Highlight, Cursor, Annotation entry). Cursor lists Arrow,
    I-beam, Hand and Hidden. The list opens on the current Highlight row.
 5. Pick **Hidden** (the preview updates in place):
-   - Over prose the pointer disappears; the line band follows where it is.
+   - Over prose the pointer disappears. The word under it is underlined, and the underline moves word
+     to word (the line band still shows too, with the default style).
+   - Switch the highlight to **None**: the underline alone marks the spot.
+   - Hover inline code: the underline sits below the chip.
    - Over a code block, a comment card or the `+`, the arrow is back.
    - Over a link, the hand is back.
    - The `+` is still clickable.
-   - Optional: switch the highlight to **None** to see the no-feedback combination.
 6. Pick **Click the paragraph**:
    - No `+` anywhere. Click a paragraph: the composer opens below it.
    - Drag-select text: no composer. Click once to dismiss the selection: no composer. Click again: it
