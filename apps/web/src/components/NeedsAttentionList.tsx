@@ -1,4 +1,5 @@
 import type { OverviewPR, OverviewBuilder } from '../lib/api.js';
+import { issueRef } from '../lib/issueIds.js';
 
 interface NeedsAttentionListProps {
   prs: OverviewPR[];
@@ -116,7 +117,7 @@ export function buildItems(
   for (const b of builders) {
     if (b.prReady) continue;
     if (!b.blocked || !b.blockedSince) continue;
-    const label = b.issueId ? `#${b.issueId}` : b.id;
+    const label = b.issueId ? issueRef(b.issueId) : b.id;
     items.push({
       key: `gate-${b.id}`,
       issueOrPR: label,

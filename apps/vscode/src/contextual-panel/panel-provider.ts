@@ -25,6 +25,7 @@ import type { ReviewQueueStore } from '../review-queue/store.js';
 import { builderById } from '../builder-lookup.js';
 import { onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
 import { resolveMode } from './resolver.js';
+import { pinSurfaceToBuilder } from './pin.js';
 import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
 import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
@@ -59,6 +60,10 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     terminalManager: TerminalManager,
     private readonly overviewCache: OverviewCache,
     private readonly reviewQueue: ReviewQueueStore,
+    /** #1809: in a builder-worktree window, the worktree's own builder id. The panel is pinned to it:
+     *  no Attention body (the PARENT's builders, the same overview data as the status-bar counts and
+     *  activity badge, which that window also hides) and Code Review / Builder Inspector only for it. */
+    private readonly pinnedBuilderId?: string,
   ) {
     this.reader = new SurfaceContextReader(() => terminalManager.getActiveBuilderId());
     this.disposables.push(
@@ -68,7 +73,7 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       // Builder Inspector also reads it: the terminal-id -> queue-key mapping comes from the overview.
       this.overviewCache.onDidChange(() => {
         const kind = this.lastDescriptor?.kind;
-        if (kind === 'attention' || kind === 'builder-inspector') {
+        if ((kind === 'attention' && this.pinnedBuilderId === undefined) || kind === 'builder-inspector') {
           this.repost();
         }
       }),
@@ -216,7 +221,11 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   /** Re-resolve the active surface and post only if the render (surface key + descriptor) changed. */
   private refresh(): void {
     const { context, key } = this.reader.read();
-    const descriptor = resolveMode(context);
+    let surface = context;
+    if (this.pinnedBuilderId !== undefined) {
+      surface = pinSurfaceToBuilder(context, this.pinnedBuilderId);
+    }
+    const descriptor = resolveMode(surface);
     this.lastDescriptor = descriptor;
     const postId = [key, descriptor.kind, descriptor.context.builderId ?? '', descriptor.context.resourcePath ?? ''].join('|');
     if (postId !== this.lastPostId) {
@@ -236,8 +245,11 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   private post(descriptor: ModeDescriptor): void {
     // Attach the Attention roll-up only in Attention mode, projected fresh from the live cache so a
     // re-post (visibility restore, or an SSE-driven refresh) always reflects current state.
-    const attention =
-      descriptor.kind === 'attention' ? deriveAttention(this.overviewCache.getData()) : undefined;
+    // A pinned (builder-worktree) window never projects Attention: it would list the parent's builders.
+    let attention: HostToWebviewMessage['attention'];
+    if (descriptor.kind === 'attention' && this.pinnedBuilderId === undefined) {
+      attention = deriveAttention(this.overviewCache.getData());
+    }
     // The review queue rides along in Code Review (a builder diff) and Builder Inspector (that
     // builder's terminal), read from the store's cache for the queue key the surface maps to.
     let codeReview: HostToWebviewMessage['codeReview'];
@@ -251,7 +263,9 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     } else if (descriptor.kind === 'code-review') {
       codeReview = deriveCodeReview({ comments: [], sent: [] });
     }
-    const message: HostToWebviewMessage = { type: 'render', descriptor, attention, codeReview, reviewBuilderId };
+    const message: HostToWebviewMessage = {
+      type: 'render', descriptor, attention, codeReview, reviewBuilderId, pinnedBuilderId: this.pinnedBuilderId,
+    };
     this.view?.webview.postMessage(message);
   }
 

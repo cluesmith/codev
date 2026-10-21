@@ -15,9 +15,11 @@
 
 import * as vscode from 'vscode';
 import * as path from 'node:path';
+import { parseBuilderWorktreePath } from '@cluesmith/codev-sdk/builder-worktree';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { TerminalManager } from '../terminal-manager.js';
 import { loadWorktreeConfig } from '../load-worktree-config.js';
+import { mainCheckoutRoot } from '../terminal-resolve.js';
 
 export const KILL_WAIT_TIMEOUT_MS = 7000;
 export const KILL_POLL_INTERVAL_MS = 200;
@@ -37,17 +39,17 @@ export interface DevTarget {
  * Resolve the dev target from the folder *this VSCode window* is rooted at.
  *
  * Path-sniffing against the fixed `<root>/.builders/<id>/` layout that
- * `afx spawn` creates (the same invariant detectWorkspacePath / openWorktreeWindow
- * already rely on) — deterministic, offline, no Tower round-trip:
- *   - parent dir is `.builders` → builder worktree, id = basename
- *   - otherwise                 → the main checkout, id = `main`
+ * `afx spawn` creates, via the shared sdk predicate (#1809) — deterministic,
+ * offline, no Tower round-trip:
+ *   - a builder worktree → id = the builder id
+ *   - otherwise          → the main checkout, id = `main`
  */
-export function resolveWorkspaceDevTarget(workspacePath: string): DevTarget {
-  if (path.basename(path.dirname(workspacePath)) === '.builders') {
-    const id = path.basename(workspacePath);
-    return { id, cwd: workspacePath, name: id };
+export function resolveWorkspaceDevTarget(windowRoot: string): DevTarget {
+  const worktree = parseBuilderWorktreePath(windowRoot);
+  if (worktree) {
+    return { id: worktree.builderId, cwd: worktree.worktreePath, name: worktree.builderId };
   }
-  return { id: 'main', cwd: workspacePath, name: 'Workspace' };
+  return { id: 'main', cwd: windowRoot, name: 'Workspace' };
 }
 
 /** Poll `listTerminals` until the killed terminal disappears (or timeout). */
@@ -176,10 +178,7 @@ export async function restartDevForTarget(
 /** The main checkout root for the active window. In a builder worktree
  *  (`<root>/.builders/<id>`) that's two levels up; otherwise the window root. */
 function mainRootOf(workspacePath: string): string {
-  if (path.basename(path.dirname(workspacePath)) === '.builders') {
-    return path.dirname(path.dirname(workspacePath));
-  }
-  return workspacePath;
+  return mainCheckoutRoot(workspacePath);
 }
 
 /**
@@ -215,7 +214,9 @@ export async function resolveDevTargetById(
   if (builderId === 'main') {
     return { id: 'main', cwd: mainRootOf(workspacePath), name: 'main' };
   }
-  const local = resolveWorkspaceDevTarget(workspacePath);
+  // The window root, not the Tower workspace path (the parent root in a builder-worktree window,
+  // #1809), so a worktree window resolves its own builder without a Tower round-trip.
+  const local = resolveWorkspaceDevTarget(connectionManager.getWindowRoot() ?? workspacePath);
   if (local.id === builderId) { return local; }
   const client = connectionManager.getClient();
   const overview = client ? await client.getOverview(workspacePath) : null;

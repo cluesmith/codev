@@ -20,7 +20,7 @@ vi.mock('vscode', () => ({
   Uri: { parse: (s: string) => ({ toString: () => s, __parsed: s }) },
 }));
 
-const { parseIssueId, openIssueById } = await import('../commands/open-issue-by-id.js');
+const { parseIssueId, parseIssueInput, openIssueById } = await import('../commands/open-issue-by-id.js');
 
 describe('parseIssueId', () => {
   it('accepts a bare numeric id', () => {
@@ -121,5 +121,52 @@ describe('openIssueById', () => {
     expect(openExternal).not.toHaveBeenCalled();
     expect(executeCommand).not.toHaveBeenCalled();
     expect(showWarningMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('tracker keys in Open Issue by ID (#1740)', () => {
+  it('parseIssueId stays numeric-only (Open PR by ID shares it)', () => {
+    expect(parseIssueId('ENG-12')).toBeUndefined();
+  });
+
+  it('parseIssueInput accepts keys only when allowed, canonicalized', () => {
+    expect(parseIssueInput(' eng-12 ', true)).toBe('ENG-12');
+    expect(parseIssueInput('#ENG-12', true)).toBe('ENG-12');
+    expect(parseIssueInput('42', true)).toBe('42');
+    expect(parseIssueInput('ENG-12', false)).toBeUndefined();
+    expect(parseIssueInput('UTF 8', true)).toBeUndefined();
+  });
+
+  function validatorFor(getOverview?: () => unknown) {
+    let validate: ((v: string) => string | undefined) | undefined;
+    showInputBox.mockImplementation(async (opts: { validateInput: (v: string) => string | undefined }) => {
+      validate = opts.validateInput;
+      return undefined;
+    });
+    return openIssueById({} as never, getOverview as never).then(() => validate!);
+  }
+
+  it('rejects a key inline on a numeric-id workspace', async () => {
+    const validate = await validatorFor(() => ({ issueIdKind: 'number', backlog: [] }));
+    expect(validate('ABC-12')).toMatch(/numeric/);
+    expect(validate('42')).toBeUndefined();
+  });
+
+  it('accepts a key on a Jira workspace, even with an empty backlog', async () => {
+    const validate = await validatorFor(() => ({ issueIdKind: 'key', backlog: [] }));
+    expect(validate('PROJ-123')).toBeUndefined();
+  });
+
+  it('accepts a key when the kind is unknown (overview not loaded)', async () => {
+    const validate = await validatorFor(() => null);
+    expect(validate('PROJ-123')).toBeUndefined();
+  });
+
+  it('fetches the canonical key', async () => {
+    showInputBox.mockResolvedValue('proj-123');
+    const getIssue = vi.fn().mockResolvedValue({ title: 't', body: '', state: 'open', url: 'https://x/browse/PROJ-123', comments: [] });
+    const conn = { getState: () => 'connected', getWorkspacePath: () => '/ws', getClient: () => ({ getIssue }) };
+    await openIssueById(conn as never, () => ({ issueIdKind: 'key', backlog: [] }) as never);
+    expect(getIssue).toHaveBeenCalledWith('PROJ-123', '/ws');
   });
 });

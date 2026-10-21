@@ -262,6 +262,24 @@ ${FOOTER}`;
 }
 
 /**
+ * Format the notice Tower sends the hub architect when the owner submits a ruling
+ * from the dashboard's Decisions tab (#1828). Like the VS Code relay, the distinct
+ * `[USER via Decisions tab]` header marks it as the owner's word relayed by a UI,
+ * not a peer-architect instruction. Wraps in a structured header/footer unless raw mode
+ * is requested.
+ */
+export function formatUserViaDecisionsTabMessage(toAgent: string, message: string, raw: boolean = false): string {
+  if (raw) {
+    return message;
+  }
+
+  const timestamp = new Date().toISOString();
+  return `### [USER via Decisions tab${recipient(toAgent)} | ${timestamp}] ###
+${message}
+${FOOTER}`;
+}
+
+/**
  * Format a message from a builder to the architect.
  * Wraps in a structured header/footer unless raw mode is requested.
  *

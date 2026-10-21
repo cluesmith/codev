@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev-sdk",
-  "version": "3.3.4",
+  "version": "3.3.6",
   "description": "Client SDK for Tower: the single implementation of how anything talks to Tower. Environment-agnostic (browser, Node, React Native); auth and transport arrive as injected adapters.",
   "type": "module",
   "exports": {
@@ -47,6 +47,10 @@
     "./phase-grouping": {
       "types": "./dist/phase-grouping.d.ts",
       "default": "./dist/phase-grouping.js"
+    },
+    "./builder-worktree": {
+      "types": "./dist/builder-worktree.d.ts",
+      "default": "./dist/builder-worktree.js"
     },
     "./review-markers": {
       "types": "./dist/review-markers.d.ts",

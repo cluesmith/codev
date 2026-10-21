@@ -43,7 +43,7 @@ In `.codev/config.json`:
 
 ### Providers
 
-Built-in presets: `github` (default), `gitlab` (via `glab`), `gitea` (via `tea`).
+Built-in presets: `github` (default), `gitlab` (via `glab`), `gitea` (via `tea`), `linear` (Linear API), `jira` (Jira Cloud via `acli`). `linear` and `jira` are hybrid: they serve the issue concepts only, and every PR concept falls through to the `gh` default. Jira takes `jira-site` and `jira-project` keys; issue ids are work item keys (`ENG-123`).
 
 **Note:** Non-GitHub presets are best-effort. Output schemas may differ from GitHub's JSON contracts. Non-conforming JSON returns `null` — consumers handle this gracefully. Override individual concepts if a preset doesn't match your CLI version.
 

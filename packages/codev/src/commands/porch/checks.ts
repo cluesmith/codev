@@ -14,8 +14,14 @@ import { executeForgeCommand, getForgeCommand, loadForgeConfig } from '../../lib
 
 const execFileAsync = promisify(execFile);
 
-/** Default timeout for checks: 5 minutes */
+/** Default timeout for checks: 5 minutes. A check may set its own `timeout_ms`. */
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** After a timeout's SIGTERM, how long the check's process group gets before SIGKILL */
+const KILL_GRACE_MS = 5000;
+
+/** Signals porch forwards to a running check's process group */
+const RELAYED_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 // ============================================================================
 // Check Execution
@@ -27,8 +33,26 @@ export interface CheckEnv {
   PROJECT_TITLE: string;
 }
 
+/** Resolve once process group `pgid` has no members, or after `withinMs`. */
+async function waitForGroupExit(pgid: number, withinMs: number): Promise<void> {
+  const deadline = Date.now() + withinMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(-pgid, 0);
+    } catch {
+      return; // Group is empty
+    }
+    await new Promise(r => setTimeout(r, 100));
+  }
+}
+
 /**
- * Run a single check command
+ * Run a single check command.
+ *
+ * While the check runs, this installs process-level SIGINT/SIGTERM/SIGHUP
+ * listeners that re-raise the signal on porch itself, so call it only from
+ * the short-lived porch CLI (porch check/done/approve in index.ts), never
+ * from a long-running server.
  */
 export async function runCheck(
   name: string,
@@ -49,9 +73,15 @@ export async function runCheck(
     const executable = parts[0];
     const args = parts.slice(1);
 
+    // detached: the check leads its own process group, so a timeout can kill
+    // the whole tree (#1814). Killing only the shell left its grandchildren
+    // (test workers) holding stdout open, and 'close' never fired. detached
+    // calls setsid, so the check also has no controlling terminal: one that
+    // opens /dev/tty fails instead of prompting, which is intended.
     const proc = spawn(executable, args, {
       cwd,
       shell: true,
+      detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
@@ -60,15 +90,34 @@ export async function runCheck(
       },
     });
 
+    const killGroup = (signal: NodeJS.Signals) => {
+      if (proc.pid === undefined) return;
+      try {
+        process.kill(-proc.pid, signal);
+      } catch {
+        // Group already gone
+      }
+    };
+
+    // Leaving porch's process group also means a Ctrl+C at porch's terminal
+    // no longer reaches the check. Relay porch's own interruption to the
+    // group, then re-raise it so porch dies of the signal as before.
+    const relay = (signal: NodeJS.Signals) => {
+      stopRelaying();
+      killGroup(signal);
+      process.kill(process.pid, signal);
+    };
+    const stopRelaying = () => {
+      for (const signal of RELAYED_SIGNALS) process.removeListener(signal, relay);
+    };
+    for (const signal of RELAYED_SIGNALS) process.on(signal, relay);
+
     // Set up timeout
+    let escalation: NodeJS.Timeout | undefined;
     const timeout = setTimeout(() => {
       killed = true;
-      proc.kill('SIGTERM');
-      setTimeout(() => {
-        if (!proc.killed) {
-          proc.kill('SIGKILL');
-        }
-      }, 5000);
+      killGroup('SIGTERM');
+      escalation = setTimeout(() => killGroup('SIGKILL'), KILL_GRACE_MS);
     }, timeoutMs);
 
     proc.stdout.on('data', (data) => {
@@ -79,19 +128,29 @@ export async function runCheck(
       stderr += data.toString();
     });
 
-    proc.on('close', (code) => {
+    proc.on('close', async (code) => {
       clearTimeout(timeout);
-      const duration = Date.now() - startTime;
 
       if (killed) {
+        // 'close' means the pipes closed, not that the group is gone: a member
+        // that ignores SIGTERM and holds no pipe outlives the shell. Resolving
+        // now would let porch exit before the SIGKILL escalation fires.
+        if (proc.pid !== undefined) await waitForGroupExit(proc.pid, KILL_GRACE_MS + 1000);
+        clearTimeout(escalation);
+        stopRelaying();
         resolve({
           name,
           command,
           passed: false,
-          error: `Timed out after ${timeoutMs / 1000}s`,
-          duration_ms: duration,
+          error: `Timed out after ${timeoutMs / 1000}s (raise this check's timeout_ms if it needs longer)`,
+          duration_ms: Date.now() - startTime,
         });
-      } else if (code === 0) {
+        return;
+      }
+
+      stopRelaying();
+      const duration = Date.now() - startTime;
+      if (code === 0) {
         resolve({
           name,
           command,
@@ -113,6 +172,7 @@ export async function runCheck(
 
     proc.on('error', (err) => {
       clearTimeout(timeout);
+      stopRelaying();
       resolve({
         name,
         command,
@@ -287,6 +347,7 @@ export function runArtifactCheck(
 /**
  * Run multiple checks for a phase.
  * Accepts either Record<string, string> (legacy) or Record<string, CheckDef>.
+ * `timeoutMs` applies to each check that carries no `timeout_ms` of its own.
  *
  * Special handling: `pr_exists` checks are routed through the forge concept
  * command dispatcher instead of running the protocol.json command directly.
@@ -320,6 +381,9 @@ export async function runPhaseChecks(
     const checkCwd = typeof checkVal === 'object' && checkVal.cwd
       ? path.resolve(cwd, checkVal.cwd)
       : cwd;
+    const checkTimeoutMs = typeof checkVal === 'object' && checkVal.timeout_ms !== undefined
+      ? checkVal.timeout_ms
+      : timeoutMs;
 
     // Intercept pr_exists: route through forge concept command
     if (name === 'pr_exists') {
@@ -329,7 +393,7 @@ export async function runPhaseChecks(
       continue;
     }
 
-    const result = await runCheck(name, command, checkCwd, env, timeoutMs);
+    const result = await runCheck(name, command, checkCwd, env, checkTimeoutMs);
     results.push(result);
 
     // Stop on first failure

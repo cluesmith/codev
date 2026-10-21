@@ -7,6 +7,7 @@
 
 import type { OverviewBuilder } from '@cluesmith/codev-types';
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
+import { issueRef } from '../issue-id.js';
 
 /**
  * Blocked-gate → codicon name. Keyed off the CANONICAL gate name
@@ -158,5 +159,5 @@ export function builderRowLabel(
     : isIdle
     ? ` waiting on input${idleTime}`
     : '';
-  return `${prefix}#${b.issueId ?? b.id} ${b.issueTitle ?? ''}${stateLabel}`;
+  return `${prefix}${issueRef(b.issueId ?? b.id)} ${b.issueTitle ?? ''}${stateLabel}`;
 }

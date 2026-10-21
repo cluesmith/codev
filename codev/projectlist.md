@@ -233,6 +233,11 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.3.5"
+    name: "Luxor"
+    status: released
+    target_date: "2026-10-18"
+    notes: "Decisions tab with hub notice, porch per-check timeouts with process-group kill, Tower fleet view and review queue in VS Code, Tower startup safety"
   - version: "v3.3.4"
     name: "Luxor"
     status: released

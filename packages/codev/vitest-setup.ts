@@ -28,6 +28,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { realAgyOptIn } from './src/lib/test-env.js';
+import { BUILDER_WORKTREE_ENV } from './src/lib/agent-env.js';
 
 /**
  * Stand-in for the Antigravity CLI: no network, no browser tab, no OAuth. It
@@ -101,6 +102,11 @@ if (!process.env.CODEV_AGENT_FARM_DIR) {
   mkdirSync(agentFarmDir, { recursive: true, mode: 0o700 });
   process.env.CODEV_AGENT_FARM_DIR = agentFarmDir;
 }
+
+// A suite run from inside a builder session inherits that builder's identity
+// (`CODEV_BUILDER_WORKTREE`, Issue #1783), which would override every cwd the
+// identity tests set up. Tests that exercise it set it themselves.
+delete process.env[BUILDER_WORKTREE_ENV];
 
 if (firstRun) {
   process.on('exit', () => {

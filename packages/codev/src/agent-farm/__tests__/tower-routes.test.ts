@@ -9,13 +9,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PASTE_BEGIN, PASTE_END } from '../servers/message-write.js';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
 import { handleRequest } from '../servers/tower-routes.js';
+import { getWorkspaceTerminals } from '../servers/tower-terminals.js';
+import type { DbMailbox } from '../db/types.js';
+import { setArchitectByName } from '../state.js';
+import { DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
 import type { RouteContext } from '../servers/tower-routes.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
-import { MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
+import { MAX_MESSAGE_BYTES, MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
 // Issue #1473: a REAL PtySession for the raw-write route test. The claim under test is that the
 // route's bytes reach the gate's input signal, and a session double cannot make that claim —
@@ -44,6 +51,7 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockReadCloudConfig,
   mockComputeAnalytics,
   mockGetKnownWorkspacePaths,
+  mockGetAllKnownWorkspacePaths,
   mockIsStartupReconcileSettled,
   sendDbHolder } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
@@ -70,6 +78,7 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockReadCloudConfig: vi.fn(),
   mockComputeAnalytics: vi.fn(),
   mockGetKnownWorkspacePaths: vi.fn(() => []),
+  mockGetAllKnownWorkspacePaths: vi.fn((): string[] => []),
   mockIsStartupReconcileSettled: vi.fn(() => true),
   // Holder for the in-memory global.db used by the Spec 1313 send path (mailbox
   // persist + gate delivery). Re-created per test in beforeEach.
@@ -83,6 +92,7 @@ vi.mock('../lib/cloud-config.js', () => ({
 vi.mock('../servers/tower-instances.js', () => ({
   getInstances: mockGetInstances,
   getKnownWorkspacePaths: (...args: unknown[]) => mockGetKnownWorkspacePaths(...args),
+  getAllKnownWorkspacePaths: (...args: unknown[]) => mockGetAllKnownWorkspacePaths(...args),
   getDirectorySuggestions: vi.fn(async () => []),
   launchInstance: vi.fn(async () => ({ success: true })),
   killTerminalWithShellper: vi.fn(async () => true),
@@ -131,6 +141,9 @@ vi.mock('../servers/tower-messages.js', () => ({
 vi.mock('../db/index.js', async (importActual) => ({
   ...(await importActual<typeof import('../db/index.js')>()),
   getGlobalDb: () => sendDbHolder.db,
+  // getDb() aliases the global connection (Issue #1118), so the registry reads in state.ts
+  // see the same in-memory rows as the mailbox.
+  getDb: () => sendDbHolder.db,
 }));
 
 vi.mock('../servers/tower-utils.js', () => ({
@@ -198,9 +211,11 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
   const hdrs: Record<string, string> = {};
 
   const res = {
+    headersSent: false,
     writeHead: vi.fn((status: number, h?: Record<string, string>) => {
       code = status;
       if (h) Object.assign(hdrs, h);
+      res.headersSent = true;
     }),
     setHeader: vi.fn((k: string, v: string) => { hdrs[k] = v; }),
     end: vi.fn((data?: string | Buffer) => {
@@ -734,6 +749,221 @@ describe('tower-routes', () => {
       const parsed = JSON.parse(body());
       expect(parsed.hostname).toBeUndefined();
     });
+
+    describe('decisions (Spec 1819)', () => {
+      const FIXTURE = fs.readFileSync(path.resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8');
+      let workspace: string;
+      let encoded: string;
+      let decisionsFile: string;
+      let origHome: string | undefined;
+
+      beforeEach(() => {
+        workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tower-routes-decisions-')));
+        encoded = Buffer.from(workspace).toString('base64url');
+        decisionsFile = path.join(workspace, 'codev', 'state', 'pending-decisions.md');
+        fs.mkdirSync(path.dirname(decisionsFile), { recursive: true });
+        // The decisions path comes from loadConfig, which also reads ~/.codev/config.json.
+        origHome = process.env.HOME;
+        process.env.HOME = path.join(workspace, 'home');
+      });
+
+      afterEach(() => {
+        process.env.HOME = origHome;
+        fs.rmSync(workspace, { recursive: true, force: true });
+      });
+
+      async function request(method: string, sub: string) {
+        const { res, statusCode, body } = makeRes();
+        await handleRequest(makeReq(method, `/workspace/${encoded}/${sub}`), res, makeCtx());
+        return { status: statusCode(), body: JSON.parse(body()) };
+      }
+
+      it('sets decisionsEnabled on /api/state from whether the file exists', async () => {
+        expect((await request('GET', 'api/state')).body.decisionsEnabled).toBe(false);
+        fs.writeFileSync(decisionsFile, FIXTURE);
+        expect((await request('GET', 'api/state')).body.decisionsEnabled).toBe(true);
+      });
+
+      it('keeps /api/state working, with decisionsEnabled false, when the config is broken', async () => {
+        fs.writeFileSync(decisionsFile, FIXTURE);
+        fs.mkdirSync(path.join(workspace, '.codev'));
+        fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), '{ not json');
+        const { status, body } = await request('GET', 'api/state');
+        expect(status).toBe(200);
+        expect(body.decisionsEnabled).toBe(false);
+        expect(body).toHaveProperty('builders');
+        expect((await request('GET', 'api/decisions')).body.code).toBe('config-error');
+      });
+
+      it('dispatches GET api/decisions and POST api/decisions/rule', async () => {
+        fs.writeFileSync(decisionsFile, FIXTURE);
+        const read = await request('GET', 'api/decisions');
+        expect(read.status).toBe(200);
+        const item = read.body.document.items.find((i: { id: string }) => i.id === 'main-11');
+
+        mockParseJsonBody.mockResolvedValueOnce({ id: 'main-11', word: 'accept', fingerprint: item.fingerprint });
+        const written = await request('POST', 'api/decisions/rule');
+        expect(written.status).toBe(200);
+        expect(written.body.document.items.find((i: { id: string }) => i.id === 'main-11').currentRuling).toBe('accept');
+        expect(fs.readFileSync(decisionsFile, 'utf8')).not.toBe(FIXTURE);
+      });
+
+      // #1828: a submit tells the hub architect through the mailbox — one row, gated.
+      describe('the hub notice (#1828)', () => {
+        const allRows = () => sendDbHolder.db.prepare('SELECT * FROM mailbox').all() as DbMailbox[];
+        /** Register architects in the (in-memory) registry, in the order given. */
+        const register = (...names: string[]) => {
+          for (const name of names) setArchitectByName(workspace, name, { name, cmd: 'claude', startedAt: '2026-10-18T00:00:00.000Z' });
+        };
+
+        /** Submit a ruling for main-11 against a fresh copy of `text`. */
+        async function submit(ruling: Record<string, unknown>, ctx = makeCtx(), text = FIXTURE) {
+          fs.writeFileSync(decisionsFile, text);
+          const item = (await request('GET', 'api/decisions')).body.document.items.find((i: { id: string }) => i.id === 'main-11');
+          mockParseJsonBody.mockResolvedValueOnce({ id: 'main-11', fingerprint: item.fingerprint, ...ruling });
+          const { res, statusCode, body } = makeRes();
+          await handleRequest(makeReq('POST', `/workspace/${encoded}/api/decisions/rule`), res, ctx);
+          return { status: statusCode(), body: JSON.parse(body()) };
+        }
+
+        afterEach(() => {
+          vi.mocked(getWorkspaceTerminals).mockImplementation(() => new Map());
+        });
+
+        /** Route the workspace's live architects to clean prompts; returns each one's write spy. */
+        function liveArchitects(...names: string[]): Record<string, ReturnType<typeof vi.fn>> {
+          const writes = Object.fromEntries(names.map(name => [name, vi.fn()]));
+          vi.mocked(getWorkspaceTerminals).mockImplementation(() => new Map([[workspace, {
+            architects: new Map(names.map(name => [name, `term-arch-${name}`])),
+            builders: new Map(),
+            shells: new Map(),
+            fileTabs: new Map(),
+          }]]) as any);
+          mockGetTerminalManager.mockReturnValue({
+            listSessions: mockListSessions.mockReturnValue([]),
+            getSession: (id: string) => {
+              const name = names.find(n => id === `term-arch-${n}`);
+              return name ? gateSession(writes[name], '❯ ', true, id) : null;
+            },
+          });
+          return writes;
+        }
+
+        it('delivers exactly one mailbox row to a live main architect through the gate', async () => {
+          const writes = liveArchitects('main');
+          register('main');
+          const ctx = makeCtx();
+
+          const { status } = await submit({ word: 'accept', comment: 'ship it\nno new limits' }, ctx);
+          expect(status).toBe(200);
+
+          const rows = allRows();
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({
+            workspace_path: workspace,
+            to_agent: 'main',
+            from_agent: 'decisions-tab',
+            body: 'RULED main-11: accept\nship it\nno new limits',
+            status: 'delivered',
+          });
+          expect(rows[0].formatted_message).toMatch(/^### \[USER via Decisions tab → main \| .+\] ###\nRULED main-11: accept\n/);
+          expect(writes.main.mock.calls.map(([data]) => data).join('')).toContain('RULED main-11: accept');
+          expect(ctx.log).toHaveBeenCalledWith('INFO', expect.stringMatching(/^Decisions notice delivered → main @ /));
+        });
+
+        it('holds the row for an offline main architect rather than telling a live sibling', async () => {
+          const writes = liveArchitects('sibling');
+          register('main', 'sibling');
+          const ctx = makeCtx();
+
+          expect((await submit({ comment: 'which branch?' }, ctx)).status).toBe(200);
+          const rows = allRows();
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({ to_agent: 'main', body: 'QUESTION main-11:\nwhich branch?', status: 'held', reason: 'no-live-pty' });
+          expect(writes.sibling).not.toHaveBeenCalled();
+          expect(ctx.log).toHaveBeenCalledWith('INFO', expect.stringMatching(/^Decisions notice held \(no-live-pty\) → main @ /));
+        });
+
+        it('tells no architect when none is named main, whatever the registration order (#1633)', async () => {
+          // Registered zeta first, then alpha: neither "first registered" nor alphabetical
+          // order may stand in for the hub.
+          const writes = liveArchitects('zeta', 'alpha');
+          register('zeta', 'alpha');
+          const ctx = makeCtx();
+
+          expect((await submit({ word: 'accept' }, ctx)).status).toBe(200);
+          expect(fs.readFileSync(decisionsFile, 'utf8')).not.toBe(FIXTURE);
+          expect(allRows()).toHaveLength(0);
+          expect(writes.zeta).not.toHaveBeenCalled();
+          expect(writes.alpha).not.toHaveBeenCalled();
+          expect(ctx.log).toHaveBeenCalledWith('WARN', expect.stringContaining(`no architect named 'main' is registered in workspace ${workspace}`));
+        });
+
+        it('still writes the ruling, and logs, when the workspace has no architect', async () => {
+          const ctx = makeCtx();
+          const { status, body } = await submit({ word: 'accept' }, ctx);
+
+          expect(status).toBe(200);
+          expect(body.document.items.find((i: { id: string }) => i.id === 'main-11').currentRuling).toBe('accept');
+          expect(allRows()).toHaveLength(0);
+          expect(ctx.log).toHaveBeenCalledWith('WARN', expect.stringContaining('hub architect was not told'));
+        });
+
+        it('frames an /api/send from the Decisions-tab sender to an architect as the owner, never a builder', async () => {
+          mockParseJsonBody.mockResolvedValueOnce({ to: 'architect', message: 'RULED main-11: accept', workspace, from: DECISIONS_TAB_SENDER });
+          mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+          mockResolveAgentInRegistry.mockReturnValue({ workspacePath: workspace, agent: 'main', kind: 'architect' });
+          const { res, body } = makeRes();
+          await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+          const row = mailbox.getById(sendDbHolder.db, JSON.parse(body()).mailboxId)!;
+          expect(row.formatted_message).toMatch(/^### \[USER via Decisions tab → main \| .+\] ###\nRULED main-11: accept\n#+$/);
+        });
+
+        it('does not answer twice when the route fails after its response', async () => {
+          // No `main`, so the notice fails; a log sink that throws on that WARN makes the route
+          // itself throw after res.end(), into handleRequest's catch.
+          const ctx = makeCtx({ log: vi.fn((level: string) => { if (level === 'WARN') throw new Error('log sink down'); }) });
+          fs.writeFileSync(decisionsFile, FIXTURE);
+          const item = (await request('GET', 'api/decisions')).body.document.items.find((i: { id: string }) => i.id === 'main-11');
+          mockParseJsonBody.mockResolvedValueOnce({ id: 'main-11', word: 'accept', fingerprint: item.fingerprint });
+          const { res, statusCode } = makeRes();
+          await handleRequest(makeReq('POST', `/workspace/${encoded}/api/decisions/rule`), res, ctx);
+
+          expect(ctx.log).toHaveBeenCalledWith('ERROR', 'Request error: log sink down');
+          expect(res.writeHead).toHaveBeenCalledOnce();
+          expect(statusCode()).toBe(200);
+        });
+
+        it('refuses, persisting nothing, a notice over the send limit', async () => {
+          register('main');
+          const word = 'x'.repeat(MAX_MESSAGE_BYTES);
+          const text = FIXTURE.replace('**Your word:** `accept`', `**Your word:** \`${word}\``);
+          expect(text).not.toBe(FIXTURE);
+          const ctx = makeCtx();
+
+          expect((await submit({ word }, ctx, text)).status).toBe(200);
+          expect(fs.readFileSync(decisionsFile, 'utf8')).toContain(`\n${word}\n`);
+          expect(allRows()).toHaveLength(0);
+          expect(ctx.log).toHaveBeenCalledWith('WARN', expect.stringContaining('over the 49152-byte'));
+        });
+      });
+
+      it('rejects both routes without the Tower key', async () => {
+        fs.writeFileSync(decisionsFile, FIXTURE);
+        const actual = await vi.importActual<typeof import('../utils/server-utils.js')>('../utils/server-utils.js');
+        const { isRequestAllowed } = await import('../utils/server-utils.js');
+        for (const [method, sub] of [['GET', 'api/decisions'], ['POST', 'api/decisions/rule']]) {
+          (isRequestAllowed as any).mockImplementationOnce(actual.isRequestAllowed);
+          const { res, statusCode, body } = makeRes();
+          await handleRequest(makeReq(method, `/workspace/${encoded}/${sub}`), res, makeCtx());
+          expect(statusCode()).toBe(401);
+          expect(body()).toBe('Unauthorized');
+        }
+        expect(mockParseJsonBody).not.toHaveBeenCalled();
+        expect(fs.readFileSync(decisionsFile, 'utf8')).toBe(FIXTURE);
+      });
+    });
   });
 
   // =========================================================================
@@ -815,6 +1045,38 @@ describe('tower-routes', () => {
       expect(json.success).toBe(false);
       expect(json.error).toMatch(/Failed to create architect terminal/);
       expect(json.error).toMatch(/spawn claude ENOENT/);
+    });
+  });
+
+  // =========================================================================
+  // #1809: deactivate still reaches a live stray builder-worktree workspace
+  // =========================================================================
+
+  describe('POST /api/workspaces/:path/deactivate', () => {
+    const worktree = '/repo/.builders/pir-1802';
+    const encoded = Buffer.from(worktree).toString('base64url');
+
+    it('stops a stray worktree workspace that the filtered list excludes', async () => {
+      const { stopInstance } = await import('../servers/tower-instances.js');
+      mockGetKnownWorkspacePaths.mockReturnValueOnce([]);
+      mockGetAllKnownWorkspacePaths.mockReturnValueOnce([worktree]);
+
+      const req = makeReq('POST', `/api/workspaces/${encoded}/deactivate`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      expect(stopInstance).toHaveBeenCalledWith(worktree);
+    });
+
+    it('still returns 404 for a path Tower has never seen', async () => {
+      mockGetAllKnownWorkspacePaths.mockReturnValueOnce([]);
+
+      const req = makeReq('POST', `/api/workspaces/${encoded}/deactivate`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(404);
     });
   });
 

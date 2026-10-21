@@ -12,6 +12,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
 import type { ArtifactResolver } from './artifacts.js';
+import { CANONICAL_KEY_SOURCE, ISSUE_KEY_SOURCE, canonicalIssueId } from '../../lib/issue-id.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -367,14 +368,24 @@ export function detectProjectIdFromCwd(cwd: string): string | null {
   const match = normalized.match(
     /\/\.builders\/(bugfix-(\d+)(?:-[^/]*)?|(?:aspir|spir|air|pir)-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/,
   );
-  if (!match) return null;
-  // bugfix uses "bugfix-N" as the porch project ID
-  if (match[2]) return `bugfix-${match[2]}`;
-  // Protocol worktrees (aspir, spir, air, pir) use the bare numeric ID
-  if (match[3]) return match[3];
-  // Spec worktrees use zero-padded numeric IDs
-  return match[4];
+  if (match) {
+    // bugfix uses "bugfix-N" as the porch project ID
+    if (match[2]) return `bugfix-${match[2]}`;
+    // Protocol worktrees (aspir, spir, air, pir) use the bare numeric ID
+    if (match[3]) return match[3];
+    // Spec worktrees use zero-padded numeric IDs
+    return match[4];
+  }
+  // Tracker keys (#1740): .builders/bugfix-ENG-123[-slug] → "bugfix-ENG-123",
+  // .builders/pir-ENG-123[-slug] → "ENG-123", canonical upper case.
+  const keyMatch = normalized.match(CWD_KEY_WORKTREE);
+  if (!keyMatch) return null;
+  const key = canonicalIssueId(keyMatch[2]);
+  if (keyMatch[1].toLowerCase() === 'bugfix') return `bugfix-${key}`;
+  return key;
 }
+
+const CWD_KEY_WORKTREE = new RegExp(`/\\.builders/(bugfix|aspir|spir|air|pir)-(${ISSUE_KEY_SOURCE})(?:-[^/]*)?(?:/|$)`, 'i');
 
 export type ResolvedProjectId = { id: string; source: 'explicit' | 'cwd' | 'filesystem' };
 
@@ -409,6 +420,9 @@ export function resolveProjectId(
  * Auto-detect project ID when only one project exists.
  * Returns null if zero or multiple projects found.
  */
+/** Project dir id prefix: `bugfix-237`, `0076`, or a tracker key `ENG-123` / `bugfix-ENG-123` (#1740). */
+const PROJECT_DIR_ID = new RegExp(`^(bugfix-\\d+|\\d{4}|(?:bugfix-)?${CANONICAL_KEY_SOURCE})-`);
+
 export function detectProjectId(workspaceRoot: string): string | null {
   const projectsDir = path.join(workspaceRoot, PROJECTS_DIR);
 
@@ -423,7 +437,7 @@ export function detectProjectId(workspaceRoot: string): string | null {
     if (entry.isDirectory()) {
       // Extract project ID from directory name
       // Matches: "0076-skip-close" -> "0076", "bugfix-237-fix-name" -> "bugfix-237"
-      const match = entry.name.match(/^(bugfix-\d+|\d{4})-/);
+      const match = entry.name.match(PROJECT_DIR_ID);
       if (match) {
         const statusPath = path.join(projectsDir, entry.name, 'status.yaml');
         if (fs.existsSync(statusPath)) {

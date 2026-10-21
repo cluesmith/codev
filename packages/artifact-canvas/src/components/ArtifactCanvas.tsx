@@ -19,6 +19,8 @@ import {
   measureColumnGeometry,
   wheelDeltaPx,
 } from './column-geometry.js';
+import { parseHighlightStyle, parseReadingCursor } from './hover-word.js';
+import { useHoverWordHighlight } from './useHoverWordHighlight.js';
 
 /** Coerce an untrusted (host-persisted) mode value to the closed vocabulary (spec 1380 D4). */
 function coerceReadingMode(value: string | undefined): ReadingMode {
@@ -259,6 +261,8 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     initialReadingMode,
     onReadingModeChange,
     commandAdapter,
+    hoverHighlight,
+    readingCursor,
   } = props;
   const canEdit = onEditComment !== undefined;
   const canDelete = onDeleteComment !== undefined;
@@ -1341,13 +1345,28 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // readout one stable identity per layout-relevant state.
   const progressKey = React.useMemo(() => ({}), [html, markers, composingLine]);
 
+  // Hover reading aid (#1802). Coerced here too: JS hosts can pass anything. The same
+  // layout key as the progress readout re-resolves the word when content shifts under it.
+  useHoverWordHighlight(rootRef, bodyRef, parseHighlightStyle(hoverHighlight), progressKey);
+  // Prose cursor (#1802): arrow carries no attribute, so #1232's `cursor: default` is untouched.
+  let readingCursorAttr: string | undefined;
+  const cursor = parseReadingCursor(readingCursor);
+  if (cursor !== 'arrow') {
+    readingCursorAttr = cursor;
+  }
+
   let rootClassName = 'codev-artifact-canvas';
   if (readingMode === 'horizontal') {
     rootClassName += ' codev-canvas-mode-horizontal';
   }
 
   return (
-    <div ref={rootRef} className={rootClassName} onMouseLeave={dismissAffordance}>
+    <div
+      ref={rootRef}
+      className={rootClassName}
+      data-reading-cursor={readingCursorAttr}
+      onMouseLeave={dismissAffordance}
+    >
       {/* Reading-mode toggle (spec 1380 D4): canvas-owned chrome so every host gets the control.
           Rendered in both modes — it is the way back. Placed BEFORE the body so it is the FIRST
           tab stop, not the last one behind every tabindex="0" block (iter-1 Claude); it is

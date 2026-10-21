@@ -102,6 +102,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@cluesmith/codev-artifact-canvas':
+        specifier: workspace:*
+        version: link:../../packages/artifact-canvas
       '@cluesmith/codev-sdk':
         specifier: workspace:*
         version: link:../../packages/sdk

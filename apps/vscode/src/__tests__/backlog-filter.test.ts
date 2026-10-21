@@ -263,6 +263,12 @@ describe('searchBacklog — sort', () => {
     expect(searchBacklog(items, { sort: 'id', direction: 'asc' }).map(i => i.id)).toEqual(['2', '7', '10']);
   });
 
+  it('sorts tracker keys by project then number, after numbers (#1740)', () => {
+    const keyed = ['ENG-10', 'ENG-9', 'API-3', '42'].map(id => searchItem({ id, title: id, area: '', createdAt: '' }));
+    expect(searchBacklog(keyed, { sort: 'id', direction: 'asc' }).map(i => i.id)).toEqual(['42', 'API-3', 'ENG-9', 'ENG-10']);
+    expect(searchBacklog(keyed, { sort: 'id', direction: 'desc' }).map(i => i.id)).toEqual(['ENG-10', 'ENG-9', 'API-3', '42']);
+  });
+
   it('sorts by title case-insensitively (asc)', () => {
     expect(searchBacklog(items, { sort: 'title', direction: 'asc' }).map(i => i.title))
       .toEqual(['alpha', 'Beta', 'Gamma']);
@@ -315,6 +321,22 @@ describe('clampCriteriaToDataset', () => {
     const out = clampCriteriaToDataset(crit, items);
     expect(out).toEqual({ area: 'area/vscode', assignee: 'alice', author: 'bob' });
     expect(crit.assignee).toBe('alice'); // input untouched
+  });
+});
+
+describe('missing createdAt (#1740: Jira search returns no dates)', () => {
+  it('formatAge renders nothing for a missing date', () => {
+    expect(formatAge(undefined)).toBe('');
+  });
+
+  it('sorts items without a date last on the age column, in both directions', () => {
+    const items = [
+      searchItem({ id: 'ENG-1', title: 'no date', area: '', createdAt: undefined }),
+      searchItem({ id: '2', title: 'old', area: '', createdAt: '2026-01-01T00:00:00Z' }),
+      searchItem({ id: '3', title: 'new', area: '', createdAt: '2026-06-01T00:00:00Z' }),
+    ];
+    expect(searchBacklog(items, { sort: 'age', direction: 'asc' }).map(i => i.id)).toEqual(['3', '2', 'ENG-1']);
+    expect(searchBacklog(items, { sort: 'age', direction: 'desc' }).map(i => i.id)).toEqual(['2', '3', 'ENG-1']);
   });
 });
 

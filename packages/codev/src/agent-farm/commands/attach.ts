@@ -24,7 +24,7 @@ import chalk from 'chalk';
 
 export interface AttachOptions {
   project?: string;     // Builder ID / project ID
-  issue?: number;       // Issue number (for bugfix builders)
+  issue?: number | string;  // Issue number or tracker key (for bugfix builders)
   browser?: boolean;    // Open in browser instead of attaching
 }
 

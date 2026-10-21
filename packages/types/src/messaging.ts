@@ -10,3 +10,13 @@
  * builder-spoofing check like any other non-builder sender.
  */
 export const VSCODE_USER_SENDER = 'vscode-user';
+
+/**
+ * Reserved `from` sender identity for the notice Tower sends the hub architect when the
+ * owner submits a ruling from the dashboard's Decisions tab (#1828).
+ *
+ * Like {@link VSCODE_USER_SENDER}, Tower's `formatMessageForTarget` matches it and renders
+ * a distinct `[USER via Decisions tab]` header, so the owner's word relayed by the tab is
+ * never framed as a builder's message.
+ */
+export const DECISIONS_TAB_SENDER = 'decisions-tab';

@@ -200,6 +200,25 @@ function normalizeContextRefresh(
   return { on_enter, on_plan_phase_advance };
 }
 
+/** setTimeout's ceiling; a larger delay overflows and fires after 1ms. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
+/**
+ * Validate a check's optional `timeout_ms` (#1814). Absent stays absent, so the
+ * runner's 5-minute default applies. Anything but a positive integer fails
+ * loudly: silently reverting to the default is the failure this key exists to fix.
+ */
+function parseTimeoutMs(value: unknown, where: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0 || value > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `${where}: timeout_ms must be a positive integer of milliseconds (at most ${MAX_TIMEOUT_MS}), ` +
+        `got ${JSON.stringify(value)}`,
+    );
+  }
+  return value;
+}
+
 /**
  * Normalize protocol JSON to our simplified Protocol type
  */
@@ -232,7 +251,11 @@ function normalizeProtocol(json: unknown): Protocol {
         checks[name] = { command: val };
       } else if (typeof val === 'object' && val !== null && 'command' in val) {
         const checkObj = val as Record<string, unknown>;
-        checks[name] = { command: checkObj.command as string, cwd: checkObj.cwd as string | undefined };
+        checks[name] = {
+          command: checkObj.command as string,
+          cwd: checkObj.cwd as string | undefined,
+          timeout_ms: parseTimeoutMs(checkObj.timeout_ms, `Invalid protocol: check "${name}"`),
+        };
       }
     }
   }
@@ -243,7 +266,11 @@ function normalizeProtocol(json: unknown): Protocol {
       for (const [name, check] of Object.entries(phase.checks as Record<string, unknown>)) {
         if (typeof check === 'object' && check !== null && 'command' in check) {
           const checkObj = check as Record<string, unknown>;
-          checks[name] = { command: checkObj.command as string, cwd: checkObj.cwd as string | undefined };
+          checks[name] = {
+            command: checkObj.command as string,
+            cwd: checkObj.cwd as string | undefined,
+            timeout_ms: parseTimeoutMs(checkObj.timeout_ms, `Invalid protocol: check "${name}"`),
+          };
         } else if (typeof check === 'string') {
           checks[name] = { command: check };
         }
@@ -380,9 +407,10 @@ export function getNextPhase(protocol: Protocol, currentPhaseId: string): Protoc
  * Get check definitions for a phase, optionally merging in .codev/config.json overrides.
  *
  * Override semantics (applied per check name):
- *   - skip: true   → check is omitted from the result
- *   - command set  → replaces the protocol's command
- *   - cwd set      → replaces the protocol's cwd
+ *   - skip: true      → check is omitted from the result
+ *   - command set     → replaces the protocol's command
+ *   - cwd set         → replaces the protocol's cwd
+ *   - timeout_ms set  → replaces the protocol's timeout
  *
  * Unknown override names (not found in this phase's check list) are warned
  * via a chalk.yellow log line. All existing call sites that pass no overrides
@@ -426,6 +454,9 @@ export function getPhaseChecks(
       result[checkName] = {
         command: override.command ?? base.command,
         cwd: override.cwd ?? base.cwd,
+        timeout_ms:
+          parseTimeoutMs(override.timeout_ms, `.codev/config.json porch.checks.${checkName}`) ??
+          base.timeout_ms,
       };
     } else {
       result[checkName] = base;

@@ -257,5 +257,6 @@ afx open <file>                 # Open file in annotation viewer (NOT system ope
 afx shell                       # Spawn utility shell
 afx attach                      # Attach to running builder terminal
 afx rename <name>               # Rename current shell session
+afx decisions init              # Create the decisions file; turns on the Decisions tab
 afx architect                   # Start architect session in current terminal
 ```

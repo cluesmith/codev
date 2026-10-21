@@ -97,7 +97,7 @@ function scopeResolver(
  * @param resolvedChecks - checks after applying overrides (skipped ones absent)
  * @param overrides - raw override map from .codev/config.json (null if not configured)
  */
-function logCheckOverrides(
+export function logCheckOverrides(
   phaseCheckNames: string[],
   resolvedChecks: Record<string, import('./types.js').CheckDef>,
   overrides: import('./types.js').CheckOverrides | null
@@ -110,10 +110,11 @@ function logCheckOverrides(
 
     if (override.skip) {
       console.log(chalk.yellow(`  ⚠ Check "${name}" skipped (.codev/config.json)`));
-    } else if (override.command || override.cwd) {
+    } else if (override.command || override.cwd || override.timeout_ms !== undefined) {
       const parts: string[] = [];
       if (override.command) parts.push(resolvedChecks[name]?.command ?? override.command);
       if (override.cwd) parts.push(`cwd: ${override.cwd}`);
+      if (override.timeout_ms !== undefined) parts.push(`timeout: ${override.timeout_ms}ms`);
       console.log(chalk.yellow(`  ⚠ Check "${name}" overridden: ${parts.join(', ')}`));
     }
   }

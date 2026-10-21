@@ -7,6 +7,11 @@ Use it for dead code and unused dependencies, quarterly hygiene, pre-release cle
 keeping the governance docs honest — `arch.md`/`arch-critical.md`,
 `lessons-learned.md`/`lessons-critical.md`, and the `CLAUDE.md`↔`AGENTS.md` twins.
 
+It is a scheduled, whole-repository run that a human asks for, scoped from the last run's base
+commit. It is **not** the protocol for one targeted cleanup: a specific dead file, a drifted
+document, or a stale section is an ordinary issue under BUGFIX (or AIR). Reaching for "a
+MAINTAIN pass" to fix one thing misuses the since-marker and the audit discipline below.
+
 ## The state machine
 
 ```json

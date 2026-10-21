@@ -41,6 +41,7 @@ import {
   formatSnapshotLostWarning,
   appendTreeChangeWarningToOutput,
 } from './tree-tripwire.js';
+import { ISSUE_KEY_SOURCE } from '../../lib/issue-id.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -334,8 +335,18 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): Buil
   } else if (projectDirs.length > 1) {
     // Multiple project dirs — try to disambiguate from worktree directory name
     const cwd = process.cwd();
+    // Tracker-key worktrees (#1740): .builders/pir-ENG-123[-slug]
+    const keyMatch = cwd.match(new RegExp(`\\.builders/[a-z]+-(${ISSUE_KEY_SOURCE})(?:-|/|$)`, 'i'));
     const builderMatch = cwd.match(/\.builders\/[^/]*?-?(\d+)-([^/]+)/);
-    if (builderMatch) {
+    if (keyMatch) {
+      const key = keyMatch[1].toLowerCase();
+      const matched = projectDirs.find(d => d.toLowerCase().startsWith(`${key}-`) || d.toLowerCase().startsWith(`bugfix-${key}-`));
+      if (matched) {
+        dir = matched;
+      } else {
+        throw new Error(`Multiple projects found and none match worktree ID ${keyMatch[1]}: ${projectDirs.join(', ')}`);
+      }
+    } else if (builderMatch) {
       const worktreeId = builderMatch[1];
       const matched = projectDirs.find(d => d.startsWith(`${worktreeId}-`) || d.startsWith(`bugfix-${worktreeId}-`));
       if (matched) {

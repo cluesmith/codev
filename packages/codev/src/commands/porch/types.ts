@@ -56,6 +56,7 @@ export interface ProtocolPhase {
 export interface CheckDef {
   command: string;             // Command to run (e.g., "npm run build")
   cwd?: string;               // Working directory relative to project root (e.g., "packages/codev")
+  timeout_ms?: number;        // Kill the check after this long (default: 5 minutes)
 }
 
 /**
@@ -65,6 +66,7 @@ export interface CheckDef {
 export interface CheckOverride {
   command?: string;    // Replace the protocol's check command
   cwd?: string;        // Replace the protocol's working directory
+  timeout_ms?: number; // Replace the protocol's timeout
   skip?: boolean;      // Omit this check entirely when true
 }
 

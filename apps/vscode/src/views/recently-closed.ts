@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { OverviewCache } from './overview-data.js';
+import { issueRef } from '../issue-id.js';
 
 export class RecentlyClosedProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
@@ -18,7 +19,7 @@ export class RecentlyClosedProvider implements vscode.TreeDataProvider<vscode.Tr
     if (!data) { return []; }
 
     return data.recentlyClosed.map(item => {
-      const ti = new vscode.TreeItem(`#${item.id} ${item.title} (${item.type})`);
+      const ti = new vscode.TreeItem(`${issueRef(item.id)} ${item.title} (${item.type})`);
       ti.tooltip = item.url;
       ti.contextValue = 'recently-closed';
       ti.iconPath = new vscode.ThemeIcon('check');

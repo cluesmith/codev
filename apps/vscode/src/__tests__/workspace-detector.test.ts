@@ -29,7 +29,7 @@ vi.mock('vscode', () => ({
   },
 }));
 
-import { detectWorkspacePath, isCodevWorkspaceRoot } from '../workspace-detector.js';
+import { detectWorkspace, detectWorkspacePath, detectIsBuilderWorktree, isCodevWorkspaceRoot } from '../workspace-detector.js';
 
 let root: string;
 
@@ -91,5 +91,48 @@ describe('detectWorkspacePath', () => {
     workspacePathOverride = '/somewhere/else';
     openFolder(root); // plain folder, no markers
     expect(detectWorkspacePath()).toBe('/somewhere/else');
+  });
+});
+
+describe('detectWorkspace — builder worktrees (#1809)', () => {
+  const makeWorktree = (id: string) => {
+    const worktree = join(root, '.builders', id);
+    mkdirSync(join(worktree, 'codev'), { recursive: true });
+    return worktree;
+  };
+
+  it('classifies a codev root as a root', () => {
+    mkdirSync(join(root, 'codev'));
+    openFolder(root);
+    expect(detectWorkspace()).toEqual({ kind: 'root', path: root });
+    expect(detectIsBuilderWorktree()).toBe(false);
+  });
+
+  it('classifies a builder worktree and resolves its parent root', () => {
+    const worktree = makeWorktree('pir-1809');
+    openFolder(worktree);
+    expect(detectWorkspace()).toEqual({
+      kind: 'builder-worktree',
+      path: worktree,
+      workspaceRoot: root,
+      builderId: 'pir-1809',
+    });
+    expect(detectIsBuilderWorktree()).toBe(true);
+  });
+
+  it('detectWorkspacePath returns the PARENT root for a worktree window', () => {
+    openFolder(makeWorktree('pir-1809'));
+    expect(detectWorkspacePath()).toBe(root);
+  });
+
+  it('classifies an override that points into a worktree as a worktree', () => {
+    workspacePathOverride = '/repo/.builders/bugfix-7';
+    expect(detectWorkspace()).toEqual({
+      kind: 'builder-worktree',
+      path: '/repo/.builders/bugfix-7',
+      workspaceRoot: '/repo',
+      builderId: 'bugfix-7',
+    });
+    expect(detectWorkspacePath()).toBe('/repo');
   });
 });

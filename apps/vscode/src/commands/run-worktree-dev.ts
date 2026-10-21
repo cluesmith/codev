@@ -14,6 +14,7 @@ import type { ConnectionManager } from '../connection-manager.js';
 import type { TerminalManager } from '../terminal-manager.js';
 import { startDevForTarget } from './dev-shared.js';
 import { builderById } from '../builder-lookup.js';
+import { issueRef } from '../issue-id.js';
 
 export async function runWorktreeDev(
   connectionManager: ConnectionManager,
@@ -78,7 +79,7 @@ interface BuilderLike {
 async function pickBuilder<T extends BuilderLike>(builders: T[]): Promise<T | undefined> {
   const picked = await vscode.window.showQuickPick(
     builders.map(b => ({
-      label: `#${b.issueId ?? b.id} ${b.issueTitle ?? ''}`,
+      label: `${issueRef(b.issueId ?? b.id)} ${b.issueTitle ?? ''}`,
       builder: b,
     })),
     { placeHolder: 'Select builder to run dev for' },

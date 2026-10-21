@@ -2428,3 +2428,450 @@ a.attention-row {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Decisions Tab (Spec 1819) */
+.decisions-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.decisions-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.decisions-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.decisions-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.decisions-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.decisions-path {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
+}
+
+.decisions-loading,
+.decisions-empty {
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 20px 0;
+  text-align: center;
+}
+
+.decisions-notice,
+.decisions-error {
+  font-size: 12px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.decisions-notice {
+  color: var(--status-waiting);
+  background: rgba(234, 179, 8, 0.1);
+}
+
+.decisions-error {
+  color: var(--status-error);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* The shared markdown renderer, re-themed to the dashboard. The tokens are declared on the
+   renderer's own root, so the override must target that root, not an ancestor. */
+.decisions-view .codev-artifact-canvas-rendered {
+  --codev-canvas-foreground: var(--text-primary);
+  --codev-canvas-background: transparent;
+  --codev-canvas-accent: var(--accent);
+  --codev-canvas-border: var(--border-color);
+  --codev-canvas-muted: var(--text-secondary);
+  --codev-canvas-code-background: var(--bg-tertiary);
+  --codev-canvas-code-foreground: var(--text-primary);
+  --codev-canvas-link: #60a5fa;
+  --codev-canvas-font-size: 13px;
+  --codev-canvas-paragraph-spacing: 8px;
+  overflow-wrap: anywhere;
+}
+
+.decisions-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.decisions-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.decisions-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  font-size: 12px;
+}
+
+.decisions-item-id {
+  font-family: monospace;
+  color: var(--accent);
+}
+
+.decisions-stamp {
+  color: var(--text-secondary);
+}
+
+.decisions-stamp-unconverted {
+  font-family: monospace;
+}
+
+.decisions-stamp-flag {
+  display: block;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  color: var(--status-waiting);
+}
+
+.decisions-card-question {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 4px 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.decisions-card-body {
+  margin-bottom: 8px;
+}
+
+.decisions-section-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+
+.decisions-thread {
+  list-style: none;
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-color);
+}
+
+.decisions-thread-entry + .decisions-thread-entry {
+  margin-top: 6px;
+}
+
+.decisions-thread-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.decisions-thread-who {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.decisions-thread-answer .decisions-thread-who {
+  color: var(--accent);
+}
+
+.decisions-thread-time {
+  color: var(--text-muted);
+}
+
+.decisions-thread-awaiting {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--status-waiting);
+}
+
+.decisions-options {
+  margin-bottom: 8px;
+}
+
+.decisions-option-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.decisions-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.decisions-option-word {
+  font-family: monospace;
+  background: var(--bg-tertiary);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+/* The word and its colon stay together: "raised: raise the limit now". */
+.decisions-option-term {
+  white-space: nowrap;
+}
+
+.decisions-option-desc {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.decisions-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--status-active);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.decisions-ruling-text {
+  margin: 0;
+  padding: 6px 8px;
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-left: 3px solid var(--accent);
+  border-radius: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.decisions-ruling-note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.decisions-form {
+  margin-bottom: 8px;
+}
+
+/* The fieldset is there for the radio group's semantics; it draws no frame of its own. */
+.decisions-form .decisions-options {
+  border: none;
+  margin: 0 0 8px;
+  padding: 0;
+  min-width: 0;
+}
+
+.decisions-form legend {
+  padding: 0;
+}
+
+.decisions-choice {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.decisions-choice input {
+  margin: 0;
+  align-self: center;
+  accent-color: var(--accent);
+}
+
+.decisions-options:disabled .decisions-choice {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.decisions-link-btn {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.decisions-held-pointer {
+  margin: 8px 0 0;
+}
+
+.decisions-held-pointer .decisions-link-btn {
+  color: inherit;
+  font-size: inherit;
+}
+
+.decisions-comment-label {
+  display: block;
+}
+
+.decisions-comment {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 60px;
+  resize: vertical;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.decisions-comment:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.decisions-comment:read-only {
+  opacity: 0.6;
+}
+
+.decisions-form .decisions-notice,
+.decisions-form .decisions-error {
+  margin: 6px 0 0;
+}
+
+.decisions-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.decisions-submit-btn {
+  padding: 5px 14px;
+  font-size: 13px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.decisions-submit-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.decisions-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.decisions-held {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.decisions-held-card {
+  border-style: dashed;
+  border-color: var(--status-waiting);
+}
+
+.decisions-held-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--status-waiting);
+}
+
+.decisions-held-question {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 4px 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.decisions-held-text {
+  user-select: text;
+}
+
+.decisions-discard-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.decisions-discard-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.decisions-ruled {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.decisions-ruled > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+
+.decisions-ruled-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 768px) {
+  .decisions-content {
+    padding: 8px 12px;
+  }
+
+  .decisions-card {
+    padding: 8px 10px;
+  }
+
+  /* 16px keeps iOS from zooming the page when the comment box takes focus. */
+  .decisions-comment {
+    font-size: 16px;
+  }
+
+  .decisions-submit-btn {
+    padding: 8px 18px;
+    font-size: 14px;
+  }
+}

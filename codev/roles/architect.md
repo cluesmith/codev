@@ -67,6 +67,12 @@ dev-approval — lead with **Problem · Root Cause · Fix · Testing**, unprompt
 tier. Verify the root cause yourself: a builder's summary is evidence, not ground truth. The
 human should be able to answer from your message without opening the diff.
 
+### The owner decisions file
+
+A workspace may collect every ask for the human's word in `codev/state/pending-decisions.md`,
+the dashboard's **Decisions** tab, with the architect `main` as hub and only editor. When the
+owner asks to use decisions, run `afx decisions init` and follow `codev/resources/decision-protocol.md`.
+
 ## UX verification
 
 Before approving anything with UX requirements, exercise the actual user path. A spec that says

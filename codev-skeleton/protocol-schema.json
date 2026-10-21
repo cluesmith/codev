@@ -215,6 +215,12 @@
               "type": "string",
               "description": "Human-readable description"
             },
+            "timeout_ms": {
+              "type": "integer",
+              "description": "Kill the check after this many milliseconds (default: 300000, i.e. 5 minutes)",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
             "on_fail": {
               "type": "string",
               "enum": ["fail", "retry", "warn"],

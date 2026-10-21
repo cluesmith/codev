@@ -10,6 +10,7 @@ import {
   isRetiredHarness,
   getRetirement,
   getBuiltinHarness,
+  resolveInteractiveTaskLauncher,
   type CustomHarnessConfig,
 } from '../utils/harness.js';
 
@@ -513,6 +514,158 @@ describe('harness', () => {
       expect(getRetirement('claude')).toBeUndefined();
       expect(getRetirement('frobnicate')).toBeUndefined();
       expect(getRetirement('constructor')).toBeUndefined();
+    });
+  });
+
+  // ===========================================================================
+  // Interactive task launch (Spec 1797)
+  // ===========================================================================
+
+  describe('buildInteractiveTaskLaunch', () => {
+    const PROMPT = 'Bootstrap the governance docs.';
+
+    it('claude and codex pass the prompt as the positional argument after --', () => {
+      expect(CLAUDE_HARNESS.buildInteractiveTaskLaunch?.(PROMPT)).toEqual({ args: ['--', PROMPT] });
+      expect(CODEX_HARNESS.buildInteractiveTaskLaunch?.(PROMPT)).toEqual({ args: ['--', PROMPT] });
+    });
+
+    it('opencode and custom harnesses do not declare it', () => {
+      expect(OPENCODE_HARNESS.buildInteractiveTaskLaunch).toBeUndefined();
+      expect(OPENCODE_HARNESS.interactiveLaunchBlocker).toBeUndefined();
+      const custom = buildCustomHarnessProvider({ roleArgs: [], roleScriptFragment: '' });
+      expect(custom.buildInteractiveTaskLaunch).toBeUndefined();
+    });
+  });
+
+  describe('resolveInteractiveTaskLauncher', () => {
+    const PROMPT = 'Bootstrap the governance docs.';
+
+    function launch(command: string | string[], harnessName?: string, custom?: Record<string, CustomHarnessConfig>) {
+      const launcher = resolveInteractiveTaskLauncher(command, harnessName, custom);
+      if (!launcher.supported) throw new Error(`expected supported, got: ${launcher.reason}`);
+      return { harnessName: launcher.harnessName, ...launcher.buildLaunch(PROMPT) };
+    }
+
+    function unsupportedReason(command: string | string[], harnessName?: string, custom?: Record<string, CustomHarnessConfig>): string {
+      const launcher = resolveInteractiveTaskLauncher(command, harnessName, custom);
+      if (launcher.supported) throw new Error('expected unsupported');
+      return launcher.reason;
+    }
+
+    it('claude with flags keeps the flags and appends the prompt', () => {
+      expect(launch('claude --dangerously-skip-permissions')).toEqual({
+        harnessName: 'claude',
+        executable: 'claude',
+        args: ['--dangerously-skip-permissions', '--', PROMPT],
+      });
+    });
+
+    it('a full codex path resolves by basename', () => {
+      expect(launch('/opt/homebrew/bin/codex')).toEqual({
+        harnessName: 'codex',
+        executable: '/opt/homebrew/bin/codex',
+        args: ['--', PROMPT],
+      });
+    });
+
+    it('accepts the array command form', () => {
+      expect(launch(['claude', '--model', 'opus'])).toEqual({
+        harnessName: 'claude',
+        executable: 'claude',
+        args: ['--model', 'opus', '--', PROMPT],
+      });
+    });
+
+    it('an explicit architectHarness wins over an unrecognisable command path', () => {
+      expect(launch('/usr/local/bin/my-wrapper --yolo', 'codex')).toEqual({
+        harnessName: 'codex',
+        executable: '/usr/local/bin/my-wrapper',
+        args: ['--yolo', '--', PROMPT],
+      });
+    });
+
+    it('an unrecognised command is unsupported, never the Claude fall-through', () => {
+      expect(unsupportedReason('aider --model x')).toMatch(/not recognised/);
+    });
+
+    it('opencode is unsupported', () => {
+      expect(unsupportedReason('opencode')).toMatch(/does not support/);
+    });
+
+    it('a custom harness is unsupported', () => {
+      const custom: Record<string, CustomHarnessConfig> = {
+        'my-agent': { roleArgs: [], roleScriptFragment: '' },
+        gemini: { roleArgs: [], roleScriptFragment: '' },
+      };
+      expect(unsupportedReason('my-agent', 'my-agent', custom)).toMatch(/does not support/);
+      expect(unsupportedReason('gemini', 'gemini', custom)).toMatch(/does not support/);
+    });
+
+    it('claude -p and --print are unsupported with a reason', () => {
+      expect(unsupportedReason('claude -p')).toMatch(/passes -p,/);
+      expect(unsupportedReason('claude --dangerously-skip-permissions --print')).toMatch(/--print/);
+    });
+
+    it('claude --bg and --resume (which would swallow the prompt) are unsupported', () => {
+      expect(unsupportedReason('claude --bg')).toMatch(/--bg/);
+      expect(unsupportedReason('claude --background')).toMatch(/--background/);
+      expect(unsupportedReason('claude -r')).toMatch(/passes -r,/);
+      expect(unsupportedReason('claude --resume')).toMatch(/--resume/);
+    });
+
+    it('blocking flags match in the --flag=value form too', () => {
+      expect(unsupportedReason('claude --resume=abc123')).toMatch(/--resume=abc123/);
+    });
+
+    it('a variadic configured flag cannot swallow the prompt (it follows --)', () => {
+      expect(launch('claude --add-dir /a /b').args).toEqual(['--add-dir', '/a', '/b', '--', PROMPT]);
+      expect(launch('codex -i shot.png').args).toEqual(['-i', 'shot.png', '--', PROMPT]);
+    });
+
+    it('claude subcommands are unsupported with a reason', () => {
+      expect(unsupportedReason('claude doctor')).toMatch(/"doctor" subcommand/);
+      expect(unsupportedReason('claude --dangerously-skip-permissions mcp')).toMatch(/"mcp" subcommand/);
+      for (const sub of ['agents', 'attach', 'auth', 'install', 'update', 'ultrareview']) {
+        expect(unsupportedReason(`claude ${sub}`)).toMatch(`"${sub}" subcommand`);
+      }
+    });
+
+    it('codex mcp-server (earlier releases) is unsupported', () => {
+      expect(unsupportedReason('codex mcp-server')).toMatch(/"mcp-server" subcommand/);
+    });
+
+    it('codex exec and other subcommands are unsupported with a reason', () => {
+      expect(unsupportedReason('codex exec')).toMatch(/"exec" subcommand/);
+      expect(unsupportedReason('codex e')).toMatch(/"e" subcommand/);
+      expect(unsupportedReason('codex --full-auto review')).toMatch(/"review" subcommand/);
+    });
+
+    it('a codex flag value is not misread as a subcommand', () => {
+      expect(launch('codex --model gpt-5-codex').args).toEqual(['--model', 'gpt-5-codex', '--', PROMPT]);
+    });
+
+    it('blocks the non-interactive codex subcommands by name', () => {
+      for (const sub of ['exec', 'e', 'review', 'login', 'logout', 'mcp', 'resume', 'fork']) {
+        expect(unsupportedReason(`codex ${sub}`)).toMatch(`"${sub}" subcommand`);
+      }
+    });
+
+    it('a detected retired gemini command returns the retirement message instead of throwing', () => {
+      expect(unsupportedReason('gemini --yolo')).toMatch(/retired/i);
+    });
+
+    it('an explicit retired or unknown harness name is unsupported, not thrown', () => {
+      expect(unsupportedReason('claude', 'gemini')).toMatch(/retired/i);
+      expect(unsupportedReason('claude', 'nonexistent')).toMatch(/Unknown harness "nonexistent"/);
+    });
+
+    it('an inherited Object key as harness name is unsupported', () => {
+      expect(unsupportedReason('claude', 'constructor')).toMatch(/Unknown harness/);
+    });
+
+    it('an empty command is unsupported', () => {
+      expect(unsupportedReason('   ')).toMatch(/no agent command/);
+      expect(unsupportedReason([])).toMatch(/no agent command/);
     });
   });
 });

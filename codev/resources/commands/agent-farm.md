@@ -682,6 +682,21 @@ Dismissal is CLI-only; the dashboard and VSCode held-count indicators surface th
 
 ---
 
+### afx decisions init
+
+Turn on the dashboard's Decisions tab (Issue #1840).
+
+```bash
+afx decisions init [--path <file>]
+```
+
+**Options:**
+- `--path <file>` - File to create, relative to the workspace root (default: `dashboard.decisionsFile`, else `codev/state/pending-decisions.md`)
+
+Creates the decisions file from its template and prints the sentence to tell the main architect. It never replaces an existing file, and refuses a path outside the workspace. See [Decisions tab](#decisions-tab).
+
+---
+
 ### afx interrupt
 
 Interrupt a builder mid-turn by sending an ESC keystroke to its PTY.
@@ -1162,6 +1177,32 @@ refreshes the snapshot from the main workspace.
 
 Both are Tower-global (they apply to the whole Tower, not per-project) and optional — omit them to use the defaults above.
 
+### Decisions tab
+
+Turn the tab on with `afx decisions init`. It creates the decisions file from its template, prints where it went, and gives the one sentence to tell the main architect: "Route every ask for my word through the decisions file." It refuses a file that already exists, because that file holds the owner's rulings, and a path outside the workspace. `--path <file>` creates another file, relative to the workspace root; the tab shows it once `dashboard.decisionsFile` names it.
+
+When a workspace has a pending-decisions file, the dashboard shows a **Decisions** tab (Spec 1819). The tab is a view of that file. Each item under `## Open` becomes a card with a click box per option (the first option, the recommended one, is marked) and a comment box. Submitting writes the chosen word, then the comment, on the lines right after the item's `**Your word:**` line, exactly as the owner would type them, and changes nothing else. `## Ruled` is shown below as a collapsed, read-only list. The file is the only state. While the tab is open it re-reads the file every 2 seconds, so edits made elsewhere appear without a reload, and an unsent draft survives them.
+
+The file's format and the process around it are in [`decision-protocol.md`](../decision-protocol.md): one hub architect, `main`, is the only agent that edits the file, other architects send it their items, and the hub relays each ruling. The tab reads exactly the item format that document describes.
+
+The file is `codev/state/pending-decisions.md` unless `dashboard.decisionsFile` names another:
+
+```json
+{
+  "dashboard": {
+    "decisionsFile": "codev/state/pending-decisions.md"
+  }
+}
+```
+
+- **Relative to the workspace root.** An absolute path, or anything but a non-empty string, is a configuration error: the tab does not appear, and Tower logs the error once.
+- **Inside the workspace.** The path is resolved with symlinks followed on every read and write, and a path that leads outside the workspace (directly, through `..`, or through a symlink) is refused. A symlinked decisions file keeps its link: the ruling is written to its in-workspace target.
+- **Layers.** Like the other settings, it can be set globally in `~/.codev/config.json`, for the team in the project's `.codev/config.json`, or per engineer in `.codev/config.local.json`. Project settings override global ones, and project-local settings override both.
+
+The tab appears once the file exists (within about 5 seconds of a change to the setting), and then stays for the page session: if the file is deleted while the tab is open, the tab says so and keeps any unsent draft. A reload of a workspace without the file shows no tab. A submit is refused, with a message on the card and the draft kept, when the item has changed or been ruled since the tab showed it. Tower applies one write to a file at a time and replaces the file atomically (a temporary file renamed over it).
+
+After each ruling is written, Tower tells the workspace's hub architect, the one named `main`, in one mailbox message delivered like an `afx send architect`: `RULED <id>: <word>`, or `QUESTION <id>:` for a comment-only submit, with the comment on the lines after it, under a `[USER via Decisions tab]` header. Like any message it waits for a clear prompt, and it waits for `main` to come back if `main` is not running. A workspace with no architect named `main` gets no notice: Tower logs a warning naming the workspace and does not pick another architect. A failed send is logged and leaves the ruling as written: the file is still the source of truth, and a ruling typed into the file by hand reaches the hub only when it scans the file.
+
 ### Language-Agnostic Porch Checks
 
 By default, porch protocol checks use `npm run build` and `npm test`. Non-Node.js projects can override these via the `porch.checks` section in `.codev/config.json`:
@@ -1181,6 +1222,7 @@ By default, porch protocol checks use `npm run build` and `npm test`. Non-Node.j
 **Override fields:**
 - `command` — Replace the protocol's check command with a custom shell command
 - `cwd` — Override the working directory for this check (relative to project root)
+- `timeout_ms` — Kill the check after this many milliseconds (default 5 minutes; a protocol.json check can set it too). On timeout porch kills the check's whole process tree
 - `skip: true` — Omit this check entirely (for checks that don't apply to your project)
 
 Porch logs a visible warning for each overridden or skipped check so the change is always visible.

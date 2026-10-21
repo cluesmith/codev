@@ -1,5 +1,6 @@
 import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import type { OverviewBuilder } from '../lib/api.js';
+import { issueRef } from '../lib/issueIds.js';
 
 interface BuilderCardProps {
   builder: OverviewBuilder;
@@ -46,7 +47,7 @@ function elapsed(startedAt: string | null, idleMs: number): string {
 }
 
 export function BuilderCard({ builder, onOpen, architectCount = 0 }: BuilderCardProps) {
-  const displayId = builder.issueId ? `#${builder.issueId}` : builder.id;
+  const displayId = builder.issueId ? issueRef(builder.issueId) : builder.id;
   const displayTitle = builder.issueTitle || builder.id;
   const isBlocked = builder.blocked !== null && builder.blocked !== '';
   const isWaiting = !isBlocked && isIdleWaiting(builder);

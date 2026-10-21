@@ -133,6 +133,12 @@
           "type": "string",
           "description": "Command to run"
         },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Kill the check after this many milliseconds (default: 300000, i.e. 5 minutes)"
+        },
         "on_fail": {
           "type": "string",
           "description": "Action on failure: 'retry' or phase name to return to"

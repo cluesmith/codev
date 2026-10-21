@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
+import { issueRef } from '../issue-id.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -38,7 +39,7 @@ export async function cleanupBuilder(
 
   const picked = await vscode.window.showQuickPick(
     builders.map(b => ({
-      label: `#${b.issueId ?? b.id} ${b.issueTitle ?? ''}`,
+      label: `${issueRef(b.issueId ?? b.id)} ${b.issueTitle ?? ''}`,
       description: b.phase,
       id: b.id,
     })),

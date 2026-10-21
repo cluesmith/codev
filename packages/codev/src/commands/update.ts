@@ -9,7 +9,8 @@
  *    4. Remove .update-hashes.json
  *
  * B. AI-assistant file refresh (runs every time):
- *    1. Update CLAUDE.md, AGENTS.md, and provider skill trees from package
+ *    1. Update CLAUDE.md, AGENTS.md, and provider skill trees from package. A skill the
+ *       user never edited is replaced; an edited one gets `.codev-new` copies (#1811).
  */
 
 import * as fs from 'node:fs';
@@ -23,7 +24,6 @@ import {
   loadHashStore,
 } from '../lib/templates.js';
 import {
-  copySkills,
   copyRootFiles,
   copyHotTierDefaults,
   copyColdTierDefaults,
@@ -34,6 +34,11 @@ import {
   CODEV_GITIGNORE_ENTRIES,
 } from '../lib/gitignore.js';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
+import { shouldOfferBootstrap } from '../lib/governance-bootstrap.js';
+import { refreshSkills, CODEV_NEW_SUFFIX } from '../lib/skill-refresh.js';
+
+export const BOOTSTRAP_DOCS_HINT =
+  'Governance docs are still placeholders: run `codev bootstrap-docs` to draft them from this codebase.';
 
 export interface UpdateOptions {
   dryRun?: boolean;
@@ -60,6 +65,8 @@ export interface UpdateResult {
   gitignoreSkipped?: boolean;
   /** Loud warnings for PR-producing protocol overrides missing a `pr` gate (#943). */
   prGateWarnings?: string[];
+  /** Set when governance files are still starters on a non-empty project (Spec 1797). */
+  bootstrapDocsHint?: string;
   error?: string;
 }
 
@@ -220,28 +227,61 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
 
     const templatesDir = getTemplatesDir();
 
-    // Add missing provider-native skills without replacing customizations.
-    if (!dryRun) {
-      const skillsResult = copySkills(targetDir, templatesDir, { skipExisting: true });
-      for (const skill of skillsResult.copied) {
-        result.newFiles.push(skill);
-        log(chalk.green('  + (new)'), skill);
+    // Refresh provider-native skills (#1811): add missing ones, replace the ones the user
+    // never edited, and offer an edited one's new version as `.codev-new` for the merge.
+    // A dry run reports the same outcome and writes nothing.
+    const skillsResult = refreshSkills(targetDir, templatesDir, { force, dryRun });
+    // "would be" wording for everything this refresh only previews under --dry-run.
+    let previewVerb = '';
+    if (dryRun) previewVerb = 'would be ';
+    for (const skill of skillsResult.added) {
+      result.newFiles.push(skill);
+      log(chalk.green(`  + (${previewVerb}new)`), skill);
+    }
+    for (const skill of skillsResult.updated) {
+      result.updated.push(skill);
+      log(chalk.blue(`  ~ (${previewVerb}updated)`), skill);
+    }
+    for (const file of skillsResult.conflicts) {
+      result.conflicts.push({
+        file,
+        codevNew: `${file}${CODEV_NEW_SUFFIX}`,
+        reason: 'Skill edited locally; new version differs',
+      });
+      log(chalk.yellow('  ! (conflict)'), file);
+      if (dryRun) {
+        log(chalk.dim('    New version would be saved as:'), `${file}${CODEV_NEW_SUFFIX}`);
+      } else {
+        log(chalk.dim('    New version saved as:'), `${file}${CODEV_NEW_SUFFIX}`);
       }
     }
+    for (const skill of skillsResult.notRegular) {
+      result.skipped.push(skill);
+      log(chalk.dim('  - (skipped, symlinked, unreadable, or not a directory)'), skill);
+    }
 
-    // Update root files (CLAUDE.md, AGENTS.md)
+    // Update root files (CLAUDE.md, AGENTS.md). A dry run reports the same outcome and
+    // writes nothing.
     const projectName = path.basename(targetDir);
+    const reportIrregularRootFiles = (files: string[]): void => {
+      for (const file of files) {
+        result.skipped.push(file);
+        log(chalk.dim('  - (skipped, symlinked or not a regular file)'), file);
+      }
+    };
     if (force) {
-      const rootResult = copyRootFiles(targetDir, templatesDir, projectName);
+      const rootResult = copyRootFiles(targetDir, templatesDir, projectName, { dryRun });
+      reportIrregularRootFiles(rootResult.notRegular);
       for (const file of rootResult.copied) {
         result.updated.push(file);
-        log(chalk.blue('  ~ (updated)'), file);
+        log(chalk.blue(`  ~ (${previewVerb}updated)`), file);
       }
     } else {
-      const rootResult = copyRootFiles(targetDir, templatesDir, projectName, { handleConflicts: true });
+      const rootResult = copyRootFiles(targetDir, templatesDir, projectName, { handleConflicts: true, dryRun });
+      reportIrregularRootFiles(rootResult.notRegular);
       for (const file of rootResult.copied) {
         result.newFiles.push(file);
-        log(chalk.green('  + (new)'), file);
+        log(chalk.green(`  + (${previewVerb}new)`), file);
       }
       for (const file of rootResult.conflicts) {
         result.rootConflicts.push({
@@ -250,7 +290,11 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
           reason: 'Content differs from template',
         });
         log(chalk.yellow('  ! (conflict)'), file);
-        log(chalk.dim('    New version saved as:'), `${file}.codev-new`);
+        if (dryRun) {
+          log(chalk.dim('    New version would be saved as:'), `${file}.codev-new`);
+        } else {
+          log(chalk.dim('    New version saved as:'), `${file}.codev-new`);
+        }
       }
     }
 
@@ -276,6 +320,12 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
         result.newFiles.push(rel);
         log(chalk.green('  + (new)'), rel);
       }
+    }
+
+    // Starters left on a project with something to document point at the bootstrap pass
+    // (Spec 1797). A dry run has not backfilled anything, so it says nothing.
+    if (!dryRun && shouldOfferBootstrap(targetDir, path.join(templatesDir, 'templates'))) {
+      result.bootstrapDocsHint = BOOTSTRAP_DOCS_HINT;
     }
 
     // Refresh the always-on hot-tier managed block in CLAUDE.md / AGENTS.md (Spec 987).
@@ -315,8 +365,9 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
     if (result.updated.length > 0) {
       log(chalk.blue(`  ~ ${result.updated.length} updated`));
     }
-    if (result.rootConflicts.length > 0) {
-      log(chalk.yellow(`  ! ${result.rootConflicts.length} conflicts`));
+    const conflictCount = result.conflicts.length + result.rootConflicts.length;
+    if (conflictCount > 0) {
+      log(chalk.yellow(`  ! ${conflictCount} conflicts`));
     }
     if (result.gitignoreAdded && result.gitignoreAdded.length > 0) {
       log(chalk.green(`  gitignore: added ${result.gitignoreAdded.length} entries`));
@@ -328,7 +379,7 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
       !result.migrated &&
       result.newFiles.length === 0 &&
       result.updated.length === 0 &&
-      result.rootConflicts.length === 0 &&
+      conflictCount === 0 &&
       (!result.gitignoreAdded || result.gitignoreAdded.length === 0)
     ) {
       log(chalk.dim('  Already up to date!'));
@@ -348,6 +399,12 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
       }
     }
 
+    // In agent mode the hint travels in the JSON `instructions` instead.
+    if (result.bootstrapDocsHint && !agent) {
+      log('');
+      log(chalk.cyan(result.bootstrapDocsHint));
+    }
+
     if (dryRun) {
       log('');
       log(chalk.yellow('Dry run complete. Run without --dry-run to apply changes.'));
@@ -359,7 +416,7 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
     }
 
     // Combine all conflicts for Claude merge
-    const allConflicts = result.rootConflicts.map(c => c.file);
+    const allConflicts = [...result.rootConflicts, ...result.conflicts].map(c => c.file);
 
     if (allConflicts.length > 0) {
       log('');

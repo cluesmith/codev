@@ -20,24 +20,39 @@ import { getConfig } from '../utils/config.js';
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
 import { getGlobalDb } from '../db/index.js';
 import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
+import { ISSUE_KEY_SOURCE, canonicalIssueId, sameIssueId } from '../../lib/issue-id.js';
 
 /**
- * Find a builder by issue number. Local state first, then Tower fallback.
+ * Find a builder by issue number or tracker key. Local state first, then Tower
+ * fallback. Keys match case-insensitively (role ids are lower-cased).
  */
-export function findBuilderByIssue(issueNumber: number): Builder | null {
+export function findBuilderByIssue(issueNumber: number | string): Builder | null {
   // Issue #1118: scope to this workspace (matches loadTowerBuilderRows below),
   // now that builders from every workspace share one global.db.
   const workspaceRoot = normalizeWorkspacePath(getConfig().workspaceRoot);
-  const local = getBuilders(workspaceRoot).find((b) => b.issueNumber === issueNumber);
+  const local = getBuilders(workspaceRoot).find((b) => sameIssueId(b.issueNumber, issueNumber));
   if (local) return local;
 
   const rows = loadTowerBuilderRows();
-  const stripped = String(issueNumber);
-  const match = rows.find((r) => {
-    const m = r.role_id.match(/-bugfix-(\d+)/);
-    return m !== null && m[1] === stripped;
-  });
+  const wanted = String(issueNumber).toLowerCase();
+  const match = rows.find((r) => bugfixIssueOfRole(r.role_id) === wanted);
   return match ? towerRowToBuilder(match) : null;
+}
+
+/** The issue segment of a bugfix role id (`builder-bugfix-42`, `builder-bugfix-eng-12`), lower-cased. */
+function bugfixIssueOfRole(roleId: string): string | null {
+  const m = roleId.match(BUGFIX_ROLE_ISSUE);
+  if (!m) return null;
+  return m[1].toLowerCase();
+}
+
+const BUGFIX_ROLE_ISSUE = new RegExp(`-bugfix-(\\d+|${ISSUE_KEY_SOURCE})`, 'i');
+
+/** A role id's issue segment as a Builder issue: numbers as numbers, keys canonicalized. */
+function issueFromRoleSegment(segment: string | null): number | string | undefined {
+  if (segment === null) return undefined;
+  if (/^\d+$/.test(segment)) return Number(segment);
+  return canonicalIssueId(segment);
 }
 
 /**
@@ -102,7 +117,7 @@ function loadTowerBuilderRows(): TowerBuilderRow[] {
 
 function towerRowToBuilder(row: TowerBuilderRow): Builder {
   const isBugfix = row.role_id.includes('-bugfix-');
-  const issueMatch = isBugfix ? row.role_id.match(/-bugfix-(\d+)/) : null;
+  const issue = isBugfix ? bugfixIssueOfRole(row.role_id) : null;
   return {
     id: row.role_id,
     name: row.label ?? row.role_id,
@@ -111,6 +126,6 @@ function towerRowToBuilder(row: TowerBuilderRow): Builder {
     worktree: row.cwd ?? '',
     branch: '',
     type: isBugfix ? 'bugfix' : 'spec',
-    issueNumber: issueMatch ? Number(issueMatch[1]) : undefined,
+    issueNumber: issueFromRoleSegment(issue),
   };
 }

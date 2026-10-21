@@ -15,6 +15,7 @@ import { logger } from './utils/logger.js';
 import { setCliOverrides } from './utils/config.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from './lib/tower-client.js';
 import { version } from '../version.js';
+import { parseIssueArg } from '../lib/issue-id.js';
 
 /**
  * Show tower daemon status and cloud connection info.
@@ -252,12 +253,16 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('attach')
     .description('Attach to a running builder terminal')
     .option('-p, --project <id>', 'Builder ID / project ID to attach to')
-    .option('-i, --issue <number>', 'Issue number (for bugfix builders)')
+    .option('-i, --issue <id>', 'Issue number or tracker key (for bugfix builders)')
     .option('-b, --browser', 'Open in browser')
     .action(async (options) => {
       const { attach } = await import('./commands/attach.js');
       try {
-        const issue = options.issue ? parseInt(options.issue, 10) : undefined;
+        const issue = options.issue ? parseIssueArg(options.issue) : undefined;
+        if (options.issue && issue === undefined) {
+          logger.error(`Invalid issue identifier: ${options.issue}`);
+          process.exit(1);
+        }
         await attach({
           project: options.project,
           issue,
@@ -339,12 +344,10 @@ export async function runAgentFarm(args: string[]): Promise<void> {
         const files = options.files ? (options.files as string).split(',').map((f: string) => f.trim()) : undefined;
         let issueNumber: number | string | undefined;
         if (numberArg) {
-          const parsed = parseInt(numberArg, 10);
-          if (!isNaN(parsed) && parsed > 0) {
-            issueNumber = parsed;
-          } else if (/^[A-Z]+-\d+$/i.test(numberArg)) {
-            issueNumber = numberArg;
-          } else {
+          // A number, or a tracker key (Jira/Linear `ENG-123`), canonicalized to
+          // upper case so the worktree, branch and porch state share one spelling.
+          issueNumber = parseIssueArg(numberArg);
+          if (issueNumber === undefined) {
             logger.error(`Invalid issue identifier: ${numberArg}`);
             process.exit(1);
           }
@@ -421,13 +424,17 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('cleanup')
     .description('Clean up a builder worktree and branch')
     .option('-p, --project <id>', 'Builder ID to clean up')
-    .option('-i, --issue <number>', 'Cleanup bugfix builder for a GitHub issue')
+    .option('-i, --issue <id>', 'Cleanup bugfix builder for an issue (number or tracker key)')
     .option('-t, --task <id>', 'Cleanup task builder (e.g., task-bEPd)')
     .option('-f, --force', 'Force cleanup even if branch not merged')
     .action(async (options) => {
       const { cleanup } = await import('./commands/cleanup.js');
       try {
-        const issue = options.issue ? parseInt(options.issue, 10) : undefined;
+        const issue = options.issue ? parseIssueArg(options.issue) : undefined;
+        if (options.issue && issue === undefined) {
+          logger.error(`Invalid issue identifier: ${options.issue}`);
+          process.exit(1);
+        }
         const specifiedCount = [options.project, issue, options.task].filter(Boolean).length;
         if (specifiedCount === 0) {
           logger.error('Must specify one of --project (-p), --issue (-i), or --task (-t)');
@@ -884,6 +891,25 @@ export async function runAgentFarm(args: string[]): Promise<void> {
         await inboxDismiss(id, {
           port: options.port ? parseInt(options.port, 10) : undefined,
         });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  // Decisions commands (Issue #1840) — the owner decisions file behind the Decisions tab
+  const decisionsCmd = program
+    .command('decisions')
+    .description("The owner decisions file behind the dashboard's Decisions tab");
+
+  decisionsCmd
+    .command('init')
+    .description('Create the decisions file from its template, which turns on the Decisions tab')
+    .option('--path <file>', 'File to create, relative to the workspace root (default: dashboard.decisionsFile, else codev/state/pending-decisions.md)')
+    .action(async (options) => {
+      const { decisionsInit } = await import('./commands/decisions.js');
+      try {
+        await decisionsInit({ path: options.path });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);

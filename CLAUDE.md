@@ -99,7 +99,7 @@ Pick by the nature of the work, not its size. Full definitions in `codev/protoco
 | **SPIR** | New feature from scratch, new protocol, architecture change |
 | **ASPIR** | SPIR without the spec/plan human gates — trusted, low-risk work |
 | **EXPERIMENT** | Proof of concept, model/library evaluation, research spike |
-| **MAINTAIN** | Dead code, dependency cleanup, doc sync (arch/lessons, CLAUDE↔AGENTS) |
+| **MAINTAIN** | A scheduled whole-repo hygiene run the human calls for (audit → clean → sync since the last run). Not for one targeted cleanup or doc fix: a specific dead file or drifted doc is a BUGFIX |
 | **RESEARCH** | Competitive/technology analysis; output to `codev/research/` |
 
 Skip protocol ceremony for README typos, template one-liners, and dependency bumps.

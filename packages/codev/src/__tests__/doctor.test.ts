@@ -34,6 +34,7 @@ vi.mock('../lib/forge.js', () => ({
   loadForgeConfig: loadForgeConfigMock,
   validateForgeConfig: validateForgeConfigMock,
   resolveAllConcepts: resolveAllConceptsMock,
+  isHybridProvider: (provider?: string) => provider === 'linear' || provider === 'jira',
 }));
 
 // A minimal fake child process for the async `spawn`-based agy auth probe.
@@ -377,6 +378,115 @@ describe('doctor command', () => {
         line.includes('gh') && line.includes('authenticated')
       );
       expect(hasGhAuth).toBe(true);
+    });
+  });
+
+  describe('hybrid provider auth (#1740)', () => {
+    // A hybrid workspace: issue concepts on the tracker's CLI, PR concepts on gh.
+    function hybridResolutions(trackerExec: string) {
+      const issueConcepts = new Set(['issue-view', 'issue-list', 'issue-search', 'issue-comment', 'recently-closed', 'user-identity', 'auth-status']);
+      return () => [
+        'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
+        'recently-closed', 'recently-merged', 'user-identity', 'pr-create', 'pr-merge', 'pr-search',
+        'pr-view', 'pr-diff', 'auth-status', 'repo-archive',
+      ].map(c => issueConcepts.has(c)
+        ? { concept: c, command: `/scripts/forge/tracker/${c}.sh`, source: 'preset', executable: trackerExec }
+        : { concept: c, command: `/scripts/forge/github/${c}.sh`, source: 'default', executable: 'gh' });
+    }
+
+    type ForgeOpts = { forgeConfig?: { provider?: string } | null } | undefined;
+    const isGhCall = (opts: ForgeOpts) => opts?.forgeConfig?.provider === 'github' || opts?.forgeConfig == null;
+
+    async function runDoctor(missing: string[] = []): Promise<string[]> {
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          if (missing.some(m => cmd.includes(m))) throw new Error('not found');
+          return Buffer.from('/usr/bin/command');
+        }
+        return Buffer.from('');
+      });
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = { node: 'v20.0.0', git: 'git version 2.40.0' };
+        return {
+          status: 0, stdout: responses[cmd] || 'working', stderr: '', signal: null,
+          output: [null, responses[cmd] || 'working', ''], pid: 0,
+        };
+      });
+      vi.resetModules();
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => { logOutput.push(args.join(' ')); });
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+      return logOutput;
+    }
+
+    afterEach(() => {
+      loadForgeConfigMock.mockImplementation(() => null);
+      resolveAllConceptsMock.mockReset();
+      executeForgeCommandSyncMock.mockImplementation((concept: string) => (concept === 'auth-status' ? 'Logged in' : null));
+    });
+
+    it('jira: reports the acli login and the gh login separately', async () => {
+      loadForgeConfigMock.mockImplementation(() => ({ provider: 'jira' }) as never);
+      resolveAllConceptsMock.mockImplementation(hybridResolutions('acli') as never);
+      const seen: Array<string | undefined> = [];
+      executeForgeCommandSyncMock.mockImplementation(((concept: string, _env: unknown, opts: ForgeOpts) => {
+        if (concept !== 'auth-status') return null;
+        seen.push(opts?.forgeConfig?.provider);
+        return isGhCall(opts) ? 'Logged in to github.com account octo (keyring)' : 'Site: x\n  Email: dev@example.com';
+      }) as never);
+
+      const out = await runDoctor();
+      expect(out.some(l => l.includes('jira auth') && l.includes('authenticated as dev@example.com'))).toBe(true);
+      expect(out.some(l => l.includes('gh auth') && l.includes('authenticated as octo'))).toBe(true);
+      // The tracker check runs against the workspace config; the gh check is forced onto the github default.
+      expect(seen).toEqual(['jira', 'github']);
+    });
+
+    it('jira: an unauthenticated acli warns with the acli login hint', async () => {
+      loadForgeConfigMock.mockImplementation(() => ({ provider: 'jira' }) as never);
+      resolveAllConceptsMock.mockImplementation(hybridResolutions('acli') as never);
+      executeForgeCommandSyncMock.mockImplementation(((concept: string, _env: unknown, opts: ForgeOpts) => {
+        if (concept !== 'auth-status') return null;
+        return isGhCall(opts) ? 'Logged in' : null;
+      }) as never);
+
+      const out = await runDoctor();
+      expect(out.some(l => l.includes('jira auth') && l.includes('not authenticated'))).toBe(true);
+      expect(out.some(l => l.includes('acli jira auth login'))).toBe(true);
+    });
+
+    it('jira: a missing acli gets the executable warning, not a misleading auth line', async () => {
+      loadForgeConfigMock.mockImplementation(() => ({ provider: 'jira' }) as never);
+      resolveAllConceptsMock.mockImplementation(hybridResolutions('acli') as never);
+      const out = await runDoctor(['acli']);
+      expect(out.some(l => l.includes('acli not found'))).toBe(true);
+      expect(out.some(l => l.includes('jira auth'))).toBe(false);
+    });
+
+    it('linear: reports the linear login and the gh login', async () => {
+      loadForgeConfigMock.mockImplementation(() => ({ provider: 'linear' }) as never);
+      resolveAllConceptsMock.mockImplementation(hybridResolutions('curl') as never);
+      executeForgeCommandSyncMock.mockImplementation(((concept: string, _env: unknown, opts: ForgeOpts) => {
+        if (concept !== 'auth-status') return null;
+        return isGhCall(opts) ? 'Logged in' : null;
+      }) as never);
+
+      const out = await runDoctor();
+      expect(out.some(l => l.includes('linear auth') && l.includes('not authenticated'))).toBe(true);
+      expect(out.some(l => l.includes('LINEAR_API_KEY'))).toBe(true);
+      expect(out.some(l => l.includes('gh auth') && l.includes('authenticated'))).toBe(true);
+    });
+
+    it('gitlab and gitea: no auth lines at all, exactly as before', async () => {
+      for (const provider of ['gitlab', 'gitea']) {
+        loadForgeConfigMock.mockImplementation(() => ({ provider }) as never);
+        resolveAllConceptsMock.mockImplementation(hybridResolutions(provider === 'gitlab' ? 'glab' : 'tea') as never);
+        executeForgeCommandSyncMock.mockClear();
+        const out = await runDoctor();
+        expect(out.some(l => / auth\s/.test(l) && /authenticated/.test(l)), provider).toBe(false);
+        expect(executeForgeCommandSyncMock.mock.calls.some(c => c[0] === 'auth-status'), provider).toBe(false);
+      }
     });
   });
 

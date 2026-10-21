@@ -1,0 +1,30 @@
+id: '1740'
+title: forge-add-a-jira-provider-pres
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-10-11T21:36:33.529Z'
+    approved_at: '2026-10-21T00:55:16.214Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-10-21T01:25:32.369Z'
+    approved_at: '2026-10-21T04:05:00.791Z'
+  pr:
+    status: approved
+    requested_at: '2026-10-21T04:22:57.277Z'
+    approved_at: '2026-10-21T04:27:23.070Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-10-11T21:32:00.036Z'
+updated_at: '2026-10-21T04:27:25.003Z'
+pr_history:
+  - phase: review
+    pr_number: 1848
+    branch: builder/pir-1740
+    created_at: '2026-10-21T04:08:40.981Z'
+pr_ready_for_human: false

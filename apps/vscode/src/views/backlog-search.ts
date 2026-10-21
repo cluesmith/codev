@@ -1,5 +1,6 @@
 import type { OverviewBacklogItem, OverviewData } from '@cluesmith/codev-types';
 import { spawnableBacklog } from './backlog-filter.js';
+import { ISSUE_KEY_SOURCE, issueRef } from '../issue-id.js';
 
 /**
  * A backlog row projected for the Search Backlog Quick Pick.
@@ -58,7 +59,7 @@ export function toQuickPickItems(
     const assignee = item.assignees?.[0];
     if (assignee) { parts.push(`@${assignee}`); }
     return {
-      label: `#${item.id} ${item.title}`,
+      label: `${issueRef(item.id)} ${item.title}`,
       description: parts.join(' · '),
       issueId: item.id,
     };
@@ -86,6 +87,9 @@ export interface DynamicQuickPickItem {
 
 const BARE_ID = /^#?(\d+)$/;
 const TYPED_ID = /^(?:view\s+)?(issue|pr)\s+#?(\d+)$/i;
+// Tracker keys (#1740), issue-only: PR ids are always numbers.
+const BARE_KEY = new RegExp(`^#?(${ISSUE_KEY_SOURCE})$`);
+const TYPED_KEY = new RegExp(`^(?:view\\s+)?issue\\s+#?(${ISSUE_KEY_SOURCE})$`, 'i');
 
 /**
  * Parse the Quick Pick's typed value against the dynamic type-ahead grammar:
@@ -95,11 +99,15 @@ const TYPED_ID = /^(?:view\s+)?(issue|pr)\s+#?(\d+)$/i;
  * - `issue 1350` / `view issue 1350` names the target explicitly; likewise
  *   `pr 1350` / `view pr 1350`. Case-insensitive, leading `#` on the number
  *   tolerated (the `parseIssueId` convention).
+ * - `ENG-123` / `issue ENG-123` (a tracker key, #1740) offers the issue only,
+ *   canonicalized to upper case, and only when `acceptKeys` (see
+ *   `acceptsIssueKeys`): on a numeric-id workspace `UTF-8` stays plain text.
  * - Anything else (non-numeric, trailing text, bare keyword) yields no
  *   dynamic rows: the input is an ordinary text search over the static rows.
  */
 export function parseSearchDynamicQuery(
   value: string,
+  acceptKeys = false,
 ): Array<{ target: DynamicPickTarget; id: string }> {
   const trimmed = value.trim();
   const bare = BARE_ID.exec(trimmed);
@@ -110,12 +118,18 @@ export function parseSearchDynamicQuery(
   if (typed) {
     return [{ target: typed[1].toLowerCase() as DynamicPickTarget, id: typed[2] }];
   }
+  if (acceptKeys) {
+    const key = BARE_KEY.exec(trimmed) ?? TYPED_KEY.exec(trimmed);
+    if (key) {
+      return [{ target: 'issue', id: key[1].toUpperCase() }];
+    }
+  }
   return [];
 }
 
 /** Project the parsed dynamic grammar into ready-to-insert Quick Pick rows. */
-export function toDynamicQuickPickItems(value: string): DynamicQuickPickItem[] {
-  return parseSearchDynamicQuery(value).map(({ target, id }) => {
+export function toDynamicQuickPickItems(value: string, acceptKeys = false): DynamicQuickPickItem[] {
+  return parseSearchDynamicQuery(value, acceptKeys).map(({ target, id }) => {
     let noun: string;
     if (target === 'issue') {
       noun = 'Issue';
@@ -123,7 +137,7 @@ export function toDynamicQuickPickItems(value: string): DynamicQuickPickItem[] {
       noun = 'PR';
     }
     return {
-      label: `View ${noun} #${id}`,
+      label: `View ${noun} ${issueRef(id)}`,
       description: 'Open in browser',
       alwaysShow: true,
       target,

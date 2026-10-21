@@ -358,6 +358,22 @@ updated_at: "${state.updated_at}"
   });
 
   describe('detectProjectId (filesystem scan)', () => {
+    it('should detect a single tracker-key project (#1740)', () => {
+      const projectDir = path.join(projectsDir, 'ENG-123-fix-login');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "ENG-123"\n');
+
+      expect(detectProjectId(testDir)).toBe('ENG-123');
+    });
+
+    it('should detect a single tracker-key bugfix project (#1740)', () => {
+      const projectDir = path.join(projectsDir, 'bugfix-ENG-9-crash');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "bugfix-ENG-9"\n');
+
+      expect(detectProjectId(testDir)).toBe('bugfix-ENG-9');
+    });
+
     it('should detect a single bugfix project', () => {
       const projectDir = path.join(projectsDir, 'bugfix-42-login-bug');
       fs.mkdirSync(projectDir, { recursive: true });
@@ -390,6 +406,20 @@ updated_at: "${state.updated_at}"
 
     it('should return full bugfix ID from bugfix worktree', () => {
       expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228')).toBe('bugfix-228');
+    });
+
+    it('detects tracker-key worktrees, canonicalized (#1740)', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/pir-ENG-123')).toBe('ENG-123');
+      expect(detectProjectIdFromCwd('/repo/.builders/pir-ENG-123/src/x')).toBe('ENG-123');
+      expect(detectProjectIdFromCwd('/repo/.builders/spir-AB2_X-7-slug')).toBe('AB2_X-7');
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-ENG-9-crash')).toBe('bugfix-ENG-9');
+      expect(detectProjectIdFromCwd('/repo/.builders/pir-eng-5')).toBe('ENG-5');
+    });
+
+    it('keeps numeric worktrees exactly as before (#1740)', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/pir-1740')).toBe('1740');
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228-slug')).toBe('bugfix-228');
+      expect(detectProjectIdFromCwd('/repo/.builders/task-Ab-3')).toBeNull();
     });
 
     it('should detect bugfix ID from subdirectory', () => {

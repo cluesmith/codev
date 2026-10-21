@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from './connection-manager.js';
 import { wireCommandProvider } from './command-relay.js';
-import { fireActivity, setActivityHooks } from './activity-hooks.js';
+import { fireActivity, setActivityHooks, setActivityHooksSuppressed } from './activity-hooks.js';
 import { loadActivityHooks } from './load-activity-hooks.js';
 import { TerminalManager } from './terminal-manager.js';
 import { openResolvedArchitect } from './open-architect.js';
@@ -51,6 +51,12 @@ import {
   type FontSizeDirection,
   type ConfigScope,
 } from './markdown-preview/font-size-control.js';
+import {
+	READING_AIDS_PLACEHOLDER,
+	initialActiveRow,
+	readingAidItems,
+	type ReadingAidItem,
+} from './markdown-preview/reading-aids.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider, IssueRefTerminalLinkProvider } from './terminal-link-provider.js';
 import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-terminals.js';
@@ -83,8 +89,9 @@ import { persistAreaGroupExpansion } from './views/area-group-expansion.js';
 import { buildArchitectReferenceInjection } from './architect-reference-injection.js';
 import { runPreflight, recheckCli, isCliReady, showPreflightFeedback, probeTowerVersion, openWalkthrough, maybeOpenWalkthrough } from './preflight/preflight.js';
 import { detectIdeMode, decideActivationTier, activationPolicy, IDE_SIMULATION_ENV_VAR } from './ide-mode.js';
-import { detectWorkspacePath } from './workspace-detector.js';
+import { detectWorkspace, detectWorkspacePath, detectIsBuilderWorktree } from './workspace-detector.js';
 import { loadWorktreeConfig, hasRunnableDevCommand } from './load-worktree-config.js';
+import { issueRef } from './issue-id.js';
 
 let connectionManager: ConnectionManager | null = null;
 let terminalManager: TerminalManager | null = null;
@@ -184,6 +191,57 @@ async function stepMarkdownPreviewFontSize(direction: FontSizeDirection): Promis
 	await cfg.update('fontSize', next, configTargetFor(resolveWriteScope(cfg.inspect('fontSize') ?? {})));
 }
 
+/**
+ * "Reading Aids…" (#1802): one QuickPick with a Highlight section and a Cursor section, the
+ * current choice of each checked. Picking a row writes that one setting to the scope it already
+ * lives in (same rule as the font-size buttons); the provider's config listener re-renders every
+ * open preview.
+ */
+async function pickMarkdownPreviewReadingAid(): Promise<void> {
+	const cfg = vscode.workspace.getConfiguration('codev.markdownPreview');
+	const rows = readingAidItems(cfg.get('hoverHighlight'), cfg.get('readingCursor'));
+	type Pick = vscode.QuickPickItem & { row?: ReadingAidItem };
+	const picks: Pick[] = [];
+	let section: string | undefined;
+	for (const row of rows) {
+		if (row.section !== section) {
+			section = row.section;
+			picks.push({ label: row.section, kind: vscode.QuickPickItemKind.Separator });
+		}
+		let icon = 'blank';
+		if (row.current) {
+			icon = 'check';
+		}
+		picks.push({ label: row.label, iconPath: new vscode.ThemeIcon(icon), row });
+	}
+	// createQuickPick (not showQuickPick) so the list can open on the current style.
+	const quickPick = vscode.window.createQuickPick<Pick>();
+	quickPick.title = 'Markdown Preview Reading Aids';
+	quickPick.placeholder = READING_AIDS_PLACEHOLDER;
+	quickPick.items = picks;
+	const start = initialActiveRow(rows);
+	const startPick = picks.find((p) => p.row !== undefined && p.row === start);
+	if (startPick) {
+		quickPick.activeItems = [startPick];
+	}
+	const chosen = await new Promise<Pick | undefined>((resolve) => {
+		quickPick.onDidAccept(() => {
+			resolve(quickPick.selectedItems[0]);
+			quickPick.hide();
+		});
+		quickPick.onDidHide(() => {
+			resolve(undefined);
+			quickPick.dispose();
+		});
+		quickPick.show();
+	});
+	if (!chosen?.row || chosen.row.current) {
+		return;
+	}
+	const { setting, value } = chosen.row;
+	await cfg.update(setting, value, configTargetFor(resolveWriteScope(cfg.inspect(setting) ?? {})));
+}
+
 export async function activate(context: vscode.ExtensionContext) {
 	// Layer model (#1144): compute the activation tier before ANY side effect.
 	// `onStartupFinished` fires this in every window of every install, so the
@@ -202,6 +260,13 @@ export async function activate(context: vscode.ExtensionContext) {
 		hasCodevWorkspace: detectWorkspacePath() !== null,
 	});
 	const policy = activationPolicy(tier);
+	// #1809: a builder-worktree window attaches read-only to the PARENT
+	// workspace, so its overview data is the parent's builders. Surfaces that
+	// summarize or act on those builders (gate toasts with their Approve button,
+	// mailbox-escalation toasts, status-bar counts, the activity-bar badge) stay
+	// off in such a window; the parent's own window carries them. Computed once:
+	// a folder change restarts the extension host.
+	const isBuilderWorktreeWindow = detectIsBuilderWorktree();
 
 	// The two layer-model context keys (#1144). `codev.ideMode` is immutable
 	// for the window's lifetime (appName can't change in-process).
@@ -216,10 +281,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	// opening a folder from an empty window restarts the extension host
 	// anyway.
 	vscode.commands.executeCommand('setContext', 'codev.ideMode', ideMode);
-	const syncHasWorkspaceContext = () =>
+	// `codev.isBuilderWorktree` (#1809): the window is rooted at a
+	// `<root>/.builders/<id>` worktree. Codev never activates a worktree; the
+	// window attaches read-only to the parent, the Agents view is gated off
+	// (absent, not empty) and activity hooks are suppressed.
+	const syncHasWorkspaceContext = () => {
+		const isBuilderWorktree = detectIsBuilderWorktree();
+		setActivityHooksSuppressed(isBuilderWorktree);
 		vscode.commands.executeCommand(
+			'setContext', 'codev.isBuilderWorktree', isBuilderWorktree);
+		return vscode.commands.executeCommand(
 			'setContext', 'codev.hasWorkspace',
 			detectWorkspacePath() !== null);
+	};
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeWorkspaceFolders(syncHasWorkspaceContext));
 	syncHasWorkspaceContext(); // seed initial state
@@ -421,6 +495,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Each is shown only when > 0, with its own icon.
 	const updateStatusBarCounts = () => {
 		if (!statusBarItem || connectionManager?.getState() !== 'connected') { return; }
+		if (isBuilderWorktreeWindow) { return; }
 		const data = overviewCache.getData();
 		if (!data) { return; }
 		const builderCount = data.builders.length;
@@ -481,7 +556,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	const updateActivityBadge = () => {
 		if (!buildersView) { return; }
 		const data = overviewCache.getData();
-		if (connectionManager?.getState() !== 'connected' || !data) {
+		if (isBuilderWorktreeWindow || connectionManager?.getState() !== 'connected' || !data) {
 			buildersView.badge = undefined;
 			return;
 		}
@@ -581,7 +656,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	// surface and posts a ModeDescriptor to its webview. Takes the terminal manager for the
 	// builder-terminal surface (getActiveBuilderId). (#921's Codev Dev panel view was removed —
 	// its status is carried by the status-bar chip below.)
-	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!, overviewCache, reviewQueueStore);
+	// #1809: in a builder-worktree window the panel is pinned to that worktree's own builder.
+	const windowWorkspace = detectWorkspace();
+	let pinnedPanelBuilderId: string | undefined;
+	if (windowWorkspace?.kind === 'builder-worktree') {
+		pinnedPanelBuilderId = windowWorkspace.builderId;
+	}
+	const contextualPanelProvider = new ContextualPanelProvider(
+		context.extensionUri, terminalManager!, overviewCache, reviewQueueStore, pinnedPanelBuilderId);
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,
@@ -1241,8 +1323,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		reg('codev.copyBacklogIssueNumber', async (arg: vscode.TreeItem | undefined) => {
 			if (arg instanceof BacklogTreeItem) {
-				await vscode.env.clipboard.writeText(`#${arg.issueId}`);
-				vscode.window.showInformationMessage(`Codev: Copied #${arg.issueId}`);
+				await vscode.env.clipboard.writeText(issueRef(arg.issueId));
+				vscode.window.showInformationMessage(`Codev: Copied ${issueRef(arg.issueId)}`);
 			}
 		}),
 		reg('codev.viewBacklogIssue', (arg: vscode.TreeItem | string | undefined) =>
@@ -1250,7 +1332,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		reg('codev.openBacklogSearch', () =>
 			BacklogSearchPanel.createOrShow(connectionManager!, overviewCache, context.extensionUri)),
 		reg('codev.searchBacklog', () => searchBacklog(connectionManager!, overviewCache)),
-		reg('codev.openIssueById', () => openIssueById(connectionManager!)),
+		reg('codev.openIssueById', () => openIssueById(connectionManager!, () => overviewCache.getData())),
 		reg('codev.openPRById', () => openPRById(connectionManager!)),
 		reg('codev.openMarkdownPreview', async () => {
 			const uri = vscode.window.activeTextEditor?.document.uri;
@@ -1280,6 +1362,8 @@ export async function activate(context: vscode.ExtensionContext) {
 			await cfg.update('fontSize', 0, configTargetFor(resolveWriteScope(cfg.inspect('fontSize') ?? {})));
 			await cfg.update('lineHeight', 0, configTargetFor(resolveWriteScope(cfg.inspect('lineHeight') ?? {})));
 		}),
+		// Reading aids (#1802): hover highlight + prose cursor, in the title-bar `…` menu.
+		reg('codev.markdownPreview.readingAids', pickMarkdownPreviewReadingAid),
 		regCli('codev.referenceIssueInArchitect', async (arg: IssueCommandArg) => {
 			// Inline-button action on a backlog row: open + focus the architect
 			// terminal, then type `#<id> "<title>" ` into its prompt without
@@ -1668,18 +1752,25 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Toast on new gate-pending — surfaces blocked builders without forcing the
 	// user to watch the Builders tree. Respects `codev.gateToasts.enabled`.
-	activateGateToasts(context, overviewCache);
+	// Both toast families are the parent's in a builder-worktree window (#1809).
+	if (!isBuilderWorktreeWindow) {
+		activateGateToasts(context, overviewCache);
 
-	// Spec 1313 Phase 8: toast when a held message crosses the escalation age
-	// (the `mailbox-escalation` SSE event). Visibility only — read/dismiss via
-	// `afx inbox`. Respects `codev.mailboxEscalationToasts.enabled`.
-	activateMailboxEscalationToasts(context, connectionManager, overviewCache);
+		// Spec 1313 Phase 8: toast when a held message crosses the escalation age
+		// (the `mailbox-escalation` SSE event). Visibility only — read/dismiss via
+		// `afx inbox`. Respects `codev.mailboxEscalationToasts.enabled`.
+		activateMailboxEscalationToasts(context, connectionManager, overviewCache);
+	}
 
-	// Auto-open builder terminals on Tower spawn events
-	const builderSpawnHandler = new BuilderSpawnHandler(connectionManager, terminalManager, outputChannel);
-	context.subscriptions.push(
-		connectionManager.onSSEEvent(({ type, data }) => builderSpawnHandler.handle(type, data)),
-	);
+	// Auto-open builder terminals on Tower spawn events. Not in a builder-worktree
+	// window (#1809): its workspace path is the PARENT root, so a sibling lane's
+	// spawn would toast there (`notify`) or open that sibling's live terminal (`auto`).
+	if (!isBuilderWorktreeWindow) {
+		const builderSpawnHandler = new BuilderSpawnHandler(connectionManager, terminalManager, outputChannel);
+		context.subscriptions.push(
+			connectionManager.onSSEEvent(({ type, data }) => builderSpawnHandler.handle(type, data)),
+		);
+	}
 
 	// VSCode as the command provider for Tower's command relay: run canonical
 	// verbs sent by a controller (the focused window self-gates).

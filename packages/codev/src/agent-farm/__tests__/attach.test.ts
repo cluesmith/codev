@@ -196,6 +196,43 @@ describe('attach command', () => {
 
       expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
     });
+
+    it('finds a tracker-key builder by key, case-insensitively (#1740)', async () => {
+      mockBuilders.push({
+        id: 'builder-bugfix-eng-12', name: 'Bugfix ENG-12', status: 'implementing', phase: 'init',
+        worktree: '/path/to/.builders/bugfix-ENG-12', branch: 'builder/bugfix-ENG-12', type: 'bugfix',
+        issueNumber: 'eng-12',
+      });
+
+      const { attach } = await import('../commands/attach.js');
+      const { openBrowser } = await import('../utils/shell.js');
+
+      await attach({ issue: 'ENG-12', browser: true });
+
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
+    });
+
+    it('falls back to a tracker-key Tower row (#1740)', async () => {
+      mockDbAll.mockReturnValue([
+        { role_id: 'builder-bugfix-eng-12', cwd: '/workspace/.builders/bugfix-ENG-12', label: 'Bugfix ENG-12' },
+      ]);
+
+      const { attach } = await import('../commands/attach.js');
+      const { openBrowser } = await import('../utils/shell.js');
+
+      await attach({ issue: 'ENG-12', browser: true });
+
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
+    });
+
+    it('does not match a numeric issue to a key builder sharing its digits (#1740)', async () => {
+      mockDbAll.mockReturnValue([
+        { role_id: 'builder-bugfix-eng-12', cwd: '/workspace/.builders/bugfix-ENG-12', label: 'Bugfix ENG-12' },
+      ]);
+
+      const { attach } = await import('../commands/attach.js');
+      await expect(attach({ issue: 12 })).rejects.toThrow();
+    });
   });
 
   describe('findBuilderById', () => {

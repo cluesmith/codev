@@ -10,7 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
-import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, type ConceptResolution } from '../lib/forge.js';
+import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, isHybridProvider, type ConceptResolution } from '../lib/forge.js';
 import { detectHarnessFromCommand, getRetirement } from '../agent-farm/utils/harness.js';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
 import { auditStateFileIgnore } from '../lib/gitignore.js';
@@ -609,6 +609,12 @@ function verifyAiModel(modelName: string): CheckResult {
     return { status: 'fail', version: 'error', note: `${config.authHint} (${errMsg})` };
   }
 }
+
+/** How to log in to each hybrid provider's tracker, for the doctor auth line (#1740). */
+const TRACKER_LOGIN_HINTS: Record<string, string> = {
+  jira: 'run: acli jira auth login (with a standard user account; service accounts are not supported)',
+  linear: 'set LINEAR_API_KEY',
+};
 
 const AGY_INSTALL_HINT = 'install: curl -fsSL https://antigravity.google/cli/install.sh | bash, then run `agy` once to sign in';
 
@@ -1259,10 +1265,36 @@ export async function doctor(): Promise<number> {
       });
     }
 
-    // gh auth check — only for GitHub provider
-    if (provider === 'github' && commandExists('gh')) {
+    // Tracker auth for hybrid providers (spec 719, #1740): they hold the issues,
+    // so report their own login. Skipped when the tracker's CLI is missing (the
+    // executable warning above already says so) or auth-status is disabled.
+    const trackerAuth = resolutions.find((r) => r.concept === 'auth-status');
+    if (isHybridProvider(provider) && trackerAuth?.command && (!trackerAuth.executable || !missingExecs.has(trackerAuth.executable))) {
+      const label = `${provider} auth`;
+      const recommendation = TRACKER_LOGIN_HINTS[provider.toLowerCase()] ?? `check the ${provider} credentials`;
+      let authOutput: unknown = null;
       try {
-        const result = executeForgeCommandSync('auth-status', {}, { raw: true });
+        authOutput = executeForgeCommandSync('auth-status', {}, { raw: true, forgeConfig, cwd: workspaceRoot });
+      } catch {
+        authOutput = null;
+      }
+      if (authOutput !== null) {
+        const accountMatch = typeof authOutput === 'string' ? authOutput.match(/^\s*Email:\s*(\S+)/m) : null;
+        console.log(`  ${chalk.green('✓')} ${label.padEnd(20)} ${accountMatch ? `authenticated as ${accountMatch[1]}` : 'authenticated'}`);
+      } else {
+        console.log(`  ${chalk.yellow('⚠')} ${label.padEnd(20)} not authenticated`);
+        warnings++;
+        warningDetails.push({ name: label, issue: 'not authenticated', recommendation });
+      }
+    }
+
+    // gh auth check — for GitHub, and for hybrid providers, whose PR concepts
+    // all run gh (the github default scripts), so a missing gh login means no PRs.
+    const hybrid = isHybridProvider(provider);
+    if ((provider === 'github' || hybrid) && commandExists('gh')) {
+      try {
+        const ghOptions = hybrid ? { raw: true, forgeConfig: { provider: 'github' }, cwd: workspaceRoot } : { raw: true };
+        const result = executeForgeCommandSync('auth-status', {}, ghOptions);
         if (result) {
           const authOutput = typeof result === 'string' ? result : '';
           const accountMatch = authOutput.match(/Logged in to .+ account (\S+)/);

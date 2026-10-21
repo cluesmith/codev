@@ -50,3 +50,15 @@ jobs:
           # explicit port so it can never target a live Tower on 4100.
           TOWER_TEST_PORT: '14100'
         run: pnpm exec playwright test --retries 3
+
+      # Spec 1819: the Decisions tab suite writes files, so it runs through its own config —
+      # no global setup activating the repository workspace — on a Tower that shares nothing
+      # with the one above: its own port, state dir and shellper socket dir.
+      - name: Run Decisions tab tests
+        if: ${{ !cancelled() }}
+        working-directory: packages/codev
+        env:
+          TOWER_TEST_PORT: '14101'
+          CODEV_AGENT_FARM_DIR: ${{ runner.temp }}/decisions-agent-farm
+          SHELLPER_SOCKET_DIR: ${{ runner.temp }}/decisions-shellper
+        run: pnpm exec playwright test --config playwright.decisions.config.ts --retries 3

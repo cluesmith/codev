@@ -330,8 +330,13 @@ function builderInspectorBody(builderId: string | undefined, summary: CodeReview
 }
 
 function body(props: PanelProps & { descriptor: ModeDescriptor }): React.ReactNode {
-  const { descriptor, attention, codeReview, reviewBuilderId } = props;
+  const { descriptor, attention, codeReview, reviewBuilderId, pinnedBuilderId } = props;
   if (descriptor.kind === 'attention') {
+    if (pinnedBuilderId !== undefined) {
+      // #1809: a builder-worktree window is pinned to its own builder and shows no parent roll-up.
+      return h('div', { className: 'cp-body-empty' },
+        `This window is pinned to ${pinnedBuilderId}. Open one of its plans, specs, reviews or diffs to see it here.`);
+    }
     if (attention === undefined) {
       // No payload attached yet — the provider always sends one in Attention mode, so this is only
       // a transient pre-first-post frame. Render a neutral placeholder, not an empty-state claim
@@ -358,6 +363,7 @@ interface PanelProps {
   attention: AttentionSummary | undefined;
   codeReview: CodeReviewSummary | undefined;
   reviewBuilderId: string | undefined;
+  pinnedBuilderId: string | undefined;
 }
 
 function Panel(props: PanelProps): React.ReactElement {
@@ -399,9 +405,10 @@ window.addEventListener('message', (event: MessageEvent) => {
       attention: message.attention,
       codeReview: message.codeReview,
       reviewBuilderId: message.reviewBuilderId,
+      pinnedBuilderId: message.pinnedBuilderId,
     });
   }
 });
 
-render({ descriptor: undefined, attention: undefined, codeReview: undefined, reviewBuilderId: undefined });
+render({ descriptor: undefined, attention: undefined, codeReview: undefined, reviewBuilderId: undefined, pinnedBuilderId: undefined });
 vscodeApi.postMessage({ type: 'ready' });

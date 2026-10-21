@@ -6,6 +6,7 @@ import { encodeWorkspacePath } from '@cluesmith/codev-sdk/workspace';
 import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { resolveBuilderTerminal, mainCheckoutRoot } from './terminal-resolve.js';
+import { issueRef, roleShortId } from './issue-id.js';
 
 /**
  * Default per-window terminal cap, overridable via the `codev.maxTerminals`
@@ -79,7 +80,7 @@ export class TerminalManager {
     // matches a *short* target against canonical candidates, so feed it the
     // trailing id token, not the full roleId (otherwise it never matches and
     // every builder falls back to the agent name).
-    const shortId = builderId.split('-').pop() ?? builderId;
+    const shortId = roleShortId(builderId);
     const { builder } = resolveAgentName(shortId, data.builders);
     // Mirror the sidebar exactly: `#${issueId ?? id} ${issueTitle ?? ''}`.
     const num = builder?.issueId ?? builder?.id;
@@ -98,7 +99,7 @@ export class TerminalManager {
       const cut = lastSpace > 0 ? slice.slice(0, lastSpace) : slice.slice(0, MAX_TITLE - 1);
       title = `${cut.trimEnd()}…`;
     }
-    return `Codev: #${num}${title ? ` ${title}` : ''}`;
+    return `Codev: ${issueRef(num)}${title ? ` ${title}` : ''}`;
   }
 
   /**
@@ -315,10 +316,10 @@ export class TerminalManager {
   private friendlyBuilderId(roleOrId: string): string {
     const data = this.overviewCache.getData();
     if (!data?.builders?.length) { return roleOrId; }
-    const shortId = roleOrId.split('-').pop() ?? roleOrId;
+    const shortId = roleShortId(roleOrId);
     const { builder } = resolveAgentName(shortId, data.builders);
     const num = builder?.issueId ?? builder?.id;
-    return num ? `#${num}` : roleOrId;
+    return num ? issueRef(num) : roleOrId;
   }
 
   /**

@@ -85,6 +85,7 @@ vi.mock('../db/index.js', async (importOriginal) => {
 });
 
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
+import { buildAgentName } from '../utils/agent-names.js';
 
 // ============================================================================
 // Temp directory helper
@@ -1197,6 +1198,33 @@ describe('overview', () => {
       expect(extractProjectIdFromWorktreeName('task-1234')).toBeNull();
       expect(extractProjectIdFromWorktreeName('worktree-1234')).toBeNull();
     });
+
+    // #1740: tracker keys (Jira/Linear) as porch project ids.
+    it.each([
+      ['pir-ENG-123', 'ENG-123'],
+      ['pir-ENG-123-fix-login', 'ENG-123'],
+      ['spir-AB2_X-7-slug', 'AB2_X-7'],
+      ['aspir-eng-5', 'ENG-5'],
+      ['bugfix-ENG-123-fix-login', 'bugfix-ENG-123'],
+      ['bugfix-ENG-123', 'bugfix-ENG-123'],
+    ])('extracts the canonical key from tracker worktree %s (#1740)', (dir, id) => {
+      expect(extractProjectIdFromWorktreeName(dir)).toBe(id);
+    });
+
+    it('keeps task/worktree short ids that look like keys in soft mode (#1740)', () => {
+      // base64url short ids can contain '-' and digits.
+      expect(extractProjectIdFromWorktreeName('task-Ab-3')).toBeNull();
+      expect(extractProjectIdFromWorktreeName('worktree-x_9-1')).toBeNull();
+    });
+
+    it('resolves every pre-#1740 numeric form exactly as before', () => {
+      const cases: Array<[string, string | null]> = [
+        ['spir-126-slug', '126'], ['bugfix-296-slug', 'bugfix-296'], ['pir-1298', '1298'],
+        ['air-633-x', '633'], ['aspir-633-x', '633'], ['tick-130-x', '130'], ['0110', '0110'],
+        ['experiment-1560', '1560'], ['task-NAvW', null], ['worktree-foIg', null], ['experiment-AbCd', null],
+      ];
+      for (const [dir, id] of cases) expect(extractProjectIdFromWorktreeName(dir), dir).toBe(id);
+    });
   });
 
   // ==========================================================================
@@ -1242,6 +1270,32 @@ describe('overview', () => {
 
     it('returns null for empty string', () => {
       expect(worktreeNameToRoleId('')).toBeNull();
+    });
+
+    it('maps tracker-key worktrees to the role id buildAgentName produces (#1740)', () => {
+      expect(worktreeNameToRoleId('pir-ENG-123')).toBe('builder-pir-eng-123');
+      expect(worktreeNameToRoleId('pir-ENG-123-fix-login')).toBe('builder-pir-eng-123');
+      expect(worktreeNameToRoleId('bugfix-ENG-123-x')).toBe('builder-bugfix-eng-123');
+      expect(worktreeNameToRoleId('spir-AB2_X-7')).toBe('builder-spir-ab2_x-7');
+    });
+
+    it('maps base64url short ids with - and _ to what buildAgentName produces (#1740)', () => {
+      // generateShortId() is base64url (A-Z a-z 0-9 - _); buildAgentName lowercases it whole.
+      expect(worktreeNameToRoleId('experiment-Ab-3')).toBe(buildAgentName('protocol', 'Ab-3', 'experiment'));
+      expect(worktreeNameToRoleId('maintain-x_9Q')).toBe(buildAgentName('protocol', 'x_9Q', 'maintain'));
+      expect(worktreeNameToRoleId('maintain--ab3')).toBe(buildAgentName('protocol', '-ab3', 'maintain'));
+      expect(worktreeNameToRoleId('task-Ab-3')).toBe(buildAgentName('task', 'Ab-3'));
+      expect(worktreeNameToRoleId('task-x_9Q')).toBe(buildAgentName('task', 'x_9Q'));
+      expect(worktreeNameToRoleId('worktree-a_-1')).toBe('worktree-a_-1');
+    });
+
+    it('resolves every pre-#1740 numeric and short-id form exactly as before', () => {
+      const cases: Array<[string, string]> = [
+        ['spir-126-x', 'builder-spir-126'], ['bugfix-296-x', 'builder-bugfix-296'], ['pir-1298-x', 'builder-pir-1298'],
+        ['0110', 'builder-spir-110'], ['task-NAvW', 'builder-task-navw'], ['worktree-foIg', 'worktree-foig'],
+        ['experiment-AbCd', 'builder-experiment-abcd'], ['experiment-1560', 'builder-experiment-1560'],
+      ];
+      for (const [dir, role] of cases) expect(worktreeNameToRoleId(dir), dir).toBe(role);
     });
   });
 
@@ -1326,6 +1380,85 @@ describe('overview', () => {
       expect(builders).toHaveLength(1);
       expect(builders[0].mode).toBe('soft');
       expect(builders[0].issueId).toBeNull();
+    });
+
+    it('discovers a strict tracker-key PIR builder (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'pir-ENG-123', [
+        "id: 'ENG-123'",
+        'title: fix-login',
+        'protocol: pir',
+        'phase: implement',
+      ].join('\n'), 'ENG-123-fix-login');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].mode).toBe('strict');
+      expect(builders[0].issueId).toBe('ENG-123');
+      expect(builders[0].roleId).toBe('builder-pir-eng-123');
+    });
+
+    it('discovers a strict tracker-key bugfix builder (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'bugfix-ENG-9-x', [
+        "id: 'bugfix-ENG-9'",
+        'title: crash',
+        'protocol: bugfix',
+        'phase: fix',
+      ].join('\n'), 'bugfix-ENG-9-crash');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders[0].mode).toBe('strict');
+      expect(builders[0].issueId).toBe('ENG-9');
+    });
+
+    it('matches a project dir spawned in lower case before keys were canonicalized (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'pir-eng-5', [
+        "id: 'eng-5'", 'title: old', 'protocol: pir', 'phase: implement',
+      ].join('\n'), 'eng-5-old');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders[0].mode).toBe('strict');
+      expect(builders[0].issueId).toBe('ENG-5');
+    });
+
+    it('prefers the stored builder id over the parsed directory name (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'task-Ab-3');
+      const worktree = path.join(tmpDir, '.builders', 'task-Ab-3');
+      const stored = new Map([[worktree, { roleId: 'builder-task-zz-9', issueNumber: null, spawnedByArchitect: null }]]);
+      expect(discoverBuilders(tmpDir, stored)[0].roleId).toBe('builder-task-zz-9');
+    });
+
+    it('does not read an issue-less protocol short id as a tracker key when the stored row has no issue (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'maintain-Ab-3');
+      const worktree = path.join(tmpDir, '.builders', 'maintain-Ab-3');
+      const stored = new Map([[worktree, { roleId: 'builder-maintain-Ab-3', issueNumber: null, spawnedByArchitect: null }]]);
+
+      const builders = discoverBuilders(tmpDir, stored);
+      expect(builders[0].mode).toBe('soft');
+      expect(builders[0].issueId).toBeNull();
+      expect(builders[0].roleId).toBe('builder-maintain-ab-3');
+    });
+
+    it('trusts a key-shaped name when the stored row confirms the issue (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'pir-AB-3');
+      const worktree = path.join(tmpDir, '.builders', 'pir-AB-3');
+      const stored = new Map([[worktree, { roleId: 'builder-pir-ab-3', issueNumber: 'AB-3', spawnedByArchitect: null }]]);
+
+      expect(discoverBuilders(tmpDir, stored)[0].issueId).toBe('AB-3');
+    });
+
+    it('ignores a legacy stored id that is not a role id (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'bugfix-42-x');
+      const worktree = path.join(tmpDir, '.builders', 'bugfix-42-x');
+      const stored = new Map([[worktree, { roleId: 'bugfix-42', issueNumber: '42', spawnedByArchitect: null }]]);
+      expect(discoverBuilders(tmpDir, stored)[0].roleId).toBe('builder-bugfix-42');
+    });
+
+    it('stored identities leave numeric discovery unchanged', () => {
+      createBuilderWorktree(tmpDir, 'spir-126-x', ["id: '0126'", 'title: t', 'protocol: spir', 'phase: implement'].join('\n'), '0126-t');
+      const worktree = path.join(tmpDir, '.builders', 'spir-126-x');
+      const without = discoverBuilders(tmpDir)[0];
+      const withStored = discoverBuilders(tmpDir, new Map([[worktree, { roleId: 'builder-spir-126', issueNumber: '126', spawnedByArchitect: null }]]))[0];
+      expect(withStored).toEqual(without);
     });
 
     it('populates progress and blocked from status.yaml', () => {
@@ -1631,6 +1764,22 @@ describe('overview', () => {
       expect(backlog[0].reviewPath).toBe('codev/reviews/42-my-feature.md');
     });
 
+    it('links spec/plan files named by a tracker key (#1740)', () => {
+      for (const dir of ['specs', 'plans']) {
+        fs.mkdirSync(path.join(tmpDir, 'codev', dir), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, 'codev', dir, 'ENG-12-login.md'), '# x');
+      }
+      // A bugfix review named bugfix-<N>-slug must not be read as key BUGFIX-<N>.
+      fs.mkdirSync(path.join(tmpDir, 'codev', 'reviews'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'codev', 'reviews', 'bugfix-12-x.md'), '# x');
+
+      const issues = [{ number: 'ENG-12', title: 'Login', url: 'https://x.atlassian.net/browse/ENG-12', labels: [], createdAt: '' }];
+      const backlog = deriveBacklog(issues as never, tmpDir, new Set(), new Set());
+      expect(backlog[0].specPath).toBe('codev/specs/ENG-12-login.md');
+      expect(backlog[0].planPath).toBe('codev/plans/ENG-12-login.md');
+      expect(backlog[0].hasReview).toBe(false);
+    });
+
     it('marks issues with active builders', () => {
       const issues = [issueItem(100, 'Active'), issueItem(200, 'Idle')];
 
@@ -1789,6 +1938,24 @@ describe('overview', () => {
       const data = await cache.getOverview(tmpDir);
 
       expect(data.backlog[0].author).toBe('external-dev');
+    });
+
+    it('reports issueIdKind from the configured forge provider (#1740)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+      const writeForge = (forge: Record<string, unknown>) => {
+        fs.mkdirSync(path.join(tmpDir, '.codev'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.codev', 'config.json'), JSON.stringify({ forge }));
+      };
+
+      expect((await new OverviewCache().getOverview(tmpDir)).issueIdKind).toBe('number');
+
+      writeForge({ provider: 'jira' });
+      expect((await new OverviewCache().getOverview(tmpDir)).issueIdKind).toBe('key');
+
+      // Hand-overridden issue concepts: the provider no longer says what ids look like.
+      writeForge({ 'issue-view': 'my-jira-view' });
+      expect((await new OverviewCache().getOverview(tmpDir)).issueIdKind).toBeUndefined();
     });
 
     it('handles PR without author field', async () => {
@@ -2417,6 +2584,21 @@ describe('overview', () => {
 
       expect(data.builders).toHaveLength(1);
       expect(data.builders[0].issueId).toBe('42');
+    });
+
+    it('canonicalizes a lower-case stored tracker key (#1740)', async () => {
+      // A row written before spawn canonicalized keys holds `eng-123`.
+      const worktreePath = createBuilderWorktree(tmpDir, 'pir-eng-123', [
+        "id: 'eng-123'", 'title: old', 'protocol: pir', 'phase: implement',
+      ].join('\n'), 'eng-123-old');
+      createStateDb(tmpDir, [{ worktree: worktreePath, issue_number: 'eng-123' }]);
+      mockFetchIssueList.mockResolvedValue([{ number: 'ENG-123', title: 'Old', url: 'https://x/browse/ENG-123', labels: [] }]);
+
+      const data = await new OverviewCache().getOverview(tmpDir);
+
+      expect(data.builders[0].issueId).toBe('ENG-123');
+      // The forge's ENG-123 matches the builder, so it is not offered again as spawnable.
+      expect(data.backlog.find(b => b.id === 'ENG-123')?.hasBuilder).toBe(true);
     });
 
     it('falls back to regex-parsed issueId when DB has no issue_number (#664)', async () => {

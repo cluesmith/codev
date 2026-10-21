@@ -32,6 +32,7 @@ import { parseHunkRanges, parseUnifiedDiff } from '../diff-inject-ref.js';
 import { setDiffInjectSession, upsertDiffInjectEntry, type DiffInjectSessionEntry } from '../diff-inject-codelens.js';
 import { ensureDiffEditorCodeLens } from '../ensure-diff-codelens.js';
 import { builderById } from '../builder-lookup.js';
+import { issueRef } from '../issue-id.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -347,7 +348,7 @@ export async function viewDiff(
 
   if (changes.length === 0) {
     vscode.window.showInformationMessage(
-      `Codev: No changes to review yet for #${builder.issueId ?? builder.id}`,
+      `Codev: No changes to review yet for ${issueRef(builder.issueId ?? builder.id)}`,
     );
     return;
   }
@@ -381,7 +382,7 @@ export async function viewDiff(
 
   await vscode.commands.executeCommand(
     'vscode.changes',
-    `Reviewing #${builder.issueId ?? builder.id} (${defaultBranch} ↔ HEAD)`,
+    `Reviewing ${issueRef(builder.issueId ?? builder.id)} (${defaultBranch} ↔ HEAD)`,
     resources,
   );
 
@@ -497,7 +498,7 @@ interface BuilderLike {
 async function pickBuilder<T extends BuilderLike>(builders: T[]): Promise<T | undefined> {
   const picked = await vscode.window.showQuickPick(
     builders.map(b => ({
-      label: `#${b.issueId ?? b.id} ${b.issueTitle ?? ''}`,
+      label: `${issueRef(b.issueId ?? b.id)} ${b.issueTitle ?? ''}`,
       builder: b,
     })),
     { placeHolder: 'Select builder to diff against the default branch' },

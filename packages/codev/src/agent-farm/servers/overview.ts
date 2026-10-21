@@ -28,11 +28,14 @@ import type {
   OverviewBacklogItem,
   OverviewRecentlyClosed,
   OverviewData,
+  IssueIdKind,
 } from '@cluesmith/codev-types';
 import Database from 'better-sqlite3';
 import { getGlobalDbPath } from '../db/index.js';
 import { heldSummaryForWorkspace } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
+import { CANONICAL_KEY_SOURCE, ISSUE_KEY_SOURCE, canonicalIssueId, isIssueKey } from '../../lib/issue-id.js';
+import { resolveIssueIdKind, loadForgeConfig } from '../../lib/forge.js';
 
 // =============================================================================
 // Status YAML parser (lightweight, no library dependency)
@@ -472,6 +475,38 @@ export function computeIdleMs(parsed: ParsedStatus): number {
 // Builder discovery
 // =============================================================================
 
+/** `task-<short id>` / `worktree-<short id>`: base64url, so '-' and '_' can appear. */
+const SHORT_ID_NAME_TASK = /^task-([a-z0-9_-]+)$/;
+const SHORT_ID_NAME_WORKTREE = /^worktree-([a-z0-9_-]+)$/;
+
+/** `<protocol>-<KEY>` at the start of a worktree name, optionally followed by `-slug`. */
+const WORKTREE_KEY_NAME = new RegExp(`^([a-z]+)-(${ISSUE_KEY_SOURCE})(?:-|$)`, 'i');
+
+/**
+ * The issue id a porch project id names: `ENG-123` / `bugfix-ENG-123` → the
+ * key; numeric forms → the trailing number without zero padding
+ * (`bugfix-315` → "315", `0042` → "42"). Null when it names no issue.
+ */
+function issueIdFromProjectId(projectId: string): string | null {
+  // `bugfix-315` is itself key-shaped, so the numeric forms go first.
+  if (/^(?:bugfix-)?\d+$/i.test(projectId)) return String(Number(projectId.replace(/^bugfix-/i, '')));
+  const key = projectId.match(new RegExp(`^(?:bugfix-)?(${ISSUE_KEY_SOURCE})$`, 'i'));
+  if (key) return canonicalIssueId(key[1]);
+  const trailingNum = projectId.match(/(\d+)$/);
+  if (trailingNum) return String(Number(trailingNum[1]));
+  return null;
+}
+
+/** What global.db records for a builder, by worktree path (#1740). */
+export interface StoredBuilderIdentity {
+  /** The builder id, which is its terminal role id. */
+  roleId: string;
+  /** The issue it was spawned for, or null for task/protocol/worktree builders. */
+  issueNumber: string | null;
+  /** The architect that spawned it (Spec 823), or null. */
+  spawnedByArchitect: string | null;
+}
+
 /**
  * Map a worktree directory name to its expected terminal role_id.
  * Must match what buildAgentName() produces during spawn so we can
@@ -486,7 +521,11 @@ export function computeIdleMs(parsed: ParsedStatus): number {
  *   task-NAvW             → "builder-task-navw"
  *   worktree-foIg         → "worktree-foig"
  *   0110-legacy           → "builder-spir-110"
+ *   pir-ENG-123-slug      → "builder-pir-eng-123"   (tracker key, #1740)
  *   experiment-AbCd       → "builder-experiment-abcd"
+ *
+ * This is the fallback: discoverBuilders prefers the builder id stored in
+ * global.db, which is the role id itself.
  */
 export function worktreeNameToRoleId(dirName: string): string | null {
   const lower = dirName.toLowerCase();
@@ -507,21 +546,35 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   const pirMatch = lower.match(/^pir-(\d+)/);
   if (pirMatch) return `builder-pir-${Number(pirMatch[1])}`;
 
-  // Task: task-NAvW → builder-task-navw
-  const taskMatch = lower.match(/^task-([a-z0-9]+)/);
+  // Task: task-NAvW → builder-task-navw. The whole remainder is the short id:
+  // base64url short ids can contain '-' and '_' (task-Ab-3 → builder-task-ab-3,
+  // as buildAgentName produces; #1740).
+  const taskMatch = lower.match(SHORT_ID_NAME_TASK);
   if (taskMatch) return `builder-task-${taskMatch[1]}`;
 
   // Worktree: worktree-foIg → worktree-foig (no builder- prefix)
-  const worktreeMatch = lower.match(/^worktree-([a-z0-9]+)/);
+  const worktreeMatch = lower.match(SHORT_ID_NAME_WORKTREE);
   if (worktreeMatch) return `worktree-${worktreeMatch[1]}`;
 
   // Legacy numeric: 0110-slug → builder-spir-110 (assume spir)
   const numericMatch = lower.match(/^(\d+)(?:-|$)/);
   if (numericMatch) return `builder-spir-${Number(numericMatch[1])}`;
 
-  // Generic protocol: experiment-AbCd → builder-experiment-abcd
-  const genericMatch = lower.match(/^([a-z]+)-([a-z0-9]+)/);
-  if (genericMatch) return `builder-${genericMatch[1]}-${genericMatch[2]}`;
+  // Tracker key (#1740): pir-ENG-123[-slug] → builder-pir-eng-123. After every
+  // numeric form, so a name that resolves today resolves identically.
+  const keyMatch = lower.match(WORKTREE_KEY_NAME);
+  if (keyMatch) return `builder-${keyMatch[1]}-${keyMatch[2]}`;
+
+  // Generic protocol: experiment-1560[-slug] → builder-experiment-1560 (a
+  // numbered spawn), else experiment-AbCd → builder-experiment-abcd, where the
+  // whole remainder is the issue-less spawn's short id, '-'/'_' included
+  // (maintain-x_9Q → builder-maintain-x_9q, as buildAgentName produces; #1740).
+  const genericMatch = lower.match(/^([a-z]+)-(.+)$/);
+  if (genericMatch) {
+    const numbered = genericMatch[2].match(/^(\d+)(?:-|$)/);
+    if (numbered) return `builder-${genericMatch[1]}-${numbered[1]}`;
+    return `builder-${genericMatch[1]}-${genericMatch[2]}`;
+  }
 
   return null;
 }
@@ -573,14 +626,97 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
   const numericMatch = dirName.match(/^(\d+)(?:-|$)/);
   if (numericMatch) return numericMatch[1];
 
+  // Tracker key (#1740), after every numeric form: bugfix-ENG-123[-slug] →
+  // "bugfix-ENG-123" (porch's bugfix convention), pir-ENG-123[-slug] →
+  // "ENG-123". Canonical upper case, the spelling spawn now records.
+  const keyMatch = dirName.match(WORKTREE_KEY_NAME);
+  if (keyMatch) {
+    const key = canonicalIssueId(keyMatch[2]);
+    if (keyMatch[1].toLowerCase() === 'bugfix') return `bugfix-${key}`;
+    return key;
+  }
+
   // task-NAvW, worktree-foIg → null (soft mode)
   return null;
 }
 
 /**
+ * The porch project id for a worktree. A key-shaped directory name is
+ * ambiguous: an issue-less protocol spawn is named `<protocol>-<short id>`, and
+ * a base64url short id can look like a key (`maintain-Ab-3`). So when the
+ * stored row says the builder has no issue, a key-shaped name is not read as
+ * one. Numeric names are trusted as before.
+ */
+function projectIdForWorktree(dirName: string, storedIdentity: StoredBuilderIdentity | undefined): string | null {
+  const projectId = extractProjectIdFromWorktreeName(dirName);
+  if (projectId === null || storedIdentity === undefined) return projectId;
+  const keyed = isIssueKey(projectId.replace(/^bugfix-/i, ''));
+  if (keyed && storedIdentity.issueNumber === null) return null;
+  return projectId;
+}
+
+/**
+ * The stored builder id as a terminal role id, when it has the shape
+ * buildAgentName() produces (`builder-…`, `worktree-…`). Rows written by older
+ * versions can carry a legacy id (`bugfix-42`) that is not the role id; those
+ * fall back to parsing the directory name, as before.
+ */
+function storedRoleId(storedIdentity: StoredBuilderIdentity | undefined): string | null {
+  if (!storedIdentity) return null;
+  const id = storedIdentity.roleId.toLowerCase();
+  if (id.startsWith('builder-') || id.startsWith('worktree-')) return id;
+  return null;
+}
+
+/**
+ * Read each builder's stored identity (builder id, issue) from global.db for
+ * this workspace, keyed by worktree path. Empty when the DB is missing or
+ * unreadable, so discovery falls back to parsing directory names.
+ */
+export function loadStoredBuilderIdentities(workspaceRoot: string): Map<string, StoredBuilderIdentity> {
+  const result = new Map<string, StoredBuilderIdentity>();
+  try {
+    const dbPath = getGlobalDbPath();
+    if (!fs.existsSync(dbPath)) return result;
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      const rows = db.prepare(
+        'SELECT worktree, id, issue_number, spawned_by_architect FROM builders WHERE workspace_path = ?',
+      ).all(normalizeWorkspacePath(workspaceRoot)) as Array<{
+        worktree: string; id: string; issue_number: string | null; spawned_by_architect: string | null;
+      }>;
+      for (const row of rows) {
+        result.set(row.worktree, {
+          roleId: row.id,
+          issueNumber: row.issue_number,
+          spawnedByArchitect: row.spawned_by_architect,
+        });
+      }
+    } finally {
+      db.close();
+    }
+  } catch {
+    // DB not available: discovery parses directory names instead.
+  }
+  return result;
+}
+
+/** The workspace's issue-id kind from its forge config, or undefined when unknown. */
+function issueIdKindFor(workspaceRoot: string): IssueIdKind | undefined {
+  try {
+    return resolveIssueIdKind(loadForgeConfig(workspaceRoot));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Discover builders by scanning .builders/ directory and reading status.yaml.
  */
-export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
+export function discoverBuilders(
+  workspaceRoot: string,
+  stored: ReadonlyMap<string, StoredBuilderIdentity> = new Map(),
+): OverviewBuilder[] {
   const buildersDir = path.join(workspaceRoot, '.builders');
   if (!fs.existsSync(buildersDir)) return [];
 
@@ -597,11 +733,14 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
     if (!entry.isDirectory()) continue;
 
     const worktreePath = path.join(buildersDir, entry.name);
-    const projectId = extractProjectIdFromWorktreeName(entry.name);
+    // #1740: the stored builder row is the source of truth where it exists;
+    // parsing the directory name is the fallback for rows that don't.
+    const storedIdentity = stored.get(worktreePath);
+    const projectId = projectIdForWorktree(entry.name, storedIdentity);
     // Compute the canonical roleId once per worktree — used both as a
     // filter key (against entry.builders.keys()) and as the bridge to
     // PtySession at request time, so callers don't re-run the regex.
-    const roleId = worktreeNameToRoleId(entry.name);
+    const roleId = storedRoleId(storedIdentity) ?? worktreeNameToRoleId(entry.name);
 
     if (!projectId) {
       // No ID extracted (task-*, worktree-*) → soft mode
@@ -637,6 +776,9 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
     // Porch may create dirs with or without zero-padding (e.g. "386-slug" or "0386-slug"),
     // and bugfix dirs may be "bugfix-382-slug" or "builder-bugfix-382-slug".
     const paddedId = /^\d+$/.test(projectId) ? projectId.padStart(4, '0') : null;
+    // Keys compare case-insensitively: a project spawned as `eng-123` before
+    // spawn canonicalized keys still matches `ENG-123`.
+    const keyed = isIssueKey(projectId.replace(/^bugfix-/i, ''));
     let found = false;
     if (fs.existsSync(projectsDir)) {
       try {
@@ -644,7 +786,8 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
         for (const projEntry of projectEntries) {
           if (!projEntry.isDirectory()) continue;
           const name = projEntry.name;
-          const matches = name.startsWith(`${projectId}-`)
+          const matches = (keyed && name.toLowerCase().startsWith(`${projectId.toLowerCase()}-`))
+            || name.startsWith(`${projectId}-`)
             || (paddedId && name.startsWith(`${paddedId}-`));
           if (!matches) continue;
 
@@ -654,12 +797,9 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
           const content = fs.readFileSync(statusFile, 'utf-8');
           const parsed = parseStatusYaml(content);
 
+          // "bugfix-315" → "315", "0042" → "42", "ENG-123" → "ENG-123"
           let issueId: string | null = parsed.id || null;
-          if (issueId) {
-            // Extract trailing number as the issue ID (e.g. "bugfix-315" → "315", "0042" → "42")
-            const trailingNum = issueId.match(/(\d+)$/);
-            if (trailingNum) issueId = String(Number(trailingNum[1]));
-          }
+          if (issueId) issueId = issueIdFromProjectId(issueId) ?? issueId;
 
           builders.push({
             id: parsed.id || entry.name,
@@ -698,8 +838,7 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
 
     if (!found) {
       // No matching project dir → soft mode, but extract issue ID from dir name
-      const numMatch = projectId.match(/(\d+)$/);
-      const issueId = numMatch ? numMatch[1] : null;
+      const issueId = issueIdFromProjectId(projectId);
       builders.push({
         id: entry.name,
         issueId,
@@ -733,8 +872,12 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
 // Backlog derivation
 // =============================================================================
 
+// Upper case only: artifacts are named from the canonical (upper-case) id, and
+// a case-insensitive match would read `bugfix-1436-slug.md` as key BUGFIX-1436.
+const ARTIFACT_KEY_PREFIX = new RegExp(`^(${CANONICAL_KEY_SOURCE})(?:-|\\.md$)`);
+
 /**
- * Scan a codev artifact directory and return a map of issue number → filename.
+ * Scan a codev artifact directory and return a map of issue id → filename.
  */
 function scanArtifactDir(dirPath: string): Map<string, string> {
   const result = new Map<string, string>();
@@ -743,6 +886,12 @@ function scanArtifactDir(dirPath: string): Map<string, string> {
     const files = fs.readdirSync(dirPath);
     for (const file of files) {
       if (!file.endsWith('.md')) continue;
+      // Tracker keys first (#1740): `ENG-123-slug.md` → "ENG-123".
+      const key = file.match(ARTIFACT_KEY_PREFIX);
+      if (key) {
+        result.set(canonicalIssueId(key[1]), file);
+        continue;
+      }
       const idStr = file.split('-')[0];
       if (/^\d+$/.test(idStr)) result.set(String(Number(idStr)), file);
     }
@@ -928,13 +1077,16 @@ export class OverviewCache {
     const errors: { prs?: string; issues?: string } = {};
 
     // 1. Discover builders from .builders/ directory, then filter to live sessions
-    let builders = discoverBuilders(workspaceRoot);
+    // One read of the builders table (#1740) feeds both discovery (role id,
+    // project id) and the issueId / spawnedByArchitect enrichment below.
+    const stored = loadStoredBuilderIdentities(workspaceRoot);
+    let builders = discoverBuilders(workspaceRoot, stored);
     if (activeBuilderRoleIds) {
       // roleId is precomputed by discoverBuilders — no regex per call.
       builders = builders.filter(b => b.roleId !== null && activeBuilderRoleIds.has(b.roleId));
     }
 
-    // Enrich issueId and spawnedByArchitect from the builders table — protocol-
+    // Enrich issueId and spawnedByArchitect from the builders table (read once above), protocol-
     // agnostic (fixes #664 for issueId; adds spawnedByArchitect per Spec 823).
     // Issue #1118: builders now live in the single shared global.db, scoped by
     // workspace_path; read that file (read-only) and scope to this workspace.
@@ -942,6 +1094,15 @@ export class OverviewCache {
     // Spec 823: dropped the `WHERE issue_number IS NOT NULL` filter so soft-mode
     // builders (issue_number=null) also enrich their spawnedByArchitect. Each
     // field is applied conditionally on per-row non-nullness.
+    for (const [worktree, row] of stored) {
+      const builder = builders.find(b => b.worktreePath === worktree);
+      if (!builder) continue;
+      // Canonical spelling (#1740): a row written before spawn canonicalized keys
+      // holds `eng-123`, which would fail to match the forge's `ENG-123`.
+      if (row.issueNumber != null) builder.issueId = canonicalIssueId(String(row.issueNumber));
+      if (row.spawnedByArchitect != null) builder.spawnedByArchitect = row.spawnedByArchitect;
+    }
+
     // Spec 1313 Phase 7: workspace held-mail summary, folded into the overview so the
     // dashboard/VSCode indicator renders count + attention state straight off
     // /api/overview. Defaults (0 / false) survive a missing or unreadable DB.
@@ -953,15 +1114,6 @@ export class OverviewCache {
         const normWs = normalizeWorkspacePath(workspaceRoot);
         const db = new Database(dbPath, { readonly: true });
         try {
-          const rows = db.prepare(
-            'SELECT worktree, issue_number, spawned_by_architect FROM builders WHERE workspace_path = ?',
-          ).all(normWs) as Array<{ worktree: string; issue_number: string | null; spawned_by_architect: string | null }>;
-          for (const row of rows) {
-            const builder = builders.find(b => b.worktreePath === row.worktree);
-            if (!builder) continue;
-            if (row.issue_number != null) builder.issueId = String(row.issue_number);
-            if (row.spawned_by_architect != null) builder.spawnedByArchitect = row.spawned_by_architect;
-          }
           // Counts + escalation flag only — never bodies (redaction rule). Per-agent
           // held counts attach to the matching builder by roleId (the same
           // case-normalized key handleOverview uses to map the terminal registry).
@@ -1142,6 +1294,12 @@ export class OverviewCache {
     const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, queuedFeedback, feedbackMode, forgeStatus };
     if (forgeResetAt) {
       result.forgeResetAt = forgeResetAt;
+    }
+    // #1740: tell clients whether issue ids are numbers or tracker keys, so
+    // they can accept `ENG-123` input on Jira/Linear workspaces only.
+    const issueIdKind = issueIdKindFor(workspaceRoot);
+    if (issueIdKind) {
+      result.issueIdKind = issueIdKind;
     }
     if (currentUser) {
       result.currentUser = currentUser;

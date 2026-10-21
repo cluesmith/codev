@@ -60,6 +60,7 @@ import {
   executePreSpawnHooks,
   slugify,
   findExistingIssueWorktree,
+  issueDirName,
   validateResumeWorktree,
   createPtySession,
   startBuilderSession,
@@ -68,6 +69,7 @@ import {
 } from './spawn-worktree.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { executeForgeCommand, loadForgeConfig } from '../../lib/forge.js';
+import { ISSUE_KEY_SOURCE, isIssueKey, issueRef } from '../../lib/issue-id.js';
 
 // =============================================================================
 // ID and Session Management
@@ -113,11 +115,24 @@ function logSpawnSuccess(label: string, terminalId: string, mode?: string): void
 
 /**
  * Generate a short 4-character base64-encoded ID
- * Uses URL-safe base64 (a-z, A-Z, 0-9, -, _) for filesystem-safe IDs
+ * Uses URL-safe base64 (a-z, A-Z, 0-9, -, _) for filesystem-safe IDs.
+ *
+ * Never key-shaped (#1740): about 0.24% of raw draws look like a tracker key
+ * (`Ab-3`), and an issue-less spawn named `pir-Ab-3` would collide with issue
+ * AB-3's worktree, role id and porch project. Such a draw is redrawn. `random`
+ * is injectable for tests.
  */
-function generateShortId(): string {
+export function generateShortId(random: () => number = Math.random): string {
+  let id = drawShortId(random);
+  while (isIssueKey(id)) {
+    id = drawShortId(random);
+  }
+  return id;
+}
+
+function drawShortId(random: () => number): string {
   // Generate random 24-bit number and base64 encode to 4 chars
-  const num = Math.floor(Math.random() * 0xFFFFFF);
+  const num = Math.floor(random() * 0xFFFFFF);
   const bytes = new Uint8Array([num >> 16, (num >> 8) & 0xFF, num & 0xFF]);
   return btoa(String.fromCharCode(...bytes))
     .replace(/\+/g, '-')
@@ -291,18 +306,27 @@ async function resolveIssueProtocol(
  */
 function inferProtocolFromWorktree(config: Config, issueNumber: number | string): string | null {
   if (!existsSync(config.buildersDir)) return null;
+  return inferProtocolFromDirs(readdirSync(config.buildersDir), issueNumber);
+}
+
+/**
+ * The protocol prefix of the worktree directory spawned for `issueNumber`, or
+ * null. Matches spir-315-feature-name, bugfix-315-slug, spir-0076-feature,
+ * and tracker keys: pir-ENG-123, bugfix-ENG-123-slug (#1740). The id is the
+ * whole segment after the protocol, so a key's own dash isn't split.
+ */
+export function inferProtocolFromDirs(dirs: string[], issueNumber: number | string): string | null {
   const strippedId = stripLeadingZeros(String(issueNumber));
-  const dirs = readdirSync(config.buildersDir);
-  // Match patterns like: spir-315-feature-name, bugfix-315-slug, spir-0076-feature
-  const match = dirs.find(d => {
-    const parts = d.split('-');
-    return parts.length >= 2 && stripLeadingZeros(parts[1]) === strippedId;
-  });
-  if (match) {
-    return match.split('-')[0];
+  for (const d of dirs) {
+    const m = d.match(WORKTREE_ISSUE_SEGMENT);
+    if (m && issueDirName(stripLeadingZeros(m[2]), strippedId) === issueDirName(strippedId, strippedId)) {
+      return m[1];
+    }
   }
   return null;
 }
+
+const WORKTREE_ISSUE_SEGMENT = new RegExp(`^([a-z]+)-(\\d+|${ISSUE_KEY_SOURCE})(?:-|$)`, 'i');
 
 // =============================================================================
 // Mode-specific spawn implementations
@@ -387,12 +411,14 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     if (existsSync(idOnlyPath)) {
       worktreeName = idOnlyName;
     } else {
-      // Search for old-format worktree: <protocol>-<id>-<title-slug>
+      // Search for the ID-only name in another case (a tracker key spawned
+      // before canonicalization), then the old-format <protocol>-<id>-<title-slug>.
       const prefix = `${protocol}-${strippedId}-`;
       try {
-        const entries = readdirSync(config.buildersDir, { withFileTypes: true });
-        const match = entries.find(e => e.isDirectory() && e.name.startsWith(prefix));
-        worktreeName = match ? match.name : idOnlyName;
+        const entries = readdirSync(config.buildersDir, { withFileTypes: true }).filter(e => e.isDirectory());
+        const sameId = entries.find(e => issueDirName(e.name, strippedId) === issueDirName(idOnlyName, strippedId));
+        const withSlug = entries.find(e => issueDirName(e.name, strippedId).startsWith(issueDirName(prefix, strippedId)));
+        worktreeName = (sameId ?? withSlug)?.name ?? idOnlyName;
       } catch {
         worktreeName = idOnlyName;
       }
@@ -720,7 +746,7 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
 /**
  * Spawn builder for an issue-driven protocol (BUGFIX, PIR, …).
  *
- * Implements the shared spawn pattern: fetch the GitHub issue, derive the
+ * Implements the shared spawn pattern: fetch the issue from the forge, derive the
  * builder ID / worktree / branch from `prefix`, run pre-spawn hooks, create
  * or resume the worktree, initialize porch, render the builder prompt from
  * the protocol's template, and start the PTY session.
@@ -742,7 +768,7 @@ async function spawnIssueDrivenBuilder(
   logger.header(`${options.resume ? 'Resuming' : 'Spawning'} ${protocolLabel} Builder for Issue #${issueNumber}`);
 
   // Fetch issue from GitHub
-  logger.info('Fetching issue from GitHub...');
+  logger.info(`Fetching issue ${issueRef(issueNumber)}...`);
   const issue = await fetchGitHubIssue(issueNumber, { cwd: config.workspaceRoot, forgeConfig });
 
   const builderId = buildAgentName(prefix, String(issueNumber));
@@ -848,7 +874,7 @@ async function spawnIssueDrivenBuilder(
     // The porch project ID — what `porch next/done/approve` expects.
     // NOT the builder agent name (which includes the `builder-` prefix).
     project_id: porchProjectId,
-    input_description: `work for GitHub Issue #${issueNumber}`,
+    input_description: `work for issue ${issueRef(issueNumber)}`,
     issue: { number: issueNumber, title: issue.title, body: issue.body || '(No description provided)' },
   };
   if (options.branch) {

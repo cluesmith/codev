@@ -107,6 +107,7 @@ Project management commands. Typically used by **humans** to set up and maintain
 |---------|-------------|
 | `codev init <dirname>` | Create a new Codev project |
 | `codev adopt` | Add Codev to an existing project |
+| `codev bootstrap-docs` | Draft the governance docs from an existing codebase |
 | `codev doctor` | Check dependencies and configuration |
 | `codev update` | Update Codev framework |
 | `codev import` | Import specs from another project |

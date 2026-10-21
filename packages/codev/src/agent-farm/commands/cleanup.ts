@@ -17,6 +17,7 @@ import { deleteFileTabsByPathPrefix } from '../utils/file-tabs.js';
 import { dismissHeldForAgent } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { executeForgeCommand } from '../../lib/forge.js';
+import { sameIssueId } from '../../lib/issue-id.js';
 
 /**
  * Clean porch review artifacts for a project from codev/projects/,
@@ -115,7 +116,7 @@ export async function killShellperProcesses(worktreePath: string): Promise<numbe
 
 export interface CleanupOptions {
   project?: string;
-  issue?: number;
+  issue?: number | string;
   task?: string;
   force?: boolean;
 }
@@ -192,7 +193,7 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
 
     if (!builder) {
       // Also check by issueNumber field (in case ID format differs)
-      builder = state.builders.find((b) => b.issueNumber === options.issue);
+      builder = state.builders.find((b) => sameIssueId(b.issueNumber, options.issue));
     }
 
     if (!builder) {
@@ -243,7 +244,7 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
   await cleanupBuilder(builder, options.force, options.issue);
 }
 
-async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: number): Promise<void> {
+async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: number | string): Promise<void> {
   const config = getConfig();
   const isShellMode = builder.type === 'shell';
   const isBugfixMode = builder.type === 'bugfix';

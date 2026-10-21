@@ -126,6 +126,13 @@ export interface CodevConfig {
   };
   dashboard?: {
     frontend?: 'react' | 'legacy';
+    /**
+     * The pending-decisions file the Decisions tab views and writes rulings into
+     * (Spec 1819), relative to the workspace root. Default
+     * `codev/state/pending-decisions.md`. It must resolve — symlinks followed — to a
+     * file inside the workspace; anything else is refused.
+     */
+    decisionsFile?: string;
   };
   framework?: {
     source?: string;
@@ -138,6 +145,7 @@ export interface CodevConfig {
 export interface CheckOverride {
   command?: string;
   cwd?: string;
+  timeout_ms?: number;
   skip?: boolean;
 }
 

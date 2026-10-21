@@ -359,6 +359,28 @@ describe('spawn-worktree', () => {
       return script.match(new RegExp(`codev_launch_${name}\\(\\) \\{\\n(.*)\\n\\}`))?.[1].trim();
     }
 
+    // Issue #1783: the builder's identity travels in its environment, so `afx send`
+    // resolves it from any cwd — fresh spawns and resumes alike.
+    it.each([
+      ['fresh', undefined],
+      ['resume', { sessionId: 'abc-1234-uuid', scriptFragment: "--resume 'abc-1234-uuid'" }],
+    ])('%s → exports CODEV_BUILDER_WORKTREE before launching the agent', async (_label, resume) => {
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'bugfix-1783', "/tmp/ws/.builders/it's", 'claude',
+        'PROMPT', 'ROLE', 'codev', resume,
+      );
+      const script = findScript()!;
+      const exportLine = `export CODEV_BUILDER_WORKTREE='/tmp/ws/.builders/it'\\''s'`;
+      expect(script).toContain(exportLine);
+      expect(script.indexOf(exportLine)).toBeLessThan(script.indexOf('codev_launch_entry()'));
+    });
+
+    it('worktree-mode script exports CODEV_BUILDER_WORKTREE too', () => {
+      const script = buildWorktreeLaunchScript('/tmp/ws/.builders/task-x', 'claude', null);
+      expect(script).toContain(`export CODEV_BUILDER_WORKTREE='/tmp/ws/.builders/task-x'`);
+    });
+
     it('resume → entry command is the escaped scriptFragment, with no role injection', async () => {
       const resume = { sessionId: 'abc-1234-uuid', scriptFragment: "--resume 'abc-1234-uuid'" };
       await startBuilderSession(

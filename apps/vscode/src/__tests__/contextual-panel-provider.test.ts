@@ -111,6 +111,7 @@ interface RenderMessage {
   attention?: AttentionSummary;
   codeReview?: CodeReviewSummary;
   reviewBuilderId?: string;
+  pinnedBuilderId?: string;
 }
 
 function makeView() {
@@ -147,7 +148,7 @@ function makeView() {
   };
 }
 
-function newProvider() {
+function newProvider(pinnedBuilderId?: string) {
   const terminalManager = { getActiveBuilderId: () => hoisted.state.activeBuilderId };
   const overviewCache = {
     getData: () => hoisted.state.overviewData as OverviewData | null,
@@ -180,6 +181,7 @@ function newProvider() {
     terminalManager as unknown as import('../terminal-manager.js').TerminalManager,
     overviewCache as unknown as import('../views/overview-data.js').OverviewCache,
     reviewQueue as unknown as import('../review-queue/store.js').ReviewQueueStore,
+    pinnedBuilderId,
   );
 }
 
@@ -717,5 +719,77 @@ describe('ContextualPanelProvider — review-queue body (#1559)', () => {
       fireMessage({ type: 'review-action', action: 'submit', builderId: '1559' });
       expect(hoisted.state.executed).toEqual([]);
     });
+  });
+});
+
+// #1809: in a builder-worktree window the panel is pinned to the worktree's own builder. The palette can
+// still open a sibling builder's diff or terminal there (read-only viewing), but the panel must not
+// become an action path onto it, and it never projects the parent's Attention roll-up.
+describe('ContextualPanelProvider — pinned to a builder-worktree window (#1809)', () => {
+  beforeEach(() => {
+    hoisted.state.overviewData = overview({
+      builders: [builderRow({ id: 'pir-1809', blocked: 'plan review', blockedGate: 'plan-approval' })],
+    });
+  });
+
+  it('renders no Attention roll-up and does not re-post on overview ticks', () => {
+    const provider = newProvider('pir-1809');
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    expect(posted[0].descriptor.kind).toBe('attention');
+    expect(posted[0].attention).toBeUndefined();
+    expect(posted[0].pinnedBuilderId).toBe('pir-1809');
+    fireOverviewChange();
+    expect(posted).toHaveLength(1);
+  });
+
+  it("does not open Code Review for a sibling builder's diff, and ignores review actions for it", () => {
+    hoisted.state.diffBuilders['/w/.builders/sibling/x.ts'] = 'sibling';
+    hoisted.state.activeTabInput = diffTab('/w/.builders/sibling/x.ts');
+    const provider = newProvider('pir-1809');
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+
+    expect(last(posted).descriptor.kind).not.toBe('code-review');
+    expect(last(posted).reviewBuilderId).toBeUndefined();
+    fireMessage({ type: 'review-action', action: 'submit', builderId: 'sibling' });
+    expect(hoisted.state.executed).toEqual([]);
+  });
+
+  it("opens Code Review for the window's own builder's diff", () => {
+    hoisted.state.diffBuilders['/w/.builders/pir-1809/x.ts'] = 'pir-1809';
+    hoisted.state.activeTabInput = diffTab('/w/.builders/pir-1809/x.ts');
+    const provider = newProvider('pir-1809');
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    expect(last(posted).descriptor.kind).toBe('code-review');
+    expect(last(posted).descriptor.context.builderId).toBe('pir-1809');
+  });
+
+  it("drops a sibling builder's terminal but keeps the own builder's (tail-matched terminal id)", () => {
+    hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
+    const provider = newProvider('pir-1809');
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    hoisted.state.activeBuilderId = 'builder-spir-1049';
+    hoisted.state.listeners['terminal']?.({});
+    expect(last(posted).descriptor.kind).toBe('attention');
+
+    hoisted.state.activeBuilderId = 'builder-pir-1809';
+    hoisted.state.listeners['terminal']?.({});
+    expect(last(posted).descriptor.kind).toBe('builder-inspector');
+    expect(last(posted).descriptor.context.builderId).toBe('builder-pir-1809');
+  });
+
+  it('an unpinned window still projects Attention from the overview', () => {
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    expect(posted[0].attention).toBeDefined();
+    expect(posted[0].pinnedBuilderId).toBeUndefined();
   });
 });

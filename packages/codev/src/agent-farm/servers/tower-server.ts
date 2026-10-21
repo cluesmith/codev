@@ -54,6 +54,7 @@ import {
   deleteFileTabsForWorkspace,
   getTerminalsForWorkspace,
   reconcileTerminalSessions,
+  pruneBuilderWorktreeWorkspaces,
 } from './tower-terminals.js';
 import {
   setupUpgradeHandler,
@@ -705,6 +706,12 @@ async function bootSequence(): Promise<void> {
   // model causes the first client to be replaced, corrupting the session
   // and deleting the architect terminal's socket file (Bugfix #274).
   await reconcileTerminalSessions();
+
+  // Issue #1809: drop global.db rows that recorded a builder worktree as a
+  // workspace. Runs AFTER reconcile (liveness is known) and BEFORE the #341
+  // orphan sweep, so liveness is decided before anything is killed; the prune
+  // itself never signals a process and only reports live stray architects.
+  pruneBuilderWorktreeWorkspaces();
 
   // Bugfix #341: Kill orphaned shellper processes not in active sessions. Must
   // run AFTER reconciliation so reconnected sessions are in the active map and

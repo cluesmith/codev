@@ -45,11 +45,13 @@ cat codev/protocols/maintain/protocol.md
 
 ### 3. Run E2E Tests
 
+The e2e suites run in CI on every PR and on `main` (CLI Tests, CLI Integration Tests, Tower Integration Tests, Artifact-Canvas Browser Tests, Package Install Verification); the old `bats tests/e2e/` directory no longer exists. Confirm the CI run on the `main` commit you are about to tag is green:
+
 ```bash
-bats tests/e2e/
+gh run list --branch main --limit 5
 ```
 
-**Stop if**: Any tests fail. Fix issues before proceeding.
+**Stop if**: Any check on that commit failed. Fix issues before proceeding.
 
 ### 4. Update Version and Tag
 

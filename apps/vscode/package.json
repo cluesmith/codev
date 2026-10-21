@@ -3,7 +3,7 @@
   "publisher": "cluesmith",
   "displayName": "Codev for VS Code",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "3.3.4",
+  "version": "3.3.6",
   "license": "Apache-2.0",
   "icon": "icons/codev.png",
   "pricing": "Free",
@@ -116,6 +116,10 @@
       {
         "command": "codev.markdownPreview.resetFontSize",
         "title": "Codev: Reset Markdown Preview Font Size"
+      },
+      {
+        "command": "codev.markdownPreview.readingAids",
+        "title": "Codev: Markdown Preview Reading Aids…"
       },
       {
         "command": "codev.forwardSelectionToBuilder",
@@ -526,6 +530,11 @@
           "group": "1_run"
         },
         {
+          "command": "codev.markdownPreview.readingAids",
+          "when": "activeCustomEditorId == codev.markdownPreview",
+          "group": "1_run"
+        },
+        {
           "command": "codev.diffCodelensUseForward",
           "when": "codev.activeEditorIsBuilderFile && codev.diffCodelensMode == 'comment'",
           "group": "navigation"
@@ -563,6 +572,10 @@
         },
         {
           "command": "codev.markdownPreview.resetFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview"
+        },
+        {
+          "command": "codev.markdownPreview.readingAids",
           "when": "activeCustomEditorId == codev.markdownPreview"
         },
         {
@@ -1138,7 +1151,7 @@
     "views": {
       "codev": [
         { "id": "codev.workspace", "name": "Workspace", "when": "codev.hasWorkspace" },
-        { "id": "codev.agents", "name": "Agents" },
+        { "id": "codev.agents", "name": "Agents", "when": "!codev.isBuilderWorktree" },
         { "id": "codev.backlog", "name": "Backlog", "when": "codev.hasWorkspace" },
         { "id": "codev.pullRequests", "name": "Pull Requests", "when": "codev.hasWorkspace", "visibility": "collapsed" },
         { "id": "codev.recentlyClosed", "name": "Recently Closed", "when": "codev.hasWorkspace", "visibility": "collapsed" },
@@ -1324,6 +1337,42 @@
           "default": 0,
           "minimum": 0,
           "description": "Prose line-height (unitless multiplier) for the Codev Markdown Preview. 0 uses the built-in default (1.5, the github-markdown-css baseline)."
+        },
+        "codev.markdownPreview.hoverHighlight": {
+          "type": "string",
+          "enum": [
+            "none",
+            "word",
+            "wordLine",
+            "wordLineParagraph",
+            "line",
+            "lineParagraph"
+          ],
+          "enumDescriptions": [
+            "No highlight.",
+            "A soft pill behind the word under the pointer.",
+            "The word plus a fainter band along its line.",
+            "The word, its line, and a faint tint behind the whole paragraph.",
+            "A faint band along the line under the pointer, no word pill.",
+            "The line band plus a faint tint behind the whole paragraph, no word pill."
+          ],
+          "default": "lineParagraph",
+          "description": "Reading aid for the Codev Markdown Preview: what to highlight under the pointer. Also available from the preview's title-bar menu (Reading Aids…)."
+        },
+        "codev.markdownPreview.readingCursor": {
+          "type": "string",
+          "enum": [
+            "arrow",
+            "iBeam",
+            "hand"
+          ],
+          "enumDescriptions": [
+            "The standard arrow.",
+            "The text (I-beam) cursor.",
+            "The pointing hand."
+          ],
+          "default": "arrow",
+          "description": "Mouse pointer shape over prose in the Codev Markdown Preview. Code, comment cards and buttons keep their own pointers. Also available from the preview's title-bar menu (Reading Aids…)."
         }
       }
     },

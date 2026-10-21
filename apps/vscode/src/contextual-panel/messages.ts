@@ -27,6 +27,9 @@ export interface RenderMessage {
   /** The queue key `codeReview` belongs to (the overview builder id). Review actions address it;
    *  in Builder Inspector mode it differs from the descriptor's terminal builder id. */
   reviewBuilderId?: string;
+  /** Set in a builder-worktree window (#1809): the panel is pinned to this builder and shows no
+   *  Attention roll-up, so the Attention fallback renders a pinned notice instead of `attention`. */
+  pinnedBuilderId?: string;
 }
 
 export type HostToWebviewMessage = RenderMessage;

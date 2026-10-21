@@ -17,6 +17,7 @@ import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { IssueIdKind } from '@cluesmith/codev-types';
 import { loadConfig as loadCodevConfig } from './config.js';
 
 const execAsync = promisify(exec);
@@ -132,6 +133,10 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
     // default. Disabling pr-create here would leave Linear the one provider
     // that can merge a PR but not open one.
     linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps']),
+    // Jira Cloud via Atlassian's `acli` (#1740) is hybrid on the Linear model:
+    // issue concepts only, every PR concept (pr-create included) on the github
+    // default.
+    jira: buildPresetFromScripts('jira', ['team-activity', 'on-it-timestamps']),
   };
   return _providerPresets;
 }
@@ -139,6 +144,38 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
 /** Get known provider names. */
 export function getKnownProviders(): string[] {
   return Object.keys(getProviderPresets());
+}
+
+/**
+ * Providers that hold only the issues (spec 719). Their PR concepts run `gh`,
+ * so a workspace on one needs a working `gh` login as well as the tracker's.
+ */
+const HYBRID_PROVIDERS: ReadonlySet<string> = new Set(['linear', 'jira']);
+
+export function isHybridProvider(provider: string | undefined): boolean {
+  return provider !== undefined && HYBRID_PROVIDERS.has(provider.toLowerCase());
+}
+
+const ISSUE_ID_KIND_BY_PROVIDER: Record<string, IssueIdKind> = {
+  github: 'number',
+  gitlab: 'number',
+  gitea: 'number',
+  linear: 'key',
+  jira: 'key',
+};
+
+const ISSUE_CONCEPTS = ['issue-view', 'issue-list', 'issue-search', 'issue-comment', 'recently-closed'];
+
+/**
+ * The shape of the workspace's issue ids, from its provider (#1740). Undefined
+ * when a hand-written override replaces an issue concept: the provider then no
+ * longer says what the ids look like, so this reports nothing rather than guess.
+ */
+export function resolveIssueIdKind(forgeConfig: ForgeConfig | null | undefined): IssueIdKind | undefined {
+  if (forgeConfig && ISSUE_CONCEPTS.some((concept) => typeof forgeConfig[concept] === 'string')) {
+    return undefined;
+  }
+  return ISSUE_ID_KIND_BY_PROVIDER[(forgeConfig?.provider ?? 'github').toLowerCase()];
 }
 
 /** Resolution source for a concept command. */
@@ -525,6 +562,23 @@ export function getDefaultCommand(concept: string): string | null {
  * Returns an array of diagnostic messages.
  * Used by `codev doctor`.
  */
+/**
+ * Non-concept settings each provider's scripts read, passed through as
+ * `CODEV_<KEY>` (see buildForgeEnv). Listed so validation can tell a real
+ * setting from a typo'd concept name.
+ */
+const PROVIDER_SETTINGS: Record<string, readonly string[]> = {
+  linear: ['linear-team'],
+  jira: ['jira-site', 'jira-project'],
+};
+
+function providerOwningSetting(key: string): string | null {
+  for (const [provider, settings] of Object.entries(PROVIDER_SETTINGS)) {
+    if (settings.includes(key)) return provider;
+  }
+  return null;
+}
+
 export function validateForgeConfig(
   forgeConfig: ForgeConfig,
 ): { concept: string; status: 'ok' | 'disabled' | 'unknown_concept' | 'empty_command' | 'provider'; message: string }[] {
@@ -547,7 +601,14 @@ export function validateForgeConfig(
     } else if (command === '') {
       results.push({ concept, status: 'empty_command', message: `Concept '${concept}' has an empty command string` });
     } else if (!(concept in getDefaultCommands())) {
-      results.push({ concept, status: 'unknown_concept', message: `Concept '${concept}' is not a known forge concept` });
+      const owner = providerOwningSetting(concept);
+      if (owner !== null && owner === forgeConfig.provider?.toLowerCase()) {
+        results.push({ concept, status: 'ok', message: `Setting '${concept}': ${command}` });
+      } else if (owner !== null) {
+        results.push({ concept, status: 'unknown_concept', message: `Setting '${concept}' only applies to provider '${owner}'` });
+      } else {
+        results.push({ concept, status: 'unknown_concept', message: `Concept '${concept}' is not a known forge concept` });
+      }
     } else {
       results.push({ concept, status: 'ok', message: `Concept '${concept}' overridden: ${command}` });
     }

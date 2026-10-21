@@ -22,6 +22,7 @@ import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
+import { isBuilderWorktreePath, parseBuilderWorktreePath } from '@cluesmith/codev-sdk/builder-worktree';
 import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
 import {
   normalizeWorkspacePath,
@@ -195,8 +196,15 @@ export function instancesReady(): boolean {
 /**
  * Register a workspace in the known_workspaces table so it persists across restarts
  * even when all terminal sessions are gone.
+ *
+ * A builder worktree is never a workspace (#1809), so this is a no-op for one. That
+ * also stops boot reconcile from re-registering a live stray worktree architect it
+ * reattaches: the session stays live, it just isn't recorded as a workspace.
  */
 export function registerKnownWorkspace(workspacePath: string): void {
+  if (isBuilderWorktreePath(workspacePath)) {
+    return;
+  }
   try {
     const db = getGlobalDb();
     db.prepare(`
@@ -210,9 +218,19 @@ export function registerKnownWorkspace(workspacePath: string): void {
 }
 
 /**
- * Get all known workspace paths from known_workspaces, terminal_sessions, and in-memory cache.
+ * Known workspace paths with builder worktrees excluded (#1809). This is the list
+ * for listing, cron and activation; a builder worktree is never a workspace.
  */
 export function getKnownWorkspacePaths(): string[] {
+  return getAllKnownWorkspacePaths().filter((p) => !isBuilderWorktreePath(p));
+}
+
+/**
+ * Every known workspace path from known_workspaces, terminal_sessions, and the
+ * in-memory cache, INCLUDING builder worktrees. Only stop/deactivate uses this:
+ * a stray architect left running in a worktree (#1809) must still be stoppable.
+ */
+export function getAllKnownWorkspacePaths(): string[] {
   const workspacePaths = new Set<string>();
 
   // From known_workspaces table (persists even after all terminals are killed)
@@ -274,7 +292,7 @@ export async function getInstances(): Promise<InstanceStatus[]> {
 
   for (const workspacePath of knownPaths) {
     // Skip builder worktrees - they're managed by their parent workspace
-    if (workspacePath.includes('/.builders/')) {
+    if (isBuilderWorktreePath(workspacePath)) {
       continue;
     }
 
@@ -445,6 +463,16 @@ function findArchitectTerminalSessionIds(name: string, resolvedPath: string, wor
   }
 }
 
+/** The refusal message for activating a builder worktree, or null for any other path. */
+function builderWorktreeRefusal(workspacePath: string): string | null {
+  const worktree = parseBuilderWorktreePath(workspacePath);
+  if (!worktree) {
+    return null;
+  }
+  return `Refusing to activate a builder worktree (${worktree.worktreePath}). `
+    + `Builder worktrees are managed by their parent workspace; activate ${worktree.workspaceRoot} instead.`;
+}
+
 /**
  * Launch a new agent-farm instance.
  * Phase 4 (Spec 0090): Tower manages terminals directly, no dashboard-server.
@@ -452,6 +480,13 @@ function findArchitectTerminalSessionIds(name: string, resolvedPath: string, wor
  */
 export async function launchInstance(workspacePath: string): Promise<{ success: boolean; error?: string; adopted?: boolean }> {
   if (!_deps) return { success: false, error: 'Tower is still starting up. Try again shortly.' };
+
+  // #1809: a builder worktree is never a workspace. Refuse before anything is
+  // adopted, registered or spawned. Checked again after realpath below.
+  const worktreeRefusal = builderWorktreeRefusal(workspacePath);
+  if (worktreeRefusal) {
+    return { success: false, error: worktreeRefusal };
+  }
 
   // Validate path exists
   if (!fs.existsSync(workspacePath)) {
@@ -462,6 +497,13 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
   const stat = fs.statSync(workspacePath);
   if (!stat.isDirectory()) {
     return { success: false, error: `Not a directory: ${workspacePath}` };
+  }
+
+  // A symlink can point into a worktree, so refuse on the real path too, still
+  // before the adopt step below can run in it.
+  const realPathRefusal = builderWorktreeRefusal(fs.realpathSync(workspacePath));
+  if (realPathRefusal) {
+    return { success: false, error: realPathRefusal };
   }
 
   // Auto-adopt non-codev directories

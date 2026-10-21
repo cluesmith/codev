@@ -171,3 +171,38 @@ describe('toDynamicQuickPickItems', () => {
     expect(rows[0].target).toBe('pr');
   });
 });
+
+describe('tracker-key dynamic rows (#1740)', () => {
+  it('offers no key rows unless keys are accepted (numeric workspaces unchanged)', () => {
+    for (const q of ['UTF-8', 'ABC-12', 'issue ABC-12', 'COVID-19']) {
+      expect(parseSearchDynamicQuery(q), q).toEqual([]);
+      expect(parseSearchDynamicQuery(q, false), q).toEqual([]);
+    }
+  });
+
+  it('offers an issue-only row for a key when accepted, canonicalized', () => {
+    expect(parseSearchDynamicQuery('eng-123', true)).toEqual([{ target: 'issue', id: 'ENG-123' }]);
+    expect(parseSearchDynamicQuery('#ENG-123', true)).toEqual([{ target: 'issue', id: 'ENG-123' }]);
+    expect(parseSearchDynamicQuery('view issue ENG-123', true)).toEqual([{ target: 'issue', id: 'ENG-123' }]);
+  });
+
+  it('never offers a PR row for a key (PR ids are numbers)', () => {
+    expect(parseSearchDynamicQuery('pr ENG-123', true)).toEqual([]);
+  });
+
+  it('keeps numeric rows exactly as before when keys are accepted', () => {
+    expect(parseSearchDynamicQuery('1350', true)).toEqual(parseSearchDynamicQuery('1350'));
+  });
+
+  it('labels a key row without a #', () => {
+    expect(toDynamicQuickPickItems('ENG-123', true)[0].label).toBe('View Issue ENG-123');
+    expect(toDynamicQuickPickItems('1350', true)[0].label).toBe('View Issue #1350');
+  });
+});
+
+describe('static rows label tracker keys without # (#1740)', () => {
+  it('renders ENG-12 and #42', () => {
+    const rows = toQuickPickItems([item('ENG-12', { title: 'Jira' }), item('42', { title: 'GitHub' })], Date.now());
+    expect(rows.map(r => r.label)).toEqual(['ENG-12 Jira', '#42 GitHub']);
+  });
+});

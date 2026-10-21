@@ -19,6 +19,7 @@
  */
 
 import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
+import { issueRef } from './issue-id.js';
 
 /** Minimal shape of an `OverviewBuilder` row needs for display. */
 export interface OverviewBuilderRow {
@@ -64,7 +65,7 @@ export function buildBuilderPickRows(
     const { builder: wb } = resolveAgentName(ob.id, workspaceBuilders);
     if (!wb?.terminalId) { continue; }
     rows.push({
-      label: `#${ob.issueId ?? ob.id} ${ob.issueTitle ?? ''}`,
+      label: `${issueRef(ob.issueId ?? ob.id)} ${ob.issueTitle ?? ''}`,
       description: ob.phase,
       id: wb.id,
       name: wb.name,

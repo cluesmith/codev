@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, rmSync, chmodSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -241,6 +241,8 @@ describe('cloud-config', () => {
       // Create file with world-readable permissions (0644)
       mkdirSync(AGENT_FARM_DIR, { recursive: true, mode: 0o700 });
       writeFileSync(CONFIG_PATH, '{}', { mode: 0o644 });
+      // `mode` is filtered by the process umask (a 077 umask yields 0600), so set it explicitly.
+      chmodSync(CONFIG_PATH, 0o644);
       const beforeMode = statSync(CONFIG_PATH).mode & 0o777;
       expect(beforeMode).toBe(0o644);
 

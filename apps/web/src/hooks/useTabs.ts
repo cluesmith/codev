@@ -3,7 +3,7 @@ import type { DashboardState, ArchitectState } from '../lib/api.js';
 
 export interface Tab {
   id: string;
-  type: 'work' | 'files' | 'architect' | 'builder' | 'shell' | 'file' | 'activity' | 'analytics' | 'team';
+  type: 'work' | 'files' | 'architect' | 'builder' | 'shell' | 'file' | 'activity' | 'analytics' | 'team' | 'decisions';
   label: string;
   closable: boolean;
   terminalId?: string;
@@ -66,7 +66,7 @@ function buildArchitectTabs(state: DashboardState | null): Tab[] {
   });
 }
 
-function buildTabs(state: DashboardState | null): Tab[] {
+function buildTabs(state: DashboardState | null, showDecisions: boolean): Tab[] {
   const tabs: Tab[] = [
     { id: 'work', type: 'work', label: 'Work', closable: false },
     { id: 'analytics', type: 'analytics', label: 'Analytics', closable: false, persistent: true },
@@ -74,6 +74,10 @@ function buildTabs(state: DashboardState | null): Tab[] {
 
   if (state?.teamEnabled) {
     tabs.push({ id: 'team', type: 'team', label: 'Team', closable: false });
+  }
+
+  if (showDecisions) {
+    tabs.push({ id: 'decisions', type: 'decisions', label: 'Decisions', closable: false });
   }
 
   tabs.push(...buildArchitectTabs(state));
@@ -123,7 +127,13 @@ export function useTabs(state: DashboardState | null) {
   const [activeTabId, setActiveTabId] = useState<string>('work');
   const knownTabIds = useRef<Set<string> | null>(null);
   const urlTabHandled = useRef(false);
-  const tabs = buildTabs(state);
+  // Spec 1819: the Decisions tab appears once the workspace reports its decisions
+  // file, then stays for the page session — so a file that disappears while the tab
+  // is open shows a not-found message (and any held drafts) rather than the tab
+  // vanishing. A reload of a workspace without the file shows no tab.
+  const [decisionsSeen, setDecisionsSeen] = useState(false);
+  if (state?.decisionsEnabled === true && !decisionsSeen) setDecisionsSeen(true);
+  const tabs = buildTabs(state, decisionsSeen || state?.decisionsEnabled === true);
 
   // Handle URL ?tab= parameter on initial load (for deep linking from tower).
   //
