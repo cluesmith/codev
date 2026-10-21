@@ -32,7 +32,13 @@ afterAll(async () => {
   for (const kill of killers) {
     await kill().catch(() => {});
   }
-  fs.rmSync(socketDir, { recursive: true, force: true });
+  // Best effort: killing a shellper does not yet take its PTY tree with it on
+  // Windows (Phase 3's tree teardown), so a lingering child can hold a log open.
+  try {
+    fs.rmSync(socketDir, { recursive: true, force: true });
+  } catch {
+    // Left for the runner's temp cleanup
+  }
 });
 
 function makeManager(): SessionManager {
@@ -61,7 +67,7 @@ async function startCmdSession(manager: SessionManager, marker: string): Promise
     sessionId,
     command: 'cmd.exe',
     args: ['/d', '/q', '/k', `echo ${marker}`],
-    cwd: socketDir,
+    cwd: os.homedir(),
     env: process.env as Record<string, string>,
     cols: 80,
     rows: 24,
@@ -187,7 +193,9 @@ describe.skipIf(!onWindows || !process.env.CI)('scenario 14: a second local user
     const info = manager.getSessionInfo(sessionId)!;
 
     const user = 'codev1658t';
-    const password = `Cv1658!${crypto.randomBytes(8).toString('hex')}`;
+    // At most 14 characters: a longer password makes `net user` stop on an
+    // interactive compatibility prompt.
+    const password = `Cv1!${crypto.randomBytes(4).toString('hex')}`;
     // A directory the second user can read: the runner's temp dir is private to its owner.
     const probeDir = path.join(process.env.PUBLIC ?? 'C:\\Users\\Public', 'codev-1658-probe');
     fs.mkdirSync(probeDir, { recursive: true });
