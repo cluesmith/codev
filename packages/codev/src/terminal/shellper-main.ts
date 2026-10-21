@@ -12,7 +12,8 @@
  *
  * On startup:
  * 1. Creates socket directory with 0700 permissions (POSIX)
- * 2. Spawns PTY with requested command
+ * 2. Spawns PTY with requested command (on Windows with `deferPty`, on
+ *    Tower's first HELLO instead, once Tower has assigned the session job)
  * 3. Writes { pid, startTime } to stdout as JSON, then closes stdout
  * 4. Listens on the Unix socket or named pipe at socketPath
  * 5. Handles SIGTERM gracefully
@@ -68,7 +69,15 @@ interface ShellperConfig {
   socketDir?: string;
   /** Windows only (Spec 1658): the session id reported in WELCOME. */
   sessionId?: string;
+  /**
+   * Windows only (Spec 1658 Phase 3b): hold the first PTY spawn until Tower's
+   * HELLO, after Tower has put this process in its per-session job.
+   */
+  deferPty?: boolean;
 }
+
+/** How long a deferred shellper waits for Tower's HELLO before exiting (cold job helper plus its assign timeout, with margin). */
+const DEFER_PTY_DEADLINE_MS = 30_000;
 
 function createRealPty(): IShellperPty {
   let ptyModule: typeof import('node-pty') | null = null;
@@ -217,7 +226,18 @@ async function main(): Promise<void> {
 
   logStderr(`Shellper started: pid=${process.pid}, command=${config.command}, socket=${config.socketPath}`);
 
-  // Start the shellper (spawns PTY and listens on socket)
+  // A deferred spawn needs the secret gate: only an authenticated Tower may start the PTY.
+  let deferSpawnMs: number | undefined;
+  if (config.deferPty === true && auth) {
+    deferSpawnMs = DEFER_PTY_DEADLINE_MS;
+    shellper.on('spawn-deadline', () => {
+      logStderr('Shellper exiting: Tower never connected to start the PTY');
+      shellper.shutdown();
+      process.exit(1);
+    });
+  }
+
+  // Start the shellper (spawns PTY, unless deferred, and listens on socket)
   await shellper.start(
     config.command,
     config.args,
@@ -225,9 +245,14 @@ async function main(): Promise<void> {
     config.env,
     config.cols,
     config.rows,
+    deferSpawnMs,
   );
 
-  logStderr(`PTY spawned: pid=${shellper.getPid()}, cols=${config.cols}, rows=${config.rows}`);
+  if (shellper.spawnDeferred) {
+    logStderr(`PTY spawn deferred until Tower connects, cols=${config.cols}, rows=${config.rows}`);
+  } else {
+    logStderr(`PTY spawned: pid=${shellper.getPid()}, cols=${config.cols}, rows=${config.rows}`);
+  }
   logStderr(`Socket listening: ${config.socketPath}`);
 
   // Write PID and start time to stdout, then close stdout

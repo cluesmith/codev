@@ -120,6 +120,10 @@ export class ShellperProcess extends EventEmitter {
   // EXIT broadcast reaches nobody, and the client hangs forever waiting for an
   // EXIT frame that already went out (Bugfix #905).
   private exitInfo: { code: number; signal: string | null } | null = null;
+  // Spec 1658 Phase 3b: the first PTY spawn, held until Tower's HELLO, and the
+  // deadline after which a shellper with no PTY gives up.
+  private deferredSpawn: { command: string; args: string[]; cwd: string; env: Record<string, string> } | null = null;
+  private deferredSpawnTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly ptyFactory: () => IShellperPty,
@@ -135,6 +139,15 @@ export class ShellperProcess extends EventEmitter {
 
   /**
    * Start the shellper: spawn the PTY and begin listening on the Unix socket.
+   *
+   * With `deferSpawnMs` (Windows, secret-gated shellpers only; Spec 1658 Phase
+   * 3b) the PTY is not spawned yet: Tower first puts this process in a
+   * per-session Job Object, so the PTY and everything it starts inherit the
+   * job. The first authenticated HELLO from a `tower` client spawns it, before
+   * the WELCOME. A HELLO from any other role neither spawns nor fails; that
+   * client sees an empty replay. If no `tower` HELLO arrives within
+   * `deferSpawnMs`, 'spawn-deadline' is emitted and the caller exits, so a
+   * PTY-less shellper never lingers.
    */
   async start(
     command: string,
@@ -143,13 +156,37 @@ export class ShellperProcess extends EventEmitter {
     env: Record<string, string>,
     cols: number,
     rows: number,
+    deferSpawnMs?: number,
   ): Promise<void> {
     this.cols = cols;
     this.rows = rows;
     this.startTime = Date.now();
 
-    this.spawnPty(command, args, cwd, env, cols, rows);
+    if (deferSpawnMs !== undefined && this.auth) {
+      this.deferredSpawn = { command, args, cwd, env };
+      this.deferredSpawnTimer = setTimeout(() => {
+        this.deferredSpawnTimer = null;
+        if (!this.deferredSpawn) return;
+        this.log(`No tower HELLO within ${deferSpawnMs}ms; the PTY was never spawned`);
+        this.emit('spawn-deadline');
+      }, deferSpawnMs);
+    } else {
+      this.spawnPty(command, args, cwd, env, cols, rows);
+    }
     await this.listen();
+  }
+
+  /** Whether the first PTY spawn is still waiting for Tower's HELLO. */
+  get spawnDeferred(): boolean {
+    return this.deferredSpawn !== null;
+  }
+
+  private clearDeferredSpawn(): void {
+    this.deferredSpawn = null;
+    if (this.deferredSpawnTimer) {
+      clearTimeout(this.deferredSpawnTimer);
+      this.deferredSpawnTimer = null;
+    }
   }
 
   private spawnPty(
@@ -160,6 +197,7 @@ export class ShellperProcess extends EventEmitter {
     cols: number,
     rows: number,
   ): void {
+    this.clearDeferredSpawn();
     this.exited = false;
     this.exitInfo = null;
     // PIR #1475: record what we are ACTUALLY spawning, for the WELCOME frame.
@@ -424,6 +462,14 @@ export class ShellperProcess extends EventEmitter {
 
     const clientType = hello.clientType || 'tower';
 
+    // Spec 1658 Phase 3b: Tower's HELLO means the job is in place; spawn now,
+    // so the WELCOME below carries the real PTY pid.
+    const deferred = this.deferredSpawn;
+    if (deferred && clientType === 'tower') {
+      this.log('Tower HELLO: spawning the deferred PTY');
+      this.spawnPty(deferred.command, deferred.args, deferred.cwd, deferred.env, this.cols, this.rows);
+    }
+
     // Tower replacement: destroy any existing tower connection
     if (clientType === 'tower') {
       for (const [id, entry] of this.connections) {
@@ -589,6 +635,7 @@ export class ShellperProcess extends EventEmitter {
    * Graceful shutdown: kill child process, close socket server, clean up.
    */
   shutdown(): void {
+    this.clearDeferredSpawn();
     if (this.pty && !this.exited) {
       this.pty.kill(15); // SIGTERM
     }
