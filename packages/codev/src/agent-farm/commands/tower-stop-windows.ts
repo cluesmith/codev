@@ -225,11 +225,13 @@ export async function forceKillTowerWindows(port: number, deps: WindowsStopDeps)
   for (const pid of towerPids) {
     const created = census.find((entry) => entry.pid === pid)?.creationTime;
     try {
-      const { signaled } = await deps.killTree(pid, { rootStartTime: created });
-      if (signaled) killed++;
+      await deps.killTree(pid, { rootStartTime: created });
     } catch (err) {
+      // A rejected teardown may still have acted (taskkill without a snapshot).
       deps.log.warn(`Tower pid ${pid}: ${(err as Error).message}`);
     }
+    // Counted by outcome, not by the teardown's report: Tower is gone or not.
+    if (!deps.isAlive(pid)) killed++;
     deps.releaseLock(pid);
   }
   return killed;

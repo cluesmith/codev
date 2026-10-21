@@ -125,14 +125,14 @@ async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs: numbe
   }
 }
 
-function api(tower: IsolatedTower, method: string, urlPath: string, body?: unknown): Promise<{ status: number; json: any }> {
+function api(tower: IsolatedTower, method: string, urlPath: string, body?: unknown, hostname = '127.0.0.1'): Promise<{ status: number; json: any }> {
   const key = fs.readFileSync(path.join(tower.stateDir, 'local-key'), 'utf8').trim();
   return new Promise((resolve, reject) => {
     let payload: string | undefined;
     if (body !== undefined) payload = JSON.stringify(body);
     const req = http.request(
       {
-        hostname: '127.0.0.1',
+        hostname,
         port: tower.port,
         path: urlPath,
         method,
@@ -229,6 +229,38 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
     expect(fs.readFileSync(path.join(tower.stateDir, 'tower.log'), 'utf8')).not.toContain('Tower is not running');
   }, 300_000);
 
+  it('bridge mode: a Tower bound to this machine\'s LAN address is stopped gracefully, not killed', async () => {
+    const lanAddress = Object.values(os.networkInterfaces())
+      .flat()
+      .find((entry) => entry && entry.family === 'IPv4' && !entry.internal)?.address;
+    if (!lanAddress) {
+      console.log('BRIDGE-SKIP no non-internal IPv4 address on this host');
+      return;
+    }
+    const tower = await isolatedTower();
+    tower.env.BRIDGE_MODE = '1';
+    tower.env.BRIDGE_TOWER_HOST = lanAddress;
+    // `tower start` probes readiness on loopback, which a LAN-bound Tower does not
+    // answer (a limitation of the start command on every platform), so its exit
+    // code is not checked; the daemon itself is.
+    afxRun(tower, ['tower', 'start']);
+    await waitFor(async () => {
+      try {
+        return (await api(tower, 'GET', '/health', undefined, lanAddress)).status === 200;
+      } catch {
+        return false;
+      }
+    }, 60_000, 'the bridge-mode Tower to answer on its LAN address');
+    const pid = ownerPid(tower)!;
+    leftovers.push(pid);
+
+    const stop = afxRun(tower, ['tower', 'stop']);
+    expect(stop.code, stop.output).toBe(0);
+    await waitFor(() => !alive(pid), 15_000, 'Tower to exit');
+    expect(fs.existsSync(lockFile(tower))).toBe(false);
+    expect(fs.readFileSync(path.join(tower.stateDir, 'tower.log'), 'utf8')).toContain('Graceful shutdown complete');
+  }, 300_000);
+
   it('scenario 4: a session survives tower stop/start with the same pid, replays, and takes input', async () => {
     const tower = await isolatedTower();
     expect(afxRun(tower, ['tower', 'start']).code).toBe(0);
@@ -262,6 +294,8 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
     }
     await waitFor(async () => (await output(tower, restartedId!)).includes(`STUB-READY ${agentPid}`), 30_000, 'replay of the same agent\'s banner');
     expect(alive(agentPid)).toBe(true);
+    // Exactly one banner: a respawned stub would print a second one (the old one stays in the replay).
+    expect((await output(tower, restartedId!)).match(/STUB-READY \d+/g)).toHaveLength(1);
 
     const write = await api(tower, 'POST', `/api/terminals/${restartedId}/write`, { data: 'ping-1658\r' });
     expect(write.status).toBe(200);
@@ -346,7 +380,9 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
     // The CIM-created Tower does not carry the marker, and neither does what it spawns.
     const health = await api(tower, 'GET', '/health');
     expect(health.json.insideCodevSession).toBe(false);
-    const { shellperPid } = await createStubSession(tower, 'stub-b');
+    const { terminalId: stubTerminal, shellperPid } = await createStubSession(tower, 'stub-b');
+    // The PTY under a CIM-created Tower works (ConPTY output reaches Tower).
+    await waitFor(async () => (await output(tower, stubTerminal)).includes('STUB-READY'), 30_000, 'stub banner under the CIM Tower');
 
     expect(await helper.terminate(name, launcher.pid!)).toEqual({ ok: true, found: true, member: true });
     await waitFor(() => !alive(launcher.pid!), 15_000, 'the launcher session to end');

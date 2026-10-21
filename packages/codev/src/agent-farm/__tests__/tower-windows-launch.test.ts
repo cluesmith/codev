@@ -148,6 +148,21 @@ describe('afx tower start launch path on Windows', () => {
     expect(h.spawnCalls[0].opts.windowsHide).toBe(true);
   });
 
+  it('dev mode (tower-server.ts present) goes through cmd.exe so npx resolves', async () => {
+    setHostPlatformForTests('win32');
+    process.env[SHELLPER_SESSION_ENV] = 'sess-1';
+    const tsServer = path.join(h.agentFarmDir, 'tower-server.ts');
+    fs.writeFileSync(tsServer, '// stub');
+    try {
+      await expect(towerStart({ wait: true })).rejects.toThrow('process.exit:1');
+      expect(h.cimCalls[0].command).toBe('cmd.exe');
+      expect(h.cimCalls[0].args.slice(0, 4)).toEqual(['/d', '/c', 'npx', 'tsx']);
+      expect(h.cimCalls[0].args[4]).toBe(tsServer);
+    } finally {
+      fs.rmSync(tsServer, { force: true });
+    }
+  });
+
   it('POSIX ignores the marker and spawns as before', async () => {
     process.env[SHELLPER_SESSION_ENV] = 'sess-1';
     await expect(towerStart({ wait: true })).rejects.toThrow('process.exit:1');

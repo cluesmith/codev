@@ -142,6 +142,22 @@ describe('forceKillTowerWindows', () => {
     expect(await forceKillTowerWindows(4100, deps)).toBe(1);
     expect(deps.log.warn).toHaveBeenCalledWith(expect.stringContaining('blocked'));
   });
+
+  it('counts Tower as killed by outcome when its teardown rejects after acting', async () => {
+    const alive = new Set([500]);
+    const { deps } = fakeDeps({ alive, listeners: () => [500] });
+    deps.killTree = vi.fn(async () => {
+      alive.delete(500);
+      throw new Error('teardown of pid 500 ran taskkill only, without a descendant snapshot');
+    });
+    expect(await forceKillTowerWindows(4100, deps)).toBe(1);
+
+    const stubborn = fakeDeps({ alive: new Set([600]), listeners: () => [600] });
+    stubborn.deps.killTree = vi.fn(async () => {
+      throw new Error('skipped');
+    });
+    expect(await forceKillTowerWindows(4100, stubborn.deps)).toBe(0);
+  });
 });
 
 describe('Tower inside a codev session (boot self-check and doctor)', () => {

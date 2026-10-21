@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { fileURLToPath } from 'node:url';
@@ -583,6 +583,29 @@ export function isLoopbackAddress(address: string | undefined): boolean {
 }
 
 /**
+ * True when `address` is this machine: loopback, or one of its own interface
+ * addresses. A bridge-mode Tower binds a specific LAN address, so a local
+ * `afx tower stop` reaches it from that address, not from loopback. A remote
+ * host cannot complete a TCP handshake from one of our addresses, so this still
+ * admits local callers only.
+ */
+export function isLocalMachineAddress(
+  address: string | undefined,
+  interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces(),
+): boolean {
+  if (!address) return false;
+  if (isLoopbackAddress(address)) return true;
+  let bare = address;
+  if (address.startsWith('::ffff:')) bare = address.slice('::ffff:'.length);
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries ?? []) {
+      if (entry.address === bare || entry.address === address) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * POST /api/shutdown (Spec 1658 Phase 4): the graceful stop `afx tower stop`
  * uses on Windows. Accepted only when all three hold:
  *
@@ -593,7 +616,9 @@ export function isLoopbackAddress(address: string | undefined): boolean {
  *    (TUNNEL_PROXY_HEADER, which it strips from inbound requests so it cannot
  *    be forged or suppressed) is refused here, and the proxy also blocks the
  *    path (`isBlockedPath`);
- * 3. from a loopback peer, so a bridge-mode client holding the key cannot.
+ * 3. from this machine (loopback, or one of its own interface addresses for a
+ *    bridge-mode Tower bound to a LAN address), so a remote bridge client
+ *    holding the key cannot.
  *
  * Registered on every platform, not only Windows: the conditions are the same
  * everywhere, and POSIX keeps it testable; POSIX `tower stop` still uses SIGTERM.
@@ -610,10 +635,10 @@ function handleShutdown(req: http.IncomingMessage, res: http.ServerResponse, ctx
     res.end(JSON.stringify({ error: 'shutdown is local-only' }));
     return;
   }
-  if (!isLoopbackAddress(req.socket.remoteAddress)) {
-    ctx.log('WARN', `Shutdown request REJECTED — non-loopback peer (${sourceText})`);
+  if (!isLocalMachineAddress(req.socket.remoteAddress)) {
+    ctx.log('WARN', `Shutdown request REJECTED — peer is not this machine (${sourceText})`);
     res.writeHead(403, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'shutdown is accepted from loopback only' }));
+    res.end(JSON.stringify({ error: 'shutdown is accepted from this machine only' }));
     return;
   }
   if (!ctx.requestShutdown) {

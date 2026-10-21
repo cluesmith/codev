@@ -402,9 +402,9 @@ describe('tower-routes', () => {
       expect(requestShutdown).toHaveBeenCalledTimes(3);
     });
 
-    it('refuses a non-loopback peer and does not shut down', async () => {
+    it('refuses a peer that is not this machine and does not shut down', async () => {
       const requestShutdown = vi.fn();
-      for (const address of ['192.168.1.20', '::ffff:10.0.0.5', '2001:db8::1', undefined]) {
+      for (const address of ['203.0.113.7', '::ffff:198.51.100.5', '2001:db8::1', undefined]) {
         const req = makeReq('POST', '/api/shutdown');
         (req.socket as any).remoteAddress = address;
         const { res, statusCode } = shutdownRes();
@@ -434,6 +434,17 @@ describe('tower-routes', () => {
       const line = log.mock.calls.find((c) => String(c[1]).includes('REJECTED'))![1] as string;
       expect(line).not.toMatch(/[\r\n]/);
       expect(line).toContain('evil  [ERROR] forged line');
+    });
+
+    it('accepts a peer that is one of this machine\'s own addresses (bridge mode), and only those', async () => {
+      const { isLocalMachineAddress } = await import('../servers/tower-routes.js');
+      const interfaces = { eth0: [{ address: '192.168.1.20', family: 'IPv4' }, { address: 'fe80::1', family: 'IPv6' }] } as any;
+      expect(isLocalMachineAddress('192.168.1.20', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('::ffff:192.168.1.20', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('fe80::1', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('127.0.0.1', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('192.168.1.21', interfaces)).toBe(false);
+      expect(isLocalMachineAddress(undefined, interfaces)).toBe(false);
     });
 
     it('is 501 where no shutdown hook is wired', async () => {
