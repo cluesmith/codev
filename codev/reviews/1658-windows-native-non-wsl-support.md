@@ -33,4 +33,12 @@ daemon still alive. Phase 4 fixes this.
 
 ## Flaky Tests
 
-(None recorded yet.)
+- **Unidentified intermittent failure under `porch done` (Phase 1, 2026-10-21).** The porch
+  `tests` check failed twice (51 s, against ~38-40 s for passing runs) and passed on the next
+  attempt. Six direct runs passed: `npm test` from the root, `vitest run` in the package, porch's
+  `PROJECT_ID`/`PROJECT_TITLE` env set, and a script reproducing porch's detached-process-group
+  spawn. Porch prints only a failed check's **stderr**, which held the harmless expected output of
+  the `bugfix-1455` pr-create tests. The failing test's name was in stdout, which porch does not
+  show. Next time, read `packages/codev/node_modules/.vite/vitest/<hash>/results.json` right after
+  the failed check: it records per-file pass/fail. Porch hiding a failed check's stdout is worth a
+  separate issue.
