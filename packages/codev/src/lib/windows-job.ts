@@ -36,8 +36,12 @@ export function sessionJobName(shellperSessionId: string): string {
  * readiness line, then answers one JSON response per JSON request line:
  *
  * - `{id, op:'assign', name, pid}`: create job `name` (refusing a name that
- *   already exists), set BREAKAWAY_OK, assign `pid`, close the handle. The job
- *   lives while any process is in it.
+ *   already exists), set BREAKAWAY_OK, hand `pid` its own handle to the job,
+ *   then assign `pid`. A job's NAME lives only while some handle to it is
+ *   open (member processes do not keep it), so the helper's own handle is not
+ *   enough: the helper exits with Tower. The handle duplicated into the
+ *   session root keeps the job findable by name for that root's whole life.
+ *   It is not inheritable, so the PTY never sees it.
  * - `{id, op:'terminate', name}`: open job `name` and terminate it;
  *   `found:false` when no such job exists (every member already exited).
  *
@@ -65,6 +69,7 @@ try {
   Bind 'AssignProcessToJobObject' ([bool]) @([IntPtr], [IntPtr])
   Bind 'TerminateJobObject' ([bool]) @([IntPtr], [UInt32])
   Bind 'OpenProcess' ([IntPtr]) @([UInt32], [bool], [UInt32])
+  Bind 'DuplicateHandle' ([bool]) @([IntPtr], [IntPtr], [IntPtr], [IntPtr].MakeByRefType(), [UInt32], [bool], [UInt32])
   Bind 'CloseHandle' ([bool]) @([IntPtr])
   $K = $type.CreateType()
 } catch {
@@ -73,7 +78,10 @@ try {
 }
 $JOB_ALL_ACCESS = [UInt32]0x1F001F
 $JOB_TERMINATE = [UInt32]0x0008
-$PROCESS_SET_QUOTA_TERMINATE = [UInt32]0x0101
+# PROCESS_TERMINATE | PROCESS_DUP_HANDLE | PROCESS_SET_QUOTA
+$PROCESS_ACCESS = [UInt32]0x0141
+$DUPLICATE_SAME_ACCESS = [UInt32]0x0002
+$CURRENT_PROCESS = [IntPtr](-1)
 $BREAKAWAY_OK = 0x0800
 $ERROR_ALREADY_EXISTS = 183
 function LastError { [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
@@ -94,9 +102,11 @@ function Assign($name, $procId) {
       [Runtime.InteropServices.Marshal]::WriteInt32($info, 16, $BREAKAWAY_OK)
       if (-not $K::SetInformationJobObject($job, 9, $info, [UInt32]$size)) { return @{ ok = $false; error = 'SetInformationJobObject failed'; code = (LastError) } }
     } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($info) }
-    $proc = $K::OpenProcess($PROCESS_SET_QUOTA_TERMINATE, $false, [UInt32]$procId)
+    $proc = $K::OpenProcess($PROCESS_ACCESS, $false, [UInt32]$procId)
     if ($proc -eq [IntPtr]::Zero) { return @{ ok = $false; error = 'OpenProcess failed'; code = (LastError) } }
     try {
+      $held = [IntPtr]::Zero
+      if (-not $K::DuplicateHandle($CURRENT_PROCESS, $job, $proc, [ref]$held, [UInt32]0, $false, $DUPLICATE_SAME_ACCESS)) { return @{ ok = $false; error = 'DuplicateHandle failed'; code = (LastError) } }
       if (-not $K::AssignProcessToJobObject($job, $proc)) { return @{ ok = $false; error = 'AssignProcessToJobObject failed'; code = (LastError) } }
     } finally { [void]$K::CloseHandle($proc) }
     return @{ ok = $true }
@@ -242,6 +252,7 @@ export class WindowsJobHelper {
   private launch(): Promise<string | null> {
     return new Promise((resolve) => {
       let settled = false;
+      let timer: NodeJS.Timeout | undefined;
       const settle = (failure: string | null) => {
         if (settled) return;
         settled = true;
@@ -258,7 +269,7 @@ export class WindowsJobHelper {
         return;
       }
       this.proc = proc;
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         this.reportOnce('ready-timeout', `the job helper did not report ready within ${this.readyTimeoutMs}ms`);
         this.reset(proc);
         settle('the job helper did not report ready in time');

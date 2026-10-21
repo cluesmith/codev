@@ -194,13 +194,18 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(alive(pids.get('leaf-detached')!)).toBe(true);
   }, 90_000);
 
-  it('a stopped helper (Tower restart) does not kill a job member', async () => {
+  it('a stopped helper (Tower restart) does not kill a job member, and a new helper still finds the job by name', async () => {
     const helper = newHelper();
     const child = idleProcess();
-    expect(await helper.assign(jobName(), child.pid!)).toEqual({ assigned: true });
+    const name = jobName();
+    expect(await helper.assign(name, child.pid!)).toEqual({ assigned: true });
     helper.stop();
     await new Promise((r) => setTimeout(r, 2000));
     expect(alive(child.pid!)).toBe(true);
+
+    const next = newHelper();
+    expect(await next.terminate(name)).toEqual({ ok: true, found: true });
+    expect(await waitFor(() => !alive(child.pid!), 10_000)).toBe(true);
   }, 60_000);
 
   it('terminate of an unknown job reports found:false', async () => {
