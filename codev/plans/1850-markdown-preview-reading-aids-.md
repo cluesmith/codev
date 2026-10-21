@@ -135,7 +135,8 @@ annotationEntry?: AnnotationEntry;  // omitted → 'gutterButton'
 - `aboveActive = highlightLine === 'abovePointer' && shapesOf(style).line`. Only band-drawing styles
   have a band to follow. With `none` / `word`, the `+` and the click behave exactly as today (the
   issue's "unaffected").
-- When `aboveActive`, `activateFromPointer` asks `resolveReading(e.clientX, e.clientY)`. If it gets a
+- When `aboveActive`, `activateFromPointer` keeps its existing guards first (events from the `+`
+  itself, and a primary-button drag, which must never move the `+` mid-selection). It then asks `resolveReading(e.clientX, e.clientY)`. If it gets a
   target, it sets `activeLine` to the target block's line (`resolveBlock(target.block)`) and calls
   `placeAffordance(el, bandCentreY, bandCentreX)`. Quantization lands the `+` on the banded row, in
   that block's own row host. If it gets `null`, it does nothing: the current `+` stays lit (today's
@@ -159,6 +160,10 @@ annotationEntry?: AnnotationEntry;  // omitted → 'gutterButton'
   - `e.button === 0`, there are no modifier keys, and `e.detail === 1`. A double-click's second click
     is ignored.
   - `window.getSelection()` is collapsed, so a click that ends a text selection does nothing.
+  - No selection existed at `mousedown`. A click that only dismisses an existing selection does not
+    open the composer: the browser collapses the selection on mousedown, so by click time it looks
+    like a plain click. A `mousedown` listener on the body records `selectionAtDown` for the click to
+    read. The next click opens as usual.
   - The target is not inside `a, code, pre, img, button, input, textarea, [data-action],
     .codev-canvas-marker-cards, .codev-canvas-comment-composer-host`. This is the hover aid's
     `EXCLUDED_SELECTOR` plus the issue's links, inline code, images and card-action seam. It is a named
@@ -291,6 +296,10 @@ highlight/cursor ones, mirroring #1802, so the options can be exercised in the c
   - Clicks on `a`, `code`, `pre`, `img`, a card, a card edit button, and inside the composer do not
     open a new composer. The edit button still edits.
   - A non-collapsed selection, a modifier-click, and `detail: 2` do not open it.
+  - A click whose `mousedown` found a non-collapsed selection (dismissing it) does not open it; the
+    following click does.
+  - Under `abovePointer`, a primary-button drag does not move the `+` (the existing drag guard runs
+    before `resolveReading`).
   - An open empty composer moves on click elsewhere; an open composer with a draft stays put.
   - Enter on a focused block still opens it.
   - `gutterButton`: a click on prose does not open the composer (today's behaviour).
@@ -335,7 +344,8 @@ highlight/cursor ones, mirroring #1802, so the options can be exercised in the c
    - No `+` appears anywhere.
    - Click prose: the composer opens under the highlighted paragraph (with **Line above** on, that can
      be the paragraph above the pointer).
-   - Drag-select text: no composer. Double-click a word: the word is selected and no second composer
+   - Drag-select text: no composer, and the selection can be copied. Click once to dismiss it: the
+     selection clears and no composer opens. Click again: the composer opens. Double-click a word: the word is selected and no second composer
      appears. Note whether the selection survives the composer opening.
    - Click a link, inline code, a code block, a comment card and its edit button: none opens a new
      composer (edit still edits).
