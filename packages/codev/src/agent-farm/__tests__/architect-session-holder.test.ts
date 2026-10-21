@@ -210,6 +210,32 @@ describe('reapShellpers with an asynchronous teardown (Spec 1658)', () => {
     expect(order.slice(0, 2).sort()).toEqual(['killed 10 SIGTERM', 'killed 20 SIGTERM']);
     expect(order.slice(2).every((step) => step.startsWith('probe'))).toBe(true);
   });
+
+  it('still kills and polls every pid when one teardown fails, then reports the failure', async () => {
+    const kill = vi.fn(async (pid: number) => {
+      if (pid === 10) throw new Error('process census failed');
+    });
+    const isAlive = vi.fn(() => false);
+    await expect(reapShellpers([10, 20], { kill, isAlive, wait: async () => {} }))
+      .rejects.toThrow(/teardown incomplete: pid 10: process census failed/);
+    expect(kill).toHaveBeenCalledWith(20, 'SIGTERM');
+    expect(isAlive).toHaveBeenCalled();
+  });
+});
+
+describe('reconcileArchitectSessionHolder when the reap fails (Spec 1658)', () => {
+  it('logs it and mints fresh instead of resuming a session that may still be held', async () => {
+    const list = (): ProcessEntry[] => [
+      { pid: 61274, cmdline: shellperCmdline({ sessionId: SID, architectName: 'main', cwd: WS }) },
+    ];
+    const reap = vi.fn(async () => {
+      throw new Error('shellper teardown incomplete: pid 61274: process census failed');
+    });
+    const log = vi.fn();
+    const r = await reconcileArchitectSessionHolder({ sessionId: SID, identity: { workspacePath: WS, architectName: 'main' }, list, reap, log });
+    expect(r).toEqual({ foreignHolder: true, reclaimedPids: [] });
+    expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('could not be reclaimed'));
+  });
 });
 
 describe('reconcileArchitectSessionHolder (Issue #1224)', () => {

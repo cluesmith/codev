@@ -186,8 +186,8 @@ export interface SweepShellperHusksOptions {
   census?: () => ProcessCensusEntry[] | Promise<ProcessCensusEntry[]>;
   now?: number;
   getStartTime?: (pid: number) => Promise<number | null>;
-  /** Seam, defaults to `reapShellpers`. */
-  reap?: (pids: number[]) => Promise<void>;
+  /** Seam, defaults to `reapShellpers`. Rejects when a teardown failed. */
+  reap?: (pids: number[], startTimes?: Map<number, number>) => Promise<void>;
 }
 
 /**
@@ -214,8 +214,18 @@ export async function sweepShellperHusks(
 
   if (pids.length > 0) {
     opts.log?.(`Sweeping ${pids.length} husk shellper process(es): ${pids.join(', ')}`);
-    const reap = opts.reap ?? reapShellpers;
-    await reap(pids);
+    // The census creation times (Windows only; POSIX has none) let a teardown
+    // refuse a pid reused since the sweep looked.
+    const startTimes = new Map<number, number>();
+    for (const entry of census) {
+      if (entry.creationTime !== undefined && pids.includes(entry.pid)) startTimes.set(entry.pid, entry.creationTime);
+    }
+    const reap = opts.reap ?? ((targets: number[], times?: Map<number, number>) => reapShellpers(targets, { startTimes: times }));
+    if (startTimes.size > 0) {
+      await reap(pids, startTimes);
+    } else {
+      await reap(pids);
+    }
   }
 
   return { swept: pids.length, pids };

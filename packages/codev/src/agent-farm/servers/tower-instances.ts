@@ -39,6 +39,8 @@ import {
   reconcileArchitectSessionHolder,
   findOwnArchitectShellpers,
   reapShellpers,
+  listProcessEntries,
+  type ProcessEntry,
 } from './architect-session-holder.js';
 import {
   autoNumberArchitectName,
@@ -1396,10 +1398,22 @@ export async function removeArchitect(
     // while the process kept running, and remove-architect could not clear it.
     // Reap any of our own shellpers matching this identity so this command is
     // the recovery tool for a live-process-without-a-row zombie too.
+    // One snapshot serves the identity match and the reap's pid-reuse check.
+    let processSnapshot: ProcessEntry[] = [];
+    try {
+      processSnapshot = await listProcessEntries();
+    } catch (err) {
+      _deps.log('WARN', `Zombie shellper check for architect '${name}' skipped: ${(err as Error).message}`);
+    }
     const zombiePids = await findOwnArchitectShellpers({
       identity: { workspacePath: resolvedPath, architectName: name },
       selfPid: process.pid,
+      list: () => processSnapshot,
     });
+    const zombieStartTimes = new Map<number, number>();
+    for (const entry of processSnapshot) {
+      if (entry.creationTime !== undefined && zombiePids.includes(entry.pid)) zombieStartTimes.set(entry.pid, entry.creationTime);
+    }
     if (hasStaleRow || staleTerminalIds.length > 0 || zombiePids.length > 0) {
       try {
         if (hasStaleRow) {
@@ -1415,7 +1429,11 @@ export async function removeArchitect(
         };
       }
       if (zombiePids.length > 0) {
-        await reapShellpers(zombiePids);
+        try {
+          await reapShellpers(zombiePids, { startTimes: zombieStartTimes });
+        } catch (err) {
+          _deps.log('WARN', `Zombie shellper reap for architect '${name}' incomplete: ${(err as Error).message}`);
+        }
       }
       _deps.log('INFO', `Purged stale architect state for '${name}' from workspace ${workspacePath} (no live terminal; registration=${hasStaleRow}, terminal rows=${staleTerminalIds.length}, zombie shellpers=${zombiePids.length})`);
       return { success: true };

@@ -35,6 +35,8 @@ export interface ProcessEntry {
   pid: number;
   /** The full joined argv (as `ps ... -o args=` reports it). */
   cmdline: string;
+  /** Windows: creation time from the census (epoch ms), so a reap can check the pid is still this process. */
+  creationTime?: number;
 }
 
 /**
@@ -134,7 +136,11 @@ function listPosixProcessEntries(): ProcessEntry[] {
 export async function listProcessEntries(): Promise<ProcessEntry[]> {
   if (!isWindows()) return listPosixProcessEntries();
   const census = await listProcessCensus();
-  return census.map((entry) => ({ pid: entry.pid, cmdline: shellperArgvText(entry.cmdline) }));
+  return census.map((entry) => ({
+    pid: entry.pid,
+    cmdline: shellperArgvText(entry.cmdline),
+    creationTime: entry.creationTime,
+  }));
 }
 
 export interface SessionHolderClassification {
@@ -222,16 +228,13 @@ function pidAlive(pid: number): boolean {
 
 /**
  * Kill a shellper's whole session tree (on POSIX the leader is detached, so its
- * process group; falls back to the single pid), best-effort. Resolves once the
- * teardown has run: on Windows that includes the census snapshot and taskkill,
- * which the reap must not outrun.
+ * process group; falls back to the single pid). Resolves once the teardown has
+ * run: on Windows that includes the census snapshot and taskkill, which the
+ * reap must not outrun. Rejects when the Windows census failed, so the reap can
+ * report it.
  */
-async function killProcessGroup(pid: number, signal: NodeJS.Signals): Promise<void> {
-  try {
-    await killSessionTree(pid, { signal, fallbackToPid: true });
-  } catch {
-    // Snapshot pass did not run; the poll below still sees survivors
-  }
+async function killProcessGroup(pid: number, signal: NodeJS.Signals, startTime?: number): Promise<void> {
+  await killSessionTree(pid, { signal, fallbackToPid: true, rootStartTime: startTime });
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -243,6 +246,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * release the session lock before the caller's fresh `claude --resume` runs,
  * else the collision recurs.
  *
+ * Rejects, after every kill and the death polls have run, when any teardown
+ * failed (on Windows, a failed census), so a caller never reports a reap that
+ * did not happen.
+ *
  * Seams (`isAlive`, `kill`, `wait`) keep it unit-testable without real signals.
  */
 export async function reapShellpers(
@@ -250,6 +257,8 @@ export async function reapShellpers(
   opts?: {
     isAlive?: (pid: number) => boolean;
     kill?: (pid: number, signal: NodeJS.Signals) => void | Promise<void>;
+    /** Windows: each pid's census creation time, so teardown refuses a reused pid. */
+    startTimes?: Map<number, number>;
     wait?: (ms: number) => Promise<void>;
     graceMs?: number;
     killGraceMs?: number;
@@ -258,7 +267,8 @@ export async function reapShellpers(
 ): Promise<void> {
   if (pids.length === 0) return;
   const isAlive = opts?.isAlive ?? pidAlive;
-  const kill = opts?.kill ?? killProcessGroup;
+  const startTimes = opts?.startTimes;
+  const kill = opts?.kill ?? ((pid: number, signal: NodeJS.Signals) => killProcessGroup(pid, signal, startTimes?.get(pid)));
   const wait = opts?.wait ?? sleep;
   const graceMs = opts?.graceMs ?? 3000;
   const killGraceMs = opts?.killGraceMs ?? 2000;
@@ -272,17 +282,32 @@ export async function reapShellpers(
     }
   };
 
-  await Promise.all(pids.map((pid) => kill(pid, 'SIGTERM')));
+  // Every kill runs and the poll still happens when a teardown fails; the
+  // failures are reported once the reap is over.
+  const failures: string[] = [];
+  const killAll = (targets: number[], signal: NodeJS.Signals) => Promise.all(targets.map(async (pid) => {
+    try {
+      await kill(pid, signal);
+    } catch (err) {
+      failures.push(`pid ${pid}: ${(err as Error).message}`);
+    }
+  }));
+
+  await killAll(pids, 'SIGTERM');
   await pollUntilDead(graceMs);
 
   const survivors = pids.filter((pid) => isAlive(pid));
   if (survivors.length > 0) {
-    await Promise.all(survivors.map((pid) => kill(pid, 'SIGKILL')));
+    await killAll(survivors, 'SIGKILL');
     // Confirm SIGKILL actually took effect before returning: the caller resumes
     // `claude --resume <id>` next, and a holder still in the kernel's exit path
     // has not yet released the session lock — returning early would re-open the
     // very collision race this reap exists to close (codex review, Issue #1224).
     await pollUntilDead(killGraceMs);
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`shellper teardown incomplete: ${failures.join('; ')}`);
   }
 }
 
@@ -345,7 +370,20 @@ export async function reconcileArchitectSessionHolder(opts: {
     'WARN',
     `Architect '${opts.identity.architectName}' session ${shortId}… is held by our own superseded shellper(s) [${reclaimable.join(', ')}]; reaping to reclaim the conversation in ${opts.identity.workspacePath}`,
   );
-  const reap = opts.reap ?? ((pids: number[]) => reapShellpers(pids));
-  await reap(reclaimable);
+  const startTimes = new Map<number, number>();
+  for (const entry of snapshot ?? []) {
+    if (entry.creationTime !== undefined) startTimes.set(entry.pid, entry.creationTime);
+  }
+  const reap = opts.reap ?? ((pids: number[]) => reapShellpers(pids, { startTimes }));
+  try {
+    await reap(reclaimable);
+  } catch (err) {
+    // The holder may still be alive: resuming would collide, so mint fresh.
+    opts.log?.(
+      'WARN',
+      `Architect '${opts.identity.architectName}' session ${shortId}… could not be reclaimed (${(err as Error).message}); minting a fresh session in ${opts.identity.workspacePath}`,
+    );
+    return { foreignHolder: true, reclaimedPids: [] };
+  }
   return { foreignHolder: false, reclaimedPids: reclaimable };
 }

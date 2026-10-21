@@ -85,7 +85,8 @@ describe('husk sweep on Windows', () => {
     expect(censusMock.list).toHaveBeenCalledTimes(1);
     // 100: unregistered, childless, aged. 200: registered. 300: too young. 400: other instance.
     expect(result).toEqual({ swept: 1, pids: [100] });
-    expect(reap).toHaveBeenCalledWith([100]);
+    // The reap gets the census creation time, so its teardown can refuse a reused pid.
+    expect(reap).toHaveBeenCalledWith([100], new Map([[100, NOW - 2 * ONE_HOUR]]));
   });
 
   it('a stale row (pid reused, creation time differs) does not count as registered', async () => {
@@ -94,6 +95,15 @@ describe('husk sweep on Windows', () => {
     censusMock.list.mockResolvedValue([shellper(100)]);
     const result = await sweepShellperHusks({ socketDir: SOCKET_DIR, db, graceMs: ONE_HOUR, now: NOW, reap: async () => {} });
     expect(result.pids).toEqual([100]);
+  });
+
+  it('reports a failed reap to the caller rather than counting it as swept', async () => {
+    censusMock.list.mockResolvedValue([shellper(100)]);
+    const reap = vi.fn(async () => {
+      throw new Error('shellper teardown incomplete');
+    });
+    await expect(sweepShellperHusks({ socketDir: SOCKET_DIR, db: emptyDb(), graceMs: ONE_HOUR, now: NOW, reap }))
+      .rejects.toThrow('shellper teardown incomplete');
   });
 
   it('surfaces a census failure to the caller instead of sweeping nothing silently', async () => {
