@@ -426,6 +426,16 @@ describe('tower-routes', () => {
       expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('arrived via tunnel proxy'));
     });
 
+    it('logs a refused request without control characters from its user-agent', async () => {
+      const log = vi.fn();
+      const req = makeReq('POST', '/api/shutdown', { 'x-codev-tunnel-proxy': '1', 'user-agent': 'evil\r\n[ERROR] forged line' });
+      const { res } = shutdownRes();
+      await handleRequest(req, res, makeCtx({ requestShutdown: vi.fn(), log }));
+      const line = log.mock.calls.find((c) => String(c[1]).includes('REJECTED'))![1] as string;
+      expect(line).not.toMatch(/[\r\n]/);
+      expect(line).toContain('evil  [ERROR] forged line');
+    });
+
     it('is 501 where no shutdown hook is wired', async () => {
       const { res, statusCode } = shutdownRes();
       await handleRequest(makeReq('POST', '/api/shutdown'), res, makeCtx());

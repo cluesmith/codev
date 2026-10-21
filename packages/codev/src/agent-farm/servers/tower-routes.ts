@@ -49,6 +49,7 @@ import {
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
+import { logSafe } from '../utils/log-safe.js';
 import { handleIdeApi } from './ide-server.js';
 import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
 import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
@@ -600,8 +601,8 @@ export function isLoopbackAddress(address: string | undefined): boolean {
  * process.
  */
 function handleShutdown(req: http.IncomingMessage, res: http.ServerResponse, ctx: RouteContext): void {
-  const remote = req.socket.remoteAddress ?? 'unknown';
-  const ua = String(req.headers['user-agent'] ?? 'none').slice(0, 120);
+  const remote = logSafe(req.socket.remoteAddress ?? 'unknown', 64);
+  const ua = logSafe(req.headers['user-agent']) || 'none';
   const sourceText = `remote=${remote} ua="${ua}"`;
   if (req.headers[TUNNEL_PROXY_HEADER] !== undefined) {
     ctx.log('WARN', `Shutdown request REJECTED — arrived via tunnel proxy (${sourceText} via=tunnel)`);
