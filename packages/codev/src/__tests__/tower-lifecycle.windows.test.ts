@@ -80,6 +80,9 @@ async function isolatedTower(): Promise<IsolatedTower> {
   const port = await freePort();
   const env: NodeJS.ProcessEnv = { ...process.env, CODEV_AGENT_FARM_DIR: stateDir, SHELLPER_SOCKET_DIR: path.join(stateDir, 'run') };
   delete env.CODEV_SHELLPER_SESSION;
+  // vitest sets NODE_ENV=test, which would point the daemon at test.db.
+  delete env.NODE_ENV;
+  delete env.AF_TEST_DB;
   return { stateDir, port, env };
 }
 
@@ -330,8 +333,8 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
     const towerPid = ownerPid(tower)!;
     leftovers.push(towerPid);
 
-    const sessionCheck = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${towerPid}).SessionId; (Get-Process -Id ${process.pid}).SessionId`], { encoding: 'utf8', windowsHide: true });
-    console.log(`TOWER-CIM-SESSION tower_and_test_session_ids=${sessionCheck.stdout.trim().split(/\r?\n/).join(',')}`);
+    const sessionCheck = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `"$((Get-Process -Id ${towerPid}).SessionId),$((Get-Process -Id ${process.pid}).SessionId)"`], { encoding: 'utf8', windowsHide: true });
+    console.log(`TOWER-CIM-SESSION tower_and_test_session_ids=${sessionCheck.stdout.trim()}`);
 
     // The CIM-created Tower does not carry the marker, and neither does what it spawns.
     const health = await api(tower, 'GET', '/health');
