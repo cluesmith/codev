@@ -30,7 +30,7 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
 } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -406,18 +406,37 @@ async function probeDeps() {
   return { results };
 }
 
-/** Start Tower from this checkout (built), capture the outcome and the tower log, then stop it. */
+/** A port nothing is listening on right now. */
+async function freePort() {
+  const server = net.createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+/**
+ * Start Tower from this checkout (built), capture the outcome and the tower log, then stop it.
+ *
+ * Isolated from any real install on the machine: a throwaway CODEV_AGENT_FARM_DIR (its own
+ * global.db, owner lock and tower.log), a throwaway SHELLPER_SOCKET_DIR, and a free port instead
+ * of 4100, so the probe never starts, stops, sweeps, or reconciles against a developer's running
+ * Tower or its shellpers.
+ */
 async function probeTower() {
   const afx = path.join(repoRoot, 'packages', 'codev', 'bin', 'afx.js');
   if (!existsSync(path.join(repoRoot, 'packages', 'codev', 'dist'))) {
     return { skipped: 'packages/codev is not built (run pnpm build first)' };
   }
-  const logFile = path.join(process.env.CODEV_AGENT_FARM_DIR ?? path.join(os.homedir(), '.agent-farm'), 'tower.log');
-  let offset = 0;
-  if (existsSync(logFile)) offset = statSync(logFile).size;
+  const stateDir = mkdtempSync(path.join(os.tmpdir(), 'codev-probe-tower-'));
+  const port = String(await freePort());
+  // SHELLPER_SOCKET_DIR too: the boot-time orphan sweep is scoped by socket dir, so a shared
+  // ~/.codev/run would let this empty-DB Tower treat a live install's shellpers as orphans.
+  const env = { ...process.env, CODEV_AGENT_FARM_DIR: stateDir, SHELLPER_SOCKET_DIR: path.join(stateDir, 'run') };
+  const logFile = path.join(stateDir, 'tower.log');
   const start = await new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [afx, 'tower', 'start'], { windowsHide: true });
+    const child = spawn(process.execPath, [afx, 'tower', 'start', '--port', port], { env, windowsHide: true });
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { out += d; });
@@ -425,9 +444,12 @@ async function probeTower() {
     child.on('exit', (code) => { clearTimeout(timer); resolve({ timedOut: false, code, ms: Date.now() - started, output: out }); });
   });
   let towerLog = null;
-  if (existsSync(logFile)) towerLog = readFileSync(logFile).subarray(offset).toString().slice(-12000);
-  const stop = spawnSync(process.execPath, [afx, 'tower', 'stop'], { encoding: 'utf8', windowsHide: true, timeout: 60_000 });
+  if (existsSync(logFile)) towerLog = readFileSync(logFile).toString().slice(-12000);
+  const stop = spawnSync(process.execPath, [afx, 'tower', 'stop', '--port', port], { env, encoding: 'utf8', windowsHide: true, timeout: 60_000 });
+  try { rmSync(stateDir, { recursive: true, force: true }); } catch { /* a just-stopped daemon may still hold a handle */ }
   return {
+    stateDir,
+    port: Number(port),
     start: { ...start, output: start.output.slice(-6000) },
     towerLog,
     stop: { code: stop.status, output: `${stop.stdout ?? ''}${stop.stderr ?? ''}`.slice(-3000) },

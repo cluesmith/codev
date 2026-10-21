@@ -108,4 +108,4 @@ jobs:
         working-directory: packages/codev
         env:
           FILTER: ${{ inputs.filter }}
-        run: pnpm exec vitest run $FILTER
+        run: pnpm exec vitest run "$FILTER"
