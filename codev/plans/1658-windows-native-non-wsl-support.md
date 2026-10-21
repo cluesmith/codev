@@ -85,6 +85,7 @@ sanctioned exception to "one PR at the end". Windows checks in Phases 1 to 10 th
     {"id": "phase_1", "title": "Windows audit, probe harness, and platform seam"},
     {"id": "phase_2", "title": "Shellper named-pipe transport, per-session secret, and reconnect identity"},
     {"id": "phase_3", "title": "Process census and session-tree teardown"},
+    {"id": "phase_3b", "title": "Per-session Job Object (B2) for orphaned descendants"},
     {"id": "phase_4", "title": "Tower lifecycle and detached survival on Windows"},
     {"id": "phase_5", "title": "Git Bash, executable shim, and MSYS path resolution with doctor prerequisites"},
     {"id": "phase_6", "title": "Launcher routing and shell roles"},
@@ -319,6 +320,107 @@ descendants, wired into every process-group kill and wait site and into the orph
 - Unit: CIM JSON parser (fixtures, including CRLF and empty output); kill-tree decision logic;
   cache and single-flight; matcher unescaping.
 - Windows CI: real node→bash→node trees.
+
+---
+
+### Phase 3b: Per-session Job Object (B2) for orphaned descendants
+
+**Dependencies**: Phase 3
+
+*Added 2026-10-21 under the spec's B2 fallback clause (architect ruling, Option C). Windows CI
+run 39574693242 showed that a descendant orphaned by a non-Node launcher (`cmd start /b`)
+survives the Phase 3 snapshot and `taskkill /T`, and the shellper-only sweeps cannot catch it.*
+
+#### Objective
+
+Every process descended from a shellper is in a per-session Job Object, so teardown can end the
+whole session with `TerminateJobObject`, including orphans that the census cannot link. The
+Phase 3 snapshot kill stays as is; it is still the POSIX-parity path and the fallback when the
+job is unavailable.
+
+#### Design
+
+- **No binary, no compile to disk.** The Win32 calls (`CreateJobObjectW`,
+  `SetInformationJobObject`, `AssignProcessToJobObject`, `OpenJobObjectW`, `TerminateJobObject`,
+  `OpenProcess`, `CloseHandle`) are bound inside PowerShell with `System.Reflection.Emit`
+  (`DefineDynamicAssembly` + `DefinePInvokeMethod`), so the assembly exists only in memory.
+  Windows PowerShell 5.1's `Add-Type` is not used: it compiles a temporary DLL into `%TEMP%` and
+  loads it from disk, which is the AppLocker-blockable binary the spec rejected.
+- **Off the hot path: one long-lived helper per Tower.** At startup Tower starts a single
+  `powershell.exe -NoProfile -NonInteractive -Command -` helper in the background. The helper
+  binds the P/Invoke methods once, then serves line-delimited JSON requests over stdin/stdout:
+  `assign {name, pid}` and `terminate {name}`. A session create therefore pays one round trip
+  to an already-warm helper, not a PowerShell start. The helper never wraps Tower: it creates
+  jobs for shellper pids only and never assigns its own process or Tower's. If a session is
+  created before the helper is ready (the first seconds after Tower boot), that create waits for
+  it once.
+- **Ordering: the job is in place before the PTY exists.** On Windows the shellper defers its
+  first PTY spawn until the first authenticated Tower HELLO. It still listens and prints its
+  info as soon as it boots; output from before the HELLO goes to the replay buffer as it does
+  today. Tower reads the shellper pid, has the helper create the job
+  `Local\codev-session-<shellperSessionId>` and assign the pid to it, and only then connects.
+  The PTY and everything it starts inherit the job. POSIX is unchanged: the shellper spawns
+  immediately, as today.
+- **Job limits.** `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, so a child spawned with explicit breakaway
+  (`detached: true`) still leaves the session, matching `setsid` on POSIX. No
+  `KILL_ON_JOB_CLOSE`: the helper exiting or Tower restarting must never kill sessions, because
+  shellpers survive Tower by design. The job lives as long as any process is in it.
+- **Teardown.** `killSessionTree` on Windows also asks for `terminate {name}` once a job name is
+  known (persisted shellper session id, v19). If Tower's helper is not running (an `afx cleanup`
+  with Tower down), teardown runs a one-shot helper; teardown is not a hot path, so the cold cost
+  is acceptable there. The Phase 3 snapshot kill still runs either way.
+- **Reported degradation.** If the helper cannot bind (Constrained Language Mode, or policy
+  blocking `powershell.exe`), Tower logs once that per-session jobs are disabled. Doctor reports
+  it, the same way as a census failure. Sessions still start, without a job, and teardown falls
+  back to the Phase 3 path. The degradation is never silent. It is documented under Windows
+  limitations (Phase 11 docs).
+
+#### Cost gate (first step, before the rest of the phase)
+
+Measure on the CI host, cold and warm: helper start plus binding, and the per-session
+`assign` round trip. Record the numbers in the audit. Target: warm per-session cost under ~1 s
+(expected to be milliseconds once the helper is warm). If the measured warm cost misses the
+target, stop and report to the architect before building further.
+
+#### Files to Create / Modify
+
+- `packages/codev/src/lib/windows-job.ts` (new): the helper process (lazy start, single-flight
+  readiness, request/response, restart on exit, degradation state) and the inline PowerShell
+  program.
+- `terminal/session-manager.ts`: on Windows, assign the job between reading the shellper info and
+  connecting.
+- `terminal/shellper-main.ts` / `shellper-process.ts`: on Windows, defer the first PTY spawn
+  until the first authenticated HELLO.
+- `lib/process-tree.ts`: `killSessionTree` takes an optional job name and terminates the job
+  before the snapshot pass.
+- `agent-farm/servers/tower-server.ts`: start the helper at boot and log the degradation.
+- `commands/doctor.ts`: report job availability on Windows.
+
+#### Deliverables
+
+- [ ] Cost measured and recorded (the gate above).
+- [ ] Helper with in-memory P/Invoke; job assignment before the first PTY spawn.
+- [ ] Teardown terminates the job; the Phase 3 snapshot path is kept.
+- [ ] Reported degradation (Tower log + doctor) when the helper cannot bind.
+- [ ] Tests.
+
+#### Acceptance Criteria
+
+- [ ] Windows (`targeted`): the pinned scenario 6 re-parented test passes. Its `it.fails` turns
+  red, and `.fails` is removed. A `cmd start /b` orphan in a real shellper session does not
+  survive `killSession`. A `detached: true` grandchild does survive (breakaway parity).
+- [ ] Windows (`targeted`): a Tower restart (helper exit) does not kill a running session.
+- [ ] Unit (seam `win32`, injected helper): job assigned before the connect/HELLO; helper failure
+  → degradation logged once, session still created, teardown falls back to the snapshot path;
+  POSIX never starts a helper.
+- [ ] Measured warm per-session cost recorded in the audit, and under the target.
+- [ ] POSIX suite and `check-types` green.
+
+#### Test Plan
+
+- Unit: helper protocol (fake helper process), ordering, degradation, teardown with and without
+  a job name.
+- Windows CI: real job assignment, `cmd start /b` orphan, detached breakaway, helper restart.
 
 ---
 
