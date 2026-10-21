@@ -1,9 +1,42 @@
 id: '1658'
 title: windows-native-non-wsl-support
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Windows audit, probe harness, and platform seam
+    status: in_progress
+  - id: phase_2
+    title: Shellper named-pipe transport, per-session secret, and reconnect identity
+    status: pending
+  - id: phase_3
+    title: Process census and session-tree teardown
+    status: pending
+  - id: phase_4
+    title: Tower lifecycle and detached survival on Windows
+    status: pending
+  - id: phase_5
+    title: Git Bash, executable shim, and MSYS path resolution with doctor prerequisites
+    status: pending
+  - id: phase_6
+    title: Launcher routing and shell roles
+    status: pending
+  - id: phase_7
+    title: Runnable-worktree links and worktree removal on Windows
+    status: pending
+  - id: phase_8
+    title: ConPTY render-gate validation captures
+    status: pending
+  - id: phase_9
+    title: Codev IDE server on native Windows
+    status: pending
+  - id: phase_10
+    title: POSIX residue sweep and native-dependency install guard
+    status: pending
+  - id: phase_11
+    title: Windows CI leg and install docs
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -18,10 +51,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-21T06:16:13.465Z'
+updated_at: '2026-10-21T06:16:18.818Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
