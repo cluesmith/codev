@@ -330,9 +330,26 @@ process.exit(0);
   return { grandchildPid: pid, survivedLauncherExit: survived };
 }
 
-/** True when npm's output shows an install script falling back to a node-gyp source build. */
+/**
+ * True when npm's output shows node-gyp actually running (a source build). Matches node-gyp's
+ * own log lines, not the echoed install-script text (`prebuild-install || node-gyp rebuild`),
+ * which `--foreground-scripts` prints whether or not the fallback runs.
+ */
 function sourceBuildAttempted(output) {
-  return /node-gyp(\.js)?["']? (rebuild|configure|build)|gyp (info|ERR!|verb)/.test(output);
+  return /gyp info (it worked|spawn|using)|gyp ERR!/.test(output);
+}
+
+/**
+ * Environment for npm installs that mirror a user's: drop the workflow's
+ * npm_config_script_shell (Git Bash, needed only to build this repo), so install scripts run
+ * under the default cmd.exe as they do on a user's machine.
+ */
+function userNpmEnv() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'npm_config_script_shell') delete env[key];
+  }
+  return env;
 }
 
 /**
@@ -354,7 +371,7 @@ async function probeDeps() {
     const r = spawnSync(
       npm,
       ['install', '--no-audit', '--no-fund', '--foreground-scripts', `${dep.name}@${dep.range}`],
-      { cwd: dir, encoding: 'utf8', shell: isWin, windowsHide: true, timeout: 600_000 },
+      { cwd: dir, encoding: 'utf8', shell: isWin, windowsHide: true, timeout: 600_000, env: userNpmEnv() },
     );
     const output = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
     const installed = r.status === 0;
@@ -489,7 +506,7 @@ async function probeTowerPublished(spec) {
   const r = spawnSync(
     npm,
     ['install', '-g', '--prefix', prefix, '--no-audit', '--no-fund', '--foreground-scripts', `@cluesmith/codev@${spec}`],
-    { encoding: 'utf8', shell: isWin, windowsHide: true, timeout: 900_000 },
+    { encoding: 'utf8', shell: isWin, windowsHide: true, timeout: 900_000, env: userNpmEnv() },
   );
   const output = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
   const install = {
