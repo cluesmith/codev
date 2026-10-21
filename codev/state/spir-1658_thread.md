@@ -141,3 +141,4 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Phase 6 consult iter1: codex REQUEST_CHANGES (doctor spawned codex/opencode/agy bare) fixed via spawnSyncOnHost/spawnOnHost; claude APPROVE, notes 1/2/3/5 addressed (role-text assertion, no shell.shell committed from Windows scaffolds, explicit return, PATH_INPUTS criterion), 4 declined (overrides are user bash). gemini skipped (agy exit 3). Rebuttals: 1658-phase_6-iter1-rebuttals.md.
 - Gotcha: Git Bash `$(...)` strips a trailing CR as well as LF (role file is a CRLF checkout on the runner).
 - POSIX 7152/0; Windows 39676695295 36/37 (only the CRLF expectation), then 39677250753 launchers 7/7.
+- Phase 6 consult iter2: codex APPROVE, claude APPROVE (gemini skipped). Carry-forward for the review doc: forge `PATH_INPUTS` is a manual allowlist (only CODEV_OUTPUT_DIR); a future path-valued concept input must be added or it reaches MSYS tools in native form.
