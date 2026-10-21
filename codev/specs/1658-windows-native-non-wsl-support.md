@@ -46,7 +46,8 @@ approximate; they size the work rather than enumerate it.
      only darwin and linux branches. On Windows it returns null, so **every reconnect after a
      Tower restart is treated as PID reuse and fails**. The "detached shellpers survive a Tower
      restart" guarantee is unproven on Windows.
-3. **Launchers.** All 56 forge concept scripts are POSIX `#!/bin/sh`. The scripts are fine; the
+3. **Launchers.** All 64 forge concept scripts (five providers: GitHub, GitLab, Gitea, Linear,
+   Jira) are POSIX `#!/bin/sh`. The owner ruling's count of 56 predates the Jira provider. The scripts are fine; the
    **launch sites** are not. Five places assume a POSIX shell:
    - Forge concepts run through `exec`/`execSync` with the default shell, which on Windows is
      `cmd.exe` and cannot run a shebang script.
@@ -280,7 +281,8 @@ The ruling also named known items the spec must address:
   and the shellper HELLO/WELCOME framing is transport-agnostic.
 - Git for Windows ships `bash`, `sed`, `grep`, `head`, `tail`, `sort`, `date`, `curl` and `git`,
   which covers every external tool the forge scripts use except `jq` and the provider CLIs `gh`,
-  `glab` and `tea`. The provider CLIs are separate installs on every platform already.
+  `glab`, `tea` and Atlassian's `acli` (Jira). The provider CLIs are separate installs on every
+  platform already.
 - Windows 10 1809+ (ConPTY) is the floor. Windows 10 22H2 and Windows 11 x64 are the tested
   targets. x64 is the supported architecture. Windows on ARM64 is supported only if node-pty and
   better-sqlite3 ship win32-arm64 prebuilds, verified in the audit phase. Otherwise the docs
@@ -475,7 +477,9 @@ native form before Node consumes them. Otherwise Node reads `/c/...` as a drive-
 **Executable shims.** ConPTY spawns through `CreateProcess`, which cannot execute a `.cmd`/`.bat`
 file directly. The `.cmd`/`.exe` shims that commands like `claude` and `afx` become on
 Windows are resolved through `PATHEXT` before spawn, both for PTY commands and for the VS Code
-extension's `afx` calls.
+extension's `afx` calls. A Windows-aware `PATH`/`PATHEXT` executable lookup already exists in
+the codebase (the consult-availability probe in `codev bootstrap-docs`). That lookup is the
+starting point: it is promoted to a shared helper rather than written again.
 
 **Considered and rejected:** running each launch site with `shell: <gitbash>` piecemeal, without
 a shared resolver. That spreads the System32-WSL trap across every site.
@@ -583,7 +587,7 @@ None blocking. The owner confirms the above at the spec-approval gate.
 7. **Orphan sweep:** an unregistered shellper (for example after a Tower crash) is detected and
    reaped at the next start.
 8. **Forge:** run every GitHub concept live, including ones passing `/repos/...`-style arguments.
-   Run GitLab/Gitea/Linear concepts through the same launcher in unit tests with stubbed CLIs.
+   Run GitLab/Gitea/Linear/Jira concepts through the same launcher in unit tests with stubbed CLIs.
 9. **Spawn → porch:** a BUGFIX builder spawned on Windows runs `porch next`/`porch done` through
    a phase transition and opens a PR via the forge.
 10. **postSpawn** with a multi-command bash hook; also with a CRLF hook file, where doctor warns
