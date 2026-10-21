@@ -28,7 +28,7 @@ published 3.3.5 installs globally in 24 s with no toolchain.
 |---|---|---|---|---|
 | node-pty 1.1.0 | prebuilt, loads | prebuilt, loads | prebuilt, loads | prebuild bundled (`prebuilds/win32-arm64`) |
 | better-sqlite3 12.10.0 | **no prebuild → node-gyp source build → install fails** | prebuilt, loads | prebuilt, loads | release assets for node-v127/v137 win32-arm64 |
-| `npm install -g @cluesmith/codev@latest` (3.3.5) | **fails** (better-sqlite3) | installs, no source build | installs, no source build | not measured (no ARM64 runner) |
+| `npm install -g @cluesmith/codev@latest` (3.3.5) | **fails** (better-sqlite3) | installs, no source build | installs, no source build | **measured** on `windows-11-arm`, Node 22 and 24: both deps prebuilt, no source build; published package installs; Tower reaches ready |
 
 better-sqlite3 12.10.0 ships Node prebuilds only for ABIs 127, 137, 141 and 147 (Node 22, 24,
 25, 26). Its install script is `prebuild-install || node-gyp rebuild --release`, so when no
@@ -39,9 +39,10 @@ can succeed silently; without one, it fails with a node-gyp error.
 - **Supported Windows Node versions: 22 and 24** (the prebuild set, per the spec's definition).
   Node 20 is unsupported on native Windows. Docs (Phase 11) say so, and Phase 10's install guard
   turns the node-gyp failure into a message naming 22/24.
-- **ARM64:** both dependencies publish win32-arm64 prebuilds for Node 22/24, so ARM64 meets the
-  spec's bar for support. It has not been exercised on hardware; docs state "prebuilds exist,
-  not CI-tested".
+- **ARM64: supported** (Node 22/24). Measured on GitHub's `windows-11-arm` runner (run
+  39560462785), not inferred: prebuilt installs, the published package installs, and Tower starts.
+  Building the *repo* from source on ARM64 fails in the `artifact-canvas` bundler (tsdown/rolldown).
+  That is a contributor concern, not a user one; `windows.yml` builds the checkout on x64 only.
 - **Cross-platform note (outside this spec):** the same gap exists on macOS and Linux. Node 20
   has no better-sqlite3 12.10 prebuild anywhere, so `engines: >=20` silently implies a source
   build there. Reported to the architect as a possible separate item.
@@ -168,17 +169,27 @@ probe then kills it by PID). That is fixed in Phase 4.
 global install): ready in 549 ms, and `tower stop` hits the same `lsof` defect, leaving the daemon
 alive.
 
-**Conclusion for the review:** the 2026-09-09 hang does not reproduce on the current release with
-fresh state, on CI or on the owner's machine. Candidates for what the field test hit:
+**Deliberate reproduction of the leading candidate (run 39560462785).** Start Tower, run the
+broken `afx tower stop` (the daemon stays alive), then run `afx tower start` again on the same
+port and state dir. Measured on x64 and ARM64, from the checkout and from published 3.3.5: the
+second start **does not hang**. It finds the live Tower over HTTP, prints "Tower already running"
+and exits 0 in about 2.3 s. So "a Tower left running by the broken stop" is **ruled out** as the
+hang mechanism, at least with a healthy leftover daemon.
+
+**Conclusion for the review:** the 2026-09-09 hang does not reproduce on the current release, on
+CI (x64 and ARM64) or on the owner's machine, and the leading candidate mechanism is ruled out by
+direct test. The root cause cannot be identified from the current release. How the spec's
+"root cause identified" criterion is discharged is put to the architect (Phase 1 rebuttal). Candidates
+originally considered:
 - an older release (code since 2026-09-09 has changed the start path);
 - pre-existing `~/.agent-farm` state from an earlier attempt, for example a stale owner lock or
   a Tower that the broken `tower stop` left running and that still holds port 4100;
 - something specific to that machine (home path, port reservation, antivirus).
 
-The second candidate is consistent with the `tower stop` defect above: a Tower that never
-stopped can block the next start's readiness on the default port. The review records the hang as
-not reproducible on the current release; Phase 4 removes the `tower stop` defect that could cause
-it, and Phase 4's Windows tests cover start → stop → start on the default flow.
+The second candidate is now ruled out (above), except for an *unhealthy* leftover daemon (alive but
+not answering HTTP), which the probe cannot construct. Phase 4 removes the `tower stop` defect
+regardless, and its Windows tests cover start → stop → start. The first and third candidates
+cannot be tested without the 2026-09-09 machine and release.
 
 ### 1.7 Repo build on Windows (dev-only, not a user concern)
 
