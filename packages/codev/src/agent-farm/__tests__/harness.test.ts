@@ -469,6 +469,16 @@ describe('harness', () => {
       expect(detectHarnessFromCommand('/opt/homebrew/bin/codex')).toBe('codex');
     });
 
+    it('reads a Windows path by its basename, not by a directory name (Spec 1658)', () => {
+      expect(detectHarnessFromCommand('C:\\Users\\claude\\AppData\\Roaming\\npm\\codex.cmd')).toBe('codex');
+      expect(detectHarnessFromCommand('C:\\Users\\codex\\.local\\bin\\claude.exe --model haiku')).toBe('claude');
+      expect(detectHarnessFromCommand('C:\\Users\\claude\\Git\\bin\\bash.exe')).toBeUndefined();
+    });
+
+    it('takes a quoted Windows path with spaces as one token (Spec 1658)', () => {
+      expect(detectHarnessFromCommand('"C:\\Program Files\\Claude\\claude.exe" --model haiku')).toBe('claude');
+    });
+
     it('detects from command with flags', () => {
       expect(detectHarnessFromCommand('codex exec --full-auto')).toBe('codex');
     });

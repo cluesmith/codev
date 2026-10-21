@@ -369,6 +369,39 @@ extension's `afx`/`codev` spawns (shim resolver); `afx tower log --follow` (Node
 - `agent-farm/servers/render-gate.ts`, `gate-profiles.ts`, `mailbox-delivery.ts`; fixtures in
   `agent-farm/__tests__/fixtures/`.
 
+#### Capture recipe (owner, Windows machine)
+
+CI has no authenticated agent, so the ConPTY fixtures are recorded by hand. Needs: the branch
+checked out and built (`pnpm install`, `pnpm build` in `packages/codev`), and `claude` / `codex`
+installed and signed in (`claude -p "say OK"`, `codex exec "say OK"` succeed). From
+`packages/codev`, in PowerShell:
+
+```powershell
+node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app claude --state all -- --model haiku
+node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app codex --state all
+# agy too, if it is installed and signed in:
+node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app agy --state all
+```
+
+Each run starts a fresh session per state in a scratch directory under `%TEMP%`, accepts the
+first-run folder-trust dialog, and writes `conpty-captures\conpty-<app>-<state>.capture.jsonl.gz`.
+The states: `idle` (expect delivered), `draft` (a typed, unsent line: expect held), `midturn` (a
+turn streaming, composer empty: expect delivered, Issue #1664), `resize` (two resizes, then
+expect delivered). `midturn` spends one short model turn. If an account email or organisation
+name shows on the agent's screen, pass it with `--redact <value>` (repeatable); the user name,
+profile directory, scratch directory and host name are scrubbed automatically, with same-length
+placeholders, and a capture that still contains one is refused rather than written.
+
+The files go to `packages/codev/src/agent-farm/__tests__/fixtures/gate/conpty/`; the replay test
+is `spec-1658-conpty-gate-replay.test.ts`. The same recorder runs on macOS and Linux, which is how
+it was proven (claude 2.1.306: idle delivered at once, draft held `user-text`, mid-turn delivered
+after one 250 ms composer sample, resize delivered); those captures are not committed, because
+the replay suite accepts only `platform: win32`.
+
+Live check for scenario 12, on the same machine, against the production path without Tower:
+`node --experimental-strip-types scripts/bugfix-1664-streaming-delivery-harness.mts --scenario streaming`
+and `--scenario draft` (claude by default; `--harness codex` for codex).
+
 ### IDE server → Phase 9
 
 - On `main` (#1668): `agent-farm/servers/ide-server.ts` (spawn `:138`, detached, no
