@@ -33,7 +33,8 @@ import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
-import { isWindows } from '../lib/platform.js';
+import { hostPlatform, isWindows } from '../lib/platform.js';
+import { getWorktreeConfig } from '../agent-farm/utils/config.js';
 import type { CodevConfig } from '../lib/config.js';
 import { resolveGitBash, GitBashError, type GitBash } from '../lib/git-bash.js';
 import { findExecutable } from '@cluesmith/codev-sdk/node/executable';
@@ -388,11 +389,11 @@ export function checkWindowsPrerequisites(deps: WindowsPrereqDeps): WindowsPrere
     results.push({ name: 'jq', status: 'fail', version: 'not found', note: `forge scripts need jq; ${JQ_INSTALL_HINT}` });
   } else {
     const output = deps.jqVersion(jq);
-    let version = '(version unknown)';
-    if (output !== null) {
-      version = output.replace(/^jq-/, '');
+    if (output === null) {
+      results.push({ name: 'jq', status: 'fail', version: 'not working', note: `${jq} --version failed; ${JQ_INSTALL_HINT}` });
+    } else {
+      results.push({ name: 'jq', status: 'ok', version: output.replace(/^jq-/, ''), note: jq });
     }
-    results.push({ name: 'jq', status: 'ok', version, note: jq });
   }
 
   for (const script of deps.crlfScripts()) {
@@ -408,9 +409,57 @@ export function checkWindowsPrerequisites(deps: WindowsPrereqDeps): WindowsPrere
 }
 
 /**
+ * The words of a shell command, quote-aware: `'...'` and `"..."` group (a
+ * backslash escapes the next character outside single quotes), and `;`, `&`,
+ * `|` separate words as whitespace does. Enough to find script paths in hook
+ * commands; not a full shell parser.
+ */
+export function splitShellWords(command: string): string[] {
+  const words: string[] = [];
+  let current = '';
+  let inWord = false;
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null;
+      } else if (ch === '\\' && quote === '"' && i + 1 < command.length) {
+        i++;
+        current += command[i];
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      inWord = true;
+    } else if (ch === '\\' && i + 1 < command.length) {
+      i++;
+      current += command[i];
+      inWord = true;
+    } else if (/[\s;&|]/.test(ch)) {
+      if (inWord) {
+        words.push(current);
+      }
+      current = '';
+      inWord = false;
+    } else {
+      current += ch;
+      inWord = true;
+    }
+  }
+  if (inWord) {
+    words.push(current);
+  }
+  return words;
+}
+
+/**
  * Script files named in `postSpawn`/`devCommand` commands that exist inside
  * `workspaceRoot` and contain CRLF line endings, as workspace-relative paths.
- * A token is treated as a file reference when it contains a path separator or
+ * A word is treated as a file reference when it contains a path separator or
  * ends in `.sh`/`.bash`; files outside the workspace are not user-authored
  * hooks and are skipped.
  */
@@ -421,12 +470,11 @@ export function findCrlfHookScripts(
 ): string[] {
   const found: string[] = [];
   for (const command of commands) {
-    for (const rawToken of command.split(/\s+/)) {
-      const token = rawToken.replace(/^['"]|['";&|]+$/g, '');
-      if (token === '' || !(/[\\/]/.test(token) || /\.(sh|bash)$/.test(token))) {
+    for (const word of splitShellWords(command)) {
+      if (!(/[\\/]/.test(word) || /\.(sh|bash)$/.test(word))) {
         continue;
       }
-      const file = resolve(workspaceRoot, token);
+      const file = resolve(workspaceRoot, word);
       const rel = relative(workspaceRoot, file);
       if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || found.includes(rel)) {
         continue;
@@ -450,11 +498,10 @@ function defaultReadText(file: string): string | null {
 
 /** The real-host seams for `checkWindowsPrerequisites`. */
 export function windowsPrereqDeps(workspaceRoot: string | null, config: CodevConfig | null): WindowsPrereqDeps {
-  const worktree = (config as { worktree?: { postSpawn?: string[]; devCommand?: string } } | null)?.worktree;
   return {
     resolveGitBash: () => resolveGitBash({ configPath: config?.windows?.gitBashPath }),
     findJq: (gitRoot) => {
-      const onPath = findExecutable('jq', { platform: 'win32' });
+      const onPath = findExecutable('jq', { platform: hostPlatform() });
       if (onPath !== null || gitRoot === null) {
         return onPath;
       }
@@ -471,8 +518,14 @@ export function windowsPrereqDeps(workspaceRoot: string | null, config: CodevCon
       if (workspaceRoot === null) {
         return [];
       }
-      const commands = [...(worktree?.postSpawn ?? [])];
-      if (worktree?.devCommand) {
+      let worktree;
+      try {
+        worktree = getWorktreeConfig(workspaceRoot);
+      } catch {
+        return [];
+      }
+      const commands = [...worktree.postSpawn];
+      if (worktree.devCommand !== null) {
         commands.push(worktree.devCommand);
       }
       return findCrlfHookScripts(commands, workspaceRoot);

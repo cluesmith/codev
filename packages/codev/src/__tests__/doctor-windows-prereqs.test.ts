@@ -3,12 +3,12 @@
  * the real Git Bash resolver over a fake host. The section itself only prints
  * when the platform seam is `win32`; the POSIX doctor output is pinned in
  * doctor.test.ts, and the real runner's Git Bash and jq in
- * `doctor-windows-prereqs.windows.test.ts`.
+ * `windows-launch-resolvers.windows.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
-import { checkWindowsPrerequisites, findCrlfHookScripts, type WindowsPrereqDeps } from '../commands/doctor.js';
+import { checkWindowsPrerequisites, findCrlfHookScripts, splitShellWords, type WindowsPrereqDeps } from '../commands/doctor.js';
 import { resolveGitBash, type GitBashHost } from '../lib/git-bash.js';
 
 const SYSTEM32_BASH = 'C:\\Windows\\System32\\bash.exe';
@@ -67,6 +67,12 @@ describe('checkWindowsPrerequisites', () => {
     expect(results[1].note).toContain('winget install jqlang.jq');
   });
 
+  it('jq that is found but does not run is a failure, not ok', () => {
+    const results = checkWindowsPrerequisites(deps({ jqVersion: () => null }));
+    expect(results[1]).toMatchObject({ name: 'jq', status: 'fail', version: 'not working' });
+    expect(results[1].note).toContain('--version failed');
+  });
+
   it('looks for jq in the resolved Git install', () => {
     const seen: Array<string | null> = [];
     checkWindowsPrerequisites(deps({ findJq: (root) => { seen.push(root); return null; } }));
@@ -89,6 +95,7 @@ describe('findCrlfHookScripts', () => {
     [path.join(root, 'scripts', 'setup.sh')]: '#!/bin/sh\r\npnpm install\r\n',
     [path.join(root, 'scripts', 'lf.sh')]: '#!/bin/sh\npnpm install\n',
     [path.join(root, 'dev.sh')]: 'pnpm dev\r\n',
+    [path.join(root, 'scripts', 'my setup.sh')]: 'echo hi\r\n',
     [path.resolve('/etc/outside.sh')]: 'x\r\n',
   };
   const read = (file: string) => files[file] ?? null;
@@ -105,5 +112,23 @@ describe('findCrlfHookScripts', () => {
   it('ignores files outside the workspace and reports each script once', () => {
     expect(findCrlfHookScripts(['/etc/outside.sh', 'scripts/setup.sh && scripts/setup.sh'], root, read))
       .toEqual([path.join('scripts', 'setup.sh')]);
+  });
+
+  it('finds a quoted script path containing spaces', () => {
+    expect(findCrlfHookScripts(['bash "scripts/my setup.sh" --x', "sh 'scripts/my setup.sh'"], root, read))
+      .toEqual([path.join('scripts', 'my setup.sh')]);
+  });
+});
+
+describe('splitShellWords', () => {
+  it.each([
+    ['pnpm install', ['pnpm', 'install']],
+    ['bash "scripts/my setup.sh" --x', ['bash', 'scripts/my setup.sh', '--x']],
+    ["sh 'a b.sh';./c.sh&&d", ['sh', 'a b.sh', './c.sh', 'd']],
+    ['run my\\ file.sh', ['run', 'my file.sh']],
+    ['echo "say \\"hi\\""', ['echo', 'say "hi"']],
+    ['echo ""', ['echo', '']],
+  ])('%s', (command, words) => {
+    expect(splitShellWords(command)).toEqual(words);
   });
 });

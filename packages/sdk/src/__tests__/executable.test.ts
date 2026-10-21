@@ -5,7 +5,7 @@ import { findAllExecutables, findExecutable, isExecutableOnPath, resolveSpawnabl
  * Spec 1658 Phase 5: the shared PATH/PATHEXT lookup and the shim resolver.
  * Platform, env and file probes are injected, so the Windows branches run on
  * any host. Real `CreateProcess` execution of the resolved form is covered by
- * `packages/codev/src/__tests__/executable.windows.test.ts`.
+ * `packages/codev/src/__tests__/windows-launch-resolvers.windows.test.ts`.
  */
 
 /** A fake file system: a case-insensitive set of executable files plus shim texts. */

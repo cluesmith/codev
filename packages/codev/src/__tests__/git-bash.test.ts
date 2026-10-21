@@ -1,7 +1,7 @@
 /**
  * Spec 1658 Phase 5: Git Bash resolution precedence (ruling 5 as amended
  * 2026-10-21T06:15:45Z), against a fake host. Real resolution on a Windows
- * runner is in `git-bash.windows.test.ts`.
+ * runner is in `windows-launch-resolvers.windows.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -29,6 +29,7 @@ function fakeHost(opts: {
   files: string[];
   env?: Record<string, string>;
   onPath?: string[];
+  gitOnPath?: string[];
   versions?: Record<string, string>;
 }): GitBashHost {
   const files = new Set(opts.files.map((f) => f.toLowerCase()));
@@ -37,6 +38,7 @@ function fakeHost(opts: {
     isFile: (file) => files.has(file.toLowerCase()),
     gitVersion: (gitExe) => opts.versions?.[gitExe] ?? GIT_VERSION,
     findBashOnPath: () => opts.onPath ?? [],
+    findGitOnPath: () => opts.gitOnPath ?? [],
   };
 }
 
@@ -118,6 +120,28 @@ describe('resolveGitBash precedence', () => {
       versions: { 'C:\\msys64\\usr\\bin\\git.exe': 'git version 2.45.2' },
     });
     expect(resolveGitBash({}, host).path).toBe(`${CUSTOM_GIT}\\bin\\bash.exe`);
+  });
+
+  it('ProgramW6432 is probed before a 32-bit ProgramFiles', () => {
+    const host = fakeHost({
+      files: gitInstall(PROGRAM_FILES_GIT),
+      env: { ProgramW6432: 'C:\\Program Files', ProgramFiles: 'C:\\Program Files (x86)' },
+    });
+    expect(resolveGitBash({}, host)).toMatchObject({ root: PROGRAM_FILES_GIT, source: 'install' });
+  });
+
+  it('a non-default install is found through git.exe on PATH (Git puts <root>\\cmd on PATH, not bin)', () => {
+    const host = fakeHost({
+      files: [SYSTEM32_BASH, ...gitInstall(CUSTOM_GIT)],
+      onPath: [SYSTEM32_BASH],
+      gitOnPath: [`${CUSTOM_GIT}\\cmd\\git.exe`],
+    });
+    expect(resolveGitBash({}, host)).toMatchObject({ path: `${CUSTOM_GIT}\\bin\\bash.exe`, root: CUSTOM_GIT, source: 'path' });
+  });
+
+  it('a git.exe on PATH outside a Git for Windows layout is ignored', () => {
+    const host = fakeHost({ files: ['C:\\tools\\git.exe'], gitOnPath: ['C:\\tools\\git.exe'] });
+    expect(failureOf(() => resolveGitBash({}, host)).failure).toBe('not-found');
   });
 
   it('an install whose git.exe does not run is skipped', () => {

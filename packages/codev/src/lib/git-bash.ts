@@ -13,7 +13,8 @@
  *    `CLAUDE_CODE_GIT_BASH_PATH`. It wins when it points at a real Git Bash and
  *    fails loudly when it does not (no silent fallback).
  * 2. The standard install locations.
- * 3. `PATH`, skipping the WSL launcher and any bash that is not Git's.
+ * 3. `PATH`: each `bash` that is Git's (never the WSL launcher), then the
+ *    install that owns a `git.exe` on `PATH`.
  *
  * "A real Git Bash" is decided by layout, without running bash (running the
  * WSL launcher would start WSL): `<GitRoot>\bin\bash.exe` or
@@ -59,6 +60,8 @@ export interface GitBashHost {
   gitVersion?: (gitExe: string) => string | null;
   /** Every `bash` on `PATH`, in order. */
   findBashOnPath?: () => string[];
+  /** Every `git` on `PATH`, in order. Git's default `PATH` entry is `<root>\cmd`, which holds no bash. */
+  findGitOnPath?: () => string[];
 }
 
 export interface ResolveGitBashOptions {
@@ -78,6 +81,7 @@ interface Host {
   isFile: (file: string) => boolean;
   gitVersion: (gitExe: string) => string | null;
   findBashOnPath: () => string[];
+  findGitOnPath: () => string[];
 }
 
 function defaultIsFile(file: string): boolean {
@@ -103,6 +107,7 @@ function resolveHost(host: GitBashHost): Host {
     isFile: host.isFile ?? defaultIsFile,
     gitVersion: host.gitVersion ?? defaultGitVersion,
     findBashOnPath: host.findBashOnPath ?? (() => findAllExecutables('bash', { platform: 'win32', env })),
+    findGitOnPath: host.findGitOnPath ?? (() => findAllExecutables('git', { platform: 'win32', env })),
   };
 }
 
@@ -151,6 +156,27 @@ function gitRootOf(bashPath: string): string | null {
   }
   const parent = win32.dirname(binDir);
   if (win32.basename(parent).toLowerCase() === 'usr') {
+    return win32.dirname(parent);
+  }
+  return parent;
+}
+
+/** The Git for Windows root that owns `gitExe` (`<root>\cmd`, `<root>\bin` or `<root>\mingw64\bin`), or null. */
+function gitRootOfGitExe(gitExe: string): string | null {
+  const normalized = win32.normalize(gitExe);
+  if (win32.basename(normalized).toLowerCase() !== 'git.exe') {
+    return null;
+  }
+  const dir = win32.dirname(normalized);
+  const dirName = win32.basename(dir).toLowerCase();
+  if (dirName === 'cmd') {
+    return win32.dirname(dir);
+  }
+  if (dirName !== 'bin') {
+    return null;
+  }
+  const parent = win32.dirname(dir);
+  if (win32.basename(parent).toLowerCase() === 'mingw64') {
     return win32.dirname(parent);
   }
   return parent;
@@ -218,8 +244,18 @@ export function resolveGitBash(options: ResolveGitBashOptions = {}, hostSeams: G
     return checkOverride(envPath, 'env', host);
   }
 
+  // ProgramW6432 is the 64-bit Program Files even for a 32-bit Node, whose
+  // ProgramFiles is the x86 one.
   const installs: string[] = [];
-  installs.push(win32.join(envValue(host.env, 'ProgramFiles') ?? 'C:\\Program Files', 'Git', 'bin', 'bash.exe'));
+  for (const programFiles of [envValue(host.env, 'ProgramW6432'), envValue(host.env, 'ProgramFiles') ?? 'C:\\Program Files']) {
+    if (programFiles === undefined) {
+      continue;
+    }
+    const candidate = win32.join(programFiles, 'Git', 'bin', 'bash.exe');
+    if (!installs.some((seen) => seen.toLowerCase() === candidate.toLowerCase())) {
+      installs.push(candidate);
+    }
+  }
   const localAppData = envValue(host.env, 'LocalAppData');
   if (localAppData !== undefined) {
     installs.push(win32.join(localAppData, 'Programs', 'Git', 'bin', 'bash.exe'));
@@ -233,6 +269,17 @@ export function resolveGitBash(options: ResolveGitBashOptions = {}, hostSeams: G
 
   for (const candidate of host.findBashOnPath()) {
     const resolved = asGitBash(candidate, 'path', host);
+    if (resolved !== null) {
+      return resolved;
+    }
+  }
+
+  for (const gitExe of host.findGitOnPath()) {
+    const root = gitRootOfGitExe(gitExe);
+    if (root === null) {
+      continue;
+    }
+    const resolved = asGitBash(win32.join(root, 'bin', 'bash.exe'), 'path', host);
     if (resolved !== null) {
       return resolved;
     }
