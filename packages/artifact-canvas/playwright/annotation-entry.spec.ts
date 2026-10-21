@@ -2,7 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 
 /**
  * Click-to-annotate and the Hidden prose cursor (#1850) in real Chromium: real selection, real
- * double-click and real computed cursors, none of which jsdom has.
+ * double-click, real computed cursors and the word underline's real geometry, none of which jsdom
+ * has.
  *
  * Sample doc lines (0-based): 8/9/10 are the three list items. Labels are 1-based.
  */
@@ -117,4 +118,64 @@ test('Hidden cursor: links keep the pointing hand', async ({ page }) => {
     document.querySelector('.codev-artifact-canvas-body p')!.append(a);
   });
   expect(await cursorAt(page, '#probe-link')).toBe('pointer');
+});
+
+async function underlines(page: Page): Promise<Rect[]> {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('.codev-canvas-hover-underline'))
+      .filter((el) => !el.hidden)
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, width: r.width, height: r.height };
+      }),
+  );
+}
+
+test('Hidden cursor: the word under the hidden pointer is underlined, with any highlight style', async ({ page }) => {
+  await ready(page, '/?cursor=none&highlight=none');
+  const r = await hover(page, LI, 'Surface', 1);
+  await expect.poll(async () => (await underlines(page)).length).toBe(1);
+  let [bar] = await underlines(page);
+  expect(Math.abs(bar.left - r.left)).toBeLessThan(1);
+  expect(Math.abs(bar.width - r.width)).toBeLessThan(1);
+  expect(bar.top).toBeGreaterThanOrEqual(r.top + r.height - 0.5);
+  expect(bar.top).toBeLessThan(r.top + r.height + 6);
+  // highlight=none draws nothing else.
+  expect(await page.locator('.codev-canvas-hover-line:not([hidden]), .codev-canvas-hover-word:not([hidden])').count()).toBe(0);
+
+  // It follows the pointer to the next word.
+  const next = await hover(page, LI, 'review', 1);
+  await expect.poll(async () => Math.abs((await underlines(page))[0]?.left - next.left) < 1).toBe(true);
+
+  // Leaving the canvas clears it.
+  await page.mouse.move(2, 2);
+  await page.mouse.move(-1, -1);
+  [bar] = await underlines(page);
+  expect(bar).toBeUndefined();
+});
+
+test('Hidden cursor: the underline sits below an inline code chip, not hidden under it', async ({ page }) => {
+  await ready(page, '/?cursor=none');
+  await page.evaluate(() => {
+    const p = document.querySelector('.codev-artifact-canvas-body p')!;
+    const code = document.createElement('code');
+    code.textContent = 'chipword';
+    p.append(' ', code);
+  });
+  const r = await hover(page, '.codev-artifact-canvas-body p code', 'chipword');
+  const chip = await page.evaluate(() => {
+    const b = document.querySelector('.codev-artifact-canvas-body p code')!.getBoundingClientRect();
+    return { top: b.top, height: b.height };
+  });
+  await expect.poll(async () => (await underlines(page)).length).toBe(1);
+  const [bar] = await underlines(page);
+  expect(bar.top).toBeGreaterThanOrEqual(chip.top + chip.height - 0.5);
+  expect(Math.abs(bar.left - r.left)).toBeLessThan(1);
+});
+
+test('no underline with a visible cursor', async ({ page }) => {
+  await ready(page, '/');
+  await hover(page, LI, 'Surface', 1);
+  await expect.poll(async () => page.locator('.codev-canvas-hover-line:not([hidden])').count()).toBe(1);
+  expect(await underlines(page)).toHaveLength(0);
 });

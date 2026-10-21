@@ -52,6 +52,7 @@ describe('default-theme.css token vocabulary', () => {
         "--codev-canvas-h6-size",
         "--codev-canvas-hover-line-background",
         "--codev-canvas-hover-paragraph-background",
+        "--codev-canvas-hover-underline-color",
         "--codev-canvas-hover-word-background",
         "--codev-canvas-line-height",
         "--codev-canvas-link",
@@ -181,6 +182,11 @@ describe('default-theme.css token vocabulary', () => {
     expect(css).toMatch(
       /\.codev-artifact-canvas\[data-reading-cursor\]\s+\.codev-artifact-canvas-body\s*:is\(pre, \.codev-canvas-marker-cards, \.codev-canvas-comment-composer-host, \.codev-canvas-row-affordance\)\s*\{[^}]*cursor:\s*default/,
     );
+  });
+
+  it('paints the Hidden cursor word underline from its own foreground-derived token (#1850)', () => {
+    expect(tokens.get('--codev-canvas-hover-underline-color')).toMatch(/var\(--codev-canvas-foreground\)/);
+    expect(css).toMatch(/\.codev-canvas-hover-underline\s*\{[^}]*background:\s*var\(--codev-canvas-hover-underline-color\)/);
   });
 
   it('sizes the "+" affordance against the prose, with a 24px hit-target floor (#1236/#1343)', () => {

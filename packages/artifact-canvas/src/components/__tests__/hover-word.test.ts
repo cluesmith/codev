@@ -13,6 +13,7 @@ import {
   shapesOf,
   wordBoundsAt,
   wordPills,
+  wordUnderlines,
   type Box,
 } from '../hover-word.js';
 
@@ -209,5 +210,33 @@ describe('CLICK_EXCLUDED_SELECTOR (#1850)', () => {
     const hit = (id: string): boolean => body.querySelector(`#${id}`)!.closest(CLICK_EXCLUDED_SELECTOR) !== null;
     expect(hit('prose')).toBe(false);
     for (const id of ['link', 'chip', 'img', 'pre', 'card', 'edit', 'ta']) expect(hit(id)).toBe(true);
+  });
+});
+
+describe('wordUnderlines (#1850, Hidden cursor)', () => {
+  const m = { fontSize: 20, lineHeight: 30 };
+
+  it('draws a thin bar just below each word fragment, as wide as the fragment', () => {
+    const rects: Box[] = [
+      { left: 100, top: 10, width: 50, height: 22 },
+      { left: 0, top: 40, width: 30, height: 22 }, // the word wrapped onto the next line
+    ];
+    expect(wordUnderlines(rects, m)).toEqual([
+      { left: 100, top: 32 + 1.6, width: 50, height: 2 },
+      { left: 0, top: 62 + 1.6, width: 30, height: 2 },
+    ]);
+  });
+
+  it('goes below an inline-code chip box, which would hide it, and ignores boxes elsewhere', () => {
+    const word: Box = { left: 100, top: 10, width: 50, height: 22 };
+    const chip: Box = { left: 96, top: 8, width: 58, height: 28 };
+    const elsewhere: Box = { left: 300, top: 8, width: 58, height: 60 };
+    const [bar] = wordUnderlines([word], m, [chip, elsewhere]);
+    expect(bar.top).toBe(36 + 1.6);
+  });
+
+  it('keeps a visible minimum thickness at small font sizes', () => {
+    const [bar] = wordUnderlines([{ left: 0, top: 0, width: 10, height: 10 }], { fontSize: 8, lineHeight: 12 });
+    expect(bar.height).toBe(1.5);
   });
 });
