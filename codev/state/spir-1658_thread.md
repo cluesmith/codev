@@ -33,3 +33,5 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
   - Pipe secret is Windows-only, so POSIX is unchanged and no upgrade compatibility is needed.
   - Owner-only files rely on user-folder privacy; no extra doctor checks; console windows hidden.
   - Still at the spec-approval gate, waiting for the owner.
+- [gate feedback 2026-10-21] Merged origin/main (389 commits; clean). Spec synced: 64 forge scripts (Jira/acli added), reuse bootstrap-docs PATHEXT lookup.
+- [gate feedback 2026-10-21] Owner direction via main: Codev IDE server (#1789) IN SCOPE on native Windows. Added SC block, Dependencies (1789 merges first; @cluesmith/codev-ide + win32-x64 pkg 1.0.0; floor 1.128.0 on --version line 1), scenarios 15a/15b (joint check on owner's Windows box), decision 12. Spec head 1c6b39602. Still holding at spec-approval.
