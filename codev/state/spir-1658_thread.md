@@ -35,3 +35,9 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
   - Still at the spec-approval gate, waiting for the owner.
 - [gate feedback 2026-10-21] Merged origin/main (389 commits; clean). Spec synced: 64 forge scripts (Jira/acli added), reuse bootstrap-docs PATHEXT lookup.
 - [gate feedback 2026-10-21] Owner direction via main: Codev IDE server (#1789) IN SCOPE on native Windows. Added SC block, Dependencies (1789 merges first; @cluesmith/codev-ide + win32-x64 pkg 1.0.0; floor 1.128.0 on --version line 1), scenarios 15a/15b (joint check on owner's Windows box), decision 12. Spec head 1c6b39602. Still holding at spec-approval.
+
+## 2026-10-21 plan drafted
+- Plan written: 10 phases (audit+seam, pipe transport, lifecycle, resolvers+doctor, launcher routing, worktree links, ConPTY captures, IDE server, residue sweep, CI leg+docs). Ruling-1 order kept; buckets split.
+- Audit at plan time: #1789 (PR #1806) still OPEN; IDE server spawn/forward from #1668 already on main. #1595/#1672 not seen on main yet; re-audit at Phases 5/8/9.
+- Key ask for the plan gate: land the dispatch-only windows.yml skeleton on main early (GitHub dispatches only workflows present on the default branch), so each phase can run Windows checks on the branch.
+- IDE joint check: formal at verify (SPIR has no dev-approval gate); optional dry run before the pr gate.
