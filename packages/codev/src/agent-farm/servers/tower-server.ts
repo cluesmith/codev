@@ -75,6 +75,8 @@ import { runBootConsolidation } from '../db/consolidate.js';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/server-utils.js';
 import { version } from '../../version.js';
+import { isWindows } from '../../lib/platform.js';
+import { WindowsJobHelper, setTowerJobHelper } from '../../lib/windows-job.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -536,6 +538,18 @@ async function bootSequence(): Promise<void> {
     process.exit(1);
   }
   log('INFO', `Claimed global.db ownership (pid ${process.pid}, port ${port}) at ${AGENT_FARM_DIR}`);
+
+  // Spec 1658 Phase 3b: one job helper per Tower, started now so the first
+  // session create finds it warm. It never wraps Tower: it only puts shellper
+  // pids in per-session jobs. A failure to bind is logged by the helper once;
+  // sessions then start without a job.
+  if (isWindows()) {
+    const jobHelper = new WindowsJobHelper({ log: (msg: string) => log('WARN', msg) });
+    setTowerJobHelper(jobHelper);
+    jobHelper.start().then((failure) => {
+      if (failure === null) log('INFO', 'Per-session job objects available');
+    });
+  }
 
   // Initialize shellper session manager for persistent terminals
   const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.codev', 'run');

@@ -35,6 +35,7 @@ import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { isWindows } from '../lib/platform.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
+import { WindowsJobHelper } from '../lib/windows-job.js';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import {
   measureSessionLogs,
@@ -1358,6 +1359,28 @@ export async function doctor(): Promise<number> {
         issue,
         recommendation: 'Allow powershell.exe to run Get-CimInstance Win32_Process; without it Tower cannot tear down session trees or reap orphaned shellpers',
       });
+    }
+
+    // Per-session Job Objects (Phase 3b): the same helper Tower starts at boot,
+    // bound here once. A failure means sessions run without a job, and a
+    // process whose parent exited can outlive its session.
+    const jobHelper = new WindowsJobHelper();
+    try {
+      const failure = await jobHelper.start();
+      if (failure === null) {
+        console.log(`  ${chalk.green('✓')} Per-session job objects available`);
+      } else {
+        const issue = `Per-session job objects unavailable: ${failure}`;
+        console.log(`  ${chalk.yellow('⚠')} ${issue}`);
+        warnings++;
+        warningDetails.push({
+          name: 'Per-session job objects',
+          issue,
+          recommendation: 'Allow powershell.exe in FullLanguage mode; without it a process whose parent exited can outlive its session',
+        });
+      }
+    } finally {
+      jobHelper.stop();
     }
     console.log('');
   }

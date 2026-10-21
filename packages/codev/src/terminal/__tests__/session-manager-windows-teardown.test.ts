@@ -67,7 +67,7 @@ describe('killOrphanedShellpers on Windows', () => {
 
     expect(await manager.killOrphanedShellpers()).toBe(1);
     expect(treeMock.kill).toHaveBeenCalledTimes(1);
-    expect(treeMock.kill).toHaveBeenCalledWith(100, { fallbackToPid: true, rootStartTime: 1 });
+    expect(treeMock.kill).toHaveBeenCalledWith(100, { fallbackToPid: true, rootStartTime: 1, jobName: 'Local\\codev-session-s-100' });
   });
 
   it('probes the decoded pipe name before killing', async () => {
@@ -102,6 +102,7 @@ describe('killSession on Windows', () => {
       startTime: 4242_000,
       client: { disconnect },
       socketPath: '\\\\.\\pipe\\codev-shellper-me-s1',
+      shellperSessionId: 's1',
       logPath: 'C:\\nonexistent\\s1.log',
       restartResetTimer: null,
       stderrBuffer: null,
@@ -110,7 +111,7 @@ describe('killSession on Windows', () => {
 
     await manager.killSession('s1');
 
-    expect(treeMock.kill).toHaveBeenCalledWith(4242, { rootStartTime: 4242_000 });
+    expect(treeMock.kill).toHaveBeenCalledWith(4242, { rootStartTime: 4242_000, jobName: 'Local\\codev-session-s1' });
     expect(treeMock.wait).toHaveBeenCalledWith(4242, snapshot, 5000);
     expect(killSpy).not.toHaveBeenCalled();
     expect(disconnect).toHaveBeenCalled();

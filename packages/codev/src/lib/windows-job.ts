@@ -164,6 +164,8 @@ export function spawnPowerShellHelper(): HelperProcess {
 
 export interface JobResult {
   ok: boolean;
+  /** The helper could not serve the request (as opposed to the request failing). */
+  helperFailure?: boolean;
   /** terminate: false when no job had that name. */
   found?: boolean;
   error?: string;
@@ -173,7 +175,12 @@ export interface JobResult {
 
 export type JobAssignOutcome =
   | { assigned: true }
-  | { assigned: false; reason: string };
+  /**
+   * `helperFailure`: the helper itself could not serve (not ready, disabled,
+   * timed out, exited), which it reports once; otherwise this one request was
+   * refused or failed in Win32, and the caller reports it.
+   */
+  | { assigned: false; reason: string; helperFailure: boolean };
 
 export interface WindowsJobHelperOptions {
   spawnHelper?: () => HelperProcess;
@@ -352,7 +359,7 @@ export class WindowsJobHelper {
     }
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
-      pending.resolve({ ok: false, error: 'the job helper exited' });
+      pending.resolve({ ok: false, error: 'the job helper exited', helperFailure: true });
       this.pending.delete(id);
     }
   }
@@ -372,15 +379,15 @@ export class WindowsJobHelper {
 
   private async request(op: Record<string, unknown>): Promise<JobResult> {
     const failure = await this.start();
-    if (failure !== null) return { ok: false, error: failure };
+    if (failure !== null) return { ok: false, error: failure, helperFailure: true };
     const proc = this.proc;
-    if (!proc) return { ok: false, error: 'the job helper exited' };
+    if (!proc) return { ok: false, error: 'the job helper exited', helperFailure: true };
     const id = this.nextId++;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         this.reportOnce('request-timeout', `a request got no answer within ${this.requestTimeoutMs}ms`);
-        resolve({ ok: false, error: `no answer within ${this.requestTimeoutMs}ms` });
+        resolve({ ok: false, error: `no answer within ${this.requestTimeoutMs}ms`, helperFailure: true });
       }, this.requestTimeoutMs);
       this.pending.set(id, { resolve, timer });
       proc.stdin.write(JSON.stringify({ ...op, id }) + '\n');
@@ -397,7 +404,7 @@ export class WindowsJobHelper {
     if (result.ok) return { assigned: true };
     let reason = result.error ?? 'unknown failure';
     if (result.code !== undefined) reason = `${reason} (Win32 error ${result.code})`;
-    return { assigned: false, reason };
+    return { assigned: false, reason, helperFailure: result.helperFailure === true };
   }
 
   /** Terminate job `name`. `found: false` when no process is left in it. */

@@ -19,7 +19,8 @@ import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { executeForgeCommand } from '../../lib/forge.js';
 import { sameIssueId } from '../../lib/issue-id.js';
 import { isWindows } from '../../lib/platform.js';
-import { killSessionTree } from '../../lib/process-tree.js';
+import { killSessionTree, type KillSessionTreeOptions } from '../../lib/process-tree.js';
+import { WindowsJobHelper, sessionJobName } from '../../lib/windows-job.js';
 import { listProcessCensus, type ProcessCensusEntry } from '../servers/process-census.js';
 import {
   SHELLPER_MARKER,
@@ -130,12 +131,39 @@ async function killWindowsShellperProcesses(worktreePath: string): Promise<numbe
     return 0;
   }
   let killed = 0;
+  // One helper for the whole pass, started on the first job: its cold start is paid once.
+  const jobs: { helper: WindowsJobHelper | null } = { helper: null };
+  const terminateJob = (name: string) => {
+    if (!jobs.helper) jobs.helper = new WindowsJobHelper({ log: (message) => logger.warn(message) });
+    return jobs.helper.terminate(name);
+  };
+  try {
+    killed = await killMatchingShellpers(census, worktreePath, terminateJob);
+  } finally {
+    jobs.helper?.stop();
+  }
+  return killed;
+}
+
+async function killMatchingShellpers(
+  census: ProcessCensusEntry[],
+  worktreePath: string,
+  terminateJob: KillSessionTreeOptions['terminateJob'],
+): Promise<number> {
+  let killed = 0;
   for (const entry of census) {
     if (entry.pid === process.pid || !entry.cmdline.includes(SHELLPER_MARKER)) continue;
-    const cwd = readJsonStringField(unquoteWindowsCommandLine(entry.cmdline), 'cwd');
+    const config = unquoteWindowsCommandLine(entry.cmdline);
+    const cwd = readJsonStringField(config, 'cwd');
     if (cwd === null || !sameWindowsPath(cwd, worktreePath)) continue;
+    // The session job (Spec 1658 Phase 3b) also ends descendants with no live
+    // parent; this pass has its own helper, since cleanup runs outside Tower.
+    const opts: KillSessionTreeOptions = { rootStartTime: entry.creationTime, terminateJob };
+    const shellperSessionId = readJsonStringField(config, 'sessionId');
+    if (shellperSessionId) opts.jobName = sessionJobName(shellperSessionId);
     try {
-      const { signaled } = await killSessionTree(entry.pid, { rootStartTime: entry.creationTime });
+      const { signaled, jobError } = await killSessionTree(entry.pid, opts);
+      if (jobError !== undefined) logger.warn(`Shellper pid ${entry.pid}: ${jobError}`);
       if (signaled) killed++;
     } catch (err) {
       logger.warn(`Shellper pid ${entry.pid}: ${(err as Error).message}`);

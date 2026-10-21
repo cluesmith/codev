@@ -40,6 +40,7 @@ import {
 } from './shellper-endpoint.js';
 import { isWindows } from '../lib/platform.js';
 import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
+import { getTowerJobHelper, sessionJobName, type WindowsJobHelper } from '../lib/windows-job.js';
 import { WINDOWS_CENSUS_TIMEOUT_MS, listProcessCensus } from '../agent-farm/servers/process-census.js';
 import { SHELLPER_MARKER, isShellperInScope, readJsonStringField, unquoteWindowsCommandLine } from './shellper-cmdline.js';
 import { isDeliberateExit, type ExitMessage } from './shellper-protocol.js';
@@ -49,6 +50,12 @@ export interface SessionManagerConfig {
   shellperScript: string;
   nodeExecutable: string;
   logger?: (message: string) => void;
+  /**
+   * Windows (Spec 1658 Phase 3b): the helper that puts each new shellper in its
+   * per-session Job Object. Defaults to Tower's helper; null runs sessions
+   * without a job.
+   */
+  jobHelper?: () => WindowsJobHelper | null;
 }
 
 /**
@@ -323,6 +330,7 @@ function sleep(ms: number): Promise<void> {
 export class SessionManager extends EventEmitter {
   private sessions = new Map<string, ManagedSession>();
   private readonly log: (msg: string) => void;
+  private loggedNoJobHelper = false;
 
   constructor(private readonly config: SessionManagerConfig) {
     super();
@@ -385,6 +393,8 @@ export class SessionManager extends EventEmitter {
     if (secret !== null) {
       shellperConfigFields.socketDir = this.config.socketDir;
       shellperConfigFields.sessionId = opts.sessionId;
+      // Phase 3b: the PTY waits for our HELLO, so the job is in place first.
+      shellperConfigFields.deferPty = true;
     }
     const shellperConfig = JSON.stringify(shellperConfigFields);
     let stderrFd: number | null = null;
@@ -428,6 +438,9 @@ export class SessionManager extends EventEmitter {
     try {
       // Wait briefly for socket to be ready
       await waitForEndpoint(socketPath);
+
+      // Windows: put the shellper in its job before the HELLO that spawns its PTY.
+      if (secret !== null) await this.assignSessionJob(opts.sessionId, info.pid);
 
       // Connect client
       client = new ShellperClient(socketPath, 'tower', clientAuthFor(secret, opts.sessionId, info.pid));
@@ -793,7 +806,7 @@ export class SessionManager extends EventEmitter {
     if (isWindows()) {
       // A Windows SIGTERM is a hard kill, so the shellper never gets to stop
       // its PTY child; tear the whole tree down instead (Spec 1658).
-      await this.killWindowsSessionTree(sessionId, session.pid, session.startTime);
+      await this.killWindowsSessionTree(sessionId, session.pid, session.startTime, session.shellperSessionId);
     } else {
       // Send SIGTERM
       try {
@@ -826,10 +839,34 @@ export class SessionManager extends EventEmitter {
     this.cleanupEndpoint(session.socketPath, session.logPath);
   }
 
+  /**
+   * Put a new Windows shellper in the per-session Job Object (Spec 1658 Phase
+   * 3b). Never throws: without a job the session still starts, and teardown
+   * falls back to the snapshot kill. Helper-wide degradation (cannot bind,
+   * timeouts, restarts spent) is logged once by the helper; a refusal for this
+   * session alone (the name already exists, a Win32 failure) is logged here.
+   */
+  private async assignSessionJob(sessionId: string, shellperPid: number): Promise<void> {
+    let helper: WindowsJobHelper | null = getTowerJobHelper();
+    if (this.config.jobHelper) helper = this.config.jobHelper();
+    if (!helper) {
+      if (!this.loggedNoJobHelper) {
+        this.loggedNoJobHelper = true;
+        this.log('No job helper: Windows sessions start without a per-session job');
+      }
+      return;
+    }
+    const outcome = await helper.assign(sessionJobName(sessionId), shellperPid);
+    if (!outcome.assigned && !outcome.helperFailure) {
+      this.log(`Session ${sessionId}: started without a job object: ${outcome.reason}`);
+    }
+  }
+
   /** Windows teardown of a shellper and everything under it, waiting up to 5s. */
-  private async killWindowsSessionTree(sessionId: string, pid: number, startTime: number): Promise<void> {
+  private async killWindowsSessionTree(sessionId: string, pid: number, startTime: number, shellperSessionId: string): Promise<void> {
     try {
-      const { snapshot } = await killSessionTree(pid, { rootStartTime: startTime });
+      const { snapshot, jobError } = await killSessionTree(pid, { rootStartTime: startTime, jobName: sessionJobName(shellperSessionId) });
+      if (jobError !== undefined) this.log(`Session ${sessionId}: ${jobError}`);
       if (!(await waitForTreeExit(pid, snapshot, 5000))) {
         this.log(`Session ${sessionId}: processes still alive 5s after tree teardown of pid=${pid}`);
       }
@@ -978,7 +1015,7 @@ export class SessionManager extends EventEmitter {
 
     // The `ps` scan is a single await with no inner loop to break out of, so
     // bound its wait explicitly. It performs no kills, so abandoning it is safe.
-    let entries: Array<{ pid: number; socketPath?: string; creationTime?: number }>;
+    let entries: Array<{ pid: number; socketPath?: string; creationTime?: number; jobName?: string }>;
     try {
       const remaining = deadline - Date.now();
       const scan = await this.withDeadline(
@@ -1004,7 +1041,7 @@ export class SessionManager extends EventEmitter {
       return 0;
     }
 
-    for (const { pid, socketPath, creationTime } of entries) {
+    for (const { pid, socketPath, creationTime, jobName } of entries) {
       // Cooperative cancellation: stop at the deadline rather than continue.
       // Because we STOP here (no background tail), a bounded sweep never kills
       // past its budget, so it cannot race a session created after startup.
@@ -1033,7 +1070,8 @@ export class SessionManager extends EventEmitter {
       // is a process group leader; if the group signal fails (already dead or
       // permission error), the individual PID is tried.
       try {
-        const { signaled } = await killSessionTree(pid, { fallbackToPid: true, rootStartTime: creationTime });
+        const { signaled, jobError } = await killSessionTree(pid, { fallbackToPid: true, rootStartTime: creationTime, jobName });
+        if (jobError !== undefined) this.log(`Orphan pid=${pid}: ${jobError}`);
         if (signaled) killed++;
       } catch (err) {
         this.log(`Orphan pid=${pid}: ${(err as Error).message}`);
@@ -1079,7 +1117,7 @@ export class SessionManager extends EventEmitter {
    * bounded by `timeoutMs` (execFile kills the child on overrun); a timed-out or
    * failed scan resolves to `[]` and is non-fatal.
    */
-  private findShellperProcesses(timeoutMs = ORPHAN_SWEEP_TIMEOUT_MS): Promise<Array<{ pid: number; socketPath?: string; creationTime?: number }>> {
+  private findShellperProcesses(timeoutMs = ORPHAN_SWEEP_TIMEOUT_MS): Promise<Array<{ pid: number; socketPath?: string; creationTime?: number; jobName?: string }>> {
     if (isWindows()) return this.findWindowsShellperProcesses();
     return new Promise((resolve) => {
       // -ww prevents arg truncation on macOS/Linux. `timeout: 0` disables the
@@ -1118,13 +1156,21 @@ export class SessionManager extends EventEmitter {
    * census carries its own timeout, and `killOrphanedShellpers` still bounds
    * the wait with its deadline.
    */
-  private async findWindowsShellperProcesses(): Promise<Array<{ pid: number; socketPath?: string; creationTime?: number }>> {
-    const results: Array<{ pid: number; socketPath?: string; creationTime?: number }> = [];
+  private async findWindowsShellperProcesses(): Promise<Array<{ pid: number; socketPath?: string; creationTime?: number; jobName?: string }>> {
+    const results: Array<{ pid: number; socketPath?: string; creationTime?: number; jobName?: string }> = [];
     for (const entry of await listProcessCensus()) {
       if (!entry.cmdline.includes(SHELLPER_MARKER)) continue;
       if (!isShellperInScope(entry.cmdline, this.config.socketDir)) continue;
-      const socketPath = readJsonStringField(unquoteWindowsCommandLine(entry.cmdline), 'socketPath');
-      results.push({ pid: entry.pid, socketPath: socketPath ?? undefined, creationTime: entry.creationTime });
+      const config = unquoteWindowsCommandLine(entry.cmdline);
+      const socketPath = readJsonStringField(config, 'socketPath');
+      const shellperSessionId = readJsonStringField(config, 'sessionId');
+      const found: { pid: number; socketPath?: string; creationTime?: number; jobName?: string } = {
+        pid: entry.pid,
+        socketPath: socketPath ?? undefined,
+        creationTime: entry.creationTime,
+      };
+      if (shellperSessionId) found.jobName = sessionJobName(shellperSessionId);
+      results.push(found);
     }
     return results;
   }
@@ -1503,7 +1549,7 @@ export class SessionManager extends EventEmitter {
         // killOrphanedShellpers pass, or immediately for architects via `afx
         // workspace remove-architect`'s identity-matched zombie reap
         // (tower-instances.ts).
-        killSessionTree(session.pid, { rootStartTime: session.startTime }).catch((err: Error) => {
+        killSessionTree(session.pid, { rootStartTime: session.startTime, jobName: sessionJobName(session.shellperSessionId) }).catch((err: Error) => {
           this.log(`Session ${sessionId}: ${err.message}`);
         });
         this.emit('session-error', sessionId, new Error(`Max restarts (${maxRestarts}) exceeded`));

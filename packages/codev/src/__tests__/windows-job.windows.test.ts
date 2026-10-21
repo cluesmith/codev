@@ -7,9 +7,10 @@
  *   audit. The warm assign must stay under 1s.
  * - Assignment works while the target already sits in the runner's job (nested).
  * - A job name that already exists is never joined.
- * - Terminating the job ends a `cmd start /b` orphan that has no live parent.
- * - Measured (`JOB-DETACHED`, `JOB-CIM`): whether a `detached: true` child and
- *   a CIM `Win32_Process.Create` launch leave the job.
+ * - Terminating the job ends a `cmd start /b` orphan that has no live parent,
+ *   and a Node `detached: true` child (libuv never requests breakaway).
+ * - A CIM `Win32_Process.Create` launch from inside the job escapes it (the
+ *   mechanism Phase 4's daemon start relies on).
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
@@ -151,7 +152,7 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     if (!second.assigned) expect(second.reason).toMatch(/already exists/);
   }, 60_000);
 
-  it('terminating the job ends a cmd start /b orphan; a detached child breaks away', async () => {
+  it('terminating the job ends a cmd start /b orphan and a Node detached child', async () => {
     const helper = newHelper();
     const name = jobName();
     const pidFile = path.join(workDir, `pids-${crypto.randomUUID()}.txt`);
@@ -192,14 +193,12 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(await helper.terminate(name)).toEqual({ ok: true, found: true });
 
     expect(await waitFor(() => !alive(root.pid!) && !alive(pids.get('leaf')!) && !alive(pids.get('orphan')!), 10_000)).toBe(true);
-    // Measured, not asserted yet (architect ruling pending): libuv does not
-    // request CREATE_BREAKAWAY_FROM_JOB for a detached child, so BREAKAWAY_OK
-    // alone may not let it leave the session.
-    await new Promise((r) => setTimeout(r, 1000));
-    console.log(`JOB-DETACHED detached_grandchild_survived=${alive(pids.get('leaf-detached')!)}`);
+    // libuv never requests CREATE_BREAKAWAY_FROM_JOB, so a Node detached child
+    // stays in the job and ends with it (no setsid parity; architect ruling).
+    expect(await waitFor(() => !alive(pids.get('leaf-detached')!), 10_000)).toBe(true);
   }, 90_000);
 
-  it('measures whether a CIM Win32_Process.Create launch from inside a session job escapes it', async () => {
+  it('a CIM Win32_Process.Create launch from inside a session job escapes it', async () => {
     const helper = newHelper();
     const name = jobName();
     const pidFile = path.join(workDir, `cim-${crypto.randomUUID()}.txt`);
@@ -226,8 +225,9 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
 
     expect(await helper.terminate(name)).toEqual({ ok: true, found: true });
     expect(await waitFor(() => !alive(root.pid!), 10_000)).toBe(true);
+    // Created by the WMI provider host, so never in the caller's job.
     await new Promise((r) => setTimeout(r, 1000));
-    console.log(`JOB-CIM cim_launched_survived=${alive(leafPid)}`);
+    expect(alive(leafPid)).toBe(true);
   }, 90_000);
 
   it('a stopped helper (Tower restart) does not kill a job member, and a new helper still finds the job by name', async () => {

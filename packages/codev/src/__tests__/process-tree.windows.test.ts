@@ -5,8 +5,8 @@
  *
  * - Scenario 6 (teardown): no descendant survives `killSessionTree`, including
  *   when the session root is already dead. Killing a real shellper session
- *   takes its PTY tree with it. The re-parented variant (an intermediate exited
- *   first) is a pinned known gap until Phase 3b's Job Object.
+ *   takes its PTY tree with it, including (through the Phase 3b session job) a
+ *   descendant whose parent exited first and a Node `detached` child.
  * - Scenario 7 (orphan sweep): an unregistered shellper is detected by the
  *   census-backed sweeps and reaped by the husk sweep.
  * - A porch check that times out has its whole tree killed.
@@ -24,6 +24,7 @@ import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
 import { isConsoleHostEntry, sweepShellperHusks } from '../agent-farm/servers/shellper-husk-sweep.js';
 import { SessionManager } from '../terminal/session-manager.js';
+import { WindowsJobHelper } from '../lib/windows-job.js';
 import { runCheck } from '../commands/porch/checks.js';
 
 const onWindows = process.platform === 'win32';
@@ -42,8 +43,10 @@ const leftovers: number[] = [];
  *   keeps the backgrounded job's Windows parent alive;
  * - mid: starts `leaf`;
  * - leaf: idles.
- * Children are never `detached`: a detached child leaves the session on both
- * platforms by design (setsid on POSIX, job breakaway on Windows).
+ * In `detached` mode root starts `leaf` with `detached: true`. On POSIX that
+ * child would leave the session (setsid); on Windows it stays in the session
+ * job, because libuv never requests job breakaway. Every other child is
+ * non-detached.
  */
 fs.writeFileSync(treeScript, `
 const { spawn } = require('child_process');
@@ -55,6 +58,8 @@ const fwd = (p) => p.split('\\\\').join('/');
 if (role === 'root') {
   if (mode === 'bash') {
     spawn(${JSON.stringify(GIT_BASH)}, ['-c', '"' + fwd(node) + '" "' + fwd(__filename) + '" mid "' + fwd(pidFile) + '" ' + mode], { stdio: 'ignore' });
+  } else if (mode === 'detached') {
+    spawn(node, [__filename, 'leaf', pidFile, mode], { stdio: 'ignore', detached: true }).unref();
   } else if (mode === 'reparent') {
     fs.appendFileSync(pidFile, '0\\n');
     spawn('cmd.exe', ['/d', '/c', 'start', '""', '/b', node, __filename, 'leaf', pidFile, mode], { stdio: 'ignore', windowsVerbatimArguments: false });
@@ -143,25 +148,103 @@ describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees
     await expectAllGone(pids);
   }, 60_000);
 
-  // Known gap, pinned so it stays visible (Windows CI run 39574693242): a
-  // descendant orphaned by a non-Node launcher (`cmd start /b`) has a dead
-  // parent pid, so neither the pre-kill snapshot nor `taskkill /T` can link it
-  // to the session. Spec 1658 Phase 3b's per-session Job Object closes it; this
-  // test then passes and `it.fails` turns red, which is the cue to drop `.fails`.
-  it.fails('scenario 6: clears a descendant whose parent exited first (re-parented) [known gap until Phase 3b]', async () => {
-    const { rootPid, pids } = await startTree('reparent');
-    const leafPid = pids[2];
-    const census = await listProcessCensus({ fresh: true });
-    const leaf = census.find((entry) => entry.pid === leafPid);
-    const midPid = leaf?.ppid ?? -1;
-    await waitFor(() => !alive(midPid), 10_000, `intermediate (pid ${midPid}) to exit`);
-    expect(alive(leafPid)).toBe(true);
+  // Run 39574693242 found the gap: a descendant orphaned by a non-Node launcher
+  // (`cmd start /b`) has a dead parent pid, so neither the pre-kill snapshot
+  // nor `taskkill /T` can link it to its root. A bare `killSessionTree` on such
+  // a tree still misses it; inside a shellper session, the per-session Job
+  // Object (Phase 3b) ends it. The setup is checked before teardown, so a
+  // broken setup cannot pass as a fix.
+  it('scenario 6: a session descendant whose parent exited first (re-parented) does not survive killSession', async () => {
+    const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-reparent-'));
+    const jobHelper = new WindowsJobHelper({ log: (msg) => console.log(`[job-helper] ${msg}`) });
+    const manager = new SessionManager({ socketDir, shellperScript, nodeExecutable: process.execPath, jobHelper: () => jobHelper });
+    try {
+      const pidFile = path.join(workDir, `pids-${crypto.randomUUID()}.txt`);
+      const sessionId = crypto.randomUUID();
+      await manager.createSession({
+        sessionId,
+        command: process.execPath,
+        args: [treeScript, 'root', pidFile, 'reparent'],
+        cwd: workDir,
+        env: process.env as Record<string, string>,
+        cols: 80,
+        rows: 24,
+      });
+      await waitFor(() => readPids(pidFile).length >= 3, 20_000, 'session tree to start');
+      const shellperPid = manager.getSessionInfo(sessionId)!.pid;
+      const [rootPid, , leafPid] = readPids(pidFile);
+      leftovers.push(shellperPid, rootPid, leafPid);
 
-    await killSessionTree(rootPid);
+      const census = await listProcessCensus({ fresh: true });
+      const leaf = census.find((entry) => entry.pid === leafPid);
+      const midPid = leaf?.ppid ?? -1;
+      await waitFor(() => !alive(midPid), 10_000, `intermediate (pid ${midPid}) to exit`);
+      expect(alive(leafPid)).toBe(true);
+
+      await manager.killSession(sessionId);
+      await expectAllGone([shellperPid, rootPid, leafPid]);
+    } finally {
+      jobHelper.stop();
+    }
+  }, 90_000);
+
+  it('scenario 6: a Node detached child ends with its session (no setsid parity on Windows)', async () => {
+    const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-detached-'));
+    const jobHelper = new WindowsJobHelper();
+    const manager = new SessionManager({ socketDir, shellperScript, nodeExecutable: process.execPath, jobHelper: () => jobHelper });
+    try {
+      const pidFile = path.join(workDir, `pids-${crypto.randomUUID()}.txt`);
+      const sessionId = crypto.randomUUID();
+      await manager.createSession({
+        sessionId,
+        command: process.execPath,
+        args: [treeScript, 'root', pidFile, 'detached'],
+        cwd: workDir,
+        env: process.env as Record<string, string>,
+        cols: 80,
+        rows: 24,
+      });
+      await waitFor(() => readPids(pidFile).length >= 2, 20_000, 'session tree to start');
+      const shellperPid = manager.getSessionInfo(sessionId)!.pid;
+      const [rootPid, detachedPid] = readPids(pidFile);
+      leftovers.push(shellperPid, rootPid, detachedPid);
+
+      await manager.killSession(sessionId);
+      await expectAllGone([shellperPid, rootPid, detachedPid]);
+    } finally {
+      jobHelper.stop();
+    }
+  }, 90_000);
+
+  it('a job helper exit (Tower restart) does not kill a running session; a one-shot helper still ends its job', async () => {
+    const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-helper-exit-'));
+    const jobHelper = new WindowsJobHelper();
+    const manager = new SessionManager({ socketDir, shellperScript, nodeExecutable: process.execPath, jobHelper: () => jobHelper });
+    const pidFile = path.join(workDir, `pids-${crypto.randomUUID()}.txt`);
+    const sessionId = crypto.randomUUID();
+    await manager.createSession({
+      sessionId,
+      command: process.execPath,
+      args: [treeScript, 'root', pidFile, 'reparent'],
+      cwd: workDir,
+      env: process.env as Record<string, string>,
+      cols: 80,
+      rows: 24,
+    });
+    await waitFor(() => readPids(pidFile).length >= 3, 20_000, 'session tree to start');
+    const shellperPid = manager.getSessionInfo(sessionId)!.pid;
+    const [rootPid, , leafPid] = readPids(pidFile);
+    leftovers.push(shellperPid, rootPid, leafPid);
+
+    jobHelper.stop();
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    const survivors = [rootPid, leafPid].filter(alive);
-    expect(survivors, `root=${rootPid} mid=${midPid} leaf=${leafPid}`).toEqual([]);
-  }, 60_000);
+    expect([shellperPid, rootPid, leafPid].filter(alive)).toEqual([shellperPid, rootPid, leafPid]);
+
+    // No Tower helper is registered in this process, so teardown starts a
+    // one-shot helper, which finds the job by name (the shellper holds it open).
+    await manager.killSession(sessionId);
+    await expectAllGone([shellperPid, rootPid, leafPid]);
+  }, 90_000);
 
   it('scenario 6: killing a real shellper session takes its PTY tree with it', async () => {
     const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-sess-'));

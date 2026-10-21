@@ -102,7 +102,7 @@ describe('WindowsJobHelper', () => {
   it('reports a refused name with its Win32 code, without throwing', async () => {
     const f = fakeFactory({ respond: () => ({ ok: false, error: 'job name already exists', code: 183 }) });
     const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
-    expect(await helper.assign('job', 1)).toEqual({ assigned: false, reason: 'job name already exists (Win32 error 183)' });
+    expect(await helper.assign('job', 1)).toEqual({ assigned: false, reason: 'job name already exists (Win32 error 183)', helperFailure: false });
   });
 
   it('a bind failure disables jobs for good and is logged once', async () => {
@@ -154,7 +154,7 @@ describe('WindowsJobHelper', () => {
 
       const first = helper.assign('a', 1);
       await vi.advanceTimersByTimeAsync(5000);
-      expect(await first).toEqual({ assigned: false, reason: 'no answer within 5000ms' });
+      expect(await first).toEqual({ assigned: false, reason: 'no answer within 5000ms', helperFailure: true });
       const second = helper.assign('b', 2);
       await vi.advanceTimersByTimeAsync(5000);
       expect((await second).assigned).toBe(false);
@@ -190,7 +190,7 @@ describe('WindowsJobHelper', () => {
     const inFlight = helper.assign('a', 1);
     await new Promise((r) => setImmediate(r));
     f.spawned[0].exit(0);
-    expect(await inFlight).toEqual({ assigned: false, reason: 'the job helper exited' });
+    expect(await inFlight).toEqual({ assigned: false, reason: 'the job helper exited', helperFailure: true });
 
     for (let restart = 1; restart <= 3; restart++) {
       now += 1000;
