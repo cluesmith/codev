@@ -14,10 +14,10 @@ plan_phases:
     status: complete
   - id: phase_4
     title: Tower lifecycle and detached survival on Windows
-    status: in_progress
+    status: complete
   - id: phase_5
     title: Git Bash, executable shim, and MSYS path resolution with doctor prerequisites
-    status: pending
+    status: in_progress
   - id: phase_6
     title: Launcher routing and shell roles
     status: pending
@@ -36,7 +36,7 @@ plan_phases:
   - id: phase_11
     title: Windows CI leg and install docs
     status: pending
-current_plan_phase: phase_4
+current_plan_phase: phase_5
 gates:
   spec-approval:
     status: approved
@@ -50,8 +50,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -166,7 +166,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1658/codev/projects/1658-windows-native-non-wsl-support/1658-phase_4-iter2-claude.txt
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-21T19:36:17.558Z'
+updated_at: '2026-10-21T19:44:57.960Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
@@ -180,6 +180,8 @@ context_refreshes:
   - boundary: plan-phase:phase_4
     at: '2026-10-21T09:52:28.519Z'
     acknowledged_at: '2026-10-21T09:52:48.433Z'
+  - boundary: plan-phase:phase_5
+    at: '2026-10-21T19:44:57.959Z'
 force_advanced:
   phase: phase_3
   iteration: 3
