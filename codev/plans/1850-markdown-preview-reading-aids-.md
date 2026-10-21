@@ -7,13 +7,23 @@
 are chosen from the "Reading Aids…" title-bar picker. #1850 adds two more options in the same
 places:
 
-1. **`highlightLine`**: `underPointer` (today) | `abovePointer`. With `abovePointer`, the line band
-   moves to the line above the pointer **inside the same block**, so the mouse sits below the text
-   being read. The word pill stays under the pointer. The `+` and the composer target follow the band.
-2. **`annotationEntry`**: `gutterButton` (today) | `clickParagraph`. With `clickParagraph`, the
-   in-row `+` is never mounted, and a plain primary click on prose opens the inline composer.
+1. **`highlightLine`**: `underPointer` (today) | `abovePointer`. The model is a reader's index finger
+   on a printed page: the fingertip sits **below** the line being read. With `abovePointer`, the line
+   band (and everything that follows it) sits on the line above the pointer.
+2. **`annotationEntry`**: `gutterButton` (today) | `clickParagraph`. With `clickParagraph`, the in-row
+   `+` is never mounted, and a plain primary click on prose opens the inline composer.
 
 Both default to today's behaviour, byte for byte.
+
+### Owner rulings (as revised at plan review, 2026-10-21)
+
+- **The line above may cross into the previous block** (revises the issue's first ruling). With the
+  finger on a block's first line, or in the gap just below a block, the band goes on the last line of
+  the block above, as on a book page. The issue's original rule (no band on a block's first line,
+  never use the previous paragraph) meant the **last line of every paragraph, and every one-line
+  block (headings, short list items), could never be highlighted**. The owner chose crossing over that.
+- **The `+` and the composer follow the band** (unchanged): the annotated block is the block that
+  contains the highlighted line, even when that is the block above the pointer.
 
 ### How the code works today
 
@@ -23,19 +33,19 @@ Both default to today's behaviour, byte for byte.
   and its fragments, picks the column with `fragmentContainingX`, and calls `lineBand(anchor,
   lineRects, column, m)` (hover-word.ts:301-325). `current.lineBox` is that band, and it doubles as
   the "sticky" region: the pointer can cross spaces and punctuation on the same line without a
-  redraw (useHoverWordHighlight.ts:196-203).
-- **`+` affordance** (`ArtifactCanvas.tsx:1200-1340`). `activateFromPointer` resolves the
-  `[data-line]` block under the target (`resolveBlock`), sets `activeLine` to that block's line, and
-  `placeAffordance(el, clientY, clientX)` positions the wrapper. It quantizes `clientY - frag.top`
-  to `el`'s line-height, so the `+` snaps line to line, within the fragment (column) under the
-  pointer. `activateFromFocus` does the same for keyboard focus, anchored to the block's first line,
-  and also records `cursorLineRef` (the navigation cursor, spec 1401). The button is portalled in only
-  when `activeLine !== null && affordanceWrapRef.current` (ArtifactCanvas.tsx:1398).
+  redraw (useHoverWordHighlight.ts:196-203). When the pointer is not on a word, nothing is drawn.
+- **`+` affordance** (`ArtifactCanvas.tsx:1200-1340`).
+  - `activateFromPointer` resolves the `[data-line]` block under the target (`resolveBlock`), sets
+    `activeLine` to that block's line, and `placeAffordance(el, clientY, clientX)` positions the
+    wrapper. It quantizes `clientY - frag.top` to the element's line-height, so the `+` snaps line to
+    line.
+  - Moves over dead strips (margins, the gutter) keep the current row lit: the `+` is sticky.
+  - `activateFromFocus` does the same for keyboard focus, anchored to the block's first line, and
+    records `cursorLineRef` (the navigation cursor, spec 1401).
+  - The button is portalled in only when `activeLine !== null && affordanceWrapRef.current`
+    (ArtifactCanvas.tsx:1398).
 - **Composer target.** `CommentAffordance` calls `openComposer(activeLine)`. The target is always a
-  block's source line (`data-line`). The visual line only decides where the `+` is drawn, not what
-  gets annotated. So "the composer opens for the highlighted line" means: the block that contains the
-  highlighted line. With `abovePointer` that is always the pointer's own block, because the band
-  never leaves it (owner ruling).
+  block's source line (`data-line`). The visual line only decides where the `+` is drawn.
 - **Body click** (`onBodyClick`, ArtifactCanvas.tsx:599-617) today only routes card edit/delete
   buttons (`[data-action]`).
 - **Host.** `reading-aids.ts` holds the vocabularies, the case-insensitive `known*` parsers, the
@@ -47,6 +57,40 @@ Both default to today's behaviour, byte for byte.
   `extension.ts:200-246` builds the QuickPick.
 
 ## Proposed Change
+
+### The reading target (one geometry, three consumers)
+
+Under `abovePointer`, the band, the paragraph tint, the `+` and the click all have to agree on one
+thing: **the reading target**, meaning the line being read and the block that contains it. It is
+resolved in one place, the hover controller, and queried by the canvas. That way the band and the
+`+` can never disagree.
+
+`resolveReading(x, y)` returns `{ block: Element, band: Box } | null`:
+
+1. **Pointer on a word** (today's hit test). Let `B` be its block, and `P` the pointer's line row in
+   its column (today's `lineBand`).
+   - `underPointer`: the target is `(B, P)`. Same as today.
+   - `abovePointer`: if `B` has a row above `P` in the same column, the target is `(B, that row)`.
+     Otherwise the target is `(A, A's last row in that column)`, where `A` is the **block above**.
+2. **Pointer not on a word, but in the gap just below a block** (`abovePointer` only). The pointer's
+   x must be within that block's text extent, and its y within one line-height below the block's
+   last row in that column. The target is that block and its last row. This covers a finger resting
+   in the space between paragraphs. The gutter is outside the text extent, so it never counts as a
+   gap.
+3. Otherwise `null`: nothing is drawn, as today.
+
+**The block above** is the nearest preceding paragraph-level block (`BLOCK_SELECTOR`) in document
+order that is not an ancestor of `B`. It only qualifies when:
+
+- its last row sits in the same column as the pointer's line, above it; and
+- it is not excluded (code block, comment cards, composer, the `+` wrapper).
+
+If the immediately preceding content is a code block or a card stack, there is no target. A band
+would otherwise jump over that content to an unrelated paragraph. At the very top of the document,
+or at the top of a column in horizontal mode, there is also no target.
+
+The **word pill** stays under the pointer (issue requirement). The **paragraph tint** follows the
+reading target's block, so it always frames the line being read.
 
 ### Canvas package (`packages/artifact-canvas`)
 
@@ -60,64 +104,75 @@ highlightLine?: HighlightLine;      // omitted → 'underPointer'
 annotationEntry?: AnnotationEntry;  // omitted → 'gutterButton'
 ```
 
-**Pure helpers** (`src/components/hover-word.ts`):
+**Pure helpers** (`src/components/hover-word.ts`, unit-tested on plain boxes):
 
-- `parseHighlightLine` / `parseAnnotationEntry`: same `matchVocabulary` case-insensitive coercion,
-  with unknown values falling back to the default.
-- `lineAboveBand(pointerLine: Box, lineRects: readonly Box[], column: Box | null, m: TextMetrics): Box | null`.
-  It takes the block's line rects that lie in `column` (same filter `lineBand` uses) and whose
-  vertical centre is above `pointerLine.top`. Of those, it keeps the row nearest to the pointer line:
-  rects whose centre is within half a line-height of the lowest such centre. It unions them into a
-  band with the same padding and height rules as `lineBand`. It returns `null` when nothing qualifies,
-  which is the block's first line, or the first line of a continuation fragment in a new column.
-  Column-aware by construction: the line above the top of column N is never the bottom of column N-1.
+- `parseHighlightLine` / `parseAnnotationEntry`: same `matchVocabulary` coercion, with unknown
+  values falling back to the default.
+- `rowsInColumn(lineRects, column, m)`: groups a block's inline rects into visual rows (rects whose
+  vertical centres are within half a line-height of each other), keeping only those in `column`.
+  `lineBand`'s existing union and padding rules give each row's box.
+- `rowAbove(rows, pointerRow)`: the nearest row whose centre is above the pointer row's top, or
+  `null`.
+- `lastRow(rows)`: the lowest row, or `null`.
+- `inGapBelow(lastRowBox, textExtent, x, y, m)`: the gap test from rule 2.
+- `previousBlock(block, body)`: the DOM walk for "the block above", including the exclusion rule.
+  This is DOM-based, not geometry, so it is tested with jsdom fixtures.
 
 **Hover controller** (`useHoverWordHighlight.ts`):
 
-- The hook and controller take `highlightLine`. In `draw()`, `band` is computed exactly as today and
-  stays the `current.lineBox` sticky region, which is still the pointer's line. When `abovePointer`,
-  the painted line shape is `lineAboveBand(band, lineRects, column, m)`. A `null` result paints no
-  line shape. The paragraph tint and word pill are unchanged.
-- With `underPointer`, the code path is identical to today.
+- The hook and controller take `highlightLine`. `draw()` is split into `resolveReading()` (above) and
+  painting. With `underPointer`, the resolved target is exactly today's `(block, band)`, and painting
+  is unchanged.
+- `current.lineBox` (the sticky region) stays the **pointer's** row, so crossing spaces does not
+  redraw. The painted band is the reading target's row.
+- The gap case (rule 2) adds no sticky state: it redraws on every frame and clears when the pointer
+  leaves the gap.
+- The hook returns a stable ref to `resolveReading`. It is `null` when the controller is not
+  attached, which is the `none` style.
 
-**`+` affordance and composer target** (`ArtifactCanvas.tsx`):
+**`+` affordance** (`ArtifactCanvas.tsx`):
 
-- `aboveActive = highlightLine === 'abovePointer' && shapesOf(style).line`. The setting only takes
-  effect for band-drawing styles, which keeps `none` / `word` "unaffected" as the issue requires
-  (see Risks).
-- In `placeAffordance`'s mouse path, the quantized line index `k = floor((clientY - frag.top) /
-  lineHeight)` becomes `k - 1` when `aboveActive`. If that is `< 0` (first line of the fragment, so no
-  band), it returns "not placed". `activateFromPointer` then clears `activeLine` and detaches the
-  wrapper, so no `+` is lit for that block. The jsdom offset fallback gets the same `- 1` treatment, so
-  it is unit-testable. `placeAffordance` returns a boolean. The keyboard path (`clientY === null`) is
-  untouched.
-- Known approximation: the `+` uses line-height quantization while the band uses measured line rects.
-  This is how they already relate under `underPointer` today, so both stay "one line up" together.
+- `aboveActive = highlightLine === 'abovePointer' && shapesOf(style).line`. Only band-drawing styles
+  have a band to follow. With `none` / `word`, the `+` and the click behave exactly as today (the
+  issue's "unaffected").
+- When `aboveActive`, `activateFromPointer` asks `resolveReading(e.clientX, e.clientY)`. If it gets a
+  target, it sets `activeLine` to the target block's line (`resolveBlock(target.block)`) and calls
+  `placeAffordance(el, bandCentreY, bandCentreX)`. Quantization lands the `+` on the banded row, in
+  that block's own row host. If it gets `null`, it does nothing: the current `+` stays lit (today's
+  sticky rule).
+- **Why the `+` can't run away from the pointer.** Reaching the `+` means moving left into the gutter,
+  then up. The gutter has no words and is not a gap, so `resolveReading` returns `null` there and the
+  `+` stays put until the pointer arrives. Pointer events on the button itself are already ignored
+  (`fromAffordance`). Without this, the `+` would re-anchor one line higher every time the pointer
+  crossed a line on its way up. This is checked explicitly in tests and at the dev gate.
+- The keyboard focus path (`activateFromFocus`) is unchanged: it anchors to the focused block's first
+  line, so Enter is unchanged.
 
-**`clickParagraph`** (`ArtifactCanvas.tsx`):
+**`clickParagraph`** (`ArtifactCanvas.tsx`, `CommentComposer.tsx`):
 
 - `activateFromPointer` returns immediately. `activateFromFocus` still records `cursorLineRef`
-  (navigation must keep working), but skips `setActiveLine` / `placeAffordance`. The wrapper node is
-  then never created, `activeLine` stays `null`, and the portal never mounts the button. So the `+` is
-  absent from the DOM, not hidden. The decoration effect's re-host is already guarded on the wrapper
-  existing.
-- The row gutter padding stays, so the layout is identical between the two modes (no reflow on
-  toggle).
-- `onBodyClick`: after the existing `[data-action]` routing, if `clickParagraph`, it calls
-  `maybeOpenComposerFromClick(e)`, which opens the composer for `resolveBlock(target).line` only when
-  all of these hold:
+  (navigation keeps working), but skips `setActiveLine` / `placeAffordance`. The wrapper node is then
+  never created and the portal never mounts the button. The `+` is absent from the DOM, not hidden.
+- The row gutter padding stays, so layout is identical between the two modes (no reflow on toggle).
+- `onBodyClick`: after the existing `[data-action]` routing, if `clickParagraph`, it opens the
+  composer when all of these hold:
   - `e.button === 0`, there are no modifier keys, and `e.detail === 1`. A double-click's second click
-    is ignored, so word selection keeps working.
-  - `window.getSelection()` is collapsed (a click that ends a text selection does nothing).
+    is ignored.
+  - `window.getSelection()` is collapsed, so a click that ends a text selection does nothing.
   - The target is not inside `a, code, pre, img, button, input, textarea, [data-action],
     .codev-canvas-marker-cards, .codev-canvas-comment-composer-host`. This is the hover aid's
-    `EXCLUDED_SELECTOR` plus the issue's links, inline code, images and card-action seam. The
-    selector lives as a named export next to `EXCLUDED_SELECTOR` in `hover-word.ts`.
-  - No composer is already open. A stray click on prose must not discard a draft. Today's `+` can
-    move an open composer, but it needs an aimed click on the button, while click-anywhere makes that
-    an accident (see Risks).
-  - With `aboveActive`, the click is not on the block's first line, using the same `k - 1 < 0` test
-    as the `+`. Per the ruling, there is no band there and so nothing to annotate.
+    `EXCLUDED_SELECTOR` plus the issue's links, inline code, images and card-action seam. It is a named
+    export next to `EXCLUDED_SELECTOR`.
+  - The composer is closed, or open but **empty**. An empty composer (often from an accidental click)
+    simply moves to the new target. A composer holding a draft ignores clicks elsewhere, so a stray
+    click can never discard written text. This needs a new `hasDraft()` on `CommentComposerHandle`
+    (`text.trim() !== ''`), alongside `submit()`.
+- **The click target:**
+  - When `aboveActive`, it is `resolveReading(e.clientX, e.clientY)`'s block. This is the line being
+    read, the same block the band and tint show, even when that block is above the pointer.
+  - If that returns `null` (for example, a first line below a code block), it falls back to the clicked
+    block, so a click on prose is never dead.
+  - Otherwise it is the clicked block (`resolveBlock(target)`).
 - Enter on a focused block (`onBodyKeyDown`) and the remote `composer-open` commands are unchanged.
 - No cursor CSS changes: `readingCursor` still governs the pointer.
 
@@ -126,77 +181,78 @@ annotationEntry?: AnnotationEntry;  // omitted → 'gutterButton'
 - **`reading-aids.ts`**:
   - Add `HIGHLIGHT_LINE_SETTING`, `ANNOTATION_ENTRY_SETTING`, the defaults, and
     `HIGHLIGHT_LINE_CHOICES` (`Line under the pointer`, `Line above the pointer`) and
-    `ANNOTATION_ENTRY_CHOICES` (`Gutter + button`, `Click the paragraph`). Each is typed
-    `satisfies` the canvas types, with two more `assertNoneMissing` checks.
+    `ANNOTATION_ENTRY_CHOICES` (`Gutter + button`, `Click the paragraph`). Each is typed `satisfies`
+    the canvas types, with two more `assertNoneMissing` checks.
   - Add `knownHighlightLine` / `knownAnnotationEntry`.
   - `ReadingAidSection` gains `'Highlight line'` and `'Annotation entry'`. `ReadingAidItem.setting`
     widens to the four settings.
-  - `readingAidItems(storedHighlight, storedCursor, storedHighlightLine, storedAnnotationEntry)`
-    emits four sections in order: Highlight, Cursor, Highlight line, Annotation entry.
-  - `initialActiveRow` is unchanged, so it still lands on the current highlight style.
-  - `READING_AIDS_PLACEHOLDER` gets a wording that covers all four sections.
+  - `readingAidItems(storedHighlight, storedCursor, storedHighlightLine, storedAnnotationEntry)` emits
+    four sections in order: Highlight, Cursor, Highlight line, Annotation entry.
+  - `initialActiveRow` is unchanged (it still lands on the current highlight style).
+  - `READING_AIDS_PLACEHOLDER` is reworded to cover all four sections.
 - **`preview-template.ts`**: two more options, and `readingAidAttrs` emits `data-highlight-line` /
   `data-annotation-entry` only for known values, as today.
 - **`preview-provider.ts`**: read `highlightLine` / `annotationEntry` from `cfg`.
 - **`webview/main.ts`**: parse the two attributes with the canvas parsers and pass them as props.
-- **`extension.ts`**: pass the two extra settings to `readingAidItems`. The QuickPick builder
-  already renders sections generically, so separators come out of the new sections automatically.
-- **`package.json`**: two new settings with enum descriptions in the existing voice. For example:
-  `highlightLine`: "The line under the pointer." / "The line above the pointer, so the pointer
-  trails below the text you're reading. No band on a paragraph's first line." `annotationEntry`:
-  "A + button in the hovered row's gutter." / "Click a paragraph to comment on it. No + button is
-  shown." Each description ends "Also available from the preview's title-bar menu (Reading Aids…)."
+- **`extension.ts`**: pass the two extra settings to `readingAidItems`. The QuickPick builder already
+  renders sections generically.
+- **`package.json`**: two new settings with enum descriptions in the existing voice:
+  - `highlightLine`: "The line under the pointer." / "The line above the pointer, like a finger
+    resting under the line you're reading. Comments go to the highlighted line's paragraph."
+  - `annotationEntry`: "A + button in the hovered row's gutter." / "Click a paragraph to comment on
+    it. No + button is shown."
+  - Each description ends "Also available from the preview's title-bar menu (Reading Aids…)."
 
 ### Examples
 
 `packages/artifact-canvas/examples/main.tsx` gets two more selectors next to the existing
-highlight/cursor ones, so the options can be exercised in the canvas playground. This is small and
-optional; it mirrors what #1802 did.
+highlight/cursor ones, mirroring #1802, so the options can be exercised in the canvas playground.
 
 ## Files to Change
 
 - `packages/artifact-canvas/src/types.ts:140-157`: two types and two optional props
 - `packages/artifact-canvas/src/index.ts`: export the new types
-- `packages/artifact-canvas/src/components/hover-word.ts`: parsers, `lineAboveBand`, the click-exclusion selector
-- `packages/artifact-canvas/src/components/useHoverWordHighlight.ts:244-285, 340-363`: thread `highlightLine` into the band shape
-- `packages/artifact-canvas/src/components/ArtifactCanvas.tsx`: props destructure (~264), `onBodyClick` (~599), `placeAffordance` / `activateFromPointer` / `activateFromFocus` (~1253-1340), hook call (~1350)
+- `packages/artifact-canvas/src/components/hover-word.ts`: parsers, row helpers, `previousBlock`, gap test, click-exclusion selector
+- `packages/artifact-canvas/src/components/useHoverWordHighlight.ts:196-285, 340-363`: `resolveReading`, paint split, returned ref
+- `packages/artifact-canvas/src/components/ArtifactCanvas.tsx`: props (~264), `onBodyClick` (~599), `activateFromPointer` / `activateFromFocus` (~1304-1331), hook call (~1350)
+- `packages/artifact-canvas/src/overlays/CommentComposer.tsx:32-35, 81`: `hasDraft()` on the handle
 - `packages/artifact-canvas/examples/main.tsx`: playground selectors
 - `apps/vscode/src/markdown-preview/reading-aids.ts`: vocabularies, checks, four-section rows
 - `apps/vscode/src/markdown-preview/preview-template.ts:33-40, 133-145`: options and attributes
 - `apps/vscode/src/markdown-preview/preview-provider.ts:262-266`: read the two settings
 - `apps/vscode/src/markdown-preview/webview/main.ts:59-60, 144-145`: parse and pass
-- `apps/vscode/src/extension.ts:200-202`: four-arg `readingAidItems`
+- `apps/vscode/src/extension.ts:200-202`: four-argument `readingAidItems`
 - `apps/vscode/package.json:1341-1378`: two settings
-- Tests: `packages/artifact-canvas/src/components/__tests__/hover-word.test.ts`, `full-row-affordance.test.tsx`, new `annotation-entry.test.tsx`; `apps/vscode/src/__tests__/preview-reading-aids.test.ts`
+- Tests: `packages/artifact-canvas/src/components/__tests__/hover-word.test.ts`, `full-row-affordance.test.tsx`, new `annotation-entry.test.tsx`, `src/overlays/__tests__/comment-composer.test.tsx`; `apps/vscode/src/__tests__/preview-reading-aids.test.ts`
 
 ## Risks & Alternatives Considered
 
-- **Single-line blocks under `abovePointer` (owner FYI, not a blocker).** By the ruling, a block's
-  first line has no band and no `+`. So a one-line block (most headings, short list items,
-  one-sentence paragraphs) has no pointer entry point at all under `abovePointer`, in either entry
-  mode. Keyboard focus plus Enter still works. I will implement the ruling literally. If the owner
-  wants a fallback (for example, single-line blocks keep the under-pointer `+`), it is a small change
-  in the same `k - 1 < 0` branch.
-- **`abovePointer` with `none` / `word` styles.** The issue says these styles are "unaffected". I read
-  that as: the setting does nothing for them, including the `+` and the click target, which stay under
-  the pointer. The alternative (moving the `+` up even with no band) would put the `+` on a line with
-  nothing highlighted, which contradicts "what the reviewer sees highlighted is what they annotate."
-- **Draft loss with `clickParagraph`.** Without the "no composer open" guard, any stray click on prose
-  would retarget an open composer and drop the draft. The guard costs one step (Esc, or Cancel) to
-  move to another paragraph. The alternative (retarget like the `+`) is the riskier default.
-- **Click versus selection.** The selection is checked at click time (after mouseup), so a drag that
-  selects text does not open the composer. A plain click that only collapses an existing selection
-  does open it, which reads as an intentional click. A double-click opens on its first click (the
-  composer appears below the block) and ignores its second, so the word still gets selected. The
-  composer's autofocus may take focus from that selection, and I'll check this in the dev host. If it
-  bites, the fix is to defer opening by one tick and cancel on `dblclick`.
-- **Column-aware "line above".** In horizontal mode, the top line of a block's continuation in column N
-  gets no band. The line "above" it is in another column, and a band there would be off-screen or
-  across the gutter. This is consistent with the first-line rule.
-- **Alternative: let the hover controller own the `+` position**, so band and `+` share one
-  measurement. Rejected: the controller is disabled for `none`, it runs in a rAF while the affordance
-  is synchronous React state, and coupling them would rework both #1343 and #1802. Quantizing one line
-  up keeps the existing relationship between band and `+`.
+- **Crossing into the previous block.** This is the owner's revision of the issue's first ruling,
+  chosen because the original rule left every paragraph's last line and every one-line block
+  unhighlightable. The guard against surprises: the band only crosses to the immediately preceding
+  prose block, in the same column, and never jumps over a code block or a comment-card stack.
+- **The `+` landing in the block above.** With the finger on paragraph B's first line, the `+` appears
+  in paragraph A's row, on A's last line. That is the "follows the band" ruling working as intended
+  ("what you see highlighted is what you annotate"), but it is the most unfamiliar visual in this
+  change. It will be called out in the dev-gate runbook.
+- **`abovePointer` with `none` / `word`.** With no band, there is nothing to follow, so the `+` and
+  the click stay on the pointer's block. The alternative (moving the target up with nothing drawn)
+  would annotate something the reader can't see.
+- **Accidental composer opens in `clickParagraph`.** People click while reading, and with the arrow
+  cursor nothing signals that prose is clickable. This is an opt-in mode, an empty composer costs
+  nothing (Esc, or just click where you meant), and a draft is never lost.
+- **Double-click to select a word.** The first click opens the composer, and its second click is
+  ignored. The composer's autofocus may pull focus from the selection. To be checked in the dev host.
+  If it bites, the fix is to defer opening by a double-click interval (about 250ms, a small lag on
+  every click-to-comment) and cancel on `dblclick`. This is not built unless the gate shows it is
+  needed.
+- **Approximation in the `+` position.** The `+` is quantized against the target element's
+  line-height. It is fed the band's centre, so it lands on the band's row. Unusual rows (a tall
+  inline image) can still be off by part of a line, as under `underPointer` today.
+- **Rejected: keeping the `+` on the pointer's line.** This was my first fix for the run-away `+`.
+  With crossing it breaks: the `+` would sit in paragraph B while the band is on paragraph A, so the
+  `+` and the band would point at different blocks. Resolving the reading target in one place, plus
+  the gutter's natural "no target" zone, fixes the run-away without that split.
 - **Defaults are byte-for-byte.** Every new branch is gated on a non-default value. The existing
   reading-aid, affordance, keyboard and composer tests run unchanged as the regression net.
 
@@ -205,70 +261,87 @@ optional; it mirrors what #1802 did.
 ### Unit (canvas, vitest + jsdom)
 
 - `hover-word.test.ts`:
-  - `parseHighlightLine` / `parseAnnotationEntry`: case-insensitive matching, defaults, garbage input.
-  - `lineAboveBand`:
-    - Middle line returns the previous row's union.
-    - First line returns `null`.
-    - Two-column block: the first line of the column-N fragment returns `null`, and the line above
-      never comes from the other column.
-    - Mixed-height inline rects on a row (inline code) union into one band.
-- `full-row-affordance.test.tsx` (offset fallback path, inline `line-height`):
-  - `abovePointer` with a band style: hovering line 2 places the `+` one line up.
-  - Hovering line 1 renders no `+`.
+  - The parsers: case-insensitive matching, defaults, garbage input.
+  - `rowsInColumn`: mixed-height inline rects (inline code) merge into one row; other-column rects are
+    dropped.
+  - `rowAbove`: a middle row gives the previous row; the top row gives `null`.
+  - `lastRow`, and `inGapBelow` (inside the gap, below it, in the gutter, in the other column).
+  - `previousBlock` on jsdom fixtures: the preceding `<p>`; skipping an ancestor `li` around a `p`;
+    `null` when the preceding content is a `pre` or a comment-card stack; `null` at the top of the
+    document.
+- Controller behaviour (mocked rects):
+  - Finger on line 2 bands line 1 of the same block.
+  - Finger on a block's first line bands the last line of the block above, and the tint moves there.
+  - Finger in the gap below a block bands its last line.
+  - Finger on a first line below a `pre` draws no band.
+  - The word pill stays under the pointer.
+  - With `underPointer`, the output is identical to today.
+- `full-row-affordance.test.tsx`:
+  - `abovePointer` with a band style: the `+` lands on the reading target (same-block row above, and
+    the previous block on a first line).
+  - A `null` target keeps the current `+` (sticky), so the pointer can travel left and up into the
+    gutter without the `+` moving.
   - The `word` style is unaffected.
   - The keyboard focus path is unchanged.
 - New `annotation-entry.test.tsx`:
-  - `clickParagraph`: no `.codev-canvas-add-comment` and no `.codev-canvas-row-affordance` in the DOM
-    after hover and after focus.
-  - A click on a `<p>` opens the composer for that block's line.
+  - `clickParagraph`: no `.codev-canvas-add-comment` / `.codev-canvas-row-affordance` in the DOM after
+    hover and after focus.
+  - A click on a `<p>` opens the composer for that block's line. With `abovePointer`, a click on a
+    first line opens the block above, and falls back to the clicked block when there is no target.
   - Clicks on `a`, `code`, `pre`, `img`, a card, a card edit button, and inside the composer do not
     open a new composer. The edit button still edits.
-  - A non-collapsed selection at click does not open it.
-  - Modifier-click and `detail: 2` do not open it.
-  - With a composer open, a click elsewhere keeps it open on the original line.
+  - A non-collapsed selection, a modifier-click, and `detail: 2` do not open it.
+  - An open empty composer moves on click elsewhere; an open composer with a draft stays put.
   - Enter on a focused block still opens it.
   - `gutterButton`: a click on prose does not open the composer (today's behaviour).
+- `comment-composer.test.tsx`: `hasDraft()` returns false for empty or whitespace text, true once
+  there is text.
 
 ### Unit (host)
 
 - `preview-reading-aids.test.ts`:
-  - Four sections in order, with the current value marked for each new setting, defaults when unset
-    or garbage, and case-insensitive stored values.
-  - Each new row's `setting` / `value` pair.
+  - Four sections in order, with the current value marked for each new setting.
+  - Defaults when unset or garbage, and case-insensitive stored values.
+  - Each new row's `setting` / `value`.
   - `initialActiveRow` still returns the current Highlight row.
   - The template emits the new `data-*` attributes only for known values.
-- Typecheck: `pnpm --filter ... check-types` for both packages, covering the exhaustiveness asserts.
+- Typecheck both packages (`check-types`), which covers the exhaustiveness asserts.
 
 ### Manual: dev-gate runbook for Amr (F5 dev host)
 
 1. Open the worktree (`.builders/pir-1850`) in VS Code and press **F5** ("Run Codev Extension"; its
    `build-extension` pre-launch task builds the canvas and the extension).
-2. In the dev host, open a markdown file with multi-line paragraphs, a heading, a list, a code block,
-   a link, and at least one existing review comment (any `codev/specs/*.md` works). Open it with
+2. In the dev host, open a markdown file with multi-line paragraphs, headings, a list, a code block, a
+   link, and at least one existing review comment (any `codev/specs/*.md` works). Open it with
    **Codev: Open Markdown Preview**.
-3. **Defaults.** With neither new setting written, hover a paragraph: the band is on the pointer's
-   line and the `+` is in the gutter. Click prose: nothing opens. This is today's behaviour.
+3. **Defaults.** With neither new setting written: the band is on the pointer's line and the `+` is in
+   the gutter. Clicking prose opens nothing. This is today's behaviour.
 4. **`…` → Reading Aids…**: four sections (Highlight, Cursor, Highlight line, Annotation entry), each
    with a check on the current value. The list opens on the current Highlight row.
-5. Pick **Line above the pointer** (the preview updates in place):
-   - On line 2+ of a paragraph, the band sits one line above the pointer.
-   - On the first line, there is no band, but the paragraph tint stays (style `lineParagraph`).
+5. Pick **Line above the pointer** (the preview updates in place). Read a few paragraphs with the
+   pointer just under the line, like a finger:
+   - The band is on the line above the pointer.
+   - On a paragraph's first line, the band is on the last line of the paragraph above, and the tint
+     moves with it.
+   - Resting in the gap between two paragraphs bands the upper paragraph's last line.
+   - Headings and one-line items highlight when the pointer is just below them.
+   - Below a code block, a paragraph's first line shows no band.
    - Switch the highlight to **Word, line and paragraph**: the word pill stays under the pointer.
-   - The `+` sits on the banded line. Click it: the composer opens under that paragraph. Hover a first
-     line: no `+`.
-   - Optional: toggle horizontal reading mode and check the top line of a paragraph that continues
-     into the next column.
+   - **`+` reachability:** the `+` sits on the banded line, in that paragraph's gutter. Move the
+     pointer left into the gutter, then up to the `+`. It must stay still and be clickable. The
+     composer opens under the highlighted paragraph.
+   - Optional: in horizontal reading mode, check the top line of a column (no band).
 6. Pick **Click the paragraph**:
    - No `+` appears anywhere.
-   - Click a paragraph: the composer opens below it. Type something, Cancel.
+   - Click prose: the composer opens under the highlighted paragraph (with **Line above** on, that can
+     be the paragraph above the pointer).
    - Drag-select text: no composer. Double-click a word: the word is selected and no second composer
-     appears.
-   - Click a link, inline code, a code block, an existing comment card and its edit button: none opens
-     a new composer (edit still edits).
-   - With a composer open, click another paragraph: the draft stays where it is.
+     appears. Note whether the selection survives the composer opening.
+   - Click a link, inline code, a code block, a comment card and its edit button: none opens a new
+     composer (edit still edits).
+   - Open a composer, leave it empty, click another paragraph: the composer moves.
+   - Type a draft, click another paragraph: the draft stays where it is.
    - Tab or click to focus a block and press **Enter**: the composer opens.
-   - With **Line above the pointer** still on, click a paragraph's first line: nothing opens. Click
-     line 2+: the composer opens for that paragraph.
 7. Set both back to the defaults from the picker: the behaviour is identical to step 3.
 
 The review will record the dev-gate run.
