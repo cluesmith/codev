@@ -111,3 +111,4 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Gotcha: vitest's NODE_ENV=test leaks into a spawned Tower and points it at test.db.
 - Windows run 39658293851: scenarios 3, 4, 5 and the CIM survival test green; CIM Tower lands in the same logon session as the launcher.
 - Phase 4 consult iter1 addressed (codex agent-pid; claude minors); Windows 39660493868 23/23. Architect logSafe nit done d4fd2e7b6.
+- phase_4 iter2 consult addressed (codex bridge-mode stop; claude test tightening); Windows 39662352535 24/24.
