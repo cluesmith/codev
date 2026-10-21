@@ -4,9 +4,9 @@
  * node -> bash -> node trees, no mocks:
  *
  * - Scenario 6 (teardown): no descendant survives `killSessionTree`, including
- *   when the session root is already dead and when an intermediate process
- *   exited first (re-parenting its child). Killing a real shellper session
- *   takes its PTY tree with it.
+ *   when the session root is already dead. Killing a real shellper session
+ *   takes its PTY tree with it. The re-parented variant (an intermediate exited
+ *   first) is a pinned known gap until Phase 3b's Job Object.
  * - Scenario 7 (orphan sweep): an unregistered shellper is detected by the
  *   census-backed sweeps and reaped by the husk sweep.
  * - A porch check that times out has its whole tree killed.
@@ -143,7 +143,12 @@ describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees
     await expectAllGone(pids);
   }, 60_000);
 
-  it('scenario 6: clears a descendant whose parent exited first (re-parented)', async () => {
+  // Known gap, pinned so it stays visible (Windows CI run 39574693242): a
+  // descendant orphaned by a non-Node launcher (`cmd start /b`) has a dead
+  // parent pid, so neither the pre-kill snapshot nor `taskkill /T` can link it
+  // to the session. Spec 1658 Phase 3b's per-session Job Object closes it; this
+  // test then passes and `it.fails` turns red, which is the cue to drop `.fails`.
+  it.fails('scenario 6: clears a descendant whose parent exited first (re-parented) [known gap until Phase 3b]', async () => {
     const { rootPid, pids } = await startTree('reparent');
     const leafPid = pids[2];
     const census = await listProcessCensus({ fresh: true });

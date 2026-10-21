@@ -31,6 +31,32 @@ A real defect turned up along the way: **`afx tower stop` cannot stop Tower on W
 `lsof` port lookup fails under `cmd.exe`, so it prints "Tower is not running" and exits 0 with the
 daemon still alive. Phase 4 fixes this.
 
+## Session-tree teardown on Windows: what leaks and why it is bounded (Phase 3)
+
+Measured on Windows CI (targeted runs 39572306380 through 39574693242), with real process trees:
+
+- **Node children die with their Node parent.** libuv places every non-detached child that a
+  Node process spawns in a kill-on-close job. When a Node root is killed, its Node-spawned
+  descendants are already gone before teardown looks for them (the dead-root test).
+- **A Git Bash `&` does not orphan.** MSYS keeps the background job's Windows parent alive, so
+  the descendant stays linked to the session and the pre-kill census snapshot reaches it.
+- **`detached: true` escapes on both platforms.** It calls `setsid` on POSIX and breaks away from
+  the job on Windows. That matches POSIX, so it is not a gap.
+
+So the leak is limited to descendants orphaned by **non-Node launchers**. The proven case is
+`cmd /c start "" /b <program>`: cmd exits at once, the program keeps a dead parent pid, and
+neither the snapshot nor `taskkill /T` can link it back to the session. The orphan and husk
+sweeps reap only shellpers, so they cannot catch it either. That is the spec's B2 trigger.
+**Architect ruling (2026-10-21T09:20Z): Option C.** Phase 3 ships with the re-parented test
+pinned as a known gap (`it.fails`), and Phase 3b adds a per-session Job Object created through
+inline PowerShell.
+
+Two fixes the Windows runs forced along the way:
+- Teardown reads the census fresh. The 2 s TTL cache had missed children started a moment
+  earlier, and still showed processes that had just been killed.
+- ConPTY's `conhost.exe --headless` stays a child of the shellper after the PTY's program exits,
+  so the husk predicate no longer counts the console host as a child.
+
 ## Flaky Tests
 
 - **Unidentified intermittent failure under `porch done` (Phase 1, 2026-10-21).** The porch

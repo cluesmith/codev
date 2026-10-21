@@ -306,9 +306,12 @@ descendants, wired into every process-group kill and wait site and into the orph
   census failure surfaces as an error and a Tower log line; concurrent census calls within the
   TTL spawn one query; husk sweep makes one census call per sweep; escaped-backslash cmdline
   matches.
-- [ ] Windows (`targeted`): scenario 6 (no descendants after kill, including re-parented and
-  dead-root variants), scenario 7 (an unregistered shellper is detected and reaped by the sweep),
-  porch check timeout kills its tree and honors the grace period.
+- [ ] Windows (`targeted`): scenario 6 (no descendants after kill, including the dead-root
+  variant), scenario 7 (an unregistered shellper is detected and reaped by the sweep), porch
+  check timeout kills its tree and honors the grace period. The re-parented variant is met by
+  Phase 3b: Windows CI run 39574693242 showed that a descendant orphaned by a non-Node launcher
+  (`cmd start /b`) survives the snapshot and `taskkill /T`, the spec's B2 trigger. Until then
+  the test stays pinned as a known gap (`it.fails`). (Amended 2026-10-21, architect ruling.)
 - [ ] POSIX suite and `check-types` green.
 
 #### Test Plan
