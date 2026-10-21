@@ -87,6 +87,8 @@ Linux user, under two prerequisites: Git for Windows and jq.
   to them.
 - Forge concepts (all providers), porch, consult, `afx dev`, runnable worktrees and the VS Code
   extension work.
+- The Tower-managed **Codev IDE server** (`afx ide`, #1789) works on native Windows. This covers
+  discovery, version preflight, spawn, the `/ide/` forward, and sidebar extension install.
 - Shell roles are split:
   - **PowerShell** is the interactive shell a human types into (shell terminals). Agent
     terminals run their harness directly, as on POSIX.
@@ -175,6 +177,25 @@ disabled, unless it says otherwise.
   worktrees and their dependency trees without the admin-only `LongPathsEnabled` setting. Doctor
   reports when the workspace root is deep enough to risk MAX_PATH overruns, and whether Git's
   per-user `core.longpaths` is set.
+
+**Codev IDE server (#1789) on native Windows**
+- [ ] `afx ide start` without `--server-path` finds `codev-ide-server` on `PATH`. On Windows that
+  is an npm `.cmd` shim, resolved through `PATHEXT` by the same shared shim resolver as every
+  other command (Area D).
+- [ ] The version preflight reads line 1 of `codev-ide-server --version` as a bare
+  `major.minor.patch` (the VS Code base) and compares it against the declared floor (1.128.0).
+  It never compares the npm package version. A server below the floor is refused with a message
+  naming the installed version and the floor.
+- [ ] Tower spawns the server headless: the console window is hidden, under the same rule as
+  every other background process.
+- [ ] `/ide/?folder=<repo>` is served through Tower, with the folder given as a native Windows
+  path.
+- [ ] The embedded sidebar extension is installed with `--install-extension` into a Tower-owned
+  Windows extensions directory, and the server is spawned with `--extensions-dir`. Both flags
+  receive native Windows paths, including paths longer than 260 characters.
+- [ ] `afx ide stop` tears down the whole process tree. No server or extension-host process
+  survives.
+- [ ] Nothing the IDE integration writes lands outside the user profile.
 
 **Breadth**
 - [ ] `consult` (all three reviewers, with non-blocking skip semantics intact), porch checks,
@@ -309,6 +330,26 @@ The ruling also named known items the spec must address:
   terminals still run their configured harness command directly (`shell.architect: claude`), as
   they do on POSIX. A terminal that needs a host shell uses PowerShell. Confirmed at the spec gate
   (decision 4): the architect spawns builders with no user intervention.
+
+**Dependencies on other work**
+- **#1789 (Tower-managed Codev IDE server) merges first.** This project builds on its code
+  (discovery, version handshake, extensions handover) and adds the Windows behavior. It does not
+  re-implement any of it.
+- **The Codev IDE server package**, published by the codev-ide lane:
+  - Meta-package `@cluesmith/codev-ide`, with bin `codev-ide-server`.
+  - Windows platform package `@cluesmith/codev-ide-server-win32-x64`.
+  - Both ship in the first publish (1.0.0), are built against this spec's assumptions, and are
+    versioned independently of `@cluesmith/codev`.
+  - Tower compares the VS Code base on `--version` line 1 against the 1.128.0 floor, never the
+    npm version.
+- **Facts agreed with the codev-ide architect**, which this project relies on and does not
+  re-derive:
+  - On Windows, `codev-ide-server` on `PATH` is an npm `.cmd` shim.
+  - Line 1 of `--version` stays a bare `major.minor.patch`.
+  - The server runs headless.
+  - It exits cleanly on process-tree teardown.
+  - `--extensions-dir` and `--install-extension` accept native and long Windows paths.
+  - It writes only under the user profile.
 
 ## Solution Approaches
 
@@ -551,6 +592,12 @@ These were open questions in the reviewed draft. They are now settled.
 10. **Console windows:** always hidden for background processes.
 11. **Upgrade compatibility:** not required. POSIX shellper connections are unchanged (decision
     7 is Windows-only), and there are no existing Windows sessions to stay compatible with.
+12. **Codev IDE server in scope on native Windows** (owner direction, 2026-10-21, relayed by the
+    main architect from the codev-ide architect). Tower's IDE integration from #1789 (discovery,
+    version preflight, spawn, `/ide/` forward, extension install) must work on native Windows.
+    It is not a follow-up or an unsupported platform. The codev-ide lane ships
+    `@cluesmith/codev-ide-server-win32-x64` in its first publish (1.0.0). #1789 merges first,
+    and this project builds on its code (see "Dependencies on other work").
 
 ### Remaining
 
@@ -606,6 +653,17 @@ None blocking. The owner confirms the above at the spec-approval gate.
     bytes, and frames it sends have no effect.
 15. **VS Code extension:** start Tower, spawn a builder, open its terminal, and reveal a file,
     all on Windows.
+15a. **Codev IDE server:**
+    - `afx ide start` on Windows finds the `codev-ide-server` `.cmd` shim, passes the version
+      floor, and serves `/ide/?folder=<repo>` through Tower.
+    - It installs the sidebar extension into a Windows extensions directory.
+    - `afx ide stop` leaves no server or extension-host process.
+    - Negative case: a server whose `--version` line 1 is below 1.128.0 is refused with the
+      versioned message.
+15b. **Joint check with the codev-ide lane:** the codev-ide architect brings the win32-x64
+     package from its CI run, and the owner's Windows machine is the test machine. The plan
+     decides whether this runs at dev-approval or at verify. Scenario 15a is executed
+     end-to-end there.
 
 **Non-functional**
 16. The macOS and Linux suites pass unchanged, so there is no POSIX regression.
