@@ -136,7 +136,7 @@ describe('Spec 1658: cleanup removes an ephemeral worktree', () => {
     resetHostPlatformForTests();
   });
 
-  it('POSIX: runs git worktree remove --force, unchanged', async () => {
+  it.skipIf(process.platform === 'win32')('POSIX: runs git worktree remove --force, unchanged', async () => {
     await cleanup({ issue: 7 });
     expect(steps).toContain(`git worktree remove "${worktree}" --force`);
     expect(mockRemoveWorktreeDirectory).not.toHaveBeenCalled();
