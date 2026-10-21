@@ -49,8 +49,9 @@ export interface KillSessionTreeOptions {
   /**
    * Windows: when the root was started (epoch ms), if the caller knows it. A
    * root found in the census whose creation time differs by more than
-   * ROOT_START_TOLERANCE_MS, or that has no creation time to compare, is
-   * treated as a reused pid, and nothing is killed. With the
+   * ROOT_START_TOLERANCE_MS is a reused pid, and nothing is killed (result
+   * `refused: 'reused-pid'`). A root with no creation time to compare cannot
+   * be verified, so nothing is killed and the call rejects. With the
    * root already dead, it also anchors which ppid-matching processes count as
    * the root's children.
    */
@@ -67,6 +68,12 @@ export interface KillSessionTreeResult {
   /** True when something was signaled (POSIX) or there was a live tree to kill (Windows). */
   signaled: boolean;
   snapshot: TreeSnapshot;
+  /**
+   * Windows: set when the root's identity check refused the kill because the
+   * census shows a different process on that pid. Expected and harmless: the
+   * session's own root is gone.
+   */
+  refused?: 'reused-pid';
 }
 
 const TASKKILL_TIMEOUT_MS = 10_000;
@@ -109,7 +116,10 @@ function runTaskkill(pid: number): Promise<void> {
  * time), so a reused pid's unrelated tree is never killed. A census failure
  * leaves nothing to check against; the root then gets `taskkill /T /F` on the
  * caller's word, as POSIX would signal it, and the call rejects so the caller
- * can report that the snapshot pass did not run.
+ * can report that the snapshot pass did not run. A live root the census lists
+ * without a creation time, when the caller gave `rootStartTime`, is left alive
+ * and the call rejects: that is a degraded census, and the leak must be
+ * reported, not read as "nothing to kill".
  */
 export function killSessionTree(rootPid: number, opts: KillSessionTreeOptions = {}): Promise<KillSessionTreeResult> {
   if (isWindows()) return killWindowsTree(rootPid, opts);
@@ -217,14 +227,16 @@ function sameProcesses(snapshot: TreeMember[], census: ProcessCensusEntry[]): Tr
 }
 
 /**
- * True when the caller knows the root's start time and the census cannot
- * confirm it: a different creation time (the pid was reused), or none at all
- * (unverifiable, so it fails closed).
+ * Why the census cannot confirm a live root is the caller's process, when the
+ * caller knows its start time: a different creation time (the pid was reused),
+ * or none at all (unverifiable). Null when the root checks out or the caller
+ * gave no start time.
  */
-function isReusedRoot(root: ProcessCensusEntry, rootStartTime: number | undefined): boolean {
-  if (rootStartTime === undefined) return false;
-  if (root.creationTime === undefined) return true;
-  return Math.abs(root.creationTime - rootStartTime) > ROOT_START_TOLERANCE_MS;
+function rootIdentityFailure(root: ProcessCensusEntry, rootStartTime: number | undefined): 'reused-pid' | 'unverified-root' | null {
+  if (rootStartTime === undefined) return null;
+  if (root.creationTime === undefined) return 'unverified-root';
+  if (Math.abs(root.creationTime - rootStartTime) > ROOT_START_TOLERANCE_MS) return 'reused-pid';
+  return null;
 }
 
 async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): Promise<KillSessionTreeResult> {
@@ -241,8 +253,17 @@ async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): P
   }
 
   const root = snapshotCensus.find((entry) => entry.pid === rootPid);
-  if (root && isReusedRoot(root, opts.rootStartTime)) {
-    return { signaled: false, snapshot: { rootPid, members: [] } };
+  const identityFailure = root ? rootIdentityFailure(root, opts.rootStartTime) : null;
+  if (identityFailure === 'reused-pid') {
+    return { signaled: false, snapshot: { rootPid, members: [] }, refused: 'reused-pid' };
+  }
+  if (identityFailure === 'unverified-root') {
+    // Stays closed even with `fallbackToPid`: that option retries a failed
+    // POSIX group signal on the same trusted pid, while here the pid itself
+    // is unverified, and killing it alone could still hit a reused pid.
+    throw new Error(
+      `teardown of pid ${rootPid} skipped: the census has no creation time for it, so it cannot be told from a reused pid; its tree is left alive`,
+    );
   }
   const members = collectTree(snapshotCensus, rootPid, opts.rootStartTime);
 

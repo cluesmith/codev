@@ -193,18 +193,20 @@ describe('killSessionTree on Windows', () => {
     const result = await killSessionTree(25, { census: h.census, taskkill: h.taskkill, kill: h.kill, rootStartTime: 100_000 });
 
     expect(h.events).toEqual(['census']);
-    expect(result).toEqual({ signaled: false, snapshot: { rootPid: 25, members: [] } });
+    expect(result).toEqual({ signaled: false, snapshot: { rootPid: 25, members: [] }, refused: 'reused-pid' });
   });
 
-  it('fails closed when the root has no creation time to check against the known start', async () => {
+  it('fails closed and rejects, naming pid and cause, when the root has no creation time to check against the known start', async () => {
     setHostPlatformForTests('win32');
     const root: ProcessCensusEntry = { pid: 24, ppid: 1, rssKb: 0, cmdline: 'proc-24' };
     const h = windowsHarness({ censuses: [[root, entry(31, 24, 900)]], alive: new Set([24, 31]) });
 
-    const result = await killSessionTree(24, { census: h.census, taskkill: h.taskkill, kill: h.kill, rootStartTime: 100_000 });
+    await expect(
+      killSessionTree(24, { census: h.census, taskkill: h.taskkill, kill: h.kill, rootStartTime: 100_000, fallbackToPid: true }),
+    ).rejects.toThrow(/pid 24 skipped: the census has no creation time/);
 
+    // fallbackToPid does not reopen it: nothing is signaled.
     expect(h.events).toEqual(['census']);
-    expect(result.signaled).toBe(false);
   });
 
   it('accepts a root whose creation time is within tolerance of the known start', async () => {
