@@ -20,7 +20,6 @@ export type {
   ReadingMode,
   HoverHighlightStyle,
   ReadingCursor,
-  HighlightLine,
   AnnotationEntry,
 } from './types.js';
 
@@ -28,7 +27,6 @@ export { ArtifactCanvas } from './components/ArtifactCanvas.js';
 export {
   parseHighlightStyle,
   parseReadingCursor,
-  parseHighlightLine,
   parseAnnotationEntry,
 } from './components/hover-word.js';
 

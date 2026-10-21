@@ -52,19 +52,11 @@ export type HoverHighlightStyle =
 
 /**
  * Pointer shape over prose (#1802). `arrow` keeps #1232's `cursor: default`; `iBeam` is the
- * text cursor; `hand` is the pointing hand. Code, comment cards, the composer and the "+" keep
- * their own cursors in every mode.
+ * text cursor; `hand` is the pointing hand; `none` (#1850) hides the pointer over prose so it
+ * never covers the words being read (the line band, when drawn, marks the position instead).
+ * Code, comment cards, the composer, the "+" and links keep their own cursors in every mode.
  */
-export type ReadingCursor = 'arrow' | 'iBeam' | 'hand';
-
-/**
- * Which line the hover band marks (#1850). `underPointer` is the pointer's own line;
- * `abovePointer` is the line above it, like a finger resting under the line being read. With
- * `abovePointer` the band (and the paragraph tint, the "+" and the click target with it) may cross
- * into the block above when the pointer is on a block's first line or in the gap just below a
- * block. The word pill always stays under the pointer.
- */
-export type HighlightLine = 'underPointer' | 'abovePointer';
+export type ReadingCursor = 'arrow' | 'iBeam' | 'hand' | 'none';
 
 /**
  * How a new annotation starts (#1850). `gutterButton` is the in-row "+"; `clickParagraph` opens
@@ -165,15 +157,10 @@ export interface ArtifactCanvasProps {
    */
   hoverHighlight?: HoverHighlightStyle;
   /**
-   * Pointer shape over prose (contract amendment #1802). Optional and additive: omitted means
-   * `arrow`, today's behavior.
+   * Pointer shape over prose (contract amendment #1802; `none` added by #1850). Optional and
+   * additive: omitted means `arrow`, today's behavior.
    */
   readingCursor?: ReadingCursor;
-  /**
-   * Which line the hover band marks (contract amendment #1850). Optional and additive: omitted
-   * means `underPointer`, today's behavior.
-   */
-  highlightLine?: HighlightLine;
   /**
    * How a new annotation starts (contract amendment #1850). Optional and additive: omitted means
    * `gutterButton`, today's behavior.

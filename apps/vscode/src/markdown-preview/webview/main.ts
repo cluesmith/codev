@@ -38,7 +38,6 @@ import {
   type ThemeAdapter,
   type ReviewMarker,
   parseAnnotationEntry,
-  parseHighlightLine,
   parseHighlightStyle,
   parseReadingCursor,
 } from '@cluesmith/codev-artifact-canvas';
@@ -60,7 +59,6 @@ const initialReadingMode = rootElement.dataset.readingMode;
 // Reading aids (#1802): bootstrapped the same way; a settings change re-renders the HTML.
 const hoverHighlight = parseHighlightStyle(rootElement.dataset.hoverHighlight);
 const readingCursor = parseReadingCursor(rootElement.dataset.readingCursor);
-const highlightLine = parseHighlightLine(rootElement.dataset.highlightLine);
 const annotationEntry = parseAnnotationEntry(rootElement.dataset.annotationEntry);
 
 let content = '';
@@ -147,7 +145,6 @@ function render(): void {
         vscodeApi.postMessage({ type: 'readingModeChange', mode }),
       hoverHighlight,
       readingCursor,
-      highlightLine,
       annotationEntry,
       refreshKey,
     }),

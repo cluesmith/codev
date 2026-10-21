@@ -192,8 +192,8 @@ async function stepMarkdownPreviewFontSize(direction: FontSizeDirection): Promis
 }
 
 /**
- * "Reading Aids…" (#1802, #1850): one QuickPick with Highlight, Cursor, Highlight line and
- * Annotation entry sections, the current choice of each checked. Picking a row writes that one setting to the scope it already
+ * "Reading Aids…" (#1802, #1850): one QuickPick with Highlight, Cursor and Annotation entry
+ * sections, the current choice of each checked. Picking a row writes that one setting to the scope it already
  * lives in (same rule as the font-size buttons); the provider's config listener re-renders every
  * open preview.
  */
@@ -202,7 +202,6 @@ async function pickMarkdownPreviewReadingAid(): Promise<void> {
 	const rows = readingAidItems(
 		cfg.get('hoverHighlight'),
 		cfg.get('readingCursor'),
-		cfg.get('highlightLine'),
 		cfg.get('annotationEntry'),
 	);
 	type Pick = vscode.QuickPickItem & { row?: ReadingAidItem };

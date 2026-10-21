@@ -1364,28 +1364,17 @@
           "enum": [
             "arrow",
             "iBeam",
-            "hand"
+            "hand",
+            "none"
           ],
           "enumDescriptions": [
             "The standard arrow.",
             "The text (I-beam) cursor.",
-            "The pointing hand."
+            "The pointing hand.",
+            "Hidden over prose, so it never covers the text you're reading. The line highlight shows where the pointer is."
           ],
           "default": "arrow",
           "description": "Mouse pointer shape over prose in the Codev Markdown Preview. Code, comment cards and buttons keep their own pointers. Also available from the preview's title-bar menu (Reading Aids…)."
-        },
-        "codev.markdownPreview.highlightLine": {
-          "type": "string",
-          "enum": [
-            "underPointer",
-            "abovePointer"
-          ],
-          "enumDescriptions": [
-            "The line under the pointer.",
-            "The line above the pointer, like a finger resting under the line you're reading. Comments go to the highlighted line's paragraph."
-          ],
-          "default": "underPointer",
-          "description": "Reading aid for the Codev Markdown Preview: which line the highlight band marks. Applies to the highlight styles that draw a line band. Also available from the preview's title-bar menu (Reading Aids…)."
         },
         "codev.markdownPreview.annotationEntry": {
           "type": "string",

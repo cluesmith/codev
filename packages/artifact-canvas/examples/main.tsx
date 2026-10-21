@@ -12,8 +12,7 @@
  *   ?mode=horizontal          seed `initialReadingMode` (any other value exercises coercion)
  *   ?height=unbounded         omit the bounded-height container (self-bounding assertion)
  *   ?highlight=<style>        seed the hover reading aid (#1802): none | word | wordLine | wordLineParagraph | line | lineParagraph
- *   ?cursor=<cursor>          seed the prose cursor (#1802): arrow | iBeam | hand
- *   ?line=<line>              seed the band line (#1850): underPointer | abovePointer
+ *   ?cursor=<cursor>          seed the prose cursor (#1802, #1850): arrow | iBeam | hand | none
  *   ?entry=<entry>            seed the annotation entry (#1850): gutterButton | clickParagraph
  * Default (no params) is the classic hands-on page, unchanged.
  *
@@ -26,10 +25,9 @@ import { createRoot } from 'react-dom/client';
 import { ArtifactCanvas } from '../src/components/ArtifactCanvas.js';
 import type { CommandAdapter } from '../src/adapters/CommandAdapter.js';
 import type { CanvasCommand } from '@cluesmith/codev-types';
-import type { AnnotationEntry, HighlightLine, HoverHighlightStyle, ReadingCursor } from '../src/types.js';
+import type { AnnotationEntry, HoverHighlightStyle, ReadingCursor } from '../src/types.js';
 import {
   parseAnnotationEntry,
-  parseHighlightLine,
   parseHighlightStyle,
   parseReadingCursor,
 } from '../src/components/hover-word.js';
@@ -100,7 +98,6 @@ function Example(): React.ReactElement {
     parseHighlightStyle(params.get('highlight') ?? undefined),
   );
   const [cursor, setCursor] = React.useState<ReadingCursor>(parseReadingCursor(params.get('cursor') ?? undefined));
-  const [line, setLine] = React.useState<HighlightLine>(parseHighlightLine(params.get('line') ?? undefined));
   const [entry, setEntry] = React.useState<AnnotationEntry>(parseAnnotationEntry(params.get('entry') ?? undefined));
   const onAddComment = (line: number, text: string) => {
     // Host glue (spec D6): the canvas's inline composer (#1107) collects the body and passes it
@@ -123,7 +120,6 @@ function Example(): React.ReactElement {
     commandAdapter,
     hoverHighlight: highlight,
     readingCursor: cursor,
-    highlightLine: line,
     annotationEntry: entry,
     initialReadingMode: mode,
     onReadingModeChange: (next: string) => {
@@ -203,21 +199,7 @@ function Example(): React.ReactElement {
             React.createElement('option', { value: 'arrow' }, 'Arrow'),
             React.createElement('option', { value: 'iBeam' }, 'I-beam'),
             React.createElement('option', { value: 'hand' }, 'Hand'),
-          ),
-        ),
-        ' ',
-        React.createElement(
-          'label',
-          null,
-          'Line ',
-          React.createElement(
-            'select',
-            {
-              value: line,
-              onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setLine(parseHighlightLine(e.target.value)),
-            },
-            React.createElement('option', { value: 'underPointer' }, 'Under the pointer'),
-            React.createElement('option', { value: 'abovePointer' }, 'Above the pointer'),
+            React.createElement('option', { value: 'none' }, 'Hidden'),
           ),
         ),
         ' ',

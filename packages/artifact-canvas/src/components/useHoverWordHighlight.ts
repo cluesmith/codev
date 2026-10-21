@@ -13,24 +13,18 @@
  */
 
 import * as React from 'react';
-import type { HighlightLine, HoverHighlightStyle } from '../types.js';
+import type { HoverHighlightStyle } from '../types.js';
 import {
   type Box,
   type TextMetrics,
-  bandForRow,
   blockOf,
   caretAt,
   containsPoint,
   fragmentContainingX,
-  inGapBelow,
   isExcluded,
   isInlineCode,
-  lastRow,
   lineBand,
   paragraphBlocks,
-  previousBlock,
-  rowAbove,
-  rowsInColumn,
   shapesOf,
   textMetricsOf,
   wordBoundsAt,
@@ -58,30 +52,6 @@ interface CurrentWord {
   lineBox: Box;
 }
 
-/**
- * The line being read (#1850) and the block that holds it: what the band marks, the paragraph tint
- * frames, and (under `abovePointer`) the "+" and a click-to-annotate click target.
- */
-export interface ReadingTarget {
-  block: Element;
-  band: Box;
-}
-
-/** Called after each paint with the target just drawn, or null when nothing is drawn. */
-export type ReadingTargetListener = (target: ReadingTarget | null) => void;
-
-/** The controller surface the canvas reads (#1850). */
-export interface ReadingTargetSource {
-  /** The target that was lit when the primary button last went down (mousedown clears the shapes). */
-  targetAtLastPress(): ReadingTarget | null;
-}
-
-/**
- * How far above the pointer's line a crossing "line above" may reach, in line-heights: past a
- * paragraph margin or a heading's, never over a tall figure.
- */
-const MAX_CROSS_DISTANCE_LINES = 3;
-
 function toBoxes(list: DOMRectList | DOMRect[]): Box[] {
   const out: Box[] = [];
   for (const r of Array.from(list)) {
@@ -105,13 +75,7 @@ function cancelFrame(handle: number): void {
   window.clearTimeout(handle);
 }
 
-function rangeRects(doc: Document, el: Element): Box[] {
-  const range = doc.createRange();
-  range.selectNodeContents(el);
-  return toBoxes(range.getClientRects());
-}
-
-class HoverWordController implements ReadingTargetSource {
+class HoverWordController {
   private readonly doc: Document;
   private readonly layer: HTMLDivElement;
   private readonly groups: Record<ShapeKind, HTMLDivElement>;
@@ -120,15 +84,11 @@ class HoverWordController implements ReadingTargetSource {
   private frame = 0;
   private forceNext = false;
   private current: CurrentWord | null = null;
-  private target: ReadingTarget | null = null;
-  private pressTarget: ReadingTarget | null = null;
 
   constructor(
     private readonly root: HTMLElement,
     private readonly body: HTMLElement,
     private readonly style: HoverHighlightStyle,
-    private readonly highlightLine: HighlightLine,
-    private readonly listener: ReadingTargetListener,
   ) {
     this.doc = root.ownerDocument;
     this.layer = this.doc.createElement('div');
@@ -181,16 +141,8 @@ class HoverWordController implements ReadingTargetSource {
   };
 
   private readonly onDown = (e: MouseEvent): void => {
-    if (e.button !== 0) return;
-    this.pressTarget = this.target;
-    this.clear();
+    if (e.button === 0) this.clear();
   };
-
-  targetAtLastPress(): ReadingTarget | null {
-    const t = this.pressTarget;
-    if (t && !t.block.isConnected) return null;
-    return t;
-  }
 
   private readonly onFocusIn = (e: FocusEvent): void => {
     const target = e.target as Element | null;
@@ -248,54 +200,7 @@ class HoverWordController implements ReadingTargetSource {
         if (cur && containsPoint(cur.lineBox, p.x, p.y)) return;
       }
     }
-    if (this.highlightLine === 'abovePointer' && caret && this.drawGap(caret.node, p)) return;
     this.clear();
-  }
-
-  /**
-   * The finger resting in the gap just below a block (#1850, `abovePointer`): band that block's
-   * last row. The caret API snaps to the nearest text, which may be the block below the gap, so
-   * the caret's block and the block above it are both candidates. No word, so no pill and no
-   * sticky state: the next frame re-resolves.
-   */
-  private drawGap(node: Text, p: Pointer): boolean {
-    if (isExcluded(node, this.body)) return false;
-    const caretBlock = blockOf(node, this.body);
-    if (!caretBlock) return false;
-    const candidates = [caretBlock];
-    const above = previousBlock(caretBlock, this.body);
-    if (above) candidates.push(above);
-    for (const block of candidates) {
-      const m = textMetricsOf(block);
-      const column = fragmentContainingX(toBoxes(block.getClientRects()), p.x);
-      const rows = rowsInColumn(rangeRects(this.doc, block), column, m);
-      const last = lastRow(rows);
-      if (last && inGapBelow(last, rows, p.x, p.y, m)) {
-        this.current = null;
-        this.paintTarget(bandForRow(last, m), block, [], m);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * The line above the pointer's row (#1850): the row above inside the same block and column, or
-   * else the last row of the block above when it sits in the same column, close above. Null at
-   * the top of a column, at the top of the document, or below a code block / card stack.
-   */
-  private lineAbove(block: Element, lineRects: Box[], column: Box | null, pointerBand: Box, m: TextMetrics): ReadingTarget | null {
-    const above = rowAbove(rowsInColumn(lineRects, column, m), pointerBand);
-    if (above) return { block, band: bandForRow(above, m) };
-    const prev = previousBlock(block, this.body);
-    if (!prev) return null;
-    const prevMetrics = textMetricsOf(prev);
-    const last = lastRow(rowsInColumn(rangeRects(this.doc, prev), column, prevMetrics));
-    if (!last) return null;
-    const centre = last.top + last.height / 2;
-    if (centre >= pointerBand.top) return null;
-    if (pointerBand.top - centre > MAX_CROSS_DISTANCE_LINES * m.lineHeight) return null;
-    return { block: prev, band: bandForRow(last, prevMetrics) };
   }
 
   /** Measure the word and draw it if the pointer really is over it; false on a near-miss. */
@@ -350,41 +255,21 @@ class HoverWordController implements ReadingTargetSource {
     let lineRects: Box[] = [];
     let fragments: Box[] = [];
     if (block) {
-      lineRects = rangeRects(this.doc, block);
+      const blockRange = this.doc.createRange();
+      blockRange.selectNodeContents(block);
+      lineRects = toBoxes(blockRange.getClientRects());
       fragments = toBoxes(block.getClientRects());
     }
     const column = fragmentContainingX(fragments, anchor.left + anchor.width / 2);
     const band = lineBand(anchor, lineRects, column, m);
-    // The sticky region stays the POINTER's line in both modes: crossing a space on that line
-    // must not redraw, whichever line the band marks.
     this.current = { node, start, end, lineBox: band };
 
-    let pills: Box[] = [];
-    if (shapesOf(this.style).word && !isInlineCode(node)) {
-      pills = wordPills(wordRects, m);
-    }
-    if (this.highlightLine !== 'abovePointer' || !block) {
-      this.paintTarget(band, block, pills, m);
-      return;
-    }
-    const above = this.lineAbove(block, lineRects, column, band, m);
-    if (above) {
-      this.paintTarget(above.band, above.block, pills, m);
-      return;
-    }
-    // No line above: no band, but the paragraph tint still frames the pointer's block.
-    this.paintTarget(null, block, pills, m);
-  }
-
-  /**
-   * Paint the word pills, the band, and the tint behind `block`, then report the lit target (a
-   * band inside a block). Either may be absent: no block (a stray `[data-line]`-less run of text)
-   * still bands, and a block with no line above still tints.
-   */
-  private paintTarget(band: Box | null, block: Element | null, pills: Box[], m: TextMetrics): void {
     const drawn = shapesOf(this.style);
-    const shapes: Record<ShapeKind, Box[]> = { paragraph: [], line: [], word: pills };
-    if (drawn.line && band) {
+    const shapes: Record<ShapeKind, Box[]> = { paragraph: [], line: [], word: [] };
+    if (drawn.word && !isInlineCode(node)) {
+      shapes.word = wordPills(wordRects, m);
+    }
+    if (drawn.line) {
       shapes.line = [band];
     }
     if (drawn.paragraph && block) {
@@ -395,7 +280,7 @@ class HoverWordController implements ReadingTargetSource {
         top: parseFloat(cs.paddingTop) || 0,
         bottom: parseFloat(cs.paddingBottom) || 0,
       };
-      shapes.paragraph = paragraphBlocks(toBoxes(block.getClientRects()), insets, m);
+      shapes.paragraph = paragraphBlocks(fragments, insets, m);
     }
     const radius: Record<ShapeKind, number> = {
       paragraph: m.fontSize * 0.5,
@@ -403,22 +288,6 @@ class HoverWordController implements ReadingTargetSource {
       word: m.fontSize * 0.3,
     };
     for (const kind of SHAPE_KINDS) this.paint(kind, shapes[kind], radius[kind]);
-    let lit: ReadingTarget | null = null;
-    if (band && block) lit = { block, band };
-    this.setTarget(lit);
-  }
-
-  private setTarget(next: ReadingTarget | null): void {
-    const prev = this.target;
-    this.target = next;
-    const same =
-      prev === next ||
-      (prev !== null &&
-        next !== null &&
-        prev.block === next.block &&
-        prev.band.top === next.band.top &&
-        prev.band.left === next.band.left);
-    if (!same) this.listener(next);
   }
 
   private paint(kind: ShapeKind, boxes: Box[], radius: number): void {
@@ -447,7 +316,6 @@ class HoverWordController implements ReadingTargetSource {
 
   private clear(): void {
     this.current = null;
-    this.setTarget(null);
     for (const kind of SHAPE_KINDS) {
       for (const el of this.pools[kind]) el.hidden = true;
     }
@@ -458,39 +326,28 @@ class HoverWordController implements ReadingTargetSource {
  * Attach the hover reading aid to the canvas. `style: 'none'` attaches nothing. `contentKey`
  * changes whenever the body's layout-relevant content changes (html, cards, composer), which
  * drops the current shapes and re-resolves the word under a still pointer.
- *
- * `highlightLine` (#1850) picks the line the band marks. `onReadingTarget` hears each change of
- * the lit target (read through a ref, so a new callback identity never rebuilds the controller).
- * The returned ref exposes the target that was lit at the last primary press, for the canvas's
- * click-to-annotate path; it is null while no controller is attached.
  */
 export function useHoverWordHighlight(
   rootRef: React.RefObject<HTMLElement | null>,
   bodyRef: React.RefObject<HTMLElement | null>,
   style: HoverHighlightStyle,
   contentKey: unknown,
-  highlightLine: HighlightLine = 'underPointer',
-  onReadingTarget?: ReadingTargetListener,
-): React.RefObject<ReadingTargetSource | null> {
+): void {
   const controllerRef = React.useRef<HoverWordController | null>(null);
-  const listenerRef = React.useRef<ReadingTargetListener | undefined>(onReadingTarget);
-  listenerRef.current = onReadingTarget;
 
   React.useEffect(() => {
     const root = rootRef.current;
     const body = bodyRef.current;
     if (style === 'none' || !root || !body) return undefined;
-    const controller = new HoverWordController(root, body, style, highlightLine, (t) => listenerRef.current?.(t));
+    const controller = new HoverWordController(root, body, style);
     controllerRef.current = controller;
     return () => {
       controller.dispose();
       controllerRef.current = null;
     };
-  }, [rootRef, bodyRef, style, highlightLine]);
+  }, [rootRef, bodyRef, style]);
 
   React.useEffect(() => {
     controllerRef.current?.reset();
   }, [contentKey]);
-
-  return controllerRef;
 }

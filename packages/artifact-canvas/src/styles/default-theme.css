@@ -151,6 +151,12 @@
 .codev-artifact-canvas[data-reading-cursor='hand'] .codev-artifact-canvas-body {
   cursor: pointer;
 }
+/* Hidden (#1850): no pointer over prose, so it never covers the words being read; the line band
+   (when the highlight style draws one) marks the position. Links (UA rule) and the regions below
+   keep a visible pointer, so everything clickable can still be found. */
+.codev-artifact-canvas[data-reading-cursor='none'] .codev-artifact-canvas-body {
+  cursor: none;
+}
 .codev-artifact-canvas[data-reading-cursor] .codev-artifact-canvas-body
   :is(pre, .codev-canvas-marker-cards, .codev-canvas-comment-composer-host, .codev-canvas-row-affordance) {
   cursor: default;
