@@ -289,10 +289,11 @@ describe.skipIf(!onWindows)('Launcher routing on native Windows', () => {
     expect(fs.readFileSync(path.join(worktree, '.builder-session-id'), 'utf8').trim()).toMatch(/^[0-9a-f-]{36}$/);
     // The role reached the harness through `$(cat '<role file>')`: an empty
     // substitution would still launch the stub, so the text itself is checked.
+    // Git Bash's `$(...)` strips trailing CR as well as LF (a CRLF checkout).
     const agentArgs = JSON.parse(fs.readFileSync(path.join(worktree, 'agent-args.json'), 'utf8')) as string[];
     const roleIndex = agentArgs.indexOf('--append-system-prompt');
     expect(roleIndex, JSON.stringify(agentArgs).slice(0, 500)).toBeGreaterThanOrEqual(0);
-    expect(agentArgs[roleIndex + 1]).toBe(fs.readFileSync(path.join(worktree, '.builder-role.md'), 'utf8').replace(/\n+$/, ''));
+    expect(agentArgs[roleIndex + 1]).toBe(fs.readFileSync(path.join(worktree, '.builder-role.md'), 'utf8').replace(/[\r\n]+$/, ''));
     expect(agentArgs[roleIndex + 1].length).toBeGreaterThan(100);
   }, 300_000);
 
