@@ -46,3 +46,11 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - CMAP: gemini APPROVE, codex + claude REQUEST_CHANGES. All points verified against code and accepted; rebuttal in codev/projects/1658-*/1658-plan-iter1-rebuttals.md.
 - Plan now 11 phases (old Phase 3 split into census/teardown and Tower lifecycle). Reconnect identity moved into Phase 2; CIM census gets TTL+single-flight (it sits on /health, which sizes the owner-lock probe budget); executable resolver lives in codev-sdk/node (shared with apps/vscode); native-dep install guard added.
 - Two items for the architect at the gate: (1) early landing of dispatch-only windows.yml on main; (2) Git Bash order as literally ruled makes the override a last resort.
+
+## 2026-10-21 plan approved → Phase 1 committed, early PR #1849
+- Owner approved the plan with main's recommendations: early dispatch-only windows.yml PR = yes; Git Bash override wins when valid (System32 / non-Git override fails loudly). Spec ruling 5 + plan amended (96b64a811); gate approved by me on main's relay.
+- Phase 1 committed (4736ccec4): lib/platform.ts seam, scripts/windows-probe.mjs, .github/workflows/windows.yml, audit.md (site inventory; measured facts PENDING).
+- Early PR #1849 (branch spir-1658-windows-workflow, built from origin/main via plumbing, no checkout): windows.yml + probe script only.
+- Audit surprises: forge scripts live in packages/codev/scripts/forge (not skeleton); doctor's ps-eww Tower-env check has no CIM equivalent; builder session-id minting needs uuidgen or /proc uuid inside Git Bash (probe checks); repo build on Windows needs npm_config_script_shell=Git Bash.
+- Env note: worktree needed `pnpm install` after the main merge (artifact-canvas link missing → apps/web tsc failure). Not a code defect.
+- Holding porch done for Phase 1 until #1849 merges + probe facts + owner survival matrix are in.
