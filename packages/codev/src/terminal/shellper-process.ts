@@ -44,7 +44,7 @@ import {
   type SpawnMessage,
 } from './shellper-protocol.js';
 import { ShellperReplayBuffer, REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
-import { SHELLPER_SECRET_ENV, isPipeEndpoint, secretsMatch } from './shellper-endpoint.js';
+import { SHELLPER_SECRET_ENV, SHELLPER_SESSION_ENV, isPipeEndpoint, secretsMatch } from './shellper-endpoint.js';
 import { DEFAULT_COLS, DEFAULT_ROWS } from './index.js';
 
 // --- IShellperPty: abstraction over node-pty for testing ---
@@ -220,6 +220,7 @@ export class ShellperProcess extends EventEmitter {
     // env the launch or a SPAWN frame supplies.
     const childEnv = { ...env };
     delete childEnv[SHELLPER_SECRET_ENV];
+    if (this.auth) childEnv[SHELLPER_SESSION_ENV] = this.auth.sessionId;
     pty.spawn(command, args, {
       name: 'xterm-256color',
       cols,

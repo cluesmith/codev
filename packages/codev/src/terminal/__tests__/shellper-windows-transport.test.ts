@@ -33,6 +33,7 @@ import { ShellperProcess, type IShellperPty, type PtyOptions, type ShellperAuth 
 import { ShellperClient, ShellperIdentityError } from '../shellper-client.js';
 import {
   SHELLPER_SECRET_ENV,
+  SHELLPER_SESSION_ENV,
   endpointMayExist,
   isPipeEndpoint,
   removeStaleEndpoint,
@@ -295,15 +296,15 @@ describe('Windows secret gate (ShellperProcess with auth)', () => {
     expect(mockPty.writtenData).toEqual(['ls\r']);
   });
 
-  it('the secret never reaches the PTY child env, at launch or on SPAWN', async () => {
+  it('the secret never reaches the PTY child env, at launch or on SPAWN; the session marker always does', async () => {
     await startShellper(socketPath, auth, { [SHELLPER_SECRET_ENV]: SECRET, KEEP: '1' });
-    expect(mockPty.spawnEnvs[0]).toEqual({ KEEP: '1' });
+    expect(mockPty.spawnEnvs[0]).toEqual({ KEEP: '1', [SHELLPER_SESSION_ENV]: 'sess-1' });
 
     const { socket } = await handshake(socketPath, { version: PROTOCOL_VERSION, clientType: 'tower', secret: SECRET });
     cleanups.push(() => socket.destroy());
     socket.write(encodeSpawn({ command: '/bin/sh', args: [], cwd: '/', env: { [SHELLPER_SECRET_ENV]: SECRET, B: '2' } }));
     await sleep(50);
-    expect(mockPty.spawnEnvs[0]).toEqual({ B: '2' });
+    expect(mockPty.spawnEnvs[0]).toEqual({ B: '2', [SHELLPER_SESSION_ENV]: 'sess-1' });
   });
 });
 

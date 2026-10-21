@@ -36,6 +36,8 @@ import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { isWindows } from '../lib/platform.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
 import { WindowsJobHelper } from '../lib/windows-job.js';
+import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING } from '../agent-farm/commands/tower-start-windows.js';
+import http from 'node:http';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import {
   measureSessionLogs,
@@ -188,6 +190,55 @@ export const TOWER_ENV_SESSION_HINT =
  * plain restart Tower reads clean while the agents it spawned earlier are still
  * carrying the markers — and still unresumable.
  */
+export interface TowerSessionCheck {
+  status: 'ok' | 'warn' | 'skipped';
+  summary: string;
+  recommendation?: string;
+}
+
+/**
+ * Windows (Spec 1658 Phase 4): whether the running Tower sits inside a codev
+ * session, as Tower reports it in `/health` (doctor cannot read its
+ * environment). `null` health means no Tower answered: skipped, not a fault.
+ */
+export function checkWindowsTowerSession(health: { insideCodevSession?: unknown } | null): TowerSessionCheck {
+  if (health === null) return { status: 'skipped', summary: 'Tower is not running' };
+  if (health.insideCodevSession === true) {
+    return {
+      status: 'warn',
+      summary: TOWER_IN_SESSION_WARNING,
+      recommendation: `Stop Tower, then ${SUPPORTED_TOWER_LAUNCH_PATHS}`,
+    };
+  }
+  return { status: 'ok', summary: 'Tower is not running inside a codev session' };
+}
+
+/** GET /health on the local Tower; null when nothing answers with JSON. */
+function fetchTowerHealth(port: number): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    const req = http.request({ hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 15_000 }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        if (body.length < 64_000) body += chunk;
+      });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body) as Record<string, unknown>);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.end();
+  });
+}
+
 export function checkTowerEnv(
   readTowerEnv: () => Record<string, string> | null,
   readSessionEnvs: () => Array<Record<string, string>> = () => [],
@@ -1393,7 +1444,17 @@ export async function doctor(): Promise<number> {
   console.log(chalk.bold('Tower Environment') + ` (port ${DEFAULT_TOWER_PORT})`);
   console.log('');
   if (isWindows()) {
-    console.log(`  ${chalk.blue('-')} Not available on Windows (a process's environment cannot be read)`);
+    console.log(`  ${chalk.blue('-')} Session markers: not available on Windows (a process's environment cannot be read)`);
+    const towerSession = checkWindowsTowerSession(await fetchTowerHealth(DEFAULT_TOWER_PORT));
+    if (towerSession.status === 'warn') {
+      console.log(`  ${chalk.yellow('⚠')} ${towerSession.summary}`);
+      warnings++;
+      warningDetails.push({ name: 'Tower session', issue: towerSession.summary, recommendation: towerSession.recommendation });
+    } else if (towerSession.status === 'skipped') {
+      console.log(`  ${chalk.blue('-')} ${towerSession.summary}`);
+    } else {
+      console.log(`  ${chalk.green('✓')} ${towerSession.summary}`);
+    }
   } else {
     const towerPids = getProcessesOnPort(DEFAULT_TOWER_PORT);
     const towerEnv = checkTowerEnv(

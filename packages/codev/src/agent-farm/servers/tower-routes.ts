@@ -36,6 +36,8 @@ import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
+import { isWindows } from '../../lib/platform.js';
+import { isInsideCodevSession } from '../commands/tower-start-windows.js';
 import {
   isRateLimited,
   normalizeWorkspacePath,
@@ -183,6 +185,11 @@ export interface RouteContext {
   broadcastNotification: (notification: { type: string; title: string; body: string; workspace?: string }) => void;
   addSseClient: (client: SSEClient) => boolean;
   removeSseClient: (id: string) => void;
+  /**
+   * Begin a graceful shutdown (Spec 1658): `afx tower stop` on Windows, where a
+   * signal is a hard kill that skips the shutdown path. Absent in route tests.
+   */
+  requestShutdown?: (reason: string) => void;
 }
 
 // ============================================================================
@@ -204,6 +211,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
+  'POST /api/shutdown':   (req, res, _url, ctx) => handleShutdown(req, res, ctx),
   'GET /api/version':     (_req, res, _url, ctx) => handleVersion(res, ctx),
   'GET /api/overview':    (_req, res, url, ctx) => handleOverview(res, url, undefined, ctx),
   'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
@@ -452,6 +460,10 @@ async function handleHealthCheck(res: http.ServerResponse, ctx: RouteContext): P
   const instances = await getInstances();
   const activeCount = instances.filter((i) => i.running).length;
   const fleetFields = await computeFleetHealthFields(ctx);
+  // Spec 1658 Phase 4: doctor cannot read another process's environment on
+  // Windows, so Tower reports whether it runs inside a codev session itself.
+  const platformFields: Record<string, boolean> = {};
+  if (isWindows()) platformFields.insideCodevSession = isInsideCodevSession(process.env);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(
     JSON.stringify({
@@ -465,6 +477,7 @@ async function handleHealthCheck(res: http.ServerResponse, ctx: RouteContext): P
       totalWorkspaces: instances.length,
       memoryUsage: process.memoryUsage().heapUsed,
       ...fleetFields,
+      ...platformFields,
       timestamp: new Date().toISOString(),
     })
   );
@@ -558,6 +571,40 @@ async function handleHuskSweep(res: http.ServerResponse, ctx: RouteContext): Pro
  * restart, the two diverge; the VS Code preflight probes this to detect that.
  * Read-only, no auth beyond the existing Host/Origin gate (same as /health).
  */
+/** Loopback peers only: the IPv4, IPv6 and IPv4-mapped forms. */
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  if (address === '::1') return true;
+  let v4 = address;
+  if (address.startsWith('::ffff:')) v4 = address.slice('::ffff:'.length);
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v4);
+}
+
+/**
+ * POST /api/shutdown (Spec 1658 Phase 4): the graceful stop `afx tower stop`
+ * uses on Windows. Keyed like every route, and loopback-only on top: a bridge
+ * or tunnel client holding the key still cannot stop Tower. Answers with the
+ * pid before shutting down, so the caller waits on the right process.
+ */
+function handleShutdown(req: http.IncomingMessage, res: http.ServerResponse, ctx: RouteContext): void {
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    ctx.log('WARN', `Refused shutdown request from non-loopback peer ${req.socket.remoteAddress ?? 'unknown'}`);
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'shutdown is accepted from loopback only' }));
+    return;
+  }
+  if (!ctx.requestShutdown) {
+    res.writeHead(501, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'shutdown is not available' }));
+    return;
+  }
+  const requestShutdown = ctx.requestShutdown;
+  res.writeHead(202, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ pid: process.pid }), () => {
+    requestShutdown('shutdown request');
+  });
+}
+
 function handleVersion(res: http.ServerResponse, ctx: RouteContext): void {
   const body: TowerVersionInfo = { version: ctx.version, startedAt: ctx.startedAt };
   res.writeHead(200, { 'Content-Type': 'application/json' });

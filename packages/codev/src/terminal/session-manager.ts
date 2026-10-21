@@ -418,6 +418,8 @@ export class SessionManager extends EventEmitter {
     // shellper is still a marker-carrying ancestor for anything else it starts.
     const child = cpSpawn(this.config.nodeExecutable, [this.config.shellperScript, shellperConfig], {
       detached: true,
+      // Spec 1658: no console window for the detached shellper (ignored on POSIX).
+      windowsHide: true,
       env: shellperEnv,
       stdio: ['ignore', 'pipe', stderrFd ?? 'ignore'],
     });

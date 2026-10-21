@@ -32,6 +32,16 @@ import { isWindows } from '../lib/platform.js';
  */
 export const SHELLPER_SECRET_ENV = 'CODEV_SHELLPER_SECRET';
 
+/**
+ * Environment variable a Windows shellper sets for its PTY (Spec 1658 Phase 4):
+ * the shellper session id, marking every process in the session (and so in its
+ * Job Object). A Tower started from inside a session would land in that job and
+ * end with it, so `afx tower start` launches the daemon outside it when this is
+ * set, and the launch strips it from the daemon's environment. Only the
+ * secret-gated (Windows) shellper sets it; POSIX PTY environments are unchanged.
+ */
+export const SHELLPER_SESSION_ENV = 'CODEV_SHELLPER_SESSION';
+
 const PIPE_PREFIXES = ['\\\\.\\pipe\\', '\\\\?\\pipe\\'];
 
 /** True when the endpoint is a Windows named pipe rather than a socket file. */

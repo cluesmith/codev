@@ -17,6 +17,9 @@ import { getGlobalDbPath } from '../db/index.js';
 import { activeStateDbPath, planMigration } from '../db/consolidate.js';
 import { sanitizeAgentEnv, findClaudeSessionMarkers } from '../../lib/agent-env.js';
 import { getProcessesOnPort } from '../utils/port.js';
+import { isWindows } from '../../lib/platform.js';
+import { defaultWindowsStopDeps, forceKillTowerWindows, pidList, stopTowerWindows } from './tower-stop-windows.js';
+import { cimRefusalMessage, daemonEnvironment, isInsideCodevSession, launchViaCim } from './tower-start-windows.js';
 
 // Log file location
 const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
@@ -300,34 +303,73 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     logToFile(`Scrubbed inherited Claude Code session markers: ${inheritedMarkers.join(', ')}`);
   }
 
-  // Start tower server fully detached - stdio: 'ignore' ensures parent can exit
-  const serverProcess = spawn(command, args, {
-    cwd: process.cwd(),
-    env: sanitizeAgentEnv(process.env),
-    detached: true,
-    stdio: 'ignore', // Must be 'ignore' for true daemonization
-  });
-
-  if (!serverProcess.pid) {
-    logToFile('Failed to spawn tower server process');
-    fatal('Failed to start tower server');
-  }
-
-  // Detach from parent process
-  serverProcess.unref();
-
-  logToFile(`Spawned tower server with PID ${serverProcess.pid}`);
-
   // Issue #1691: track the daemon's liveness and mark where its own log output begins, so the
   // readiness wait can distinguish a fast-exit (owner-lock refusal, early boot failure) from a
   // genuine hang — and, on a fast-exit, surface the daemon's teaching error verbatim instead of
-  // a generic timeout. The offset is captured here (after the launcher's own pre-spawn writes)
-  // so readLogSince() returns only what THIS daemon run appended.
+  // a generic timeout. The offset is captured before the daemon starts (after the launcher's own
+  // pre-spawn writes) so readLogSince() returns only what THIS daemon run appended.
   let daemonExited = false;
-  serverProcess.on('exit', () => {
-    daemonExited = true;
-  });
-  const logOffsetAtSpawn = currentLogOffset();
+  let logOffsetAtSpawn = currentLogOffset();
+  let isDaemonAlive = () => !daemonExited;
+
+  if (isWindows() && isInsideCodevSession(process.env)) {
+    // Spec 1658 Phase 4: launched from inside a codev session, a spawned daemon would sit in
+    // that session's Job Object and stop with it; create it outside through CIM instead.
+    let cimCommand = process.execPath;
+    let cimArgs = args;
+    if (command === 'npx') {
+      cimCommand = 'cmd.exe';
+      cimArgs = ['/d', '/c', 'npx', ...args];
+    }
+    logger.info('Inside a codev session: starting Tower outside the session job (CIM)');
+    logToFile('Launcher is inside a codev session; creating the daemon through CIM Win32_Process.Create');
+    logOffsetAtSpawn = currentLogOffset();
+    const launched = await launchViaCim({
+      command: cimCommand,
+      args: cimArgs,
+      cwd: process.cwd(),
+      env: daemonEnvironment(sanitizeAgentEnv(process.env)),
+    });
+    if ('error' in launched) {
+      logToFile(`CIM launch failed: ${launched.error}`);
+      fatal(cimRefusalMessage(launched.error));
+    }
+    const daemonPid = launched.pid;
+    logToFile(`Created tower server through CIM with PID ${daemonPid}`);
+    isDaemonAlive = () => {
+      try {
+        process.kill(daemonPid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+  } else {
+    // Start tower server fully detached - stdio: 'ignore' ensures parent can exit
+    const serverProcess = spawn(command, args, {
+      cwd: process.cwd(),
+      env: sanitizeAgentEnv(process.env),
+      detached: true,
+      // Spec 1658: no console window for the daemon (ignored on POSIX).
+      windowsHide: true,
+      stdio: 'ignore', // Must be 'ignore' for true daemonization
+    });
+
+    if (!serverProcess.pid) {
+      logToFile('Failed to spawn tower server process');
+      fatal('Failed to start tower server');
+    }
+
+    // Detach from parent process
+    serverProcess.unref();
+
+    logToFile(`Spawned tower server with PID ${serverProcess.pid}`);
+
+    serverProcess.on('exit', () => {
+      daemonExited = true;
+    });
+    logOffsetAtSpawn = currentLogOffset();
+  }
 
   const dashboardUrl = `http://localhost:${port}`;
 
@@ -336,7 +378,7 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     logger.info('Waiting for server to start...');
     const outcome = await waitForServerOutcome(
       () => isServerResponding(port),
-      () => !daemonExited
+      () => isDaemonAlive()
     );
 
     if (outcome === 'exited') {
@@ -382,6 +424,11 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
   const forceKill = options.forceKillAllChildProcesses || false;
 
   logger.header(forceKill ? 'Force-Killing Tower and All Child Processes' : 'Stopping Tower');
+
+  if (isWindows()) {
+    await towerStopWindows(port, forceKill);
+    return;
+  }
 
   const pids = getProcessesOnPort(port);
 
@@ -483,6 +530,30 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
   if (stopped > 0) {
     logger.success(`Tower stopped (${stopped} process${stopped > 1 ? 'es' : ''}: PIDs ${pids.join(', ')})`);
   }
+}
+
+/** Windows: graceful stop over HTTP, single-pid fallback; see tower-stop-windows.ts. */
+async function towerStopWindows(port: number, forceKill: boolean): Promise<void> {
+  const deps = defaultWindowsStopDeps({
+    info: (m) => logger.info(m),
+    warn: (m) => logger.warn(m),
+    success: (m) => logger.success(m),
+  });
+  if (forceKill) {
+    const killed = await forceKillTowerWindows(port, deps);
+    if (killed === 0) {
+      logger.info('Tower is not running');
+      return;
+    }
+    logger.success(`Force-killed ${killed} process tree(s) (tower and shellper sessions)`);
+    return;
+  }
+  const { stopped } = await stopTowerWindows(port, deps);
+  if (stopped.length === 0) {
+    logger.info('Tower is not running');
+    return;
+  }
+  logger.success(`Tower stopped (${pidList(stopped)}); sessions keep running`);
 }
 
 export interface TowerLogOptions {

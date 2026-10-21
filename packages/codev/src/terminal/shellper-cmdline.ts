@@ -23,6 +23,31 @@ import { sessionJobName } from '../lib/windows-job.js';
 export const SHELLPER_MARKER = 'shellper-main.js';
 
 /**
+ * Quote one argument the way Node (libuv) does when it builds a Windows
+ * command line, so `CommandLineToArgvW` reads it back unchanged: the inverse
+ * of `unquoteWindowsCommandLine` for a single argument.
+ */
+export function quoteWindowsArg(arg: string): string {
+  if (arg === '') return '""';
+  if (!/[\s"]/.test(arg)) return arg;
+  let out = '"';
+  let backslashes = 0;
+  for (const ch of arg) {
+    if (ch === '\\') {
+      backslashes++;
+      continue;
+    }
+    if (ch === '"') {
+      out += '\\'.repeat(backslashes * 2 + 1) + '"';
+    } else {
+      out += '\\'.repeat(backslashes) + ch;
+    }
+    backslashes = 0;
+  }
+  return out + '\\'.repeat(backslashes * 2) + '"';
+}
+
+/**
  * Undo Windows argv quoting across a whole command line, the way
  * `CommandLineToArgvW` reads it, without splitting into arguments: `2n`
  * backslashes before a `"` become `n` backslashes and the quote is a delimiter

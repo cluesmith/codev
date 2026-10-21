@@ -15,6 +15,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
 import { handleRequest } from '../servers/tower-routes.js';
+import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 import { getWorkspaceTerminals } from '../servers/tower-terminals.js';
 import type { DbMailbox } from '../db/types.js';
 import { setArchitectByName } from '../state.js';
@@ -376,6 +377,71 @@ describe('tower-routes', () => {
   // =========================================================================
   // Health check
   // =========================================================================
+
+  describe('POST /api/shutdown (Spec 1658 Phase 4)', () => {
+    function shutdownRes() {
+      const made = makeRes();
+      // The handler starts the shutdown once the answer is flushed.
+      made.res.end = vi.fn((data?: string, cb?: () => void) => {
+        made.res.write(data ?? '');
+        cb?.();
+      }) as any;
+      return made;
+    }
+
+    it('answers 202 with the pid, then starts the shutdown, from loopback', async () => {
+      const requestShutdown = vi.fn();
+      for (const address of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+        const req = makeReq('POST', '/api/shutdown');
+        (req.socket as any).remoteAddress = address;
+        const { res, statusCode, body } = shutdownRes();
+        await handleRequest(req, res, makeCtx({ requestShutdown }));
+        expect(statusCode()).toBe(202);
+        expect(JSON.parse(body())).toEqual({ pid: process.pid });
+      }
+      expect(requestShutdown).toHaveBeenCalledTimes(3);
+    });
+
+    it('refuses a non-loopback peer and does not shut down', async () => {
+      const requestShutdown = vi.fn();
+      for (const address of ['192.168.1.20', '::ffff:10.0.0.5', '2001:db8::1', undefined]) {
+        const req = makeReq('POST', '/api/shutdown');
+        (req.socket as any).remoteAddress = address;
+        const { res, statusCode } = shutdownRes();
+        await handleRequest(req, res, makeCtx({ requestShutdown }));
+        expect(statusCode()).toBe(403);
+      }
+      expect(requestShutdown).not.toHaveBeenCalled();
+    });
+
+    it('is 501 where no shutdown hook is wired', async () => {
+      const { res, statusCode } = shutdownRes();
+      await handleRequest(makeReq('POST', '/api/shutdown'), res, makeCtx());
+      expect(statusCode()).toBe(501);
+    });
+  });
+
+  describe('GET /health on Windows (Spec 1658 Phase 4)', () => {
+    it('reports whether Tower runs inside a codev session; POSIX omits the field', async () => {
+      mockGetInstances.mockResolvedValue([]);
+      const posix = makeRes();
+      await handleRequest(makeReq('GET', '/health'), posix.res, makeCtx());
+      expect(JSON.parse(posix.body()).insideCodevSession).toBeUndefined();
+
+      setHostPlatformForTests('win32');
+      try {
+        const saved = process.env.CODEV_SHELLPER_SESSION;
+        process.env.CODEV_SHELLPER_SESSION = 'sess-1';
+        const win = makeRes();
+        await handleRequest(makeReq('GET', '/health'), win.res, makeCtx());
+        expect(JSON.parse(win.body()).insideCodevSession).toBe(true);
+        if (saved === undefined) delete process.env.CODEV_SHELLPER_SESSION;
+        else process.env.CODEV_SHELLPER_SESSION = saved;
+      } finally {
+        resetHostPlatformForTests();
+      }
+    });
+  });
 
   describe('GET /health', () => {
     it('returns healthy status with workspace counts', async () => {
