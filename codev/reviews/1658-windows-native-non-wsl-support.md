@@ -160,6 +160,14 @@ codex fixtures may be absent at the PR gate; claude fixtures are required.
 installer. The recorder accepts only the folder-trust dialog, confirms only a yes/trust option
 and never one naming update/install, and dismisses the update offer with its own Esc.
 
+**Carry-forwards.** The spec's capture criterion names "at minimum claude and codex", so #1858
+gates that spec criterion, not only codex convenience; verify must not drop it quietly. The
+pre-existing `*.txt` gate fixtures carry no `binary` attribute, so a Windows checkout with
+`core.autocrlf=true` would rewrite their raw PTY bytes (CI runners default to false and would not
+notice): a `.gitattributes` rule for that directory belongs with the Phase 10 residue sweep. The
+recorder runs the agent with the production agent env (`sanitizeAgentEnv`), so it should be run
+from the same kind of console Tower is started from.
+
 **Also in this phase:** `detectHarnessFromCommand` reads a Windows backslash or quoted path by
 its basename (a directory named `claude` no longer decides the harness), and the #1664 delivery
 harness launches through `ptyCommand`, so it runs on Windows for live scenario 12.

@@ -29,6 +29,7 @@ import { join, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 import { ptyCommand } from '../dist/lib/pty-command.js';
+import { sanitizeAgentEnv } from '../dist/lib/agent-env.js';
 import { SessionScreen } from '../dist/terminal/session-screen.js';
 import { bufferLines, classifyBuffer } from '../dist/agent-farm/servers/render-gate.js';
 import { resolveProfile } from '../dist/agent-farm/servers/gate-profiles.js';
@@ -126,11 +127,11 @@ class Recording {
 
   constructor() {
     this.cwd = mkdtempSync(join(tmpdir(), 'codev-conpty-'));
-    // A nested claude must not inherit an outer session's identity.
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined && !key.startsWith('CLAUDE')) env[key] = value;
-    }
+    // The environment an agent session gets in production: Tower's own env through
+    // sanitizeAgentEnv (Claude session markers and the worktree variable removed), not the
+    // dashboard-shell whitelist. Run the recorder from the kind of console Tower is started from,
+    // since colour variables there (COLORTERM, WT_SESSION) reach the agent the same way.
+    const env = sanitizeAgentEnv(process.env);
     env.TERM = 'xterm-256color';
     this.screen = new SessionScreen(COLS, ROWS);
     const launch = ptyCommand(APP, AGENT_ARGS, env);
@@ -344,7 +345,7 @@ async function write(state: string, rec: Recording): Promise<string> {
     format: 'codev-terminal-capture',
     version: 1,
     app: APP,
-    appVersion,
+    appVersion: scrub(appVersion, values),
     state,
     platform: process.platform,
     cols: COLS,

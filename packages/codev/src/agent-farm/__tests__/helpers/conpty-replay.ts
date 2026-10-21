@@ -15,8 +15,13 @@
  * Nothing in this module re-implements a gate. Each probe enqueues a row in a real sqlite
  * mailbox and calls `deliverAgentMail` with the live bindings, `classifyAgentScreen` and
  * `composerFingerprintForSession`, reading a `SessionScreen` mirror fed the captured bytes. The
- * replay supplies only the clock and the terminal, so a verdict here is the verdict Tower would
- * reach on the same bytes at the same moments.
+ * replay supplies only the clock and the terminal, so a gate verdict here is the verdict Tower
+ * would reach on the same bytes at the same moments.
+ *
+ * What is NOT replayed: the write edge (`writeMessage` is a stub, so no paced or bracketed write
+ * reaches the screen) and echo verification (`watchEcho` always confirms), and retries step by
+ * `retryAfterMs` without the drainer's small input-retry margin. Each of those can only make the
+ * replay hold where production would, never deliver where production would hold.
  */
 
 import { existsSync, readdirSync } from 'node:fs';
