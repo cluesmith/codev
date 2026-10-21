@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
-import { sweepShellperHusks } from '../agent-farm/servers/shellper-husk-sweep.js';
+import { isConsoleHostEntry, sweepShellperHusks } from '../agent-farm/servers/shellper-husk-sweep.js';
 import { SessionManager } from '../terminal/session-manager.js';
 import { runCheck } from '../commands/porch/checks.js';
 
@@ -134,8 +134,12 @@ describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees
     process.kill(rootPid, 'SIGKILL');
     await waitFor(() => !alive(rootPid), 10_000, 'root to exit');
 
+    const before = await listProcessCensus({ fresh: true });
     const { signaled } = await killSessionTree(rootPid);
-    expect(signaled).toBe(true);
+    const rows = before
+      .filter((entry) => pids.includes(entry.pid) || entry.ppid === rootPid)
+      .map((entry) => `pid=${entry.pid} ppid=${entry.ppid} created=${entry.creationTime}`);
+    expect(signaled, `root ${rootPid} dead; census rows: ${rows.join(' | ')}`).toBe(true);
     await expectAllGone(pids);
   }, 60_000);
 
@@ -146,7 +150,9 @@ describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees
     expect(alive(leafPid)).toBe(true);
 
     await killSessionTree(rootPid);
-    await expectAllGone([rootPid, leafPid]);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const survivors = [rootPid, leafPid].filter(alive);
+    expect(survivors, `root=${rootPid} mid=${midPid} leaf=${leafPid}`).toEqual([]);
   }, 60_000);
 
   it('scenario 6: killing a real shellper session takes its PTY tree with it', async () => {
@@ -193,7 +199,7 @@ describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees
     const deadline = Date.now() + 20_000;
     for (;;) {
       const census = await listProcessCensus({ fresh: true });
-      children = census.filter((entry) => entry.ppid === shellperPid).map((entry) => `${entry.pid} ${entry.cmdline}`);
+      children = census.filter((entry) => entry.ppid === shellperPid && !isConsoleHostEntry(entry)).map((entry) => `${entry.pid} ${entry.cmdline}`);
       if (children.length === 0) break;
       if (Date.now() > deadline) throw new Error(`shellper ${shellperPid} still has children: ${children.join(' | ')}`);
       await new Promise((resolve) => setTimeout(resolve, 500));

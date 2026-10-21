@@ -31,6 +31,20 @@ import { SHELLPER_MARKER, isShellperInScope } from '../../terminal/shellper-cmdl
 
 export { SHELLPER_MARKER };
 
+/**
+ * True for the console host ConPTY runs under a Windows PTY owner
+ * (`conhost.exe --headless`, or `OpenConsole.exe` when node-pty ships its own).
+ * It stays a child of the shellper for as long as the pseudoconsole is open,
+ * including after the PTY's program exits, so it is infrastructure rather than
+ * a child program: it does not make a shellper "not childless". Killing the
+ * husk's tree takes it down too.
+ */
+export function isConsoleHostEntry(entry: ProcessCensusEntry): boolean {
+  if (!isWindows()) return false;
+  const cmdline = entry.cmdline.toLowerCase();
+  return cmdline.includes('--headless') && (cmdline.includes('conhost.exe') || cmdline.includes('openconsole.exe'));
+}
+
 /** Looks up a process's start time (epoch ms), or null when it cannot be read. */
 export type StartTimeLookup = (pid: number) => Promise<number | null>;
 
@@ -132,7 +146,7 @@ export async function findHuskShellpers(opts: FindHuskShellpersOptions): Promise
   // Scope to this instance: the trailing-'/' socketDir marker on POSIX
   // (prevents /run matching /run2), the decoded `socketDir` config field on
   // Windows (see isShellperInScope).
-  const parentPids = new Set(census.map((entry) => entry.ppid));
+  const parentPids = new Set(census.filter((entry) => !isConsoleHostEntry(entry)).map((entry) => entry.ppid));
 
   const candidates: number[] = [];
   for (const entry of census) {

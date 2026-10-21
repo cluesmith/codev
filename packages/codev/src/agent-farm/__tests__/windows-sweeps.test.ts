@@ -102,6 +102,19 @@ describe('husk sweep on Windows', () => {
       .rejects.toThrow(/process census failed/);
   });
 
+  it('a shellper whose only child is the ConPTY console host is still a husk', async () => {
+    const conhost = { pid: 900, ppid: 100, rssKb: 1, cmdline: '\\\\?\\C:\\Windows\\system32\\conhost.exe --headless --width 80 --height 24', creationTime: NOW - ONE_HOUR };
+    const program = { pid: 901, ppid: 200, rssKb: 1, cmdline: 'C:\\Windows\\system32\\cmd.exe', creationTime: NOW - ONE_HOUR };
+    const pids = await findHuskShellpers({
+      socketDir: SOCKET_DIR,
+      registeredShellperPids: new Set(),
+      graceMs: ONE_HOUR,
+      now: NOW,
+      census: () => [shellper(100), conhost, shellper(200), program],
+    });
+    expect(pids).toEqual([100]);
+  });
+
   it('skips a shellper whose creation time the census did not report', async () => {
     const entry = shellper(100);
     delete entry.creationTime;
