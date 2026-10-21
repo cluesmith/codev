@@ -37,7 +37,7 @@ import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
 import { isWindows } from '../../lib/platform.js';
-import { isInsideCodevSession } from '../commands/tower-start-windows.js';
+import { isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
 import {
   isRateLimited,
   normalizeWorkspacePath,

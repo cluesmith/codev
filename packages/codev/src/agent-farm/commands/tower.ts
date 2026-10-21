@@ -340,8 +340,9 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
       try {
         process.kill(daemonPid, 0);
         return true;
-      } catch {
-        return false;
+      } catch (err) {
+        // EPERM: alive, just not ours to signal (same rule as the Windows stop).
+        return (err as NodeJS.ErrnoException).code === 'EPERM';
       }
     };
   } else {

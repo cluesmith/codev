@@ -21,7 +21,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { SHELLPER_SESSION_ENV } from '../../terminal/shellper-endpoint.js';
+import { SHELLPER_SESSION_ENV, isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
 import { quoteWindowsArg } from '../../terminal/shellper-cmdline.js';
 import { encodeHelperCommand } from '../../lib/windows-job.js';
 
@@ -31,11 +31,7 @@ const CIM_LAUNCH_TIMEOUT_MS = 30_000;
 export const SUPPORTED_TOWER_LAUNCH_PATHS =
   'start Tower from a terminal that is not a codev session (for example Windows Terminal or a PowerShell window), or let the VS Code extension start it';
 
-/** True when this process runs inside a codev session (a shellper's PTY tree). */
-export function isInsideCodevSession(env: NodeJS.ProcessEnv): boolean {
-  const marker = env[SHELLPER_SESSION_ENV];
-  return typeof marker === 'string' && marker !== '';
-}
+export { isInsideCodevSession };
 
 /** The daemon's environment for a CIM launch: as given, without the session marker. */
 export function daemonEnvironment(env: NodeJS.ProcessEnv): Record<string, string> {

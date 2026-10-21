@@ -235,10 +235,16 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
     leftovers.push(ownerPid(tower)!);
     const { terminalId, shellperPid } = await createStubSession(tower, 'stub-4');
     await waitFor(async () => (await output(tower, terminalId)).includes('STUB-READY'), 30_000, 'stub banner');
+    // The agent process itself (the PTY child), not only its shellper, must survive.
+    const banner = (await output(tower, terminalId)).match(/STUB-READY (\d+)/);
+    expect(banner).not.toBeNull();
+    const agentPid = Number(banner![1]);
+    leftovers.push(agentPid);
 
     expect(afxRun(tower, ['tower', 'stop']).code).toBe(0);
     await new Promise((r) => setTimeout(r, 2000));
     expect(alive(shellperPid)).toBe(true);
+    expect(alive(agentPid)).toBe(true);
 
     expect(afxRun(tower, ['tower', 'start']).code).toBe(0);
     leftovers.push(ownerPid(tower)!);
@@ -254,7 +260,8 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
     } finally {
       db.close();
     }
-    await waitFor(async () => (await output(tower, restartedId!)).includes('STUB-READY'), 30_000, 'replay of the banner');
+    await waitFor(async () => (await output(tower, restartedId!)).includes(`STUB-READY ${agentPid}`), 30_000, 'replay of the same agent\'s banner');
+    expect(alive(agentPid)).toBe(true);
 
     const write = await api(tower, 'POST', `/api/terminals/${restartedId}/write`, { data: 'ping-1658\r' });
     expect(write.status).toBe(200);

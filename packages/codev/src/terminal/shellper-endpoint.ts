@@ -42,6 +42,12 @@ export const SHELLPER_SECRET_ENV = 'CODEV_SHELLPER_SECRET';
  */
 export const SHELLPER_SESSION_ENV = 'CODEV_SHELLPER_SESSION';
 
+/** True when this process runs inside a codev session (a shellper's PTY tree). */
+export function isInsideCodevSession(env: NodeJS.ProcessEnv): boolean {
+  const marker = env[SHELLPER_SESSION_ENV];
+  return typeof marker === 'string' && marker !== '';
+}
+
 const PIPE_PREFIXES = ['\\\\.\\pipe\\', '\\\\?\\pipe\\'];
 
 /** True when the endpoint is a Windows named pipe rather than a socket file. */
