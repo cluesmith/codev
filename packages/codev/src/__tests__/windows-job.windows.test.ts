@@ -7,8 +7,9 @@
  *   audit. The warm assign must stay under 1s.
  * - Assignment works while the target already sits in the runner's job (nested).
  * - A job name that already exists is never joined.
- * - Terminating the job ends a `cmd start /b` orphan that has no live parent;
- *   a `detached: true` child broke away and survives.
+ * - Terminating the job ends a `cmd start /b` orphan that has no live parent.
+ * - Measured (`JOB-DETACHED`, `JOB-CIM`): whether a `detached: true` child and
+ *   a CIM `Win32_Process.Create` launch leave the job.
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
@@ -191,7 +192,42 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(await helper.terminate(name)).toEqual({ ok: true, found: true });
 
     expect(await waitFor(() => !alive(root.pid!) && !alive(pids.get('leaf')!) && !alive(pids.get('orphan')!), 10_000)).toBe(true);
-    expect(alive(pids.get('leaf-detached')!)).toBe(true);
+    // Measured, not asserted yet (architect ruling pending): libuv does not
+    // request CREATE_BREAKAWAY_FROM_JOB for a detached child, so BREAKAWAY_OK
+    // alone may not let it leave the session.
+    await new Promise((r) => setTimeout(r, 1000));
+    console.log(`JOB-DETACHED detached_grandchild_survived=${alive(pids.get('leaf-detached')!)}`);
+  }, 90_000);
+
+  it('measures whether a CIM Win32_Process.Create launch from inside a session job escapes it', async () => {
+    const helper = newHelper();
+    const name = jobName();
+    const pidFile = path.join(workDir, `cim-${crypto.randomUUID()}.txt`);
+    const gate = path.join(workDir, `gate-${crypto.randomUUID()}`);
+    const leafCmd = `"${process.execPath}" "${treeScript}" cim-leaf "${pidFile}"`;
+    const ps = `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${leafCmd.replace(/'/g, "''")}' }; exit $r.ReturnValue`;
+    const root = spawn(process.execPath, ['-e', `
+      const fs = require('fs');
+      const { spawn } = require('child_process');
+      const wait = setInterval(() => {
+        if (!fs.existsSync(${JSON.stringify(gate)})) return;
+        clearInterval(wait);
+        spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ${JSON.stringify(ps)}], { stdio: 'ignore', windowsHide: true });
+      }, 50);
+      setInterval(() => {}, 1000);
+    `], { stdio: 'ignore', detached: true, windowsHide: true });
+    leftovers.push(root.pid!);
+    expect(await helper.assign(name, root.pid!)).toEqual({ assigned: true });
+    fs.writeFileSync(gate, '');
+
+    expect(await waitFor(() => readPids(pidFile).has('cim-leaf'), 30_000)).toBe(true);
+    const leafPid = readPids(pidFile).get('cim-leaf')!;
+    leftovers.push(leafPid);
+
+    expect(await helper.terminate(name)).toEqual({ ok: true, found: true });
+    expect(await waitFor(() => !alive(root.pid!), 10_000)).toBe(true);
+    await new Promise((r) => setTimeout(r, 1000));
+    console.log(`JOB-CIM cim_launched_survived=${alive(leafPid)}`);
   }, 90_000);
 
   it('a stopped helper (Tower restart) does not kill a job member, and a new helper still finds the job by name', async () => {
