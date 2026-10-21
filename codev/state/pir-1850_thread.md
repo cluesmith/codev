@@ -17,3 +17,10 @@
 - Host: two settings, four-section picker. Three existing picker-model assertions had to change, because the issue mandates the two extra sections.
 - Tests: 44 new jsdom tests (a layout-mock.ts stand-in drives the controller) and 6 Chromium Playwright tests (the "+" is reachable by mouse, real line-above, drag/dismiss/double-click). The existing 202 jsdom and 58 Playwright tests are unchanged and green.
 - Finding: in clickParagraph, a double-click opens the composer on its first click and the composer's autofocus drops the word selection (measured in Chromium). Not fixed; the plan's deferred-open fix (~250ms lag) is left for Amr's decision at the dev gate.
+
+## 2026-10-21 dev-gate revision (owner, in pane)
+- Owner after trying it: highlightLine "not good from a usability point of view"; replace with hiding the cursor over prose.
+- Owner chose: always hidden over prose (no idle timer), as a 4th readingCursor choice `none` ("Hidden").
+- Implemented as one CSS rule (cursor: none on the body). The existing shared rule keeps the arrow over code, cards, the composer and the "+"; links keep the hand via the UA rule.
+- highlightLine fully removed (hover controller restored to main). Its implementation remains in history at 2af31184f.
+- Tests: canvas 221 jsdom, 63 Chromium (5 new), extension 1245, all green.
