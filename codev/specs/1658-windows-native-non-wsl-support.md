@@ -126,8 +126,11 @@ disabled, unless it says otherwise.
 
 **Tower and terminals**
 - [ ] The root cause of the 2026-09-09 `afx tower start` hang is identified and recorded in the
-  review. `afx tower start` reaches ready, and `afx tower stop` stops it. Both work without
-  `lsof`/`pgrep`.
+  review. *(Discharged by owner ruling, 2026-10-21T07:41:34Z: the hang is not reproducible on the
+  2026-09-09 release (3.3.3) or the current one; the leading mechanism, a stale Tower holding the
+  port after a broken `afx tower stop`, was ruled out by direct test on x64 and ARM64, Node 22/24,
+  on CI and on the owner's Windows 11 machine. No further hunt.)* `afx tower start` reaches ready,
+  and `afx tower stop` stops it. Both work without `lsof`/`pgrep`.
 - [ ] Terminal roles are distinct:
   - **Agent terminals** (architect, builder) run the configured harness command (`claude` by
     default) directly, as on POSIX, with `.cmd`/`.exe` shims resolved.
