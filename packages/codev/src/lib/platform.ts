@@ -49,3 +49,15 @@ export function setHostPlatformForTests(platform: NodeJS.Platform): void {
 export function resetHostPlatformForTests(): void {
   override = null;
 }
+
+/**
+ * The default interactive shell (`shell.shell`) for the host (Spec 1658, Area
+ * F): the built-in Windows PowerShell 5.1 on Windows, `bash` elsewhere. An
+ * explicit `bash` in a Windows config means Git Bash (`windowsInteractiveShell`).
+ */
+export function defaultInteractiveShell(): string {
+  if (isWindows()) {
+    return 'powershell.exe';
+  }
+  return 'bash';
+}

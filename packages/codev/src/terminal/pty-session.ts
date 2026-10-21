@@ -38,6 +38,7 @@ const LOG_INPUT_SIGNAL = process.env.AF_LOG_INPUT_SIGNAL === '1';
 import type { IShellperClient } from './shellper-client.js';
 import { isDeliberateExit } from './shellper-protocol.js';
 import { killSessionTree } from '../lib/process-tree.js';
+import { ptyCommand } from '../lib/pty-command.js';
 
 /**
  * Terminal delivery-signal bus (Spec 1313, Phase 5).
@@ -272,7 +273,9 @@ export class PtySession extends EventEmitter {
     this.cols = this.requestedCols;
     this.rows = this.requestedRows;
     this.resizePending = false;
-    this.pty = nodePty.spawn(this.config.command, this.config.args, {
+    // Spec 1658: on Windows a bare or `.cmd` command becomes one ConPTY can start.
+    const launch = ptyCommand(this.config.command, this.config.args, this.config.env);
+    this.pty = nodePty.spawn(launch.file, launch.args, {
       name: 'xterm-256color',
       cols: this.cols,
       rows: this.rows,

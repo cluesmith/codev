@@ -30,6 +30,7 @@ import { DEFER_PTY_DEADLINE_MS, ShellperProcess, type IShellperPty, type PtyOpti
 import { SHELLPER_SECRET_ENV, isPipeEndpoint, removeStaleEndpoint } from './shellper-endpoint.js';
 import { REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
 import { isWindows } from '../lib/platform.js';
+import { ptyCommand } from '../lib/pty-command.js';
 import { killSessionTree } from '../lib/process-tree.js';
 
 // createRequire enables importing native/CJS modules (like node-pty) from ESM.
@@ -100,7 +101,9 @@ function createRealPty(): IShellperPty {
       const cols = pendingResize?.cols ?? options.cols;
       const rows = pendingResize?.rows ?? options.rows;
       pendingResize = null;
-      ptyInstance = ptyModule.spawn(command, args, {
+      // Spec 1658: on Windows a bare or `.cmd` command becomes one ConPTY can start.
+      const launch = ptyCommand(command, args, options.env);
+      ptyInstance = ptyModule.spawn(launch.file, launch.args, {
         name: options.name ?? 'xterm-256color',
         cols,
         rows,

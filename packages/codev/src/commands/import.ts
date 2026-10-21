@@ -9,9 +9,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import chalk from 'chalk';
 import { findWorkspaceRoot } from '../lib/skeleton.js';
+import { isWindows } from '../lib/platform.js';
+import { findOnHostPath, spawnOnHost } from '../lib/shell-launch.js';
 
 interface ImportOptions {
   dryRun?: boolean;
@@ -274,9 +276,7 @@ export async function importCommand(source: string, options: ImportOptions = {})
     }
 
     // Check if claude is available
-    try {
-      execSync('which claude', { stdio: 'pipe' });
-    } catch {
+    if (!isClaudeOnPath()) {
       throw new Error(
         'Claude CLI not found.\n' +
         'Install with: npm install -g @anthropic-ai/claude-code'
@@ -290,7 +290,7 @@ export async function importCommand(source: string, options: ImportOptions = {})
 
     // Spawn interactive Claude session
     // We use -p to pass the initial prompt, but NOT --print so it stays interactive
-    const claudeProcess = spawn('claude', ['-p', prompt], {
+    const claudeProcess = spawnOnHost('claude', ['-p', prompt], {
       stdio: 'inherit',
       cwd: workspaceRoot, // Run from workspace root so Claude can make edits
     });
@@ -317,5 +317,18 @@ export async function importCommand(source: string, options: ImportOptions = {})
     if (tempDir && fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  }
+}
+
+/** True when the `claude` CLI is on `PATH` (a PATHEXT lookup on Windows, where `which` does not exist). */
+function isClaudeOnPath(): boolean {
+  if (isWindows()) {
+    return findOnHostPath('claude') !== null;
+  }
+  try {
+    execSync('which claude', { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
   }
 }

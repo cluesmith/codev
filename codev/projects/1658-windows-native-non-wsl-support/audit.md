@@ -327,6 +327,38 @@ They size the work; each phase re-greps its own class before claiming it done.
   promotes.
 - Config default `shell: 'bash'`: `agent-farm/utils/config.ts:30`.
 
+#### Phase 6 completion grep (launcher routing)
+
+Grep over `packages/{codev,core,sdk}/src` and `apps/vscode/src`, tests excluded, for
+`'/bin/sh'`, `'/bin/bash'`, `shell: true`, `shell: '/bin/sh'`, `spawn('tail'`, bare
+`spawn('afx'|'npx'|'consult'|'codev'|'bash'`, `which ` and `command -v`. Every remaining hit
+is on a POSIX-only branch or is not a launch:
+
+- POSIX branches behind `isWindows()`: `pty-manager.ts` (`$SHELL ?? /bin/bash`),
+  `tower-routes.ts` (dashboard shell `$SHELL`), `spawn-worktree.ts` (`builderScriptLaunch`,
+  `startShellSession`), `dev.ts` (`devCommandLaunch`), `utils/shell.ts` (`runStreaming`
+  `shell: true`, `commandExists` `which`), `porch/checks.ts` (`shell: true`), `tower.ts`
+  (`tail -f`), `bench.ts` (`sysctl`/`lscpu`/`free`, `which consult`), `doctor.ts` and
+  `consult/index.ts` (`which`, `command -v agy`), `import.ts` (`which claude`).
+- Not a launch: `shell-launch.ts` name tables that MAP POSIX shell names to Git Bash; the
+  generated launch script's `command -v uuidgen` (runs inside Git Bash, with a Node fallback
+  on Windows).
+- `apps/vscode/src/commands/dev-shared.ts` still sends `/bin/sh -lc <devCommand>` to Tower;
+  a Windows Tower maps any client POSIX shell request onto the resolved Git Bash
+  (`windowsShellRequest` in `handleTerminalCreate`), so the extension needs no Git Bash
+  resolver of its own.
+- `utils/shell.ts` `run()` keeps `exec` (cmd.exe on Windows). Its callers are plain `git`,
+  `gh` and `porch` invocations with double-quoted arguments, which cmd.exe runs as-is
+  (`porch` is an npm `.cmd` shim, which cmd.exe executes). No pipes, `$VAR` or POSIX
+  redirects pass through it.
+
+Routed in Phase 6: forge concepts (sync and async), the builder launch script and
+`afx spawn --shell`, `postSpawn`, `devCommand`, porch shell-string checks (all Git Bash);
+PTY commands at both spawn points (`ptyCommand`), the dev-mode `npx` daemon, consult's
+reviewer CLIs, bootstrap-docs' `consult`, porch's `afx open`, `afx bench`'s `consult`,
+`codev import`'s `claude`, the agent-session launcher (`spawnAgentProcess`), and the VS Code
+extension's `afx`/`codev` spawns (shim resolver); `afx tower log --follow` (Node follower).
+
 ### Runnable worktrees → Phase 7
 
 - `symlinkSync`: `agent-farm/commands/spawn-worktree.ts:95,112,136,143`.

@@ -22,6 +22,7 @@ import {
   copyColdTierDefaults,
 } from '../lib/scaffold.js';
 import { updateGitignore } from '../lib/gitignore.js';
+import { defaultInteractiveShell } from '../lib/platform.js';
 
 interface AdoptOptions {
   yes?: boolean;
@@ -210,7 +211,7 @@ export async function adopt(options: AdoptOptions = {}, overrides: Partial<Adopt
       shell: {
         architect: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
         builder: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
-        shell: 'bash',
+        shell: defaultInteractiveShell(),
       },
       worktree: {
         '//': 'Opt-in runnable worktree config. See CLAUDE.md > Runnable Worktrees for stack-specific recipes (pnpm, npm, yarn, bun, cargo, poetry/uv, go mod). Defaults shown below are no-ops; fill in to enable.',

@@ -133,4 +133,6 @@ jobs:
         working-directory: packages/codev
         env:
           FILTER: ${{ inputs.filter }}
+          # Read-only GitHub concepts run live (Spec 1658 scenario 8).
+          GH_TOKEN: ${{ github.token }}
         run: pnpm exec vitest run "$FILTER"

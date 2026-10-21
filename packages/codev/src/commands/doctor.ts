@@ -34,6 +34,7 @@ import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { hostPlatform, isWindows } from '../lib/platform.js';
+import { findOnHostPath } from '../lib/shell-launch.js';
 import { getWorktreeConfig } from '../agent-farm/utils/config.js';
 import type { CodevConfig } from '../lib/config.js';
 import { resolveGitBash, GitBashError, type GitBash } from '../lib/git-bash.js';
@@ -553,6 +554,9 @@ function versionGte(v1: string, v2: string): boolean {
  * Check if a command exists
  */
 function commandExists(cmd: string): boolean {
+  if (isWindows()) {
+    return findOnHostPath(cmd) !== null;
+  }
   try {
     execSync(`which ${cmd}`, { stdio: 'pipe' });
     return true;

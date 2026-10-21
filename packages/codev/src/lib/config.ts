@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { getFrameworkCacheDir as _getFrameworkCacheDir } from './skeleton.js';
+import { defaultInteractiveShell } from './platform.js';
 import { validateCustomHarnessConfig } from '../agent-farm/utils/harness.js';
 import {
   validateConsultModels,
@@ -313,7 +314,7 @@ export function resolveLocalConfigPath(workspaceRoot: string): string | null {
  * `.gitignore` so it's never accidentally committed.
  */
 export function loadConfig(workspaceRoot: string): CodevConfig {
-  let merged: CodevConfig = structuredClone(DEFAULT_CONFIG);
+  let merged: CodevConfig = defaultConfigForHost();
 
   // Layer 2: remote framework base config (if cached)
   const cacheDir = _getFrameworkCacheDir();
@@ -419,5 +420,12 @@ export function findConfigSource(workspaceRoot: string, keyPath: string[]): stri
  * Get the default config (useful for init/adopt to write a starter config).
  */
 export function getDefaultConfig(): CodevConfig {
-  return structuredClone(DEFAULT_CONFIG);
+  return defaultConfigForHost();
+}
+
+/** A fresh copy of the defaults, with the host's interactive shell. */
+function defaultConfigForHost(): CodevConfig {
+  const config = structuredClone(DEFAULT_CONFIG);
+  config.shell = { ...config.shell, shell: defaultInteractiveShell() };
+  return config;
 }

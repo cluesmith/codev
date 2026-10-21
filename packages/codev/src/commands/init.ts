@@ -21,6 +21,7 @@ import {
 } from '../lib/scaffold.js';
 import { syncHotContextBlock } from '../lib/managed-block.js';
 import { createGitignore } from '../lib/gitignore.js';
+import { defaultInteractiveShell } from '../lib/platform.js';
 
 interface InitOptions {
   yes?: boolean;
@@ -148,7 +149,7 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
     shell: {
       architect: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
       builder: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
-      shell: 'bash',
+      shell: defaultInteractiveShell(),
     },
     worktree: {
       '//': 'Opt-in runnable worktree config. See CLAUDE.md > Runnable Worktrees for stack-specific recipes (pnpm, npm, yarn, bun, cargo, poetry/uv, go mod). Defaults shown below are no-ops; fill in to enable.',

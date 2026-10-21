@@ -52,7 +52,8 @@ import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 import { logSafe } from '../utils/log-safe.js';
 import { handleIdeApi } from './ide-server.js';
 import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
-import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
+import { getWorktreeConfig, getActivityHooks, getResolvedCommands } from '../utils/config.js';
+import { windowsInteractiveShell, windowsShellRequest } from '../../lib/shell-launch.js';
 import { ensureCodevConfigWatcher } from './codev-config-watcher.js';
 import { handleDecisionsGet, handleDecisionsRule } from './decisions/routes.js';
 import { decisionsFilePresent } from './decisions/file.js';
@@ -903,8 +904,8 @@ async function handleTerminalCreate(
     const manager = getTerminalManager();
 
     // Parse request fields
-    const command = typeof body.command === 'string' ? body.command : undefined;
-    const args = Array.isArray(body.args) ? body.args as string[] : undefined;
+    let command = typeof body.command === 'string' ? body.command : undefined;
+    let args = Array.isArray(body.args) ? body.args as string[] : undefined;
     const cols = typeof body.cols === 'number' ? body.cols : undefined;
     const rows = typeof body.rows === 'number' ? body.rows : undefined;
     const cwd = typeof body.cwd === 'string' ? body.cwd : undefined;
@@ -920,6 +921,14 @@ async function handleTerminalCreate(
     const termType = typeof body.type === 'string' && ['builder', 'shell'].includes(body.type) ? body.type as 'builder' | 'shell' : null;
     const roleId = typeof body.roleId === 'string' ? body.roleId : null;
     const requestPersistence = body.persistent === true;
+
+    // Spec 1658: on Windows a client's POSIX shell (`/bin/sh -lc ...`) runs in
+    // the resolved Git Bash, never System32's WSL launcher.
+    if (isWindows() && command) {
+      const launch = windowsShellRequest(command, args ?? [], workspacePath ?? undefined);
+      command = launch.command;
+      args = launch.args;
+    }
 
     let info: PtySessionInfo | undefined;
     let persistent = false;
@@ -3365,8 +3374,15 @@ async function handleWorkspaceShellCreate(
   try {
     const manager = getTerminalManager();
     const shellId = getNextShellId(workspacePath);
-    const shellCmd = process.env.SHELL || '/bin/bash';
-    const shellArgs: string[] = [];
+    let shellCmd = process.env.SHELL || '/bin/bash';
+    let shellArgs: string[] = [];
+    if (isWindows()) {
+      // Spec 1658, Area F: the configured `shell.shell` (Windows PowerShell by
+      // default; `bash` means Git Bash, never System32's WSL launcher).
+      const launch = windowsInteractiveShell(getResolvedCommands(workspacePath).shell, workspacePath);
+      shellCmd = launch.command;
+      shellArgs = launch.args;
+    }
 
     let shellCreated = false;
 

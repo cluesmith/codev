@@ -15,7 +15,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawnOnHost } from '../lib/shell-launch.js';
 import chalk from 'chalk';
 import { isExecutableOnPath } from '@cluesmith/codev-sdk/node/executable';
 import { spawnAgentProcess, type AgentExit, type AgentLaunch } from '../lib/agent-process.js';
@@ -284,7 +284,7 @@ function isExecutableAvailable(executable: string): boolean {
  */
 function runConsultProcess(args: string[], cwd: string): Promise<AgentExit> {
   return new Promise<AgentExit>(resolve => {
-    const child = spawn('consult', args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawnOnHost('consult', args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr?.on('data', chunk => {
       stderr = (stderr + String(chunk)).slice(-4000);

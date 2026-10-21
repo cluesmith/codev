@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { existsSync, mkdirSync, appendFileSync, statSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import { logger, fatal } from '../utils/logger.js';
-import { spawn } from 'node:child_process';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import { getConfig } from '../utils/config.js';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
@@ -18,6 +18,8 @@ import { activeStateDbPath, planMigration } from '../db/consolidate.js';
 import { sanitizeAgentEnv, findClaudeSessionMarkers } from '../../lib/agent-env.js';
 import { getProcessesOnPort } from '../utils/port.js';
 import { isWindows } from '../../lib/platform.js';
+import { spawnableOnHost } from '../../lib/shell-launch.js';
+import { followFile } from '../../lib/file-follow.js';
 import { defaultWindowsStopDeps, forceKillTowerWindows, pidList, stopTowerWindows } from './tower-stop-windows.js';
 import { cimRefusalMessage, daemonEnvironment, isInsideCodevSession, launchViaCim } from './tower-start-windows.js';
 
@@ -347,14 +349,24 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     };
   } else {
     // Start tower server fully detached - stdio: 'ignore' ensures parent can exit
-    const serverProcess = spawn(command, args, {
+    const spawnOptions: SpawnOptions = {
       cwd: process.cwd(),
       env: sanitizeAgentEnv(process.env),
       detached: true,
       // Spec 1658: no console window for the daemon (ignored on POSIX).
       windowsHide: true,
       stdio: 'ignore', // Must be 'ignore' for true daemonization
-    });
+    };
+    let daemonCommand = command;
+    let daemonArgs = args;
+    if (isWindows()) {
+      // Spec 1658: dev mode's `npx` is a .cmd shim, which spawn cannot run without a shell.
+      const spawnable = spawnableOnHost(command, args);
+      daemonCommand = spawnable.command;
+      daemonArgs = spawnable.args;
+      spawnOptions.windowsVerbatimArguments = spawnable.windowsVerbatimArguments;
+    }
+    const serverProcess = spawn(daemonCommand, daemonArgs, spawnOptions);
 
     if (!serverProcess.pid) {
       logToFile('Failed to spawn tower server process');
@@ -577,6 +589,11 @@ export async function towerLog(options: TowerLogOptions = {}): Promise<void> {
   if (options.follow) {
     // Tail -f the log file
     logger.info(`Following ${LOG_FILE} (Ctrl+C to stop)`);
+    if (isWindows()) {
+      // Spec 1658: no `tail` on native Windows; follow in Node.
+      followFile(LOG_FILE, (text) => process.stdout.write(text));
+      await new Promise(() => {});
+    }
     const tail = spawn('tail', ['-f', LOG_FILE], { stdio: 'inherit' });
     tail.on('error', (err) => {
       logger.error(`Failed to tail log: ${err.message}`);

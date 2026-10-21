@@ -12,6 +12,9 @@ import type { PtySessionConfig, PtySessionInfo } from './pty-session.js';
 import { decodeFrame, encodeControl, encodeData } from './ws-protocol.js';
 import { attachWithReplay } from './attach-replay.js';
 import { defaultSessionOptions, DEFAULT_DISK_LOG_MAX_BYTES } from './index.js';
+import { isWindows } from '../lib/platform.js';
+import { windowsPtyBaseEnv } from '../lib/pty-command.js';
+import { windowsPowerShellPath } from '../lib/shell-launch.js';
 
 export interface TerminalManagerConfig {
   workspaceRoot: string;
@@ -63,8 +66,8 @@ export class TerminalManager {
     }
 
     const id = randomUUID();
-    const shell = req.command ?? process.env.SHELL ?? '/bin/bash';
-    const baseEnv: Record<string, string> = {
+    let shell = req.command ?? process.env.SHELL ?? '/bin/bash';
+    let baseEnv: Record<string, string> = {
       PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
       HOME: process.env.HOME ?? '/tmp',
       SHELL: shell,
@@ -75,6 +78,16 @@ export class TerminalManager {
       // Propagate artifact data repo for CliResolver in builder worktrees
       ...(process.env.CODEV_ARTIFACTS_DATA_REPO ? { CODEV_ARTIFACTS_DATA_REPO: process.env.CODEV_ARTIFACTS_DATA_REPO } : {}),
     };
+    if (isWindows()) {
+      // Spec 1658: Windows has no $SHELL default (one inherited from a Git Bash
+      // launcher is an MSYS path) and needs its own base variables.
+      shell = req.command ?? windowsPowerShellPath();
+      baseEnv = {
+        ...windowsPtyBaseEnv(process.env),
+        TERM: 'xterm-256color',
+        ...(process.env.CODEV_ARTIFACTS_DATA_REPO ? { CODEV_ARTIFACTS_DATA_REPO: process.env.CODEV_ARTIFACTS_DATA_REPO } : {}),
+      };
+    }
 
     const defaults = defaultSessionOptions();
     const sessionConfig: PtySessionConfig = {

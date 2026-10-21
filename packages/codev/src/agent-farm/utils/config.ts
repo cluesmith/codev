@@ -13,6 +13,7 @@ import { loadConfig } from '../../lib/config.js';
 import type { CodevConfig } from '../../lib/config.js';
 import { resolveHarness, RetiredHarnessError, type HarnessProvider, type CustomHarnessConfig } from './harness.js';
 import { logger } from './logger.js';
+import { defaultInteractiveShell } from '../../lib/platform.js';
 import type { ResolvedWorktreeConfig, WorktreeDevUrl, ResolvedActivityHooks, ActivityHook, ActivityEvent } from '@cluesmith/codev-types';
 
 // Re-export so existing internal callers that import the resolved types
@@ -23,11 +24,11 @@ export type { ResolvedWorktreeConfig, WorktreeDevUrl };
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Default commands
+// Default commands. The interactive shell default is per host (Spec 1658):
+// `defaultInteractiveShell()` gives `bash`, or Windows PowerShell on Windows.
 const DEFAULT_COMMANDS = {
   architect: 'claude',
   builder: 'claude',
-  shell: 'bash',
 };
 
 // CLI overrides (set via setCliOverrides)
@@ -244,7 +245,7 @@ export function getResolvedCommands(workspaceRoot?: string): ResolvedCommands {
     builder: cliOverrides.builder ||
              resolveCommand(userConfig?.shell?.builder, DEFAULT_COMMANDS.builder),
     shell: cliOverrides.shell ||
-           resolveCommand(userConfig?.shell?.shell, DEFAULT_COMMANDS.shell),
+           resolveCommand(userConfig?.shell?.shell, defaultInteractiveShell()),
   };
 }
 

@@ -4,6 +4,8 @@
 
 import { exec, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isWindows } from '../../lib/platform.js';
+import { gitBashCommand, findOnHostPath } from '../../lib/shell-launch.js';
 
 const execAsync = promisify(exec);
 
@@ -48,14 +50,26 @@ export async function run(
  */
 export async function runStreaming(
   command: string,
-  options: { cwd?: string } = {},
+  options: { cwd?: string; workspaceRoot?: string } = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, {
-      cwd: options.cwd,
-      shell: true,       // route through /bin/sh -c so shell features (cd, &&, $VAR) work
-      stdio: 'inherit',  // stream output straight to the parent terminal
-    });
+    let child: ChildProcess;
+    if (isWindows()) {
+      // Spec 1658: the resolved Git Bash, never cmd.exe or System32's WSL bash.
+      // `workspaceRoot` locates its `windows.gitBashPath` override.
+      const launch = gitBashCommand(command, options.workspaceRoot ?? options.cwd);
+      child = spawn(launch.command, launch.args, {
+        cwd: options.cwd,
+        stdio: 'inherit',
+        windowsHide: true,
+      });
+    } else {
+      child = spawn(command, {
+        cwd: options.cwd,
+        shell: true,       // route through /bin/sh -c so shell features (cd, &&, $VAR) work
+        stdio: 'inherit',  // stream output straight to the parent terminal
+      });
+    }
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) {
@@ -133,6 +147,10 @@ export async function commandExists(command: string): Promise<boolean> {
   const sanitized = command.replace(/[^a-zA-Z0-9_-]/g, '');
   if (sanitized !== command) {
     return false; // Command name contains invalid characters
+  }
+
+  if (isWindows()) {
+    return findOnHostPath(command) !== null;
   }
 
   return new Promise((resolve) => {
