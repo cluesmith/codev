@@ -218,7 +218,8 @@ unaffected; this matters only for building from source.
 **Porch slot:** porch's `phase_4` slot carries plan phases 3b and then 4 (architect ruling,
 Option C). Phase 3b commits are tagged `[Phase: phase_3b]`: a891d303c..cfedc4f1e (its own
 3-way review: `1658-phase_3b-iter1-rebuttals.md`). Phase 4 commits are tagged
-`[Phase: phase_4]` and follow cfedc4f1e; that range is completed when Phase 4 closes.
+`[Phase: phase_4]`: b980eceaf..HEAD at `porch done` (the first is b980eceaf). Porch's
+consultation for the slot covers both ranges.
 
 **Verdict:** the cost gate passes. Warm per-session assign is milliseconds, far under the ~1 s
 target.
