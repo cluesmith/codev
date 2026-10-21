@@ -8,10 +8,10 @@ plan_phases:
     status: complete
   - id: phase_2
     title: Shellper named-pipe transport, per-session secret, and reconnect identity
-    status: in_progress
+    status: complete
   - id: phase_3
     title: Process census and session-tree teardown
-    status: pending
+    status: in_progress
   - id: phase_4
     title: Tower lifecycle and detached survival on Windows
     status: pending
@@ -36,7 +36,7 @@ plan_phases:
   - id: phase_11
     title: Windows CI leg and install docs
     status: pending
-current_plan_phase: phase_2
+current_plan_phase: phase_3
 gates:
   spec-approval:
     status: approved
@@ -51,7 +51,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -86,7 +86,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1658/codev/projects/1658-windows-native-non-wsl-support/1658-phase_1-iter2-claude.txt
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-21T08:29:41.397Z'
+updated_at: '2026-10-21T08:36:12.688Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
@@ -94,3 +94,5 @@ context_refreshes:
   - boundary: plan-phase:phase_2
     at: '2026-10-21T07:52:57.502Z'
     acknowledged_at: '2026-10-21T07:53:48.964Z'
+  - boundary: plan-phase:phase_3
+    at: '2026-10-21T08:36:12.688Z'
