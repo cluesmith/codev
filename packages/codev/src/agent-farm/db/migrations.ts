@@ -26,7 +26,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /** Current migration version — bump when adding new migrations. */
-export const GLOBAL_CURRENT_VERSION = 18;
+export const GLOBAL_CURRENT_VERSION = 19;
 
 export interface GlobalMigrationOptions {
   /**
@@ -565,5 +565,31 @@ export function runGlobalMigrations(
     }
     db.prepare('INSERT INTO _migrations (version) VALUES (18)').run();
     log('[info] Added detail column to mailbox (Issue #1482 gate-verdict detail)');
+  }
+
+  // Migration v19: Add shellper_session_id and shellper_secret to terminal_sessions (Spec 1658).
+  // A Windows shellper listens on a named pipe that any local user can open, so every
+  // connection presents a per-session secret, and a reconnect after a Tower restart proves
+  // identity by the WELCOME's session id instead of the process start time. Both values must
+  // survive the restart, so they live on the row. The session id used to be recoverable only by
+  // parsing the `shellper-<id>.sock` basename, which a pipe name does not carry. Both columns
+  // are nullable: `shellper_secret` is always null on POSIX, and pre-v19 rows keep the basename
+  // fallback. Same PRAGMA-gated ADD COLUMN shape as v16-v18.
+  const v19 = db.prepare('SELECT version FROM _migrations WHERE version = 19').get();
+  if (!v19) {
+    const columns = (db.prepare(`PRAGMA table_info(terminal_sessions)`).all() as Array<{ name: string }>)
+      .map((c) => c.name);
+    // An empty column list means there is no terminal_sessions table to extend (a
+    // partial database, such as the per-migration test harness builds).
+    if (columns.length > 0) {
+      if (!columns.includes('shellper_session_id')) {
+        db.exec(`ALTER TABLE terminal_sessions ADD COLUMN shellper_session_id TEXT`);
+      }
+      if (!columns.includes('shellper_secret')) {
+        db.exec(`ALTER TABLE terminal_sessions ADD COLUMN shellper_secret TEXT`);
+      }
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (19)').run();
+    log('[info] Added shellper_session_id and shellper_secret columns to terminal_sessions (Spec 1658)');
   }
 }

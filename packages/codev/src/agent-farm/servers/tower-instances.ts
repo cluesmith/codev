@@ -23,7 +23,7 @@ import type { SessionManager } from '../../terminal/session-manager.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { isBuilderWorktreePath, parseBuilderWorktreePath } from '@cluesmith/codev-sdk/builder-worktree';
-import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
+import type { WorkspaceTerminals, TerminalEntry, InstanceStatus, ShellperRowAuth } from './tower-types.js';
 import {
   normalizeWorkspacePath,
   getWorkspaceName,
@@ -66,6 +66,7 @@ export interface InstanceDeps {
     roleId: string | null, pid: number | null,
     shellperSocket?: string | null, shellperPid?: number | null, shellperStartTime?: number | null,
     label?: string | null, cwd?: string | null, command?: string | null,
+    shellperAuth?: ShellperRowAuth | null,
   ) => void;
   /** Delete a terminal session row from SQLite */
   deleteTerminalSession: (id: string) => void;
@@ -700,7 +701,8 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
             logSessionIdentity(_deps.log, 'architect-launch', session.id, ptySession, cmd);
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', shellperInfo.pid,
               shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
-              persistableCommand(ptySession) ?? cmd);
+              persistableCommand(ptySession) ?? cmd,
+              { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret });
 
             // Spec 755: persist to local state.db (architect table) so afx
             // status / stop see the architect via loadState's scalar shim.
@@ -1223,6 +1225,7 @@ export async function addArchitect(
         session.id, resolvedPath, 'architect', name, shellperInfo.pid,
         shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
         persistableCommand(ptySession) ?? cmd,
+        { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret },
       );
 
       // Spec 755: persist to local state.db so the architect appears in

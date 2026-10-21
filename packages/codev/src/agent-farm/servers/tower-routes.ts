@@ -883,7 +883,8 @@ async function handleTerminalCreate(
           logSessionIdentity(ctx.log, 'terminal-create', session.id, ptySession, command ?? null);
           saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
             shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null,
-            persistableCommand(ptySession) ?? command ?? null);
+            persistableCommand(ptySession) ?? command ?? null,
+            { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret });
           ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
@@ -3318,7 +3319,8 @@ async function handleWorkspaceShellCreate(
         logSessionIdentity(ctx.log, 'shell-create', session.id, ptySession, shellCmd);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
           shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath,
-          persistableCommand(ptySession) ?? shellCmd);
+          persistableCommand(ptySession) ?? shellCmd,
+          { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret });
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -52,9 +52,30 @@ function extractShellperSessionId(socketPath: string | null): string | null {
   const match = path.basename(socketPath).match(/^shellper-(.+)\.sock$/);
   return match ? match[1] : null;
 }
-import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
+
+/**
+ * The shellper session id for a row (Spec 1658): the persisted column, else the
+ * legacy `shellper-<id>.sock` basename (pre-v19 POSIX rows), else the row id.
+ */
+function rowShellperSessionId(dbSession: DbTerminalSession): string {
+  return dbSession.shellper_session_id ?? extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
+}
+
+/** What a Windows reconnect needs from the row to authenticate (Spec 1658). */
+function rowReconnectAuth(dbSession: DbTerminalSession): ReconnectAuth {
+  return {
+    shellperSessionId: dbSession.shellper_session_id ?? extractShellperSessionId(dbSession.shellper_socket),
+    secret: dbSession.shellper_secret,
+  };
+}
+
+/** The row's shellper identity columns, carried forward when a row is re-saved. */
+function rowShellperAuth(dbSession: DbTerminalSession): ShellperRowAuth {
+  return { sessionId: dbSession.shellper_session_id, secret: dbSession.shellper_secret };
+}
+import { isIdentityRefused, type SessionManager, type ReconnectRestartOptions, type ReconnectAuth } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
-import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
+import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession, ShellperRowAuth } from './tower-types.js';
 import {
   normalizeWorkspacePath,
   buildArchitectReconnectRestartOptions,
@@ -306,6 +327,7 @@ export function saveTerminalSession(
   label: string | null = null,
   cwd: string | null = null,
   command: string | null = null,
+  shellperAuth: ShellperRowAuth | null = null,
 ): void {
   try {
     const normalizedPath = normalizeWorkspacePath(workspacePath);
@@ -319,9 +341,10 @@ export function saveTerminalSession(
 
     const db = getGlobalDb();
     db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label, cwd, command)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label, cwd, command);
+      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label, cwd, command, shellper_session_id, shellper_secret)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label, cwd, command,
+      shellperAuth?.sessionId ?? null, shellperAuth?.secret ?? null);
     _deps?.log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
   } catch (err) {
     _deps?.log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
@@ -655,6 +678,10 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 
   // Track matched session IDs across all phases
   const matchedSessionIds = new Set<string>();
+  // Spec 1658: rows whose reconnect was refused on identity (the endpoint is
+  // provably not this session's shellper). Phase 2 deletes them even when the
+  // recorded pid is alive, and never signals that pid: it is not ours.
+  const identityRefusedIds = new Set<string>();
 
   // ---- Phase 1: Shellper reconnection ----
   let allDbSessions: DbTerminalSession[];
@@ -770,7 +797,12 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
           task.dbSession.shellper_pid!,
           task.dbSession.shellper_start_time!,
           task.restartOptions,
+          rowReconnectAuth(task.dbSession),
         );
+        if (isIdentityRefused(client)) {
+          identityRefusedIds.add(task.dbSession.id);
+          return { dbSession: task.dbSession, client: null, replayData: null, restartOptions: task.restartOptions };
+        }
         if (!client) {
           return { dbSession: task.dbSession, client: null, replayData: null, restartOptions: task.restartOptions };
         }
@@ -840,7 +872,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     });
     const ptySession = manager.getSession(session.id);
     if (ptySession) {
-      const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
+      const shellperSessId = rowShellperSessionId(dbSession);
       // replayData is only null when client is null (probe batch above),
       // which the `if (!client)` guard already excluded — fall back to
       // empty defensively rather than asserting.
@@ -891,7 +923,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
     saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
       dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, sessionCwd,
-      ptySession ? persistableCommand(ptySession) : identitySeed);
+      ptySession ? persistableCommand(ptySession) : identitySeed, rowShellperAuth(dbSession));
     _deps.registerKnownWorkspace(workspacePath);
 
     // Clean up on exit (only fires for permanent death when restartOnExit is set)
@@ -945,6 +977,16 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // absent socket is the same transient-failure class and must not kill a live
     // agent). The row is left in place (WARN) and retried on a later
     // reconcile/adoption pass; a pid-dead row still deletes below as before.
+    //
+    // Spec 1658: an identity refusal IS proof. The shellper answered (or its
+    // pipe is gone) and is not this row's, so the live pid belongs to some other
+    // process: delete the row, and never signal that pid.
+    if (identityRefusedIds.has(session.id)) {
+      _deps.log('WARN', `Shellper session ${session.id} refused reconnect on identity — removing row without signaling pid ${session.shellper_pid} (${session.type} for ${path.basename(session.workspace_path)})`);
+      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
+      cleaned++;
+      continue;
+    }
     if (session.shellper_socket) {
       const shellperAlive = session.shellper_pid != null && processExists(session.shellper_pid);
       if (shellperAlive) {
@@ -1158,6 +1200,9 @@ export async function getTerminalsForWorkspace(
     // Verify session still exists in TerminalManager (runtime state)
     let session = manager.getSession(dbSession.id);
 
+    // Spec 1658: set when the on-the-fly reconnect proves the endpoint is not
+    // this row's shellper.
+    let identityRefused = false;
     if (!session && dbSession.shellper_socket && _deps?.shellperManager && !_reconciling) {
       // PTY session gone but shellper may still be alive — reconnect on-the-fly
       // Skip during reconciliation to avoid racing with reconcileTerminalSessions()
@@ -1208,8 +1253,11 @@ export async function getTerminalsForWorkspace(
           dbSession.shellper_pid!,
           dbSession.shellper_start_time!,
           restartOptions,
+          rowReconnectAuth(dbSession),
         );
-        if (client) {
+        if (isIdentityRefused(client)) {
+          identityRefused = true;
+        } else if (client) {
           // #1198: wait for the REPLAY frame instead of racing it (see the
           // matching change in the startup adoption pass above). Uncapped —
           // the ring seed is capped at the attach below, while the mirror
@@ -1229,7 +1277,7 @@ export async function getTerminalsForWorkspace(
           });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
-            const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
+            const shellperSessId = rowShellperSessionId(dbSession);
             // Capped ring seed, full mirror seed (PIR #1354) — single-session path,
             // so no cross-session parse sequencing is needed here.
             ptySession.attachShellper(client, capRingSeed(replayData, dbSession.id), dbSession.shellper_pid!, shellperSessId, replayData);
@@ -1273,7 +1321,7 @@ export async function getTerminalsForWorkspace(
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
             dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, dbSession.cwd,
-            ptySession ? persistableCommand(ptySession) : identitySeed);
+            ptySession ? persistableCommand(ptySession) : identitySeed, rowShellperAuth(dbSession));
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
           _deps.log('INFO', `On-the-fly reconnect succeeded for ${newSession.id} (id preserved)`);
@@ -1294,7 +1342,9 @@ export async function getTerminalsForWorkspace(
       // Phase 2's "retried next reconcile/adoption pass" promise false. Destroy
       // only what is proven dead: a live shellper pid is never deleted here,
       // regardless of socket-file state; the row is kept for a later pass.
-      if (dbSession.shellper_socket) {
+      // Spec 1658: an identity refusal is proof the pid is not this row's
+      // shellper, so the row goes (the pid is never signaled here either way).
+      if (dbSession.shellper_socket && !identityRefused) {
         const shellperAlive = dbSession.shellper_pid != null && processExists(dbSession.shellper_pid);
         if (shellperAlive) {
           _deps?.log('WARN', `On-the-fly reconnect for ${dbSession.id} failed but pid ${dbSession.shellper_pid} is alive — leaving row untouched (a live pid is never signaled), retried next reconcile/adoption pass (${dbSession.type})`);

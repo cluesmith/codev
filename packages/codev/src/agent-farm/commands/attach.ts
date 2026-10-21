@@ -1,7 +1,8 @@
 /**
  * Attach command - attach to a running builder terminal
  *
- * Default mode: connect directly to shellper Unix socket as a terminal client.
+ * Default mode: connect directly to the shellper's Unix socket (POSIX) or named
+ * pipe (Windows) as a terminal client.
  * --browser mode: open Tower dashboard in browser.
  */
 
@@ -15,7 +16,9 @@ import { openBrowser } from '../utils/shell.js';
 import { loadState } from '../state.js';
 import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
-import { ShellperClient, DEFAULT_REPLAY_TIMEOUT_MS } from '../../terminal/shellper-client.js';
+import { ShellperClient, DEFAULT_REPLAY_TIMEOUT_MS, type ShellperClientAuth } from '../../terminal/shellper-client.js';
+import { isPipeEndpoint } from '../../terminal/shellper-endpoint.js';
+import { isWindows } from '../../lib/platform.js';
 import type { DbTerminalSession } from '../servers/tower-types.js';
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
 import { getGlobalDb } from '../db/index.js';
@@ -76,14 +79,32 @@ async function displayBuilderList(): Promise<void> {
 }
 
 
+/** Where and how to attach to a builder's shellper. */
+export interface ShellperAttachTarget {
+  /** Socket path (POSIX) or pipe name (Windows). */
+  endpoint: string;
+  /** Connection credentials for a Windows shellper; null on POSIX. */
+  auth: ShellperClientAuth | null;
+}
+
 /**
  * Find the shellper socket path for a builder.
+ * See {@link findShellperAttachTarget}; this returns only the endpoint.
+ */
+export function findShellperSocket(builder: Builder): string | null {
+  return findShellperAttachTarget(builder)?.endpoint ?? null;
+}
+
+/**
+ * Find the shellper endpoint (and, on Windows, its credentials) for a builder.
  *
  * Discovery order:
  * 1. SQLite terminal_sessions table (workspace-scoped)
- * 2. Fallback: scan ~/.codev/run/shellper-*.sock
+ * 2. Fallback (POSIX only): scan ~/.codev/run/shellper-*.sock. A Windows pipe
+ *    cannot be used without the secret the DB row holds, so the registry is the
+ *    only source there (Spec 1658).
  */
-export function findShellperSocket(builder: Builder): string | null {
+export function findShellperAttachTarget(builder: Builder): ShellperAttachTarget | null {
   // 1. Try SQLite lookup. terminal_sessions.workspace_path is the workspace
   // ROOT (set to config.workspaceRoot at spawn time), not the builder's
   // worktree path — querying by builder.worktree would never match. Without
@@ -94,16 +115,36 @@ export function findShellperSocket(builder: Builder): string | null {
     const workspacePath = normalizeWorkspacePath(getConfig().workspaceRoot);
 
     const session = db.prepare(`
-      SELECT shellper_socket FROM terminal_sessions
+      SELECT shellper_socket, shellper_pid, shellper_session_id, shellper_secret FROM terminal_sessions
       WHERE workspace_path = ? AND role_id = ? AND shellper_socket IS NOT NULL
       ORDER BY created_at DESC LIMIT 1
-    `).get(workspacePath, builder.id) as Pick<DbTerminalSession, 'shellper_socket'> | undefined;
+    `).get(workspacePath, builder.id) as
+      | Pick<DbTerminalSession, 'shellper_socket' | 'shellper_pid' | 'shellper_session_id' | 'shellper_secret'>
+      | undefined;
 
+    if (session?.shellper_socket && isPipeEndpoint(session.shellper_socket)) {
+      // A pipe has no file to check; the connect (and its WELCOME check) is the probe.
+      if (!session.shellper_secret) {
+        return null;
+      }
+      const auth: ShellperClientAuth = { secret: session.shellper_secret };
+      if (session.shellper_session_id) {
+        auth.expectedSessionId = session.shellper_session_id;
+      }
+      if (session.shellper_pid !== null) {
+        auth.expectedShellperPid = session.shellper_pid;
+      }
+      return { endpoint: session.shellper_socket, auth };
+    }
     if (session?.shellper_socket && fs.existsSync(session.shellper_socket)) {
-      return session.shellper_socket;
+      return { endpoint: session.shellper_socket, auth: null };
     }
   } catch {
     // SQLite unavailable — fall through to scan
+  }
+
+  if (isWindows()) {
+    return null;
   }
 
   // 2. Fallback: scan ~/.codev/run/ for matching sockets
@@ -117,7 +158,7 @@ export function findShellperSocket(builder: Builder): string | null {
         // Check if socket file exists and is accessible
         try {
           fs.accessSync(sockPath, fs.constants.R_OK | fs.constants.W_OK);
-          return sockPath;
+          return { endpoint: sockPath, auth: null };
         } catch {
           continue;
         }
@@ -138,8 +179,8 @@ const DETACH_KEY = 0x1c; // Ctrl-\
  * Connects as a 'terminal' client, enters raw mode, pipes stdin/stdout,
  * handles SIGWINCH for resize, and detaches on Ctrl-\.
  */
-export async function attachTerminal(socketPath: string): Promise<void> {
-  const client = new ShellperClient(socketPath, 'terminal');
+export async function attachTerminal(socketPath: string, auth: ShellperClientAuth | null = null): Promise<void> {
+  const client = new ShellperClient(socketPath, 'terminal', auth);
 
   // Track terminal state for cleanup
   let rawModeEnabled = false;
@@ -286,14 +327,14 @@ export async function attach(options: AttachOptions): Promise<void> {
   }
 
   // Default: terminal attach mode
-  const socketPath = findShellperSocket(builder);
-  if (!socketPath) {
+  const target = findShellperAttachTarget(builder);
+  if (!target) {
     fatal(`No shellper socket found for builder ${builder.id}. Is the builder running?`);
     return;
   }
 
   try {
-    await attachTerminal(socketPath);
+    await attachTerminal(target.endpoint, target.auth);
   } catch (err) {
     fatal(`Failed to attach to builder ${builder.id}: ${(err as Error).message}`);
   }

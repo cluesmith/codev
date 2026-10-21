@@ -9,19 +9,36 @@
  * - Auto-restart on exit (configurable per session)
  * - Reconnect to existing shellpers after Tower restart
  *
- * Process start time validation prevents PID reuse reconnection.
+ * Process start time validation prevents PID reuse reconnection on POSIX. On
+ * Windows (Spec 1658) the reconnect identity is the authenticated WELCOME over
+ * the session's secret-gated named pipe instead.
  */
 
 import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
 import { defaultSessionOptions } from './index.js';
 import { sanitizeAgentEnv } from '../lib/agent-env.js';
 import type { Readable } from 'node:stream';
-import { ShellperClient, type IShellperClient } from './shellper-client.js';
+import {
+  ShellperClient,
+  ShellperIdentityError,
+  type IShellperClient,
+  type ShellperClientAuth,
+} from './shellper-client.js';
+import {
+  SHELLPER_SECRET_ENV,
+  endpointMayExist,
+  generateShellperSecret,
+  probeEndpoint,
+  removeStaleEndpoint,
+  resolveShellperEndpoint,
+  shellperLogPath,
+  waitForEndpoint,
+} from './shellper-endpoint.js';
+import { isWindows } from '../lib/platform.js';
 import { isDeliberateExit, type ExitMessage } from './shellper-protocol.js';
 
 export interface SessionManagerConfig {
@@ -88,6 +105,33 @@ export interface CreateSessionOptions {
   restartResetAfter?: number;
   crashLoopFallback?: CrashLoopFallback;
   freshLaunch?: FreshLaunch;
+}
+
+/**
+ * What a Windows reconnect needs from the DB row (Spec 1658): the shellper
+ * session id to expect in WELCOME and the secret to present in HELLO. Unused on
+ * POSIX, where the start-time check is the identity proof.
+ */
+export interface ReconnectAuth {
+  shellperSessionId: string | null;
+  secret: string | null;
+}
+
+/**
+ * Reconnect reached a verdict, not a transient failure: the endpoint does not
+ * belong to the recorded session (Spec 1658, Windows). Callers clean the row
+ * even though the recorded PID is alive, because that PID is not our shellper,
+ * and never signal it. A `null` reconnect result stays "unconfirmed" (#1686).
+ */
+export interface ReconnectIdentityRefused {
+  identityRefused: true;
+  reason: string;
+}
+
+export type ReconnectResult = IShellperClient | ReconnectIdentityRefused | null;
+
+export function isIdentityRefused(result: unknown): result is ReconnectIdentityRefused {
+  return typeof result === 'object' && result !== null && (result as ReconnectIdentityRefused).identityRefused === true;
 }
 
 export interface ReconnectRestartOptions {
@@ -219,7 +263,14 @@ export class StderrBuffer {
 
 interface ManagedSession {
   client: IShellperClient;
+  /** The shellper's endpoint: a socket path (POSIX) or pipe name (Windows). */
   socketPath: string;
+  /** The shellper's stderr log, decoupled from the endpoint (Spec 1658). */
+  logPath: string;
+  /** The id the shellper was created with; reported in its WELCOME on Windows. */
+  shellperSessionId: string;
+  /** Per-session connection secret (Windows only; null on POSIX). */
+  secret: string | null;
   pid: number;
   startTime: number;
   options: CreateSessionOptions;
@@ -238,6 +289,17 @@ interface ManagedSession {
   lastSpawnAt: number;
   /** Consecutive clean exits too fast to be a user gesture (#1264). */
   fastCleanExits: number;
+}
+
+/**
+ * Client credentials for a session: none on POSIX (null secret); on Windows the
+ * secret plus the WELCOME identity to expect (Spec 1658).
+ */
+function clientAuthFor(secret: string | null, shellperSessionId: string, shellperPid: number): ShellperClientAuth | null {
+  if (secret === null) {
+    return null;
+  }
+  return { secret, expectedSessionId: shellperSessionId, expectedShellperPid: shellperPid };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -268,17 +330,36 @@ export class SessionManager extends EventEmitter {
    * Returns the connected client.
    */
   async createSession(opts: CreateSessionOptions): Promise<IShellperClient> {
-    const socketPath = this.getSocketPath(opts.sessionId);
+    const socketPath = resolveShellperEndpoint(this.config.socketDir, opts.sessionId);
     this.log(`Creating session ${opts.sessionId}: command=${opts.command}, socket=${socketPath}`);
 
-    // Ensure socket directory exists with 0700 permissions
+    // Ensure socket directory exists with 0700 permissions (it also holds the
+    // shellper logs on Windows)
     fs.mkdirSync(this.config.socketDir, { recursive: true, mode: 0o700 });
 
-    // Clean up any stale socket file
-    this.unlinkSocketIfExists(socketPath);
+    // Redirect shellper stderr to a log file instead of a pipe.
+    // Using 'pipe' for stderr creates a parent→child pipe dependency: when Tower
+    // exits, the pipe breaks, and the async EPIPE error on process.stderr crashes
+    // the shellper (Bugfix #324). A file FD has no such dependency.
+    const stderrLogPath = shellperLogPath(socketPath, this.config.socketDir, opts.sessionId);
 
-    // Build config for shellper-main.js
-    const shellperConfig = JSON.stringify({
+    // Clean up any stale socket file
+    this.cleanupEndpoint(socketPath, stderrLogPath);
+
+    // Spec 1658: a Windows shellper's pipe is gated on a per-session secret.
+    // It travels in the shellper's environment, never its argv.
+    let secret: string | null = null;
+    const shellperEnv = sanitizeAgentEnv(process.env);
+    if (isWindows()) {
+      secret = generateShellperSecret();
+      shellperEnv[SHELLPER_SECRET_ENV] = secret;
+    }
+
+    // Build config for shellper-main.js. On Windows the pipe name does not
+    // contain the socket directory, so it is carried as its own field to keep the
+    // Tower-instance scope marker in the shellper's command line; POSIX argv is
+    // unchanged.
+    const shellperConfigFields: Record<string, unknown> = {
       command: opts.command,
       args: opts.args,
       cwd: opts.cwd,
@@ -286,13 +367,12 @@ export class SessionManager extends EventEmitter {
       cols: opts.cols,
       rows: opts.rows,
       socketPath,
-    });
-
-    // Redirect shellper stderr to a log file instead of a pipe.
-    // Using 'pipe' for stderr creates a parent→child pipe dependency: when Tower
-    // exits, the pipe breaks, and the async EPIPE error on process.stderr crashes
-    // the shellper (Bugfix #324). A file FD has no such dependency.
-    const stderrLogPath = socketPath.replace('.sock', '.log');
+    };
+    if (secret !== null) {
+      shellperConfigFields.socketDir = this.config.socketDir;
+      shellperConfigFields.sessionId = opts.sessionId;
+    }
+    const shellperConfig = JSON.stringify(shellperConfigFields);
     let stderrFd: number | null = null;
     try {
       stderrFd = fs.openSync(stderrLogPath, 'a');
@@ -306,7 +386,7 @@ export class SessionManager extends EventEmitter {
     // shellper is still a marker-carrying ancestor for anything else it starts.
     const child = cpSpawn(this.config.nodeExecutable, [this.config.shellperScript, shellperConfig], {
       detached: true,
-      env: sanitizeAgentEnv(process.env),
+      env: shellperEnv,
       stdio: ['ignore', 'pipe', stderrFd ?? 'ignore'],
     });
 
@@ -323,7 +403,7 @@ export class SessionManager extends EventEmitter {
       this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}`);
       // Kill orphaned child process using handle (not PID — may not be available yet)
       try { child.kill('SIGKILL'); } catch { /* already dead or no permission */ }
-      this.unlinkSocketIfExists(socketPath);
+      this.cleanupEndpoint(socketPath, stderrLogPath);
       throw err;
     }
     child.unref();
@@ -333,22 +413,25 @@ export class SessionManager extends EventEmitter {
     let client: ShellperClient;
     try {
       // Wait briefly for socket to be ready
-      await this.waitForSocket(socketPath);
+      await waitForEndpoint(socketPath);
 
       // Connect client
-      client = new ShellperClient(socketPath);
+      client = new ShellperClient(socketPath, 'tower', clientAuthFor(secret, opts.sessionId, info.pid));
       await client.connect();
     } catch (err) {
       // Rollback: kill the orphaned shellper process
       this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}`);
       try { process.kill(info.pid, 'SIGKILL'); } catch { /* already dead */ }
-      this.unlinkSocketIfExists(socketPath);
+      this.cleanupEndpoint(socketPath, stderrLogPath);
       throw err;
     }
 
     const session: ManagedSession = {
       client,
       socketPath,
+      logPath: stderrLogPath,
+      shellperSessionId: opts.sessionId,
+      secret,
       pid: info.pid,
       startTime: info.startTime,
       options: opts,
@@ -463,11 +546,19 @@ export class SessionManager extends EventEmitter {
         break;
       }
 
-      const client = new ShellperClient(session.socketPath);
+      const client = new ShellperClient(
+        session.socketPath,
+        'tower',
+        clientAuthFor(session.secret, session.shellperSessionId, session.pid),
+      );
       try {
         await client.connect();
       } catch (err) {
         this.log(`Session ${sessionId} reconnect attempt ${attempt + 1}/${RECONNECT_BACKOFF_MS.length} failed: ${(err as Error).message}`);
+        // Spec 1658: a verified identity mismatch will not heal with retries.
+        if (err instanceof ShellperIdentityError) {
+          break;
+        }
         continue;
       }
 
@@ -491,9 +582,14 @@ export class SessionManager extends EventEmitter {
   /**
    * Whether the session's recorded shellper process is still the one running
    * under its PID: alive, and with a matching start time (guards PID reuse).
+   *
+   * On Windows (Spec 1658) start time is not the identity proof; the
+   * authenticated WELCOME is, and every reconnect verifies it. Here, liveness is
+   * the cheap precondition.
    */
   private async isShellperProcessCurrent(session: ManagedSession): Promise<boolean> {
     if (!this.isProcessAlive(session.pid)) return false;
+    if (isWindows()) return true;
     const actualStartTime = await getProcessStartTime(session.pid);
     if (actualStartTime === null || Math.abs(actualStartTime - session.startTime) > 2000) {
       return false;
@@ -507,12 +603,7 @@ export class SessionManager extends EventEmitter {
    */
   private async canReachShellper(session: ManagedSession): Promise<boolean> {
     if (!(await this.isShellperProcessCurrent(session))) return false;
-    try {
-      const stat = fs.lstatSync(session.socketPath);
-      return stat.isSocket();
-    } catch {
-      return false;
-    }
+    return endpointMayExist(session.socketPath);
   }
 
   /**
@@ -529,8 +620,14 @@ export class SessionManager extends EventEmitter {
 
   /**
    * Reconnect to an existing shellper process after Tower restart.
-   * Validates PID is alive and start time matches.
-   * Returns connected client, or null if shellper is stale/dead.
+   *
+   * POSIX validates that the PID is alive and its start time matches. Windows
+   * (Spec 1658) validates that the PID is alive, then connects with the row's
+   * secret and verifies the WELCOME names the row's session and shellper PID.
+   *
+   * Returns the connected client; `null` when the shellper is dead or the
+   * attempt failed for a reason that may be transient; or an identity-refused
+   * result when the endpoint provably does not belong to this session.
    */
   async reconnectSession(
     sessionId: string,
@@ -538,7 +635,8 @@ export class SessionManager extends EventEmitter {
     pid: number,
     startTime: number,
     restartOptions?: ReconnectRestartOptions,
-  ): Promise<IShellperClient | null> {
+    auth?: ReconnectAuth,
+  ): Promise<ReconnectResult> {
     this.log(`Reconnecting session ${sessionId}: pid=${pid}, socket=${socketPath}`);
 
     // Check if process is alive
@@ -547,31 +645,60 @@ export class SessionManager extends EventEmitter {
       return null;
     }
 
-    // Validate process start time to prevent PID reuse
-    const actualStartTime = await getProcessStartTime(pid);
-    if (actualStartTime === null || Math.abs(actualStartTime - startTime) > 2000) {
-      // Start time mismatch or couldn't determine — PID was reused
-      this.log(`Session ${sessionId} reconnect failed: PID ${pid} reused (start time mismatch)`);
-      return null;
-    }
+    const refuse = (reason: string): ReconnectIdentityRefused => {
+      this.log(`Session ${sessionId} reconnect refused: ${reason}`);
+      return { identityRefused: true, reason };
+    };
 
-    // Check socket file exists
-    try {
-      const stat = fs.lstatSync(socketPath);
-      if (!stat.isSocket()) {
-        this.log(`Session ${sessionId} reconnect failed: socket not a socket file`);
+    let secret: string | null = null;
+    let shellperSessionId = sessionId;
+    if (isWindows()) {
+      // The row must carry what the identity check needs; without it this
+      // endpoint can never be authenticated.
+      if (!auth?.secret || !auth.shellperSessionId) {
+        return refuse('row has no shellper secret or session id');
+      }
+      secret = auth.secret;
+      shellperSessionId = auth.shellperSessionId;
+    } else {
+      // Validate process start time to prevent PID reuse
+      const actualStartTime = await getProcessStartTime(pid);
+      if (actualStartTime === null || Math.abs(actualStartTime - startTime) > 2000) {
+        // Start time mismatch or couldn't determine — PID was reused
+        this.log(`Session ${sessionId} reconnect failed: PID ${pid} reused (start time mismatch)`);
         return null;
       }
-    } catch {
-      this.log(`Session ${sessionId} reconnect failed: socket missing or lstat error`);
-      return null;
+
+      // Check socket file exists
+      try {
+        const stat = fs.lstatSync(socketPath);
+        if (!stat.isSocket()) {
+          this.log(`Session ${sessionId} reconnect failed: socket not a socket file`);
+          return null;
+        }
+      } catch {
+        this.log(`Session ${sessionId} reconnect failed: socket missing or lstat error`);
+        return null;
+      }
+      if (auth?.shellperSessionId) {
+        shellperSessionId = auth.shellperSessionId;
+      }
     }
 
     // Connect client
-    const client = new ShellperClient(socketPath);
+    const client = new ShellperClient(socketPath, 'tower', clientAuthFor(secret, shellperSessionId, pid));
     try {
       await client.connect();
     } catch (err) {
+      if (err instanceof ShellperIdentityError) {
+        return refuse(err.message);
+      }
+      // A named pipe exists exactly as long as its server listens, and a
+      // shellper listens for its whole life. No pipe means no shellper, so the
+      // live PID is someone else's.
+      if (isWindows() && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return refuse(`pipe ${socketPath} does not exist`);
+      }
       this.log(`Session ${sessionId} reconnect failed: connect error: ${(err as Error).message}`);
       return null;
     }
@@ -580,6 +707,9 @@ export class SessionManager extends EventEmitter {
     const session: ManagedSession = {
       client,
       socketPath,
+      logPath: shellperLogPath(socketPath, this.config.socketDir, shellperSessionId),
+      shellperSessionId,
+      secret,
       pid,
       startTime,
       options: {
@@ -673,7 +803,7 @@ export class SessionManager extends EventEmitter {
     session.client.disconnect();
 
     // Clean up socket file
-    this.unlinkSocketIfExists(session.socketPath);
+    this.cleanupEndpoint(session.socketPath, session.logPath);
   }
 
   /**
@@ -688,15 +818,25 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Get session metadata (pid, startTime, socketPath) for a session.
+   * Get session metadata for a session. `shellperSessionId` and `secret` are
+   * persisted with the row so a Windows reconnect can authenticate (Spec 1658);
+   * `secret` is null on POSIX.
    */
-  getSessionInfo(sessionId: string): { pid: number; startTime: number; socketPath: string } | null {
+  getSessionInfo(sessionId: string): {
+    pid: number;
+    startTime: number;
+    socketPath: string;
+    shellperSessionId: string;
+    secret: string | null;
+  } | null {
     const session = this.sessions.get(sessionId);
     if (!session) return null;
     return {
       pid: session.pid,
       startTime: session.startTime,
       socketPath: session.socketPath,
+      shellperSessionId: session.shellperSessionId,
+      secret: session.secret,
     };
   }
 
@@ -759,29 +899,11 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Test if a Unix socket has a listener by attempting a brief connection.
+   * Test if a shellper endpoint has a listener by attempting a brief connection.
    * Returns true if connection succeeds, false if refused/timed out.
    */
   private probeSocket(socketPath: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      const socket = net.createConnection(socketPath);
-      const timeout = setTimeout(() => {
-        socket.destroy();
-        resolve(false);
-      }, 2000);
-
-      socket.on('connect', () => {
-        clearTimeout(timeout);
-        socket.destroy();
-        resolve(true);
-      });
-
-      socket.on('error', () => {
-        clearTimeout(timeout);
-        socket.destroy();
-        resolve(false);
-      });
-    });
+    return probeEndpoint(socketPath);
   }
 
   /**
@@ -928,8 +1050,11 @@ export class SessionManager extends EventEmitter {
           return;
         }
         const results: Array<{ pid: number; socketPath?: string }> = [];
-        // Use socketDir + '/' to prevent prefix overlaps (e.g. /run matching /run2)
-        const scopeMarker = this.config.socketDir.endsWith('/') ? this.config.socketDir : this.config.socketDir + '/';
+        // Use socketDir + separator to prevent prefix overlaps (e.g. /run matching /run2)
+        let scopeMarker = this.config.socketDir;
+        if (!scopeMarker.endsWith(path.sep)) {
+          scopeMarker += path.sep;
+        }
         for (const line of stdout.trim().split('\n')) {
           if (line.includes('shellper-main.js') && line.includes(scopeMarker)) {
             const pid = parseInt(line.trim(), 10);
@@ -980,7 +1105,7 @@ export class SessionManager extends EventEmitter {
   private removeDeadSession(sessionId: string): void {
     const session = this.detachSessionFromMap(sessionId);
     if (!session) return;
-    this.unlinkSocketIfExists(session.socketPath);
+    this.cleanupEndpoint(session.socketPath, session.logPath);
   }
 
   /**
@@ -1030,24 +1155,13 @@ export class SessionManager extends EventEmitter {
     if (this.sessions.has(sessionId)) {
       return;
     }
-    this.unlinkSocketIfExists(session.socketPath);
+    this.cleanupEndpoint(session.socketPath, session.logPath);
   }
 
-  private getSocketPath(sessionId: string): string {
-    return path.join(this.config.socketDir, `shellper-${sessionId}.sock`);
-  }
-
-  private unlinkSocketIfExists(socketPath: string): void {
-    try {
-      const stat = fs.lstatSync(socketPath);
-      if (stat.isSocket()) {
-        fs.unlinkSync(socketPath);
-      }
-    } catch {
-      // Doesn't exist — fine
-    }
+  /** Remove a session's stale socket file (none for a pipe) and its stderr log. */
+  private cleanupEndpoint(socketPath: string, logPath: string): void {
+    removeStaleEndpoint(socketPath);
     // Also clean up the companion stderr log file (Bugfix #324)
-    const logPath = socketPath.replace('.sock', '.log');
     try {
       fs.unlinkSync(logPath);
     } catch {
@@ -1156,25 +1270,6 @@ export class SessionManager extends EventEmitter {
     } catch {
       return '';
     }
-  }
-
-  private waitForSocket(socketPath: string, timeout = 5000): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const start = Date.now();
-      const check = () => {
-        try {
-          fs.statSync(socketPath);
-          resolve();
-        } catch {
-          if (Date.now() - start > timeout) {
-            reject(new Error(`Socket ${socketPath} not created within ${timeout}ms`));
-          } else {
-            setTimeout(check, 50);
-          }
-        }
-      };
-      check();
-    });
   }
 
   private isProcessAlive(pid: number): boolean {
