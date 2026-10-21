@@ -10,8 +10,8 @@ Phase 1 deliverable. Two parts:
 
 CI facts come from dispatches 39555516317, 39555898877 and 39556358109 (after PR #1849 put the
 workflow on `main`). Facts still marked **PENDING** need the owner's Windows machine: the
-launcher survival matrix and their own `--deps`/`--tower` runs. Phase 2 does not start until
-those are filled in (plan, Phase 1 test plan).
+launcher survival matrix for the PowerShell console, the VS Code terminal and extension host, and
+SSH. The owner's full probe arrived 2026-10-21T06:59Z.
 
 ## 1. Measured facts
 
@@ -20,6 +20,9 @@ those are filled in (plan, Phase 1 test plan).
 Source: `probe --deps` and `--tower-published latest`, one leg per Node version (run
 39556358109, windows-latest). Installs run with a user's npm environment (default `cmd.exe`
 script shell). A source build is detected from node-gyp's own log lines.
+
+Owner machine (Windows 11 Home, Node 24.13): both dependencies prebuilt, no source build; the
+published 3.3.5 installs globally in 24 s with no toolchain.
 
 | Dependency | Node 20 x64 (ABI 115) | Node 22 x64 (ABI 127) | Node 24 x64 (ABI 137) | win32-arm64 |
 |---|---|---|---|---|
@@ -59,17 +62,20 @@ Source: `probe` `census` section, three runs of the inline `Win32_Process` query
 | | Cold | Warm | Processes | With CommandLine | With CreationDate |
 |---|---|---|---|---|---|
 | windows-latest (Node 20/22/24) | 3.6-4.3 s | 470-490 ms | 146-151 | 129-133 | all |
-| Owner machine | PENDING | PENDING | PENDING | PENDING | PENDING |
+| Owner machine (Win 11 Home 26200, Node 24.13) | 753 ms | 443-445 ms | 313 | 68 | all |
 
-Port-owner lookup (`Get-NetTCPConnection`): 1.3-1.7 s; owner PID matches: yes.
+Port-owner lookup (`Get-NetTCPConnection`): 1.3-1.7 s on the runner, 1.9 s on the owner
+machine; owner PID matches: yes.
 
 **Consequence.** A warm CIM census costs about half a second, roughly 10× `ps -A`, and the
 first one in a fresh PowerShell costs about 4 s. Today `/health` awaits the census twice. Phase
 3's TTL cache plus single-flight is required, not optional. The `probeTowerHealth` budget must
 cover a cold census on first boot. The census, and anything else that spawns PowerShell, must
 never sit on the reconnect hot path (C1 holds). Processes without a CommandLine (~12%) are
-system processes the runner account cannot read. Shellpers run as the user, so they are
-unaffected.
+system processes the runner account cannot read. On the owner's non-admin account only 68 of
+313 processes expose a CommandLine: a standard user sees only their own processes' command lines.
+Shellpers and their trees run as that user, so the sweeps still see everything they need. A
+process's command line being null therefore means "not ours", never "an empty command".
 
 ### 1.4 Job objects and detached survival
 
@@ -80,12 +86,18 @@ Source: `probe` `job` and `detached` sections; owner `--survival start`/`check` 
 | GitHub Actions runner | yes | **yes** | yes (incl. silent) | yes (parent exit only; job close not observable in-run) |
 | Windows Terminal | not measured | not measured | not measured | **yes** (owner, 2026-10-21T06:57Z, PowerShell tab) |
 | PowerShell console (conhost) | PENDING | PENDING | PENDING | PENDING |
-| VS Code integrated terminal | PENDING | PENDING | PENDING | PENDING |
+| VS Code integrated terminal | PENDING | PENDING | PENDING | PENDING (owner) |
 | VS Code extension host | PENDING | PENDING | PENDING | PENDING |
 | SSH session | PENDING | PENDING | PENDING | PENDING |
 
 PowerShell language mode on each host (Add-Type needs FullLanguage): runner = FullLanguage;
-owner launchers PENDING.
+owner machine = FullLanguage.
+
+The owner's full probe reports the same job flags `0x3C00` (kill-on-close plus silent
+breakaway), yet the Windows Terminal survival test shows detached children surviving a close.
+That is what SILENT_BREAKAWAY_OK means: children are created outside the job automatically, so
+kill-on-close does not reach them. The flag reading alone therefore cannot predict survival.
+The empirical survival column is authoritative.
 
 Runner job flags `0x3C00` = KILL_ON_JOB_CLOSE | SILENT_BREAKAWAY_OK | BREAKAWAY_OK |
 DIE_ON_UNHANDLED_EXCEPTION. One caveat: the flags come from `QueryInformationJobObject(NULL)` in
@@ -97,6 +109,13 @@ close), which avoids this ambiguity.
 
 Source: `probe` `gitBash` and `pathext` sections.
 
+- **Owner machine (the realistic case):** Git for Windows with bash 4.4.23 (x86_64-pc-msys),
+  resolved from the standard path `C:\Program Files\Git\bin\bash.exe`. **System32 `bash.exe` is
+  FIRST on `PATH`** (listed several times), and `Git\bin` is not on `PATH` at all; only
+  `Git\usr\bin` is, second. Bare `bash` on this machine launches WSL. This is direct evidence
+  for ruling 5: resolution must start from the install paths (or a valid override) and never from
+  `PATH` order. `jq` and `gh` are not installed: doctor must flag `jq`, and `gh` is the user's
+  forge CLI, as on every platform.
 - Git Bash on the runner: `C:\Program Files\Git\bin\bash.exe`, GNU bash 5.3.15
   (x86_64-pc-cygwin). `PATH` order: `Git\usr\bin\bash.EXE`, `Git\bin\bash.EXE`, then
   **`C:\Windows\system32\bash.EXE`**. So the WSL launcher is on a stock `PATH`, which is the trap
@@ -114,7 +133,10 @@ Source: `probe` `gitBash` and `pathext` sections.
 - PATHEXT resolution on the runner: `npx`/`npm` resolve to `.CMD` shims (confirming the shim
   problem for every npm-installed bin, including `afx`, `codev`, `claude`, `codev-ide-server`);
   `gh`, `git`, `jq` resolve to `.EXE`. The harness CLIs are not installed on the runner, so their
-  resolution is checked on the owner's machine.
+  resolution is checked on the owner's machine: `claude` resolves to
+  `C:\Users\<user>\.local\bin\claude.EXE`, a native `.exe` (the native installer), not a `.cmd`
+  shim. The shim resolver must handle both. `codex`, `agy`, `afx`, `codev` are not installed
+  there.
 
 ### 1.6 Root cause of the 2026-09-09 `afx tower start` hang
 
@@ -137,17 +159,21 @@ port owner with `lsof` (`utils/port.ts`) through `cmd.exe` ("The system cannot f
 specified."), concludes "Tower is not running", and exits 0 with the daemon still alive (the
 probe then kills it by PID). That is fixed in Phase 4.
 
-Remaining candidates for the 2026-09-09 field hang, which the owner's `--tower` run on their
-machine can separate:
+**The owner's machine agrees** (Windows 11 Home, Node 24.13, published 3.3.5 from a fresh
+global install): ready in 549 ms, and `tower stop` hits the same `lsof` defect, leaving the daemon
+alive.
+
+**Conclusion for the review:** the 2026-09-09 hang does not reproduce on the current release with
+fresh state, on CI or on the owner's machine. Candidates for what the field test hit:
 - an older release (code since 2026-09-09 has changed the start path);
 - pre-existing `~/.agent-farm` state from an earlier attempt, for example a stale owner lock or
   a Tower that the broken `tower stop` left running and that still holds port 4100;
 - something specific to that machine (home path, port reservation, antivirus).
 
 The second candidate is consistent with the `tower stop` defect above: a Tower that never
-stopped can block the next start's readiness on the default port. If the owner's run also
-starts cleanly, the review records the hang as not reproducible on the current release, with
-Phase 4 removing the `tower stop` defect that could cause it.
+stopped can block the next start's readiness on the default port. The review records the hang as
+not reproducible on the current release; Phase 4 removes the `tower stop` defect that could cause
+it, and Phase 4's Windows tests cover start → stop → start on the default flow.
 
 ### 1.7 Repo build on Windows (dev-only, not a user concern)
 
