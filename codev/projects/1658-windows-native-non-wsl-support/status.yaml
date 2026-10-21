@@ -17,10 +17,10 @@ plan_phases:
     status: complete
   - id: phase_5
     title: Git Bash, executable shim, and MSYS path resolution with doctor prerequisites
-    status: in_progress
+    status: complete
   - id: phase_6
     title: Launcher routing and shell roles
-    status: pending
+    status: in_progress
   - id: phase_7
     title: Runnable-worktree links and worktree removal on Windows
     status: pending
@@ -36,7 +36,7 @@ plan_phases:
   - id: phase_11
     title: Windows CI leg and install docs
     status: pending
-current_plan_phase: phase_5
+current_plan_phase: phase_6
 gates:
   spec-approval:
     status: approved
@@ -50,8 +50,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -182,7 +182,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1658/codev/projects/1658-windows-native-non-wsl-support/1658-phase_5-iter1-claude.txt
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-21T20:12:52.559Z'
+updated_at: '2026-10-21T20:17:29.796Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
@@ -199,6 +199,8 @@ context_refreshes:
   - boundary: plan-phase:phase_5
     at: '2026-10-21T19:44:57.959Z'
     acknowledged_at: '2026-10-21T19:46:37.030Z'
+  - boundary: plan-phase:phase_6
+    at: '2026-10-21T20:17:29.796Z'
 force_advanced:
   phase: phase_3
   iteration: 3
