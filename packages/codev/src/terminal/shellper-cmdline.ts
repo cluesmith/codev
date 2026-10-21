@@ -17,6 +17,7 @@
 
 import * as path from 'node:path';
 import { isWindows } from '../lib/platform.js';
+import { sessionJobName } from '../lib/windows-job.js';
 
 /** Marker identifying a Codev shellper process in a command line. */
 export const SHELLPER_MARKER = 'shellper-main.js';
@@ -112,4 +113,26 @@ export function isShellperInScope(cmdline: string, socketDir: string): boolean {
   }
   const scopeMarker = socketDir.endsWith('/') ? socketDir : `${socketDir}/`;
   return cmdline.includes(scopeMarker);
+}
+
+/**
+ * The teardown identity of each shellper in `pids`, read from process-table
+ * entries: the census creation time (Windows; lets a teardown refuse a reused
+ * pid) and the session Job Object name decoded from the config's `sessionId`
+ * (Windows only, Spec 1658 Phase 3b). POSIX entries carry neither.
+ */
+export function shellperTeardownIdentities(
+  entries: ReadonlyArray<{ pid: number; cmdline: string; creationTime?: number }>,
+  pids: readonly number[],
+): { startTimes: Map<number, number>; jobNames: Map<number, string> } {
+  const startTimes = new Map<number, number>();
+  const jobNames = new Map<number, string>();
+  for (const entry of entries) {
+    if (!pids.includes(entry.pid)) continue;
+    if (entry.creationTime !== undefined) startTimes.set(entry.pid, entry.creationTime);
+    if (!isWindows()) continue;
+    const shellperSessionId = readJsonStringField(unquoteWindowsCommandLine(entry.cmdline), 'sessionId');
+    if (shellperSessionId) jobNames.set(entry.pid, sessionJobName(shellperSessionId));
+  }
+  return { startTimes, jobNames };
 }

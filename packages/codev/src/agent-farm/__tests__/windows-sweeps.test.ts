@@ -85,8 +85,13 @@ describe('husk sweep on Windows', () => {
     expect(censusMock.list).toHaveBeenCalledTimes(1);
     // 100: unregistered, childless, aged. 200: registered. 300: too young. 400: other instance.
     expect(result).toEqual({ swept: 1, pids: [100] });
-    // The reap gets the census creation time, so its teardown can refuse a reused pid.
-    expect(reap).toHaveBeenCalledWith([100], new Map([[100, NOW - 2 * ONE_HOUR]]));
+    // The reap gets the census creation time, so its teardown can refuse a reused
+    // pid, and the session job name decoded from the config (Phase 3b).
+    expect(reap).toHaveBeenCalledWith(
+      [100],
+      new Map([[100, NOW - 2 * ONE_HOUR]]),
+      new Map([[100, 'Local\\codev-session-s-100']]),
+    );
   });
 
   it('a stale row (pid reused, creation time differs) does not count as registered', async () => {

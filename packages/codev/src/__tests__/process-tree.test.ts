@@ -233,14 +233,34 @@ describe('killSessionTree on Windows', () => {
     setHostPlatformForTests('win32');
     const census = [entry(40, 1, 100), entry(41, 40, 110)];
     const h = windowsHarness({ censuses: [census, census], alive: new Set([41]) });
-    const terminateJob = vi.fn(async (name: string) => {
-      h.events.push(`terminate ${name}`);
-      return { ok: true, found: true };
+    const terminateJob = vi.fn(async (name: string, rootPid: number) => {
+      h.events.push(`terminate ${name} ${rootPid}`);
+      return { ok: true, found: true, member: true };
     });
 
     const result = await killSessionTree(40, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
 
-    expect(h.events).toEqual(['terminate J', 'census', 'taskkill 40', 'census', 'kill 41']);
+    expect(h.events).toEqual(['terminate J 40', 'census', 'taskkill 40', 'census', 'kill 41']);
+    expect(result.jobError).toBeUndefined();
+  });
+
+  it('counts a terminated job as signaled even when the census then finds nothing', async () => {
+    setHostPlatformForTests('win32');
+    const h = windowsHarness({ censuses: [[]], alive: new Set() });
+    const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
+    const result = await killSessionTree(45, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+    expect(result.signaled).toBe(true);
+
+    const notOurs = vi.fn(async () => ({ ok: true, found: true, member: false }));
+    const other = windowsHarness({ censuses: [[]], alive: new Set() });
+    expect((await killSessionTree(46, { census: other.census, taskkill: other.taskkill, kill: other.kill, jobName: 'J', terminateJob: notOurs })).signaled).toBe(false);
+  });
+
+  it('does not report a job error when jobs are disabled (reported once already)', async () => {
+    setHostPlatformForTests('win32');
+    const h = windowsHarness({ censuses: [[entry(47, 1, 100)]], alive: new Set() });
+    const terminateJob = vi.fn(async () => ({ ok: false, error: 'Per-session job objects disabled', helperFailure: true, disabled: true }));
+    const result = await killSessionTree(47, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
     expect(result.jobError).toBeUndefined();
   });
 
@@ -258,7 +278,7 @@ describe('killSessionTree on Windows', () => {
 
   it('terminates the job even when the root pid was reused, and names it in a refusal or census failure', async () => {
     setHostPlatformForTests('win32');
-    const terminateJob = vi.fn(async () => ({ ok: true, found: true }));
+    const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
     const reused = windowsHarness({ censuses: [[entry(43, 1, 900_000)]], alive: new Set([43]) });
     const refused = await killSessionTree(43, { census: reused.census, taskkill: reused.taskkill, kill: reused.kill, rootStartTime: 100_000, jobName: 'J', terminateJob });
     expect(refused.refused).toBe('reused-pid');

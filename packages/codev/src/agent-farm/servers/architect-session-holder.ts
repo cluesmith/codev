@@ -29,6 +29,7 @@ import {
   readJsonStringField,
   sameWindowsPath,
   shellperArgvText,
+  shellperTeardownIdentities,
 } from '../../terminal/shellper-cmdline.js';
 
 export interface ProcessEntry {
@@ -233,8 +234,9 @@ function pidAlive(pid: number): boolean {
  * reap must not outrun. Rejects when the Windows census failed, so the reap can
  * report it.
  */
-async function killProcessGroup(pid: number, signal: NodeJS.Signals, startTime?: number): Promise<void> {
-  await killSessionTree(pid, { signal, fallbackToPid: true, rootStartTime: startTime });
+async function killProcessGroup(pid: number, signal: NodeJS.Signals, startTime?: number, jobName?: string): Promise<void> {
+  const { jobError } = await killSessionTree(pid, { signal, fallbackToPid: true, rootStartTime: startTime, jobName });
+  if (jobError !== undefined) throw new Error(jobError);
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -259,6 +261,8 @@ export async function reapShellpers(
     kill?: (pid: number, signal: NodeJS.Signals) => void | Promise<void>;
     /** Windows: each pid's census creation time, so teardown refuses a reused pid. */
     startTimes?: Map<number, number>;
+    /** Windows: each pid's session Job Object, terminated with it (Spec 1658 Phase 3b). */
+    jobNames?: Map<number, string>;
     wait?: (ms: number) => Promise<void>;
     graceMs?: number;
     killGraceMs?: number;
@@ -268,7 +272,8 @@ export async function reapShellpers(
   if (pids.length === 0) return;
   const isAlive = opts?.isAlive ?? pidAlive;
   const startTimes = opts?.startTimes;
-  const kill = opts?.kill ?? ((pid: number, signal: NodeJS.Signals) => killProcessGroup(pid, signal, startTimes?.get(pid)));
+  const jobNames = opts?.jobNames;
+  const kill = opts?.kill ?? ((pid: number, signal: NodeJS.Signals) => killProcessGroup(pid, signal, startTimes?.get(pid), jobNames?.get(pid)));
   const wait = opts?.wait ?? sleep;
   const graceMs = opts?.graceMs ?? 3000;
   const killGraceMs = opts?.killGraceMs ?? 2000;
@@ -370,11 +375,8 @@ export async function reconcileArchitectSessionHolder(opts: {
     'WARN',
     `Architect '${opts.identity.architectName}' session ${shortId}… is held by our own superseded shellper(s) [${reclaimable.join(', ')}]; reaping to reclaim the conversation in ${opts.identity.workspacePath}`,
   );
-  const startTimes = new Map<number, number>();
-  for (const entry of snapshot ?? []) {
-    if (entry.creationTime !== undefined) startTimes.set(entry.pid, entry.creationTime);
-  }
-  const reap = opts.reap ?? ((pids: number[]) => reapShellpers(pids, { startTimes }));
+  const { startTimes, jobNames } = shellperTeardownIdentities(snapshot ?? [], reclaimable);
+  const reap = opts.reap ?? ((pids: number[]) => reapShellpers(pids, { startTimes, jobNames }));
   try {
     await reap(reclaimable);
   } catch (err) {

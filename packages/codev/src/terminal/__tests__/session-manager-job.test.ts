@@ -55,7 +55,7 @@ vi.mock('../shellper-client.js', async (importOriginal) => {
   return { ...actual, ShellperClient: FakeClient };
 });
 
-const { SessionManager } = await import('../session-manager.js');
+const { SessionManager, JOB_ASSIGN_BUDGET_MS } = await import('../session-manager.js');
 const { resetHostPlatformForTests, setHostPlatformForTests } = await import('../../lib/platform.js');
 
 let socketDir: string;
@@ -124,6 +124,22 @@ describe('SessionManager per-session job (Windows)', () => {
     await newManager(logs, helper).createSession(createOpts());
     expect(events).toContain('connect');
     expect(logs.some((l) => l.includes('without a job object'))).toBe(false);
+  });
+
+  it('an assign that outlasts the budget is abandoned: the session connects in time, logged', async () => {
+    setHostPlatformForTests('win32');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const helper = { assign: vi.fn(() => new Promise(() => {})) } as unknown as WindowsJobHelper;
+      const logs: string[] = [];
+      const created = newManager(logs, helper).createSession(createOpts());
+      await vi.advanceTimersByTimeAsync(JOB_ASSIGN_BUDGET_MS);
+      await created;
+      expect(events).toEqual(['connect']);
+      expect(logs).toContain(`Session sess-j: started without a job object: no job assigned within ${JOB_ASSIGN_BUDGET_MS}ms`);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('with no helper, sessions start without a job and that is logged once', async () => {

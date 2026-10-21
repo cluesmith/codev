@@ -133,9 +133,9 @@ async function killWindowsShellperProcesses(worktreePath: string): Promise<numbe
   let killed = 0;
   // One helper for the whole pass, started on the first job: its cold start is paid once.
   const jobs: { helper: WindowsJobHelper | null } = { helper: null };
-  const terminateJob = (name: string) => {
+  const terminateJob = (name: string, rootPid: number) => {
     if (!jobs.helper) jobs.helper = new WindowsJobHelper({ log: (message) => logger.warn(message) });
-    return jobs.helper.terminate(name);
+    return jobs.helper.terminate(name, rootPid);
   };
   try {
     killed = await killMatchingShellpers(census, worktreePath, terminateJob);

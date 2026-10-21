@@ -7,7 +7,18 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { WindowsJobHelper, encodeHelperCommand, sessionJobName, terminateSessionJob, HELPER_SCRIPT, type HelperProcess } from '../lib/windows-job.js';
+import {
+  HELPER_READY_TIMEOUT_MS,
+  HELPER_REQUEST_TIMEOUT_MS,
+  HELPER_SCRIPT,
+  WindowsJobHelper,
+  encodeHelperCommand,
+  sessionJobName,
+  terminateSessionJob,
+  type HelperProcess,
+} from '../lib/windows-job.js';
+import { JOB_ASSIGN_BUDGET_MS } from '../terminal/session-manager.js';
+import { DEFER_PTY_DEADLINE_MS } from '../terminal/shellper-process.js';
 
 type Responder = (request: Record<string, unknown>) => Record<string, unknown> | null;
 
@@ -72,12 +83,15 @@ describe('WindowsJobHelper', () => {
     expect(HELPER_SCRIPT).not.toMatch(/Add-Type/i);
     expect(HELPER_SCRIPT).not.toContain('KILL_ON_JOB_CLOSE');
     expect(HELPER_SCRIPT).toContain('0x0800');
+    // A terminate checks membership; the shellper's handle is query-only.
+    expect(HELPER_SCRIPT).toContain('IsProcessInJob');
+    expect(HELPER_SCRIPT).not.toContain('DUPLICATE_SAME_ACCESS');
   });
 
   it('starts once (single flight) and serves assign and terminate', async () => {
     const f = fakeFactory({
       respond: (req) => {
-        if (req.op === 'terminate') return { ok: true, found: true };
+        if (req.op === 'terminate') return { ok: true, found: true, member: true };
         return { ok: true };
       },
     });
@@ -85,11 +99,11 @@ describe('WindowsJobHelper', () => {
     const [a, b] = await Promise.all([helper.start(), helper.start()]);
     expect([a, b]).toEqual([null, null]);
     expect(await helper.assign('job', 42)).toEqual({ assigned: true });
-    expect(await helper.terminate('job')).toEqual({ ok: true, found: true });
+    expect(await helper.terminate('job', 42)).toEqual({ ok: true, found: true, member: true });
     expect(f.spawnHelper).toHaveBeenCalledTimes(1);
     expect(f.spawned[0].requests.map((r) => [r.op, r.name, r.pid])).toEqual([
       ['assign', 'job', 42],
-      ['terminate', 'job', undefined],
+      ['terminate', 'job', 42],
     ]);
   });
 
@@ -226,9 +240,51 @@ describe('WindowsJobHelper', () => {
     expect(f.spawned[0].killed).toBe(true);
   });
 
+  it('stop fails requests in flight at once', async () => {
+    const f = fakeFactory({ respond: () => null });
+    const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
+    await helper.start();
+    const inFlight = helper.assign('a', 1);
+    await new Promise((r) => setImmediate(r));
+    helper.stop();
+    expect(await inFlight).toEqual({ assigned: false, reason: 'the job helper exited', helperFailure: true });
+  });
+
+  it('an exit after readiness is logged once; a stop is not', async () => {
+    const log = vi.fn();
+    const f = fakeFactory();
+    const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper, log });
+    await helper.start();
+    f.spawned[0].exit(1);
+    await helper.start();
+    f.spawned[1].exit(1);
+    expect(log.mock.calls.map((c) => c[0])).toEqual(['Job helper: the job helper exited (code 1); it restarts on the next request']);
+
+    const quiet = vi.fn();
+    const g = fakeFactory();
+    const stopped = new WindowsJobHelper({ spawnHelper: g.spawnHelper, log: quiet });
+    await stopped.start();
+    stopped.stop();
+    g.spawned[0].exit(0);
+    expect(quiet).not.toHaveBeenCalled();
+  });
+
+  it('marks a request refused because jobs are disabled', async () => {
+    const f = fakeFactory({ ready: { ready: false, error: 'blocked', languageMode: 'ConstrainedLanguage' } });
+    const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
+    const result = await helper.terminate('job', 1);
+    expect(result.disabled).toBe(true);
+    expect(result.helperFailure).toBe(true);
+  });
+
+  it('a cold helper plus one request fits the create budget, which fits the shellper deadline', () => {
+    expect(HELPER_READY_TIMEOUT_MS + HELPER_REQUEST_TIMEOUT_MS).toBeLessThan(JOB_ASSIGN_BUDGET_MS);
+    expect(JOB_ASSIGN_BUDGET_MS).toBeLessThan(DEFER_PTY_DEADLINE_MS);
+  });
+
   it('terminateSessionJob uses the given helper', async () => {
     const f = fakeFactory({ respond: () => ({ ok: true, found: false }) });
     const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
-    expect(await terminateSessionJob('job', helper)).toEqual({ ok: true, found: false });
+    expect(await terminateSessionJob('job', 7, helper)).toEqual({ ok: true, found: false });
   });
 });

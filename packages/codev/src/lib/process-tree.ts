@@ -66,8 +66,8 @@ export interface KillSessionTreeOptions {
    * POSIX.
    */
   jobName?: string;
-  /** Seam (Windows): terminate a job by name. */
-  terminateJob?: (name: string) => Promise<JobResult>;
+  /** Seam (Windows): terminate a job by name, only if the root pid is in it. */
+  terminateJob?: (name: string, rootPid: number) => Promise<JobResult>;
   /** Seam: the process census (must read the table fresh, never a cached copy). */
   census?: () => Promise<ProcessCensusEntry[]>;
   /** Seam (Windows): `taskkill /T /F /PID <pid>`; must not reject. */
@@ -77,7 +77,10 @@ export interface KillSessionTreeOptions {
 }
 
 export interface KillSessionTreeResult {
-  /** True when something was signaled (POSIX) or there was a live tree to kill (Windows). */
+  /**
+   * True when something was signaled (POSIX) or there was a live tree to kill
+   * (Windows: the snapshot found one, or the session job was terminated).
+   */
   signaled: boolean;
   snapshot: TreeSnapshot;
   /**
@@ -88,7 +91,8 @@ export interface KillSessionTreeResult {
   refused?: 'reused-pid';
   /**
    * Windows, with `jobName`: why terminating the job failed. The snapshot pass
-   * still ran; the caller reports this, since orphans may survive.
+   * still ran; the caller reports this, since orphans may survive. Not set
+   * when jobs are disabled outright: that was reported once, when it happened.
    */
   jobError?: string;
 }
@@ -256,21 +260,29 @@ function rootIdentityFailure(root: ProcessCensusEntry, rootStartTime: number | u
   return null;
 }
 
-/** Terminate the session job, if one is named. Returns why it failed, or undefined. */
-async function terminateJobFor(opts: KillSessionTreeOptions): Promise<string | undefined> {
-  if (opts.jobName === undefined) return undefined;
-  const result = await (opts.terminateJob ?? terminateSessionJob)(opts.jobName);
-  if (result.ok) return undefined;
-  let reason = `job ${opts.jobName} not terminated: ${result.error ?? 'unknown failure'}`;
-  if (result.code !== undefined) reason = `${reason} (Win32 error ${result.code})`;
-  return reason;
+interface JobTeardown {
+  /** The job existed, held the root, and was terminated. */
+  terminated: boolean;
+  /** Why terminating it failed, when that needs reporting. */
+  error?: string;
+}
+
+/** Terminate the session job, if one is named and the root is in it. */
+async function terminateJobFor(rootPid: number, opts: KillSessionTreeOptions): Promise<JobTeardown> {
+  if (opts.jobName === undefined) return { terminated: false };
+  const result = await (opts.terminateJob ?? terminateSessionJob)(opts.jobName, rootPid);
+  if (result.ok) return { terminated: result.member === true };
+  if (result.disabled) return { terminated: false };
+  let error = `job ${opts.jobName} not terminated: ${result.error ?? 'unknown failure'}`;
+  if (result.code !== undefined) error = `${error} (Win32 error ${result.code})`;
+  return { terminated: false, error };
 }
 
 /** What became of the session job, for an error raised after it was handled. */
-function jobNote(opts: KillSessionTreeOptions, jobError: string | undefined): string {
-  if (opts.jobName === undefined) return '';
-  if (jobError !== undefined) return `; ${jobError}`;
-  return `; its session job was terminated`;
+function jobNote(job: JobTeardown): string {
+  if (job.error !== undefined) return `; ${job.error}`;
+  if (job.terminated) return '; its session job was terminated';
+  return '';
 }
 
 async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): Promise<KillSessionTreeResult> {
@@ -279,16 +291,18 @@ async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): P
   const kill = opts.kill ?? defaultKill;
 
   // The job holds exactly this session's processes (the name carries the
-  // session id, and an existing name is never joined), so it is ended first
-  // and needs no pid identity check: a reused pid's process is not in it.
-  const jobError = await terminateJobFor(opts);
+  // session id, an existing name is never joined, and the helper terminates
+  // it only when the root is a member), so it is ended first and needs no
+  // creation-time check: a reused pid's process is not in it.
+  const job = await terminateJobFor(rootPid, opts);
+  const jobError = job.error;
 
   let snapshotCensus: ProcessCensusEntry[];
   try {
     snapshotCensus = await census();
   } catch (err) {
     await taskkill(rootPid);
-    throw new Error(`teardown of pid ${rootPid} ran taskkill only, without a descendant snapshot: ${(err as Error).message}${jobNote(opts, jobError)}`);
+    throw new Error(`teardown of pid ${rootPid} ran taskkill only, without a descendant snapshot: ${(err as Error).message}${jobNote(job)}`);
   }
 
   const root = snapshotCensus.find((entry) => entry.pid === rootPid);
@@ -303,7 +317,7 @@ async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): P
     // POSIX group signal on the same trusted pid, while here the pid itself
     // is unverified, and killing it alone could still hit a reused pid.
     throw new Error(
-      `teardown of pid ${rootPid} skipped: the census has no creation time for it, so it cannot be told from a reused pid; its tree is left alive${jobNote(opts, jobError)}`,
+      `teardown of pid ${rootPid} skipped: the census has no creation time for it, so it cannot be told from a reused pid; its tree is left alive${jobNote(job)}`,
     );
   }
   const members = collectTree(snapshotCensus, rootPid, opts.rootStartTime);
@@ -324,7 +338,9 @@ async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): P
       }
     }
   }
-  const result: KillSessionTreeResult = { signaled: members.length > 0, snapshot: { rootPid, members } };
+  // The job usually ends the tree before the census runs, so the snapshot
+  // alone would report nothing killed.
+  const result: KillSessionTreeResult = { signaled: members.length > 0 || job.terminated, snapshot: { rootPid, members } };
   if (jobError !== undefined) result.jobError = jobError;
   return result;
 }

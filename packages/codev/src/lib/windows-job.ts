@@ -13,8 +13,11 @@
  * - One long-lived helper per Tower, started at boot, binds once and serves
  *   line-delimited JSON over stdin/stdout, so a session create pays a round trip
  *   to a warm helper, not a PowerShell start.
- * - Jobs carry BREAKAWAY_OK (a `detached: true` child leaves the session, as
- *   `setsid` does on POSIX) and never KILL_ON_JOB_CLOSE: the helper exiting or
+ * - Jobs carry BREAKAWAY_OK, for a launcher that requests breakaway
+ *   explicitly. Node's `detached: true` does not (libuv never passes
+ *   CREATE_BREAKAWAY_FROM_JOB), so a Node detached child stays in the session:
+ *   there is no `setsid` parity on Windows (measured, audit 1.8). Never
+ *   KILL_ON_JOB_CLOSE: the helper exiting or
  *   Tower restarting must never kill sessions. The helper creates jobs for
  *   shellper pids only, never for itself or Tower.
  * - Degradation is reported, never silent and never thrown at a session
@@ -36,14 +39,15 @@ export function sessionJobName(shellperSessionId: string): string {
  * readiness line, then answers one JSON response per JSON request line:
  *
  * - `{id, op:'assign', name, pid}`: create job `name` (refusing a name that
- *   already exists), set BREAKAWAY_OK, hand `pid` its own handle to the job,
- *   then assign `pid`. A job's NAME lives only while some handle to it is
+ *   already exists), set BREAKAWAY_OK, assign `pid`, then hand `pid` its own
+ *   query-only handle to the job. A job's NAME lives only while some handle to it is
  *   open (member processes do not keep it), so the helper's own handle is not
  *   enough: the helper exits with Tower. The handle duplicated into the
  *   session root keeps the job findable by name for that root's whole life.
  *   It is not inheritable, so the PTY never sees it.
- * - `{id, op:'terminate', name}`: open job `name` and terminate it;
- *   `found:false` when no such job exists (every member already exited).
+ * - `{id, op:'terminate', name, pid}`: open job `name` and terminate it, only
+ *   if `pid` (the session root) is a member (`member:false` otherwise);
+ *   `found:false` when no such job exists (its root already exited).
  *
  * Errors carry the Win32 code. The readiness line reports a bind failure
  * instead of exiting silently, so the caller can name the cause.
@@ -62,6 +66,7 @@ try {
   function Bind($name, [Type]$ret, [Type[]]$params) {
     $m = $type.DefineMethod($name, 'Public, Static, PinvokeImpl', $ret, $params)
     $m.SetCustomAttribute((New-Object Reflection.Emit.CustomAttributeBuilder($ctor, @('kernel32.dll'), $fields, $values)))
+    $m.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
   }
   Bind 'CreateJobObjectW' ([IntPtr]) @([IntPtr], [string])
   Bind 'OpenJobObjectW' ([IntPtr]) @([UInt32], [bool], [string])
@@ -70,6 +75,7 @@ try {
   Bind 'TerminateJobObject' ([bool]) @([IntPtr], [UInt32])
   Bind 'OpenProcess' ([IntPtr]) @([UInt32], [bool], [UInt32])
   Bind 'DuplicateHandle' ([bool]) @([IntPtr], [IntPtr], [IntPtr], [IntPtr].MakeByRefType(), [UInt32], [bool], [UInt32])
+  Bind 'IsProcessInJob' ([bool]) @([IntPtr], [IntPtr], [bool].MakeByRefType())
   Bind 'CloseHandle' ([bool]) @([IntPtr])
   $K = $type.CreateType()
 } catch {
@@ -77,12 +83,15 @@ try {
   exit 1
 }
 $JOB_ALL_ACCESS = [UInt32]0x1F001F
-$JOB_TERMINATE = [UInt32]0x0008
+$JOB_QUERY = [UInt32]0x0004
+# JOB_OBJECT_TERMINATE | JOB_OBJECT_QUERY
+$JOB_TERMINATE_QUERY = [UInt32]0x000C
 # PROCESS_TERMINATE | PROCESS_DUP_HANDLE | PROCESS_SET_QUOTA
 $PROCESS_ACCESS = [UInt32]0x0141
-$DUPLICATE_SAME_ACCESS = [UInt32]0x0002
+$PROCESS_QUERY_LIMITED = [UInt32]0x1000
 $CURRENT_PROCESS = [IntPtr](-1)
 $BREAKAWAY_OK = 0x0800
+$ERROR_FILE_NOT_FOUND = 2
 $ERROR_ALREADY_EXISTS = 183
 function LastError { [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
 function Assign($name, $procId) {
@@ -105,19 +114,35 @@ function Assign($name, $procId) {
     $proc = $K::OpenProcess($PROCESS_ACCESS, $false, [UInt32]$procId)
     if ($proc -eq [IntPtr]::Zero) { return @{ ok = $false; error = 'OpenProcess failed'; code = (LastError) } }
     try {
-      $held = [IntPtr]::Zero
-      if (-not $K::DuplicateHandle($CURRENT_PROCESS, $job, $proc, [ref]$held, [UInt32]0, $false, $DUPLICATE_SAME_ACCESS)) { return @{ ok = $false; error = 'DuplicateHandle failed'; code = (LastError) } }
       if (-not $K::AssignProcessToJobObject($job, $proc)) { return @{ ok = $false; error = 'AssignProcessToJobObject failed'; code = (LastError) } }
+      # Only after a successful assign, so a refused assign leaves no handle
+      # (and no reserved name) behind. Query access is enough to keep the name.
+      $held = [IntPtr]::Zero
+      if (-not $K::DuplicateHandle($CURRENT_PROCESS, $job, $proc, [ref]$held, $JOB_QUERY, $false, [UInt32]0)) { return @{ ok = $false; error = 'DuplicateHandle failed (the process is in a job that cannot be found by name)'; code = (LastError) } }
     } finally { [void]$K::CloseHandle($proc) }
     return @{ ok = $true }
   } finally { [void]$K::CloseHandle($job) }
 }
-function Terminate($name) {
-  $job = $K::OpenJobObjectW($JOB_TERMINATE, $false, $name)
-  if ($job -eq [IntPtr]::Zero) { return @{ ok = $true; found = $false } }
+function Terminate($name, $procId) {
+  $job = $K::OpenJobObjectW($JOB_TERMINATE_QUERY, $false, $name)
+  if ($job -eq [IntPtr]::Zero) {
+    $code = LastError
+    if ($code -eq $ERROR_FILE_NOT_FOUND) { return @{ ok = $true; found = $false } }
+    return @{ ok = $false; error = 'OpenJobObjectW failed'; code = $code }
+  }
   try {
+    # Only a job the session root is a member of is ours to end: the name may
+    # belong to a job this session never joined (an assign refused because the
+    # name existed).
+    $proc = $K::OpenProcess($PROCESS_QUERY_LIMITED, $false, [UInt32]$procId)
+    if ($proc -eq [IntPtr]::Zero) { return @{ ok = $true; found = $true; member = $false } }
+    try {
+      $inJob = $false
+      if (-not $K::IsProcessInJob($proc, $job, [ref]$inJob)) { return @{ ok = $false; error = 'IsProcessInJob failed'; code = (LastError) } }
+      if (-not $inJob) { return @{ ok = $true; found = $true; member = $false } }
+    } finally { [void]$K::CloseHandle($proc) }
     if (-not $K::TerminateJobObject($job, [UInt32]1)) { return @{ ok = $false; error = 'TerminateJobObject failed'; code = (LastError) } }
-    return @{ ok = $true; found = $true }
+    return @{ ok = $true; found = $true; member = $true }
   } finally { [void]$K::CloseHandle($job) }
 }
 Out-Line @{ ready = $true; languageMode = $ExecutionContext.SessionState.LanguageMode.ToString() }
@@ -130,7 +155,7 @@ while ($true) {
     $req = $line | ConvertFrom-Json
     $id = $req.id
     if ($req.op -eq 'assign') { $res = Assign $req.name $req.pid }
-    elseif ($req.op -eq 'terminate') { $res = Terminate $req.name }
+    elseif ($req.op -eq 'terminate') { $res = Terminate $req.name $req.pid }
     else { $res = @{ ok = $false; error = "unknown op $($req.op)" } }
   } catch {
     $res = @{ ok = $false; error = $_.Exception.Message }
@@ -166,8 +191,12 @@ export interface JobResult {
   ok: boolean;
   /** The helper could not serve the request (as opposed to the request failing). */
   helperFailure?: boolean;
+  /** The helper is disabled for good; that was already reported once, when it happened. */
+  disabled?: boolean;
   /** terminate: false when no job had that name. */
   found?: boolean;
+  /** terminate: whether the session root was in the job (it is terminated only then). */
+  member?: boolean;
   error?: string;
   /** Win32 error code, when a call failed. */
   code?: number;
@@ -182,13 +211,17 @@ export type JobAssignOutcome =
    */
   | { assigned: false; reason: string; helperFailure: boolean };
 
+/** Defaults, exported so tests can check they fit inside a session create's assign budget. */
+export const HELPER_READY_TIMEOUT_MS = 12_000;
+export const HELPER_REQUEST_TIMEOUT_MS = 5000;
+
 export interface WindowsJobHelperOptions {
   spawnHelper?: () => HelperProcess;
   /** Reported once per degradation cause. */
   log?: (message: string) => void;
   /** Per-request budget. Default 5s. */
   requestTimeoutMs?: number;
-  /** Budget for the helper's bind and readiness line. Default 20s (a cold PowerShell). */
+  /** Budget for the helper's bind and readiness line. Default 12s (a cold PowerShell measured 3.6-4.8s). */
   readyTimeoutMs?: number;
   /** Restarts allowed within `restartWindowMs` before the helper stays degraded. Default 3. */
   maxRestarts?: number;
@@ -228,8 +261,8 @@ export class WindowsJobHelper {
   constructor(opts: WindowsJobHelperOptions = {}) {
     this.spawnHelper = opts.spawnHelper ?? spawnPowerShellHelper;
     this.log = opts.log ?? (() => {});
-    this.requestTimeoutMs = opts.requestTimeoutMs ?? 5000;
-    this.readyTimeoutMs = opts.readyTimeoutMs ?? 20_000;
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? HELPER_REQUEST_TIMEOUT_MS;
+    this.readyTimeoutMs = opts.readyTimeoutMs ?? HELPER_READY_TIMEOUT_MS;
     this.maxRestarts = opts.maxRestarts ?? 3;
     this.restartWindowMs = opts.restartWindowMs ?? 5 * 60_000;
     this.now = opts.now ?? Date.now;
@@ -323,8 +356,14 @@ export class WindowsJobHelper {
         settle(this.disabledReason ?? `the job helper failed: ${err.message}`);
       });
       proc.on('exit', (code) => {
+        const wasCurrent = this.proc === proc;
         this.reset(proc);
-        if (!sawReady) this.disable(`the job helper exited (code ${code}) before it was ready`);
+        if (!sawReady) {
+          this.disable(`the job helper exited (code ${code}) before it was ready`);
+        } else if (wasCurrent) {
+          // Not a stop(): sessions created until the restart run without a job.
+          this.reportOnce('exit', `the job helper exited (code ${code}); it restarts on the next request`);
+        }
         settle(this.disabledReason ?? 'the job helper exited');
       });
       proc.stdin.on('error', () => {
@@ -342,6 +381,7 @@ export class WindowsJobHelper {
     clearTimeout(pending.timer);
     const result: JobResult = { ok: message.ok === true };
     if (typeof message.found === 'boolean') result.found = message.found;
+    if (typeof message.member === 'boolean') result.member = message.member;
     if (typeof message.error === 'string') result.error = message.error;
     if (typeof message.code === 'number') result.code = message.code;
     pending.resolve(result);
@@ -357,6 +397,10 @@ export class WindowsJobHelper {
     } catch {
       // Already gone
     }
+    this.failPending();
+  }
+
+  private failPending(): void {
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.resolve({ ok: false, error: 'the job helper exited', helperFailure: true });
@@ -379,9 +423,16 @@ export class WindowsJobHelper {
 
   private async request(op: Record<string, unknown>): Promise<JobResult> {
     const failure = await this.start();
-    if (failure !== null) return { ok: false, error: failure, helperFailure: true };
+    if (failure !== null) {
+      const result: JobResult = { ok: false, error: failure, helperFailure: true };
+      if (failure === this.disabledReason) result.disabled = true;
+      return result;
+    }
     const proc = this.proc;
-    if (!proc) return { ok: false, error: 'the job helper exited', helperFailure: true };
+    if (!proc) {
+      this.reportOnce('exit', 'the job helper exited; it restarts on the next request');
+      return { ok: false, error: 'the job helper exited', helperFailure: true };
+    }
     const id = this.nextId++;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -407,9 +458,12 @@ export class WindowsJobHelper {
     return { assigned: false, reason, helperFailure: result.helperFailure === true };
   }
 
-  /** Terminate job `name`. `found: false` when no process is left in it. */
-  terminate(name: string): Promise<JobResult> {
-    return this.request({ op: 'terminate', name });
+  /**
+   * Terminate job `name` if `rootPid` is in it. `found: false` when no job has
+   * that name; `member: false` when the job is not this session's.
+   */
+  terminate(name: string, rootPid: number): Promise<JobResult> {
+    return this.request({ op: 'terminate', name, pid: rootPid });
   }
 
   /** Stop the helper. Jobs are not affected: they carry no kill-on-close. */
@@ -418,6 +472,7 @@ export class WindowsJobHelper {
     if (!proc) return;
     this.proc = null;
     this.ready = null;
+    this.failPending();
     try {
       proc.stdin.end();
     } catch {
@@ -447,11 +502,11 @@ export function setTowerJobHelper(helper: WindowsJobHelper | null): void {
  * helper (an `afx cleanup` with Tower down). Teardown is not a hot path, so the
  * cold start is acceptable there.
  */
-export async function terminateSessionJob(name: string, helper: WindowsJobHelper | null = towerHelper): Promise<JobResult> {
-  if (helper) return helper.terminate(name);
+export async function terminateSessionJob(name: string, rootPid: number, helper: WindowsJobHelper | null = towerHelper): Promise<JobResult> {
+  if (helper) return helper.terminate(name, rootPid);
   const oneShot = new WindowsJobHelper();
   try {
-    return await oneShot.terminate(name);
+    return await oneShot.terminate(name, rootPid);
   } finally {
     oneShot.stop();
   }

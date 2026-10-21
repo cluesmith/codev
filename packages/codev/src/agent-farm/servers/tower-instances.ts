@@ -42,6 +42,7 @@ import {
   listProcessEntries,
   type ProcessEntry,
 } from './architect-session-holder.js';
+import { shellperTeardownIdentities } from '../../terminal/shellper-cmdline.js';
 import {
   autoNumberArchitectName,
   validateArchitectName,
@@ -1410,10 +1411,7 @@ export async function removeArchitect(
       selfPid: process.pid,
       list: () => processSnapshot,
     });
-    const zombieStartTimes = new Map<number, number>();
-    for (const entry of processSnapshot) {
-      if (entry.creationTime !== undefined && zombiePids.includes(entry.pid)) zombieStartTimes.set(entry.pid, entry.creationTime);
-    }
+    const zombieIdentities = shellperTeardownIdentities(processSnapshot, zombiePids);
     if (hasStaleRow || staleTerminalIds.length > 0 || zombiePids.length > 0) {
       try {
         if (hasStaleRow) {
@@ -1430,7 +1428,7 @@ export async function removeArchitect(
       }
       if (zombiePids.length > 0) {
         try {
-          await reapShellpers(zombiePids, { startTimes: zombieStartTimes });
+          await reapShellpers(zombiePids, { startTimes: zombieIdentities.startTimes, jobNames: zombieIdentities.jobNames });
         } catch (err) {
           _deps.log('WARN', `Zombie shellper reap for architect '${name}' incomplete: ${(err as Error).message}`);
         }

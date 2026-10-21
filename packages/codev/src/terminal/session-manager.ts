@@ -40,10 +40,11 @@ import {
 } from './shellper-endpoint.js';
 import { isWindows } from '../lib/platform.js';
 import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
-import { getTowerJobHelper, sessionJobName, type WindowsJobHelper } from '../lib/windows-job.js';
+import { getTowerJobHelper, sessionJobName, type JobAssignOutcome, type WindowsJobHelper } from '../lib/windows-job.js';
 import { WINDOWS_CENSUS_TIMEOUT_MS, listProcessCensus } from '../agent-farm/servers/process-census.js';
 import { SHELLPER_MARKER, isShellperInScope, readJsonStringField, unquoteWindowsCommandLine } from './shellper-cmdline.js';
 import { isDeliberateExit, type ExitMessage } from './shellper-protocol.js';
+import { DEFER_PTY_DEADLINE_MS } from './shellper-process.js';
 
 export interface SessionManagerConfig {
   socketDir: string;
@@ -322,6 +323,13 @@ function clientAuthFor(secret: string | null, shellperSessionId: string, shellpe
   }
   return { secret, expectedSessionId: shellperSessionId, expectedShellperPid: shellperPid };
 }
+
+/**
+ * Spec 1658 Phase 3b: the most a session create waits for its job assign
+ * (a cold helper's start plus the request), leaving the shellper's PTY-less
+ * deadline room for the connect. Past it, the session starts without a job.
+ */
+export const JOB_ASSIGN_BUDGET_MS = DEFER_PTY_DEADLINE_MS - 10_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -856,7 +864,14 @@ export class SessionManager extends EventEmitter {
       }
       return;
     }
-    const outcome = await helper.assign(sessionJobName(sessionId), shellperPid);
+    let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+    const overBudget = new Promise<JobAssignOutcome>((resolve) => {
+      budgetTimer = setTimeout(() => {
+        resolve({ assigned: false, reason: `no job assigned within ${JOB_ASSIGN_BUDGET_MS}ms`, helperFailure: false });
+      }, JOB_ASSIGN_BUDGET_MS);
+    });
+    const outcome = await Promise.race([helper.assign(sessionJobName(sessionId), shellperPid), overBudget]);
+    clearTimeout(budgetTimer);
     if (!outcome.assigned && !outcome.helperFailure) {
       this.log(`Session ${sessionId}: started without a job object: ${outcome.reason}`);
     }
@@ -1549,9 +1564,14 @@ export class SessionManager extends EventEmitter {
         // killOrphanedShellpers pass, or immediately for architects via `afx
         // workspace remove-architect`'s identity-matched zombie reap
         // (tower-instances.ts).
-        killSessionTree(session.pid, { rootStartTime: session.startTime, jobName: sessionJobName(session.shellperSessionId) }).catch((err: Error) => {
-          this.log(`Session ${sessionId}: ${err.message}`);
-        });
+        killSessionTree(session.pid, { rootStartTime: session.startTime, jobName: sessionJobName(session.shellperSessionId) }).then(
+          ({ jobError }) => {
+            if (jobError !== undefined) this.log(`Session ${sessionId}: ${jobError}`);
+          },
+          (err: Error) => {
+            this.log(`Session ${sessionId}: ${err.message}`);
+          },
+        );
         this.emit('session-error', sessionId, new Error(`Max restarts (${maxRestarts}) exceeded`));
         // Remove the exhausted session from the map
         this.removeDeadSession(sessionId);

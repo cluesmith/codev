@@ -91,6 +91,14 @@ interface ConnectionEntry {
 
 // --- ShellperProcess ---
 
+/**
+ * How long a deferred shellper (Spec 1658 Phase 3b) waits for Tower's HELLO
+ * before exiting. Tower bounds its job assign well inside this
+ * (JOB_ASSIGN_BUDGET_MS), so a slow helper degrades the session to "no job"
+ * rather than costing the create.
+ */
+export const DEFER_PTY_DEADLINE_MS = 30_000;
+
 export class ShellperProcess extends EventEmitter {
   private pty: IShellperPty | null = null;
   private server: net.Server | null = null;

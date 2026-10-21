@@ -27,7 +27,7 @@ import { listProcessCensus, type ProcessCensusEntry } from './process-census.js'
 import { getProcessStartTime } from '../../terminal/session-manager.js';
 import { reapShellpers } from './architect-session-holder.js';
 import { isWindows } from '../../lib/platform.js';
-import { SHELLPER_MARKER, isShellperInScope } from '../../terminal/shellper-cmdline.js';
+import { SHELLPER_MARKER, isShellperInScope, shellperTeardownIdentities } from '../../terminal/shellper-cmdline.js';
 
 export { SHELLPER_MARKER };
 
@@ -187,7 +187,7 @@ export interface SweepShellperHusksOptions {
   now?: number;
   getStartTime?: (pid: number) => Promise<number | null>;
   /** Seam, defaults to `reapShellpers`. Rejects when a teardown failed. */
-  reap?: (pids: number[], startTimes?: Map<number, number>) => Promise<void>;
+  reap?: (pids: number[], startTimes?: Map<number, number>, jobNames?: Map<number, string>) => Promise<void>;
 }
 
 /**
@@ -216,13 +216,12 @@ export async function sweepShellperHusks(
     opts.log?.(`Sweeping ${pids.length} husk shellper process(es): ${pids.join(', ')}`);
     // The census creation times (Windows only; POSIX has none) let a teardown
     // refuse a pid reused since the sweep looked.
-    const startTimes = new Map<number, number>();
-    for (const entry of census) {
-      if (entry.creationTime !== undefined && pids.includes(entry.pid)) startTimes.set(entry.pid, entry.creationTime);
-    }
-    const reap = opts.reap ?? ((targets: number[], times?: Map<number, number>) => reapShellpers(targets, { startTimes: times }));
+    // The session job names (Windows, Phase 3b) let the teardown end
+    // descendants no parent link leads to.
+    const { startTimes, jobNames } = shellperTeardownIdentities(census, pids);
+    const reap = opts.reap ?? ((targets: number[], times?: Map<number, number>, names?: Map<number, string>) => reapShellpers(targets, { startTimes: times, jobNames: names }));
     if (startTimes.size > 0) {
-      await reap(pids, startTimes);
+      await reap(pids, startTimes, jobNames);
     } else {
       await reap(pids);
     }

@@ -7,6 +7,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import {
+  shellperTeardownIdentities,
   isShellperInScope,
   readJsonStringField,
   sameWindowsPath,
@@ -100,5 +101,25 @@ describe('sameWindowsPath', () => {
   it('ignores case, separator style and a trailing separator', () => {
     expect(sameWindowsPath('C:\\Users\\Me\\ws', 'c:/users/me/ws/')).toBe(true);
     expect(sameWindowsPath('C:\\Users\\Me\\ws', 'C:\\Users\\Me\\ws2')).toBe(false);
+  });
+});
+
+describe('shellperTeardownIdentities', () => {
+  const entries = [
+    { pid: 1, cmdline: windowsShellperCmdline({ sessionId: 'abc' }), creationTime: 10 },
+    { pid: 2, cmdline: windowsShellperCmdline({ cwd: 'C:\\ws' }), creationTime: 20 },
+    { pid: 3, cmdline: windowsShellperCmdline({ sessionId: 'not-reaped' }), creationTime: 30 },
+  ];
+
+  it('Windows: creation times and session job names for the reaped pids only', () => {
+    setHostPlatformForTests('win32');
+    const { startTimes, jobNames } = shellperTeardownIdentities(entries, [1, 2]);
+    expect(startTimes).toEqual(new Map([[1, 10], [2, 20]]));
+    expect(jobNames).toEqual(new Map([[1, 'Local\\codev-session-abc']]));
+  });
+
+  it('POSIX: no job names', () => {
+    const { jobNames } = shellperTeardownIdentities([{ pid: 1, cmdline: 'node shellper-main.js {"sessionId":"abc"}' }], [1]);
+    expect(jobNames.size).toBe(0);
   });
 });

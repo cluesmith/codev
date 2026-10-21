@@ -143,13 +143,20 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(outcome).toEqual({ assigned: true });
   }, 60_000);
 
-  it('refuses to join a job name that already exists', async () => {
+  it('refuses to join a job name that already exists, and never terminates it for a non-member', async () => {
     const helper = newHelper();
     const name = jobName();
-    expect(await helper.assign(name, idleProcess().pid!)).toEqual({ assigned: true });
-    const second = await helper.assign(name, idleProcess().pid!);
+    const owner = idleProcess();
+    const latecomer = idleProcess();
+    expect(await helper.assign(name, owner.pid!)).toEqual({ assigned: true });
+    const second = await helper.assign(name, latecomer.pid!);
     expect(second.assigned).toBe(false);
     if (!second.assigned) expect(second.reason).toMatch(/already exists/);
+
+    // The latecomer's teardown names the same job, which is not its own.
+    expect(await helper.terminate(name, latecomer.pid!)).toEqual({ ok: true, found: true, member: false });
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(alive(owner.pid!)).toBe(true);
   }, 60_000);
 
   it('terminating the job ends a cmd start /b orphan and a Node detached child', async () => {
@@ -190,7 +197,7 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(leaf).toBeDefined();
     expect(census.some((entry) => entry.pid === leaf!.ppid)).toBe(false);
 
-    expect(await helper.terminate(name)).toEqual({ ok: true, found: true });
+    expect(await helper.terminate(name, root.pid!)).toEqual({ ok: true, found: true, member: true });
 
     expect(await waitFor(() => !alive(root.pid!) && !alive(pids.get('leaf')!) && !alive(pids.get('orphan')!), 10_000)).toBe(true);
     // libuv never requests CREATE_BREAKAWAY_FROM_JOB, so a Node detached child
@@ -223,7 +230,7 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     const leafPid = readPids(pidFile).get('cim-leaf')!;
     leftovers.push(leafPid);
 
-    expect(await helper.terminate(name)).toEqual({ ok: true, found: true });
+    expect(await helper.terminate(name, root.pid!)).toEqual({ ok: true, found: true, member: true });
     expect(await waitFor(() => !alive(root.pid!), 10_000)).toBe(true);
     // Created by the WMI provider host, so never in the caller's job.
     await new Promise((r) => setTimeout(r, 1000));
@@ -240,12 +247,12 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(alive(child.pid!)).toBe(true);
 
     const next = newHelper();
-    expect(await next.terminate(name)).toEqual({ ok: true, found: true });
+    expect(await next.terminate(name, child.pid!)).toEqual({ ok: true, found: true, member: true });
     expect(await waitFor(() => !alive(child.pid!), 10_000)).toBe(true);
   }, 60_000);
 
   it('terminate of an unknown job reports found:false', async () => {
     const helper = newHelper();
-    expect(await helper.terminate(jobName())).toEqual({ ok: true, found: false });
+    expect(await helper.terminate(jobName(), process.pid)).toEqual({ ok: true, found: false });
   }, 60_000);
 });

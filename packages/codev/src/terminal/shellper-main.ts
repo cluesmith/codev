@@ -26,7 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { ShellperProcess, type IShellperPty, type PtyOptions, type ShellperAuth } from './shellper-process.js';
+import { DEFER_PTY_DEADLINE_MS, ShellperProcess, type IShellperPty, type PtyOptions, type ShellperAuth } from './shellper-process.js';
 import { SHELLPER_SECRET_ENV, isPipeEndpoint, removeStaleEndpoint } from './shellper-endpoint.js';
 import { REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
 import { isWindows } from '../lib/platform.js';
@@ -75,9 +75,6 @@ interface ShellperConfig {
    */
   deferPty?: boolean;
 }
-
-/** How long a deferred shellper waits for Tower's HELLO before exiting (cold job helper plus its assign timeout, with margin). */
-const DEFER_PTY_DEADLINE_MS = 30_000;
 
 function createRealPty(): IShellperPty {
   let ptyModule: typeof import('node-pty') | null = null;
