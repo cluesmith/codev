@@ -9,9 +9,9 @@ Phase 1 deliverable. Two parts:
    `main` (2026-10-21, merge base `91ef2e3c7`), each tagged with the phase that fixes it.
 
 CI facts come from dispatches 39555516317, 39555898877 and 39556358109 (after PR #1849 put the
-workflow on `main`). Facts still marked **PENDING** need the owner's Windows machine: the
-launcher survival matrix for the PowerShell console, the VS Code terminal and extension host, and
-SSH. The owner's full probe arrived 2026-10-21T06:59Z.
+workflow on `main`). Owner facts come from their full probe (2026-10-21T06:59Z) and survival
+runs in Windows Terminal and the VS Code terminal. The VS Code extension host row is deferred to
+the PR-gate manual pass, since only the extension can launch from there.
 
 ## 1. Measured facts
 
@@ -79,16 +79,21 @@ process's command line being null therefore means "not ours", never "an empty co
 
 ### 1.4 Job objects and detached survival
 
+**Verdict:** detached children survive every launcher measured: Windows Terminal, the VS Code
+terminal, and the CI runner (parent exit). None of them needs the CIM `Win32_Process.Create`
+relaunch. Phase 4 keeps the job-escape path for launchers that do kill (decision 3), driven by
+the empirical check, and the extension-host row is confirmed at the PR-gate pass.
+
 Source: `probe` `job` and `detached` sections; owner `--survival start`/`check` per launcher.
 
 | Launcher | In job | Kill-on-close | Breakaway allowed | Detached child survives launcher close |
 |---|---|---|---|---|
 | GitHub Actions runner | yes | **yes** | yes (incl. silent) | yes (parent exit only; job close not observable in-run) |
 | Windows Terminal | not measured | not measured | not measured | **yes** (owner, 2026-10-21T06:57Z, PowerShell tab) |
-| PowerShell console (conhost) | PENDING | PENDING | PENDING | PENDING |
-| VS Code integrated terminal | PENDING | PENDING | PENDING | PENDING (owner) |
-| VS Code extension host | PENDING | PENDING | PENDING | PENDING |
-| SSH session | PENDING | PENDING | PENDING | PENDING |
+| PowerShell console (conhost) | not measured | not measured | not measured | optional: on Windows 11 with Windows Terminal as the default console host this is the Windows Terminal row |
+| VS Code integrated terminal | not measured | not measured | not measured | **yes** (owner, 2026-10-21T07:04Z, VS Code window closed) |
+| VS Code extension host | not measured | not measured | not measured | deferred: the probe cannot launch from the extension host; covered by the PR-gate manual pass once the extension starts Tower on Windows (Phase 6) |
+| SSH session | not measured | not measured | not measured | untested: owner does not start Tower over SSH; documented as untested |
 
 PowerShell language mode on each host (Add-Type needs FullLanguage): runner = FullLanguage;
 owner machine = FullLanguage.
