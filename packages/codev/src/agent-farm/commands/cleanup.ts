@@ -20,6 +20,7 @@ import { executeForgeCommand } from '../../lib/forge.js';
 import { sameIssueId } from '../../lib/issue-id.js';
 import { isWindows } from '../../lib/platform.js';
 import { killSessionTree, type KillSessionTreeOptions } from '../../lib/process-tree.js';
+import { removeWorktreeDirectory } from '../lib/worktree-links.js';
 import { WindowsJobHelper, sessionJobName } from '../../lib/windows-job.js';
 import { listProcessCensus, type ProcessCensusEntry } from '../servers/process-census.js';
 import {
@@ -233,6 +234,37 @@ async function deleteRemoteBranch(branch: string, config: Config): Promise<void>
 }
 
 /**
+ * Remove a builder worktree. POSIX: `git worktree remove --force`. Native
+ * Windows (Spec 1658): the session tree is already killed, so the directory is
+ * removed here without following its junctions and links into the workspace
+ * root, retrying while a closing process still holds a handle; the worktree
+ * entry is then pruned so the branch can be deleted.
+ */
+async function removeWorktree(worktreePath: string, config: Config): Promise<void> {
+  if (!isWindows()) {
+    try {
+      await run(`git worktree remove "${worktreePath}" --force`, { cwd: config.workspaceRoot });
+      logger.info('Worktree removed');
+    } catch {
+      logger.warn('Warning: Failed to remove worktree');
+    }
+    return;
+  }
+  try {
+    await removeWorktreeDirectory(worktreePath);
+  } catch (error) {
+    logger.warn(`Warning: Failed to remove worktree: ${(error as Error).message}`);
+    return;
+  }
+  try {
+    await run('git worktree prune', { cwd: config.workspaceRoot });
+  } catch {
+    // The final prune below retries; the directory itself is gone.
+  }
+  logger.info('Worktree removed');
+}
+
+/**
  * Cleanup a builder's worktree and branch
  */
 export async function cleanup(options: CleanupOptions): Promise<void> {
@@ -368,12 +400,7 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     // Remove worktree
     if (existsSync(builder.worktree)) {
       logger.info('Removing worktree...');
-      try {
-        await run(`git worktree remove "${builder.worktree}" --force`, { cwd: config.workspaceRoot });
-        logger.info('Worktree removed');
-      } catch {
-        logger.warn('Warning: Failed to remove worktree');
-      }
+      await removeWorktree(builder.worktree, config);
     }
 
     // Delete local branch

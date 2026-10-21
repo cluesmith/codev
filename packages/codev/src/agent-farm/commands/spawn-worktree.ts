@@ -17,7 +17,6 @@ import {
   readFileSync,
   writeFileSync,
   chmodSync,
-  symlinkSync,
   readdirSync,
   mkdirSync,
   copyFileSync,
@@ -40,6 +39,7 @@ import { isWindows } from '../../lib/platform.js';
 import { toMsysPath } from '../../lib/msys-path.js';
 import { gitBashFor, gitBashScript, gitBashCommand, type Launch } from '../../lib/shell-launch.js';
 import { GIT_BASH_ENV } from '../../lib/git-bash.js';
+import { createWorktreeLink, type WorktreeLinkMethod } from '../lib/worktree-links.js';
 
 // =============================================================================
 // Dependency Checks
@@ -76,6 +76,19 @@ function pathOccupied(p: string): boolean {
 }
 
 /**
+ * Log a link made into the worktree. A copy (native Windows, when neither a
+ * symlink nor a hard link could be made) is reported as a warning: edits in the
+ * worktree do not reach the workspace root.
+ */
+function reportLink(label: string, method: WorktreeLinkMethod): void {
+  if (method === 'copy') {
+    logger.warn(`Copied ${label} from workspace root (no link possible here); edits will not write through`);
+    return;
+  }
+  logger.info(`Linked ${label} from workspace root`);
+}
+
+/**
  * Symlink config files from workspace root into a worktree (if they exist).
  * Shared by createWorktree() and createWorktreeFromBranch().
  *
@@ -96,8 +109,7 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
   const envWorktree = resolve(worktreePath, '.env');
   if (existsSync(envRoot) && !existsSync(envWorktree)) {
     try {
-      symlinkSync(envRoot, envWorktree);
-      logger.info(`Linked .env from workspace root`);
+      reportLink('.env', createWorktreeLink(envRoot, envWorktree, 'file'));
     } catch (error) {
       logger.debug(`Failed to symlink .env: ${error}`);
     }
@@ -113,8 +125,7 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
     const configWorktree = resolve(codevDir, 'config.json');
     if (!existsSync(configWorktree)) {
       try {
-        symlinkSync(configRoot, configWorktree);
-        logger.info(`Linked .codev/config.json from workspace root`);
+        reportLink('.codev/config.json', createWorktreeLink(configRoot, configWorktree, 'file'));
       } catch (error) {
         logger.debug(`Failed to symlink .codev/config.json: ${error}`);
       }
@@ -137,15 +148,13 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
       const srcAbs = resolve(config.workspaceRoot, rel);
       mkdirSync(dirname(target), { recursive: true });
       const isDir = existsSync(srcAbs) && statSync(srcAbs).isDirectory();
-      symlinkSync(srcAbs, target, isDir ? 'dir' : undefined);
-      logger.info(`Linked directory ${rel}/ from workspace root`);
+      reportLink(`directory ${rel}/`, createWorktreeLink(srcAbs, target, 'directory', isDir ? 'dir' : undefined));
     } else {
       for (const rel of globSync(pattern, { cwd: config.workspaceRoot, dot: true, nodir: true })) {
         const target = resolve(worktreePath, rel);
         if (existsSync(target)) continue;
         mkdirSync(dirname(target), { recursive: true });
-        symlinkSync(resolve(config.workspaceRoot, rel), target);
-        logger.info(`Linked ${rel} from workspace root`);
+        reportLink(rel, createWorktreeLink(resolve(config.workspaceRoot, rel), target, 'file'));
       }
     }
   }
