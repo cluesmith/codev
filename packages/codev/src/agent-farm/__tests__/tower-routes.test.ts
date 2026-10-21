@@ -442,6 +442,7 @@ describe('tower-routes', () => {
       expect(isLocalMachineAddress('192.168.1.20', interfaces)).toBe(true);
       expect(isLocalMachineAddress('::ffff:192.168.1.20', interfaces)).toBe(true);
       expect(isLocalMachineAddress('fe80::1', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('fe80::1%eth0', interfaces)).toBe(true);
       expect(isLocalMachineAddress('127.0.0.1', interfaces)).toBe(true);
       expect(isLocalMachineAddress('192.168.1.21', interfaces)).toBe(false);
       expect(isLocalMachineAddress(undefined, interfaces)).toBe(false);

@@ -597,6 +597,10 @@ export function isLocalMachineAddress(
   if (isLoopbackAddress(address)) return true;
   let bare = address;
   if (address.startsWith('::ffff:')) bare = address.slice('::ffff:'.length);
+  // A link-local IPv6 peer may carry a zone suffix (`fe80::1%eth0`); the
+  // interface list reports the bare address.
+  const zone = bare.indexOf('%');
+  if (zone !== -1) bare = bare.slice(0, zone);
   for (const entries of Object.values(interfaces)) {
     for (const entry of entries ?? []) {
       if (entry.address === bare || entry.address === address) return true;

@@ -5,8 +5,9 @@
  * every signal is a hard kill (TerminateProcess), so a SIGTERM would skip the
  * shutdown path: the owner lock stays behind and timers never stop. Instead:
  *
- * 1. Ask Tower to shut down over HTTP (`POST /api/shutdown`, keyed and
- *    loopback-only). Its answer names its pid; wait for that pid to exit.
+ * 1. Ask Tower to shut down over HTTP (`POST /api/shutdown`: keyed, not
+ *    tunnel-borne, from this machine). Its answer names its pid; wait for that
+ *    pid to exit.
  * 2. If Tower did not answer or did not exit in time, kill the listening pid
  *    alone. Never its tree: shellpers are Tower's children by ppid, and
  *    sessions survive a Tower stop by design (`taskkill /T` would end them).

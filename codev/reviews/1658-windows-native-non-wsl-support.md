@@ -90,8 +90,9 @@ Two fixes the Windows runs forced along the way:
 
 ## Tower lifecycle on Windows (Phase 4)
 
-- `afx tower stop` asks Tower to shut down over HTTP (`POST /api/shutdown`, keyed and
-  loopback-only), because a Windows signal is a hard kill that skips the shutdown path (the owner
+- `afx tower stop` asks Tower to shut down over HTTP (`POST /api/shutdown`: keyed, not
+  tunnel-borne, and from this machine, meaning loopback or one of its own interface addresses
+  for a bridge-mode Tower), because a Windows signal is a hard kill that skips the shutdown path (the owner
   lock would stay behind). If Tower does not answer or does not exit within 8 s, the listening
   pid alone is killed. **Deviation from the plan text:** the plan named `killSessionTree` as the
   fallback, but shellpers are Tower's children by ppid, so a tree kill (`taskkill /T`) would end
@@ -115,6 +116,10 @@ Two fixes the Windows runs forced along the way:
   first two alone let a cloud-side actor stop Tower (found by the architect in review). The
   route refuses the tunnel proxy marker, and the proxy blocks the path too. It is registered on
   every platform: the conditions are the same everywhere.
+- `afx tower start` probes readiness on loopback, so with `BRIDGE_MODE=1` and a specific
+  non-loopback `BRIDGE_TOWER_HOST` it reports a readiness timeout although the daemon is up.
+  This holds on every platform and predates this spec; `tower stop` handles that Tower
+  gracefully (Phase 4 iteration 2). Worth its own issue.
 - Follow-up (not needed by the Phase 4 criteria): a Tower that is alive but neither answers HTTP
   nor holds its port is reported "not running" by `tower stop`, because the owner lock's pid
   alone is not trusted (pid reuse). A census-verified lock pid (`tower-server.js` in the command

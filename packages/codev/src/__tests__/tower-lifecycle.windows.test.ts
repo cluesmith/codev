@@ -225,8 +225,10 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
     expect(second.code, second.output).toBe(0);
     const secondPid = ownerPid(tower);
     leftovers.push(secondPid!);
-    expect(afxRun(tower, ['tower', 'stop']).code).toBe(0);
-    expect(fs.readFileSync(path.join(tower.stateDir, 'tower.log'), 'utf8')).not.toContain('Tower is not running');
+    const secondStop = afxRun(tower, ['tower', 'stop']);
+    expect(secondStop.code, secondStop.output).toBe(0);
+    expect(secondStop.output).toContain('Tower stopped');
+    expect(alive(secondPid!)).toBe(false);
   }, 300_000);
 
   it('bridge mode: a Tower bound to this machine\'s LAN address is stopped gracefully, not killed', async () => {
