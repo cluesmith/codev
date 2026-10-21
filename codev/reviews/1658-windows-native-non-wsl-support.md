@@ -115,6 +115,10 @@ Two fixes the Windows runs forced along the way:
   first two alone let a cloud-side actor stop Tower (found by the architect in review). The
   route refuses the tunnel proxy marker, and the proxy blocks the path too. It is registered on
   every platform: the conditions are the same everywhere.
+- Follow-up (not needed by the Phase 4 criteria): a Tower that is alive but neither answers HTTP
+  nor holds its port is reported "not running" by `tower stop`, because the owner lock's pid
+  alone is not trusted (pid reuse). A census-verified lock pid (`tower-server.js` in the command
+  line and a matching creation time) would cover it.
 - Owner-machine launcher checks (Windows Terminal, PowerShell console, VS Code terminal,
   extension host) are part of the PR-gate manual pass.
 
