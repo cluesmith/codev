@@ -56,6 +56,15 @@ three**. Listen 2-7 ms; HELLO→WELCOME round trip 6-10 ms; pipe name
 `\\.\pipe\codev-probe-runneradmin-<uuid>`. On macOS the same code round-trips over a Unix
 socket in ~1 ms. The framing is transport-agnostic, as the spec assumes.
 
+**Phase 2 measurements (windows.yml targeted, runs 39567735755 and 39568235990, windows-latest, Node 22).**
+A real shellper on `\\.\pipe\codev-shellper-<user>-<uuid>` reconnects with replay from a fresh
+`SessionManager`, and input still works. A reconnect expecting another session is identity-refused, and
+a connection without the secret receives zero bytes. Scenario 14: a second, non-admin local user
+cannot open the pipe at all (`EPERM`). Node's default pipe DACL already refuses it, so the
+secret gate is a second layer rather than the only one. One finding fixed along the way: the shellper's
+`closeSync(1)` does not close Tower's stdout pipe on Windows, so Tower now reads the shellper info as
+soon as the JSON is complete instead of waiting for EOF.
+
 ### 1.3 CIM census latency (sizes the Phase 3 cache and the `probeTowerHealth` budget)
 
 Source: `probe` `census` section, three runs of the inline `Win32_Process` query.
