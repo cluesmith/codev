@@ -8,7 +8,7 @@
  * Windows machine.
  *
  * Usage:
- *   node scripts/windows-probe.mjs [--out report.json] [--tower] [--deps]
+ *   node scripts/windows-probe.mjs [--out report.json] [--deps] [--tower] [--tower-published latest]
  *   node scripts/windows-probe.mjs --survival start   # then close this terminal window
  *   node scripts/windows-probe.mjs --survival check   # from a new terminal
  *
@@ -21,8 +21,10 @@
  *   portOwner   Get-NetTCPConnection port-owner lookup latency
  *   job         whether this process runs inside a job object, and its kill-on-close flag
  *   detached    a detached grandchild survives its launching process exiting
- *   deps        (--deps) native-dependency install behavior with a failing node-gyp stub
+ *   deps        (--deps) native-dependency install behavior: prebuilt binary or node-gyp source build
  *   tower       (--tower) `afx tower start` from this checkout, with the tower log captured
+ *   towerPublished (--tower-published <version|latest>) the same, from a global install of the
+ *               published @cluesmith/codev into a throwaway prefix (the path users take)
  *
  * Every section catches its own errors, so one failure never hides the rest.
  */
@@ -328,36 +330,33 @@ process.exit(0);
   return { grandchildPid: pid, survivedLauncherExit: survived };
 }
 
+/** True when npm's output shows an install script falling back to a node-gyp source build. */
+function sourceBuildAttempted(output) {
+  return /node-gyp(\.js)?["']? (rebuild|configure|build)|gyp (info|ERR!|verb)/.test(output);
+}
+
 /**
  * Native dependency install behavior. Installs each pinned dependency into a scratch dir with
- * `npm_config_node_gyp` pointing at a stub that records its invocation and fails, so a source-build
- * fallback is visible instead of silently succeeding on a machine that has a toolchain.
+ * install-script output in the foreground, and reports whether a node-gyp source build was
+ * attempted. (npm ignores `npm_config_node_gyp` for a dependency's own `node-gyp rebuild`, so the
+ * output is the reliable signal.)
  */
 async function probeDeps() {
   const pkg = JSON.parse(readFileSync(path.join(repoRoot, 'packages', 'codev', 'package.json'), 'utf8'));
   const deps = ['node-pty', 'better-sqlite3'].map((n) => ({ name: n, range: pkg.dependencies[n] }));
+  let npm = 'npm';
+  if (isWin) npm = 'npm.cmd';
   const results = [];
   for (const dep of deps) {
     const dir = mkdtempSync(path.join(os.tmpdir(), `codev-probe-${dep.name}-`));
-    const marker = path.join(dir, 'node-gyp-invoked');
-    const stub = path.join(dir, 'node-gyp-stub.js');
-    writeFileSync(stub, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.argv.join(' ')); process.exit(1);\n`);
     writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', private: true }));
     const started = Date.now();
-    let npm = 'npm';
-    if (isWin) npm = 'npm.cmd';
     const r = spawnSync(
       npm,
-      ['install', '--no-audit', '--no-fund', `${dep.name}@${dep.range}`],
-      {
-        cwd: dir,
-        encoding: 'utf8',
-        shell: isWin,
-        windowsHide: true,
-        timeout: 600_000,
-        env: { ...process.env, npm_config_node_gyp: stub },
-      },
+      ['install', '--no-audit', '--no-fund', '--foreground-scripts', `${dep.name}@${dep.range}`],
+      { cwd: dir, encoding: 'utf8', shell: isWin, windowsHide: true, timeout: 600_000 },
     );
+    const output = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
     const installed = r.status === 0;
     let loads = null;
     let loadError = null;
@@ -366,25 +365,22 @@ async function probeDeps() {
       loads = l.status === 0;
       if (!loads) loadError = (l.stderr ?? '').slice(-2000);
     }
+    const v = spawnSync(npm, ['view', `${dep.name}@${dep.range}`, 'version', '--json'], { encoding: 'utf8', shell: isWin, windowsHide: true });
     let version = null;
+    try { version = [JSON.parse(v.stdout)].flat().pop(); } catch { /* leave null */ }
     let prebuilds = null;
-    const depDir = path.join(dir, 'node_modules', dep.name);
-    if (existsSync(path.join(depDir, 'package.json'))) {
-      version = JSON.parse(readFileSync(path.join(depDir, 'package.json'), 'utf8')).version;
-      const pbDir = path.join(depDir, 'prebuilds');
-      if (existsSync(pbDir)) prebuilds = readdirSync(pbDir);
-    }
-    let nodeGypInvoked = false;
-    if (existsSync(marker)) nodeGypInvoked = readFileSync(marker, 'utf8');
+    const pbDir = path.join(dir, 'node_modules', dep.name, 'prebuilds');
+    if (existsSync(pbDir)) prebuilds = readdirSync(pbDir);
     let npmTail = null;
-    if (!installed) npmTail = `${r.stdout ?? ''}\n${r.stderr ?? ''}`.slice(-3000);
+    if (!installed) npmTail = output.slice(-3000);
     results.push({
       name: dep.name,
       range: dep.range,
       version,
+      abi: process.versions.modules,
       installed,
       ms: Date.now() - started,
-      nodeGypInvoked,
+      sourceBuildAttempted: sourceBuildAttempted(output),
       loads,
       loadError,
       bundledPrebuilds: prebuilds,
@@ -415,19 +411,26 @@ async function freePort() {
   return port;
 }
 
+/** Kill a process tree regardless of what `afx tower stop` managed. */
+function killTree(pid) {
+  if (!Number.isFinite(pid) || !isAlive(pid)) return false;
+  if (isWin) {
+    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
+  } else {
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  }
+  return true;
+}
+
 /**
- * Start Tower from this checkout (built), capture the outcome and the tower log, then stop it.
- *
- * Isolated from any real install on the machine: a throwaway CODEV_AGENT_FARM_DIR (its own
+ * Start a Tower with the given afx entry point, capture the outcome and the tower log, then stop
+ * it. Isolated from any real install on the machine: a throwaway CODEV_AGENT_FARM_DIR (its own
  * global.db, owner lock and tower.log), a throwaway SHELLPER_SOCKET_DIR, and a free port instead
  * of 4100, so the probe never starts, stops, sweeps, or reconciles against a developer's running
- * Tower or its shellpers.
+ * Tower or its shellpers. If `afx tower stop` cannot stop it (it cannot on Windows today), the
+ * daemon PID from the tower log is killed directly, so the probe never leaks a Tower.
  */
-async function probeTower() {
-  const afx = path.join(repoRoot, 'packages', 'codev', 'bin', 'afx.js');
-  if (!existsSync(path.join(repoRoot, 'packages', 'codev', 'dist'))) {
-    return { skipped: 'packages/codev is not built (run pnpm build first)' };
-  }
+async function runIsolatedTower(afx) {
   const stateDir = mkdtempSync(path.join(os.tmpdir(), 'codev-probe-tower-'));
   const port = String(await freePort());
   // SHELLPER_SOCKET_DIR too: the boot-time orphan sweep is scoped by socket dir, so a shared
@@ -440,20 +443,71 @@ async function probeTower() {
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { out += d; });
-    const timer = setTimeout(() => { child.kill(); resolve({ timedOut: true, ms: Date.now() - started, output: out }); }, 120_000);
+    const timer = setTimeout(() => { killTree(child.pid); resolve({ timedOut: true, ms: Date.now() - started, output: out }); }, 120_000);
     child.on('exit', (code) => { clearTimeout(timer); resolve({ timedOut: false, code, ms: Date.now() - started, output: out }); });
   });
   let towerLog = null;
-  if (existsSync(logFile)) towerLog = readFileSync(logFile).toString().slice(-12000);
+  if (existsSync(logFile)) towerLog = readFileSync(logFile).toString();
   const stop = spawnSync(process.execPath, [afx, 'tower', 'stop', '--port', port], { env, encoding: 'utf8', windowsHide: true, timeout: 60_000 });
-  try { rmSync(stateDir, { recursive: true, force: true }); } catch { /* a just-stopped daemon may still hold a handle */ }
+  let daemonPid = null;
+  const m = (towerLog ?? '').match(/Spawned tower server with PID (\d+)/);
+  if (m) daemonPid = parseInt(m[1], 10);
+  const daemonAliveAfterStop = daemonPid !== null && isAlive(daemonPid);
+  if (daemonAliveAfterStop) killTree(daemonPid);
+  await new Promise((res) => setTimeout(res, 500));
+  try { rmSync(stateDir, { recursive: true, force: true }); } catch { /* a just-killed daemon may still hold a handle */ }
+  let logTail = null;
+  if (towerLog) logTail = towerLog.slice(-12000);
   return {
     stateDir,
     port: Number(port),
     start: { ...start, output: start.output.slice(-6000) },
-    towerLog,
+    towerLog: logTail,
     stop: { code: stop.status, output: `${stop.stdout ?? ''}${stop.stderr ?? ''}`.slice(-3000) },
+    daemonPid,
+    daemonAliveAfterStop,
   };
+}
+
+/** Tower from this checkout (requires packages/codev built). */
+async function probeTower() {
+  if (!existsSync(path.join(repoRoot, 'packages', 'codev', 'dist'))) {
+    return { skipped: 'packages/codev is not built (run pnpm build first)' };
+  }
+  return runIsolatedTower(path.join(repoRoot, 'packages', 'codev', 'bin', 'afx.js'));
+}
+
+/**
+ * Tower from the PUBLISHED package, installed globally into a throwaway prefix: the path a user
+ * takes (`npm install -g @cluesmith/codev`), which the 2026-09-09 field test used.
+ */
+async function probeTowerPublished(spec) {
+  const prefix = mkdtempSync(path.join(os.tmpdir(), 'codev-probe-global-'));
+  let npm = 'npm';
+  if (isWin) npm = 'npm.cmd';
+  const started = Date.now();
+  const r = spawnSync(
+    npm,
+    ['install', '-g', '--prefix', prefix, '--no-audit', '--no-fund', '--foreground-scripts', `@cluesmith/codev@${spec}`],
+    { encoding: 'utf8', shell: isWin, windowsHide: true, timeout: 900_000 },
+  );
+  const output = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
+  const install = {
+    spec,
+    code: r.status,
+    ms: Date.now() - started,
+    sourceBuildAttempted: sourceBuildAttempted(output),
+    tail: output.slice(-4000),
+  };
+  // npm's global layout: <prefix>/node_modules on Windows, <prefix>/lib/node_modules elsewhere.
+  let pkgDir = path.join(prefix, 'lib', 'node_modules', '@cluesmith', 'codev');
+  if (isWin) pkgDir = path.join(prefix, 'node_modules', '@cluesmith', 'codev');
+  let version = null;
+  if (existsSync(path.join(pkgDir, 'package.json'))) version = JSON.parse(readFileSync(path.join(pkgDir, 'package.json'), 'utf8')).version;
+  let tower = null;
+  if (r.status === 0) tower = await runIsolatedTower(path.join(pkgDir, 'bin', 'afx.js'));
+  try { rmSync(prefix, { recursive: true, force: true }); } catch { /* best effort */ }
+  return { install, version, tower };
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +569,8 @@ async function main() {
   ];
   if (flag('--deps')) sections.push(await section('deps', probeDeps));
   if (flag('--tower')) sections.push(await section('tower', probeTower));
+  const published = option('--tower-published');
+  if (published) sections.push(await section('towerPublished', () => probeTowerPublished(published)));
   const report = { generatedAt: new Date().toISOString(), sections };
   const json = JSON.stringify(report, null, 2);
   const out = option('--out');

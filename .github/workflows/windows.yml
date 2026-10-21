@@ -20,7 +20,7 @@ on:
         required: false
         default: ''
       tower:
-        description: 'Probe: also try `afx tower start` from the built checkout'
+        description: 'Probe: also try `afx tower start` (built checkout on Node 22; published package on every leg)'
         type: boolean
         required: false
         default: false
@@ -70,6 +70,10 @@ jobs:
       - name: Probe Tower start
         if: ${{ inputs.tower && matrix.node == '22' }}
         run: node scripts/windows-probe.mjs --tower --out "$RUNNER_TEMP/probe-tower.json"
+
+      - name: Probe Tower start from the published package (global install)
+        if: ${{ inputs.tower }}
+        run: node scripts/windows-probe.mjs --tower-published latest --out "$RUNNER_TEMP/probe-published-node${{ matrix.node }}.json"
 
       - name: Upload probe reports
         if: always()
