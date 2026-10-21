@@ -23,10 +23,10 @@ plan_phases:
     status: complete
   - id: phase_7
     title: Runnable-worktree links and worktree removal on Windows
-    status: in_progress
+    status: complete
   - id: phase_8
     title: ConPTY render-gate validation captures
-    status: pending
+    status: in_progress
   - id: phase_9
     title: Codev IDE server on native Windows
     status: pending
@@ -36,7 +36,7 @@ plan_phases:
   - id: phase_11
     title: Windows CI leg and install docs
     status: pending
-current_plan_phase: phase_7
+current_plan_phase: phase_8
 gates:
   spec-approval:
     status: approved
@@ -50,8 +50,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -214,7 +214,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1658/codev/projects/1658-windows-native-non-wsl-support/1658-phase_7-iter1-claude.txt
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-21T21:53:27.454Z'
+updated_at: '2026-10-21T21:56:48.189Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
@@ -237,6 +237,8 @@ context_refreshes:
   - boundary: plan-phase:phase_7
     at: '2026-10-21T21:25:06.714Z'
     acknowledged_at: '2026-10-21T21:26:08.148Z'
+  - boundary: plan-phase:phase_8
+    at: '2026-10-21T21:56:48.189Z'
 force_advanced:
   phase: phase_3
   iteration: 3
