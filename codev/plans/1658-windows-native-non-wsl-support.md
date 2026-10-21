@@ -384,10 +384,13 @@ job is unavailable.
 - **Nested jobs (condition 4).** The shellper may already be in a job, as on the GitHub runner,
   so assignment relies on nested-job support (Windows 8+). A failed assignment is a degradation
   for that session, never a thrown error. The Win8+ requirement goes under Windows limitations.
-- **Job limits.** `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, so a child spawned with explicit breakaway
-  (`detached: true`) still leaves the session, matching `setsid` on POSIX. No
+- **Job limits.** `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, so a launcher that requests breakaway
+  explicitly leaves the session. Node's `detached: true` does not request it (measured; see the
+  acceptance criteria), so it gets no `setsid` parity (ruling (c): BREAKAWAY_OK is kept). No
   `KILL_ON_JOB_CLOSE`: the helper exiting or Tower restarting must never kill sessions, because
-  shellpers survive Tower by design. The job lives as long as any process is in it.
+  shellpers survive Tower by design. The job lives as long as any process is in it, but its
+  NAME lives only while a handle is open, so the helper duplicates a non-inheritable job
+  handle into the shellper (measured fix, audit 1.8).
 - **Teardown (condition 6).** The job is terminated first, then the Phase 3 snapshot pass runs.
   The POSIX code path stays byte-identical. `killSessionTree` on Windows asks for `terminate {name}` once a job name is
   known (persisted shellper session id, v19). If Tower's helper is not running (an `afx cleanup`
@@ -435,7 +438,9 @@ target, stop and report to the architect before building further.
   red, and `.fails` is removed. Before un-pinning, confirm that the test's own setup (the
   `cmd start /b` orphan and the wait on the intermediate) still works: `it.fails` also "passes"
   when setup breaks. A `cmd start /b` orphan in a real shellper session does not
-  survive `killSession`. A `detached: true` grandchild does survive (breakaway parity).
+  survive `killSession`. A Node `detached: true` child ends with its session on Windows
+  (measured, runs 39581676362 and 39582608788: libuv never requests breakaway; no setsid
+  parity; architect ruling 2026-10-21T10:20Z).
 - [ ] Windows (`targeted`): a Tower restart (helper exit) does not kill a running session.
 - [ ] Unit (seam `win32`, injected helper): job assigned before the connect/HELLO; helper failure
   or `assign` timeout → degradation logged once, session still created, teardown falls back to
@@ -452,7 +457,8 @@ target, stop and report to the architect before building further.
 
 - Unit: helper protocol (fake helper process), ordering, degradation, teardown with and without
   a job name.
-- Windows CI: real job assignment, `cmd start /b` orphan, detached breakaway, helper restart.
+- Windows CI: real job assignment, `cmd start /b` orphan, a Node detached child ending with its
+  session, a CIM launch escaping it, helper exit.
 
 ---
 

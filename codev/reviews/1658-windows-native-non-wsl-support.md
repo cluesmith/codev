@@ -66,6 +66,27 @@ Two fixes the Windows runs forced along the way:
   configuration (Phase 3).
 - Per-session Job Objects need Windows 8+ for nested jobs, and Full Language Mode to bind the
   Win32 calls; otherwise their absence is reported (Phase 3b).
+- A Node `detached: true` child ends with its session on Windows. Measured (runs 39581676362 and
+  39582608788): libuv never requests job breakaway, so the session job keeps it, and there is
+  no setsid parity. In-tree inventory of detached spawns (architect check, 2026-10-21, so it
+  need not be redone): the shellper spawn in `session-manager.ts` runs from Tower, not from a
+  session; `ide-server.ts` is spawned by Tower and follows Tower; porch `index.ts` and
+  `checks.ts` use `detached` only to group-kill porch's own children, which must not outlive the
+  session, so the job is an improvement there; `utils/shell.ts` was deleted in Phase 3. The one
+  real casualty is the Tower daemon start in `tower.ts` (a Tower started from inside a session),
+  which Phase 4 handles.
+- A process created through CIM `Win32_Process.Create` from inside a session escapes the
+  session job (measured, `JOB-CIM`): the WMI provider host creates it. Phase 4's daemon start
+  relies on this.
+- A session job is found by name only while its shellper is alive. A job's name lives as long
+  as some handle to it is open, and the shellper holds the only long-lived one (duplicated in
+  by the helper, so a helper exit or a Tower restart does not lose it). If the shellper itself
+  dies and leaves descendants, terminate-by-name finds nothing, and those orphans fall back to
+  the Phase 3 snapshot kill and the orphan and husk sweeps. The Phase 3b acceptance "a
+  `cmd start /b` orphan does not survive `killSession`" is the shellper-alive case.
+- A shellper whose Tower died between spawning it and connecting is not in a job if a
+  restarted Tower reconnects within the 30 s PTY-less deadline: the reconnect HELLO spawns
+  the PTY, and no assign is made on reconnect. Its teardown falls back to the snapshot path.
 
 ## Flaky Tests
 
