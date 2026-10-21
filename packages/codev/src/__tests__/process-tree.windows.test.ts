@@ -309,7 +309,9 @@ describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees
     const started = Date.now();
     const result = await runCheck(
       'tree',
-      `"${process.execPath}" ${treeScript} root ${pidFile} plain`,
+      // A check string is a bash string (it runs in Git Bash, Spec 1658 Phase 6):
+      // single quotes keep a Windows path's backslashes.
+      `'${process.execPath}' '${treeScript}' root '${pidFile}' plain`,
       workDir,
       { PROJECT_ID: '1658', PROJECT_TITLE: 'tree' },
       5_000,

@@ -329,9 +329,19 @@ describe.skipIf(!onWindows)('Launcher routing on native Windows', () => {
     expect(alive(pids.server)).toBe(true);
     expect(alive(pids.child)).toBe(true);
 
+    const terminals = await api('GET', '/api/terminals');
+    console.log(`DEV-TERMINALS ${JSON.stringify(terminals.json)}`);
     const stopped = run(afx, ['dev', '--stop'], workspace);
+    console.log(`DEV-STOP ${JSON.stringify(stopped.output)}`);
     expect(stopped.code, stopped.output).toBe(0);
-    await waitFor(() => !alive(pids.server) && !alive(pids.child), 30_000, 'the dev server tree to exit');
+    expect(stopped.output).toContain('Stopped dev server');
+    try {
+      await waitFor(() => !alive(pids.server) && !alive(pids.child), 30_000, 'the dev server tree to exit');
+    } catch (err) {
+      const log = fs.readFileSync(path.join(stateDir, 'tower.log'), 'utf8').split('\n').slice(-40).join('\n');
+      console.log(`DEV-TOWER-LOG\n${log}\nalive server=${alive(pids.server)} child=${alive(pids.child)}`);
+      throw err;
+    }
   }, 300_000);
 
   it('cleans up the spawned sessions', async () => {
