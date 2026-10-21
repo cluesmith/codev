@@ -1,7 +1,7 @@
 id: '1658'
 title: windows-native-non-wsl-support
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-21T05:23:41.123Z'
+updated_at: '2026-10-21T05:23:43.085Z'
+context_refreshes:
+  - boundary: enter:plan
+    at: '2026-10-21T05:23:43.084Z'
