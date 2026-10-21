@@ -93,7 +93,8 @@ Linux user, under two prerequisites: Git for Windows and jq.
     `postSpawn`, and `devCommand`.
 - `codev doctor` on Windows checks the Windows prerequisites and explains anything missing.
 - Docs present two supported Windows paths: **native + Git Bash** and **WSL 2**.
-- A Windows CI leg keeps the support from rotting.
+- An on-demand Windows CI workflow lets maintainers check Windows before a release, or whenever
+  a change touches platform code.
 
 The macOS and Linux paths behave exactly as before. Every Windows change is a platform branch
 or an abstraction whose POSIX implementation is today's code.
@@ -153,8 +154,7 @@ disabled, unless it says otherwise.
   process-age race guard the POSIX sweep uses.
 - [ ] Other non-admin local users cannot **read session data from, or control,** a shellper. An
   unauthenticated connection receives zero bytes, and every frame it sends is ignored before the
-  connection is dropped. Whether OS-level *non-connectability* is also required is Open
-  Question 6.
+  connection is dropped. OS-level non-connectability is not required (decision 7).
 
 **Launchers and forge**
 - [ ] Paths flow correctly in both directions across the Git Bash boundary: Windows paths passed
@@ -187,11 +187,18 @@ disabled, unless it says otherwise.
 
 **Non-regression and CI**
 - [ ] The macOS and Linux unit, integration, CLI e2e and post-release e2e suites pass unchanged.
-- [ ] `windows-latest` runs the unit, CLI e2e, and post-release e2e workflows. It is introduced
-  as non-required, *pending owner confirmation at the spec gate* (see Open Questions).
+- [ ] A Windows CI workflow (`windows-latest`) runs the unit, CLI e2e, and post-release e2e
+  suites **on demand only** (manual dispatch). It never runs automatically on PRs or pushes and
+  is never a required check.
+- [ ] Shellper connections on macOS/Linux are unchanged: the same Unix-socket endpoint, the same
+  handshake, and no secret. The Windows-only per-session secret never applies on POSIX. Upgrade
+  compatibility with sessions started by an older release is therefore a non-issue on POSIX,
+  and there is no existing Windows install base to stay compatible with.
 - [ ] The test suite no longer hardcodes `/tmp` or POSIX-only helpers in tests that are meant to
   run on Windows. Tests that are inherently POSIX-only are explicitly skipped on win32, with a
-  reason.
+  reason. Test helpers that use `/tmp` *deliberately* to keep Unix-socket paths under the
+  104-byte macOS `sun_path` limit keep doing so on POSIX. macOS's `os.tmpdir()` (`/var/folders/...`)
+  is long enough to overflow that limit.
 
 **Docs**
 - [ ] The install docs present native Windows (Git for Windows + jq, plus Node ≥ 20, 22
@@ -228,7 +235,8 @@ Decisions. Quoted in substance:**
 6. **Prerequisites and docs.** Git for Windows and jq are hard Windows prerequisites, checked by
    `codev doctor`, including a CRLF warning for user-authored `postSpawn` scripts. WSL 2 stays a
    documented, supported alternative; docs present native + Git Bash and WSL 2 as two paths.
-7. **Windows CI leg.** Recommended, but the owner confirms it at the spec gate: add
+7. **Windows CI leg.** *(Superseded at the spec gate, 2026-10-21. See "Decisions at the spec
+   gate" below: the workflow is on-demand only.)* Original text: add
    `windows-latest` to the unit, CLI e2e, and post-release e2e workflows. It starts as
    non-required during stabilization and is then promoted to a required check.
 
@@ -274,11 +282,19 @@ The ruling also named known items the spec must address:
   which covers every external tool the forge scripts use except `jq` and the provider CLIs `gh`,
   `glab` and `tea`. The provider CLIs are separate installs on every platform already.
 - Windows 10 1809+ (ConPTY) is the floor. Windows 10 22H2 and Windows 11 x64 are the tested
-  targets. Windows on ARM is not a tested target in this project (see Open Questions).
+  targets. x64 is the supported architecture. Windows on ARM64 is supported only if node-pty and
+  better-sqlite3 ship win32-arm64 prebuilds, verified in the audit phase. Otherwise the docs
+  state ARM64 is unsupported, because a source build needs a compiler toolchain.
 - The VS Code extension already branches for Windows where it touches the OS (for example
   Explorer reveal). It needs only launcher fixes (`afx`/`.cmd` shims), not a redesign.
-- GitHub-hosted `windows-latest` runners include Git for Windows, so CI exercises the same
-  Git Bash path users have.
+- GitHub-hosted `windows-latest` runners include Git for Windows, so the on-demand CI
+  workflow exercises the same Git Bash path users have.
+- Windows PowerShell 5.1 (`powershell.exe`) ships with every supported Windows version. Codev
+  uses it as needed for OS integration that Node does not expose: the process census, the
+  port-owner lookup, and relaunching Tower outside a kill-on-close job. These are inline
+  commands (`-NoProfile -NonInteractive -Command`), never `.ps1` scripts, so script execution
+  policy does not apply. They are not twins of forge scripts; ruling 4's Git-Bash-only rule
+  governs *scripts*.
 - Claude Code honors `CLAUDE_CODE_GIT_BASH_PATH` on Windows, so a builder's own Bash tool uses
   the same Git Bash Codev resolved.
 - Windows' 260-character MAX_PATH limit can only be lifted machine-wide with admin rights
@@ -289,8 +305,8 @@ The ruling also named known items the spec must address:
 - Ruling 4's "PowerShell is the default interactive shell for architect and shell terminals" is
   read as follows. The `.codev/config.json` *shell* role defaults to PowerShell on Windows. Agent
   terminals still run their configured harness command directly (`shell.architect: claude`), as
-  they do on POSIX. A terminal that needs a host shell uses PowerShell. This is confirmed at the
-  spec gate (Open Question 10).
+  they do on POSIX. A terminal that needs a host shell uses PowerShell. Confirmed at the spec gate
+  (decision 4): the architect spawns builders with no user intervention.
 
 ## Solution Approaches
 
@@ -328,8 +344,8 @@ fallback**. Each has competing approaches below.
   already-connected read-only client, because the server writes nothing before HELLO is
   verified. Name squatting is mitigated by unguessable UUID names and by the client verifying the
   WELCOME (session id and pid). Under the secret gate another user *can* open a handle to the
-  pipe but gets nothing from it. True non-connectability needs a restrictive DACL (Open
-  Question 6).
+  pipe but gets nothing from it. **Decided at the spec gate: option 2, Windows only.** POSIX
+  keeps its `0600` socket and today's handshake unchanged.
 - **Pros:** smallest conceptual change; one framing; reuses the existing persistence model.
 - **Cons:** each file-based assumption needs a platform branch.
 - **Risk:** medium.
@@ -383,13 +399,16 @@ Node cannot request job breakaway. The spec requires the following:
   - `afx tower start` from PowerShell / Windows Terminal;
   - from the VS Code extension;
   - from CI.
-- **If Tower detects it is inside a kill-on-close job**, that launch context cannot keep the
-  persistence guarantee. A warning alone is not parity. The two candidate behaviors are Open
-  Question 3:
-  1. **Relaunch outside the job.** A process created through WMI's `Win32_Process.Create` or a
-     one-shot scheduled task is parented outside the caller's job, with no native code.
-  2. **Refuse.** Refuse to start Tower in that context, with an actionable error naming a
-     supported launch path.
+- **Measure first.** The audit phase determines which common launchers (Windows Terminal,
+  PowerShell console, VS Code integrated terminal and extension host, SSH sessions, CI runners)
+  actually place children in a kill-on-close job.
+- **If Tower's launcher is a kill-on-close job**, `afx tower start` launches the daemon
+  **outside the job** through the built-in PowerShell. A process created via CIM/WMI
+  `Win32_Process.Create` is parented by the WMI service, not the caller, so it is not in the
+  caller's job. No native code is needed. A warning alone is not parity.
+- **If that relaunch is itself blocked by policy**, `afx tower start` refuses with an
+  actionable error naming a supported launch path. It never starts a Tower whose builders would
+  silently die with the launcher.
 
 ### Area C: Process introspection (census, start time, port owner)
 
@@ -422,12 +441,11 @@ census (pid, ppid, cmdline), process start time, the port-to-PID owner, and live
   binary on the hot path.
 - **Risk:** medium.
 
-**The census provider itself** has two options, and the choice is an open question for the
-owner. Both must satisfy the field requirements above.
-1. A `powershell.exe -NoProfile -NonInteractive -Command` CIM query. Inline commands are not
-   governed by script execution policy, but Constrained Language Mode or AppLocker may still
-   apply.
-2. A dependency that bundles a small native census binary.
+**The census provider (decided at the spec gate)** is the built-in Windows PowerShell: an
+inline `powershell.exe -NoProfile -NonInteractive -Command` CIM query against `Win32_Process`
+(pid, ppid, command line, creation time). The same mechanism serves port-owner lookup
+(`Get-NetTCPConnection`). Inline commands are not governed by script execution policy. No
+bundled binary and no new dependency.
 
 Note that `wmic` is removed on current Windows 11, and Git Bash's MSYS `ps` cannot see native
 command lines.
@@ -480,9 +498,14 @@ a shared resolver. That spreads the System32-WSL trap across every site.
 ### Area F: Interactive shell default
 
 On Windows the default for `shell.shell`, and the dashboard and `afx shell` fallback, is
-PowerShell. We prefer `pwsh` (PowerShell 7) if installed and fall back to `powershell.exe`
-(5.1, always present). Architect and builder commands are unchanged (`claude`), apart from shim
-resolution.
+PowerShell: the built-in Windows PowerShell 5.1 (`powershell.exe`), with no auto-detection of
+PowerShell 7. A user who prefers PowerShell 7 sets `shell.shell: "pwsh"` in
+`.codev/config.json`. Architect and builder commands are unchanged (`claude`), apart from shim
+resolution. The architect spawns builders with no human intervention, exactly as on POSIX.
+
+**Console windows.** Every background process Codev starts on Windows (the Tower daemon,
+shellpers, the IDE server, detached helpers) is spawned with its console window hidden. No
+empty console window appears on the desktop, so closing one cannot kill Tower.
 
 An existing `.codev/config.json` carrying `shell: "bash"` (today's scaffold default) is
 interpreted on Windows as **Git Bash**, never as System32 `bash.exe`, so existing configs cannot
@@ -490,44 +513,44 @@ launch WSL.
 
 ## Open Questions
 
-**Critical (blocks the plan)**
-1. **Windows CI leg commitment** (ruling 7 is "recommended, owner confirms at the spec gate").
-   Does the owner confirm `windows-latest` on unit, CLI e2e, and post-release e2e, introduced
-   non-required and promoted to required after stabilization? What is the promotion criterion?
-   We propose N consecutive green runs on main without a Windows-only flake.
-2. **Process census provider (Area C).** The provider must return pid, ppid, command line *and
-   creation time*, or the Windows husk sweep and teardown snapshot become no-ops (see Area C).
-   Ruling 4 makes Git Bash "the only plumbing shell" for scripts. Is an inline
-   `powershell.exe -Command` CIM query, used only for the census and not as a script, acceptable
-   under that ruling? Or does the owner prefer a bundled census binary? A third option, "DB-registered PIDs plus `taskkill` only", **forfeits** the husk sweep
-   and the re-parented-descendant guarantee, so it does not meet full parity. The recommended C1
-   keeps the census off the reconnect hot path either way.
+### Decisions at the spec gate (user feedback, 2026-10-21)
 
-**Important (shapes the design)**
-3. **Kill-on-close job context.** If Tower is launched inside a kill-on-close job (so shellpers
-   would die with it), should Codev relaunch Tower outside the job (WMI `Win32_Process.Create`
-   or a one-shot scheduled task, both without native code but each subject to policy), or refuse
-   to start with an actionable error? Detect-and-warn alone does not meet parity.
-4. **PowerShell flavor.** Should we prefer `pwsh` 7 when present and fall back to Windows
-   PowerShell 5.1, or always use 5.1 for predictability? (Proposed: prefer `pwsh`.)
-5. **Windows on ARM64.** Out of scope for this project (documented as untested), or a supported
-   target?
-6. **Pipe access control.** Is the per-session HELLO secret (A1, option 2) acceptable as the
-   owner-only guarantee, or does the owner require OS-level pipe ACLs (native interop)?
-7. **Owner-only files** (local key, cloud config). Is setting an explicit current-user-only ACL
-   at creation time required, or is reliance on the default per-user profile ACL (`%USERPROFILE%`
-   is already private to the user on default installs) acceptable, documented as such?
+These were open questions in the reviewed draft. They are now settled.
 
-**Nice-to-know**
-8. Should doctor also report Developer Mode and `core.autocrlf`, so the user knows ahead of time
-   which link mode and line-ending behavior they will get? (Long paths are now a success
-   criterion.)
-9. Should `afx tower start` on Windows hide the daemon console window (`windowsHide`), which
-   matters for UX in the VS Code extension and the CLI?
+1. **Windows CI:** create the Windows CI workflow, but run it **on demand only** (manual
+   dispatch). It never runs automatically and is never a required check. This supersedes ruling
+   7's non-required-then-required plan, so no promotion criterion is needed.
+2. **Process census and other OS integration:** use the built-in Windows PowerShell as needed
+   ("don't reinvent the wheel"). Inline CIM queries serve the census (with creation time),
+   port-owner lookup, and relaunching outside a kill-on-close job. No bundled binary, no native
+   addon.
+3. **Kill-on-close job:** measure which launchers do this. Where one does, relaunch Tower outside
+   the job through built-in PowerShell (CIM `Win32_Process.Create`). Refuse with an actionable
+   error only if that relaunch is blocked (see Area B).
+4. **Agent terminals:** the architect and builder terminals launch their harness directly, and
+   the architect spawns builders with **no user intervention**, exactly as on POSIX. PowerShell
+   is the default only for plain human shell terminals (the `shell` role). This resolves the
+   ruling-4 reading.
+5. **PowerShell version:** the built-in Windows PowerShell 5.1, everywhere. There is no
+   PowerShell 7 dependency or auto-detection; users may opt in via `shell.shell: "pwsh"`.
+6. **CPU architecture:** x64 is supported. ARM64 is supported only if the native dependencies
+   ship win32-arm64 prebuilds; otherwise it is documented as unsupported.
+7. **Pipe access control:** a per-session secret, **Windows only**. Other users can open the
+   pipe but receive nothing and control nothing. No OS-level pipe ACL and no native code. POSIX
+   connections are unchanged.
+8. **Owner-only files:** rely on Windows user folders (`%USERPROFILE%`) being private to their
+   owner by default. No explicit ACLs. This is documented in the install docs.
+9. **Doctor scope:** doctor does **not** report Developer Mode or `core.autocrlf`. Link fallback
+   is reported by `afx spawn` when it happens, shipped scripts are pinned to LF, and doctor keeps
+   only ruling 6's CRLF warning for user-authored `postSpawn`/`devCommand` scripts. The long-path
+   diagnosis in the success criteria stays.
+10. **Console windows:** always hidden for background processes.
+11. **Upgrade compatibility:** not required. POSIX shellper connections are unchanged (decision
+    7 is Windows-only), and there are no existing Windows sessions to stay compatible with.
 
-**Important (confirm at the spec gate)**
-10. **Ruling 4 interpretation.** Is the reading in Assumptions right? Agent terminals run the
-    harness directly; the *shell* role and any host-shell need default to PowerShell.
+### Remaining
+
+None blocking. The owner confirms the above at the spec-approval gate.
 
 ## Test Scenarios
 
@@ -582,8 +605,8 @@ launch WSL.
 
 **Non-functional**
 16. The macOS and Linux suites pass unchanged, so there is no POSIX regression.
-17. Windows CI leg stability: track the flake rate over the stabilization window. A Windows-only
-    flaky test is annotated, not silently retried.
+17. The on-demand Windows CI workflow runs green from a manual dispatch. A Windows-only flaky
+    test is annotated, not silently retried.
 18. Render-gate captures: ConPTY capture fixtures for each validated harness are checked in and
     replayed by unit tests, the same way existing gate captures are.
 
@@ -591,18 +614,18 @@ launch WSL.
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| Shellpers die with Tower when Tower runs inside a kill-on-close job (terminal host or IDE) | Medium | High (breaks the persistence guarantee) | Survival required on each documented launch path; detect the job at start and relaunch outside it or refuse (OQ 3); never a silent warning |
+| Shellpers die with Tower when Tower runs inside a kill-on-close job (terminal host or IDE) | Medium | High (breaks the persistence guarantee) | Measure the launchers; relaunch Tower outside the job via built-in PowerShell CIM; refuse only if that is blocked; never a silent warning |
 | `taskkill /T` misses re-parented descendants, or walks nothing when the root is already dead | Medium | Medium | Pre-kill census snapshot with explicit per-PID kills; orphan/husk sweep as backstop; teardown tests assert no survivors; Job Objects as fallback (Area B2) |
 | ConPTY timing differs from POSIX PTYs, so the render gate misclassifies (lost or force-held mail) | High | High | Assume nothing (#1567 lesson): capture real ConPTY sessions per harness, replay them as fixtures, adjust gate profiles from the data |
 | MSYS path conversion mangles forge arguments | High | Medium | Per-call opt-out of automatic conversion; explicit translation helper; concept-by-concept tests with slash-prefixed arguments |
 | System32 `bash.exe` invoked by accident, launching WSL or failing on WSL-blocked machines | Medium | High | Single resolver; never bare `bash`; doctor rejects System32; config `shell: bash` maps to Git Bash on Windows |
-| Locked-down policy (AppLocker, Constrained Language Mode) blocks the census provider or a bundled binary | Medium | Medium | Keep introspection off the reconnect hot path (C1); sweeps degrade to DB-registered PIDs if the provider fails |
+| Locked-down policy (AppLocker, Constrained Language Mode) blocks the inline PowerShell CIM queries | Medium | Medium | Keep introspection off the reconnect hot path (C1); a blocked census is a reported failure (doctor + Tower log), not a silent degrade |
 | Pipe readable or connectable by other local users | Low | High | Per-session HELLO secret, kept off argv; server sends nothing pre-auth; UUID pipe names; client verifies WELCOME |
 | Native deps lack Windows prebuilds for a Node version | Low | Medium | Verify in the audit phase; supported Node versions are defined as those with prebuilds; clear failure otherwise (no toolchain fallback); CI leg catches regressions |
 | Worktree removal fails on open handles (antivirus, indexer, lingering cwd) | High | Medium | Kill the session tree first; retry with backoff; report the blocking path; never recurse through junctions |
 | MAX_PATH overruns in nested `.builders/<id>/` plus dependency trees (raising the limit needs admin) | Medium | High | Doctor depth check and `core.longpaths` check; docs recommend a short workspace root; keep Codev-generated paths short |
 | `.cmd` shims cannot be spawned directly under ConPTY | High | High | Resolve shims through `PATHEXT` and launch them through `%COMSPEC% /c` or the underlying Node entry point |
-| Windows CI leg is flaky or slow, so it gets ignored and support rots | High | High | Non-required during stabilization with an explicit promotion criterion; flaky tests annotated per protocol; required check after promotion |
+| On-demand-only Windows CI means a Windows regression can merge unnoticed until someone dispatches the workflow | High | Medium | Dispatch before every release and on any PR touching platform code (documented in the release protocol and the PR checklist); flaky tests annotated per protocol |
 | A platform branch changes POSIX behavior | Low | High | POSIX implementations stay today's code; full macOS/Linux suites gate every phase |
 | CRLF line endings (Git `autocrlf`) break bash scripts or output parsing | Medium | Medium | `.gitattributes` `eol=lf` for shipped `.sh` scripts; CRLF-tolerant output parsing; doctor CRLF warning for user scripts |
 
