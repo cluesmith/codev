@@ -7,13 +7,25 @@
  * Runtime state lives in the `~/.agent-farm/ide-server.json` record (Issue
  * #1668 §D3) — no config file, no `global.db` change. Liveness is discovered by
  * port (`getProcessesOnPort`), the same way Tower finds its own process.
+ *
+ * Native Windows (Spec 1658 Phase 9): the server path is usually a `.cmd`
+ * shim, which `spawn` cannot run without a shell, so the spawn goes through
+ * the shared shim resolver with no console window. There are no signals or
+ * process groups, so stop kills the server's process tree. Readiness is a
+ * loopback connect, since the Windows port query costs a PowerShell start per
+ * poll. POSIX is unchanged.
  */
 
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import net from 'node:net';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { getProcessesOnPort } from '../utils/port.js';
 import { sanitizeAgentEnv } from '../../lib/agent-env.js';
+import { isWindows } from '../../lib/platform.js';
+import { spawnOnHost } from '../../lib/shell-launch.js';
+import { collectTree, killSessionTree } from '../../lib/process-tree.js';
+import { listProcessCensus, type ProcessCensusEntry } from './process-census.js';
 import { parseJsonBody } from '../utils/server-utils.js';
 import {
   IDE_DEFAULT_PREFIX,
@@ -32,6 +44,7 @@ const READY_TIMEOUT_MS = 15_000;
 const READY_POLL_MS = 200;
 const STOP_EXIT_TIMEOUT_MS = 5_000;
 const STOP_POLL_MS = 200;
+const CONNECT_PROBE_TIMEOUT_MS = 1_000;
 
 /**
  * True if some process is listening on the port. Uses `lsof` (`getProcessesOnPort`),
@@ -64,14 +77,45 @@ export function getRecordedIdePort(): number | null {
   return readIdeRecord()?.port ?? null;
 }
 
+/** True if a loopback TCP connect to `port` succeeds within the probe timeout. */
+export function isPortAccepting(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port });
+    const finish = (accepting: boolean) => {
+      socket.destroy();
+      resolve(accepting);
+    };
+    socket.setTimeout(CONNECT_PROBE_TIMEOUT_MS, () => finish(false));
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+  });
+}
+
+/** One readiness poll: the port query on POSIX, a loopback connect on Windows. */
+async function isPortReady(port: number): Promise<boolean> {
+  if (isWindows()) return isPortAccepting(port);
+  return isPortLive(port);
+}
+
 /** Poll until a process is listening on `port`, or the timeout elapses. */
 async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (isPortLive(port)) return true;
+    if (await isPortReady(port)) return true;
     await new Promise((r) => setTimeout(r, READY_POLL_MS));
   }
-  return isPortLive(port);
+  return isPortReady(port);
+}
+
+/**
+ * Start the server process. POSIX spawns the path as given. Windows resolves
+ * it through the shim resolver (`.cmd` → the `node <entry>` it wraps, or a
+ * `cmd.exe /d /s /c` line), with no console window; arguments, native paths
+ * included, reach the server unaltered.
+ */
+export function spawnIdeServerProcess(serverPath: string, args: string[], options: SpawnOptions): ChildProcess {
+  if (!isWindows()) return spawn(serverPath, args, options);
+  return spawnOnHost(serverPath, args, options);
 }
 
 export interface SpawnIdeOptions {
@@ -135,7 +179,7 @@ export async function spawnIdeServer(opts: SpawnIdeOptions, log: LogFn): Promise
   }
 
   log('INFO', `Spawning IDE server: ${opts.serverPath} ${args.join(' ')}`);
-  const child = spawn(opts.serverPath, args, {
+  const child = spawnIdeServerProcess(opts.serverPath, args, {
     cwd: process.cwd(),
     env: sanitizeAgentEnv(process.env),
     detached: true,
@@ -175,6 +219,9 @@ export async function stopIdeServer(log: LogFn): Promise<{ stopped: boolean; por
     return { stopped: false, port: null };
   }
   const pids = getProcessesOnPort(record.port);
+  if (isWindows()) {
+    return stopWindowsIdeServer(record, pids, log);
+  }
   for (const pid of pids) {
     try {
       process.kill(pid, 'SIGTERM');
@@ -203,6 +250,94 @@ export async function stopIdeServer(log: LogFn): Promise<{ stopped: boolean; por
   const killedNote = survivors.length > 0 ? `, SIGKILL escalated for ${survivors.length}` : '';
   log('INFO', `Stopped IDE server on port ${record.port} (${pids.length} process(es)${killedNote})`);
   return { stopped: pids.length > 0, port: record.port };
+}
+
+/** Seams for the Windows stop path; production uses the real census and tree kill. */
+export interface WindowsIdeStopSeams {
+  census?: typeof listProcessCensus;
+  killTree?: (pid: number) => Promise<unknown>;
+  isAlive?: (pid: number) => boolean;
+}
+
+/**
+ * The roots whose trees a Windows stop kills. The recorded pid (a `cmd.exe`
+ * wrapper, or the server itself) is a root only when the census shows a
+ * listener among its descendants: that live listener is what proves the pid
+ * still belongs to this server and was not reused. Any listener outside that
+ * tree (an adopted server) is a root of its own. `targets` is every process
+ * the stop expects to end, for the exit wait.
+ */
+export function windowsIdeStopRoots(
+  census: ProcessCensusEntry[],
+  recordedPid: number,
+  listeners: number[],
+): { roots: number[]; targets: number[] } {
+  const recordedTree = collectTree(census, recordedPid).map((member) => member.pid);
+  const roots: number[] = [];
+  const targets: number[] = [];
+  if (recordedPid > 0 && listeners.some((pid) => recordedTree.includes(pid))) {
+    roots.push(recordedPid);
+    targets.push(...recordedTree);
+  }
+  for (const pid of listeners) {
+    if (!targets.includes(pid)) {
+      roots.push(pid);
+      targets.push(...collectTree(census, pid).map((member) => member.pid));
+      if (!targets.includes(pid)) targets.push(pid);
+    }
+  }
+  return { roots, targets };
+}
+
+/**
+ * Windows stop: kill each root's process tree (`killSessionTree`: census
+ * snapshot, `taskkill /T /F`, then any snapshot member still alive), wait for
+ * the targets to exit, then delete the record. A census failure falls back to
+ * the listeners alone. A kill that fails is logged and the wait reports what
+ * survived.
+ */
+export async function stopWindowsIdeServer(
+  record: IdeServerRecord,
+  listeners: number[],
+  log: LogFn,
+  seams: WindowsIdeStopSeams = {},
+): Promise<{ stopped: boolean; port: number | null }> {
+  const census = seams.census ?? listProcessCensus;
+  const killTree = seams.killTree ?? ((pid: number) => killSessionTree(pid));
+  const isAlive = seams.isAlive ?? isPidAlive;
+
+  let plan: { roots: number[]; targets: number[] } = { roots: listeners, targets: listeners };
+  if (listeners.length > 0) {
+    try {
+      plan = windowsIdeStopRoots(await census({ fresh: true }), record.pid, listeners);
+    } catch (err) {
+      log('WARN', `IDE server stop: process census failed (${(err as Error).message}); killing the listeners' trees only`);
+    }
+  }
+
+  for (const pid of plan.roots) {
+    try {
+      await killTree(pid);
+    } catch (err) {
+      log('WARN', `IDE server stop: tree kill of pid ${pid} failed: ${(err as Error).message}`);
+    }
+  }
+
+  const deadline = Date.now() + STOP_EXIT_TIMEOUT_MS;
+  let survivors = plan.targets.filter(isAlive);
+  while (survivors.length > 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, STOP_POLL_MS));
+    survivors = survivors.filter(isAlive);
+  }
+
+  deleteIdeRecord();
+  let survivorNote = '';
+  if (survivors.length > 0) {
+    survivorNote = `, ${survivors.length} still running: ${survivors.join(', ')}`;
+    log('WARN', `IDE server stop: processes survived the tree kill: ${survivors.join(', ')}`);
+  }
+  log('INFO', `Stopped IDE server on port ${record.port} (${plan.targets.length} process(es)${survivorNote})`);
+  return { stopped: listeners.length > 0, port: record.port };
 }
 
 export interface IdeStatus {

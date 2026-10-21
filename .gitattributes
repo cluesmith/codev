@@ -4,3 +4,6 @@
 # packages/codev/scripts/forge/ (and every other .sh) stay runnable.
 *.sh text eol=lf
 *.bash text eol=lf
+
+# Windows batch files need CRLF; cmd.exe misparses some LF-only scripts.
+*.cmd text eol=crlf

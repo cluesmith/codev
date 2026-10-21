@@ -99,6 +99,25 @@ function get(path: string, headers: Record<string, string> = {}): Promise<{ stat
 }
 
 describe('IDE HTTP forward (stub loopback)', () => {
+  // Spec 1658 Phase 9: on native Windows `?folder=` carries a native path
+  // (drive letter, backslashes, possibly past MAX_PATH). The forward must hand
+  // it to the server byte for byte, encoded or not.
+  it('forwards a native Windows ?folder path unchanged, encoded, raw, or long', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    const longRepo = `C:\\Users\\dev\\${'nested-folder\\'.repeat(20)}repo`;
+    expect(longRepo.length).toBeGreaterThan(260);
+    const paths = [
+      `/ide/?folder=${encodeURIComponent('C:\\Users\\dev\\My Repo')}`,
+      '/ide/?folder=C:\\Users\\dev\\repo',
+      `/ide/?folder=${encodeURIComponent(longRepo)}`,
+    ];
+    for (const path of paths) {
+      const res = await get(path);
+      expect(res.status).toBe(200);
+      expect((JSON.parse(res.body) as { url: string }).url).toBe(path);
+    }
+  });
+
   it('forwards path + ?folder unchanged, sanitizes request headers, and preserves Cache-Control/ETag', async () => {
     writeIdeRecord(recordFor(stubPort));
 
