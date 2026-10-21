@@ -339,7 +339,10 @@ describe.skipIf(!onWindows)('Launcher routing on native Windows', () => {
       await waitFor(() => !alive(pids.server) && !alive(pids.child), 30_000, 'the dev server tree to exit');
     } catch (err) {
       const log = fs.readFileSync(path.join(stateDir, 'tower.log'), 'utf8').split('\n').slice(-40).join('\n');
-      console.log(`DEV-TOWER-LOG\n${log}\nalive server=${alive(pids.server)} child=${alive(pids.child)}`);
+      const ancestry = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `Get-CimInstance Win32_Process -Filter "ProcessId=${pids.server} OR ProcessId=${pids.child}" | ForEach-Object { "$($_.ProcessId) ppid=$($_.ParentProcessId) $($_.CommandLine)" }`],
+      { encoding: 'utf8', windowsHide: true });
+      console.log(`DEV-TOWER-LOG\n${log}\nalive server=${alive(pids.server)} child=${alive(pids.child)}\n${ancestry.stdout}`);
       throw err;
     }
   }, 300_000);

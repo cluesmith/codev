@@ -229,7 +229,7 @@ describe('killSessionTree on Windows', () => {
     expect(h.events).toEqual(['census', 'census', 'kill 30']);
   });
 
-  it('terminates the session job before the snapshot pass, which still runs', async () => {
+  it('takes the snapshot before terminating the session job, then runs the kill pass', async () => {
     setHostPlatformForTests('win32');
     const census = [entry(40, 1, 100), entry(41, 40, 110)];
     const h = windowsHarness({ censuses: [census, census], alive: new Set([41]) });
@@ -240,8 +240,26 @@ describe('killSessionTree on Windows', () => {
 
     const result = await killSessionTree(40, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
 
-    expect(h.events).toEqual(['terminate J 40', 'census', 'taskkill 40', 'census', 'kill 41']);
+    expect(h.events).toEqual(['census', 'terminate J 40', 'taskkill 40', 'census', 'kill 41']);
     expect(result.jobError).toBeUndefined();
+  });
+
+  it('kills a descendant that broke away from the job after the job took its parents', async () => {
+    setHostPlatformForTests('win32');
+    // 50 root, 51 bash inside the job, 52 a native child that broke away.
+    const before = [entry(50, 1, 100), entry(51, 50, 110), entry(52, 51, 120)];
+    // After the job ends: only the breakaway child is left, its parent gone.
+    const after = [entry(52, 51, 120)];
+    const h = windowsHarness({ censuses: [before, after], alive: new Set([52]) });
+    const terminateJob = vi.fn(async (name: string, rootPid: number) => {
+      h.events.push(`terminate ${name} ${rootPid}`);
+      return { ok: true, found: true, member: true };
+    });
+
+    const result = await killSessionTree(50, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+
+    expect(result.snapshot.members.map((m) => m.pid)).toEqual([50, 51, 52]);
+    expect(h.events).toEqual(['census', 'terminate J 50', 'taskkill 50', 'census', 'kill 52']);
   });
 
   it('counts a terminated job as signaled even when the census then finds nothing', async () => {

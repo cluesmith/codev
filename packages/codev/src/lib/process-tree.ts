@@ -290,19 +290,28 @@ async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): P
   const taskkill = opts.taskkill ?? runTaskkill;
   const kill = opts.kill ?? defaultKill;
 
-  // The job holds exactly this session's processes (the name carries the
-  // session id, an existing name is never joined, and the helper terminates
-  // it only when the root is a member), so it is ended first and needs no
-  // creation-time check: a reused pid's process is not in it.
-  const job = await terminateJobFor(rootPid, opts);
-  const jobError = job.error;
-
-  let snapshotCensus: ProcessCensusEntry[];
+  // The snapshot is taken BEFORE the job ends. The job allows breakaway (Phase
+  // 3b), and a child that broke away (the MSYS runtime starts native programs
+  // that way) survives the job, while its parents inside the job die with it;
+  // a snapshot taken afterwards would no longer link it to the root.
+  let snapshotCensus: ProcessCensusEntry[] | null = null;
+  let censusError: Error | null = null;
   try {
     snapshotCensus = await census();
   } catch (err) {
+    censusError = err as Error;
+  }
+
+  // The job holds exactly this session's processes (the name carries the
+  // session id, an existing name is never joined, and the helper terminates
+  // it only when the root is a member), so it needs no creation-time check: a
+  // reused pid's process is not in it.
+  const job = await terminateJobFor(rootPid, opts);
+  const jobError = job.error;
+
+  if (snapshotCensus === null) {
     await taskkill(rootPid);
-    throw new Error(`teardown of pid ${rootPid} ran taskkill only, without a descendant snapshot: ${(err as Error).message}${jobNote(job)}`);
+    throw new Error(`teardown of pid ${rootPid} ran taskkill only, without a descendant snapshot: ${censusError?.message}${jobNote(job)}`);
   }
 
   const root = snapshotCensus.find((entry) => entry.pid === rootPid);
@@ -338,8 +347,8 @@ async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): P
       }
     }
   }
-  // The job usually ends the tree before the census runs, so the snapshot
-  // alone would report nothing killed.
+  // The job usually ends the tree before the kill pass, so the snapshot alone
+  // could report nothing killed.
   const result: KillSessionTreeResult = { signaled: members.length > 0 || job.terminated, snapshot: { rootPid, members } };
   if (jobError !== undefined) result.jobError = jobError;
   return result;
