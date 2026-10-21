@@ -26,17 +26,17 @@ plan_phases:
     status: complete
   - id: phase_8
     title: ConPTY render-gate validation captures
-    status: in_progress
+    status: complete
   - id: phase_9
     title: Codev IDE server on native Windows
-    status: pending
+    status: in_progress
   - id: phase_10
     title: POSIX residue sweep and native-dependency install guard
     status: pending
   - id: phase_11
     title: Windows CI leg and install docs
     status: pending
-current_plan_phase: phase_8
+current_plan_phase: phase_9
 gates:
   spec-approval:
     status: approved
@@ -51,7 +51,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -214,7 +214,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1658/codev/projects/1658-windows-native-non-wsl-support/1658-phase_7-iter1-claude.txt
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-21T22:29:04.617Z'
+updated_at: '2026-10-21T22:35:34.954Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
@@ -240,6 +240,8 @@ context_refreshes:
   - boundary: plan-phase:phase_8
     at: '2026-10-21T21:56:48.189Z'
     acknowledged_at: '2026-10-21T21:57:39.382Z'
+  - boundary: plan-phase:phase_9
+    at: '2026-10-21T22:35:34.954Z'
 force_advanced:
   phase: phase_3
   iteration: 3
