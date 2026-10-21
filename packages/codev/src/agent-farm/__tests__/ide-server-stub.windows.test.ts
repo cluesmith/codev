@@ -3,8 +3,10 @@
  * job runs it; it skips everywhere else). The IDE server lifecycle against a
  * stub server behind a plain `.cmd` shim, no fakes:
  *
- * - `spawnIdeServer` starts the shim through the shim resolver (cmd.exe, then
- *   node), and the server receives its native-path arguments intact.
+ * - `spawnIdeServer` starts the shim through the shim resolver, for both
+ *   shapes: an npm-style shim (node runs the entry directly, as for a real
+ *   npm install) and a plain `.cmd` (cmd.exe, then node), and the server
+ *   receives its native-path arguments intact.
  * - The forward serves `/ide/?folder=C:\...` with the folder unaltered.
  * - `stopIdeServer` leaves no process behind: not the cmd.exe root, not the
  *   server, not the server's own child.
@@ -31,7 +33,10 @@ import { forwardIdeHttp } from '../servers/ide-forward.js';
 import { getIdeConnectionTokenPath, getIdeRecordPath, readIdeRecord } from '../lib/ide-record.js';
 
 const onWindows = process.platform === 'win32';
-const SHIM = path.join(__dirname, 'fixtures', 'ide', 'codev-ide-server.cmd');
+const SHIMS = [
+  { shape: 'npm-style shim', file: 'codev-ide-server.cmd', rootIsServer: true },
+  { shape: 'plain .cmd', file: 'codev-ide-server-plain.cmd', rootIsServer: false },
+];
 const AGENT_FARM = path.resolve(TMP_DIR);
 const STATE_FILE = path.join(AGENT_FARM, 'stub-state.json');
 
@@ -112,9 +117,11 @@ describe.runIf(onWindows)('Phase 9: IDE server lifecycle against a .cmd stub on 
     fs.rmSync(AGENT_FARM, { recursive: true, force: true });
   });
 
-  it('spawns, forwards a native ?folder path, and stops with nothing left running', async () => {
+  it.each(SHIMS)('$shape: spawns, forwards a native ?folder path, and stops with nothing left running', async (shim) => {
+    fs.rmSync(STATE_FILE, { force: true });
     const port = await freePort();
-    const record = await spawnIdeServer({ serverPath: SHIM, port }, log);
+    const serverPath = path.join(__dirname, 'fixtures', 'ide', shim.file);
+    const record = await spawnIdeServer({ serverPath, port }, log);
     expect(record.port).toBe(port);
 
     const state = await waitFor<StubState>(() => {
@@ -123,7 +130,8 @@ describe.runIf(onWindows)('Phase 9: IDE server lifecycle against a .cmd stub on 
     }, 10_000);
     expect(state).not.toBeNull();
     const stub = state as StubState;
-    console.log(`STUB-TREE root=${record.pid} server=${stub.pid} child=${stub.childPid}`);
+    console.log(`STUB-TREE ${shim.shape} root=${record.pid} server=${stub.pid} child=${stub.childPid}`);
+    expect(record.pid === stub.pid).toBe(shim.rootIsServer);
 
     // The native token path reached the server unaltered, and Tower's files
     // live under the (temp) agent-farm directory.
