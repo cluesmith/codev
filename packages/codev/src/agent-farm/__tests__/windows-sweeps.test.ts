@@ -183,7 +183,11 @@ describe('afx cleanup shellper kill on Windows', () => {
     const killed = await killShellperProcesses(`${WS}\\.builders\\spir-1`);
     expect(killed).toBe(1);
     expect(treeMock.kill).toHaveBeenCalledTimes(1);
-    expect(treeMock.kill).toHaveBeenCalledWith(100, { rootStartTime: NOW - 2 * ONE_HOUR });
+    expect(treeMock.kill).toHaveBeenCalledWith(100, {
+      rootStartTime: NOW - 2 * ONE_HOUR,
+      jobName: 'Local\\codev-session-s-100',
+      terminateJob: expect.any(Function),
+    });
   });
 
   it('carries on (killing nothing) when the census fails', async () => {
