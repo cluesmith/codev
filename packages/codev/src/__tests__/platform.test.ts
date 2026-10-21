@@ -29,8 +29,23 @@ describe('platform seam (Spec 1658)', () => {
   });
 
   it('reset restores process.platform', () => {
-    setHostPlatformForTests(process.platform === 'win32' ? 'darwin' : 'win32');
+    let other: NodeJS.Platform = 'win32';
+    if (process.platform === 'win32') other = 'darwin';
+    setHostPlatformForTests(other);
     resetHostPlatformForTests();
     expect(hostPlatform()).toBe(process.platform);
+  });
+
+  it('refuses to override outside a test runner', () => {
+    const saved = { vitest: process.env.VITEST, isolation: process.env.CODEV_TEST_ISOLATION };
+    delete process.env.VITEST;
+    delete process.env.CODEV_TEST_ISOLATION;
+    try {
+      expect(() => setHostPlatformForTests('win32')).toThrow(/test-only/);
+      expect(hostPlatform()).toBe(process.platform);
+    } finally {
+      if (saved.vitest !== undefined) process.env.VITEST = saved.vitest;
+      if (saved.isolation !== undefined) process.env.CODEV_TEST_ISOLATION = saved.isolation;
+    }
   });
 });

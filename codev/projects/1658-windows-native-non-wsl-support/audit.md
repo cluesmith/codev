@@ -245,7 +245,11 @@ They size the work; each phase re-greps its own class before claiming it done.
 - Builder launch: `/bin/bash` at `agent-farm/commands/spawn.ts:728`, `spawn-worktree.ts:1173,1194`;
   generated scripts `spawn-worktree.ts:1162,1253`.
 - `shell: true`: `agent-farm/utils/shell.ts:56` (`postSpawn`), `commands/porch/checks.ts:83`.
-- `afx dev`: `agent-farm/commands/dev.ts:102` (`/bin/sh -lc`).
+- `afx dev`: `agent-farm/commands/dev.ts:102` (`/bin/sh -lc`); and the VS Code extension's dev
+  runner, `apps/vscode/src/commands/dev-shared.ts:130` (`command: '/bin/sh'`), which builds its own
+  dev terminal rather than calling `afx dev`.
+- `afx bench`: `agent-farm/commands/bench.ts:51,71` (`shell: '/bin/sh'`).
+- Bare `consult` spawn: `commands/bootstrap-docs.ts:300`.
 - Shell fallbacks: `terminal/pty-manager.ts:66` (`$SHELL ?? /bin/bash`),
   `agent-farm/servers/tower-routes.ts:3268`.
 - Bare commands → `resolveSpawnable`, **Phase 6:** `commands/porch/index.ts:696` (`afx open`),
@@ -294,6 +298,11 @@ They size the work; each phase re-greps its own class before claiming it done.
 - #1789: not on `main` at audit time; re-audit at the start of Phase 9.
 - #1595 (hooks) and #1672 (lane card): not found on `main` at audit time; re-audit at the
   start of Phases 6, 9 and 10.
+
+Phase 1 review (codex) found the four launch sites above, which the first inventory missed. All
+are Phase 6 (launcher routing). Phase 6's completion grep covers `/bin/sh`, `/bin/bash`,
+`shell: true`, `shell: '/bin/sh'` and bare spawns of npm-installed bins across `packages/` AND
+`apps/`.
 
 ## 3. Plan adjustments from this audit
 

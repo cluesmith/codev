@@ -11,6 +11,8 @@
  * the seam is exactly `process.platform`.
  */
 
+import { isUnderTestRunner } from './test-env.js';
+
 let override: NodeJS.Platform | null = null;
 
 /** The platform the runtime should behave as: `process.platform` unless a test forced it. */
@@ -29,8 +31,17 @@ export function isWindows(): boolean {
 /**
  * Force the seam to a platform for the duration of a test. Pair every call
  * with `resetHostPlatformForTests()` (typically in `afterEach`).
+ *
+ * Throws outside a test runner, so production code cannot flip a real host's
+ * platform. The override is module state in the current process only: it does
+ * not cross a spawn boundary, so behavior of a spawned process (a shellper, the
+ * Tower daemon) on Windows is covered by the Windows workflow, not by forcing
+ * the seam.
  */
 export function setHostPlatformForTests(platform: NodeJS.Platform): void {
+  if (!isUnderTestRunner()) {
+    throw new Error('setHostPlatformForTests is test-only (VITEST or CODEV_TEST_ISOLATION must be set)');
+  }
   override = platform;
 }
 

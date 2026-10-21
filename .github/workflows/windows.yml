@@ -7,7 +7,7 @@ name: Windows (on demand)
 #   gh workflow run windows.yml --ref <branch> [-f filter=<vitest filter>] [-f tower=true]
 #
 # Jobs:
-#   probe     scripts/windows-probe.mjs on Node 20/22/24: Git Bash, PATHEXT, named pipes,
+#   probe     scripts/windows-probe.mjs on Node 20/22/24 (x64) and 22/24 (ARM64): Git Bash, PATHEXT, named pipes,
 #             CIM census latency, job objects, detached survival, native-dependency installs.
 #             With tower=true the Node 22 leg also starts Tower from the built checkout.
 #   targeted  runs the packages/codev vitest files matching `filter` (skipped when empty).
@@ -36,13 +36,21 @@ env:
 
 jobs:
   probe:
-    name: Probe (Node ${{ matrix.node }})
-    runs-on: windows-latest
+    name: Probe (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        os: [windows-latest]
         node: ['20', '22', '24']
+        # ARM64: the spec supports it only if the native dependencies install from prebuilds;
+        # measured here rather than inferred from release asset names.
+        include:
+          - os: windows-11-arm
+            node: '22'
+          - os: windows-11-arm
+            node: '24'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,30 +64,30 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Probe platform facts and native-dependency installs
-        run: node scripts/windows-probe.mjs --deps --out "$RUNNER_TEMP/probe-node${{ matrix.node }}.json"
+        run: node scripts/windows-probe.mjs --deps --out "$RUNNER_TEMP/probe-${{ matrix.os }}-node${{ matrix.node }}.json"
 
       - name: Install dependencies
-        if: ${{ inputs.tower && matrix.node == '22' }}
+        if: ${{ !cancelled() && inputs.tower && matrix.node == '22' }}
         run: pnpm install
 
       - name: Build packages/codev
-        if: ${{ inputs.tower && matrix.node == '22' }}
+        if: ${{ !cancelled() && inputs.tower && matrix.node == '22' }}
         working-directory: packages/codev
         run: pnpm build
 
       - name: Probe Tower start
-        if: ${{ inputs.tower && matrix.node == '22' }}
-        run: node scripts/windows-probe.mjs --tower --out "$RUNNER_TEMP/probe-tower.json"
+        if: ${{ !cancelled() && inputs.tower && matrix.node == '22' }}
+        run: node scripts/windows-probe.mjs --tower --out "$RUNNER_TEMP/probe-tower-${{ matrix.os }}.json"
 
       - name: Probe Tower start from the published package (global install)
-        if: ${{ inputs.tower }}
-        run: node scripts/windows-probe.mjs --tower-published latest --out "$RUNNER_TEMP/probe-published-node${{ matrix.node }}.json"
+        if: ${{ !cancelled() && inputs.tower }}
+        run: node scripts/windows-probe.mjs --tower-published latest --out "$RUNNER_TEMP/probe-published-${{ matrix.os }}-node${{ matrix.node }}.json"
 
       - name: Upload probe reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-probe-node${{ matrix.node }}
+          name: windows-probe-${{ matrix.os }}-node${{ matrix.node }}
           path: ${{ runner.temp }}/probe-*.json
           if-no-files-found: warn
 

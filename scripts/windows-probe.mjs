@@ -26,7 +26,8 @@
  *   towerPublished (--tower-published <version|latest>) the same, from a global install of the
  *               published @cluesmith/codev into a throwaway prefix (the path users take)
  *
- * Every section catches its own errors, so one failure never hides the rest.
+ * Every section catches its own errors, so one failure never hides the rest; the script still
+ * exits non-zero when any section failed, so a dispatch never shows a misleading green.
  */
 
 import { execFile, spawn, spawnSync } from 'node:child_process';
@@ -439,38 +440,66 @@ function killTree(pid) {
   return true;
 }
 
+/** Run `afx tower start` once and capture its outcome; a start still waiting after 120 s is a hang. */
+function startTowerOnce(afx, env, port) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const child = spawn(process.execPath, [afx, 'tower', 'start', '--port', port], { env, windowsHide: true });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    const timer = setTimeout(() => {
+      killTree(child.pid);
+      resolve({ timedOut: true, ms: Date.now() - started, output: out.slice(-6000) });
+    }, 120_000);
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      resolve({ timedOut: false, code, ms: Date.now() - started, output: out.slice(-6000) });
+    });
+  });
+}
+
+/** Every daemon PID the tower log says was spawned. */
+function daemonPidsFromLog(towerLog) {
+  return [...(towerLog ?? '').matchAll(/Spawned tower server with PID (\d+)/g)].map((m) => parseInt(m[1], 10));
+}
+
 /**
  * Start a Tower with the given afx entry point, capture the outcome and the tower log, then stop
  * it. Isolated from any real install on the machine: a throwaway CODEV_AGENT_FARM_DIR (its own
  * global.db, owner lock and tower.log), a throwaway SHELLPER_SOCKET_DIR, and a free port instead
  * of 4100, so the probe never starts, stops, sweeps, or reconciles against a developer's running
- * Tower or its shellpers. If `afx tower stop` cannot stop it (it cannot on Windows today), the
+ * Tower or its shellpers. If `afx tower stop` cannot stop it (it cannot on Windows today), every
  * daemon PID from the tower log is killed directly, so the probe never leaks a Tower.
+ *
+ * With `restart`, a second `afx tower start` runs on the same port and state dir AFTER the stop
+ * and BEFORE the cleanup kill: a deliberate reproduction of "start, stop (which silently fails on
+ * Windows), start again", the candidate root cause of the 2026-09-09 hang.
  */
-async function runIsolatedTower(afx) {
+async function runIsolatedTower(afx, { restart = false } = {}) {
   const stateDir = mkdtempSync(path.join(os.tmpdir(), 'codev-probe-tower-'));
   const port = String(await freePort());
   // SHELLPER_SOCKET_DIR too: the boot-time orphan sweep is scoped by socket dir, so a shared
   // ~/.codev/run would let this empty-DB Tower treat a live install's shellpers as orphans.
   const env = { ...process.env, CODEV_AGENT_FARM_DIR: stateDir, SHELLPER_SOCKET_DIR: path.join(stateDir, 'run') };
   const logFile = path.join(stateDir, 'tower.log');
-  const start = await new Promise((resolve) => {
-    const started = Date.now();
-    const child = spawn(process.execPath, [afx, 'tower', 'start', '--port', port], { env, windowsHide: true });
-    let out = '';
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { out += d; });
-    const timer = setTimeout(() => { killTree(child.pid); resolve({ timedOut: true, ms: Date.now() - started, output: out }); }, 120_000);
-    child.on('exit', (code) => { clearTimeout(timer); resolve({ timedOut: false, code, ms: Date.now() - started, output: out }); });
-  });
-  let towerLog = null;
-  if (existsSync(logFile)) towerLog = readFileSync(logFile).toString();
+  const readLog = () => {
+    if (existsSync(logFile)) return readFileSync(logFile).toString();
+    return null;
+  };
+  const start = await startTowerOnce(afx, env, port);
   const stop = spawnSync(process.execPath, [afx, 'tower', 'stop', '--port', port], { env, encoding: 'utf8', windowsHide: true, timeout: 60_000 });
+  const firstPids = daemonPidsFromLog(readLog());
   let daemonPid = null;
-  const m = (towerLog ?? '').match(/Spawned tower server with PID (\d+)/);
-  if (m) daemonPid = parseInt(m[1], 10);
+  if (firstPids.length > 0) daemonPid = firstPids[0];
   const daemonAliveAfterStop = daemonPid !== null && isAlive(daemonPid);
-  if (daemonAliveAfterStop) killTree(daemonPid);
+  let secondStart = null;
+  if (restart) {
+    secondStart = await startTowerOnce(afx, env, port);
+    secondStart.firstDaemonStillAlive = daemonPid !== null && isAlive(daemonPid);
+  }
+  const towerLog = readLog();
+  for (const pid of daemonPidsFromLog(towerLog)) killTree(pid);
   await new Promise((res) => setTimeout(res, 500));
   try { rmSync(stateDir, { recursive: true, force: true }); } catch { /* a just-killed daemon may still hold a handle */ }
   let logTail = null;
@@ -478,11 +507,12 @@ async function runIsolatedTower(afx) {
   return {
     stateDir,
     port: Number(port),
-    start: { ...start, output: start.output.slice(-6000) },
+    start,
     towerLog: logTail,
     stop: { code: stop.status, output: `${stop.stdout ?? ''}${stop.stderr ?? ''}`.slice(-3000) },
     daemonPid,
     daemonAliveAfterStop,
+    secondStart,
   };
 }
 
@@ -491,7 +521,7 @@ async function probeTower() {
   if (!existsSync(path.join(repoRoot, 'packages', 'codev', 'dist'))) {
     return { skipped: 'packages/codev is not built (run pnpm build first)' };
   }
-  return runIsolatedTower(path.join(repoRoot, 'packages', 'codev', 'bin', 'afx.js'));
+  return runIsolatedTower(path.join(repoRoot, 'packages', 'codev', 'bin', 'afx.js'), { restart: true });
 }
 
 /**
@@ -522,7 +552,7 @@ async function probeTowerPublished(spec) {
   let version = null;
   if (existsSync(path.join(pkgDir, 'package.json'))) version = JSON.parse(readFileSync(path.join(pkgDir, 'package.json'), 'utf8')).version;
   let tower = null;
-  if (r.status === 0) tower = await runIsolatedTower(path.join(pkgDir, 'bin', 'afx.js'));
+  if (r.status === 0) tower = await runIsolatedTower(path.join(pkgDir, 'bin', 'afx.js'), { restart: true });
   try { rmSync(prefix, { recursive: true, force: true }); } catch { /* best effort */ }
   return { install, version, tower };
 }
@@ -593,6 +623,11 @@ async function main() {
   const out = option('--out');
   if (out) writeFileSync(out, json);
   console.log(json);
+  const failed = sections.filter((x) => !x.ok).map((x) => x.name);
+  if (failed.length > 0) {
+    console.error(`Probe sections failed: ${failed.join(', ')}`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((err) => {
