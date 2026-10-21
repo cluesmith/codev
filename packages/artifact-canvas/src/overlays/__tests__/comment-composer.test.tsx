@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import * as React from 'react';
-import { CommentComposer } from '../CommentComposer.js';
+import { CommentComposer, type CommentComposerHandle } from '../CommentComposer.js';
 
 afterEach(cleanup);
 
@@ -79,5 +79,26 @@ describe('CommentComposer (#1107)', () => {
     const { onCancel } = setup();
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
     expect(onCancel).toHaveBeenCalled();
+  });
+});
+
+describe('CommentComposer handle: hasDraft (#1850)', () => {
+  it('is false for an empty or whitespace-only box and true once there is text', () => {
+    const ref = React.createRef<CommentComposerHandle>();
+    render(React.createElement(CommentComposer, { line: 0, onSubmit: vi.fn(), onCancel: vi.fn(), ref }));
+    const input = screen.getByRole('textbox', { name: /add comment on line/i }) as HTMLTextAreaElement;
+    expect(ref.current?.hasDraft()).toBe(false);
+    fireEvent.change(input, { target: { value: '   ' } });
+    expect(ref.current?.hasDraft()).toBe(false);
+    fireEvent.change(input, { target: { value: 'a thought' } });
+    expect(ref.current?.hasDraft()).toBe(true);
+  });
+
+  it('is true for an edit seeded with the existing body', () => {
+    const ref = React.createRef<CommentComposerHandle>();
+    render(
+      React.createElement(CommentComposer, { line: 0, onSubmit: vi.fn(), onCancel: vi.fn(), initialText: 'old', ref }),
+    );
+    expect(ref.current?.hasDraft()).toBe(true);
   });
 });
