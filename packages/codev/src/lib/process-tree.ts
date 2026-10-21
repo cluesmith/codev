@@ -49,7 +49,8 @@ export interface KillSessionTreeOptions {
   /**
    * Windows: when the root was started (epoch ms), if the caller knows it. A
    * root found in the census whose creation time differs by more than
-   * ROOT_START_TOLERANCE_MS is a reused pid, and nothing is killed. With the
+   * ROOT_START_TOLERANCE_MS, or that has no creation time to compare, is
+   * treated as a reused pid, and nothing is killed. With the
    * root already dead, it also anchors which ppid-matching processes count as
    * the root's children.
    */
@@ -215,8 +216,14 @@ function sameProcesses(snapshot: TreeMember[], census: ProcessCensusEntry[]): Tr
   });
 }
 
+/**
+ * True when the caller knows the root's start time and the census cannot
+ * confirm it: a different creation time (the pid was reused), or none at all
+ * (unverifiable, so it fails closed).
+ */
 function isReusedRoot(root: ProcessCensusEntry, rootStartTime: number | undefined): boolean {
-  if (rootStartTime === undefined || root.creationTime === undefined) return false;
+  if (rootStartTime === undefined) return false;
+  if (root.creationTime === undefined) return true;
   return Math.abs(root.creationTime - rootStartTime) > ROOT_START_TOLERANCE_MS;
 }
 
