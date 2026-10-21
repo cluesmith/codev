@@ -154,7 +154,9 @@ export class WorktreeRemovalError extends Error {
     readonly path: string,
     readonly code: string | undefined,
   ) {
-    super(`Could not remove ${path} (${code ?? 'unknown error'}): a process may still have it open`);
+    let message = `Could not remove ${path} (${code ?? 'unknown error'})`;
+    if (BUSY_CODES.has(code ?? '')) message += ': a process may still have it open';
+    super(message);
     this.name = 'WorktreeRemovalError';
   }
 }

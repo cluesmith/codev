@@ -6,7 +6,8 @@
  *   removed by `removeWorktreeDirectory` (no link traversal, busy retries) and
  *   the worktree entry is pruned BEFORE the branch is deleted (git refuses to
  *   delete a branch a registered worktree still has checked out). A removal
- *   failure is reported with the blocking path.
+ *   failure ends cleanup naming the blocking path, before the branch and
+ *   builder state are touched.
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
@@ -29,9 +30,10 @@ vi.mock('node:child_process', async () => {
 });
 
 const mockLoadState = vi.fn();
+const mockRemoveBuilder = vi.fn();
 vi.mock('../state.js', () => ({
   loadState: (ws: string) => mockLoadState(ws),
-  removeBuilder: vi.fn(),
+  removeBuilder: (id: string, ws?: string) => mockRemoveBuilder(id, ws),
 }));
 
 const mockGetConfig = vi.fn<() => Config>();
@@ -40,13 +42,12 @@ vi.mock('../utils/index.js', async (importOriginal) => ({
   getConfig: () => mockGetConfig(),
 }));
 
-const loggerWarn = vi.fn();
 vi.mock('../utils/logger.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../utils/logger.js')>();
   const silent = Object.fromEntries(Object.keys(actual.logger).map((k) => [k, vi.fn()]));
   return {
     ...actual,
-    logger: { ...silent, warn: loggerWarn },
+    logger: silent,
     fatal: (msg: string) => {
       throw new Error(msg);
     },
@@ -157,13 +158,14 @@ describe('Spec 1658: cleanup removes an ephemeral worktree', () => {
     expect(branch).toBeGreaterThan(prune);
   });
 
-  it('Windows: reports the blocking path when removal fails, and carries on', async () => {
+  it('Windows: a failed removal names the blocking path and stops before the branch and state', async () => {
     setHostPlatformForTests('win32');
     mockRemoveWorktreeDirectory.mockRejectedValueOnce(
       new Error(`Could not remove ${worktree}\\node_modules\\x.node (EBUSY): a process may still have it open`),
     );
-    await cleanup({ issue: 7 });
-    expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('node_modules\\x.node (EBUSY)'));
-    expect(steps).toContain('git branch -D "builder/bugfix-7"');
+    await expect(cleanup({ issue: 7 })).rejects.toThrow('node_modules\\x.node (EBUSY)');
+    expect(steps.some((s) => s.startsWith('git branch -D'))).toBe(false);
+    expect(steps).not.toContain('git worktree prune');
+    expect(mockRemoveBuilder).not.toHaveBeenCalled();
   });
 });

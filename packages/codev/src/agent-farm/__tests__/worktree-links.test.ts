@@ -355,7 +355,10 @@ describe('removeWorktreeDirectory on a real tree', () => {
     const worktree = path.join(workDir, 'wt');
     fs.mkdirSync(path.join(worktree, 'src'), { recursive: true });
     fs.writeFileSync(path.join(worktree, 'src', 'a.ts'), 'x');
-    fs.symlinkSync(target, path.join(worktree, 'data'), 'dir');
+    // A junction on Windows: it needs no symlink privilege.
+    let linkType: 'dir' | 'junction' = 'dir';
+    if (process.platform === 'win32') linkType = 'junction';
+    fs.symlinkSync(target, path.join(worktree, 'data'), linkType);
 
     await removeWorktreeDirectory(worktree);
 

@@ -238,7 +238,9 @@ async function deleteRemoteBranch(branch: string, config: Config): Promise<void>
  * Windows (Spec 1658): the session tree is already killed, so the directory is
  * removed here without following its junctions and links into the workspace
  * root, retrying while a closing process still holds a handle; the worktree
- * entry is then pruned so the branch can be deleted.
+ * entry is then pruned so the branch can be deleted. A removal that still
+ * fails ends cleanup, naming the blocking path, with the branch and builder
+ * state left in place.
  */
 async function removeWorktree(worktreePath: string, config: Config): Promise<void> {
   if (!isWindows()) {
@@ -253,8 +255,8 @@ async function removeWorktree(worktreePath: string, config: Config): Promise<voi
   try {
     await removeWorktreeDirectory(worktreePath);
   } catch (error) {
-    logger.warn(`Warning: Failed to remove worktree: ${(error as Error).message}`);
-    return;
+    // Stop before the branch and builder state go: a re-run retries the removal.
+    fatal(`Failed to remove worktree: ${(error as Error).message}. Close what holds it and re-run afx cleanup.`);
   }
   try {
     await run('git worktree prune', { cwd: config.workspaceRoot });
