@@ -263,6 +263,8 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider,
       // Reading aids (#1802). A change re-renders the webview via onDidChangeConfiguration.
       hoverHighlight: cfg.get<string>('hoverHighlight'),
       readingCursor: cfg.get<string>('readingCursor'),
+      highlightLine: cfg.get<string>('highlightLine'),
+      annotationEntry: cfg.get<string>('annotationEntry'),
     });
   }
 }

@@ -7,7 +7,7 @@
  * and the CSP source; this builds the document with a fresh per-render nonce.
  */
 
-import { knownCursor, knownHighlight } from './reading-aids.js';
+import { knownAnnotationEntry, knownCursor, knownHighlight, knownHighlightLine } from './reading-aids.js';
 
 export interface MarkdownPreviewHtmlOptions {
   /** `webview.cspSource` — the origin the webview may load styles/images/fonts from. */
@@ -37,6 +37,9 @@ export interface MarkdownPreviewHtmlOptions {
    */
   hoverHighlight?: string;
   readingCursor?: string;
+  /** Band line and annotation entry (#1850), same rule: emitted only when known. */
+  highlightLine?: string;
+  annotationEntry?: string;
 }
 
 /** Build the full webview document with a fresh nonce bound into the CSP and the script tag. */
@@ -127,7 +130,8 @@ function readingModeAttr(mode: string | undefined): string {
   return '';
 }
 
-/** The bootstrap `data-hover-highlight` / `data-reading-cursor` attributes (#1802). Only known
+/** The bootstrap reading-aid attributes (#1802, #1850): `data-hover-highlight`,
+ * `data-reading-cursor`, `data-highlight-line`, `data-annotation-entry`. Only known
  * vocabulary values are interpolated (the canonical spelling, not the stored text), so the markup
  * is closed-vocabulary by construction. */
 function readingAidAttrs(opts: MarkdownPreviewHtmlOptions): string {
@@ -139,6 +143,14 @@ function readingAidAttrs(opts: MarkdownPreviewHtmlOptions): string {
   const cursor = knownCursor(opts.readingCursor);
   if (cursor) {
     out += ` data-reading-cursor="${cursor}"`;
+  }
+  const line = knownHighlightLine(opts.highlightLine);
+  if (line) {
+    out += ` data-highlight-line="${line}"`;
+  }
+  const entry = knownAnnotationEntry(opts.annotationEntry);
+  if (entry) {
+    out += ` data-annotation-entry="${entry}"`;
   }
   return out;
 }

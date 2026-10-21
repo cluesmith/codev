@@ -13,6 +13,8 @@
  *   ?height=unbounded         omit the bounded-height container (self-bounding assertion)
  *   ?highlight=<style>        seed the hover reading aid (#1802): none | word | wordLine | wordLineParagraph | line | lineParagraph
  *   ?cursor=<cursor>          seed the prose cursor (#1802): arrow | iBeam | hand
+ *   ?line=<line>              seed the band line (#1850): underPointer | abovePointer
+ *   ?entry=<entry>            seed the annotation entry (#1850): gutterButton | clickParagraph
  * Default (no params) is the classic hands-on page, unchanged.
  *
  * Remote commands (spec 1401): the page wires a `CommandAdapter` to `window.__canvasCommand`,
@@ -24,8 +26,13 @@ import { createRoot } from 'react-dom/client';
 import { ArtifactCanvas } from '../src/components/ArtifactCanvas.js';
 import type { CommandAdapter } from '../src/adapters/CommandAdapter.js';
 import type { CanvasCommand } from '@cluesmith/codev-types';
-import type { HoverHighlightStyle, ReadingCursor } from '../src/types.js';
-import { parseHighlightStyle, parseReadingCursor } from '../src/components/hover-word.js';
+import type { AnnotationEntry, HighlightLine, HoverHighlightStyle, ReadingCursor } from '../src/types.js';
+import {
+  parseAnnotationEntry,
+  parseHighlightLine,
+  parseHighlightStyle,
+  parseReadingCursor,
+} from '../src/components/hover-word.js';
 import { createStubHost, stubEditMarker, stubDeleteMarker } from '../src/__tests__/fixtures/stub-adapters.js';
 import { SAMPLE_ARTIFACT } from '../src/__tests__/fixtures/sample-artifact.js';
 import { COLUMNS_FIXTURE } from '../src/__tests__/fixtures/columns-fixture.js';
@@ -93,6 +100,8 @@ function Example(): React.ReactElement {
     parseHighlightStyle(params.get('highlight') ?? undefined),
   );
   const [cursor, setCursor] = React.useState<ReadingCursor>(parseReadingCursor(params.get('cursor') ?? undefined));
+  const [line, setLine] = React.useState<HighlightLine>(parseHighlightLine(params.get('line') ?? undefined));
+  const [entry, setEntry] = React.useState<AnnotationEntry>(parseAnnotationEntry(params.get('entry') ?? undefined));
   const onAddComment = (line: number, text: string) => {
     // Host glue (spec D6): the canvas's inline composer (#1107) collects the body and passes it
     // here; the host just writes it back. (Pre-#1107 this used window.prompt for the input.)
@@ -114,6 +123,8 @@ function Example(): React.ReactElement {
     commandAdapter,
     hoverHighlight: highlight,
     readingCursor: cursor,
+    highlightLine: line,
+    annotationEntry: entry,
     initialReadingMode: mode,
     onReadingModeChange: (next: string) => {
       setMode(next);
@@ -192,6 +203,36 @@ function Example(): React.ReactElement {
             React.createElement('option', { value: 'arrow' }, 'Arrow'),
             React.createElement('option', { value: 'iBeam' }, 'I-beam'),
             React.createElement('option', { value: 'hand' }, 'Hand'),
+          ),
+        ),
+        ' ',
+        React.createElement(
+          'label',
+          null,
+          'Line ',
+          React.createElement(
+            'select',
+            {
+              value: line,
+              onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setLine(parseHighlightLine(e.target.value)),
+            },
+            React.createElement('option', { value: 'underPointer' }, 'Under the pointer'),
+            React.createElement('option', { value: 'abovePointer' }, 'Above the pointer'),
+          ),
+        ),
+        ' ',
+        React.createElement(
+          'label',
+          null,
+          'Entry ',
+          React.createElement(
+            'select',
+            {
+              value: entry,
+              onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setEntry(parseAnnotationEntry(e.target.value)),
+            },
+            React.createElement('option', { value: 'gutterButton' }, 'Gutter + button'),
+            React.createElement('option', { value: 'clickParagraph' }, 'Click the paragraph'),
           ),
         ),
       ),
