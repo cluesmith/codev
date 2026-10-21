@@ -56,19 +56,13 @@ The builder works on macOS. Windows facts come from three places:
 3. **The owner's Windows machine** for what CI cannot do. These are listed per phase and
    collected into one manual test pass at the PR gate.
 
-**Open decision for the architect at plan approval: the early `windows.yml` landing.** GitHub
-only dispatches a workflow whose file exists on the default branch; a branch's version of the
-file then runs via `--ref`. So item 2 works before the final PR only if the dispatch-only
-`windows.yml` skeleton lands on `main` early, as a small separate PR. It is inert on `main`
-(dispatch only). That PR is an exception to "one PR at the end", so it happens **only if the
-architect asks for it**; the builder then opens it from a branch cut from `origin/main` right
-after Phase 1. The plan works either way:
-
-- **Approved:** Windows checks in Phases 1 to 10 run through `targeted` dispatches as written.
-- **Declined:** those same checks run on the owner's Windows machine, batched per phase where
-  practical and otherwise at the PR-gate pass, and the Windows workflow is first dispatched
-  after the final PR merges. Every "Windows (`targeted`)" criterion below then reads "Windows
-  (owner machine or post-merge dispatch)". No phase's scope changes.
+**Early `windows.yml` landing (owner ruling at plan approval, 2026-10-21T06:15:45Z: yes).**
+GitHub only dispatches a workflow whose file exists on the default branch; a branch's version of
+the file then runs via `--ref`. So right after Phase 1, the builder opens a small separate PR,
+from a branch cut from `origin/main`, that lands the dispatch-only `windows.yml` skeleton on
+`main`. It is manual dispatch only, never automatic, never a required check. This is the one
+sanctioned exception to "one PR at the end". Windows checks in Phases 1 to 10 then run through
+`targeted` dispatches as written.
 
 ### Standing constraints applied to every phase
 
@@ -80,8 +74,8 @@ after Phase 1. The plan works either way:
   four copies (`.claude`/`.codex` × root/skeleton).
 - The mailbox invariant (Spec 1313) and server/client isolation (#1189) hold. No Windows code
   enters `codev-sdk` outside its `/node` adapter.
-- Commits: `[Spec 1658][Phase: <id>] ...`, files staged explicitly. One PR at the end (subject
-  to the open decision above).
+- Commits: `[Spec 1658][Phase: <id>] ...`, files staged explicitly. One PR at the end, plus the
+  early `windows.yml` PR above.
 
 ## Phases (Machine Readable)
 
@@ -160,8 +154,8 @@ a testable platform seam and a way to run code on Windows.
 - [ ] `audit.md` lists every site class with its owning phase, the prebuild and install-script
   matrix (which defines the supported Windows Node versions and the ARM64 verdict), the CIM
   latency numbers, the launcher survival matrix, and the hang root cause.
-- [ ] `windows.yml` `probe` job runs green from a dispatch (if the early landing is approved;
-  otherwise the owner runs `windows-probe.mjs` directly).
+- [ ] `windows.yml` `probe` job runs green from a dispatch once the early PR has landed it on
+  `main`.
 - [ ] Platform seam tests pass; POSIX unit suite and `check-types` green.
 
 #### Test Plan
@@ -386,13 +380,12 @@ pieces, so it is observable through doctor alone.
 
 #### Files to Create / Modify
 
-- `packages/codev/src/lib/git-bash.ts` (new): resolution in the order ruling 5 and the spec fix:
-  standard install locations (`%ProgramFiles%\Git\bin\bash.exe`,
-  `%LocalAppData%\Programs\Git\bin\bash.exe`), then `PATH`, then the explicit override (config
-  setting, or `CLAUDE_CODE_GIT_BASH_PATH` if the user set it). `%SystemRoot%\System32\bash.exe`
-  is always rejected. Returns path and Git version. (The literal order makes the override a
-  last resort rather than a winner over an installed Git; this is raised with the architect at
-  plan approval, and the order changes only on their ruling.)
+- `packages/codev/src/lib/git-bash.ts` (new): resolution per ruling 5 as amended
+  (2026-10-21T06:15:45Z): the explicit override (config setting, or `CLAUDE_CODE_GIT_BASH_PATH`
+  if the user set it) wins when it points at a real Git Bash; otherwise standard install
+  locations (`%ProgramFiles%\Git\bin\bash.exe`, `%LocalAppData%\Programs\Git\bin\bash.exe`),
+  then `PATH`. `%SystemRoot%\System32\bash.exe` is always rejected; an override pointing at it
+  or at a non-Git bash fails loudly (no silent fallback). Returns path and Git version.
 - `packages/sdk/src/node/executable.ts` (new): `which`-style PATH/PATHEXT lookup promoted from
   `commands/bootstrap-docs.ts`, plus `resolveSpawnable(cmd)` that turns a `.cmd`/`.bat` shim into
   `%COMSPEC% /d /s /c` form or its underlying `node <entry>`. It lives in `codev-sdk/node`, the
@@ -416,8 +409,9 @@ pieces, so it is observable through doctor alone.
 
 #### Acceptance Criteria
 
-- [ ] Resolver precedence tests (fake fs/env) for the ruled order; System32 never returned even
-  when first on `PATH`; nothing found → error naming Git for Windows.
+- [ ] Resolver precedence tests (fake fs/env): a valid override wins over an installed Git;
+  install path before `PATH`; System32 never returned even when first on `PATH`; an override at
+  System32 or at a non-Git bash fails loudly; nothing found → error naming Git for Windows.
 - [ ] Shim tests: `claude` → `claude.cmd` via PATHEXT; spawnable form is executable by
   `CreateProcess`. The sdk boundary test still passes (no `vscode` import, zero runtime deps).
 - [ ] MSYS round-trip table, including UNC and spaces.
@@ -783,15 +777,14 @@ scenarios CI cannot cover: 1, 3 (interactive), 4 (from Windows Terminal, PowerSh
 VS Code), 8 (all GitHub concepts live), 9 (real PR via forge), 11 (Developer Mode on), 12, 13
 (3-way consult from a Windows builder; unauthenticated agy skips), 15 (VS Code extension), 6b,
 a global install with no toolchain, and the optional IDE dry run (15a with the real package).
-If the early `windows.yml` landing was declined, this pass also carries every phase's
-"Windows (`targeted`)" criterion. The builder supplies a checklist with expected results;
+The builder supplies a checklist with expected results;
 results are recorded in the review.
 
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| `windows.yml` cannot be dispatched before it is on `main` | High | High (slows every phase's Windows check) | Architect decides at plan approval; plan is written for both outcomes (owner machine + PR-gate pass otherwise) |
+| `windows.yml` cannot be dispatched before it is on `main` | High | High (slows every phase's Windows check) | Early dispatch-only PR right after Phase 1 (owner ruling); until it merges, Phase 1's probe runs on the owner's machine |
 | Audit contradicts a spec assumption (no prebuilds, every launcher kills detached children, CIM blocked or too slow) | Medium | High | Phase 1 stops and reports before Phase 2; scope is the architect's call |
 | PowerShell CIM census latency on `/health` trips the owner-lock probe budget (a new start hang) | Medium | High | Phase 1 measures; Phase 3 caches and coalesces; probe budget re-derived from measurements |
 | Owner availability for captures and the manual pass | Medium | Medium | Phase 8 is off the critical path (9, 10 proceed); captures requested as soon as Phase 6 lands; one consolidated PR-gate pass |
@@ -799,7 +792,6 @@ results are recorded in the review.
 | A platform branch changes POSIX behavior | Low | High | Per-site POSIX argv/env/bytes assertions; explicit POSIX decision where a shared contract changes; full macOS/Linux suites every phase |
 | Seam-forced unit tests pass but real Windows differs | High | Medium | Each phase has real-Windows checks; nothing is called done on unit tests alone |
 | Phase 6 is large (many launch sites) | Medium | Medium | Resolvers are already built and tested in Phase 5; sites are mechanical uses of them, each with a per-site POSIX assertion |
-| Git Bash override order as ruled makes the override a last resort | Medium | Low | Implemented as ruled; raised with the architect at plan approval |
 | Spec-level risks (kill-on-close jobs, `taskkill` gaps, ConPTY timing, MSYS mangling, System32 bash, CIM policy, pipe access, worktree handles, MAX_PATH, `.cmd` shims, CRLF) | per spec | per spec | Mitigations are the phase deliverables above (4, 3, 8, 5/6, 5, 3, 2, 7, 10, 5/6, 5/10) |
 
 ## Documentation Updates

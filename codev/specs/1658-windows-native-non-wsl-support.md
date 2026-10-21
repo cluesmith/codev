@@ -115,10 +115,12 @@ disabled, unless it says otherwise.
     endings.
 
   It never reports System32 `bash.exe` (the WSL launcher) as Git Bash.
-- [ ] Git Bash is resolved from the standard install locations, then `PATH`, then an explicit
-  override. Codev never invokes bare `bash`. The resolved path is exported to spawned builders
-  as `CLAUDE_CODE_GIT_BASH_PATH`; if the user already set that variable, Codev honors it as the
-  override.
+- [ ] Git Bash resolution: an explicit override (the config setting, or
+  `CLAUDE_CODE_GIT_BASH_PATH` if the user set it) wins when it points at a real Git Bash;
+  otherwise the standard install locations, then `PATH`. System32 `bash.exe` is always rejected,
+  and an override pointing at it or at a non-Git bash fails loudly. Codev never invokes bare
+  `bash`. The resolved path is exported to spawned builders as `CLAUDE_CODE_GIT_BASH_PATH`.
+  *(Order amended by owner ruling, 2026-10-21T06:15:45Z.)*
 - [ ] Missing Git Bash or jq fails fast with an actionable message naming the prerequisite. It
   does not hang and does not fail with an obscure spawn error.
 
@@ -250,10 +252,13 @@ Decisions. Quoted in substance:**
 4. **Shell roles on Windows.** PowerShell is the default *interactive* shell for architect and
    shell terminals (`.codev/config.json`). Git Bash is the only *plumbing* shell: forge concepts,
    the builder launch script, `postSpawn`. No PowerShell twins of any script.
-5. **Git Bash resolution.** Resolve the Git for Windows bash explicitly (standard install paths,
-   then PATH, then an override setting). Never invoke bare `bash`: System32 `bash.exe` launches
-   WSL. Spawn sets or honors Claude Code's `CLAUDE_CODE_GIT_BASH_PATH`, so builders and Codev
-   agree on one binary.
+5. **Git Bash resolution.** Resolve the Git for Windows bash explicitly. *(Amended by owner
+   ruling, 2026-10-21T06:15:45Z: the explicit override wins.)* When the override setting or
+   `CLAUDE_CODE_GIT_BASH_PATH` is set and points at a real Git Bash, use it; otherwise the
+   standard install paths, then PATH. An override pointing at System32 `bash.exe` or at a
+   non-Git bash fails loudly. Never invoke bare `bash`: System32 `bash.exe` launches WSL. Spawn
+   sets or honors Claude Code's `CLAUDE_CODE_GIT_BASH_PATH`, so builders and Codev agree on one
+   binary. Original order: standard install paths, then PATH, then an override setting.
 6. **Prerequisites and docs.** Git for Windows and jq are hard Windows prerequisites, checked by
    `codev doctor`, including a CRLF warning for user-authored `postSpawn` scripts. WSL 2 stays a
    documented, supported alternative; docs present native + Git Bash and WSL 2 as two paths.
@@ -502,7 +507,8 @@ Every plumbing launch site routes through one resolved Git Bash binary:
 - `devCommand`;
 - porch check commands that are shell strings.
 
-**Resolution** follows ruling 5: install paths, then PATH, then override, with System32 excluded.
+**Resolution** follows ruling 5 as amended: a valid explicit override, else install paths, then
+PATH, with System32 always excluded.
 
 **Paths.**
 - `cwd` is passed as a native Windows path; Git Bash accepts it.
