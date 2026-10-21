@@ -4,7 +4,7 @@
  * Port of codev/bin/codev-doctor to TypeScript
  */
 
-import { execSync, spawnSync, spawn } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,7 +34,7 @@ import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { hostPlatform, isWindows } from '../lib/platform.js';
-import { findOnHostPath } from '../lib/shell-launch.js';
+import { findOnHostPath, spawnOnHost, spawnSyncOnHost } from '../lib/shell-launch.js';
 import { getWorktreeConfig } from '../agent-farm/utils/config.js';
 import type { CodevConfig } from '../lib/config.js';
 import { resolveGitBash, GitBashError, type GitBash } from '../lib/git-bash.js';
@@ -570,7 +570,7 @@ function commandExists(cmd: string): boolean {
  */
 function runCommand(cmd: string, args: string[]): string | null {
   try {
-    const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 5000 });
+    const result = spawnSyncOnHost(cmd, args, { encoding: 'utf-8', timeout: 5000 });
     if (result.status === 0) {
       return result.stdout.trim();
     }
@@ -828,7 +828,7 @@ function verifyAiModel(modelName: string): CheckResult {
   }
 
   try {
-    const result = spawnSync(config.command, config.args, {
+    const result = spawnSyncOnHost(config.command, config.args, {
       encoding: 'utf-8',
       timeout: config.timeout,
       stdio: 'pipe',
@@ -919,7 +919,7 @@ function verifyAgy(): Promise<CheckResult> {
   }
 
   return new Promise<CheckResult>((resolve) => {
-    const proc = spawn(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {
+    const proc = spawnOnHost(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let settled = false;

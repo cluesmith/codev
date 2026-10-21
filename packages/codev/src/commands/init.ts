@@ -21,7 +21,7 @@ import {
 } from '../lib/scaffold.js';
 import { syncHotContextBlock } from '../lib/managed-block.js';
 import { createGitignore } from '../lib/gitignore.js';
-import { defaultInteractiveShell } from '../lib/platform.js';
+import { isWindows } from '../lib/platform.js';
 
 interface InitOptions {
   yes?: boolean;
@@ -149,7 +149,7 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
     shell: {
       architect: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
       builder: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
-      shell: defaultInteractiveShell(),
+      shell: 'bash',
     },
     worktree: {
       '//': 'Opt-in runnable worktree config. See CLAUDE.md > Runnable Worktrees for stack-specific recipes (pnpm, npm, yarn, bun, cargo, poetry/uv, go mod). Defaults shown below are no-ops; fill in to enable.',
@@ -157,6 +157,11 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
       postSpawn: [],
     },
   };
+  // Spec 1658: no interactive shell is committed from a Windows machine; the
+  // loader's per-host default (Windows PowerShell there, bash elsewhere) applies.
+  if (isWindows()) {
+    delete (codevConfig.shell as Record<string, unknown>).shell;
+  }
   fs.writeFileSync(
     path.join(codevConfigDir, 'config.json'),
     JSON.stringify(codevConfig, null, 2) + '\n'

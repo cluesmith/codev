@@ -10,15 +10,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 
-const childProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
+const childProcess = vi.hoisted(() => ({ spawn: vi.fn(), spawnSync: vi.fn() }));
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
-  return { ...actual, spawn: childProcess.spawn };
+  return { ...actual, spawn: childProcess.spawn, spawnSync: childProcess.spawnSync };
 });
 
 import { runStreaming, commandExists } from '../agent-farm/utils/shell.js';
 import { runCheck } from '../commands/porch/checks.js';
-import { spawnOnHost } from '../lib/shell-launch.js';
+import { spawnOnHost, spawnSyncOnHost } from '../lib/shell-launch.js';
+import { windowsPrereqDeps } from '../commands/doctor.js';
 import { setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
 import { setGitBashForTests } from '../lib/shell-launch.js';
 
@@ -44,6 +45,8 @@ function fakeChild(): EventEmitter & { stdout: PassThrough; stderr: PassThrough;
 beforeEach(() => {
   childProcess.spawn.mockReset();
   childProcess.spawn.mockImplementation(() => fakeChild());
+  childProcess.spawnSync.mockReset();
+  childProcess.spawnSync.mockReturnValue({ status: 0, stdout: 'jq-1.7.1\n', stderr: '' });
   setGitBashForTests(GIT_BASH);
 });
 
@@ -137,5 +140,33 @@ describe('spawnOnHost', () => {
       windowsHide: true,
       windowsVerbatimArguments: false,
     });
+  });
+});
+
+describe('spawnSyncOnHost (doctor CLI probes)', () => {
+  it('POSIX: spawnSync exactly as given', () => {
+    setHostPlatformForTests('linux');
+    spawnSyncOnHost('codex', ['--version'], { encoding: 'utf-8', timeout: 5000 });
+    expect(childProcess.spawnSync).toHaveBeenCalledWith('codex', ['--version'], { encoding: 'utf-8', timeout: 5000 });
+  });
+
+  it('Windows: hidden, through the shim resolver', () => {
+    setHostPlatformForTests('win32');
+    spawnSyncOnHost('codex', ['--version'], { encoding: 'utf-8', env: { PATH: '' } });
+    expect(childProcess.spawnSync).toHaveBeenCalledWith('codex', ['--version'], {
+      encoding: 'utf-8',
+      env: { PATH: '' },
+      windowsHide: true,
+      windowsVerbatimArguments: false,
+    });
+  });
+
+  it('doctor version probes go through it on Windows', () => {
+    setHostPlatformForTests('win32');
+    expect(windowsPrereqDeps(null, null).jqVersion('jq')).toBe('jq-1.7.1');
+    const [command, args, opts] = childProcess.spawnSync.mock.calls[0];
+    expect(command).toBe('jq');
+    expect(args).toEqual(['--version']);
+    expect(opts).toMatchObject({ windowsHide: true });
   });
 });

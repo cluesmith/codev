@@ -139,7 +139,8 @@ async function terminalOutput(terminalId: string): Promise<string> {
 function installAgentStub(): void {
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(path.join(binDir, 'stub-agent.cjs'), `
-process.stdout.write('AGENT-READY ' + process.pid + ' args=' + JSON.stringify(process.argv.slice(2)) + '\\r\\n');
+require('fs').writeFileSync('agent-args.json', JSON.stringify(process.argv.slice(2)));
+process.stdout.write('AGENT-READY ' + process.pid + '\\r\\n');
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => process.stdout.write('ECHO:' + d.trim() + '\\r\\n'));
 setInterval(() => {}, 1000);
@@ -286,6 +287,13 @@ describe.skipIf(!onWindows)('Launcher routing on native Windows', () => {
     expect(builder!.command?.toLowerCase()).toBe(gitBash.path.toLowerCase());
     await waitFor(async () => (await terminalOutput(builder!.id)).includes('AGENT-READY'), 60_000, 'the builder harness banner');
     expect(fs.readFileSync(path.join(worktree, '.builder-session-id'), 'utf8').trim()).toMatch(/^[0-9a-f-]{36}$/);
+    // The role reached the harness through `$(cat '<role file>')`: an empty
+    // substitution would still launch the stub, so the text itself is checked.
+    const agentArgs = JSON.parse(fs.readFileSync(path.join(worktree, 'agent-args.json'), 'utf8')) as string[];
+    const roleIndex = agentArgs.indexOf('--append-system-prompt');
+    expect(roleIndex, JSON.stringify(agentArgs).slice(0, 500)).toBeGreaterThanOrEqual(0);
+    expect(agentArgs[roleIndex + 1]).toBe(fs.readFileSync(path.join(worktree, '.builder-role.md'), 'utf8').replace(/\n+$/, ''));
+    expect(agentArgs[roleIndex + 1].length).toBeGreaterThan(100);
   }, 300_000);
 
   it('scenario 10 (CRLF): a CRLF hook either runs or fails naming itself, and doctor flags it', async () => {

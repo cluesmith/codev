@@ -11,7 +11,7 @@
  * and only the Windows branch calls in here.
  */
 
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from 'node:child_process';
 import { win32 } from 'node:path';
 import { resolveSpawnable, findExecutable, type SpawnableCommand } from '@cluesmith/codev-sdk/node/executable';
 import { hostPlatform, isWindows } from './platform.js';
@@ -104,6 +104,19 @@ export function spawnOnHost(command: string, args: string[], options: SpawnOptio
   }
   const spawnable = spawnableOnHost(command, args, options.env ?? process.env);
   return spawn(spawnable.command, spawnable.args, {
+    ...options,
+    windowsHide: true,
+    windowsVerbatimArguments: spawnable.windowsVerbatimArguments,
+  });
+}
+
+/** `spawnSync` counterpart of `spawnOnHost`, for probes that read a CLI's output. */
+export function spawnSyncOnHost(command: string, args: string[], options: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> {
+  if (!isWindows()) {
+    return spawnSync(command, args, options);
+  }
+  const spawnable = spawnableOnHost(command, args, options.env ?? process.env);
+  return spawnSync(spawnable.command, spawnable.args, {
     ...options,
     windowsHide: true,
     windowsVerbatimArguments: spawnable.windowsVerbatimArguments,

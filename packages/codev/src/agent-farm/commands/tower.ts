@@ -593,6 +593,7 @@ export async function towerLog(options: TowerLogOptions = {}): Promise<void> {
       // Spec 1658: no `tail` on native Windows; follow in Node.
       followFile(LOG_FILE, (text) => process.stdout.write(text));
       await new Promise(() => {});
+      return;
     }
     const tail = spawn('tail', ['-f', LOG_FILE], { stdio: 'inherit' });
     tail.on('error', (err) => {

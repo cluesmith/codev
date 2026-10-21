@@ -547,7 +547,12 @@ function windowsForgeLaunch(command: string, options?: ForgeCommandOptions): Lau
   return gitBashCommand(command, workspaceRoot);
 }
 
-/** Concept inputs that carry a local path. Scripts hand them to MSYS tools (`tar -C`), which need POSIX form. */
+/**
+ * Concept inputs that carry a local path. Scripts hand them to MSYS tools
+ * (`tar -C`), which need POSIX form. Add any new CODEV_* input whose value is a
+ * host file-system path; identifiers, URLs and API paths stay out (they must
+ * pass through unchanged).
+ */
 const PATH_INPUTS = ['CODEV_OUTPUT_DIR'];
 
 /** The concept environment for Git Bash: path inputs in POSIX form, MSYS argument conversion off. */
