@@ -1,7 +1,7 @@
 id: '1797'
 title: adopt-bootstrap-the-governance
 protocol: spir
-phase: verify
+phase: verified
 plan_phases:
   - id: phase_1
     title: Governance-doc classifier and validator library
@@ -155,7 +155,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter3-claude.txt
 started_at: '2026-10-12T20:18:01.796Z'
-updated_at: '2026-10-21T04:26:48.611Z'
+updated_at: '2026-10-21T04:26:50.390Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-12T20:29:16.809Z'
