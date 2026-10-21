@@ -28,6 +28,8 @@ import { createRequire } from 'node:module';
 import { ShellperProcess, type IShellperPty, type PtyOptions, type ShellperAuth } from './shellper-process.js';
 import { SHELLPER_SECRET_ENV, isPipeEndpoint, removeStaleEndpoint } from './shellper-endpoint.js';
 import { REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
+import { isWindows } from '../lib/platform.js';
+import { killSessionTree } from '../lib/process-tree.js';
 
 // createRequire enables importing native/CJS modules (like node-pty) from ESM.
 // The package uses "type": "module", so bare `require()` is not available.
@@ -121,12 +123,20 @@ function createRealPty(): IShellperPty {
     },
 
     kill(signal?: number): void {
-      if (ptyInstance) {
-        try {
-          process.kill(ptyInstance.pid, signal ?? 15);
-        } catch {
-          // Process already dead
-        }
+      if (!ptyInstance) return;
+      // Windows has no signals to forward: every kill is a hard kill, and
+      // killing the PTY's root alone would leave its descendants running, so
+      // the whole tree goes (Spec 1658).
+      if (isWindows()) {
+        killSessionTree(ptyInstance.pid).catch((err: Error) => {
+          logStderr(`PTY tree teardown incomplete: ${err.message}`);
+        });
+        return;
+      }
+      try {
+        process.kill(ptyInstance.pid, signal ?? 15);
+      } catch {
+        // Process already dead
       }
     },
 

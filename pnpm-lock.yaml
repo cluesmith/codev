@@ -269,9 +269,6 @@ importers:
       open:
         specifier: ^10.1.0
         version: 10.2.0
-      tree-kill:
-        specifier: ^1.2.2
-        version: 1.2.2
       ws:
         specifier: ^8.18.0
         version: 8.20.0

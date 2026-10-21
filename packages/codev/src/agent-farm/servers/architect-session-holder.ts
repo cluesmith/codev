@@ -21,9 +21,15 @@
 
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-
-/** Marker identifying a Codev shellper process in a `ps` command line. */
-const SHELLPER_MARKER = 'shellper-main.js';
+import { isWindows } from '../../lib/platform.js';
+import { killSessionTree } from '../../lib/process-tree.js';
+import { listProcessCensus } from './process-census.js';
+import {
+  SHELLPER_MARKER,
+  readJsonStringField,
+  sameWindowsPath,
+  shellperArgvText,
+} from '../../terminal/shellper-cmdline.js';
 
 export interface ProcessEntry {
   pid: number;
@@ -62,16 +68,6 @@ function realpathOrSelf(p: string): string {
   }
 }
 
-/**
- * Extract a `"key":"value"` string field from a shellper's JSON config as it
- * appears verbatim in the `ps` argv. Regex rather than JSON.parse: the config
- * embeds the full process env, so the blob is large and a partial/edge `ps`
- * line must degrade to "field absent" rather than throw.
- */
-function extractJsonStringField(cmdline: string, key: string): string | null {
-  const m = cmdline.match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`));
-  return m ? m[1] : null;
-}
 
 export interface ArchitectIdentity {
   /** Absolute workspace path the shellper runs in (`cwd` in its config). */
@@ -92,11 +88,12 @@ export interface ArchitectIdentity {
 export function isOwnArchitectShellper(cmdline: string, identity: ArchitectIdentity): boolean {
   if (!cmdline.includes(SHELLPER_MARKER)) return false;
 
-  const cfgName = extractJsonStringField(cmdline, 'CODEV_ARCHITECT_NAME');
+  const cfgName = readJsonStringField(cmdline, 'CODEV_ARCHITECT_NAME');
   if (cfgName !== identity.architectName) return false;
 
-  const cfgCwd = extractJsonStringField(cmdline, 'cwd');
+  const cfgCwd = readJsonStringField(cmdline, 'cwd');
   if (!cfgCwd) return false;
+  if (isWindows()) return sameWindowsPath(cfgCwd, identity.workspacePath);
   const wanted = new Set([identity.workspacePath, realpathOrSelf(identity.workspacePath)]);
   const got = new Set([cfgCwd, realpathOrSelf(cfgCwd)]);
   const cwdMatches = [...got].some((g) => wanted.has(g));
@@ -110,7 +107,7 @@ export function isOwnArchitectShellper(cmdline: string, identity: ArchitectIdent
  * truncation (the shellper config blob is large) on both BSD and coreutils.
  * Throws on `ps` failure; callers decide how to degrade.
  */
-export function listProcessEntries(): ProcessEntry[] {
+function listPosixProcessEntries(): ProcessEntry[] {
   const out = execFileSync('ps', ['-ww', '-eo', 'pid=,args='], {
     encoding: 'utf-8',
     timeout: 5000,
@@ -126,6 +123,18 @@ export function listProcessEntries(): ProcessEntry[] {
     entries.push({ pid, cmdline: trimmed.slice(sp + 1) });
   }
   return entries;
+}
+
+/**
+ * Snapshot every running process as {pid, cmdline} for the matchers here.
+ * POSIX reads `ps`; Windows reads the census (Spec 1658), with each command
+ * line argv-unquoted so the shellper's JSON config reads as plain JSON. Rejects
+ * on failure; callers decide how to degrade.
+ */
+export async function listProcessEntries(): Promise<ProcessEntry[]> {
+  if (!isWindows()) return listPosixProcessEntries();
+  const census = await listProcessCensus();
+  return census.map((entry) => ({ pid: entry.pid, cmdline: shellperArgvText(entry.cmdline) }));
 }
 
 export interface SessionHolderClassification {
@@ -149,10 +158,10 @@ export function classifyArchitectSessionHolder(opts: {
   identity: ArchitectIdentity;
   /** Exclude this pid (e.g. Tower's own) from consideration. */
   selfPid?: number;
-  /** Test seam: override the process snapshot. */
-  list?: () => ProcessEntry[];
+  /** The process snapshot (see `listProcessEntries`). */
+  list: () => ProcessEntry[];
 }): SessionHolderClassification {
-  const list = opts.list ?? listProcessEntries;
+  const list = opts.list;
   let entries: ProcessEntry[];
   try {
     entries = list();
@@ -180,15 +189,15 @@ export function classifyArchitectSessionHolder(opts: {
  * registry-row zombie (Issue #1224 symptom B) — there is no stored session id to
  * key on, so identity (shellper-main.js + cwd + CODEV_ARCHITECT_NAME) is the key.
  */
-export function findOwnArchitectShellpers(opts: {
+export async function findOwnArchitectShellpers(opts: {
   identity: ArchitectIdentity;
   selfPid?: number;
-  list?: () => ProcessEntry[];
-}): number[] {
+  list?: () => ProcessEntry[] | Promise<ProcessEntry[]>;
+}): Promise<number[]> {
   const list = opts.list ?? listProcessEntries;
   let entries: ProcessEntry[];
   try {
-    entries = list();
+    entries = await list();
   } catch {
     return [];
   }
@@ -211,18 +220,14 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-/** Kill a shellper's whole process group (leader is detached), best-effort. */
+/**
+ * Kill a shellper's whole session tree (on POSIX the leader is detached, so its
+ * process group; falls back to the single pid), best-effort.
+ */
 function killProcessGroup(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    // Group gone or not permitted — fall back to the single pid.
-    try {
-      process.kill(pid, signal);
-    } catch {
-      /* already dead */
-    }
-  }
+  killSessionTree(pid, { signal, fallbackToPid: true }).catch(() => {
+    // Snapshot pass did not run; the poll below still sees survivors
+  });
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -295,14 +300,28 @@ export async function reconcileArchitectSessionHolder(opts: {
   identity: ArchitectIdentity;
   selfPid?: number;
   log?: ArchitectLogger;
-  list?: () => ProcessEntry[];
+  list?: () => ProcessEntry[] | Promise<ProcessEntry[]>;
   reap?: (pids: number[]) => Promise<void>;
 }): Promise<{ foreignHolder: boolean; reclaimedPids: number[] }> {
+  // Snapshot first (asynchronously: on Windows it is a PowerShell census), then
+  // classify. A failed snapshot classifies as "no holder", as before.
+  const list = opts.list ?? listProcessEntries;
+  let snapshot: ProcessEntry[] | null = null;
+  try {
+    snapshot = await list();
+  } catch (err) {
+    if (isWindows()) {
+      opts.log?.('WARN', `Architect '${opts.identity.architectName}' session-holder check skipped: ${(err as Error).message}`);
+    }
+  }
   const { reclaimable, foreign } = classifyArchitectSessionHolder({
     sessionId: opts.sessionId,
     identity: opts.identity,
     selfPid: opts.selfPid,
-    list: opts.list,
+    list: () => {
+      if (snapshot === null) throw new Error('process snapshot unavailable');
+      return snapshot;
+    },
   });
 
   const shortId = opts.sessionId.slice(0, 8);

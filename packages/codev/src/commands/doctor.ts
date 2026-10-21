@@ -33,6 +33,8 @@ import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
+import { isWindows } from '../lib/platform.js';
+import { listProcessCensus } from '../agent-farm/servers/process-census.js';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import {
   measureSessionLogs,
@@ -1337,30 +1339,59 @@ export async function doctor(): Promise<number> {
   }
   console.log('');
 
+  // Process census (Spec 1658). On Windows, session teardown and the orphan
+  // and husk sweeps read the process table through an inline PowerShell CIM
+  // query; a machine where that is blocked (for example by policy) runs Tower
+  // without them, which is not a supported configuration.
+  if (isWindows()) {
+    console.log(chalk.bold('Process Census') + ' (PowerShell CIM)');
+    console.log('');
+    try {
+      const census = await listProcessCensus();
+      console.log(`  ${chalk.green('✓')} Process census available (${census.length} processes)`);
+    } catch (err) {
+      const issue = `Process census unavailable: ${(err as Error).message}`;
+      console.log(`  ${chalk.yellow('⚠')} ${issue}`);
+      warnings++;
+      warningDetails.push({
+        name: 'Process census',
+        issue,
+        recommendation: 'Allow powershell.exe to run Get-CimInstance Win32_Process; without it Tower cannot tear down session trees or reap orphaned shellpers',
+      });
+    }
+    console.log('');
+  }
+
   // Tower environment hygiene (#1219). A Tower that inherited a Claude Code
   // session's markers spawns agents whose transcripts are never saved, so they
-  // cannot be resumed after a crash — silent until recovery time.
-  const towerPids = getProcessesOnPort(DEFAULT_TOWER_PORT);
-  const towerEnv = checkTowerEnv(
-    () => (towerPids.length > 0 ? readProcessEnv(towerPids[0]) : null),
-    () => findShellperPids()
-      .map(readProcessEnv)
-      .filter((e): e is Record<string, string> => e !== null),
-  );
+  // cannot be resumed after a crash — silent until recovery time. Windows
+  // exposes no way to read another process's environment, so the check is
+  // reported as not available there rather than guessed (Spec 1658).
   console.log(chalk.bold('Tower Environment') + ` (port ${DEFAULT_TOWER_PORT})`);
   console.log('');
-  if (towerEnv.status === 'warn') {
-    console.log(`  ${chalk.yellow('⚠')} ${towerEnv.summary}`);
-    warnings++;
-    warningDetails.push({
-      name: 'Tower environment',
-      issue: towerEnv.summary,
-      recommendation: towerEnv.recommendation,
-    });
-  } else if (towerEnv.status === 'skipped') {
-    console.log(`  ${chalk.blue('-')} ${towerEnv.summary}`);
+  if (isWindows()) {
+    console.log(`  ${chalk.blue('-')} Not available on Windows (a process's environment cannot be read)`);
   } else {
-    console.log(`  ${chalk.green('✓')} ${towerEnv.summary}`);
+    const towerPids = getProcessesOnPort(DEFAULT_TOWER_PORT);
+    const towerEnv = checkTowerEnv(
+      () => (towerPids.length > 0 ? readProcessEnv(towerPids[0]) : null),
+      () => findShellperPids()
+        .map(readProcessEnv)
+        .filter((e): e is Record<string, string> => e !== null),
+    );
+    if (towerEnv.status === 'warn') {
+      console.log(`  ${chalk.yellow('⚠')} ${towerEnv.summary}`);
+      warnings++;
+      warningDetails.push({
+        name: 'Tower environment',
+        issue: towerEnv.summary,
+        recommendation: towerEnv.recommendation,
+      });
+    } else if (towerEnv.status === 'skipped') {
+      console.log(`  ${chalk.blue('-')} ${towerEnv.summary}`);
+    } else {
+      console.log(`  ${chalk.green('✓')} ${towerEnv.summary}`);
+    }
   }
   console.log('');
 

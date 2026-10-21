@@ -1,0 +1,228 @@
+/**
+ * Spec 1658 Phase 3, native Windows only (the on-demand `windows.yml` targeted
+ * job runs it against the built checkout; it skips everywhere else). Real
+ * node -> bash -> node trees, no mocks:
+ *
+ * - Scenario 6 (teardown): no descendant survives `killSessionTree`, including
+ *   when the session root is already dead and when an intermediate process
+ *   exited first (re-parenting its child). Killing a real shellper session
+ *   takes its PTY tree with it.
+ * - Scenario 7 (orphan sweep): an unregistered shellper is detected by the
+ *   census-backed sweeps and reaped by the husk sweep.
+ * - A porch check that times out has its whole tree killed.
+ */
+
+import { describe, it, expect, afterAll } from 'vitest';
+import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import Database from 'better-sqlite3';
+import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
+import { listProcessCensus } from '../agent-farm/servers/process-census.js';
+import { sweepShellperHusks } from '../agent-farm/servers/shellper-husk-sweep.js';
+import { SessionManager } from '../terminal/session-manager.js';
+import { runCheck } from '../commands/porch/checks.js';
+
+const onWindows = process.platform === 'win32';
+const GIT_BASH = 'C:\\Program Files\\Git\\bin\\bash.exe';
+const shellperScript = fileURLToPath(new URL('../../dist/terminal/shellper-main.js', import.meta.url));
+const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-tree-'));
+const treeScript = path.join(workDir, 'tree.cjs');
+const leftovers: number[] = [];
+
+/**
+ * Each process appends its pid to the pid file, then:
+ * - root: starts `mid` (through Git Bash in `bash` mode), then idles;
+ * - mid: starts `leaf`; in `reparent` mode the leaf is detached and mid exits;
+ * - leaf: idles.
+ */
+fs.writeFileSync(treeScript, `
+const { spawn } = require('child_process');
+const fs = require('fs');
+const [, , role, pidFile, mode] = process.argv;
+fs.appendFileSync(pidFile, process.pid + '\\n');
+const node = process.execPath;
+if (role === 'root') {
+  if (mode === 'bash') {
+    const fwd = (p) => p.split('\\\\').join('/');
+    spawn(${JSON.stringify(GIT_BASH)}, ['-c', '"' + fwd(node) + '" "' + fwd(__filename) + '" mid "' + fwd(pidFile) + '" ' + mode], { stdio: 'ignore' });
+  } else {
+    spawn(node, [__filename, 'mid', pidFile, mode], { stdio: 'ignore' });
+  }
+} else if (role === 'mid') {
+  const detached = mode === 'reparent';
+  const leaf = spawn(node, [__filename, 'leaf', pidFile, mode], { stdio: 'ignore', detached });
+  if (detached) {
+    leaf.unref();
+    setTimeout(() => process.exit(0), 300);
+    return;
+  }
+}
+setInterval(() => {}, 1000);
+`);
+
+afterAll(() => {
+  for (const pid of leftovers) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Already gone
+    }
+  }
+  try {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  } catch {
+    // Left for the runner's temp cleanup
+  }
+});
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitFor(check: () => boolean, timeoutMs: number, what: string): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+function readPids(pidFile: string): number[] {
+  if (!fs.existsSync(pidFile)) return [];
+  return fs.readFileSync(pidFile, 'utf-8').split(/\r?\n/).filter(Boolean).map(Number);
+}
+
+/** Start a tree and wait until root, mid and leaf have all reported. */
+async function startTree(mode: 'plain' | 'bash' | 'reparent'): Promise<{ rootPid: number; pids: number[] }> {
+  const pidFile = path.join(workDir, `pids-${crypto.randomUUID()}.txt`);
+  const root = spawn(process.execPath, [treeScript, 'root', pidFile, mode], { stdio: 'ignore' });
+  root.unref();
+  await waitFor(() => readPids(pidFile).length >= 3, 20_000, `${mode} tree to start`);
+  const pids = readPids(pidFile);
+  leftovers.push(...pids);
+  return { rootPid: root.pid!, pids };
+}
+
+async function expectAllGone(pids: number[]): Promise<void> {
+  await waitFor(() => pids.every((pid) => !alive(pid)), 10_000, `pids ${pids.join(',')} to exit`);
+  const census = await listProcessCensus();
+  expect(census.filter((entry) => pids.includes(entry.pid))).toEqual([]);
+}
+
+describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees', () => {
+  it('scenario 6: kills a node -> bash -> node tree with no survivors', async () => {
+    const { rootPid, pids } = await startTree('bash');
+    const { signaled, snapshot } = await killSessionTree(rootPid);
+    expect(signaled).toBe(true);
+    // The snapshot holds the Git Bash layer too, not only the processes that reported.
+    expect(snapshot.members.length).toBeGreaterThan(pids.length);
+    expect(await waitForTreeExit(rootPid, snapshot, 10_000)).toBe(true);
+    await expectAllGone([...pids, ...snapshot.members.map((m) => m.pid)]);
+  }, 60_000);
+
+  it('scenario 6: clears the descendants when the session root is already dead', async () => {
+    const { rootPid, pids } = await startTree('plain');
+    process.kill(rootPid, 'SIGKILL');
+    await waitFor(() => !alive(rootPid), 10_000, 'root to exit');
+
+    const { signaled } = await killSessionTree(rootPid);
+    expect(signaled).toBe(true);
+    await expectAllGone(pids);
+  }, 60_000);
+
+  it('scenario 6: clears a descendant whose parent exited first (re-parented)', async () => {
+    const { rootPid, pids } = await startTree('reparent');
+    const [, midPid, leafPid] = pids;
+    await waitFor(() => !alive(midPid), 10_000, 'intermediate to exit');
+    expect(alive(leafPid)).toBe(true);
+
+    await killSessionTree(rootPid);
+    await expectAllGone([rootPid, leafPid]);
+  }, 60_000);
+
+  it('scenario 6: killing a real shellper session takes its PTY tree with it', async () => {
+    const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-sess-'));
+    const manager = new SessionManager({ socketDir, shellperScript, nodeExecutable: process.execPath });
+    const pidFile = path.join(workDir, `pids-${crypto.randomUUID()}.txt`);
+    const sessionId = crypto.randomUUID();
+    await manager.createSession({
+      sessionId,
+      command: process.execPath,
+      args: [treeScript, 'root', pidFile, 'bash'],
+      cwd: workDir,
+      env: process.env as Record<string, string>,
+      cols: 80,
+      rows: 24,
+    });
+    await waitFor(() => readPids(pidFile).length >= 3, 20_000, 'session tree to start');
+    const shellperPid = manager.getSessionInfo(sessionId)!.pid;
+    const pids = readPids(pidFile);
+    leftovers.push(shellperPid, ...pids);
+
+    await manager.killSession(sessionId);
+    await expectAllGone([shellperPid, ...pids]);
+  }, 90_000);
+
+  it('scenario 7: an unregistered shellper husk is detected and reaped', async () => {
+    const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-husk-'));
+    const first = new SessionManager({ socketDir, shellperScript, nodeExecutable: process.execPath });
+    const sessionId = crypto.randomUUID();
+    const client = await first.createSession({
+      sessionId,
+      command: 'cmd.exe',
+      args: ['/d', '/c', 'exit 0'],
+      cwd: workDir,
+      env: process.env as Record<string, string>,
+      cols: 80,
+      rows: 24,
+    });
+    expect(client).toBeDefined();
+    const shellperPid = first.getSessionInfo(sessionId)!.pid;
+    leftovers.push(shellperPid);
+    // The PTY child exits; the shellper lingers (a husk). Tower "crashes".
+    let children: string[] = [];
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      const census = await listProcessCensus();
+      children = census.filter((entry) => entry.ppid === shellperPid).map((entry) => `${entry.pid} ${entry.cmdline}`);
+      if (children.length === 0) break;
+      if (Date.now() > deadline) throw new Error(`shellper ${shellperPid} still has children: ${children.join(' | ')}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    first.shutdown();
+
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE terminal_sessions (shellper_pid INTEGER, shellper_start_time INTEGER)');
+    const result = await sweepShellperHusks({ socketDir, db, graceMs: 0, now: Date.now() + 1000 });
+    expect(result.pids).toEqual([shellperPid]);
+    await waitFor(() => !alive(shellperPid), 15_000, 'husk to be reaped');
+  }, 90_000);
+
+  it('a porch check that times out has its whole tree killed', async () => {
+    const pidFile = path.join(workDir, `pids-${crypto.randomUUID()}.txt`);
+    const started = Date.now();
+    const result = await runCheck(
+      'tree',
+      `"${process.execPath}" ${treeScript} root ${pidFile} plain`,
+      workDir,
+      { PROJECT_ID: '1658', PROJECT_TITLE: 'tree' },
+      5_000,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.error).toMatch(/Timed out/);
+    expect(Date.now() - started).toBeLessThan(30_000);
+    const pids = readPids(pidFile);
+    expect(pids.length).toBeGreaterThanOrEqual(3);
+    leftovers.push(...pids);
+    await expectAllGone(pids);
+  }, 60_000);
+});

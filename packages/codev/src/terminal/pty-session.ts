@@ -37,6 +37,7 @@ import { stripTerminalReplies, terminalReplyMatches, escapeBytes } from './termi
 const LOG_INPUT_SIGNAL = process.env.AF_LOG_INPUT_SIGNAL === '1';
 import type { IShellperClient } from './shellper-client.js';
 import { isDeliberateExit } from './shellper-protocol.js';
+import { killSessionTree } from '../lib/process-tree.js';
 
 /**
  * Terminal delivery-signal bus (Spec 1313, Phase 5).
@@ -796,15 +797,11 @@ export class PtySession extends EventEmitter {
       return;
     }
     if (this.pty && this.status === 'running') {
-      try {
-        // Kill process group to prevent orphans
-        process.kill(-this.pty.pid, 'SIGTERM');
-        setTimeout(() => {
-          try { process.kill(-this.pty!.pid, 'SIGKILL'); } catch { /* already dead */ }
-        }, 5000);
-      } catch {
-        // Process already exited
-      }
+      // Kill the whole session tree to prevent orphans (SIGTERM, then SIGKILL
+      // after 5s on POSIX; a snapshot-backed tree kill on Windows).
+      killSessionTree(this.pty.pid, { escalateAfterMs: 5000 }).catch(() => {
+        // Teardown incomplete; the orphan sweep is the backstop
+      });
     }
     this.cleanup();
   }

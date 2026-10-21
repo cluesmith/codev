@@ -128,8 +128,9 @@ import {
   findHuskShellpers,
   sweepShellperHusks,
   resolveHuskGraceMs,
+  startTimeLookupFor,
 } from './shellper-husk-sweep.js';
-import { getProcessStartTime } from '../../terminal/session-manager.js';
+import { isShellperInScope } from '../../terminal/shellper-cmdline.js';
 import type { CronTask } from './tower-cron.js';
 import {
   getWorkspaceTerminals,
@@ -420,14 +421,11 @@ async function computeFleetHealthFields(
   if (!shellperManager) return {};
   try {
     const census = await listProcessCensus();
-    const scopeMarker = shellperManager.socketDir.endsWith('/')
-      ? shellperManager.socketDir
-      : `${shellperManager.socketDir}/`;
 
     const inScopePids = new Set<number>();
     let fleetRssKb = 0;
     for (const entry of census) {
-      if (entry.cmdline.includes(SHELLPER_MARKER) && entry.cmdline.includes(scopeMarker)) {
+      if (entry.cmdline.includes(SHELLPER_MARKER) && isShellperInScope(entry.cmdline, shellperManager.socketDir)) {
         inScopePids.add(entry.pid);
         fleetRssKb += entry.rssKb;
       }
@@ -438,7 +436,7 @@ async function computeFleetHealthFields(
       }
     }
 
-    const registered = await computeRegisteredShellperPids(getGlobalDb());
+    const registered = await computeRegisteredShellperPids(getGlobalDb(), startTimeLookupFor(census));
     let unregisteredShellperCount = 0;
     for (const pid of inScopePids) {
       if (!registered.has(pid)) unregisteredShellperCount++;
@@ -492,19 +490,21 @@ async function handleHuskPreview(res: http.ServerResponse, ctx: RouteContext): P
     // candidacy, not a later, possibly-different one (codex #1227 PR review).
     const census = await listProcessCensus();
     const rssByPid = new Map(census.map((entry) => [entry.pid, entry.rssKb]));
+    const getStartTime = startTimeLookupFor(census);
 
-    const registered = await computeRegisteredShellperPids(getGlobalDb());
+    const registered = await computeRegisteredShellperPids(getGlobalDb(), getStartTime);
     const pids = await findHuskShellpers({
       socketDir: shellperManager.socketDir,
       registeredShellperPids: registered,
       graceMs,
       census: () => census,
+      getStartTime,
     });
 
     const now = Date.now();
     const candidates = await Promise.all(
       pids.map(async (pid) => {
-        const startTime = await getProcessStartTime(pid);
+        const startTime = await getStartTime(pid);
         return {
           pid,
           rssKb: rssByPid.get(pid) ?? 0,

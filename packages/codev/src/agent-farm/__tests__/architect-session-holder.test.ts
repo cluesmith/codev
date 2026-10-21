@@ -130,13 +130,13 @@ describe('classifyArchitectSessionHolder (Issue #1224)', () => {
 });
 
 describe('findOwnArchitectShellpers (Issue #1224)', () => {
-  it('finds our shellpers by identity regardless of the session they hold', () => {
+  it('finds our shellpers by identity regardless of the session they hold', async () => {
     const list = (): ProcessEntry[] => [
       { pid: 61274, cmdline: shellperCmdline({ sessionId: 'aaa', architectName: 'C', cwd: WS }) },
       { pid: 99, cmdline: shellperCmdline({ sessionId: 'bbb', architectName: 'other', cwd: WS }) },
       { pid: 12, cmdline: claudeChildCmdline() },
     ];
-    const pids = findOwnArchitectShellpers({ identity: { workspacePath: WS, architectName: 'C' }, list });
+    const pids = await findOwnArchitectShellpers({ identity: { workspacePath: WS, architectName: 'C' }, list });
     expect(pids).toEqual([61274]);
   });
 });

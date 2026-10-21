@@ -18,6 +18,15 @@ import { dismissHeldForAgent } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { executeForgeCommand } from '../../lib/forge.js';
 import { sameIssueId } from '../../lib/issue-id.js';
+import { isWindows } from '../../lib/platform.js';
+import { killSessionTree } from '../../lib/process-tree.js';
+import { listProcessCensus, type ProcessCensusEntry } from '../servers/process-census.js';
+import {
+  SHELLPER_MARKER,
+  readJsonStringField,
+  sameWindowsPath,
+  unquoteWindowsCommandLine,
+} from '../../terminal/shellper-cmdline.js';
 
 /**
  * Clean porch review artifacts for a project from codev/projects/,
@@ -68,9 +77,11 @@ async function cleanupPorchState(projectId: string, config: Config): Promise<voi
  * orphaned. This function searches `ps` output for shellper-main.js processes
  * whose JSON config contains the worktree path as `cwd`, and kills them directly.
  *
- * Uses process group kill (-pid) to also terminate PTY children (Claude, bash).
+ * Uses process group kill (-pid) to also terminate PTY children (Claude, bash);
+ * on Windows, a snapshot-backed tree kill found through the census (Spec 1658).
  */
 export async function killShellperProcesses(worktreePath: string): Promise<number> {
+  if (isWindows()) return killWindowsShellperProcesses(worktreePath);
   let killed = 0;
   try {
     const stdout = await new Promise<string>((resolve, reject) => {
@@ -92,24 +103,44 @@ export async function killShellperProcesses(worktreePath: string): Promise<numbe
       const pid = parseInt(line.trim(), 10);
       if (isNaN(pid) || pid <= 0 || pid === process.pid) continue;
 
-      try {
-        // Kill process group (shellper + its PTY child) to prevent orphaned
-        // PTY processes. Shellper is spawned with detached:true, so it's a
-        // process group leader.
-        process.kill(-pid, 'SIGTERM');
-        killed++;
-      } catch {
-        // Process group kill failed — try individual PID
-        try {
-          process.kill(pid, 'SIGTERM');
-          killed++;
-        } catch {
-          // Process already dead
-        }
-      }
+      // Kill process group (shellper + its PTY child) to prevent orphaned
+      // PTY processes. Shellper is spawned with detached:true, so it's a
+      // process group leader. If the group kill fails, the individual PID is
+      // tried.
+      const { signaled } = await killSessionTree(pid, { fallbackToPid: true });
+      if (signaled) killed++;
     }
   } catch {
     // ps not available or failed — non-fatal
+  }
+  return killed;
+}
+
+/**
+ * Windows variant of `killShellperProcesses`: the census, matching the decoded
+ * `cwd` of each shellper's JSON config. A census failure is reported, not read
+ * as "no shellpers" (Spec 1658), and cleanup carries on.
+ */
+async function killWindowsShellperProcesses(worktreePath: string): Promise<number> {
+  let census: ProcessCensusEntry[];
+  try {
+    census = await listProcessCensus();
+  } catch (err) {
+    logger.warn(`Could not check for running shellpers in ${worktreePath}: ${(err as Error).message}`);
+    return 0;
+  }
+  let killed = 0;
+  for (const entry of census) {
+    if (entry.pid === process.pid || !entry.cmdline.includes(SHELLPER_MARKER)) continue;
+    const cwd = readJsonStringField(unquoteWindowsCommandLine(entry.cmdline), 'cwd');
+    if (cwd === null || !sameWindowsPath(cwd, worktreePath)) continue;
+    try {
+      const { signaled } = await killSessionTree(entry.pid);
+      if (signaled) killed++;
+    } catch (err) {
+      logger.warn(`Shellper pid ${entry.pid}: ${(err as Error).message}`);
+      killed++;
+    }
   }
   return killed;
 }

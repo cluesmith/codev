@@ -1396,7 +1396,7 @@ export async function removeArchitect(
     // while the process kept running, and remove-architect could not clear it.
     // Reap any of our own shellpers matching this identity so this command is
     // the recovery tool for a live-process-without-a-row zombie too.
-    const zombiePids = findOwnArchitectShellpers({
+    const zombiePids = await findOwnArchitectShellpers({
       identity: { workspacePath: resolvedPath, architectName: name },
       selfPid: process.pid,
     });

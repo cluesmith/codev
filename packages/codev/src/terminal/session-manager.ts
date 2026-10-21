@@ -39,6 +39,9 @@ import {
   waitForEndpoint,
 } from './shellper-endpoint.js';
 import { isWindows } from '../lib/platform.js';
+import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
+import { listProcessCensus } from '../agent-farm/servers/process-census.js';
+import { SHELLPER_MARKER, isShellperInScope, readJsonStringField, unquoteWindowsCommandLine } from './shellper-cmdline.js';
 import { isDeliberateExit, type ExitMessage } from './shellper-protocol.js';
 
 export interface SessionManagerConfig {
@@ -776,22 +779,28 @@ export class SessionManager extends EventEmitter {
     // Disable auto-restart by removing the session from the map before killing
     this.sessions.delete(sessionId);
 
-    // Send SIGTERM
-    try {
-      process.kill(session.pid, 'SIGTERM');
-    } catch {
-      // Process already dead
-    }
-
-    // Wait up to 5s for process to die
-    const died = await this.waitForProcessExit(session.pid, 5000);
-
-    if (!died) {
-      // Force kill
+    if (isWindows()) {
+      // A Windows SIGTERM is a hard kill, so the shellper never gets to stop
+      // its PTY child; tear the whole tree down instead (Spec 1658).
+      await this.killWindowsSessionTree(sessionId, session.pid);
+    } else {
+      // Send SIGTERM
       try {
-        process.kill(session.pid, 'SIGKILL');
+        process.kill(session.pid, 'SIGTERM');
       } catch {
-        // Already dead
+        // Process already dead
+      }
+
+      // Wait up to 5s for process to die
+      const died = await this.waitForProcessExit(session.pid, 5000);
+
+      if (!died) {
+        // Force kill
+        try {
+          process.kill(session.pid, 'SIGKILL');
+        } catch {
+          // Already dead
+        }
       }
     }
 
@@ -804,6 +813,18 @@ export class SessionManager extends EventEmitter {
 
     // Clean up socket file
     this.cleanupEndpoint(session.socketPath, session.logPath);
+  }
+
+  /** Windows teardown of a shellper and everything under it, waiting up to 5s. */
+  private async killWindowsSessionTree(sessionId: string, pid: number): Promise<void> {
+    try {
+      const { snapshot } = await killSessionTree(pid);
+      if (!(await waitForTreeExit(pid, snapshot, 5000))) {
+        this.log(`Session ${sessionId}: processes still alive 5s after tree teardown of pid=${pid}`);
+      }
+    } catch (err) {
+      this.log(`Session ${sessionId}: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -960,8 +981,13 @@ export class SessionManager extends EventEmitter {
       );
       if (!scan.ok) return -1;  // process-table scan exceeded the budget
       entries = scan.value;
-    } catch {
+    } catch (err) {
       // `ps` not available or failed — non-fatal, matching pre-#1685 behavior.
+      // On Windows the census reports its failure (Spec 1658): say that the
+      // sweep did not run rather than look like a clean table.
+      if (isWindows()) {
+        this.log(`Orphan shellper sweep disabled: ${(err as Error).message}`);
+      }
       return 0;
     }
 
@@ -989,15 +1015,16 @@ export class SessionManager extends EventEmitter {
       }
 
       this.log(`Killing orphaned shellper process: pid=${pid}`);
+      // Kill the session tree (shellper + its PTY child) to prevent orphaned
+      // PTY processes. Shellper is spawned with detached:true, so on POSIX it
+      // is a process group leader; if the group signal fails (already dead or
+      // permission error), the individual PID is tried.
       try {
-        // Kill the process group (shellper + its PTY child) to prevent
-        // orphaned PTY processes. Shellper is spawned with detached:true,
-        // so it's a process group leader.
-        process.kill(-pid, 'SIGTERM');
+        const { signaled } = await killSessionTree(pid, { fallbackToPid: true });
+        if (signaled) killed++;
+      } catch (err) {
+        this.log(`Orphan pid=${pid}: ${(err as Error).message}`);
         killed++;
-      } catch {
-        // Process already dead or permission error — try individual PID
-        try { process.kill(pid, 'SIGTERM'); killed++; } catch { /* already dead */ }
       }
     }
 
@@ -1041,6 +1068,7 @@ export class SessionManager extends EventEmitter {
    * failed scan resolves to `[]` and is non-fatal.
    */
   private findShellperProcesses(timeoutMs = ORPHAN_SWEEP_TIMEOUT_MS): Promise<Array<{ pid: number; socketPath?: string }>> {
+    if (isWindows()) return this.findWindowsShellperProcesses();
     return new Promise((resolve) => {
       // -ww prevents arg truncation on macOS/Linux. `timeout: 0` disables the
       // execFile timeout, so floor it at 1ms to keep the bound meaningful.
@@ -1069,6 +1097,24 @@ export class SessionManager extends EventEmitter {
         resolve(results);
       });
     });
+  }
+
+  /**
+   * Windows variant of `findShellperProcesses` (Spec 1658): the census, scoped
+   * by the `socketDir` field of the shellper's JSON config, with the pipe name
+   * decoded from it. A census failure rejects; the caller reports it. The
+   * census carries its own timeout, and `killOrphanedShellpers` still bounds
+   * the wait with its deadline.
+   */
+  private async findWindowsShellperProcesses(): Promise<Array<{ pid: number; socketPath?: string }>> {
+    const results: Array<{ pid: number; socketPath?: string }> = [];
+    for (const entry of await listProcessCensus()) {
+      if (!entry.cmdline.includes(SHELLPER_MARKER)) continue;
+      if (!isShellperInScope(entry.cmdline, this.config.socketDir)) continue;
+      const socketPath = readJsonStringField(unquoteWindowsCommandLine(entry.cmdline), 'socketPath');
+      results.push({ pid: entry.pid, socketPath: socketPath ?? undefined });
+    }
+    return results;
   }
 
   /**
@@ -1445,11 +1491,9 @@ export class SessionManager extends EventEmitter {
         // killOrphanedShellpers pass, or immediately for architects via `afx
         // workspace remove-architect`'s identity-matched zombie reap
         // (tower-instances.ts).
-        try {
-          process.kill(-session.pid, 'SIGTERM');
-        } catch {
-          /* already gone or not permitted */
-        }
+        killSessionTree(session.pid).catch((err: Error) => {
+          this.log(`Session ${sessionId}: ${err.message}`);
+        });
         this.emit('session-error', sessionId, new Error(`Max restarts (${maxRestarts}) exceeded`));
         // Remove the exhausted session from the map
         this.removeDeadSession(sessionId);
