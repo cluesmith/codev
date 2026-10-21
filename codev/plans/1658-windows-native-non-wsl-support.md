@@ -329,7 +329,13 @@ descendants, wired into every process-group kill and wait site and into the orph
 
 *Added 2026-10-21 under the spec's B2 fallback clause (architect ruling, Option C). Windows CI
 run 39574693242 showed that a descendant orphaned by a non-Node launcher (`cmd start /b`)
-survives the Phase 3 snapshot and `taskkill /T`, and the shellper-only sweeps cannot catch it.*
+survives the Phase 3 snapshot and `taskkill /T`, and the shellper-only sweeps cannot catch it.
+Plan diff approved 2026-10-21T09:35Z with six conditions, folded in below.*
+
+*Porch slot: porch's plan-phase list was fixed at init, so 3b runs inside porch's `phase_4` slot
+as its own iteration first. Commits are tagged `[Phase: phase_3b]`, and 3b gets its own 3-way
+consultation before any Phase 4 work starts. The audit records the commit ranges for 3b and 4
+within that slot.*
 
 #### Objective
 
@@ -355,17 +361,35 @@ job is unavailable.
   created before the helper is ready (the first seconds after Tower boot), that create waits for
   it once.
 - **Ordering: the job is in place before the PTY exists.** On Windows the shellper defers its
-  first PTY spawn until the first authenticated Tower HELLO. It still listens and prints its
-  info as soon as it boots; output from before the HELLO goes to the replay buffer as it does
-  today. Tower reads the shellper pid, has the helper create the job
+  first PTY spawn until the first authenticated HELLO from a `tower` client. It still listens and
+  prints its info as soon as it boots. Tower reads the shellper pid, has the helper create the job
   `Local\codev-session-<shellperSessionId>` and assign the pid to it, and only then connects.
   The PTY and everything it starts inherit the job. POSIX is unchanged: the shellper spawns
   immediately, as today.
+  - **Only the `tower` role starts the PTY (condition 2).** A HELLO from any other role (for
+    example `attach`) that arrives first neither spawns the PTY nor errors. That client sees an
+    empty replay until Tower connects.
+  - **PTY-less deadline (condition 1).** If no `tower` HELLO arrives within 30 s (Tower crashed
+    between spawn and connect, or the helper hung past its own timeout), the shellper exits on
+    its own. It never lingers as a PTY-less process that the scenario 7 husk sweep might not
+    recognise. 30 s covers a cold helper start (~4 s measured for a cold PowerShell) plus the
+    assign timeout, with margin.
+- **Helper timeouts (condition 3).** Each `assign` waits at most 5 s. On timeout, that create
+  proceeds without a job and the degradation is logged once, on the same path as a failed bind.
+  Restart-on-exit is bounded: at most 3 restarts in 5 minutes, after which the helper stays
+  degraded for the life of that Tower and does not spin.
+- **Name collision (condition 5).** The job is created with `CreateJobObjectW`, and
+  `ERROR_ALREADY_EXISTS` is checked. If the name already exists, the shellper is NOT assigned to
+  a job we did not create. That session is created without a job, and the case is logged.
+- **Nested jobs (condition 4).** The shellper may already be in a job, as on the GitHub runner,
+  so assignment relies on nested-job support (Windows 8+). A failed assignment is a degradation
+  for that session, never a thrown error. The Win8+ requirement goes under Windows limitations.
 - **Job limits.** `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, so a child spawned with explicit breakaway
   (`detached: true`) still leaves the session, matching `setsid` on POSIX. No
   `KILL_ON_JOB_CLOSE`: the helper exiting or Tower restarting must never kill sessions, because
   shellpers survive Tower by design. The job lives as long as any process is in it.
-- **Teardown.** `killSessionTree` on Windows also asks for `terminate {name}` once a job name is
+- **Teardown (condition 6).** The job is terminated first, then the Phase 3 snapshot pass runs.
+  The POSIX code path stays byte-identical. `killSessionTree` on Windows asks for `terminate {name}` once a job name is
   known (persisted shellper session id, v19). If Tower's helper is not running (an `afx cleanup`
   with Tower down), teardown runs a one-shot helper; teardown is not a hot path, so the cold cost
   is acceptable there. The Phase 3 snapshot kill still runs either way.
@@ -378,7 +402,8 @@ job is unavailable.
 #### Cost gate (first step, before the rest of the phase)
 
 Measure on the CI host, cold and warm: helper start plus binding, and the per-session
-`assign` round trip. Record the numbers in the audit. Target: warm per-session cost under ~1 s
+`assign` round trip. Also record that assignment succeeds while the shellper is already in the
+runner's job (nested). Record the numbers in the audit. Target: warm per-session cost under ~1 s
 (expected to be milliseconds once the helper is warm). If the measured warm cost misses the
 target, stop and report to the architect before building further.
 
@@ -411,8 +436,13 @@ target, stop and report to the architect before building further.
   survive `killSession`. A `detached: true` grandchild does survive (breakaway parity).
 - [ ] Windows (`targeted`): a Tower restart (helper exit) does not kill a running session.
 - [ ] Unit (seam `win32`, injected helper): job assigned before the connect/HELLO; helper failure
-  → degradation logged once, session still created, teardown falls back to the snapshot path;
-  POSIX never starts a helper.
+  or `assign` timeout → degradation logged once, session still created, teardown falls back to
+  the snapshot path; bounded helper restarts; an existing job name is not joined; POSIX never
+  starts a helper.
+- [ ] Unit (shellper): no `tower` HELLO within the deadline → the shellper exits; an `attach`
+  HELLO first neither spawns the PTY nor errors, and sees an empty replay.
+- [ ] Windows (`targeted`): assignment succeeds while the shellper is inside the runner's job
+  (nested), or the degradation is reported.
 - [ ] Measured warm per-session cost recorded in the audit, and under the target.
 - [ ] POSIX suite and `check-types` green.
 
