@@ -8,32 +8,49 @@ Phase 1 deliverable. Two parts:
 2. **Site inventory.** Every POSIX-dependent site class in the runtime, re-audited on current
    `main` (2026-10-21, merge base `91ef2e3c7`), each tagged with the phase that fixes it.
 
-Facts marked **PENDING** are filled in from the first `probe` dispatch, which can only run once
-the early `windows.yml` PR has put the workflow on `main`, and from the owner's
-`--survival` runs. Phase 2 does not start until they are filled in (plan, Phase 1 test plan).
+CI facts come from dispatches 39555516317, 39555898877 and 39556358109 (after PR #1849 put the
+workflow on `main`). Facts still marked **PENDING** need the owner's Windows machine: the
+launcher survival matrix and their own `--deps`/`--tower` runs. Phase 2 does not start until
+those are filled in (plan, Phase 1 test plan).
 
 ## 1. Measured facts
 
 ### 1.1 Native dependencies (defines the supported Windows Node versions)
 
-Source: `probe --deps`, one leg per Node version. Each install runs with `npm_config_node_gyp`
-pointed at a failing stub, so a source-build fallback shows up as `nodeGypInvoked` instead of
-quietly succeeding on the runner's toolchain.
+Source: `probe --deps` and `--tower-published latest`, one leg per Node version (run
+39556358109, windows-latest). Installs run with a user's npm environment (default `cmd.exe`
+script shell). A source build is detected from node-gyp's own log lines.
 
-| Dependency | Node 20 x64 | Node 22 x64 | Node 24 x64 | win32-arm64 |
+| Dependency | Node 20 x64 (ABI 115) | Node 22 x64 (ABI 127) | Node 24 x64 (ABI 137) | win32-arm64 |
 |---|---|---|---|---|
-| node-pty (`^1.1.0`) | PENDING | PENDING | PENDING | PENDING (bundled `prebuilds/` listing) |
-| better-sqlite3 (`^12.10.0`) | PENDING | PENDING | PENDING | PENDING (release asset list) |
+| node-pty 1.1.0 | prebuilt, loads | prebuilt, loads | prebuilt, loads | prebuild bundled (`prebuilds/win32-arm64`) |
+| better-sqlite3 12.10.0 | **no prebuild → node-gyp source build → install fails** | prebuilt, loads | prebuilt, loads | release assets for node-v127/v137 win32-arm64 |
+| `npm install -g @cluesmith/codev@latest` (3.3.5) | **fails** (better-sqlite3) | installs, no source build | installs, no source build | not measured (no ARM64 runner) |
 
-Install-script behavior when no prebuild matches: PENDING. This decides Phase 10's
-install guard.
+better-sqlite3 12.10.0 ships Node prebuilds only for ABIs 127, 137, 141 and 147 (Node 22, 24,
+25, 26). Its install script is `prebuild-install || node-gyp rebuild --release`, so when no
+prebuild matches it **falls back to a source build**. On a machine with a toolchain that build
+can succeed silently; without one, it fails with a node-gyp error.
+
+**Verdicts.**
+- **Supported Windows Node versions: 22 and 24** (the prebuild set, per the spec's definition).
+  Node 20 is unsupported on native Windows. Docs (Phase 11) say so, and Phase 10's install guard
+  turns the node-gyp failure into a message naming 22/24.
+- **ARM64:** both dependencies publish win32-arm64 prebuilds for Node 22/24, so ARM64 meets the
+  spec's bar for support. It has not been exercised on hardware; docs state "prebuilds exist,
+  not CI-tested".
+- **Cross-platform note (outside this spec):** the same gap exists on macOS and Linux. Node 20
+  has no better-sqlite3 12.10 prebuild anywhere, so `engines: >=20` silently implies a source
+  build there. Reported to the architect as a possible separate item.
 
 ### 1.2 Named pipes
 
 Source: `probe` `pipe` section. Listen and connect on
 `\\.\pipe\codev-probe-<user>-<uuid>` with a shellper-format HELLO→WELCOME round trip.
-Result: PENDING. On macOS the same code round-trips over a Unix socket in ~1 ms, so the
-framing is transport-agnostic, as the spec assumes.
+Result (run 39555516317, windows-latest = Windows Server 2025, Node 20/22/24): **works on all
+three**. Listen 2-7 ms; HELLO→WELCOME round trip 6-10 ms; pipe name
+`\\.\pipe\codev-probe-runneradmin-<uuid>`. On macOS the same code round-trips over a Unix
+socket in ~1 ms. The framing is transport-agnostic, as the spec assumes.
 
 ### 1.3 CIM census latency (sizes the Phase 3 cache and the `probeTowerHealth` budget)
 
@@ -41,10 +58,18 @@ Source: `probe` `census` section, three runs of the inline `Win32_Process` query
 
 | | Cold | Warm | Processes | With CommandLine | With CreationDate |
 |---|---|---|---|---|---|
-| windows-latest | PENDING | PENDING | PENDING | PENDING | PENDING |
+| windows-latest (Node 20/22/24) | 3.6-4.3 s | 470-490 ms | 146-151 | 129-133 | all |
 | Owner machine | PENDING | PENDING | PENDING | PENDING | PENDING |
 
-Port-owner lookup (`Get-NetTCPConnection`): PENDING ms; owner PID matches: PENDING.
+Port-owner lookup (`Get-NetTCPConnection`): 1.3-1.7 s; owner PID matches: yes.
+
+**Consequence.** A warm CIM census costs about half a second, roughly 10× `ps -A`, and the
+first one in a fresh PowerShell costs about 4 s. Today `/health` awaits the census twice. Phase
+3's TTL cache plus single-flight is required, not optional. The `probeTowerHealth` budget must
+cover a cold census on first boot. The census, and anything else that spawns PowerShell, must
+never sit on the reconnect hot path (C1 holds). Processes without a CommandLine (~12%) are
+system processes the runner account cannot read. Shellpers run as the user, so they are
+unaffected.
 
 ### 1.4 Job objects and detached survival
 
@@ -52,40 +77,77 @@ Source: `probe` `job` and `detached` sections; owner `--survival start`/`check` 
 
 | Launcher | In job | Kill-on-close | Breakaway allowed | Detached child survives launcher close |
 |---|---|---|---|---|
-| GitHub Actions runner | PENDING | PENDING | PENDING | PENDING (parent exit only) |
+| GitHub Actions runner | yes | **yes** | yes (incl. silent) | yes (parent exit only; job close not observable in-run) |
 | Windows Terminal | PENDING | PENDING | PENDING | PENDING |
 | PowerShell console (conhost) | PENDING | PENDING | PENDING | PENDING |
 | VS Code integrated terminal | PENDING | PENDING | PENDING | PENDING |
 | VS Code extension host | PENDING | PENDING | PENDING | PENDING |
 | SSH session | PENDING | PENDING | PENDING | PENDING |
 
-PowerShell language mode on each host (Add-Type needs FullLanguage): PENDING.
+PowerShell language mode on each host (Add-Type needs FullLanguage): runner = FullLanguage;
+owner launchers PENDING.
+
+Runner job flags `0x3C00` = KILL_ON_JOB_CLOSE | SILENT_BREAKAWAY_OK | BREAKAWAY_OK |
+DIE_ON_UNHANDLED_EXCEPTION. One caveat: the flags come from `QueryInformationJobObject(NULL)` in
+the child PowerShell, so they describe that process's job. Under silent breakaway that need not
+be Node's own job. The interactive launchers are measured empirically (survival across a real
+close), which avoids this ambiguity.
 
 ### 1.5 Git Bash and executables
 
 Source: `probe` `gitBash` and `pathext` sections.
 
-- Git Bash locations found, and whether System32 `bash.exe` is first on `PATH`: PENDING.
+- Git Bash on the runner: `C:\Program Files\Git\bin\bash.exe`, GNU bash 5.3.15
+  (x86_64-pc-cygwin). `PATH` order: `Git\usr\bin\bash.EXE`, `Git\bin\bash.EXE`, then
+  **`C:\Windows\system32\bash.EXE`**. So the WSL launcher is on a stock `PATH`, which is the trap
+  ruling 5 exists for. Here it is third, not first. On a machine without Git in `PATH`, it would be
+  the only `bash`.
 - Tools inside Git Bash. The forge scripts need `sed grep head tail sort date curl git` plus
   `jq`. The generated `.builder-start.sh` mints session ids with `uuidgen`, else
   `/proc/sys/kernel/random/uuid` (`spawn-worktree.ts`). Git for Windows is not known to ship
-  `uuidgen`, so whether its `/proc` provides the UUID file is load-bearing for builder launch:
-  PENDING. If neither works, Phase 6 mints the id in Node.
-- PATHEXT resolution of `claude`, `codex`, `agy`, `afx`, `codev`, `npx`, `npm`, `gh`, `git`, `jq`,
-  `codev-ide-server`: PENDING.
+  `uuidgen`, so whether its `/proc` provides the UUID file is load-bearing for builder launch.
+  **Result: neither exists** (`uuidgen` absent, `/proc/sys/kernel/random/uuid` unreadable). Today's
+  generated script would mint an empty session id under Git Bash. **Phase 6 mints the id in Node**
+  and passes it into the script. All the forge tools (`sed grep head tail sort date curl git`)
+  are present; `jq` came from Chocolatey on the runner, so on a user machine it is a separate
+  install, as ruling 6 says.
+- PATHEXT resolution on the runner: `npx`/`npm` resolve to `.CMD` shims (confirming the shim
+  problem for every npm-installed bin, including `afx`, `codev`, `claude`, `codev-ide-server`);
+  `gh`, `git`, `jq` resolve to `.EXE`. The harness CLIs are not installed on the runner, so their
+  resolution is checked on the owner's machine.
 
 ### 1.6 Root cause of the 2026-09-09 `afx tower start` hang
 
 Source: `probe --tower` (Node 22 leg, built checkout) and the owner's machine.
 
-PENDING. The probe captures `afx tower start`'s output and the new tail of `tower.log`. Leading
-hypotheses from code reading, to be confirmed or rejected by that capture:
+**Not reproduced on the current release with fresh state.** On windows-latest, with an isolated
+state dir and port, `afx tower start` reached ready in all three configurations measured:
 
-- the daemon dies on a POSIX-only call during boot (for example the `/health` census shelling
-  out to `ps`, or the shellper `.sock` listen, which Windows rejects for a non-pipe path), and
-  the CLI keeps waiting for readiness;
-- or the readiness check itself (`lsof` in `utils/port.ts`) cannot run, so readiness is never
-  observed.
+- the built checkout on Node 22: daemon ready in 649 ms;
+- published 3.3.5 from a global install on Node 22 (620 ms) and on Node 24 (711 ms).
+
+On Node 20 the published package cannot be installed at all (1.1), so there is no `afx` to hang.
+
+What the captures rule out: boot does not die on the `ps` census or the shellper socket dir.
+The orphan sweep runs (its `ps` call fails and is swallowed, so "0 killed" is not a real sweep;
+Phase 3). Readiness is observed over HTTP, so `lsof` is not on the start path.
+
+What they found instead: **`afx tower stop` cannot stop Tower on Windows.** It looks up the
+port owner with `lsof` (`utils/port.ts`) through `cmd.exe` ("The system cannot find the path
+specified."), concludes "Tower is not running", and exits 0 with the daemon still alive (the
+probe then kills it by PID). That is fixed in Phase 4.
+
+Remaining candidates for the 2026-09-09 field hang, which the owner's `--tower` run on their
+machine can separate:
+- an older release (code since 2026-09-09 has changed the start path);
+- pre-existing `~/.agent-farm` state from an earlier attempt, for example a stale owner lock or
+  a Tower that the broken `tower stop` left running and that still holds port 4100;
+- something specific to that machine (home path, port reservation, antivirus).
+
+The second candidate is consistent with the `tower stop` defect above: a Tower that never
+stopped can block the next start's readiness on the default port. If the owner's run also
+starts cleanly, the review records the hang as not reproducible on the current release, with
+Phase 4 removing the `tower stop` defect that could cause it.
 
 ### 1.7 Repo build on Windows (dev-only, not a user concern)
 
