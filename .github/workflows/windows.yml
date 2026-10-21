@@ -1,0 +1,111 @@
+name: Windows (on demand)
+
+# Native Windows checks for Spec 1658. Manual dispatch ONLY: this workflow never runs on
+# push or pull_request and is never a required check (owner ruling, 2026-10-21). Dispatch it
+# before a release and on any PR that touches platform code:
+#
+#   gh workflow run windows.yml --ref <branch> [-f filter=<vitest filter>] [-f tower=true]
+#
+# Jobs:
+#   probe     scripts/windows-probe.mjs on Node 20/22/24: Git Bash, PATHEXT, named pipes,
+#             CIM census latency, job objects, detached survival, native-dependency installs.
+#             With tower=true the Node 22 leg also starts Tower from the built checkout.
+#   targeted  runs the packages/codev vitest files matching `filter` (skipped when empty).
+
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: 'Vitest filter for the targeted job (packages/codev); empty skips it'
+        required: false
+        default: ''
+      tower:
+        description: 'Probe: also try `afx tower start` from the built checkout'
+        type: boolean
+        required: false
+        default: false
+
+defaults:
+  run:
+    # Git for Windows' bash: the plumbing shell the spec makes a prerequisite.
+    shell: bash
+
+env:
+  # The repo's package scripts use rm/cp; route pnpm's script shell through Git Bash.
+  npm_config_script_shell: 'C:\Program Files\Git\bin\bash.exe'
+
+jobs:
+  probe:
+    name: Probe (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Probe platform facts and native-dependency installs
+        run: node scripts/windows-probe.mjs --deps --out "$RUNNER_TEMP/probe-node${{ matrix.node }}.json"
+
+      - name: Install dependencies
+        if: ${{ inputs.tower && matrix.node == '22' }}
+        run: pnpm install
+
+      - name: Build packages/codev
+        if: ${{ inputs.tower && matrix.node == '22' }}
+        working-directory: packages/codev
+        run: pnpm build
+
+      - name: Probe Tower start
+        if: ${{ inputs.tower && matrix.node == '22' }}
+        run: node scripts/windows-probe.mjs --tower --out "$RUNNER_TEMP/probe-tower.json"
+
+      - name: Upload probe reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-probe-node${{ matrix.node }}
+          path: ${{ runner.temp }}/probe-*.json
+          if-no-files-found: warn
+
+  targeted:
+    name: Targeted tests
+    if: ${{ inputs.filter != '' }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages/codev
+        working-directory: packages/codev
+        run: pnpm build
+
+      - name: Run targeted tests
+        working-directory: packages/codev
+        env:
+          FILTER: ${{ inputs.filter }}
+        run: pnpm exec vitest run $FILTER
