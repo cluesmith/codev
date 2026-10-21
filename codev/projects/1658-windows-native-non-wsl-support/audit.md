@@ -78,7 +78,7 @@ Source: `probe` `job` and `detached` sections; owner `--survival start`/`check` 
 | Launcher | In job | Kill-on-close | Breakaway allowed | Detached child survives launcher close |
 |---|---|---|---|---|
 | GitHub Actions runner | yes | **yes** | yes (incl. silent) | yes (parent exit only; job close not observable in-run) |
-| Windows Terminal | PENDING | PENDING | PENDING | PENDING |
+| Windows Terminal | not measured | not measured | not measured | **yes** (owner, 2026-10-21T06:57Z, PowerShell tab) |
 | PowerShell console (conhost) | PENDING | PENDING | PENDING | PENDING |
 | VS Code integrated terminal | PENDING | PENDING | PENDING | PENDING |
 | VS Code extension host | PENDING | PENDING | PENDING | PENDING |
