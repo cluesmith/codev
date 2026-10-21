@@ -24,3 +24,8 @@
 - Implemented as one CSS rule (cursor: none on the body). The existing shared rule keeps the arrow over code, cards, the composer and the "+"; links keep the hand via the UA rule.
 - highlightLine fully removed (hover controller restored to main). Its implementation remains in history at 2af31184f.
 - Tests: canvas 221 jsdom, 63 Chromium (5 new), extension 1245, all green.
+
+## 2026-10-21 dev-gate revision 2 (owner, in pane)
+- "Hidden on its own is confusing": with Hidden, the word under the invisible pointer is underlined (owner picked the word over the whole line). It shows with every highlight style, including None.
+- An underline shape kind in the hover controller; the controller attaches for Hidden even with style none; the bar goes below inline-code chips; new token --codev-canvas-hover-underline-color added to the locked snapshot.
+- Tests: canvas 225 jsdom, 66 Chromium (3 new), extension 1245, all green.
