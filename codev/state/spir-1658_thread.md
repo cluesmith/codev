@@ -62,3 +62,9 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - CIM census ~0.5s warm / ~4s cold; Git Bash lacks uuidgen and /proc uuid (builder session id would be empty → mint in Node, Phase 6).
 - Probe lessons: npm ignores npm_config_node_gyp for deps' own `node-gyp rebuild`; --foreground-scripts echoes the script text, so detect node-gyp by its log lines; the workflow's npm_config_script_shell must not leak into user-path install probes.
 - Waiting on owner's launcher survival matrix + their probe runs before porch done / Phase 2.
+
+## 2026-10-21 Phase 1 approved (iter 3: codex + claude APPROVE; gemini skipped, agy not signed in)
+- Owner ruling 07:41Z: hang criterion discharged as not reproducible (3.3.3 = the 2026-09-09 release, and 3.3.5, both start fine x64/ARM64 Node 22/24; stale-Tower mechanism ruled out by direct test). Spec amended; review doc started early.
+- ARM64 measured supported (windows-11-arm). Repo build on ARM fails in artifact-canvas bundler (contributor-only).
+- Intermittent porch tests-check failure x2, unidentified (porch shows only stderr); recorded under Flaky Tests with the vitest results.json recipe.
+- Carry-forward (non-blocking, claude iter3): survival check uses PID liveness only (add creation-time identity when Phase 4 relies on it); elevated same-user processes have null CommandLine → husks from an elevated session are unreapable, record in Phase 3; --survival arg handling nits; isSystem32 WindowsApps/Sysnative coverage carries into Phase 5 resolver; plan's "check-types" = pnpm build (tsc) in packages/codev. (Claude's "targeted job never ran" is wrong: run 39555516317 ran it green.)
