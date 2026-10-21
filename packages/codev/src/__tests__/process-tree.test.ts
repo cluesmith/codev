@@ -229,6 +229,54 @@ describe('killSessionTree on Windows', () => {
     expect(h.events).toEqual(['census', 'census', 'kill 30']);
   });
 
+  it('terminates the session job before the snapshot pass, which still runs', async () => {
+    setHostPlatformForTests('win32');
+    const census = [entry(40, 1, 100), entry(41, 40, 110)];
+    const h = windowsHarness({ censuses: [census, census], alive: new Set([41]) });
+    const terminateJob = vi.fn(async (name: string) => {
+      h.events.push(`terminate ${name}`);
+      return { ok: true, found: true };
+    });
+
+    const result = await killSessionTree(40, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+
+    expect(h.events).toEqual(['terminate J', 'census', 'taskkill 40', 'census', 'kill 41']);
+    expect(result.jobError).toBeUndefined();
+  });
+
+  it('reports a failed job terminate and still runs the snapshot pass', async () => {
+    setHostPlatformForTests('win32');
+    const census = [entry(42, 1, 100)];
+    const h = windowsHarness({ censuses: [census], alive: new Set() });
+    const terminateJob = vi.fn(async () => ({ ok: false, error: 'TerminateJobObject failed', code: 5 }));
+
+    const result = await killSessionTree(42, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+
+    expect(h.events).toEqual(['census', 'taskkill 42']);
+    expect(result.jobError).toBe('job J not terminated: TerminateJobObject failed (Win32 error 5)');
+  });
+
+  it('terminates the job even when the root pid was reused, and names it in a refusal or census failure', async () => {
+    setHostPlatformForTests('win32');
+    const terminateJob = vi.fn(async () => ({ ok: true, found: true }));
+    const reused = windowsHarness({ censuses: [[entry(43, 1, 900_000)]], alive: new Set([43]) });
+    const refused = await killSessionTree(43, { census: reused.census, taskkill: reused.taskkill, kill: reused.kill, rootStartTime: 100_000, jobName: 'J', terminateJob });
+    expect(refused.refused).toBe('reused-pid');
+    expect(terminateJob).toHaveBeenCalledTimes(1);
+
+    const failing = windowsHarness({ censuses: [new Error('cim down')], alive: new Set() });
+    await expect(
+      killSessionTree(44, { census: failing.census, taskkill: failing.taskkill, kill: failing.kill, jobName: 'J', terminateJob }),
+    ).rejects.toThrow(/cim down; its session job was terminated/);
+  });
+
+  it('ignores the job name on POSIX', async () => {
+    const kill = vi.fn();
+    const terminateJob = vi.fn();
+    await killSessionTree(4321, { kill, jobName: 'J', terminateJob });
+    expect(terminateJob).not.toHaveBeenCalled();
+  });
+
   it('spares a recorded pid whose creation time no longer matches (pid reused)', async () => {
     setHostPlatformForTests('win32');
     const before = [entry(30, 1, 300), entry(31, 30, 310)];

@@ -15,12 +15,15 @@
  *   process whose parent exited between the snapshot and the kill escapes it,
  *   and when the root itself is already dead it walks nothing; the snapshot
  *   closes both gaps. The orphan and husk sweeps remain the backstop for
- *   anything started after the snapshot.
+ *   anything started after the snapshot. With the session's Job Object
+ *   (Phase 3b), the job is terminated before `taskkill`, reaching descendants
+ *   no parent link leads to.
  */
 
 import { execFile } from 'node:child_process';
 import { isWindows } from './platform.js';
 import { listProcessCensus, type ProcessCensusEntry } from '../agent-farm/servers/process-census.js';
+import { terminateSessionJob, type JobResult } from './windows-job.js';
 
 /** A process recorded by a teardown snapshot. */
 export interface TreeMember {
@@ -56,6 +59,15 @@ export interface KillSessionTreeOptions {
    * the root's children.
    */
   rootStartTime?: number;
+  /**
+   * Windows: the session's Job Object (Spec 1658 Phase 3b). When given, the job
+   * is terminated first, which also ends descendants the census cannot link
+   * (a parent that exited); the snapshot pass then runs as before. Ignored on
+   * POSIX.
+   */
+  jobName?: string;
+  /** Seam (Windows): terminate a job by name. */
+  terminateJob?: (name: string) => Promise<JobResult>;
   /** Seam: the process census (must read the table fresh, never a cached copy). */
   census?: () => Promise<ProcessCensusEntry[]>;
   /** Seam (Windows): `taskkill /T /F /PID <pid>`; must not reject. */
@@ -74,6 +86,11 @@ export interface KillSessionTreeResult {
    * session's own root is gone.
    */
   refused?: 'reused-pid';
+  /**
+   * Windows, with `jobName`: why terminating the job failed. The snapshot pass
+   * still ran; the caller reports this, since orphans may survive.
+   */
+  jobError?: string;
 }
 
 const TASKKILL_TIMEOUT_MS = 10_000;
@@ -239,30 +256,54 @@ function rootIdentityFailure(root: ProcessCensusEntry, rootStartTime: number | u
   return null;
 }
 
+/** Terminate the session job, if one is named. Returns why it failed, or undefined. */
+async function terminateJobFor(opts: KillSessionTreeOptions): Promise<string | undefined> {
+  if (opts.jobName === undefined) return undefined;
+  const result = await (opts.terminateJob ?? terminateSessionJob)(opts.jobName);
+  if (result.ok) return undefined;
+  let reason = `job ${opts.jobName} not terminated: ${result.error ?? 'unknown failure'}`;
+  if (result.code !== undefined) reason = `${reason} (Win32 error ${result.code})`;
+  return reason;
+}
+
+/** What became of the session job, for an error raised after it was handled. */
+function jobNote(opts: KillSessionTreeOptions, jobError: string | undefined): string {
+  if (opts.jobName === undefined) return '';
+  if (jobError !== undefined) return `; ${jobError}`;
+  return `; its session job was terminated`;
+}
+
 async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): Promise<KillSessionTreeResult> {
   const census = opts.census ?? freshCensus;
   const taskkill = opts.taskkill ?? runTaskkill;
   const kill = opts.kill ?? defaultKill;
+
+  // The job holds exactly this session's processes (the name carries the
+  // session id, and an existing name is never joined), so it is ended first
+  // and needs no pid identity check: a reused pid's process is not in it.
+  const jobError = await terminateJobFor(opts);
 
   let snapshotCensus: ProcessCensusEntry[];
   try {
     snapshotCensus = await census();
   } catch (err) {
     await taskkill(rootPid);
-    throw new Error(`teardown of pid ${rootPid} ran taskkill only, without a descendant snapshot: ${(err as Error).message}`);
+    throw new Error(`teardown of pid ${rootPid} ran taskkill only, without a descendant snapshot: ${(err as Error).message}${jobNote(opts, jobError)}`);
   }
 
   const root = snapshotCensus.find((entry) => entry.pid === rootPid);
   const identityFailure = root ? rootIdentityFailure(root, opts.rootStartTime) : null;
   if (identityFailure === 'reused-pid') {
-    return { signaled: false, snapshot: { rootPid, members: [] }, refused: 'reused-pid' };
+    const refused: KillSessionTreeResult = { signaled: false, snapshot: { rootPid, members: [] }, refused: 'reused-pid' };
+    if (jobError !== undefined) refused.jobError = jobError;
+    return refused;
   }
   if (identityFailure === 'unverified-root') {
     // Stays closed even with `fallbackToPid`: that option retries a failed
     // POSIX group signal on the same trusted pid, while here the pid itself
     // is unverified, and killing it alone could still hit a reused pid.
     throw new Error(
-      `teardown of pid ${rootPid} skipped: the census has no creation time for it, so it cannot be told from a reused pid; its tree is left alive`,
+      `teardown of pid ${rootPid} skipped: the census has no creation time for it, so it cannot be told from a reused pid; its tree is left alive${jobNote(opts, jobError)}`,
     );
   }
   const members = collectTree(snapshotCensus, rootPid, opts.rootStartTime);
@@ -283,7 +324,9 @@ async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): P
       }
     }
   }
-  return { signaled: members.length > 0, snapshot: { rootPid, members } };
+  const result: KillSessionTreeResult = { signaled: members.length > 0, snapshot: { rootPid, members } };
+  if (jobError !== undefined) result.jobError = jobError;
+  return result;
 }
 
 export interface WaitForTreeExitOptions {
