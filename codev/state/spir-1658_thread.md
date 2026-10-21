@@ -102,3 +102,11 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - 3b own consult (codex + claude REQUEST_CHANGES, gemini skipped): all findings fixed; see 1658-phase_3b-iter1-rebuttals.md. Biggest: a teardown could terminate a job the session never joined, so terminate now requires the root to be a job member (IsProcessInJob). Also: a helper exit is logged once; one assign budget per create sits inside the shellper deadline; every reap path passes job names; duplicate after assign, query-only.
 - Gotcha: reading the Win32 last error through a PowerShell function returns garbage (203); read Marshal::GetLastWin32Error() on the statement right after the call.
 - Verified: POSIX 7001/0; Windows run 39655482085 19/19.
+
+## 2026-10-22 Phase 4 (Tower lifecycle on Windows)
+- tower stop: POST /api/shutdown (keyed + loopback-only) then wait on the answering pid; fallback kills the listening pid ALONE (a tree kill would end every session: shellpers are Tower's ppid-children). Force path: census, every shellper session tree with its job, then Tower's tree.
+- Port owner on Windows via Get-NetTCPConnection -State Listen (fixes doctor and ide-server too).
+- tower start from inside a session (CODEV_SHELLPER_SESSION, set by the Windows shellper for its PTY): daemon created through CIM Win32_Process.Create (env sanitized, marker stripped, same cwd); CIM failure refuses with the supported launch paths. Tower boot warns once if the marker is in its own env; /health reports insideCodevSession on Windows; doctor shows it.
+- windowsHide on the daemon and shellper spawns.
+- Gotcha: vitest's NODE_ENV=test leaks into a spawned Tower and points it at test.db.
+- Windows run 39658293851: scenarios 3, 4, 5 and the CIM survival test green; CIM Tower lands in the same logon session as the launcher.

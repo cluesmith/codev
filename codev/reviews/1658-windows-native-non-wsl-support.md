@@ -88,6 +88,29 @@ Two fixes the Windows runs forced along the way:
   restarted Tower reconnects within the 30 s PTY-less deadline: the reconnect HELLO spawns
   the PTY, and no assign is made on reconnect. Its teardown falls back to the snapshot path.
 
+## Tower lifecycle on Windows (Phase 4)
+
+- `afx tower stop` asks Tower to shut down over HTTP (`POST /api/shutdown`, keyed and
+  loopback-only), because a Windows signal is a hard kill that skips the shutdown path (the owner
+  lock would stay behind). If Tower does not answer or does not exit within 8 s, the listening
+  pid alone is killed. **Deviation from the plan text:** the plan named `killSessionTree` as the
+  fallback, but shellpers are Tower's children by ppid, so a tree kill (`taskkill /T`) would end
+  every session; sessions survive a Tower stop by design. Only the force flag kills trees.
+- Tower started from inside a codev session (the shellper sets `CODEV_SHELLPER_SESSION` in its
+  PTY's environment on Windows) is created through CIM `Win32_Process.Create`, with the
+  sanitized environment minus the marker and the same cwd. Measured: it survives the launching
+  session's teardown together with a shellper it spawned, and runs in the same Windows logon
+  session as the launcher (`TOWER-CIM-SESSION 2,2`), so session-local job names still resolve.
+- `IsProcessInJob` is not used as a cross-check: without a handle to the session's own job it
+  cannot tell a codev job from the runner's, libuv's or a terminal's, so the env marker is the
+  only signal (code comment in `tower-start-windows.ts`).
+- `Win32_ProcessStartup.EnvironmentVariables` take precedence over, but are merged with, the
+  user's and the system's environment. A CIM-created Tower can therefore carry variables from
+  the user/system environment that the launcher had unset. The marker and the Claude session
+  markers are not in those scopes, so the checks that matter hold.
+- Owner-machine launcher checks (Windows Terminal, PowerShell console, VS Code terminal,
+  extension host) are part of the PR-gate manual pass.
+
 ## Flaky Tests
 
 - **Unidentified intermittent failure under `porch done` (Phase 1, 2026-10-21).** The porch
