@@ -213,6 +213,43 @@ pnpm runs package scripts with `cmd.exe` on Windows, so building the repo there 
 `npm_config_script_shell` set to Git Bash. `windows.yml` sets it. Users installing from npm are
 unaffected; this matters only for building from source.
 
+### 1.8 Per-session Job Objects (Phase 3b cost gate)
+
+**Porch slot:** porch's `phase_4` slot carries plan phases 3b and then 4 (architect ruling,
+Option C). Phase 3b commits are tagged `[Phase: phase_3b]` and start at a891d303c; Phase 4
+commits are tagged `[Phase: phase_4]`. The ranges are completed when each phase closes.
+
+**Verdict:** the cost gate passes. Warm per-session assign is milliseconds, far under the ~1 s
+target.
+
+Source: `windows-job.windows.test.ts` (`JOB-*` lines), `windows.yml` targeted runs 39580989425,
+39581288482 and 39581676362 (windows-latest, Node 22).
+
+| Measure | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| Cold helper start plus Reflection.Emit bind | 4277 ms | 3585 ms | 4021 ms |
+| Second cold start in the same job (warm disk cache) | 295 ms | 362 ms | 381 ms |
+| Warm assign round trips (first, then four more) | 140, 2, 1, 1, 1 ms | 168, 3, 3, 3, 3 ms | 152, 3, 3, 3, 2 ms |
+| Assign while the target sits in libuv's job inside the runner's job (nested) | assigned | assigned | assigned |
+
+Measured facts that shaped the design:
+
+- **A job's name lives only while a handle to it is open.** Member processes do not keep the
+  name. With the helper closing its handle after the assign, a later `OpenJobObjectW` by name
+  failed (run 1). The helper now duplicates a non-inheritable job handle into the session root
+  (the shellper), so the name lives as long as the shellper. It survives a helper stop and is
+  found by a fresh helper (run 3).
+- **A `detached: true` child does not leave the job** (`JOB-DETACHED
+  detached_grandchild_survived=false`). libuv does not pass `CREATE_BREAKAWAY_FROM_JOB`, so
+  `JOB_OBJECT_LIMIT_BREAKAWAY_OK` is never exercised by Node. `SILENT_BREAKAWAY_OK` would let
+  every child leave, which defeats the job. There is no setsid parity for Node-detached
+  children; this is raised with the architect.
+- **A CIM `Win32_Process.Create` launch from inside a session job escapes it** (`JOB-CIM
+  cim_launched_survived=true`). The WMI provider host creates the process, so it never inherits
+  the caller's job.
+- `TerminateJobObject` ends a `cmd start /b` orphan whose parent is gone (the Phase 3 gap).
+- A stopped helper does not kill job members (no `KILL_ON_JOB_CLOSE`).
+
 ## 2. Site inventory (current `main`)
 
 Counts are from grep over `packages/{codev,core,sdk}/src` and `apps/vscode/src`, tests excluded.
