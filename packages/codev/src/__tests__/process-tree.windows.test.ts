@@ -35,9 +35,14 @@ const leftovers: number[] = [];
 
 /**
  * Each process appends its pid to the pid file, then:
- * - root: starts `mid` (through Git Bash in `bash` mode), then idles;
- * - mid: starts `leaf`; in `reparent` mode the leaf is detached and mid exits;
+ * - root: starts `mid` (through Git Bash in `bash` mode), then idles; in
+ *   `reparent` mode it starts a Git Bash that backgrounds `leaf` and exits at
+ *   once, so the leaf's parent is dead before teardown (on POSIX the leaf would
+ *   still be in the session's process group);
+ * - mid: starts `leaf`;
  * - leaf: idles.
+ * Children are never `detached`: a detached child leaves the session on both
+ * platforms by design (setsid on POSIX, job breakaway on Windows).
  */
 fs.writeFileSync(treeScript, `
 const { spawn } = require('child_process');
@@ -45,21 +50,18 @@ const fs = require('fs');
 const [, , role, pidFile, mode] = process.argv;
 fs.appendFileSync(pidFile, process.pid + '\\n');
 const node = process.execPath;
+const fwd = (p) => p.split('\\\\').join('/');
 if (role === 'root') {
   if (mode === 'bash') {
-    const fwd = (p) => p.split('\\\\').join('/');
     spawn(${JSON.stringify(GIT_BASH)}, ['-c', '"' + fwd(node) + '" "' + fwd(__filename) + '" mid "' + fwd(pidFile) + '" ' + mode], { stdio: 'ignore' });
+  } else if (mode === 'reparent') {
+    fs.appendFileSync(pidFile, '0\\n');
+    spawn(${JSON.stringify(GIT_BASH)}, ['-c', '"' + fwd(node) + '" "' + fwd(__filename) + '" leaf "' + fwd(pidFile) + '" ' + mode + ' > /dev/null 2>&1 &'], { stdio: 'ignore' });
   } else {
     spawn(node, [__filename, 'mid', pidFile, mode], { stdio: 'ignore' });
   }
 } else if (role === 'mid') {
-  const detached = mode === 'reparent';
-  const leaf = spawn(node, [__filename, 'leaf', pidFile, mode], { stdio: 'ignore', detached });
-  if (detached) {
-    leaf.unref();
-    setTimeout(() => process.exit(0), 300);
-    return;
-  }
+  spawn(node, [__filename, 'leaf', pidFile, mode], { stdio: 'ignore' });
 }
 setInterval(() => {}, 1000);
 `);
@@ -108,7 +110,7 @@ async function startTree(mode: 'plain' | 'bash' | 'reparent'): Promise<{ rootPid
   root.unref();
   await waitFor(() => readPids(pidFile).length >= 3, 20_000, `${mode} tree to start`);
   const pids = readPids(pidFile);
-  leftovers.push(...pids);
+  leftovers.push(...pids.filter((pid) => pid > 0));
   return { rootPid: root.pid!, pids };
 }
 
@@ -134,19 +136,19 @@ describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees
     process.kill(rootPid, 'SIGKILL');
     await waitFor(() => !alive(rootPid), 10_000, 'root to exit');
 
-    const before = await listProcessCensus({ fresh: true });
-    const { signaled } = await killSessionTree(rootPid);
-    const rows = before
-      .filter((entry) => pids.includes(entry.pid) || entry.ppid === rootPid)
-      .map((entry) => `pid=${entry.pid} ppid=${entry.ppid} created=${entry.creationTime}`);
-    expect(signaled, `root ${rootPid} dead; census rows: ${rows.join(' | ')}`).toBe(true);
+    // libuv places a Node process's non-detached children in a kill-on-close
+    // job, so they may already have died with the root; whatever is left must go.
+    await killSessionTree(rootPid);
     await expectAllGone(pids);
   }, 60_000);
 
   it('scenario 6: clears a descendant whose parent exited first (re-parented)', async () => {
     const { rootPid, pids } = await startTree('reparent');
-    const [, midPid, leafPid] = pids;
-    await waitFor(() => !alive(midPid), 10_000, 'intermediate to exit');
+    const leafPid = pids[2];
+    const census = await listProcessCensus({ fresh: true });
+    const leaf = census.find((entry) => entry.pid === leafPid);
+    const midPid = leaf?.ppid ?? -1;
+    await waitFor(() => !alive(midPid), 10_000, 'intermediate bash to exit');
     expect(alive(leafPid)).toBe(true);
 
     await killSessionTree(rootPid);
