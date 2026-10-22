@@ -88,7 +88,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1789/codev/projects/1789-tower-managed-codev-ide-server/1789-phase_4-iter1-claude.txt
 started_at: '2026-10-06T01:04:39.827Z'
-updated_at: '2026-10-12T23:22:54.156Z'
+updated_at: '2026-10-22T23:39:21.384Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-12T20:22:35.464Z'
@@ -119,4 +119,6 @@ pr_history:
     pr_number: 1806
     branch: builder/spir-1789
     created_at: '2026-10-12T23:13:25.215Z'
+    merged: true
+    merged_at: '2026-10-22T23:39:21.383Z'
 pr_ready_for_human: true
