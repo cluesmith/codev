@@ -46,7 +46,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-05T05:42:35.416Z'
-updated_at: '2026-10-21T09:41:49.630Z'
+updated_at: '2026-10-22T23:40:52.943Z'
 force_advanced:
   phase: plan
   iteration: 3
@@ -82,3 +82,8 @@ context_refreshes:
     at: '2026-10-21T09:22:25.259Z'
     acknowledged_at: '2026-10-21T09:23:38.587Z'
 pr_ready_for_human: true
+pr_history:
+  - phase: review
+    pr_number: 1854
+    branch: builder/spir-1595
+    created_at: '2026-10-22T23:40:52.942Z'
