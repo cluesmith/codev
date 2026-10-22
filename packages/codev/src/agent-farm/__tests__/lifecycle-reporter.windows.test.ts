@@ -8,8 +8,9 @@
  *   the translated event to Tower and prints nothing.
  * - With the script deleted, it still exits 0 and prints nothing (fail-open).
  * - The settings file hands Claude forward-slash paths only.
- * - Under cmd.exe the command is not valid; the outcome is logged
- *   (CMD-RESULT) so the report can say what a cmd-run hook would do.
+ * - Claude Code runs a hook under Git Bash on Windows and falls back to
+ *   PowerShell without it. The command is bash syntax, so the PowerShell
+ *   outcome is logged (POWERSHELL-RESULT) for the report, not asserted.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -123,17 +124,16 @@ describe.runIf(onWindows)('Spec 1595 lifecycle reporter hook on a real Windows h
     }
   });
 
-  it('cmd.exe: records what a cmd-run hook would do', () => {
+  it('PowerShell (Claude Code\'s fallback without Git Bash): records what the hook would do', () => {
     const before = received.length;
-    const run = spawnSync('cmd.exe', ['/d', '/s', '/c', `"${hookCommand}"`], {
+    const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', hookCommand], {
       input: payload,
       env: hookEnv(),
       encoding: 'utf-8',
       windowsHide: true,
-      windowsVerbatimArguments: true,
       timeout: 30_000,
     });
-    console.log(`CMD-RESULT status=${run.status} stdout=${JSON.stringify(run.stdout)} stderr=${JSON.stringify(run.stderr)} posted=${received.length - before}`);
+    console.log(`POWERSHELL-RESULT status=${run.status} stdout=${JSON.stringify(run.stdout)} stderr=${JSON.stringify(run.stderr.slice(0, 600))} posted=${received.length - before}`);
     expect(run.error).toBeUndefined();
   });
 });
