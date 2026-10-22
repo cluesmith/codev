@@ -2,8 +2,10 @@
  * Spec 1658 Phase 9: the Codev IDE server's Windows lifecycle, with the host
  * platform forced and every system seam injected.
  *
- * - Spawn goes through the shared shim resolver on Windows and is the plain
- *   `spawn` on POSIX.
+ * - Spawn goes through `ideServerSpawnable` on Windows (a JS launcher under
+ *   Node, a `.cmd` shim through the shared shim resolver) and is the plain
+ *   `spawn` on POSIX. The server env keeps Windows' own `Path` key.
+ * - Discovery on Windows uses the shared executable resolver (`PATHEXT`).
  * - Stop kills the server's process tree on Windows: the recorded root only
  *   when a live listener descends from it (so a reused pid is never a root),
  *   any other listener as a root of its own. POSIX keeps the per-pid
@@ -14,6 +16,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import http from 'node:http';
 import { rmSync } from 'node:fs';
+import path from 'node:path';
 import type { ProcessCensusEntry } from '../servers/process-census.js';
 
 const TMP_DIR = vi.hoisted(() => `${process.env.TMPDIR || '/tmp'}/ide-server-windows-${process.pid}-${Date.now()}`);
@@ -24,7 +27,8 @@ vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
 });
 
 const spawnMock = vi.hoisted(() => vi.fn());
-const spawnOnHostMock = vi.hoisted(() => vi.fn());
+const spawnableOnHostMock = vi.hoisted(() => vi.fn());
+const findOnHostPathMock = vi.hoisted(() => vi.fn());
 const portPids = vi.hoisted(() => ({ value: [] as number[] }));
 const killSessionTreeMock = vi.hoisted(() => vi.fn());
 
@@ -34,7 +38,7 @@ vi.mock('node:child_process', async (importActual) => {
 });
 vi.mock('../../lib/shell-launch.js', async (importActual) => {
   const actual = await importActual<typeof import('../../lib/shell-launch.js')>();
-  return { ...actual, spawnOnHost: spawnOnHostMock };
+  return { ...actual, spawnableOnHost: spawnableOnHostMock, findOnHostPath: findOnHostPathMock };
 });
 vi.mock('../utils/port.js', async (importActual) => {
   const actual = await importActual<typeof import('../utils/port.js')>();
@@ -57,6 +61,8 @@ import {
   windowsIdeStopRoots,
 } from '../servers/ide-server.js';
 import { readIdeRecord, writeIdeRecord, type IdeServerRecord } from '../lib/ide-record.js';
+import { buildIdeServerEnv, ideServerSpawnable } from '../lib/ide-version.js';
+import { resolveIdeServerPath } from '../commands/ide.js';
 import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 
 function entry(pid: number, ppid: number, creationTime: number): ProcessCensusEntry {
@@ -72,6 +78,8 @@ const noopLog = (): void => {};
 afterEach(() => {
   resetHostPlatformForTests();
   vi.clearAllMocks();
+  spawnableOnHostMock.mockReset();
+  findOnHostPathMock.mockReset();
   portPids.value = [];
 });
 
@@ -80,23 +88,103 @@ afterAll(() => {
 });
 
 describe('spawnIdeServerProcess', () => {
-  const options = { detached: true, stdio: 'ignore' as const };
+  const env = { Path: 'C:\\Windows' };
+  const options = { detached: true, stdio: 'ignore' as const, env };
 
-  it('Windows: spawns through the shim resolver with the arguments unaltered', () => {
+  it('Windows: spawns the resolved form, no console window, the arguments unaltered', () => {
     setHostPlatformForTests('win32');
     const longDir = `C:\\Users\\dev\\${'nested-folder\\'.repeat(20)}`;
-    const args = ['--connection-token-file', `${longDir}ide-connection-token`];
+    const args = ['--extensions-dir', `${longDir}ide-extensions`];
     expect(args[1].length).toBeGreaterThan(260);
+    const resolved = { command: 'C:\\Windows\\System32\\cmd.exe', args: ['/d', '/s', '/c', '"line"'], windowsVerbatimArguments: true };
+    spawnableOnHostMock.mockReturnValue(resolved);
     spawnIdeServerProcess('C:\\tools\\codev-ide-server.cmd', args, options);
-    expect(spawnOnHostMock).toHaveBeenCalledWith('C:\\tools\\codev-ide-server.cmd', args, options);
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(spawnableOnHostMock).toHaveBeenCalledWith('C:\\tools\\codev-ide-server.cmd', args, env);
+    expect(spawnMock).toHaveBeenCalledWith(resolved.command, resolved.args, {
+      ...options,
+      windowsHide: true,
+      windowsVerbatimArguments: true,
+    });
   });
 
   it('POSIX: the plain spawn, exactly as before', () => {
     setHostPlatformForTests('linux');
     spawnIdeServerProcess('/opt/codev-ide/bin/server', ['--port', '8200'], options);
     expect(spawnMock).toHaveBeenCalledWith('/opt/codev-ide/bin/server', ['--port', '8200'], options);
-    expect(spawnOnHostMock).not.toHaveBeenCalled();
+    expect(spawnableOnHostMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('ideServerSpawnable', () => {
+  const env = { Path: 'C:\\Windows' };
+
+  it('Windows: a JS launcher runs under the Node running Tower', () => {
+    setHostPlatformForTests('win32');
+    const launcher = 'C:\\Users\\dev\\AppData\\Roaming\\npm\\node_modules\\@cluesmith\\codev-ide\\bin\\codev-ide-server.js';
+    expect(ideServerSpawnable(launcher, ['--version'], env)).toEqual({
+      command: process.execPath,
+      args: [launcher, '--version'],
+      windowsVerbatimArguments: false,
+    });
+    expect(spawnableOnHostMock).not.toHaveBeenCalled();
+  });
+
+  it('Windows: a .cmd shim goes through the shim resolver', () => {
+    setHostPlatformForTests('win32');
+    const resolved = { command: 'node.exe', args: ['entry.js', '--version'], windowsVerbatimArguments: false };
+    spawnableOnHostMock.mockReturnValue(resolved);
+    expect(ideServerSpawnable('C:\\npm\\codev-ide-server.cmd', ['--version'], env)).toBe(resolved);
+  });
+
+  it('POSIX: as given, even a .js path (its shebang finds Node)', () => {
+    setHostPlatformForTests('darwin');
+    expect(ideServerSpawnable('/usr/lib/codev-ide/bin/server.js', ['--version'], env)).toEqual({
+      command: '/usr/lib/codev-ide/bin/server.js',
+      args: ['--version'],
+      windowsVerbatimArguments: false,
+    });
+  });
+});
+
+describe('buildIdeServerEnv on Windows', () => {
+  it('puts Node first under the inherited Path key, never a second PATH', () => {
+    setHostPlatformForTests('win32');
+    const nodeDir = path.dirname(process.execPath);
+    const env = buildIdeServerEnv({ Path: `C:\\Windows;${nodeDir.toUpperCase()};C:\\Git\\cmd`, USERPROFILE: 'C:\\Users\\dev' });
+    expect(Object.keys(env).filter((key) => key.toUpperCase() === 'PATH')).toEqual(['Path']);
+    expect(env.Path).toBe(`${nodeDir};C:\\Windows;C:\\Git\\cmd`);
+  });
+
+  it('folds case-variant duplicates into one key', () => {
+    setHostPlatformForTests('win32');
+    const env = buildIdeServerEnv({ Path: 'C:\\A', PATH: 'C:\\B' });
+    const keys = Object.keys(env).filter((key) => key.toUpperCase() === 'PATH');
+    expect(keys).toHaveLength(1);
+    expect(env[keys[0]].split(';').slice(1)).toEqual(['C:\\A', 'C:\\B']);
+  });
+
+  it('POSIX: unchanged', () => {
+    setHostPlatformForTests('linux');
+    const nodeDir = path.dirname(process.execPath);
+    expect(buildIdeServerEnv({ PATH: '/usr/bin' }).PATH).toBe(`${nodeDir}:/usr/bin`);
+  });
+});
+
+describe('resolveIdeServerPath on Windows', () => {
+  it('looks codev-ide-server up through the shared resolver (PATHEXT)', async () => {
+    setHostPlatformForTests('win32');
+    const env = { Path: 'C:\\Users\\dev\\AppData\\Roaming\\npm', PATHEXT: '.COM;.EXE;.BAT;.CMD' };
+    findOnHostPathMock.mockReturnValue('C:\\Users\\dev\\AppData\\Roaming\\npm\\codev-ide-server.cmd');
+    const found = await resolveIdeServerPath({ env });
+    expect(findOnHostPathMock).toHaveBeenCalledWith('codev-ide-server', env);
+    expect(found).toBe('C:\\Users\\dev\\AppData\\Roaming\\npm\\codev-ide-server.cmd');
+  });
+
+  it('POSIX: the direct PATH scan, not the shared resolver', async () => {
+    setHostPlatformForTests('linux');
+    spawnableOnHostMock.mockImplementation((command: string, args: string[]) => ({ command, args, windowsVerbatimArguments: false }));
+    await resolveIdeServerPath({ env: { PATH: '' }, codevRoot: TMP_DIR });
+    expect(findOnHostPathMock).not.toHaveBeenCalled();
   });
 });
 

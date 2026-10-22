@@ -1,44 +1,70 @@
 /**
  * Spec 1658 Phase 9, native Windows only (the on-demand `windows.yml` targeted
  * job runs it; it skips everywhere else). The IDE server lifecycle against a
- * stub server behind a plain `.cmd` shim, no fakes:
+ * stub server behind `.cmd` shims, no fakes:
  *
- * - `spawnIdeServer` starts the shim through the shim resolver, for both
- *   shapes: an npm-style shim (node runs the entry directly, as for a real
- *   npm install) and a plain `.cmd` (cmd.exe, then node), and the server
- *   receives its native-path arguments intact.
+ * - Discovery without `--server-path` finds `codev-ide-server.cmd` on `PATH`
+ *   (`PATHEXT`).
+ * - `spawnIdeServer` passes the version floor and starts the shim through the
+ *   shim resolver, for both shapes: an npm-style shim (node runs the entry
+ *   directly, as for a real npm install) and a plain `.cmd` (cmd.exe, then
+ *   node). The server receives its native-path arguments intact, with the
+ *   agent-farm directory deliberately past MAX_PATH.
+ * - A below-floor server is refused, names its version and the floor, and
+ *   leaves nothing running and no record.
+ * - The sidebar install hands the server native `--install-extension` and
+ *   `--extensions-dir` paths past MAX_PATH, unaltered.
  * - The forward serves `/ide/?folder=C:\...` with the folder unaltered.
  * - `stopIdeServer` leaves no process behind: not the cmd.exe root, not the
  *   server, not the server's own child.
- *
- * Discovery without `--server-path` and the version floor arrive with #1789
- * and are tested once it merges.
+ * - Everything Tower writes is under the agent-farm directory, in the profile.
  */
 
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TEMP || process.env.TMPDIR || '/tmp'}/codev-1658-p9-${process.pid}-${Date.now()}`);
+const DIRS = vi.hoisted(() => {
+  const root = `${process.env.TEMP || process.env.TMPDIR || '/tmp'}/codev-1658-p9-${process.pid}-${Date.now()}`;
+  return { root, agentFarm: `${root}/${'segment-past-max-path-0123456/'.repeat(8)}agent-farm` };
+});
 
 vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
   const actual = await importActual<typeof import('@cluesmith/codev-core/constants')>();
-  return { ...actual, AGENT_FARM_DIR: TMP_DIR };
+  return { ...actual, AGENT_FARM_DIR: DIRS.agentFarm };
 });
 
 import { spawnIdeServer, stopIdeServer } from '../servers/ide-server.js';
 import { forwardIdeHttp } from '../servers/ide-forward.js';
 import { getIdeConnectionTokenPath, getIdeRecordPath, readIdeRecord } from '../lib/ide-record.js';
+import { IdeServerVersionError } from '../lib/ide-version.js';
+import { ensureSidebarInstalled, getIdeExtensionsDir, locateEmbeddedSidebar, readInstalledExtensionVersion } from '../lib/ide-extensions.js';
+import { resolveIdeServerPath } from '../commands/ide.js';
 
 const onWindows = process.platform === 'win32';
+const FIXTURES = path.join(__dirname, 'fixtures', 'ide');
 const SHIMS = [
   { shape: 'npm-style shim', file: 'codev-ide-server.cmd', rootIsServer: true },
   { shape: 'plain .cmd', file: 'codev-ide-server-plain.cmd', rootIsServer: false },
 ];
-const AGENT_FARM = path.resolve(TMP_DIR);
-const STATE_FILE = path.join(AGENT_FARM, 'stub-state.json');
+const ROOT = path.resolve(DIRS.root);
+const AGENT_FARM = path.resolve(DIRS.agentFarm);
+const STATE_FILE = path.join(ROOT, 'stub-state.json');
+const INSTALL_LOG = path.join(ROOT, 'install-log.jsonl');
+const SIDEBAR_ID = 'cluesmith.codev-vscode';
+
+// The stub "installs" whatever these name. The spawn path installs the
+// package's embedded sidebar when the build produced one, so they follow it;
+// the long-path install test points them at its own manifest.
+const EMBEDDED = locateEmbeddedSidebar();
+const STUB_ENV = {
+  STUB_IDE_STATE_FILE: STATE_FILE,
+  STUB_IDE_INSTALL_LOG: INSTALL_LOG,
+  STUB_IDE_EXTENSION_ID: EMBEDDED?.id ?? SIDEBAR_ID,
+  STUB_IDE_EXTENSION_VERSION: EMBEDDED?.version ?? '9.9.9',
+};
 
 const log = (level: string, message: string): void => {
   console.log(`[${level}] ${message}`);
@@ -93,13 +119,19 @@ interface StubState {
   argv: string[];
 }
 
-describe.runIf(onWindows)('Phase 9: IDE server lifecycle against a .cmd stub on a real Windows host', () => {
+function readState(): StubState | null {
+  if (!fs.existsSync(STATE_FILE)) return null;
+  return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) as StubState;
+}
+
+describe.runIf(onWindows)('Phase 9: IDE server lifecycle against .cmd stubs on a real Windows host', () => {
   let tower: http.Server;
   let towerPort: number;
 
   beforeAll(async () => {
+    expect(AGENT_FARM.length).toBeGreaterThan(260);
     fs.mkdirSync(AGENT_FARM, { recursive: true });
-    process.env.STUB_IDE_STATE_FILE = STATE_FILE;
+    Object.assign(process.env, STUB_ENV);
     tower = http.createServer((req, res) => {
       forwardIdeHttp(req, res, log);
     });
@@ -111,34 +143,76 @@ describe.runIf(onWindows)('Phase 9: IDE server lifecycle against a .cmd stub on 
     });
   });
 
-  afterAll(async () => {
-    delete process.env.STUB_IDE_STATE_FILE;
-    await new Promise<void>((resolve) => tower.close(() => resolve()));
-    fs.rmSync(AGENT_FARM, { recursive: true, force: true });
+  afterEach(() => {
+    delete process.env.STUB_IDE_VERSION;
+    Object.assign(process.env, STUB_ENV);
+    fs.rmSync(STATE_FILE, { force: true });
   });
 
-  it.each(SHIMS)('$shape: spawns, forwards a native ?folder path, and stops with nothing left running', async (shim) => {
-    fs.rmSync(STATE_FILE, { force: true });
-    const port = await freePort();
-    const serverPath = path.join(__dirname, 'fixtures', 'ide', shim.file);
-    const record = await spawnIdeServer({ serverPath, port }, log);
-    expect(record.port).toBe(port);
+  afterAll(async () => {
+    for (const key of Object.keys(STUB_ENV)) delete process.env[key];
+    await new Promise<void>((resolve) => tower.close(() => resolve()));
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  });
 
-    const state = await waitFor<StubState>(() => {
-      if (!fs.existsSync(STATE_FILE)) return null;
-      return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) as StubState;
-    }, 10_000);
-    expect(state).not.toBeNull();
-    const stub = state as StubState;
+  it('discovery without --server-path finds the .cmd shim on PATH (PATHEXT)', async () => {
+    const found = await resolveIdeServerPath({ env: { Path: FIXTURES, PATHEXT: process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD' } });
+    expect(found?.toLowerCase()).toBe(path.join(FIXTURES, 'codev-ide-server.cmd').toLowerCase());
+  });
+
+  it('the sidebar install gets native paths past MAX_PATH, unaltered', async () => {
+    const embedded = path.join(ROOT, 'embedded');
+    fs.mkdirSync(embedded, { recursive: true });
+    fs.writeFileSync(path.join(embedded, 'codev-vscode.vsix'), 'stub');
+    fs.writeFileSync(path.join(embedded, 'manifest.json'), JSON.stringify({ id: SIDEBAR_ID, version: '9.9.9' }));
+    const extensionsDir = getIdeExtensionsDir();
+    expect(extensionsDir.length).toBeGreaterThan(260);
+    process.env.STUB_IDE_EXTENSION_ID = SIDEBAR_ID;
+    process.env.STUB_IDE_EXTENSION_VERSION = '9.9.9';
+
+    const result = await ensureSidebarInstalled(path.join(FIXTURES, 'codev-ide-server-plain.cmd'), {
+      extensionsDir,
+      embeddedDir: embedded,
+      log,
+    });
+    expect(result.outcome).toBe('installed');
+    expect(readInstalledExtensionVersion(extensionsDir, SIDEBAR_ID)).toBe('9.9.9');
+    const argv = JSON.parse(fs.readFileSync(INSTALL_LOG, 'utf-8').trim().split('\n').pop() as string) as string[];
+    expect(argv).toEqual(['--install-extension', path.join(embedded, 'codev-vscode.vsix'), '--force', '--extensions-dir', extensionsDir]);
+  }, 60_000);
+
+  it('a below-floor server is refused with its version and the floor; nothing runs, no record', async () => {
+    process.env.STUB_IDE_VERSION = '1.127.9';
+    const port = await freePort();
+    const attempt = spawnIdeServer({ serverPath: path.join(FIXTURES, 'codev-ide-server.cmd'), port }, log);
+    await expect(attempt).rejects.toBeInstanceOf(IdeServerVersionError);
+    await expect(attempt).rejects.toThrow(/version 1\.127\.9.*1\.128\.0/);
+    expect(readIdeRecord()).toBeNull();
+    expect(readState()).toBeNull();
+  }, 60_000);
+
+  it.each(SHIMS)('$shape: spawns, forwards a native ?folder path, and stops with nothing left running', async (shim) => {
+    const port = await freePort();
+    const serverPath = path.join(FIXTURES, shim.file);
+    const { record } = await spawnIdeServer({ serverPath, port }, log);
+    expect(record.port).toBe(port);
+    expect(record.serverVersion).toBe('1.128.0');
+
+    const stub = (await waitFor(readState, 10_000)) as StubState;
+    expect(stub).not.toBeNull();
     console.log(`STUB-TREE ${shim.shape} root=${record.pid} server=${stub.pid} child=${stub.childPid}`);
     expect(record.pid === stub.pid).toBe(shim.rootIsServer);
 
-    // The native token path reached the server unaltered, and Tower's files
-    // live under the (temp) agent-farm directory.
-    const tokenIndex = stub.argv.indexOf('--connection-token-file');
-    expect(stub.argv[tokenIndex + 1]).toBe(getIdeConnectionTokenPath());
-    expect(getIdeConnectionTokenPath().startsWith(AGENT_FARM)).toBe(true);
-    expect(getIdeRecordPath().startsWith(AGENT_FARM)).toBe(true);
+    // Native paths past MAX_PATH reached the server unaltered.
+    const tokenPath = getIdeConnectionTokenPath();
+    expect(tokenPath.length).toBeGreaterThan(260);
+    expect(stub.argv[stub.argv.indexOf('--connection-token-file') + 1]).toBe(tokenPath);
+    expect(stub.argv[stub.argv.indexOf('--extensions-dir') + 1]).toBe(getIdeExtensionsDir());
+
+    // Everything Tower writes is under the agent-farm directory, in the profile.
+    for (const written of [tokenPath, getIdeRecordPath(), getIdeExtensionsDir()]) {
+      expect(written.startsWith(AGENT_FARM)).toBe(true);
+    }
     const profile = fs.realpathSync.native(os.homedir()).toLowerCase();
     expect(fs.realpathSync.native(AGENT_FARM).toLowerCase().startsWith(profile)).toBe(true);
 

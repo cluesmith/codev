@@ -30,7 +30,6 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { existsSync } from 'node:fs';
 import { getProcessesOnPort } from '../utils/port.js';
 import { isWindows } from '../../lib/platform.js';
-import { spawnOnHost } from '../../lib/shell-launch.js';
 import { collectTree, killSessionTree } from '../../lib/process-tree.js';
 import { listProcessCensus, type ProcessCensusEntry } from './process-census.js';
 import { parseJsonBody } from '../utils/server-utils.js';
@@ -50,6 +49,7 @@ import {
   type LogFn,
   buildIdeServerEnv,
   checkIdeServerVersion,
+  ideServerSpawnable,
 } from '../lib/ide-version.js';
 import { ensureSidebarInstalled, getIdeExtensionsDir } from '../lib/ide-extensions.js';
 
@@ -119,14 +119,18 @@ async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
 }
 
 /**
- * Start the server process. POSIX spawns the path as given. Windows resolves
- * it through the shim resolver (`.cmd` → the `node <entry>` it wraps, or a
- * `cmd.exe /d /s /c` line), with no console window; arguments, native paths
- * included, reach the server unaltered.
+ * Start the server process. POSIX spawns the path as given. Windows spawns the
+ * form `ideServerSpawnable` resolves (a JS launcher under Node, a `.cmd` shim
+ * through the shim resolver), with no console window.
  */
-export function spawnIdeServerProcess(serverPath: string, args: string[], options: SpawnOptions): ChildProcess {
+export function spawnIdeServerProcess(serverPath: string, args: string[], options: SpawnOptions & { env: Record<string, string> }): ChildProcess {
   if (!isWindows()) return spawn(serverPath, args, options);
-  return spawnOnHost(serverPath, args, options);
+  const spawnable = ideServerSpawnable(serverPath, args, options.env);
+  return spawn(spawnable.command, spawnable.args, {
+    ...options,
+    windowsHide: true,
+    windowsVerbatimArguments: spawnable.windowsVerbatimArguments,
+  });
 }
 
 /**
