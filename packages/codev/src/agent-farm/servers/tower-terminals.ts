@@ -12,7 +12,7 @@ import { AGENT_FARM_DIR, encodeWorkspacePath } from '../lib/tower-client.js';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { isBuilderWorktreePath } from '@cluesmith/codev-sdk/builder-worktree';
 import { loadConfig } from '../../lib/config.js';
-import { sanitizeAgentEnv } from '../../lib/agent-env.js';
+import { sanitizeAgentEnv, withTowerPort, ARCHITECT_WORKSPACE_ENV } from '../../lib/agent-env.js';
 import { getGlobalDb } from '../db/index.js';
 import {
   saveFileTab as saveFileTabToDb,
@@ -108,6 +108,8 @@ let _reconciling = false;
 export interface TerminalDeps {
   /** Logging function */
   log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void;
+  /** Tower's listening port, set as `CODEV_TOWER_PORT` on every architect restart env (Spec 1595). */
+  towerPort?: number;
   /** Shellper session manager for persistent terminals */
   shellperManager: SessionManager | null;
   /** Register a known workspace path (from tower-instances) */
@@ -753,15 +755,18 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
         } catch { /* use default */ }
       }
       const cmdParts = architectCmd.split(/\s+/);
-      const cleanEnv = sanitizeAgentEnv(process.env);
+      // Spec 1595: Tower's port, for the restarted agent's lifecycle reporter.
+      const cleanEnv = withTowerPort(sanitizeAgentEnv(process.env), _deps.towerPort);
       // Spec 786 Phase 2: preserve architect identity across shellper auto-
       // restart. Without this, the new claude process would inherit Tower's
       // CODEV_ARCHITECT_NAME (or none), and builders spawned by a restarted
       // sibling would lose affinity to the sibling. The `|| 'main'` fallback
       // covers legacy rows where role_id is null (v13 backfill should have
-      // populated them; this is belt-and-suspenders).
+      // populated them; this is belt-and-suspenders). Spec 1595: the
+      // workspace travels beside the name.
       const architectName = dbSession.role_id || 'main';
       cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
+      cleanEnv[ARCHITECT_WORKSPACE_ENV] = workspacePath;
       // Issue #832/#1149/#1264: bake `--resume <storedId>` + a #1264 clean-exit
       // fresh-launch factory + a #1149 crash-loop fallback into the auto-restart
       // args, so a claude crash inside a live shellper revives the SAME
@@ -1225,11 +1230,12 @@ export async function getTerminalsForWorkspace(
             } catch { /* use default */ }
           }
           const cmdParts = architectCmd.split(/\s+/);
-          const cleanEnv = sanitizeAgentEnv(process.env);
+          const cleanEnv = withTowerPort(sanitizeAgentEnv(process.env), _deps?.towerPort);
           // Spec 786 Phase 2: preserve architect identity across shellper auto-
           // restart (see matching block in reconcileTerminalSessionsInner above).
           const architectName = dbSession.role_id || 'main';
           cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
+          cleanEnv[ARCHITECT_WORKSPACE_ENV] = dbSession.workspace_path;
           // Issue #832/#1149: revive the same conversation on auto-restart via the
           // stored session id, with the #1149 crash-loop fallback (see matching
           // block in reconcileTerminalSessionsInner above). Issue #1338: a retired

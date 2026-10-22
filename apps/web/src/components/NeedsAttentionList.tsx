@@ -1,9 +1,12 @@
-import type { OverviewPR, OverviewBuilder } from '../lib/api.js';
+import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
+import type { OverviewPR, OverviewBuilder, ArchitectState } from '../lib/api.js';
 import { issueRef } from '../lib/issueIds.js';
 
 interface NeedsAttentionListProps {
   prs: OverviewPR[];
   builders: OverviewBuilder[];
+  /** Spec 1595: the overview's architects, so one at a prompt or dead is listed under its name. */
+  architects?: ArchitectState[];
 }
 
 interface AttentionItem {
@@ -52,6 +55,8 @@ function timeAgo(dateStr: string): string {
 export function buildItems(
   prs: OverviewPR[],
   builders: OverviewBuilder[],
+  architects: ArchitectState[] = [],
+  now: number = Date.now(),
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
 
@@ -128,6 +133,12 @@ export function buildItems(
     });
   }
 
+  // (C) Agent rows (Spec 1595): builders and architects at a prompt or with their agent dead, from
+  // the shared `deriveAttention`, so an agent at a prompt appears here as well as on its card. An idle
+  // agent is not listed: it is the card's state, not an ask. `deriveAttention` already omits a
+  // builder whose porch gate row (B) covers it.
+  items.push(...agentItems(builders, architects, now));
+
   // Sort by waiting time (oldest first)
   items.sort((a, b) =>
     new Date(a.waitingSince).getTime() - new Date(b.waitingSince).getTime()
@@ -136,8 +147,51 @@ export function buildItems(
   return items;
 }
 
-export function NeedsAttentionList({ prs, builders }: NeedsAttentionListProps) {
-  const items = buildItems(prs, builders);
+/** The row kind and class for an agent's wait. */
+function agentKind(state: 'needs-input' | 'dead'): { kind: string; kindClass: string } {
+  if (state === 'dead') return { kind: 'Agent exited', kindClass: 'attention-kind--dead' };
+  return { kind: 'Needs input', kindClass: 'attention-kind--needs-input' };
+}
+
+/** Needs-input and dead rows for builders and architects, through `deriveAttention`. */
+function agentItems(builders: OverviewBuilder[], architects: ArchitectState[], now: number): AttentionItem[] {
+  const attention = deriveAttention({
+    builders,
+    architects,
+    pendingPRs: [],
+    backlog: [],
+    recentlyClosed: [],
+    heldCount: 0,
+    mailboxEscalated: false,
+    queuedFeedback: {},
+    feedbackMode: 'forward',
+  }, now);
+  const fallbackSince = new Date(now).toISOString();
+  const items: AttentionItem[] = [];
+  for (const wait of attention.waiting) {
+    if (wait.state !== 'needs-input' && wait.state !== 'dead') continue;
+    items.push({
+      key: `agent-${wait.builderId}`,
+      issueOrPR: wait.issueId ? issueRef(wait.issueId) : wait.builderId,
+      title: wait.issueTitle || wait.builderId,
+      ...agentKind(wait.state),
+      waitingSince: wait.since ?? fallbackSince,
+    });
+  }
+  for (const architect of attention.architects) {
+    items.push({
+      key: `architect-${architect.architect}`,
+      issueOrPR: 'architect',
+      title: architect.architect,
+      ...agentKind(architect.state),
+      waitingSince: architect.since ?? fallbackSince,
+    });
+  }
+  return items;
+}
+
+export function NeedsAttentionList({ prs, builders, architects = [] }: NeedsAttentionListProps) {
+  const items = buildItems(prs, builders, architects);
 
   if (items.length === 0) {
     return <p className="work-empty">Nothing needs attention</p>;

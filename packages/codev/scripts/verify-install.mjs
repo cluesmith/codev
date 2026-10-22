@@ -4,7 +4,8 @@
  * Post-release install verification script.
  *
  * Installs the package from a tarball or npm registry, then verifies
- * all CLI binaries exist and respond to --help.
+ * all CLI binaries exist and respond to --help, and that the embedded
+ * sidebar vsix ships with its manifest (Spec 1789).
  *
  * Usage:
  *   node scripts/verify-install.mjs <tarball-or-package> [...extra-tarballs]
@@ -15,9 +16,10 @@
  */
 
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { IDE_EXTENSION_DIR, IDE_EXTENSION_MANIFEST, IDE_EXTENSION_VSIX } from './ide-extension-manifest.mjs';
 
 const targets = process.argv.slice(2);
 if (targets.length === 0) {
@@ -41,6 +43,28 @@ try {
       console.error(`  FAIL: ${bin} --help (exit code ${err.status})`);
       failed = true;
     }
+  }
+
+  const globalRoot = execSync(`npm root -g --prefix "${prefix}"`, { encoding: 'utf8' }).trim();
+  const ideExtensionDir = join(globalRoot, '@cluesmith', 'codev', IDE_EXTENSION_DIR);
+  const vsixPath = join(ideExtensionDir, IDE_EXTENSION_VSIX);
+  if (existsSync(vsixPath)) {
+    console.log(`  OK: ${IDE_EXTENSION_DIR}/${IDE_EXTENSION_VSIX} present`);
+  } else {
+    console.error(`  FAIL: embedded sidebar vsix missing at ${vsixPath}`);
+    failed = true;
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(join(ideExtensionDir, IDE_EXTENSION_MANIFEST), 'utf8'));
+    if (manifest.id === 'cluesmith.codev-vscode' && typeof manifest.version === 'string') {
+      console.log(`  OK: ide-extension/manifest.json ${manifest.id}@${manifest.version}`);
+    } else {
+      console.error(`  FAIL: ide-extension/manifest.json is malformed (${JSON.stringify(manifest)})`);
+      failed = true;
+    }
+  } catch (err) {
+    console.error(`  FAIL: cannot read ide-extension/manifest.json (${err.message})`);
+    failed = true;
   }
 
   if (failed) {

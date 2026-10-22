@@ -785,6 +785,99 @@ afx tower status [options]
 
 ---
 
+### afx ide
+
+Manage the Codev IDE server: a Codev-branded VS Code server-web build that Tower spawns, owns,
+and forwards at the `/ide/` prefix. One server serves any folder; open a workspace at
+`http://localhost:4100/ide/?folder=<absolute path>`. These commands drive Tower's local-only
+`/api/ide` endpoint, so Tower must be running.
+
+**Install:** `npm i -g @cluesmith/codev @cluesmith/codev-ide` (or `afx ide install` for the
+second package). `@cluesmith/codev` carries the Codev sidebar extension; `@cluesmith/codev-ide`
+carries the server binary `codev-ide-server` for your platform.
+
+#### afx ide install
+
+Install the IDE server package.
+
+```bash
+afx ide install
+```
+
+Runs `npm i -g @cluesmith/codev-ide` in your shell with npm's output shown, and exits with npm's
+status. On success it reports the server it now finds and its version. Running it again upgrades
+the server in place; a server that is already running keeps the old version until it is
+restarted (`afx ide stop && afx ide start`).
+
+#### afx ide start
+
+Find the server and ask Tower to spawn it.
+
+```bash
+afx ide start [options]
+```
+
+**Options:**
+- `--server-path <path>` - Path to the `codev-ide-server` binary (overrides discovery)
+- `-p, --port <port>` - Port the server listens on (default: 8200, loopback only)
+
+**Discovery** (without `--server-path`), first match wins:
+1. `codev-ide-server` on `PATH`
+2. `@cluesmith/codev-ide` installed next to the running `@cluesmith/codev`
+3. `@cluesmith/codev-ide` under `npm root -g`
+
+Discovery runs in the CLI, in your shell's environment, because Tower is a long-running daemon
+whose `PATH` may predate the install. When nothing is found the command exits 1 without
+contacting Tower and names `afx ide install` and `--server-path`. A `--server-path` that does
+not exist fails the same way.
+
+**What Tower does on every start, before spawning:**
+1. **Version check.** Runs `codev-ide-server --version` and refuses a server older than the
+   minimum Tower supports, naming the installed version, the minimum, and the upgrade command.
+2. **Sidebar install.** Installs the sidebar vsix embedded in `@cluesmith/codev` into
+   `~/.agent-farm/ide-extensions` with the server's own `--install-extension`. Skipped when that
+   version is already installed. Other extensions in the directory are left alone. If the
+   installed codev package has no embedded sidebar, Tower warns and starts the server without it.
+3. **Spawn** with `--extensions-dir ~/.agent-farm/ide-extensions`.
+
+A failed check or install refuses the start and leaves any running server untouched. The first
+start can take a minute or more.
+
+The server loads extensions only from `~/.agent-farm/ide-extensions`, so anything installed into
+its default extensions directory is no longer loaded. Install additional extensions there:
+`codev-ide-server --install-extension <id-or-vsix> --extensions-dir ~/.agent-farm/ide-extensions`.
+
+If a server is already live on the port, `start` adopts it rather than killing it. When that
+server predates the current start (a different binary, an older sidebar, or a server started
+before this feature), the command prints a restart hint: `afx ide stop && afx ide start`.
+
+On success it prints the prefix, port, PID, server version, and sidebar version.
+
+#### afx ide stop
+
+```bash
+afx ide stop
+```
+
+Stops the server and clears Tower's record. Reports when no server was running.
+
+#### afx ide status
+
+```bash
+afx ide status
+```
+
+Shows the prefix, port, server path, server version, extensions directory, sidebar version,
+and whether the process is live. Records written before this feature
+show `unknown` for the version and extensions fields.
+
+**Files:**
+- `~/.agent-farm/ide-server.json` - Tower's record of the running server
+- `~/.agent-farm/ide-extensions/` - Tower-owned extensions directory (mode 0700)
+- `~/.agent-farm/ide-connection-token` - Token guarding direct access to the server port
+
+---
+
 ### afx cron
 
 Manage scheduled tasks defined as YAML files in `.af-cron/` at the workspace root. The Tower scheduler loads these every tick, runs due commands, and delivers messages through the normal send pipeline.

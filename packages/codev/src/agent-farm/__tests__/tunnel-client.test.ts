@@ -173,6 +173,16 @@ describe('tunnel-client unit tests', () => {
       expect(isBlockedPath('/api/shutdowns')).toBe(false);
     });
 
+    // Spec 1595: the lifecycle reporter posts only to 127.0.0.1, so a
+    // tunnel-proxied report could only spoof an agent's attention state.
+    it('blocks /api/agent-lifecycle, bare and workspace-scoped', () => {
+      expect(isBlockedPath('/api/agent-lifecycle')).toBe(true);
+      expect(isBlockedPath('/api/agent-lifecycle?x=1')).toBe(true);
+      expect(isBlockedPath('/workspace/abc/api/agent-lifecycle')).toBe(true);
+      expect(isBlockedPath('/api%2Fagent-lifecycle')).toBe(true);
+      expect(isBlockedPath('/api/agent-lifecycles')).toBe(false);
+    });
+
     it('blocks percent-encoded slash bypass: /api%2Ftunnel/connect', () => {
       expect(isBlockedPath('/api%2Ftunnel/connect')).toBe(true);
     });

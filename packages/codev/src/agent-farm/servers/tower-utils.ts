@@ -16,6 +16,7 @@ import crypto from 'node:crypto';
 import { loadRolePrompt, type RoleConfig } from '../utils/roles.js';
 import { getArchitectHarness } from '../utils/config.js';
 import { RetiredHarnessError, type HarnessProvider } from '../utils/harness.js';
+import { resolveLifecycleReporterInjection } from '../utils/lifecycle-reporter.js';
 import { getArchitectByName, setArchitectSessionId } from '../state.js';
 import type { CrashLoopFallback, FreshLaunch, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import { cmdlineHoldsSession } from './architect-session-holder.js';
@@ -187,9 +188,13 @@ export function buildArchitectArgs(baseArgs: string[], workspacePath: string): {
   // .message). The non-launch liveness predicate is handled separately in
   // siblingRegistrationIsLive.
   const harness = getArchitectHarness(workspacePath);
+  // Spec 1595: the lifecycle reporter rides on every launch built here, with or
+  // without a role. The resume primary in resolveArchitectLaunch bypasses this
+  // funnel and applies it itself.
+  const reporter = lifecycleReporterLaunch(harness);
 
   const role = loadRolePrompt(config, 'architect');
-  if (!role) return { args: baseArgs, env: {} };
+  if (!role) return { args: [...baseArgs, ...reporter.args], env: reporter.env };
 
   const roleFile = path.join(workspacePath, '.architect-role.md');
   fs.writeFileSync(roleFile, role.content);
@@ -197,9 +202,16 @@ export function buildArchitectArgs(baseArgs: string[], workspacePath: string): {
   const injection = harness.buildRoleInjection(role.content, roleFile);
 
   return {
-    args: [...baseArgs, ...injection.args],
-    env: injection.env,
+    args: [...baseArgs, ...injection.args, ...reporter.args],
+    env: { ...injection.env, ...reporter.env },
   };
+}
+
+/** Spec 1595: the reporter's argv and env for an architect launch, empty when the harness has none. */
+function lifecycleReporterLaunch(harness: HarnessProvider): { args: string[]; env: Record<string, string> } {
+  const injection = resolveLifecycleReporterInjection(harness);
+  if (!injection) return { args: [], env: {} };
+  return { args: injection.args, env: injection.env };
 }
 
 /**
@@ -424,9 +436,10 @@ export function resolveArchitectLaunch(opts: {
       [...baseArgs, ...harness.session.newSessionArgs(fallbackSessionId)],
       workspacePath,
     );
+    const reporter = lifecycleReporterLaunch(harness);
     return {
-      args: [...baseArgs, ...harness.session.resumeArgs(storedSessionId)],
-      env: {},
+      args: [...baseArgs, ...harness.session.resumeArgs(storedSessionId), ...reporter.args],
+      env: reporter.env,
       sessionId: storedSessionId,
       resumed: true,
       fallback: { args: fresh.args, env: fresh.env, sessionId: fallbackSessionId },

@@ -705,6 +705,90 @@ describe('tower-instances', () => {
   });
 
   // =========================================================================
+  // Spec 1595 — every architect launch carries its workspace and Tower's port
+  // =========================================================================
+  describe('architect launch env (Spec 1595)', () => {
+    const saved: Record<string, string | undefined> = {};
+    const keys = ['HOME', 'TOWER_ARCHITECT_CMD', 'CODEV_TOWER_PORT', 'CODEV_ARCHITECT_WORKSPACE'];
+    let isoHome: string;
+
+    beforeEach(() => {
+      for (const key of keys) saved[key] = process.env[key];
+      isoHome = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-env-home-'));
+      process.env.HOME = isoHome;
+      process.env.TOWER_ARCHITECT_CMD = 'bash';
+      // Inherited stale values Tower must overwrite.
+      process.env.CODEV_TOWER_PORT = '1';
+      process.env.CODEV_ARCHITECT_WORKSPACE = '/stale/workspace';
+    });
+
+    afterEach(() => {
+      for (const key of keys) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
+      fs.rmSync(isoHome, { recursive: true, force: true });
+    });
+
+    function terminalManager(createSession: ReturnType<typeof vi.fn>) {
+      return vi.fn().mockReturnValue({
+        getSession: vi.fn(),
+        killSession: vi.fn(),
+        createSession,
+        createSessionRaw: vi.fn(),
+        listSessions: vi.fn().mockReturnValue([]),
+      }) as any;
+    }
+
+    it('launchInstance sets CODEV_ARCHITECT_WORKSPACE and CODEV_TOWER_PORT on the main architect', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-env-launch-'));
+      fs.mkdirSync(path.join(tmpDir, 'codev'));
+      try {
+        const createSession = vi.fn().mockResolvedValue({ id: 'arch-main', pid: 1 });
+        initInstances(makeDeps({ towerPort: 4242, getTerminalManager: terminalManager(createSession) }));
+
+        expect((await launchInstance(tmpDir)).success).toBe(true);
+        const env = createSession.mock.calls[0][0].env as Record<string, string>;
+        expect(env.CODEV_ARCHITECT_NAME).toBe('main');
+        expect(env.CODEV_ARCHITECT_WORKSPACE).toBe(fs.realpathSync(tmpDir));
+        expect(env.CODEV_TOWER_PORT).toBe('4242');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('addArchitect sets CODEV_ARCHITECT_WORKSPACE and CODEV_TOWER_PORT on a sibling architect', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-env-add-'));
+      fs.mkdirSync(path.join(tmpDir, 'codev'));
+      const resolvedPath = fs.realpathSync(tmpDir);
+      try {
+        const createSession = vi.fn().mockResolvedValue({ id: 'arch-reviewer', pid: 1 });
+        const workspaceTerminals = new Map([
+          [resolvedPath, {
+            architects: new Map([['main', { terminalId: 'main-t' }]]),
+            builders: new Map(),
+            shells: new Map(),
+          }],
+        ]);
+        initInstances(makeDeps({
+          towerPort: 4242,
+          workspaceTerminals: workspaceTerminals as any,
+          getTerminalManager: terminalManager(createSession),
+        }));
+
+        await addArchitect(tmpDir, 'reviewer');
+        expect(createSession).toHaveBeenCalled();
+        const env = createSession.mock.calls[0][0].env as Record<string, string>;
+        expect(env.CODEV_ARCHITECT_NAME).toBe('reviewer');
+        expect(env.CODEV_ARCHITECT_WORKSPACE).toBe(resolvedPath);
+        expect(env.CODEV_TOWER_PORT).toBe('4242');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // =========================================================================
   // Issue #929 / #1145 — architect launch never discovery-resumes
   //
   // #929's crash-loop guard (a non-claude architect like codex + stale Claude jsonl must not launch

@@ -197,6 +197,15 @@ body {
   color: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue));
 }
 
+/* Spec 1595: an agent at a prompt reads as a warning, a dead agent as an error. */
+.cp-badge-needs-input {
+  color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-charts-yellow));
+}
+
+.cp-badge-dead {
+  color: var(--vscode-notificationsErrorIcon-foreground, var(--vscode-charts-red));
+}
+
 .cp-badge-queued {
   color: var(--vscode-textLink-foreground);
 }

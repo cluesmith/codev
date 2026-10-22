@@ -524,6 +524,14 @@ export class PtySession extends EventEmitter {
     this.onPtyData(`\r\n\x1b[33m${text}\x1b[0m\r\n`);
   }
 
+  /**
+   * Whether the session is in restart wait: its process exited and the bounded
+   * wait for the relaunched process is armed (Spec 1595 reads this as not alive).
+   */
+  get awaitingRestart(): boolean {
+    return this._restartCleanupTimeout !== null;
+  }
+
   /** Whether this session is backed by a shellper process. */
   get shellperBacked(): boolean {
     return this._shellperBacked;

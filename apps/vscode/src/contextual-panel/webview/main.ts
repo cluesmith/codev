@@ -21,7 +21,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import './styles.css';
 import type { ModeDescriptor, ModeKind } from '../types.js';
 import { formatAge } from '@cluesmith/codev-sdk/builder-helpers';
-import type { AttentionBuilderRef, AttentionSummary, GateItem, WaitingItem, CountItem } from '@cluesmith/codev-sdk/builder-helpers';
+import type { ArchitectAttentionItem, AttentionBuilderRef, AttentionSummary, GateItem, WaitingItem, CountItem } from '@cluesmith/codev-sdk/builder-helpers';
+import { waitWord } from '../../views/attention-format.js';
 import type { HostToWebviewMessage, OpenLocationMessage, ReviewAction, WebviewToHostMessage } from '../messages.js';
 import type { CodeReviewComment, CodeReviewFile, CodeReviewSentComment, CodeReviewSummary } from '../code-review.js';
 
@@ -110,14 +111,39 @@ function gateRow(item: GateItem, index: number): React.ReactElement {
   );
 }
 
+/** The wait badge, `<word> · <age>`; a distinct modifier class per state. */
+function waitBadge(state: WaitingItem['state'] | ArchitectAttentionItem['state'], since: string | null): React.ReactElement {
+  const age = formatAge(since);
+  const word = waitWord(state);
+  let modifier = '';
+  if (state === 'needs-input') { modifier = ' cp-badge-needs-input'; }
+  if (state === 'dead') { modifier = ' cp-badge-dead'; }
+  return h('span', { className: `cp-badge cp-badge-waiting${modifier}` }, age !== null ? `${word} · ${age}` : word);
+}
+
 function waitingRow(item: WaitingItem, index: number): React.ReactElement {
-  const age = formatAge(item.since);
   return h(
     'div',
     { className: 'cp-row cp-row-waiting', key: `${item.builderId}:${index}` },
     h('span', { className: 'cp-stripe' }),
     rowMain(item),
-    h('span', { className: 'cp-badge cp-badge-waiting' }, age !== null ? `idle · ${age}` : 'idle'),
+    waitBadge(item.state, item.since),
+  );
+}
+
+/** Spec 1595: an architect at a prompt or with its agent dead, under its name. */
+function architectRow(item: ArchitectAttentionItem, index: number): React.ReactElement {
+  return h(
+    'div',
+    { className: 'cp-row cp-row-waiting', key: `architect:${item.architect}:${index}` },
+    h('span', { className: 'cp-stripe' }),
+    h(
+      'span',
+      { className: 'cp-row-main' },
+      h('span', { className: 'cp-row-id' }, item.architect),
+      h('span', { className: 'cp-row-sub' }, 'architect'),
+    ),
+    waitBadge(item.state, item.since),
   );
 }
 
@@ -157,14 +183,13 @@ function attentionBody(summary: AttentionSummary): React.ReactNode {
       ),
     );
   }
-  if (summary.waiting.length > 0) {
-    sections.push(
-      h(
-        React.Fragment,
-        { key: 'waiting' },
-        section('Waiting on input', summary.waiting.length, summary.waiting.map((item, i) => waitingRow(item, i))),
-      ),
-    );
+  const waitingCount = summary.waiting.length + summary.architects.length;
+  if (waitingCount > 0) {
+    const rows = [
+      ...summary.architects.map((item, i) => architectRow(item, i)),
+      ...summary.waiting.map((item, i) => waitingRow(item, i)),
+    ];
+    sections.push(h(React.Fragment, { key: 'waiting' }, section('Waiting on input', waitingCount, rows)));
   }
   if (summary.heldTotal > 0) {
     const title = summary.heldEscalated ? 'Held mail · escalated' : 'Held mail';

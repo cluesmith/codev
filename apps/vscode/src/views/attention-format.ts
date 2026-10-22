@@ -1,5 +1,5 @@
 import { formatAge } from '@cluesmith/codev-sdk/builder-helpers';
-import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
+import type { AttentionSummary, ArchitectAttentionItem, WaitingItem } from '@cluesmith/codev-sdk/builder-helpers';
 
 /**
  * How a workspace's attention reads at a glance — shared by the Tower tree row and the switch
@@ -24,11 +24,9 @@ export function describeAttention(a: AttentionSummary): AttentionGlance | null {
     if (age) { text = `${gate.gate} · ${age}`; }
     return { icon: 'warning', color: 'list.warningForeground', text };
   }
-  if (a.waiting.length > 0) {
-    const age = formatAge(a.waiting[0].since);
-    let text = 'waiting';
-    if (age) { text = `waiting ${age}`; }
-    return { icon: 'clock', text };
+  const wait = mostUrgentWait(a);
+  if (wait !== null) {
+    return describeWait(wait.state, wait.since);
   }
   // Mirror `urgencyBucket`'s held predicate (heldTotal OR heldMail rows), so a workspace never
   // buckets as held-mail yet reads as quiet here.
@@ -52,4 +50,60 @@ export function totalQueued(a: AttentionSummary): number {
   let total = 0;
   for (const item of a.queuedFeedback) { total += item.count; }
   return total;
+}
+
+/** What a waiting builder or architect is waiting in; absent for the PTY-silence fallback. */
+export type WaitState = WaitingItem['state'] | ArchitectAttentionItem['state'];
+
+/** Urgency of a wait within the waiting bucket: at a prompt, then dead, then idle or silent. */
+function waitRank(state: WaitState): number {
+  if (state === 'needs-input') { return 0; }
+  if (state === 'dead') { return 1; }
+  return 2;
+}
+
+/**
+ * The waiting item a workspace's glance shows (Spec 1595): across waiting builders and architects,
+ * the first at a prompt, else the first dead, else the first idle. `null` when nothing waits.
+ */
+function mostUrgentWait(a: AttentionSummary): { state?: WaitState; since: string | null } | null {
+  let best: { state?: WaitState; since: string | null } | null = null;
+  for (const item of [...a.waiting, ...a.architects]) {
+    if (best === null || waitRank(item.state) < waitRank(best.state)) { best = item; }
+  }
+  return best;
+}
+
+/**
+ * How one wait reads (Spec 1595), shared by the workspace glance and its expanded rows: `needs
+ * input · 6m` at a prompt, `agent exited · 6m` when dead, `waiting 6m` when idle or silent.
+ */
+export function describeWait(state: WaitState, since: string | null): AttentionGlance {
+  const age = formatAge(since);
+  if (state === 'needs-input') {
+    return { icon: 'question', color: 'list.warningForeground', text: withAge('needs input', age) };
+  }
+  if (state === 'dead') {
+    return { icon: 'debug-disconnect', color: 'list.errorForeground', text: withAge('agent exited', age) };
+  }
+  let text = 'waiting';
+  if (age) { text = `waiting ${age}`; }
+  return { icon: 'clock', text };
+}
+
+/** `<text> · <age>`, or just the text when there is no age. */
+function withAge(text: string, age: string | null): string {
+  if (age) { return `${text} · ${age}`; }
+  return text;
+}
+
+/**
+ * The one-word badge for a wait (Spec 1595): `needs input` at a prompt, `agent exited` when dead,
+ * `idle` for a served turn end, and `waiting` for the PTY-silence fallback (no served state).
+ */
+export function waitWord(state: WaitState | undefined): string {
+  if (state === 'needs-input') { return 'needs input'; }
+  if (state === 'dead') { return 'agent exited'; }
+  if (state === 'idle') { return 'idle'; }
+  return 'waiting';
 }

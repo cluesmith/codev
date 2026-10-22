@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { BuilderCard } from '../src/components/BuilderCard.js';
 import type { OverviewBuilder } from '../src/lib/api.js';
+import type { ServedAgentState } from '@cluesmith/codev-types';
 
 afterEach(() => {
   cleanup();
@@ -124,5 +125,64 @@ describe('BuilderCard — Spec 823 attribution rendering', () => {
       architectCount: 3,
     });
     expect(document.querySelector('.builder-attribution')!.textContent).toBe(' · team-a');
+  });
+});
+
+/** Spec 1595: a served state begun two minutes ago, with fresh output (not a stale `working`). */
+function served(state: ServedAgentState['state'], extra: Partial<ServedAgentState> = {}): Partial<OverviewBuilder> {
+  const since = new Date(Date.now() - 2 * 60_000).toISOString();
+  return {
+    lastDataAt: new Date().toISOString(),
+    agentState: { state, since, source: 'harness', alive: state !== 'dead', activity: null, activityAt: since, backgroundWork: false, ...extra },
+  };
+}
+
+function stateCell(): HTMLElement {
+  return document.querySelector('.builder-col-state span') as HTMLElement;
+}
+
+describe('BuilderCard — Spec 1595 agent state', () => {
+  it('shows a permission prompt as "Needs input: …"', () => {
+    renderBuilder({ builder: makeBuilder(served('needs-input', { needsInput: { kind: 'permission', tool: 'Bash', summary: 'git push' } })) });
+    expect(stateCell().textContent).toBe('Needs input: at a permission prompt: Bash git push');
+    expect(document.querySelector('.builder-row--waiting')).not.toBeNull();
+  });
+
+  it('shows a question, and a needs-input without detail', () => {
+    renderBuilder({ builder: makeBuilder(served('needs-input', { needsInput: { kind: 'question' } })) });
+    expect(stateCell().textContent).toBe('Needs input: asking a question');
+    cleanup();
+    renderBuilder({ builder: makeBuilder(served('needs-input')) });
+    expect(stateCell().textContent).toBe('Needs input');
+  });
+
+  it('shows Idle for a turn end and the phase for a working agent', () => {
+    renderBuilder({ builder: makeBuilder(served('idle')) });
+    expect(stateCell().textContent).toBe('Idle');
+    cleanup();
+    renderBuilder({ builder: makeBuilder(served('working')) });
+    expect(stateCell().textContent).toBe('implement');
+  });
+
+  it('renders a dead agent distinctly from idle and needs-input (SC7)', () => {
+    renderBuilder({ builder: makeBuilder(served('dead')) });
+    expect(stateCell().textContent).toBe('Agent exited');
+    expect(stateCell().className).toBe('builder-state-dead');
+    expect(document.querySelector('.builder-row--dead')).not.toBeNull();
+    expect(document.querySelector('.builder-row--waiting')).toBeNull();
+  });
+
+  it('keeps the PTY-silence wording when Tower serves no state', () => {
+    renderBuilder({ builder: makeBuilder({ lastDataAt: new Date(Date.now() - 10 * 60_000).toISOString() }) });
+    expect(stateCell().textContent).toBe('Waiting on input');
+  });
+
+  it('renders a Markdown and HTML summary literally, as a text node (SC19)', () => {
+    const summary = '<img src=x onerror=alert(1)> [run](command:x) **b**';
+    renderBuilder({ builder: makeBuilder(served('needs-input', { needsInput: { kind: 'permission', tool: 'Bash', summary } })) });
+    expect(stateCell().textContent).toBe(`Needs input: at a permission prompt: Bash ${summary}`);
+    expect(stateCell().children.length).toBe(0);
+    expect(document.querySelector('.builder-col-state img')).toBeNull();
+    expect(document.querySelector('.builder-col-state a')).toBeNull();
   });
 });

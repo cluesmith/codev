@@ -253,6 +253,18 @@ afx spawn 42 --protocol spir
 3. Builder: Rebase or merge main into branch
 4. Builder: Force push if needed
 
+### Claude Agent Exits With "Settings file not found"
+
+A Claude builder or architect that exits at once with `Settings file not found` (exit 1),
+with its builder loop relaunching every 2 seconds, means the attention-state reporter
+files under `~/.agent-farm/hooks/` were deleted. Any Tower launch reinstalls them:
+
+```bash
+afx spawn XXXX --resume
+# or, for a whole workspace
+afx workspace recover
+```
+
 ### Builder Worktree Broken
 
 ```bash

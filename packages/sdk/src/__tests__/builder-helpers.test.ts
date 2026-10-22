@@ -4,8 +4,17 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';
-import { compareAttention, deriveAttention, formatAge, isIdleWaiting, IDLE_WAITING_THRESHOLD_MS } from '../builder-helpers.js';
+import type { ArchitectState, OverviewBuilder, OverviewData, ServedAgentState } from '@cluesmith/codev-types';
+import {
+  agentAttentionState,
+  BACKGROUND_WORK_STALE_MS,
+  compareAttention,
+  deriveAttention,
+  describeNeedsInput,
+  formatAge,
+  isIdleWaiting,
+  IDLE_WAITING_THRESHOLD_MS,
+} from '../builder-helpers.js';
 import type { AttentionSummary } from '../builder-helpers.js';
 
 const NOW = Date.parse('2026-08-25T12:00:00Z');
@@ -46,6 +55,243 @@ describe('isIdleWaiting', () => {
     expect(isIdleWaiting(builderRow({ id: 'a', lastDataAt: STALE, phase: 'complete' }), NOW)).toBe(false);
     expect(isIdleWaiting(builderRow({ id: 'a', lastDataAt: FRESH }), NOW)).toBe(false);
     expect(isIdleWaiting(builderRow({ id: 'a', lastDataAt: null }), NOW)).toBe(false);
+  });
+});
+
+// --- Spec 1595: the served-state classifier and predicate ---
+
+const ago = (ms: number) => new Date(NOW - ms).toISOString();
+const SINCE = ago(2 * 60_000);
+
+/** A served state row; only the fields under test carry real values. */
+function served(state: ServedAgentState['state'], over: Partial<ServedAgentState> = {}): ServedAgentState {
+  return {
+    state,
+    since: SINCE,
+    source: 'harness',
+    alive: true,
+    activity: null,
+    activityAt: null,
+    backgroundWork: false,
+    ...over,
+  };
+}
+
+describe('agentAttentionState / isIdleWaiting over a served state (Spec 1595)', () => {
+  const OVER_THRESHOLD = IDLE_WAITING_THRESHOLD_MS + 60_000;
+  const cases: Array<{
+    name: string;
+    agentState: ServedAgentState;
+    lastDataAt: string | null;
+    expected: ReturnType<typeof agentAttentionState>;
+    waiting: boolean;
+  }> = [
+    { name: 'needs-input with fresh output', agentState: served('needs-input'), lastDataAt: FRESH, expected: 'needs-input', waiting: true },
+    { name: 'idle with fresh output', agentState: served('idle'), lastDataAt: FRESH, expected: 'idle', waiting: true },
+    { name: 'dead with no output', agentState: served('dead', { alive: false, source: 'tower' }), lastDataAt: null, expected: 'dead', waiting: true },
+    { name: 'blocked', agentState: served('blocked', { source: 'tower' }), lastDataAt: STALE, expected: 'blocked', waiting: false },
+    { name: 'working with fresh output', agentState: served('working'), lastDataAt: FRESH, expected: 'working', waiting: false },
+    { name: 'working just under the threshold', agentState: served('working'), lastDataAt: ago(IDLE_WAITING_THRESHOLD_MS), expected: 'working', waiting: false },
+    { name: 'working silent past the threshold (SC6)', agentState: served('working'), lastDataAt: STALE, expected: 'idle', waiting: true },
+    { name: 'working with no output yet', agentState: served('working'), lastDataAt: null, expected: 'working', waiting: false },
+    {
+      name: 'background working, silent, report within its bound',
+      agentState: served('working', { backgroundWork: true, activityAt: ago(BACKGROUND_WORK_STALE_MS - 60_000) }),
+      lastDataAt: ago(OVER_THRESHOLD),
+      expected: 'working',
+      waiting: false,
+    },
+    {
+      name: 'background working, silent, report past its bound',
+      agentState: served('working', { backgroundWork: true, activityAt: ago(BACKGROUND_WORK_STALE_MS + 60_000) }),
+      lastDataAt: ago(BACKGROUND_WORK_STALE_MS + 60_000),
+      expected: 'idle',
+      waiting: true,
+    },
+    {
+      name: 'background working with no report time falls back to the output rule',
+      agentState: served('working', { backgroundWork: true, activityAt: null }),
+      lastDataAt: STALE,
+      expected: 'idle',
+      waiting: true,
+    },
+    {
+      name: 'background working with fresh output stays working past its bound',
+      agentState: served('working', { backgroundWork: true, activityAt: ago(BACKGROUND_WORK_STALE_MS + 60_000) }),
+      lastDataAt: FRESH,
+      expected: 'working',
+      waiting: false,
+    },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name}: ${String(c.expected)}, waiting=${c.waiting}`, () => {
+      const b = builderRow({ id: 'a', agentState: c.agentState, lastDataAt: c.lastDataAt });
+      expect(agentAttentionState(b, NOW)).toBe(c.expected);
+      expect(isIdleWaiting(b, NOW)).toBe(c.waiting);
+    });
+  }
+
+  it('never counts a builder at a porch gate, even when the served state disagrees', () => {
+    const b = builderRow({ id: 'a', blocked: 'plan review', agentState: served('needs-input'), lastDataAt: FRESH });
+    expect(isIdleWaiting(b, NOW)).toBe(false);
+  });
+
+  it('never counts a complete or verified builder, whatever its state (SC14)', () => {
+    for (const phase of ['complete', 'verified']) {
+      for (const state of ['working', 'needs-input', 'idle', 'blocked', 'dead'] as const) {
+        for (const lastDataAt of [STALE, FRESH, null]) {
+          const b = builderRow({ id: 'a', phase, agentState: served(state), lastDataAt });
+          expect(agentAttentionState(b, NOW)).toBeNull();
+          expect(isIdleWaiting(b, NOW)).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('a null or absent state is unknown, and reproduces the PTY-silence rule exactly', () => {
+    const fixtures: Array<Partial<OverviewBuilder>> = [
+      { lastDataAt: STALE },
+      { lastDataAt: FRESH },
+      { lastDataAt: null },
+      { lastDataAt: STALE, blocked: 'plan review' },
+      { lastDataAt: STALE, phase: 'complete' },
+      { lastDataAt: STALE, phase: 'verified' },
+      { lastDataAt: ago(IDLE_WAITING_THRESHOLD_MS) },
+      { lastDataAt: ago(IDLE_WAITING_THRESHOLD_MS + 1) },
+      { lastDataAt: 'not-a-date' },
+    ];
+    const todays = (b: OverviewBuilder) => {
+      if (b.blocked) { return false; }
+      if (b.phase === 'complete' || b.phase === 'verified') { return false; }
+      if (!b.lastDataAt) { return false; }
+      return NOW - new Date(b.lastDataAt).getTime() > IDLE_WAITING_THRESHOLD_MS;
+    };
+    for (const fixture of fixtures) {
+      for (const agentState of [null, undefined]) {
+        const b = builderRow({ id: 'a', ...fixture, agentState });
+        expect(agentAttentionState(b, NOW)).toBeNull();
+        expect(isIdleWaiting(b, NOW)).toBe(todays(b));
+      }
+    }
+  });
+});
+
+describe('deriveAttention over a served state (Spec 1595)', () => {
+  it('lists a needs-input builder at once, with its state and the state\'s since', () => {
+    const summary = deriveAttention(overview({
+      builders: [builderRow({ id: 'spir-1', agentState: served('needs-input', { activity: 'needs-input' }), lastDataAt: FRESH })],
+    }), NOW);
+    expect(summary.waiting).toEqual([{ builderId: 'spir-1', issueId: null, issueTitle: null, state: 'needs-input', since: SINCE }]);
+    expect(summary.isEmpty).toBe(false);
+  });
+
+  it('dates a dead builder with no output by its state, not lastDataAt', () => {
+    const summary = deriveAttention(overview({
+      builders: [builderRow({ id: 'spir-2', agentState: served('dead', { alive: false, source: 'tower' }), lastDataAt: null })],
+    }), NOW);
+    expect(summary.waiting).toEqual([{ builderId: 'spir-2', issueId: null, issueTitle: null, state: 'dead', since: SINCE }]);
+  });
+
+  it('dates a stale working builder by its last output', () => {
+    const summary = deriveAttention(overview({ builders: [builderRow({ id: 'spir-3', agentState: served('working'), lastDataAt: STALE })] }), NOW);
+    expect(summary.waiting).toEqual([{ builderId: 'spir-3', issueId: null, issueTitle: null, state: 'idle', since: STALE }]);
+  });
+
+  it('does not list a working builder whose output is fresh', () => {
+    const summary = deriveAttention(overview({ builders: [builderRow({ id: 'spir-4', agentState: served('working'), lastDataAt: FRESH })] }), NOW);
+    expect(summary.waiting).toEqual([]);
+    expect(summary.isEmpty).toBe(true);
+  });
+
+  it('keeps a served blocked builder on the gate path only (never counted twice)', () => {
+    const summary = deriveAttention(overview({
+      builders: [builderRow({ id: 'spir-5', blocked: 'plan review', blockedGate: 'plan-approval', agentState: served('blocked', { source: 'tower' }), lastDataAt: STALE })],
+    }), NOW);
+    expect(summary.pendingGates.map((g) => g.builderId)).toEqual(['spir-5']);
+    expect(summary.waiting).toEqual([]);
+  });
+
+  it('shows a prompt on a porch-gated builder under the gate only', () => {
+    const summary = deriveAttention(overview({
+      builders: [builderRow({ id: 'spir-6', blocked: 'plan review', agentState: served('needs-input'), lastDataAt: FRESH })],
+    }), NOW);
+    expect(summary.pendingGates.map((g) => g.builderId)).toEqual(['spir-6']);
+    expect(summary.waiting).toEqual([]);
+  });
+
+  it('lists needs-input and dead on a prReady-only builder alongside its PR row (SC1, SC7)', () => {
+    const summary = deriveAttention(overview({
+      builders: [
+        builderRow({ id: 'pir-7', prReady: true, agentState: served('needs-input'), lastDataAt: FRESH }),
+        builderRow({ id: 'pir-8', prReady: true, agentState: served('dead', { alive: false }), lastDataAt: null }),
+      ],
+    }), NOW);
+    expect(summary.pendingGates.map((g) => g.builderId)).toEqual(['pir-7', 'pir-8']);
+    expect(summary.waiting.map((w) => [w.builderId, w.state])).toEqual([['pir-7', 'needs-input'], ['pir-8', 'dead']]);
+  });
+
+  it('suppresses idle and stale working on a prReady-only builder', () => {
+    const summary = deriveAttention(overview({
+      builders: [
+        builderRow({ id: 'pir-9', prReady: true, agentState: served('idle'), lastDataAt: FRESH }),
+        builderRow({ id: 'pir-10', prReady: true, agentState: served('working'), lastDataAt: STALE }),
+      ],
+    }), NOW);
+    expect(summary.waiting).toEqual([]);
+  });
+
+  it('never lists a complete or verified builder (SC14)', () => {
+    const summary = deriveAttention(overview({
+      builders: [
+        builderRow({ id: 'a', phase: 'complete', agentState: served('dead', { alive: false }) }),
+        builderRow({ id: 'b', phase: 'verified', agentState: served('needs-input'), lastDataAt: STALE }),
+      ],
+    }), NOW);
+    expect(summary.waiting).toEqual([]);
+    expect(summary.isEmpty).toBe(true);
+  });
+});
+
+describe('deriveAttention architects (Spec 1595)', () => {
+  function architect(name: string, agentState: ServedAgentState | null | undefined, lastDataAt: string | null = FRESH): ArchitectState {
+    return { name, port: 0, pid: 0, agentState, lastDataAt };
+  }
+
+  it('lists architect needs-input and dead in order; idle, working and unknown are absent', () => {
+    const summary = deriveAttention(overview({
+      architects: [
+        architect('main', served('needs-input', { since: '2026-08-25T11:00:00Z' })),
+        architect('idle-one', served('idle')),
+        architect('busy', served('working')),
+        architect('stale', served('working'), STALE),
+        architect('old', null, STALE),
+        architect('older', undefined, STALE),
+        architect('gone', served('dead', { alive: false, source: 'tower', since: '2026-08-25T10:00:00Z' }), null),
+      ],
+    }), NOW);
+    expect(summary.architects).toEqual([
+      { architect: 'main', state: 'needs-input', since: '2026-08-25T11:00:00Z' },
+      { architect: 'gone', state: 'dead', since: '2026-08-25T10:00:00Z' },
+    ]);
+    expect(summary.isEmpty).toBe(false);
+  });
+
+  it('is empty with only idle architects, and tolerates an overview without architects', () => {
+    expect(deriveAttention(overview({ architects: [architect('main', served('idle'))] }), NOW).isEmpty).toBe(true);
+    expect(deriveAttention(overview({}), NOW).architects).toEqual([]);
+  });
+
+  it('sorts an architect-only summary in the waiting bucket, by its oldest since', () => {
+    const arch = (since: string) => deriveAttention(overview({ architects: [architect('main', served('needs-input', { since }))] }), NOW);
+    const gateSummary = deriveAttention(overview({ builders: [builderRow({ id: 'g', blocked: 'plan review', blockedSince: '2026-08-25T11:00:00Z' })] }), NOW);
+    const heldSummary = deriveAttention(overview({ heldCount: 3 }), NOW);
+    expect(sign(compareAttention(gateSummary, arch('2026-08-25T09:00:00Z')))).toBe(-1);
+    expect(sign(compareAttention(arch('2026-08-25T09:00:00Z'), heldSummary))).toBe(-1);
+    expect(sign(compareAttention(arch('2026-08-25T09:00:00Z'), arch('2026-08-25T11:00:00Z')))).toBe(-1);
+    const builderWait = deriveAttention(overview({ builders: [builderRow({ id: 'w', lastDataAt: '2026-08-25T10:00:00Z' })] }), NOW);
+    expect(sign(compareAttention(arch('2026-08-25T09:00:00Z'), builderWait))).toBe(-1);
+    expect(sign(compareAttention(builderWait, arch('2026-08-25T11:00:00Z')))).toBe(-1);
   });
 });
 
@@ -153,6 +399,7 @@ describe('deriveAttention', () => {
     expect(deriveAttention(null, NOW)).toEqual({
       pendingGates: [],
       waiting: [],
+      architects: [],
       heldTotal: 0,
       heldEscalated: false,
       heldMail: [],
@@ -184,6 +431,7 @@ function summary(over: Partial<AttentionSummary>): AttentionSummary {
   return {
     pendingGates: [],
     waiting: [],
+    architects: [],
     heldTotal: 0,
     heldEscalated: false,
     heldMail: [],
@@ -197,6 +445,7 @@ const gate = (since: string | null) => summary({ pendingGates: [{ ...ref, gate: 
 const waiting = (since: string | null) => summary({ waiting: [{ ...ref, since }], isEmpty: false });
 const held = (heldTotal: number, heldEscalated = false) => summary({ heldTotal, heldEscalated, heldMail: [{ ...ref, count: heldTotal }], isEmpty: false });
 const queued = (count: number) => summary({ queuedFeedback: [{ ...ref, count }], isEmpty: false });
+const architectWaiting = (since: string | null) => summary({ architects: [{ architect: 'main', state: 'needs-input', since }], isEmpty: false });
 const quiet = () => summary({});
 
 function sign(n: number): number {
@@ -248,6 +497,7 @@ describe('compareAttention — order properties', () => {
   const samples: AttentionSummary[] = [
     gate('2026-08-25T09:00:00Z'), gate('2026-08-25T11:00:00Z'), gate(null),
     waiting('2026-08-25T08:00:00Z'), waiting('2026-08-25T12:00:00Z'),
+    architectWaiting('2026-08-25T10:00:00Z'), architectWaiting(null),
     held(1, true), held(9, false), held(3, false),
     queued(5), queued(1), quiet(),
   ];
@@ -332,5 +582,28 @@ describe('formatAge — the canonical cross-client relative age', () => {
     expect(formatAge(null, now)).toBeNull();
     expect(formatAge('not-a-date', now)).toBeNull();
     expect(formatAge(new Date(now + 60_000).toISOString(), now)).toBeNull();
+  });
+});
+
+describe('describeNeedsInput (Spec 1595)', () => {
+  it('names the tool and summary of a permission prompt', () => {
+    expect(describeNeedsInput({ kind: 'permission', tool: 'Bash', summary: 'git push' })).toBe('at a permission prompt: Bash git push');
+  });
+
+  it('omits whichever of tool and summary is absent', () => {
+    expect(describeNeedsInput({ kind: 'permission', tool: 'Edit' })).toBe('at a permission prompt: Edit');
+    expect(describeNeedsInput({ kind: 'permission', summary: 'src/a.ts' })).toBe('at a permission prompt: src/a.ts');
+    expect(describeNeedsInput({ kind: 'permission' })).toBe('at a permission prompt');
+  });
+
+  it('reads a question as asking a question, and anything else as needing input', () => {
+    expect(describeNeedsInput({ kind: 'question', tool: 'AskUserQuestion' })).toBe('asking a question');
+    expect(describeNeedsInput({ kind: 'other' })).toBe('needs input');
+    expect(describeNeedsInput(undefined)).toBe('needs input');
+  });
+
+  it('copies markup in the summary verbatim for the caller to render as text', () => {
+    const summary = '[click](command:workbench.action.terminal.sendSequence) **bold**';
+    expect(describeNeedsInput({ kind: 'permission', tool: 'Bash', summary })).toBe(`at a permission prompt: Bash ${summary}`);
   });
 });

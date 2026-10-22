@@ -9,6 +9,7 @@
 import { spawn } from 'node:child_process';
 import { getConfig, getResolvedCommands } from '../utils/index.js';
 import { buildArchitectArgs } from '../servers/tower-utils.js';
+import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 
 export interface ArchitectOptions {
   args?: string[];
@@ -34,7 +35,10 @@ export async function architect(options: ArchitectOptions = {}): Promise<void> {
     const child = spawn(cmd, allArgs, {
       stdio: 'inherit',
       cwd: config.workspaceRoot,
-      env: { ...process.env, ...env },
+      // Spec 1595: strip any inherited agent identity (and Claude session
+      // markers), as every Tower launch path does, so a nested launch never
+      // reports under its parent's identity.
+      env: { ...sanitizeAgentEnv(process.env), ...env },
     });
 
     child.on('error', (err) => {

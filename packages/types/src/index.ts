@@ -91,3 +91,13 @@ export {
   type ProtocolStats,
   type AnalyticsResponse,
 } from './api.js';
+
+export {
+  type AgentState,
+  type AgentActivity,
+  type NeedsInputDetail,
+  type ServedAgentState,
+  type AgentLifecycleEventName,
+  type AgentLaunchIdentity,
+  type AgentLifecycleEvent,
+} from './agent-state.js';

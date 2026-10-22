@@ -5,7 +5,7 @@ import type { ConnectionManager } from '../connection-manager.js';
 import type { TowerFleetCache } from './tower-cache.js';
 import { orderFleet } from './fleet-order.js';
 import type { LabelledEntry } from './fleet-order.js';
-import { describeAttention } from './attention-format.js';
+import { describeAttention, describeWait } from './attention-format.js';
 import { gateIconFor } from './builder-row.js';
 
 /** Command a Tower workspace row runs — switch to it, or activate-then-open if dormant. */
@@ -191,10 +191,13 @@ function attentionRows(a: AttentionSummary): TowerNode[] {
     rows.push({ kind: 'attention', label: builderLabel(gate), description, icon, color: 'list.warningForeground' });
   }
   for (const wait of a.waiting) {
-    const age = formatAge(wait.since);
-    let description = 'waiting';
-    if (age) { description = `waiting ${age}`; }
-    rows.push({ kind: 'attention', label: builderLabel(wait), description, icon: 'clock' });
+    const glance = describeWait(wait.state, wait.since);
+    rows.push({ kind: 'attention', label: builderLabel(wait), description: glance.text, icon: glance.icon, color: glance.color });
+  }
+  // Spec 1595: architects at a prompt or with their agent dead, under their own name.
+  for (const architect of a.architects) {
+    const glance = describeWait(architect.state, architect.since);
+    rows.push({ kind: 'attention', label: `architect ${architect.architect}`, description: glance.text, icon: glance.icon, color: glance.color });
   }
   for (const held of a.heldMail) {
     rows.push({ kind: 'attention', label: builderLabel(held), description: `${held.count} held`, icon: 'mail' });

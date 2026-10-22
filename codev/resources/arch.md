@@ -496,6 +496,23 @@ spawning → implementing → blocked → implementing → pr → complete
 | `pr` | Implementation complete, awaiting review |
 | `complete` | Merged, ready for cleanup |
 
+### Agent State (Spec 1595)
+
+Each agent (builder or architect) is served one attention state on the overview: `working`, `needs-input`, `idle`, `blocked` or `dead`, as `agentState` on `OverviewBuilder` and `ArchitectState` (optional and nullable; `null` means "nothing known", and today's PTY-silence rule applies). The pipeline, in order:
+
+- **Contract** (`packages/types/src/agent-state.ts`): `AgentState`, `AgentActivity`, `NeedsInputDetail`, `ServedAgentState`, `AgentLaunchIdentity`, `AgentLifecycleEvent` with five harness-neutral event names (`session-started`, `turn-started`, `tool-activity`, `needs-input`, `turn-ended`). Shapes only; no policy ships in types.
+- **Reporter** (`agent-farm/utils/lifecycle-reporter.ts`): a generated, dependency-free CJS script plus a `--settings` hooks file, installed under `AGENT_FARM_DIR/hooks/` (0700/0600, temp+rename, only on change, no secret). It is Claude's only, behind the optional `HarnessProvider.buildLifecycleReporterInjection` capability; Codex, OpenCode and custom harnesses get none, and their agents are served from liveness and porch only. Every launch path (spawn, `--resume`, `workspace recover`, architects) goes through `resolveLifecycleReporterInjection`, which installs first and injects nothing if the install fails, because Claude refuses to start with a missing `--settings` file. The script maps Claude hooks to neutral events: the question tool's kind comes from the tool name; the summary is the tool's primary argument, single line, control characters stripped, at most 200 characters. Identity is copied from the launch env (`CODEV_BUILDER_WORKTREE`, or `CODEV_ARCHITECT_WORKSPACE` plus `CODEV_ARCHITECT_NAME`) and the port from `CODEV_TOWER_PORT`. Each hook POSTs once to `127.0.0.1` with a sub-second deadline and no retry, then exits 0 with no output. Hooks are `async`, so a stopped or hanging Tower never delays a turn and never prints into the TUI. The hook command is a fail-silent shell wrapper, so a missing script is silent too. The hooks concatenate with the worktree write-guard's hooks; they never replace them.
+- **Ingestion** (`servers/agent-state/route.ts`, `identity.ts`): `POST /api/agent-lifecycle`, local-key auth, 8 KB cap, strict validation, empty 2xx. Paths are normalized with `normalizeWorkspacePath` before the registry lookup. The agent is resolved to Tower's canonical id the way `afx whoami` resolves it, and an unknown agent is rejected.
+- **Store** (`servers/agent-state/store.ts`): **memory only**, by owner ruling. Nothing is written to `global.db`, so after a Tower restart every agent starts with no reported state. Ordering (SC17): an older hook time is ignored, a different session supersedes only with a newer hook time, and a hook time far in the future is rejected; the ordering watermark (`latestHookAt`) advances on every accepted report, even one that changes nothing served. A `turn-ended` with `backgroundWork: true` holds the agent `working`. A same-session turn end that makes no background claim does not release that hold. Claude's `Notification(idle_prompt)` fires 60 s after `Stop` even while the background task runs; this rule was a real-session finding in Phase 8. Changes reach clients as `overview-changed`, coalesced per workspace over a 500 ms window (`broadcast.ts`).
+- **Liveness** (`servers/agent-state/liveness.ts`): the one place `dead` comes from. One `ps` census every 5 s walks shellper → launch loop → agent for builders, and shellper → agent for architects. An agent is not alive with no session, an exited session, a restart wait, or a loop with no agent child; `dead` is published after two consecutive misses. A failed census publishes `alive: null`, never `dead`. Detached daemons a harness leaves behind (Codex's `app-server`, parent pid 1) are not loop children and are ignored.
+- **Projection** (`packages/core/src/agent-state.ts` `projectAgentState`, called per request by `serve.ts`): blocked (the overview's own `detectBlocked`), then dead (never for `complete`/`verified`), then reported activity, then `null`.
+- **Predicate** (`packages/sdk/src/builder-helpers.ts`): `agentAttentionState`, `isIdleWaiting` and `deriveAttention` are the only consumers of the served state; every surface (extension status bar, badge, Builders and Tower views, panel, dashboard card and Needs Attention) goes through them. `needs-input`, `idle` and `dead` count as waiting at once. A served `working` stops suppressing the count after today's 5-minute PTY silence (this covers Esc interrupts, which fire no hook), or after a 30-minute bound when it is background work. Idle architects are not counted.
+
+Known limitations:
+- An **approved** long-running tool stays `needs-input` until it completes, because Claude fires no hook on approval: a false "needs input" while the agent is working (#1851).
+- An agent at a pre-session dialog (folder trust, external imports) reports nothing until the dialog closes, so it is served `null`.
+- If `~/.agent-farm/hooks` is deleted by hand, Claude fails with "Settings file not found" (exit 1), and baked builder loops relaunch every 2 s until the next `afx spawn --resume` or `afx workspace recover` reinstalls the files. Any Tower launch or `afx spawn --resume` recovers.
+
 ### Worktree Management
 
 Git worktrees provide isolated working directories for each builder, enabling parallel development without conflicts.
@@ -2188,7 +2205,8 @@ Tower forwards a fixed `/ide/` prefix to a **single** local VS Code server-web p
 HTTP in `tower-routes.ts` and a **raw bidirectional WebSocket pipe** in `tower-websocket.ts`
 (Tower never parses those frames; they are VS Code's own remote protocol, not Tower's PTY
 bridge). The target workspace is chosen per browser connection via `?folder=<abs path>`; one
-server serves any folder. Forwarding code lives in `servers/ide-forward.ts`; lifecycle
+server serves any folder. Tower passes the server no default folder: it manages several
+workspaces, so no single default makes sense (owner ruling, 2026-10-21, retired `--default-folder`). Forwarding code lives in `servers/ide-forward.ts`; lifecycle
 (spawn / stop / status / boot-reconcile / on-demand respawn) in `servers/ide-server.ts`.
 
 - **Auth**: the forward is a *post-auth* handler behind Tower's existing key choke point. HTTP
@@ -2211,8 +2229,37 @@ server serves any folder. Forwarding code lives in `servers/ide-forward.ts`; lif
 - **Management API**: `POST/DELETE/GET /api/ide` (driven by `afx ide start|stop|status`) is
   local-only — blocked from the tunnel like `/api/tunnel/*` because it spawns/kills a process.
 - **State**: a Tower-managed `~/.agent-farm/ide-server.json` record (`{prefix, port, serverPath,
-  pid}`), the `cloud-config.json` pattern — **no config file, no `global.db` change**. Live PID
-  is discovered by port. `codev/` and `codev-skeleton/` are unaffected (this is product code).
+  pid}`, plus optional `serverVersion`, `extensionsDir`, `sidebarVersion` from Spec 1789; legacy
+  records without them still parse, and a retired `defaultFolder` is ignored), the `cloud-config.json` pattern — **no
+  config file, no `global.db` change**. Live PID is discovered by port. `codev/` and
+  `codev-skeleton/` are unaffected (this is product code).
+- **npm distribution (Spec 1789)**: the server ships as `@cluesmith/codev-ide` (bin
+  `codev-ide-server`, per-platform `optionalDependencies`); `@cluesmith/codev` embeds the sidebar
+  vsix (`ide-extension/{codev-vscode.vsix,manifest.json}`, built from `apps/vscode` by the codev
+  build). No npm dependency in either direction; the server tree ships no copy of the sidebar.
+- **CLI-side discovery**: `afx ide start` resolves the server in the user's shell (`--server-path`,
+  then `PATH`, then the sibling `@cluesmith/codev-ide` of the running codev install, then
+  `npm root -g`) and sends the path to Tower, because the daemon's environment can predate the
+  install. It returns the bin link, not its realpath, so an in-place `npm i -g` upgrade lands on
+  the next respawn. `afx ide install` runs npm in the CLI too; Tower never exposes it.
+- **Preflight (`spawnIdeServer`)**: before touching a running server, Tower checks
+  `--version` line 1 against `IDE_SERVER_MIN_VERSION` (`lib/ide-version.ts`), then installs the
+  embedded vsix into the Tower-owned `~/.agent-farm/ide-extensions` (0700, non-symlink, owned by
+  the user) with the server's own `--install-extension --force --extensions-dir`, skipped when
+  `extensions.json` already lists that version. Only then does it stop (on a port change) or
+  adopt, and it spawns with `--extensions-dir` and an env whose `PATH` includes Tower's Node
+  directory. A failure refuses the start transactionally; a missing embedded vsix only warns.
+  Adopting a live server never kills it; `restartRequired` flags a server that predates the
+  current binary, sidebar, or extensions dir, and the CLI prints the restart hint. Subprocess
+  bounds live beside the floor, and the CLI's request timeout (`IDE_START_BUDGET_MS`) is derived
+  from them.
+- **Serialization**: one non-reentrant promise-chain lock (`withIdeLock`) wraps only the entry
+  points (the `/api/ide` POST and DELETE, and the respawn body of `ensureIdeServerLive`, which
+  boot reconcile reaches). Inner unlocked bodies call each other freely, so spawn-calls-stop and
+  respawn-calls-spawn cannot deadlock.
+- **Floor coupling**: `IDE_SERVER_MIN_VERSION` is test-tied to the sidebar's `engines.vscode`
+  minimum, which follows its own policy (it tracks the VS Code base Cursor bundles), so an
+  engines bump forces a floor bump and can retire older published servers.
 
 ## System-Wide Patterns
 
@@ -2258,7 +2305,7 @@ try {
 
 ### State Persistence
 
-**Pattern**: SQLite for all structured state.
+**Pattern**: SQLite for all persisted structured state. Deliberate exception: harness-reported agent state (Spec 1595) is held in Tower's memory only and never persisted, so no report can outlive the Tower process that received it (see Agent State under Agent Farm Internals).
 
 - `.agent-farm/state.db` - Builder/util state (local, per-project)
 - `~/.agent-farm/global.db` - Global workspace/session registry (cross-project)

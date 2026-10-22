@@ -145,4 +145,30 @@ describe('afx architect command', () => {
 
     await expect(architect()).rejects.toThrow('claude exited with code 1');
   });
+
+  // Spec 1595: a nested launch (from inside a builder or another architect)
+  // must not inherit its parent's identity, or its reporter would post as the parent.
+  it('strips inherited agent identity from the spawned env', async () => {
+    const mockProcess = {
+      on: vi.fn((event: string, callback: (...args: unknown[]) => void) => {
+        if (event === 'close') {
+          setTimeout(() => callback(0), 0);
+        }
+        return mockProcess;
+      }),
+    };
+    mockSpawn.mockReturnValue(mockProcess);
+    vi.stubEnv('CODEV_BUILDER_WORKTREE', '/repo/.builders/spir-1');
+    vi.stubEnv('CODEV_ARCHITECT_WORKSPACE', '/repo');
+    vi.stubEnv('CODEV_P8_KEPT', 'yes');
+
+    const { architect } = await import('../commands/architect.js');
+    await architect();
+    vi.unstubAllEnvs();
+
+    const env = mockSpawn.mock.calls[0][2].env as Record<string, string>;
+    expect(env.CODEV_BUILDER_WORKTREE).toBeUndefined();
+    expect(env.CODEV_ARCHITECT_WORKSPACE).toBeUndefined();
+    expect(env.CODEV_P8_KEPT).toBe('yes');
+  });
 });

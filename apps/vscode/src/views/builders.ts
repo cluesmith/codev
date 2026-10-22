@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
-import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import type { OverviewCache } from './overview-data.js';
@@ -23,6 +22,8 @@ import {
 } from './builder-grouping.js';
 import {
   builderRowLabel,
+  builderRowTooltip,
+  classifyBuilderRow,
   gateIconFor,
   rollupGroupState,
   BUILDER_STATE_GLYPH,
@@ -37,18 +38,20 @@ import {
  */
 const CONTEXT_FAMILY: Record<BuilderState, 'blocked-builder' | 'awaiting-builder' | 'builder'> = {
   blocked: 'blocked-builder',
+  'needs-input': 'awaiting-builder',
   idle: 'awaiting-builder',
+  dead: 'awaiting-builder',
   active: 'builder',
 };
 
 /**
  * Order builders for the Builders tree: three buckets, top-down.
  *  1. **blocked** (formal gate awaiting approval) — longest-waiting first.
- *  2. **idle waiting** (`isIdleWaiting`) — agent silent past the threshold,
- *      likely paused at a clarifying question.
+ *  2. **waiting** (`classifyBuilderRow`: needs-input, idle or dead, from the
+ *      served agent state or, without one, PTY silence past the threshold).
  *  3. **active** — everything else; overview order.
  * Blocked rows with no `blockedSince` sort last within the blocked group
- * (we don't pretend to know their wait time). Idle-waiting and active
+ * (we don't pretend to know their wait time). Waiting and active
  * rows preserve Tower's source order within each bucket.
  */
 export function orderForDisplay(builders: OverviewBuilder[], now: number = Date.now()): OverviewBuilder[] {
@@ -56,9 +59,10 @@ export function orderForDisplay(builders: OverviewBuilder[], now: number = Date.
   const blocked = builders
     .filter(b => b.blocked)
     .sort((a, b) => ms(a.blockedSince) - ms(b.blockedSince));
-  const idleWaiting = builders.filter(b => !b.blocked && isIdleWaiting(b, now));
-  const active = builders.filter(b => !b.blocked && !isIdleWaiting(b, now));
-  return [...blocked, ...idleWaiting, ...active];
+  const rest = builders.filter(b => !b.blocked);
+  const waiting = rest.filter(b => classifyBuilderRow(b, now) !== 'active');
+  const active = rest.filter(b => classifyBuilderRow(b, now) === 'active');
+  return [...blocked, ...waiting, ...active];
 }
 
 /**
@@ -627,9 +631,10 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
   }
 
   private makeBuilderRow(b: OverviewBuilder, now: number): BuilderTreeItem {
-    const isBlocked = !!b.blocked;
-    const isIdle = !isBlocked && isIdleWaiting(b, now);
-    const item = new BuilderTreeItem(b.id, builderRowLabel(b, isIdle, now, this.active().rowPrefix(b)));
+    // Classify once; the state drives the label, the tooltip, the contextValue
+    // family (menu scoping) and the icon.
+    const state = classifyBuilderRow(b, now);
+    const item = new BuilderTreeItem(b.id, builderRowLabel(b, state, now, this.active().rowPrefix(b)));
     // Versioned id (#913). The base `b.id` is stable (not the churning label) so
     // VSCode preserves a row's expansion across the frequent overview-poll
     // refreshes; the `#<version>` suffix is the accordion lever (see
@@ -640,7 +645,8 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     // The row keeps its open-terminal command (single click); the chevron
     // toggles the file list.
     item.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
-    item.tooltip = `Protocol: ${b.protocol} | Mode: ${b.mode} | Progress: ${b.progress}%`;
+    // A plain string, never a MarkdownString: the needs-input summary renders literally (SC19).
+    item.tooltip = builderRowTooltip(b, state);
     // contextValue encodes the row's state-family + protocol so menus
     // can scope by either (Approve Gate inline only on
     // blocked-builder-*; everything else applies to all three
@@ -648,16 +654,6 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     // builder has committed a review file on disk — the
     // `codev.viewReviewFile` menu entry's `when` clause keys off it so
     // PIR rows hide the entry until the review phase produces the file.
-    // Classify once (blocked > idle > active); the state drives both the
-    // contextValue family (menu scoping) and the icon.
-    let state: BuilderState;
-    if (isBlocked) {
-      state = 'blocked';
-    } else if (isIdle) {
-      state = 'idle';
-    } else {
-      state = 'active';
-    }
     const protocol = b.protocol || 'unknown';
     const reviewSuffix = builderHasReviewFile(b) ? '-review' : '';
     item.contextValue = `${CONTEXT_FAMILY[state]}-${protocol}${reviewSuffix}`;
@@ -665,7 +661,8 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     // builder-row.ts). A blocked row overrides the shape with the gate-specific
     // `gateIconFor` codicon while keeping the shared warning color.
     const { icon, color } = BUILDER_STATE_GLYPH[state];
-    const iconName = isBlocked ? gateIconFor(b.blockedGate) : icon;
+    let iconName = icon;
+    if (state === 'blocked') { iconName = gateIconFor(b.blockedGate); }
     item.iconPath = new vscode.ThemeIcon(iconName, new vscode.ThemeColor(color));
     // The row click runs `codev.openBuilderRow` — a wrapper that opens the
     // builder terminal and, when `codev.buildersClickExpands` is on (the

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildItems } from '../src/components/NeedsAttentionList.js';
-import type { OverviewPR, OverviewBuilder } from '../src/lib/api.js';
+import type { OverviewPR, OverviewBuilder, ArchitectState } from '../src/lib/api.js';
+import type { ServedAgentState } from '@cluesmith/codev-types';
 
 function makePR(overrides: Partial<OverviewPR> = {}): OverviewPR {
   return {
@@ -349,5 +350,46 @@ describe('NeedsAttentionList buildItems — non-core gates (#1779)', () => {
     expect(row).toBeDefined();
     expect(row!.kind).toBe('security review');
     expect(row!.kindClass).toBe('attention-kind--other');
+  });
+});
+
+describe('NeedsAttentionList buildItems — agent rows (Spec 1595)', () => {
+  const NOW = new Date('2026-01-10T12:00:00Z').getTime();
+  const since = new Date(NOW - 3 * 60_000).toISOString();
+  const fresh = new Date(NOW - 30_000).toISOString();
+  function served(state: ServedAgentState['state']): ServedAgentState {
+    return { state, since, source: 'harness', alive: state !== 'dead', activity: null, activityAt: since, backgroundWork: false };
+  }
+  function architect(name: string, state: ServedAgentState['state']): ArchitectState {
+    return { name, port: 0, pid: 0, terminalId: `t-${name}`, lastDataAt: fresh, agentState: served(state) } as unknown as ArchitectState;
+  }
+
+  it('lists needs-input and dead builders, not idle or working ones', () => {
+    const builders = [
+      makeBuilder({ id: 'b-1', issueId: '1', issueTitle: 'one', lastDataAt: fresh, agentState: served('needs-input') }),
+      makeBuilder({ id: 'b-2', issueId: '2', issueTitle: 'two', lastDataAt: fresh, agentState: served('dead') }),
+      makeBuilder({ id: 'b-3', issueId: '3', issueTitle: 'three', lastDataAt: fresh, agentState: served('idle') }),
+      makeBuilder({ id: 'b-4', issueId: '4', issueTitle: 'four', lastDataAt: fresh, agentState: served('working') }),
+    ];
+    const items = buildItems([], builders, [], NOW);
+    expect(items.map(i => [i.key, i.kind, i.kindClass, i.waitingSince])).toEqual([
+      ['agent-b-1', 'Needs input', 'attention-kind--needs-input', since],
+      ['agent-b-2', 'Agent exited', 'attention-kind--dead', since],
+    ]);
+  });
+
+  it('lists an architect at a prompt or dead under its name, never an idle one (SC13)', () => {
+    const architects = [architect('main', 'needs-input'), architect('ob', 'dead'), architect('casa', 'idle')];
+    const items = buildItems([], [], architects, NOW);
+    expect(items.map(i => [i.issueOrPR, i.title, i.kind])).toEqual([
+      ['architect', 'main', 'Needs input'],
+      ['architect', 'ob', 'Agent exited'],
+    ]);
+  });
+
+  it('leaves a builder at a porch gate to its gate row', () => {
+    const blockedSince = new Date(NOW - 60 * 60_000).toISOString();
+    const builders = [makeBuilder({ id: 'b-1', blocked: 'plan review', blockedGate: 'plan-approval', blockedSince, agentState: served('needs-input') })];
+    expect(buildItems([], builders, [], NOW).map(i => i.key)).toEqual(['gate-b-1']);
   });
 });

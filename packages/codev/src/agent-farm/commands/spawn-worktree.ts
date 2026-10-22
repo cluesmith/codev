@@ -28,6 +28,7 @@ import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness, getWorktreeConfig } from '../utils/config.js';
 import { shellEscapeSingleQuote, type HarnessProvider } from '../utils/harness.js';
+import { resolveLifecycleReporterInjection } from '../utils/lifecycle-reporter.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, runStreaming, commandExists } from '../utils/shell.js';
 import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
@@ -1065,6 +1066,30 @@ done
 `;
 }
 
+/** `export K='v'` lines for `env`, newline-terminated, or '' when empty. */
+function envExportBlock(env: Record<string, string>): string {
+  const envExports = Object.entries(env)
+    .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
+    .join('\n');
+  return envExports ? `${envExports}\n` : '';
+}
+
+/**
+ * Spec 1595: the base command carrying the harness's lifecycle reporter, and
+ * the env it needs. Applied to the BASE command, before the role, prompt and
+ * session forms are built on it, so every loop form (initial, resume, pinned
+ * and unpinned fresh, crash resume) reports. A harness without the capability
+ * gets the command unchanged, which keeps its script byte-identical.
+ */
+function withLifecycleReporter(
+  harness: HarnessProvider,
+  baseCmd: string,
+): { command: string; env: Record<string, string> } {
+  const injection = resolveLifecycleReporterInjection(harness);
+  if (!injection) return { command: baseCmd, env: {} };
+  return { command: `${baseCmd} ${injection.scriptFragment}`, env: injection.env };
+}
+
 /**
  * Export the builder's worktree as its identity (Issue #1783), so `afx send` /
  * `afx whoami` resolve this builder from any cwd — including the workspace root a
@@ -1167,7 +1192,9 @@ export async function startBuilderSession(
   if (!resume) writeFileSync(promptFile, prompt);
 
   const harness = getBuilderHarness(config.workspaceRoot);
-  let envBlock = '';
+  const reporter = withLifecycleReporter(harness, baseCmd);
+  const launchCmd = reporter.command;
+  let roleEnv: Record<string, string> = {};
   let roleFragment = '';
 
   if (roleContent) {
@@ -1180,10 +1207,7 @@ export async function startBuilderSession(
 
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
     roleFragment = fragment;
-    const envExports = Object.entries(env)
-      .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
-      .join('\n');
-    envBlock = envExports ? `${envExports}\n` : '';
+    roleEnv = env;
 
     // Write any harness-specific worktree files (e.g., opencode.json for OpenCode,
     // the write-guard hook for Claude — Issue #1018)
@@ -1197,7 +1221,8 @@ export async function startBuilderSession(
   // With a role, the fragment is appended even when empty (gemini injects via
   // env only, fragment '') — preserving the historical command text exactly,
   // double space included, so session-less scripts stay byte-identical.
-  const withRole = roleContent ? `${baseCmd} ${roleFragment}` : baseCmd;
+  const withRole = roleContent ? `${launchCmd} ${roleFragment}` : launchCmd;
+  const envBlock = envExportBlock({ ...roleEnv, ...reporter.env });
   const promptArg = `"$(cat '${scriptLocalPath(promptFile)}')"`;
   const freshCommand = `${withRole} ${promptArg}`;
 
@@ -1215,16 +1240,16 @@ export async function startBuilderSession(
     const sessionId = resume ? resume.sessionId : randomUUID();
     loop = buildSessionLaunchLoop({
       sessionId,
-      initial: resume ? `${baseCmd} ${resume.scriptFragment}` : undefined,
+      initial: resume ? `${launchCmd} ${resume.scriptFragment}` : undefined,
       pinnedFresh: `${withRole} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)} ${promptArg}`,
       unpinnedFresh: freshCommand,
-      resume: `${baseCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+      resume: `${launchCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
       mintFallback: sessionIdMintFallback(),
     });
   } else {
     // Session-less harness (codex/gemini/opencode/custom): historical loop,
     // byte for byte. Resume entry via the pre-escaped harness fragment.
-    const initialCommand = resume ? `${baseCmd} ${resume.scriptFragment}` : freshCommand;
+    const initialCommand = resume ? `${launchCmd} ${resume.scriptFragment}` : freshCommand;
     loop = buildLaunchLoop(initialCommand, freshCommand);
   }
 
@@ -1283,8 +1308,10 @@ export function buildWorktreeLaunchScript(
   workspaceRoot?: string,
 ): string {
   const harness = getBuilderHarness(workspaceRoot);
-  let envBlock = '';
-  let command = baseCmd;
+  const reporter = withLifecycleReporter(harness, baseCmd);
+  const launchCmd = reporter.command;
+  let roleEnv: Record<string, string> = {};
+  let command = launchCmd;
 
   if (role) {
     const roleFile = resolve(worktreePath, '.builder-role.md');
@@ -1293,16 +1320,13 @@ export function buildWorktreeLaunchScript(
     logger.info(`Loaded role (${role.source})`);
 
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
-    const envExports = Object.entries(env)
-      .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
-      .join('\n');
-    envBlock = envExports ? `${envExports}\n` : '';
+    roleEnv = env;
 
     // Write any harness-specific worktree files (e.g., opencode.json for OpenCode,
     // the write-guard hook for Claude — Issue #1018)
     installHarnessWorktreeFiles(harness, roleWithPort, roleFile, worktreePath);
 
-    command = `${baseCmd} ${fragment}`;
+    command = `${launchCmd} ${fragment}`;
   } else {
     // Install harness worktree files even without a role, so the write-guard
     // (Issue #1018) is deterministic across all Claude spawn modes.
@@ -1313,13 +1337,14 @@ export function buildWorktreeLaunchScript(
   // session-aware when the harness supports it (Issue #1233): crash restarts
   // resume the pinned conversation here too. There is no prompt file in this
   // mode, so the fresh and degraded invocations are the bare command.
+  const envBlock = envExportBlock({ ...roleEnv, ...reporter.env });
   const sessionForms = scriptSessionForms(harness);
   const loop = sessionForms
     ? buildSessionLaunchLoop({
       sessionId: randomUUID(),
       pinnedFresh: `${command} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)}`,
       unpinnedFresh: command,
-      resume: `${baseCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+      resume: `${launchCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
       mintFallback: sessionIdMintFallback(),
     })
     : buildLaunchLoop(command, command);

@@ -1361,6 +1361,25 @@ body {
   color: var(--status-waiting);
 }
 
+/* Spec 1595: a long permission summary is cut with an ellipsis; the full text is the title. */
+.builder-state-needs-input {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+/* Spec 1595: an exited agent reads distinctly from the waits (SC7). */
+.builder-state-dead {
+  font-size: 14px;
+  color: var(--status-error);
+}
+
+.builder-row--dead td:first-child {
+  border-left: 3px solid var(--status-error);
+}
+
 .builder-col-progress {
   width: 120px;
   white-space: nowrap;
@@ -1575,6 +1594,15 @@ a.attention-row {
    competing with the core spec → plan → dev → PR → verify progression. */
 .attention-kind--other {
   color: var(--text-secondary);
+}
+
+/* Spec 1595: an agent at a prompt waits like a review; an exited agent reads as an error. */
+.attention-kind--needs-input {
+  color: var(--status-waiting);
+}
+
+.attention-kind--dead {
+  color: var(--status-error);
 }
 
 .attention-row-age {

@@ -9,7 +9,7 @@ import { Command } from 'commander';
 import { start, stop } from './commands/index.js';
 import { towerStart, towerStop, towerLog } from './commands/tower.js';
 import { towerSweepHusks } from './commands/tower-sweep-husks.js';
-import { ideStart, ideStop, ideStatus } from './commands/ide.js';
+import { ideStart, ideStop, ideStatus, ideInstall } from './commands/ide.js';
 import { towerRegister, towerDeregister, towerCloudStatus } from './commands/tower-cloud.js';
 import { logger } from './utils/logger.js';
 import { setCliOverrides } from './utils/config.js';
@@ -971,16 +971,14 @@ export async function runAgentFarm(args: string[]): Promise<void> {
 
   ideCmd
     .command('start')
-    .description('Ask Tower to spawn the IDE server')
-    .requiredOption('--server-path <path>', 'Path to the codev-ide server-web binary (no default)')
+    .description('Ask Tower to spawn the IDE server (found on PATH or in the global node_modules)')
+    .option('--server-path <path>', 'Path to the codev-ide-server binary (overrides discovery)')
     .option('-p, --port <port>', 'Port to run on (default: 8200)')
-    .option('--default-folder <path>', 'Folder to open when a URL carries no ?folder=')
     .action(async (options) => {
       try {
         await ideStart({
           serverPath: options.serverPath,
           port: options.port ? parseInt(options.port, 10) : undefined,
-          defaultFolder: options.defaultFolder,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
@@ -1006,6 +1004,18 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .action(async () => {
       try {
         await ideStatus();
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  ideCmd
+    .command('install')
+    .description('Install the Codev IDE server with npm i -g @cluesmith/codev-ide')
+    .action(async () => {
+      try {
+        await ideInstall();
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);

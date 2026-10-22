@@ -16,6 +16,7 @@ import { logger, fatal } from '../utils/logger.js';
 import { loadState } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
+import { matchBuilderRow, parseBuilderWorktreePath, type BuilderWorktreeRow } from '../utils/builder-worktree-identity.js';
 import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
@@ -135,14 +136,12 @@ export function describeStateDbOpenFailure(dbPath: string, worktreeDirName: stri
  *     unverified id silently misroutes `afx send architect` to `main` (#1094).
  */
 export function detectCurrentBuilderId(): string | null {
-  const path = identityPath();
-  // Builder worktrees are at .builders/<dir-name>/. Greedy `.+` (not lazy `.+?`)
-  // so a nested worktree resolves the INNER builder (the LAST `/.builders/`).
-  const match = path.match(/^(.+)\/\.builders\/([^/]+)/);
-  if (!match) return null;
+  // Builder worktrees are at .builders/<dir-name>/; a nested worktree resolves
+  // the INNER builder (the LAST `/.builders/`).
+  const ref = parseBuilderWorktreePath(identityPath());
+  if (!ref) return null;
 
-  const workspacePath = match[1];
-  const worktreeDirName = match[2];
+  const { workspacePath, worktreeDirName } = ref;
 
   // Issue #1118: builders live in the single shared global.db, scoped by
   // workspace_path (state.db is retired). Open global.db readonly and scope the
@@ -167,21 +166,17 @@ export function detectCurrentBuilderId(): string | null {
   }
 
   try {
-    // Match by canonical worktree path first (most precise), then fall back
-    // to a tail-segment match for legacy rows that recorded a different
-    // absolute prefix. Scoped by workspace_path so only this workspace's
-    // builders are considered.
+    // The shared matcher (Spec 1595): canonical worktree path first (most
+    // precise), then a tail-segment match for legacy rows that recorded a
+    // different absolute prefix. Scoped by workspace_path so only this
+    // workspace's builders are considered.
     const ws = normalizeWorkspacePath(workspacePath);
-    const canonicalWorktree = join(workspacePath, '.builders', worktreeDirName);
     const rows = gdb
       .prepare('SELECT id, worktree FROM builders WHERE workspace_path = ? AND worktree IS NOT NULL')
-      .all(ws) as Array<{ id: string; worktree: string }>;
+      .all(ws) as BuilderWorktreeRow[];
 
-    const exact = rows.find(r => r.worktree === canonicalWorktree);
-    if (exact) return exact.id;
-
-    const tail = rows.find(r => r.worktree.split('/').pop() === worktreeDirName);
-    if (tail) return tail.id;
+    const row = matchBuilderRow(rows, ref);
+    if (row) return row.id;
 
     throw new BuilderIdResolutionError(
       `Cannot resolve canonical builder id for worktree '${worktreeDirName}': ` +

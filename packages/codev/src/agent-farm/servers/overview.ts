@@ -661,11 +661,21 @@ function projectIdForWorktree(dirName: string, storedIdentity: StoredBuilderIden
  * versions can carry a legacy id (`bugfix-42`) that is not the role id; those
  * fall back to parsing the directory name, as before.
  */
-function storedRoleId(storedIdentity: StoredBuilderIdentity | undefined): string | null {
-  if (!storedIdentity) return null;
-  const id = storedIdentity.roleId.toLowerCase();
+function storedRoleId(storedId: string | undefined): string | null {
+  if (!storedId) return null;
+  const id = storedId.toLowerCase();
   if (id.startsWith('builder-') || id.startsWith('worktree-')) return id;
   return null;
+}
+
+/**
+ * A builder's lowercased role id: the stored builder id when it has the role-id
+ * shape, else the id derived from its worktree directory name; `null` when
+ * neither yields one. The one derivation shared by overview discovery and
+ * Tower's agent-state key (Spec 1595), so the two cannot diverge.
+ */
+export function builderRoleId(storedId: string | undefined, worktreeDirName: string): string | null {
+  return storedRoleId(storedId) ?? worktreeNameToRoleId(worktreeDirName);
 }
 
 /**
@@ -740,7 +750,7 @@ export function discoverBuilders(
     // Compute the canonical roleId once per worktree — used both as a
     // filter key (against entry.builders.keys()) and as the bridge to
     // PtySession at request time, so callers don't re-run the regex.
-    const roleId = storedRoleId(storedIdentity) ?? worktreeNameToRoleId(entry.name);
+    const roleId = builderRoleId(storedIdentity?.roleId, entry.name);
 
     if (!projectId) {
       // No ID extracted (task-*, worktree-*) → soft mode

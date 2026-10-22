@@ -123,6 +123,7 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
             <NeedsAttentionList
               prs={overview?.pendingPRs ?? []}
               builders={overview?.builders ?? []}
+              architects={overview?.architects ?? []}
             />
           )}
         </section>

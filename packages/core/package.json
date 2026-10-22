@@ -11,6 +11,10 @@
     "./constants": {
       "types": "./dist/constants.d.ts",
       "default": "./dist/constants.js"
+    },
+    "./agent-state": {
+      "types": "./dist/agent-state.d.ts",
+      "default": "./dist/agent-state.js"
     }
   },
   "files": [
@@ -23,10 +27,12 @@
     "prepublishOnly": "pnpm build"
   },
   "devDependencies": {
-    "@cluesmith/codev-types": "workspace:*",
     "@types/node": "22.x",
     "typescript": "catalog:",
     "vitest": "^4.0.15"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@cluesmith/codev-types": "workspace:*"
+  }
 }

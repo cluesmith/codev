@@ -179,6 +179,41 @@ afx tower disconnect            # Disconnect from Codev Cloud
 
 There is NO `afx tower restart` — use `afx tower stop && afx tower start`.
 
+## afx ide
+
+Manages the Codev IDE server (VS Code server-web) that Tower forwards at `/ide/`. Tower spawns
+and owns the process; these commands drive it. Open a workspace at
+`http://localhost:4100/ide/?folder=<abs path>`.
+
+```bash
+afx ide install                 # npm i -g @cluesmith/codev-ide, then report the installed version
+afx ide start                   # Find codev-ide-server, ask Tower to spawn it (port 8200)
+afx ide start --server-path <bin>   # Use this binary instead of discovery
+afx ide start -p <port>         # Run the server on another port
+afx ide stop                    # Stop the server
+afx ide status                  # Port, PID, server path/version, extensions dir, sidebar version
+```
+
+**Discovery** (when `--server-path` is absent): `codev-ide-server` on `PATH`, then
+`@cluesmith/codev-ide` next to the running codev install, then under `npm root -g`. Nothing
+found exits 1 before Tower is contacted, naming `afx ide install` and `--server-path`.
+
+**On every start** Tower checks `codev-ide-server --version` against a minimum (an older server
+is refused with the installed version, the floor, and the upgrade command), installs the
+sidebar vsix that ships inside `@cluesmith/codev` into `~/.agent-farm/ide-extensions` (skipped
+when that version is already installed; other extensions in the directory are left alone), and
+spawns the server with `--extensions-dir` pointing there. The first start can take a minute or more.
+
+The server loads extensions only from `~/.agent-farm/ide-extensions`, so anything installed into
+its default extensions directory is no longer loaded. Install additional extensions there:
+`codev-ide-server --install-extension <id-or-vsix> --extensions-dir ~/.agent-farm/ide-extensions`.
+
+A server that is already running is never killed by `start`. If it predates the current server
+or sidebar, `start` warns: restart it with `afx ide stop && afx ide start`.
+
+There is NO `afx ide restart` and NO `afx ide upgrade`. To upgrade, run `afx ide install`, then
+`afx ide stop && afx ide start`.
+
 ## afx workspace
 
 ```bash

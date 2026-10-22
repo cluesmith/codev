@@ -10,6 +10,8 @@ import {
   heldBadgeCount,
   composeStatusBarText,
   composeActivityBadge,
+  composeStatusBarTooltip,
+  architectTooltipClause,
   escalationToastText,
   escalationMatchesWorkspace,
 } from '../mailbox-indicators.js';
@@ -218,5 +220,26 @@ describe('escalationMatchesWorkspace', () => {
 
   it('matches everything when no active workspace is known yet (startup)', () => {
     expect(escalationMatchesWorkspace('/ws/a', null)).toBe(true);
+  });
+});
+
+describe('waiting architects (Spec 1595, SC13)', () => {
+  it('names one or several architects', () => {
+    expect(architectTooltipClause([])).toBe('');
+    expect(architectTooltipClause(['main'])).toBe('architect main waiting on input');
+    expect(architectTooltipClause(['main', 'ob'])).toBe('architects main, ob waiting on input');
+  });
+
+  it('folds waiting architects into the badge count and names them in its tooltip', () => {
+    expect(composeActivityBadge(0, 0, 0, ['main'])).toEqual({ value: 1, tooltip: 'architect main waiting on input' });
+    expect(composeActivityBadge(1, 1, 0, ['ob'])).toEqual({
+      value: 3,
+      tooltip: '1 blocked, 1 waiting on input · architect ob waiting on input',
+    });
+  });
+
+  it('names waiting architects in the status-bar tooltip ahead of the click action', () => {
+    expect(composeStatusBarTooltip([])).toBe('Click to reconnect to Tower');
+    expect(composeStatusBarTooltip(['main'])).toBe('Architect main waiting on input\nClick to reconnect to Tower');
   });
 });

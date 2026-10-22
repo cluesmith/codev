@@ -1,4 +1,4 @@
-import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
+import { agentAttentionState, describeNeedsInput, isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import type { OverviewBuilder } from '../lib/api.js';
 import { issueRef } from '../lib/issueIds.js';
 
@@ -14,9 +14,34 @@ interface BuilderCardProps {
   architectCount?: number;
 }
 
-function stateLabel(builder: OverviewBuilder): string {
-  if (builder.blocked) return `Blocked: ${builder.blocked}`;
-  if (isIdleWaiting(builder)) return 'Waiting on input';
+/**
+ * The card's attention state, through the shared sdk classifier (Spec 1595): a porch gate first,
+ * then the served agent state (a stale `working` reads as idle), then, when Tower serves no state,
+ * the PTY-silence predicate (`waiting`).
+ */
+type CardState = 'blocked' | 'needs-input' | 'idle' | 'dead' | 'waiting' | 'active';
+
+function cardState(builder: OverviewBuilder): CardState {
+  if (builder.blocked) return 'blocked';
+  const served = agentAttentionState(builder);
+  if (served === 'needs-input' || served === 'idle' || served === 'dead' || served === 'blocked') return served;
+  if (served === null && isIdleWaiting(builder)) return 'waiting';
+  return 'active';
+}
+
+/** "Needs input: <what>", or bare "Needs input" when the reporter sent no detail. */
+function needsInputLabel(builder: OverviewBuilder): string {
+  const detail = builder.agentState?.needsInput;
+  if (!detail || detail.kind === 'other') return 'Needs input';
+  return `Needs input: ${describeNeedsInput(detail)}`;
+}
+
+function stateLabel(builder: OverviewBuilder, state: CardState): string {
+  if (state === 'blocked') return `Blocked: ${builder.blocked ?? 'gate'}`;
+  if (state === 'needs-input') return needsInputLabel(builder);
+  if (state === 'idle') return 'Idle';
+  if (state === 'dead') return 'Agent exited';
+  if (state === 'waiting') return 'Waiting on input';
   if (builder.mode === 'soft') return 'running';
   if (!builder.phase) return 'starting';
   const phases = builder.planPhases;
@@ -24,6 +49,28 @@ function stateLabel(builder: OverviewBuilder): string {
   const idx = phases.findIndex(p => p.id === builder.phase);
   if (idx === -1) return builder.phase;
   return `${builder.phase} (${idx + 1}/${phases.length})`;
+}
+
+/** The state text's class: a distinct one for a dead agent, the shared "needs me" one for the waits. */
+function stateClass(state: CardState): string {
+  if (state === 'dead') return 'builder-state-dead';
+  if (state === 'needs-input') return 'builder-state-blocked builder-state-needs-input';
+  if (state === 'active') return 'builder-state-active';
+  return 'builder-state-blocked';
+}
+
+/** The row modifier: blocked and dead have their own; every other wait shares `--waiting`. */
+function rowModifier(state: CardState): string {
+  if (state === 'blocked') return ' builder-row--blocked';
+  if (state === 'dead') return ' builder-row--dead';
+  if (state === 'active') return '';
+  return ' builder-row--waiting';
+}
+
+function fillModifier(state: CardState): string {
+  if (state === 'blocked') return ' progress-fill--blocked';
+  if (state === 'active') return '';
+  return ' progress-fill--waiting';
 }
 
 function formatMs(ms: number): string {
@@ -49,19 +96,18 @@ function elapsed(startedAt: string | null, idleMs: number): string {
 export function BuilderCard({ builder, onOpen, architectCount = 0 }: BuilderCardProps) {
   const displayId = builder.issueId ? issueRef(builder.issueId) : builder.id;
   const displayTitle = builder.issueTitle || builder.id;
-  const isBlocked = builder.blocked !== null && builder.blocked !== '';
-  const isWaiting = !isBlocked && isIdleWaiting(builder);
+  const state = cardState(builder);
+  const label = stateLabel(builder, state);
   const pct = Math.min(100, Math.max(0, Math.round(builder.progress ?? 0)));
   // Spec 823: render attribution only when the workspace has >1 architect AND
   // the builder carries a spawning-architect name. N=1 renders identically to
   // pre-823 (no extra DOM, per baked decision 2b).
   const showAttribution = architectCount > 1 && !!builder.spawnedByArchitect;
 
-  // Reuse the blocked visual treatment for waiting rows in v1 — both are
-  // "needs me" states. Splitting CSS into a distinct `--waiting` modifier
-  // is a follow-up refinement once we see how the signal behaves in practice.
-  const rowMod = isBlocked ? ' builder-row--blocked' : isWaiting ? ' builder-row--waiting' : '';
-  const fillMod = isBlocked ? ' progress-fill--blocked' : isWaiting ? ' progress-fill--waiting' : '';
+  // The waits reuse the blocked text color (all are "needs me" states); a dead
+  // agent has its own row and text treatment (SC7).
+  const rowMod = rowModifier(state);
+  const fillMod = fillModifier(state);
 
   return (
     <tr className={`builder-row${rowMod}`}>
@@ -75,8 +121,9 @@ export function BuilderCard({ builder, onOpen, architectCount = 0 }: BuilderCard
       </td>
       <td className="builder-col-title">{displayTitle}</td>
       <td className="builder-col-state">
-        <span className={isBlocked || isWaiting ? 'builder-state-blocked' : 'builder-state-active'}>
-          {stateLabel(builder)}
+        {/* A text node and a plain `title`: a needs-input summary renders literally (SC19). */}
+        <span className={stateClass(state)} title={label}>
+          {label}
         </span>
       </td>
       <td className="builder-col-progress">

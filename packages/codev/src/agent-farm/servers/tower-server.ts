@@ -64,6 +64,10 @@ import { startMailboxDrainer, stopMailboxDrainer, setMailboxBroadcaster } from '
 import { shutdownDelayedSends } from './delayed-send.js';
 import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
+import { agentStateStore, AGENT_STATE_CHANGED } from './agent-state/store.js';
+import { coalesceAgentStateChanges } from './agent-state/broadcast.js';
+import { registeredAgents, startAgentLiveness, stopAgentLiveness } from './agent-state/liveness.js';
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { getGlobalDb } from '../db/index.js';
 import {
   claimGlobalDbOwnership,
@@ -212,6 +216,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   if (shellperHuskSweepInterval) clearInterval(shellperHuskSweepInterval);
   if (terminalPartialMonitorInterval) clearInterval(terminalPartialMonitorInterval);
   if (sessionLogSweepInterval) clearInterval(sessionLogSweepInterval);
+  stopAgentLiveness();
   clearInterval(sseHeartbeatInterval);
 
   // 4b. Drop pending delayed sends FIRST (Spec 1307 `--delay`). Cancels every timer
@@ -431,6 +436,21 @@ setCodevConfigNotifier(broadcastNotification);
 // escalation age (moves the indicator into its attention state). The pure delivery
 // module and the boot-time drainer have no RouteContext, so they fan out through here.
 setMailboxBroadcaster(broadcastNotification);
+
+// Spec 1595: an accepted lifecycle report that changes an agent's served state
+// fans out as the existing `overview-changed` event, so surfaces refetch the
+// overview (which projects agent state per request; no cache to invalidate).
+// Changes are coalesced per workspace: reports arrive once per tool call.
+// Liveness flips (started after the boot reconcile) share the same coalescer.
+const announceAgentStateChange = coalesceAgentStateChanges((workspacePath) => {
+  broadcastNotification({
+    type: 'overview-changed',
+    title: 'Agent state changed',
+    body: 'agent state',
+    workspace: workspacePath,
+  });
+});
+agentStateStore.on(AGENT_STATE_CHANGED, announceAgentStateChange);
 
 // ============================================================================
 // Readiness gate (Issue #1261)
@@ -684,6 +704,7 @@ async function bootSequence(): Promise<void> {
   // Spec 0105 Phase 4: Initialize terminal management module
   initTerminals({
     log,
+    towerPort: port,
     shellperManager,
     registerKnownWorkspace,
     getKnownWorkspacePaths,
@@ -746,6 +767,19 @@ async function bootSequence(): Promise<void> {
   // itself never signals a process and only reports live stray architects.
   pruneBuilderWorktreeWorkspaces();
 
+  // Spec 1595: agent liveness, the one place Tower decides whether an agent's
+  // process is running. Started after the reconcile so the registry it sweeps
+  // is complete; it also drops the reported state of agents no longer registered.
+  const agentLiveness = startAgentLiveness({
+    agents: () => registeredAgents(
+      getWorkspaceTerminals(),
+      (terminalId) => getTerminalManager().getSession(terminalId),
+      normalizeWorkspacePath,
+    ),
+    log: (msg: string) => log('ERROR', msg),
+  });
+  agentLiveness.on(AGENT_STATE_CHANGED, announceAgentStateChange);
+
   // Bugfix #341: Kill orphaned shellper processes not in active sessions. Must
   // run AFTER reconciliation so reconnected sessions are in the active map and
   // won't be killed. Catches shellpers from crashed tests or previous Tower
@@ -789,6 +823,7 @@ async function bootSequence(): Promise<void> {
   // now runs here and the two maintenance sweeps run after readiness instead.
   initInstances({
     log,
+    towerPort: port,
     workspaceTerminals: getWorkspaceTerminals(),
     getTerminalManager,
     shellperManager,

@@ -61,8 +61,8 @@ const HOP_BY_HOP_HEADERS = new Set([
 const BLOCKED_PATH_PREFIX = '/api/tunnel/';
 
 /**
- * Matches an `api/tunnel/` or `api/ide` management segment anywhere in a
- * normalized path, not just at the root (#1370, #1668).
+ * Matches an `api/tunnel/`, `api/ide`, `api/shutdown` or `api/agent-lifecycle` management
+ * segment anywhere in a normalized path, not just at the root (#1370, #1668).
  *
  * A root-anchored prefix check misses the workspace-scoped form the dashboard
  * actually uses — `/workspace/<base64url>/api/tunnel/disconnect` — which
@@ -79,8 +79,12 @@ const BLOCKED_PATH_PREFIX = '/api/tunnel/';
  * `api/shutdown` (Spec 1658) stops Tower itself, so it is local-only too, with
  * the same `(\/|$)` boundary. Tower refuses a tunnel-borne one as well; this
  * keeps it from leaving the proxy at all.
+ *
+ * `api/agent-lifecycle` (Spec 1595) is the lifecycle-reporter ingestion route.
+ * Its only legitimate caller is the reporter hook, which always posts to
+ * 127.0.0.1, so a tunnel-proxied call could only spoof an agent's state.
  */
-const BLOCKED_PATH_SEGMENT = /(^|\/)api\/(tunnel\/|ide(\/|$)|shutdown(\/|$))/;
+const BLOCKED_PATH_SEGMENT = /(^|\/)api\/(tunnel\/|ide(\/|$)|shutdown(\/|$)|agent-lifecycle(\/|$))/;
 
 /**
  * Header stamped on every request this client proxies in from the cloud (#1370).

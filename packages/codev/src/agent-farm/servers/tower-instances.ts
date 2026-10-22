@@ -14,7 +14,7 @@ import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import { encodeWorkspacePath } from '../lib/tower-client.js';
 import { loadConfig } from '../../lib/config.js';
-import { sanitizeAgentEnv } from '../../lib/agent-env.js';
+import { sanitizeAgentEnv, withTowerPort, ARCHITECT_WORKSPACE_ENV } from '../../lib/agent-env.js';
 
 const execAsync = promisify(exec);
 import { getGlobalDb } from '../db/index.js';
@@ -58,6 +58,8 @@ import { setArchitect, setArchitectByName, getArchitects, getArchitectByName } f
 /** Dependencies injected by the orchestrator (tower-server.ts) */
 export interface InstanceDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void;
+  /** Tower's listening port, set as `CODEV_TOWER_PORT` on every architect launch (Spec 1595). */
+  towerPort?: number;
   workspaceTerminals: Map<string, WorkspaceTerminals>;
   getTerminalManager: () => TerminalManager;
   shellperManager: SessionManager | null;
@@ -626,12 +628,14 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         // Build env with Claude Code session markers removed so spawned Claude
         // processes don't detect a nested session (#1219), and merge harness env
         // vars. Spec 755: inject CODEV_ARCHITECT_NAME so afx spawn invocations
-        // from inside this terminal can record the spawning architect.
-        const cleanEnv = {
+        // from inside this terminal can record the spawning architect. Spec 1595:
+        // its workspace beside it, and Tower's port, for the lifecycle reporter.
+        const cleanEnv = withTowerPort({
           ...sanitizeAgentEnv(process.env),
           ...harnessEnv,
           CODEV_ARCHITECT_NAME: DEFAULT_ARCHITECT_NAME,
-        } as Record<string, string>;
+          [ARCHITECT_WORKSPACE_ENV]: resolvedPath,
+        } as Record<string, string>, _deps.towerPort);
 
         // Try shellper first for persistent session with auto-restart
         let shellperCreated = false;
@@ -1160,12 +1164,14 @@ export async function addArchitect(
   }
 
   // Spec 755: inject CODEV_ARCHITECT_NAME so the new architect terminal's
-  // afx spawn invocations tag builders with this architect's name.
-  const cleanEnv = {
+  // afx spawn invocations tag builders with this architect's name. Spec 1595:
+  // its workspace beside it, and Tower's port, for the lifecycle reporter.
+  const cleanEnv = withTowerPort({
     ...sanitizeAgentEnv(process.env),
     ...harnessEnv,
     CODEV_ARCHITECT_NAME: name,
-  } as Record<string, string>;
+    [ARCHITECT_WORKSPACE_ENV]: resolvedPath,
+  } as Record<string, string>, _deps.towerPort);
 
   // Try shellper first; fall back to a non-persistent PTY if shellper is
   // unavailable (matches launchInstance's degradation).

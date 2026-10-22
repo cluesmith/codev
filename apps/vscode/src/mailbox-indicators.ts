@@ -82,21 +82,50 @@ export function composeStatusBarText(
 }
 
 /**
+ * Spec 1595: tooltip clause naming the architects waiting on the user (at a
+ * prompt, or with their agent dead), e.g. `architect main waiting on input` or
+ * `architects main, ob waiting on input`. Empty string when none are.
+ */
+export function architectTooltipClause(architectNames: readonly string[]): string {
+  if (architectNames.length === 0) {
+    return '';
+  }
+  if (architectNames.length === 1) {
+    return `architect ${architectNames[0]} waiting on input`;
+  }
+  return `architects ${architectNames.join(', ')} waiting on input`;
+}
+
+/**
+ * Spec 1595: the status-bar tooltip. Names the waiting architects (their count
+ * is already in the `waiting` segment), then the click action.
+ */
+export function composeStatusBarTooltip(waitingArchitects: readonly string[]): string {
+  const clause = architectTooltipClause(waitingArchitects);
+  if (clause === '') {
+    return 'Click to reconnect to Tower';
+  }
+  return `${clause.charAt(0).toUpperCase()}${clause.slice(1)}\nClick to reconnect to Tower`;
+}
+
+/**
  * Compose the activity-bar badge (value + tooltip) from the live "needs me"
- * counts, folding the workspace held-mail count into the total so the icon
- * reflects held mail even when the sidebar is collapsed. Returns `undefined`
- * when nothing needs the user (blocked + idle + held all zero) so the caller
- * clears the badge. The blocked/idle tooltip phrasing is preserved verbatim from
- * the original inline logic; the held clause is appended after a ` · `. Pure so
- * the fold + tooltip composition is unit-tested (previously inline + untested).
+ * counts, folding the workspace held-mail count and the waiting architects into
+ * the total so the icon reflects them even when the sidebar is collapsed.
+ * Returns `undefined` when nothing needs the user (blocked + idle + held +
+ * architects all zero) so the caller clears the badge. The blocked/idle tooltip
+ * phrasing is preserved verbatim from the original inline logic; the held and
+ * architect clauses are appended after a ` · `. Pure so the fold + tooltip
+ * composition is unit-tested (previously inline + untested).
  */
 export function composeActivityBadge(
   blockedCount: number,
   idleCount: number,
   heldCount: number,
+  waitingArchitects: readonly string[] = [],
 ): BadgeValue | undefined {
   const held = heldBadgeCount(heldCount);
-  const total = blockedCount + idleCount + held;
+  const total = blockedCount + idleCount + held + waitingArchitects.length;
   if (total === 0) {
     return undefined;
   }
@@ -107,7 +136,7 @@ export function composeActivityBadge(
       : idleCount > 0
         ? (idleCount === 1 ? '1 builder waiting on input' : `${idleCount} builders waiting on input`)
         : '';
-  const tooltip = [builderTip, heldTooltipClause(held)].filter(Boolean).join(' · ');
+  const tooltip = [builderTip, heldTooltipClause(held), architectTooltipClause(waitingArchitects)].filter(Boolean).join(' · ');
   return { value: total, tooltip };
 }
 

@@ -1,3 +1,5 @@
+import type { ServedAgentState } from './agent-state.js';
+
 /**
  * Tower API response shapes.
  *
@@ -20,6 +22,17 @@ export interface ArchitectState {
   pid: number;
   terminalId?: string;
   persistent?: boolean;
+  /**
+   * Spec 1595: the architect's served attention state. Optional and nullable:
+   * absent and `null` both mean unknown.
+   */
+  agentState?: ServedAgentState | null;
+  /**
+   * Spec 1595: wall-clock ISO time of the architect session's last PTY output,
+   * for the sdk's `working` staleness rule. Optional and nullable like
+   * `OverviewBuilder.lastDataAt`'s `null`.
+   */
+  lastDataAt?: string | null;
 }
 
 export interface Builder {
@@ -197,6 +210,12 @@ export interface OverviewBuilder {
    * which sums time spent at formal porch gates.
    */
   lastDataAt: string | null;
+  /**
+   * Spec 1595: the builder's served attention state (working / needs-input /
+   * idle / blocked / dead). Optional and nullable: absent and `null` both mean
+   * unknown, and consumers fall back to the `lastDataAt` silence rule.
+   */
+  agentState?: ServedAgentState | null;
   /**
    * Name of the architect that spawned this builder (Spec 755 / 823). `null` for
    * legacy rows from before #755, for builders whose worktree doesn't have a

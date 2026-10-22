@@ -64,6 +64,19 @@ function workspaceHeld(count: number): OverviewData {
   return { builders: [], backlog: [], pendingPRs: [], recentlyClosed: [], architects: [], heldCount: count, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' } as unknown as OverviewData;
 }
 
+/** Spec 1595: a served agent state, begun at `since`. */
+function servedState(state: string, since: string, needsInput?: unknown) {
+  return { state, since, source: 'harness', alive: state !== 'dead', activity: null, activityAt: since, backgroundWork: false, needsInput };
+}
+/** One builder and one architect, each with a served state. */
+function agents(builderState: string, architectState: string, since: string): OverviewData {
+  return {
+    builders: [{ id: 'b0', issueId: '7', issueTitle: 'seven', phase: 'implement', blocked: null, blockedGate: null, blockedSince: null, prReady: false, lastDataAt: since, agentState: servedState(builderState, since) }],
+    architects: [{ name: 'main', port: 0, pid: 0, terminalId: 't', lastDataAt: since, agentState: servedState(architectState, since) }],
+    backlog: [], pendingPRs: [], recentlyClosed: [], heldCount: 0, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward',
+  } as unknown as OverviewData;
+}
+
 function entry(ws: TowerWorkspace, overview: OverviewData | null): FleetEntry {
   return { workspace: ws, attention: deriveAttention(overview) };
 }
@@ -227,5 +240,25 @@ describe('TowerProvider', () => {
     // junk yields undefined
     expect(toWorkspaceTarget(undefined)).toBeUndefined();
     expect(toWorkspaceTarget({ kind: 'message' })).toBeUndefined();
+  });
+
+  it('lists a waiting architect under its name and renders each wait state distinctly (Spec 1595, SC13)', () => {
+    const since = new Date(Date.now() - 2 * 60_000).toISOString();
+    const fleet = [entry(wsRow('/w/a', 'a', true), agents('dead', 'needs-input', since))];
+    const provider = new TowerProvider(fakeCache(fleet), fakeCm(null));
+    const wsItem = provider.getTreeItem(provider.getChildren()[0]);
+    // The workspace glance shows the most urgent wait: the architect at a prompt.
+    expect(wsItem.description).toContain('needs input');
+    const children = provider.getChildren(provider.getChildren()[0]).map((n) => provider.getTreeItem(n));
+    expect(children.map((c) => c.label)).toEqual(['b0 · seven', 'architect main']);
+    expect(children.map((c) => c.description)).toEqual(['agent exited · 2m', 'needs input · 2m']);
+    expect(children.map((c) => (c.iconPath as { id: string }).id)).toEqual(['debug-disconnect', 'question']);
+  });
+
+  it('does not list an idle architect (Spec 1595, SC13)', () => {
+    const since = new Date(Date.now() - 2 * 60_000).toISOString();
+    const fleet = [entry(wsRow('/w/a', 'a', true), agents('working', 'idle', since))];
+    const provider = new TowerProvider(fakeCache(fleet), fakeCm(null));
+    expect(provider.getTreeItem(provider.getChildren()[0]).collapsibleState).toBe(0);
   });
 });

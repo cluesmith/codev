@@ -18,6 +18,8 @@ import {
   validateResumeWorktree, initPorchInWorktree, type GitHubIssue,
 } from '../commands/spawn-worktree.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
+import { join } from 'node:path';
+import { LIFECYCLE_REPORTER_SETTINGS_NAME, lifecycleReporterDir } from '../utils/lifecycle-reporter.js';
 // node:fs is mocked below; import writeFileSync so resume-script assertions can
 // read its captured calls without a per-test dynamic import.
 import { writeFileSync } from 'node:fs';
@@ -71,7 +73,7 @@ vi.mock('../../lib/forge.js', () => ({
 }));
 
 // Mock the harness resolution to return claude harness by default
-import { CLAUDE_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
+import { CLAUDE_HARNESS, CODEX_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
 const getBuilderHarnessMock = vi.fn(() => CLAUDE_HARNESS);
 const getWorktreeConfigMock = vi.fn(() => ({ symlinks: [], postSpawn: [], devCommand: null, devUrls: [] }));
 vi.mock('../utils/config.js', () => ({
@@ -96,6 +98,9 @@ vi.mock('../lib/tower-client.js', async (importOriginal) => {
     getTowerClient: () => ({ createTerminal: createTerminalMock }),
   };
 });
+
+/** Spec 1595: the reporter fragment every Claude builder launch carries. */
+const REPORTER_FRAGMENT = `--settings '${join(lifecycleReporterDir(), LIFECYCLE_REPORTER_SETTINGS_NAME)}'`;
 
 describe('spawn-worktree', () => {
   beforeEach(() => {
@@ -376,6 +381,63 @@ describe('spawn-worktree', () => {
       expect(script.indexOf(exportLine)).toBeLessThan(script.indexOf('codev_launch_entry()'));
     });
 
+    // Spec 1595 (Test 7): the lifecycle reporter rides on the base command, so
+    // every launcher a Claude builder script can run carries it exactly once.
+    it.each([
+      ['fresh', undefined, ['entry', 'pinned', 'unpinned', 'resume']],
+      ['resume', { sessionId: 'abc-1234-uuid', scriptFragment: "--resume 'abc-1234-uuid'" }, ['entry', 'pinned', 'unpinned', 'resume']],
+    ] as const)('%s → every Claude launcher carries the lifecycle reporter once', async (_label, resume, launchers) => {
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'spir-1595', '/tmp/ws/.builders/spir-1595', 'claude',
+        'PROMPT', 'ROLE', 'codev', resume,
+      );
+      const script = findScript()!;
+      for (const name of launchers) {
+        const body = launcherBody(script, name);
+        expect(body, name).toBeDefined();
+        expect(body!.startsWith(`claude ${REPORTER_FRAGMENT}`), name).toBe(true);
+        expect(body!.split('--settings').length - 1, name).toBe(1);
+      }
+    });
+
+    it('no role → the Claude launchers still carry the lifecycle reporter', async () => {
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'spir-1595b', '/tmp/ws/.builders/spir-1595b', 'claude',
+        'PROMPT', null, 'none',
+      );
+      const script = findScript()!;
+      for (const name of ['entry', 'pinned', 'unpinned', 'resume'] as const) {
+        expect(launcherBody(script, name)!.startsWith(`claude ${REPORTER_FRAGMENT}`), name).toBe(true);
+      }
+    });
+
+    it('worktree-mode Claude script carries the lifecycle reporter on every launcher', () => {
+      const script = buildWorktreeLaunchScript('/tmp/ws/.builders/task-x', 'claude', { content: 'ROLE', source: 'codev' });
+      for (const name of ['entry', 'pinned', 'unpinned', 'resume'] as const) {
+        expect(launcherBody(script, name)!.startsWith(`claude ${REPORTER_FRAGMENT}`), name).toBe(true);
+      }
+    });
+
+    it.each([
+      ['codex', CODEX_HARNESS],
+      ['opencode', OPENCODE_HARNESS],
+    ] as const)('%s builder script carries no lifecycle reporter', async (name, harness) => {
+      getBuilderHarnessMock.mockReturnValue(harness);
+      try {
+        await startBuilderSession(
+          { workspaceRoot: '/tmp/ws' } as any,
+          `spir-${name}`, `/tmp/ws/.builders/spir-${name}`, name,
+          'PROMPT', 'ROLE', 'codev',
+        );
+        expect(findScript()).not.toContain('--settings');
+        expect(buildWorktreeLaunchScript('/tmp/ws/.builders/task-y', name, null)).not.toContain('--settings');
+      } finally {
+        getBuilderHarnessMock.mockReturnValue(CLAUDE_HARNESS);
+      }
+    });
+
     it('worktree-mode script exports CODEV_BUILDER_WORKTREE too', () => {
       const script = buildWorktreeLaunchScript('/tmp/ws/.builders/task-x', 'claude', null);
       expect(script).toContain(`export CODEV_BUILDER_WORKTREE='/tmp/ws/.builders/task-x'`);
@@ -396,7 +458,7 @@ describe('spawn-worktree', () => {
       // fresh command, so this asserts on the *entry* launcher specifically:
       // the resumed conversation carries its own system prompt, so role
       // injection and the initial prompt stay off this path.
-      expect(launcherBody(script!, 'entry')).toBe("claude --resume 'abc-1234-uuid'");
+      expect(launcherBody(script!, 'entry')).toBe(`claude ${REPORTER_FRAGMENT} --resume 'abc-1234-uuid'`);
       expect(script).not.toContain('--resume,');
       expect(script).toContain('while true');
       // Resume never rewrites the prompt file: `afx refresh` reads the spawn-time

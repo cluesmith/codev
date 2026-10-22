@@ -8,6 +8,14 @@
  * #1668 §D3) — no config file, no `global.db` change. Liveness is discovered by
  * port (`getProcessesOnPort`), the same way Tower finds its own process.
  *
+ * Every spawn runs a preflight first (Spec 1789): the server version floor and
+ * the embedded sidebar install into the Tower-owned extensions directory. The
+ * preflight throws before anything is stopped, replaced or recorded, so a
+ * refused start leaves a live server and its record untouched. Lifecycle
+ * operations are serialized by `withIdeLock`, taken only at the entry points
+ * (`spawnIdeServer`, `stopIdeServer`, the respawn in `ensureIdeServerLive`);
+ * the unlocked bodies call each other freely, so the nesting cannot deadlock.
+ *
  * Native Windows (Spec 1658 Phase 9): the server path is usually a `.cmd`
  * shim, which `spawn` cannot run without a shell, so the spawn goes through
  * the shared shim resolver with no console window. There are no signals or
@@ -21,7 +29,6 @@ import net from 'node:net';
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { getProcessesOnPort } from '../utils/port.js';
-import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 import { isWindows } from '../../lib/platform.js';
 import { spawnOnHost } from '../../lib/shell-launch.js';
 import { collectTree, killSessionTree } from '../../lib/process-tree.js';
@@ -37,12 +44,16 @@ import {
   ensureIdeConnectionToken,
   getIdeConnectionTokenPath,
 } from '../lib/ide-record.js';
+import {
+  IDE_READY_TIMEOUT_MS,
+  IDE_STOP_EXIT_TIMEOUT_MS,
+  type LogFn,
+  buildIdeServerEnv,
+  checkIdeServerVersion,
+} from '../lib/ide-version.js';
+import { ensureSidebarInstalled, getIdeExtensionsDir } from '../lib/ide-extensions.js';
 
-type LogFn = (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
-
-const READY_TIMEOUT_MS = 15_000;
 const READY_POLL_MS = 200;
-const STOP_EXIT_TIMEOUT_MS = 5_000;
 const STOP_POLL_MS = 200;
 const CONNECT_PROBE_TIMEOUT_MS = 1_000;
 
@@ -118,18 +129,73 @@ export function spawnIdeServerProcess(serverPath: string, args: string[], option
   return spawnOnHost(serverPath, args, options);
 }
 
+/**
+ * Tail of the lifecycle lock: a non-reentrant promise chain. Taken only at the
+ * entry points, never inside the unlocked bodies.
+ */
+let ideLockTail: Promise<unknown> = Promise.resolve();
+
+function withIdeLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = ideLockTail.then(fn);
+  ideLockTail = run.catch(() => {});
+  return run;
+}
+
 export interface SpawnIdeOptions {
   serverPath: string;
   port?: number;
-  defaultFolder?: string;
+}
+
+export interface SpawnIdeResult {
+  record: IdeServerRecord;
+  /**
+   * True when an already-live server was adopted that is not running what
+   * this start asked for: the sidebar just changed, the recorded server path,
+   * sidebar version or extensions directory differs from the current one
+   * (including a legacy record with neither), or its launch arguments are
+   * unknown (no prior record). The live server is never killed; the user
+   * restarts it.
+   */
+  restartRequired: boolean;
+}
+
+interface IdePreflight {
+  serverVersion: string;
+  extensionsDir: string;
+  /** Null when the package carries no embedded sidebar. */
+  sidebarVersion: string | null;
+  sidebarChanged: boolean;
+}
+
+/**
+ * Version floor, then the sidebar install (which validates or creates the
+ * extensions directory first). Throws before any side effect on the server or
+ * the record. A missing embedded sidebar only warns: the server still gets
+ * `--extensions-dir`.
+ */
+async function runIdePreflight(serverPath: string, log: LogFn): Promise<IdePreflight> {
+  const { version } = await checkIdeServerVersion(serverPath);
+  const extensionsDir = getIdeExtensionsDir();
+  const sidebar = await ensureSidebarInstalled(serverPath, { extensionsDir, log });
+  return {
+    serverVersion: version,
+    extensionsDir,
+    sidebarVersion: sidebar.version,
+    sidebarChanged: sidebar.outcome === 'installed',
+  };
 }
 
 /**
  * Spawn the IDE server detached (so it survives a Tower restart, like a
- * shellper) and write the runtime record. Resolves to the record once the
- * server is listening, or throws if the binary is missing or never binds.
+ * shellper) and write the runtime record. Resolves once the server is
+ * listening, or throws if the binary is missing, fails the preflight, or never
+ * binds. Serialized with every other lifecycle operation.
  */
-export async function spawnIdeServer(opts: SpawnIdeOptions, log: LogFn): Promise<IdeServerRecord> {
+export function spawnIdeServer(opts: SpawnIdeOptions, log: LogFn): Promise<SpawnIdeResult> {
+  return withIdeLock(() => spawnIdeServerUnlocked(opts, log));
+}
+
+async function spawnIdeServerUnlocked(opts: SpawnIdeOptions, log: LogFn): Promise<SpawnIdeResult> {
   const port = opts.port ?? IDE_DEFAULT_PORT;
   if (!opts.serverPath) {
     throw new Error('IDE server path is required (no default — set --server-path)');
@@ -138,29 +204,22 @@ export async function spawnIdeServer(opts: SpawnIdeOptions, log: LogFn): Promise
     throw new Error(`IDE server binary not found at ${opts.serverPath}`);
   }
 
+  // Before anything is stopped or replaced: a refused server or a failed
+  // install must leave the current server and its record exactly as they are.
+  const preflight = await runIdePreflight(opts.serverPath, log);
+
   // Start-collision: a prior server recorded on a DIFFERENT port would be orphaned
   // (still running, no longer tracked) if we just overwrote the singleton record.
   // Stop it first so "start on a new port" never leaves a detached stray (#1668).
   const existing = readIdeRecord();
   if (existing && existing.port !== port && isPortLive(existing.port)) {
     log('WARN', `IDE server already recorded on port ${existing.port}; stopping it before starting on ${port}`);
-    await stopIdeServer(log);
+    await stopIdeServerUnlocked(log);
   }
 
-  // Already live on the port — idempotent: adopt and record, don't double-spawn.
+  // Already live on the port: idempotent, adopt and record, never kill or double-spawn.
   if (isPortLive(port)) {
-    log('INFO', `IDE server already listening on port ${port}; adopting`);
-    const pid = getProcessesOnPort(port)[0] ?? 0;
-    const record: IdeServerRecord = {
-      prefix: IDE_DEFAULT_PREFIX,
-      port,
-      serverPath: opts.serverPath,
-      pid,
-      defaultFolder: opts.defaultFolder,
-      startedAt: new Date().toISOString(),
-    };
-    writeIdeRecord(record);
-    return record;
+    return adoptLiveIdeServer(opts, port, existing, preflight, log);
   }
 
   const basePath = IDE_DEFAULT_PREFIX.replace(/\/$/, ''); // "/ide"
@@ -172,16 +231,14 @@ export async function spawnIdeServer(opts: SpawnIdeOptions, log: LogFn): Promise
     '--port', String(port),
     '--server-base-path', basePath,
     '--connection-token-file', tokenFile,
+    '--extensions-dir', preflight.extensionsDir,
     '--accept-server-license-terms',
   ];
-  if (opts.defaultFolder) {
-    args.push('--default-folder', opts.defaultFolder);
-  }
 
-  log('INFO', `Spawning IDE server: ${opts.serverPath} ${args.join(' ')}`);
+  log('INFO', `Spawning IDE server ${preflight.serverVersion}: ${opts.serverPath} ${args.join(' ')}`);
   const child = spawnIdeServerProcess(opts.serverPath, args, {
     cwd: process.cwd(),
-    env: sanitizeAgentEnv(process.env),
+    env: buildIdeServerEnv(),
     detached: true,
     stdio: 'ignore',
   });
@@ -190,9 +247,9 @@ export async function spawnIdeServer(opts: SpawnIdeOptions, log: LogFn): Promise
   }
   child.unref();
 
-  const ready = await waitForPort(port, READY_TIMEOUT_MS);
+  const ready = await waitForPort(port, IDE_READY_TIMEOUT_MS);
   if (!ready) {
-    throw new Error(`IDE server did not start listening on port ${port} within ${READY_TIMEOUT_MS / 1000}s`);
+    throw new Error(`IDE server did not start listening on port ${port} within ${IDE_READY_TIMEOUT_MS / 1000}s`);
   }
 
   const record: IdeServerRecord = {
@@ -200,20 +257,85 @@ export async function spawnIdeServer(opts: SpawnIdeOptions, log: LogFn): Promise
     port,
     serverPath: opts.serverPath,
     pid: child.pid,
-    defaultFolder: opts.defaultFolder,
     startedAt: new Date().toISOString(),
+    serverVersion: preflight.serverVersion,
+    extensionsDir: preflight.extensionsDir,
+    sidebarVersion: preflight.sidebarVersion ?? undefined,
   };
   writeIdeRecord(record);
   log('INFO', `IDE server listening on port ${port} (pid ${child.pid})`);
-  return record;
+  return { record, restartRequired: false };
+}
+
+/**
+ * Record a server already listening on `port` without touching it. The record
+ * keeps what the live process was actually spawned with (the prior record's
+ * server path, version, extensions directory and sidebar; absent stays absent):
+ * the version just checked describes `opts.serverPath`, which need not be the
+ * binary the live process came from. With no prior record on that port the live
+ * binary is unknown, so the requested path is recorded and a restart is flagged.
+ */
+function adoptLiveIdeServer(
+  opts: SpawnIdeOptions,
+  port: number,
+  existing: IdeServerRecord | null,
+  preflight: IdePreflight,
+  log: LogFn,
+): SpawnIdeResult {
+  let prior: IdeServerRecord | null = null;
+  if (existing && existing.port === port) {
+    prior = existing;
+  }
+  const restartRequired = prior === null || !liveServerIsCurrent(prior, opts.serverPath, preflight);
+
+  const record: IdeServerRecord = {
+    prefix: IDE_DEFAULT_PREFIX,
+    port,
+    serverPath: prior?.serverPath ?? opts.serverPath,
+    pid: getProcessesOnPort(port)[0] ?? 0,
+    startedAt: prior?.startedAt ?? new Date().toISOString(),
+    serverVersion: prior?.serverVersion,
+    extensionsDir: prior?.extensionsDir,
+    sidebarVersion: prior?.sidebarVersion,
+  };
+  writeIdeRecord(record);
+  let note = '';
+  if (restartRequired) {
+    note = '; restart it to load the current Codev sidebar';
+  }
+  log('INFO', `IDE server already listening on port ${port}; adopted${note}`);
+  return { record, restartRequired };
+}
+
+/**
+ * True when the live server recorded in `prior` already runs what this start
+ * prepared: the same server binary at the same version, the same extensions
+ * directory and, when a sidebar is embedded, the same sidebar version. Compared
+ * against the record rather than this preflight's outcome, so a server left
+ * running after an earlier start upgraded the server (in place, as `npm i -g`
+ * does, or at a new path) or the sidebar is still reported stale on every later
+ * start. An unknown recorded version is not treated as stale on its own.
+ */
+function liveServerIsCurrent(prior: IdeServerRecord, serverPath: string, preflight: IdePreflight): boolean {
+  if (prior.serverPath !== serverPath) return false;
+  if (prior.serverVersion !== undefined && prior.serverVersion !== preflight.serverVersion) return false;
+  if (preflight.sidebarChanged) return false;
+  if (prior.extensionsDir !== preflight.extensionsDir) return false;
+  if (preflight.sidebarVersion === null) return true;
+  return prior.sidebarVersion === preflight.sidebarVersion;
 }
 
 /**
  * Stop the IDE server on the recorded port: SIGTERM, wait for exit, escalate to
  * SIGKILL for survivors (mirrors `towerStop`, #1668 plan §4), then delete the
- * record. Cold path — `getProcessesOnPort` is fine here.
+ * record. Cold path — `getProcessesOnPort` is fine here. Serialized with every
+ * other lifecycle operation.
  */
-export async function stopIdeServer(log: LogFn): Promise<{ stopped: boolean; port: number | null }> {
+export function stopIdeServer(log: LogFn): Promise<{ stopped: boolean; port: number | null }> {
+  return withIdeLock(() => stopIdeServerUnlocked(log));
+}
+
+async function stopIdeServerUnlocked(log: LogFn): Promise<{ stopped: boolean; port: number | null }> {
   const record = readIdeRecord();
   if (!record) {
     return { stopped: false, port: null };
@@ -232,7 +354,7 @@ export async function stopIdeServer(log: LogFn): Promise<{ stopped: boolean; por
 
   // Wait for the SIGTERMed processes to actually exit before deleting the record;
   // escalate any survivors to SIGKILL, so a lingering process can't be re-adopted.
-  const deadline = Date.now() + STOP_EXIT_TIMEOUT_MS;
+  const deadline = Date.now() + IDE_STOP_EXIT_TIMEOUT_MS;
   let survivors = pids.filter(isPidAlive);
   while (survivors.length > 0 && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, STOP_POLL_MS));
@@ -323,7 +445,7 @@ export async function stopWindowsIdeServer(
     }
   }
 
-  const deadline = Date.now() + STOP_EXIT_TIMEOUT_MS;
+  const deadline = Date.now() + IDE_STOP_EXIT_TIMEOUT_MS;
   let survivors = plan.targets.filter(isAlive);
   while (survivors.length > 0 && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, STOP_POLL_MS));
@@ -369,22 +491,32 @@ export async function ensureIdeServerLive(log: LogFn = () => {}): Promise<number
   if (isPortLive(record.port)) return record.port;
 
   if (respawnInFlight) return respawnInFlight;
-  respawnInFlight = (async () => {
-    try {
-      log('INFO', `IDE server on port ${record.port} is down; respawning from ${record.serverPath}`);
-      const fresh = await spawnIdeServer(
-        { serverPath: record.serverPath, port: record.port, defaultFolder: record.defaultFolder },
-        log,
-      );
-      return fresh.port;
-    } catch (err) {
-      log('WARN', `IDE server respawn failed: ${(err as Error).message}`);
-      return null;
-    } finally {
-      respawnInFlight = null;
-    }
-  })();
+  respawnInFlight = withIdeLock(() => respawnRecordedIdeServer(log)).finally(() => {
+    respawnInFlight = null;
+  });
   return respawnInFlight;
+}
+
+/**
+ * The respawn body, run under the lock. It re-reads the record first: a start
+ * or stop queued ahead of it may have changed or removed the record, or
+ * already brought the server up.
+ */
+async function respawnRecordedIdeServer(log: LogFn): Promise<number | null> {
+  try {
+    const current = readIdeRecord();
+    if (!current) return null;
+    if (isPortLive(current.port)) return current.port;
+    log('INFO', `IDE server on port ${current.port} is down; respawning from ${current.serverPath}`);
+    const fresh = await spawnIdeServerUnlocked(
+      { serverPath: current.serverPath, port: current.port },
+      log,
+    );
+    return fresh.record.port;
+  } catch (err) {
+    log('WARN', `IDE server respawn failed: ${(err as Error).message}`);
+    return null;
+  }
 }
 
 /**
@@ -403,7 +535,7 @@ export async function reconcileIdeServer(log: LogFn): Promise<void> {
 
 /**
  * Local-only `/api/ide` management endpoint driving the lifecycle above:
- * `POST` starts (body `{ serverPath, port?, defaultFolder? }`), `DELETE` stops,
+ * `POST` starts (body `{ serverPath, port? }`), `DELETE` stops,
  * `GET` reports status. Reached only post-`isRequestAllowed` (key required) and
  * blocked from the tunnel like `/api/tunnel/*` — it spawns/kills a process.
  */
@@ -437,16 +569,15 @@ export async function handleIdeApi(
     }
     const serverPath = typeof body.serverPath === 'string' ? body.serverPath : '';
     const port = typeof body.port === 'number' ? body.port : undefined;
-    const defaultFolder = typeof body.defaultFolder === 'string' ? body.defaultFolder : undefined;
     if (!serverPath) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'serverPath is required' }));
       return;
     }
     try {
-      const record = await spawnIdeServer({ serverPath, port, defaultFolder }, log);
+      const { record, restartRequired } = await spawnIdeServer({ serverPath, port }, log);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, ...record }));
+      res.end(JSON.stringify({ ok: true, ...record, restartRequired }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: (err as Error).message }));

@@ -44,6 +44,8 @@
  * place. Adding the new name here is the fix when that happens.
  */
 
+import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
+
 /**
  * Whole families of per-session identity. Every variable Claude Code ships
  * under these prefixes describes *this* session — its id, its socket, its
@@ -116,7 +118,33 @@ export function isClaudeSessionMarker(name: string): boolean {
 export const BUILDER_WORKTREE_ENV = 'CODEV_BUILDER_WORKTREE';
 
 /**
- * Copy `env` with Claude Code session markers (and the builder identity) removed.
+ * The workspace an architect terminal belongs to (Spec 1595), set beside
+ * `CODEV_ARCHITECT_NAME` at every architect launch so the agent's lifecycle
+ * reporter can name itself as `{ workspacePath, name }`. Stripped below like the
+ * builder identity: a Tower started from an architect's shell must not hand that
+ * architect's workspace to every terminal it spawns.
+ */
+export const ARCHITECT_WORKSPACE_ENV = 'CODEV_ARCHITECT_WORKSPACE';
+
+/**
+ * The port of the Tower that created an agent session (Spec 1595), read by the
+ * agent's lifecycle reporter. Tower sets it on the final environment of every
+ * session it creates, so an inherited value is always overwritten; it is
+ * therefore not stripped by `sanitizeAgentEnv`.
+ */
+export const TOWER_PORT_ENV = 'CODEV_TOWER_PORT';
+
+/**
+ * `env` with `CODEV_TOWER_PORT` set to Tower's listening `port`, overwriting any
+ * inherited value. `DEFAULT_TOWER_PORT` is the only default, for callers built
+ * without a port (tests).
+ */
+export function withTowerPort(env: Record<string, string>, port: number | undefined): Record<string, string> {
+  return { ...env, [TOWER_PORT_ENV]: String(port ?? DEFAULT_TOWER_PORT) };
+}
+
+/**
+ * Copy `env` with Claude Code session markers (and codev's agent identity) removed.
  *
  * Returns a plain `Record<string, string>` — `undefined`-valued entries (which
  * `NodeJS.ProcessEnv` permits and node-pty rejects) are dropped — so callers can
@@ -130,6 +158,7 @@ export function sanitizeAgentEnv(
     if (value === undefined) continue;
     if (isClaudeSessionMarker(key)) continue;
     if (key === BUILDER_WORKTREE_ENV) continue;
+    if (key === ARCHITECT_WORKSPACE_ENV) continue;
     out[key] = value;
   }
   return out;

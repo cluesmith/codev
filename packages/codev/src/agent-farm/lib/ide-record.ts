@@ -45,8 +45,13 @@ export interface IdeServerRecord {
   port: number;
   serverPath: string;
   pid: number;
-  defaultFolder?: string;
   startedAt: string;
+  /** Base version the server reported at its spawn preflight (Spec 1789). Absent on a pre-#1789 record. */
+  serverVersion?: string;
+  /** The `--extensions-dir` the server was spawned with (Spec 1789). Absent on a pre-#1789 record. */
+  extensionsDir?: string;
+  /** Embedded sidebar version installed for the server (Spec 1789). Absent when none was embedded. */
+  sidebarVersion?: string;
 }
 
 /** Path to `~/.agent-farm/ide-server.json`. */
@@ -83,12 +88,19 @@ export function readIdeRecord(): IdeServerRecord | null {
       port: parsed.port,
       serverPath: parsed.serverPath,
       pid: parsed.pid,
-      defaultFolder: typeof parsed.defaultFolder === 'string' ? parsed.defaultFolder : undefined,
       startedAt: parsed.startedAt,
+      serverVersion: optionalString(parsed.serverVersion),
+      extensionsDir: optionalString(parsed.extensionsDir),
+      sidebarVersion: optionalString(parsed.sidebarVersion),
     };
   } catch {
     return null;
   }
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  return undefined;
 }
 
 /** Write the IDE server record, creating `~/.agent-farm/` if needed. */

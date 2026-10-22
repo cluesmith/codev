@@ -23,7 +23,7 @@ import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { fileURLToPath } from 'node:url';
 import { version } from '../../version.js';
-import { sanitizeAgentEnv } from '../../lib/agent-env.js';
+import { sanitizeAgentEnv, withTowerPort } from '../../lib/agent-env.js';
 
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
@@ -112,6 +112,10 @@ import {
   removeArchitect,
 } from './tower-instances.js';
 import { OverviewCache } from './overview.js';
+import { handleAgentLifecycle } from './agent-state/route.js';
+import { agentStateStore } from './agent-state/store.js';
+import { resolveAgentIdentity } from './agent-state/identity.js';
+import { serveAgentState } from './agent-state/serve.js';
 import {
   fetchIssue,
   fetchPR,
@@ -226,6 +230,11 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/overview/refresh': (_req, res, _url, ctx) => handleOverviewRefresh(res, ctx),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
   'POST /api/notify':     (req, res, _url, ctx) => handleNotify(req, res, ctx),
+  // Spec 1595: write-only lifecycle ingestion; key-authenticated like every non-public route.
+  'POST /api/agent-lifecycle': (req, res) => handleAgentLifecycle(req, res, {
+    store: agentStateStore,
+    resolve: identity => resolveAgentIdentity(identity),
+  }),
   'GET /api/browse':      (_req, res, url) => handleBrowse(res, url),
   'POST /api/create':     (req, res, _url, ctx) => handleCreateWorkspace(req, res, ctx),
   'POST /api/launch':     (req, res) => handleLaunchInstance(req, res),
@@ -941,8 +950,9 @@ async function handleTerminalCreate(
         // Strip Claude Code session markers so spawned Claude processes don't
         // detect nesting and disable transcript saving (#1219). `env` is normally
         // absent — `createPtySession` sends no env — so this is the path by which
-        // Tower's own environment becomes every builder's environment.
-        const sessionEnv = sanitizeAgentEnv(env || process.env);
+        // Tower's own environment becomes every builder's environment. Spec 1595:
+        // Tower's port is set last, so an inherited value never survives.
+        const sessionEnv = withTowerPort(sanitizeAgentEnv(env || process.env), ctx.port);
         const client = await shellperManager.createSession({
           sessionId,
           command,
@@ -1003,7 +1013,10 @@ async function handleTerminalCreate(
     // Fallback: non-persistent session (graceful degradation per plan)
     // Shellper is the only persistence backend for new sessions.
     if (!info) {
-      info = await manager.createSession({ command, args, cols, rows, cwd, env: env && sanitizeAgentEnv(env), label });
+      // Spec 1595: the manager merges this over its own base env, so Tower's port
+      // reaches the session whether or not the client supplied an env.
+      const sessionEnv = withTowerPort(sanitizeAgentEnv(env ?? {}), ctx.port);
+      info = await manager.createSession({ command, args, cols, rows, cwd, env: sessionEnv, label });
       persistent = false;
 
       if (workspacePath && termType && roleId) {
@@ -1256,18 +1269,27 @@ async function handleStatus(res: http.ServerResponse): Promise<void> {
  * dashboard-state handler (`/api/state`) and the overview handler
  * (`/api/overview`), so the two payloads list an identical set and can't drift.
  * Extracted verbatim from the dashboard-state builder's former inline loop.
+ *
+ * Spec 1595: each architect also carries its served `agentState` (read by
+ * `(workspace, name)` from the agent-state store and liveness, projected per
+ * request) and its session's `lastDataAt`, for the sdk's staleness rule.
  */
-function liveArchitects(entry: WorkspaceTerminals, manager: TerminalManager): ArchitectState[] {
+function liveArchitects(entry: WorkspaceTerminals, manager: TerminalManager, workspacePath: string): ArchitectState[] {
+  const agentWorkspace = normalizeWorkspacePath(workspacePath);
   const architects: ArchitectState[] = [];
   for (const [architectName, terminalId] of entry.architects) {
     const session = manager.getSession(terminalId);
     if (!session) continue;
+    let lastDataAt: string | null = null;
+    if (Number.isFinite(session.lastDataAt)) lastDataAt = new Date(session.lastDataAt).toISOString();
     architects.push({
       name: architectName,
       port: 0,
       pid: session.pid || 0,
       terminalId,
       persistent: isSessionPersistent(terminalId, session),
+      agentState: serveAgentState(agentWorkspace, architectName, { blocked: false, blockedSince: null, phase: '' }),
+      lastDataAt,
     });
   }
   const mainIdx = architects.findIndex(a => a.name === 'main');
@@ -1329,11 +1351,27 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     builder.lastDataAt = new Date(ptySession.lastDataAt).toISOString();
   }
 
+  // Spec 1595: project the served agent state over EVERY listed builder, not
+  // inside the loop above, which skips a builder whose session is gone (the
+  // case liveness reports as dead). Every listed builder is registered: the
+  // list is filtered to `entry.builders`, and its `roleId` is the lowercased
+  // registry key, the same key the store and liveness use. `blocked` reuses the
+  // gate the overview already detected (no second parse of status.yaml).
+  const agentWorkspace = normalizeWorkspacePath(workspaceRoot);
+  for (const builder of data.builders) {
+    if (builder.roleId === null) continue;
+    builder.agentState = serveAgentState(agentWorkspace, builder.roleId, {
+      blocked: builder.blocked !== null,
+      blockedSince: builder.blockedSince,
+      phase: builder.phase,
+    });
+  }
+
   // Issue 1104: enrich with the live architects (main-first) so the VSCode
   // Agents tree can render its architect tier and attribution badge straight
   // off the overview cache. Same `liveArchitects` helper (and so the same set)
   // the dashboard-state handler uses.
-  data.architects = liveArchitects(entry, terminalManager);
+  data.architects = liveArchitects(entry, terminalManager, workspaceRoot);
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
@@ -3241,7 +3279,7 @@ async function handleWorkspaceState(
   // (Issue 1104) so both payloads list an identical set.
   // Spec 755: the scalar `state.architect` is preserved as a backward-compat
   // pointer to the same default architect (architects[0] when present).
-  const architects = liveArchitects(entry, manager);
+  const architects = liveArchitects(entry, manager, workspacePath);
   state.architects = architects;
   state.architect = architects[0] ?? null;
 

@@ -1210,7 +1210,7 @@ describe('tower-terminals', () => {
           return null; // stale — phase 2 cares only about restartOptions construction
         });
 
-        const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+        const deps = makeDeps({ towerPort: 4242, shellperManager: { reconnectSession: mockReconnectSession } as any });
         initTerminals(deps);
 
         mockDbAll.mockReturnValue([{
@@ -1237,6 +1237,9 @@ describe('tower-terminals', () => {
 
         expect(capturedRestartOptions).not.toBeNull();
         expect(capturedRestartOptions.env.CODEV_ARCHITECT_NAME).toBe('ob-refine');
+        // Spec 1595: the workspace travels beside the name, with Tower's port.
+        expect(capturedRestartOptions.env.CODEV_ARCHITECT_WORKSPACE).toBe('/real/project');
+        expect(capturedRestartOptions.env.CODEV_TOWER_PORT).toBe('4242');
       });
 
       it('falls back to CODEV_ARCHITECT_NAME=main when role_id is null (legacy rows)', async () => {
@@ -1319,7 +1322,7 @@ describe('tower-terminals', () => {
           return null; // stale — phase 2 cares only about restartOptions construction
         });
 
-        const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+        const deps = makeDeps({ towerPort: 4242, shellperManager: { reconnectSession: mockReconnectSession } as any });
         initTerminals(deps);
 
         // getTerminalSessionsForWorkspace queries via mockDbAll. Return a
@@ -1348,6 +1351,8 @@ describe('tower-terminals', () => {
         expect(mockReconnectSession).toHaveBeenCalledTimes(1);
         expect(capturedRestartOptions).not.toBeNull();
         expect(capturedRestartOptions.env.CODEV_ARCHITECT_NAME).toBe('team-a');
+        expect(capturedRestartOptions.env.CODEV_ARCHITECT_WORKSPACE).toBe('/real/project');
+        expect(capturedRestartOptions.env.CODEV_TOWER_PORT).toBe('4242');
       });
 
       it('does not set CODEV_ARCHITECT_NAME for non-architect sessions (builders/shells)', async () => {

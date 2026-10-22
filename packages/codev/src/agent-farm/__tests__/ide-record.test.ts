@@ -29,7 +29,6 @@ const SAMPLE: IdeServerRecord = {
   port: 8200,
   serverPath: '/opt/codev-ide/bin/server',
   pid: 4242,
-  defaultFolder: '/home/dev/project',
   startedAt: '2026-09-11T00:00:00.000Z',
 };
 
@@ -71,6 +70,48 @@ describe('ide-record', () => {
 
     writeFileSync(getIdeRecordPath(), JSON.stringify({ port: 8200 })); // missing required fields
     expect(readIdeRecord()).toBeNull();
+  });
+
+  it('round-trips the Spec 1789 fields', () => {
+    const record: IdeServerRecord = {
+      ...SAMPLE,
+      serverVersion: '1.135.0',
+      extensionsDir: '/home/dev/.agent-farm/ide-extensions',
+      sidebarVersion: '3.3.4',
+    };
+    writeIdeRecord(record);
+    expect(readIdeRecord()).toEqual(record);
+  });
+
+  it('parses a legacy (pre-#1789) record without the new fields', () => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    writeFileSync(getIdeRecordPath(), JSON.stringify(SAMPLE));
+    const parsed = readIdeRecord();
+    expect(parsed).toMatchObject(SAMPLE);
+    expect(parsed?.serverVersion).toBeUndefined();
+    expect(parsed?.extensionsDir).toBeUndefined();
+    expect(parsed?.sidebarVersion).toBeUndefined();
+  });
+
+  it('ignores a retired defaultFolder left by an earlier Tower, keeping the record', () => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    writeFileSync(getIdeRecordPath(), JSON.stringify({ ...SAMPLE, defaultFolder: '/home/dev/project' }));
+    const parsed = readIdeRecord();
+    expect(parsed).toEqual(SAMPLE);
+    expect(parsed).not.toHaveProperty('defaultFolder');
+  });
+
+  it('drops new fields that are not strings, keeping the record', () => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    writeFileSync(
+      getIdeRecordPath(),
+      JSON.stringify({ ...SAMPLE, serverVersion: 1135, extensionsDir: null, sidebarVersion: ['3.3.4'] }),
+    );
+    const parsed = readIdeRecord();
+    expect(parsed).toMatchObject(SAMPLE);
+    expect(parsed?.serverVersion).toBeUndefined();
+    expect(parsed?.extensionsDir).toBeUndefined();
+    expect(parsed?.sidebarVersion).toBeUndefined();
   });
 
   it('generates and persists a connection token, returning the same value on reuse', () => {

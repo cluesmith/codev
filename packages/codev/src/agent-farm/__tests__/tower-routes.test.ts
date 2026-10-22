@@ -548,6 +548,56 @@ describe('tower-routes', () => {
   });
 
   // =========================================================================
+  // Terminal create: Tower's port on the final session env (Spec 1595)
+  // =========================================================================
+
+  describe('POST /api/terminals sets CODEV_TOWER_PORT on the final env', () => {
+    const inheritedEnv = { PATH: '/usr/bin', CODEV_TOWER_PORT: '1', CLAUDECODE: '1' };
+
+    it('non-persistent branch: overrides an inherited port, with or without a client env', async () => {
+      const createSession = vi.fn(async () => ({ id: 'term-new', pid: 1 }));
+      mockGetTerminalManager.mockReturnValue({ createSession });
+
+      for (const env of [inheritedEnv, undefined]) {
+        mockParseJsonBody.mockResolvedValueOnce({ command: 'bash', cwd: '/tmp', env });
+        const { res, statusCode } = makeRes();
+        await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx({ port: 4242 }));
+        expect(statusCode()).toBe(201);
+      }
+
+      const [withClientEnv, withoutClientEnv] = createSession.mock.calls.map(c => (c[0] as { env: Record<string, string> }).env);
+      expect(withClientEnv.CODEV_TOWER_PORT).toBe('4242');
+      expect(withClientEnv.CLAUDECODE).toBeUndefined();
+      expect(withClientEnv.PATH).toBe('/usr/bin');
+      expect(withoutClientEnv).toEqual({ CODEV_TOWER_PORT: '4242' });
+    });
+
+    it('shellper branch: overrides an inherited port', async () => {
+      const shellperCreate = vi.fn(async () => ({ waitForReplay: async () => Buffer.alloc(0) }));
+      const shellperManager = {
+        createSession: shellperCreate,
+        getSessionInfo: () => ({ pid: 7, socketPath: '/tmp/s.sock', startTime: 1 }),
+      };
+      mockGetTerminalManager.mockReturnValue({
+        createSessionRaw: vi.fn(() => ({ id: 'term-new', pid: 7 })),
+        getSession: vi.fn(() => undefined),
+      });
+      mockParseJsonBody.mockResolvedValueOnce({ command: 'bash', cwd: '/tmp', env: inheritedEnv, persistent: true });
+
+      const { res, statusCode } = makeRes();
+      await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx({
+        port: 4242,
+        getShellperManager: () => shellperManager as unknown as ReturnType<RouteContext['getShellperManager']>,
+      }));
+
+      expect(statusCode()).toBe(201);
+      const env = (shellperCreate.mock.calls[0][0] as { env: Record<string, string> }).env;
+      expect(env.CODEV_TOWER_PORT).toBe('4242');
+      expect(env.CLAUDECODE).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
   // API status
   // =========================================================================
 

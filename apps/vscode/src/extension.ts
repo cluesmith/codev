@@ -36,7 +36,7 @@ import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
 import { activateGateToasts } from './notifications/gate-toast.js';
 import { activateMailboxEscalationToasts } from './notifications/mailbox-escalation-toast.js';
-import { composeStatusBarText, composeActivityBadge } from './mailbox-indicators.js';
+import { composeStatusBarText, composeStatusBarTooltip, composeActivityBadge } from './mailbox-indicators.js';
 import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
 import { activateBuilderReviewComments } from './comments/builder-review.js';
@@ -62,7 +62,7 @@ import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider, IssueRefTer
 import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-terminals.js';
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
-import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
+import { deriveAttention, isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import { BuildersProvider, AccordionGate, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
 // Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
 import { TowerFleetCache } from './views/tower-cache.js';
@@ -330,6 +330,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	connectionManager.onStateChange((state) => {
 		if (!statusBarItem) { return; }
+		// The overview refresh re-names any waiting architects once connected.
+		statusBarItem.tooltip = composeStatusBarTooltip([]);
 		switch (state) {
 			case 'connected':
 				statusBarItem.text = '$(server) Codev: Connected';
@@ -489,10 +491,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	seedActivityHooks();
 
 	// Update status bar with builder + needs-attention counts.
-	// Two "needs me" signals: blocked (formal gate) and idle-waiting
-	// (PTY silent past threshold, likely paused at a non-gate question
-	// — see isIdleWaiting in @cluesmith/codev-sdk/builder-helpers).
-	// Each is shown only when > 0, with its own icon.
+	// Two "needs me" signals: blocked (formal gate) and waiting (at a
+	// prompt, turn ended, agent dead, or, with no served state, PTY silent
+	// past threshold — see isIdleWaiting in @cluesmith/codev-sdk/builder-helpers).
+	// Waiting also counts architects at a prompt or with their agent dead
+	// (Spec 1595, deriveAttention's `architects`). Each is shown only when > 0,
+	// with its own icon.
 	const updateStatusBarCounts = () => {
 		if (!statusBarItem || connectionManager?.getState() !== 'connected') { return; }
 		if (isBuilderWorktreeWindow) { return; }
@@ -501,7 +505,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		const builderCount = data.builders.length;
 		const now = Date.now();
 		const blockedCount = data.builders.filter(b => b.blocked).length;
-		const idleCount = data.builders.filter(b => isIdleWaiting(b, now)).length;
+		const waitingArchitects = deriveAttention(data, now).architects;
+		const idleCount = data.builders.filter(b => isIdleWaiting(b, now)).length + waitingArchitects.length;
 		// Spec 1313 Phase 8: workspace-wide held-mail count (all recipients, incl.
 		// architects — the authoritative `data.heldCount`, not a per-builder sum),
 		// with a warning-flavored attention state once a held row has escalated.
@@ -509,6 +514,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		const heldCount = data.heldCount;
 		const escalated = data.mailboxEscalated === true;
 		statusBarItem.text = composeStatusBarText(builderCount, blockedCount, idleCount, heldCount, escalated);
+		statusBarItem.tooltip = composeStatusBarTooltip(waitingArchitects.map(a => a.architect));
 		// Amber background is the persistent, log-free attention state for the count;
 		// it clears when the escalated row resolves (an overview refetch on the
 		// held-state-change broadcast flips `mailboxEscalated` back to false).
@@ -563,12 +569,14 @@ export async function activate(context: vscode.ExtensionContext) {
 		const now = Date.now();
 		const blockedCount = data.builders.filter(b => b.blocked).length;
 		const idleCount = data.builders.filter(b => isIdleWaiting(b, now)).length;
+		// Spec 1595: architects at a prompt or with their agent dead fold in by name.
+		const waitingArchitects = deriveAttention(data, now).architects.map(a => a.architect);
 		// Spec 1313 Phase 8: fold the workspace held-mail count into the badge so the
 		// activity-bar icon reflects it even when the sidebar is collapsed. Held is a
 		// count only (not a per-builder "needs me" gate); the tooltip disambiguates it
 		// from the blocked/idle signals. The fold + tooltip composition (and the
 		// undefined-when-empty clear) is pure + unit-tested in `composeActivityBadge`.
-		buildersView.badge = composeActivityBadge(blockedCount, idleCount, data.heldCount);
+		buildersView.badge = composeActivityBadge(blockedCount, idleCount, data.heldCount, waitingArchitects);
 	};
 
 	// Close builder/dev terminal tabs when their builder disappears from the

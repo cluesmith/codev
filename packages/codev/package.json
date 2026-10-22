@@ -18,12 +18,13 @@
     "templates",
     "dashboard-dist",
     "scripts/forge",
-    "scripts/postinstall.mjs"
+    "scripts/postinstall.mjs",
+    "ide-extension"
   ],
   "scripts": {
     "clean": "rm -rf dist",
     "build": "pnpm --filter \"@cluesmith/codev^...\" build && pnpm clean && tsc && pnpm bundle-assets",
-    "bundle-assets": "pnpm copy-dashboard && pnpm copy-skeleton && node ./scripts/copy-three.mjs",
+    "bundle-assets": "pnpm copy-dashboard && pnpm copy-skeleton && node ./scripts/copy-three.mjs && node ./scripts/build-ide-extension.mjs",
     "copy-dashboard": "rm -rf dashboard-dist && cp -r ../../apps/web/dist dashboard-dist",
     "dev:dashboard": "cd ../../apps/web && pnpm dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",

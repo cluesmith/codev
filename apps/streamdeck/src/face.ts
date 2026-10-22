@@ -13,6 +13,9 @@ import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
  * sidebar's look independently and the maps are kept aligned by the sync-notes on each. This is an
  * accepted, intentional pattern here, not single-source-of-truth debt.
  *
+ * The face renders `blocked` and `active` only; the served attention states from Spec 1595
+ * (needs-input, idle, dead) are not rendered here yet, tracked as #1857.
+ *
  * Pure and SDK-free so it unit-tests without the Stream Deck runtime (mirrors `nav/cursor.ts`).
  */
 
