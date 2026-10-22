@@ -166,7 +166,7 @@ describe('buildIdeServerEnv on Windows', () => {
   it('POSIX: unchanged', () => {
     setHostPlatformForTests('linux');
     const nodeDir = path.dirname(process.execPath);
-    expect(buildIdeServerEnv({ PATH: '/usr/bin' }).PATH).toBe(`${nodeDir}:/usr/bin`);
+    expect(buildIdeServerEnv({ PATH: '/usr/bin' }).PATH).toBe(`${nodeDir}${path.delimiter}/usr/bin`);
   });
 });
 

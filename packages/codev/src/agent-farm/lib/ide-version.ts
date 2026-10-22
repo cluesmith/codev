@@ -242,9 +242,13 @@ export function runIdeServerCommand(
     let stdout = '';
     let stderr = '';
     const spawnable = ideServerSpawnable(serverPath, args, opts.env);
+    // POSIX: its own process group, for the group kill on timeout. Windows has
+    // no groups (the timeout kills the tree), and a detached `cmd.exe` gets no
+    // console, so a plain `.cmd` shim's child would not write to the pipes.
+    const detached = !isWindows();
     const child = spawn(spawnable.command, spawnable.args, {
       env: opts.env,
-      detached: true,
+      detached,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       windowsVerbatimArguments: spawnable.windowsVerbatimArguments,

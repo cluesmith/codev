@@ -188,7 +188,16 @@ afterAll(() => {
   rmSync(TMP_DIR, { recursive: true, force: true });
 });
 
-describe('spawn preflight', () => {
+
+/**
+ * Spec 1658: tests marked with this drive `#!/bin/sh` stub servers, or assert
+ * POSIX modes, paths or the `:` separator, so they cannot run on native
+ * Windows. The Windows behavior they stand for is covered natively by
+ * `ide-server-stub.windows.test.ts` (.cmd stubs) and `ide-server-windows.test.ts`.
+ */
+const posixStubsOnly = process.platform === 'win32';
+
+describe.skipIf(posixStubsOnly)('spawn preflight', () => {
   it('spawns with --extensions-dir and the server env, and records the new facts', async () => {
     const { record, restartRequired } = await spawnIdeServer({ serverPath: SERVER_PATH, port: 8200 }, log);
 
@@ -278,7 +287,7 @@ describe('spawn preflight', () => {
   });
 });
 
-describe('live-port adopt', () => {
+describe.skipIf(posixStubsOnly)('live-port adopt', () => {
   it('adopts a current server without killing it and needs no restart', async () => {
     fakes.seedRecord(recordOn(8200, 4100));
     fakes.ports.set(8200, [4100]);
@@ -395,7 +404,7 @@ describe('live-port adopt', () => {
   });
 });
 
-describe('respawn and boot reconcile', () => {
+describe.skipIf(posixStubsOnly)('respawn and boot reconcile', () => {
   it('respawns a dead recorded server with --extensions-dir (Scenario 18)', async () => {
     fakes.seedRecord(recordOn(8200, 4100));
 
@@ -439,7 +448,7 @@ describe('respawn and boot reconcile', () => {
   });
 });
 
-describe('serialization', () => {
+describe.skipIf(posixStubsOnly)('serialization', () => {
   /** Hold every preflight at the version check until released. */
   function gatePreflight(): () => void {
     const gate = deferred();
@@ -517,7 +526,7 @@ describe('serialization', () => {
   });
 });
 
-describe('/api/ide', () => {
+describe.skipIf(posixStubsOnly)('/api/ide', () => {
   async function post(body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
     const server = http.createServer((req, res) => {
       handleIdeApi(req, res, log);
