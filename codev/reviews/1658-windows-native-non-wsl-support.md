@@ -674,6 +674,20 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
 #### Claude (COMMENT)
 - **Concern**: the `isSameProcess` comment overstated when a census failure is reported → **Addressed**: comment corrected.
 
+### Review (PR) Round 3 (porch PR consultation, head 2d85e6fd8)
+
+#### Gemini (COMMENT)
+- Skipped (agy unavailable, exit 3).
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: fixtures, manual pass, #1858 scope → **N/A**: pr-gate conditions held by the owner.
+- **Concern**: confirm the final-head Windows run → **Addressed**: run 39927653580; see "Windows runs after the PR opened" below.
+
+#### Claude (COMMENT)
+- **Concern**: stale PR Testing claim → **Addressed**: updated.
+- **Concern**: POSIX required checks pending → **N/A**: verified on a stationary head before the gate request.
+- **Concern**: `HUMAN_HOLD_DETAILS` admits `composer-redraw`, so a real held fixture could pass for the ConPTY pathology → **Accepted, deferred to the fixtures commit**: each capture gets its own expected detail when the claude captures land (no real captures exist to apply it to yet).
+
 ### Integration review Round 1 (architect, head 1b78fc076)
 
 - **Concern**: `readShellperInfo`'s resolve-on-data was a Windows-motivated change applied to POSIX → **Addressed**: gated behind `isWindows()`; POSIX resolves only at EOF as before, pinned by a test (valid JSON followed by trailing bytes must fail on POSIX). A fake shellper that never closed stdout was fixed to close it, as a real POSIX shellper does.
@@ -800,6 +814,17 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
   subscribed before the session exists. The outer test timeout (30 s) is the only bound. The
   `maxRestarts` sibling had the same shape plus a late subscription, and is fixed the same way.
   No skip.
+
+- **Windows runs after the PR opened: three one-off unit intermittents, none skipped.** Each hit a
+  different test on one Node leg only, and passed on the other leg and on rerun:
+  `forge-jira-preset` "fills closedAt" (run 39924678195, Node 24, `[]` with exit 0, which
+  exposed the jq-masking defect fixed in this PR); a vitest worker exiting without output in
+  `agy-lane-model.test.ts` (run 39927082964, Node 22); and `spec-1280-measurement-instrument` T12
+  (run 39927653580 attempt 1, Node 24: `measure-prompt-surface.sh` exited non-zero with no stderr).
+  Attempt 2 of 39927653580 on the final head was green on both legs. The architect's ruling on
+  Phase 4(b) (a recurrence blocks the gate until the cause is named) is not engaged: none of these
+  is Phase 4(b), and none recurred. They are recorded so a later Windows run that hits one again
+  starts from this list.
 
 ## Follow-up Items
 
