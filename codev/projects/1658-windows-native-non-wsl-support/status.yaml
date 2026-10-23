@@ -1,7 +1,7 @@
 id: '1658'
 title: windows-native-non-wsl-support
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: Windows audit, probe harness, and platform seam
@@ -35,8 +35,8 @@ plan_phases:
     status: complete
   - id: phase_11
     title: Windows CI leg and install docs
-    status: in_progress
-current_plan_phase: phase_11
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -50,8 +50,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -326,7 +326,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1658/codev/projects/1658-windows-native-non-wsl-support/1658-phase_11-iter2-claude.txt
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-23T08:10:22.384Z'
+updated_at: '2026-10-23T08:18:55.821Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
@@ -361,6 +361,8 @@ context_refreshes:
   - boundary: plan-phase:phase_11
     at: '2026-10-23T07:10:43.630Z'
     acknowledged_at: '2026-10-23T07:12:15.763Z'
+  - boundary: enter:review
+    at: '2026-10-23T08:18:55.821Z'
 force_advanced:
   phase: phase_9
   iteration: 3
