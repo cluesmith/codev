@@ -113,6 +113,15 @@ function ownerPid(tower: IsolatedTower): number | null {
   }
 }
 
+/** The last lines of the isolated Tower's log, for failure messages. */
+function towerLogTail(tower: IsolatedTower): string {
+  try {
+    return fs.readFileSync(path.join(tower.stateDir, 'tower.log'), 'utf8').split(/\r?\n/).slice(-40).join('\n');
+  } catch (err) {
+    return `(no tower.log: ${(err as Error).message})`;
+  }
+}
+
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -394,7 +403,9 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
     expect(await helper.terminate(name, launcher.pid!)).toEqual({ ok: true, found: true, member: true });
     await waitFor(() => !alive(launcher.pid!), 15_000, 'the launcher session to end');
     await new Promise((r) => setTimeout(r, 2000));
-    expect(alive(towerPid)).toBe(true);
+    // On failure, the Tower log says whether it was torn down with the job or exited on its own
+    // (Phase 10: seen once in nine runs on a loaded runner).
+    expect(alive(towerPid), `Tower ${towerPid} died with the session job; log tail:\n${towerLogTail(tower)}`).toBe(true);
     expect(alive(shellperPid)).toBe(true);
     expect((await api(tower, 'GET', '/health')).status).toBe(200);
 

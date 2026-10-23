@@ -20,6 +20,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import Database from 'better-sqlite3';
 import { _runAgyConsultation, resolveOptionalLaneModelChoice } from '../index.js';
+import { removeFakeCliTempDir } from './fake-cli-temp-dir.js';
 
 const ENV_KEYS = [
   'CODEV_AGY_BIN',
@@ -126,7 +127,7 @@ afterEach(() => {
     else process.env[k] = savedEnv[k];
   }
   vi.restoreAllMocks();
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeFakeCliTempDir(dir);
 });
 
 // --- argv passthrough ---------------------------------------------------------------

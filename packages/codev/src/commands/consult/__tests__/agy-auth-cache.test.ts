@@ -30,6 +30,7 @@ import {
   agyAuthCacheDir,
 } from '../agy-auth-cache.js';
 import { _runAgyConsultation } from '../index.js';
+import { removeFakeCliTempDir } from './fake-cli-temp-dir.js';
 
 /** Env keys this suite manipulates; restored wholesale after each test. */
 const ENV_KEYS = [
@@ -154,12 +155,7 @@ afterEach(async () => {
   }
   const survivors = await fakeAgySurvivors();
   vi.restoreAllMocks();
-  try {
-    // Retries: on Windows a just-killed process can hold the directory for a moment (EBUSY).
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
-  } catch (err) {
-    throw new Error(`temp dir still held (fake agy survivors: ${JSON.stringify(survivors)}): ${(err as Error).message}`, { cause: err });
-  }
+  removeFakeCliTempDir(dir);
   expect(survivors, 'fake agy outlived its lane').toEqual([]);
 });
 
