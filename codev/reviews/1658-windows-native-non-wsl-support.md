@@ -317,6 +317,14 @@ no `'error'` listener throws before `start()` rejects (every platform, not chang
 - The `version` input (verify a published release on Windows) works only for releases after
   3.3.5: the Windows bin lookup uses the installed `codev-sdk/node/executable` export, which no
   published release has yet. verify-install.mjs fails with that reason.
+- Two intermittent Windows unit failures turned up while re-running the suites, both test bugs.
+  `ws-snapshot-e2e` attached once the alt-screen switch arrived, but ConPTY can deliver the switch
+  before the paint; it now waits until Tower's mirror holds the painted text. `launchers.windows`
+  scenario 9/10 reported the postSpawn result "missing" after `afx spawn` exited 0 (about 1 run
+  in 8). The architect ruled that a product question until shown otherwise, so the hook got an
+  entry sentinel and the test a miss diagnosis. It showed the hook ran in the right worktree; the
+  test cut the base64url builder id at the first `-` or `_` (`worktree-MF-L` read as
+  `worktree-MF`) and looked in a directory that does not exist. Neither was skipped.
 - Docs: DEPENDENCIES.md (both trees) presents native Windows and WSL 2; the release protocol
   dispatches the workflow before tagging and after publishing; the PR-time rule lives in this
   repo's CLAUDE.md/AGENTS.md because protocol prompts ship to adopters, who have no `windows.yml`.
