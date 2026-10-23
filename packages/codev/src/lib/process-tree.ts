@@ -272,8 +272,9 @@ interface JobTeardown {
 /**
  * Whether `recorded` is still the same process on a fresh census: present,
  * with the same creation time when one was recorded. A census failure answers
- * false, so an unverifiable pid is not tree-killed; the kill pass that follows
- * reads the census again and reports the failure.
+ * false, so an unverifiable pid is not tree-killed. The kill pass that follows
+ * reads the census again only when a recorded member still answers, and then
+ * rejects if that read fails too; otherwise the skipped root is not reported.
  */
 async function isSameProcess(census: () => Promise<ProcessCensusEntry[]>, recorded: ProcessCensusEntry): Promise<boolean> {
   let fresh: ProcessCensusEntry[];

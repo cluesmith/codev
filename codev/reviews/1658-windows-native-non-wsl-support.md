@@ -661,6 +661,19 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
 - **Concern**: `WINDOWS_PREBUILD_NODE_ABIS` fail-closes future Node releases → **Rebutted**: deliberate; a Node without a better-sqlite3 prebuild cannot install, and the guard's message names the supported versions.
 - **Concern**: Gemini absent from every implementation round → **N/A**: recorded under Methodology Improvements.
 
+### Review (PR) Round 2 (porch PR consultation, head 5dca14060)
+
+#### Gemini (COMMENT)
+- Skipped (agy unavailable, exit 3).
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: bare user-tool spawns stay cwd-first → **Rebutted**: architect ruling (b); a Windows release blocker recorded under Known gaps, with its inventory, for the first follow-up after #1859.
+- **Concern**: ConPTY fixtures, the manual pass, and the #1858 scope → **N/A**: declared pr-gate conditions.
+- **Concern**: no Windows run on the final head with `install_guard` → **Addressed**: dispatched on the final head with `suites=true` and `install_guard=true`; the PR's Testing section links it.
+
+#### Claude (COMMENT)
+- **Concern**: the `isSameProcess` comment overstated when a census failure is reported → **Addressed**: comment corrected.
+
 ### Integration review Round 1 (architect, head 1b78fc076)
 
 - **Concern**: `readShellperInfo`'s resolve-on-data was a Windows-motivated change applied to POSIX → **Addressed**: gated behind `isWindows()`; POSIX resolves only at EOF as before, pinned by a test (valid JSON followed by trailing bytes must fail on POSIX). A fake shellper that never closed stdout was fixed to close it, as a real POSIX shellper does.
