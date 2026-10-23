@@ -259,10 +259,12 @@ async function spawnIdeServerUnlocked(opts: SpawnIdeOptions, log: LogFn): Promis
 
   const ready = await waitForPort(port, IDE_READY_TIMEOUT_MS);
   if (!ready) {
-    // Windows: no record is written for a server that never bound, so nothing
-    // could stop it later; end its tree now (Spec 1658 Phase 9).
-    if (isWindows()) await killUnreadyWindowsServer(child.pid, log);
-    throw new Error(`IDE server did not start listening on port ${port} within ${IDE_READY_TIMEOUT_MS / 1000}s`);
+    // No record is written for a server that never bound, so nothing could
+    // stop it later: stop it now (Spec 1658 Phase 9; the leak dates from #1668).
+    await stopUnreadyIdeServer(child.pid, log);
+    throw new Error(
+      `IDE server did not start listening on port ${port} within ${IDE_READY_TIMEOUT_MS / 1000}s; the server process was stopped`,
+    );
   }
 
   const record: IdeServerRecord = {
@@ -388,13 +390,48 @@ async function stopIdeServerUnlocked(log: LogFn): Promise<{ stopped: boolean; po
   return { stopped: pids.length > 0, port: record.port };
 }
 
-/** Windows: kill the tree of a spawned server that never started listening. */
-async function killUnreadyWindowsServer(pid: number, log: LogFn): Promise<void> {
+/** True while any process in the group led by `pgid` is alive. */
+function isGroupAlive(pgid: number): boolean {
   try {
-    await killSessionTree(pid);
-  } catch (err) {
-    log('WARN', `IDE server pid ${pid} never listened, and killing its tree failed: ${(err as Error).message}`);
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
   }
+}
+
+/**
+ * Stop a spawned server that never started listening. Windows: kill its tree.
+ * POSIX: it leads its own process group (spawned detached), so SIGTERM the
+ * group, wait for it to empty, and SIGKILL it if it outlives the wait,
+ * mirroring `stopIdeServer`. A failure is logged, never thrown: the caller is
+ * already failing the start.
+ */
+async function stopUnreadyIdeServer(pid: number, log: LogFn): Promise<void> {
+  if (isWindows()) {
+    try {
+      await killSessionTree(pid);
+    } catch (err) {
+      log('WARN', `IDE server pid ${pid} never listened, and killing its tree failed: ${(err as Error).message}`);
+    }
+    return;
+  }
+  try {
+    process.kill(-pid, 'SIGTERM');
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + IDE_STOP_EXIT_TIMEOUT_MS;
+  while (isGroupAlive(pid) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, STOP_POLL_MS));
+  }
+  if (!isGroupAlive(pid)) return;
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    // exited between the check and the kill
+  }
+  log('WARN', `IDE server pid ${pid} never listened and ignored SIGTERM; SIGKILL sent to its group`);
 }
 
 /** Seams for the Windows stop path; production uses the real census and tree kill. */

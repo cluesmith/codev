@@ -9,8 +9,12 @@ Gemini was skipped (agy exit 3). Codex requested changes; Claude approved with n
    readiness timeout. A failed kill is logged. The real-Windows stub test gains a never-listening
    server (`STUB_IDE_NO_LISTEN`), driven through the plain `.cmd` shim so the tree has a cmd.exe
    root. It asserts that the start fails, the server and its child are gone, and no record exists.
-   The POSIX start path has the same defect, but this project keeps POSIX byte-identical, so it
-   is raised with the architect and not changed here.
+   The POSIX start path has the same defect (origin #1668/#1789). Architect ruling, 2026-10-23:
+   it is a sibling-site fix and in scope. POSIX now SIGTERMs the child's process group before the
+   start fails, then SIGKILLs it if it outlives the stop wait. The error says the process was
+   stopped. `ide-server-unready.test.ts` drives a real stub that never binds and asserts no
+   process is left and no record exists; with the kill removed, it fails with both pids alive.
+   The deviation is recorded in the spec and the plan.
 
 2. **A stop with survivors deletes the record.** Accepted and fixed. When any target outlives
    the exit wait, `stopWindowsIdeServer` keeps the record and throws, naming the surviving pids,

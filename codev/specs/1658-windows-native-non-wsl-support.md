@@ -280,6 +280,10 @@ The ruling also named known items the spec must address:
 **Technical constraints**
 - **POSIX behavior must not change.** Windows support enters through platform branches or
   abstractions whose POSIX implementation is today's code, byte for byte where practical.
+  *(Deviation, architect ruling 2026-10-23: a defect found on a Windows path whose root cause
+  also exists on POSIX is fixed on both sides. The first case is the IDE server start, which
+  leaked a never-ready server with no record (origin #1668/#1789). See the plan's Phase 9 note.
+  The rule guards success-path behavior; a leak is not behavior.)*
 - **The framework tree split applies.** Changes to shipped framework content (skeleton docs,
   `DEPENDENCIES.md`, config defaults written by `codev init`/`adopt`, skills) are mirrored in
   `codev/` and `codev-skeleton/`. Shipped skill edits touch all four copies (`.claude` and

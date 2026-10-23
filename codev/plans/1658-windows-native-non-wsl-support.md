@@ -779,6 +779,14 @@ The spec's "Codev IDE server (#1789) on native Windows" success criteria and sce
   child process; below-floor stub is refused; nothing is written outside the user profile.
 - [ ] POSIX suite and `check-types` green.
 
+Amended 2026-10-23 (architect ruling, sibling-site fix under the POSIX rule): a server that never
+starts listening was left running with no record, so nothing could stop it. The leak dates from
+#1668/#1789. CMAP found it on the Windows path. The same root cause exists on POSIX, so it is
+fixed there too: one group kill of the child before the start fails (SIGTERM, then SIGKILL after
+the stop wait, as `stopIdeServer` does), and the error says the process was stopped. A POSIX test
+drives a stub that never binds and asserts no process is left and no record is written. The POSIX
+rule guards success-path behavior; a never-ready child is a leak, not behavior.
+
 #### Joint check with the codev-ide lane (scenario 15b): where it lands
 
 SPIR has no dev-approval gate; the gates are spec-approval, plan-approval and pr. So:
