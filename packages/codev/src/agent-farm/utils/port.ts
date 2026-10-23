@@ -77,9 +77,11 @@ function windowsPortQueryArgs(port: number): string[] {
  * `getProcessesOnPort` for callers inside Tower's event loop. POSIX: the same
  * `lsof` lookup. Windows: the same query, run asynchronously, because it takes
  * seconds and the synchronous form would stall every terminal and request
- * while it runs (Spec 1658 Phase 9).
+ * while it runs (Spec 1658 Phase 9). Windows resolves null when the query
+ * itself fails or times out, so a caller can tell "unknown" from "nothing
+ * listening"; POSIX keeps `lsof`'s `[]` for both.
  */
-export function getProcessesOnPortAsync(port: number): Promise<number[]> {
+export function getProcessesOnPortAsync(port: number): Promise<number[] | null> {
   if (!isWindows()) return Promise.resolve(getProcessesOnPort(port));
   if (!isValidPort(port)) return Promise.resolve([]);
   return new Promise((resolve) => {
@@ -89,7 +91,7 @@ export function getProcessesOnPortAsync(port: number): Promise<number[]> {
       { encoding: 'utf-8', timeout: WINDOWS_PORT_QUERY_TIMEOUT_MS, windowsHide: true },
       (error, stdout) => {
         if (error) {
-          resolve([]);
+          resolve(null);
           return;
         }
         resolve(parsePidLines(stdout));

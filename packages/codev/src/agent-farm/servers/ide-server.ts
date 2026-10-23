@@ -30,7 +30,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { existsSync } from 'node:fs';
 import { getProcessesOnPort, getProcessesOnPortAsync } from '../utils/port.js';
 import { isWindows } from '../../lib/platform.js';
-import { collectTree, killSessionTree } from '../../lib/process-tree.js';
+import { collectTree, killSessionTree, type TreeMember } from '../../lib/process-tree.js';
 import { listProcessCensus, type ProcessCensusEntry } from './process-census.js';
 import { parseJsonBody } from '../utils/server-utils.js';
 import {
@@ -261,10 +261,10 @@ async function spawnIdeServerUnlocked(opts: SpawnIdeOptions, log: LogFn): Promis
   if (!ready) {
     // No record is written for a server that never bound, so nothing could
     // stop it later: stop it now (Spec 1658 Phase 9; the leak dates from #1668).
-    await stopUnreadyIdeServer(child.pid, log);
-    throw new Error(
-      `IDE server did not start listening on port ${port} within ${IDE_READY_TIMEOUT_MS / 1000}s; the server process was stopped`,
-    );
+    const stopped = await stopUnreadyIdeServer(child.pid, log);
+    let outcome = 'the server process was stopped';
+    if (!stopped) outcome = `the server process (pid ${child.pid}) could not be stopped and may still be running`;
+    throw new Error(`IDE server did not start listening on port ${port} within ${IDE_READY_TIMEOUT_MS / 1000}s; ${outcome}`);
   }
 
   const record: IdeServerRecord = {
@@ -308,7 +308,7 @@ async function adoptLiveIdeServer(
     prefix: IDE_DEFAULT_PREFIX,
     port,
     serverPath: prior?.serverPath ?? opts.serverPath,
-    pid: listeners[0] ?? 0,
+    pid: listeners?.[0] ?? 0,
     startedAt: prior?.startedAt ?? new Date().toISOString(),
     serverVersion: prior?.serverVersion,
     extensionsDir: prior?.extensionsDir,
@@ -356,10 +356,11 @@ async function stopIdeServerUnlocked(log: LogFn): Promise<{ stopped: boolean; po
   if (!record) {
     return { stopped: false, port: null };
   }
-  const pids = await getProcessesOnPortAsync(record.port);
+  const listeners = await getProcessesOnPortAsync(record.port);
   if (isWindows()) {
-    return stopWindowsIdeServer(record, pids, log);
+    return stopWindowsIdeServer(record, listeners, log);
   }
+  const pids = listeners ?? [];
   for (const pid of pids) {
     try {
       process.kill(pid, 'SIGTERM');
@@ -401,37 +402,44 @@ function isGroupAlive(pgid: number): boolean {
 }
 
 /**
- * Stop a spawned server that never started listening. Windows: kill its tree.
- * POSIX: it leads its own process group (spawned detached), so SIGTERM the
- * group, wait for it to empty, and SIGKILL it if it outlives the wait,
- * mirroring `stopIdeServer`. A failure is logged, never thrown: the caller is
- * already failing the start.
+ * Stop a spawned server that never started listening; true when it is gone.
+ * Windows: kill its tree. POSIX: it leads its own process group (spawned
+ * detached), so SIGTERM the group, wait for it to empty, and SIGKILL it if it
+ * outlives the wait, mirroring `stopIdeServer`. A failure is logged, never
+ * thrown: the caller is already failing the start, and says whether this
+ * worked.
  */
-async function stopUnreadyIdeServer(pid: number, log: LogFn): Promise<void> {
+async function stopUnreadyIdeServer(pid: number, log: LogFn): Promise<boolean> {
   if (isWindows()) {
     try {
-      await killSessionTree(pid);
+      const result = await killSessionTree(pid);
+      return result.refused === undefined;
     } catch (err) {
       log('WARN', `IDE server pid ${pid} never listened, and killing its tree failed: ${(err as Error).message}`);
+      return false;
     }
-    return;
   }
   try {
     process.kill(-pid, 'SIGTERM');
-  } catch {
-    return;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return true;
+    log('WARN', `IDE server pid ${pid} never listened, and SIGTERM to its group failed: ${code ?? (err as Error).message}`);
+    return false;
   }
   const deadline = Date.now() + IDE_STOP_EXIT_TIMEOUT_MS;
   while (isGroupAlive(pid) && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, STOP_POLL_MS));
   }
-  if (!isGroupAlive(pid)) return;
+  if (!isGroupAlive(pid)) return true;
   try {
     process.kill(-pid, 'SIGKILL');
   } catch {
     // exited between the check and the kill
   }
   log('WARN', `IDE server pid ${pid} never listened and ignored SIGTERM; SIGKILL sent to its group`);
+  await new Promise((r) => setTimeout(r, STOP_POLL_MS));
+  return !isGroupAlive(pid);
 }
 
 /** Seams for the Windows stop path; production uses the real census and tree kill. */
@@ -441,60 +449,105 @@ export interface WindowsIdeStopSeams {
   isAlive?: (pid: number) => boolean;
 }
 
+/** What a Windows stop kills (`roots`, as trees) and waits on (`targets`). */
+export interface WindowsIdeStopPlan {
+  roots: number[];
+  targets: TreeMember[];
+}
+
 /**
- * The roots whose trees a Windows stop kills. The recorded pid (a `cmd.exe`
- * wrapper, or the server itself) is a root only when the census shows a
- * listener among its descendants: that live listener is what proves the pid
- * still belongs to this server and was not reused. Any listener outside that
- * tree (an adopted server) is a root of its own. `targets` is every process
- * the stop expects to end, for the exit wait.
+ * The roots whose trees a Windows stop kills while the port has listeners.
+ * The recorded pid (a `cmd.exe` wrapper, or the server itself) is a root only
+ * when the census shows a listener among its descendants: that live listener
+ * is what proves the pid still belongs to this server and was not reused. Any
+ * listener outside that tree (an adopted server) is a root of its own.
+ * `targets` is every process the stop expects to end, with its creation time.
  */
 export function windowsIdeStopRoots(
   census: ProcessCensusEntry[],
   recordedPid: number,
   listeners: number[],
-): { roots: number[]; targets: number[] } {
-  const recordedTree = collectTree(census, recordedPid).map((member) => member.pid);
+): WindowsIdeStopPlan {
+  const recordedTree = collectTree(census, recordedPid);
   const roots: number[] = [];
-  const targets: number[] = [];
-  if (recordedPid > 0 && listeners.some((pid) => recordedTree.includes(pid))) {
+  const targets: TreeMember[] = [];
+  const targeted = (pid: number) => targets.some((member) => member.pid === pid);
+  if (recordedPid > 0 && listeners.some((pid) => recordedTree.some((member) => member.pid === pid))) {
     roots.push(recordedPid);
     targets.push(...recordedTree);
   }
   for (const pid of listeners) {
-    if (!targets.includes(pid)) {
-      roots.push(pid);
-      targets.push(...collectTree(census, pid).map((member) => member.pid));
-      if (!targets.includes(pid)) targets.push(pid);
-    }
+    if (targeted(pid)) continue;
+    roots.push(pid);
+    targets.push(...collectTree(census, pid));
+    if (!targeted(pid)) targets.push({ pid, creationTime: null });
   }
   return { roots, targets };
 }
 
 /**
+ * The plan when nothing listens on the port but the record names a pid: the
+ * server may be alive with its port closed. The recorded tree is ours only if
+ * a process in it carries Tower's connection-token path on its command line
+ * (every spawn passes `--connection-token-file <path>`), so a reused pid is
+ * never killed. Otherwise there is nothing of ours to stop.
+ */
+export function windowsIdeRecordedServerPlan(
+  census: ProcessCensusEntry[],
+  recordedPid: number,
+  tokenPath: string,
+): WindowsIdeStopPlan {
+  if (recordedPid <= 0) return { roots: [], targets: [] };
+  const tree = collectTree(census, recordedPid);
+  const marker = tokenPath.toLowerCase();
+  const byPid = new Map(census.map((entry) => [entry.pid, entry.cmdline.toLowerCase()]));
+  const ours = tree.some((member) => (byPid.get(member.pid) ?? '').includes(marker));
+  if (!ours) return { roots: [], targets: [] };
+  return { roots: [recordedPid], targets: tree };
+}
+
+/**
  * Windows stop: kill each root's process tree (`killSessionTree`: census
  * snapshot, `taskkill /T /F`, then any snapshot member still alive), wait for
- * the targets to exit, then delete the record. A census failure falls back to
- * the listeners alone. A kill that fails is logged; if any target outlives the
- * wait, the record is kept and the stop throws, naming the survivors.
+ * the targets to exit, then delete the record. With no listener, the recorded
+ * tree is checked for being this server (`windowsIdeRecordedServerPlan`).
+ * Whenever the stop cannot tell what is running (the port query failed, or
+ * there is no listener and the census failed) or a target outlives the wait,
+ * the record is kept and the stop throws, so the server stays tracked and the
+ * stop can be retried. A census failure with listeners falls back to their
+ * trees alone. Survivors are re-checked by creation time, so a pid reused
+ * during the wait is not reported.
  */
 export async function stopWindowsIdeServer(
   record: IdeServerRecord,
-  listeners: number[],
+  listeners: number[] | null,
   log: LogFn,
   seams: WindowsIdeStopSeams = {},
 ): Promise<{ stopped: boolean; port: number | null }> {
   const census = seams.census ?? listProcessCensus;
   const killTree = seams.killTree ?? ((pid: number) => killSessionTree(pid));
   const isAlive = seams.isAlive ?? isPidAlive;
+  const keep = (reason: string): Error =>
+    new Error(`IDE server on port ${record.port} was not stopped: ${reason}; the record is kept so the stop can be retried`);
 
-  let plan: { roots: number[]; targets: number[] } = { roots: listeners, targets: listeners };
-  if (listeners.length > 0) {
-    try {
-      plan = windowsIdeStopRoots(await census({ fresh: true }), record.pid, listeners);
-    } catch (err) {
-      log('WARN', `IDE server stop: process census failed (${(err as Error).message}); killing the listeners' trees only`);
-    }
+  if (listeners === null) throw keep('the port query failed, so its processes are unknown');
+
+  let snapshot: ProcessCensusEntry[] | null = null;
+  try {
+    snapshot = await census({ fresh: true });
+  } catch (err) {
+    log('WARN', `IDE server stop: process census failed (${(err as Error).message})`);
+  }
+
+  let plan: WindowsIdeStopPlan;
+  if (listeners.length === 0) {
+    if (snapshot === null) throw keep(`the process census failed, so whether pid ${record.pid} still runs is unknown`);
+    plan = windowsIdeRecordedServerPlan(snapshot, record.pid, getIdeConnectionTokenPath());
+  } else if (snapshot === null) {
+    log('WARN', "IDE server stop: killing the listeners' trees only");
+    plan = { roots: listeners, targets: listeners.map((pid) => ({ pid, creationTime: null })) };
+  } else {
+    plan = windowsIdeStopRoots(snapshot, record.pid, listeners);
   }
 
   for (const pid of plan.roots) {
@@ -506,23 +559,43 @@ export async function stopWindowsIdeServer(
   }
 
   const deadline = Date.now() + IDE_STOP_EXIT_TIMEOUT_MS;
-  let survivors = plan.targets.filter(isAlive);
+  let survivors = plan.targets.filter((member) => isAlive(member.pid));
   while (survivors.length > 0 && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, STOP_POLL_MS));
-    survivors = survivors.filter(isAlive);
+    survivors = survivors.filter((member) => isAlive(member.pid));
+  }
+  if (survivors.length > 0) {
+    survivors = await sameSurvivors(survivors, census);
   }
 
-  // A survivor keeps the record, so the server stays tracked and the stop can
-  // be retried; the caller reports the failure.
   if (survivors.length > 0) {
-    log('WARN', `IDE server stop: processes survived the tree kill: ${survivors.join(', ')}`);
-    throw new Error(
-      `IDE server on port ${record.port} did not stop: process(es) ${survivors.join(', ')} still running; the record is kept so the stop can be retried`,
-    );
+    const pids = survivors.map((member) => member.pid).join(', ');
+    log('WARN', `IDE server stop: processes survived the tree kill: ${pids}`);
+    throw keep(`process(es) ${pids} still running`);
   }
   deleteIdeRecord();
   log('INFO', `Stopped IDE server on port ${record.port} (${plan.targets.length} process(es))`);
-  return { stopped: listeners.length > 0, port: record.port };
+  return { stopped: plan.targets.length > 0, port: record.port };
+}
+
+/**
+ * Survivors that are still the processes the stop targeted: present in a fresh
+ * census with the recorded creation time. One recorded without a creation
+ * time, or a failed census, counts as surviving (fail safe: the record stays).
+ */
+async function sameSurvivors(survivors: TreeMember[], census: typeof listProcessCensus): Promise<TreeMember[]> {
+  let fresh: ProcessCensusEntry[];
+  try {
+    fresh = await census({ fresh: true });
+  } catch {
+    return survivors;
+  }
+  const createdByPid = new Map(fresh.map((entry) => [entry.pid, entry.creationTime ?? null]));
+  return survivors.filter((member) => {
+    if (!createdByPid.has(member.pid)) return false;
+    if (member.creationTime === null) return true;
+    return createdByPid.get(member.pid) === member.creationTime;
+  });
 }
 
 export interface IdeStatus {
@@ -536,6 +609,8 @@ export async function ideServerStatus(): Promise<IdeStatus> {
   const record = readIdeRecord();
   if (!record) return { record: null, alive: false, pid: null };
   const pids = await getProcessesOnPortAsync(record.port);
+  // Windows: a failed port query is unknown, not dead; fall back to a connect.
+  if (pids === null) return { record, alive: await isPortListening(record.port), pid: null };
   return { record, alive: pids.length > 0, pid: pids[0] ?? null };
 }
 

@@ -60,7 +60,7 @@ import {
   stopWindowsIdeServer,
   windowsIdeStopRoots,
 } from '../servers/ide-server.js';
-import { readIdeRecord, writeIdeRecord, type IdeServerRecord } from '../lib/ide-record.js';
+import { getIdeConnectionTokenPath, readIdeRecord, writeIdeRecord, type IdeServerRecord } from '../lib/ide-record.js';
 import { buildIdeServerEnv, ideServerSpawnable } from '../lib/ide-version.js';
 import { resolveIdeServerPath } from '../commands/ide.js';
 import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
@@ -195,7 +195,7 @@ describe('windowsIdeStopRoots', () => {
   it('kills the recorded root when the listener descends from it', () => {
     const plan = windowsIdeStopRoots(census, 20, [30]);
     expect(plan.roots).toEqual([20]);
-    expect(plan.targets.sort()).toEqual([20, 30, 40]);
+    expect(plan.targets.map((m) => m.pid).sort()).toEqual([20, 30, 40]);
   });
 
   it('a recorded pid with no listener under it (reused) is never a root', () => {
@@ -203,19 +203,19 @@ describe('windowsIdeStopRoots', () => {
     const reused = [entry(20, 10, 9000), entry(50, 1, 3000), entry(60, 50, 3100)];
     const plan = windowsIdeStopRoots(reused, 20, [50]);
     expect(plan.roots).toEqual([50]);
-    expect(plan.targets.sort()).toEqual([50, 60]);
+    expect(plan.targets.map((m) => m.pid).sort()).toEqual([50, 60]);
   });
 
   it('a recorded pid that is the listener itself (npm shim, adoption) is one root', () => {
     const plan = windowsIdeStopRoots(census, 30, [30]);
     expect(plan.roots).toEqual([30]);
-    expect(plan.targets.sort()).toEqual([30, 40]);
+    expect(plan.targets.map((m) => m.pid).sort()).toEqual([30, 40]);
   });
 
   it('a listener missing from the census is still a root and a target', () => {
     const plan = windowsIdeStopRoots([], 20, [77]);
     expect(plan.roots).toEqual([77]);
-    expect(plan.targets).toEqual([77]);
+    expect(plan.targets).toEqual([{ pid: 77, creationTime: null }]);
   });
 });
 
@@ -269,18 +269,70 @@ describe('stopWindowsIdeServer', () => {
       },
       isAlive: (pid) => pid === 30,
     });
-    await expect(attempt).rejects.toThrow(/did not stop: process\(es\) 30 still running/);
+    await expect(attempt).rejects.toThrow(/was not stopped: process\(es\) 30 still running.*record is kept/);
     expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('taskkill timed out'));
     expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('survived the tree kill: 30'));
     expect(readIdeRecord()?.pid).toBe(20);
   }, 10_000);
 
-  it('nothing listening: no kill, stopped is false', async () => {
+  it('nothing listening and the recorded pid is not ours (reused): no kill, record deleted, stopped false', async () => {
     const killTree = vi.fn(async () => {});
-    const result = await stopWindowsIdeServer(record(20), [], noopLog, { killTree, isAlive: () => false });
+    const census = async () => [entry(20, 10, 9000)];
+    const result = await stopWindowsIdeServer(record(20), [], noopLog, { census, killTree, isAlive: () => true });
     expect(killTree).not.toHaveBeenCalled();
     expect(result).toEqual({ stopped: false, port: 8200 });
+    expect(readIdeRecord()).toBeNull();
   });
+
+  it('nothing listening but the recorded tree is this server (port closed): killed, then the record goes', async () => {
+    const tokenArg = `--connection-token-file ${getIdeConnectionTokenPath()}`;
+    const census = async () => [
+      { ...entry(20, 10, 2000), cmdline: `cmd.exe /d /s /c "codev-ide-server.cmd ^"${getIdeConnectionTokenPath()}^""` },
+      { ...entry(30, 20, 2100), cmdline: `node.exe server.js ${tokenArg.toUpperCase()}` },
+    ];
+    const alive = new Set([20, 30]);
+    const killTree = vi.fn(async () => {
+      alive.clear();
+    });
+    const result = await stopWindowsIdeServer(record(20), [], noopLog, { census, killTree, isAlive: (pid) => alive.has(pid) });
+    expect(killTree).toHaveBeenCalledWith(20);
+    expect(result).toEqual({ stopped: true, port: 8200 });
+    expect(readIdeRecord()).toBeNull();
+  });
+
+  it('a failed port query keeps the record and fails the stop; nothing is killed', async () => {
+    const killTree = vi.fn(async () => {});
+    const attempt = stopWindowsIdeServer(record(20), null, noopLog, { killTree });
+    await expect(attempt).rejects.toThrow(/port query failed.*record is kept/);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(readIdeRecord()?.pid).toBe(20);
+  });
+
+  it('no listener and a failed census keeps the record and fails the stop', async () => {
+    const attempt = stopWindowsIdeServer(record(20), [], noopLog, {
+      census: async () => {
+        throw new Error('powershell unavailable');
+      },
+    });
+    await expect(attempt).rejects.toThrow(/whether pid 20 still runs is unknown/);
+    expect(readIdeRecord()?.pid).toBe(20);
+  });
+
+  it('a target pid reused during the wait is not reported as a survivor', async () => {
+    let calls = 0;
+    const census = async () => {
+      calls += 1;
+      if (calls === 1) return [entry(30, 1, 2100)];
+      return [entry(30, 1, 7777)];
+    };
+    const result = await stopWindowsIdeServer(record(20), [30], noopLog, {
+      census,
+      killTree: async () => {},
+      isAlive: (pid) => pid === 30,
+    });
+    expect(result).toEqual({ stopped: true, port: 8200 });
+    expect(readIdeRecord()).toBeNull();
+  }, 10_000);
 });
 
 describe('stopIdeServer routing', () => {
