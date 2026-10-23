@@ -40,6 +40,17 @@ function seedBuilder(workspacePath: string, id: string, worktree: string): void 
   db.close();
 }
 
+
+/**
+ * The first test's hook opens the first better-sqlite3 database in a fresh
+ * worker, which cold-loads the native binding: past vitest's 10 s hook default
+ * on a loaded Windows runner.
+ */
+function firstDbOpenTimeoutMs(): number {
+  if (process.platform === 'win32') return 60_000;
+  return 10_000;
+}
+
 describe('builder identity from the spawn environment — issue #1783', () => {
   let tmpRoot: string;
   let workspacePath: string;
@@ -54,7 +65,7 @@ describe('builder identity from the spawn environment — issue #1783', () => {
     mkdirSync(join(workspacePath, '.git'));
     dbState.globalDbPath = join(tmpRoot, 'global.db');
     seedBuilder(workspacePath, 'builder-experiment-1782', worktreePath);
-  });
+  }, firstDbOpenTimeoutMs());
 
   afterEach(() => {
     process.chdir(origCwd);

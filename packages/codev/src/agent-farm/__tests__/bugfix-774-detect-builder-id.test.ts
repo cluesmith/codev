@@ -48,6 +48,17 @@ function seedBuilder(globalDbPath: string, workspacePath: string, id: string, wo
   db.close();
 }
 
+
+/**
+ * The first test's hook opens the first better-sqlite3 database in a fresh
+ * worker, which cold-loads the native binding: past vitest's 10 s hook default
+ * on a loaded Windows runner.
+ */
+function firstDbOpenTimeoutMs(): number {
+  if (process.platform === 'win32') return 60_000;
+  return 10_000;
+}
+
 describe('detectCurrentBuilderId — issue #774 / #1118', () => {
   let tmpRoot: string;
   let workspacePath: string;
@@ -62,7 +73,7 @@ describe('detectCurrentBuilderId — issue #774 / #1118', () => {
 
     dbState.globalDbPath = join(tmpRoot, 'global.db');
     seedBuilder(dbState.globalDbPath, workspacePath, 'builder-bugfix-1599', worktreePath);
-  });
+  }, firstDbOpenTimeoutMs());
 
   afterEach(() => {
     process.chdir(origCwd);
