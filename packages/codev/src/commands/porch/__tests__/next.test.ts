@@ -10,6 +10,11 @@ import { next } from '../next.js';
 import { writeState, getProjectDir, getStatusPath, PROJECTS_DIR } from '../state.js';
 import type { ProjectState, Protocol, PorchNextResponse } from '../types.js';
 
+/** A review file path that does not exist (the history entry's file is never written). */
+function missingReview(name: string): string {
+  return path.join(tmpdir(), 'codev-porch-next-missing-reviews', name);
+}
+
 // Mock loadConfig to return defaults, preventing workspace/global config from leaking in.
 // Without this, loadConfig reads ~/.codev/config.json and framework cache, which can
 // override consultation models (e.g., "parent") and break tests expecting 3-model defaults.
@@ -724,9 +729,9 @@ describe('porch next', () => {
         iteration: 1,
         build_output: '',
         reviews: [
-          { model: 'gemini', verdict: 'REQUEST_CHANGES', file: '/tmp/fake-review-gemini.txt' },
-          { model: 'codex', verdict: 'REQUEST_CHANGES', file: '/tmp/fake-review-codex.txt' },
-          { model: 'claude', verdict: 'APPROVE', file: '/tmp/fake-review-claude.txt' },
+          { model: 'gemini', verdict: 'REQUEST_CHANGES', file: missingReview('fake-review-gemini.txt') },
+          { model: 'codex', verdict: 'REQUEST_CHANGES', file: missingReview('fake-review-codex.txt') },
+          { model: 'claude', verdict: 'APPROVE', file: missingReview('fake-review-claude.txt') },
         ],
       }],
     });
@@ -757,9 +762,9 @@ describe('porch next', () => {
         iteration: 1,
         build_output: '',
         reviews: [
-          { model: 'gemini', verdict: 'REQUEST_CHANGES', file: '/tmp/fake-review.txt' },
-          { model: 'codex', verdict: 'APPROVE', file: '/tmp/fake-review2.txt' },
-          { model: 'claude', verdict: 'APPROVE', file: '/tmp/fake-review3.txt' },
+          { model: 'gemini', verdict: 'REQUEST_CHANGES', file: missingReview('fake-review.txt') },
+          { model: 'codex', verdict: 'APPROVE', file: missingReview('fake-review2.txt') },
+          { model: 'claude', verdict: 'APPROVE', file: missingReview('fake-review3.txt') },
         ],
       }],
     });

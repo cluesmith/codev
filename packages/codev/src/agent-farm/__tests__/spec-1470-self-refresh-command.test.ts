@@ -13,6 +13,7 @@
  * derives identity from the worktree, and every Tower call must carry that
  * derived id.
  */
+// spec-1658-tmp: opaque (/tmp/ws paths are fake builder rows, a mocked cwd and mocked orchestrator results; writes and git are mocked, so at most a realpath/stat probe of the nonexistent path fails the same way on every OS)
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 

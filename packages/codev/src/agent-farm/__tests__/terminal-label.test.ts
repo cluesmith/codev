@@ -6,6 +6,8 @@
  * and label preservation during reconnection.
  */
 
+// spec-1658-tmp: opaque (every /tmp is a shellper_socket value in DB rows or a string fed to extractShellperSessionId; the DB itself lives under os.tmpdir())
+
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';

@@ -16,6 +16,7 @@ import {
   copyTemplateDir,
   getTemplateFiles,
 } from '../lib/templates.js';
+import { resetHostPlatformForTests, setHostPlatformForTests } from '../lib/platform.js';
 
 describe('template utilities', () => {
   const testDir = path.join(tmpdir(), `codev-test-${Date.now()}`);
@@ -115,6 +116,26 @@ describe('template utilities', () => {
       expect(isUserDataPath('resources/commands/codev.md')).toBe(false);
       expect(isUserDataPath('resources/workflow-reference.md')).toBe(false);
       expect(isUserDataPath('config.json')).toBe(false);
+    });
+  });
+
+  describe('backslash-separated paths (Windows path.join)', () => {
+    afterEach(() => resetHostPlatformForTests());
+
+    it('match the same patterns on Windows', () => {
+      setHostPlatformForTests('win32');
+      expect(isUserDataPath('specs\\0001-feature.md')).toBe(true);
+      expect(isUserDataPath('codev\\resources\\arch.md')).toBe(true);
+      expect(isUserDataPath('protocols\\spir\\protocol.md')).toBe(false);
+      expect(isUpdatableFile('protocols\\spir\\protocol.md')).toBe(true);
+      expect(isUpdatableFile('resources\\commands\\codev.md')).toBe(true);
+      expect(isUpdatableFile('specs\\0001-feature.md')).toBe(false);
+    });
+
+    it('are taken as written on POSIX, where a backslash is a filename character', () => {
+      setHostPlatformForTests('linux');
+      expect(isUserDataPath('specs\\0001-feature.md')).toBe(false);
+      expect(isUpdatableFile('protocols\\spir\\protocol.md')).toBe(false);
     });
   });
 

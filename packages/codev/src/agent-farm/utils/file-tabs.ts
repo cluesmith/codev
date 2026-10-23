@@ -4,6 +4,7 @@
  */
 
 import type Database from 'better-sqlite3';
+import path from 'node:path';
 
 export interface FileTab {
   id: string;
@@ -45,11 +46,12 @@ export function deleteFileTabsForWorkspace(db: Database.Database, workspacePath:
 /**
  * Delete file tabs whose file_path is inside a given directory.
  * Used during builder cleanup to remove tabs pointing into a deleted worktree.
- * Ensures path boundary safety by normalizing the prefix to end with '/'.
+ * Ensures path boundary safety by normalizing the prefix to end with the host
+ * separator (`\` on Windows, Spec 1658).
  */
 export function deleteFileTabsByPathPrefix(db: Database.Database, pathPrefix: string): number {
   // Ensure trailing slash to prevent prefix collisions (e.g. bugfix-42 matching bugfix-424)
-  const safePrefix = pathPrefix.endsWith('/') ? pathPrefix : pathPrefix + '/';
+  const safePrefix = pathPrefix.endsWith(path.sep) ? pathPrefix : pathPrefix + path.sep;
   const result = db.prepare('DELETE FROM file_tabs WHERE file_path LIKE ? || \'%\'').run(safePrefix);
   return result.changes;
 }

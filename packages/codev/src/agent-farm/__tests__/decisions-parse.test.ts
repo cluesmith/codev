@@ -8,7 +8,9 @@ import { resolve } from 'node:path';
 import { classifyLines } from '../servers/decisions/grammar.js';
 import { parseDecisions, parseOptions, toDecisionsDocument } from '../servers/decisions/parse.js';
 
-const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8');
+// The fixture is LF; a CRLF checkout (core.autocrlf on Windows) is normalized back, and
+// the CRLF behaviour is tested by converting it explicitly.
+const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8').replace(/\r\n/g, '\n');
 
 /** A minimal file with one item whose body is `body` and whose tail after the Your-word line is `tail`. */
 function oneItem(body: string, yourWord = '**Your word:** `accept` = merge / `hold`', tail = ''): string {

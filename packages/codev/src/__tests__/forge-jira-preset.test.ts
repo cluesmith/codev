@@ -18,8 +18,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { gitBashEnv, gitBashScript } from '../lib/shell-launch.js';
 
 const jiraDir = resolve(__dirname, '..', '..', 'scripts', 'forge', 'jira');
 
@@ -134,7 +135,25 @@ let fakeBin: string;
 let fixtures: string;
 
 function run(script: string, env: Record<string, string> = {}) {
-  const res = spawnSync(join(jiraDir, `${script}.sh`), [], {
+  const scriptPath = join(jiraDir, `${script}.sh`);
+  if (process.platform === 'win32') {
+    // Native Windows runs a shipped concept script the way forge.ts does: through
+    // the resolved Git Bash, with MSYS argument conversion off. The host
+    // environment is kept (Windows programs need SystemRoot and friends), minus
+    // its own spelling of PATH so the one below is the only one.
+    const hostEnv: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (key.toUpperCase() !== 'PATH') hostEnv[key] = value;
+    }
+    const launch = gitBashScript(scriptPath);
+    const res = spawnSync(launch.command, launch.args, {
+      env: gitBashEnv({ ...hostEnv, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, FAKE_ACLI_DIR: fixtures, HOME: fixtures, ...env }),
+      encoding: 'utf-8',
+      windowsHide: true,
+    });
+    return { status: res.status, stdout: res.stdout, stderr: res.stderr };
+  }
+  const res = spawnSync(scriptPath, [], {
     env: { PATH: `${fakeBin}:${process.env.PATH}`, FAKE_ACLI_DIR: fixtures, HOME: fixtures, ...env },
     encoding: 'utf-8',
   });
@@ -368,6 +387,13 @@ describe('jira recently-closed', () => {
     const eng3 = JSON.parse(r.stdout).find((i: { number: string }) => i.number === 'ENG-3');
     expect(eng3.closedAt).toBeNull();
     expect(r.stderr).toContain('could not fetch dates for ENG-3');
+  });
+
+  it('fails, rather than reporting nothing closed, when the search output cannot be read', () => {
+    writeFileSync(join(fixtures, 'search.json'), 'not json');
+    const r = run('recently-closed', { CODEV_JIRA_SITE: 'example.atlassian.net' });
+    expect(r.status).not.toBe(0);
+    expect(r.stdout.trim()).not.toBe('[]');
   });
 
   it('emits [] and makes no view calls when nothing closed', () => {

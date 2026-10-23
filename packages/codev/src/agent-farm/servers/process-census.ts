@@ -14,14 +14,25 @@
  */
 
 import { execFile } from 'node:child_process';
+import { isWindows, windowsPowerShellPath } from '../../lib/platform.js';
 
 export interface ProcessCensusEntry {
   pid: number;
   ppid: number;
-  /** Resident set size in kilobytes, as `ps -o rss=` reports it. */
+  /** Resident set size in kilobytes, as `ps -o rss=` reports it (working set on Windows). */
   rssKb: number;
-  /** The full joined argv (as `ps ... -o args=` reports it). */
+  /**
+   * The full joined argv (as `ps ... -o args=` reports it). On Windows this is
+   * the raw command line, still carrying its argv quoting; a process whose
+   * command line the current user cannot read reports `''` ("not ours").
+   */
   cmdline: string;
+  /**
+   * Process creation time, epoch ms. Set by the Windows provider (Spec 1658),
+   * where it is what tells a live PID from a reused one; the POSIX provider
+   * leaves it unset and callers use `getProcessStartTime` there.
+   */
+  creationTime?: number;
 }
 
 function parseCensus(out: string): ProcessCensusEntry[] {
@@ -41,11 +52,12 @@ function parseCensus(out: string): ProcessCensusEntry[] {
 }
 
 /**
- * Snapshot every running process as {pid, ppid, rssKb, cmdline}. `ps -ww`
- * prevents argv truncation (shellper config blobs are large) on both BSD and
- * coreutils `ps`. Resolves to `[]` on `ps` failure (missing binary, timeout,
- * non-zero exit) — callers decide how to degrade, mirroring the async
- * `findShellperProcesses` convention in `../../terminal/session-manager.ts`.
+ * POSIX provider: snapshot every running process as {pid, ppid, rssKb,
+ * cmdline}. `ps -ww` prevents argv truncation (shellper config blobs are large)
+ * on both BSD and coreutils `ps`. Resolves to `[]` on `ps` failure (missing
+ * binary, timeout, non-zero exit) — callers decide how to degrade, mirroring
+ * the async `findShellperProcesses` convention in
+ * `../../terminal/session-manager.ts`.
  *
  * Deliberately raw `execFile` + a hand-rolled Promise, not `execFileSync` and
  * not `util.promisify(execFile)`: this is called from `/health`
@@ -57,7 +69,7 @@ function parseCensus(out: string): ProcessCensusEntry[] {
  * `{stdout, stderr}` via a non-standard symbol that a test mock would need to
  * reproduce exactly to avoid silently promisifying to the wrong shape.
  */
-export function listProcessCensus(): Promise<ProcessCensusEntry[]> {
+function listPosixCensus(): Promise<ProcessCensusEntry[]> {
   return new Promise((resolve) => {
     execFile('ps', ['-A', '-ww', '-eo', 'pid=,ppid=,rss=,args='], { timeout: 5000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
       if (err || !stdout) {
@@ -67,4 +79,158 @@ export function listProcessCensus(): Promise<ProcessCensusEntry[]> {
       resolve(parseCensus(stdout));
     });
   });
+}
+
+// ============================================================================
+// Windows provider (Spec 1658)
+// ============================================================================
+
+/**
+ * Inline CIM query: pid, ppid, command line, creation time (UTC ISO-8601) and
+ * working set, as one compact JSON document. Single quotes only, so the command
+ * survives Windows argv quoting unchanged; UTF-8 output so a non-ASCII path in
+ * a command line is not mangled by the console code page. Inline commands are
+ * not governed by script execution policy.
+ */
+export const WINDOWS_CENSUS_QUERY = '[Console]::OutputEncoding = [Text.Encoding]::UTF8; '
+  + 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,'
+  + "@{n='CreationDate';e={$_.CreationDate.ToUniversalTime().ToString('o')}},WorkingSetSize"
+  + ' | ConvertTo-Json -Compress';
+
+/**
+ * Measured on windows-latest and the owner machine (audit 1.3): a warm query
+ * takes about 0.5 s and the first one in a fresh PowerShell up to 4.3 s. The
+ * timeout leaves room for a cold query on a loaded machine.
+ */
+export const WINDOWS_CENSUS_TIMEOUT_MS = 10_000;
+
+/**
+ * How long a Windows census result is reused. `/health` awaits the census, and
+ * a warm query costs ~10x `ps -A`, so back-to-back callers inside this window
+ * share one snapshot. Short enough that a sweep never acts on a stale table:
+ * every kill decision is re-checked against creation time.
+ */
+export const WINDOWS_CENSUS_TTL_MS = 2_000;
+
+interface CimProcess {
+  ProcessId?: unknown;
+  ParentProcessId?: unknown;
+  CommandLine?: unknown;
+  CreationDate?: unknown;
+  WorkingSetSize?: unknown;
+}
+
+/**
+ * Parse the CIM query's JSON. `ConvertTo-Json` emits an object rather than an
+ * array when there is exactly one row, and nothing at all when there are none.
+ * Throws on output that is not the expected JSON: on Windows a census failure
+ * is reported, never read as an empty process table.
+ */
+export function parseWindowsCensus(out: string): ProcessCensusEntry[] {
+  const text = out.replace(/^\uFEFF/, '').trim();
+  if (!text) return [];
+  const parsed: unknown = JSON.parse(text);
+  const rows: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+  const entries: ProcessCensusEntry[] = [];
+  for (const row of rows) {
+    if (row === null || typeof row !== 'object') continue;
+    const cim = row as CimProcess;
+    const pid = Number(cim.ProcessId);
+    const ppid = Number(cim.ParentProcessId);
+    if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(ppid) || ppid < 0) continue;
+    const entry: ProcessCensusEntry = {
+      pid,
+      ppid,
+      rssKb: Math.round((Number(cim.WorkingSetSize) || 0) / 1024),
+      cmdline: typeof cim.CommandLine === 'string' ? cim.CommandLine : '',
+    };
+    if (typeof cim.CreationDate === 'string') {
+      const creationTime = Date.parse(cim.CreationDate);
+      if (!Number.isNaN(creationTime)) entry.creationTime = creationTime;
+    }
+    entries.push(entry);
+  }
+  return entries;
+}
+
+/** Runs one PowerShell command and resolves to its stdout. */
+export type PowerShellExec = (command: string, timeoutMs: number) => Promise<string>;
+
+const runPowerShell: PowerShellExec = (command, timeoutMs) => new Promise((resolve, reject) => {
+  execFile(
+    windowsPowerShellPath(),
+    ['-NoProfile', '-NonInteractive', '-Command', command],
+    { timeout: timeoutMs, windowsHide: true, maxBuffer: 64 * 1024 * 1024 },
+    (err, stdout) => {
+      if (err) {
+        reject(new Error(`process census failed (PowerShell CIM query): ${err.message}`));
+        return;
+      }
+      resolve(String(stdout));
+    },
+  );
+});
+
+export interface WindowsCensusProviderOptions {
+  exec?: PowerShellExec;
+  ttlMs?: number;
+  timeoutMs?: number;
+  now?: () => number;
+}
+
+export interface CensusReadOptions {
+  /**
+   * Read the table now, bypassing the Windows TTL cache and any query already
+   * in flight. Teardown needs this: a snapshot must include processes started
+   * a moment ago, and its re-check must see processes that just died.
+   */
+  fresh?: boolean;
+}
+
+/**
+ * A Windows census with a short TTL cache and single-flight coalescing: callers
+ * arriving while a query is in flight share it, and callers inside the TTL get
+ * the last result without spawning PowerShell. A `fresh` read always runs its
+ * own query (and refreshes the cache). A failed query is not cached.
+ */
+export function createWindowsCensusProvider(
+  opts: WindowsCensusProviderOptions = {},
+): (read?: CensusReadOptions) => Promise<ProcessCensusEntry[]> {
+  const exec = opts.exec ?? runPowerShell;
+  const ttlMs = opts.ttlMs ?? WINDOWS_CENSUS_TTL_MS;
+  const timeoutMs = opts.timeoutMs ?? WINDOWS_CENSUS_TIMEOUT_MS;
+  const now = opts.now ?? Date.now;
+  let cached: { at: number; entries: ProcessCensusEntry[] } | null = null;
+  let inFlight: Promise<ProcessCensusEntry[]> | null = null;
+
+  return (read) => {
+    const fresh = read?.fresh === true;
+    if (!fresh) {
+      if (cached && now() - cached.at < ttlMs) return Promise.resolve(cached.entries);
+      if (inFlight) return inFlight;
+    }
+    const query = exec(WINDOWS_CENSUS_QUERY, timeoutMs).then((out) => {
+      const entries = parseWindowsCensus(out);
+      cached = { at: now(), entries };
+      return entries;
+    });
+    const shared = query.finally(() => {
+      if (inFlight === shared) inFlight = null;
+    });
+    inFlight = shared;
+    return shared;
+  };
+}
+
+const windowsCensus = createWindowsCensusProvider();
+
+/**
+ * Snapshot every running process. POSIX resolves to `[]` when `ps` fails (see
+ * `listPosixCensus`). On Windows a failure REJECTS: the census is load-bearing
+ * for teardown and the sweeps (Spec 1658), so an unreadable process table must
+ * surface as an error rather than look like a machine with no processes.
+ */
+export function listProcessCensus(read?: CensusReadOptions): Promise<ProcessCensusEntry[]> {
+  if (isWindows()) return windowsCensus(read);
+  return listPosixCensus();
 }

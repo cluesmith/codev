@@ -7,6 +7,16 @@ import { execSync, spawnSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
+import { setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
+
+// These tests call vi.resetModules() and re-import doctor, which loads a fresh
+// platform module with no override; pin every instance to POSIX so a win32 host
+// does not take the Windows sections (covered by doctor-windows-*.test.ts).
+vi.mock('../lib/platform.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/platform.js')>();
+  actual.setHostPlatformForTests('linux');
+  return actual;
+});
 
 // We need to test the internal functions, so we'll import the module
 // and test the exported function behavior
@@ -121,11 +131,16 @@ function restoreEnv(key: string, prior: string | undefined): void {
 describe('doctor command', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // These are the POSIX doctor's checks (which/--version probes through the mocked
+    // child_process); force the seam so a win32 host does not take the Windows sections
+    // (process census, job helper, Windows prerequisites), which have their own tests.
+    setHostPlatformForTests('linux');
     // Suppress console output during tests
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
+    resetHostPlatformForTests();
     vi.restoreAllMocks();
   });
 
@@ -174,6 +189,19 @@ describe('doctor command', () => {
       const { doctor } = await import('../commands/doctor.js');
       const result = await doctor();
       expect(result).toBe(0);
+    });
+
+    it('prints no Windows prerequisites section on POSIX (Spec 1658: POSIX output unchanged)', async () => {
+      vi.mocked(execSync).mockImplementation(() => Buffer.from('/usr/bin/command'));
+      vi.mocked(spawnSync).mockImplementation(() => ({
+        status: 0, stdout: 'git version 2.40.0', stderr: '', signal: null, output: [null, 'git version 2.40.0', ''], pid: 0,
+      }));
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+      const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join('\n');
+      expect(printed).toContain('Core Dependencies');
+      expect(printed).not.toContain('Windows Prerequisites');
+      expect(printed).not.toContain('Git Bash');
     });
 
     it('should return 1 when required dependencies are missing', async () => {

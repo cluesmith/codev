@@ -20,6 +20,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import Database from 'better-sqlite3';
 import { _runAgyConsultation, resolveOptionalLaneModelChoice } from '../index.js';
+import { removeFakeCliTempDir } from './fake-cli-temp-dir.js';
 
 const ENV_KEYS = [
   'CODEV_AGY_BIN',
@@ -68,6 +69,24 @@ process.stdout.write('---\\nVERDICT: APPROVE\\nSUMMARY: ok\\nCONFIDENCE: HIGH\\n
 process.exit(0);
 `;
 
+/**
+ * Install the fake agy the way the host installs a CLI and return the path to pin in
+ * `CODEV_AGY_BIN`. POSIX: an executable node script. Native Windows cannot start an
+ * extensionless script, so there the script sits beside an npm-style `.cmd` shim, which the
+ * lane resolves to `node <entry>` exactly as it does for an npm-installed CLI.
+ */
+function installFakeAgy(installDir: string): string {
+  if (process.platform === 'win32') {
+    fs.writeFileSync(path.join(installDir, 'agy.cjs'), FAKE_AGY_SOURCE);
+    const shim = path.join(installDir, 'agy.cmd');
+    fs.writeFileSync(shim, '@ECHO off\r\nSETLOCAL\r\nSET dp0=%~dp0\r\n"%_prog%" "%dp0%\\agy.cjs" %*\r\n');
+    return shim;
+  }
+  const bin = path.join(installDir, 'agy');
+  fs.writeFileSync(bin, FAKE_AGY_SOURCE, { mode: 0o755 });
+  return bin;
+}
+
 let dir: string;
 let savedEnv: Record<string, string | undefined>;
 let argvLog: string;
@@ -86,8 +105,7 @@ beforeEach(() => {
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
 
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-lane-model-'));
-  const fakeAgy = path.join(dir, 'agy');
-  fs.writeFileSync(fakeAgy, FAKE_AGY_SOURCE, { mode: 0o755 });
+  const fakeAgy = installFakeAgy(dir);
   argvLog = path.join(dir, 'argv.json');
 
   process.env.CODEV_AGY_BIN = fakeAgy;
@@ -109,7 +127,7 @@ afterEach(() => {
     else process.env[k] = savedEnv[k];
   }
   vi.restoreAllMocks();
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeFakeCliTempDir(dir);
 });
 
 // --- argv passthrough ---------------------------------------------------------------
@@ -241,7 +259,9 @@ describe('configured lane hard-fails on a non-zero exit', () => {
 
   // Found by claude: `code !== 0` is also true for `code === null`, which is a signal kill —
   // an environment cause, not a rejected model.
-  it('a signal-killed agy stays a skip rather than hard-failing', async () => {
+  // POSIX-only assertion: relies on a signal kill reaching the parent as `code === null`; Windows
+  // has no signals, and a killed process there exits with a plain code (TerminateProcess).
+  it.skipIf(process.platform === 'win32')('a signal-killed agy stays a skip rather than hard-failing', async () => {
     process.env.FAKE_AGY_MODE = 'signal';
     const outputPath = path.join(dir, 'review.txt');
 

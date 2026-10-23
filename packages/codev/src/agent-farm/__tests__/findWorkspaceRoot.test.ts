@@ -11,7 +11,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { _findWorkspaceRoot as findWorkspaceRoot } from '../utils/config.js';
 
 describe('findWorkspaceRoot (issue #407)', () => {
@@ -114,8 +115,10 @@ describe('findWorkspaceRoot (issue #407)', () => {
  * (git rev-parse fails in non-git temp dirs, so mainRepo is always null).
  */
 describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
-  // Resolve tmpdir symlinks (macOS /var → /private/var) so paths match git output
-  const testBase = path.join(fs.realpathSync(tmpdir()), `codev-wsr-git-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  // Resolve tmpdir symlinks (macOS /var → /private/var) so paths match git output.
+  // The native realpath also expands a Windows 8.3 short name (the runner's
+  // `RUNNER~1` temp dir) to the long form git reports; the JS one does not.
+  const testBase = path.join(fs.realpathSync.native(tmpdir()), `codev-wsr-git-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   let mainRepo: string;
   let worktreePath: string;
 
@@ -175,3 +178,37 @@ describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
     expect(result).toBe(mainRepo);
   });
 });
+
+/**
+ * Spec 1658 regression: the walk up must stop at the filesystem root on every
+ * host. It once stopped only at '/', so on Windows a start path with no marker
+ * looped forever at the drive root (dirname('C:\\') is 'C:\\'). A synchronous
+ * loop cannot be timed out in-process, so the walk runs in a child with a
+ * deadline: a regression fails instead of hanging the suite.
+ */
+describe('findWorkspaceRoot terminates at the filesystem root (Spec 1658)', () => {
+  it('returns the start dir for a markerless path directly under the root (a drive root on Windows)', () => {
+    // The source runs under tsx, so the test needs no build (the POSIX unit job
+    // does not build dist). The package dir is the child's cwd only so that
+    // `--import tsx` resolves; the walk starts from `startDir`, never the cwd.
+    const packageDir = path.resolve(import.meta.dirname, '../../..');
+    const sourceConfig = path.join(packageDir, 'src/agent-farm/utils/config.ts');
+    const root = path.parse(tmpdir()).root;
+    const startDir = path.join(root, `codev-no-marker-${process.pid}-${Date.now()}`);
+    const script = [
+      `const { _findWorkspaceRoot } = await import(${JSON.stringify(pathToFileURL(sourceConfig).href)});`,
+      `process.stdout.write(_findWorkspaceRoot(${JSON.stringify(startDir)}));`,
+    ].join('\n');
+
+    const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+      cwd: packageDir,
+      encoding: 'utf8',
+      timeout: 20_000,
+    });
+
+    expect(result.error?.message, 'the walk did not terminate').toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(startDir);
+  });
+});
+

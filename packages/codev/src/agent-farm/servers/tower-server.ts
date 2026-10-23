@@ -79,6 +79,9 @@ import { runBootConsolidation } from '../db/consolidate.js';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/server-utils.js';
 import { version } from '../../version.js';
+import { isWindows } from '../../lib/platform.js';
+import { WindowsJobHelper, getTowerJobHelper, setTowerJobHelper } from '../../lib/windows-job.js';
+import { towerBootSessionWarning } from '../commands/tower-start-windows.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -178,7 +181,12 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Graceful shutdown handler (Phase 2 - Spec 0090)
+let shutdownStarted = false;
+
 async function gracefulShutdown(signal: string): Promise<void> {
+  // A signal and a shutdown request (Spec 1658) can both arrive; run once.
+  if (shutdownStarted) return;
+  shutdownStarted = true;
   log('INFO', `Received ${signal}, starting graceful shutdown...`);
 
   // 1. Stop accepting new connections
@@ -241,6 +249,10 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   // 8. Tear down terminal module (Spec 0105 Phase 4) — shuts down terminal manager
   shutdownTerminals();
+
+  // 8b. Spec 1658 Phase 3b: stop the job helper. Session jobs carry no
+  // kill-on-close, so this never touches a session.
+  getTowerJobHelper()?.stop();
 
   // 9. Issue #1629: release our global.db owner lock so the next start sees an
   // unowned DB. Best-effort and pid-scoped (never removes a lock we don't own);
@@ -407,6 +419,9 @@ const routeCtx: RouteContext = {
       sseClients.splice(index, 1);
     }
   },
+  requestShutdown: (reason: string) => {
+    gracefulShutdown(reason);
+  },
 };
 
 // Wire the broadcast function into the codev config-file watcher so edits
@@ -556,6 +571,24 @@ async function bootSequence(): Promise<void> {
     process.exit(1);
   }
   log('INFO', `Claimed global.db ownership (pid ${process.pid}, port ${port}) at ${AGENT_FARM_DIR}`);
+
+  // Spec 1658 Phase 3b: one job helper per Tower, started now so the first
+  // session create finds it warm. It never wraps Tower: it only puts shellper
+  // pids in per-session jobs. A failure to bind is logged by the helper once;
+  // sessions then start without a job.
+  // Spec 1658 Phase 4: a Tower inside a codev session's job stops when that
+  // session is torn down. Warn, never refuse: the marker is inherited and can
+  // be stale. The launcher is what refuses (tower-start-windows.ts).
+  const sessionWarning = towerBootSessionWarning(process.env, isWindows());
+  if (sessionWarning !== null) log('WARN', sessionWarning);
+
+  if (isWindows()) {
+    const jobHelper = new WindowsJobHelper({ log: (msg: string) => log('WARN', msg) });
+    setTowerJobHelper(jobHelper);
+    jobHelper.start().then((failure) => {
+      if (failure === null) log('INFO', 'Per-session job objects available');
+    });
+  }
 
   // Initialize shellper session manager for persistent terminals
   const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.codev', 'run');

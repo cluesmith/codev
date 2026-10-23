@@ -43,6 +43,16 @@ vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(() => Buffer.from('')),
 }));
 
+// The suite drives consult's POSIX branches (`which` / execSync probes through the
+// child_process mock above), so the platform seam is forced to linux; on a win32 host
+// the CLI checks would otherwise take the PATHEXT lookup. Forced inside the factory so
+// every fresh module instance after vi.resetModules() is forced too.
+vi.mock('../lib/platform.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/platform.js')>();
+  actual.setHostPlatformForTests('linux');
+  return actual;
+});
+
 // Mock Claude Agent SDK
 let mockQueryFn: ReturnType<typeof vi.fn>;
 

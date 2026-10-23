@@ -9,6 +9,8 @@
  * @see codev/specs/591-af-workspace-failure-with-code.md (Test Scenarios 1–8)
  */
 
+// spec-1658-tmp: opaque (every /tmp is a worktree, workspace or role-file string; the launch-script writes go to the mocked node:fs and the architect-args case loads no role so writes nothing)
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   CLAUDE_HARNESS,

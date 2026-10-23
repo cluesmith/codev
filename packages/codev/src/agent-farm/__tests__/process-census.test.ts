@@ -7,7 +7,8 @@
  * async-execFile convention.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import { execFile, execFileSync } from 'node:child_process';
 import { listProcessCensus } from '../servers/process-census.js';
 
@@ -39,6 +40,17 @@ function simulatePsError(): void {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+// These tests drive the POSIX branch (ps output from a mocked execFile), so
+// force the platform seam to linux; on a win32 host the code would otherwise take its
+// Windows branch.
+beforeEach(() => {
+  setHostPlatformForTests('linux');
+});
+
+afterEach(() => {
+  resetHostPlatformForTests();
 });
 
 describe('listProcessCensus (Issue #1227)', () => {

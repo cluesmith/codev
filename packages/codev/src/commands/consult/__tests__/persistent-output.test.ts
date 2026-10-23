@@ -5,6 +5,7 @@
  * directory paths rather than relying on temp files that get cleaned up.
  */
 
+import * as path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { _computePersistentOutputPath as computePersistentOutputPath } from '../index.js';
 
@@ -20,7 +21,7 @@ describe('computePersistentOutputPath', () => {
     };
 
     const result = computePersistentOutputPath(state, 'gemini');
-    expect(result).toBe('/workspace/codev/projects/0042-feature-name/0042-specify-iter1-gemini.txt');
+    expect(result).toBe(path.join('/workspace/codev/projects/0042-feature-name', '0042-specify-iter1-gemini.txt'));
   });
 
   it('generates correct path for bugfix project ID', () => {
@@ -35,7 +36,7 @@ describe('computePersistentOutputPath', () => {
 
     const result = computePersistentOutputPath(state, 'codex');
     expect(result).toBe(
-      '/workspace/codev/projects/bugfix-512-consultation-output-files-dele/bugfix-512-fix-iter1-codex.txt'
+      path.join('/workspace/codev/projects/bugfix-512-consultation-output-files-dele', 'bugfix-512-fix-iter1-codex.txt')
     );
   });
 
@@ -50,7 +51,7 @@ describe('computePersistentOutputPath', () => {
     };
 
     const result = computePersistentOutputPath(state, 'claude');
-    expect(result).toBe('/workspace/codev/projects/0042-feature-name/0042-phase_2-iter3-claude.txt');
+    expect(result).toBe(path.join('/workspace/codev/projects/0042-feature-name', '0042-phase_2-iter3-claude.txt'));
   });
 
   it('falls back to phase when currentPlanPhase is null', () => {
@@ -64,7 +65,7 @@ describe('computePersistentOutputPath', () => {
     };
 
     const result = computePersistentOutputPath(state, 'gemini');
-    expect(result).toBe('/workspace/codev/projects/0042-feature-name/0042-review-iter2-gemini.txt');
+    expect(result).toBe(path.join('/workspace/codev/projects/0042-feature-name', '0042-review-iter2-gemini.txt'));
   });
 
   it('path matches porch findReviewFiles pattern', () => {
@@ -82,7 +83,7 @@ describe('computePersistentOutputPath', () => {
 
     for (const model of ['gemini', 'codex', 'claude', 'hermes']) {
       const result = computePersistentOutputPath(state, model);
-      const fileName = result.split('/').pop()!;
+      const fileName = path.basename(result);
       // Must match: <id>-<phase>-iter<N>-<model>.txt
       expect(fileName).toMatch(/^0073-phase_1-iter1-(gemini|codex|claude|hermes)\.txt$/);
     }

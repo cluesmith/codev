@@ -9,10 +9,13 @@
  * harness: everything else tower-routes imports is stubbed).
  */
 
+// spec-1658-tmp: opaque (the only /tmp is reactDashboardPath in a RouteContext with hasReactDashboard false; never read)
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import { join, resolve as resolvePath } from 'node:path';
 import Database from 'better-sqlite3';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { GLOBAL_SCHEMA } from '../../../db/schema.js';
@@ -77,8 +80,10 @@ const { invalidateAgentIdentityMemo } = await import('../identity.js');
 type RouteContext = import('../../tower-routes.js').RouteContext;
 
 const KEY = 'a'.repeat(64);
-const WS = '/nonexistent-spec-1595/workspace';
-const WORKTREE = `${WS}/.builders/spir-1595-agent-attention`;
+// Host-resolved, as the resolver normalizes it (a drive-rooted path on Windows),
+// so the store key the assertions read is the one the route writes.
+const WS = resolvePath('/nonexistent-spec-1595/workspace');
+const WORKTREE = join(WS, '.builders', 'spir-1595-agent-attention');
 const NOW = Date.now();
 
 function report(overrides: Record<string, unknown> = {}): Record<string, unknown> {

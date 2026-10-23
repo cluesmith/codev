@@ -5,22 +5,27 @@
  * external commands. Default commands wrap the `gh` CLI for GitHub repos.
  * Projects override commands via the `forge` section in .codev/config.json.
  *
- * Concept commands are executed via shell (`sh -c`) to support pipes,
- * redirects, and variable expansion in user-configured commands.
+ * Concept commands are executed via shell (`sh -c`; the resolved Git Bash on
+ * native Windows) to support pipes, redirects, and variable expansion in
+ * user-configured commands.
  * Environment variables (CODEV_*) are set before invocation.
  *
  * @see codev/specs/589-non-github-repository-support.md
  */
 
-import { exec, execSync } from 'node:child_process';
+import { exec, execSync, execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { IssueIdKind } from '@cluesmith/codev-types';
 import { loadConfig as loadCodevConfig } from './config.js';
+import { isWindows } from './platform.js';
+import { gitBashCommand, gitBashEnv, gitBashScript, type Launch } from './shell-launch.js';
+import { toMsysPath } from './msys-path.js';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -401,11 +406,24 @@ export async function executeForgeCommandDetailed(
       return { data: null, error: { message: `concept '${concept}' is disabled or unknown`, stderr: '', exitCode: null } };
     }
 
+    const execEnv = { ...process.env, ...buildForgeEnv(forgeConfig), ...env };
+    const maxBuffer = options?.maxBuffer ?? DEFAULT_MAX_BUFFER;
+    if (isWindows()) {
+      const launch = windowsForgeLaunch(command, options);
+      const { stdout } = await execFileAsync(launch.command, launch.args, {
+        cwd: options?.cwd,
+        env: windowsForgeEnv(execEnv),
+        timeout: 30_000,
+        maxBuffer,
+        windowsHide: true,
+      });
+      return { data: parseOutput(stdout, options?.raw), error: null };
+    }
     const { stdout } = await execAsync(command, {
       cwd: options?.cwd,
-      env: { ...process.env, ...buildForgeEnv(forgeConfig), ...env },
+      env: execEnv,
       timeout: 30_000,
-      maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
+      maxBuffer,
     });
     return { data: parseOutput(stdout, options?.raw), error: null };
   } catch (err: unknown) {
@@ -476,12 +494,27 @@ export function executeForgeCommandSync(
   const forgeEnv = buildForgeEnv(forgeConfig);
 
   try {
+    const execEnv = { ...process.env, ...forgeEnv, ...env };
+    const maxBuffer = options?.maxBuffer ?? DEFAULT_MAX_BUFFER;
+    if (isWindows()) {
+      const launch = windowsForgeLaunch(command, options);
+      const stdout = execFileSync(launch.command, launch.args, {
+        cwd: options?.cwd,
+        env: windowsForgeEnv(execEnv),
+        encoding: 'utf-8',
+        timeout: 30_000,
+        maxBuffer,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      return parseOutput(stdout, options?.raw);
+    }
     const stdout = execSync(command, {
       cwd: options?.cwd,
-      env: { ...process.env, ...forgeEnv, ...env },
+      env: execEnv,
       encoding: 'utf-8',
       timeout: 30_000,
-      maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
+      maxBuffer,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -497,6 +530,42 @@ export function executeForgeCommandSync(
 // =============================================================================
 
 const _knownConceptSet = new Set<string>(KNOWN_CONCEPTS);
+
+/**
+ * How a concept command runs on native Windows (Spec 1658, Area D): through
+ * the resolved Git Bash, never `cmd.exe`. A shipped concept script (a bare
+ * path to an existing `.sh` file) runs as a script with its path in POSIX
+ * form; any other command is a shell string for `bash -c`. Callers pair this
+ * with `gitBashEnv`, so slash-prefixed arguments such as `gh api /repos/...`
+ * reach the forge CLI unmangled.
+ */
+function windowsForgeLaunch(command: string, options?: ForgeCommandOptions): Launch {
+  const workspaceRoot = options?.workspaceRoot ?? options?.cwd;
+  if (command.endsWith('.sh') && existsSync(command)) {
+    return gitBashScript(command, [], workspaceRoot);
+  }
+  return gitBashCommand(command, workspaceRoot);
+}
+
+/**
+ * Concept inputs that carry a local path. Scripts hand them to MSYS tools
+ * (`tar -C`), which need POSIX form. Add any new CODEV_* input whose value is a
+ * host file-system path; identifiers, URLs and API paths stay out (they must
+ * pass through unchanged).
+ */
+const PATH_INPUTS = ['CODEV_OUTPUT_DIR'];
+
+/** The concept environment for Git Bash: path inputs in POSIX form, MSYS argument conversion off. */
+function windowsForgeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const translated: NodeJS.ProcessEnv = { ...env };
+  for (const key of PATH_INPUTS) {
+    const value = translated[key];
+    if (value) {
+      translated[key] = toMsysPath(value);
+    }
+  }
+  return gitBashEnv(translated);
+}
 
 /**
  * Build environment variables from non-concept forge config keys.

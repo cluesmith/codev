@@ -15,11 +15,13 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawnOnHost } from '../lib/shell-launch.js';
 import chalk from 'chalk';
+import { isExecutableOnPath } from '@cluesmith/codev-sdk/node/executable';
 import { spawnAgentProcess, type AgentExit, type AgentLaunch } from '../lib/agent-process.js';
 import { confirm } from '../lib/cli-prompts.js';
 import { loadConfig } from '../lib/config.js';
+import { hostPlatform } from '../lib/platform.js';
 import { getTemplatesDir } from '../lib/templates.js';
 import {
   GOVERNANCE_FILES,
@@ -271,24 +273,9 @@ function resolveConfiguredLauncher(root: string): InteractiveTaskLauncher {
   );
 }
 
-function isExecutableOnPath(executable: string): boolean {
-  const canRun = (candidate: string): boolean => {
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return fs.statSync(candidate).isFile();
-    } catch {
-      return false;
-    }
-  };
-  if (executable.includes('/') || executable.includes(path.sep)) return canRun(executable);
-  const extensions = process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';') : [''];
-  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
-    if (dir === '') continue;
-    for (const ext of extensions) {
-      if (canRun(path.join(dir, executable + ext))) return true;
-    }
-  }
-  return false;
+/** True when `executable` resolves on `PATH` (through `PATHEXT` on Windows). */
+function isExecutableAvailable(executable: string): boolean {
+  return isExecutableOnPath(executable, { platform: hostPlatform() });
 }
 
 /**
@@ -297,7 +284,7 @@ function isExecutableOnPath(executable: string): boolean {
  */
 function runConsultProcess(args: string[], cwd: string): Promise<AgentExit> {
   return new Promise<AgentExit>(resolve => {
-    const child = spawn('consult', args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawnOnHost('consult', args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr?.on('data', chunk => {
       stderr = (stderr + String(chunk)).slice(-4000);
@@ -319,7 +306,7 @@ function defaultDeps(): Omit<BootstrapDocsDeps, 'skeletonDir'> {
   return {
     runConsult: runConsultProcess,
     resolveLauncher: resolveConfiguredLauncher,
-    isExecutableAvailable: isExecutableOnPath,
+    isExecutableAvailable,
     confirm: question => confirm(question, false),
     stdinIsTTY: Boolean(process.stdin.isTTY),
     spawnAgent: spawnAgentProcess,

@@ -10,6 +10,7 @@
  * its own case, because the failure this gate prevents — clearing a builder's
  * context before its state landed — is irreversible.
  */
+// spec-1658-tmp: opaque (the /tmp/ws state path is a key in an in-memory fs port and a string compared through join)
 
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';

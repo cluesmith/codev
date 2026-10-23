@@ -6,6 +6,8 @@
  * getTerminalsForWorkspace, and initTerminals/shutdownTerminals lifecycle.
  */
 
+// spec-1658-tmp: opaque (every /tmp is a shellper_socket in mocked DB rows, checked only through spied existsSync and a mocked shellperManager)
+
 import { describe, it, expect, beforeEach, afterEach, onTestFinished, vi } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -943,6 +945,104 @@ describe('tower-terminals', () => {
       expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
     });
 
+    // Spec 1658 (scenario 5): on Windows a reconnect can REFUSE on identity — the
+    // pipe's WELCOME names another session/shellper, or the pipe is gone while the
+    // pid lives on (PID reuse). That is proof, not a transient failure: the row
+    // must be deleted even though the pid is alive, and the pid (someone else's
+    // process) is never signaled. The #1686 keep-row guard still covers `null`.
+    it('deletes an identity-refused row without signaling its live pid — reconcile (Spec 1658)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const refusedId = 'spec-1658-refused-session';
+      const pipeName = '\\\\.\\pipe\\codev-shellper-user-0000';
+
+      const mockReconnectSession = vi.fn(async () => ({ identityRefused: true as const, reason: 'WELCOME sessionId mismatch' }));
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: refusedId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-refused',
+        pid: process.pid,
+        shellper_socket: pipeName,
+        shellper_pid: process.pid,
+        shellper_start_time: Date.now(),
+        shellper_session_id: 'shellper-sess-1',
+        shellper_secret: 'a'.repeat(64),
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => String(p) === '/real/project');
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      // The row's persisted shellper identity reached the reconnect.
+      expect(mockReconnectSession).toHaveBeenCalledWith(
+        refusedId, pipeName, process.pid, expect.any(Number), undefined,
+        { shellperSessionId: 'shellper-sess-1', secret: 'a'.repeat(64) },
+      );
+      // Never signaled: the live pid is not this row's shellper.
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      // Row deleted despite the live pid.
+      expect(mockDbRun).toHaveBeenCalledWith(refusedId);
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('refused reconnect on identity'));
+    });
+
+    it('deletes an identity-refused row without signaling its live pid — on-the-fly (Spec 1658)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const refusedId = 'spec-1658-refused-otf-session';
+      const pipeName = '\\\\.\\pipe\\codev-shellper-user-0001';
+
+      const mockReconnectSession = vi.fn(async () => ({ identityRefused: true as const, reason: 'pipe does not exist' }));
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: refusedId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-refused-otf',
+        pid: process.pid,
+        shellper_socket: pipeName,
+        shellper_pid: process.pid,
+        shellper_start_time: Date.now(),
+        shellper_session_id: 'shellper-sess-2',
+        shellper_secret: 'b'.repeat(64),
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => String(p) === '/real/project');
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { getTerminalsForWorkspace: getTerms } = await import('../servers/tower-terminals.js');
+      await getTerms('/real/project', 'http://proxy');
+
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(mockDbRun).toHaveBeenCalledWith(refusedId);
+      expect(deps.log).not.toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+    });
+
     // Bugfix #1686 (socket-absent edge, #1693 ruling): the sole proof of death
     // is the pid being down. A live pid whose socket FILE is absent — the same
     // transient-failure class (fd pressure / hiccup) that fails the reconnect —
@@ -1321,7 +1421,9 @@ describe('tower-terminals', () => {
     function setupWorkspaceWithArchitects(names: string[]) {
       const deps = makeDeps();
       initTerminals(deps);
-      const wsPath = '/real/project';
+      // Host-resolved: the entry is keyed by this path and the read normalizes
+      // it, which on Windows (not on disk, so `resolve`) prefixes the drive.
+      const wsPath = path.resolve('/real/project');
       vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
         if (String(p) === wsPath) return true;
         return false;

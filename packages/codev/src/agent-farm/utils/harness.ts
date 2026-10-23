@@ -563,13 +563,21 @@ export function validateCustomHarnessConfig(name: string, config: unknown): Cust
  * Detect harness type from a command string by extracting the basename of the
  * first token and matching against known CLI names.
  * Returns undefined if no match (caller decides what to do).
+ *
+ * Spec 1658: a Windows command is a backslash path, often quoted because it
+ * sits under `Program Files`, so a leading double-quoted path is one token and
+ * both separators end a directory. Matching the whole path would let a
+ * directory name (`C:\Users\claude\...\codex.exe`) decide the harness.
  */
 export function detectHarnessFromCommand(command: string): string | undefined {
-  const firstToken = command.trim().split(/\s+/)[0];
+  const trimmed = command.trim();
+  let firstToken = trimmed.split(/\s+/)[0];
+  const quoted = /^"([^"]+)"/.exec(trimmed);
+  if (quoted) firstToken = quoted[1];
   if (!firstToken) return undefined;
 
-  // Extract basename (handles full paths like /opt/homebrew/bin/codex)
-  const basename = firstToken.split('/').pop() || firstToken;
+  // Extract basename (handles full paths like /opt/homebrew/bin/codex and C:\tools\codex.exe)
+  const basename = firstToken.split(/[\\/]/).pop() || firstToken;
 
   if (basename.includes('claude')) return 'claude';
   if (basename.includes('codex')) return 'codex';

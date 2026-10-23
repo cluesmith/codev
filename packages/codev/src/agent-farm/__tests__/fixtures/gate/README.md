@@ -59,6 +59,14 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
 - **wrapper-boot.busy.txt** — **synthetic** builder launch-loop screen (a born-dirty
   state with no composer marker). App-agnostic: no marker → busy under any profile.
 
+- **conpty/\*.capture.jsonl.gz** (Spec 1658) — **timed** captures of a real agent TUI under
+  Windows ConPTY: output chunks, keystrokes and resizes stamped in milliseconds, plus probe
+  points. Recorded by `packages/codev/scripts/spec-1658-conpty-capture.mts` on an authenticated
+  Windows machine (recipe: `codev/projects/1658-windows-native-non-wsl-support/audit.md`,
+  "ConPTY → Phase 8"); replayed through the production delivery path by
+  `spec-1658-conpty-gate-replay.test.ts`. Scrubbed of user name, profile path, scratch path and
+  host name with same-length placeholders at record time.
+
 ## Classifier assumption
 
 CLEAN requires a composer marker **and** zero normal-intensity, non-whitespace,

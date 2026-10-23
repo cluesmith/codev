@@ -9,8 +9,9 @@
  * lives in `preflight.ts` and is reviewed by running the worktree.
  */
 
-import { spawn } from 'node:child_process';
+import type { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
+import { spawnCodevCli } from '../cli-process.js';
 
 /**
  * Default hard cap on the `codev --version` probe so a hung binary can't stall
@@ -46,7 +47,7 @@ export function runCodevVersion(
 
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(codevPath, ['--version'], { cwd: cwd ?? undefined });
+      child = spawnCodevCli(codevPath, ['--version'], { cwd: cwd ?? undefined });
     } catch {
       finish(false, false);
       return;

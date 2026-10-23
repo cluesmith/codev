@@ -10,11 +10,20 @@
  * subprocess wait (version check, extension install, readiness, stop), so the
  * CLI's request budget is derived from them and cannot silently desync.
  * `ide-server.ts` imports this module, never the reverse.
+ *
+ * Native Windows (Spec 1658 Phase 9): the server is reached through a `.cmd`
+ * shim or a JS launcher, neither of which `spawn` runs without a shell, so
+ * every server subprocess goes through `ideServerSpawnable`, with no console
+ * window. The environment keeps Windows' own `Path` key, and a timed-out
+ * command's tree is killed with `killSessionTree` (no process groups there).
  */
 
 import { spawn } from 'node:child_process';
-import { delimiter, dirname } from 'node:path';
+import { delimiter, dirname, extname } from 'node:path';
 import { sanitizeAgentEnv } from '../../lib/agent-env.js';
+import { isWindows } from '../../lib/platform.js';
+import { spawnableOnHost } from '../../lib/shell-launch.js';
+import { killSessionTree } from '../../lib/process-tree.js';
 
 /** Log sink shared by the IDE lifecycle modules; Tower passes its own logger. */
 export type LogFn = (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
@@ -92,9 +101,56 @@ export function compareVersions(a: string, b: string): number {
 export function buildIdeServerEnv(baseEnv: NodeJS.ProcessEnv | Record<string, string> = process.env): Record<string, string> {
   const env = sanitizeAgentEnv(baseEnv);
   const nodeDir = dirname(process.execPath);
+  if (isWindows()) return withWindowsNodeFirst(env, nodeDir);
   const rest = (env.PATH ?? '').split(delimiter).filter((entry) => entry !== '' && entry !== nodeDir);
   env.PATH = [nodeDir, ...rest].join(delimiter);
   return env;
+}
+
+/**
+ * Windows: environment names are case-insensitive and the inherited key is
+ * usually `Path`. Writing a separate `PATH` would leave two entries, and the
+ * child would see only one of them, so the existing key is reused, any
+ * case-variant duplicates are folded into it, and entries compare
+ * case-insensitively. `;` is the separator whatever the host module says.
+ */
+function withWindowsNodeFirst(env: Record<string, string>, nodeDir: string): Record<string, string> {
+  const pathKeys = Object.keys(env).filter((key) => key.toUpperCase() === 'PATH');
+  let key = 'Path';
+  if (pathKeys.length > 0) key = pathKeys[0];
+  const entries: string[] = [];
+  for (const pathKey of pathKeys) {
+    entries.push(...env[pathKey].split(';'));
+    delete env[pathKey];
+  }
+  const wanted = nodeDir.toLowerCase();
+  const rest = entries.filter((entry) => entry !== '' && entry.toLowerCase() !== wanted);
+  env[key] = [nodeDir, ...rest].join(';');
+  return env;
+}
+
+/** A server command in the form `spawn` runs without a shell. */
+export interface IdeServerSpawnable {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments: boolean;
+}
+
+const JS_LAUNCHER_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);
+
+/**
+ * How to spawn `serverPath` with `args`. POSIX: as given (the npm launcher's
+ * shebang finds Node). Windows: a JS launcher (what package discovery finds)
+ * runs under the Node running Tower; anything else, a `.cmd` shim included,
+ * goes through the shared shim resolver. Arguments, native paths of any
+ * length included, reach the server unaltered.
+ */
+export function ideServerSpawnable(serverPath: string, args: string[], env: Record<string, string>): IdeServerSpawnable {
+  if (!isWindows()) return { command: serverPath, args, windowsVerbatimArguments: false };
+  if (JS_LAUNCHER_EXTENSIONS.has(extname(serverPath).toLowerCase())) {
+    return { command: process.execPath, args: [serverPath, ...args], windowsVerbatimArguments: false };
+  }
+  return spawnableOnHost(serverPath, args, env);
 }
 
 /** Thrown when the server's version is below the floor or cannot be determined. */
@@ -145,8 +201,19 @@ const MAX_CAPTURED_STDERR = 4_000;
  */
 const MAX_CAPTURED_STDOUT = 64_000;
 
-/** SIGKILL the child's whole process group, falling back to the child alone. */
+/**
+ * SIGKILL the child's whole process group, falling back to the child alone.
+ * Windows has no groups: the child's tree is killed instead.
+ */
 function killProcessGroup(pid: number | undefined, kill: () => void): void {
+  if (isWindows()) {
+    if (pid === undefined) {
+      kill();
+      return;
+    }
+    killSessionTree(pid).catch(() => kill());
+    return;
+  }
   if (pid !== undefined) {
     try {
       process.kill(-pid, 'SIGKILL');
@@ -174,7 +241,18 @@ export function runIdeServerCommand(
     let settled = false;
     let stdout = '';
     let stderr = '';
-    const child = spawn(serverPath, args, { env: opts.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const spawnable = ideServerSpawnable(serverPath, args, opts.env);
+    // POSIX: its own process group, for the group kill on timeout. Windows has
+    // no groups (the timeout kills the tree), and a detached `cmd.exe` gets no
+    // console, so a plain `.cmd` shim's child would not write to the pipes.
+    const detached = !isWindows();
+    const child = spawn(spawnable.command, spawnable.args, {
+      env: opts.env,
+      detached,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      windowsVerbatimArguments: spawnable.windowsVerbatimArguments,
+    });
 
     function settle(outcome: () => void): void {
       if (settled) return;

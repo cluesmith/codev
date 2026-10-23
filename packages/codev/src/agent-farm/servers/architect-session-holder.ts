@@ -21,14 +21,23 @@
 
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-
-/** Marker identifying a Codev shellper process in a `ps` command line. */
-const SHELLPER_MARKER = 'shellper-main.js';
+import { isWindows } from '../../lib/platform.js';
+import { killSessionTree } from '../../lib/process-tree.js';
+import { listProcessCensus } from './process-census.js';
+import {
+  SHELLPER_MARKER,
+  readJsonStringField,
+  sameWindowsPath,
+  shellperArgvText,
+  shellperTeardownIdentities,
+} from '../../terminal/shellper-cmdline.js';
 
 export interface ProcessEntry {
   pid: number;
   /** The full joined argv (as `ps ... -o args=` reports it). */
   cmdline: string;
+  /** Windows: creation time from the census (epoch ms), so a reap can check the pid is still this process. */
+  creationTime?: number;
 }
 
 /**
@@ -62,16 +71,6 @@ function realpathOrSelf(p: string): string {
   }
 }
 
-/**
- * Extract a `"key":"value"` string field from a shellper's JSON config as it
- * appears verbatim in the `ps` argv. Regex rather than JSON.parse: the config
- * embeds the full process env, so the blob is large and a partial/edge `ps`
- * line must degrade to "field absent" rather than throw.
- */
-function extractJsonStringField(cmdline: string, key: string): string | null {
-  const m = cmdline.match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`));
-  return m ? m[1] : null;
-}
 
 export interface ArchitectIdentity {
   /** Absolute workspace path the shellper runs in (`cwd` in its config). */
@@ -92,11 +91,12 @@ export interface ArchitectIdentity {
 export function isOwnArchitectShellper(cmdline: string, identity: ArchitectIdentity): boolean {
   if (!cmdline.includes(SHELLPER_MARKER)) return false;
 
-  const cfgName = extractJsonStringField(cmdline, 'CODEV_ARCHITECT_NAME');
+  const cfgName = readJsonStringField(cmdline, 'CODEV_ARCHITECT_NAME');
   if (cfgName !== identity.architectName) return false;
 
-  const cfgCwd = extractJsonStringField(cmdline, 'cwd');
+  const cfgCwd = readJsonStringField(cmdline, 'cwd');
   if (!cfgCwd) return false;
+  if (isWindows()) return sameWindowsPath(cfgCwd, identity.workspacePath);
   const wanted = new Set([identity.workspacePath, realpathOrSelf(identity.workspacePath)]);
   const got = new Set([cfgCwd, realpathOrSelf(cfgCwd)]);
   const cwdMatches = [...got].some((g) => wanted.has(g));
@@ -110,7 +110,7 @@ export function isOwnArchitectShellper(cmdline: string, identity: ArchitectIdent
  * truncation (the shellper config blob is large) on both BSD and coreutils.
  * Throws on `ps` failure; callers decide how to degrade.
  */
-export function listProcessEntries(): ProcessEntry[] {
+function listPosixProcessEntries(): ProcessEntry[] {
   const out = execFileSync('ps', ['-ww', '-eo', 'pid=,args='], {
     encoding: 'utf-8',
     timeout: 5000,
@@ -126,6 +126,22 @@ export function listProcessEntries(): ProcessEntry[] {
     entries.push({ pid, cmdline: trimmed.slice(sp + 1) });
   }
   return entries;
+}
+
+/**
+ * Snapshot every running process as {pid, cmdline} for the matchers here.
+ * POSIX reads `ps`; Windows reads the census (Spec 1658), with each command
+ * line argv-unquoted so the shellper's JSON config reads as plain JSON. Rejects
+ * on failure; callers decide how to degrade.
+ */
+export async function listProcessEntries(): Promise<ProcessEntry[]> {
+  if (!isWindows()) return listPosixProcessEntries();
+  const census = await listProcessCensus();
+  return census.map((entry) => ({
+    pid: entry.pid,
+    cmdline: shellperArgvText(entry.cmdline),
+    creationTime: entry.creationTime,
+  }));
 }
 
 export interface SessionHolderClassification {
@@ -149,10 +165,10 @@ export function classifyArchitectSessionHolder(opts: {
   identity: ArchitectIdentity;
   /** Exclude this pid (e.g. Tower's own) from consideration. */
   selfPid?: number;
-  /** Test seam: override the process snapshot. */
-  list?: () => ProcessEntry[];
+  /** The process snapshot (see `listProcessEntries`). */
+  list: () => ProcessEntry[];
 }): SessionHolderClassification {
-  const list = opts.list ?? listProcessEntries;
+  const list = opts.list;
   let entries: ProcessEntry[];
   try {
     entries = list();
@@ -180,15 +196,15 @@ export function classifyArchitectSessionHolder(opts: {
  * registry-row zombie (Issue #1224 symptom B) — there is no stored session id to
  * key on, so identity (shellper-main.js + cwd + CODEV_ARCHITECT_NAME) is the key.
  */
-export function findOwnArchitectShellpers(opts: {
+export async function findOwnArchitectShellpers(opts: {
   identity: ArchitectIdentity;
   selfPid?: number;
-  list?: () => ProcessEntry[];
-}): number[] {
+  list?: () => ProcessEntry[] | Promise<ProcessEntry[]>;
+}): Promise<number[]> {
   const list = opts.list ?? listProcessEntries;
   let entries: ProcessEntry[];
   try {
-    entries = list();
+    entries = await list();
   } catch {
     return [];
   }
@@ -211,18 +227,16 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-/** Kill a shellper's whole process group (leader is detached), best-effort. */
-function killProcessGroup(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    // Group gone or not permitted — fall back to the single pid.
-    try {
-      process.kill(pid, signal);
-    } catch {
-      /* already dead */
-    }
-  }
+/**
+ * Kill a shellper's whole session tree (on POSIX the leader is detached, so its
+ * process group; falls back to the single pid). Resolves once the teardown has
+ * run: on Windows that includes the census snapshot and taskkill, which the
+ * reap must not outrun. Rejects when the Windows census failed, so the reap can
+ * report it.
+ */
+async function killProcessGroup(pid: number, signal: NodeJS.Signals, startTime?: number, jobName?: string): Promise<void> {
+  const { jobError } = await killSessionTree(pid, { signal, fallbackToPid: true, rootStartTime: startTime, jobName });
+  if (jobError !== undefined) throw new Error(jobError);
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -234,13 +248,21 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * release the session lock before the caller's fresh `claude --resume` runs,
  * else the collision recurs.
  *
+ * Rejects, after every kill and the death polls have run, when any teardown
+ * failed (on Windows, a failed census), so a caller never reports a reap that
+ * did not happen.
+ *
  * Seams (`isAlive`, `kill`, `wait`) keep it unit-testable without real signals.
  */
 export async function reapShellpers(
   pids: number[],
   opts?: {
     isAlive?: (pid: number) => boolean;
-    kill?: (pid: number, signal: NodeJS.Signals) => void;
+    kill?: (pid: number, signal: NodeJS.Signals) => void | Promise<void>;
+    /** Windows: each pid's census creation time, so teardown refuses a reused pid. */
+    startTimes?: Map<number, number>;
+    /** Windows: each pid's session Job Object, terminated with it (Spec 1658 Phase 3b). */
+    jobNames?: Map<number, string>;
     wait?: (ms: number) => Promise<void>;
     graceMs?: number;
     killGraceMs?: number;
@@ -249,7 +271,9 @@ export async function reapShellpers(
 ): Promise<void> {
   if (pids.length === 0) return;
   const isAlive = opts?.isAlive ?? pidAlive;
-  const kill = opts?.kill ?? killProcessGroup;
+  const startTimes = opts?.startTimes;
+  const jobNames = opts?.jobNames;
+  const kill = opts?.kill ?? ((pid: number, signal: NodeJS.Signals) => killProcessGroup(pid, signal, startTimes?.get(pid), jobNames?.get(pid)));
   const wait = opts?.wait ?? sleep;
   const graceMs = opts?.graceMs ?? 3000;
   const killGraceMs = opts?.killGraceMs ?? 2000;
@@ -263,17 +287,32 @@ export async function reapShellpers(
     }
   };
 
-  for (const pid of pids) kill(pid, 'SIGTERM');
+  // Every kill runs and the poll still happens when a teardown fails; the
+  // failures are reported once the reap is over.
+  const failures: string[] = [];
+  const killAll = (targets: number[], signal: NodeJS.Signals) => Promise.all(targets.map(async (pid) => {
+    try {
+      await kill(pid, signal);
+    } catch (err) {
+      failures.push(`pid ${pid}: ${(err as Error).message}`);
+    }
+  }));
+
+  await killAll(pids, 'SIGTERM');
   await pollUntilDead(graceMs);
 
   const survivors = pids.filter((pid) => isAlive(pid));
   if (survivors.length > 0) {
-    for (const pid of survivors) kill(pid, 'SIGKILL');
+    await killAll(survivors, 'SIGKILL');
     // Confirm SIGKILL actually took effect before returning: the caller resumes
     // `claude --resume <id>` next, and a holder still in the kernel's exit path
     // has not yet released the session lock — returning early would re-open the
     // very collision race this reap exists to close (codex review, Issue #1224).
     await pollUntilDead(killGraceMs);
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`shellper teardown incomplete: ${failures.join('; ')}`);
   }
 }
 
@@ -295,14 +334,28 @@ export async function reconcileArchitectSessionHolder(opts: {
   identity: ArchitectIdentity;
   selfPid?: number;
   log?: ArchitectLogger;
-  list?: () => ProcessEntry[];
+  list?: () => ProcessEntry[] | Promise<ProcessEntry[]>;
   reap?: (pids: number[]) => Promise<void>;
 }): Promise<{ foreignHolder: boolean; reclaimedPids: number[] }> {
+  // Snapshot first (asynchronously: on Windows it is a PowerShell census), then
+  // classify. A failed snapshot classifies as "no holder", as before.
+  const list = opts.list ?? listProcessEntries;
+  let snapshot: ProcessEntry[] | null = null;
+  try {
+    snapshot = await list();
+  } catch (err) {
+    if (isWindows()) {
+      opts.log?.('WARN', `Architect '${opts.identity.architectName}' session-holder check skipped: ${(err as Error).message}`);
+    }
+  }
   const { reclaimable, foreign } = classifyArchitectSessionHolder({
     sessionId: opts.sessionId,
     identity: opts.identity,
     selfPid: opts.selfPid,
-    list: opts.list,
+    list: () => {
+      if (snapshot === null) throw new Error('process snapshot unavailable');
+      return snapshot;
+    },
   });
 
   const shortId = opts.sessionId.slice(0, 8);
@@ -322,7 +375,17 @@ export async function reconcileArchitectSessionHolder(opts: {
     'WARN',
     `Architect '${opts.identity.architectName}' session ${shortId}… is held by our own superseded shellper(s) [${reclaimable.join(', ')}]; reaping to reclaim the conversation in ${opts.identity.workspacePath}`,
   );
-  const reap = opts.reap ?? ((pids: number[]) => reapShellpers(pids));
-  await reap(reclaimable);
+  const { startTimes, jobNames } = shellperTeardownIdentities(snapshot ?? [], reclaimable);
+  const reap = opts.reap ?? ((pids: number[]) => reapShellpers(pids, { startTimes, jobNames }));
+  try {
+    await reap(reclaimable);
+  } catch (err) {
+    // The holder may still be alive: resuming would collide, so mint fresh.
+    opts.log?.(
+      'WARN',
+      `Architect '${opts.identity.architectName}' session ${shortId}… could not be reclaimed (${(err as Error).message}); minting a fresh session in ${opts.identity.workspacePath}`,
+    );
+    return { foreignHolder: true, reclaimedPids: [] };
+  }
   return { foreignHolder: false, reclaimedPids: reclaimable };
 }

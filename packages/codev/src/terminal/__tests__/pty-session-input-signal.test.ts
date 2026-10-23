@@ -6,6 +6,7 @@
  * two signals that close that, and — just as importantly — the things that must NOT change:
  * the PTY still receives every byte verbatim, and the delivery's own write moves nothing.
  */
+// spec-1658-tmp: opaque (every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off)
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';

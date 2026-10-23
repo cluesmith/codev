@@ -84,7 +84,8 @@ export function matchesProjectId(name: string, projectId: string): boolean {
  * Used by both LocalResolver and CliResolver for consistency.
  */
 export function isPreApprovedContent(content: string): boolean {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  // CRLF too: a spec or plan checked out with core.autocrlf, or saved by a Windows editor.
+  const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!frontmatterMatch) return false;
 
   const frontmatter = frontmatterMatch[1];

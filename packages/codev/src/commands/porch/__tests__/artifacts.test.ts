@@ -48,6 +48,14 @@ validated: [gemini, codex, claude]
     expect(isPreApprovedContent('# Spec\n\nNo frontmatter')).toBe(false);
   });
 
+  it('returns true for CRLF content, inline and block validated (Spec 1658: autocrlf checkouts)', () => {
+    const inline = '---\r\napproved: 2026-01-01\r\nvalidated: [gemini, codex, claude]\r\n---\r\n\r\n# Spec';
+    const block = '---\r\napproved: 2026-01-01\r\nvalidated:\r\n  - gemini\r\n---\r\n\r\n# Spec';
+    expect(isPreApprovedContent(inline)).toBe(true);
+    expect(isPreApprovedContent(block)).toBe(true);
+    expect(isPreApprovedContent('---\r\napproved: 2026-01-01\r\n---\r\n# Spec')).toBe(false);
+  });
+
   it('returns false when missing validated field', () => {
     const content = `---
 approved: 2026-01-01

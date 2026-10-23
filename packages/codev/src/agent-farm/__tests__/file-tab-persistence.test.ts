@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
+import { join } from 'node:path';
 import {
   saveFileTab,
   deleteFileTab,
@@ -130,14 +131,17 @@ describe('File tab SQLite persistence (utils/file-tabs)', () => {
   });
 
   it('should delete file tabs by path prefix via deleteFileTabsByPathPrefix', () => {
-    const workspace = '/home/user/project';
-    const worktreePath = '/home/user/project/.builders/bugfix-42';
+    // Host-joined: Tower stores a tab's realpath and cleanup passes the native
+    // worktree path, so both carry the host separator (`\` on Windows).
+    const workspace = join('/home', 'user', 'project');
+    const worktreePath = join(workspace, '.builders', 'bugfix-42');
+    const mainTab = join(workspace, 'src', 'app.ts');
 
     // Simulate tabs created by a builder via afx open (stored under main workspace)
-    saveFileTab(db, 'file-wt1', workspace, `${worktreePath}/src/fix.ts`, 1000);
-    saveFileTab(db, 'file-wt2', workspace, `${worktreePath}/tests/fix.test.ts`, 2000);
+    saveFileTab(db, 'file-wt1', workspace, join(worktreePath, 'src', 'fix.ts'), 1000);
+    saveFileTab(db, 'file-wt2', workspace, join(worktreePath, 'tests', 'fix.test.ts'), 2000);
     // A tab from the main workspace (should survive)
-    saveFileTab(db, 'file-main', workspace, '/home/user/project/src/app.ts', 3000);
+    saveFileTab(db, 'file-main', workspace, mainTab, 3000);
 
     const deleted = deleteFileTabsByPathPrefix(db, worktreePath);
     expect(deleted).toBe(2);
@@ -145,7 +149,7 @@ describe('File tab SQLite persistence (utils/file-tabs)', () => {
     // Main workspace tab should survive
     const tabs = loadFileTabsForWorkspace(db, workspace);
     expect(tabs.size).toBe(1);
-    expect(tabs.get('file-main')?.path).toBe('/home/user/project/src/app.ts');
+    expect(tabs.get('file-main')?.path).toBe(mainTab);
   });
 
   it('should return 0 when no tabs match path prefix', () => {
@@ -160,14 +164,15 @@ describe('File tab SQLite persistence (utils/file-tabs)', () => {
   });
 
   it('should not delete tabs for similarly-prefixed worktrees (boundary safety)', () => {
-    const workspace = '/home/user/project';
-    const worktree42 = '/home/user/project/.builders/bugfix-42';
-    const worktree424 = '/home/user/project/.builders/bugfix-424';
+    const workspace = join('/home', 'user', 'project');
+    const worktree42 = join(workspace, '.builders', 'bugfix-42');
+    const worktree424 = join(workspace, '.builders', 'bugfix-424');
+    const otherTab = join(worktree424, 'src', 'other.ts');
 
     // Tabs in bugfix-42 worktree
-    saveFileTab(db, 'file-42a', workspace, `${worktree42}/src/fix.ts`, 1000);
+    saveFileTab(db, 'file-42a', workspace, join(worktree42, 'src', 'fix.ts'), 1000);
     // Tabs in bugfix-424 worktree (should NOT be deleted when cleaning bugfix-42)
-    saveFileTab(db, 'file-424a', workspace, `${worktree424}/src/other.ts`, 2000);
+    saveFileTab(db, 'file-424a', workspace, otherTab, 2000);
 
     const deleted = deleteFileTabsByPathPrefix(db, worktree42);
     expect(deleted).toBe(1);
@@ -175,6 +180,6 @@ describe('File tab SQLite persistence (utils/file-tabs)', () => {
     // bugfix-424 tab should survive
     const tabs = loadFileTabsForWorkspace(db, workspace);
     expect(tabs.size).toBe(1);
-    expect(tabs.get('file-424a')?.path).toBe(`${worktree424}/src/other.ts`);
+    expect(tabs.get('file-424a')?.path).toBe(otherTab);
   });
 });

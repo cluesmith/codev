@@ -153,6 +153,19 @@ describe('behavioural metrics (M12a / T14)', () => {
     }
   });
 
+  it('B3 reads a CRLF file the same as its LF form', () => {
+    const root = fixtureRoot(
+      {},
+      { 'codev/reviews/2-y.md': 'first line\r\nI ran git add -A by mistake\r\n' },
+    );
+    try {
+      const hit = measureBehavior(root).b3_candidateHits.find((h) => h.rule === 'git-add-all');
+      expect(hit).toMatchObject({ file: 'codev/reviews/2-y.md', line: 2, excerpt: 'I ran git add -A by mistake' });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('does NOT report gate-rejection counts (the data does not exist)', () => {
     // Appendix D §2: no `rejected` gate state is ever persisted and
     // `requested_at` is overwritten on re-request, so a rejected-then-approved

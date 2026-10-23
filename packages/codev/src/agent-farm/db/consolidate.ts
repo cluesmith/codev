@@ -18,6 +18,7 @@
  */
 
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
 import { existsSync, renameSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { getConfig } from '../utils/index.js';
@@ -311,7 +312,7 @@ export function planMigration(globalDb: Database.Database, sourcePath: string): 
     return { sourcePath, exists: false, stats: [], get total() { return 0; } };
   }
   const wsFromFile = workspaceFromStateDbPath(sourcePath);
-  const src = new Database(sourcePath, { readonly: true });
+  const src = openDatabase(sourcePath, { readonly: true });
   try {
     const specs = buildSpecs(src, wsFromFile);
     const stats: TableStat[] = specs.map((spec) => {
@@ -355,7 +356,7 @@ function prepareMigration(
   sourcePath: string,
 ): { specs: TableSpec[]; stats: TableStat[]; total: number } {
   const wsFromFile = workspaceFromStateDbPath(sourcePath);
-  const src = new Database(sourcePath, { readonly: true });
+  const src = openDatabase(sourcePath, { readonly: true });
   try {
     const specs = buildSpecs(src, wsFromFile);
     let total = 0;

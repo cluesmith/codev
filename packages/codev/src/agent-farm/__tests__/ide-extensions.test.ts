@@ -19,7 +19,11 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TMPDIR || '/tmp'}/ide-extensions-test-${process.pid}-${Date.now()}`);
+const TMP_DIR = await vi.hoisted(async () => {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  return join(tmpdir(), `ide-extensions-test-${process.pid}-${Date.now()}`);
+});
 
 vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
   const actual = await importActual<typeof import('@cluesmith/codev-core/constants')>();
@@ -142,6 +146,15 @@ afterAll(() => {
   rmSync(TMP_DIR, { recursive: true, force: true });
 });
 
+
+/**
+ * Spec 1658: tests marked with this drive `#!/bin/sh` stub servers, or assert
+ * POSIX modes, paths or the `:` separator, so they cannot run on native
+ * Windows. The Windows behavior they stand for is covered natively by
+ * `ide-server-stub.windows.test.ts` (.cmd stubs) and `ide-server-windows.test.ts`.
+ */
+const posixStubsOnly = process.platform === 'win32';
+
 describe('embedded sidebar constants', () => {
   it('match the build script that writes the embedded directory', () => {
     expect(IDE_EXTENSION_DIR).toBe(buildManifest.IDE_EXTENSION_DIR);
@@ -157,7 +170,7 @@ describe('getIdeExtensionsDir', () => {
 });
 
 describe('ensureIdeExtensionsDir', () => {
-  it('creates a missing directory owner-only (0700), whatever the umask', () => {
+  it.skipIf(posixStubsOnly)('creates a missing directory owner-only (0700), whatever the umask', () => {
     const dir = join(root, 'nested', 'ide-extensions');
     const previousUmask = process.umask(0o000);
     try {
@@ -204,7 +217,7 @@ describe('ensureIdeExtensionsDir', () => {
 });
 
 describe('locateEmbeddedSidebar', () => {
-  it('returns the vsix path, id and version from the manifest', () => {
+  it.skipIf(posixStubsOnly)('returns the vsix path, id and version from the manifest', () => {
     const dir = writeEmbedded(freshDir('embedded'));
     expect(locateEmbeddedSidebar(dir)).toEqual({
       vsixPath: join(dir, IDE_EXTENSION_VSIX),
@@ -267,7 +280,7 @@ describe('readInstalledExtensionVersion', () => {
   });
 });
 
-describe('ensureSidebarInstalled', () => {
+describe.skipIf(posixStubsOnly)('ensureSidebarInstalled', () => {
   it('installs into an empty directory with exactly the expected args (Scenario 12)', async () => {
     const h = harness();
     const result = await ensureSidebarInstalled(h.server, {

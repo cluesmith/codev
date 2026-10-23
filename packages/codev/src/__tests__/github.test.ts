@@ -4,6 +4,8 @@
  * Tests: parseLinkedIssue, parseLabelDefaults, forge concept routing.
  */
 
+// spec-1658-tmp: opaque (the /tmp cwd is handed to a mocked executeForgeCommand and asserted on; nothing touches the disk)
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   parseLinkedIssue,

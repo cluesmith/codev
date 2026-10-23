@@ -16,6 +16,7 @@ import {
   findLatestSessionId,
   verifySessionOwnership,
 } from '../utils/claude-session-discovery.js';
+import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 
 describe('encodeClaudeProjectDir', () => {
   it('replaces / with -', () => {
@@ -36,6 +37,25 @@ describe('encodeClaudeProjectDir', () => {
 
   it('handles paths with multiple dots and slashes', () => {
     expect(encodeClaudeProjectDir('/a/b.c/.d.e/f')).toBe('-a-b-c--d-e-f');
+  });
+
+  describe('on Windows (Spec 1658)', () => {
+    beforeEach(() => setHostPlatformForTests('win32'));
+    afterEach(() => resetHostPlatformForTests());
+
+    it('replaces the drive colon and backslashes with -', () => {
+      expect(encodeClaudeProjectDir('C:\\Users\\x\\repo')).toBe('C--Users-x-repo');
+    });
+
+    it('replaces every non-alphanumeric character, as Claude does', () => {
+      expect(encodeClaudeProjectDir('C:\\Users\\RUNNER~1\\my_repo\\.builders\\pir-1')).toBe(
+        'C--Users-RUNNER-1-my-repo--builders-pir-1',
+      );
+    });
+
+    it('encodes a forward-slash Windows path the same way', () => {
+      expect(encodeClaudeProjectDir('C:/Users/x/repo')).toBe('C--Users-x-repo');
+    });
   });
 });
 
