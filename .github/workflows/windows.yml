@@ -6,7 +6,7 @@ run-name: "Windows: ${{ inputs.purpose || 'unlabelled' }}"
 # push or pull_request and is never a required check (owner ruling, 2026-10-21). Dispatch it
 # before a release and on any PR that touches platform code:
 #
-#   gh workflow run windows.yml --ref <branch> -f purpose='<what this run is for>' [-f filter=<vitest filter>] [-f tower=true]
+#   gh workflow run windows.yml --ref <branch> -f purpose='<what this run is for>' [-f suites=true] [-f filter=<vitest filter>] [-f tower=true]
 #
 # Jobs:
 #   probe     scripts/windows-probe.mjs on Node 20/22/24 (x64) and 22/24 (ARM64): Git Bash, PATHEXT, named pipes,
@@ -17,6 +17,11 @@ run-name: "Windows: ${{ inputs.purpose || 'unlabelled' }}"
 #   install-guard (install_guard=true) packs the branch packages, then on Node 20 installs them
 #             globally with node-gyp replaced by a failing stub: the install must fail with the
 #             supported-versions message and never reach the stub; on Node 22 it must succeed.
+#   unit, cli-e2e, post-release-e2e (suites=true) the full suites on windows-latest, Node 22 and 24
+#             (Node 20 has no better-sqlite3 prebuild on Windows, so it cannot install there):
+#             unit runs the sdk, core and codev unit tests; cli-e2e runs the built CLI tests;
+#             post-release-e2e packs the dispatched ref's packages and installs those tarballs
+#             with verify-install.mjs, or a published release when `version` is set.
 
 on:
   workflow_dispatch:
@@ -39,6 +44,15 @@ on:
         type: boolean
         required: false
         default: false
+      suites:
+        description: 'Run the full unit, cli-e2e and post-release-e2e suites (about an hour)'
+        type: boolean
+        required: false
+        default: false
+      version:
+        description: 'post-release-e2e: verify this published @cluesmith/codev version instead of the packed branch (e.g. 3.3.6)'
+        required: false
+        default: ''
       published:
         description: 'Published @cluesmith/codev versions to probe with tower=true (space-separated; 3.3.3 was current on 2026-09-09)'
         required: false
@@ -211,3 +225,148 @@ jobs:
           name: windows-vitest-report
           path: ${{ runner.temp }}/vitest-report.json
           if-no-files-found: warn
+
+  unit:
+    name: Unit tests (Node ${{ matrix.node }})
+    if: ${{ inputs.suites }}
+    runs-on: windows-latest
+    # The codev unit suite alone runs about 50 minutes on windows-latest.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # Builds codev's workspace dependencies (types, sdk, core) first.
+      - name: Build packages/codev
+        working-directory: packages/codev
+        run: pnpm build
+
+      - name: Run sdk unit tests
+        working-directory: packages/sdk
+        run: pnpm test
+
+      - name: Run core unit tests
+        working-directory: packages/core
+        run: pnpm test
+
+      - name: Copy skeleton for unit tests
+        working-directory: packages/codev
+        run: pnpm copy-skeleton
+
+      - name: Run codev unit tests
+        working-directory: packages/codev
+        env:
+          # Read-only GitHub concepts run live (Spec 1658 scenario 8).
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-unit-report.json"
+
+      - name: Upload the test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unit-report-node${{ matrix.node }}
+          path: ${{ runner.temp }}/vitest-unit-report.json
+          if-no-files-found: warn
+
+  cli-e2e:
+    name: CLI tests (Node ${{ matrix.node }})
+    if: ${{ inputs.suites }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages/codev
+        working-directory: packages/codev
+        run: pnpm build
+
+      - name: Run CLI integration tests
+        working-directory: packages/codev
+        run: pnpm exec vitest run --config vitest.cli.config.ts
+
+  post-release-e2e:
+    name: Install verification (Node ${{ matrix.node }})
+    if: ${{ inputs.suites }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        if: ${{ inputs.version == '' }}
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies
+        if: ${{ inputs.version == '' }}
+        run: pnpm install
+
+      - name: Build packages/codev
+        if: ${{ inputs.version == '' }}
+        working-directory: packages/codev
+        run: pnpm build
+
+      # codev-types, codev-core and codev-sdk are runtime dependencies of codev, so the branch
+      # install takes their tarballs too (as test.yml's install verification does).
+      - name: Pack the branch packages
+        if: ${{ inputs.version == '' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs"
+          for p in codev-types codev-core codev-sdk codev; do
+            pnpm --filter "@cluesmith/$p" pack --pack-destination "$RUNNER_TEMP/packs"
+          done
+          ls -l "$RUNNER_TEMP/packs"
+
+      - name: Download the published package
+        if: ${{ inputs.version != '' }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs"
+          npm view "@cluesmith/codev@$VERSION" version
+          npm pack "@cluesmith/codev@$VERSION" --pack-destination "$RUNNER_TEMP/packs"
+
+      - name: Verify installation
+        run: node packages/codev/scripts/verify-install.mjs "$RUNNER_TEMP"/packs/*.tgz

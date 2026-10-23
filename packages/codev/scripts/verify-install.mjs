@@ -7,6 +7,11 @@
  * all CLI binaries exist and respond to --help, and that the embedded
  * sidebar vsix ships with its manifest (Spec 1789).
  *
+ * On Windows, npm's global layout puts each bin at `<prefix>\<bin>.cmd` (no
+ * `bin/` directory), and `.cmd` shims cannot be run without a shell, so each
+ * bin goes through the installed SDK's `resolveSpawnable` and `execFileSync`
+ * with an argument array (Spec 1658).
+ *
  * Usage:
  *   node scripts/verify-install.mjs <tarball-or-package> [...extra-tarballs]
  *
@@ -15,10 +20,12 @@
  *   node scripts/verify-install.mjs @cluesmith/codev@2.0.0
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { IDE_EXTENSION_DIR, IDE_EXTENSION_MANIFEST, IDE_EXTENSION_VSIX } from './ide-extension-manifest.mjs';
 
 const targets = process.argv.slice(2);
@@ -29,15 +36,38 @@ if (targets.length === 0) {
 const prefix = mkdtempSync(join(tmpdir(), 'codev-install-verify-'));
 let failed = false;
 
+/**
+ * A runner for `<bin> --help` from the install under `prefix`. POSIX runs the
+ * bin's path through the shell, as before; Windows resolves the bin's `.cmd`
+ * shim with the SDK installed alongside the package and runs it without one.
+ */
+async function binRunner(globalRoot) {
+  if (process.platform !== 'win32') {
+    return (bin) => execSync(`"${join(prefix, 'bin', bin)}" --help`, { stdio: 'pipe' });
+  }
+  const requireFromCodev = createRequire(join(globalRoot, '@cluesmith', 'codev', 'package.json'));
+  const executableModule = requireFromCodev.resolve('@cluesmith/codev-sdk/node/executable');
+  const { resolveSpawnable } = await import(pathToFileURL(executableModule).href);
+  return (bin) => {
+    const spawnable = resolveSpawnable(join(prefix, `${bin}.cmd`), ['--help']);
+    return execFileSync(spawnable.command, spawnable.args, {
+      stdio: 'pipe',
+      windowsVerbatimArguments: spawnable.windowsVerbatimArguments,
+    });
+  };
+}
+
 try {
   const quoted = targets.map(t => `"${t}"`).join(' ');
   console.log(`Installing ${targets.join(', ')} into ${prefix}...`);
   execSync(`npm install -g --prefix "${prefix}" ${quoted}`, { stdio: 'inherit' });
 
+  const globalRoot = execSync(`npm root -g --prefix "${prefix}"`, { encoding: 'utf8' }).trim();
+  const runHelp = await binRunner(globalRoot);
   const bins = ['codev', 'afx', 'porch', 'consult'];
   for (const bin of bins) {
     try {
-      execSync(`"${join(prefix, 'bin', bin)}" --help`, { stdio: 'pipe' });
+      runHelp(bin);
       console.log(`  OK: ${bin} --help`);
     } catch (err) {
       console.error(`  FAIL: ${bin} --help (exit code ${err.status})`);
@@ -45,7 +75,6 @@ try {
     }
   }
 
-  const globalRoot = execSync(`npm root -g --prefix "${prefix}"`, { encoding: 'utf8' }).trim();
   const ideExtensionDir = join(globalRoot, '@cluesmith', 'codev', IDE_EXTENSION_DIR);
   const vsixPath = join(ideExtensionDir, IDE_EXTENSION_VSIX);
   if (existsSync(vsixPath)) {
