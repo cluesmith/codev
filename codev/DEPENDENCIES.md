@@ -224,14 +224,17 @@ Codev runs directly on Windows 10 22H2 or Windows 11, x64 or ARM64, with no admi
 
 ```powershell
 # After installing Node.js 22 or 24 from https://nodejs.org
-winget install Git.Git jqlang.jq GitHub.cli
+winget install Git.Git
+winget install jqlang.jq
+winget install GitHub.cli
 npm install -g @cluesmith/codev
 codev doctor
 ```
 
 How it works and what to know:
 
-- **Shells.** Architect and shell terminals open Windows PowerShell 5.1 by default (set
+- **Shells.** Architect and builder terminals run their configured agent CLI (`claude` by
+  default) directly. Plain shell terminals open Windows PowerShell 5.1 by default (set
   `shell.shell` to `"pwsh"` in `.codev/config.json` to use PowerShell 7). Codev's own scripts
   (forge concepts, the builder launch script, `postSpawn`) run under Git Bash. Codev never runs
   bare `bash`, because `C:\Windows\System32\bash.exe` starts WSL. It finds Git Bash from

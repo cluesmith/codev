@@ -1161,7 +1161,7 @@ const CONFIG = {
 ### Agent-Farm CLI (TypeScript)
 - **commander.js**: CLI argument parsing and command structure
 - **better-sqlite3**: SQLite database for atomic state management (WAL mode, `synchronous = FULL` — commits fsync before acknowledging, so a committed removal can't be rolled back by OS crash; ~26µs/commit on SSD, acceptable at global.db's lifecycle-event write rate — Issue #1150)
-- **tree-kill**: Process cleanup and termination
+- **Session-tree teardown**: `lib/process-tree.ts` (`killSessionTree`; see Platform Layer), which replaced `tree-kill`
 - **Shellper processes**: Detached Node.js processes for terminal session persistence (Spec 0104)
 - **node-pty**: Native PTY sessions with WebSocket multiplexing (Spec 0085)
 - **React 19 + Vite 6**: Dashboard SPA at `apps/web/` (standalone workspace member)

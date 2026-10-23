@@ -70,7 +70,14 @@ try {
   execSync(`npm install -g --prefix "${prefix}" ${quoted}`, { stdio: 'inherit' });
 
   const globalRoot = execSync(`npm root -g --prefix "${prefix}"`, { encoding: 'utf8' }).trim();
-  const runHelp = await binRunner(globalRoot);
+  let runHelp;
+  try {
+    runHelp = await binRunner(globalRoot);
+  } catch (err) {
+    console.error(`  FAIL: ${err.message}`);
+    console.error('\nInstall verification FAILED.');
+    process.exit(1);
+  }
   const bins = ['codev', 'afx', 'porch', 'consult'];
   for (const bin of bins) {
     try {

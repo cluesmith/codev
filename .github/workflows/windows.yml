@@ -22,7 +22,7 @@ run-name: "Windows: ${{ inputs.purpose || 'unlabelled' }}"
 #             unit runs the sdk, core and codev unit tests; cli-e2e runs the built CLI tests;
 #             post-release-e2e packs the dispatched ref's packages and installs those tarballs
 #             with verify-install.mjs, or a published release when `version` is set (setting
-#             `version` alone runs only this job).
+#             `version` without `suites` runs this job and the probes, not unit or cli-e2e).
 
 on:
   workflow_dispatch:
