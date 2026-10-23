@@ -6,6 +6,8 @@
  * workspace path decoding, and 404 fallback.
  */
 
+// spec-1658-tmp: opaque (every /tmp is a fake ctx path, a cwd handed to a mocked terminal manager, or a workspace string in mocked send routing and in-memory mailbox rows; nothing touches the disk)
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PASTE_BEGIN, PASTE_END } from '../servers/message-write.js';
 import http from 'node:http';

@@ -63,11 +63,16 @@ const { BuildersProvider, partitionArchitectGroups, agentTargetIsFocused, agentC
 const { BuilderGroupTreeItem, IdleArchitectsGroupTreeItem, BuilderTreeItem } = await import('../views/builder-tree-item.js');
 import type { AgentTarget } from '../views/builders.js';
 import type { BuilderGroup } from '../views/builder-grouping.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+/** A worktree path that does not exist: the review-file probe (existsSync) finds nothing. */
+const MISSING_WORKTREE = join(tmpdir(), 'codev-test-missing-worktree');
 
 function builder(overrides: Partial<OverviewBuilder>): OverviewBuilder {
   return {
     id: 'pir-1', issueId: '1', issueTitle: 't', phase: 'implement', protocolPhase: 'implement',
-    mode: 'strict', gates: {}, worktreePath: '/tmp/wt', roleId: null, protocol: 'pir',
+    mode: 'strict', gates: {}, worktreePath: MISSING_WORKTREE, roleId: null, protocol: 'pir',
     planPhases: [], progress: 0, blocked: null, blockedGate: null, blockedSince: null,
     startedAt: null, idleMs: 0, lastDataAt: null, spawnedByArchitect: null,
     area: 'Uncategorized', prReady: false,

@@ -8,6 +8,7 @@
  * named pipes (and a second local user, scenario 14) are covered by the
  * on-demand Windows workflow.
  */
+// spec-1658-tmp: opaque (the /tmp cwd is handed to a MockPty; the real socket dir uses os.tmpdir())
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';

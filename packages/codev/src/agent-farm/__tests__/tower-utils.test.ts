@@ -5,6 +5,8 @@
  * workspace name extraction, MIME types, static file serving.
  */
 
+// spec-1658-tmp: posix-only (the /tmp and /private/tmp isTempDirectory cases are it.skipIf(win32), since Windows counts only the host temp dir)
+
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';

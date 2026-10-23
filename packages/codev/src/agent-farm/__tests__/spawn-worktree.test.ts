@@ -4,6 +4,7 @@
  * Tests: worktree creation, dependency checking, porch initialization,
  * bugfix collision detection, slugify, resume validation, and session creation.
  */
+// spec-1658-tmp: opaque (every /tmp worktree path goes to mocked node:fs, mocked run/runStreaming or a launch-script string assertion)
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {

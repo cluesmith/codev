@@ -5,6 +5,8 @@
  * the snapshot cannot be produced.
  */
 
+// spec-1658-tmp: opaque (cwd and logDir /tmp are config strings for a PtySession that is never spawned and has diskLogEnabled false)
+
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { attachWithReplay } from '../attach-replay.js';

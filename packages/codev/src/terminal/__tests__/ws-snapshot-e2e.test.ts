@@ -14,6 +14,7 @@ import { WebSocket } from 'ws';
 import { TerminalManager } from '../pty-manager.js';
 import { SessionScreen } from '../session-screen.js';
 import { decodeFrame } from '../ws-protocol.js';
+import { tmpdir } from 'node:os';
 
 const COLS = 120;
 const ROWS = 30;
@@ -32,7 +33,7 @@ describe('WS attach serves the O(screen) snapshot (PIR #1354, real PTY + real WS
   let port: number;
 
   beforeEach(async () => {
-    manager = new TerminalManager({ workspaceRoot: '/tmp', diskLogEnabled: false, maxSessions: 3 });
+    manager = new TerminalManager({ workspaceRoot: tmpdir(), diskLogEnabled: false, maxSessions: 3 });
     server = http.createServer();
     manager.attachWebSocket(server);
     server.listen(0);

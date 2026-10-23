@@ -5,6 +5,7 @@
  * attachShellper() is used, and that the SessionManager + PtySession
  * combination works for terminal lifecycle (create, reconnect, kill).
  */
+// spec-1658-tmp: opaque (every /tmp is a cwd/HOME string for a mocked node-pty or a socketDir on a SessionManager that never creates it; real dirs use os.tmpdir())
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import os from 'node:os';

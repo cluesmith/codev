@@ -6,6 +6,8 @@
  * getTerminalsForWorkspace, and initTerminals/shutdownTerminals lifecycle.
  */
 
+// spec-1658-tmp: opaque (every /tmp is a shellper_socket in mocked DB rows, checked only through spied existsSync and a mocked shellperManager)
+
 import { describe, it, expect, beforeEach, afterEach, onTestFinished, vi } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';

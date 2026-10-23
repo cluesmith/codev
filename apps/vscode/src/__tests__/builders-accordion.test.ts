@@ -18,6 +18,11 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+/** A worktree path that does not exist: the review-file probe (existsSync) finds nothing. */
+const MISSING_WORKTREE = join(tmpdir(), 'codev-test-missing-worktree');
 
 vi.mock('vscode', () => {
   class FakeEventEmitter<T> {
@@ -60,7 +65,7 @@ const { BuilderTreeItem, BuilderGroupTreeItem } = await import('../views/builder
 function builder(overrides: Partial<OverviewBuilder>): OverviewBuilder {
   return {
     id: 'pir-1', issueId: '1', issueTitle: 't', phase: 'implement', protocolPhase: 'implement',
-    mode: 'strict', gates: {}, worktreePath: '/tmp/wt', roleId: null, protocol: 'pir',
+    mode: 'strict', gates: {}, worktreePath: MISSING_WORKTREE, roleId: null, protocol: 'pir',
     planPhases: [], progress: 0, blocked: null, blockedGate: null, blockedSince: null,
     startedAt: null, idleMs: 0, lastDataAt: null, spawnedByArchitect: null,
     area: 'Uncategorized', prReady: false,

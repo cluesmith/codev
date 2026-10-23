@@ -9,6 +9,8 @@
  * overview's discovery cache are stubbed.
  */
 
+// spec-1658-tmp: opaque (the only /tmp is reactDashboardPath in a RouteContext with hasReactDashboard false; never read)
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { Readable } from 'node:stream';

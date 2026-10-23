@@ -10,6 +10,8 @@
  * pass without the migration ever running.
  */
 
+// spec-1658-tmp: opaque (every /tmp is a workspace_path column value written into the metrics DB, which itself lives under os.tmpdir())
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';

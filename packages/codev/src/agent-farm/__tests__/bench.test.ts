@@ -2,6 +2,8 @@
  * Tests for afx bench command
  */
 
+// spec-1658-tmp: opaque (every /tmp is an output path or cwd given to fully mocked node:fs, child_process and process.cwd; nothing touches the disk)
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter, Readable, PassThrough } from 'node:stream';
 import {

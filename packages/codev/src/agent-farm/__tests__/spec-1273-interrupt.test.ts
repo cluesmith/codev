@@ -13,6 +13,7 @@
  *  - that ESC delivery is never deferred by the send buffer — an interrupt that
  *    can be delayed because someone recently typed is not an interrupt.
  */
+// spec-1658-tmp: opaque (/tmp/ws is the return value of a mocked detectWorkspaceRoot)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {

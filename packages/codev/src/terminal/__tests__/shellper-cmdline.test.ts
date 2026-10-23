@@ -4,6 +4,7 @@
  * JSON argument carries argv quoting and its paths carry JSON-escaped
  * backslashes (`C:\\Users\\...`); matchers must still find `C:\Users\...`.
  */
+// spec-1658-tmp: opaque (the /tmp socket path is a JSON string parsed with string ops)
 
 import { describe, it, expect, afterEach } from 'vitest';
 import {

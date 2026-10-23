@@ -122,8 +122,11 @@ if (mode === '--control') {
   } else {
     if (code !== 0) fail(`the install failed (exit ${code})`, output);
     if (invoked) fail(`node-gyp was invoked (${readFileSync(marker, 'utf8').trim()})`, output);
+    const expected = JSON.parse(readFileSync(path.join(repoRoot, 'packages', 'codev', 'package.json'), 'utf8')).version;
     const version = spawnSync(quote(path.join(prefix, 'codev.cmd')), ['--version'], { encoding: 'utf8', shell: true, windowsHide: true });
-    if (version.status !== 0) fail(`codev --version failed (exit ${version.status})`, `${version.stdout}${version.stderr}`);
+    const versionOutput = `stdout: ${JSON.stringify(version.stdout)}\nstderr: ${JSON.stringify(version.stderr)}`;
+    if (version.status !== 0) fail(`codev --version failed (exit ${version.status})`, versionOutput);
+    if (!version.stdout.includes(expected)) fail(`codev --version did not print ${expected}`, versionOutput);
     console.log(`OK supported: installed without node-gyp; codev --version = ${version.stdout.trim()}`);
   }
 } else {

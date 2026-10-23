@@ -13,7 +13,11 @@ import type { AddressInfo } from 'node:net';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TMPDIR || '/tmp'}/ide-preflight-test-${process.pid}-${Date.now()}`);
+const TMP_DIR = await vi.hoisted(async () => {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  return join(tmpdir(), `ide-preflight-test-${process.pid}-${Date.now()}`);
+});
 
 const fakes = vi.hoisted(() => ({
   /** port -> listening pids */

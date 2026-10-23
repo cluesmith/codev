@@ -19,7 +19,11 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TMPDIR || '/tmp'}/ide-extensions-test-${process.pid}-${Date.now()}`);
+const TMP_DIR = await vi.hoisted(async () => {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  return join(tmpdir(), `ide-extensions-test-${process.pid}-${Date.now()}`);
+});
 
 vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
   const actual = await importActual<typeof import('@cluesmith/codev-core/constants')>();

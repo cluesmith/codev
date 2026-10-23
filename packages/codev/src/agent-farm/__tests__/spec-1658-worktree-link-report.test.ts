@@ -3,6 +3,7 @@
  * (native Windows with neither a symlink nor a hard link available) is a
  * warning, since edits in the worktree do not reach the workspace root.
  */
+// spec-1658-tmp: opaque (/tmp/wt is a target path for mocked existsSync and a mocked createWorktreeLink)
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 

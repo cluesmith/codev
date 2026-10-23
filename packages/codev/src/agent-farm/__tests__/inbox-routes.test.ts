@@ -6,6 +6,7 @@
 // listHeld/dismiss run for real). Everything else tower-routes imports is stubbed —
 // the standard tower-routes route-test harness. This covers the plan's integration
 // case: held row → afx inbox shows it → dismiss → gone from the list, not delivered.
+// spec-1658-tmp: opaque (reactDashboardPath /tmp/dash is a RouteContext field the inbox routes never read; hasReactDashboard is false)
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';

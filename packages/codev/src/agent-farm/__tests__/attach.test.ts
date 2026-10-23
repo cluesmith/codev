@@ -5,6 +5,8 @@
  * that attach to actual builders require git and Tower to be running.
  */
 
+// spec-1658-tmp: opaque (every /tmp socket is a fake DB row value checked against a mocked existsSync and handed to a mocked ShellperClient; nothing touches the disk)
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Builder } from '../types.js';
 import { EventEmitter } from 'node:events';

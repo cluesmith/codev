@@ -9,6 +9,7 @@
  * `child_process.spawn` is mocked to capture the launch; the fake child then
  * reports bad info so creation stops right after the spawn.
  */
+// spec-1658-tmp: opaque (the /tmp cwd only reaches the mocked child_process.spawn and the captured argv JSON; the socket dir uses os.tmpdir())
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';

@@ -4,6 +4,7 @@
  * and flatten rule; this pins those per-axis decisions in one place. Pure /
  * vscode-free, so it runs under the vitest harness.
  */
+// spec-1658-tmp: opaque (/tmp/wt is a worktreePath field in fake builder rows for pure grouping helpers)
 
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-types';

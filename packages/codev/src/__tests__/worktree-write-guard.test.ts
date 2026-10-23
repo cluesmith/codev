@@ -7,6 +7,8 @@
  * so the tested behavior is the behavior builders get.
  */
 
+// spec-1658-tmp: posix-only (the /tmp and /private/tmp guard-allowlist tests are it.skipIf(onWindows); the Windows temp allowlist is covered by runIf(onWindows) tests using os.tmpdir())
+
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync, execSync } from 'node:child_process';
 import * as fs from 'node:fs';

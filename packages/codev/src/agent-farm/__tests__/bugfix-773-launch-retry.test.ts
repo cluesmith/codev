@@ -14,6 +14,8 @@
  * "already active" pass-through is preserved.
  */
 
+// spec-1658-tmp: opaque (/tmp/workspace is a workspace string posted through an injected mock fetch; nothing touches the disk)
+
 import { describe, it, expect, vi } from 'vitest';
 import { launchWorkspaceWithRetry } from './e2e/global-setup.js';
 

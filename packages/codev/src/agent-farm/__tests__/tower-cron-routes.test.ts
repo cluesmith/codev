@@ -1,6 +1,8 @@
 // Tests for cron API route handlers (Spec 399 Phase 3)
 // Tests handleCronList, handleCronTaskAction, enable/disable
 
+// spec-1658-tmp: opaque (the only /tmp is reactDashboardPath in a RouteContext with hasReactDashboard false; never read)
+
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';

@@ -9,7 +9,11 @@ import http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { rmSync } from 'node:fs';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TMPDIR || '/tmp'}/ide-forward-int-${process.pid}-${Date.now()}`);
+const TMP_DIR = await vi.hoisted(async () => {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  return join(tmpdir(), `ide-forward-int-${process.pid}-${Date.now()}`);
+});
 
 vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
   const actual = await importActual<typeof import('@cluesmith/codev-core/constants')>();

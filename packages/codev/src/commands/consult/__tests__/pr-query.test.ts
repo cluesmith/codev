@@ -6,6 +6,8 @@
  * reference the path, NOT inline the raw diff in the prompt.
  */
 
+// spec-1658-tmp: opaque (the only /tmp is a diffPath string asserted inside the composed prompt text)
+
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';

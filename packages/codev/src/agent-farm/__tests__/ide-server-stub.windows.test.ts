@@ -29,8 +29,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIRS = vi.hoisted(() => {
-  const root = `${process.env.TEMP || process.env.TMPDIR || '/tmp'}/codev-1658-p9-${process.pid}-${Date.now()}`;
+const DIRS = await vi.hoisted(async () => {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = join(tmpdir(), `codev-1658-p9-${process.pid}-${Date.now()}`);
   return { root, agentFarm: `${root}/${'segment-past-max-path-0123456/'.repeat(8)}agent-farm` };
 });
 

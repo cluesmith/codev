@@ -6,6 +6,8 @@
  * Tests protocolFromBranch for branch-name-based protocol derivation.
  */
 
+// spec-1658-tmp: opaque (every /tmp is a cwd or workspace string passed to mocked child_process, forge and MetricsDB and asserted on; nothing touches the disk)
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------

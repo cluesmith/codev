@@ -12,6 +12,8 @@
  * for a given tree state, so a mocked git would only assert that the code calls
  * the function I wrote it to call.
  */
+
+// spec-1658-tmp: opaque (the only /tmp is an output path given to relativeOutputPath, which is pure path math)
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';

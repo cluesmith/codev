@@ -6,6 +6,8 @@
  * claude the user started by hand) is classified foreign and left untouched.
  */
 
+// spec-1658-tmp: opaque (/tmp/sock/s.sock is a socketPath inside a fake ps cmdline string; nothing touches the disk)
+
 import { describe, it, expect, vi } from 'vitest';
 import {
   sessionIdNeedles,

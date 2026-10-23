@@ -8,6 +8,7 @@
  * Lives in `__tests__/` (vitest) rather than `src/test/` (vscode-test Electron
  * harness) because the helpers touch no `vscode` APIs.
  */
+// spec-1658-tmp: opaque (/tmp/wt is a worktreePath field in fake builder rows for pure label/icon helpers)
 
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-types';

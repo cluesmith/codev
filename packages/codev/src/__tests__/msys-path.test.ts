@@ -2,6 +2,8 @@
  * Spec 1658 Phase 5: path translation across the Git Bash boundary.
  */
 
+// spec-1658-tmp: opaque (/tmp/x is a string fed to a pure MSYS path translator to assert it throws; nothing touches the disk)
+
 import { describe, it, expect } from 'vitest';
 import { toMsysPath, fromMsysPath, MSYS_PATHCONV_OPT_OUT, withoutMsysPathConversion } from '../lib/msys-path.js';
 

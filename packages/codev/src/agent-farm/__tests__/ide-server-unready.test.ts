@@ -13,7 +13,11 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TEMP || process.env.TMPDIR || '/tmp'}/ide-unready-${process.pid}-${Date.now()}`);
+const TMP_DIR = await vi.hoisted(async () => {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  return join(tmpdir(), `ide-unready-${process.pid}-${Date.now()}`);
+});
 
 vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
   const actual = await importActual<typeof import('@cluesmith/codev-core/constants')>();

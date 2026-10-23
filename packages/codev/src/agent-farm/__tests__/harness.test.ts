@@ -14,6 +14,8 @@ import {
   type CustomHarnessConfig,
 } from '../utils/harness.js';
 
+// spec-1658-tmp: opaque (/tmp/workspace/.builder-role.md is a role-file string interpolated into harness args and fragments; nothing touches the disk)
+
 // Capture whether resolveHarness returned a provider or threw — lets a test
 // assert a retired path returns NEITHER a provider NOR undefined (it throws).
 function resolveResult(fn: () => unknown): { returned?: unknown; threw?: Error } {

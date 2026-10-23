@@ -9,6 +9,12 @@ import { SessionManager, StderrBuffer, getProcessStartTime, isCrashLooping, CRAS
 import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
 import { ShellperClient } from '../shellper-client.js';
 
+// spec-1658-tmp: posix-only (real disk and process uses of /tmp sit in the real-shellper tests, skipped on win32 by skipRealShellper; the rest are mock cwd strings)
+// Real-shellper tests are skipped in CI, where the child cannot resolve the
+// node-pty binding, and on win32: they run /bin/echo, /bin/sh, /bin/cat and
+// /bin/bash under a Unix-socket shellper with cwd /tmp (POSIX-only).
+const skipRealShellper = !!process.env.CI || process.platform === 'win32';
+
 // Helper: create a temp directory for socket files
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'session-mgr-test-'));
@@ -784,7 +790,7 @@ describe('SessionManager', () => {
 
   // Real shellper integration tests require node-pty native module and are
   // skipped in CI where the child process cannot resolve the native binding.
-  describe.skipIf(!!process.env.CI)('createSession (integration with real shellper)', () => {
+  describe.skipIf(skipRealShellper)('createSession (integration with real shellper)', () => {
     // These tests spawn a real shellper-main.js process
     const shellperScript = path.resolve(
       path.dirname(new URL(import.meta.url).pathname),
@@ -1331,7 +1337,7 @@ describe('SessionManager', () => {
     });
 
     // This test spawns real shellper processes — skip in CI
-    it.skipIf(!!process.env.CI)('respects maxRestarts limit', async () => {
+    it.skipIf(skipRealShellper)('respects maxRestarts limit', async () => {
       const shellperScript = path.resolve(
         path.dirname(new URL(import.meta.url).pathname),
         '../../../dist/terminal/shellper-main.js',
@@ -1383,7 +1389,7 @@ describe('SessionManager', () => {
     // Issue #1149: a fast-failing launch (e.g. an unresumable --resume) swaps
     // to the caller-provided fallback args after 3 failing exits within the
     // window. Spawns real shellper processes — skip in CI.
-    it.skipIf(!!process.env.CI)('applies crashLoopFallback after repeated fast failures', async () => {
+    it.skipIf(skipRealShellper)('applies crashLoopFallback after repeated fast failures', async () => {
       const shellperScript = path.resolve(
         path.dirname(new URL(import.meta.url).pathname),
         '../../../dist/terminal/shellper-main.js',
@@ -1452,7 +1458,7 @@ describe('SessionManager', () => {
     // is given up rather than respawning forever. A real agent being quit by a
     // human never trips this (see FAST_CLEAN_EXIT_MS).
     // Spawns real shellper processes — skip in CI.
-    it.skipIf(!!process.env.CI)('bounds a harness that exits 0 immediately, without applying crashLoopFallback', async () => {
+    it.skipIf(skipRealShellper)('bounds a harness that exits 0 immediately, without applying crashLoopFallback', async () => {
       const shellperScript = path.resolve(
         path.dirname(new URL(import.meta.url).pathname),
         '../../../dist/terminal/shellper-main.js',
@@ -2202,7 +2208,7 @@ describe('stderr tail logging (integration)', () => {
     rmrf(socketDir);
   });
 
-  it.skipIf(!!process.env.CI)('logs session exit without stderr tail (stderr goes to file)', async () => {
+  it.skipIf(skipRealShellper)('logs session exit without stderr tail (stderr goes to file)', async () => {
     // Bugfix #324: stderr is redirected to a log file (not a pipe), so
     // logStderrTail returns early (stderrBuffer is null). No "Last stderr"
     // message is expected — diagnostics are in the .log file instead.
@@ -2240,7 +2246,7 @@ describe('stderr tail logging (integration)', () => {
     expect(logs.some((m) => m.includes('last stderr'))).toBe(false);
   }, 15000);
 
-  it.skipIf(!!process.env.CI)('logs session kill without stderr tail (stderr goes to file)', async () => {
+  it.skipIf(skipRealShellper)('logs session kill without stderr tail (stderr goes to file)', async () => {
     // Bugfix #324: stderr goes to a file, not a pipe — no "Last stderr" log.
     const logs: string[] = [];
     const manager = new SessionManager({
@@ -2274,7 +2280,7 @@ describe('stderr tail logging (integration)', () => {
     expect(logs.some((m) => m.includes('last stderr'))).toBe(false);
   }, 15000);
 
-  it.skipIf(!!process.env.CI)('does not log stderr for reconnected sessions', async () => {
+  it.skipIf(skipRealShellper)('does not log stderr for reconnected sessions', async () => {
     const logs: string[] = [];
     const socketPath = path.join(socketDir, 'shellper-no-stderr.sock');
     let mockPty: MockPty | null = null;

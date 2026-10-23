@@ -19,7 +19,11 @@ import { rmSync } from 'node:fs';
 import path from 'node:path';
 import type { ProcessCensusEntry } from '../servers/process-census.js';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TEMP || process.env.TMPDIR || '/tmp'}/ide-server-windows-${process.pid}-${Date.now()}`);
+const TMP_DIR = await vi.hoisted(async () => {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  return join(tmpdir(), `ide-server-windows-${process.pid}-${Date.now()}`);
+});
 
 vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
   const actual = await importActual<typeof import('@cluesmith/codev-core/constants')>();
