@@ -179,6 +179,7 @@ function main(raw) {
       addAllow(path.join(process.env.USERPROFILE, '.claude'));
     }
   } else {
+    // POSIX temp roots (macOS /tmp is a symlink to /private/tmp).
     addAllow('/tmp');
     addAllow('/private/tmp');
   }

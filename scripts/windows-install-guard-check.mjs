@@ -5,9 +5,10 @@
  * real Windows host, against tarballs packed from the branch.
  *
  * The compiler is made unreachable by pointing npm's `node-gyp` config at a
- * stub that records each call and fails. npm's own node-gyp shim runs
- * `node "$npm_config_node_gyp"`, so every dependency's source-build fallback
- * lands in the stub.
+ * stub (`--node-gyp=<stub>` on the npm command line; npm overrides an
+ * inherited `npm_config_node_gyp` with its own default) that records each
+ * call and fails. npm's node-gyp shim runs `node "$npm_config_node_gyp"`,
+ * so every dependency's source-build fallback lands in the stub.
  *
  * Usage (from the repo root, with the four packed tarballs in <dir>):
  *   node scripts/windows-install-guard-check.mjs --control <dir>
@@ -58,7 +59,7 @@ function makeStub() {
 }
 
 function npm(args, env, cwd) {
-  const result = spawnSync('npm', args, {
+  const result = spawnSync('npm', [...args, quote(`--node-gyp=${stub}`)], {
     cwd,
     env,
     encoding: 'utf8',
@@ -84,7 +85,7 @@ function quote(value) {
 }
 
 const { stub, marker } = makeStub();
-const env = { ...process.env, npm_config_node_gyp: stub, npm_config_foreground_scripts: 'false' };
+const env = { ...process.env };
 delete env.npm_config_prefix;
 
 if (mode === '--control') {

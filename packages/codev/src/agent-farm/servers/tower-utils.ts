@@ -111,6 +111,7 @@ export function isTempDirectory(workspacePath: string): boolean {
   if (isWindows()) {
     return false;
   }
+  // POSIX temp roots (macOS /tmp is a symlink to /private/tmp).
   return workspacePath.startsWith('/tmp/') || workspacePath.startsWith('/private/tmp/');
 }
 
