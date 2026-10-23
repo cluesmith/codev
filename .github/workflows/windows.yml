@@ -51,7 +51,7 @@ on:
         required: false
         default: false
       version:
-        description: 'post-release-e2e: verify this published @cluesmith/codev version instead of the packed branch (e.g. 3.3.6)'
+        description: 'post-release-e2e: verify this published @cluesmith/codev version instead of the packed branch (a release after 3.3.5)'
         required: false
         default: ''
       published:

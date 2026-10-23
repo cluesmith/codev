@@ -46,7 +46,14 @@ async function binRunner(globalRoot) {
     return (bin) => execSync(`"${join(prefix, 'bin', bin)}" --help`, { stdio: 'pipe' });
   }
   const requireFromCodev = createRequire(join(globalRoot, '@cluesmith', 'codev', 'package.json'));
-  const executableModule = requireFromCodev.resolve('@cluesmith/codev-sdk/node/executable');
+  let executableModule;
+  try {
+    executableModule = requireFromCodev.resolve('@cluesmith/codev-sdk/node/executable');
+  } catch (err) {
+    throw new Error(
+      `The installed @cluesmith/codev-sdk has no node/executable export (added after 3.3.5), so its Windows bins cannot be resolved: ${err.message}`,
+    );
+  }
   const { resolveSpawnable } = await import(pathToFileURL(executableModule).href);
   return (bin) => {
     const spawnable = resolveSpawnable(join(prefix, `${bin}.cmd`), ['--help']);
