@@ -846,6 +846,13 @@ building from source, so the Windows unit suite can run.
   - the package ships npm config (or documents the flag, if config cannot be shipped for a
     global install) that disables source-build fallback for the prebuild-based dependency, so a
     missing prebuild fails install instead of compiling;
+    **Deviation (Phase 10):** not shipped. better-sqlite3's install script is literally
+    `prebuild-install || node-gyp rebuild`, so the fallback is in the dependency's own script
+    and no npm config or flag removes it for a global install. The Windows `preinstall` gate
+    covers this item: it refuses a Node with no win32 prebuild before any `install` script runs,
+    so the fallback is never reached. The `install-guard` check proves it, with node-gyp as a
+    failing stub that the guard never reaches, and a control run showing the stub is reached
+    without the guard;
   - `scripts/postinstall.mjs` (runs after dependencies) verifies on Windows that both bindings
     load and, if not, prints the supported Node versions and exits non-zero;
   - first-run load failure prints the same message.
