@@ -113,6 +113,31 @@ function ownerPid(tower: IsolatedTower): number | null {
   }
 }
 
+/**
+ * Membership of `pid` in job `jobName`, plus its parent pid and creation time, read
+ * before the job is torn down. A Phase 4 (b) failure then states whether Tower was
+ * in the job (in-session start instead of CIM, or breakaway failed) or exited on its own.
+ */
+function jobFacts(jobName: string, pid: number): string {
+  const script = [
+    "$sig = '[DllImport(\"kernel32.dll\", SetLastError = true, CharSet = CharSet.Unicode)] public static extern IntPtr OpenJobObjectW(uint access, bool inherit, string name);",
+    "[DllImport(\"kernel32.dll\", SetLastError = true)] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);",
+    "[DllImport(\"kernel32.dll\", SetLastError = true)] public static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);",
+    "[DllImport(\"kernel32.dll\")] public static extern bool CloseHandle(IntPtr handle);'",
+    '$K = Add-Type -MemberDefinition $sig -Name JobFacts -Namespace Codev1658 -PassThru',
+    `$job = $K::OpenJobObjectW(0x4, $false, '${jobName}')`,
+    `$proc = $K::OpenProcess(0x1000, $false, ${pid})`,
+    '$inJob = "unknown"',
+    'if ($job -ne [IntPtr]::Zero -and $proc -ne [IntPtr]::Zero) { $r = $false; if ($K::IsProcessInJob($proc, $job, [ref]$r)) { $inJob = "$r" } }',
+    `$cim = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"`,
+    '"inJob=$inJob jobOpened=$($job -ne [IntPtr]::Zero) procOpened=$($proc -ne [IntPtr]::Zero) ppid=$($cim.ParentProcessId) created=$($cim.CreationDate.ToUniversalTime().ToString(\"o\"))"',
+  ].join('\n');
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', windowsHide: true });
+  let facts = r.stdout.trim();
+  if (r.stderr.trim() !== '') facts = `${facts} stderr=${r.stderr.trim()}`;
+  return facts;
+}
+
 /** The last lines of the isolated Tower's log, for failure messages. */
 function towerLogTail(tower: IsolatedTower): string {
   try {
@@ -400,12 +425,14 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
     // The PTY under a CIM-created Tower works (ConPTY output reaches Tower).
     await waitFor(async () => (await output(tower, stubTerminal)).includes('STUB-READY'), 30_000, 'stub banner under the CIM Tower');
 
+    const towerJobFacts = jobFacts(name, towerPid);
+    console.log(`TOWER-JOB-FACTS ${towerJobFacts}`);
     expect(await helper.terminate(name, launcher.pid!)).toEqual({ ok: true, found: true, member: true });
     await waitFor(() => !alive(launcher.pid!), 15_000, 'the launcher session to end');
     await new Promise((r) => setTimeout(r, 2000));
     // On failure, the Tower log says whether it was torn down with the job or exited on its own
     // (Phase 10: seen once in nine runs on a loaded runner).
-    expect(alive(towerPid), `Tower ${towerPid} died with the session job; log tail:\n${towerLogTail(tower)}`).toBe(true);
+    expect(alive(towerPid), `Tower ${towerPid} died with the session job (before teardown: ${towerJobFacts}); log tail:\n${towerLogTail(tower)}`).toBe(true);
     expect(alive(shellperPid)).toBe(true);
     expect((await api(tower, 'GET', '/health')).status).toBe(200);
 
