@@ -60,6 +60,15 @@ describe('WS attach serves the O(screen) snapshot (PIR #1354, real PTY + real WS
     // Wait for the paint to reach Tower's mirror (real PTY output is async).
     await until(() => session.bytesWritten > 0);
     await until(() => session.screenBufferType === 'alternate');
+    // The alt-screen switch and the paint can arrive in separate chunks (ConPTY
+    // re-renders on native Windows), so wait until the mirror holds the painted text.
+    const paintDeadline = Date.now() + 5000;
+    for (;;) {
+      const snap = await session.replaySnapshot();
+      if (snap.ok && snap.data.includes('status: alive')) break;
+      if (Date.now() > paintDeadline) throw new Error('timeout waiting for the paint to reach the mirror');
+      await new Promise((r) => setTimeout(r, 25));
+    }
 
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/terminal/${info.id}`);
     const frames: Buffer[] = [];

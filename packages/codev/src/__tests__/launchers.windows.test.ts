@@ -276,6 +276,7 @@ describe.skipIf(!onWindows)('Launcher routing on native Windows', () => {
     const worktree = path.join(workspace, '.builders', builderId!);
 
     // The multi-command hook ran in the worktree.
+    expect(fs.existsSync(path.join(worktree, 'post-spawn.txt')), spawned.output).toBe(true);
     expect(fs.readFileSync(path.join(worktree, 'post-spawn.txt'), 'utf8').split(/\r?\n/).filter(Boolean)).toEqual(['one', 'two']);
 
     const script = fs.readFileSync(path.join(worktree, '.builder-start.sh'), 'utf8');
