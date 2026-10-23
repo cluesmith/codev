@@ -369,5 +369,7 @@ jobs:
           npm view "@cluesmith/codev@$VERSION" version
           npm pack "@cluesmith/codev@$VERSION" --pack-destination "$RUNNER_TEMP/packs"
 
+      # A user's npm runs install scripts under cmd.exe, so the workflow's Git Bash script shell
+      # (needed only to build this repo) is removed for the install, as windows-probe.mjs does.
       - name: Verify installation
-        run: node packages/codev/scripts/verify-install.mjs "$RUNNER_TEMP"/packs/*.tgz
+        run: env -u npm_config_script_shell node packages/codev/scripts/verify-install.mjs "$RUNNER_TEMP"/packs/*.tgz

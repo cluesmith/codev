@@ -300,6 +300,27 @@ replaces only `/` and `.`; if Claude replaces every non-alphanumeric character o
 with `_`, a space or `~` resumes fresh (unverified, filing candidate). A shellper listen error with
 no `'error'` listener throws before `start()` rejects (every platform, not changed).
 
+## Windows CI leg and install docs (Phase 11)
+
+- `windows.yml` (dispatch only, never required) gains `unit`, `cli-e2e` and `post-release-e2e`
+  behind `suites=true`, on windows-latest with Node 22 and 24. Node 20 is not a leg: it cannot
+  install on native Windows, and `install-guard` already tests that refusal. `post-release-e2e`
+  packs codev-types, codev-core, codev-sdk and codev from the dispatched ref and installs those
+  tarballs, so it tests the branch, not the last release. It installs with npm's default
+  `cmd.exe` script shell, as a user's npm does (the workflow's Git Bash script shell is only for
+  building the repo).
+- First full dispatch, run 39916423619 @ 61c203201: all green. sdk 204/204, core 174/174, codev
+  7522 passed / 156 skipped on both Node versions. The codev suite took about 6 minutes, down from
+  about 50 in Phase 10 (the drive-root walk-up loop fix and the Windows-only timeouts).
+- Not covered by the Windows `unit` job: the apps/* suites (web, vscode, streamdeck) and
+  artifact-canvas. They hold no platform branches of their own; they run on POSIX in `test.yml`.
+- The `version` input (verify a published release on Windows) works only for releases after
+  3.3.5: the Windows bin lookup uses the installed `codev-sdk/node/executable` export, which no
+  published release has yet. verify-install.mjs fails with that reason.
+- Docs: DEPENDENCIES.md (both trees) presents native Windows and WSL 2; the release protocol
+  dispatches the workflow before tagging and after publishing; the PR-time rule lives in this
+  repo's CLAUDE.md/AGENTS.md because protocol prompts ship to adopters, who have no `windows.yml`.
+
 ## Flaky Tests
 
 - **`session-manager.test.ts` "respects maxRestarts limit" (#1800, recurred in Phase 10; now
