@@ -220,3 +220,14 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Review doc completed to the SPIR template: summary, spec compliance per criterion, deviations, consultation feedback for all 29 CMAP rounds (gemini skipped every implementation round, agy exit 3), lessons, governance routing (cold only; both hot files at cap), follow-ups, the owner's PR-gate manual-pass checklist with expected results, and the per-phase notes as an appendix (Phase 5-7 notes added).
 - Landed the Phase 8 carry-forward: `.gitattributes` marks `fixtures/gate/**` `-text`, so Windows-recorded ConPTY captures keep their raw bytes under `core.autocrlf=true` (no churn on existing files).
 - Still open for the pr gate: claude ConPTY fixtures (directory absent) and the owner's manual pass.
+- PR #1859 opened. Porch PR CMAP ran 3 rounds:
+  - iter1, claude: root taskkill PID-reuse window, and bare powershell/taskkill/cmd spawns with a worktree cwd. Both fixed: a fresh-census recheck before the root taskkill, and full System32 paths through the platform seam.
+  - iter2, codex: install_guard was missing from the final-head dispatch. Fixed by redispatching with install_guard=true.
+  - iter3: gate items only. Porch force-advanced at the ceiling.
+- Integration review (main) must-fix items, all done: the POSIX readShellperInfo EOF path is gated and pinned by a test; the sdk /node charter is restated in package.json and arch.md; #1858 is recorded as a known gap.
+- Architect ruling: bare user-tool spawns (git/gh/npm, 36 sites) look in the cwd first. This is a Windows release blocker, filed as the first follow-up after #1859. The review lists the sites.
+- jira recently-closed: Phase 10's `jq | tr` masked jq failures as "nothing closed". Fixed, with a test.
+- POSIX CI on the PR (its first run on this branch) found two latent test bugs that macOS hid: a dist-dependent child test, and the Ubuntu /tmp temp dir. Both fixed.
+- Windows intermittents after the PR opened, none skipped: jira, an agy worker exit, spec-1280 T12, and the ARM64 probe census. Each passed on rerun or on the other leg.
+- 8273c6b6c: all 7 required checks green. Windows 39927653580 green (attempt 2), with install guard; targeted 39930623116 and 39930636358 green.
+- Porch pr gate pending. Not requested: claude ConPTY fixtures, the owner's manual pass, and the #1858 scope decision are still open.
