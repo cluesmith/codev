@@ -68,3 +68,13 @@ export function withNativeLoadExplanation<T>(load: () => T): T {
     throw explainNativeLoadFailure(err);
   }
 }
+
+/**
+ * For a caller that degrades on an open failure: on Windows a binding load failure
+ * is not a missing database, so it is rethrown. POSIX callers keep their behaviour.
+ */
+export function rethrowIfNativeLoadFailure(err: unknown): void {
+  if (isWindows() && isNativeBindingLoadFailure(err)) {
+    throw err;
+  }
+}

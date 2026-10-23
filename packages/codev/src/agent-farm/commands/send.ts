@@ -11,6 +11,8 @@ import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { dirname, join, win32 } from 'node:path';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
+import { rethrowIfNativeLoadFailure } from '../../lib/native-deps.js';
 import type { SendOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadState } from '../state.js';
@@ -173,8 +175,9 @@ export function detectCurrentBuilderId(): string | null {
 
   let gdb: Database.Database;
   try {
-    gdb = new Database(dbPath, { readonly: true });
+    gdb = openDatabase(dbPath, { readonly: true });
   } catch (err) {
+    rethrowIfNativeLoadFailure(err);
     throw new BuilderIdResolutionError(describeStateDbOpenFailure(dbPath, worktreeDirName, err));
   }
 

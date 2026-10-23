@@ -13,6 +13,7 @@ import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { isPortAvailable } from '../utils/shell.js';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { activeStateDbPath, planMigration } from '../db/consolidate.js';
 import { sanitizeAgentEnv, findClaudeSessionMarkers } from '../../lib/agent-env.js';
@@ -72,9 +73,9 @@ async function previewStateDbMigration(): Promise<void> {
 
   let globalDb: Database.Database;
   if (existsSync(globalPath)) {
-    globalDb = new Database(globalPath, { readonly: true });
+    globalDb = openDatabase(globalPath, { readonly: true });
   } else {
-    globalDb = new Database(':memory:');
+    globalDb = openDatabase(':memory:');
   }
   try {
     const plan = planMigration(globalDb, source);
