@@ -837,6 +837,12 @@ building from source, so the Windows unit suite can run.
   script may already have tried a source build. So, using Phase 1's install-script findings:
   - `packages/codev/package.json` `engines.node` is narrowed to the audited supported set if it
     is narrower than `>=20`, so npm warns before install;
+    **Deviation (architect ruling, 2026-10-23):** `engines.node` stays `>=20`. `engines` cannot be
+    set per platform, so narrowing it would change macOS and Linux installs, which this phase
+    keeps unaffected. A Windows-only `preinstall` gate takes its place, and it is stricter: npm
+    runs every package's `preinstall` before any `install` script, so a Node with no win32
+    prebuild is refused before the source-build fallback can start. The cross-platform Node 20
+    floor is a separate item on the architect's filing list;
   - the package ships npm config (or documents the flag, if config cannot be shipped for a
     global install) that disables source-build fallback for the prebuild-based dependency, so a
     missing prebuild fails install instead of compiling;

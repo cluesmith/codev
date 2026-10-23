@@ -63,6 +63,11 @@ export function getMainRepoFromWorktree(dir: string): string | null {
   }
 }
 
+/** True at the top of a path walk: dirname() no longer moves. */
+function isFilesystemRoot(dir: string): boolean {
+  return dirname(dir) === dir;
+}
+
 /**
  * Find the workspace root by looking for codev/ directory.
  *
@@ -81,7 +86,9 @@ function findWorkspaceRoot(startDir: string = process.cwd()): string {
     // We're in a git worktree. Find the worktree root by walking up to
     // the .git file (worktrees have a .git file, not a directory).
     let dir = startDir;
-    while (dir !== '/') {
+    // Stop at the filesystem root: `/` on POSIX, a drive root such as `C:\` on
+    // Windows (where a `!== '/'` sentinel never matches and the walk never ends).
+    while (!isFilesystemRoot(dir)) {
       if (existsSync(resolve(dir, '.git'))) {
         // Found the worktree root. If it has its own codev/, use it
         // instead of resolving to the main repo.
@@ -101,7 +108,7 @@ function findWorkspaceRoot(startDir: string = process.cwd()): string {
 
   // Not in a worktree: walk up looking for codev/ or .git
   let dir = startDir;
-  while (dir !== '/') {
+  while (!isFilesystemRoot(dir)) {
     if (existsSync(resolve(dir, 'codev'))) {
       return dir;
     }

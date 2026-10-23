@@ -4,11 +4,13 @@
  * run by the on-demand `windows.yml` workflow (`install-guard` job) on a
  * real Windows host, against tarballs packed from the branch.
  *
- * The compiler is made unreachable by pointing npm's `node-gyp` config at a
- * stub (`--node-gyp=<stub>` on the npm command line; npm overrides an
- * inherited `npm_config_node_gyp` with its own default) that records each
- * call and fails. npm's node-gyp shim runs `node "$npm_config_node_gyp"`,
- * so every dependency's source-build fallback lands in the stub.
+ * The compiler is made unreachable by a `node-gyp` stub that records each
+ * call and fails. npm does not forward its `node-gyp` config (CLI flag or
+ * `npm_config_node_gyp`) to dependency install scripts: @npmcli/run-script
+ * falls back to the bundled node-gyp. What it does honour is PATH order: a
+ * script's PATH lists `node_modules/.bin` of every ancestor directory before
+ * npm's own node-gyp shim. So the stub is placed in `<root>/node_modules/.bin`,
+ * and the control project and the install prefix both live under `<root>`.
  *
  * Usage (from the repo root, with the four packed tarballs in <dir>):
  *   node scripts/windows-install-guard-check.mjs --control <dir>
@@ -25,7 +27,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,11 +45,17 @@ function fail(reason, output) {
   process.exit(1);
 }
 
-/** A node-gyp stand-in that records each call in `marker` and fails. */
+/**
+ * A node-gyp stand-in that records each call in `marker` and fails, reachable
+ * as `node-gyp` from every script run under `root`: a POSIX-shell shim for npm's
+ * Git Bash script shell and a .cmd shim for cmd.exe.
+ */
 function makeStub() {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'codev-gyp-stub-'));
-  const marker = path.join(dir, 'invoked.log');
-  const stub = path.join(dir, 'node-gyp-stub.cjs');
+  const root = mkdtempSync(path.join(os.tmpdir(), 'codev-gyp-'));
+  const binDir = path.join(root, 'node_modules', '.bin');
+  mkdirSync(binDir, { recursive: true });
+  const marker = path.join(root, 'invoked.log');
+  const stub = path.join(root, 'node-gyp-stub.cjs');
   writeFileSync(stub, [
     "const fs = require('node:fs');",
     `fs.appendFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(' ') + '\\n');`,
@@ -55,11 +63,14 @@ function makeStub() {
     'process.exit(1);',
     '',
   ].join('\n'));
-  return { stub, marker };
+  const stubForShell = stub.split(path.sep).join('/');
+  writeFileSync(path.join(binDir, 'node-gyp'), `#!/usr/bin/env sh\nnode "${stubForShell}" "$@"\n`);
+  writeFileSync(path.join(binDir, 'node-gyp.cmd'), `@node "${stub}" %*\r\n`);
+  return { root, marker };
 }
 
 function npm(args, env, cwd) {
-  const result = spawnSync('npm', [...args, quote(`--node-gyp=${stub}`)], {
+  const result = spawnSync('npm', args, {
     cwd,
     env,
     encoding: 'utf8',
@@ -84,12 +95,13 @@ function quote(value) {
   return `"${value}"`;
 }
 
-const { stub, marker } = makeStub();
+const { root, marker } = makeStub();
 const env = { ...process.env };
 delete env.npm_config_prefix;
 
 if (mode === '--control') {
-  const project = mkdtempSync(path.join(os.tmpdir(), 'codev-gyp-control-'));
+  const project = path.join(root, 'control');
+  mkdirSync(project);
   writeFileSync(path.join(project, 'package.json'), '{"name":"control","version":"1.0.0","private":true}\n');
   const range = JSON.parse(readFileSync(path.join(repoRoot, 'packages', 'codev', 'package.json'), 'utf8')).dependencies['better-sqlite3'];
   const { code, output } = npm(['install', quote(`better-sqlite3@${range}`), '--no-audit', '--no-fund'], env, project);
@@ -98,8 +110,9 @@ if (mode === '--control') {
   }
   console.log(`OK control: the source-build fallback reached the stub (${readFileSync(marker, 'utf8').trim()}); npm exit ${code}`);
 } else if (mode === '--unsupported' || mode === '--supported') {
-  const prefix = mkdtempSync(path.join(os.tmpdir(), 'codev-guard-prefix-'));
-  const { code, output } = npm(['install', '-g', '--prefix', quote(prefix), '--no-audit', '--no-fund', ...tarballs().map(quote)], env, os.tmpdir());
+  const prefix = path.join(root, 'prefix');
+  mkdirSync(prefix);
+  const { code, output } = npm(['install', '-g', '--prefix', quote(prefix), '--no-audit', '--no-fund', ...tarballs().map(quote)], env, root);
   const invoked = existsSync(marker);
   if (mode === '--unsupported') {
     if (code === 0) fail('the install succeeded on an unsupported Node', output);
