@@ -123,7 +123,9 @@ afterEach(() => {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
   }
-  fs.rmSync(dir, { recursive: true, force: true });
+  // Retries: on Windows a just-exited fake agy can still hold the directory for a
+  // moment (EBUSY); POSIX removes it on the first try.
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   vi.restoreAllMocks();
 });
 

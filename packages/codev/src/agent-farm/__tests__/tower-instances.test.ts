@@ -895,6 +895,14 @@ describe('tower-instances', () => {
       },
     ));
 
+    // A resume launch reads the process census to check that the stored id is not held
+    // (reconcileArchitectSessionHolder). On Windows that is a CIM query, seconds on a
+    // cold runner (audit 1.3), past vitest's 5 s default.
+    function resumeLaunchTimeoutMs(): number {
+      if (process.platform === 'win32') return 30_000;
+      return 5_000;
+    }
+
     it('main row with a stored session id + owned jsonl → resumes that id', withSetup(
       null,
       async (tmpDir, _fakeHome, _uuid) => {
@@ -927,7 +935,7 @@ describe('tower-instances', () => {
           mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
         }
       },
-    ));
+    ), resumeLaunchTimeoutMs());
 
   });
 
