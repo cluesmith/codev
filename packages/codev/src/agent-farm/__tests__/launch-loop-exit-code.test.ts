@@ -49,6 +49,15 @@ afterEach(() => {
   fs.rmSync(worktree, { recursive: true, force: true });
 });
 
+/**
+ * Each test runs the loop through bash with an inner 10 s timeout. On Windows a
+ * Git Bash cold start under full-suite load took 8 s, past vitest's 5 s default.
+ */
+function firstBashRunTimeoutMs(): number {
+  if (process.platform === 'win32') return 30_000;
+  return 5_000;
+}
+
 describe('builder launch loop exit handling (Bugfix #1241)', () => {
   it('does not respawn the agent after a deliberate exit (code 0)', () => {
     const scriptPath = writeLaunchScript(0);
@@ -66,7 +75,7 @@ describe('builder launch loop exit handling (Bugfix #1241)', () => {
     expect(runCount()).toBe(1);
     expect(result.stdout).toContain('Agent exited at your request');
     expect(result.stdout).not.toContain('Restarting in 2 seconds');
-  });
+  }, firstBashRunTimeoutMs());
 
   it('relaunches once per keypress after a deliberate exit', () => {
     const scriptPath = writeLaunchScript(0);
@@ -80,7 +89,7 @@ describe('builder launch loop exit handling (Bugfix #1241)', () => {
 
     expect(result.status).toBe(0);
     expect(runCount()).toBe(2);
-  });
+  }, firstBashRunTimeoutMs());
 
   it('still auto-restarts after a crash (nonzero exit)', () => {
     const scriptPath = writeLaunchScript(7);

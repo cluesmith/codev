@@ -7,8 +7,21 @@
 
 import { defineConfig } from 'vitest/config';
 
+/**
+ * Native Windows (Spec 1658): process creation, Git Bash and the CIM census take
+ * seconds on a loaded runner, so tests that spawn or open native bindings ran past
+ * vitest's 5 s test / 10 s hook defaults there. POSIX keeps the defaults; a test's
+ * own timeout still wins.
+ */
+const timeouts: { testTimeout?: number; hookTimeout?: number } = {};
+if (process.platform === 'win32') {
+  timeouts.testTimeout = 30_000;
+  timeouts.hookTimeout = 60_000;
+}
+
 export default defineConfig({
   test: {
+    ...timeouts,
     // Sandboxes the real agy binary and the user-global metrics DB (#1323).
     setupFiles: ['./vitest-setup.ts'],
     pool: 'forks',

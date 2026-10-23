@@ -277,6 +277,15 @@ not force the platform seam, `.sock` paths where Windows needs named pipes, `HOM
 checked out as CRLF. Skips are limited to assertions that are POSIX-only by nature, each naming
 its assumption: mode bits, sh stubs, process groups and signals, and an NTFS-illegal filename.
 
+**Windows timing.** Once the suite ran to completion, the remaining failures moved from run to
+run. Each was a test that spawns (Git Bash, PowerShell or CIM, Python) or cold-loads a native
+binding, running past vitest's 5 s test and 10 s hook defaults on a loaded runner. On Windows only,
+the config raises those defaults to 30 s and 60 s. Agy lane temp dirs that a host process still
+holds after the fake CLI exits (EBUSY, with a check that no fake survives) are left to the OS on
+Windows. Phase 4 (b) was not given a budget: it failed once (Tower gone after the session job's
+teardown), so it now records Tower's job membership, parent pid and creation time before teardown
+(architect ruling: a recurrence before the PR blocks the gate until the cause is named).
+
 **Carry-forwards.** CRLF in `overview.ts` status.yaml parsing (tolerant where checked, not
 audited end to end) and `managed-block.ts` (mixed endings). The POSIX Claude project-dir encoding
 replaces only `/` and `.`; if Claude replaces every non-alphanumeric character on POSIX too, a cwd
