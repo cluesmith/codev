@@ -326,7 +326,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1658/codev/projects/1658-windows-native-non-wsl-support/1658-phase_11-iter2-claude.txt
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-23T08:20:06.721Z'
+updated_at: '2026-10-23T08:27:08.234Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
@@ -370,3 +370,8 @@ force_advanced:
   max_iterations: 3
   rebuttal_file: 1658-phase_9-iter3-rebuttals.md
   at: '2026-10-23T01:00:31.120Z'
+pr_history:
+  - phase: review
+    pr_number: 1859
+    branch: builder/spir-1658
+    created_at: '2026-10-23T08:27:08.233Z'
