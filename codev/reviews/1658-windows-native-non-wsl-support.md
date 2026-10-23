@@ -202,8 +202,10 @@ shared shim resolver, with no console window. Discovery uses the shared executab
 **Stop and failed starts never lose a process.** Stop kills process trees. The recorded pid counts
 as a root only when a live listener descends from it, so a reused pid is never killed. If anything
 survives, the record is kept and the stop fails, naming the survivors, so it can be retried. A
-server that never starts listening has its tree killed before the start fails, because no record
-exists to stop it later. (CMAP iter 1, codex.)
+server that never starts listening is stopped before the start fails, because no record exists to
+stop it later (CMAP iter 1, codex). The same leak existed on POSIX since #1668/#1789. It is fixed
+there too as a sibling-site fix under the POSIX rule (architect ruling): SIGTERM to the group,
+then SIGKILL after the stop wait.
 
 **Test coverage trade.** #1789's unit suites drive `#!/bin/sh` stub servers and assert POSIX
 modes and separators, so those tests are POSIX-only. The Windows behavior they stand for is
@@ -212,8 +214,7 @@ covered on a real Windows host by `ide-server-stub.windows.test.ts`: discovery w
 spawn, forward, stop and a never-ready server for both shim shapes. The adopt/restart-required
 and serialization logic is not re-run on Windows. It is platform-neutral apart from spawning.
 
-**Carry-forwards.** The POSIX start path also leaves a never-ready server running untracked. That
-is the same defect class, outside this phase's Windows scope, raised with the architect. The joint
+**Carry-forwards.** The joint
 check with the real `@cluesmith/codev-ide-server-win32-x64` package (scenario 15b) runs at verify,
 or earlier as an optional dry run.
 
