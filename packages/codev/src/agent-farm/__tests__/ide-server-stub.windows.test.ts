@@ -116,6 +116,23 @@ function get(port: number, urlPath: string): Promise<{ status: number; body: str
   });
 }
 
+/**
+ * The agent-farm directory production resolves: the real constants module,
+ * re-evaluated without the vitest harness's `CODEV_AGENT_FARM_DIR` sandbox
+ * override (#1597), which nothing in production sets.
+ */
+async function productionAgentFarmDir(): Promise<string> {
+  const saved = process.env.CODEV_AGENT_FARM_DIR;
+  delete process.env.CODEV_AGENT_FARM_DIR;
+  try {
+    vi.resetModules();
+    const actual = await vi.importActual<typeof import('@cluesmith/codev-core/constants')>('@cluesmith/codev-core/constants');
+    return actual.AGENT_FARM_DIR;
+  } finally {
+    if (saved !== undefined) process.env.CODEV_AGENT_FARM_DIR = saved;
+  }
+}
+
 interface StubState {
   pid: number;
   childPid: number;
@@ -233,8 +250,7 @@ describe.runIf(onWindows)('Phase 9: IDE server lifecycle against .cmd stubs on a
     for (const written of [tokenPath, getIdeRecordPath(), getIdeExtensionsDir()]) {
       expect(written.startsWith(AGENT_FARM)).toBe(true);
     }
-    const actual = await vi.importActual<typeof import('@cluesmith/codev-core/constants')>('@cluesmith/codev-core/constants');
-    expect(path.resolve(actual.AGENT_FARM_DIR).toLowerCase().startsWith(path.resolve(os.homedir()).toLowerCase())).toBe(true);
+    expect((await productionAgentFarmDir()).toLowerCase().startsWith(path.resolve(os.homedir()).toLowerCase())).toBe(true);
 
     const folderUrl = `/ide/?folder=${encodeURIComponent('C:\\Users\\dev\\My Repo')}`;
     const res = await get(towerPort, folderUrl);
