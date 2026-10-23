@@ -122,6 +122,58 @@ is fixed and codex ConPTY captures are recorded, the spec's "at minimum claude a
 validation is met for claude only. Whether that ships as a recorded scope amendment or waits on
 #1858 is the owner's decision, pending at the time of writing.
 
+### Known gap: bare user-tool spawns find a program in the cwd first (Windows release blocker)
+
+**Architect ruling (2026-10-23): a Windows release blocker, not a follow-up nicety.** Native
+Windows support must not be announced until this is fixed. On Windows, a spawn by bare name
+(libuv for Node spawns, cmd.exe for `execSync` strings) looks in the current directory before
+`PATH`. Many codev spawns run with a worktree or a cloned repo as cwd, so a `git.exe`, `gh.exe`,
+`npm.cmd` or `node.exe` committed to that repo would run under codev. This PR fixes the system
+programs: `powershell.exe`, `taskkill` and `cmd.exe` now go by full System32 path through
+`windowsSystem32Path` / `windowsPowerShellPath`. The user tools are not fixed. The fix routes
+each site through `spawnOnHost` / `spawnSyncOnHost` / `findOnHostPath` (`lib/shell-launch.ts`):
+the `codev-sdk/node/executable` resolver searches `PATH` and never the cwd. The architect files
+it as the first follow-up after #1859 merges, since it depends on that resolver.
+
+Inventory at head 47523751f: direct `child_process` calls whose command is a string literal,
+in non-test source, by file and line. Call sites that take the command from a variable
+(harness commands, which go through `ptyCommand`/`spawnOnHost`) are not listed; neither are
+wrappers, of which none exist for git today.
+
+User tools (36 sites, the follow-up's scope):
+- `packages/codev/src/agent-farm/commands/self-refresh.ts`: 484 `execFileSync(git)`
+- `packages/codev/src/agent-farm/commands/team.ts`: 26 `execSync(git ...)`
+- `packages/codev/src/agent-farm/utils/config.ts`: 43 `execSync(git ...)`
+- `packages/codev/src/agent-farm/utils/worktree-write-guard.ts`: 151 `execSync(git ...)`
+- `packages/codev/src/commands/consult/index.ts`: 1639, 1640, 1808, 1825, 1840, 1845, 1950,
+  2344, 2377 `execFileSync(git)`; 2074, 2125, 2240 `execSync(git ...)`
+- `packages/codev/src/commands/doctor.ts`: 1104 `spawnSync(git)`
+- `packages/codev/src/commands/init.ts`: 176 `execSync(git ...)`, 192 `execSync(codev ...)`
+- `packages/codev/src/commands/porch/artifacts.ts`: 390, 411, 424, 455 `execFileSync(git)`
+- `packages/codev/src/commands/update.ts`: 429 `spawn(claude)`
+- `packages/codev/src/lib/default-branch.ts`: 15 `execSync(git ...)`
+- `packages/codev/src/lib/github.ts`: 288 `execFile(gh)`
+- `packages/codev/src/lib/gitignore.ts`: 168, 218 `spawnSync(git)`
+- `packages/codev/src/lib/governance-bootstrap.ts`: 254, 275 `execFileSync(git)`
+- `packages/codev/src/lib/protocol-drift-audit.ts`: 200 `spawnSync(npm)`
+- `packages/codev/src/lib/tree-snapshot.ts`: 91, 107, 125, 184, 359 `execFileSync(git)`
+
+POSIX-only tools, listed so the follow-up confirms each is unreachable on Windows (most sit
+behind an `isWindows()` branch today):
+- `ps`: `agent-farm/commands/cleanup.ts` 91, `agent-farm/servers/architect-session-holder.ts`
+  114, `agent-farm/servers/process-census.ts` 74, `agent-farm/servers/tower-utils.ts` 251,
+  `terminal/session-manager.ts` 1142, 1722
+- `pgrep` and `tail`: `agent-farm/commands/tower.ts` 483, 599; `which`:
+  `agent-farm/commands/bench.ts` 229, `agent-farm/utils/shell.ts` 157, `commands/import.ts` 329;
+  `sysctl`: `bench.ts` 50, 72; `du`: `lib/migration-backup-audit.ts` 79; `command -v`:
+  `commands/consult/index.ts` 1027 (POSIX branch; Windows uses `findOnHostPath`)
+
+Repo scripts (contributor tooling, not shipped): `scripts/windows-install-guard-check.mjs` 73
+`spawnSync(npm)`, `scripts/windows-probe.mjs` 443 `spawnSync(taskkill)`.
+
+The inventory came from a regex over `child_process` calls (string-literal first argument,
+possibly on the next line), with SQL `db.exec(...)` matches dropped.
+
 ## Deviations from Plan
 
 - **Phase 2:** schema v19 adds `shellper_session_id` as well as the secret column. The shellper
@@ -604,7 +656,7 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
 
 #### Claude (REQUEST_CHANGES)
 - **Concern**: the root's `taskkill /T /F` is identity-checked against the snapshot taken before the job round trip (seconds); a pid reused in that window loses an unrelated tree → **Addressed**: after a job round trip the root is re-checked on a fresh census (present, same creation time) before `taskkill`; a census failure skips the tree kill. New unit test for the reused-pid case.
-- **Concern**: `powershell.exe` / `taskkill` spawned by bare name with the worktree as cwd; Windows searches the cwd before `PATH`, so a planted binary in a cloned repo runs → **Addressed**: `windowsSystem32Path` / `windowsPowerShellPath` in the platform seam; the census, job helper, CIM launch, both port queries, `taskkill` and the CIM `cmd.exe` all use full System32 paths. The wider class (bare `git`, `gh` and other user tools spawned with a worktree cwd) was raised with the architect.
+- **Concern**: `powershell.exe` / `taskkill` spawned by bare name with the worktree as cwd; Windows searches the cwd before `PATH`, so a planted binary in a cloned repo runs → **Addressed**: `windowsSystem32Path` / `windowsPowerShellPath` in the platform seam; the census, job helper, CIM launch, both port queries, `taskkill` and the CIM `cmd.exe` all use full System32 paths. The wider class (bare `git`, `gh` and other user tools spawned with a worktree cwd) was ruled a Windows release blocker for a follow-up after #1859 (Known gaps, with the site inventory).
 - **Concern**: POSIX CI pending on the final head → **N/A**: verified before the gate request.
 - **Concern**: `WINDOWS_PREBUILD_NODE_ABIS` fail-closes future Node releases → **Rebutted**: deliberate; a Node without a better-sqlite3 prebuild cannot install, and the guard's message names the supported versions.
 - **Concern**: Gemini absent from every implementation round → **N/A**: recorded under Methodology Improvements.
@@ -738,7 +790,9 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
 
 ## Follow-up Items
 
-Filed:
+Filed or ruled:
+- Windows release blocker: bare user-tool spawns find a cwd program first. The architect files it
+  after #1859 merges; the site inventory is under Spec Compliance, "Known gap: bare user-tool spawns".
 - #1800: session-manager real-shellper restart tests are load-sensitive on POSIX; two are skipped
   as FLAKY and the cause is open.
 - #1858: codex-cli status-line drift (`GPT-6.1-Sol`) makes every codex composer classify
@@ -746,10 +800,6 @@ Filed:
   and the spec's "at minimum claude and codex" criterion.
 
 Filing candidates (owner's call):
-- On Windows, a bare user-tool spawn (`git`, `gh`, and the like) with a worktree as cwd finds a
-  same-named program in that directory before `PATH`. System programs are fixed here (full
-  System32 paths); user tools need resolving through `PATH` without the cwd (the `codev-sdk`
-  resolver already does this), raised with the architect for scope.
 - A PowerShell-safe form of the #1595 lifecycle hook (inert today when Claude Code falls back to
   PowerShell for lack of Git Bash; Git Bash is a hard prerequisite, so no 1658 work).
 - Porch hides a failed check's stdout, where the failing test's name is.
