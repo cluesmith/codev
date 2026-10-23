@@ -188,17 +188,20 @@ describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
  */
 describe('findWorkspaceRoot terminates at the filesystem root (Spec 1658)', () => {
   it('returns the start dir for a markerless path directly under the root (a drive root on Windows)', () => {
-    const builtConfig = path.resolve(import.meta.dirname, '../../../dist/agent-farm/utils/config.js');
-    expect(fs.existsSync(builtConfig), `build first: ${builtConfig}`).toBe(true);
+    // The source runs under tsx, so the test needs no build (the POSIX unit job
+    // does not build dist). The package dir is the child's cwd only so that
+    // `--import tsx` resolves; the walk starts from `startDir`, never the cwd.
+    const packageDir = path.resolve(import.meta.dirname, '../../..');
+    const sourceConfig = path.join(packageDir, 'src/agent-farm/utils/config.ts');
     const root = path.parse(tmpdir()).root;
     const startDir = path.join(root, `codev-no-marker-${process.pid}-${Date.now()}`);
     const script = [
-      `const { _findWorkspaceRoot } = await import(${JSON.stringify(pathToFileURL(builtConfig).href)});`,
+      `const { _findWorkspaceRoot } = await import(${JSON.stringify(pathToFileURL(sourceConfig).href)});`,
       `process.stdout.write(_findWorkspaceRoot(${JSON.stringify(startDir)}));`,
     ].join('\n');
 
-    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-      cwd: tmpdir(),
+    const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+      cwd: packageDir,
       encoding: 'utf8',
       timeout: 20_000,
     });

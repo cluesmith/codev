@@ -7,6 +7,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 import { isTempDirectory } from '../servers/tower-utils.js';
@@ -26,8 +27,14 @@ describe('isTempDirectory on Windows', () => {
     setHostPlatformForTests('win32');
     expect(isTempDirectory(path.join(tmpdir(), 'ws'))).toBe(true);
     expect(isTempDirectory(path.join(tmpdir(), 'ws').toUpperCase())).toBe(true);
-    expect(isTempDirectory('/tmp/ws')).toBe(false);
-    expect(isTempDirectory('/private/tmp/ws')).toBe(false);
+    // The POSIX roots are not temp dirs to a Windows host, unless this host's own
+    // temp dir is one of them (Linux CI: os.tmpdir() is /tmp; on macOS /tmp is
+    // /private/tmp once resolved).
+    const hostTemps = [tmpdir(), realpathSync(tmpdir())];
+    for (const posixRoot of ['/tmp', '/private/tmp']) {
+      const hostTempIsUnder = hostTemps.some((t) => t === posixRoot || t.startsWith(`${posixRoot}/`));
+      if (!hostTempIsUnder) expect(isTempDirectory(`${posixRoot}/ws`), posixRoot).toBe(false);
+    }
     expect(isTempDirectory(tmpdir() + '-other/ws')).toBe(false);
   });
 });
