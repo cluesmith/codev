@@ -30,9 +30,9 @@ needs a C/C++ toolchain:
 
 - **Linux and WSL:** node-pty compiles from source, so install `build-essential` and `python3`
   before `npm install -g @cluesmith/codev`.
-- **Native Windows:** prebuilds exist for Node 22 and 24 (x64 and ARM64) only. On any other
-  Node version the install stops and names the supported versions, rather than starting a
-  source build.
+- **Native Windows:** Node 22 and 24 (x64 and ARM64) are supported. On a Node version with no
+  Windows prebuild (Node 20, for example) the install stops and names the supported versions,
+  rather than starting a source build.
 
 **Installation:**
 
