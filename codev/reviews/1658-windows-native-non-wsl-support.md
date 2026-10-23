@@ -243,18 +243,21 @@ synchronous loop cannot be timed out in-process, so the regression test runs the
 process with a deadline.
 
 **Runtime defects the first complete Windows run exposed** (run 39898982593: 80 failing files, 508
-tests). Each was fixed behind the seam, with POSIX unchanged:
-- Builder-worktree matchers split on `/` only. A builder on native Windows was treated as a
+tests). Each was fixed behind the seam, with POSIX unchanged. Failing tests each defect
+accounts for are in parentheses; 62 in all:
+- (32) Builder-worktree matchers split on `/` only. A builder on native Windows was treated as a
   non-builder by `afx send` and `whoami`, and Tower answered its lifecycle reports with 404.
-- The Claude project-dir encoding (`~/.claude/projects/<cwd>`) left `C:\` and backslashes in the
+- (20) The Claude project-dir encoding (`~/.claude/projects/<cwd>`) left `C:\` and backslashes in the
   name. Resume never found a stored session and always launched fresh.
-- `porch done` built its review-file glob from an absolute path, and glob reads `\` as an
+- (2) `porch done` built its review-file glob from an absolute path, and glob reads `\` as an
   escape. `done` always refused on Windows. The relative pattern with `cwd` also fixes a POSIX
   workspace path containing glob metacharacters (`[...]`), which used to refuse falsely.
-- Frontmatter of a CRLF spec or plan (Git for Windows checks out with `core.autocrlf=true`) was
+- (sibling site, no failing test) Frontmatter of a CRLF spec or plan (Git for Windows checks out with `core.autocrlf=true`) was
   never recognized as pre-approved.
-- Template user-data patterns did not match backslash relative paths.
-- The jira forge preset broke under Git Bash with a native `jq.exe`, in two ways:
+- (1) Template user-data patterns did not match backslash relative paths.
+- (5) `scripts/measure-prompt-surface.sh` (repo dev script): its embedded Python used the
+  console code page (cp1252) for stdio, so it could not print its own report on Windows.
+- (2) The jira forge preset broke under Git Bash with a native `jq.exe`, in two ways:
   - Raw `jq -r` lines end in CRLF. MSYS strips only the final CR of a command substitution, so
     every per-key view but the last missed, and closed items lost their dates.
   - Forge turns off MSYS argument conversion, so MSYS temp paths handed to native programs
@@ -262,6 +265,11 @@ tests). Each was fixed behind the seam, with POSIX unchanged:
   Fixed with `tr -d '\r'` on the keys and a `native_path` helper (`cygpath -w`, only where
   cygpath exists). The other presets' `jq -r` uses are single-value, where the trailing CR is
   stripped.
+
+**Totals** (final run 39909843476: 7513 passed, 0 failed, 156 skipped): 62 tests fixed in
+runtime (above), plus the two suite-level defects (the silent `codev` entry and the drive-root hang);
+about 445 fixed in tests; about 29 skipped on win32, each naming its POSIX assumption (mode bits 13,
+Unix socket files 9, process groups and signals 6, NTFS-illegal filename 1); 1 flaky (#1800, POSIX).
 
 **Install guard.** `preinstall` runs before any dependency's `install` script (npm's rebuild
 order), so on a Windows Node with no better-sqlite3 prebuild it stops the install with the
