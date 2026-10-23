@@ -32,6 +32,7 @@ vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
 
 vi.mock('../utils/port.js', () => ({
   getProcessesOnPort: (port: number) => fakes.ports.get(port) ?? [],
+  getProcessesOnPortAsync: async (port: number) => fakes.ports.get(port) ?? [],
 }));
 
 vi.mock('node:child_process', async (importActual) => {

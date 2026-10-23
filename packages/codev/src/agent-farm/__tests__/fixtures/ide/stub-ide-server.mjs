@@ -8,7 +8,8 @@
 // Otherwise it starts one long-lived child (standing in for the extension
 // host), listens on --host/--port, answers every request with its URL and
 // argv as JSON, and writes { pid, childPid, argv } to STUB_IDE_STATE_FILE
-// once listening.
+// once listening. With STUB_IDE_NO_LISTEN set it writes the state file and
+// never listens (a server that hangs before binding).
 
 import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -46,14 +47,23 @@ const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], 
   windowsHide: true,
 });
 
-const server = http.createServer((req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify({ url: req.url, argv }));
-});
+if (process.env.STUB_IDE_NO_LISTEN) {
+  writeFileSync(process.env.STUB_IDE_STATE_FILE, JSON.stringify({ pid: process.pid, childPid: child.pid, argv }));
+  setInterval(() => {}, 1 << 30);
+} else {
+  serve();
+}
 
-server.listen(port, host, () => {
-  const stateFile = process.env.STUB_IDE_STATE_FILE;
-  if (stateFile) {
-    writeFileSync(stateFile, JSON.stringify({ pid: process.pid, childPid: child.pid, argv }));
-  }
-});
+function serve() {
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ url: req.url, argv }));
+  });
+
+  server.listen(port, host, () => {
+    const stateFile = process.env.STUB_IDE_STATE_FILE;
+    if (stateFile) {
+      writeFileSync(stateFile, JSON.stringify({ pid: process.pid, childPid: child.pid, argv }));
+    }
+  });
+}

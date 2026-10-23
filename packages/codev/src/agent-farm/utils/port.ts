@@ -8,7 +8,7 @@
  * existing consumers are unaffected. On Windows the lookup is `Get-NetTCPConnection`.
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execFile, execFileSync, execSync } from 'node:child_process';
 import { isWindows } from '../../lib/platform.js';
 
 /** Windows: `Get-NetTCPConnection` in a cold PowerShell takes a few seconds; bound it. */
@@ -47,22 +47,55 @@ export function getProcessesOnPort(port: number): number[] {
  * command. A failed or timed-out query returns `[]`, as the POSIX branch does.
  */
 function getWindowsProcessesOnPort(port: number): number[] {
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) return [];
+  if (!isValidPort(port)) return [];
   try {
-    const result = execFileSync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`,
-      ],
-      { encoding: 'utf-8', timeout: WINDOWS_PORT_QUERY_TIMEOUT_MS, windowsHide: true },
-    );
+    const result = execFileSync('powershell.exe', windowsPortQueryArgs(port), {
+      encoding: 'utf-8',
+      timeout: WINDOWS_PORT_QUERY_TIMEOUT_MS,
+      windowsHide: true,
+    });
     return parsePidLines(result);
   } catch {
     return [];
   }
+}
+
+function isValidPort(port: number): boolean {
+  return Number.isInteger(port) && port > 0 && port <= 65535;
+}
+
+function windowsPortQueryArgs(port: number): string[] {
+  return [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    `Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`,
+  ];
+}
+
+/**
+ * `getProcessesOnPort` for callers inside Tower's event loop. POSIX: the same
+ * `lsof` lookup. Windows: the same query, run asynchronously, because it takes
+ * seconds and the synchronous form would stall every terminal and request
+ * while it runs (Spec 1658 Phase 9).
+ */
+export function getProcessesOnPortAsync(port: number): Promise<number[]> {
+  if (!isWindows()) return Promise.resolve(getProcessesOnPort(port));
+  if (!isValidPort(port)) return Promise.resolve([]);
+  return new Promise((resolve) => {
+    execFile(
+      'powershell.exe',
+      windowsPortQueryArgs(port),
+      { encoding: 'utf-8', timeout: WINDOWS_PORT_QUERY_TIMEOUT_MS, windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          resolve([]);
+          return;
+        }
+        resolve(parsePidLines(stdout));
+      },
+    );
+  });
 }
 
 /** One pid per line; blank lines, non-numbers and pid 0 (the idle process) are dropped. */

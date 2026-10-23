@@ -172,6 +172,57 @@ from the same kind of console Tower is started from.
 its basename (a directory named `claude` no longer decides the harness), and the #1664 delivery
 harness launches through `ptyCommand`, so it runs on Windows for live scenario 12.
 
+## Codev IDE server on native Windows (Phase 9)
+
+**Built in two halves (architect ruling, 2026-10-22).** #1789's PR (#1806) was still open when the
+phase began. The first half built on what main had: spawn, stop, readiness, the forward, and a
+stub server behind `.cmd` shims. After #1806 merged, the second half built on #1789's own code:
+discovery, the version floor, the sidebar install. The phase stayed open in porch until both
+were in.
+
+**Every server subprocess goes through one resolver.** `ideServerSpawnable` decides how the
+spawn, `--version` and `--install-extension` run on Windows. A JS launcher, which is what package
+discovery finds, runs under Tower's Node. Anything else, a `.cmd` shim included, goes through the
+shared shim resolver, with no console window. Discovery uses the shared executable resolver
+(`PATHEXT`), and npm runs through the shim resolver. POSIX is unchanged throughout.
+
+**Windows defects found by running the real thing, not by the unit tests:**
+- `buildIdeServerEnv` wrote `PATH` next to Windows' inherited `Path` key. The child would have
+  seen one of the two, so the server could lose the user's `PATH`. It now reuses the inherited key.
+- Server CLI commands ran detached. A detached `cmd.exe` has no console, so a plain `.cmd` shim's
+  `--version` output reached no pipe. They are no longer detached on Windows, and a timeout kills
+  the tree, since Windows has no process groups.
+- `scripts/build-ide-extension.mjs` spawned bare `pnpm`, which fails with ENOENT on Windows. Every
+  Windows build broke after #1789. It now runs pnpm's own entry (`npm_execpath`) under Node.
+- With the server down, an `/ide/` request's respawn check ran the synchronous PowerShell port
+  query and stalled Tower's event loop for seconds, every terminal included. The async liveness
+  checks now use a loopback connect on Windows. Adoption, stop and status read the port owners
+  with an asynchronous query. The forward test file went from ~5 s with a timeout to 58 ms.
+
+**Stop and failed starts never lose a process.** Stop kills process trees. The recorded pid counts
+as a root only when a live listener descends from it, so a reused pid is never killed. If anything
+survives, the record is kept and the stop fails, naming the survivors, so it can be retried. A
+server that never starts listening has its tree killed before the start fails, because no record
+exists to stop it later. (CMAP iter 1, codex.)
+
+**Test coverage trade.** #1789's unit suites drive `#!/bin/sh` stub servers and assert POSIX
+modes and separators, so those tests are POSIX-only. The Windows behavior they stand for is
+covered on a real Windows host by `ide-server-stub.windows.test.ts`: discovery without
+`--server-path`, floor accept and refusal, sidebar install with native paths over 260 characters,
+spawn, forward, stop and a never-ready server for both shim shapes. The adopt/restart-required
+and serialization logic is not re-run on Windows. It is platform-neutral apart from spawning.
+
+**Carry-forwards.** The POSIX start path also leaves a never-ready server running untracked. That
+is the same defect class, outside this phase's Windows scope, raised with the architect. The joint
+check with the real `@cluesmith/codev-ide-server-win32-x64` package (scenario 15b) runs at verify,
+or earlier as an optional dry run.
+
+**#1595 lifecycle reporter (checked here, no change).** The hook posts and is silent under Git
+Bash, from a path with a space. A deleted script still exits 0 silently. When Claude Code finds no
+Git Bash it falls back to PowerShell, where the bash-syntax hook fails to parse: fail-open, and
+the reporter is inert. Architect ruling: no Windows work in 1658, since Git Bash is a hard
+prerequisite. A PowerShell-safe hook form is a filing candidate for the owner.
+
 ## Flaky Tests
 
 - **Unidentified intermittent failure under `porch done` (Phase 1, 2026-10-21).** The porch

@@ -17,7 +17,10 @@
  * - The forward serves `/ide/?folder=C:\...` with the folder unaltered.
  * - `stopIdeServer` leaves no process behind: not the cmd.exe root, not the
  *   server, not the server's own child.
- * - Everything Tower writes is under the agent-farm directory, in the profile.
+ * - A server that never listens is refused after the readiness wait with its
+ *   whole tree killed and no record (nothing would be left to stop it).
+ * - Everything Tower writes is under the agent-farm directory, and the real
+ *   (unmocked) agent-farm directory is in the user profile.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
@@ -145,6 +148,7 @@ describe.runIf(onWindows)('Phase 9: IDE server lifecycle against .cmd stubs on a
 
   afterEach(() => {
     delete process.env.STUB_IDE_VERSION;
+    delete process.env.STUB_IDE_NO_LISTEN;
     Object.assign(process.env, STUB_ENV);
     fs.rmSync(STATE_FILE, { force: true });
   });
@@ -191,6 +195,22 @@ describe.runIf(onWindows)('Phase 9: IDE server lifecycle against .cmd stubs on a
     expect(readState()).toBeNull();
   }, 60_000);
 
+  it('a server that never listens is refused, its tree killed, no record', async () => {
+    process.env.STUB_IDE_NO_LISTEN = '1';
+    const port = await freePort();
+    const attempt = spawnIdeServer({ serverPath: path.join(FIXTURES, 'codev-ide-server-plain.cmd'), port }, log);
+    await expect(attempt).rejects.toThrow(/did not start listening/);
+    const stub = readState();
+    expect(stub).not.toBeNull();
+    const lingering = await waitFor(() => {
+      const alive = [(stub as StubState).pid, (stub as StubState).childPid].filter(isAlive);
+      if (alive.length === 0) return [];
+      return null;
+    }, 5_000);
+    expect(lingering).toEqual([]);
+    expect(readIdeRecord()).toBeNull();
+  }, 60_000);
+
   it.each(SHIMS)('$shape: spawns, forwards a native ?folder path, and stops with nothing left running', async (shim) => {
     const port = await freePort();
     const serverPath = path.join(FIXTURES, shim.file);
@@ -213,8 +233,8 @@ describe.runIf(onWindows)('Phase 9: IDE server lifecycle against .cmd stubs on a
     for (const written of [tokenPath, getIdeRecordPath(), getIdeExtensionsDir()]) {
       expect(written.startsWith(AGENT_FARM)).toBe(true);
     }
-    const profile = fs.realpathSync.native(os.homedir()).toLowerCase();
-    expect(fs.realpathSync.native(AGENT_FARM).toLowerCase().startsWith(profile)).toBe(true);
+    const actual = await vi.importActual<typeof import('@cluesmith/codev-core/constants')>('@cluesmith/codev-core/constants');
+    expect(path.resolve(actual.AGENT_FARM_DIR).toLowerCase().startsWith(path.resolve(os.homedir()).toLowerCase())).toBe(true);
 
     const folderUrl = `/ide/?folder=${encodeURIComponent('C:\\Users\\dev\\My Repo')}`;
     const res = await get(towerPort, folderUrl);

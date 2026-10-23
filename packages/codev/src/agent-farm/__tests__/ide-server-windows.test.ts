@@ -19,7 +19,7 @@ import { rmSync } from 'node:fs';
 import path from 'node:path';
 import type { ProcessCensusEntry } from '../servers/process-census.js';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TMPDIR || '/tmp'}/ide-server-windows-${process.pid}-${Date.now()}`);
+const TMP_DIR = vi.hoisted(() => `${process.env.TEMP || process.env.TMPDIR || '/tmp'}/ide-server-windows-${process.pid}-${Date.now()}`);
 
 vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
   const actual = await importActual<typeof import('@cluesmith/codev-core/constants')>();
@@ -42,7 +42,7 @@ vi.mock('../../lib/shell-launch.js', async (importActual) => {
 });
 vi.mock('../utils/port.js', async (importActual) => {
   const actual = await importActual<typeof import('../utils/port.js')>();
-  return { ...actual, getProcessesOnPort: () => portPids.value };
+  return { ...actual, getProcessesOnPort: () => portPids.value, getProcessesOnPortAsync: async () => portPids.value };
 });
 vi.mock('../../lib/process-tree.js', async (importActual) => {
   const actual = await importActual<typeof import('../../lib/process-tree.js')>();
@@ -260,19 +260,19 @@ describe('stopWindowsIdeServer', () => {
     expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('powershell unavailable'));
   });
 
-  it('a failed tree kill is logged and the survivor reported; the record still goes', async () => {
+  it('a survivor keeps the record and fails the stop, naming it, so the stop can be retried', async () => {
     const log = vi.fn();
-    const result = await stopWindowsIdeServer(record(20), [30], log, {
+    const attempt = stopWindowsIdeServer(record(20), [30], log, {
       census: async () => [entry(30, 1, 2100)],
       killTree: async () => {
         throw new Error('taskkill timed out');
       },
       isAlive: (pid) => pid === 30,
     });
-    expect(result.stopped).toBe(true);
+    await expect(attempt).rejects.toThrow(/did not stop: process\(es\) 30 still running/);
     expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('taskkill timed out'));
     expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('survived the tree kill: 30'));
-    expect(readIdeRecord()).toBeNull();
+    expect(readIdeRecord()?.pid).toBe(20);
   }, 10_000);
 
   it('nothing listening: no kill, stopped is false', async () => {

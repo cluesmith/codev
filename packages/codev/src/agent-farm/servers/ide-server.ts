@@ -28,7 +28,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { getProcessesOnPort } from '../utils/port.js';
+import { getProcessesOnPort, getProcessesOnPortAsync } from '../utils/port.js';
 import { isWindows } from '../../lib/platform.js';
 import { collectTree, killSessionTree } from '../../lib/process-tree.js';
 import { listProcessCensus, type ProcessCensusEntry } from './process-census.js';
@@ -58,8 +58,8 @@ const STOP_POLL_MS = 200;
 const CONNECT_PROBE_TIMEOUT_MS = 1_000;
 
 /**
- * True if some process is listening on the port. Uses `lsof` (`getProcessesOnPort`),
- * which is ~100 ms and synchronous, so it is a **COLD-path only** check — restart
+ * True if some process is listening on the port. Uses `getProcessesOnPort`
+ * (`lsof`, ~100 ms and synchronous), so it is a **COLD-path only** check — restart
  * reconcile, `afx ide status`, start-collision detection, and respawn. The request
  * forward must NEVER call this (Issue #1668): it reads the port from the record and
  * lets the upstream connect error be the liveness truth-teller.
@@ -259,6 +259,9 @@ async function spawnIdeServerUnlocked(opts: SpawnIdeOptions, log: LogFn): Promis
 
   const ready = await waitForPort(port, IDE_READY_TIMEOUT_MS);
   if (!ready) {
+    // Windows: no record is written for a server that never bound, so nothing
+    // could stop it later; end its tree now (Spec 1658 Phase 9).
+    if (isWindows()) await killUnreadyWindowsServer(child.pid, log);
     throw new Error(`IDE server did not start listening on port ${port} within ${IDE_READY_TIMEOUT_MS / 1000}s`);
   }
 
@@ -285,13 +288,14 @@ async function spawnIdeServerUnlocked(opts: SpawnIdeOptions, log: LogFn): Promis
  * binary the live process came from. With no prior record on that port the live
  * binary is unknown, so the requested path is recorded and a restart is flagged.
  */
-function adoptLiveIdeServer(
+async function adoptLiveIdeServer(
   opts: SpawnIdeOptions,
   port: number,
   existing: IdeServerRecord | null,
   preflight: IdePreflight,
   log: LogFn,
-): SpawnIdeResult {
+): Promise<SpawnIdeResult> {
+  const listeners = await getProcessesOnPortAsync(port);
   let prior: IdeServerRecord | null = null;
   if (existing && existing.port === port) {
     prior = existing;
@@ -302,7 +306,7 @@ function adoptLiveIdeServer(
     prefix: IDE_DEFAULT_PREFIX,
     port,
     serverPath: prior?.serverPath ?? opts.serverPath,
-    pid: getProcessesOnPort(port)[0] ?? 0,
+    pid: listeners[0] ?? 0,
     startedAt: prior?.startedAt ?? new Date().toISOString(),
     serverVersion: prior?.serverVersion,
     extensionsDir: prior?.extensionsDir,
@@ -350,7 +354,7 @@ async function stopIdeServerUnlocked(log: LogFn): Promise<{ stopped: boolean; po
   if (!record) {
     return { stopped: false, port: null };
   }
-  const pids = getProcessesOnPort(record.port);
+  const pids = await getProcessesOnPortAsync(record.port);
   if (isWindows()) {
     return stopWindowsIdeServer(record, pids, log);
   }
@@ -382,6 +386,15 @@ async function stopIdeServerUnlocked(log: LogFn): Promise<{ stopped: boolean; po
   const killedNote = survivors.length > 0 ? `, SIGKILL escalated for ${survivors.length}` : '';
   log('INFO', `Stopped IDE server on port ${record.port} (${pids.length} process(es)${killedNote})`);
   return { stopped: pids.length > 0, port: record.port };
+}
+
+/** Windows: kill the tree of a spawned server that never started listening. */
+async function killUnreadyWindowsServer(pid: number, log: LogFn): Promise<void> {
+  try {
+    await killSessionTree(pid);
+  } catch (err) {
+    log('WARN', `IDE server pid ${pid} never listened, and killing its tree failed: ${(err as Error).message}`);
+  }
 }
 
 /** Seams for the Windows stop path; production uses the real census and tree kill. */
@@ -425,8 +438,8 @@ export function windowsIdeStopRoots(
  * Windows stop: kill each root's process tree (`killSessionTree`: census
  * snapshot, `taskkill /T /F`, then any snapshot member still alive), wait for
  * the targets to exit, then delete the record. A census failure falls back to
- * the listeners alone. A kill that fails is logged and the wait reports what
- * survived.
+ * the listeners alone. A kill that fails is logged; if any target outlives the
+ * wait, the record is kept and the stop throws, naming the survivors.
  */
 export async function stopWindowsIdeServer(
   record: IdeServerRecord,
@@ -462,13 +475,16 @@ export async function stopWindowsIdeServer(
     survivors = survivors.filter(isAlive);
   }
 
-  deleteIdeRecord();
-  let survivorNote = '';
+  // A survivor keeps the record, so the server stays tracked and the stop can
+  // be retried; the caller reports the failure.
   if (survivors.length > 0) {
-    survivorNote = `, ${survivors.length} still running: ${survivors.join(', ')}`;
     log('WARN', `IDE server stop: processes survived the tree kill: ${survivors.join(', ')}`);
+    throw new Error(
+      `IDE server on port ${record.port} did not stop: process(es) ${survivors.join(', ')} still running; the record is kept so the stop can be retried`,
+    );
   }
-  log('INFO', `Stopped IDE server on port ${record.port} (${plan.targets.length} process(es)${survivorNote})`);
+  deleteIdeRecord();
+  log('INFO', `Stopped IDE server on port ${record.port} (${plan.targets.length} process(es))`);
   return { stopped: listeners.length > 0, port: record.port };
 }
 
@@ -479,10 +495,10 @@ export interface IdeStatus {
 }
 
 /** Report the IDE server's status from the record plus a live port probe. */
-export function ideServerStatus(): IdeStatus {
+export async function ideServerStatus(): Promise<IdeStatus> {
   const record = readIdeRecord();
   if (!record) return { record: null, alive: false, pid: null };
-  const pids = getProcessesOnPort(record.port);
+  const pids = await getProcessesOnPortAsync(record.port);
   return { record, alive: pids.length > 0, pid: pids[0] ?? null };
 }
 
@@ -555,14 +571,21 @@ export async function handleIdeApi(
   log: LogFn,
 ): Promise<void> {
   if (req.method === 'GET') {
-    const status = ideServerStatus();
+    const status = await ideServerStatus();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(status));
     return;
   }
 
   if (req.method === 'DELETE') {
-    const result = await stopIdeServer(log);
+    let result: { stopped: boolean; port: number | null };
+    try {
+      result = await stopIdeServer(log);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: (err as Error).message }));
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
     return;
