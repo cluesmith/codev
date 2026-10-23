@@ -7,3 +7,7 @@
 
 # Windows batch files need CRLF; cmd.exe misparses some LF-only scripts.
 *.cmd text eol=crlf
+
+# Render-gate fixtures are raw PTY bytes (Spec 1658): never convert their line
+# endings, or a Windows checkout with core.autocrlf=true rewrites the captures.
+packages/codev/src/agent-farm/__tests__/fixtures/gate/** -text
