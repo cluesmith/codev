@@ -20,6 +20,8 @@ import { resolveLifecycleReporterInjection } from '../utils/lifecycle-reporter.j
 import { getArchitectByName, setArchitectSessionId } from '../state.js';
 import type { CrashLoopFallback, FreshLaunch, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import { cmdlineHoldsSession } from './architect-session-holder.js';
+import { isWindows } from '../../lib/platform.js';
+import { isHostPathUnder } from '../../lib/host-paths.js';
 
 // ============================================================================
 // Rate Limiting
@@ -99,15 +101,17 @@ const _tmpDirResolved = (() => {
 })();
 
 /**
- * Check if a workspace path points to a temp directory.
+ * Check if a workspace path points to a temp directory. On Windows only the
+ * host temp dir counts (Spec 1658): `/tmp` is a POSIX location.
  */
 export function isTempDirectory(workspacePath: string): boolean {
-  return (
-    workspacePath.startsWith(_tmpDir + '/') ||
-    workspacePath.startsWith(_tmpDirResolved + '/') ||
-    workspacePath.startsWith('/tmp/') ||
-    workspacePath.startsWith('/private/tmp/')
-  );
+  if (isHostPathUnder(workspacePath, _tmpDir) || isHostPathUnder(workspacePath, _tmpDirResolved)) {
+    return true;
+  }
+  if (isWindows()) {
+    return false;
+  }
+  return workspacePath.startsWith('/tmp/') || workspacePath.startsWith('/private/tmp/');
 }
 
 // ============================================================================

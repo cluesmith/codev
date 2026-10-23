@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { homedir, networkInterfaces, tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,7 @@ import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
 import { isWindows } from '../../lib/platform.js';
+import { expandHomePath } from '../../lib/host-paths.js';
 import { isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
 import {
   isRateLimited,
@@ -2744,11 +2745,7 @@ async function handleCreateWorkspace(
     return;
   }
 
-  // Expand ~ to home directory
-  let expandedParent = parentPath;
-  if (expandedParent.startsWith('~')) {
-    expandedParent = expandedParent.replace('~', homedir());
-  }
+  const expandedParent = expandHomePath(parentPath);
 
   // Validate parent exists
   if (!fs.existsSync(expandedParent)) {
@@ -2810,10 +2807,7 @@ async function handleLaunchInstance(
     return;
   }
 
-  // Expand ~ to home directory
-  if (workspacePath.startsWith('~')) {
-    workspacePath = workspacePath.replace('~', homedir());
-  }
+  workspacePath = expandHomePath(workspacePath);
 
   // Reject relative paths — tower daemon CWD is unpredictable
   if (!path.isAbsolute(workspacePath)) {

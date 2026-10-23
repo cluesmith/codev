@@ -38,7 +38,11 @@ const onWindows = process.platform === 'win32';
 const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
 const afx = fileURLToPath(new URL('../../bin/afx.js', import.meta.url));
 const porch = fileURLToPath(new URL('../../bin/porch.js', import.meta.url));
-const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-p6-'));
+// Under the home directory, not the OS temp dir: Tower neither lists nor
+// reconnects workspaces in a temp directory (isTempDirectory).
+const testWorkspaces = path.join(os.homedir(), '.agent-farm', 'test-workspaces');
+fs.mkdirSync(testWorkspaces, { recursive: true });
+const workDir = fs.mkdtempSync(path.join(testWorkspaces, 'codev-1658-p6-'));
 const binDir = path.join(workDir, 'bin');
 const workspace = path.join(workDir, 'ws');
 const stateDir = path.join(workDir, 'state');

@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir } from 'node:os';
+import { endsWithHostSeparator, expandHomePath } from '../../lib/host-paths.js';
 import { encodeWorkspacePath } from '../lib/tower-client.js';
 import { loadConfig } from '../../lib/config.js';
 import { sanitizeAgentEnv, withTowerPort, ARCHITECT_WORKSPACE_ENV } from '../../lib/agent-env.js';
@@ -365,10 +366,7 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
     inputPath = homedir();
   }
 
-  // Expand ~ to home directory
-  if (inputPath.startsWith('~')) {
-    inputPath = inputPath.replace('~', homedir());
-  }
+  inputPath = expandHomePath(inputPath);
 
   // Relative paths are meaningless for the tower daemon — only absolute paths
   if (!path.isAbsolute(inputPath)) {
@@ -379,7 +377,7 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
   let dirToList: string;
   let prefix: string;
 
-  if (inputPath.endsWith('/')) {
+  if (endsWithHostSeparator(inputPath)) {
     // User typed a complete directory path, list its contents
     dirToList = inputPath;
     prefix = '';

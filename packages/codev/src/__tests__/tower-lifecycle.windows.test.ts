@@ -29,7 +29,12 @@ import { killSessionTree } from '../lib/process-tree.js';
 
 const onWindows = process.platform === 'win32';
 const afx = fileURLToPath(new URL('../../bin/afx.js', import.meta.url));
-const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-tower-'));
+// Under the home directory, not the OS temp dir: Tower neither lists nor
+// reconnects workspaces in a temp directory (isTempDirectory), as the POSIX
+// e2e suites also arrange.
+const testWorkspaces = path.join(os.homedir(), '.agent-farm', 'test-workspaces');
+fs.mkdirSync(testWorkspaces, { recursive: true });
+const workDir = fs.mkdtempSync(path.join(testWorkspaces, 'codev-1658-tower-'));
 const stubScript = path.join(workDir, 'stub.cjs');
 const leftovers: number[] = [];
 const helpers: WindowsJobHelper[] = [];

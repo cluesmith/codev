@@ -184,11 +184,12 @@ describe('tower-utils', () => {
   });
 
   describe('isTempDirectory', () => {
-    it('detects /tmp/ paths', () => {
+    // POSIX temp roots; Windows counts only the host temp dir (spec-1658-posix-residue.test.ts).
+    it.skipIf(process.platform === 'win32')('detects /tmp/ paths', () => {
       expect(isTempDirectory('/tmp/test-project')).toBe(true);
     });
 
-    it('detects /private/tmp/ paths (macOS)', () => {
+    it.skipIf(process.platform === 'win32')('detects /private/tmp/ paths (macOS)', () => {
       expect(isTempDirectory('/private/tmp/test-project')).toBe(true);
     });
 

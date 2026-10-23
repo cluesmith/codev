@@ -17,6 +17,7 @@
 
 import { join } from 'node:path';
 import { normalizeWorkspacePath } from './workspace-path.js';
+import { lastPathSegment } from '../../lib/host-paths.js';
 
 /** A builder worktree path split into its owning workspace and directory name. */
 export interface BuilderWorktreeRef {
@@ -53,5 +54,5 @@ export function matchBuilderRow<T extends BuilderWorktreeRow>(
   const canonicalWorktree = normalizeWorkspacePath(join(ref.workspacePath, '.builders', ref.worktreeDirName));
   const exact = rows.find(r => normalizeWorkspacePath(r.worktree) === canonicalWorktree);
   if (exact) return exact;
-  return rows.find(r => r.worktree.split('/').pop() === ref.worktreeDirName);
+  return rows.find(r => lastPathSegment(r.worktree) === ref.worktreeDirName);
 }

@@ -84,6 +84,9 @@ import {
 } from './tower-utils.js';
 import { setArchitectByName } from '../state.js';
 import { isIntentionallyStopping } from './tower-instances.js';
+import { isWindows } from '../../lib/platform.js';
+import { isHostPathAtOrUnder } from '../../lib/host-paths.js';
+import { homedir, tmpdir } from 'node:os';
 
 // ============================================================================
 // Module-private state (lifecycle driven by orchestrator)
@@ -236,7 +239,11 @@ export function getWorkspaceTerminals(): Map<string, WorkspaceTerminals> {
  */
 export function getTerminalManager(): TerminalManager {
   if (!terminalManager) {
-    const workspaceRoot = process.env.HOME || '/tmp';
+    // POSIX keeps its `/tmp` fallback; Windows has no HOME by default (Spec 1658).
+    let workspaceRoot = process.env.HOME || '/tmp';
+    if (isWindows()) {
+      workspaceRoot = homedir();
+    }
     terminalManager = new TerminalManager({
       workspaceRoot: workspaceRoot,
       logDir: path.join(AGENT_FARM_DIR, 'logs'),
@@ -576,7 +583,7 @@ export function deleteFileTabsByPathPrefix(pathPrefix: string): number {
   try {
     const deleted = deleteFileTabsByPathPrefixFromDb(getGlobalDb(), pathPrefix);
     // Ensure trailing slash for boundary-safe in-memory matching
-    const safePrefix = pathPrefix.endsWith('/') ? pathPrefix : pathPrefix + '/';
+    const safePrefix = pathPrefix.endsWith(path.sep) ? pathPrefix : pathPrefix + path.sep;
     // Evict matching entries from in-memory registries
     for (const [, entry] of workspaceTerminals) {
       if (entry.fileTabs) {
@@ -627,6 +634,21 @@ export function processExists(pid: number): boolean {
 // ============================================================================
 // Terminal reconciliation
 // ============================================================================
+
+/** POSIX temp roots a reconnect skips; Windows uses the host temp dir (Spec 1658). */
+const POSIX_TEMP_ROOTS = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
+
+/** True when a workspace lives in a temp directory, so its sessions are not reconnected. */
+function isTemporaryWorkspace(workspacePath: string): boolean {
+  if (isWindows()) {
+    const roots = [tmpdir()];
+    try {
+      roots.push(fs.realpathSync(tmpdir()));
+    } catch { /* the unresolved form is enough */ }
+    return roots.some(d => isHostPathAtOrUnder(workspacePath, d));
+  }
+  return POSIX_TEMP_ROOTS.some(d => isHostPathAtOrUnder(workspacePath, d));
+}
 
 /**
  * Reconcile terminal sessions on startup.
@@ -719,8 +741,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       cleaned++;
       continue;
     }
-    const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
-    if (tmpDirs.some(d => workspacePath === d || workspacePath.startsWith(d + '/'))) {
+    if (isTemporaryWorkspace(workspacePath)) {
       _deps.log('INFO', `Skipping shellper session ${dbSession.id} — workspace is in temp directory: ${workspacePath}`);
       if (dbSession.shellper_pid && processExists(dbSession.shellper_pid)) {
         try { process.kill(dbSession.shellper_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }

@@ -53,6 +53,7 @@ export const WORKTREE_WRITE_GUARD_SCRIPT = `#!/usr/bin/env node
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { execSync } = require('node:child_process');
 
@@ -102,14 +103,24 @@ function canonicalize(p, cwd) {
   }
 }
 
+// Windows paths compare case-insensitively (Spec 1658).
+function comparable(p) {
+  if (process.platform === 'win32') {
+    return p.toLowerCase();
+  }
+  return p;
+}
+
 function isInside(child, parent) {
   if (!parent) {
     return false;
   }
-  if (child === parent) {
+  const c = comparable(child);
+  const p = comparable(parent);
+  if (c === p) {
     return true;
   }
-  return child.startsWith(parent + path.sep);
+  return c.startsWith(p + path.sep);
 }
 
 function main(raw) {
@@ -161,8 +172,16 @@ function main(raw) {
       allowRoots.push(canonicalize(p, cwd));
     }
   };
-  addAllow('/tmp');
-  addAllow('/private/tmp');
+  if (process.platform === 'win32') {
+    // Spec 1658: the user temp dir and %USERPROFILE%\\.claude.
+    addAllow(os.tmpdir());
+    if (process.env.USERPROFILE) {
+      addAllow(path.join(process.env.USERPROFILE, '.claude'));
+    }
+  } else {
+    addAllow('/tmp');
+    addAllow('/private/tmp');
+  }
   addAllow(process.env.TMPDIR);
   if (process.env.HOME) {
     addAllow(path.join(process.env.HOME, '.claude'));
@@ -192,6 +211,14 @@ process.stdin.on('end', () => {
 });
 `;
 
+/**
+ * A path as Git Bash must see it: forward slashes (as `toShellPath` in
+ * harness.ts, which imports this module, so it is not imported back).
+ */
+function forwardSlashes(value: string): string {
+  return value.replace(/\\/g, '/');
+}
+
 /** Single-quote-escape a value for safe embedding in a POSIX shell command. */
 function shellSingleQuote(value: string): string {
   return value.replace(/'/g, `'\\''`);
@@ -210,10 +237,11 @@ export function buildWorktreeGuardFiles(
   const scriptAbs = join(root, GUARD_SCRIPT_RELPATH);
 
   // Bake the worktree root in (deterministic) and run via `node` so the emitted
-  // script needs no executable bit.
+  // script needs no executable bit. Forward slashes, because Claude Code runs
+  // hooks under Git Bash on Windows (Spec 1658); a no-op on POSIX.
   const command =
-    `CODEV_WORKTREE_ROOT='${shellSingleQuote(root)}' ` +
-    `node '${shellSingleQuote(scriptAbs)}'`;
+    `CODEV_WORKTREE_ROOT='${shellSingleQuote(forwardSlashes(root))}' ` +
+    `node '${shellSingleQuote(forwardSlashes(scriptAbs))}'`;
 
   const settings = {
     hooks: {

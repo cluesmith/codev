@@ -67,6 +67,7 @@ export class TerminalManager {
 
     const id = randomUUID();
     let shell = req.command ?? process.env.SHELL ?? '/bin/bash';
+    // POSIX base env (`/tmp` HOME fallback included); Windows replaces it below.
     let baseEnv: Record<string, string> = {
       PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
       HOME: process.env.HOME ?? '/tmp',

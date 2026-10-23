@@ -5,7 +5,7 @@
  * This command creates a file tab via the Tower API.
  */
 
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, isAbsolute } from 'node:path';
 import { existsSync } from 'node:fs';
 import { getMainRepoFromWorktree, findWorkspaceRoot } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -56,7 +56,7 @@ async function tryTowerApi(client: TowerClient, workspacePath: string, filePath:
 export async function open(options: OpenOptions): Promise<void> {
   // Resolve file path relative to current directory (works correctly in worktrees)
   let filePath: string;
-  if (options.file.startsWith('/')) {
+  if (isAbsolute(options.file)) {
     filePath = options.file;
   } else {
     filePath = resolve(process.cwd(), options.file);

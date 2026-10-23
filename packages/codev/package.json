@@ -19,6 +19,8 @@
     "dashboard-dist",
     "scripts/forge",
     "scripts/postinstall.mjs",
+    "scripts/preinstall.mjs",
+    "scripts/native-deps-guard.mjs",
     "ide-extension"
   ],
   "scripts": {
@@ -36,6 +38,7 @@
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
     "test:e2e:playwright": "pnpm exec playwright test",
     "test:e2e:cli": "pnpm build && vitest run --config vitest.cli.config.ts",
+    "preinstall": "node ./scripts/preinstall.mjs",
     "postinstall": "node ./scripts/postinstall.mjs",
     "prepublishOnly": "pnpm build"
   },

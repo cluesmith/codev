@@ -38,6 +38,8 @@ import {
   type HarnessProvider,
 } from '../../utils/harness.js';
 import { canonicalIssueId, isIssueKey } from '../../../lib/issue-id.js';
+import { lastPathSegment } from '../../../lib/host-paths.js';
+import { isWindows } from '../../../lib/platform.js';
 
 // ============================================================================
 // Ports
@@ -493,9 +495,12 @@ function commandNameOf(line: string): string | null {
   if (!first || first.includes('=')) return null;
 
   // Basename, so `/usr/local/bin/claude` resolves like `claude`, with any
-  // surrounding quotes removed.
-  const base = first.replace(/^['"]|['"]$/g, '').split('/').pop();
-  return base && base !== '' ? base : null;
+  // surrounding quotes removed. On Windows `C:\tools\claude.exe` does too.
+  let base = lastPathSegment(first.replace(/^['"]|['"]$/g, ''));
+  if (isWindows()) {
+    base = base.replace(/\.(exe|cmd|bat)$/i, '');
+  }
+  return base !== '' ? base : null;
 }
 
 /**

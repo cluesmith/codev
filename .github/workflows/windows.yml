@@ -12,6 +12,9 @@ name: Windows (on demand)
 #             With tower=true the x64 Node 22 leg also starts Tower from the built checkout (building
 #             the repo on ARM64 fails in the artifact-canvas bundler; users install prebuilt packages).
 #   targeted  runs the packages/codev vitest files matching `filter` (skipped when empty).
+#   install-guard (install_guard=true) packs the branch packages, then on Node 20 installs them
+#             globally with node-gyp replaced by a failing stub: the install must fail with the
+#             supported-versions message and never reach the stub; on Node 22 it must succeed.
 
 on:
   workflow_dispatch:
@@ -22,6 +25,11 @@ on:
         default: ''
       tower:
         description: 'Probe: also try `afx tower start` (built checkout on Node 22; published package on every leg)'
+        type: boolean
+        required: false
+        default: false
+      install_guard:
+        description: 'Run the native-dependency install guard check (Node 20 refused, Node 22 installs)'
         type: boolean
         required: false
         default: false
@@ -103,6 +111,58 @@ jobs:
           name: windows-probe-${{ matrix.os }}-node${{ matrix.node }}
           path: ${{ runner.temp }}/probe-*.json
           if-no-files-found: warn
+
+  install-guard:
+    name: Install guard (native dependencies)
+    if: ${{ inputs.install_guard }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22 (build and pack)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages/codev
+        working-directory: packages/codev
+        run: pnpm build
+
+      - name: Pack the branch packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs"
+          for p in codev-types codev-core codev-sdk codev; do
+            pnpm --filter "@cluesmith/$p" pack --pack-destination "$RUNNER_TEMP/packs"
+          done
+          ls -l "$RUNNER_TEMP/packs"
+
+      - name: Setup Node.js 20 (unsupported on native Windows)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Control - without the guard, better-sqlite3 falls back to node-gyp on Node 20
+        run: node scripts/windows-install-guard-check.mjs --control "$RUNNER_TEMP/packs"
+
+      - name: Guard - Node 20 install fails with the supported versions, node-gyp never runs
+        run: node scripts/windows-install-guard-check.mjs --unsupported "$RUNNER_TEMP/packs"
+
+      - name: Setup Node.js 22 (supported)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Supported - Node 22 installs from prebuilds
+        run: node scripts/windows-install-guard-check.mjs --supported "$RUNNER_TEMP/packs"
 
   targeted:
     name: Targeted tests

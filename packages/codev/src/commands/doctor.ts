@@ -34,6 +34,7 @@ import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { hostPlatform, isWindows } from '../lib/platform.js';
+import { isHostPathAtOrUnder } from '../lib/host-paths.js';
 import { findOnHostPath, spawnOnHost, spawnSyncOnHost } from '../lib/shell-launch.js';
 import { getWorktreeConfig } from '../agent-farm/utils/config.js';
 import type { CodevConfig } from '../lib/config.js';
@@ -407,6 +408,116 @@ export function checkWindowsPrerequisites(deps: WindowsPrereqDeps): WindowsPrere
   }
 
   return results;
+}
+
+/** Windows' path limit with the admin-only `LongPathsEnabled` off (Spec 1658). */
+export const WINDOWS_MAX_PATH = 260;
+
+/**
+ * What a builder worktree adds to the workspace root: `\.builders\<id>\`
+ * with room for a long builder id (`spir-1234-some-feature-name`).
+ */
+export const BUILDER_WORKTREE_PATH_BUDGET = 42;
+
+/**
+ * Room left for paths inside a worktree: source trees and, above all,
+ * dependency trees (`node_modules\.pnpm\<scope>+<name>@<version>\node_modules\...`).
+ */
+export const WORKTREE_CONTENT_PATH_BUDGET = 150;
+
+/** The longest workspace root that leaves both budgets inside MAX_PATH. */
+export const MAX_SAFE_WORKSPACE_ROOT_LENGTH =
+  WINDOWS_MAX_PATH - BUILDER_WORKTREE_PATH_BUDGET - WORKTREE_CONTENT_PATH_BUDGET;
+
+/** Host seams for `checkWindowsPathsAndState`. */
+export interface WindowsPathDeps {
+  /** The workspace root doctor runs in, or null outside a workspace. */
+  workspaceRoot: string | null;
+  /** The effective `git config core.longpaths` value, or null when unset. */
+  gitLongPaths: () => string | null;
+  /** `CODEV_AGENT_FARM_DIR` resolved, or null when state is in its default place. */
+  relocatedStateDir: string | null;
+  /** `%USERPROFILE%`, or null when unset. */
+  userProfile: string | null;
+}
+
+/**
+ * Long-path and state-location checks for native Windows (Spec 1658). A deep
+ * workspace root risks MAX_PATH overruns in builder worktrees and their
+ * dependency trees; Git needs the per-user `core.longpaths` to check out long
+ * paths at all; and state relocated outside the user profile loses the
+ * owner-only protection that the profile's default permissions provide.
+ */
+export function checkWindowsPathsAndState(deps: WindowsPathDeps): WindowsPrereqResult[] {
+  const results: WindowsPrereqResult[] = [];
+
+  if (deps.workspaceRoot !== null) {
+    const length = deps.workspaceRoot.length;
+    if (length > MAX_SAFE_WORKSPACE_ROOT_LENGTH) {
+      results.push({
+        name: 'Workspace depth',
+        status: 'warn',
+        version: `root is ${length} characters (over ${MAX_SAFE_WORKSPACE_ROOT_LENGTH})`,
+        note: `builder worktrees and their dependency trees may exceed Windows' ${WINDOWS_MAX_PATH}-character path limit; move the workspace to a shorter root, for example C:\\src\\<repo>`,
+      });
+    } else {
+      results.push({ name: 'Workspace depth', status: 'ok', version: `root is ${length} characters` });
+    }
+  }
+
+  const longPaths = deps.gitLongPaths();
+  if (longPaths !== null && longPaths.toLowerCase() === 'true') {
+    results.push({ name: 'Git core.longpaths', status: 'ok', version: 'true' });
+  } else {
+    let version = 'not set';
+    if (longPaths !== null) {
+      version = longPaths;
+    }
+    results.push({
+      name: 'Git core.longpaths',
+      status: 'warn',
+      version,
+      note: `Git cannot check out paths over ${WINDOWS_MAX_PATH} characters without it; run: git config --global core.longpaths true`,
+    });
+  }
+
+  if (deps.relocatedStateDir !== null) {
+    const insideProfile = deps.userProfile !== null && isHostPathAtOrUnder(deps.relocatedStateDir, deps.userProfile);
+    if (!insideProfile) {
+      results.push({
+        name: 'State directory',
+        status: 'warn',
+        version: `CODEV_AGENT_FARM_DIR is outside the user profile (${deps.relocatedStateDir})`,
+        note: 'the local key and state rely on the user profile being private to you; keep CODEV_AGENT_FARM_DIR under %USERPROFILE%',
+      });
+    }
+  }
+
+  return results;
+}
+
+/** The real-host seams for `checkWindowsPathsAndState`. */
+export function windowsPathDeps(workspaceRoot: string | null): WindowsPathDeps {
+  let relocatedStateDir: string | null = null;
+  if (process.env.CODEV_AGENT_FARM_DIR) {
+    relocatedStateDir = AGENT_FARM_DIR;
+  }
+  return {
+    workspaceRoot,
+    gitLongPaths: () => {
+      const args = ['config', '--get', 'core.longpaths'];
+      if (workspaceRoot !== null) {
+        args.unshift('-C', workspaceRoot);
+      }
+      const value = runCommand('git', args);
+      if (value === null || value === '') {
+        return null;
+      }
+      return value;
+    },
+    relocatedStateDir,
+    userProfile: process.env.USERPROFILE ?? null,
+  };
 }
 
 /**
@@ -1135,7 +1246,11 @@ export async function doctor(): Promise<number> {
         prereqConfig = null;
       }
     }
-    for (const result of checkWindowsPrerequisites(windowsPrereqDeps(prereqRoot, prereqConfig))) {
+    const windowsResults = [
+      ...checkWindowsPrerequisites(windowsPrereqDeps(prereqRoot, prereqConfig)),
+      ...checkWindowsPathsAndState(windowsPathDeps(prereqRoot)),
+    ];
+    for (const result of windowsResults) {
       printStatus(result.name, result);
       if (result.status === 'fail') errors++;
       if (result.status === 'warn') {
