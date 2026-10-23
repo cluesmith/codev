@@ -18,6 +18,7 @@ vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(),
 }));
 
+import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { notifyTerminal, gateApprovedMessage } from '../notify.js';
 
@@ -113,7 +114,7 @@ describe('notifyTerminal', () => {
     });
 
     const args = mockExecFile.mock.calls[0][1]!;
-    expect(args[0]).toMatch(/bin\/afx\.js$/);
+    expect(args[0].endsWith(path.join('bin', 'afx.js'))).toBe(true);
   });
 });
 

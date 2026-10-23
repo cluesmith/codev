@@ -1421,7 +1421,9 @@ describe('tower-terminals', () => {
     function setupWorkspaceWithArchitects(names: string[]) {
       const deps = makeDeps();
       initTerminals(deps);
-      const wsPath = '/real/project';
+      // Host-resolved: the entry is keyed by this path and the read normalizes
+      // it, which on Windows (not on disk, so `resolve`) prefixes the drive.
+      const wsPath = path.resolve('/real/project');
       vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
         if (String(p) === wsPath) return true;
         return false;

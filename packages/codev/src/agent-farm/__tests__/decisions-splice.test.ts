@@ -8,7 +8,9 @@ import { resolve } from 'node:path';
 import { parseDecisions } from '../servers/decisions/parse.js';
 import { MAX_COMMENT_LENGTH, spliceRuling, type RulingRequest, type SpliceResult } from '../servers/decisions/splice.js';
 
-const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8');
+// The fixture is LF; a CRLF checkout (core.autocrlf on Windows) is normalized back, and
+// the CRLF behaviour is tested by converting it explicitly.
+const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8').replace(/\r\n/g, '\n');
 
 const PREAMBLE = '# Pending owner decisions\n\n_Status: 2 open._\n\n## Open\n\n';
 const NEXT_ITEM = '### main-11 · …\n\n- **Context:** the next item.\n\n**Your word:** `yes` / `no`\n\n## Ruled\n\n- **main-10** · ruled `approve`\n';

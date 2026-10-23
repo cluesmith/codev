@@ -163,7 +163,15 @@ describe('spawnSyncOnHost (doctor CLI probes)', () => {
 
   it('doctor version probes go through it on Windows', () => {
     setHostPlatformForTests('win32');
-    expect(windowsPrereqDeps(null, null).jqVersion('jq')).toBe('jq-1.7.1');
+    // An empty PATH keeps the shim resolver from turning 'jq' into a host jq.exe's full path
+    // (a real Windows runner with jq installed resolves it), so the name passes through.
+    const previous = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      expect(windowsPrereqDeps(null, null).jqVersion('jq')).toBe('jq-1.7.1');
+    } finally {
+      process.env.PATH = previous;
+    }
     const [command, args, opts] = childProcess.spawnSync.mock.calls[0];
     expect(command).toBe('jq');
     expect(args).toEqual(['--version']);

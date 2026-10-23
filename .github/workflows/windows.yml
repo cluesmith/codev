@@ -1,10 +1,12 @@
 name: Windows (on demand)
+# Each dispatch names its purpose, so the run list says what every run was for.
+run-name: "Windows: ${{ inputs.purpose || 'unlabelled' }}"
 
 # Native Windows checks for Spec 1658. Manual dispatch ONLY: this workflow never runs on
 # push or pull_request and is never a required check (owner ruling, 2026-10-21). Dispatch it
 # before a release and on any PR that touches platform code:
 #
-#   gh workflow run windows.yml --ref <branch> [-f filter=<vitest filter>] [-f tower=true]
+#   gh workflow run windows.yml --ref <branch> -f purpose='<what this run is for>' [-f filter=<vitest filter>] [-f tower=true]
 #
 # Jobs:
 #   probe     scripts/windows-probe.mjs on Node 20/22/24 (x64) and 22/24 (ARM64): Git Bash, PATHEXT, named pipes,
@@ -19,6 +21,10 @@ name: Windows (on demand)
 on:
   workflow_dispatch:
     inputs:
+      purpose:
+        description: 'What this run is for (shown as the run name)'
+        required: false
+        default: ''
       filter:
         description: 'Vitest filter for the targeted job (packages/codev); empty skips it'
         required: false

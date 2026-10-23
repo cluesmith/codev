@@ -6,7 +6,7 @@
  * already-running same-builder, swap accept/decline, and --stop.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Builder } from '../types.js';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────
@@ -73,6 +73,7 @@ vi.mock('node:readline', () => ({
 // ─── Imports (after mocks) ──────────────────────────────────────────────
 
 const { dev } = await import('../commands/dev.js');
+const { setHostPlatformForTests, resetHostPlatformForTests } = await import('../../lib/platform.js');
 
 // ─── Fixtures ───────────────────────────────────────────────────────────
 
@@ -98,6 +99,10 @@ beforeEach(() => {
   getWorktreeConfigMock.mockReturnValue({ symlinks: [], postSpawn: [], devCommand: 'pnpm dev', devUrls: [] });
 });
 
+afterEach(() => {
+  resetHostPlatformForTests();
+});
+
 // ─── Tests ──────────────────────────────────────────────────────────────
 
 describe('afx dev — validation', () => {
@@ -118,6 +123,8 @@ describe('afx dev — validation', () => {
 
 describe('afx dev — spawn (no existing dev)', () => {
   it('creates a PTY with type=dev, label=Dev: <id>, cwd=worktree', async () => {
+    // The POSIX launch (/bin/sh -lc); the Windows launch is pinned in windows-launch-sites.test.ts.
+    setHostPlatformForTests('linux');
     await dev({ builderId: 'spir-42' });
 
     expect(createPtySessionMock).toHaveBeenCalledTimes(1);

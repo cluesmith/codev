@@ -132,6 +132,7 @@ import { computeAnalytics } from './analytics.js';
 import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
 import { getGlobalDb } from '../db/index.js';
 import { listProcessCensus } from './process-census.js';
+import { containsBuildersSegment } from '../utils/builder-worktree-identity.js';
 import {
   SHELLPER_MARKER,
   computeRegisteredShellperPids,
@@ -1307,7 +1308,7 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
 
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
 
   if (!workspaceRoot) {
@@ -1384,7 +1385,7 @@ async function handleIssueView(res: http.ServerResponse, url: URL): Promise<void
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
 
   const number = url.searchParams.get('number');
@@ -1413,7 +1414,7 @@ async function handlePRView(res: http.ServerResponse, url: URL): Promise<void> {
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
 
   const number = url.searchParams.get('number');
@@ -1453,7 +1454,7 @@ async function handleIssueSearch(res: http.ServerResponse, url: URL): Promise<vo
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1532,7 +1533,7 @@ function handleWorktreeConfigView(res: http.ServerResponse, url: URL): void {
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1561,7 +1562,7 @@ function handleActivityHooksView(res: http.ServerResponse, url: URL): void {
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1596,7 +1597,7 @@ async function handleAnalytics(res: http.ServerResponse, url: URL, workspaceOver
 
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
 
   // Validate range parameter (before workspace check so fallback uses correct range)

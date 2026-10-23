@@ -154,6 +154,7 @@ describe('SessionManager per-session job (Windows)', () => {
 
 describe('SessionManager per-session job (POSIX)', () => {
   it('never asks for a job and launches without deferPty', async () => {
+    setHostPlatformForTests('linux');
     const { helper, assign } = fakeHelper({ assigned: true });
     await newManager([], helper).createSession(createOpts());
     expect(assign).not.toHaveBeenCalled();

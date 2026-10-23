@@ -79,6 +79,7 @@ afterEach(() => {
 
 describe('SessionManager.createSession launch config', () => {
   it('POSIX: argv JSON is the unchanged shape, and no secret is minted', async () => {
+    setHostPlatformForTests('linux');
     const { config, env } = await captureLaunch();
     expect(Object.keys(config)).toEqual(['command', 'args', 'cwd', 'env', 'cols', 'rows', 'socketPath']);
     expect(config.socketPath).toBe(path.join(socketDir, 'shellper-sess-1658.sock'));

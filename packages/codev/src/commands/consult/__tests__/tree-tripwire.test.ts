@@ -302,7 +302,9 @@ describe('escapeControlChars — a filename must not be able to forge the banner
     expect(w).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/);
   });
 
-  it('is applied to a real filename carrying an escape sequence', () => {
+  // POSIX-only assertion: needs a filename holding an ESC control character, which NTFS rejects.
+  // The escaping itself is covered on every host by the two string-level tests above.
+  it.skipIf(process.platform === 'win32')('is applied to a real filename carrying an escape sequence', () => {
     const nasty = 'esc\x1b[31mred.ts';
     const before = snapshotTree(repo);
     write(nasty, 'x');

@@ -9,7 +9,7 @@
  * spared, and a census failure surfaces as an error.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   collectTree,
   killSessionTree,
@@ -33,6 +33,10 @@ function entry(pid: number, ppid: number, creationTime: number): ProcessCensusEn
 }
 
 describe('killSessionTree on POSIX', () => {
+  beforeEach(() => {
+    setHostPlatformForTests('linux');
+  });
+
   it('sends SIGTERM to the process group and nothing else by default', async () => {
     const kill = vi.fn();
     const result = await killSessionTree(4321, { kill });
@@ -91,6 +95,10 @@ describe('killSessionTree on POSIX', () => {
 });
 
 describe('waitForTreeExit on POSIX', () => {
+  beforeEach(() => {
+    setHostPlatformForTests('linux');
+  });
+
   it('probes the process group with signal 0 until it is empty', async () => {
     let probes = 0;
     const kill = vi.fn(() => {
@@ -309,6 +317,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('ignores the job name on POSIX', async () => {
+    setHostPlatformForTests('linux');
     const kill = vi.fn();
     const terminateJob = vi.fn();
     await killSessionTree(4321, { kill, jobName: 'J', terminateJob });

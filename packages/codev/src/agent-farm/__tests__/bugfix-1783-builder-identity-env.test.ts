@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import { BUILDER_WORKTREE_ENV, sanitizeAgentEnv } from '../../lib/agent-env.js';
+import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 
 const dbState = vi.hoisted(() => ({ globalDbPath: '' }));
 vi.mock('../db/index.js', async (importOriginal) => {
@@ -106,6 +107,19 @@ describe('builder identity from the spawn environment — issue #1783', () => {
     process.chdir(workspacePath);
     expect(() => detectCurrentBuilderId()).toThrow(BuilderIdResolutionError);
     expect(() => detectCurrentBuilderId()).toThrow(/experiment-1782/);
+  });
+
+  it('on Windows, a native drive-rooted env worktree names the builder; a relative one does not (Spec 1658)', () => {
+    setHostPlatformForTests('win32');
+    try {
+      process.env[BUILDER_WORKTREE_ENV] = 'C:\\repo\\.builders\\bugfix-42';
+      expect(detectWorkspaceRoot()).toBe('C:\\repo');
+      process.env[BUILDER_WORKTREE_ENV] = 'repo\\.builders\\bugfix-42';
+      process.chdir(workspacePath);
+      expect(detectWorkspaceRoot()).toBe(workspacePath);
+    } finally {
+      resetHostPlatformForTests();
+    }
   });
 
   it('sanitizeAgentEnv strips the builder identity so a Tower started from a builder shell cannot leak it', () => {

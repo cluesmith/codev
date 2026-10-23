@@ -141,7 +141,11 @@ describe('bugfix #1814: a timed-out check dies with its whole process tree', () 
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('timeout kills grandchildren holding stdout, so the check resolves', async () => {
+  // POSIX-only assertion: the grandchild reports its pid as the shell's `$$` and the check's
+  // process group is signalled; under Git Bash `$$` is an MSYS pid Node cannot probe, and Windows
+  // has no process groups. The Windows tree teardown is covered by process-tree.windows.test.ts
+  // ("a porch check that times out has its whole tree killed").
+  it.skipIf(process.platform === 'win32')('timeout kills grandchildren holding stdout, so the check resolves', async () => {
     const pidFile = path.join(root, 'grandchild.pid');
 
     const result = await runCheck('tree', grandchildCommand(pidFile), root, env, 300);
@@ -152,7 +156,10 @@ describe('bugfix #1814: a timed-out check dies with its whole process tree', () 
     await expectProcessGone(await readPid(pidFile));
   }, 15_000);
 
-  it('a member that ignores SIGTERM and holds no pipe is SIGKILLed before the check resolves', async () => {
+  // POSIX-only assertion: a member that traps SIGTERM, escalated to SIGKILL, with its pid read from
+  // the shell's `$$`; Windows has neither signal and Git Bash's `$$` is an MSYS pid. The Windows
+  // tree teardown is covered by process-tree.windows.test.ts.
+  it.skipIf(process.platform === 'win32')('a member that ignores SIGTERM and holds no pipe is SIGKILLed before the check resolves', async () => {
     const pidFile = path.join(root, 'stubborn.pid');
     // The shell dies on SIGTERM and closes the pipes at once; the backgrounded
     // grandchild ignores SIGTERM with its stdio on /dev/null. porch exits right
@@ -165,7 +172,9 @@ describe('bugfix #1814: a timed-out check dies with its whole process tree', () 
     await expectProcessGone(await readPid(pidFile), 500);
   }, 30_000);
 
-  it("porch's own SIGINT is relayed to the check's process group, then re-raised", async () => {
+  // POSIX-only assertion: relays SIGINT to the check's process group and probes the grandchild by
+  // the shell's `$$`; Windows has no process groups and Git Bash's `$$` is an MSYS pid.
+  it.skipIf(process.platform === 'win32')("porch's own SIGINT is relayed to the check's process group, then re-raised", async () => {
     const pidFile = path.join(root, 'grandchild.pid');
     const before = new Set(process.listeners('SIGINT'));
 

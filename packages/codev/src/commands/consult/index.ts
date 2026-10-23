@@ -43,6 +43,7 @@ import {
 } from './tree-tripwire.js';
 import { ISSUE_KEY_SOURCE } from '../../lib/issue-id.js';
 import { isWindows } from '../../lib/platform.js';
+import { containsBuildersSegment } from '../../agent-farm/utils/builder-worktree-identity.js';
 import { findOnHostPath, spawnableOnHost, spawnOnHost } from '../../lib/shell-launch.js';
 
 // Content reference — resolved artifact content with a display label
@@ -296,7 +297,7 @@ function findPlanContent(workspaceRoot: string, id: string, resolver?: ArtifactR
  * Check if running in a builder worktree
  */
 function isBuilderContext(): boolean {
-  return process.cwd().includes('/.builders/');
+  return containsBuildersSegment(process.cwd());
 }
 
 interface BuilderProjectState {
@@ -336,7 +337,11 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): Buil
     }
   } else if (projectDirs.length > 1) {
     // Multiple project dirs — try to disambiguate from worktree directory name
-    const cwd = process.cwd();
+    let cwd = process.cwd();
+    if (isWindows()) {
+      // The matchers below are written against '/' separators.
+      cwd = cwd.replace(/\\/g, '/');
+    }
     // Tracker-key worktrees (#1740): .builders/pir-ENG-123[-slug]
     const keyMatch = cwd.match(new RegExp(`\\.builders/[a-z]+-(${ISSUE_KEY_SOURCE})(?:-|/|$)`, 'i'));
     const builderMatch = cwd.match(/\.builders\/[^/]*?-?(\d+)-([^/]+)/);

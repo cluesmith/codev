@@ -3,8 +3,7 @@
  * (native Windows with neither a symlink nor a hard link available) is a
  * warning, since edits in the worktree do not reach the workspace root.
  */
-// spec-1658-tmp: opaque (/tmp/wt is a target path for mocked existsSync and a mocked createWorktreeLink)
-
+import * as path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -33,20 +32,26 @@ import { existsSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { symlinkConfigFiles } from '../commands/spawn-worktree.js';
 
-const config = { workspaceRoot: '/projects/test' } as Parameters<typeof symlinkConfigFiles>[0];
+// Host-shaped paths: the product resolves with path.resolve, which gives a drive-letter path on
+// Windows. Neither path exists on disk; existsSync and createWorktreeLink are mocked.
+const workspaceRoot = path.resolve('/projects/test');
+const worktree = path.resolve('/worktrees/wt');
+const config = { workspaceRoot } as Parameters<typeof symlinkConfigFiles>[0];
 
 describe('symlinkConfigFiles reports each link', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Root .env and .codev/config.json exist; nothing yet in the worktree.
-    vi.mocked(existsSync).mockImplementation((p) => !String(p).startsWith('/tmp/wt'));
+    vi.mocked(existsSync).mockImplementation((p) => !String(p).startsWith(worktree));
   });
 
   it('warns on a copy and logs a link as linked', () => {
     createWorktreeLink.mockReturnValueOnce('copy').mockReturnValueOnce('junction');
-    symlinkConfigFiles(config, '/tmp/wt');
+    symlinkConfigFiles(config, worktree);
 
-    expect(createWorktreeLink).toHaveBeenCalledWith('/projects/test/.env', '/tmp/wt/.env', 'file');
+    expect(createWorktreeLink).toHaveBeenCalledWith(
+      path.join(workspaceRoot, '.env'), path.join(worktree, '.env'), 'file'
+    );
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Copied .env from workspace root'));
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('edits will not write through'));
     expect(logger.info).toHaveBeenCalledWith('Linked .codev/config.json from workspace root');

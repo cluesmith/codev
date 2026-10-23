@@ -8,6 +8,7 @@ import { SessionManager, StderrBuffer, getProcessStartTime, isCrashLooping, CRAS
   FAST_CLEAN_EXIT_MS, MAX_FAST_CLEAN_EXITS, type CreateSessionOptions } from '../session-manager.js';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
 import { ShellperClient } from '../shellper-client.js';
+import { testEndpointIn } from './shellper-test-endpoint.js';
 
 // spec-1658-tmp: posix-only (real disk and process uses of /tmp sit in the real-shellper tests, skipped on win32 by skipRealShellper; the rest are mock cwd strings)
 // Real-shellper tests are skipped in CI, where the child cannot resolve the
@@ -108,7 +109,7 @@ describe('SessionManager', () => {
       socketPath: string;
       mockPty: MockPty;
     }> {
-      const socketPath = path.join(socketDir, `shellper-${sessionId}.sock`);
+      const socketPath = testEndpointIn(socketDir, `shellper-${sessionId}.sock`);
       let capturedPty: MockPty | null = null;
 
       const shellper = new ShellperProcess(

@@ -512,9 +512,11 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
       const missingModels: string[] = [];
 
       for (const model of effectiveModels) {
-        // Look for any review file for this model+phase (any iteration)
-        const pattern = path.join(projectDir, `${state.id}-${phase}-iter*-${model}.txt`);
-        const matches = globSync(pattern);
+        // Look for any review file for this model+phase (any iteration). The pattern is relative
+        // to `cwd`, never joined onto projectDir: glob treats '\' as an escape character, so a
+        // Windows absolute path in the pattern matched nothing and `done` always refused.
+        const pattern = `${state.id}-${phase}-iter*-${model}.txt`;
+        const matches = globSync(pattern, { cwd: projectDir });
         if (matches.length === 0) {
           missingModels.push(model);
         }

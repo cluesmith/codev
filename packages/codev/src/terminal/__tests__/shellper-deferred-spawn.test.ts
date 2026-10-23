@@ -1,8 +1,9 @@
 /**
  * Spec 1658 Phase 3b: a secret-gated shellper started with `deferSpawnMs`
  * holds its first PTY spawn until Tower's authenticated HELLO (Tower assigns
- * the per-session Job Object in between). Over a real Unix socket: the gate is
- * transport-agnostic, so this exercises the same code a named pipe does.
+ * the per-session Job Object in between). Over the host's real transport (a
+ * Unix socket, or a named pipe on a Windows host): the gate is transport-
+ * agnostic, so either exercises the same code.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -21,6 +22,7 @@ import {
   type WelcomeMessage,
 } from '../shellper-protocol.js';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
+import { testEndpointIn } from './shellper-test-endpoint.js';
 
 const SECRET = 'a'.repeat(64);
 
@@ -79,7 +81,7 @@ function hello(clientType: HelloMessage['clientType'], secret: string = SECRET):
 describe('ShellperProcess deferred first spawn (Spec 1658 Phase 3b)', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shellper-defer-'));
-    socketPath = path.join(tmpDir, 's.sock');
+    socketPath = testEndpointIn(tmpDir, 's.sock');
     ptys = [];
   });
 

@@ -20,6 +20,7 @@ import {
   type ExitMessage,
 } from '../shellper-protocol.js';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
+import { testEndpointIn } from './shellper-test-endpoint.js';
 // spec-1658-tmp: opaque (every /tmp is a cwd handed to a MockPty or carried in a SPAWN frame; the real socket lives under os.tmpdir())
 
 // --- Mock PTY ---
@@ -160,7 +161,7 @@ async function connectAsTerminal(sockPath: string): Promise<{ socket: net.Socket
 describe('ShellperProcess', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shellper-test-'));
-    socketPath = path.join(tmpDir, 'test.sock');
+    socketPath = testEndpointIn(tmpDir, 'test.sock');
   });
 
   afterEach(() => {
@@ -186,7 +187,9 @@ describe('ShellperProcess', () => {
       expect(mockPty.spawnArgs?.options.cwd).toBe('/home/user');
     });
 
-    it('listens on Unix socket', async () => {
+    // POSIX-only assertion: checks for a socket file, which a Windows named pipe
+    // does not have (the real-pipe listener is covered by shellper-named-pipe.windows.test.ts).
+    it.skipIf(process.platform === 'win32')('listens on Unix socket', async () => {
       shellper = new ShellperProcess(createMockPty, socketPath);
       await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
@@ -977,7 +980,10 @@ describe('ShellperProcess', () => {
   });
 
   describe('socket permissions', () => {
-    it('creates socket file with 0600 permissions', async () => {
+    // POSIX-only assertion: checks the 0600 mode bits of the socket file; a Windows
+    // named pipe has no file mode (its access control is the secret gate, covered
+    // by shellper-windows-transport.test.ts).
+    it.skipIf(process.platform === 'win32')('creates socket file with 0600 permissions', async () => {
       shellper = new ShellperProcess(createMockPty, socketPath);
       await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 

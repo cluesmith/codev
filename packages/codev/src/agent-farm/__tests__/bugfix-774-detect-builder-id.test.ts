@@ -20,6 +20,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
+import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
+import { parseBuilderWorktreePath, containsBuildersSegment } from '../utils/builder-worktree-identity.js';
 
 // Issue #1118: detectCurrentBuilderId reads global.db at getGlobalDbPath();
 // redirect it to a per-test temp file.
@@ -149,5 +151,41 @@ describe('describeStateDbOpenFailure — issue #1094 actionable messages', () =>
     expect(msg).toMatch(/corruption|permissions|stale lock/i);
     expect(msg).not.toMatch(/ABI mismatch/i);
     expect(msg).toContain('bugfix-2461');
+  });
+});
+
+describe('builder worktree path parsing on Windows (Spec 1658)', () => {
+  afterEach(() => {
+    resetHostPlatformForTests();
+  });
+
+  it('splits a native backslash path, a mixed path, and the inner worktree of a nested one', () => {
+    setHostPlatformForTests('win32');
+    expect(parseBuilderWorktreePath('C:\\repo\\.builders\\bugfix-42\\src')).toEqual({
+      workspacePath: 'C:\\repo',
+      worktreeDirName: 'bugfix-42',
+    });
+    expect(parseBuilderWorktreePath('C:\\repo/.builders\\bugfix-42')).toEqual({
+      workspacePath: 'C:\\repo',
+      worktreeDirName: 'bugfix-42',
+    });
+    expect(parseBuilderWorktreePath('C:\\repo\\.builders\\pir-1\\.builders\\bugfix-2')).toEqual({
+      workspacePath: 'C:\\repo\\.builders\\pir-1',
+      worktreeDirName: 'bugfix-2',
+    });
+    expect(parseBuilderWorktreePath('C:\\repo\\src')).toBeNull();
+    expect(containsBuildersSegment('C:\\repo\\.builders\\bugfix-42')).toBe(true);
+    expect(containsBuildersSegment('C:\\repo')).toBe(false);
+  });
+
+  it('keeps POSIX on `/` alone: a backslash is a filename byte there', () => {
+    setHostPlatformForTests('linux');
+    expect(parseBuilderWorktreePath('/repo/.builders/bugfix-42/src')).toEqual({
+      workspacePath: '/repo',
+      worktreeDirName: 'bugfix-42',
+    });
+    expect(parseBuilderWorktreePath('/repo\\.builders\\bugfix-42')).toBeNull();
+    expect(containsBuildersSegment('/repo/.builders/bugfix-42')).toBe(true);
+    expect(containsBuildersSegment('/repo\\.builders\\bugfix-42')).toBe(false);
   });
 });

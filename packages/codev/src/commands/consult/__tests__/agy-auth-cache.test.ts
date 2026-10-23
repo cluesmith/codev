@@ -75,6 +75,24 @@ if (process.env.FAKE_AGY_MODE === 'unauth' || process.env.FAKE_AGY_MODE === 'una
 }
 `;
 
+/**
+ * Install the fake agy the way the host installs a CLI and return the path to pin in
+ * `CODEV_AGY_BIN`. POSIX: an executable node script. Native Windows cannot start an
+ * extensionless script, so there the script sits beside an npm-style `.cmd` shim, which the
+ * lane resolves to `node <entry>` exactly as it does for an npm-installed CLI.
+ */
+function installFakeAgy(installDir: string): string {
+  if (process.platform === 'win32') {
+    fs.writeFileSync(path.join(installDir, 'agy.cjs'), FAKE_AGY_SOURCE);
+    const shim = path.join(installDir, 'agy.cmd');
+    fs.writeFileSync(shim, '@ECHO off\r\nSETLOCAL\r\nSET dp0=%~dp0\r\n"%_prog%" "%dp0%\\agy.cjs" %*\r\n');
+    return shim;
+  }
+  const bin = path.join(installDir, 'agy');
+  fs.writeFileSync(bin, FAKE_AGY_SOURCE, { mode: 0o755 });
+  return bin;
+}
+
 /** Invocations of the fake agy so far — i.e. how many browser tabs would exist. */
 function spawnCount(): number {
   if (!fs.existsSync(spawnLog)) return 0;
@@ -90,8 +108,7 @@ beforeEach(() => {
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
 
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-auth-cache-test-'));
-  fakeAgy = path.join(dir, 'agy');
-  fs.writeFileSync(fakeAgy, FAKE_AGY_SOURCE, { mode: 0o755 });
+  fakeAgy = installFakeAgy(dir);
   spawnLog = path.join(dir, 'spawns.log');
   fs.writeFileSync(spawnLog, '');
 
@@ -122,7 +139,8 @@ describe('agy auth-state cache', () => {
     expect(checkCachedAgyAuth(fakeAgy)).toBe('auth');
   });
 
-  it('writes the cache file 0600 in a 0700 directory', () => {
+  // POSIX-only assertion: checks the 0600 / 0700 mode bits, which NTFS does not carry.
+  it.skipIf(process.platform === 'win32')('writes the cache file 0600 in a 0700 directory', () => {
     recordAgyAuthState('unauth', fakeAgy);
     const cacheFile = path.join(agyAuthCacheDir(), 'agy-auth.json');
     expect(fs.statSync(cacheFile).mode & 0o777).toBe(0o600);

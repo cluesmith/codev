@@ -461,9 +461,14 @@ describe('tower-routes', () => {
   describe('GET /health on Windows (Spec 1658 Phase 4)', () => {
     it('reports whether Tower runs inside a codev session; POSIX omits the field', async () => {
       mockGetInstances.mockResolvedValue([]);
-      const posix = makeRes();
-      await handleRequest(makeReq('GET', '/health'), posix.res, makeCtx());
-      expect(JSON.parse(posix.body()).insideCodevSession).toBeUndefined();
+      setHostPlatformForTests('linux');
+      try {
+        const posix = makeRes();
+        await handleRequest(makeReq('GET', '/health'), posix.res, makeCtx());
+        expect(JSON.parse(posix.body()).insideCodevSession).toBeUndefined();
+      } finally {
+        resetHostPlatformForTests();
+      }
 
       setHostPlatformForTests('win32');
       try {
@@ -1096,7 +1101,9 @@ describe('tower-routes', () => {
           const ctx = makeCtx();
 
           expect((await submit({ word }, ctx, text)).status).toBe(200);
-          expect(fs.readFileSync(decisionsFile, 'utf8')).toContain(`\n${word}\n`);
+          // The word is spliced in as a line of its own. Split on either ending: the
+          // splice keeps the file's own (CRLF when git checks the fixture out on Windows).
+          expect(fs.readFileSync(decisionsFile, 'utf8').split(/\r?\n/)).toContain(word);
           expect(allRows()).toHaveLength(0);
           expect(ctx.log).toHaveBeenCalledWith('WARN', expect.stringContaining('over the 49152-byte'));
         });

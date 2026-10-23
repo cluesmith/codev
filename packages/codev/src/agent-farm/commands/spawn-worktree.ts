@@ -1128,7 +1128,7 @@ function scriptLocalPath(path: string): string {
  * The minting fallback for the session-aware loop: Node's `randomUUID`, run by
  * the Node executing this CLI, on Windows only (see `buildSessionLaunchLoop`).
  */
-function sessionIdMintFallback(): string | undefined {
+export function sessionIdMintFallback(): string | undefined {
   if (!isWindows()) {
     return undefined;
   }

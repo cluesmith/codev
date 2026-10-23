@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
+import { resolve } from 'node:path';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
@@ -129,7 +130,10 @@ function makeRes(): http.ServerResponse & { _body: string; _statusCode: number }
   return res;
 }
 
-const WS = '/home/user/project';
+// Host-resolved: `normalizeWorkspacePath` falls back to `resolve()` for a path not on
+// disk, which on Windows prefixes the drive. Seeding the resolved form keeps the stored
+// key and the normalized query in agreement on both hosts.
+const WS = resolve('/home/user/project');
 
 function seedHeld(overrides: Partial<mailbox.EnqueueInput> = {}, now = 1000) {
   return mailbox.enqueue(
@@ -344,8 +348,8 @@ describe('GET /api/inbox/:id', () => {
 // popover's fetch 404'd. These tests pin the branch's scoping, its read-only-ness, and the
 // non-reachability that the redaction argument depends on.
 //
-// `WS` ('/home/user/project') does not exist on disk, so `normalizeWorkspacePath` falls back
-// to `resolve()` and returns it unchanged — the seeded rows and the decoded prefix agree.
+// `WS` (resolved '/home/user/project') does not exist on disk, so `normalizeWorkspacePath`
+// falls back to `resolve()` and returns it unchanged, so the seeded rows and the decoded prefix agree.
 // The harness mocks `decodeWorkspacePath` as plain base64url (see the preamble).
 // ============================================================================
 

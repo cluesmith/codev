@@ -11,7 +11,8 @@
 
 // spec-1658-tmp: opaque (every /tmp socket is inside fake ps output from a mocked execFile; nothing touches the disk)
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import { killShellperProcesses } from '../commands/cleanup.js';
 import { execFile } from 'node:child_process';
 
@@ -31,6 +32,17 @@ const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+// These tests drive the POSIX branch (ps output from a mocked execFile, group kills), so
+// force the platform seam to linux; on a win32 host the code would otherwise take its
+// Windows branch.
+beforeEach(() => {
+  setHostPlatformForTests('linux');
+});
+
+afterEach(() => {
+  resetHostPlatformForTests();
 });
 
 describe('killShellperProcesses (Bugfix #389)', () => {

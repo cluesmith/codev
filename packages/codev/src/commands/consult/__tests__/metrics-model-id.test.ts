@@ -18,7 +18,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { MetricsDB, type MetricsRecord } from '../metrics.js';
 
@@ -220,9 +220,11 @@ describe('model_id migration against a pre-1286 database', () => {
     // every child has announced. Contention no longer depends on how long tsx takes.
     const runner = path.join(dir, 'open.mts');
     const goFile = path.join(dir, 'go');
+    // The import names a file URL, not the path: ESM reads a Windows drive path (`D:\...`) as a
+    // URL with an unsupported `d:` scheme, so every child would die before announcing itself.
     fs.writeFileSync(runner, `
       import * as fs from 'node:fs';
-      import { MetricsDB } from ${JSON.stringify(METRICS_SRC)};
+      import { MetricsDB } from ${JSON.stringify(pathToFileURL(METRICS_SRC).href)};
       fs.writeFileSync(process.argv[4] + '.' + process.argv[3], 'ready');
       // Sleep 1ms per turn rather than spinning hot: six busy-looping children peg six cores and
       // slow down the very startup we are waiting on. Atomics.wait blocks synchronously, which

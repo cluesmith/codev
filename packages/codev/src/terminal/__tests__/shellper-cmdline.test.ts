@@ -65,6 +65,7 @@ describe('readJsonStringField', () => {
 
 describe('shellperArgvText', () => {
   it('is the identity on POSIX', () => {
+    setHostPlatformForTests('linux');
     const line = 'node shellper-main.js {"cwd":"a\\"b"}';
     expect(shellperArgvText(line)).toBe(line);
   });
@@ -77,6 +78,7 @@ describe('shellperArgvText', () => {
 
 describe('isShellperInScope', () => {
   it('POSIX: matches the socketDir marker with a trailing separator only', () => {
+    setHostPlatformForTests('linux');
     const line = 'node shellper-main.js {"socketPath":"/run/s.sock"}';
     expect(isShellperInScope(line, '/run')).toBe(true);
     expect(isShellperInScope(line, '/run/')).toBe(true);
@@ -120,6 +122,7 @@ describe('shellperTeardownIdentities', () => {
   });
 
   it('POSIX: no job names', () => {
+    setHostPlatformForTests('linux');
     const { jobNames } = shellperTeardownIdentities([{ pid: 1, cmdline: 'node shellper-main.js {"sessionId":"abc"}' }], [1]);
     expect(jobNames.size).toBe(0);
   });

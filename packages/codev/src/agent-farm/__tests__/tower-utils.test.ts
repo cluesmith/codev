@@ -41,9 +41,12 @@ vi.mock('../state.js', async (importOriginal) => {
 import { getArchitectByName, setArchitectSessionId } from '../state.js';
 import { encodeClaudeProjectDir } from '../utils/claude-session-discovery.js';
 import { LIFECYCLE_REPORTER_SETTINGS_NAME, lifecycleReporterDir } from '../utils/lifecycle-reporter.js';
+import { toShellPath } from '../utils/harness.js';
 
 /** Spec 1595: the reporter argv every Claude architect launch carries. */
-const REPORTER_ARGS = ['--settings', path.join(lifecycleReporterDir(), LIFECYCLE_REPORTER_SETTINGS_NAME)];
+// The harness hands --settings a forward-slash path (toShellPath, #1658), so a
+// Windows reporter path is expected in that form; on POSIX it is unchanged.
+const REPORTER_ARGS = ['--settings', toShellPath(path.join(lifecycleReporterDir(), LIFECYCLE_REPORTER_SETTINGS_NAME))];
 
 /**
  * Issue #1145: stored-id resume now requires the session jsonl to exist under
@@ -175,8 +178,10 @@ describe('tower-utils', () => {
     });
 
     it('resolves non-existent paths with path.resolve', () => {
+      // path.resolve, not a literal: on Windows a rooted path gains the
+      // current drive and backslashes ('D:\\nonexistent\\...').
       const normalized = normalizeWorkspacePath('/nonexistent/path/to/workspace');
-      expect(normalized).toBe('/nonexistent/path/to/workspace');
+      expect(normalized).toBe(path.resolve('/nonexistent/path/to/workspace'));
     });
 
     it('resolves relative paths', () => {

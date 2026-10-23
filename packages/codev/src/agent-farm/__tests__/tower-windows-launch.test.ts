@@ -164,6 +164,7 @@ describe('afx tower start launch path on Windows', () => {
   });
 
   it('POSIX ignores the marker and spawns as before', async () => {
+    setHostPlatformForTests('linux');
     process.env[SHELLPER_SESSION_ENV] = 'sess-1';
     await expect(towerStart({ wait: true })).rejects.toThrow('process.exit:1');
     expect(h.cimCalls).toHaveLength(0);

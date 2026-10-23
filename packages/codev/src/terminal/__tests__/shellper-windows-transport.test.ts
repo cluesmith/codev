@@ -3,8 +3,9 @@
  * secret gate, and reconnect identity via WELCOME.
  *
  * The Windows branches run here with the host-platform seam forced to `win32`
- * over a real POSIX socket: the gate and the identity checks are transport-
- * agnostic, so a Unix socket exercises the same code a named pipe does. Real
+ * over the host's real transport (a Unix socket, or a named pipe on a Windows
+ * host): the gate and the identity checks are transport-agnostic, so either
+ * exercises the same code. Real
  * named pipes (and a second local user, scenario 14) are covered by the
  * on-demand Windows workflow.
  */
@@ -44,6 +45,7 @@ import {
 } from '../shellper-endpoint.js';
 import { SessionManager, getProcessStartTime, isIdentityRefused } from '../session-manager.js';
 import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
+import { testEndpointIn } from './shellper-test-endpoint.js';
 
 const SECRET = 'f'.repeat(64);
 
@@ -142,7 +144,7 @@ function sleep(ms: number): Promise<void> {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shp-1658-'));
-  socketPath = path.join(tmpDir, 's.sock');
+  socketPath = testEndpointIn(tmpDir, 's.sock');
 });
 
 afterEach(() => {
@@ -155,6 +157,7 @@ afterEach(() => {
 
 describe('endpoint resolution', () => {
   it('POSIX: the socket path and log path are unchanged', () => {
+    setHostPlatformForTests('linux');
     const endpoint = resolveShellperEndpoint('/run/dir', 'abc');
     expect(endpoint).toBe(path.join('/run/dir', 'shellper-abc.sock'));
     expect(isPipeEndpoint(endpoint)).toBe(false);
@@ -225,7 +228,11 @@ describe('POSIX golden: handshake bytes unchanged', () => {
     );
   });
 
-  it('POSIX reconnect still runs the start-time check and sends no secret', async () => {
+  // POSIX-only assertion: the POSIX reconnect lstat-checks a Unix socket file and
+  // reads the process start time from ps or /proc, neither of which a Windows host
+  // has (the Windows reconnect is covered by 'reconnects on a matching WELCOME
+  // without consulting process start time' below).
+  it.skipIf(process.platform === 'win32')('POSIX reconnect still runs the start-time check and sends no secret', async () => {
     const shellper = await startShellper(socketPath, null);
     const hellos: HelloMessage[] = [];
     shellper.on('hello', (hello: HelloMessage) => hellos.push(hello));

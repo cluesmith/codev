@@ -3,7 +3,8 @@
 //
 // Claude Code automatically persists every interactive session to
 //   ~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl
-// where the encoding replaces both '/' and '.' in the absolute path with '-'.
+// where the encoding replaces both '/' and '.' in the absolute path with '-'
+// (on Windows, every character that is not [A-Za-z0-9], see below).
 // We use the newest jsonl by mtime as a stand-in for "the last conversation
 // that ran in this directory" so reviving a dead builder can resume via
 // `claude --resume <uuid>` without any spawn-time bookkeeping.
@@ -20,6 +21,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { isWindows } from '../../lib/platform.js';
 
 const JSONL_EXT = '.jsonl';
 
@@ -28,8 +30,16 @@ const JSONL_EXT = '.jsonl';
  * ~/.claude/projects/. The scheme is: replace every '/' and '.' with '-'.
  *
  * Example: '/Users/x/repos/foo/.builders/pir-1' → '-Users-x-repos-foo--builders-pir-1'
+ *
+ * On Windows (Spec 1658) Claude replaces every character that is not
+ * [A-Za-z0-9], so the drive colon and backslashes become '-' too:
+ * 'C:\Users\x\repo' → 'C--Users-x-repo'. Without this the raw drive path
+ * lands inside the directory name and no stored session ever verifies.
  */
 export function encodeClaudeProjectDir(absolutePath: string): string {
+  if (isWindows()) {
+    return absolutePath.replace(/[^A-Za-z0-9]/g, '-');
+  }
   return absolutePath.replace(/[/.]/g, '-');
 }
 
