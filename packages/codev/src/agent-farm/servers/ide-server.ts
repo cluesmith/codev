@@ -102,8 +102,14 @@ export function isPortAccepting(port: number): Promise<boolean> {
   });
 }
 
-/** One readiness poll: the port query on POSIX, a loopback connect on Windows. */
-async function isPortReady(port: number): Promise<boolean> {
+/**
+ * Whether a server is listening on `port`: the port query on POSIX, a loopback
+ * connect on Windows. Every async liveness check uses this rather than
+ * `isPortLive`, because the Windows port query is a synchronous PowerShell run
+ * of seconds that would stall Tower's event loop, and the respawn check runs
+ * when a `/ide/` request finds the server down.
+ */
+async function isPortListening(port: number): Promise<boolean> {
   if (isWindows()) return isPortAccepting(port);
   return isPortLive(port);
 }
@@ -112,10 +118,10 @@ async function isPortReady(port: number): Promise<boolean> {
 async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await isPortReady(port)) return true;
+    if (await isPortListening(port)) return true;
     await new Promise((r) => setTimeout(r, READY_POLL_MS));
   }
-  return isPortReady(port);
+  return isPortListening(port);
 }
 
 /**
@@ -216,13 +222,13 @@ async function spawnIdeServerUnlocked(opts: SpawnIdeOptions, log: LogFn): Promis
   // (still running, no longer tracked) if we just overwrote the singleton record.
   // Stop it first so "start on a new port" never leaves a detached stray (#1668).
   const existing = readIdeRecord();
-  if (existing && existing.port !== port && isPortLive(existing.port)) {
+  if (existing && existing.port !== port && (await isPortListening(existing.port))) {
     log('WARN', `IDE server already recorded on port ${existing.port}; stopping it before starting on ${port}`);
     await stopIdeServerUnlocked(log);
   }
 
   // Already live on the port: idempotent, adopt and record, never kill or double-spawn.
-  if (isPortLive(port)) {
+  if (await isPortListening(port)) {
     return adoptLiveIdeServer(opts, port, existing, preflight, log);
   }
 
@@ -492,7 +498,7 @@ let respawnInFlight: Promise<number | null> | null = null;
 export async function ensureIdeServerLive(log: LogFn = () => {}): Promise<number | null> {
   const record = readIdeRecord();
   if (!record) return null;
-  if (isPortLive(record.port)) return record.port;
+  if (await isPortListening(record.port)) return record.port;
 
   if (respawnInFlight) return respawnInFlight;
   respawnInFlight = withIdeLock(() => respawnRecordedIdeServer(log)).finally(() => {
@@ -510,7 +516,7 @@ async function respawnRecordedIdeServer(log: LogFn): Promise<number | null> {
   try {
     const current = readIdeRecord();
     if (!current) return null;
-    if (isPortLive(current.port)) return current.port;
+    if (await isPortListening(current.port)) return current.port;
     log('INFO', `IDE server on port ${current.port} is down; respawning from ${current.serverPath}`);
     const fresh = await spawnIdeServerUnlocked(
       { serverPath: current.serverPath, port: current.port },
@@ -530,7 +536,7 @@ async function respawnRecordedIdeServer(log: LogFn): Promise<number | null> {
 export async function reconcileIdeServer(log: LogFn): Promise<void> {
   const record = readIdeRecord();
   if (!record) return;
-  if (isPortLive(record.port)) {
+  if (await isPortListening(record.port)) {
     log('INFO', `Adopted running IDE server on port ${record.port}`);
     return;
   }
