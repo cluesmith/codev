@@ -824,7 +824,19 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
   Attempt 2 of 39927653580 on the final head was green on both legs. The architect's ruling on
   Phase 4(b) (a recurrence blocks the gate until the cause is named) is not engaged: none of these
   is Phase 4(b), and none recurred. They are recorded so a later Windows run that hits one again
-  starts from this list.
+  starts from this list. A fourth, outside the test suites: the ARM64 probe's CIM census section
+  failed once on a slow runner (run 39930636358 attempt 1, the port-owner probe took 39 s) and
+  passed on attempt 2.
+
+- **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
+  run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:
+  - The Phase 10 drive-root regression test (`findWorkspaceRoot.test.ts`) ran its child against
+    `dist/`, which the Ubuntu unit job does not build. It now runs the source under `tsx`.
+  - `spec-1658-posix-residue` "isTempDirectory on Windows" assumed the host temp dir is not under
+    `/tmp`. On Ubuntu, `os.tmpdir()` is `/tmp`. The POSIX-root assertions now apply only when the
+    host temp dir, as given or resolved, is not under that root.
+  Both green on the PR's `test.yml` (head 91ea359df) and on Windows (targeted runs 39930623116
+  and 39930636358).
 
 ## Follow-up Items
 
