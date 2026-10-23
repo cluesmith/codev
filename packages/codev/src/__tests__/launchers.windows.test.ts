@@ -314,7 +314,8 @@ describe.skipIf(!onWindows)('Launcher routing on native Windows', () => {
     const gitBash = resolveGitBash();
     const spawned = run(afx, ['spawn', '--worktree'], workspace);
     expect(spawned.code, spawned.output).toBe(0);
-    const builderId = spawned.output.match(/worktree-[a-z0-9]+/i)?.[0];
+    // Worktree ids are base64url (`worktree-[A-Za-z0-9_-]{4}`): take the whole id, `-` and `_` included.
+    const builderId = spawned.output.match(/Spawning Worktree (worktree-[A-Za-z0-9_-]+)/)?.[1];
     expect(builderId, spawned.output).toBeDefined();
     const worktree = path.join(workspace, '.builders', builderId!);
 
