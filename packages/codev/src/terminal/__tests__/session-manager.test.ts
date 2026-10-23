@@ -1343,6 +1343,18 @@ describe('SessionManager', () => {
         nodeExecutable: process.execPath,
       });
 
+      // Subscribed before the session exists, so an exhaustion that lands
+      // during createSession's own await is not missed. The outer test timeout
+      // is the only bound: a fixed inner deadline failed under full-suite
+      // load (#1800).
+      const errorPromise = new Promise<Error>((resolve) => {
+        manager.on('session-error', (_id: string, err: Error) => {
+          if (err.message.includes('Max restarts')) {
+            resolve(err);
+          }
+        });
+      });
+
       // Create with maxRestarts=2 and short delay
       const client = await manager.createSession({
         sessionId: 'maxrestart-test',
@@ -1363,21 +1375,10 @@ describe('SessionManager', () => {
       });
 
       // Wait for restarts to happen and exhaust maxRestarts
-      const errorPromise = new Promise<Error>((resolve) => {
-        manager.on('session-error', (_id: string, err: Error) => {
-          if (err.message.includes('Max restarts')) {
-            resolve(err);
-          }
-        });
-      });
-
-      const err = await Promise.race([
-        errorPromise,
-        new Promise<Error>((_, reject) => setTimeout(() => reject(new Error('timeout waiting for max restarts')), 15000)),
-      ]);
+      const err = await errorPromise;
 
       expect(err.message).toContain('Max restarts (2) exceeded');
-    }, 20000);
+    }, 30000);
 
     // Issue #1149: a fast-failing launch (e.g. an unresumable --resume) swaps
     // to the caller-provided fallback args after 3 failing exits within the
@@ -1395,7 +1396,14 @@ describe('SessionManager', () => {
       });
 
       const sentinel = path.join(socketDir, 'fallback-applied');
-      const onApply = vi.fn();
+      // Wait on the fallback being applied, not on a fixed deadline: under
+      // full-suite load the restarts take longer, and the outer test timeout
+      // is the only bound (#1800).
+      let markApplied: () => void = () => {};
+      const applied = new Promise<void>((resolve) => {
+        markApplied = resolve;
+      });
+      const onApply = vi.fn(() => markApplied());
       const testEnv = { PATH: process.env.PATH || '/usr/bin:/bin' };
 
       await manager.createSession({
@@ -1421,9 +1429,9 @@ describe('SessionManager', () => {
         try { await manager.killSession('crashloop-test'); } catch { /* noop */ }
       });
 
-      // Wait for the fallback launch to touch the sentinel file
-      const deadline = Date.now() + 10000;
-      while (!fs.existsSync(sentinel) && Date.now() < deadline) {
+      await applied;
+      // The fallback launch then touches the sentinel file
+      while (!fs.existsSync(sentinel)) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
@@ -1431,7 +1439,7 @@ describe('SessionManager', () => {
       expect(onApply).toHaveBeenCalledTimes(1);
       // The fallback command sleeps, so the session should still be alive
       expect(manager.getSessionInfo('crashloop-test')).not.toBeNull();
-    }, 20000);
+    }, 30000);
 
     // Issue #1149: clean exits (code 0) never trigger the crashLoopFallback — a
     // user quitting a healthy session repeatedly must not lose a valid
@@ -1466,6 +1474,13 @@ describe('SessionManager', () => {
       manager.on('session-clean-exit', (id: string) => cleanExits.push(id));
       const errors: string[] = [];
       manager.on('session-error', (_id: string, err: Error) => errors.push(err.message));
+      // Wait on the give-up itself, not on a fixed deadline: the outer test
+      // timeout is the only bound (#1800).
+      const gaveUp = new Promise<void>((resolve) => {
+        manager.on('session-gave-up', (id: string) => {
+          if (id === 'cleanexit-test') resolve();
+        });
+      });
 
       await manager.createSession({
         sessionId: 'cleanexit-test',
@@ -1494,10 +1509,7 @@ describe('SessionManager', () => {
       // exits instantly, the fast-clean-exit valve trips and the session is
       // given up. Crucially it is NOT via the restart budget, and the
       // crashLoopFallback is still never applied (#1149).
-      const deadline2 = Date.now() + 15000;
-      while (manager.getSessionInfo('cleanexit-test') && Date.now() < deadline2) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
+      await gaveUp;
 
       expect(manager.getSessionInfo('cleanexit-test')).toBeNull();
       // Not a "clean exit ends the session" event any more — that concept is gone.

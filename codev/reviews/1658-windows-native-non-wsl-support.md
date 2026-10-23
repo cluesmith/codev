@@ -235,3 +235,20 @@ prerequisite. A PowerShell-safe hook form is a filing candidate for the owner.
   show. Next time, read `packages/codev/node_modules/.vite/vitest/<hash>/results.json` right after
   the failed check: it records per-file pass/fail. Porch hiding a failed check's stdout is worth a
   separate issue.
+
+- **Auto-restart real-shellper tests under full-suite load (#1800; identified in Phase 9, likely
+  the Phase 1 and Phase 7 intermittents too).** `session-manager.test.ts` "auto-restart logic"
+  waited on a sentinel or a removed session against a fixed inner deadline (10-15 s). Under
+  porch's sequence (build check, then the full suite) the deadline ran out. Which test failed
+  varied from run to run: "bounds a harness that exits 0 immediately" three times, "applies
+  crashLoopFallback after repeated fast failures" once. They passed with the full suite alone
+  under porch's own `runCheck`, with the build followed by that file alone, and on three direct
+  full-suite runs. The same sequence on a clean `origin/main` passed twice; the architect has
+  seen it on main in 2 of 6 of #1789's porch runs. This branch adds ~400 tests, which turned
+  intermittent into consistent. With nothing else running, the time from launch to the
+  crash-loop fallback was the same on both: branch 296-315 ms, main 290-317 ms (6 runs each).
+  So it is load, not a slower restart path. Fix (test-only, per #1800): the three tests wait on
+  the event itself (`crashLoopFallback.onApply`, `session-gave-up`, the "Max restarts" error),
+  subscribed before the session exists. The outer test timeout (30 s) is the only bound. The
+  `maxRestarts` sibling had the same shape plus a late subscription, and is fixed the same way.
+  No skip.
