@@ -175,8 +175,10 @@ function createWorkspace(): void {
     shell: { architect: 'stub-agent', builder: 'stub-agent', shell: 'powershell.exe' },
     worktree: {
       symlinks: [],
-      // Multi-command, bash-only syntax: && chains, redirects, $(...) and test.
-      postSpawn: ['echo one > post-spawn.txt && echo two >> post-spawn.txt && test "$(wc -l < post-spawn.txt)" -eq 2'],
+      // Multi-command, bash-only syntax: && chains, redirects, $(...) and test. The hook
+      // first records that it started and where (a sentinel), so a missing result can be
+      // told apart from a hook that never ran or ran in another directory.
+      postSpawn: ['pwd -W > post-spawn-entered.txt && echo one > post-spawn.txt && echo two >> post-spawn.txt && test "$(wc -l < post-spawn.txt)" -eq 2'],
       devCommand: 'node dev-server.cjs',
     },
     porch: {
@@ -189,6 +191,47 @@ function createWorkspace(): void {
   }, null, 2));
   git(['add', 'README.md', 'codev/.keep', 'dev-server.cjs', '.codev/config.json'], workspace);
   git(['commit', '-m', 'init'], workspace);
+}
+
+/** Every file named `post-spawn*.txt` under `root`, skipping `.git` and `node_modules`. */
+function findPostSpawnFiles(root: string, depth = 0): string[] {
+  if (depth > 6) return [];
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  for (const entry of entries) {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === '.git' || entry.name === 'node_modules') continue;
+      found.push(...findPostSpawnFiles(full, depth + 1));
+    } else if (entry.name.startsWith('post-spawn')) {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
+/**
+ * Evidence for a postSpawn miss: whether the hook started (its sentinel), where its
+ * files landed, the worktree's contents, and whether the result appears late.
+ */
+async function diagnosePostSpawnMiss(worktree: string, spawnOutput: string): Promise<string> {
+  const sentinel = path.join(worktree, 'post-spawn-entered.txt');
+  const facts: Record<string, unknown> = {
+    hookRunnerLogged: spawnOutput.includes('Running post-spawn hook'),
+    sentinelInWorktree: fs.existsSync(sentinel) ? fs.readFileSync(sentinel, 'utf8').trim() : null,
+    postSpawnFilesUnderWorkspace: findPostSpawnFiles(workspace),
+    worktreeEntries: fs.existsSync(worktree) ? fs.readdirSync(worktree) : 'worktree missing',
+    worktreeList: spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: workspace, encoding: 'utf8', windowsHide: true }).stdout,
+    spawnOutput,
+  };
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+  facts.presentAfter5s = fs.existsSync(path.join(worktree, 'post-spawn.txt'));
+  return JSON.stringify(facts);
 }
 
 beforeAll(() => {
@@ -276,7 +319,12 @@ describe.skipIf(!onWindows)('Launcher routing on native Windows', () => {
     const worktree = path.join(workspace, '.builders', builderId!);
 
     // The multi-command hook ran in the worktree.
-    expect(fs.existsSync(path.join(worktree, 'post-spawn.txt')), spawned.output).toBe(true);
+    if (!fs.existsSync(path.join(worktree, 'post-spawn.txt'))) {
+      const diagnosis = await diagnosePostSpawnMiss(worktree, spawned.output);
+      console.log(`POSTSPAWN-MISS ${diagnosis}`);
+      expect.fail(`post-spawn.txt missing: ${diagnosis}`);
+    }
+    expect(fs.readFileSync(path.join(worktree, 'post-spawn-entered.txt'), 'utf8').trim()).toBeTruthy();
     expect(fs.readFileSync(path.join(worktree, 'post-spawn.txt'), 'utf8').split(/\r?\n/).filter(Boolean)).toEqual(['one', 'two']);
 
     const script = fs.readFileSync(path.join(worktree, '.builder-start.sh'), 'utf8');
