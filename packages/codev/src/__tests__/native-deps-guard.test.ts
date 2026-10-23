@@ -21,6 +21,7 @@ import {
   SUPPORTED_WINDOWS_NODE,
   explainNativeLoadFailure,
   isNativeBindingLoadFailure,
+  withNativeLoadExplanation,
   unsupportedWindowsNodeMessage,
 } from '../lib/native-deps.js';
 import { resetHostPlatformForTests, setHostPlatformForTests } from '../lib/platform.js';
@@ -80,6 +81,22 @@ describe('runtime twin of the message', () => {
     expect(explained.cause).toBe(loadFailure);
     const other = new Error('SQLITE_BUSY: database is locked');
     expect(explainNativeLoadFailure(other)).toBe(other);
+  });
+});
+
+describe('node-pty binding load failures', () => {
+  it('recognises the ConPTY loader error shapes', () => {
+    expect(isNativeBindingLoadFailure(new Error('Failed to load native module: conpty.node, checked: build/Release'))).toBe(true);
+    expect(isNativeBindingLoadFailure(new Error("Cannot find module 'C:\\x\\node-pty\\build\\Release\\conpty.node'"))).toBe(true);
+    expect(isNativeBindingLoadFailure(new Error("Cannot find module '/x/node-pty/build/Release/pty.node'"))).toBe(true);
+  });
+
+  it('withNativeLoadExplanation rethrows a load failure explained on Windows, anything else as is', () => {
+    setHostPlatformForTests('win32');
+    expect(() => withNativeLoadExplanation(() => { throw new Error('Failed to load native module: conpty.node'); }))
+      .toThrow('native Windows needs Node.js 22 or 24');
+    expect(() => withNativeLoadExplanation(() => { throw new Error('boom'); })).toThrow(/^boom$/);
+    expect(withNativeLoadExplanation(() => 42)).toBe(42);
   });
 });
 

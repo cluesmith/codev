@@ -4,12 +4,25 @@
  * values. The section only prints on Windows (doctor.ts).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const spawnSyncCalls = vi.hoisted(() => [] as { cmd: string; args: string[] }[]);
+vi.mock('../lib/shell-launch.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/shell-launch.js')>();
+  return {
+    ...actual,
+    spawnSyncOnHost: (cmd: string, args: string[]) => {
+      spawnSyncCalls.push({ cmd, args });
+      return { status: 0, stdout: 'true\n', stderr: '' };
+    },
+  };
+});
 import {
   checkWindowsPathsAndState,
   MAX_SAFE_WORKSPACE_ROOT_LENGTH,
   WINDOWS_MAX_PATH,
   type WindowsPathDeps,
+  windowsPathDeps,
 } from '../commands/doctor.js';
 import { resetHostPlatformForTests, setHostPlatformForTests } from '../lib/platform.js';
 
@@ -82,5 +95,13 @@ describe('checkWindowsPathsAndState', () => {
   it('accepts state relocated inside the user profile, compared case-insensitively', () => {
     const inside = checkWindowsPathsAndState(deps({ relocatedStateDir: 'c:\\users\\ALEXANDRA\\codev-state' }));
     expect(inside.find((r) => r.name === 'State directory')).toBeUndefined();
+  });
+});
+
+describe('windowsPathDeps (the real-host seam)', () => {
+  it('reads the per-user (--global) core.longpaths, not the repository-local value', () => {
+    spawnSyncCalls.length = 0;
+    expect(windowsPathDeps(TYPICAL_ROOT).gitLongPaths()).toBe('true');
+    expect(spawnSyncCalls).toEqual([{ cmd: 'git', args: ['config', '--global', '--get', 'core.longpaths'] }]);
   });
 });

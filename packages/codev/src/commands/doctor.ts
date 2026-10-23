@@ -433,7 +433,7 @@ export const MAX_SAFE_WORKSPACE_ROOT_LENGTH =
 export interface WindowsPathDeps {
   /** The workspace root doctor runs in, or null outside a workspace. */
   workspaceRoot: string | null;
-  /** The effective `git config core.longpaths` value, or null when unset. */
+  /** The per-user `git config --global core.longpaths` value, or null when unset. */
   gitLongPaths: () => string | null;
   /** `CODEV_AGENT_FARM_DIR` resolved, or null when state is in its default place. */
   relocatedStateDir: string | null;
@@ -505,11 +505,9 @@ export function windowsPathDeps(workspaceRoot: string | null): WindowsPathDeps {
   return {
     workspaceRoot,
     gitLongPaths: () => {
-      const args = ['config', '--get', 'core.longpaths'];
-      if (workspaceRoot !== null) {
-        args.unshift('-C', workspaceRoot);
-      }
-      const value = runCommand('git', args);
+      // The per-user setting (spec: doctor reports whether Git's per-user core.longpaths
+      // is set): a repository-local value would not cover other clones and new worktrees.
+      const value = runCommand('git', ['config', '--global', '--get', 'core.longpaths']);
       if (value === null || value === '') {
         return null;
       }

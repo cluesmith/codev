@@ -31,6 +31,7 @@ import { SHELLPER_SECRET_ENV, isPipeEndpoint, removeStaleEndpoint } from './shel
 import { REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
 import { isWindows } from '../lib/platform.js';
 import { ptyCommand } from '../lib/pty-command.js';
+import { withNativeLoadExplanation } from '../lib/native-deps.js';
 import { killSessionTree } from '../lib/process-tree.js';
 
 // createRequire enables importing native/CJS modules (like node-pty) from ESM.
@@ -95,7 +96,9 @@ function createRealPty(): IShellperPty {
     spawn(command: string, args: string[], options: PtyOptions): void {
       // Load node-pty at spawn time via createRequire (defined at module level).
       // node-pty is a native CJS module; createRequire handles ESM→CJS interop.
-      ptyModule = require('node-pty') as typeof import('node-pty');
+      // A binding that cannot load on Windows surfaces with the supported-versions message (Spec 1658).
+      const nodePty = withNativeLoadExplanation(() => require('node-pty') as typeof import('node-pty'));
+      ptyModule = nodePty;
       // A resize that landed before this spawn wins over the spawn options — it is the more
       // recent statement of the caller's intent (Issue #1482).
       const cols = pendingResize?.cols ?? options.cols;
@@ -103,13 +106,13 @@ function createRealPty(): IShellperPty {
       pendingResize = null;
       // Spec 1658: on Windows a bare or `.cmd` command becomes one ConPTY can start.
       const launch = ptyCommand(command, args, options.env);
-      ptyInstance = ptyModule.spawn(launch.file, launch.args, {
+      ptyInstance = withNativeLoadExplanation(() => nodePty.spawn(launch.file, launch.args, {
         name: options.name ?? 'xterm-256color',
         cols,
         rows,
         cwd: options.cwd,
         env: options.env,
-      });
+      }));
 
       if (dataCallback) {
         ptyInstance.onData(dataCallback);

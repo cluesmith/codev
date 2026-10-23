@@ -31,6 +31,8 @@ const BINDING_LOAD_FAILURE = [
   /NODE_MODULE_VERSION/,
   /Failed to load native module/,
   /is not a valid Win32 application/,
+  /conpty\.node/,
+  /[\\/]pty\.node/,
 ];
 
 /** True when `err` is a native binding that failed to load. */
@@ -52,4 +54,17 @@ export function explainNativeLoadFailure(err: unknown): unknown {
   }
   const original = (err as Error).message;
   return new Error(`${unsupportedWindowsNodeMessage(process.version, process.arch)}\nNative binding load failure: ${original}`, { cause: err });
+}
+
+/**
+ * Run `load`, rethrowing a binding load failure through `explainNativeLoadFailure`.
+ * For node-pty, whose ConPTY binding loads lazily inside `spawn`, so the import and
+ * the first spawn are both load points.
+ */
+export function withNativeLoadExplanation<T>(load: () => T): T {
+  try {
+    return load();
+  } catch (err) {
+    throw explainNativeLoadFailure(err);
+  }
 }
