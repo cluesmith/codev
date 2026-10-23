@@ -254,6 +254,14 @@ tests). Each was fixed behind the seam, with POSIX unchanged:
 - Frontmatter of a CRLF spec or plan (Git for Windows checks out with `core.autocrlf=true`) was
   never recognized as pre-approved.
 - Template user-data patterns did not match backslash relative paths.
+- The jira forge preset broke under Git Bash with a native `jq.exe`, in two ways:
+  - Raw `jq -r` lines end in CRLF. MSYS strips only the final CR of a command substitution, so
+    every per-key view but the last missed, and closed items lost their dates.
+  - Forge turns off MSYS argument conversion, so MSYS temp paths handed to native programs
+    (`jq --slurpfile`, `acli --body-file`) were unreadable.
+  Fixed with `tr -d '\r'` on the keys and a `native_path` helper (`cygpath -w`, only where
+  cygpath exists). The other presets' `jq -r` uses are single-value, where the trailing CR is
+  stripped.
 
 **Install guard.** `preinstall` runs before any dependency's `install` script (npm's rebuild
 order), so on a Windows Node with no better-sqlite3 prebuild it stops the install with the

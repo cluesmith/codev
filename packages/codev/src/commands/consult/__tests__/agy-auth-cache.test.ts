@@ -118,15 +118,45 @@ beforeEach(() => {
   delete process.env.CODEV_AGY_AUTH_CACHE_DISABLE;
 });
 
-afterEach(() => {
+/** True while `pid` is a live process. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Every fake agy a lane started must be gone once the lane settles: the lane
+ * kills an unauthenticated agy, and one left running would hold the temp dir
+ * (its cwd) on Windows. A survivor is killed and reported, never waited out.
+ */
+async function fakeAgySurvivors(): Promise<number[]> {
+  if (!fs.existsSync(spawnLog)) return [];
+  const pids = fs.readFileSync(spawnLog, 'utf-8').split('\n').filter(Boolean).map(Number);
+  const deadline = Date.now() + 3000;
+  while (pids.some(isAlive) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const survivors = pids.filter(isAlive);
+  for (const pid of survivors) {
+    try { process.kill(pid); } catch { /* exited meanwhile */ }
+  }
+  return survivors;
+}
+
+afterEach(async () => {
   for (const k of ENV_KEYS) {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
   }
-  // Retries: on Windows a just-exited fake agy can still hold the directory for a
-  // moment (EBUSY); POSIX removes it on the first try.
+  const survivors = await fakeAgySurvivors();
+  // Retries: on Windows a just-killed process can hold the directory for a moment (EBUSY).
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   vi.restoreAllMocks();
+  expect(survivors, 'fake agy outlived its lane').toEqual([]);
 });
 
 describe('agy auth-state cache', () => {

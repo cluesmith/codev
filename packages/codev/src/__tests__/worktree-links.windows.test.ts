@@ -131,10 +131,12 @@ describe.skipIf(!onWindows)('worktree links on native Windows', () => {
     const { worktree } = fixture('stuck');
     const busyDir = path.join(worktree, 'stuck-dir');
     fs.mkdirSync(busyDir);
-    const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { cwd: busyDir, windowsHide: true });
+    // The holder says when it is running: 'spawn' fires at process creation, and a
+    // removal in the gap before the child holds its working directory succeeds.
+    const holder = spawn(process.execPath, ['-e', "process.stdout.write('ready\\n'); setTimeout(() => {}, 30000)"], { cwd: busyDir, windowsHide: true });
     const exited = new Promise<void>((resolve) => holder.once('exit', () => resolve()));
     try {
-      await once(holder, 'spawn');
+      await once(holder.stdout!, 'data');
       await expect(removeWorktreeDirectory(worktree, { retryDelaysMs: [50, 50] })).rejects.toThrow('stuck-dir');
     } finally {
       holder.kill();
