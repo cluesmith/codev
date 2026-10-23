@@ -309,6 +309,16 @@ no `'error'` listener throws before `start()` rejects (every platform, not chang
   error, outer timeout only) did not cure it. It passes alone (3/3), and under ten CPU-burning
   processes (6/6). Skipped with a FLAKY annotation naming #1800; the cause is still open.
 
+- **`session-manager.test.ts` "bounds a harness that exits 0 immediately" (#1800; skipped in
+  CMAP iter 2).** The same shape: porch's phase_10 tests check failed on it, and a replica full
+  run failed 1 of 2, stuck at the 30 s timeout without `session-gave-up`. It subscribes before
+  `createSession`, so it is not a listener race. Instrumented to dump the manager's timestamped
+  restart log when stuck; it did not recur in 18 further full runs (the 30-minute time box), so
+  no restart log was captured. Skipped as FLAKY (architect ruling). In the same loop,
+  "logs session exit without stderr tail" timed out once. That one was a real test race: it
+  subscribed to `session-exit` after `createSession`, which `exit 0` can beat. It now subscribes
+  first, and is fixed rather than skipped.
+
 - **Unidentified intermittent failure under `porch done` (Phase 1, 2026-10-21).** The porch
   `tests` check failed twice (51 s, against ~38-40 s for passing runs) and passed on the next
   attempt. Six direct runs passed: `npm test` from the root, `vitest run` in the package, porch's
