@@ -906,6 +906,12 @@ docs present the two supported Windows paths.
   input selects a published version instead. Paths use `${{ runner.temp }}`, not `/tmp`; steps
   that reuse Bash scripts run under `shell: bash` (the runner's Git Bash, the same one users
   have).
+  **Deviation (Phase 11):** the matrix is Node 22 and 24, not 20 and 22. Node 20 cannot install
+  on native Windows (no better-sqlite3 prebuild, audit 1.1; the preinstall gate refuses it), so a
+  Node 20 leg could only test the refusal, which `install-guard` already does. The suites sit
+  behind a `suites` input (about an hour); `version` alone runs only `post-release-e2e`. The
+  PR-time dispatch rule lives in this repo's CLAUDE.md/AGENTS.md, not in the protocol prompts:
+  those ship to adopters, who have no `windows.yml`.
 - `packages/codev/scripts/verify-install.mjs`: on Windows, binaries are `<prefix>\<bin>.cmd`
   (npm's global layout has no `bin/` subdirectory there) and are invoked through
   `resolveSpawnable` with `execFileSync` argument arrays instead of shell-quoted strings. POSIX

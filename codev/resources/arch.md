@@ -1017,6 +1017,31 @@ git worktree prune
 
 This catches orphaned worktrees from crashes, manual kills, or incomplete cleanups.
 
+### Platform Layer (Spec 1658)
+
+Native Windows runs behind one seam, so POSIX behavior stays byte-identical and the Windows
+branches are testable on macOS/Linux.
+
+- **Seam**: `lib/platform.ts` (`hostPlatform()`, `isWindows()`). Runtime Windows branches ask it,
+  never `process.platform`; tests force it to `win32` and inject exec/fs. Real-Windows behavior is
+  covered by the on-demand `windows.yml` workflow (dispatch only, never required).
+- **Endpoint**: `terminal/shellper-endpoint.ts`. POSIX: Unix socket `shellper-<id>.sock` (0600).
+  Windows: named pipe `\\.\pipe\codev-shellper-<user>-<uuid>`, every connection gated on a
+  per-session secret (other users can open a pipe by name).
+- **Process tree**: `lib/process-tree.ts` `killSessionTree` / `waitForTreeExit` replace
+  `process.kill(-pid)`. Windows: census snapshot (`servers/process-census.ts`, CIM via
+  PowerShell, cached and coalesced), then the session's Job Object (`lib/windows-job.ts`, one
+  in-memory PowerShell helper per Tower, never KILL_ON_JOB_CLOSE), then `taskkill /T /F`, then the
+  recorded survivors.
+- **Resolvers**: `lib/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the
+  System32 WSL launcher), `codev-sdk/node/executable` (`findExecutable` with `PATHEXT`,
+  `resolveSpawnable` turns `.cmd` shims into `node <entry>` or `%COMSPEC% /d /s /c`),
+  `lib/shell-launch.ts` (every plumbing launch site routes through it), `lib/msys-path.ts` (path
+  translation across the Git Bash boundary), `lib/host-paths.ts`, and
+  `agent-farm/lib/worktree-links.ts` (symlink, else junction / hard link / copy).
+- **Install**: Windows Node 22/24 only (better-sqlite3 prebuilds); a preinstall gate fails other
+  versions with that message instead of a node-gyp build. `engines.node` stays `>=20` for POSIX.
+
 ### Security Model
 
 Agent Farm is designed for local development use only. Understanding the security model is critical for safe operation.
@@ -1161,10 +1186,11 @@ const CONFIG = {
 
 ### Supported Platforms
 - macOS (Darwin)
-- Linux (GNU/Linux)
-- Requires: Node.js 18+, Bash 4.0+, Git 2.5+ (worktree support), standard Unix utilities
-- Native addon: node-pty (compiled during npm install, may need `npm rebuild node-pty`)
-- Runtime directory: `~/.codev/run/` for shellper Unix sockets (created automatically with `0700` permissions)
+- Linux (GNU/Linux), including WSL 2
+- Native Windows 10/11, x64 and ARM64 (Spec 1658; see Platform Layer)
+- Requires: Node.js 20+ (native Windows: 22 or 24), Bash 4.0+ (Git Bash on Windows), Git 2.5+ (worktree support), standard Unix utilities (plus `jq` on Windows)
+- Native addon: node-pty (compiled during npm install on Linux, may need `npm rebuild node-pty`; prebuilt on Windows)
+- Runtime directory: `~/.codev/run/` for shellper Unix sockets (created automatically with `0700` permissions); Windows uses named pipes
 
 ## Monorepo Structure
 

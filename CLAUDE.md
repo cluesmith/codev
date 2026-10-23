@@ -198,6 +198,11 @@ Configuration lives in `.codev/config.json`.
 UI changes (tower, dashboard, terminal) must be verified in a browser via Playwright before
 being called done — see `codev/resources/testing-guide.md`.
 
+Native Windows has no automatic CI. A PR that touches platform code (process spawning, shells,
+paths, terminals/shellper, Tower lifecycle, install scripts) dispatches the on-demand Windows
+workflow on its branch and links the run in the PR:
+`gh workflow run windows.yml --ref <branch> -f purpose='<what it checks>' -f suites=true`.
+
 ## Releasing
 
 Say "Let's release v1.6.0"; the RELEASE protocol (`codev/protocols/release/protocol.md`)

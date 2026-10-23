@@ -21,7 +21,8 @@ run-name: "Windows: ${{ inputs.purpose || 'unlabelled' }}"
 #             (Node 20 has no better-sqlite3 prebuild on Windows, so it cannot install there):
 #             unit runs the sdk, core and codev unit tests; cli-e2e runs the built CLI tests;
 #             post-release-e2e packs the dispatched ref's packages and installs those tarballs
-#             with verify-install.mjs, or a published release when `version` is set.
+#             with verify-install.mjs, or a published release when `version` is set (setting
+#             `version` alone runs only this job).
 
 on:
   workflow_dispatch:
@@ -319,7 +320,7 @@ jobs:
 
   post-release-e2e:
     name: Install verification (Node ${{ matrix.node }})
-    if: ${{ inputs.suites }}
+    if: ${{ inputs.suites || inputs.version != '' }}
     runs-on: windows-latest
     timeout-minutes: 45
     strategy:

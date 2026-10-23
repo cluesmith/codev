@@ -20,8 +20,19 @@ These are required for Agent Farm to function.
 
 | Requirement | Value |
 |-------------|-------|
-| Minimum Version | 18.0.0 |
+| Minimum Version | 20.0.0 (native Windows: 22 or 24) |
+| Recommended | 22 |
 | Purpose | Runtime for Agent Farm server |
+
+Codev's native dependencies (node-pty, better-sqlite3) install from prebuilt binaries where one
+exists for your platform and Node version. Where none exists, npm builds them from source, which
+needs a C/C++ toolchain:
+
+- **Linux and WSL:** node-pty compiles from source, so install `build-essential` and `python3`
+  before `npm install -g @cluesmith/codev`.
+- **Native Windows:** prebuilds exist for Node 22 and 24 (x64 and ARM64) only. On any other
+  Node version the install stops and names the supported versions, rather than starting a
+  source build.
 
 **Installation:**
 
@@ -29,12 +40,14 @@ These are required for Agent Farm to function.
 # macOS
 brew install node
 
-# Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
+# Ubuntu/Debian (and WSL)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs build-essential python3
+
+# Windows: the Node.js 22 or 24 installer from https://nodejs.org
 
 # Verify
-node --version  # Should show v18.x or higher
+node --version  # Should show v20.x or higher (v22.x or v24.x on native Windows)
 ```
 
 ### git
@@ -159,8 +172,9 @@ codex --version
 
 | Dependency | Minimum Version | Required? |
 |------------|-----------------|-----------|
-| Node.js | 18.0.0 | Yes |
-| git | 2.5.0 | Yes |
+| Node.js | 20.0.0 (native Windows: 22 or 24) | Yes |
+| git | 2.5.0 (native Windows: Git for Windows) | Yes |
+| jq | any | Native Windows only |
 | gh | latest | Yes |
 | Claude Code | latest | At least one AI CLI |
 | Antigravity CLI (`agy`) | latest | At least one AI CLI |
@@ -187,21 +201,71 @@ xcode-select --install
 Most dependencies are available via apt:
 
 ```bash
-# Core dependencies
-sudo apt install nodejs npm git
+# Core dependencies (build-essential and python3 build node-pty)
+sudo apt install nodejs npm git build-essential python3
 
 # gh requires adding GitHub's apt repository (see above)
 ```
 
 ### Windows
 
-Codev is designed for Unix-like systems. On Windows, use WSL2:
+Codev supports two paths on Windows: native, with Git for Windows, and WSL 2.
+
+#### Native Windows (Git for Windows)
+
+Codev runs directly on Windows 10 22H2 or Windows 11, x64 or ARM64, with no admin rights.
+
+| Prerequisite | Notes |
+|--------------|-------|
+| Node.js 22 or 24 | Node 20 is not supported on native Windows: better-sqlite3 has no Windows prebuild for it |
+| [Git for Windows](https://git-scm.com/download/win) | Provides `git` and Git Bash, the shell Codev uses for its scripts |
+| jq | `winget install jqlang.jq`; the forge scripts need it |
+| gh | `winget install GitHub.cli`, then `gh auth login` |
+
+```powershell
+# After installing Node.js 22 or 24 from https://nodejs.org
+winget install Git.Git jqlang.jq GitHub.cli
+npm install -g @cluesmith/codev
+codev doctor
+```
+
+How it works and what to know:
+
+- **Shells.** Architect and shell terminals open Windows PowerShell 5.1 by default (set
+  `shell.shell` to `"pwsh"` in `.codev/config.json` to use PowerShell 7). Codev's own scripts
+  (forge concepts, the builder launch script, `postSpawn`) run under Git Bash. Codev never runs
+  bare `bash`, because `C:\Windows\System32\bash.exe` starts WSL. It finds Git Bash from
+  `windows.gitBashPath` in `.codev/config.json` or `CLAUDE_CODE_GIT_BASH_PATH`, else the standard
+  Git for Windows install paths, else `PATH`. An override that points at a bash other than Git
+  Bash is an error.
+- **Long paths.** Builder worktrees nest under `.builders/<id>/`, and dependency trees inside them
+  can pass Windows' 260-character path limit. Keep the workspace root short (for example
+  `C:\src\<repo>`) and enable long paths in git for your user (no admin needed):
+  `git config --global core.longpaths true`. `codev doctor` checks both.
+- **Developer Mode is optional.** Runnable-worktree links (`worktree.symlinks`) are real symlinks
+  when Developer Mode is on. When it is off, a directory link becomes a junction and a file link
+  becomes a hard link, or a copy when no hard link can be made. A copy does not write through to
+  the original, and `afx spawn` warns when it makes one.
+- **Privacy.** Codev's state (`%USERPROFILE%\.agent-farm`, `%USERPROFILE%\.codev`) relies on
+  your user folder being private to you, which is the Windows default. Codev sets no ACLs of its
+  own. Terminal sessions use named pipes that require a per-session secret, so other users on
+  the machine cannot read or drive them.
+- **Line endings.** Scripts Codev ships are pinned to LF. A `postSpawn` or `devCommand` script you
+  write must use LF line endings to run under Git Bash; `codev doctor` warns about CRLF ones.
+- **PowerShell.** Tower uses the built-in `powershell.exe` (CIM) to list and stop the processes
+  each session starts. A machine policy that blocks it, or Constrained Language Mode, is not
+  supported; `codev doctor` and Tower's log report it.
+- **Known limitations.** Doctor cannot show Tower's environment on Windows (the process table does
+  not expose it). Building this repository from source on ARM64 fails in one bundler; installing
+  the published package on ARM64 works.
+
+#### WSL 2
+
+Codev also runs inside WSL 2 as on Linux. Install a distribution, then follow the Ubuntu
+instructions above inside it, including `build-essential` and `python3`:
 
 ```bash
-# Install WSL2 with Ubuntu
 wsl --install -d Ubuntu
-
-# Then follow Ubuntu installation instructions inside WSL
 ```
 
 ---
@@ -219,6 +283,14 @@ echo $PATH
 # Common fix: add npm global bin to PATH
 export PATH="$PATH:$(npm config get prefix)/bin"
 ```
+
+On native Windows, npm's global bin directory is `npm config get prefix` itself (for example
+`%APPDATA%\npm`), with no `bin` subdirectory; the Node.js installer adds it to `PATH`.
+
+### Install fails on native Windows with "supported Node versions"
+
+Your Node version has no prebuilt better-sqlite3 for Windows. Install Node 22 or 24 and run the
+install again.
 
 ### Terminal connection issues
 
