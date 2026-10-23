@@ -153,9 +153,13 @@ afterEach(async () => {
     else process.env[k] = savedEnv[k];
   }
   const survivors = await fakeAgySurvivors();
-  // Retries: on Windows a just-killed process can hold the directory for a moment (EBUSY).
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   vi.restoreAllMocks();
+  try {
+    // Retries: on Windows a just-killed process can hold the directory for a moment (EBUSY).
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  } catch (err) {
+    throw new Error(`temp dir still held (fake agy survivors: ${JSON.stringify(survivors)}): ${(err as Error).message}`, { cause: err });
+  }
   expect(survivors, 'fake agy outlived its lane').toEqual([]);
 });
 
