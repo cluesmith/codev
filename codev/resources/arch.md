@@ -1201,7 +1201,7 @@ live in `packages/`; end-user client surfaces live in `apps/`:
 |---------|----------|---------|
 | `packages/codev` | `@cluesmith/codev` | CLI + Tower server (published to npm) |
 | `packages/core` | `@cluesmith/codev-core` | Server-side runtime: local-key issuance, homedir paths (published to npm) |
-| `packages/sdk` | `@cluesmith/codev-sdk` | Client SDK for Tower: TowerClient, workspace encoding, EscapeBuffer, ReconnectPolicy, SSE, pure grouping/naming helpers. Environment-agnostic (browser / Node / React Native): zero runtime deps, injected auth + transport, CI-enforced import boundary. Never imports codev-core (published to npm) |
+| `packages/sdk` | `@cluesmith/codev-sdk` | Client SDK for Tower: TowerClient, workspace encoding, EscapeBuffer, ReconnectPolicy, SSE, pure grouping/naming helpers. Environment-agnostic (browser / Node / React Native): zero runtime deps, injected auth + transport, CI-enforced import boundary. Its `/node` subpaths also host shared Node-side utilities (see the charter below). Never imports codev-core (published to npm) |
 | `packages/types` | `@cluesmith/codev-types` | Shared TypeScript types: WebSocket protocol, API shapes, SSE events (dev dependency only) |
 | `packages/config` | `@cluesmith/codev-config` | Shared tsconfig base (cross-project) |
 | `packages/artifact-canvas` | `@cluesmith/codev-artifact-canvas` | Reusable React surface for rendering/reviewing Codev markdown artifacts |
@@ -1232,6 +1232,15 @@ and `packages/core/src/__tests__/no-sdk-import.test.ts`). The one sanctioned
 duplication: Tower's own reconnect backoff + WS close code live in a private
 copy at `packages/codev/src/agent-farm/lib/reconnect-backoff.ts` because the
 server must not import the client sdk.
+
+**sdk charter (#1658 integration review).** The sdk has two roles. Its environment-agnostic
+graph is the single implementation of how anything talks to Tower. Its `/node` subpaths
+(`./node`, `./node/executable`) are the home for **Node-side utilities shared by Tower's clients
+and the CLI**, whether or not they talk to Tower: `node` holds local-key auth, and
+`node/executable` holds `PATHEXT` executable and `.cmd` shim resolution, used by the CLI, Tower and
+the VS Code extension alike. A new shared Node utility lands under a `/node` subpath by this
+decision; it still follows the isolation invariant (no codev-core import, zero runtime deps) and
+never leaks into the environment-agnostic graph.
 
 **Build order:** `pnpm build` from root builds artifact-canvas (consumed by the VS Code extension; zero workspace deps, so no ordering hazard) and then `@cluesmith/codev`, whose own build script first builds its graph-derived workspace-dependency closure via `pnpm --filter "@cluesmith/codev^..." build` (types, sdk, core, apps/web in topological order, then the dashboard copy — Issue #1352, replacing the drift-prone hand-list). The closure guarantees `types/dist` exists, which the VS Code extension's esbuild bundle needs: it resolves the package's runtime `exports.default` (`./dist/index.js`), and a missing `types/dist` breaks the extension build even though tsc and vite resolve it from source via `exports.types` (`./src/index.ts`).
 

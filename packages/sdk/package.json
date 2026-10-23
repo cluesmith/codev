@@ -1,7 +1,7 @@
 {
   "name": "@cluesmith/codev-sdk",
   "version": "3.3.6",
-  "description": "Client SDK for Tower: the single implementation of how anything talks to Tower. Environment-agnostic (browser, Node, React Native); auth and transport arrive as injected adapters.",
+  "description": "Client SDK for Tower: the single implementation of how anything talks to Tower, environment-agnostic (browser, Node, React Native), with auth and transport arriving as injected adapters. Its /node subpaths are also the home for Node-side utilities shared by Tower's clients and the CLI (local-key auth, executable resolution), whether or not they talk to Tower.",
   "type": "module",
   "exports": {
     "./tower-client": {

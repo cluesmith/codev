@@ -165,6 +165,7 @@ describe('listProcessCensus on Windows', () => {
       return {} as ReturnType<typeof execFile>;
     });
     await expect(listProcessCensus()).rejects.toThrow(/process census failed.*ENOENT/);
-    expect(mockExecFile.mock.calls[0][0]).toBe('powershell.exe');
+    // By full path, never the bare name: Windows searches the cwd before PATH.
+    expect(mockExecFile.mock.calls[0][0]).toMatch(/[\\/]System32[\\/]WindowsPowerShell[\\/]v1\.0[\\/]powershell\.exe$/);
   });
 });

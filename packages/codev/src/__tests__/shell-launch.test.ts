@@ -33,7 +33,7 @@ import {
   windowsShellRequest,
 } from '../lib/shell-launch.js';
 import { ptyCommand, windowsPtyBaseEnv } from '../lib/pty-command.js';
-import { defaultInteractiveShell, setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
+import { defaultInteractiveShell, setHostPlatformForTests, resetHostPlatformForTests, windowsSystem32Path } from '../lib/platform.js';
 import { getDefaultConfig } from '../lib/config.js';
 
 const GIT_BASH = {
@@ -139,6 +139,15 @@ describe('Windows shell roles (Area F)', () => {
   it('leaves every other client command alone', () => {
     expect(windowsShellRequest('claude', ['--resume', 'x'])).toEqual({ command: 'claude', args: ['--resume', 'x'] });
     expect(windowsShellRequest(GIT_BASH.path, ['-c', 'x'])).toEqual({ command: GIT_BASH.path, args: ['-c', 'x'] });
+  });
+});
+
+describe('windowsSystem32Path', () => {
+  it('builds a full System32 path from SystemRoot, so a system program is never spawned by bare name', () => {
+    expect(windowsSystem32Path('taskkill.exe', { SystemRoot: 'D:\\Win' })).toBe('D:\\Win\\System32\\taskkill.exe');
+    expect(windowsSystem32Path('cmd.exe', { SYSTEMROOT: 'C:\\WINDOWS' })).toBe('C:\\WINDOWS\\System32\\cmd.exe');
+    expect(windowsSystem32Path('cmd.exe', {})).toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(windowsPowerShellPath({ SystemRoot: 'C:\\Windows' })).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
   });
 });
 

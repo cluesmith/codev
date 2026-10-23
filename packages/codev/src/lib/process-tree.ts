@@ -21,7 +21,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { isWindows } from './platform.js';
+import { isWindows, windowsSystem32Path } from './platform.js';
 import { listProcessCensus, type ProcessCensusEntry } from '../agent-farm/servers/process-census.js';
 import { terminateSessionJob, type JobResult } from './windows-job.js';
 
@@ -119,7 +119,7 @@ function runTaskkill(pid: number): Promise<void> {
   return new Promise((resolve) => {
     // Exit 128 ("process not found") is expected when the root already died;
     // the snapshot pass covers that case, so every outcome resolves.
-    execFile('taskkill', ['/T', '/F', '/PID', String(pid)], { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true }, () => {
+    execFile(windowsSystem32Path('taskkill.exe'), ['/T', '/F', '/PID', String(pid)], { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true }, () => {
       resolve();
     });
   });
@@ -263,19 +263,40 @@ function rootIdentityFailure(root: ProcessCensusEntry, rootStartTime: number | u
 interface JobTeardown {
   /** The job existed, held the root, and was terminated. */
   terminated: boolean;
+  /** The job helper was asked (a round trip that can take seconds), whatever it answered. */
+  attempted: boolean;
   /** Why terminating it failed, when that needs reporting. */
   error?: string;
 }
 
+/**
+ * Whether `recorded` is still the same process on a fresh census: present,
+ * with the same creation time when one was recorded. A census failure answers
+ * false, so an unverifiable pid is not tree-killed; the kill pass that follows
+ * reads the census again and reports the failure.
+ */
+async function isSameProcess(census: () => Promise<ProcessCensusEntry[]>, recorded: ProcessCensusEntry): Promise<boolean> {
+  let fresh: ProcessCensusEntry[];
+  try {
+    fresh = await census();
+  } catch {
+    return false;
+  }
+  const now = fresh.find((entry) => entry.pid === recorded.pid);
+  if (!now) return false;
+  if (recorded.creationTime === undefined) return true;
+  return now.creationTime === recorded.creationTime;
+}
+
 /** Terminate the session job, if one is named and the root is in it. */
 async function terminateJobFor(rootPid: number, opts: KillSessionTreeOptions): Promise<JobTeardown> {
-  if (opts.jobName === undefined) return { terminated: false };
+  if (opts.jobName === undefined) return { terminated: false, attempted: false };
   const result = await (opts.terminateJob ?? terminateSessionJob)(opts.jobName, rootPid);
-  if (result.ok) return { terminated: result.member === true };
-  if (result.disabled) return { terminated: false };
+  if (result.ok) return { terminated: result.member === true, attempted: true };
+  if (result.disabled) return { terminated: false, attempted: false };
   let error = `job ${opts.jobName} not terminated: ${result.error ?? 'unknown failure'}`;
   if (result.code !== undefined) error = `${error} (Win32 error ${result.code})`;
-  return { terminated: false, error };
+  return { terminated: false, attempted: true, error };
 }
 
 /** What became of the session job, for an error raised after it was handled. */
@@ -332,8 +353,15 @@ async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): P
   const members = collectTree(snapshotCensus, rootPid, opts.rootStartTime);
 
   // A root absent from the census is already dead; `taskkill` on its pid could
-  // only reach a process that reused it since.
-  if (root) await taskkill(rootPid);
+  // only reach a process that reused it since. The job round trip can take
+  // seconds, and a terminated job usually takes the root with it, so after one
+  // the root is checked again on a fresh census: `/T` on a pid reused in that
+  // window would kill an unrelated process and its whole tree.
+  if (root) {
+    let rootUnchanged = true;
+    if (job.attempted) rootUnchanged = await isSameProcess(census, root);
+    if (rootUnchanged) await taskkill(rootPid);
+  }
 
   const alive = members.filter((member) => isAliveWith(kill, member.pid));
   if (alive.length > 0) {

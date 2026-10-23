@@ -25,6 +25,10 @@ interface SpawnCall {
 
 const spawnCalls: SpawnCall[] = [];
 
+// What the fake shellper writes to stdout: chunks written in order, then EOF.
+const defaultStdout = ['not json'];
+let stdoutChunks: string[] = defaultStdout;
+
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
@@ -35,7 +39,11 @@ vi.mock('node:child_process', async (importOriginal) => {
       child.stdout = new PassThrough();
       child.kill = () => {};
       child.unref = () => {};
-      setImmediate(() => child.stdout.end('not json'));
+      const chunks = stdoutChunks;
+      setImmediate(() => {
+        for (const chunk of chunks.slice(0, -1)) child.stdout.write(chunk);
+        child.stdout.end(chunks[chunks.length - 1]);
+      });
       return child;
     }),
   };
@@ -73,6 +81,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  stdoutChunks = defaultStdout;
   resetHostPlatformForTests();
   fs.rmSync(socketDir, { recursive: true, force: true });
 });
@@ -109,5 +118,17 @@ describe('SessionManager.createSession launch config', () => {
     spawnCalls.length = 0;
     const second = (await captureLaunch()).env[SHELLPER_SECRET_ENV];
     expect(second).not.toBe(first);
+  });
+});
+
+describe('SessionManager shellper info read', () => {
+  it('POSIX: parses the info only at EOF, never from a complete-looking first chunk', async () => {
+    // Windows resolves on the first complete info object because 'end' never
+    // fires there. POSIX keeps the pre-1658 EOF read: trailing bytes after a
+    // valid object make the whole stdout invalid, so creation must fail here.
+    setHostPlatformForTests('linux');
+    stdoutChunks = ['{"pid":4242,"startTime":1}', ' trailing'];
+    const manager = new SessionManager({ socketDir, shellperScript: '/nonexistent.js', nodeExecutable: process.execPath });
+    await expect(manager.createSession(createOpts())).rejects.toThrow('Invalid shellper info JSON');
   });
 });

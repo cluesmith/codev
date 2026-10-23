@@ -9,7 +9,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'node:child_process';
-import { isWindows } from '../../lib/platform.js';
+import { isWindows, windowsPowerShellPath } from '../../lib/platform.js';
 
 /** Windows: `Get-NetTCPConnection` in a cold PowerShell takes a few seconds; bound it. */
 const WINDOWS_PORT_QUERY_TIMEOUT_MS = 15_000;
@@ -49,7 +49,7 @@ export function getProcessesOnPort(port: number): number[] {
 function getWindowsProcessesOnPort(port: number): number[] {
   if (!isValidPort(port)) return [];
   try {
-    const result = execFileSync('powershell.exe', windowsPortQueryArgs(port), {
+    const result = execFileSync(windowsPowerShellPath(), windowsPortQueryArgs(port), {
       encoding: 'utf-8',
       timeout: WINDOWS_PORT_QUERY_TIMEOUT_MS,
       windowsHide: true,
@@ -86,7 +86,7 @@ export function getProcessesOnPortAsync(port: number): Promise<number[] | null> 
   if (!isValidPort(port)) return Promise.resolve([]);
   return new Promise((resolve) => {
     execFile(
-      'powershell.exe',
+      windowsPowerShellPath(),
       windowsPortQueryArgs(port),
       { encoding: 'utf-8', timeout: WINDOWS_PORT_QUERY_TIMEOUT_MS, windowsHide: true },
       (error, stdout) => {

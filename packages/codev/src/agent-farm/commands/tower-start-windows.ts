@@ -24,6 +24,7 @@ import { execFile } from 'node:child_process';
 import { SHELLPER_SESSION_ENV, isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
 import { quoteWindowsArg } from '../../terminal/shellper-cmdline.js';
 import { encodeHelperCommand } from '../../lib/windows-job.js';
+import { windowsPowerShellPath } from '../../lib/platform.js';
 
 const CIM_LAUNCH_TIMEOUT_MS = 30_000;
 
@@ -98,7 +99,7 @@ export type PowerShellRunner = (script: string, input: string) => Promise<string
 export const runPowerShellScript: PowerShellRunner = (script, input) =>
   new Promise((resolve, reject) => {
     const child = execFile(
-      'powershell.exe',
+      windowsPowerShellPath(),
       ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeHelperCommand(script)],
       { timeout: CIM_LAUNCH_TIMEOUT_MS, windowsHide: true, maxBuffer: 1024 * 1024 },
       (err, stdout) => {

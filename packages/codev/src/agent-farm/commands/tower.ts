@@ -18,7 +18,7 @@ import { getGlobalDbPath } from '../db/index.js';
 import { activeStateDbPath, planMigration } from '../db/consolidate.js';
 import { sanitizeAgentEnv, findClaudeSessionMarkers } from '../../lib/agent-env.js';
 import { getProcessesOnPort } from '../utils/port.js';
-import { isWindows } from '../../lib/platform.js';
+import { isWindows, windowsSystem32Path } from '../../lib/platform.js';
 import { spawnableOnHost } from '../../lib/shell-launch.js';
 import { followFile } from '../../lib/file-follow.js';
 import { defaultWindowsStopDeps, forceKillTowerWindows, pidList, stopTowerWindows } from './tower-stop-windows.js';
@@ -321,7 +321,7 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     let cimCommand = process.execPath;
     let cimArgs = args;
     if (command === 'npx') {
-      cimCommand = 'cmd.exe';
+      cimCommand = windowsSystem32Path('cmd.exe');
       cimArgs = ['/d', '/c', 'npx', ...args];
     }
     logger.info('Inside a codev session: starting Tower outside the session job (CIM)');

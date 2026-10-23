@@ -14,7 +14,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { isWindows } from '../../lib/platform.js';
+import { isWindows, windowsPowerShellPath } from '../../lib/platform.js';
 
 export interface ProcessCensusEntry {
   pid: number;
@@ -158,7 +158,7 @@ export type PowerShellExec = (command: string, timeoutMs: number) => Promise<str
 
 const runPowerShell: PowerShellExec = (command, timeoutMs) => new Promise((resolve, reject) => {
   execFile(
-    'powershell.exe',
+    windowsPowerShellPath(),
     ['-NoProfile', '-NonInteractive', '-Command', command],
     { timeout: timeoutMs, windowsHide: true, maxBuffer: 64 * 1024 * 1024 },
     (err, stdout) => {

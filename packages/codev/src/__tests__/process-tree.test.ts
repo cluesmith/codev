@@ -248,8 +248,27 @@ describe('killSessionTree on Windows', () => {
 
     const result = await killSessionTree(40, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
 
-    expect(h.events).toEqual(['census', 'terminate J 40', 'taskkill 40', 'census', 'kill 41']);
+    // The root is re-checked after the job round trip, before taskkill.
+    expect(h.events).toEqual(['census', 'terminate J 40', 'census', 'taskkill 40', 'census', 'kill 41']);
     expect(result.jobError).toBeUndefined();
+  });
+
+  it('skips taskkill on the root when its pid was reused during the job round trip', async () => {
+    setHostPlatformForTests('win32');
+    const before = [entry(60, 1, 100), entry(61, 60, 110)];
+    // The job took the root and its child; an unrelated process now holds pid 60.
+    const after = [entry(60, 7, 5000), entry(62, 60, 5100)];
+    const h = windowsHarness({ censuses: [before, after], alive: new Set([60]) });
+    const terminateJob = vi.fn(async (name: string, rootPid: number) => {
+      h.events.push(`terminate ${name} ${rootPid}`);
+      return { ok: true, found: true, member: true };
+    });
+
+    await killSessionTree(60, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+
+    expect(h.events).not.toContain('taskkill 60');
+    expect(h.events).not.toContain('kill 60');
+    expect(h.events).toEqual(['census', 'terminate J 60', 'census', 'census']);
   });
 
   it('kills a descendant that broke away from the job after the job took its parents', async () => {
@@ -267,7 +286,8 @@ describe('killSessionTree on Windows', () => {
     const result = await killSessionTree(50, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
 
     expect(result.snapshot.members.map((m) => m.pid)).toEqual([50, 51, 52]);
-    expect(h.events).toEqual(['census', 'terminate J 50', 'taskkill 50', 'census', 'kill 52']);
+    // The root died with the job, so its pid is not tree-killed.
+    expect(h.events).toEqual(['census', 'terminate J 50', 'census', 'census', 'kill 52']);
   });
 
   it('counts a terminated job as signaled even when the census then finds nothing', async () => {
@@ -298,7 +318,7 @@ describe('killSessionTree on Windows', () => {
 
     const result = await killSessionTree(42, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
 
-    expect(h.events).toEqual(['census', 'taskkill 42']);
+    expect(h.events).toEqual(['census', 'census', 'taskkill 42']);
     expect(result.jobError).toBe('job J not terminated: TerminateJobObject failed (Win32 error 5)');
   });
 

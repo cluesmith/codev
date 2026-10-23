@@ -112,6 +112,16 @@ the owner's Windows machine, which CI cannot cover.
 2. The PR-gate manual pass on the owner's Windows machine (plan section "PR-gate manual pass");
    results are recorded here when run.
 
+### Known gap: codex agents and the render gate (#1858)
+
+codex-cli 0.162.1 renders its status line as `GPT-6.1-Sol default · <cwd>`, and the gate's
+composer region-end pattern matches only lowercase `gpt` / `high:`. Every codex composer
+classifies `no-region-end`, so **all `afx send` mail to a codex agent holds, on every platform**,
+Windows included. This is not a Windows defect and is not fixed here (filed as #1858). Until it
+is fixed and codex ConPTY captures are recorded, the spec's "at minimum claude and codex"
+validation is met for claude only. Whether that ships as a recorded scope amendment or waits on
+#1858 is the owner's decision, pending at the time of writing.
+
 ## Deviations from Plan
 
 - **Phase 2:** schema v19 adds `shellper_session_id` as well as the secret column. The shellper
@@ -582,6 +592,33 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
 - **Concern**: `DEPENDENCIES.md` says Node 22/24 "only" while the gate admits 25/26 → **Addressed**: reworded.
 - **Concern**: CLAUDE.md/AGENTS.md PR-time dispatch omits `-f install_guard=true` → **Addressed**: added.
 
+### Review (PR) Round 1 (porch PR consultation, head f6458b7d5)
+
+#### Gemini (COMMENT)
+- Skipped (agy unavailable, exit 3).
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: claude ConPTY fixtures absent; the `afx send` criterion is unchecked → **N/A**: already a declared pr-gate condition (owner's Windows machine).
+- **Concern**: codex captures blocked on #1858 without an approved waiver → **N/A**: recorded as a known gap (Spec Compliance); the scope decision is with the owner.
+- **Concern**: the owner's manual-pass table is blank → **N/A**: a declared pr-gate condition.
+
+#### Claude (REQUEST_CHANGES)
+- **Concern**: the root's `taskkill /T /F` is identity-checked against the snapshot taken before the job round trip (seconds); a pid reused in that window loses an unrelated tree → **Addressed**: after a job round trip the root is re-checked on a fresh census (present, same creation time) before `taskkill`; a census failure skips the tree kill. New unit test for the reused-pid case.
+- **Concern**: `powershell.exe` / `taskkill` spawned by bare name with the worktree as cwd; Windows searches the cwd before `PATH`, so a planted binary in a cloned repo runs → **Addressed**: `windowsSystem32Path` / `windowsPowerShellPath` in the platform seam; the census, job helper, CIM launch, both port queries, `taskkill` and the CIM `cmd.exe` all use full System32 paths. The wider class (bare `git`, `gh` and other user tools spawned with a worktree cwd) was raised with the architect.
+- **Concern**: POSIX CI pending on the final head → **N/A**: verified before the gate request.
+- **Concern**: `WINDOWS_PREBUILD_NODE_ABIS` fail-closes future Node releases → **Rebutted**: deliberate; a Node without a better-sqlite3 prebuild cannot install, and the guard's message names the supported versions.
+- **Concern**: Gemini absent from every implementation round → **N/A**: recorded under Methodology Improvements.
+
+### Integration review Round 1 (architect, head 1b78fc076)
+
+- **Concern**: `readShellperInfo`'s resolve-on-data was a Windows-motivated change applied to POSIX → **Addressed**: gated behind `isWindows()`; POSIX resolves only at EOF as before, pinned by a test (valid JSON followed by trailing bytes must fail on POSIX). A fake shellper that never closed stdout was fixed to close it, as a real POSIX shellper does.
+- **Concern**: the sdk `/node` charter does not match `node/executable` → **Addressed**: the sdk `package.json` description and arch.md (package table plus an "sdk charter" paragraph) name the shared Node-side utility role.
+- **Concern**: #1858 should be a known gap in the review doc → **Addressed**: "Known gap: codex agents and the render gate (#1858)" under Spec Compliance.
+
+### Windows run 39924678195 (Node 24, head a9b2dbae6)
+
+- `forge-jira-preset` "fills closedAt and createdAt" returned `[]` with exit 0 once (Node 22 and earlier runs green). The cause is not proven, but the script had a real masking defect, added in Phase 10: `jq … | tr -d '\r'` takes `tr`'s exit status, so a failing `jq` read as "nothing closed". → **Addressed**: jq now runs alone in its substitution, so a failure stops the script; new test. A recurrence would now show its cause.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -709,6 +746,10 @@ Filed:
   and the spec's "at minimum claude and codex" criterion.
 
 Filing candidates (owner's call):
+- On Windows, a bare user-tool spawn (`git`, `gh`, and the like) with a worktree as cwd finds a
+  same-named program in that directory before `PATH`. System programs are fixed here (full
+  System32 paths); user tools need resolving through `PATH` without the cwd (the `codev-sdk`
+  resolver already does this), raised with the architect for scope.
 - A PowerShell-safe form of the #1595 lifecycle hook (inert today when Claude Code falls back to
   PowerShell for lack of Git Bash; Git Bash is a hard prerequisite, so no 1658 work).
 - Porch hides a failed check's stdout, where the failing test's name is.

@@ -42,9 +42,12 @@ HITS="$(acli jira workitem search \
   --limit 25 \
   --json)"
 
+# jq runs alone in its substitution so that a jq failure stops the script under
+# `set -e`; piped into `tr`, it would read as "nothing closed".
 # `tr -d '\r'`: a native Windows jq.exe ends each raw line with CRLF, and the keys
 # become file names and acli arguments below.
-KEYS="$(printf '%s' "$HITS" | jq -r '.[] | select(. != null) | .key | select(type == "string" and test("^[A-Za-z][A-Za-z0-9_]*-[0-9]+$"))' | tr -d '\r')"
+KEYS="$(printf '%s' "$HITS" | jq -r '.[] | select(. != null) | .key | select(type == "string" and test("^[A-Za-z][A-Za-z0-9_]*-[0-9]+$"))')"
+KEYS="$(printf '%s' "$KEYS" | tr -d '\r')"
 if [ -z "$KEYS" ]; then
   echo '[]'
   exit 0

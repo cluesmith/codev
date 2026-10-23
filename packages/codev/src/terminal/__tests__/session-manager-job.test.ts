@@ -31,7 +31,8 @@ vi.mock('node:child_process', async (importOriginal) => {
       child.stdout = new PassThrough();
       child.kill = () => {};
       child.unref = () => {};
-      setImmediate(() => child.stdout.write(JSON.stringify({ pid: 777, startTime: 1 })));
+      // A POSIX shellper closes stdout after its info; Windows resolves on the data alone.
+      setImmediate(() => child.stdout.end(JSON.stringify({ pid: 777, startTime: 1 })));
       return child;
     }),
   };

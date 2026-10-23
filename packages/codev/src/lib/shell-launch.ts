@@ -12,9 +12,8 @@
  */
 
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from 'node:child_process';
-import { win32 } from 'node:path';
 import { resolveSpawnable, findExecutable, type SpawnableCommand } from '@cluesmith/codev-sdk/node/executable';
-import { hostPlatform, isWindows } from './platform.js';
+import { hostPlatform, isWindows, windowsPowerShellPath } from './platform.js';
 import { loadConfig } from './config.js';
 import { resolveGitBash, GIT_BASH_ENV, type GitBash } from './git-bash.js';
 import { toMsysPath, MSYS_PATHCONV_OPT_OUT } from './msys-path.js';
@@ -132,11 +131,7 @@ export function findOnHostPath(name: string, env: NodeJS.ProcessEnv = process.en
 // Interactive shells (Area F)
 // =============================================================================
 
-/** Full path of the built-in Windows PowerShell 5.1. */
-export function windowsPowerShellPath(env: NodeJS.ProcessEnv = process.env): string {
-  const systemRoot = env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows';
-  return win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-}
+export { windowsPowerShellPath };
 
 const BASH_NAMES = new Set(['bash', 'bash.exe', '/bin/bash', '/usr/bin/bash']);
 const POWERSHELL_NAMES = new Set(['powershell', 'powershell.exe']);

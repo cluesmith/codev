@@ -155,7 +155,8 @@ describe('afx tower start launch path on Windows', () => {
     fs.writeFileSync(tsServer, '// stub');
     try {
       await expect(towerStart({ wait: true })).rejects.toThrow('process.exit:1');
-      expect(h.cimCalls[0].command).toBe('cmd.exe');
+      // By full path: CreateProcess searches the cwd (often a worktree) before PATH.
+      expect(h.cimCalls[0].command).toMatch(/[\\/]System32[\\/]cmd\.exe$/);
       expect(h.cimCalls[0].args.slice(0, 4)).toEqual(['/d', '/c', 'npx', 'tsx']);
       expect(h.cimCalls[0].args[4]).toBe(tsServer);
     } finally {

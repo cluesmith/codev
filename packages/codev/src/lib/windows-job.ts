@@ -28,6 +28,7 @@
 
 import { spawn } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
+import { windowsPowerShellPath } from './platform.js';
 
 /** Job names live in the session-local namespace: Tower and `afx` share a logon session. */
 export function sessionJobName(shellperSessionId: string): string {
@@ -195,7 +196,7 @@ export interface HelperProcess {
 
 export function spawnPowerShellHelper(): HelperProcess {
   return spawn(
-    'powershell.exe',
+    windowsPowerShellPath(),
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeHelperCommand(HELPER_SCRIPT)],
     { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true },
   ) as unknown as HelperProcess;

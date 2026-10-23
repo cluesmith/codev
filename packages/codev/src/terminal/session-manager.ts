@@ -1319,13 +1319,15 @@ export class SessionManager extends EventEmitter {
         }
       };
 
-      // Resolve as soon as the complete info object has arrived rather than on
-      // EOF. On Windows the shellper's `closeSync(1)` does not close the pipe
-      // Tower reads (libuv keeps its own handle), so 'end' never fires there
-      // (Spec 1658). Our end of the pipe is released once the info is in.
+      // On Windows, resolve as soon as the complete info object has arrived
+      // rather than on EOF: the shellper's `closeSync(1)` does not close the
+      // pipe Tower reads (libuv keeps its own handle), so 'end' never fires
+      // there (Spec 1658). Our end of the pipe is released once the info is in.
+      // POSIX keeps the EOF read below unchanged.
+      const resolveOnData = isWindows();
       child.stdout!.on('data', (chunk: Buffer) => {
         data += chunk.toString();
-        if (settled) return;
+        if (settled || !resolveOnData) return;
         const info = parseInfo();
         if (info) {
           settled = true;

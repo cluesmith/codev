@@ -389,6 +389,13 @@ describe('jira recently-closed', () => {
     expect(r.stderr).toContain('could not fetch dates for ENG-3');
   });
 
+  it('fails, rather than reporting nothing closed, when the search output cannot be read', () => {
+    writeFileSync(join(fixtures, 'search.json'), 'not json');
+    const r = run('recently-closed', { CODEV_JIRA_SITE: 'example.atlassian.net' });
+    expect(r.status).not.toBe(0);
+    expect(r.stdout.trim()).not.toBe('[]');
+  });
+
   it('emits [] and makes no view calls when nothing closed', () => {
     fixture('search.json', []);
     const r = run('recently-closed', { CODEV_JIRA_SITE: 'example.atlassian.net' });

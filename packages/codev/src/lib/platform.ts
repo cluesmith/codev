@@ -11,6 +11,7 @@
  * the seam is exactly `process.platform`.
  */
 
+import { win32 } from 'node:path';
 import { isUnderTestRunner } from './test-env.js';
 
 let override: NodeJS.Platform | null = null;
@@ -48,6 +49,23 @@ export function setHostPlatformForTests(platform: NodeJS.Platform): void {
 /** Restore the seam to the real `process.platform`. */
 export function resetHostPlatformForTests(): void {
   override = null;
+}
+
+/**
+ * Full path of a Windows system program under `%SystemRoot%\System32`.
+ * Windows system programs are always spawned by full path, never by bare name:
+ * Windows searches the current directory before `PATH` (libuv for Node spawns,
+ * CreateProcess for a CIM command line), and that directory is often a user's
+ * worktree, where a planted `powershell.exe` or `taskkill.exe` would run.
+ */
+export function windowsSystem32Path(relative: string, env: NodeJS.ProcessEnv = process.env): string {
+  const systemRoot = env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows';
+  return win32.join(systemRoot, 'System32', relative);
+}
+
+/** Full path of the built-in Windows PowerShell 5.1. */
+export function windowsPowerShellPath(env: NodeJS.ProcessEnv = process.env): string {
+  return windowsSystem32Path('WindowsPowerShell\\v1.0\\powershell.exe', env);
 }
 
 /**
