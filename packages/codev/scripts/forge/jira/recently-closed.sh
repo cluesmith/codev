@@ -42,7 +42,9 @@ HITS="$(acli jira workitem search \
   --limit 25 \
   --json)"
 
-KEYS="$(printf '%s' "$HITS" | jq -r '.[] | select(. != null) | .key | select(type == "string" and test("^[A-Za-z][A-Za-z0-9_]*-[0-9]+$"))')"
+# `tr -d '\r'`: a native Windows jq.exe ends each raw line with CRLF, and the keys
+# become file names and acli arguments below.
+KEYS="$(printf '%s' "$HITS" | jq -r '.[] | select(. != null) | .key | select(type == "string" and test("^[A-Za-z][A-Za-z0-9_]*-[0-9]+$"))' | tr -d '\r')"
 if [ -z "$KEYS" ]; then
   echo '[]'
   exit 0
@@ -70,7 +72,7 @@ else
   echo '{}' > "$DATES"
 fi
 
-printf '%s' "$HITS" | jq --arg site "$SITE" --slurpfile dates "$DATES" "$JIRA_JQ_DEFS"'
+printf '%s' "$HITS" | jq --arg site "$SITE" --slurpfile dates "$(native_path "$DATES")" "$JIRA_JQ_DEFS"'
   [.[] | select(. != null and (.key | type) == "string") | ($dates[0][.key] // {}) as $d | {
     number: .key,
     title: (.fields.summary // ""),

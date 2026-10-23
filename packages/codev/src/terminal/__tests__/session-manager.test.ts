@@ -5,9 +5,10 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import { SessionManager, StderrBuffer, getProcessStartTime, isCrashLooping, CRASH_LOOP_WINDOW_MS,
-  FAST_CLEAN_EXIT_MS, MAX_FAST_CLEAN_EXITS, type CreateSessionOptions } from '../session-manager.js';
-import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
+  FAST_CLEAN_EXIT_MS, MAX_FAST_CLEAN_EXITS, type CreateSessionOptions, type ReconnectAuth } from '../session-manager.js';
+import { ShellperProcess, type IShellperPty, type PtyOptions, type ShellperAuth } from '../shellper-process.js';
 import { ShellperClient } from '../shellper-client.js';
+import { isWindows, resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 import { testEndpointIn } from './shellper-test-endpoint.js';
 
 // spec-1658-tmp: posix-only (real disk and process uses of /tmp sit in the real-shellper tests, skipped on win32 by skipRealShellper; the rest are mock cwd strings)
@@ -15,6 +16,27 @@ import { testEndpointIn } from './shellper-test-endpoint.js';
 // node-pty binding, and on win32: they run /bin/echo, /bin/sh, /bin/cat and
 // /bin/bash under a Unix-socket shellper with cwd /tmp (POSIX-only).
 const skipRealShellper = !!process.env.CI || process.platform === 'win32';
+
+// Spec 1658: the reconnect admission the product branch on this host checks,
+// for tests that need a reconnect to succeed. The Windows branch admits a
+// secret-gated shellper whose WELCOME names the row's session and shellper
+// PID; the POSIX branch checks the process start time and the socket file, and
+// its shellper is ungated (both null/undefined here).
+const HOST_TEST_SECRET = 'a'.repeat(64);
+
+function hostShellperAuth(sessionId: string): ShellperAuth | null {
+  if (!isWindows()) {
+    return null;
+  }
+  return { secret: HOST_TEST_SECRET, sessionId, shellperPid: process.pid };
+}
+
+function hostReconnectAuth(sessionId: string): ReconnectAuth | undefined {
+  if (!isWindows()) {
+    return undefined;
+  }
+  return { secret: HOST_TEST_SECRET, shellperSessionId: sessionId };
+}
 
 // Helper: create a temp directory for socket files
 function tmpDir(): string {
@@ -85,9 +107,15 @@ describe('SessionManager', () => {
   beforeEach(() => {
     socketDir = tmpDir();
     cleanupFns = [];
+    // Spec 1658: these tests drive the POSIX branch (start-time reconnect
+    // admission, process-group kills), so pin the seam on every host. The
+    // Windows branch has its own tests (shellper-windows-transport.test.ts,
+    // session-manager-windows-teardown.test.ts) and the win32-forced ones here.
+    setHostPlatformForTests('linux');
   });
 
   afterEach(async () => {
+    resetHostPlatformForTests();
     for (const fn of cleanupFns) {
       try { await fn(); } catch { /* noop */ }
     }
@@ -231,7 +259,10 @@ describe('SessionManager', () => {
   });
 
   describe('cleanupStaleSockets', () => {
-    it('removes stale socket files', async () => {
+    // POSIX-only assertion: a stale shellper socket FILE left in socketDir. A
+    // Windows endpoint is a named pipe with no file, so there is nothing to
+    // clean (shellper-windows-transport.test.ts: 'pipe endpoints have no file').
+    it.skipIf(process.platform === 'win32')('removes stale socket files', async () => {
       const manager = new SessionManager({
         socketDir,
         shellperScript: '/nonexistent/shellper.js',
@@ -315,7 +346,9 @@ describe('SessionManager', () => {
       expect(cleaned).toBe(0);
     });
 
-    it('repeated calls are idempotent (second call returns 0)', async () => {
+    // POSIX-only assertion: a stale shellper socket FILE left in socketDir (see
+    // 'removes stale socket files').
+    it.skipIf(process.platform === 'win32')('repeated calls are idempotent (second call returns 0)', async () => {
       const manager = new SessionManager({
         socketDir,
         shellperScript: '/nonexistent/shellper.js',
@@ -358,7 +391,9 @@ describe('SessionManager', () => {
   });
 
   describe('cleanupStaleSockets (live shellper preserved)', () => {
-    it('does not delete sockets with live shellpers', async () => {
+    // POSIX-only assertion: a live shellper's socket FILE in socketDir survives
+    // the sweep. A Windows pipe has no file in the directory to preserve.
+    it.skipIf(process.platform === 'win32')('does not delete sockets with live shellpers', async () => {
       // Create a real shellper that is listening on a socket
       const socketPath = path.join(socketDir, 'shellper-livesock.sock');
       let mockPty: MockPty | null = null;
@@ -426,7 +461,7 @@ describe('SessionManager', () => {
     });
 
     it('skips PIDs in active sessions', async () => {
-      const socketPath = path.join(socketDir, 'shellper-active.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-active.sock');
       let mockPty: MockPty | null = null;
       const shellper = new ShellperProcess(
         () => {
@@ -489,7 +524,7 @@ describe('SessionManager', () => {
       // But a shellper is still alive with a responsive socket. The orphan
       // killer should NOT kill it — reality (live socket) trumps SQLite.
 
-      const liveSocketPath = path.join(socketDir, 'shellper-live-orphan.sock');
+      const liveSocketPath = testEndpointIn(socketDir, 'shellper-live-orphan.sock');
       let mockPty: MockPty | null = null;
       const shellper = new ShellperProcess(
         () => {
@@ -757,7 +792,10 @@ describe('SessionManager', () => {
   });
 
   describe('socket directory permissions', () => {
-    it('creates socket directory with 0700 permissions', async () => {
+    // POSIX-only assertion: checks the 0700 mode bits, which NTFS does not carry.
+    // A Windows pipe's access control is the per-session secret gate
+    // (shellper-windows-transport.test.ts: 'Windows secret gate').
+    it.skipIf(process.platform === 'win32')('creates socket directory with 0700 permissions', async () => {
       const newSocketDir = path.join(os.tmpdir(), `session-mgr-perm-test-${Date.now()}`);
       cleanupFns.push(() => rmrf(newSocketDir));
 
@@ -983,7 +1021,7 @@ describe('SessionManager', () => {
   describe('killSession', () => {
     it('kills session and cleans up', async () => {
       // Create a shellper with MockPty
-      const socketPath = path.join(socketDir, 'shellper-kill.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-kill.sock');
       let mockPty: MockPty | null = null;
       const shellper = new ShellperProcess(
         () => {
@@ -1027,7 +1065,7 @@ describe('SessionManager', () => {
 
   describe('shellper crash cleanup (close without EXIT)', () => {
     it('removes session from map when shellper disconnects without EXIT', async () => {
-      const socketPath = path.join(socketDir, 'shellper-crash.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-crash.sock');
       let capturedPty: MockPty | null = null;
 
       const shellper = new ShellperProcess(
@@ -1107,7 +1145,10 @@ describe('SessionManager', () => {
       socket.destroy(new Error('transient socket error'));
     }
 
-    it('re-establishes the connection while the shellper stays alive', async () => {
+    // POSIX-only assertion: admission by the test process's ps / /proc start
+    // time and recovery that leaves the socket FILE in place. The Windows
+    // branch's recovery is the win32-forced test below.
+    it.skipIf(process.platform === 'win32')('re-establishes the connection while the shellper stays alive', async () => {
       const socketPath = path.join(socketDir, 'shellper-recover.sock');
       const shellper = await startMockShellper(socketPath);
       cleanupFns.push(() => shellper.shutdown());
@@ -1142,7 +1183,10 @@ describe('SessionManager', () => {
       expect(deadErrors).toEqual([]);
     }, 15_000);
 
-    it('declares the session dead when the shellper is unreachable', async () => {
+    // POSIX-only assertion: makes the shellper unreachable by unlinking its
+    // socket FILE (a Windows pipe cannot be unlinked), after admission by the
+    // ps / /proc start time.
+    it.skipIf(process.platform === 'win32')('declares the session dead when the shellper is unreachable', async () => {
       const socketPath = path.join(socketDir, 'shellper-recover-dead.sock');
       const shellper = await startMockShellper(socketPath);
       cleanupFns.push(() => shellper.shutdown());
@@ -1173,7 +1217,10 @@ describe('SessionManager', () => {
       expect(manager.listSessions().has('recover-dead')).toBe(false);
     }, 15_000);
 
-    it('gives up after exhausting reconnect attempts against a broken socket', async () => {
+    // POSIX-only assertion: the dead declaration must not unlink a live
+    // shellper's socket FILE, after admission by the ps / /proc start time. A
+    // Windows pipe has no file to unlink.
+    it.skipIf(process.platform === 'win32')('gives up after exhausting reconnect attempts against a broken socket', async () => {
       const socketPath = path.join(socketDir, 'shellper-recover-exhaust.sock');
       const shellper = await startMockShellper(socketPath);
       cleanupFns.push(() => shellper.shutdown());
@@ -1218,11 +1265,52 @@ describe('SessionManager', () => {
       await new Promise((r) => setTimeout(r, 300));
       expect(fs.existsSync(socketPath)).toBe(true);
     }, 20_000);
+
+    it('Windows branch (seam forced to win32): re-establishes the connection with the row secret', async () => {
+      // Spec 1658: the Windows recovery path admits by the authenticated
+      // WELCOME (no start time, no socket file check), and every in-place
+      // reconnect presents the session secret again.
+      setHostPlatformForTests('win32');
+      const socketPath = testEndpointIn(socketDir, 'shellper-recover-win.sock');
+      const auth: ShellperAuth = { secret: HOST_TEST_SECRET, sessionId: 'recover-win', shellperPid: process.pid };
+      const shellper = new ShellperProcess(() => new MockPty(), socketPath, 100, () => {}, undefined, auth);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
+
+      const manager = makeManager();
+      cleanupFns.push(() => manager.shutdown());
+
+      const client = await manager.reconnectSession('recover-win', socketPath, process.pid, 0, undefined, {
+        secret: HOST_TEST_SECRET,
+        shellperSessionId: 'recover-win',
+      });
+      expect(client).toBeInstanceOf(ShellperClient);
+
+      const deadErrors: Error[] = [];
+      manager.on('session-error', (_id: string, err: Error) => {
+        if (err.message.includes('Shellper disconnected unexpectedly')) deadErrors.push(err);
+      });
+      const reconnectedPromise = new Promise<{ id: string; newClient: ShellperClient }>((resolve) => {
+        manager.on('session-reconnected', (id: string, newClient: ShellperClient) => resolve({ id, newClient }));
+      });
+
+      killClientConnection(client as ShellperClient);
+
+      const evt = await Promise.race([
+        reconnectedPromise,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout waiting for session-reconnected')), 8000)),
+      ]);
+
+      expect(evt.id).toBe('recover-win');
+      expect(evt.newClient.connected).toBe(true);
+      expect(manager.listSessions().has('recover-win')).toBe(true);
+      expect(deadErrors).toEqual([]);
+    }, 15_000);
   });
 
   describe('natural exit cleanup (no auto-restart)', () => {
     it('removes session from map when process exits and restartOnExit is false', async () => {
-      const socketPath = path.join(socketDir, 'shellper-natural-exit.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-natural-exit.sock');
       let capturedPty: MockPty | null = null;
 
       const shellper = new ShellperProcess(
@@ -1273,7 +1361,7 @@ describe('SessionManager', () => {
 
   describe('auto-restart logic', () => {
     it('sends SPAWN frame on exit when restartOnExit is true', async () => {
-      const socketPath = path.join(socketDir, 'shellper-restart.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-restart.sock');
       let capturedPty: MockPty | null = null;
       let spawnCount = 0;
 
@@ -1556,7 +1644,7 @@ describe('SessionManager', () => {
 
   describe('shutdown (disconnect without killing)', () => {
     it('disconnects clients but leaves shellper processes alive', async () => {
-      const socketPath = path.join(socketDir, 'shellper-shutdown.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-shutdown.sock');
       let capturedPty: MockPty | null = null;
 
       const shellper = new ShellperProcess(
@@ -1605,7 +1693,7 @@ describe('SessionManager', () => {
 
   describe('stop/reconnect/replay integration', () => {
     it('disconnects Tower connection, reconnects, and receives replay', async () => {
-      const socketPath = path.join(socketDir, 'shellper-replay.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-replay.sock');
       let capturedPty: MockPty | null = null;
 
       const shellper = new ShellperProcess(
@@ -1736,7 +1824,11 @@ describe('SessionManager', () => {
       expect(logs.some((m) => m.includes('reconnect failed: PID') && m.includes('reused (start time mismatch)'))).toBe(true);
     });
 
-    it('logs reason when reconnect fails: connect error', async () => {
+    // POSIX-only assertion: a socket FILE with no listener (connect refused).
+    // A Windows pipe exists only while it listens; its missing-endpoint case is
+    // shellper-windows-transport.test.ts: 'is identity-refused when the
+    // endpoint does not exist but the pid is alive'.
+    it.skipIf(process.platform === 'win32')('logs reason when reconnect fails: connect error', async () => {
       const logs: string[] = [];
       const manager = new SessionManager({
         socketDir,
@@ -1775,7 +1867,7 @@ describe('SessionManager', () => {
 
     it('reconnects to a live shellper', async () => {
       // Create a real mock shellper
-      const socketPath = path.join(socketDir, 'shellper-reconnect.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-reconnect.sock');
       let mockPty: MockPty | null = null;
       const shellper = new ShellperProcess(
         () => {
@@ -1816,7 +1908,7 @@ describe('SessionManager', () => {
   describe('logger callback', () => {
     it('logs session creation', async () => {
       const logs: string[] = [];
-      const socketPath = path.join(socketDir, 'shellper-logcreate.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-logcreate.sock');
       let capturedPty: MockPty | null = null;
 
       const shellper = new ShellperProcess(
@@ -1852,7 +1944,7 @@ describe('SessionManager', () => {
 
     it('logs kill session', async () => {
       const logs: string[] = [];
-      const socketPath = path.join(socketDir, 'shellper-logkill.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-logkill.sock');
 
       const shellper = new ShellperProcess(
         () => new MockPty(),
@@ -1884,7 +1976,7 @@ describe('SessionManager', () => {
 
     it('logs unexpected disconnect', async () => {
       const logs: string[] = [];
-      const socketPath = path.join(socketDir, 'shellper-logdisconnect.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-logdisconnect.sock');
 
       const shellper = new ShellperProcess(
         () => new MockPty(),
@@ -1943,7 +2035,7 @@ describe('SessionManager', () => {
   describe('auto-restart logging', () => {
     it('logs auto-restart count, max, and delay', async () => {
       const logs: string[] = [];
-      const socketPath = path.join(socketDir, 'shellper-autorestart-log.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-autorestart-log.sock');
       let capturedPty: MockPty | null = null;
 
       const shellper = new ShellperProcess(
@@ -1998,7 +2090,7 @@ describe('SessionManager', () => {
 
     it('logs max restarts exceeded', async () => {
       const logs: string[] = [];
-      const socketPath = path.join(socketDir, 'shellper-maxrestart-log.sock');
+      const socketPath = testEndpointIn(socketDir, 'shellper-maxrestart-log.sock');
       let capturedPty: MockPty | null = null;
 
       const shellper = new ShellperProcess(
@@ -2431,6 +2523,9 @@ describe('crash-loop give-up (Issue #1224)', () => {
   }
 
   it('SIGTERMs the shellper process group on give-up', () => {
+    // Spec 1658: the POSIX branch's group signal; pin the seam on every host.
+    // The Windows give-up reaps the session tree instead (process-tree tests).
+    setHostPlatformForTests('linux');
     const socketDir = tmpDir();
     const HUSK_PID = 424242;
     const manager = new SessionManager({
@@ -2462,6 +2557,7 @@ describe('crash-loop give-up (Issue #1224)', () => {
       expect((manager as any).sessions.has('giveup-1')).toBe(false);
     } finally {
       process.kill = originalKill;
+      resetHostPlatformForTests();
       rmrf(socketDir);
     }
   });
@@ -2739,7 +2835,7 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
   it('carries freshLaunch across reconnect, so post-Tower-restart clean exits stay fresh', async () => {
     const socketDir = tmpDir();
     let capturedPty: MockPty | null = null;
-    const socketPath = path.join(socketDir, 'reconnect-fresh.sock');
+    const socketPath = testEndpointIn(socketDir, 'reconnect-fresh.sock');
     const shellper = new ShellperProcess(
       () => {
         capturedPty = new MockPty();
@@ -2747,6 +2843,9 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
       },
       socketPath,
       100,
+      () => {},
+      undefined,
+      hostShellperAuth('reconnect-1'),
     );
     await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
@@ -2760,9 +2859,10 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
       const freshLaunch = { next: () => ({ args: ['--session-id', 'reconnect-fresh'] }) };
       // Reconnect exactly as Tower's reconciliation does, with the `--resume`
       // args the #832 restart resolution bakes in for a surviving architect.
-      // The real start time — reconnectSession validates it against the process
-      // table to guard against PID reuse, and returns null on a mismatch.
-      const startTime = getProcessStartTime(process.pid)!;
+      // The real start time: on POSIX reconnectSession validates it against
+      // the process table to guard against PID reuse, and returns null on a
+      // mismatch. On Windows the row's secret is the proof (Spec 1658).
+      const startTime = (await getProcessStartTime(process.pid)) ?? 0;
       const client = await manager.reconnectSession('reconnect-1', socketPath, process.pid, startTime, {
         command: 'claude',
         args: ['--resume', 'abandoned-conversation'],
@@ -2771,7 +2871,7 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
         restartDelay: 1,
         maxRestarts: 50,
         freshLaunch,
-      });
+      }, hostReconnectAuth('reconnect-1'));
       expect(client).not.toBeNull();
 
       const spawnSpy = vi.fn();

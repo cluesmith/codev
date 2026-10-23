@@ -9,6 +9,15 @@ import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
 
+// These tests call vi.resetModules() and re-import doctor, which loads a fresh
+// platform module with no override; pin every instance to POSIX so a win32 host
+// does not take the Windows sections (covered by doctor-windows-*.test.ts).
+vi.mock('../lib/platform.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/platform.js')>();
+  actual.setHostPlatformForTests('linux');
+  return actual;
+});
+
 // We need to test the internal functions, so we'll import the module
 // and test the exported function behavior
 

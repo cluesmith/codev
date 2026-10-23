@@ -224,6 +224,57 @@ Git Bash it falls back to PowerShell, where the bash-syntax hook fails to parse:
 the reporter is inert. Architect ruling: no Windows work in 1658, since Git Bash is a hard
 prerequisite. A PowerShell-safe hook form is a filing candidate for the owner.
 
+## POSIX residue sweep and the native-dependency install guard (Phase 10)
+
+**Windows finding: every `codev` subcommand was a silent exit-0 no-op on native Windows.**
+`dist/cli.js` parsed argv only when an "is main module" check passed, and all three comparisons
+assumed forward slashes. The npm shim (`codev.cmd`) runs node with
+`argv[1] = C:\...\bin\codev.js`, and `import.meta.url` is `file:///C:/...`, so nothing matched.
+The CLI loaded, registered its commands and exited 0 with no output. `afx` and `porch` were not
+affected: they call their entry functions directly, and `consult`, `team` and `generate-image` call
+`run()`. `isCodevEntrypoint` (behind the seam, with the POSIX expression byte-identical) fixes it.
+No unit test caught it. The install-guard check did, once it required `codev --version` to print
+the packed version and not merely exit 0. Lesson: a smoke check that accepts exit 0 with empty
+output proves only that a process ran.
+
+**Windows finding: the full unit suite hung for two hours.** `findWorkspaceRoot` walked up with
+`while (dir !== '/')`, which never ends at a drive root (`dirname('C:\\')` is `'C:\\'`). A
+synchronous loop cannot be timed out in-process, so the regression test runs the walk in a child
+process with a deadline.
+
+**Runtime defects the first complete Windows run exposed** (run 39898982593: 80 failing files, 508
+tests). Each was fixed behind the seam, with POSIX unchanged:
+- Builder-worktree matchers split on `/` only. A builder on native Windows was treated as a
+  non-builder by `afx send` and `whoami`, and Tower answered its lifecycle reports with 404.
+- The Claude project-dir encoding (`~/.claude/projects/<cwd>`) left `C:\` and backslashes in the
+  name. Resume never found a stored session and always launched fresh.
+- `porch done` built its review-file glob from an absolute path, and glob reads `\` as an
+  escape. `done` always refused on Windows. The relative pattern with `cwd` also fixes a POSIX
+  workspace path containing glob metacharacters (`[...]`), which used to refuse falsely.
+- Frontmatter of a CRLF spec or plan (Git for Windows checks out with `core.autocrlf=true`) was
+  never recognized as pre-approved.
+- Template user-data patterns did not match backslash relative paths.
+
+**Install guard.** `preinstall` runs before any dependency's `install` script (npm's rebuild
+order), so on a Windows Node with no better-sqlite3 prebuild it stops the install with the
+supported versions before node-gyp can run. The Windows check proves the control case too: without
+the guard, Node 20 does reach node-gyp. npm forwards neither `--node-gyp` nor
+`npm_config_node_gyp` to dependency install scripts, so the check plants its stub on the script
+PATH instead. Deviation (architect ruling): `engines.node` stays `>=20`, because engines is not
+per-platform and POSIX installs must be unaffected.
+
+**Test-suite sweep.** Everything else the Windows run found was tests: POSIX-branch tests that did
+not force the platform seam, `.sock` paths where Windows needs named pipes, `HOME` where
+`os.homedir()` reads `USERPROFILE`, `/` in expected paths, 8.3 short temp paths, and repo fixtures
+checked out as CRLF. Skips are limited to assertions that are POSIX-only by nature, each naming
+its assumption: mode bits, sh stubs, process groups and signals, and an NTFS-illegal filename.
+
+**Carry-forwards.** CRLF in `overview.ts` status.yaml parsing (tolerant where checked, not
+audited end to end) and `managed-block.ts` (mixed endings). The POSIX Claude project-dir encoding
+replaces only `/` and `.`; if Claude replaces every non-alphanumeric character on POSIX too, a cwd
+with `_`, a space or `~` resumes fresh (unverified, filing candidate). A shellper listen error with
+no `'error'` listener throws before `start()` rejects (every platform, not changed).
+
 ## Flaky Tests
 
 - **Unidentified intermittent failure under `porch done` (Phase 1, 2026-10-21).** The porch

@@ -422,6 +422,29 @@ and `--scenario draft` (claude by default; `--harness codex` for codex).
   as host-path / command-output / not-a-path, and only the first two change.
 - Tests: `/tmp` across ~70 test files.
 
+#### Phase 10 result (2026-10-23)
+
+- **`/tmp` grep check** (`node scripts/spec-1658-tmp-residue-check.mjs`, not shipped): passes.
+  - Runtime: 6 non-comment `/tmp` sites, each on a POSIX-only branch or list carrying a POSIX annotation: `pty-manager.ts:73` (POSIX base env), `worktree-write-guard.ts:183-184` (POSIX allowlist; Windows allows `os.tmpdir()`), `tower-utils.ts:115` (POSIX temp roots), `tower-terminals.ts:243` (POSIX fallback root; Windows uses `homedir()`) and `:639` (`POSIX_TEMP_ROOTS`).
+  - Tests: 78 files annotated: 70 `opaque` (never reaches the disk), 7 `posix-only` (the `/tmp` tests are skipped on win32, reason at the skip), 1 `sun_path` (`helpers/socket-temp-root.ts`: `/tmp` on POSIX for the 104-byte socket limit, `os.tmpdir()` on Windows).
+  - Every other disk-reaching `/tmp` moved to `os.tmpdir()` or the sun_path helper.
+- **`startsWith('/')`** (8 runtime sites): all already host-aware or not host paths. `templates.ts:120` checks `path.sep` too, `msys-path.ts` is an MSYS path by definition, the 5 `workspacePath` guards in tower-websocket/tower-routes also accept `^[A-Za-z]:[\\/]`, and `contextual-panel/messages.ts` rejects `\\` and drive paths. No change.
+- **`split('/')`** (10 runtime sites):
+  - not-a-path: URL pathnames (`tower-websocket.ts:317`, `tower-routes.ts:2931`), `owner/repo` shorthand (`sync.ts:62`).
+  - command-output: `git --show-prefix` (`tree-snapshot.ts:212`).
+  - already normalized: `governance-bootstrap.ts:246` (splits on `path.sep` first), `review-queue/reconcile.ts:93`.
+  - repo-relative forward-slash resource paths from Tower: `contextual-panel/webview/main.ts:50`, `views/file-path-tree.ts:53`.
+  - host-path: `host-paths.ts` (the Phase 10 helper itself). No other change.
+- **`split('\n')`** (57 runtime sites):
+  - command-output (git, ps, CIM JSON, lsof, gh): Git for Windows and these tools emit LF, and the Windows parsers added in Phases 3 and 4 already split on `/\r?\n/`. No change.
+  - in-memory or PTY text (message bodies, PTY partial lines, prompts): not file content. No change.
+  - file content: CRLF is real on Windows (Git for Windows checks out with `core.autocrlf=true`; Windows editors write CRLF).
+    - Fixed in Phase 10: `porch/artifacts.ts` `isPreApprovedContent` (frontmatter regex now `\r?\n`; a CRLF spec or plan was never recognized as pre-approved) and `prompt-behavior-metrics.ts`.
+    - Already CRLF-safe (verified by the Windows run): decisions parse/splice (detects and preserves the file's line ending), `governance-bootstrap.ts` `toLines`, `team.ts` frontmatter, consult `.env`, `reset/context.ts` (reads afx-written launch scripts), and `forge.ts` executable sniffing (`.sh` pinned to LF by `.gitattributes`).
+    - Carry-forward, not changed: `overview.ts:97` (builder `status.yaml` line regexes; the ones checked end in `\s*$` and tolerate `\r`, but the parser has not been audited end to end), `managed-block.ts:109` (inserts an LF block into a CRLF CLAUDE.md: mixed endings, cosmetic), `framework-ref-audit.ts:72` (findings display with `\\`).
+- **Builder-worktree matchers** (`.builders/` with `/` only): fixed in `builder-worktree-identity.ts`, `send.ts`, `state.ts`, `notifications.ts`, `tower-routes.ts` (7 sites) and `consult/index.ts`. Carry-forward: `db/consolidate.ts:60` (legacy migration marker, not reached on a fresh Windows install).
+- **Walk-up loops**: `agent-farm/utils/config.ts` `findWorkspaceRoot` stopped only at `'/'` and never terminated at a Windows drive root. Fixed, with a regression test that runs the walk in a child with a deadline. No other `!== '/'` loop sentinel exists in runtime code.
+
 ### Re-audit of lanes landed since the spec
 
 - #1668 IDE server: covered above (Phase 9).

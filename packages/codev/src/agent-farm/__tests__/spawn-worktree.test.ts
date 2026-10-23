@@ -75,7 +75,7 @@ vi.mock('../../lib/forge.js', () => ({
 }));
 
 // Mock the harness resolution to return claude harness by default
-import { CLAUDE_HARNESS, CODEX_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
+import { CLAUDE_HARNESS, CODEX_HARNESS, OPENCODE_HARNESS, toShellPath } from '../utils/harness.js';
 const getBuilderHarnessMock = vi.fn(() => CLAUDE_HARNESS);
 const getWorktreeConfigMock = vi.fn(() => ({ symlinks: [], postSpawn: [], devCommand: null, devUrls: [] }));
 vi.mock('../utils/config.js', () => ({
@@ -129,7 +129,8 @@ function snapshotTemporary(worktree: string): unknown {
 }
 
 /** Spec 1595: the reporter fragment every Claude builder launch carries. */
-const REPORTER_FRAGMENT = `--settings '${join(lifecycleReporterDir(), LIFECYCLE_REPORTER_SETTINGS_NAME)}'`;
+// The harness hands the settings path to bash in forward-slash form (toShellPath), as on Windows.
+const REPORTER_FRAGMENT = `--settings '${toShellPath(join(lifecycleReporterDir(), LIFECYCLE_REPORTER_SETTINGS_NAME))}'`;
 
 describe('spawn-worktree', () => {
   beforeEach(() => {
