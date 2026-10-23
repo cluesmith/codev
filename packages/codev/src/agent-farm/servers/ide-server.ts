@@ -30,7 +30,14 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { existsSync } from 'node:fs';
 import { getProcessesOnPort, getProcessesOnPortAsync } from '../utils/port.js';
 import { isWindows } from '../../lib/platform.js';
-import { collectTree, killSessionTree, type TreeMember } from '../../lib/process-tree.js';
+import {
+  collectTree,
+  killSessionTree,
+  waitForTreeExit,
+  type KillSessionTreeResult,
+  type TreeMember,
+  type TreeSnapshot,
+} from '../../lib/process-tree.js';
 import { listProcessCensus, type ProcessCensusEntry } from './process-census.js';
 import { parseJsonBody } from '../utils/server-utils.js';
 import {
@@ -224,7 +231,11 @@ async function spawnIdeServerUnlocked(opts: SpawnIdeOptions, log: LogFn): Promis
   const existing = readIdeRecord();
   if (existing && existing.port !== port && (await isPortListening(existing.port))) {
     log('WARN', `IDE server already recorded on port ${existing.port}; stopping it before starting on ${port}`);
-    await stopIdeServerUnlocked(log);
+    try {
+      await stopIdeServerUnlocked(log);
+    } catch (err) {
+      throw new Error(`Cannot start the IDE server on port ${port}: stopping the one on port ${existing.port} failed: ${(err as Error).message}`);
+    }
   }
 
   // Already live on the port: idempotent, adopt and record, never kill or double-spawn.
@@ -391,6 +402,12 @@ async function stopIdeServerUnlocked(log: LogFn): Promise<{ stopped: boolean; po
   return { stopped: pids.length > 0, port: record.port };
 }
 
+/** Seams for the Windows path of `stopUnreadyIdeServer`. */
+export interface UnreadyStopSeams {
+  killTree?: (pid: number) => Promise<KillSessionTreeResult>;
+  waitExit?: (pid: number, snapshot: TreeSnapshot, timeoutMs: number) => Promise<boolean>;
+}
+
 /** True while any process in the group led by `pgid` is alive. */
 function isGroupAlive(pgid: number): boolean {
   try {
@@ -405,15 +422,21 @@ function isGroupAlive(pgid: number): boolean {
  * Stop a spawned server that never started listening; true when it is gone.
  * Windows: kill its tree. POSIX: it leads its own process group (spawned
  * detached), so SIGTERM the group, wait for it to empty, and SIGKILL it if it
- * outlives the wait, mirroring `stopIdeServer`. A failure is logged, never
- * thrown: the caller is already failing the start, and says whether this
- * worked.
+ * outlives the wait, mirroring `stopIdeServer`. Windows reports success only
+ * once the kill's snapshot has exited (`taskkill` failing does not reject). A
+ * failure is logged, never thrown: the caller is already failing the start,
+ * and says whether this worked.
  */
-async function stopUnreadyIdeServer(pid: number, log: LogFn): Promise<boolean> {
+export async function stopUnreadyIdeServer(pid: number, log: LogFn, seams: UnreadyStopSeams = {}): Promise<boolean> {
   if (isWindows()) {
+    const killTree = seams.killTree ?? ((root: number) => killSessionTree(root));
+    const waitExit = seams.waitExit ?? waitForTreeExit;
     try {
-      const result = await killSessionTree(pid);
-      return result.refused === undefined;
+      const result = await killTree(pid);
+      if (result.refused !== undefined) return false;
+      const gone = await waitExit(pid, result.snapshot, IDE_STOP_EXIT_TIMEOUT_MS);
+      if (!gone) log('WARN', `IDE server pid ${pid} never listened, and its tree outlived the kill`);
+      return gone;
     } catch (err) {
       log('WARN', `IDE server pid ${pid} never listened, and killing its tree failed: ${(err as Error).message}`);
       return false;
@@ -499,8 +522,9 @@ export function windowsIdeRecordedServerPlan(
 ): WindowsIdeStopPlan {
   if (recordedPid <= 0) return { roots: [], targets: [] };
   const tree = collectTree(census, recordedPid);
-  const marker = tokenPath.toLowerCase();
-  const byPid = new Map(census.map((entry) => [entry.pid, entry.cmdline.toLowerCase()]));
+  const marker = tokenPath.replace(/\^/g, '').toLowerCase();
+  // A `cmd.exe` root's line carries the path with cmd's `^` escapes.
+  const byPid = new Map(census.map((entry) => [entry.pid, entry.cmdline.replace(/\^/g, '').toLowerCase()]));
   const ours = tree.some((member) => (byPid.get(member.pid) ?? '').includes(marker));
   if (!ours) return { roots: [], targets: [] };
   return { roots: [recordedPid], targets: tree };

@@ -54,6 +54,8 @@ vi.mock('../servers/process-census.js', async (importActual) => {
 });
 
 import {
+  stopUnreadyIdeServer,
+  windowsIdeRecordedServerPlan,
   isPortAccepting,
   spawnIdeServerProcess,
   stopIdeServer,
@@ -333,6 +335,44 @@ describe('stopWindowsIdeServer', () => {
     expect(result).toEqual({ stopped: true, port: 8200 });
     expect(readIdeRecord()).toBeNull();
   }, 10_000);
+});
+
+describe('stopUnreadyIdeServer on Windows', () => {
+  const snapshot = { rootPid: 20, members: [{ pid: 20, creationTime: 2000 }] };
+
+  it('reports stopped only once the snapshot has exited', async () => {
+    setHostPlatformForTests('win32');
+    const waitExit = vi.fn(async () => true);
+    const stopped = await stopUnreadyIdeServer(20, noopLog, { killTree: async () => ({ signaled: true, snapshot }), waitExit });
+    expect(stopped).toBe(true);
+    expect(waitExit).toHaveBeenCalledWith(20, snapshot, expect.any(Number));
+  });
+
+  it('a tree that outlives the kill (taskkill failed silently) is reported not stopped', async () => {
+    setHostPlatformForTests('win32');
+    const log = vi.fn();
+    const stopped = await stopUnreadyIdeServer(20, log, { killTree: async () => ({ signaled: true, snapshot }), waitExit: async () => false });
+    expect(stopped).toBe(false);
+    expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('outlived the kill'));
+  });
+
+  it('a kill that throws is reported not stopped', async () => {
+    setHostPlatformForTests('win32');
+    const stopped = await stopUnreadyIdeServer(20, noopLog, {
+      killTree: async () => {
+        throw new Error('census unavailable');
+      },
+    });
+    expect(stopped).toBe(false);
+  });
+});
+
+describe('windowsIdeRecordedServerPlan', () => {
+  it('matches a token path that cmd.exe ^-escaped on the root line', () => {
+    const token = 'C:\\Users\\Tom & Jerry\\.agent-farm\\ide-connection-token';
+    const census = [{ ...entry(20, 10, 2000), cmdline: 'cmd.exe /d /s /c "x.cmd ^"--connection-token-file^" ^"C:\\Users\\Tom ^& Jerry\\.agent-farm\\ide-connection-token^""' }];
+    expect(windowsIdeRecordedServerPlan(census, 20, token).roots).toEqual([20]);
+  });
 });
 
 describe('stopIdeServer routing', () => {
