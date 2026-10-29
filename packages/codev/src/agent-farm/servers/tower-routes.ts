@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { homedir, tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +36,9 @@ import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
+import { isWindows } from '../../lib/platform.js';
+import { expandHomePath } from '../../lib/host-paths.js';
+import { isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
 import {
   isRateLimited,
   normalizeWorkspacePath,
@@ -46,9 +49,12 @@ import {
   logSessionIdentity,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
+import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
+import { logSafe } from '../utils/log-safe.js';
 import { handleIdeApi } from './ide-server.js';
 import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
-import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
+import { getWorktreeConfig, getActivityHooks, getResolvedCommands } from '../utils/config.js';
+import { windowsInteractiveShell, windowsShellRequest } from '../../lib/shell-launch.js';
 import { ensureCodevConfigWatcher } from './codev-config-watcher.js';
 import { handleDecisionsGet, handleDecisionsRule } from './decisions/routes.js';
 import { decisionsFilePresent } from './decisions/file.js';
@@ -126,14 +132,16 @@ import { computeAnalytics } from './analytics.js';
 import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
 import { getGlobalDb } from '../db/index.js';
 import { listProcessCensus } from './process-census.js';
+import { containsBuildersSegment } from '../utils/builder-worktree-identity.js';
 import {
   SHELLPER_MARKER,
   computeRegisteredShellperPids,
   findHuskShellpers,
   sweepShellperHusks,
   resolveHuskGraceMs,
+  startTimeLookupFor,
 } from './shellper-husk-sweep.js';
-import { getProcessStartTime } from '../../terminal/session-manager.js';
+import { isShellperInScope } from '../../terminal/shellper-cmdline.js';
 import type { CronTask } from './tower-cron.js';
 import {
   getWorkspaceTerminals,
@@ -186,6 +194,11 @@ export interface RouteContext {
   broadcastNotification: (notification: { type: string; title: string; body: string; workspace?: string }) => void;
   addSseClient: (client: SSEClient) => boolean;
   removeSseClient: (id: string) => void;
+  /**
+   * Begin a graceful shutdown (Spec 1658): `afx tower stop` on Windows, where a
+   * signal is a hard kill that skips the shutdown path. Absent in route tests.
+   */
+  requestShutdown?: (reason: string) => void;
 }
 
 // ============================================================================
@@ -207,6 +220,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
+  'POST /api/shutdown':   (req, res, _url, ctx) => handleShutdown(req, res, ctx),
   'GET /api/version':     (_req, res, _url, ctx) => handleVersion(res, ctx),
   'GET /api/overview':    (_req, res, url, ctx) => handleOverview(res, url, undefined, ctx),
   'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
@@ -429,14 +443,11 @@ async function computeFleetHealthFields(
   if (!shellperManager) return {};
   try {
     const census = await listProcessCensus();
-    const scopeMarker = shellperManager.socketDir.endsWith('/')
-      ? shellperManager.socketDir
-      : `${shellperManager.socketDir}/`;
 
     const inScopePids = new Set<number>();
     let fleetRssKb = 0;
     for (const entry of census) {
-      if (entry.cmdline.includes(SHELLPER_MARKER) && entry.cmdline.includes(scopeMarker)) {
+      if (entry.cmdline.includes(SHELLPER_MARKER) && isShellperInScope(entry.cmdline, shellperManager.socketDir)) {
         inScopePids.add(entry.pid);
         fleetRssKb += entry.rssKb;
       }
@@ -447,7 +458,7 @@ async function computeFleetHealthFields(
       }
     }
 
-    const registered = await computeRegisteredShellperPids(getGlobalDb());
+    const registered = await computeRegisteredShellperPids(getGlobalDb(), startTimeLookupFor(census));
     let unregisteredShellperCount = 0;
     for (const pid of inScopePids) {
       if (!registered.has(pid)) unregisteredShellperCount++;
@@ -463,6 +474,10 @@ async function handleHealthCheck(res: http.ServerResponse, ctx: RouteContext): P
   const instances = await getInstances();
   const activeCount = instances.filter((i) => i.running).length;
   const fleetFields = await computeFleetHealthFields(ctx);
+  // Spec 1658 Phase 4: doctor cannot read another process's environment on
+  // Windows, so Tower reports whether it runs inside a codev session itself.
+  const platformFields: Record<string, boolean> = {};
+  if (isWindows()) platformFields.insideCodevSession = isInsideCodevSession(process.env);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(
     JSON.stringify({
@@ -476,6 +491,7 @@ async function handleHealthCheck(res: http.ServerResponse, ctx: RouteContext): P
       totalWorkspaces: instances.length,
       memoryUsage: process.memoryUsage().heapUsed,
       ...fleetFields,
+      ...platformFields,
       timestamp: new Date().toISOString(),
     })
   );
@@ -501,19 +517,21 @@ async function handleHuskPreview(res: http.ServerResponse, ctx: RouteContext): P
     // candidacy, not a later, possibly-different one (codex #1227 PR review).
     const census = await listProcessCensus();
     const rssByPid = new Map(census.map((entry) => [entry.pid, entry.rssKb]));
+    const getStartTime = startTimeLookupFor(census);
 
-    const registered = await computeRegisteredShellperPids(getGlobalDb());
+    const registered = await computeRegisteredShellperPids(getGlobalDb(), getStartTime);
     const pids = await findHuskShellpers({
       socketDir: shellperManager.socketDir,
       registeredShellperPids: registered,
       graceMs,
       census: () => census,
+      getStartTime,
     });
 
     const now = Date.now();
     const candidates = await Promise.all(
       pids.map(async (pid) => {
-        const startTime = await getProcessStartTime(pid);
+        const startTime = await getStartTime(pid);
         return {
           pid,
           rssKb: rssByPid.get(pid) ?? 0,
@@ -567,6 +585,90 @@ async function handleHuskSweep(res: http.ServerResponse, ctx: RouteContext): Pro
  * restart, the two diverge; the VS Code preflight probes this to detect that.
  * Read-only, no auth beyond the existing Host/Origin gate (same as /health).
  */
+/** Loopback peers only: the IPv4, IPv6 and IPv4-mapped forms. */
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  if (address === '::1') return true;
+  let v4 = address;
+  if (address.startsWith('::ffff:')) v4 = address.slice('::ffff:'.length);
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v4);
+}
+
+/**
+ * True when `address` is this machine: loopback, or one of its own interface
+ * addresses. A bridge-mode Tower binds a specific LAN address, so a local
+ * `afx tower stop` reaches it from that address, not from loopback. A remote
+ * host cannot complete a TCP handshake from one of our addresses, so this still
+ * admits local callers only.
+ */
+export function isLocalMachineAddress(
+  address: string | undefined,
+  interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces(),
+): boolean {
+  if (!address) return false;
+  if (isLoopbackAddress(address)) return true;
+  let bare = address;
+  if (address.startsWith('::ffff:')) bare = address.slice('::ffff:'.length);
+  // A link-local IPv6 peer may carry a zone suffix (`fe80::1%eth0`); the
+  // interface list reports the bare address.
+  const zone = bare.indexOf('%');
+  if (zone !== -1) bare = bare.slice(0, zone);
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries ?? []) {
+      if (entry.address === bare || entry.address === address) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * POST /api/shutdown (Spec 1658 Phase 4): the graceful stop `afx tower stop`
+ * uses on Windows. Accepted only when all three hold:
+ *
+ * 1. keyed, like every route (the shared choke point above);
+ * 2. not tunnel-borne: the tunnel client runs inside Tower and forwards cloud
+ *    requests over loopback with the real key, so loopback and the key alone
+ *    would let a cloud-side actor stop Tower; its proxy marker
+ *    (TUNNEL_PROXY_HEADER, which it strips from inbound requests so it cannot
+ *    be forged or suppressed) is refused here, and the proxy also blocks the
+ *    path (`isBlockedPath`);
+ * 3. from this machine (loopback, or one of its own interface addresses for a
+ *    bridge-mode Tower bound to a LAN address), so a remote bridge client
+ *    holding the key cannot.
+ *
+ * Registered on every platform, not only Windows: the conditions are the same
+ * everywhere, and POSIX keeps it testable; POSIX `tower stop` still uses SIGTERM.
+ * Answers with the pid before shutting down, so the caller waits on the right
+ * process.
+ */
+function handleShutdown(req: http.IncomingMessage, res: http.ServerResponse, ctx: RouteContext): void {
+  const remote = logSafe(req.socket.remoteAddress ?? 'unknown', 64);
+  const ua = logSafe(req.headers['user-agent']) || 'none';
+  const sourceText = `remote=${remote} ua="${ua}"`;
+  if (req.headers[TUNNEL_PROXY_HEADER] !== undefined) {
+    ctx.log('WARN', `Shutdown request REJECTED — arrived via tunnel proxy (${sourceText} via=tunnel)`);
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'shutdown is local-only' }));
+    return;
+  }
+  if (!isLocalMachineAddress(req.socket.remoteAddress)) {
+    ctx.log('WARN', `Shutdown request REJECTED — peer is not this machine (${sourceText})`);
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'shutdown is accepted from this machine only' }));
+    return;
+  }
+  if (!ctx.requestShutdown) {
+    res.writeHead(501, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'shutdown is not available' }));
+    return;
+  }
+  const requestShutdown = ctx.requestShutdown;
+  res.writeHead(202, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ pid: process.pid }), () => {
+    requestShutdown('shutdown request');
+  });
+}
+
 function handleVersion(res: http.ServerResponse, ctx: RouteContext): void {
   const body: TowerVersionInfo = { version: ctx.version, startedAt: ctx.startedAt };
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -813,8 +915,8 @@ async function handleTerminalCreate(
     const manager = getTerminalManager();
 
     // Parse request fields
-    const command = typeof body.command === 'string' ? body.command : undefined;
-    const args = Array.isArray(body.args) ? body.args as string[] : undefined;
+    let command = typeof body.command === 'string' ? body.command : undefined;
+    let args = Array.isArray(body.args) ? body.args as string[] : undefined;
     const cols = typeof body.cols === 'number' ? body.cols : undefined;
     const rows = typeof body.rows === 'number' ? body.rows : undefined;
     const cwd = typeof body.cwd === 'string' ? body.cwd : undefined;
@@ -830,6 +932,14 @@ async function handleTerminalCreate(
     const termType = typeof body.type === 'string' && ['builder', 'shell'].includes(body.type) ? body.type as 'builder' | 'shell' : null;
     const roleId = typeof body.roleId === 'string' ? body.roleId : null;
     const requestPersistence = body.persistent === true;
+
+    // Spec 1658: on Windows a client's POSIX shell (`/bin/sh -lc ...`) runs in
+    // the resolved Git Bash, never System32's WSL launcher.
+    if (isWindows() && command) {
+      const launch = windowsShellRequest(command, args ?? [], workspacePath ?? undefined);
+      command = launch.command;
+      args = launch.args;
+    }
 
     let info: PtySessionInfo | undefined;
     let persistent = false;
@@ -893,7 +1003,8 @@ async function handleTerminalCreate(
           logSessionIdentity(ctx.log, 'terminal-create', session.id, ptySession, command ?? null);
           saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
             shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null,
-            persistableCommand(ptySession) ?? command ?? null);
+            persistableCommand(ptySession) ?? command ?? null,
+            { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret });
           ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
@@ -1197,7 +1308,7 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
 
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
 
   if (!workspaceRoot) {
@@ -1274,7 +1385,7 @@ async function handleIssueView(res: http.ServerResponse, url: URL): Promise<void
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
 
   const number = url.searchParams.get('number');
@@ -1303,7 +1414,7 @@ async function handlePRView(res: http.ServerResponse, url: URL): Promise<void> {
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
 
   const number = url.searchParams.get('number');
@@ -1343,7 +1454,7 @@ async function handleIssueSearch(res: http.ServerResponse, url: URL): Promise<vo
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1422,7 +1533,7 @@ function handleWorktreeConfigView(res: http.ServerResponse, url: URL): void {
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1451,7 +1562,7 @@ function handleActivityHooksView(res: http.ServerResponse, url: URL): void {
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1486,7 +1597,7 @@ async function handleAnalytics(res: http.ServerResponse, url: URL, workspaceOver
 
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
 
   // Validate range parameter (before workspace check so fallback uses correct range)
@@ -2635,11 +2746,7 @@ async function handleCreateWorkspace(
     return;
   }
 
-  // Expand ~ to home directory
-  let expandedParent = parentPath;
-  if (expandedParent.startsWith('~')) {
-    expandedParent = expandedParent.replace('~', homedir());
-  }
+  const expandedParent = expandHomePath(parentPath);
 
   // Validate parent exists
   if (!fs.existsSync(expandedParent)) {
@@ -2701,10 +2808,7 @@ async function handleLaunchInstance(
     return;
   }
 
-  // Expand ~ to home directory
-  if (workspacePath.startsWith('~')) {
-    workspacePath = workspacePath.replace('~', homedir());
-  }
+  workspacePath = expandHomePath(workspacePath);
 
   // Reject relative paths — tower daemon CWD is unpredictable
   if (!path.isAbsolute(workspacePath)) {
@@ -3303,8 +3407,15 @@ async function handleWorkspaceShellCreate(
   try {
     const manager = getTerminalManager();
     const shellId = getNextShellId(workspacePath);
-    const shellCmd = process.env.SHELL || '/bin/bash';
-    const shellArgs: string[] = [];
+    let shellCmd = process.env.SHELL || '/bin/bash';
+    let shellArgs: string[] = [];
+    if (isWindows()) {
+      // Spec 1658, Area F: the configured `shell.shell` (Windows PowerShell by
+      // default; `bash` means Git Bash, never System32's WSL launcher).
+      const launch = windowsInteractiveShell(getResolvedCommands(workspacePath).shell, workspacePath);
+      shellCmd = launch.command;
+      shellArgs = launch.args;
+    }
 
     let shellCreated = false;
 
@@ -3356,7 +3467,8 @@ async function handleWorkspaceShellCreate(
         logSessionIdentity(ctx.log, 'shell-create', session.id, ptySession, shellCmd);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
           shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath,
-          persistableCommand(ptySession) ?? shellCmd);
+          persistableCommand(ptySession) ?? shellCmd,
+          { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret });
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -3,19 +3,22 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { run, commandExists, findAvailablePort, isProcessRunning } from '../utils/shell.js';
 
 describe('Shell Utilities', () => {
   describe('run', () => {
     it('should execute a command and return output', async () => {
-      const result = await run('echo "hello world"');
+      // `node -p` prints the same on every shell run() uses (sh, cmd.exe).
+      const result = await run('node -p "\'hello world\'"');
 
       expect(result.stdout).toBe('hello world');
       expect(result.stderr).toBe('');
     });
 
     it('should trim output', async () => {
-      const result = await run('echo "  spaces  "');
+      const result = await run('node -p "\'  spaces  \'"');
 
       expect(result.stdout).toBe('spaces');
     });
@@ -25,10 +28,10 @@ describe('Shell Utilities', () => {
     });
 
     it('should execute in specified directory', async () => {
-      const result = await run('pwd', { cwd: '/tmp' });
+      const dir = realpathSync(tmpdir());
+      const result = await run('node -p "process.cwd()"', { cwd: dir });
 
-      // On macOS, /tmp is a symlink to /private/tmp
-      expect(result.stdout).toMatch(/\/tmp$/);
+      expect(realpathSync(result.stdout)).toBe(dir);
     });
   });
 

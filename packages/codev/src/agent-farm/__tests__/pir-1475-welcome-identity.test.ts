@@ -14,6 +14,7 @@
  *     healable legacy row into one that can never resolve a profile again);
  *   - the wrapped builder launch still resolving via `.builder-start.sh`.
  */
+// spec-1658-tmp: opaque (/tmp/pir1475-ws is a workspace_path value in a seeded DB row; nothing touches the disk)
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';

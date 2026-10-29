@@ -822,8 +822,9 @@ describe('tower-instances', () => {
       return { deps, createSession };
     }
 
-    // Pin HOME so the stale-jsonl lookup (os.homedir() inside
-    // findLatestSessionId) reads our fake store, not the real user's.
+    // Pin the home dir so the session-store lookup (os.homedir() inside
+    // verifySessionOwnership) reads our fake store, not the real user's.
+    // os.homedir() reads HOME on POSIX and USERPROFILE on Windows: pin both.
     function withSetup(
       configJson: Record<string, unknown> | null,
       fn: (tmpDir: string, fakeHome: string, uuid: string) => Promise<void>,
@@ -832,6 +833,7 @@ describe('tower-instances', () => {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-929-'));
         const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-929-home-'));
         const originalHome = process.env.HOME;
+        const originalProfile = process.env.USERPROFILE;
         const uuid = 'stale-claude-uuid-1234';
         try {
           fs.mkdirSync(path.join(tmpDir, 'codev'));
@@ -844,10 +846,13 @@ describe('tower-instances', () => {
           }
           writePersonalClaudeSession(fakeHome, tmpDir, uuid);
           process.env.HOME = fakeHome;
+          process.env.USERPROFILE = fakeHome;
           await fn(tmpDir, fakeHome, uuid);
         } finally {
           if (originalHome === undefined) delete process.env.HOME;
           else process.env.HOME = originalHome;
+          if (originalProfile === undefined) delete process.env.USERPROFILE;
+          else process.env.USERPROFILE = originalProfile;
           fs.rmSync(tmpDir, { recursive: true, force: true });
           fs.rmSync(fakeHome, { recursive: true, force: true });
         }
@@ -890,6 +895,14 @@ describe('tower-instances', () => {
       },
     ));
 
+    // A resume launch reads the process census to check that the stored id is not held
+    // (reconcileArchitectSessionHolder). On Windows that is a CIM query, seconds on a
+    // cold runner (audit 1.3), past vitest's 5 s default.
+    function resumeLaunchTimeoutMs(): number {
+      if (process.platform === 'win32') return 30_000;
+      return 5_000;
+    }
+
     it('main row with a stored session id + owned jsonl → resumes that id', withSetup(
       null,
       async (tmpDir, _fakeHome, _uuid) => {
@@ -922,7 +935,7 @@ describe('tower-instances', () => {
           mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
         }
       },
-    ));
+    ), resumeLaunchTimeoutMs());
 
   });
 

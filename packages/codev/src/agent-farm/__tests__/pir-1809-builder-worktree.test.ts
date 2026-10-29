@@ -5,6 +5,7 @@
  * Runs against a real in-memory global.db (GLOBAL_SCHEMA) so the assertions are on
  * the rows Tower actually writes, not on mocked SQL strings.
  */
+// spec-1658-tmp: opaque (/tmp/sock is a shellper_socket value in seeded in-memory DB rows; prune keys on the pid, never the socket path)
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';

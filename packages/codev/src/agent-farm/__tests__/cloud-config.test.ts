@@ -217,7 +217,8 @@ describe('cloud-config', () => {
       expect(parsed).toEqual(VALID_CONFIG);
     });
 
-    it('writes config file with 0600 permissions', () => {
+    // POSIX-only assertion: checks the 0600 mode bits, which NTFS does not carry.
+    it.skipIf(process.platform === 'win32')('writes config file with 0600 permissions', () => {
       writeCloudConfig(VALID_CONFIG);
 
       const stats = statSync(CONFIG_PATH);
@@ -237,7 +238,8 @@ describe('cloud-config', () => {
       expect(existsSync(CONFIG_PATH)).toBe(true);
     });
 
-    it('enforces 0600 on pre-existing files with wrong permissions', () => {
+    // POSIX-only assertion: checks the 0644 -> 0600 mode bits, which NTFS does not carry.
+    it.skipIf(process.platform === 'win32')('enforces 0600 on pre-existing files with wrong permissions', () => {
       // Create file with world-readable permissions (0644)
       mkdirSync(AGENT_FARM_DIR, { recursive: true, mode: 0o700 });
       writeFileSync(CONFIG_PATH, '{}', { mode: 0o644 });
@@ -400,7 +402,8 @@ describe('cloud-config', () => {
       expect(id).not.toBe('not-a-valid-uuid');
     });
 
-    it('enforces 0600 permissions on existing machine-id file', () => {
+    // POSIX-only assertion: checks the 0644 -> 0600 mode bits, which NTFS does not carry.
+    it.skipIf(process.platform === 'win32')('enforces 0600 permissions on existing machine-id file', () => {
       const machineIdPath = getMachineIdPath();
       // Create with lax permissions
       mkdirSync(AGENT_FARM_DIR, { recursive: true });

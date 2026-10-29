@@ -13,6 +13,7 @@
  * carry no command. Mocks `vscode` per the established `__tests__` pattern (see
  * builders-autoreveal.test.ts).
  */
+// spec-1658-tmp: opaque (/tmp/wt is a worktreePath field in fake builder rows; only group headers render, so no builder row probes the disk)
 
 import { describe, it, expect, vi } from 'vitest';
 import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';

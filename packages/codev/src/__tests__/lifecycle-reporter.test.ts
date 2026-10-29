@@ -30,10 +30,12 @@ import {
   CODEX_HARNESS,
   OPENCODE_HARNESS,
   buildCustomHarnessProvider,
+  toShellPath,
 } from '../agent-farm/utils/harness.js';
 import { buildWorktreeGuardFiles } from '../agent-farm/utils/worktree-write-guard.js';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import { parseLifecycleEvent } from '../agent-farm/servers/agent-state/route.js';
+import { findOnHostPath } from '../lib/shell-launch.js';
 
 const KEY = 'a'.repeat(64);
 const WORKTREE = '/repo/.builders/spir-1595';
@@ -383,7 +385,15 @@ describe('lifecycle hook command', () => {
 
   it('is silent with exit 0 when node is not on PATH', async () => {
     const command = buildLifecycleHookCommand(scriptPath);
-    const result = await run('/bin/sh', ['-c', command], JSON.stringify(hook('Stop')), { ...reporterEnv(1), PATH: path.join(base, 'empty-bin') });
+    // The shell is named by absolute path because the child's PATH holds no shell. On
+    // Windows that is the Git Bash sh found on the current PATH (there is no /bin/sh).
+    let shell = '/bin/sh';
+    if (process.platform === 'win32') {
+      const found = findOnHostPath('sh');
+      expect(found, 'sh on PATH').not.toBeNull();
+      shell = found as string;
+    }
+    const result = await run(shell, ['-c', command], JSON.stringify(hook('Stop')), { ...reporterEnv(1), PATH: path.join(base, 'empty-bin') });
     expect(result).toMatchObject({ code: 0, stdout: '', stderr: '' });
   });
 
@@ -468,7 +478,8 @@ describe('ensureLifecycleReporterInstalled', () => {
     return fs.statSync(p).mode & 0o777;
   }
 
-  it('installs both files with modes 0700/0600 regardless of umask, and returns the absolute settings path', () => {
+  // POSIX-only assertion: checks the 0700/0600 mode bits and the umask, which NTFS does not carry.
+  it.skipIf(process.platform === 'win32')('installs both files with modes 0700/0600 regardless of umask, and returns the absolute settings path', () => {
     const dir = path.join(base, 'install-modes', 'hooks');
     const previous = process.umask(0o000);
     let settingsPath: string;
@@ -488,9 +499,11 @@ describe('ensureLifecycleReporterInstalled', () => {
     expect(fs.readdirSync(dir).sort()).toEqual([LIFECYCLE_REPORTER_SETTINGS_NAME, LIFECYCLE_REPORTER_SCRIPT_NAME].sort());
   });
 
-  it('rewrites only on a content change, and tightens a widened mode', () => {
-    const dir = path.join(base, 'install-rewrite');
-    const settingsPath = ensureLifecycleReporterInstalled(dir);
+  // POSIX-only assertion: checks that a widened 0644 mode is tightened back to 0600, and
+  // NTFS carries no mode bits. The rewrite-on-change half runs on every host (next test).
+  it.skipIf(process.platform === 'win32')('tightens a widened mode without rewriting the file', () => {
+    const dir = path.join(base, 'install-tighten');
+    ensureLifecycleReporterInstalled(dir);
     const script = path.join(dir, LIFECYCLE_REPORTER_SCRIPT_NAME);
     const inode = fs.statSync(script).ino;
 
@@ -498,6 +511,16 @@ describe('ensureLifecycleReporterInstalled', () => {
     ensureLifecycleReporterInstalled(dir);
     expect(fs.statSync(script).ino).toBe(inode);
     expect(mode(script)).toBe(0o600);
+  });
+
+  it('rewrites only on a content change', () => {
+    const dir = path.join(base, 'install-rewrite');
+    const settingsPath = ensureLifecycleReporterInstalled(dir);
+    const script = path.join(dir, LIFECYCLE_REPORTER_SCRIPT_NAME);
+    const inode = fs.statSync(script).ino;
+
+    ensureLifecycleReporterInstalled(dir);
+    expect(fs.statSync(script).ino).toBe(inode);
 
     fs.writeFileSync(script, 'tampered');
     ensureLifecycleReporterInstalled(dir);
@@ -532,7 +555,9 @@ describe('buildLifecycleReporterInjection capability', () => {
     const dir = path.join(base, 'resolve-claude');
     const injection = resolveLifecycleReporterInjection(CLAUDE_HARNESS, dir);
     const settingsPath = path.join(dir, LIFECYCLE_REPORTER_SETTINGS_NAME);
-    expect(injection).toEqual({ args: ['--settings', settingsPath], scriptFragment: `--settings '${settingsPath}'`, env: {} });
+    // The injection hands bash a forward-slash path (identical to settingsPath on POSIX).
+    const shellPath = toShellPath(settingsPath);
+    expect(injection).toEqual({ args: ['--settings', shellPath], scriptFragment: `--settings '${shellPath}'`, env: {} });
     expect(fs.existsSync(settingsPath)).toBe(true);
   });
 

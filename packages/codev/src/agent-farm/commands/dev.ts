@@ -9,8 +9,9 @@
  * - Uses the same ports/URLs as main by design — preserves OAuth
  *   callbacks, CORS allowlists, cookie scoping, webhook URLs.
  * - Cleanup is process-based: Tower's PTY kill signals the entire
- *   process group (SIGTERM → SIGKILL after 5s), the OS reclaims ports
- *   as a consequence. Codev never touches ports directly.
+ *   process group (SIGTERM → SIGKILL after 5s; the whole process tree on
+ *   Windows), the OS reclaims ports as a consequence. Codev never touches
+ *   ports directly.
  */
 
 import { createInterface } from 'node:readline';
@@ -19,6 +20,8 @@ import { getConfig, getWorktreeConfig } from '../utils/index.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { createPtySession } from './spawn-worktree.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
+import { isWindows } from '../../lib/platform.js';
+import { gitBashCommand, type Launch } from '../../lib/shell-launch.js';
 
 export interface DevOptions {
   builderId?: string;
@@ -97,10 +100,11 @@ export async function dev(options: DevOptions): Promise<void> {
   }
 
   logger.info(`Starting dev server for ${builder.id} in ${builder.worktree}...`);
+  const launch = devCommandLaunch(devCommand, config.workspaceRoot);
   const { terminalId } = await createPtySession(
     config,
-    '/bin/sh',
-    ['-lc', devCommand],
+    launch.command,
+    launch.args,
     builder.worktree,
     {
       workspacePath: config.workspaceRoot,
@@ -113,6 +117,19 @@ export async function dev(options: DevOptions): Promise<void> {
   logger.blank();
   logger.success(`Dev server spawned for ${builder.id}`);
   logger.kv('Terminal', client.getTerminalWsUrl(terminalId));
+}
+
+/**
+ * How the dev PTY runs `devCommand`: `/bin/sh -lc` on POSIX. On native Windows
+ * (Spec 1658) it is the resolved Git Bash with `-c`, not a login shell: Git
+ * Bash's login profile changes to `$HOME`, which would lose the worktree cwd.
+ * Teardown is Tower's PTY kill, which takes the whole tree on Windows.
+ */
+export function devCommandLaunch(devCommand: string, workspaceRoot?: string): Launch {
+  if (isWindows()) {
+    return gitBashCommand(devCommand, workspaceRoot);
+  }
+  return { command: '/bin/sh', args: ['-lc', devCommand] };
 }
 
 interface DevTerminal {

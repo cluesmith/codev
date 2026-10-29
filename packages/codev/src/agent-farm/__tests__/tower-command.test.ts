@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+// spec-1658-tmp: opaque (every /tmp is a mocked config/tower-client path; the test only calls shouldWaitForTowerStart, nothing touches the disk)
+
 vi.mock('../utils/config.js', () => ({
   getConfig: vi.fn(() => ({ serversDir: '/tmp/codev-test-servers' })),
 }));

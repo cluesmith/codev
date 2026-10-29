@@ -9,14 +9,20 @@
  * Server discovery runs here, in the user's shell environment, because Tower's
  * daemon `PATH` may predate the server install or lack the npm global bin.
  * `afx ide install` runs npm here too: Tower never exposes an endpoint that runs it.
+ *
+ * Native Windows (Spec 1658 Phase 9): the `PATH` lookup is the shared
+ * executable resolver (`PATHEXT`, so npm's `codev-ide-server.cmd` shim is
+ * found), and npm itself (`npm.cmd`) runs through the shim resolver.
  */
 
 import http from 'node:http';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { logger } from '../utils/logger.js';
+import { isWindows } from '../../lib/platform.js';
+import { findOnHostPath, spawnableOnHost, spawnOnHost } from '../../lib/shell-launch.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import {
   IDE_SERVER_UPGRADE_COMMAND,
@@ -107,8 +113,14 @@ function isExecutableFile(path: string): boolean {
   }
 }
 
-/** First executable `name` in a `PATH` string, scanned directly (no `which` subprocess). */
-function findOnPath(name: string, pathValue: string): string | null {
+/**
+ * First executable `name` on the environment's `PATH`, scanned directly (no
+ * `which` subprocess). Windows: the shared resolver, which applies `PATHEXT`
+ * and reads the `Path` key case-insensitively.
+ */
+function findOnPath(name: string, env: NodeJS.ProcessEnv): string | null {
+  if (isWindows()) return findOnHostPath(name, env);
+  const pathValue = env.PATH ?? '';
   for (const entry of pathValue.split(delimiter)) {
     if (entry === '') continue;
     const candidate = resolve(entry, name);
@@ -139,7 +151,14 @@ function packageServerBin(packageDir: string): string | null {
 /** `npm root -g` in the given environment, or null when npm is missing, fails or times out. */
 function npmGlobalRoot(env: NodeJS.ProcessEnv): Promise<string | null> {
   return new Promise((resolvePromise) => {
-    execFile('npm', ['root', '-g'], { env, timeout: NPM_ROOT_TIMEOUT_MS }, (error, stdout) => {
+    const npm = spawnableOnHost('npm', ['root', '-g'], env);
+    const options = {
+      env,
+      timeout: NPM_ROOT_TIMEOUT_MS,
+      windowsHide: true,
+      windowsVerbatimArguments: npm.windowsVerbatimArguments,
+    };
+    execFile(npm.command, npm.args, options, (error, stdout) => {
       const root = String(stdout).trim();
       if (error || root === '') {
         resolvePromise(null);
@@ -176,7 +195,7 @@ export async function resolveIdeServerPath(opts: ResolveIdeServerPathOptions = {
   }
 
   const env = opts.env ?? process.env;
-  const onPath = findOnPath(IDE_SERVER_BIN, env.PATH ?? '');
+  const onPath = findOnPath(IDE_SERVER_BIN, env);
   if (onPath !== null) return onPath;
 
   const codevRoot = opts.codevRoot ?? CODEV_PACKAGE_ROOT;
@@ -302,7 +321,7 @@ export async function ideStatus(): Promise<void> {
 /** Run `npm i -g @cluesmith/codev-ide` with npm's output on this terminal; resolves with its exit status. */
 function runNpmInstall(): Promise<number> {
   return new Promise((resolvePromise) => {
-    const child = spawn('npm', ['i', '-g', IDE_SERVER_PACKAGE], { stdio: 'inherit' });
+    const child = spawnOnHost('npm', ['i', '-g', IDE_SERVER_PACKAGE], { stdio: 'inherit' });
     child.on('error', (error) => {
       logger.error(`Could not run npm: ${error.message}`);
       resolvePromise(1);

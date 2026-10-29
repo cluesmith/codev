@@ -37,6 +37,9 @@ import { stripTerminalReplies, terminalReplyMatches, escapeBytes } from './termi
 const LOG_INPUT_SIGNAL = process.env.AF_LOG_INPUT_SIGNAL === '1';
 import type { IShellperClient } from './shellper-client.js';
 import { isDeliberateExit } from './shellper-protocol.js';
+import { killSessionTree } from '../lib/process-tree.js';
+import { ptyCommand } from '../lib/pty-command.js';
+import { explainNativeLoadFailure, withNativeLoadExplanation } from '../lib/native-deps.js';
 
 /**
  * Terminal delivery-signal bus (Spec 1313, Phase 5).
@@ -255,8 +258,14 @@ export class PtySession extends EventEmitter {
 
   /** Spawn the PTY process. Must be called after construction. */
   async spawn(): Promise<void> {
-    // Dynamic import to avoid hard dependency at module level
-    const nodePty = await import('node-pty');
+    // Dynamic import to avoid hard dependency at module level. A binding that cannot
+    // load on Windows surfaces with the supported-versions message (Spec 1658).
+    let nodePty: typeof import('node-pty');
+    try {
+      nodePty = await import('node-pty');
+    } catch (err) {
+      throw explainNativeLoadFailure(err);
+    }
 
     // Ensure log directory exists
     if (this.diskLogEnabled) {
@@ -271,13 +280,15 @@ export class PtySession extends EventEmitter {
     this.cols = this.requestedCols;
     this.rows = this.requestedRows;
     this.resizePending = false;
-    this.pty = nodePty.spawn(this.config.command, this.config.args, {
+    // Spec 1658: on Windows a bare or `.cmd` command becomes one ConPTY can start.
+    const launch = ptyCommand(this.config.command, this.config.args, this.config.env);
+    this.pty = withNativeLoadExplanation(() => nodePty.spawn(launch.file, launch.args, {
       name: 'xterm-256color',
       cols: this.cols,
       rows: this.rows,
       cwd: this.config.cwd,
       env: this.config.env,
-    });
+    }));
 
     this.pty.onData((data: string) => {
       this.onPtyData(data);
@@ -804,15 +815,11 @@ export class PtySession extends EventEmitter {
       return;
     }
     if (this.pty && this.status === 'running') {
-      try {
-        // Kill process group to prevent orphans
-        process.kill(-this.pty.pid, 'SIGTERM');
-        setTimeout(() => {
-          try { process.kill(-this.pty!.pid, 'SIGKILL'); } catch { /* already dead */ }
-        }, 5000);
-      } catch {
-        // Process already exited
-      }
+      // Kill the whole session tree to prevent orphans (SIGTERM, then SIGKILL
+      // after 5s on POSIX; a snapshot-backed tree kill on Windows).
+      killSessionTree(this.pty.pid, { escalateAfterMs: 5000 }).catch(() => {
+        // Teardown incomplete; the orphan sweep is the backstop
+      });
     }
     this.cleanup();
   }

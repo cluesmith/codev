@@ -126,6 +126,8 @@ export async function startDevForTarget(
     await new Promise((r) => setTimeout(r, SWAP_GRACE_MS));
   }
 
+  // On a Windows Tower this POSIX shell request runs in the resolved Git Bash
+  // (Tower maps it in handleTerminalCreate, Spec 1658), so no local resolver is needed.
   const terminal = await client.createTerminal({
     command: '/bin/sh',
     args: ['-lc', devCommand],

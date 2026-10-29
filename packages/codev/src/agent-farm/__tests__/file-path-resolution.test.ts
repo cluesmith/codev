@@ -49,10 +49,15 @@ describe('File path resolution (Spec 0101)', () => {
   // Use a temp directory as a stand-in for workspace root
   const tmpBase = os.tmpdir();
   let workspacePath: string;
+  // A real file outside the workspace (a sibling temp dir), standing in for a
+  // system file like `/etc/hosts` on every host, including Windows.
+  let outsideFile: string;
 
   // Create temp workspace structure before tests
   const setup = () => {
     workspacePath = fs.mkdtempSync(path.join(tmpBase, 'path-resolution-test-'));
+    outsideFile = path.join(fs.mkdtempSync(path.join(tmpBase, 'path-resolution-outside-')), 'hosts');
+    fs.writeFileSync(outsideFile, '127.0.0.1 localhost\n');
     // Create some test files and dirs
     fs.mkdirSync(path.join(workspacePath, 'src', 'lib'), { recursive: true });
     fs.mkdirSync(path.join(workspacePath, '.builders', '0099', 'src'), { recursive: true });
@@ -84,9 +89,9 @@ describe('File path resolution (Spec 0101)', () => {
 
   describe('paths outside workspace (bugfix #502)', () => {
     it('resolves absolute paths outside workspace without rejection', () => {
-      // /etc/hosts exists on macOS/Linux — resolution should succeed
-      const result = resolveFilePath('/etc/hosts', workspacePath);
-      expect(result).toBe(fs.realpathSync('/etc/hosts'));
+      // An existing file outside the workspace: resolution should succeed
+      const result = resolveFilePath(outsideFile, workspacePath);
+      expect(result).toBe(fs.realpathSync(outsideFile));
     });
 
     it('resolves relative path traversal to canonical path', () => {
@@ -123,10 +128,10 @@ describe('File path resolution (Spec 0101)', () => {
     it('resolves symlinks pointing outside workspace (bugfix #502)', () => {
       const linkPath = path.join(workspacePath, 'src', 'escape-link.ts');
       try {
-        fs.symlinkSync('/etc/hosts', linkPath);
+        fs.symlinkSync(outsideFile, linkPath);
         const result = resolveFilePath('src/escape-link.ts', workspacePath);
         // Should resolve to the target without rejection
-        expect(result).toBe(fs.realpathSync('/etc/hosts'));
+        expect(result).toBe(fs.realpathSync(outsideFile));
       } finally {
         try { fs.unlinkSync(linkPath); } catch { /* cleanup */ }
       }

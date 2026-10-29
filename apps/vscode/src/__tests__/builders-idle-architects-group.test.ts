@@ -20,6 +20,7 @@
  *
  * Mocks `vscode` per the established `__tests__` pattern.
  */
+// spec-1658-tmp: opaque (/tmp/wt is a worktreePath field in fake builder rows; only group and architect headers render, so no builder row probes the disk)
 
 import { describe, it, expect, vi } from 'vitest';
 import type * as vscode from 'vscode';

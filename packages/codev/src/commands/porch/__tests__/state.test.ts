@@ -75,12 +75,12 @@ describe('porch state management', () => {
   describe('path utilities', () => {
     it('should return correct project directory', () => {
       const dir = getProjectDir('/root', '0074', 'test-feature');
-      expect(dir).toBe('/root/codev/projects/0074-test-feature');
+      expect(dir).toBe(path.join('/root', 'codev', 'projects', '0074-test-feature'));
     });
 
     it('should return correct status path', () => {
       const statusPath = getStatusPath('/root', '0074', 'test-feature');
-      expect(statusPath).toBe('/root/codev/projects/0074-test-feature/status.yaml');
+      expect(statusPath).toBe(path.join('/root', 'codev', 'projects', '0074-test-feature', 'status.yaml'));
     });
   });
 
@@ -297,8 +297,8 @@ updated_at: "${state.updated_at}"
       const result = findStatusPath(testDir, 'bugfix-622');
 
       expect(result).not.toBeNull();
-      expect(result).toContain('.builders/bugfix-622-fix-porch');
-      expect(result).toContain('bugfix-622-bug-porch-status/status.yaml');
+      expect(result).toContain(path.join('.builders', 'bugfix-622-fix-porch'));
+      expect(result).toContain(path.join('bugfix-622-bug-porch-status', 'status.yaml'));
     });
 
     it('should find numeric project in .builders worktree (bugfix #622)', () => {
@@ -313,8 +313,8 @@ updated_at: "${state.updated_at}"
       const result = findStatusPath(testDir, '0042');
 
       expect(result).not.toBeNull();
-      expect(result).toContain('.builders/spir-0042-feature');
-      expect(result).toContain('0042-some-feature/status.yaml');
+      expect(result).toContain(path.join('.builders', 'spir-0042-feature'));
+      expect(result).toContain(path.join('0042-some-feature', 'status.yaml'));
     });
 
     it('should prefer .builders worktrees over local codev/projects (spec #653)', () => {
@@ -635,12 +635,12 @@ updated_at: "${state.updated_at}"
   describe('getProjectDir (bugfix #365 regression)', () => {
     it('should not double the ID prefix', () => {
       const dir = getProjectDir('/root', '364', '0364-terminal-refresh-button');
-      expect(dir).toBe('/root/codev/projects/364-terminal-refresh-button');
+      expect(dir).toBe(path.join('/root', 'codev', 'projects', '364-terminal-refresh-button'));
     });
 
     it('should handle title without ID prefix', () => {
       const dir = getProjectDir('/root', '364', 'terminal-refresh-button');
-      expect(dir).toBe('/root/codev/projects/364-terminal-refresh-button');
+      expect(dir).toBe(path.join('/root', 'codev', 'projects', '364-terminal-refresh-button'));
     });
   });
 

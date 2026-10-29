@@ -11,6 +11,7 @@ import { resolve, dirname } from 'node:path';
 import { AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { GLOBAL_SCHEMA } from './schema.js';
 import { GLOBAL_CURRENT_VERSION, runGlobalMigrations } from './migrations.js';
+import { openDatabase } from '../../lib/sqlite.js';
 
 // Singleton instance. Issue #1118: there is now a single user-global database
 // (~/.agent-farm/global.db). getDb() and getGlobalDb() both return it; the
@@ -137,8 +138,9 @@ function ensureGlobalDatabase(): Database.Database {
   // Ensure directory exists
   ensureDir(globalDir);
 
-  // Create/open database
-  const db = new Database(dbPath);
+  // Create/open database. This is the first native-binding load on most
+  // paths, so a load failure names the supported Windows Node versions.
+  const db = openDatabase(dbPath);
   configurePragmas(db);
 
   // Detect fresh vs existing database by checking if content tables exist.

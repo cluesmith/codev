@@ -20,6 +20,8 @@
 
 import { basename } from 'node:path';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
+import { rethrowIfNativeLoadFailure } from '../../lib/native-deps.js';
 import { detectCurrentBuilderId, detectWorkspaceRoot, BuilderIdResolutionError } from './send.js';
 import { lookupBuilderSpawningArchitect } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
@@ -58,8 +60,9 @@ export class WhoamiError extends Error {
  */
 function openReadonlyGlobalDb(): Database.Database | null {
   try {
-    return new Database(getGlobalDbPath(), { readonly: true });
-  } catch {
+    return openDatabase(getGlobalDbPath(), { readonly: true });
+  } catch (err) {
+    rethrowIfNativeLoadFailure(err);
     return null;
   }
 }

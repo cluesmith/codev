@@ -6,6 +6,8 @@
  * claude the user started by hand) is classified foreign and left untouched.
  */
 
+// spec-1658-tmp: opaque (/tmp/sock/s.sock is a socketPath inside a fake ps cmdline string; nothing touches the disk)
+
 import { describe, it, expect, vi } from 'vitest';
 import {
   sessionIdNeedles,
@@ -130,13 +132,13 @@ describe('classifyArchitectSessionHolder (Issue #1224)', () => {
 });
 
 describe('findOwnArchitectShellpers (Issue #1224)', () => {
-  it('finds our shellpers by identity regardless of the session they hold', () => {
+  it('finds our shellpers by identity regardless of the session they hold', async () => {
     const list = (): ProcessEntry[] => [
       { pid: 61274, cmdline: shellperCmdline({ sessionId: 'aaa', architectName: 'C', cwd: WS }) },
       { pid: 99, cmdline: shellperCmdline({ sessionId: 'bbb', architectName: 'other', cwd: WS }) },
       { pid: 12, cmdline: claudeChildCmdline() },
     ];
-    const pids = findOwnArchitectShellpers({ identity: { workspacePath: WS, architectName: 'C' }, list });
+    const pids = await findOwnArchitectShellpers({ identity: { workspacePath: WS, architectName: 'C' }, list });
     expect(pids).toEqual([61274]);
   });
 });
@@ -192,6 +194,49 @@ describe('reapShellpers (Issue #1224)', () => {
     expect(kill).toHaveBeenCalledWith(20, 'SIGKILL');
     // It kept polling after SIGKILL rather than returning immediately.
     expect(waits.length).toBeGreaterThan(3);
+  });
+});
+
+describe('reapShellpers with an asynchronous teardown (Spec 1658)', () => {
+  it('waits for each teardown to finish before polling for death', async () => {
+    const order: string[] = [];
+    const kill = vi.fn(async (pid: number, signal: NodeJS.Signals) => {
+      await new Promise((r) => setTimeout(r, 20));
+      order.push(`killed ${pid} ${signal}`);
+    });
+    const isAlive = vi.fn((pid: number) => {
+      order.push(`probe ${pid}`);
+      return false;
+    });
+    await reapShellpers([10, 20], { kill, isAlive, wait: async () => {} });
+    expect(order.slice(0, 2).sort()).toEqual(['killed 10 SIGTERM', 'killed 20 SIGTERM']);
+    expect(order.slice(2).every((step) => step.startsWith('probe'))).toBe(true);
+  });
+
+  it('still kills and polls every pid when one teardown fails, then reports the failure', async () => {
+    const kill = vi.fn(async (pid: number) => {
+      if (pid === 10) throw new Error('process census failed');
+    });
+    const isAlive = vi.fn(() => false);
+    await expect(reapShellpers([10, 20], { kill, isAlive, wait: async () => {} }))
+      .rejects.toThrow(/teardown incomplete: pid 10: process census failed/);
+    expect(kill).toHaveBeenCalledWith(20, 'SIGTERM');
+    expect(isAlive).toHaveBeenCalled();
+  });
+});
+
+describe('reconcileArchitectSessionHolder when the reap fails (Spec 1658)', () => {
+  it('logs it and mints fresh instead of resuming a session that may still be held', async () => {
+    const list = (): ProcessEntry[] => [
+      { pid: 61274, cmdline: shellperCmdline({ sessionId: SID, architectName: 'main', cwd: WS }) },
+    ];
+    const reap = vi.fn(async () => {
+      throw new Error('shellper teardown incomplete: pid 61274: process census failed');
+    });
+    const log = vi.fn();
+    const r = await reconcileArchitectSessionHolder({ sessionId: SID, identity: { workspacePath: WS, architectName: 'main' }, list, reap, log });
+    expect(r).toEqual({ foreignHolder: true, reclaimedPids: [] });
+    expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('could not be reclaimed'));
   });
 });
 

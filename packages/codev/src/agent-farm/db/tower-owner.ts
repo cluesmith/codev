@@ -28,6 +28,8 @@
  */
 
 import http from 'node:http';
+import { isWindows } from '../../lib/platform.js';
+import { WINDOWS_CENSUS_TIMEOUT_MS } from '../servers/process-census.js';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -154,8 +156,17 @@ export type HealthProbe = 'tower' | 'gone' | 'unreachable';
  * "no Tower here", failing OPEN on the one guard that prevents data loss. Only
  * paid on the conflict path (a live pid on a different port), so it costs nothing
  * on the common restart.
+ *
+ * On Windows the census behind `/health` is a PowerShell CIM query that takes up
+ * to ~4.3s cold (audit 1.3) and is bounded by its own timeout, so the budget
+ * covers that timeout plus margin (Spec 1658).
  */
-export function probeTowerHealth(host: string, port: number, timeoutMs = 6000): Promise<HealthProbe> {
+export function defaultHealthProbeBudgetMs(): number {
+  if (isWindows()) return WINDOWS_CENSUS_TIMEOUT_MS + 2000;
+  return 6000;
+}
+
+export function probeTowerHealth(host: string, port: number, timeoutMs = defaultHealthProbeBudgetMs()): Promise<HealthProbe> {
   return new Promise<HealthProbe>((resolve) => {
     const req = http.request(
       { hostname: host, port, path: '/health', method: 'GET', timeout: timeoutMs },

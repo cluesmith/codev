@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { basename, join } from 'node:path';
 import {
   runReset,
   ResetPreflightError,
@@ -253,7 +254,7 @@ describe('Spec 1273 — reset orchestrator: happy path', () => {
     const result = await runReset(baseOptions({ fs, terminal }) as never);
 
     expect(fs.writes).toHaveLength(1);
-    expect(fs.writes[0].path).toBe(`${WORKTREE}/.builder-reorient.md`);
+    expect(fs.writes[0].path).toBe(join(WORKTREE, '.builder-reorient.md'));
     expect(fs.writes[0].content).toContain(SPAWN_PROMPT);
     expect(result.outcome).toBe('completed');
   });
@@ -867,7 +868,7 @@ describe('Spec 1273 — reset artifacts do not make a worktree look dirty', () =
     await runReset(baseOptions({ fs }) as never);
 
     for (const write of fs.writes) {
-      expect(write.path.split('/').pop()).toMatch(/^\.builder-/);
+      expect(basename(write.path)).toMatch(/^\.builder-/);
     }
   });
 });

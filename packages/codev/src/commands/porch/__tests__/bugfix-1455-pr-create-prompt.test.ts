@@ -108,9 +108,11 @@ describe('#1455 — porch substitutes {{pr_create_command}}', () => {
    */
   it('an inline override receives the title and body the prompt sets', async () => {
     const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..', '..', '..');
-    fs.copyFileSync(
-      path.join(repoRoot, 'codev/protocols/bugfix/prompts/pr.md'),
+    // Copied as LF: a CRLF checkout (core.autocrlf on Windows) would hide the fence from the
+    // pattern below and leave a carriage return on every line the shell runs.
+    fs.writeFileSync(
       path.join(tmp, 'codev', 'protocols', 'bugfix', 'prompts', 'pr.md'),
+      fs.readFileSync(path.join(repoRoot, 'codev/protocols/bugfix/prompts/pr.md'), 'utf-8').replace(/\r\n/g, '\n'),
     );
     writeForgeConfig({
       'pr-create': `sh -c 'printf "%s" "$1" > title.txt; printf "%s" "$2" > body.txt' _ "$CODEV_PR_TITLE" "$CODEV_PR_BODY"`,

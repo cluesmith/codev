@@ -18,7 +18,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildLaunchLoop } from '../commands/spawn-worktree.js';
+import { buildLaunchLoop, builderScriptLaunch } from '../commands/spawn-worktree.js';
+import { toMsysPath } from '../../lib/msys-path.js';
 import { harnessFromLaunchScript } from '../commands/reset/context.js';
 
 let dir: string;
@@ -53,6 +54,12 @@ exit "\${code:-0}"
   chmodSync(agent, '755');
   writeFileSync(join(dir, 'count'), '0\n');
   writeFileSync(join(dir, 'codes'), exitCodes.join('\n') + '\n');
+  // The tests splice the path into the loop unquoted, as a harness command sits
+  // there. Under Git Bash an unquoted Windows path loses its backslashes, so on
+  // Windows it goes in the POSIX form the launch script's own commands use.
+  if (process.platform === 'win32') {
+    return toMsysPath(agent);
+  }
   return agent;
 }
 
@@ -65,7 +72,13 @@ function runLoop(loop: string, enterPresses: number): string[] {
   const script = join(dir, 'start.sh');
   writeFileSync(script, `#!/bin/bash\ncd '${dir}'\n${loop}`);
   chmodSync(script, '755');
-  execFileSync('bash', [script], {
+  // Run it the way Tower does on Windows (the resolved Git Bash, never a bare `bash`
+  // that may be the System32 WSL launcher); POSIX keeps the PATH `bash`.
+  let launch = { command: 'bash', args: [script] };
+  if (process.platform === 'win32') {
+    launch = builderScriptLaunch(script);
+  }
+  execFileSync(launch.command, launch.args, {
     input: '\n'.repeat(enterPresses),
     stdio: ['pipe', 'ignore', 'ignore'],
     timeout: 30_000,

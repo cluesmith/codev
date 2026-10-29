@@ -1,6 +1,6 @@
 /**
- * Shellper wire protocol: binary frame encoding/decoding for Unix socket
- * communication between Tower and shellper processes.
+ * Shellper wire protocol: binary frame encoding/decoding for the socket (POSIX)
+ * or named pipe (Windows) between Tower and shellper processes.
  *
  * Frame format: [1-byte type] [4-byte big-endian length] [payload]
  *
@@ -68,6 +68,13 @@ export interface ExitMessage {
 export interface HelloMessage {
   version: number;
   clientType: 'tower' | 'terminal';
+  /**
+   * Per-session secret (Spec 1658), sent only to a Windows shellper. Other local
+   * users can open a named pipe by name, so a Windows shellper writes nothing to
+   * a connection and acts on none of its frames until a HELLO carries this. POSIX
+   * HELLO frames never include it: the owner-only socket is the access control.
+   */
+  secret?: string;
 }
 
 export interface WelcomeMessage {
@@ -129,6 +136,16 @@ export interface WelcomeMessage {
   command?: string;
   /** argv[1..] of the spawned PTY — paired with {@link WelcomeMessage.command}. */
   args?: string[];
+  /**
+   * The shellper's own PID and session id (Spec 1658), sent only by a Windows
+   * shellper, and only after an authenticated HELLO. `pid` above is the PTY
+   * child, not the shellper. On Windows these two fields are the reconnect
+   * identity check: Tower compares them with its DB row instead of comparing
+   * process start times. POSIX WELCOME frames never include them.
+   */
+  shellperPid?: number;
+  /** The shellper session id, paired with {@link WelcomeMessage.shellperPid}. */
+  sessionId?: string;
 }
 
 export interface SpawnMessage {

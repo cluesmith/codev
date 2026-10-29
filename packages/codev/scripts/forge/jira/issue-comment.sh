@@ -20,4 +20,4 @@ BODY_FILE="$(mktemp)"
 trap 'rm -f "${BODY_FILE:?}"' EXIT
 printf '%s\n' "$CODEV_COMMENT_BODY" > "$BODY_FILE"
 
-acli jira workitem comment create --key "$CODEV_ISSUE_ID" --body-file "$BODY_FILE" >/dev/null
+acli jira workitem comment create --key "$CODEV_ISSUE_ID" --body-file "$(native_path "$BODY_FILE")" >/dev/null

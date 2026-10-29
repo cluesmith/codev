@@ -13,6 +13,7 @@ import { loadConfig } from '../../lib/config.js';
 import type { CodevConfig } from '../../lib/config.js';
 import { resolveHarness, RetiredHarnessError, type HarnessProvider, type CustomHarnessConfig } from './harness.js';
 import { logger } from './logger.js';
+import { defaultInteractiveShell } from '../../lib/platform.js';
 import type { ResolvedWorktreeConfig, WorktreeDevUrl, ResolvedActivityHooks, ActivityHook, ActivityEvent } from '@cluesmith/codev-types';
 
 // Re-export so existing internal callers that import the resolved types
@@ -23,11 +24,11 @@ export type { ResolvedWorktreeConfig, WorktreeDevUrl };
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Default commands
+// Default commands. The interactive shell default is per host (Spec 1658):
+// `defaultInteractiveShell()` gives `bash`, or Windows PowerShell on Windows.
 const DEFAULT_COMMANDS = {
   architect: 'claude',
   builder: 'claude',
-  shell: 'bash',
 };
 
 // CLI overrides (set via setCliOverrides)
@@ -62,6 +63,11 @@ export function getMainRepoFromWorktree(dir: string): string | null {
   }
 }
 
+/** True at the top of a path walk: dirname() no longer moves. */
+function isFilesystemRoot(dir: string): boolean {
+  return dirname(dir) === dir;
+}
+
 /**
  * Find the workspace root by looking for codev/ directory.
  *
@@ -80,7 +86,9 @@ function findWorkspaceRoot(startDir: string = process.cwd()): string {
     // We're in a git worktree. Find the worktree root by walking up to
     // the .git file (worktrees have a .git file, not a directory).
     let dir = startDir;
-    while (dir !== '/') {
+    // Stop at the filesystem root: `/` on POSIX, a drive root such as `C:\` on
+    // Windows (where a `!== '/'` sentinel never matches and the walk never ends).
+    while (!isFilesystemRoot(dir)) {
       if (existsSync(resolve(dir, '.git'))) {
         // Found the worktree root. If it has its own codev/, use it
         // instead of resolving to the main repo.
@@ -100,7 +108,7 @@ function findWorkspaceRoot(startDir: string = process.cwd()): string {
 
   // Not in a worktree: walk up looking for codev/ or .git
   let dir = startDir;
-  while (dir !== '/') {
+  while (!isFilesystemRoot(dir)) {
     if (existsSync(resolve(dir, 'codev'))) {
       return dir;
     }
@@ -244,7 +252,7 @@ export function getResolvedCommands(workspaceRoot?: string): ResolvedCommands {
     builder: cliOverrides.builder ||
              resolveCommand(userConfig?.shell?.builder, DEFAULT_COMMANDS.builder),
     shell: cliOverrides.shell ||
-           resolveCommand(userConfig?.shell?.shell, DEFAULT_COMMANDS.shell),
+           resolveCommand(userConfig?.shell?.shell, defaultInteractiveShell()),
   };
 }
 

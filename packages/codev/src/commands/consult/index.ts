@@ -9,7 +9,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn, execSync, execFileSync } from 'node:child_process';
+import { spawnSync, execSync, execFileSync } from 'node:child_process';
 import { tmpdir, homedir } from 'node:os';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
@@ -42,6 +42,9 @@ import {
   appendTreeChangeWarningToOutput,
 } from './tree-tripwire.js';
 import { ISSUE_KEY_SOURCE } from '../../lib/issue-id.js';
+import { isWindows } from '../../lib/platform.js';
+import { containsBuildersSegment } from '../../agent-farm/utils/builder-worktree-identity.js';
+import { findOnHostPath, spawnableOnHost, spawnOnHost } from '../../lib/shell-launch.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -294,7 +297,7 @@ function findPlanContent(workspaceRoot: string, id: string, resolver?: ArtifactR
  * Check if running in a builder worktree
  */
 function isBuilderContext(): boolean {
-  return process.cwd().includes('/.builders/');
+  return containsBuildersSegment(process.cwd());
 }
 
 interface BuilderProjectState {
@@ -334,7 +337,11 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): Buil
     }
   } else if (projectDirs.length > 1) {
     // Multiple project dirs — try to disambiguate from worktree directory name
-    const cwd = process.cwd();
+    let cwd = process.cwd();
+    if (isWindows()) {
+      // The matchers below are written against '/' separators.
+      cwd = cwd.replace(/\\/g, '/');
+    }
     // Tracker-key worktrees (#1740): .builders/pir-ENG-123[-slug]
     const keyMatch = cwd.match(new RegExp(`\\.builders/[a-z]+-(${ISSUE_KEY_SOURCE})(?:-|/|$)`, 'i'));
     const builderMatch = cwd.match(/\.builders\/[^/]*?-?(\d+)-([^/]+)/);
@@ -428,6 +435,9 @@ function logQuery(workspaceRoot: string, model: string, query: string, duration?
  * Check if a command exists
  */
 function commandExists(cmd: string): boolean {
+  if (isWindows()) {
+    return findOnHostPath(cmd) !== null;
+  }
   try {
     execSync(`which ${cmd}`, { stdio: 'pipe' });
     return true;
@@ -970,6 +980,17 @@ export function isRealAgyCli(p: string): boolean {
  * candidate so we only run a binary proven to be the CLI.
  */
 export function agyRespondsToVersion(bin: string): boolean {
+  if (isWindows()) {
+    const probe = spawnableOnHost(bin, ['--version']);
+    const result = spawnSync(probe.command, probe.args, {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+      windowsVerbatimArguments: probe.windowsVerbatimArguments,
+    });
+    return result.status === 0 && typeof result.stdout === 'string' && result.stdout.trim().length > 0;
+  }
   try {
     const out = execSync(`"${bin}" --version 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
     return out.length > 0;
@@ -997,6 +1018,11 @@ export function resolveAgyBin(): string | null {
 
   // A bare PATH `agy` is untrusted: require it to NOT be the IDE (realpath) AND
   // to behave like the headless CLI (`--version`) before we'll run it.
+  if (isWindows()) {
+    const found = findOnHostPath('agy');
+    if (found && isRealAgyCli(found) && agyRespondsToVersion(found)) return found;
+    return null;
+  }
   try {
     const found = execSync('command -v agy 2>/dev/null', { encoding: 'utf-8' }).trim();
     if (found && isRealAgyCli(found) && agyRespondsToVersion(found)) return found;
@@ -1173,7 +1199,7 @@ async function runAgyConsultation(
   };
 
   return new Promise<void>((resolve, reject) => {
-    const proc = spawn(bin, args, {
+    const proc = spawnOnHost(bin, args, {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -1513,7 +1539,7 @@ async function dispatchConsultation(
   const startTime = Date.now();
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd[0], cmd.slice(1), {
+    const proc = spawnOnHost(cmd[0], cmd.slice(1), {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'inherit'],
     });

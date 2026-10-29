@@ -17,6 +17,8 @@
 
 import { join } from 'node:path';
 import { normalizeWorkspacePath } from './workspace-path.js';
+import { lastPathSegment } from '../../lib/host-paths.js';
+import { isWindows } from '../../lib/platform.js';
 
 /** A builder worktree path split into its owning workspace and directory name. */
 export interface BuilderWorktreeRef {
@@ -33,12 +35,29 @@ export interface BuilderWorktreeRow {
 /**
  * Split `path` at its last `/.builders/<dir>` segment, or `null` when the path
  * is not inside a builder worktree. Greedy `.+` so a nested worktree resolves
- * the INNER builder.
+ * the INNER builder. On Windows `\` is a separator too, so a native path such as
+ * `C:\repo\.builders\bugfix-42` splits the same way.
  */
 export function parseBuilderWorktreePath(path: string): BuilderWorktreeRef | null {
-  const match = path.match(/^(.+)\/\.builders\/([^/]+)/);
+  let match: RegExpMatchArray | null;
+  if (isWindows()) {
+    match = path.match(/^(.+)[\\/]\.builders[\\/]([^\\/]+)/);
+  } else {
+    match = path.match(/^(.+)\/\.builders\/([^/]+)/);
+  }
   if (!match) return null;
   return { workspacePath: match[1], worktreeDirName: match[2] };
+}
+
+/**
+ * Whether `path` contains a `/.builders/` segment, i.e. names a builder worktree
+ * or something inside one. On Windows `\` counts as a separator too.
+ */
+export function containsBuildersSegment(path: string): boolean {
+  if (isWindows()) {
+    return /[\\/]\.builders[\\/]/.test(path);
+  }
+  return path.includes('/.builders/');
 }
 
 /**
@@ -53,5 +72,5 @@ export function matchBuilderRow<T extends BuilderWorktreeRow>(
   const canonicalWorktree = normalizeWorkspacePath(join(ref.workspacePath, '.builders', ref.worktreeDirName));
   const exact = rows.find(r => normalizeWorkspacePath(r.worktree) === canonicalWorktree);
   if (exact) return exact;
-  return rows.find(r => r.worktree.split('/').pop() === ref.worktreeDirName);
+  return rows.find(r => lastPathSegment(r.worktree) === ref.worktreeDirName);
 }

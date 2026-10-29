@@ -5,6 +5,8 @@
  * to an earlier phase, clears downstream gates, and resets build state.
  */
 
+// spec-1658-tmp: opaque (every /tmp is a build_output or review file string in history that rollback clears; never read)
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

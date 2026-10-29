@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir } from 'node:os';
+import { endsWithHostSeparator, expandHomePath } from '../../lib/host-paths.js';
 import { encodeWorkspacePath } from '../lib/tower-client.js';
 import { loadConfig } from '../../lib/config.js';
 import { sanitizeAgentEnv, withTowerPort, ARCHITECT_WORKSPACE_ENV } from '../../lib/agent-env.js';
@@ -23,7 +24,7 @@ import type { SessionManager } from '../../terminal/session-manager.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { isBuilderWorktreePath, parseBuilderWorktreePath } from '@cluesmith/codev-sdk/builder-worktree';
-import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
+import type { WorkspaceTerminals, TerminalEntry, InstanceStatus, ShellperRowAuth } from './tower-types.js';
 import {
   normalizeWorkspacePath,
   getWorkspaceName,
@@ -39,7 +40,10 @@ import {
   reconcileArchitectSessionHolder,
   findOwnArchitectShellpers,
   reapShellpers,
+  listProcessEntries,
+  type ProcessEntry,
 } from './architect-session-holder.js';
+import { shellperTeardownIdentities } from '../../terminal/shellper-cmdline.js';
 import {
   autoNumberArchitectName,
   validateArchitectName,
@@ -68,6 +72,7 @@ export interface InstanceDeps {
     roleId: string | null, pid: number | null,
     shellperSocket?: string | null, shellperPid?: number | null, shellperStartTime?: number | null,
     label?: string | null, cwd?: string | null, command?: string | null,
+    shellperAuth?: ShellperRowAuth | null,
   ) => void;
   /** Delete a terminal session row from SQLite */
   deleteTerminalSession: (id: string) => void;
@@ -361,10 +366,7 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
     inputPath = homedir();
   }
 
-  // Expand ~ to home directory
-  if (inputPath.startsWith('~')) {
-    inputPath = inputPath.replace('~', homedir());
-  }
+  inputPath = expandHomePath(inputPath);
 
   // Relative paths are meaningless for the tower daemon — only absolute paths
   if (!path.isAbsolute(inputPath)) {
@@ -375,7 +377,7 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
   let dirToList: string;
   let prefix: string;
 
-  if (inputPath.endsWith('/')) {
+  if (endsWithHostSeparator(inputPath)) {
     // User typed a complete directory path, list its contents
     dirToList = inputPath;
     prefix = '';
@@ -704,7 +706,8 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
             logSessionIdentity(_deps.log, 'architect-launch', session.id, ptySession, cmd);
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', shellperInfo.pid,
               shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
-              persistableCommand(ptySession) ?? cmd);
+              persistableCommand(ptySession) ?? cmd,
+              { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret });
 
             // Spec 755: persist to local state.db (architect table) so afx
             // status / stop see the architect via loadState's scalar shim.
@@ -1229,6 +1232,7 @@ export async function addArchitect(
         session.id, resolvedPath, 'architect', name, shellperInfo.pid,
         shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
         persistableCommand(ptySession) ?? cmd,
+        { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret },
       );
 
       // Spec 755: persist to local state.db so the architect appears in
@@ -1399,10 +1403,19 @@ export async function removeArchitect(
     // while the process kept running, and remove-architect could not clear it.
     // Reap any of our own shellpers matching this identity so this command is
     // the recovery tool for a live-process-without-a-row zombie too.
-    const zombiePids = findOwnArchitectShellpers({
+    // One snapshot serves the identity match and the reap's pid-reuse check.
+    let processSnapshot: ProcessEntry[] = [];
+    try {
+      processSnapshot = await listProcessEntries();
+    } catch (err) {
+      _deps.log('WARN', `Zombie shellper check for architect '${name}' skipped: ${(err as Error).message}`);
+    }
+    const zombiePids = await findOwnArchitectShellpers({
       identity: { workspacePath: resolvedPath, architectName: name },
       selfPid: process.pid,
+      list: () => processSnapshot,
     });
+    const zombieIdentities = shellperTeardownIdentities(processSnapshot, zombiePids);
     if (hasStaleRow || staleTerminalIds.length > 0 || zombiePids.length > 0) {
       try {
         if (hasStaleRow) {
@@ -1418,7 +1431,11 @@ export async function removeArchitect(
         };
       }
       if (zombiePids.length > 0) {
-        await reapShellpers(zombiePids);
+        try {
+          await reapShellpers(zombiePids, { startTimes: zombieIdentities.startTimes, jobNames: zombieIdentities.jobNames });
+        } catch (err) {
+          _deps.log('WARN', `Zombie shellper reap for architect '${name}' incomplete: ${(err as Error).message}`);
+        }
       }
       _deps.log('INFO', `Purged stale architect state for '${name}' from workspace ${workspacePath} (no live terminal; registration=${hasStaleRow}, terminal rows=${staleTerminalIds.length}, zombie shellpers=${zombiePids.length})`);
       return { success: true };
