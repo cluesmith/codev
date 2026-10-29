@@ -349,7 +349,7 @@ The ruling also named known items the spec must address:
   re-implement any of it.
 - **The Codev IDE server package**, published by the codev-ide lane:
   - Meta-package `@cluesmith/codev-ide`, with bin `codev-ide-server`.
-  - Windows platform package `@cluesmith/codev-ide-server-win32-x64`.
+  - Windows platform package `@cluesmith/codev-ide-win32-x64`.
   - Both ship in the first publish (1.0.0), are built against this spec's assumptions, and are
     versioned independently of `@cluesmith/codev`.
   - Tower compares the VS Code base on `--version` line 1 against the 1.128.0 floor, never the
@@ -609,7 +609,7 @@ These were open questions in the reviewed draft. They are now settled.
     main architect from the codev-ide architect). Tower's IDE integration from #1789 (discovery,
     version preflight, spawn, `/ide/` forward, extension install) must work on native Windows.
     It is not a follow-up or an unsupported platform. The codev-ide lane ships
-    `@cluesmith/codev-ide-server-win32-x64` in its first publish (1.0.0). #1789 merges first,
+    `@cluesmith/codev-ide-win32-x64` in its first publish (1.0.0). #1789 merges first,
     and this project builds on its code (see "Dependencies on other work").
 
 ### Remaining

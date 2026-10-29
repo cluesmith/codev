@@ -78,7 +78,7 @@ the owner's Windows machine, which CI cannot cover.
   Tower-owned directory with native paths over 260 characters (Phase 9).
 - [x] `afx ide stop` tears down the whole tree (Phase 9).
 - [x] Nothing written outside the user profile (Phase 9). The joint check with the real
-  `codev-ide-server-win32-x64` package (scenario 15b) runs at verify.
+  `codev-ide-win32-x64` package (scenario 15b) runs at verify.
 
 **Breadth**
 - [x] `consult`, porch checks, `afx open` and `afx attach` work on Windows (Phases 6, 10). A 3-way
@@ -879,7 +879,7 @@ Carry-forwards (known, bounded, not filed):
 - The Windows `unit` job does not run the apps/* suites or artifact-canvas (no platform branches of
   their own; they run on POSIX). The repo build on ARM64 fails in the artifact-canvas bundler
   (contributor-only; installs work).
-- Scenario 15b (joint check with the real `codev-ide-server-win32-x64` package) runs at verify.
+- Scenario 15b (joint check with the real `codev-ide-win32-x64` package) runs at verify.
 
 ## PR-gate manual pass (owner's Windows machine)
 
@@ -1149,7 +1149,7 @@ spawn, forward, stop and a never-ready server for both shim shapes. The adopt/re
 and serialization logic is not re-run on Windows. It is platform-neutral apart from spawning.
 
 **Carry-forwards.** The joint
-check with the real `@cluesmith/codev-ide-server-win32-x64` package (scenario 15b) runs at verify,
+check with the real `@cluesmith/codev-ide-win32-x64` package (scenario 15b) runs at verify,
 or earlier as an optional dry run.
 
 **#1595 lifecycle reporter (checked here, no change).** The hook posts and is silent under Git

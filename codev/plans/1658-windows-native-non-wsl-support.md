@@ -792,7 +792,7 @@ rule guards success-path behavior; a never-ready child is a leak, not behavior.
 SPIR has no dev-approval gate; the gates are spec-approval, plan-approval and pr. So:
 
 - **Formal joint check: at verify.** After the PR merges, the codev-ide architect brings the
-  `@cluesmith/codev-ide-server-win32-x64` package from its CI run, and scenario 15a runs end to
+  `@cluesmith/codev-ide-win32-x64` package from its CI run, and scenario 15a runs end to
   end on the owner's Windows machine against `main`. Defects found there are fixed in this
   project's verify phase.
 - **Optional dry run: before the PR gate.** Once Phase 9 is committed, and if the codev-ide CI
