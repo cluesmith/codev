@@ -69,15 +69,18 @@ function buildArchitectTabs(state: DashboardState | null): Tab[] {
 function buildTabs(state: DashboardState | null, showDecisions: boolean): Tab[] {
   const tabs: Tab[] = [
     { id: 'work', type: 'work', label: 'Work', closable: false },
-    { id: 'analytics', type: 'analytics', label: 'Analytics', closable: false, persistent: true },
   ];
+
+  // Issue #1861: Decisions sits right after Work — pending rulings are the most
+  // time-sensitive thing on the dashboard.
+  if (showDecisions) {
+    tabs.push({ id: 'decisions', type: 'decisions', label: 'Decisions', closable: false });
+  }
+
+  tabs.push({ id: 'analytics', type: 'analytics', label: 'Analytics', closable: false, persistent: true });
 
   if (state?.teamEnabled) {
     tabs.push({ id: 'team', type: 'team', label: 'Team', closable: false });
-  }
-
-  if (showDecisions) {
-    tabs.push({ id: 'decisions', type: 'decisions', label: 'Decisions', closable: false });
   }
 
   tabs.push(...buildArchitectTabs(state));

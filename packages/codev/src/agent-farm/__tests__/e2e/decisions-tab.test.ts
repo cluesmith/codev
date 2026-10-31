@@ -153,6 +153,11 @@ function comment(scope: Locator): Locator {
   return scope.getByRole('textbox', { name: 'Comment or question' });
 }
 
+/** The labels of the right-pane tabs, in strip order. */
+function contentTabLabels(page: Page): Locator {
+  return page.getByRole('tablist', { name: 'Content tabs' }).locator('.tab-label');
+}
+
 /** The text a card shows as written under its Your-word line. */
 function rulingText(scope: Locator): Locator {
   return scope.locator('pre.decisions-ruling-text');
@@ -359,6 +364,20 @@ test.describe('Spec 1819: Decisions tab', () => {
     await expect(page).toHaveTitle(new RegExp(`^${basename(ws.root)}( on .+)? overview$`), { timeout: 15_000 });
     await expect(page.getByRole('tab', { name: 'Work' })).toBeVisible();
     await expect(page.getByRole('tab', { name: /Decisions/ })).toHaveCount(0);
+    await expect(contentTabLabels(page)).toHaveText(['Work', 'Analytics']);
+  });
+
+  test('the Decisions tab sits second, right after Work, ahead of Analytics and Team (#1861)', async ({ page }) => {
+    const member = (name: string) => `---\nname: ${name}\ngithub: ${name.toLowerCase()}\n---\n`;
+    const ws = makeWorkspace({
+      [DEFAULT_FILE]: FIXTURE,
+      'codev/team/people/ada.md': member('Ada'),
+      'codev/team/people/grace.md': member('Grace'),
+    });
+    await page.goto(ws.url);
+    await expect(page.getByRole('tab', { name: /Decisions/ })).toBeVisible({ timeout: 15_000 });
+    await expect(contentTabLabels(page)).toHaveText(['Work', 'Decisions', 'Analytics', 'Team']);
+    await screenshot(page, 'decisions-tab-order');
   });
 
   test('afx decisions init turns the tab on in an open dashboard, without a reload (#1840)', async ({ page }) => {

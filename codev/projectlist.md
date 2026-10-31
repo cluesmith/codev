@@ -233,6 +233,11 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.3.6"
+    name: "Luxor"
+    status: released
+    target_date: "2026-10-29"
+    notes: "Patch that grew while it waited. The owner decisions process document and afx decisions init (#1826/PR #1832, #1840/PR #1841), UTC stamps shown in the viewer's time (#1836/PR #1837); agents report their own attention state to Tower (Spec 1595/PR #1854); codev bootstrap-docs drafts governance docs for a mature codebase and codev update refreshes shipped skills (Spec 1797, #1811/PR #1808); Jira Cloud as issue tracker with tracker-key ids end to end (#1740/PR #1848); a builder worktree opened in VS Code never becomes a second workspace (#1809/PR #1846); on-demand Windows CI workflow skeleton (Spec 1658/PR #1849); Decisions tab second after Work (#1861/PR #1862). First Marketplace and Open VSX publish of the extension since 3.3.4, carrying the unpublished 3.3.5 items. Contributors: Amr Elsayed, Waleed Kadous."
   - version: "v3.3.5"
     name: "Luxor"
     status: released

@@ -36,9 +36,15 @@ describe('useTabs — Decisions tab (Spec 1819)', () => {
     }
   });
 
-  it('places the Decisions tab after Team and before the architect tabs', () => {
-    const { result } = renderHook(() => useTabs(makeState({ decisionsEnabled: true, teamEnabled: true })));
-    expect(result.current.tabs.map(t => t.id)).toEqual(['work', 'analytics', 'team', 'decisions', 'architect']);
+  // Issue #1861: Decisions is second, right after Work, ahead of Analytics and Team.
+  it.each([
+    { decisionsEnabled: true, teamEnabled: true, order: ['work', 'decisions', 'analytics', 'team', 'architect'] },
+    { decisionsEnabled: true, teamEnabled: false, order: ['work', 'decisions', 'analytics', 'architect'] },
+    { decisionsEnabled: false, teamEnabled: true, order: ['work', 'analytics', 'team', 'architect'] },
+    { decisionsEnabled: false, teamEnabled: false, order: ['work', 'analytics', 'architect'] },
+  ])('orders the fixed tabs with decisions=$decisionsEnabled, team=$teamEnabled', ({ decisionsEnabled, teamEnabled, order }) => {
+    const { result } = renderHook(() => useTabs(makeState({ decisionsEnabled, teamEnabled })));
+    expect(result.current.tabs.map(t => t.id)).toEqual(order);
   });
 
   it('keeps the tab, and the selection, when the flag goes false after it was shown', () => {
