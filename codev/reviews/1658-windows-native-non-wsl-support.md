@@ -110,7 +110,8 @@ the owner's Windows machine, which CI cannot cover.
    not exist yet; the replay suite skips with a reason until it does. Codex fixtures may wait on
    #1858.
 2. The PR-gate manual pass on the owner's Windows machine (plan section "PR-gate manual pass");
-   results are recorded here when run.
+   results are recorded here when run. In progress since 2026-11-02; finding M1 (Claude Agent
+   SDK binary missing after a fresh install) is open, cause not yet identified.
 
 ### Known gap: codex agents and the render gate (#1858)
 
@@ -888,7 +889,7 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 
 | # | Scenario | Steps | Expected | Result |
 |---|---|---|---|---|
-| 1 | Fresh install | Git for Windows, jq, Node 22 or 24; no Visual Studio Build Tools. `npm install -g` the packed tarballs; `codev --version`; `codev doctor`; `codev init` in an empty folder. | Install needs no toolchain. `--version` prints the version (not empty). Doctor's "Windows Prerequisites" is green (Git Bash path and version, jq). `init` creates the project. | |
+| 1 | Fresh install | Git for Windows, jq, Node 22 or 24; no Visual Studio Build Tools. `npm install -g` the packed tarballs; `codev --version`; `codev doctor`; `codev init` in an empty folder. | Install needs no toolchain. `--version` prints the version (not empty). Doctor's "Windows Prerequisites" is green (Git Bash path and version, jq). `init` creates the project. | In progress (2026-11-02, tarballs packed from 793332c6e). Doctor's AI model check failed for Claude: finding M1 below. Green after the workaround. Remaining items not yet reported. |
 | 3 | Tower + terminals | `afx tower start`; open the dashboard; type in the architect terminal; open a new shell; resize the window; `afx tower stop`. | Ready in seconds. The architect runs `claude` and takes input. The new shell is PowerShell. Resize reflows. Stop exits 0, `afx tower status` says not running, a second start succeeds (owner lock released). | |
 | 4 | Persistence, three launchers | Run from Windows Terminal, the PowerShell console, and the VS Code terminal: spawn a builder, note its agent PID (`Get-Process claude`), `afx tower stop`, `afx tower start`. | The builder terminal reconnects with replayed output, same PID, input still works. In each launcher. | |
 | 6b | Long paths | Workspace at `C:\Users\<name>\src\<repo>`, `LongPathsEnabled` off; spawn a builder; `npm install` in its worktree. | Install completes. Doctor reports workspace depth and `core.longpaths`. | |
@@ -900,6 +901,47 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 | 15 | VS Code extension | In VS Code on Windows: start Tower from the extension, spawn a builder, open its terminal, reveal a file. | Each works; no console windows flash. | |
 | 15a | IDE server (optional dry run) | With the real `@cluesmith/codev-ide-server` installed: `afx ide start`, open `/ide/?folder=<repo>`, `afx ide stop`. | Found via `PATH`, passes the 1.128.0 floor, serves the folder, installs the sidebar extension; stop leaves no `codev-ide-server` or extension host process. | |
 | G | ConPTY fixtures (gate condition) | Capture recipe in `audit.md` "ConPTY → Phase 8": `node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app claude --state all -- --model haiku` (and codex once #1858 lands). | Four `conpty-claude-*.capture.jsonl.gz` files, committed to `__tests__/fixtures/gate/conpty/`; the replay suite runs them instead of skipping: idle, midturn and resize delivered, draft held. | |
+
+### Manual pass findings
+
+**M1. Claude Agent SDK native binary missing after a fresh install (scenario 1, 2026-11-02).
+Cause not yet identified; no fix chosen.** Owner direction: identify the cause before deciding on
+a solution.
+
+- Symptom: `codev doctor` reported `✗ Claude error (Set ANTHROPIC_API_KEY or run: claude /login
+  (Native CLI binary for win32-x64 not found. Reinstall @anthro…))` and "No AI model
+  operational". The owner's own Claude was fine: `claude -p "say ok"` answered, a single install
+  at `%USERPROFILE%\.local\bin\claude.exe`, `.credentials.json` present, no `ANTHROPIC_*` or
+  `CLAUDE_*` variables set, `HOME` equal to `USERPROFILE`.
+- Mechanism: doctor (like `consult -m claude` and porch reviews) reaches Claude through
+  `@anthropic-ai/claude-agent-sdk`, not the user's `claude`. `packages/codev` declares `^0.2.41`;
+  the repo lockfile pins 0.2.105, which bundles its binary, but a global install resolves the
+  newest 0.2.x, 0.2.141. From 0.2.113 the SDK takes its binary from an optional per-platform
+  package, `@anthropic-ai/claude-agent-sdk-win32-x64` (about 228 MB unpacked, `os: win32`,
+  `cpu: x64`). Without it the SDK's resolver falls back only to `./cli.js`, which these versions
+  do not ship, and throws. Doctor reports that as an authentication failure.
+- Observed: `npm ls -g` showed the SDK at 0.2.141 with no win32-x64 package and no `claude*.exe`
+  beneath it. A reinstall with `--include=optional` changed nothing.
+- Workaround: `npm install -g @anthropic-ai/claude-agent-sdk-win32-x64@0.2.141` installed cleanly
+  and doctor's Claude check went green (the SDK resolves the package from the global
+  `node_modules`).
+- Ruled out: npm `omit` configuration (empty), a platform mismatch (the package's `os`/`cpu`
+  match the machine), and a cross-platform lockfile (the codev tarball ships neither
+  `npm-shrinkwrap.json` nor `package-lock.json`).
+- Why CI misses it: CI and local builds install from the lockfile (SDK 0.2.105), so no run has
+  exercised the optional binary package.
+- Open questions (candidate causes, each with a test):
+  1. npm skipping an optional dependency nested under a package installed from local tarballs.
+     Test: `npm install -g @cluesmith/codev` from the registry on Windows, then check whether the
+     win32-x64 package is present.
+  2. A transient download or extraction failure of the 228 MB package, which npm does not
+     report for optional dependencies. Test: reinstall with `--loglevel verbose` and read the
+     optional-dependency lines.
+  3. Defender interference with the new executable. Test: Windows Security, Protection history.
+  4. Scope: the SDK change is not Windows-specific, so whether fresh macOS and Linux installs
+     skip the package too is unchecked.
+- Reported to the architect 2026-11-02, including whether this belongs in #1658 or a separate
+  issue.
 
 ## Appendix: Implementation Notes by Phase
 
