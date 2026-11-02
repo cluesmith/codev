@@ -16,6 +16,23 @@ export interface OrderedFleet {
 }
 
 /**
+ * Whether Tower's path for a workspace is this window's folder. On Windows paths
+ * are case-insensitive and the two sides spell them differently: VS Code's
+ * `uri.fsPath` lower-cases the drive letter, while Tower reports the directory's
+ * canonical spelling with an upper-case drive (Spec 1658, finding M6). POSIX
+ * keeps the exact comparison.
+ */
+export function isSameWorkspacePath(towerPath: string, currentPath: string | null, platform: NodeJS.Platform = process.platform): boolean {
+  if (currentPath === null) {
+    return false;
+  }
+  if (platform === 'win32') {
+    return towerPath.toLowerCase() === currentPath.toLowerCase();
+  }
+  return towerPath === currentPath;
+}
+
+/**
  * The single ordering the Tower tree and the switch quick-pick both use, so the two surfaces can
  * never disagree on order. Labels are disambiguated once; active workspaces are sorted by label and
  * then by `compareAttention` with a **stable** sort — so "needs a human" floats up while
@@ -27,7 +44,7 @@ export function orderFleet(fleet: ReadonlyArray<FleetEntry>, currentPath: string
   const label = (entry: FleetEntry): LabelledEntry => ({
     entry,
     label: labels.get(entry.workspace.path) ?? entry.workspace.name,
-    isCurrent: entry.workspace.path === currentPath,
+    isCurrent: isSameWorkspacePath(entry.workspace.path, currentPath),
   });
 
   const active = fleet.filter((e) => e.workspace.active).map(label);

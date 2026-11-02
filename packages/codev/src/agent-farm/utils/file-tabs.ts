@@ -5,6 +5,8 @@
 
 import type Database from 'better-sqlite3';
 import path from 'node:path';
+// Spec 1658 (M6): rows keyed by the canonical spelling on Windows; identity on POSIX.
+import { workspaceKey } from './workspace-path.js';
 
 export interface FileTab {
   id: string;
@@ -25,7 +27,7 @@ export function saveFileTab(
   db.prepare(`
     INSERT OR REPLACE INTO file_tabs (id, workspace_path, file_path, created_at)
     VALUES (?, ?, ?, ?)
-  `).run(id, workspacePath, filePath, createdAt);
+  `).run(id, workspaceKey(workspacePath), filePath, createdAt);
 }
 
 /**
@@ -40,7 +42,7 @@ export function deleteFileTab(db: Database.Database, id: string): void {
  * Used when a workspace is stopped or fully cleaned up.
  */
 export function deleteFileTabsForWorkspace(db: Database.Database, workspacePath: string): void {
-  db.prepare('DELETE FROM file_tabs WHERE workspace_path = ?').run(workspacePath);
+  db.prepare('DELETE FROM file_tabs WHERE workspace_path = ?').run(workspaceKey(workspacePath));
 }
 
 /**
@@ -65,7 +67,7 @@ export function loadFileTabsForWorkspace(
 ): Map<string, FileTab> {
   const tabs = new Map<string, FileTab>();
   const rows = db.prepare('SELECT id, file_path, created_at FROM file_tabs WHERE workspace_path = ?')
-    .all(workspacePath) as Array<{ id: string; file_path: string; created_at: number }>;
+    .all(workspaceKey(workspacePath)) as Array<{ id: string; file_path: string; created_at: number }>;
   for (const row of rows) {
     tabs.set(row.id, { id: row.id, path: row.file_path, createdAt: row.created_at });
   }

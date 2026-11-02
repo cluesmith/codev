@@ -85,6 +85,7 @@ import {
 import { setArchitectByName } from '../state.js';
 import { isIntentionallyStopping } from './tower-instances.js';
 import { isWindows } from '../../lib/platform.js';
+import { workspaceKey } from '../utils/workspace-path.js';
 import { isHostPathAtOrUnder } from '../../lib/host-paths.js';
 import { homedir, tmpdir } from 'node:os';
 
@@ -94,8 +95,36 @@ import { homedir, tmpdir } from 'node:os';
 
 let _deps: TerminalDeps | null = null;
 
+/**
+ * A workspace-keyed map whose keys are canonical on Windows (Spec 1658, M6).
+ *
+ * Tower is handed workspace paths in more than one spelling on Windows (VS Code's
+ * `c:\repo`, Git Bash's `C:\repo`, a raw `?workspace=` query parameter), and many
+ * callsites look the registry up with the path exactly as they received it.
+ * Canonicalizing inside the map's own accessors makes every one of them agree,
+ * rather than relying on each callsite to normalize first. On POSIX `workspaceKey`
+ * is the identity, so the map behaves exactly like a plain `Map` there.
+ */
+export class WorkspaceKeyedMap<V> extends Map<string, V> {
+  override get(key: string): V | undefined {
+    return super.get(workspaceKey(key));
+  }
+
+  override set(key: string, value: V): this {
+    return super.set(workspaceKey(key), value);
+  }
+
+  override has(key: string): boolean {
+    return super.has(workspaceKey(key));
+  }
+
+  override delete(key: string): boolean {
+    return super.delete(workspaceKey(key));
+  }
+}
+
 /** Workspace terminal registry — tracks which terminals belong to which workspace */
-const workspaceTerminals = new Map<string, WorkspaceTerminals>();
+const workspaceTerminals = new WorkspaceKeyedMap<WorkspaceTerminals>();
 
 /** Global TerminalManager instance (lazy singleton) */
 let terminalManager: TerminalManager | null = null;
@@ -267,6 +296,9 @@ export function getTerminalManager(): TerminalManager {
  * persisted tabs are available immediately (not just after /api/state).
  */
 export function getWorkspaceTerminalsEntry(workspacePath: string): WorkspaceTerminals {
+  // Spec 1658 (M6): one spelling per directory on Windows (identity on POSIX), so
+  // the file tabs below load under the same key the registry stores.
+  workspacePath = workspaceKey(workspacePath);
   let entry = workspaceTerminals.get(workspacePath);
   if (!entry) {
     entry = { architects: new Map(), builders: new Map(), shells: new Map(), fileTabs: loadFileTabsForWorkspace(workspacePath) };

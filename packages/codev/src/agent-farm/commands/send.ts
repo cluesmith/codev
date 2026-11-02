@@ -17,7 +17,7 @@ import type { SendOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadState } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
-import { normalizeWorkspacePath } from '../utils/workspace-path.js';
+import { normalizeWorkspacePath, workspaceKey } from '../utils/workspace-path.js';
 import { matchBuilderRow, parseBuilderWorktreePath, type BuilderWorktreeRow } from '../utils/builder-worktree-identity.js';
 import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
 import { isWindows } from '../../lib/platform.js';
@@ -77,11 +77,12 @@ export function detectWorkspaceRoot(): string | null {
   // workspace, not the outer one — mirrors deriveWorkspaceFromWorktree's
   // lastIndexOf (Issue #1118 codex review). Nesting is an unsupported
   // anti-pattern, but the parse should be consistent with the rest of the code.
+  // Spec 1658 (M6): returned as one spelling per directory on Windows (as found on POSIX).
   const buildersRef = parseBuilderWorktreePath(dir);
-  if (buildersRef) return buildersRef.workspacePath;
+  if (buildersRef) return workspaceKey(buildersRef.workspacePath);
   // Walk up looking for markers
   for (let i = 0; i < 20; i++) {
-    if (existsSync(join(dir, '.codev', 'config.json')) || existsSync(join(dir, '.git'))) return dir;
+    if (existsSync(join(dir, '.codev', 'config.json')) || existsSync(join(dir, '.git'))) return workspaceKey(dir);
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;

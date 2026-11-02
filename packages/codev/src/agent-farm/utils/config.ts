@@ -15,6 +15,7 @@ import { resolveHarness, RetiredHarnessError, type HarnessProvider, type CustomH
 import { logger } from './logger.js';
 import { defaultInteractiveShell } from '../../lib/platform.js';
 import type { ResolvedWorktreeConfig, WorktreeDevUrl, ResolvedActivityHooks, ActivityHook, ActivityEvent } from '@cluesmith/codev-types';
+import { workspaceKey } from './workspace-path.js';
 
 // Re-export so existing internal callers that import the resolved types
 // from this module keep working. The canonical home is now
@@ -80,6 +81,13 @@ function isFilesystemRoot(dir: string): boolean {
  * See: https://github.com/cluesmith/codev-public/issues/407
  */
 function findWorkspaceRoot(startDir: string = process.cwd()): string {
+  // Spec 1658 (M6): on Windows the root is the directory's canonical spelling, so
+  // a CLI run from Git Bash (`C:\`), PowerShell (`c:\` if typed so) or VS Code
+  // derives the same workspace key and worktree paths. POSIX: unchanged.
+  return workspaceKey(findWorkspaceRootAsSpelled(startDir));
+}
+
+function findWorkspaceRootAsSpelled(startDir: string): string {
   const mainRepo = getMainRepoFromWorktree(startDir);
 
   if (mainRepo) {

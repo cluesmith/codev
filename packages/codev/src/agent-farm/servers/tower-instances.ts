@@ -51,6 +51,7 @@ import {
 } from '../utils/architect-name.js';
 import { RetiredHarnessError } from '../utils/harness.js';
 import { setArchitect, setArchitectByName, getArchitects, getArchitectByName } from '../state.js';
+import { workspaceKey } from '../utils/workspace-path.js';
 
 // ============================================================================
 // Dependency interface
@@ -119,7 +120,7 @@ const intentionallyStopping = new Set<string>();
  * Exported so `tower-terminals.ts`'s reconciliation exit handler can call it.
  */
 export function isIntentionallyStopping(workspacePath: string): boolean {
-  return intentionallyStopping.has(workspacePath);
+  return intentionallyStopping.has(workspaceKey(workspacePath));
 }
 
 /**
@@ -209,6 +210,8 @@ export function instancesReady(): boolean {
  * reattaches: the session stays live, it just isn't recorded as a workspace.
  */
 export function registerKnownWorkspace(workspacePath: string): void {
+  // Spec 1658 (M6): one row per directory on Windows; identity on POSIX.
+  workspacePath = workspaceKey(workspacePath);
   if (isBuilderWorktreePath(workspacePath)) {
     return;
   }
@@ -531,7 +534,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
   // No dashboard-server spawning - tower handles everything
   try {
     // Ensure workspace has port allocation
-    const resolvedPath = fs.realpathSync(workspacePath);
+    const resolvedPath = workspaceKey(fs.realpathSync(workspacePath));
 
     // Persist in known_workspaces so the workspace survives terminal cleanup
     registerKnownWorkspace(resolvedPath);
@@ -916,7 +919,7 @@ export async function stopInstance(workspacePath: string): Promise<{ success: bo
   let resolvedPath = workspacePath;
   try {
     if (fs.existsSync(workspacePath)) {
-      resolvedPath = fs.realpathSync(workspacePath);
+      resolvedPath = workspaceKey(fs.realpathSync(workspacePath));
     }
   } catch {
     // Ignore - use original path
@@ -932,8 +935,8 @@ export async function stopInstance(workspacePath: string): Promise<{ success: bo
   // handlers in tower-instances.ts (4 handlers) and tower-terminals.ts (1
   // handler) would delete sibling rows on every stop — making it impossible
   // for siblings to survive `afx workspace stop` + `start`.
-  intentionallyStopping.add(resolvedPath);
-  if (resolvedPath !== workspacePath) intentionallyStopping.add(workspacePath);
+  intentionallyStopping.add(workspaceKey(resolvedPath));
+  if (resolvedPath !== workspacePath) intentionallyStopping.add(workspaceKey(workspacePath));
   try {
     if (entry) {
       // Spec 786 Phase 3 / PR iter-2 race-fix: register exit-promises for
@@ -1006,8 +1009,8 @@ export async function stopInstance(workspacePath: string): Promise<{ success: bo
       }
     }
   } finally {
-    intentionallyStopping.delete(resolvedPath);
-    if (resolvedPath !== workspacePath) intentionallyStopping.delete(workspacePath);
+    intentionallyStopping.delete(workspaceKey(resolvedPath));
+    if (resolvedPath !== workspacePath) intentionallyStopping.delete(workspaceKey(workspacePath));
   }
 
   if (stopped.length === 0) {
@@ -1049,7 +1052,7 @@ export async function addArchitect(
   let resolvedPath = workspacePath;
   try {
     if (fs.existsSync(workspacePath)) {
-      resolvedPath = fs.realpathSync(workspacePath);
+      resolvedPath = workspaceKey(fs.realpathSync(workspacePath));
     }
   } catch {
     // Use original path on resolution failure
@@ -1364,7 +1367,7 @@ export async function removeArchitect(
   let resolvedPath = workspacePath;
   try {
     if (fs.existsSync(workspacePath)) {
-      resolvedPath = fs.realpathSync(workspacePath);
+      resolvedPath = workspaceKey(fs.realpathSync(workspacePath));
     }
   } catch {
     // Use original path on resolution failure.
@@ -1450,8 +1453,8 @@ export async function removeArchitect(
   // exit handler would call setArchitectByName(name, null) — harmless but the
   // double-delete is wasteful and the intent (this is an intentional removal)
   // is clearer with the flag set.
-  intentionallyStopping.add(resolvedPath);
-  if (resolvedPath !== workspacePath) intentionallyStopping.add(workspacePath);
+  intentionallyStopping.add(workspaceKey(resolvedPath));
+  if (resolvedPath !== workspacePath) intentionallyStopping.add(workspaceKey(workspacePath));
   try {
     // Spec 786 Phase 4 / PR iter-2 race-fix: register the exit-promise
     // BEFORE the kill so the listener is attached before node-pty can emit
@@ -1501,8 +1504,8 @@ export async function removeArchitect(
       return { success: false, error: errMsg };
     }
   } finally {
-    intentionallyStopping.delete(resolvedPath);
-    if (resolvedPath !== workspacePath) intentionallyStopping.delete(workspacePath);
+    intentionallyStopping.delete(workspaceKey(resolvedPath));
+    if (resolvedPath !== workspacePath) intentionallyStopping.delete(workspaceKey(workspacePath));
   }
 
   _deps.log('INFO', `Removed architect '${name}' from workspace ${workspacePath}`);

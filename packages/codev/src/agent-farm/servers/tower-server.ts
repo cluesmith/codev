@@ -31,7 +31,7 @@ import {
   initTunnel,
   shutdownTunnel,
 } from './tower-tunnel.js';
-import { initCron, shutdownCron } from './tower-cron.js';
+import { initCron, shutdownCron, getTaskId } from './tower-cron.js';
 import { reconcileIdeServer } from './ide-server.js';
 import {
   initInstances,
@@ -55,6 +55,7 @@ import {
   getTerminalsForWorkspace,
   reconcileTerminalSessions,
   pruneBuilderWorktreeWorkspaces,
+  processExists,
 } from './tower-terminals.js';
 import {
   setupUpgradeHandler,
@@ -76,6 +77,7 @@ import {
   releaseTowerOwnerIfMine,
 } from '../db/tower-owner.js';
 import { runBootConsolidation } from '../db/consolidate.js';
+import { canonicalizeWorkspacePathRows } from '../db/canonicalize-workspace-paths.js';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/server-utils.js';
 import { version } from '../../version.js';
@@ -749,6 +751,34 @@ async function bootSequence(): Promise<void> {
     }
   } catch (err) {
     log('ERROR', `state.db consolidation failed: ${(err as Error).message}`);
+  }
+
+  // Spec 1658 (M6): on Windows, collapse every stored spelling of a workspace path
+  // (VS Code's `c:\`, Git Bash's `C:\`, any other case) onto its canonical key,
+  // BEFORE reconcile and initInstances() read the rows. Every boot, idempotent.
+  // POSIX keeps its keys exactly as written (#1870).
+  if (isWindows()) {
+    try {
+      const report = canonicalizeWorkspacePathRows(getGlobalDb(), {
+        canonicalize: normalizeWorkspacePath,
+        cronTaskId: getTaskId,
+        isAlive: processExists,
+      });
+      for (const move of report.moved) {
+        log('INFO', `workspace path canonicalized: ${move.from} -> ${move.to}`);
+      }
+      for (const drop of report.dropped) {
+        log('WARN', `workspace path canonicalization dropped a duplicate ${drop.table} row (${drop.key}); the canonical row was kept`);
+      }
+      for (const terminalId of report.droppedTerminalIds) {
+        log('INFO', `terminal ${terminalId}: duplicate row dropped, its process had already exited`);
+      }
+      for (const dup of report.liveDuplicates) {
+        log('ERROR', `workspace ${dup.workspace}: ${dup.terminalIds.length} live ${dup.type} sessions claim role ${dup.roleId ?? '(none)'} (terminals ${dup.terminalIds.join(', ')}); both kept, only one is addressable; stop the one you do not want`);
+      }
+    } catch (err) {
+      log('ERROR', `workspace path canonicalization failed: ${(err as Error).message}`);
+    }
   }
 
   // TICK-001: Reconcile terminal sessions from previous run.

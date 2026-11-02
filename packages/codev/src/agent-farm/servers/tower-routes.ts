@@ -37,6 +37,7 @@ import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
 import { isWindows } from '../../lib/platform.js';
+import { workspaceKey } from '../utils/workspace-path.js';
 import { expandHomePath } from '../../lib/host-paths.js';
 import { isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
 import {
@@ -878,7 +879,7 @@ async function handleWorkspaceAction(
     // Unfiltered on purpose (#1809): a stray architect left running in a builder
     // worktree is excluded from the listing but must still be stoppable.
     const knownPaths = getAllKnownWorkspacePaths();
-    const resolvedPath = fs.existsSync(workspacePath) ? fs.realpathSync(workspacePath) : workspacePath;
+    const resolvedPath = fs.existsSync(workspacePath) ? workspaceKey(fs.realpathSync(workspacePath)) : workspacePath;
     const isKnown = knownPaths.some(
       (p) => p === workspacePath || p === resolvedPath
     );
@@ -1310,6 +1311,10 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     const knownPaths = getKnownWorkspacePaths();
     workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
+  }
 
   if (!workspaceRoot) {
     // Honor the full OverviewData contract even on the no-workspace branch:
@@ -1387,6 +1392,10 @@ async function handleIssueView(res: http.ServerResponse, url: URL): Promise<void
     const knownPaths = getKnownWorkspacePaths();
     workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
+  }
 
   const number = url.searchParams.get('number');
   if (!workspaceRoot || !number) {
@@ -1415,6 +1424,10 @@ async function handlePRView(res: http.ServerResponse, url: URL): Promise<void> {
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
     workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
 
   const number = url.searchParams.get('number');
@@ -1455,6 +1468,10 @@ async function handleIssueSearch(res: http.ServerResponse, url: URL): Promise<vo
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
     workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1535,6 +1552,10 @@ function handleWorktreeConfigView(res: http.ServerResponse, url: URL): void {
     const knownPaths = getKnownWorkspacePaths();
     workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
   }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
+  }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Missing workspace' }));
@@ -1563,6 +1584,10 @@ function handleActivityHooksView(res: http.ServerResponse, url: URL): void {
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
     workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1598,6 +1623,10 @@ async function handleAnalytics(res: http.ServerResponse, url: URL, workspaceOver
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
     workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
 
   // Validate range parameter (before workspace check so fallback uses correct range)
@@ -2163,8 +2192,16 @@ async function handleSend(
     }));
     return;
   }
-  const workspace = typeof body.workspace === 'string' ? body.workspace : undefined;
-  const fromWorkspace = typeof body.fromWorkspace === 'string' ? body.fromWorkspace : undefined;
+  // Spec 1658 (M6): both workspace fields as one spelling per directory on Windows
+  // (they key the registry and are stored in the mailbox); as given on POSIX.
+  let workspace: string | undefined;
+  if (typeof body.workspace === 'string') {
+    workspace = workspaceKey(body.workspace);
+  }
+  let fromWorkspace: string | undefined;
+  if (typeof body.fromWorkspace === 'string') {
+    fromWorkspace = workspaceKey(body.fromWorkspace);
+  }
   const options = typeof body.options === 'object' && body.options !== null
     ? (body.options as Record<string, unknown>)
     : {};
@@ -4176,7 +4213,7 @@ function handleCronList(res: http.ServerResponse, url: URL): void {
 
   const tasks = getAllTasks();
   const filtered = workspaceFilter
-    ? tasks.filter(t => t.workspacePath === workspaceFilter)
+    ? tasks.filter(t => workspaceKey(t.workspacePath) === workspaceKey(workspaceFilter))
     : tasks;
 
   // Merge with SQLite state
@@ -4215,7 +4252,7 @@ async function handleCronTaskAction(
   const allTasks = getAllTasks();
   const matchingTasks = allTasks.filter(t => {
     if (t.name !== taskName) return false;
-    if (workspace && t.workspacePath !== workspace) return false;
+    if (workspace && workspaceKey(t.workspacePath) !== workspaceKey(workspace)) return false;
     return true;
   });
 

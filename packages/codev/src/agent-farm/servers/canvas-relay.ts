@@ -31,6 +31,8 @@ import type {
   TraversalCommand,
 } from '@cluesmith/codev-types';
 import { parseJsonBody } from '../utils/server-utils.js';
+import { workspaceKey } from '../utils/workspace-path.js';
+import { isWindows } from '../../lib/platform.js';
 
 // Wire names — the canonical contract lives in @cluesmith/codev-types
 // (CANVAS_COMMAND_ROUTE / CANVAS_VIEWS_ROUTE / CANVAS_COMMAND_EVENT) and must match these. They
@@ -155,6 +157,15 @@ export function shutdownCanvasRelay(): void {
  * exist, and finally to a plain absolute path.
  */
 function canonicalPath(raw: string): string {
+  if (isWindows()) {
+    // Spec 1658 (M6): Windows paths are case-insensitive, and the VS Code host (`c:\`)
+    // and the CLI controller (`C:\`) spell one directory differently, so both sides
+    // compare the canonical spelling (on-disk case, upper-case drive letter).
+    if (fs.existsSync(raw)) {
+      return workspaceKey(raw);
+    }
+    return path.join(workspaceKey(path.dirname(raw)), path.basename(raw));
+  }
   try {
     return fs.realpathSync(raw);
   } catch {
