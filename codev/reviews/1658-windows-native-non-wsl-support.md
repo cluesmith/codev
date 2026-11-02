@@ -110,8 +110,9 @@ the owner's Windows machine, which CI cannot cover.
    not exist yet; the replay suite skips with a reason until it does. Codex fixtures may wait on
    #1858.
 2. The PR-gate manual pass on the owner's Windows machine (plan section "PR-gate manual pass");
-   results are recorded here when run. In progress since 2026-11-02; finding M1 (Claude Agent
-   SDK binary missing after a fresh install) is open, cause not yet identified.
+   results are recorded here when run. In progress since 2026-11-02: scenarios 1 and 3 pass;
+   findings M1 (resolved, a machine npm setting), M2 (cursor rendering, follow-up) and M3
+   (uninstall while Tower runs) are recorded under "Manual pass findings".
 
 ### Known gap: codex agents and the render gate (#1858)
 
@@ -889,8 +890,8 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 
 | # | Scenario | Steps | Expected | Result |
 |---|---|---|---|---|
-| 1 | Fresh install | Git for Windows, jq, Node 22 or 24; no Visual Studio Build Tools. `npm install -g` the packed tarballs; `codev --version`; `codev doctor`; `codev init` in an empty folder. | Install needs no toolchain. `--version` prints the version (not empty). Doctor's "Windows Prerequisites" is green (Git Bash path and version, jq). `init` creates the project. | In progress (2026-11-02, tarballs packed from 793332c6e). Doctor's AI model check failed for Claude: finding M1 below. Green after the workaround. Remaining items not yet reported. |
-| 3 | Tower + terminals | `afx tower start`; open the dashboard; type in the architect terminal; open a new shell; resize the window; `afx tower stop`. | Ready in seconds. The architect runs `claude` and takes input. The new shell is PowerShell. Resize reflows. Stop exits 0, `afx tower status` says not running, a second start succeeds (owner lock released). | |
+| 1 | Fresh install | Git for Windows, jq, Node 22 or 24; no Visual Studio Build Tools. `npm install -g` the packed tarballs; `codev --version`; `codev doctor`; `codev init` in an empty folder. | Install needs no toolchain. `--version` prints the version (not empty). Doctor's "Windows Prerequisites" is green (Git Bash path and version, jq). `init` creates the project. | Pass (2026-11-02, Windows 11 26H2 build 26300.9711, Node 24.13.0, npm 11.6.2, tarballs packed from 793332c6e). No toolchain needed; `--version`, doctor and `init` as expected. Doctor's Claude check first failed: finding M1 (a machine npm setting, not a Codev defect). `init` must not target `%TEMP%`: Tower's home page hides temp-folder workspaces by design. |
+| 3 | Tower + terminals | `afx tower start`; open the dashboard; type in the architect terminal; open a new shell; resize the window; `afx tower stop`. | Ready in seconds. The architect runs `claude` and takes input. The new shell is PowerShell. Resize reflows. Stop exits 0, `afx tower status` says not running, a second start succeeds (owner lock released). | Pass (2026-11-02). Architect `claude` starts and responds, the new shell is PowerShell, resize reflows, stop exits 0, status reports not running, restart succeeds. Cosmetic: two cursors in the architect terminal, finding M2. |
 | 4 | Persistence, three launchers | Run from Windows Terminal, the PowerShell console, and the VS Code terminal: spawn a builder, note its agent PID (`Get-Process claude`), `afx tower stop`, `afx tower start`. | The builder terminal reconnects with replayed output, same PID, input still works. In each launcher. | |
 | 6b | Long paths | Workspace at `C:\Users\<name>\src\<repo>`, `LongPathsEnabled` off; spawn a builder; `npm install` in its worktree. | Install completes. Doctor reports workspace depth and `core.longpaths`. | |
 | 8 | Forge, live | From a builder: `afx` / porch actions that list issues, view an issue, create and view a PR, and comment (all GitHub concepts). | Each succeeds; `/repos/...` style arguments are not mangled into `C:/Program Files/Git/repos/...`. | |
@@ -905,8 +906,26 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 ### Manual pass findings
 
 **M1. Claude Agent SDK native binary missing after a fresh install (scenario 1, 2026-11-02).
-Cause not yet identified; no fix chosen.** Owner direction: identify the cause before deciding on
-a solution.
+Resolved: the cause was `os = "linux"` in the owner's user npm config, not a Codev or Windows
+defect.** Owner direction was to identify the cause before deciding on a solution.
+
+- Cause: `C:\Users\amr\.npmrc` contained a single line, `os = "linux"`. npm's `os` setting
+  overrides the platform npm installs for. npm resolved and placed the SDK's optional
+  `claude-agent-sdk-win32-x64` package (debug log: `placeDep ... OK`), then dropped it as a
+  platform mismatch without logging a failure. `claude-agent-sdk-linux-x64` was skipped too,
+  because it also requires `libc: glibc`, which npm cannot detect on Windows. So no platform
+  binary qualified. Naming the package explicitly bypasses the check, which is why the global
+  workaround worked. node-pty and better-sqlite3 were unaffected because their install scripts
+  pick prebuilds from Node's `process.platform`.
+- Confirmation: after `npm config delete os --location=user`, a clean install of the branch
+  tarballs (workaround removed) installed `claude-agent-sdk-win32-x64@0.2.141` on its own and
+  doctor reported Claude operational.
+- What stays real: doctor labels a missing SDK binary as an authentication failure ("Set
+  ANTHROPIC_API_KEY or run: claude /login"), which hid the cause. Not Windows-specific; per the
+  architect, a separate issue filed by main, not part of this PR. The SDK range floating past
+  the lockfile-tested 0.2.105 is the same kind of separate issue.
+
+Investigation record:
 
 - Symptom: `codev doctor` reported `✗ Claude error (Set ANTHROPIC_API_KEY or run: claude /login
   (Native CLI binary for win32-x64 not found. Reinstall @anthro…))` and "No AI model
@@ -948,8 +967,29 @@ a solution.
      `reify failed optional dependency` only for the seven non-matching platforms, as expected. A
      tarball install alone does not cause the skip, which points at something on the Windows side
      (candidates 2 and 3, or npm behaviour specific to Windows).
-- Reported to the architect 2026-11-02, including whether this belongs in #1658 or a separate
-  issue.
+- Ruled out during the investigation: Defender (`Get-MpThreatDetection` empty), tarball vs
+  registry (a registry install of 3.3.6 on the same machine skipped the package too).
+- Reported to the architect 2026-11-02 (open, then with the cause).
+
+**M2. Two cursors in the architect terminal (scenario 3, 2026-11-02). Cosmetic; follow-up, no
+code change in this PR (owner).** The dashboard shows Claude's own drawn cursor (a highlighted
+cell) and xterm.js's real block cursor at once: beside it while typing, and at the far right of
+the line on an empty prompt. Claude run directly in a Windows terminal shows a single normal
+cursor. Two candidate causes, not yet discriminated: the in-box ConPTY (Codev spawns through
+node-pty's default, the ConPTY built into Windows, which re-renders the screen and emits its own
+cursor position and visibility; node-pty 1.1.0 also ships the newer standalone `conpty.dll`
+behind the experimental `useConptyDll` option), or the terminal environment Claude detects
+(`xterm-256color`) leading it to draw its own cursor while the hide of the real one does not
+hold. Discriminating evidence: the scenario G captures (raw cursor sequences through the in-box
+ConPTY), `claude` run in a dashboard `afx shell`, and `claude` in the VS Code terminal. A
+`useConptyDll` switch would change every Windows terminal (resize, reconnect replay) and needs
+its own Windows pass.
+
+**M3. Uninstall or upgrade fails while Tower or a session runs (2026-11-02).** `npm uninstall
+-g @cluesmith/codev` with Tower and shellpers alive failed with `EBUSY`/`EPERM` on
+`node_modules\node-pty\prebuilds\win32-x64\conpty.node`: Windows does not let npm delete a
+loaded `.node` module, where POSIX allows it. Stopping the workspace and Tower first avoided it.
+Upgrade guidance for Windows should say so (docs follow-up).
 
 ## Appendix: Implementation Notes by Phase
 
