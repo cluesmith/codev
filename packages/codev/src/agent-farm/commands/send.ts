@@ -9,15 +9,18 @@
 
 import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, win32 } from 'node:path';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
+import { rethrowIfNativeLoadFailure } from '../../lib/native-deps.js';
 import type { SendOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadState } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
-import { normalizeWorkspacePath } from '../utils/workspace-path.js';
+import { normalizeWorkspacePath, workspaceKey } from '../utils/workspace-path.js';
 import { matchBuilderRow, parseBuilderWorktreePath, type BuilderWorktreeRow } from '../utils/builder-worktree-identity.js';
 import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
+import { isWindows } from '../../lib/platform.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
@@ -42,8 +45,20 @@ const MAX_FILE_SIZE = MAX_MESSAGE_BYTES;
  */
 function identityPath(): string {
   const worktree = process.env[BUILDER_WORKTREE_ENV]?.trim();
-  if (worktree && /^\/.+\/\.builders\/[^/]+/.test(worktree)) return worktree;
+  if (worktree && namesAbsoluteBuilderWorktree(worktree)) return worktree;
   return process.cwd();
+}
+
+/**
+ * Whether `value` is an absolute path inside a builder worktree. On Windows the
+ * spawn env carries a native path (`C:\repo\.builders\<id>`), so the drive or
+ * UNC root and either separator are accepted there.
+ */
+function namesAbsoluteBuilderWorktree(value: string): boolean {
+  if (isWindows()) {
+    return win32.isAbsolute(value) && parseBuilderWorktreePath(value) !== null;
+  }
+  return /^\/.+\/\.builders\/[^/]+/.test(value);
 }
 
 /**
@@ -62,11 +77,12 @@ export function detectWorkspaceRoot(): string | null {
   // workspace, not the outer one — mirrors deriveWorkspaceFromWorktree's
   // lastIndexOf (Issue #1118 codex review). Nesting is an unsupported
   // anti-pattern, but the parse should be consistent with the rest of the code.
-  const buildersMatch = dir.match(/^(.+)\/\.builders\/[^/]+/);
-  if (buildersMatch) return buildersMatch[1];
+  // Spec 1658 (M6): returned as one spelling per directory on Windows (as found on POSIX).
+  const buildersRef = parseBuilderWorktreePath(dir);
+  if (buildersRef) return workspaceKey(buildersRef.workspacePath);
   // Walk up looking for markers
   for (let i = 0; i < 20; i++) {
-    if (existsSync(join(dir, '.codev', 'config.json')) || existsSync(join(dir, '.git'))) return dir;
+    if (existsSync(join(dir, '.codev', 'config.json')) || existsSync(join(dir, '.git'))) return workspaceKey(dir);
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -160,8 +176,9 @@ export function detectCurrentBuilderId(): string | null {
 
   let gdb: Database.Database;
   try {
-    gdb = new Database(dbPath, { readonly: true });
+    gdb = openDatabase(dbPath, { readonly: true });
   } catch (err) {
+    rethrowIfNativeLoadFailure(err);
     throw new BuilderIdResolutionError(describeStateDbOpenFailure(dbPath, worktreeDirName, err));
   }
 

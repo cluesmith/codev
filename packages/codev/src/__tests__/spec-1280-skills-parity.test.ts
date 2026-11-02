@@ -58,7 +58,8 @@ describe('T17 — touched skills are consistent across all four trees', () => {
     });
 
     it(`${skill}: carries usable frontmatter`, () => {
-      const body = fs.readFileSync(skillPath('.claude/skills', skill), 'utf-8');
+      // LF-normalized: a CRLF checkout (core.autocrlf on Windows) is the same frontmatter.
+      const body = fs.readFileSync(skillPath('.claude/skills', skill), 'utf-8').replace(/\r\n/g, '\n');
       expect(body.startsWith('---\n'), `${skill} has no frontmatter block`).toBe(true);
       expect(body).toMatch(new RegExp(`^name:\\s*${skill}$`, 'm'));
       // The description is the trigger surface — an empty one makes the skill undiscoverable,

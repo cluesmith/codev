@@ -63,6 +63,7 @@ import {
   issueDirName,
   validateResumeWorktree,
   createPtySession,
+  builderScriptLaunch,
   startBuilderSession,
   startShellSession,
   buildWorktreeLaunchScript,
@@ -723,10 +724,11 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
   writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
 
   logger.info('Creating PTY terminal session for worktree...');
+  const launch = builderScriptLaunch(scriptPath, config.workspaceRoot);
   const { terminalId: worktreeTerminalId } = await createPtySession(
     config,
-    '/bin/bash',
-    [scriptPath],
+    launch.command,
+    launch.args,
     worktreePath,
     { workspacePath: config.workspaceRoot, type: 'builder', roleId: builderId },
   );

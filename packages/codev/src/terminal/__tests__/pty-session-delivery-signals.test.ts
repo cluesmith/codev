@@ -7,6 +7,7 @@ import {
   type PtySessionConfig,
 } from '../pty-session.js';
 import type { IShellperClient } from '../shellper-client.js';
+// spec-1658-tmp: opaque (every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off)
 
 /**
  * Spec 1313 Phase 5 — fast delivery triggers, emit side.

@@ -3,6 +3,7 @@
 
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
+import { lastPathSegment } from '../../lib/host-paths.js';
 
 interface CronTaskResponse {
   name: string;
@@ -70,7 +71,7 @@ export async function cronList(options: CronListOptions = {}): Promise<void> {
   logger.row(['─'.repeat(20), '─'.repeat(18), '─'.repeat(8), '─'.repeat(15)], widths);
 
   for (const task of tasks) {
-    const wsName = task.workspacePath.split('/').pop() || task.workspacePath;
+    const wsName = lastPathSegment(task.workspacePath) || task.workspacePath;
     logger.row([
       task.name.slice(0, 20),
       task.schedule.slice(0, 18),

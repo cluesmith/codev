@@ -16,12 +16,13 @@
 
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { waitForPort } from './helpers/tower-test-utils.js';
+import { socketTempRoot } from './helpers/socket-temp-root.js';
 
 const TOWER_SERVER_PATH = resolve(
   import.meta.dirname,
@@ -80,7 +81,7 @@ describe('#1515 spawned Tower cannot reach the real agent-farm dir', () => {
     writeFileSync(resolve(isolated, 'cloud-config.json'), JSON.stringify(ISOLATED_CONFIG), { mode: 0o600 });
     writeFileSync(resolve(isolated, 'local-key'), ensureLocalKey(), { mode: 0o600 });
 
-    const socketDir = mkdtempSync('/tmp/codev-sock-1515-');
+    const socketDir = mkdtempSync(join(socketTempRoot(), 'codev-sock-1515-'));
     dirs.push(socketDir);
 
     proc = spawn('node', [TOWER_SERVER_PATH, String(PORT)], {

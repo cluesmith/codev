@@ -21,6 +21,7 @@ import {
 } from '../lib/scaffold.js';
 import { syncHotContextBlock } from '../lib/managed-block.js';
 import { createGitignore } from '../lib/gitignore.js';
+import { isWindows } from '../lib/platform.js';
 
 interface InitOptions {
   yes?: boolean;
@@ -156,6 +157,11 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
       postSpawn: [],
     },
   };
+  // Spec 1658: no interactive shell is committed from a Windows machine; the
+  // loader's per-host default (Windows PowerShell there, bash elsewhere) applies.
+  if (isWindows()) {
+    delete (codevConfig.shell as Record<string, unknown>).shell;
+  }
   fs.writeFileSync(
     path.join(codevConfigDir, 'config.json'),
     JSON.stringify(codevConfig, null, 2) + '\n'

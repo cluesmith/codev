@@ -12,12 +12,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import { BUILDER_WORKTREE_ENV, sanitizeAgentEnv } from '../../lib/agent-env.js';
+import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
+// Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 
 const dbState = vi.hoisted(() => ({ globalDbPath: '' }));
 vi.mock('../db/index.js', async (importOriginal) => {
@@ -35,8 +38,19 @@ function seedBuilder(workspacePath: string, id: string, worktree: string): void 
   db.prepare(
     `INSERT INTO builders (workspace_path, id, name, worktree, branch, type, status, spawned_by_architect)
      VALUES (?, ?, ?, ?, ?, 'bugfix', 'implementing', 'vscode')`,
-  ).run(realpathSync(workspacePath), id, id, worktree, `builder/${id}`);
+  ).run(normalizeWorkspacePath(workspacePath), id, id, worktree, `builder/${id}`);
   db.close();
+}
+
+
+/**
+ * The first test's hook opens the first better-sqlite3 database in a fresh
+ * worker, which cold-loads the native binding: past vitest's 10 s hook default
+ * on a loaded Windows runner.
+ */
+function firstDbOpenTimeoutMs(): number {
+  if (process.platform === 'win32') return 60_000;
+  return 10_000;
 }
 
 describe('builder identity from the spawn environment — issue #1783', () => {
@@ -46,14 +60,14 @@ describe('builder identity from the spawn environment — issue #1783', () => {
   const origCwd = process.cwd();
 
   beforeEach(() => {
-    tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'bugfix-1783-')));
+    tmpRoot = normalizeWorkspacePath(mkdtempSync(join(tmpdir(), 'bugfix-1783-')));
     workspacePath = join(tmpRoot, 'workspace');
     worktreePath = join(workspacePath, '.builders', 'experiment-1782');
     mkdirSync(worktreePath, { recursive: true });
     mkdirSync(join(workspacePath, '.git'));
     dbState.globalDbPath = join(tmpRoot, 'global.db');
     seedBuilder(workspacePath, 'builder-experiment-1782', worktreePath);
-  });
+  }, firstDbOpenTimeoutMs());
 
   afterEach(() => {
     process.chdir(origCwd);
@@ -106,6 +120,19 @@ describe('builder identity from the spawn environment — issue #1783', () => {
     process.chdir(workspacePath);
     expect(() => detectCurrentBuilderId()).toThrow(BuilderIdResolutionError);
     expect(() => detectCurrentBuilderId()).toThrow(/experiment-1782/);
+  });
+
+  it('on Windows, a native drive-rooted env worktree names the builder; a relative one does not (Spec 1658)', () => {
+    setHostPlatformForTests('win32');
+    try {
+      process.env[BUILDER_WORKTREE_ENV] = 'C:\\repo\\.builders\\bugfix-42';
+      expect(detectWorkspaceRoot()).toBe('C:\\repo');
+      process.env[BUILDER_WORKTREE_ENV] = 'repo\\.builders\\bugfix-42';
+      process.chdir(workspacePath);
+      expect(detectWorkspaceRoot()).toBe(workspacePath);
+    } finally {
+      resetHostPlatformForTests();
+    }
   });
 
   it('sanitizeAgentEnv strips the builder identity so a Tower started from a builder shell cannot leak it', () => {

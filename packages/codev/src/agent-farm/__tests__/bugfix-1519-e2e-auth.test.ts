@@ -27,6 +27,8 @@
  * pre-fix harness and pass with it.
  */
 
+// spec-1658-tmp: opaque (/tmp/ws is a workspace string posted through an injected mock fetch; nothing touches the disk)
+
 import { describe, it, expect, vi } from 'vitest';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { TOWER_KEY_HEADER, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';

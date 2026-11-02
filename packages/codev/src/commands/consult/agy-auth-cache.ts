@@ -124,7 +124,7 @@ export function agyAuthCacheDir(): string {
   const override = process.env.CODEV_AGY_AUTH_CACHE_DIR;
   if (override) return override;
   const xdg = process.env.XDG_CACHE_HOME;
-  return path.join(xdg && xdg.startsWith('/') ? xdg : path.join(homedir(), '.cache'), 'codev');
+  return path.join(xdg && path.isAbsolute(xdg) ? xdg : path.join(homedir(), '.cache'), 'codev');
 }
 
 function cacheFilePath(): string {

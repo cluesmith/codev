@@ -33,11 +33,22 @@ const vsixPath = join(outDir, IDE_EXTENSION_VSIX);
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
-const result = spawnSync(
-  'pnpm',
-  ['--filter', 'codev-vscode', 'exec', 'vsce', 'package', '--no-dependencies', '--out', vsixPath],
-  { cwd: repoRoot, stdio: 'inherit' },
-);
+/**
+ * How to run pnpm. On native Windows `pnpm` is a `.cmd` shim that spawn cannot
+ * run without a shell (ENOENT), so when this script runs under pnpm its own JS
+ * entry (`npm_execpath`) runs under the current Node instead (Spec 1658).
+ * Everywhere else, `pnpm` as before.
+ */
+function pnpmCommand(args) {
+  const entry = process.env.npm_execpath;
+  if (process.platform === 'win32' && entry && /\.[cm]?js$/i.test(entry)) {
+    return { command: process.execPath, args: [entry, ...args] };
+  }
+  return { command: 'pnpm', args };
+}
+
+const pnpm = pnpmCommand(['--filter', 'codev-vscode', 'exec', 'vsce', 'package', '--no-dependencies', '--out', vsixPath]);
+const result = spawnSync(pnpm.command, pnpm.args, { cwd: repoRoot, stdio: 'inherit', windowsHide: true });
 if (result.error) {
   throw new Error(`build-ide-extension: failed to run vsce: ${result.error.message}`);
 }

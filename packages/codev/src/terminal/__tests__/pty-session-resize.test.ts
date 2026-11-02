@@ -16,6 +16,7 @@
  *   - the gate mirror never sits at a geometry the process did not take;
  *   - a shellper's WELCOME geometry — the one real measurement available — is adopted on attach.
  */
+// spec-1658-tmp: opaque (every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off)
 
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';

@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TowerClient } from '@cluesmith/codev-sdk/tower-client';
 import { readLocalKey } from '@cluesmith/codev-sdk/node';
 import { getTowerAddress } from './workspace-detector.js';
+import { spawnCodevCli } from './cli-process.js';
 
 /**
  * How long `restartTower` waits for the old Tower to release `/health` after
@@ -45,7 +45,7 @@ export async function autoStartTower(
 
   try {
     // Spawn as detached process — Tower outlives VS Code
-    const child = spawn(afxPath, ['tower', 'start'], {
+    const child = spawnCodevCli(afxPath, ['tower', 'start'], {
       detached: true,
       stdio: 'ignore',
       cwd: workspacePath ?? undefined,
@@ -96,7 +96,7 @@ export async function restartTower(
   log('INFO', 'Restarting Tower (stop + start)');
   try {
     await new Promise<void>((res) => {
-      const child = spawn(afxPath, ['tower', 'stop'], {
+      const child = spawnCodevCli(afxPath, ['tower', 'stop'], {
         stdio: 'ignore',
         cwd: workspacePath ?? undefined,
       });

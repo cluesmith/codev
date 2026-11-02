@@ -12,6 +12,7 @@
  * were wrong at some point in this phase, and both would have shipped a command
  * that fails in a way the state machine's tests call success.
  */
+// spec-1658-tmp: opaque (/tmp/ws paths are fake builder rows and mocked runReset/getConfig results; the context fs port is mocked)
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 

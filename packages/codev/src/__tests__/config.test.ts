@@ -11,21 +11,36 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { deepMerge, loadConfig, resolveProjectConfigPath, resolveLocalConfigPath } from '../lib/config.js';
 import { getActivityHooks } from '../agent-farm/utils/config.js';
+import { setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
 
 // Helpers
 let tmpDir: string;
 let globalCodevDir: string;
 let origHome: string | undefined;
+let origUserProfile: string | undefined;
+
+function restoreEnv(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-config-test-'));
   globalCodevDir = path.join(tmpDir, 'fake-home', '.codev');
   origHome = process.env.HOME;
+  origUserProfile = process.env.USERPROFILE;
+  // os.homedir() reads HOME on POSIX and USERPROFILE on Windows; point both at the fake home.
   process.env.HOME = path.join(tmpDir, 'fake-home');
+  process.env.USERPROFILE = path.join(tmpDir, 'fake-home');
 });
 
 afterEach(() => {
-  process.env.HOME = origHome;
+  restoreEnv('HOME', origHome);
+  restoreEnv('USERPROFILE', origUserProfile);
+  resetHostPlatformForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -141,6 +156,9 @@ describe('resolveLocalConfigPath', () => {
 
 describe('loadConfig', () => {
   it('returns defaults when no config files exist', () => {
+    // The POSIX defaults; the Windows default shell (powershell.exe) is covered by
+    // shell-launch.test.ts 'defaultInteractiveShell'.
+    setHostPlatformForTests('linux');
     const config = loadConfig(tmpDir);
     expect(config.shell?.architect).toBe('claude');
     expect(config.shell?.builder).toBe('claude');

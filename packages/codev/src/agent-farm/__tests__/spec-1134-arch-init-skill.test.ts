@@ -134,7 +134,8 @@ describe('Spec 1134 — /arch-init skill ships in both trees', () => {
   });
 
   it('has the expected skill frontmatter (name + description)', () => {
-    const t = fs.readFileSync(SKELETON_SKILL, 'utf-8');
+    // LF-normalized: a CRLF checkout (core.autocrlf on Windows) is the same frontmatter.
+    const t = fs.readFileSync(SKELETON_SKILL, 'utf-8').replace(/\r\n/g, '\n');
     expect(t).toMatch(/^---\nname: arch-init\n/);
     expect(t).toMatch(/\ndescription: /);
   });

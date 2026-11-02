@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { spawn } from 'node:child_process';
+import { spawnCodevCli } from '../cli-process.js';
 
 /**
  * Codev: Spawn Builder.
@@ -43,7 +43,7 @@ export async function spawnBuilder(issueArg?: string): Promise<void> {
 }
 
 function runAfxCommand(args: string[]): void {
-  const child = spawn('afx', args, { detached: true, stdio: 'ignore' });
+  const child = spawnCodevCli('afx', args, { detached: true, stdio: 'ignore' });
   child.unref();
   vscode.window.showInformationMessage(`Codev: Running afx ${args.join(' ')}`);
 }

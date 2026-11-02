@@ -128,6 +128,8 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
   label TEXT,                             -- custom display label (Spec 468)
   cwd TEXT,                               -- working directory of the terminal (Bugfix #506)
   command TEXT,                           -- launch command; render-gate identity seam (Spec 1313)
+  shellper_session_id TEXT,               -- id the shellper was created with (Spec 1658)
+  shellper_secret TEXT,                   -- per-session pipe secret; Windows only, else NULL (Spec 1658)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

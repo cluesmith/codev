@@ -5,12 +5,16 @@
  * with timeout support.
  */
 
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
 import type { CheckResult, CheckDef } from './types.js';
 import type { ArtifactResolver } from './artifacts.js';
 import { executeForgeCommand, getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
+import { isWindows } from '../../lib/platform.js';
+import { gitBashCommand } from '../../lib/shell-launch.js';
+import { killSessionTree, waitForTreeExit, type KillSessionTreeResult } from '../../lib/process-tree.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,19 +35,6 @@ const RELAYED_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 export interface CheckEnv {
   PROJECT_ID: string;
   PROJECT_TITLE: string;
-}
-
-/** Resolve once process group `pgid` has no members, or after `withinMs`. */
-async function waitForGroupExit(pgid: number, withinMs: number): Promise<void> {
-  const deadline = Date.now() + withinMs;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(-pgid, 0);
-    } catch {
-      return; // Group is empty
-    }
-    await new Promise(r => setTimeout(r, 100));
-  }
 }
 
 /**
@@ -78,33 +69,60 @@ export async function runCheck(
     // (test workers) holding stdout open, and 'close' never fired. detached
     // calls setsid, so the check also has no controlling terminal: one that
     // opens /dev/tty fails instead of prompting, which is intended.
-    const proc = spawn(executable, args, {
-      cwd,
-      shell: true,
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        PROJECT_ID: env.PROJECT_ID,
-        PROJECT_TITLE: env.PROJECT_TITLE,
-      },
-    });
+    // On Windows there are no process groups (detached would only open a new
+    // console), so the check runs hidden and its tree is tracked from the
+    // teardown snapshot instead (Spec 1658).
+    const checkEnv = {
+      ...process.env,
+      PROJECT_ID: env.PROJECT_ID,
+      PROJECT_TITLE: env.PROJECT_TITLE,
+    };
+    // On Windows the check string runs in the resolved Git Bash, never cmd.exe,
+    // so a check written for POSIX `sh` means the same thing (Spec 1658).
+    let proc: ChildProcessByStdio<null, Readable, Readable>;
+    if (isWindows()) {
+      const launch = gitBashCommand(command, cwd);
+      proc = spawn(launch.command, launch.args, {
+        cwd,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: checkEnv,
+      });
+    } else {
+      proc = spawn(executable, args, {
+        cwd,
+        shell: true,
+        detached: true,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: checkEnv,
+      });
+    }
 
-    const killGroup = (signal: NodeJS.Signals) => {
-      if (proc.pid === undefined) return;
-      try {
-        process.kill(-proc.pid, signal);
-      } catch {
-        // Group already gone
-      }
+    // The first teardown's snapshot is what the close handler waits on.
+    let firstKill: Promise<KillSessionTreeResult | null> | null = null;
+    const killGroup = (signal: NodeJS.Signals): Promise<KillSessionTreeResult | null> => {
+      if (proc.pid === undefined) return Promise.resolve(null);
+      const result = killSessionTree(proc.pid, { signal }).catch((err: Error) => {
+        process.stderr.write(`porch: ${err.message}\n`);
+        return null;
+      });
+      if (firstKill === null) firstKill = result;
+      return result;
     };
 
     // Leaving porch's process group also means a Ctrl+C at porch's terminal
     // no longer reaches the check. Relay porch's own interruption to the
-    // group, then re-raise it so porch dies of the signal as before.
+    // group, then re-raise it so porch dies of the signal as before. A Windows
+    // teardown is asynchronous (it snapshots the tree first), so porch waits
+    // for it before dying.
     const relay = (signal: NodeJS.Signals) => {
       stopRelaying();
-      killGroup(signal);
+      const teardown = killGroup(signal);
+      if (isWindows()) {
+        teardown.finally(() => process.kill(process.pid, signal));
+        return;
+      }
       process.kill(process.pid, signal);
     };
     const stopRelaying = () => {
@@ -135,7 +153,11 @@ export async function runCheck(
         // 'close' means the pipes closed, not that the group is gone: a member
         // that ignores SIGTERM and holds no pipe outlives the shell. Resolving
         // now would let porch exit before the SIGKILL escalation fires.
-        if (proc.pid !== undefined) await waitForGroupExit(proc.pid, KILL_GRACE_MS + 1000);
+        if (proc.pid !== undefined) {
+          const first = await firstKill;
+          const snapshot = first?.snapshot ?? { rootPid: proc.pid, members: [] };
+          await waitForTreeExit(proc.pid, snapshot, KILL_GRACE_MS + 1000);
+        }
         clearTimeout(escalation);
         stopRelaying();
         resolve({

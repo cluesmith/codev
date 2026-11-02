@@ -6,6 +6,7 @@
  * and the screenBufferType routing signal the attach sites use to decide
  * snapshot-vs-delta on resume.
  */
+// spec-1658-tmp: opaque (every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off)
 
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';

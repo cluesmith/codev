@@ -6,7 +6,8 @@
  * the ps invocation itself (covered by process-census.test.ts) — is under test.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import {
   findHuskShellpers,
   computeRegisteredShellperPids,
@@ -50,6 +51,17 @@ function baseOpts(overrides: Partial<FindHuskShellpersOptions> = {}): FindHuskSh
     ...overrides,
   };
 }
+
+// These tests drive the POSIX branch (POSIX shellper command lines and socket dirs), so
+// force the platform seam to linux; on a win32 host the code would otherwise take its
+// Windows branch.
+beforeEach(() => {
+  setHostPlatformForTests('linux');
+});
+
+afterEach(() => {
+  resetHostPlatformForTests();
+});
 
 describe('findHuskShellpers (Issue #1227)', () => {
   it('sweeps a shellper that is unregistered AND childless AND aged', async () => {

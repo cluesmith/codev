@@ -1,6 +1,8 @@
 // Tests for tower-cron.ts (Spec 399 Phase 2)
 // Core scheduler: YAML loading, task execution, condition evaluation, message delivery
 
+// spec-1658-tmp: opaque (the only /tmp is a cwd field in task YAML, asserted after parsing; exec is mocked)
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';

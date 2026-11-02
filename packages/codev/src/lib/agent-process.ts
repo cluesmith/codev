@@ -3,7 +3,7 @@
  * `codev bootstrap-docs` and `codev adopt`'s conflict-merge session.
  */
 
-import { spawn } from 'node:child_process';
+import { spawnOnHost } from './shell-launch.js';
 
 export interface AgentLaunch {
   executable: string;
@@ -28,7 +28,7 @@ export function spawnAgentProcess(launch: AgentLaunch, cwd: string): Promise<Age
   const ignoreInterrupt = (): void => {};
   process.on('SIGINT', ignoreInterrupt);
   return new Promise<AgentExit>(resolve => {
-    const child = spawn(launch.executable, launch.args, { stdio: 'inherit', cwd });
+    const child = spawnOnHost(launch.executable, launch.args, { stdio: 'inherit', cwd });
     child.on('error', err => resolve({ code: null, signal: null, error: err.message }));
     child.on('exit', (code, signal) => resolve({ code, signal }));
   }).finally(() => {

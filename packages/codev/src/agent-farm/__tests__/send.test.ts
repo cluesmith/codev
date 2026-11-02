@@ -2,6 +2,7 @@
  * Tests for commands/send.ts (refactored to use TowerClient.sendMessage)
  * Spec 0110: Messaging Infrastructure — Phase 4
  */
+// spec-1658-tmp: opaque (the /tmp --file paths are answered by the mocked node:fs existsSync/readFileSync)
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 

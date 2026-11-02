@@ -39,7 +39,9 @@ describe('bugfix #693: forge scripts retain +x after install', () => {
     expect(pkg.files).toContain('scripts/forge');
   });
 
-  it('postinstall.mjs makes every forge script executable', () => {
+  // Executable bits are a POSIX concept; on Windows postinstall verifies the
+  // native bindings instead (native-deps-guard.test.ts).
+  it.skipIf(process.platform === 'win32')('postinstall.mjs makes every forge script executable', () => {
     const fixture = mkdtempSync(join(tmpdir(), 'codev-693-'));
     try {
       const providers = ['github', 'gitlab', 'gitea'];
@@ -57,6 +59,7 @@ describe('bugfix #693: forge scripts retain +x after install', () => {
       }
 
       copyFileSync(realPostinstall, join(fixture, 'scripts', 'postinstall.mjs'));
+      copyFileSync(join(codevPkgRoot, 'scripts', 'native-deps-guard.mjs'), join(fixture, 'scripts', 'native-deps-guard.mjs'));
       execFileSync('node', ['./scripts/postinstall.mjs'], { cwd: fixture });
 
       for (const provider of providers) {

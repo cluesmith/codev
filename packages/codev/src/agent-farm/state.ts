@@ -21,7 +21,8 @@ import { isPortConflictError } from './db/errors.js';
 // The architect/builders tables key on `workspace_path`; writers and readers
 // must agree on its exact form, so both layers normalize through this one leaf
 // helper (Bugfix #826 iter-6). Aliased to `canonicalize` for the local callsites.
-import { normalizeWorkspacePath as canonicalize } from './utils/workspace-path.js';
+import { normalizeWorkspacePath as canonicalize, workspaceKey } from './utils/workspace-path.js';
+import { isWindows } from '../lib/platform.js';
 
 /**
  * Derive a builder's owning workspace from its worktree path (Issue #1118).
@@ -37,7 +38,12 @@ function deriveWorkspaceFromWorktree(worktree: string): string {
   // `/.builders/` — robust when the path itself contains an earlier `.builders`
   // segment (e.g. a builder worktree nested under another).
   const marker = '/.builders/';
-  const idx = worktree.lastIndexOf(marker);
+  let idx = worktree.lastIndexOf(marker);
+  if (isWindows()) {
+    // A native Windows worktree uses `\` (or a mix): normalize the separators
+    // for the search only; the slice keeps the path as it was spelled.
+    idx = worktree.replace(/\\/g, '/').lastIndexOf(marker);
+  }
   let root: string;
   if (idx >= 0) {
     root = worktree.slice(0, idx);
@@ -221,7 +227,8 @@ export function upsertBuilder(builder: Builder): void {
     name: builder.name,
     status: builder.status,
     phase: builder.phase,
-    worktree: builder.worktree,
+    // Spec 1658 (M6): one spelling per directory on Windows, as given on POSIX.
+    worktree: workspaceKey(builder.worktree),
     branch: builder.branch,
     type: builder.type,
     taskText: builder.taskText ?? null,

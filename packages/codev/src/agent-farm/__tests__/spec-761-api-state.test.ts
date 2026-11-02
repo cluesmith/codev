@@ -9,6 +9,7 @@
  *  - Architects whose PTY session is gone are skipped silently.
  *  - The response carries the new shared `name` field on every architect entry.
  */
+// spec-1658-tmp: opaque (templatePath and reactDashboardPath under /tmp are RouteContext fields /api/state never reads)
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import http from 'node:http';

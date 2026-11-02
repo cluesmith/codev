@@ -19,7 +19,10 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+// spec-1658-tmp: opaque (the /tmp worktreePath is a field in the mocked /api/overview response)
 
 const TOWER_URL = `http://localhost:${process.env.TOWER_TEST_PORT || '4100'}`;
 const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../../');
@@ -146,6 +149,6 @@ test.describe('Spec 1595: dashboard agent states', () => {
     await expect(rows.filter({ hasText: '#15' })).toContainText('plan review');
     await expect(rows.filter({ hasText: '#12' })).toHaveCount(0);
     await expect(rows.filter({ hasText: '#14' })).toHaveCount(0);
-    await page.screenshot({ path: process.env.SPEC_1595_SCREENSHOT || '/tmp/spec-1595-dashboard.png', fullPage: true });
+    await page.screenshot({ path: process.env.SPEC_1595_SCREENSHOT || join(tmpdir(), 'spec-1595-dashboard.png'), fullPage: true });
   });
 });

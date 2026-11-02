@@ -10,6 +10,7 @@ import type { IShellperClient } from '../shellper-client.js';
 import { capRingSeed, RING_SEED_MAX_BYTES } from '../../agent-farm/servers/tower-terminals.js';
 import { classifyAgentScreen } from '../../agent-farm/servers/mailbox-wiring.js';
 import { CLAUDE_PROFILE } from '../../agent-farm/servers/gate-profiles.js';
+// spec-1658-tmp: opaque (every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off, and the one disk-log test uses os.tmpdir())
 
 /**
  * Fix E (#1047): attachShellper must be idempotent — re-attaching a session to

@@ -90,7 +90,9 @@ describe('classifyGovernanceFile', () => {
 
   it('treats a CRLF copy of a starter as a placeholder', () => {
     const starters = knownStarterTexts(ARCH_CRITICAL, templatesDir);
-    expect(classifyGovernanceFile(starters[0].replace(/\n/g, '\r\n'), starters)).toBe('placeholder');
+    // From the LF form, so a starter already checked out with CRLF does not become CR CR LF.
+    const crlf = starters[0].replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+    expect(classifyGovernanceFile(crlf, starters)).toBe('placeholder');
   });
 
   it('treats a starter with every marker removed as curated', () => {
@@ -306,7 +308,9 @@ describe('classifyProjectGovernance and shouldOfferBootstrap', () => {
 });
 
 describe('validateHotFile', () => {
-  const archCritical = readRepo('codev/resources/arch-critical.md');
+  // LF-normalized: the edits below splice LF text into it, and a CRLF checkout
+  // (core.autocrlf on Windows) would leave them unmatched.
+  const archCritical = readRepo('codev/resources/arch-critical.md').replace(/\r\n/g, '\n');
   const arch = readRepo('codev/resources/arch.md');
 
   function kinds(content: string, cold = arch, file = ARCH_CRITICAL): string[] {

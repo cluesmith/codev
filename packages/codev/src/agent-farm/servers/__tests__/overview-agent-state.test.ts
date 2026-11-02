@@ -9,10 +9,13 @@
  * overview's discovery cache are stubbed.
  */
 
+// spec-1658-tmp: opaque (the only /tmp is reactDashboardPath in a RouteContext with hasReactDashboard false; never read)
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { TOWER_KEY_HEADER, type OverviewBuilder, type OverviewData } from '@cluesmith/codev-types';
 import { GLOBAL_SCHEMA } from '../../db/schema.js';
@@ -98,14 +101,16 @@ type RouteContext = import('../tower-routes.js').RouteContext;
 type Census = Array<{ pid: number; ppid: number }>;
 
 const KEY = 'a'.repeat(64);
-const WS = '/nonexistent-spec-1595-overview/workspace';
+// Host-resolved, as Tower normalizes it (a drive-rooted path on Windows), so the
+// store, liveness and overview all key the workspace by the same spelling.
+const WS = resolve('/nonexistent-spec-1595-overview/workspace');
 const NOW = Date.now();
 
 const SPIR_DIR = 'spir-1595-agent-attention';
-const SPIR_WORKTREE = `${WS}/.builders/${SPIR_DIR}`;
+const SPIR_WORKTREE = join(WS, '.builders', SPIR_DIR);
 const SPIR_ROLE = 'builder-spir-1595';
 const LEGACY_DIR = 'bugfix-42-fix-thing';
-const LEGACY_WORKTREE = `${WS}/.builders/${LEGACY_DIR}`;
+const LEGACY_WORKTREE = join(WS, '.builders', LEGACY_DIR);
 const LEGACY_ROLE = 'builder-bugfix-42';
 
 /** The shellper pid of each builder session; its launch loop is pid + 1, the agent pid + 2. */
@@ -140,7 +145,7 @@ function overviewBuilder(dir: string, storedId: string, fields: Partial<Overview
     protocolPhase: 'implement',
     mode: 'strict',
     gates: {},
-    worktreePath: `${WS}/.builders/${dir}`,
+    worktreePath: join(WS, '.builders', dir),
     roleId: builderRoleId(storedId, dir),
     protocol: 'spir',
     planPhases: [],

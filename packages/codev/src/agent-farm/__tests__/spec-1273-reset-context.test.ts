@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import {
   resolveBuilderContext,
   readPorchContext,
@@ -30,7 +30,9 @@ import {
 // Fixtures
 // ============================================================================
 
-const WORKTREE = '/ws/.builders/aspir-1273';
+// Host-joined like every path the resolver derives from it, so the in-memory
+// fs keys and the worktree agree on the separator (backslash on Windows).
+const WORKTREE = join('/ws', '.builders', 'aspir-1273');
 const BRANCH = 'builder/aspir-1273';
 const BUILDER_ID = 'builder-aspir-1273';
 
@@ -64,7 +66,7 @@ done
 /** In-memory worktree. `dirs` maps a directory to its immediate subdirectories. */
 function makeFs(files: Record<string, string>, dirs: Record<string, string[]> = {}): ContextFsPort {
   return {
-    exists: (p) => p in files || p in dirs || Object.keys(files).some(f => f.startsWith(`${p}/`)),
+    exists: (p) => p in files || p in dirs || Object.keys(files).some(f => f.startsWith(`${p}${sep}`)),
     read: (p) => (p in files ? files[p] : null),
     listDirs: (p) => (p in dirs ? dirs[p] : null),
   };

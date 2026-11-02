@@ -25,6 +25,8 @@
  * Run: npx playwright test spec-823-builder-attribution
  */
 
+// spec-1658-tmp: opaque (/tmp/.builders/<id> is a worktreePath in a mocked /api/overview response; nothing touches the disk)
+
 import { test, expect } from '@playwright/test';
 import { resolve } from 'node:path';
 

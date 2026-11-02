@@ -187,6 +187,13 @@ describe('codev bootstrap-docs: no-op paths', () => {
     expect(output()).toContain('codev adopt');
   });
 
+  // Two full bootstrap passes over a real git repo: each git process start costs far
+  // more on Windows (seconds per test on a loaded runner, past vitest's 5 s default).
+  function gitHeavyTimeoutMs(): number {
+    if (process.platform === 'win32') return 30_000;
+    return 5_000;
+  }
+
   it('re-run on a populated result launches nothing and changes nothing (scenario 2)', async () => {
     setUpGitProject();
     await runBootstrapDocs({ cwd: dir }, deps(() => writeDrafts()));
@@ -200,7 +207,7 @@ describe('codev bootstrap-docs: no-op paths', () => {
     expect(spawned).toEqual([]);
     expect(Object.keys(DRAFTS).map(name => read(resource(name)))).toEqual(contents);
     expect(output()).toContain('Nothing needs bootstrapping');
-  });
+  }, gitHeavyTimeoutMs());
 
   it('an empty repository launches nothing (scenario 5)', async () => {
     git('init', '-q', '-b', 'main');

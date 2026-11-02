@@ -31,6 +31,7 @@ import type {
   IssueIdKind,
 } from '@cluesmith/codev-types';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { heldSummaryForWorkspace } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
@@ -688,7 +689,7 @@ export function loadStoredBuilderIdentities(workspaceRoot: string): Map<string, 
   try {
     const dbPath = getGlobalDbPath();
     if (!fs.existsSync(dbPath)) return result;
-    const db = new Database(dbPath, { readonly: true });
+    const db = openDatabase(dbPath, { readonly: true });
     try {
       const rows = db.prepare(
         'SELECT worktree, id, issue_number, spawned_by_architect FROM builders WHERE workspace_path = ?',
@@ -1122,7 +1123,7 @@ export class OverviewCache {
       const dbPath = getGlobalDbPath();
       if (fs.existsSync(dbPath)) {
         const normWs = normalizeWorkspacePath(workspaceRoot);
-        const db = new Database(dbPath, { readonly: true });
+        const db = openDatabase(dbPath, { readonly: true });
         try {
           // Counts + escalation flag only — never bodies (redaction rule). Per-agent
           // held counts attach to the matching builder by roleId (the same

@@ -3,6 +3,8 @@ import { parseVerdict, allApprove } from '../verdict';
 import { _agySkipContent } from '../../consult/index.js';
 import type { ReviewResult } from '../types.js';
 
+// spec-1658-tmp: opaque (every /tmp is a review file field in ReviewResult objects passed to allApprove; never read)
+
 /**
  * Phase-progression guarantee for the agy backend (Spec 778).
  *

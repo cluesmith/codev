@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { isWindows } from './platform.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,11 +90,22 @@ export const USER_DATA_PATTERNS = [
 ];
 
 /**
+ * A relative path with '/' separators, the form the patterns below are written in. On
+ * Windows a path built with `path.join` carries backslashes (`specs\x.md`); POSIX paths
+ * are returned as given.
+ */
+function toPatternForm(relativePath: string): string {
+  if (isWindows()) return relativePath.split('\\').join('/');
+  return relativePath;
+}
+
+/**
  * Check if a file path matches user data patterns
  */
 export function isUserDataPath(relativePath: string): boolean {
+  const candidate = toPatternForm(relativePath);
   return USER_DATA_PATTERNS.some(pattern =>
-    relativePath.startsWith(pattern) || relativePath.includes(`/${pattern}`)
+    candidate.startsWith(pattern) || candidate.includes(`/${pattern}`)
   );
 }
 
@@ -251,5 +263,6 @@ export const UPDATABLE_PREFIXES = [
  * Check if a file is updatable (not user data)
  */
 export function isUpdatableFile(relativePath: string): boolean {
-  return UPDATABLE_PREFIXES.some(prefix => relativePath.startsWith(prefix));
+  const candidate = toPatternForm(relativePath);
+  return UPDATABLE_PREFIXES.some(prefix => candidate.startsWith(prefix));
 }

@@ -13,6 +13,7 @@ import { parseAddress, stripLeadingZeros } from '../utils/agent-names.js';
 import { getWorkspaceTerminals } from './tower-terminals.js';
 import { lookupBuilderSpawningArchitect, getBuilders, getArchitects, getArchitectByName } from '../state.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
+import { workspaceKey } from '../utils/workspace-path.js';
 
 // ============================================================================
 // Spec 755 error messages — exported as constants so producer and asserter
@@ -155,6 +156,12 @@ export function resolveTarget(
   sender?: string,
 ): ResolveResult | ResolveError {
   const { project, agent } = parseAddress(target);
+  // Spec 1658 (M6): the caller's workspace arrives as the sender spelled it
+  // (VS Code `c:\`, Git Bash `C:\`); canonicalize it once so the registry,
+  // the architect/builder rows and the mailbox all see one key. POSIX: as given.
+  if (fallbackWorkspace) {
+    fallbackWorkspace = workspaceKey(fallbackWorkspace);
+  }
 
   // Validate: empty or whitespace-only agent is a malformed address
   if (!agent || !agent.trim()) {
@@ -464,6 +471,10 @@ export function resolveAgentInRegistry(
   fallbackWorkspace?: string,
   sender?: string,
 ): RegistryResolveResult | ResolveError {
+  // Spec 1658 (M6): canonical on Windows, as given on POSIX (see resolveTarget).
+  if (fallbackWorkspace) {
+    fallbackWorkspace = workspaceKey(fallbackWorkspace);
+  }
   const { project, agent } = parseAddress(target);
 
   if (!agent || !agent.trim()) {

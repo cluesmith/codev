@@ -190,6 +190,36 @@ describe('porch done — verification enforcement', () => {
     expect(output).toContain('ADVANCING TO: plan');
   });
 
+  // Spec 1658: the review-file lookup must not read the project directory as glob syntax. A
+  // Windows path's '\' separators are glob escapes, so a pattern built on the absolute path
+  // found nothing and `done` always refused; '[...]' in a POSIX path failed the same way.
+  it('finds review files when the workspace path holds glob metacharacters', async () => {
+    const workspace = path.join(testDir, 'ws [x] (1)');
+    setupProtocol(workspace, 'spir', spirProtocol);
+    const state = makeState({
+      build_complete: true,
+      gates: {
+        'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
+        'plan-approval': { status: 'pending' as const },
+        'pr': { status: 'pending' as const },
+      },
+    });
+    setupState(workspace, state);
+
+    const projectDir = getProjectDir(workspace, '0001', 'test-feature');
+    for (const model of ['gemini', 'codex', 'claude']) {
+      fs.writeFileSync(
+        path.join(projectDir, `0001-specify-iter1-${model}.txt`),
+        `Review content\n\n---\nVERDICT: APPROVE\n---`
+      );
+    }
+
+    await done(workspace, '0001');
+
+    const output = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(output).toContain('ADVANCING TO: plan');
+  });
+
   // --------------------------------------------------------------------------
   // Test 3: porch done skips checks when gate was recently approved (#432)
   // --------------------------------------------------------------------------

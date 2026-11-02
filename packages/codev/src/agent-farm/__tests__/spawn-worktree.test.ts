@@ -4,8 +4,9 @@
  * Tests: worktree creation, dependency checking, porch initialization,
  * bugfix collision detection, slugify, resume validation, and session creation.
  */
+// spec-1658-tmp: opaque (every /tmp worktree path goes to mocked node:fs, mocked run/runStreaming or a launch-script string assertion)
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   slugify, buildWorktreeLaunchScript, startBuilderSession,
   checkDependencies, createWorktree, createWorktreeFromBranch,
@@ -18,7 +19,8 @@ import {
   validateResumeWorktree, initPorchInWorktree, type GitHubIssue,
 } from '../commands/spawn-worktree.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 import { LIFECYCLE_REPORTER_SETTINGS_NAME, lifecycleReporterDir } from '../utils/lifecycle-reporter.js';
 // node:fs is mocked below; import writeFileSync so resume-script assertions can
 // read its captured calls without a per-test dynamic import.
@@ -73,7 +75,7 @@ vi.mock('../../lib/forge.js', () => ({
 }));
 
 // Mock the harness resolution to return claude harness by default
-import { CLAUDE_HARNESS, CODEX_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
+import { CLAUDE_HARNESS, CODEX_HARNESS, OPENCODE_HARNESS, toShellPath } from '../utils/harness.js';
 const getBuilderHarnessMock = vi.fn(() => CLAUDE_HARNESS);
 const getWorktreeConfigMock = vi.fn(() => ({ symlinks: [], postSpawn: [], devCommand: null, devUrls: [] }));
 vi.mock('../utils/config.js', () => ({
@@ -99,8 +101,36 @@ vi.mock('../lib/tower-client.js', async (importOriginal) => {
   };
 });
 
+/**
+ * The launch-script and link tests below assert the POSIX branch (the script a
+ * POSIX host writes, the `symlinkSync` call POSIX makes), so they pin the
+ * platform seam to linux; on a Windows host that branch would otherwise resolve
+ * Git Bash and take the junction/hard-link path. The Windows branches are
+ * covered by windows-launch-sites.test.ts and worktree-links.test.ts.
+ */
+function pinPosixHost(): void {
+  beforeEach(() => {
+    setHostPlatformForTests('linux');
+  });
+  afterEach(() => {
+    resetHostPlatformForTests();
+  });
+}
+
+/** The product resolves paths with node:path, so expected paths are host-shaped. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** The sibling temporary file syncLocalConfigSnapshot writes before its rename. */
+function snapshotTemporary(worktree: string): unknown {
+  const target = resolve(worktree, '.codev', 'config.local.json');
+  return expect.stringMatching(new RegExp(`^${escapeRegExp(target)}\\.tmp-`));
+}
+
 /** Spec 1595: the reporter fragment every Claude builder launch carries. */
-const REPORTER_FRAGMENT = `--settings '${join(lifecycleReporterDir(), LIFECYCLE_REPORTER_SETTINGS_NAME)}'`;
+// The harness hands the settings path to bash in forward-slash form (toShellPath), as on Windows.
+const REPORTER_FRAGMENT = `--settings '${toShellPath(join(lifecycleReporterDir(), LIFECYCLE_REPORTER_SETTINGS_NAME))}'`;
 
 describe('spawn-worktree', () => {
   beforeEach(() => {
@@ -204,6 +234,8 @@ describe('spawn-worktree', () => {
   // =========================================================================
 
   describe('buildWorktreeLaunchScript', () => {
+    pinPosixHost();
+
     it('generates script without role', () => {
       const script = buildWorktreeLaunchScript('/tmp/worktree', 'claude', null);
       expect(script).toContain('#!/bin/bash');
@@ -233,6 +265,8 @@ describe('spawn-worktree', () => {
   // =========================================================================
 
   describe('buildWorktreeLaunchScript (opencode harness)', () => {
+    pinPosixHost();
+
     it('generates script with empty fragment for opencode', () => {
       getBuilderHarnessMock.mockReturnValueOnce(OPENCODE_HARNESS);
       const role = { content: 'You are a builder', source: 'codev' };
@@ -323,8 +357,8 @@ describe('spawn-worktree', () => {
       const role = { content: 'You are a builder', source: 'codev' };
       buildWorktreeLaunchScript('/tmp/worktree', 'claude', role);
       const written = vi.mocked(writeFileSync).mock.calls.map(c => String(c[0]));
-      expect(written.some(p => p.endsWith('.claude/settings.local.json'))).toBe(true);
-      expect(written.some(p => p.endsWith('.claude/hooks/worktree-write-guard.cjs'))).toBe(true);
+      expect(written.some(p => p.endsWith(join('.claude', 'settings.local.json')))).toBe(true);
+      expect(written.some(p => p.endsWith(join('.claude', 'hooks', 'worktree-write-guard.cjs')))).toBe(true);
     });
 
     it('installs the write-guard for claude even WITHOUT a role (#1018 — no-role spawn path)', async () => {
@@ -334,8 +368,8 @@ describe('spawn-worktree', () => {
       const { writeFileSync } = await import('node:fs');
       buildWorktreeLaunchScript('/tmp/worktree', 'claude', null);
       const written = vi.mocked(writeFileSync).mock.calls.map(c => String(c[0]));
-      expect(written.some(p => p.endsWith('.claude/settings.local.json'))).toBe(true);
-      expect(written.some(p => p.endsWith('.claude/hooks/worktree-write-guard.cjs'))).toBe(true);
+      expect(written.some(p => p.endsWith(join('.claude', 'settings.local.json')))).toBe(true);
+      expect(written.some(p => p.endsWith(join('.claude', 'hooks', 'worktree-write-guard.cjs')))).toBe(true);
     });
   });
 
@@ -351,6 +385,8 @@ describe('spawn-worktree', () => {
   // =========================================================================
 
   describe('startBuilderSession resume script (Issue #929)', () => {
+    pinPosixHost();
+
     function findScript(): string | undefined {
       const writeCalls = vi.mocked(writeFileSync).mock.calls;
       const scriptCall = writeCalls.find(
@@ -655,12 +691,12 @@ describe('spawn-worktree', () => {
       await createWorktree(config, 'my-branch', '/tmp/wt');
 
       expect(copyFileSync).toHaveBeenCalledWith(
-        '/projects/test/.codev/config.local.json',
-        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
+        resolve('/projects/test', '.codev', 'config.local.json'),
+        snapshotTemporary('/tmp/wt'),
       );
       expect(renameSync).toHaveBeenCalledWith(
-        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
-        '/tmp/wt/.codev/config.local.json',
+        snapshotTemporary('/tmp/wt'),
+        resolve('/tmp/wt', '.codev', 'config.local.json'),
       );
       expect(vi.mocked(renameSync).mock.invocationCallOrder[0])
         .toBeLessThan(vi.mocked(runStreaming).mock.invocationCallOrder[0]);
@@ -1006,12 +1042,12 @@ describe('spawn-worktree', () => {
       await createWorktreeFromBranch(config, 'my-branch', '/tmp/wt');
 
       expect(copyFileSync).toHaveBeenCalledWith(
-        '/projects/test/.codev/config.local.json',
-        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
+        resolve('/projects/test', '.codev', 'config.local.json'),
+        snapshotTemporary('/tmp/wt'),
       );
       expect(renameSync).toHaveBeenCalledWith(
-        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
-        '/tmp/wt/.codev/config.local.json',
+        snapshotTemporary('/tmp/wt'),
+        resolve('/tmp/wt', '.codev', 'config.local.json'),
       );
       expect(vi.mocked(renameSync).mock.invocationCallOrder[0])
         .toBeLessThan(vi.mocked(runStreaming).mock.invocationCallOrder[0]);
@@ -1243,6 +1279,8 @@ describe('spawn-worktree', () => {
 
   describe('symlinkConfigFiles', () => {
     const config = { workspaceRoot: '/projects/test' } as any;
+    pinPosixHost();
+
 
     it('symlinks .env and .codev/config.json when they exist at root', async () => {
       const { existsSync, symlinkSync, mkdirSync } = await import('node:fs');
@@ -1305,9 +1343,13 @@ describe('spawn-worktree', () => {
 
       expect(globSyncMock).toHaveBeenCalledTimes(2);
       expect(symlinkSync).toHaveBeenCalledTimes(3);
-      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/.env.local', '/tmp/wt/.env.local');
-      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/packages/web/.env', '/tmp/wt/packages/web/.env');
-      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/packages/api/.env', '/tmp/wt/packages/api/.env');
+      expect(symlinkSync).toHaveBeenCalledWith(resolve('/projects/test', '.env.local'), resolve('/tmp/wt', '.env.local'));
+      expect(symlinkSync).toHaveBeenCalledWith(
+        resolve('/projects/test', 'packages/web/.env'), resolve('/tmp/wt', 'packages/web/.env'),
+      );
+      expect(symlinkSync).toHaveBeenCalledWith(
+        resolve('/projects/test', 'packages/api/.env'), resolve('/tmp/wt', 'packages/api/.env'),
+      );
       // mkdirSync called for the nested dirs (packages/web, packages/api)
       expect(mkdirSync).toHaveBeenCalled();
     });
@@ -1356,8 +1398,8 @@ describe('spawn-worktree', () => {
       expect(globSyncMock).not.toHaveBeenCalled();
       expect(symlinkSync).toHaveBeenCalledTimes(1);
       expect(symlinkSync).toHaveBeenCalledWith(
-        '/projects/test/.local-user-data',
-        '/tmp/wt/.local-user-data',
+        resolve('/projects/test', '.local-user-data'),
+        resolve('/tmp/wt', '.local-user-data'),
         'dir',
       );
     });
@@ -1376,8 +1418,8 @@ describe('spawn-worktree', () => {
       // Link still created (no throw); no 'dir' type since the source isn't a dir.
       expect(symlinkSync).toHaveBeenCalledTimes(1);
       expect(symlinkSync).toHaveBeenCalledWith(
-        '/projects/test/.local-user-data',
-        '/tmp/wt/.local-user-data',
+        resolve('/projects/test', '.local-user-data'),
+        resolve('/tmp/wt', '.local-user-data'),
         undefined,
       );
     });

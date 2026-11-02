@@ -5,6 +5,8 @@
  * initTunnel / shutdownTunnel lifecycle, OAuth initiation, smart reconnect.
  */
 
+// spec-1658-tmp: opaque (the only /tmp is the return value of a mocked getCloudConfigPath; fs.watch is mocked)
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { Readable } from 'node:stream';

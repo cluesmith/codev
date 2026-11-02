@@ -6,6 +6,8 @@
  * workspace path decoding, and 404 fallback.
  */
 
+// spec-1658-tmp: opaque (every /tmp is a fake ctx path, a cwd handed to a mocked terminal manager, or a workspace string in mocked send routing and in-memory mailbox rows; nothing touches the disk)
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PASTE_BEGIN, PASTE_END } from '../servers/message-write.js';
 import http from 'node:http';
@@ -15,6 +17,8 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
 import { handleRequest } from '../servers/tower-routes.js';
+import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
+import { setGitBashForTests } from '../../lib/shell-launch.js';
 import { getWorkspaceTerminals } from '../servers/tower-terminals.js';
 import type { DbMailbox } from '../db/types.js';
 import { setArchitectByName } from '../state.js';
@@ -376,6 +380,110 @@ describe('tower-routes', () => {
   // =========================================================================
   // Health check
   // =========================================================================
+
+  describe('POST /api/shutdown (Spec 1658 Phase 4)', () => {
+    function shutdownRes() {
+      const made = makeRes();
+      // The handler starts the shutdown once the answer is flushed.
+      made.res.end = vi.fn((data?: string, cb?: () => void) => {
+        made.res.write(data ?? '');
+        cb?.();
+      }) as any;
+      return made;
+    }
+
+    it('answers 202 with the pid, then starts the shutdown, from loopback', async () => {
+      const requestShutdown = vi.fn();
+      for (const address of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+        const req = makeReq('POST', '/api/shutdown');
+        (req.socket as any).remoteAddress = address;
+        const { res, statusCode, body } = shutdownRes();
+        await handleRequest(req, res, makeCtx({ requestShutdown }));
+        expect(statusCode()).toBe(202);
+        expect(JSON.parse(body())).toEqual({ pid: process.pid });
+      }
+      expect(requestShutdown).toHaveBeenCalledTimes(3);
+    });
+
+    it('refuses a peer that is not this machine and does not shut down', async () => {
+      const requestShutdown = vi.fn();
+      for (const address of ['203.0.113.7', '::ffff:198.51.100.5', '2001:db8::1', undefined]) {
+        const req = makeReq('POST', '/api/shutdown');
+        (req.socket as any).remoteAddress = address;
+        const { res, statusCode } = shutdownRes();
+        await handleRequest(req, res, makeCtx({ requestShutdown }));
+        expect(statusCode()).toBe(403);
+      }
+      expect(requestShutdown).not.toHaveBeenCalled();
+    });
+
+    it('refuses a tunnel-borne request even with loopback and the key (the proxy stamps both)', async () => {
+      const requestShutdown = vi.fn();
+      const log = vi.fn();
+      const req = makeReq('POST', '/api/shutdown', { 'x-codev-tunnel-proxy': '1' });
+      (req.socket as any).remoteAddress = '127.0.0.1';
+      const { res, statusCode } = shutdownRes();
+      await handleRequest(req, res, makeCtx({ requestShutdown, log }));
+      expect(statusCode()).toBe(403);
+      expect(requestShutdown).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('arrived via tunnel proxy'));
+    });
+
+    it('logs a refused request without control characters from its user-agent', async () => {
+      const log = vi.fn();
+      const req = makeReq('POST', '/api/shutdown', { 'x-codev-tunnel-proxy': '1', 'user-agent': 'evil\r\n[ERROR] forged line' });
+      const { res } = shutdownRes();
+      await handleRequest(req, res, makeCtx({ requestShutdown: vi.fn(), log }));
+      const line = log.mock.calls.find((c) => String(c[1]).includes('REJECTED'))![1] as string;
+      expect(line).not.toMatch(/[\r\n]/);
+      expect(line).toContain('evil  [ERROR] forged line');
+    });
+
+    it('accepts a peer that is one of this machine\'s own addresses (bridge mode), and only those', async () => {
+      const { isLocalMachineAddress } = await import('../servers/tower-routes.js');
+      const interfaces = { eth0: [{ address: '192.168.1.20', family: 'IPv4' }, { address: 'fe80::1', family: 'IPv6' }] } as any;
+      expect(isLocalMachineAddress('192.168.1.20', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('::ffff:192.168.1.20', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('fe80::1', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('fe80::1%eth0', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('127.0.0.1', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('192.168.1.21', interfaces)).toBe(false);
+      expect(isLocalMachineAddress(undefined, interfaces)).toBe(false);
+    });
+
+    it('is 501 where no shutdown hook is wired', async () => {
+      const { res, statusCode } = shutdownRes();
+      await handleRequest(makeReq('POST', '/api/shutdown'), res, makeCtx());
+      expect(statusCode()).toBe(501);
+    });
+  });
+
+  describe('GET /health on Windows (Spec 1658 Phase 4)', () => {
+    it('reports whether Tower runs inside a codev session; POSIX omits the field', async () => {
+      mockGetInstances.mockResolvedValue([]);
+      setHostPlatformForTests('linux');
+      try {
+        const posix = makeRes();
+        await handleRequest(makeReq('GET', '/health'), posix.res, makeCtx());
+        expect(JSON.parse(posix.body()).insideCodevSession).toBeUndefined();
+      } finally {
+        resetHostPlatformForTests();
+      }
+
+      setHostPlatformForTests('win32');
+      try {
+        const saved = process.env.CODEV_SHELLPER_SESSION;
+        process.env.CODEV_SHELLPER_SESSION = 'sess-1';
+        const win = makeRes();
+        await handleRequest(makeReq('GET', '/health'), win.res, makeCtx());
+        expect(JSON.parse(win.body()).insideCodevSession).toBe(true);
+        if (saved === undefined) delete process.env.CODEV_SHELLPER_SESSION;
+        else process.env.CODEV_SHELLPER_SESSION = saved;
+      } finally {
+        resetHostPlatformForTests();
+      }
+    });
+  });
 
   describe('GET /health', () => {
     it('returns healthy status with workspace counts', async () => {
@@ -993,7 +1101,9 @@ describe('tower-routes', () => {
           const ctx = makeCtx();
 
           expect((await submit({ word }, ctx, text)).status).toBe(200);
-          expect(fs.readFileSync(decisionsFile, 'utf8')).toContain(`\n${word}\n`);
+          // The word is spliced in as a line of its own. Split on either ending: the
+          // splice keeps the file's own (CRLF when git checks the fixture out on Windows).
+          expect(fs.readFileSync(decisionsFile, 'utf8').split(/\r?\n/)).toContain(word);
           expect(allRows()).toHaveLength(0);
           expect(ctx.log).toHaveBeenCalledWith('WARN', expect.stringContaining('over the 49152-byte'));
         });
@@ -2776,6 +2886,102 @@ describe('tower-routes', () => {
       await handleRequest(req, res, makeCtx());
 
       expect(statusCode()).toBe(400);
+    });
+  });
+
+  // =========================================================================
+  // Spec 1658 Phase 6: Windows shell roles (Area F) and client POSIX shells
+  // =========================================================================
+
+  describe('Windows shell roles (Spec 1658)', () => {
+    const GIT_BASH = {
+      path: 'C:\\Program Files\\Git\\bin\\bash.exe',
+      root: 'C:\\Program Files\\Git',
+      gitVersion: 'git version 2.47.1.windows.1',
+      source: 'install' as const,
+    };
+    let workspace: string;
+    let createSession: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-shell-'));
+      createSession = vi.fn(async (req: { command?: string }) => ({ id: 'term-new', pid: 77, label: 'Shell 1', command: req.command }));
+      mockGetTerminalManager.mockReturnValue({ createSession, listSessions: mockListSessions, getSession: mockGetSession });
+      mockGetNextShellId.mockReturnValue('shell-1');
+      setGitBashForTests(GIT_BASH);
+    });
+
+    afterEach(() => {
+      resetHostPlatformForTests();
+      setGitBashForTests(null);
+      fs.rmSync(workspace, { recursive: true, force: true });
+    });
+
+    function writeShellConfig(shell: string): void {
+      fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+      fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), JSON.stringify({ shell: { shell } }));
+    }
+
+    async function createShell(): Promise<void> {
+      const encoded = Buffer.from(workspace).toString('base64url');
+      const { res, statusCode } = makeRes();
+      await handleRequest(makeReq('POST', `/workspace/${encoded}/api/tabs/shell`), res, makeCtx());
+      expect(statusCode()).toBe(200);
+    }
+
+    it('a new dashboard shell opens Windows PowerShell by default', async () => {
+      setHostPlatformForTests('win32');
+      // A user-global ~/.codev/config.json may set shell.shell; keep the test hermetic.
+      const previousHome = process.env.HOME;
+      process.env.HOME = workspace;
+      try {
+        await createShell();
+      } finally {
+        process.env.HOME = previousHome;
+      }
+      const req = createSession.mock.calls[0][0];
+      expect(req.command).toMatch(/\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe$/);
+      expect(req.args).toEqual(['-NoLogo']);
+    });
+
+    it('an existing shell.shell "bash" opens Git Bash, never System32 bash.exe', async () => {
+      setHostPlatformForTests('win32');
+      writeShellConfig('bash');
+      await createShell();
+      const req = createSession.mock.calls[0][0];
+      expect(req.command).toBe(GIT_BASH.path);
+      expect(req.args).toEqual(['-i']);
+    });
+
+    it('POSIX keeps $SHELL with no arguments', async () => {
+      setHostPlatformForTests('darwin');
+      const previous = process.env.SHELL;
+      process.env.SHELL = '/bin/zsh';
+      try {
+        await createShell();
+      } finally {
+        process.env.SHELL = previous;
+      }
+      const req = createSession.mock.calls[0][0];
+      expect(req.command).toBe('/bin/zsh');
+      expect(req.args).toEqual([]);
+    });
+
+    it('a client /bin/sh -lc terminal runs in Git Bash -c on Windows', async () => {
+      setHostPlatformForTests('win32');
+      mockParseJsonBody.mockResolvedValueOnce({ command: '/bin/sh', args: ['-lc', 'pnpm dev'], cwd: 'C:\\ws', type: 'dev' });
+      const { res, statusCode } = makeRes();
+      await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx());
+      expect(statusCode()).toBeLessThan(300);
+      expect(createSession.mock.calls[0][0]).toMatchObject({ command: GIT_BASH.path, args: ['-c', 'pnpm dev'] });
+    });
+
+    it('the same request is untouched on POSIX', async () => {
+      setHostPlatformForTests('linux');
+      mockParseJsonBody.mockResolvedValueOnce({ command: '/bin/sh', args: ['-lc', 'pnpm dev'], cwd: '/ws', type: 'dev' });
+      const { res } = makeRes();
+      await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx());
+      expect(createSession.mock.calls[0][0]).toMatchObject({ command: '/bin/sh', args: ['-lc', 'pnpm dev'] });
     });
   });
 });

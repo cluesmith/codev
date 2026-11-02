@@ -6,6 +6,8 @@ import { MetricsDB, type MetricsRecord } from '../metrics.js';
 import { extractUsage, extractReviewText, type SDKResultLike } from '../usage-extractor.js';
 import { _MODEL_CONFIGS } from '../index.js';
 
+// spec-1658-tmp: opaque (the only /tmp is a workspacePath field in sample metrics records; the DB lives under os.tmpdir())
+
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'metrics-test-'));
 }
