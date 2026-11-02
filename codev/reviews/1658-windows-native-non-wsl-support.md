@@ -700,6 +700,29 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
 
 - `forge-jira-preset` "fills closedAt and createdAt" returned `[]` with exit 0 once (Node 22 and earlier runs green). The cause is not proven, but the script had a real masking defect, added in Phase 10: `jq … | tr -d '\r'` takes `tr`'s exit status, so a failing `jq` read as "nothing closed". → **Addressed**: jq now runs alone in its substitution, so a failure stops the script; new test. A recurrence would now show its cause.
 
+### M6 fix CMAP (2026-11-03, architect-required, before the push)
+
+- **claude: REQUEST_CHANGES.** (1) Server coverage complete except `canvas-relay.ts`'s private
+  canonicalizer and the extension's `fleet-order.ts` comparison, a new Windows regression.
+  (2) Canonical-wins was liveness-blind, settled agent and terminal rows independently (a
+  surviving architect could keep a dropped terminal id), and was order-dependent when neither
+  spelling was canonical. (3) A transient native failure could split a key mid-session; `\\?\`
+  prefixes escaped the drive-letter step. (4) POSIX byte-identical by construction and pinned at
+  the helper level. Also `mailbox.from_workspace`-only spellings and the stored `worktree`.
+  **Addressed all**: canvas and fleet fixed with tests; liveness-then-freshness rules with agent
+  rows settled first and the agent's own terminal kept; per-process cache and prefix stripping;
+  `from_workspace` scanned; `worktree` canonical on write.
+- **codex: REQUEST_CHANGES.** (1) Missing: `resolveAgentInRegistry`, `/api/send`'s
+  `fromWorkspace`, `send.ts`'s own root detection, `from_workspace`-only spellings,
+  `intentionallyStopping`. **Addressed all.** (2) Deleting a losing terminal row before reconcile
+  could let the orphan sweep kill its live shellper. **Addressed**: a row is deleted only when
+  its process has exited; two live sessions are both kept and reported. (3) Fallback instability.
+  **Addressed** by the cache; residual first-call case recorded above. (4) No POSIX change found.
+  **Rebutted**: "fail boot if canonicalization fails". The transaction rolls back to the
+  pre-boot state and the canonicalizing registry still unifies runtime lookups, so refusing to
+  start Tower would turn a recoverable split into an outage; it logs an ERROR instead.
+- **gemini: skipped** (agy exit 3, as in every round).
+
 ## Lessons Learned
 
 ### What Went Well
@@ -1002,15 +1025,17 @@ request. No codev change.**
   `spawn(nodeExe, [...nodeArgs, serverMain, ...args], { stdio: 'inherit' })` without
   `windowsHide`. Its parent was started detached, so it has no console, and Windows gives the
   console-subsystem `node.exe` a new, visible console. It stays blank because its stdio is the
-  inherited null handles. Fix direction: `windowsHide: true` on that spawn. Cause inferred from
-  the published source, consistent with Tower's spawn options; the window's owning process was
-  not checked on the machine.
+  inherited null handles. codev-ide confirmed the cause in its launcher source and fixed it as
+  cluesmith/codev-ide#66 (`windowsHide` on that spawn); a 1.0.1 candidate is built for the owner
+  to confirm on Windows and publish.
 - Console errors once the workbench loads (codev-ide's): `static/node_modules/vsda/rust/web/vsda.js`
   returns 404 and is then refused as `text/plain` (vsda is a proprietary module absent from OSS
   builds); "Timed out waiting for authentication provider 'none' to register", with warnings
   that providers `none` and `none-enterprise` are not declared in an extension manifest (the
   product configuration names a default-account provider nothing registers); the IDE's CSP
-  blocks the Cloudflare insights beacon the cloud injects (harmless).
+  blocks the Cloudflare insights beacon the cloud injects (harmless). codev-ide's triage: all
+  three are known benign noise (the `none` provider timeout is tracked watch-only as their
+  #47; the beacon is cloud-side). No change anywhere.
 
 **M5. IDE assets 502 under a stale tower name after a Tower re-registration (scenario 15a,
 2026-11-02). Tower tunnel registration; a filing candidate for main under `area/tower`. No code
@@ -1033,12 +1058,110 @@ change in this PR.** Sequence as observed:
 
 How the prefix is built: for a tunnel-borne request Tower stamps
 `x-forwarded-prefix: /t/<tower_name>/ide` from `cloud-config.json`, read fresh on every request
-(`ide-forward.ts`, `getPublicAuthority`). So the stale name in step 3 came from one of: the
-DevTools tab still being the step 1 URL (the screenshot does not show the full document path),
-`cloud-config.json` keeping the old `tower_name` after the step 2 reconnect while the cloud routed
-the new name, or the IDE server holding the first prefix it saw. Not determined: whether the
-`-2` suffix was chosen by the owner or assigned by the cloud, and what `tower_name` in
-`cloud-config.json` read at step 3.
+(`ide-forward.ts`, `getPublicAuthority`). codev-ide's triage rules out the IDE server: it reads
+`x-forwarded-prefix` per request and never caches it. The document was a fresh 200 whose asset
+URLs carried the old name, so Tower stamped the old `tower_name` after the re-registration: either
+`cloud-config.json` or Tower's in-memory view of it kept the old name across the step 2 reconnect.
+Main investigates on the Tower side and files it. Not determined: whether the `-2` suffix was
+chosen by the owner or assigned by the cloud, and what `tower_name` in `cloud-config.json` read
+at step 3.
+
+**M6. One workspace registered twice, split by drive-letter case (real-project run, 2026-11-03).
+Functional: the architect cannot see or receive messages from its own builders. Fixed in this PR
+for Windows (owner ruling: `realpathSync.native` on Windows only, POSIX unchanged); macOS and
+Linux follow up in #1870.**
+
+- Observed: Tower's home page listed the project twice, as `c:\repos\...\<project>` and
+  `C:\repos\...\<project>` (the two workspace ids in the dashboard URLs base64-decode to exactly
+  those strings). The lower-case one held the architect `main`; the upper-case one held the two
+  builders `main` had spawned (`builder-air-142`, `builder-pir-143`). Each workspace's overview
+  showed only its own half: the architect's had "No active builders" and VS Code's Agents view
+  showed `AGENTS (0)`; the builders' had "No architect terminal".
+- Where each spelling comes from: the architect workspace was started from the VS Code
+  extension, which takes the folder from `workspaceFolders[0].uri.fsPath`, and VS Code's `fsPath`
+  lower-cases the drive letter. The architect's `afx spawn` ran through Claude's Bash tool, in
+  Git Bash, where the cwd `/c/repos/...` reaches Node as `C:\repos\...` (upper-case drive).
+- Why they stay apart: `normalizeWorkspacePath` (`agent-farm/utils/workspace-path.ts`), the single
+  canonicalizer for every `workspace_path` key, uses `fs.realpathSync`, whose JS implementation
+  keeps the input's case on Windows. Windows paths are case-insensitive, but every key here
+  (Tower's in-memory workspace map, `known_workspaces`, the architect and builder tables) is an
+  exact string. The same split follows from any other case difference in the path, such as
+  `C:\Repos` versus `C:\repos`.
+- Not Windows-only: macOS APFS is case-insensitive by default too. Measured on macOS with a
+  mis-cased existing path, `fs.realpathSync` returned the input's case and
+  `fs.realpathSync.native` returned the on-disk case. So `~/Repos/foo` and `~/repos/foo` split a
+  workspace on macOS today. Linux filesystems are case-sensitive, so two spellings cannot reach
+  one directory. Windows hits it routinely (VS Code and Git Bash always differ); macOS only on a
+  mistyped case.
+- Impact beyond the views (from the code, not yet exercised): message routing looks up the
+  sender's workspace by exact key (`tower-messages.ts`, `resolveAgentInWorkspace`), so a builder's
+  `afx send architect` resolves to the upper-case workspace, which has no architect. Builder
+  status reports and gate notifications to the architect would fail the same way.
+- Not covered by the spec or plan; found only by a real-project run that mixed the VS Code
+  extension with CLI spawns. CI and the scripted Windows suites use one spelling throughout.
+- Fix direction, for the owner and architect to rule on: inside `normalizeWorkspacePath`, either
+  upper-case the drive letter on Windows (minimal; covers only the VS Code and Git Bash pair) or
+  use `fs.realpathSync.native` on all platforms with the current calls as fallbacks (covers every
+  case difference on Windows and macOS and Windows 8.3 short names; Linux results unchanged; a
+  cross-platform contract change; resolves Windows subst and mapped drives to their targets).
+  Existing rows keyed with another spelling need a one-time normalization.
+- Fix (owner ruling, 2026-11-03):
+  - `normalizeWorkspacePath` on Windows: `realpathSync.native`, else an earlier native answer for
+    the same case-folded path (per-process cache, so a transient native failure cannot give a
+    directory a second key in a long-lived Tower), else the JS realpath, else `win32.resolve`.
+    Every branch returns the plain Win32 spelling (`\\?\` and `\\?\UNC\` prefixes stripped)
+    with an upper-case drive letter. POSIX keeps exactly `realpathSync`, then `path.resolve`.
+    `workspaceKey()` is the canonical path on Windows and the identity on POSIX. Residual: a
+    directory whose very first native call in a process fails gets its input's folder case
+    until the next process; drive case is always canonical, and Tower's boot canonicalization
+    heals stored rows on the next start.
+  - Tower's workspace registry is a `WorkspaceKeyedMap` whose `get`/`set`/`has`/`delete` apply
+    `workspaceKey`, so every lookup agrees whatever spelling the caller holds.
+  - Raw-path entry points canonicalized with `workspaceKey` (all identity on POSIX):
+    `tower-routes.ts`: the seven `?workspace=` handlers (overview, issue, PR, issue search,
+    worktree config, activity hooks, analytics), both cron filters, and the deactivate route's
+    resolved path; `tower-instances.ts`: the four `fs.realpathSync(workspacePath)` resolved-key
+    sites and `registerKnownWorkspace`; `tower-messages.ts`: `resolveTarget`'s sender workspace;
+    `tower-terminals.ts`: `getWorkspaceTerminalsEntry` before loading file tabs;
+    `utils/file-tabs.ts`: every read and write; `utils/config.ts`: `findWorkspaceRoot`, the CLI's
+    workspace root (so worktree paths and CLI queries are canonical too). Added after CMAP:
+    `tower-routes.ts` `/api/send`'s `workspace` and `fromWorkspace`; `tower-messages.ts`
+    `resolveAgentInRegistry`'s sender workspace; `tower-instances.ts` the `intentionallyStopping`
+    set; `commands/send.ts` `detectWorkspaceRoot`; `state.ts` the stored builder `worktree`;
+    `canvas-relay.ts` its own `canonicalPath` (the VS Code host registered `c:\`, the CLI
+    controller resolved `C:\`); and in the VS Code extension, `fleet-order.ts` compares Tower's
+    path with the window's folder case-insensitively on Windows (`isSameWorkspacePath`), which
+    the canonical Tower path would otherwise have broken (no "current" marker, and switching to
+    the current workspace re-ran the switch). Call sites that already
+    normalized through `normalizeWorkspacePath` (state.ts, send.ts, whoami.ts, attach.ts,
+    builder-lookup.ts, overview's stored-identity query) pick up the Windows behaviour directly.
+  - Boot: on Windows, Tower collapses every stored spelling onto its canonical key
+    (`db/canonicalize-workspace-paths.ts`), after the state.db consolidation and before reconcile
+    and `initInstances()`, in one transaction, on every boot (idempotent). When two spellings hold
+    the same key, liveness and freshness decide, never spelling alone, and no row whose process
+    is still running is deleted: for `architect` and `builders` (per id) the row whose terminal is
+    alive wins, else the later `started_at`, a full tie keeping the row already canonical; for
+    `terminal_sessions` (per type and role id) a row whose process has exited is dropped, and
+    when neither is alive the one a surviving agent row points at is kept (no dangling terminal
+    id); when BOTH are alive both rows are kept, nothing is signalled, and the pair is logged as
+    an ERROR for a human, since reconcile reconnects both (neither is swept as an orphan) but
+    only one is addressable; `known_workspaces` keeps the later `last_launched_at`; `cron_tasks`
+    (per task name) keeps the later `last_run`, with moved ids recomputed (they hash the path).
+    `mailbox` (including `from_workspace`, also for spellings that appear only there) and
+    `file_tabs` rows all move; builder `worktree` paths are rewritten. A failure is logged as an
+    ERROR and boot continues: the transaction rolls back, and the canonicalizing registry and
+    entry points still unify every runtime lookup.
+  - Tests: `spec-1658-workspace-path-canonical.test.ts` (23): the POSIX path calls only the JS
+    realpath and returns its answer unchanged, matches `fs.realpathSync` on a real directory, and
+    `workspaceKey` is the identity; the Windows chain on each branch, including the same key for
+    `c:` and `C:` on every branch, `\\?\` stripping, the cache surviving a transient native
+    failure, and UNC paths; the keyed map on both platforms; and the boot canonicalization (the
+    owner-run split joins, a live non-canonical session beats a dead canonical one with its agent
+    row, both-live keeps both and reports them, neither-live keeps the agent's own terminal, two
+    non-canonical spellings settle by freshness, a `from_workspace`-only sender moves, cron ids
+    recompute, worktrees rewrite, a second run is a no-op). Extension:
+    `fleet-current-workspace.test.ts` (3). Negative control: without the drive-letter step, 4
+    Windows tests fail.
 
 ## Appendix: Implementation Notes by Phase
 
