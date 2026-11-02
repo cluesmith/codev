@@ -1041,6 +1041,16 @@ branches are testable on macOS/Linux.
   `agent-farm/lib/worktree-links.ts` (symlink, else junction / hard link / copy).
 - **Install**: Windows Node 22/24 only (better-sqlite3 prebuilds); a preinstall gate fails other
   versions with that message instead of a node-gyp build. `engines.node` stays `>=20` for POSIX.
+- **Workspace keys** (finding M6): Windows paths are case-insensitive but every workspace key
+  (Tower's registry, `workspace_path` in global.db) is an exact string, and VS Code (`c:\`) and
+  Git Bash (`C:\`) spell one directory differently. Invariant: every raw workspace path that
+  keys anything goes through `workspaceKey()` (`agent-farm/utils/workspace-path.ts`: on Windows
+  `realpathSync.native`, upper-case drive, per-process cache; identity on POSIX); every
+  workspace-keyed in-memory collection is a `WorkspaceKeyedMap` (`servers/tower-terminals.ts`),
+  which applies it in its accessors; and on Windows boot Tower collapses stored spellings onto
+  the canonical key (`db/canonicalize-workspace-paths.ts`) without ever deleting a row whose
+  process is still running (liveness is PID-reuse checked against the recorded start time).
+  POSIX is unchanged; macOS case-insensitivity is #1870.
 
 ### Security Model
 
