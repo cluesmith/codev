@@ -231,3 +231,8 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Windows intermittents after the PR opened, none skipped: jira, an agy worker exit, spec-1280 T12, and the ARM64 probe census. Each passed on rerun or on the other leg.
 - 8273c6b6c: all 7 required checks green. Windows 39927653580 green (attempt 2), with install guard; targeted 39930623116 and 39930636358 green.
 - Porch pr gate pending. Not requested: claude ConPTY fixtures, the owner's manual pass, and the #1858 scope decision are still open.
+
+## 2026-11-03: owner's manual pass, M1 to M6
+
+- Scenarios 1, 3 and 15a pass. Findings recorded in the review: M1 (owner npmrc `os=linux`, not a defect), M2 (double cursor, follow-up), M3 (uninstall while Tower runs, docs follow-up), M4 (codev-ide launcher window, fixed in codev-ide#66), M5 (stale tower-name prefix after re-registration, main files under area/tower).
+- M6, functional: VS Code (`c:\`) and Git Bash (`C:\`) split one Windows workspace into two. Owner ruled a Windows-only fix in this PR (realpathSync.native, canonical keys at every entry point, boot canonicalization of stored rows); macOS/Linux follow-up filed as #1870. Architect required a CMAP first: claude and codex both REQUEST_CHANGES (liveness-blind collision rule, unstable fallback keys, missed sites incl. canvas-relay and the VS Code fleet comparison); all addressed but one rebuttal (no boot failure on canonicalization error). Commit a99ffa351.
