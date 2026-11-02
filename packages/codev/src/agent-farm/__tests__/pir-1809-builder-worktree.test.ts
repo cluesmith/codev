@@ -13,6 +13,8 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
+// Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 
 const { dbHolder } = vi.hoisted(() => ({
   dbHolder: { db: null as unknown as import('better-sqlite3').Database },
@@ -94,7 +96,7 @@ let tmpRoot: string;
 beforeEach(() => {
   dbHolder.db = new Database(':memory:');
   dbHolder.db.exec(GLOBAL_SCHEMA);
-  tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pir-1809-')));
+  tmpRoot = normalizeWorkspacePath(fs.mkdtempSync(path.join(os.tmpdir(), 'pir-1809-')));
   getWorkspaceTerminals().clear();
 });
 

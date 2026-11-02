@@ -113,13 +113,24 @@ export function normalizeWorkspacePath(workspacePath: string): string {
 }
 
 /**
- * The key for a workspace in an in-memory map. Windows: the canonical path, so a
- * lookup with any spelling of the directory finds the same entry. POSIX: the
- * path exactly as given (unchanged behaviour; see #1870).
+ * The key for a workspace in an in-memory map or a stored row. Windows: the
+ * canonical path for a drive-letter or UNC path, so any spelling of the directory
+ * finds the same entry; any other shape as given. POSIX: the path exactly as given
+ * (unchanged behaviour; see #1870).
  */
 export function workspaceKey(workspacePath: string): string {
-  if (isWindows()) {
+  if (isWindows() && isWindowsAbsolute(workspacePath)) {
     return normalizeWorkspacePath(workspacePath);
   }
   return workspacePath;
+}
+
+/**
+ * A drive-letter (`C:\x`, `c:/x`) or UNC (`\\srv\share`) path. Only these name a
+ * workspace on Windows; anything else (a driveless `/x`, a relative path) is not
+ * a spelling Codev produces there, so `workspaceKey` keeps it as given rather
+ * than inventing a new key for it from the current drive.
+ */
+function isWindowsAbsolute(p: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(p) || /^[\\/]{2}[^\\/]/.test(p);
 }

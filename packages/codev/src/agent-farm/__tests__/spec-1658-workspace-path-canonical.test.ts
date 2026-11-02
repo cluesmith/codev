@@ -147,6 +147,13 @@ describe('normalizeWorkspacePath on Windows', () => {
     expect(normalizeWorkspacePathWith('\\\\server\\share\\repo', ops)).toBe(win32.resolve('\\\\server\\share\\repo'));
   });
 
+  it('workspaceKey keeps a path that is not drive-letter or UNC as given (no key invented from the current drive)', () => {
+    expect(workspaceKey('/home/user/project')).toBe('/home/user/project');
+    expect(workspaceKey('relative\\dir')).toBe('relative\\dir');
+    expect(workspaceKey('c:\\nonexistent-m6\\x')).toBe('C:\\nonexistent-m6\\x');
+    expect(workspaceKey('c:/nonexistent-m6/x')).toMatch(/^C:/);
+  });
+
   it('workspaceKey canonicalizes, so the registry map treats both spellings as one key', () => {
     const map = new WorkspaceKeyedMap<string>();
     map.set('c:\\nonexistent-m6\\repo', 'entry');

@@ -122,8 +122,12 @@ async function startTree(mode: 'plain' | 'bash' | 'reparent'): Promise<{ rootPid
 
 async function expectAllGone(pids: number[]): Promise<void> {
   await waitFor(() => pids.every((pid) => !alive(pid)), 10_000, `pids ${pids.join(',')} to exit`);
+  // Every pid was dead at this moment. A census entry created after it is a REUSED pid
+  // (Windows recycles pids quickly; one CI run caught an unrelated `sort.exe` from a
+  // parallel test on a freed pid), not a survivor of the tree under test.
+  const allDeadAt = Date.now();
   const census = await listProcessCensus({ fresh: true });
-  expect(census.filter((entry) => pids.includes(entry.pid))).toEqual([]);
+  expect(census.filter((entry) => pids.includes(entry.pid) && entry.creationTime <= allDeadAt)).toEqual([]);
 }
 
 describe.skipIf(!onWindows)('session-tree teardown on real Windows process trees', () => {

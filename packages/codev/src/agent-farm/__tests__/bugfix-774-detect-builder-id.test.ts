@@ -15,13 +15,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import { parseBuilderWorktreePath, containsBuildersSegment } from '../utils/builder-worktree-identity.js';
+// Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 
 // Issue #1118: detectCurrentBuilderId reads global.db at getGlobalDbPath();
 // redirect it to a per-test temp file.
@@ -44,7 +46,7 @@ function seedBuilder(globalDbPath: string, workspacePath: string, id: string, wo
   db.prepare(
     `INSERT INTO builders (workspace_path, id, name, worktree, branch, type, status, spawned_by_architect)
      VALUES (?, ?, ?, ?, ?, 'bugfix', 'implementing', 'ob-refine')`,
-  ).run(realpathSync(workspacePath), id, id, worktree, `builder/${id}`);
+  ).run(normalizeWorkspacePath(workspacePath), id, id, worktree, `builder/${id}`);
   db.close();
 }
 

@@ -14,6 +14,9 @@ import { tmpdir } from 'node:os';
 import { execSync, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { _findWorkspaceRoot as findWorkspaceRoot } from '../utils/config.js';
+// Spec 1658 (M6): the root is the directory's canonical spelling on Windows (8.3 names
+// expanded, as in a runner's RUNNER~1 temp dir); identity on POSIX.
+import { workspaceKey } from '../utils/workspace-path.js';
 
 describe('findWorkspaceRoot (issue #407)', () => {
   const testBase = path.join(tmpdir(), `codev-wsr-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -31,7 +34,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(path.join(projectRoot, 'codev'), { recursive: true });
 
     const result = findWorkspaceRoot(projectRoot);
-    expect(result).toBe(projectRoot);
+    expect(result).toBe(workspaceKey(projectRoot));
   });
 
   it('finds codev/ when starting from a subdirectory', () => {
@@ -42,7 +45,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(subDir, { recursive: true });
 
     const result = findWorkspaceRoot(subDir);
-    expect(result).toBe(projectRoot);
+    expect(result).toBe(workspaceKey(projectRoot));
   });
 
   it('finds .git as fallback when no codev/ exists', () => {
@@ -50,7 +53,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
 
     const result = findWorkspaceRoot(projectRoot);
-    expect(result).toBe(projectRoot);
+    expect(result).toBe(workspaceKey(projectRoot));
   });
 
   it('prefers codev/ over .git higher in the tree', () => {
@@ -62,7 +65,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(path.join(subProject, 'codev'), { recursive: true });
 
     const result = findWorkspaceRoot(subProject);
-    expect(result).toBe(subProject);
+    expect(result).toBe(workspaceKey(subProject));
   });
 
   it('returns worktree root (not main repo) when worktree has codev/', () => {
@@ -78,7 +81,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     // Key test: starting from worktree root, should find worktree's codev/
     // (NOT resolve up to main repo)
     const result = findWorkspaceRoot(worktree);
-    expect(result).toBe(worktree);
+    expect(result).toBe(workspaceKey(worktree));
     expect(result).not.toBe(mainRepo);
   });
 
@@ -95,7 +98,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(deepDir, { recursive: true });
 
     const result = findWorkspaceRoot(deepDir);
-    expect(result).toBe(worktree);
+    expect(result).toBe(workspaceKey(worktree));
     expect(result).not.toBe(mainRepo);
   });
 
@@ -104,7 +107,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(noMarkersDir, { recursive: true });
 
     const result = findWorkspaceRoot(noMarkersDir);
-    expect(result).toBe(noMarkersDir);
+    expect(result).toBe(workspaceKey(noMarkersDir));
   });
 });
 
@@ -157,7 +160,7 @@ describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
     // findWorkspaceRoot should detect the worktree via git rev-parse
     // and return the worktree root, NOT the main repo.
     const result = findWorkspaceRoot(worktreePath);
-    expect(result).toBe(worktreePath);
+    expect(result).toBe(workspaceKey(worktreePath));
     expect(result).not.toBe(mainRepo);
   });
 
@@ -166,7 +169,7 @@ describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
     fs.mkdirSync(deepDir, { recursive: true });
 
     const result = findWorkspaceRoot(deepDir);
-    expect(result).toBe(worktreePath);
+    expect(result).toBe(workspaceKey(worktreePath));
     expect(result).not.toBe(mainRepo);
   });
 
@@ -175,7 +178,7 @@ describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
     fs.rmSync(path.join(worktreePath, 'codev'), { recursive: true, force: true });
 
     const result = findWorkspaceRoot(worktreePath);
-    expect(result).toBe(mainRepo);
+    expect(result).toBe(workspaceKey(mainRepo));
   });
 });
 
