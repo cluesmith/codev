@@ -938,8 +938,16 @@ a solution.
      report for optional dependencies. Test: reinstall with `--loglevel verbose` and read the
      optional-dependency lines.
   3. Defender interference with the new executable. Test: Windows Security, Protection history.
-  4. Scope: the SDK change is not Windows-specific, so whether fresh macOS and Linux installs
-     skip the package too is unchecked.
+  4. Scope: the SDK change is not Windows-specific. Architect data point (2026-11-02): a
+     registry install of `@cluesmith/codev@3.3.6` on macOS resolved SDK 0.2.141 and pulled
+     `@anthropic-ai/claude-agent-sdk-darwin-arm64` beside it, and doctor reported Claude
+     operational. So the skip is Windows-specific, tarball-install-specific, or both.
+     Builder test (2026-11-02, macOS arm64, npm 10.9.3, Node 22.19.0): the same four tarballs
+     installed with `npm install -g --prefix <scratch>` placed
+     `@anthropic-ai/claude-agent-sdk-darwin-arm64@0.2.141` under the SDK. The verbose log shows
+     `reify failed optional dependency` only for the seven non-matching platforms, as expected. A
+     tarball install alone does not cause the skip, which points at something on the Windows side
+     (candidates 2 and 3, or npm behaviour specific to Windows).
 - Reported to the architect 2026-11-02, including whether this belongs in #1658 or a separate
   issue.
 
