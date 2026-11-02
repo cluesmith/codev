@@ -110,9 +110,24 @@ the owner's Windows machine, which CI cannot cover.
    not exist yet; the replay suite skips with a reason until it does. Codex fixtures may wait on
    #1858.
 2. The PR-gate manual pass on the owner's Windows machine (plan section "PR-gate manual pass");
-   results are recorded here when run. In progress since 2026-11-02: scenarios 1 and 3 pass;
-   findings M1 (resolved, a machine npm setting), M2 (cursor rendering, follow-up) and M3
-   (uninstall while Tower runs) are recorded under "Manual pass findings".
+   results are recorded in its table. In progress since 2026-11-02.
+   - Passed so far: scenarios 1, 3 and 15a, all on tarballs packed from `793332c6e`, that is
+     BEFORE the M6 fix rewrote Tower boot, the terminal registry and workspace routing. Scenario 3
+     (Tower and terminals) and 15a (the IDE through Tower) therefore need a re-run on the final
+     head; scenario 1 (install, doctor, init) may stand, though the tarballs have to be re-packed
+     anyway (architect's position). The owner decides the actual re-run.
+   - Remaining: scenarios 4, 6b, 8, 9, 11, 12, 13, 15, the 15a re-run, and G (item 1).
+   - Findings, under "Manual pass findings": M1 (resolved: a machine npm setting, not a defect),
+     M2 (double cursor, cosmetic follow-up), M3 (uninstall while Tower runs, docs follow-up), M4
+     (codev-ide launcher window, fixed in codev-ide#66; console noise benign), M5 (stale tower
+     name after a cloud re-registration, Tower-side, main files it), M6 (one workspace split by
+     drive-letter case: fixed in this PR for Windows, macOS follow-up #1870).
+3. The #1858 codex scope decision (owner): recorded scope amendment, or wait for #1858.
+4. The cwd-first executable lookup (Known gap below): a release blocker scheduled as the first
+   follow-up after merge, while the README announces native Windows support. Owner's call
+   whether the README wording is softened in this PR or the follow-up lands before release.
+5. Integration review: round 1's three must-fixes and round 2's four (PID-reuse-safe boot
+   liveness, the documented invariant, `WorkspaceKeyedMap` typing, this section) are addressed.
 
 ### Known gap: codex agents and the render gate (#1858)
 
@@ -700,6 +715,18 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
 
 - `forge-jira-preset` "fills closedAt and createdAt" returned `[]` with exit 0 once (Node 22 and earlier runs green). The cause is not proven, but the script had a real masking defect, added in Phase 10: `jq … | tr -d '\r'` takes `tr`'s exit status, so a failing `jq` read as "nothing closed". → **Addressed**: jq now runs alone in its substitution, so a failure stops the script; new test. A recurrence would now show its cause.
 
+### Integration review Round 2 (architect, head 1364ea7e3)
+
+Claude and Codex REQUEST_CHANGES on four items, none a design change; all addressed. (1)
+PID-reuse-safe boot liveness: `shellper-husk-sweep.ts` now exports `startTimeMatches` and
+`livenessFromStartTimes`, the boot pass uses them, and a test proves a reused pid no longer lets
+an older row win (negative control: with a bare existence probe it fails). (2) The workspace-key
+invariant is a Platform Layer bullet in `arch.md` and a clause on the existing `global.db` fact
+in `arch-critical.md` (no new hot fact). (3) `workspaceTerminals` is typed
+`WorkspaceKeyedMap<WorkspaceTerminals>` in `tower-instances.ts`, `tower-tunnel.ts`,
+`tower-types.ts` and `getWorkspaceTerminals`. (4) "Open at the PR gate" names 15a and M1 to M6
+and which scenarios ran before M6.
+
 ### M6 fix CMAP (2026-11-03, architect-required, before the push)
 
 - **claude: REQUEST_CHANGES.** (1) Server coverage complete except `canvas-relay.ts`'s private
@@ -1167,7 +1194,10 @@ Linux follow up in #1870.**
     (`db/canonicalize-workspace-paths.ts`), after the state.db consolidation and before reconcile
     and `initInstances()`, in one transaction, on every boot (idempotent). When two spellings hold
     the same key, liveness and freshness decide, never spelling alone, and no row whose process
-    is still running is deleted: for `architect` and `builders` (per id) the row whose terminal is
+    is still running is deleted (liveness is PID-reuse safe: a live pid whose start time does
+    not match the row's `shellper_start_time` within the husk sweep's tolerance is a reused pid
+    and reads as dead, via `livenessFromStartTimes` over one census taken before the
+    transaction): for `architect` and `builders` (per id) the row whose terminal is
     alive wins, else the later `started_at`, a full tie keeping the row already canonical; for
     `terminal_sessions` (per type and role id) a row whose process has exited is dropped, and
     when neither is alive the one a surviving agent row points at is kept (no dangling terminal
