@@ -722,6 +722,20 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
   pre-boot state and the canonicalizing registry still unifies runtime lookups, so refusing to
   start Tower would turn a recoverable split into an outage; it logs an ERROR instead.
 - **gemini: skipped** (agy exit 3, as in every round).
+- **Windows run 41543916772 on 5d8a6918a: Unit tests failed on Node 22 and 24** (84 tests in 18
+  files on Node 24; CLI tests, probes and install verification green). Two families, both test
+  expectations the canonicalizer correctly broke, diagnosed independently by the architect:
+  (1) 8.3 short names: the runner's temp dir is `C:\Users\RUNNER~1\...` and
+  `realpathSync.native` expands it to the long name, while fixtures keyed rows and expectations
+  with the JS `realpathSync` or the raw temp path; fixed by keying fixtures through
+  `normalizeWorkspacePath`/`workspaceKey` (identical on POSIX). (2) Synthetic POSIX paths
+  (`/test/workspace`, `/home/user/project`) resolved against the current drive; fixed by the
+  pass-through above. Also in that run: `process-tree.windows` (Node 24 only) flagged a freed
+  pid reused by an unrelated `sort.exe` from a parallel test; its survivor check now ignores
+  processes created after every tracked pid had exited (see Flaky Tests). `spec-1280`'s T12
+  (Node 24 only) is the known intermittent. The PowerShell-parsed lifecycle hook message and the
+  #1515 cloud-mutation guard lines are pre-existing (present in the last green run, 39927653580);
+  recorded, left alone.
 
 ## Lessons Learned
 
@@ -852,6 +866,16 @@ Three-way CMAP per phase iteration: Gemini runs via the Antigravity CLI (`agy`),
   starts from this list. A fourth, outside the test suites: the ARM64 probe's CIM census section
   failed once on a slow runner (run 39930636358 attempt 1, the port-owner probe took 39 s) and
   passed on attempt 2.
+
+- **`process-tree.windows.test.ts` survivor check fooled by pid reuse (Windows run 41543916772,
+  Node 24, 2026-11-03).** After teardown the helper waited until every tracked pid was dead, then
+  took a census, which found one of those pids alive again as `sort.exe -u` from a parallel
+  test. A real survivor predates the teardown; a reused pid's process was created after it. The
+  helper now ignores census entries created after the moment every tracked pid was dead. Fixed,
+  not skipped. The local `protocol-drift-audit` failure (macOS, this machine only): its "registry
+  unreachable" test fails when npm's cache already holds `@cluesmith/codev`'s version (here from
+  an `npm view` during the manual pass); CI has no such cache and passes. Not a code defect;
+  recorded, left alone.
 
 - **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
   run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:
@@ -1111,7 +1135,11 @@ Linux follow up in #1870.**
     directory a second key in a long-lived Tower), else the JS realpath, else `win32.resolve`.
     Every branch returns the plain Win32 spelling (`\\?\` and `\\?\UNC\` prefixes stripped)
     with an upper-case drive letter. POSIX keeps exactly `realpathSync`, then `path.resolve`.
-    `workspaceKey()` is the canonical path on Windows and the identity on POSIX. Residual: a
+    `workspaceKey()` is the canonical path on Windows for a drive-letter or UNC path and the
+    identity otherwise, and the identity on POSIX. A driveless or relative path (`/home/x`) is
+    kept as given on Windows: Codev never produces a workspace spelled that way there, and
+    resolving it against the current drive (`D:\home\x`) would only invent a key nothing else
+    uses (the first Windows run on 5d8a6918a showed exactly that on synthetic test fixtures). Residual: a
     directory whose very first native call in a process fails gets its input's folder case
     until the next process; drive case is always canonical, and Tower's boot canonicalization
     heals stored rows on the next start.
