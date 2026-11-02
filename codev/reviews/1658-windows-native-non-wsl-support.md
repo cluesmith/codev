@@ -900,7 +900,7 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 | 12 | `afx send` live | `scripts/bugfix-1664-streaming-delivery-harness.mts --scenario streaming`, then `--scenario draft` (from `packages/codev`). | Streaming with an empty composer: delivered. Typed draft: held (`user-text`). Idle: delivered. | |
 | 13 | Consult | From a Windows builder, a 3-way consult (porch-run, or `consult -m codex` / `-m claude` directly). | codex and claude return; an unauthenticated agy skips without blocking. | |
 | 15 | VS Code extension | In VS Code on Windows: start Tower from the extension, spawn a builder, open its terminal, reveal a file. | Each works; no console windows flash. | |
-| 15a | IDE server (optional dry run) | With the real `@cluesmith/codev-ide-server` installed: `afx ide start`, open `/ide/?folder=<repo>`, `afx ide stop`. | Found via `PATH`, passes the 1.128.0 floor, serves the folder, installs the sidebar extension; stop leaves no `codev-ide-server` or extension host process. | |
+| 15a | IDE server (optional dry run) | With the real `@cluesmith/codev-ide-server` installed: `afx ide start`, open `/ide/?folder=<repo>`, `afx ide stop`. | Found via `PATH`, passes the 1.128.0 floor, serves the folder, installs the sidebar extension; stop leaves no `codev-ide-server` or extension host process. | Pass (2026-11-02, published `@cluesmith/codev-ide` 1.0.0 and `@cluesmith/codev-ide-win32-x64` 1.0.0 via `afx ide install`; the package is now `@cluesmith/codev-ide`, not the name in Steps). The workbench loads and works through Codev Cloud, with the CODEV and CODEV TOWER views. A blank console window and some console errors belong to the codev-ide package (finding M4); asset 502s after a Tower re-registration are a Tower tunnel filing candidate (finding M5). Codev's own spawn is clean. |
 | G | ConPTY fixtures (gate condition) | Capture recipe in `audit.md` "ConPTY → Phase 8": `node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app claude --state all -- --model haiku` (and codex once #1858 lands). | Four `conpty-claude-*.capture.jsonl.gz` files, committed to `__tests__/fixtures/gate/conpty/`; the replay suite runs them instead of skipping: idle, midturn and resize delivered, draft held. | |
 
 ### Manual pass findings
@@ -990,6 +990,55 @@ its own Windows pass.
 `node_modules\node-pty\prebuilds\win32-x64\conpty.node`: Windows does not let npm delete a
 loaded `.node` module, where POSIX allows it. Stopping the workspace and Tower first avoided it.
 Upgrade guidance for Windows should say so (docs follow-up).
+
+**M4. codev-ide 1.0.0 on Windows: a blank console window and console errors (scenario 15a,
+2026-11-02). codev-ide's to fix; reported to the codev-ide workspace architect at the owner's
+request. No codev change.**
+
+- Blank console window: `afx ide start` leaves a visible, empty console window open. Codev's
+  side is clean: Tower spawns the launcher through `spawnIdeServerProcess` with
+  `windowsHide: true`, `detached: true` and `stdio: 'ignore'` (`ide-server.ts`). The window is
+  created one level down. The codev-ide launcher (`bin/codev-ide-server.js`, win32 branch) runs
+  `spawn(nodeExe, [...nodeArgs, serverMain, ...args], { stdio: 'inherit' })` without
+  `windowsHide`. Its parent was started detached, so it has no console, and Windows gives the
+  console-subsystem `node.exe` a new, visible console. It stays blank because its stdio is the
+  inherited null handles. Fix direction: `windowsHide: true` on that spawn. Cause inferred from
+  the published source, consistent with Tower's spawn options; the window's owning process was
+  not checked on the machine.
+- Console errors once the workbench loads (codev-ide's): `static/node_modules/vsda/rust/web/vsda.js`
+  returns 404 and is then refused as `text/plain` (vsda is a proprietary module absent from OSS
+  builds); "Timed out waiting for authentication provider 'none' to register", with warnings
+  that providers `none` and `none-enterprise` are not declared in an extension manifest (the
+  product configuration names a default-account provider nothing registers); the IDE's CSP
+  blocks the Cloudflare insights beacon the cloud injects (harmless).
+
+**M5. IDE assets 502 under a stale tower name after a Tower re-registration (scenario 15a,
+2026-11-02). Tower tunnel registration; a filing candidate for main under `area/tower`. No code
+change in this PR.** Sequence as observed:
+
+1. The Tower was registered with Codev Cloud as `<old-name>`. Opening
+   `https://cloud.codevos.ai/t/<old-name>/` returned Cloudflare's 502 Bad Gateway for the
+   Tower root (host error), so it was not specific to `/ide/`.
+2. The owner found an authentication problem with the Tower's cloud connection. Re-running
+   `afx tower connect` fixed it, and the Tower was then reachable as `<old-name>-2`.
+3. Opening `https://cloud.codevos.ai/t/<old-name>-2/ide/`: the `ide/` document returned
+   200, but every asset it referenced used the OLD name, for example
+   `/t/<old-name>/ide/stable-50cad25.../static/out/vs/code/browser/workbench/workbench.css`,
+   `.../workbench.js`, `.../static/out/nls.messages.js`,
+   `.../static/resources/server/manifest.json` and `.../static/resources/server/favicon.ico`. Each
+   returned 502, so the workbench never loaded.
+4. The owner reconnected the Tower under a different, fresh name (`<new-name>`). The
+   workbench at `https://cloud.codevos.ai/t/<new-name>/ide/` then loaded fully, every asset
+   under the new name.
+
+How the prefix is built: for a tunnel-borne request Tower stamps
+`x-forwarded-prefix: /t/<tower_name>/ide` from `cloud-config.json`, read fresh on every request
+(`ide-forward.ts`, `getPublicAuthority`). So the stale name in step 3 came from one of: the
+DevTools tab still being the step 1 URL (the screenshot does not show the full document path),
+`cloud-config.json` keeping the old `tower_name` after the step 2 reconnect while the cloud routed
+the new name, or the IDE server holding the first prefix it saw. Not determined: whether the
+`-2` suffix was chosen by the owner or assigned by the cloud, and what `tower_name` in
+`cloud-config.json` read at step 3.
 
 ## Appendix: Implementation Notes by Phase
 
