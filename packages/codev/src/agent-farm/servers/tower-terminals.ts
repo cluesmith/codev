@@ -258,7 +258,7 @@ export function shutdownTerminals(): void {
 // ============================================================================
 
 /** Get the workspace terminals registry (returns the Map reference) */
-export function getWorkspaceTerminals(): Map<string, WorkspaceTerminals> {
+export function getWorkspaceTerminals(): WorkspaceKeyedMap<WorkspaceTerminals> {
   return workspaceTerminals;
 }
 

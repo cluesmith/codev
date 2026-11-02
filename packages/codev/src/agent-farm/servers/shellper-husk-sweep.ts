@@ -80,6 +80,35 @@ export function startTimeLookupFor(census: ProcessCensusEntry[]): StartTimeLooku
  */
 const PID_REUSE_TOLERANCE_MS = 2000;
 
+/**
+ * True when a live PID is still the process a row recorded: its actual start time
+ * matches the recorded one within {@link PID_REUSE_TOLERANCE_MS}. An unreadable
+ * actual start time does not confirm identity. Shared with the Windows boot
+ * canonicalization of workspace rows (Spec 1658, M6) so both treat a reused PID
+ * as dead.
+ */
+export function startTimeMatches(actual: number | null, recorded: number): boolean {
+  return actual !== null && Math.abs(actual - recorded) <= PID_REUSE_TOLERANCE_MS;
+}
+
+/**
+ * A synchronous, PID-reuse-safe liveness check over a start-time snapshot: a PID
+ * that does not exist is dead; one that exists but whose start time does not
+ * match the recorded one was reused and is dead too; a row with no recorded start
+ * time can only be checked for existence. For callers that cannot await per PID
+ * (the Windows boot canonicalization runs inside a transaction, Spec 1658 M6).
+ */
+export function livenessFromStartTimes(
+  startTimes: ReadonlyMap<number, number>,
+  exists: (pid: number) => boolean,
+): (pid: number, recordedStartTime: number | null) => boolean {
+  return (pid, recordedStartTime) => {
+    if (!exists(pid)) return false;
+    if (recordedStartTime === null) return true;
+    return startTimeMatches(startTimes.get(pid) ?? null, recordedStartTime);
+  };
+}
+
 interface ShellperRegistryRow {
   shellper_pid: number;
   shellper_start_time: number | null;
@@ -108,7 +137,7 @@ export async function computeRegisteredShellperPids(
       continue;
     }
     const actual = await getStartTime(row.shellper_pid);
-    if (actual !== null && Math.abs(actual - row.shellper_start_time) <= PID_REUSE_TOLERANCE_MS) {
+    if (startTimeMatches(actual, row.shellper_start_time)) {
       registered.add(row.shellper_pid);
     }
   }

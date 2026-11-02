@@ -24,6 +24,7 @@ import {
 } from '../utils/workspace-path.js';
 import { WorkspaceKeyedMap } from '../servers/tower-terminals.js';
 import { canonicalizeWorkspacePathRows } from '../db/canonicalize-workspace-paths.js';
+import { livenessFromStartTimes } from '../servers/shellper-husk-sweep.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 
 /** Ops that record which calls were made and answer from the given functions. */
@@ -282,6 +283,37 @@ describe('canonicalizeWorkspacePathRows (boot, Windows)', () => {
     ]);
     expect(report.droppedTerminalIds).toEqual([]);
     expect(report.liveDuplicates).toEqual([{ workspace: UPPER, type: 'architect', roleId: 'main', terminalIds: ['t-a', 't-b'] }]);
+  });
+
+  it('collision: a recorded shellper pid now owned by an UNRELATED process (pid reuse) counts as dead', () => {
+    // The husk sweep's identity rule, through the same factory Tower uses at boot.
+    const startTimes = new Map<number, number>([[401, 50_000]]); // pid 401 now started at t=50s
+    const reuseAware = { ...opts, isAlive: livenessFromStartTimes(startTimes, (pid) => pid === 401) };
+    // The canonical row is OLDER and its pid looks alive; a bare existence probe would let it win.
+    addArchitect(UPPER, 'main', 't-reused', '2026-11-01 00:00:00');
+    addTerminal(UPPER, 't-reused', 'architect', 'main', 401);
+    db.prepare('UPDATE terminal_sessions SET shellper_start_time = 1000 WHERE id = ?').run('t-reused'); // recorded t=1s
+    addArchitect(LOWER, 'main', 't-real', '2026-11-03 00:00:00');
+    addTerminal(LOWER, 't-real', 'architect', 'main', 402);
+    db.prepare('UPDATE terminal_sessions SET shellper_start_time = 2000 WHERE id = ?').run('t-real');
+
+    const report = canonicalizeWorkspacePathRows(db, reuseAware);
+
+    // 401 was reused, so neither session is genuinely alive: freshness picks the newer agent row,
+    // which keeps its own terminal row; the reused one is dropped (its process is NOT ours).
+    expect(rows('SELECT terminal_id FROM architect')).toEqual([{ terminal_id: 't-real' }]);
+    expect(rows('SELECT id FROM terminal_sessions')).toEqual([{ id: 't-real' }]);
+    expect(report.droppedTerminalIds).toEqual(['t-reused']);
+    expect(report.liveDuplicates).toEqual([]);
+  });
+
+  it('livenessFromStartTimes: missing pid dead, matching start alive, mismatched start dead, no record existence-only', () => {
+    const live = livenessFromStartTimes(new Map([[7, 10_000]]), (pid) => pid === 7 || pid === 8);
+    expect(live(6, null)).toBe(false);
+    expect(live(7, 10_500)).toBe(true);
+    expect(live(7, 99_000)).toBe(false);
+    expect(live(8, null)).toBe(true);
+    expect(live(8, 10_000)).toBe(false); // exists, but its start time cannot be confirmed
   });
 
   it('two non-canonical spellings collapse onto a third key deterministically (freshness, not row order)', () => {

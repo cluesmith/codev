@@ -52,6 +52,7 @@ import {
 import { RetiredHarnessError } from '../utils/harness.js';
 import { setArchitect, setArchitectByName, getArchitects, getArchitectByName } from '../state.js';
 import { workspaceKey } from '../utils/workspace-path.js';
+import type { WorkspaceKeyedMap } from './tower-terminals.js';
 
 // ============================================================================
 // Dependency interface
@@ -62,7 +63,7 @@ export interface InstanceDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void;
   /** Tower's listening port, set as `CODEV_TOWER_PORT` on every architect launch (Spec 1595). */
   towerPort?: number;
-  workspaceTerminals: Map<string, WorkspaceTerminals>;
+  workspaceTerminals: WorkspaceKeyedMap<WorkspaceTerminals>;
   getTerminalManager: () => TerminalManager;
   shellperManager: SessionManager | null;
   /** Get or create a workspace's terminal registry entry */

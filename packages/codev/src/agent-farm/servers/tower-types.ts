@@ -11,6 +11,7 @@ import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { TunnelClient } from '../lib/tunnel-client.js';
 import type { FileTab } from '../utils/file-tabs.js';
+import type { WorkspaceKeyedMap } from './tower-terminals.js';
 /**
  * Shared context passed to all tower modules.
  * The orchestrator (tower-server.ts) owns lifecycle — it creates
@@ -21,7 +22,7 @@ export interface TowerContext {
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   terminalManager: TerminalManager;
   shellperManager: SessionManager | null;
-  workspaceTerminals: Map<string, WorkspaceTerminals>;
+  workspaceTerminals: WorkspaceKeyedMap<WorkspaceTerminals>;
   db: () => Database.Database;
   broadcastNotification: (n: { type: string; title: string; body: string; workspace?: string }) => void;
   tunnelClient: TunnelClient | null;

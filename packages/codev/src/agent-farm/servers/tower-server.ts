@@ -18,7 +18,8 @@ import { WebSocketServer } from 'ws';
 import { SessionManager, ORPHAN_SWEEP_TIMEOUT_MS } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup, persistableCommand, logSessionIdentity } from './tower-utils.js';
-import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
+import { sweepShellperHusks, resolveHuskGraceMs, livenessFromStartTimes } from './shellper-husk-sweep.js';
+import { listProcessCensus } from './process-census.js';
 import {
   sweepSessionLogs,
   measureSessionLogs,
@@ -759,10 +760,18 @@ async function bootSequence(): Promise<void> {
   // POSIX keeps its keys exactly as written (#1870).
   if (isWindows()) {
     try {
+      // Liveness must survive PID reuse (a recorded pid now owned by an unrelated
+      // process reads as dead), so take one census for start times up front: the
+      // canonicalization itself runs synchronously in a transaction.
+      const census = await listProcessCensus({ fresh: true });
+      const startTimes = new Map<number, number>();
+      for (const entry of census) {
+        if (entry.creationTime !== undefined) startTimes.set(entry.pid, entry.creationTime);
+      }
       const report = canonicalizeWorkspacePathRows(getGlobalDb(), {
         canonicalize: normalizeWorkspacePath,
         cronTaskId: getTaskId,
-        isAlive: processExists,
+        isAlive: livenessFromStartTimes(startTimes, processExists),
       });
       for (const move of report.moved) {
         log('INFO', `workspace path canonicalized: ${move.from} -> ${move.to}`);

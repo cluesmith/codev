@@ -44,8 +44,14 @@ export interface CanonicalizeOptions {
   canonicalize: (workspacePath: string) => string;
   /** A cron task's id for a workspace and task name (production: tower-cron `getTaskId`). */
   cronTaskId: (workspacePath: string, taskName: string) => string;
-  /** Whether a recorded process is still running (production: a signal-0 probe). */
-  isAlive: (pid: number) => boolean;
+  /**
+   * Whether the process a row recorded is still running. `recordedStartTime` is the
+   * row's `shellper_start_time` (null for a row without one): a live PID whose start
+   * time does not match it is a REUSED PID, so it reads as dead. Production: a
+   * signal-0 probe plus the husk sweep's start-time identity check, from a start-time
+   * snapshot taken before the transaction.
+   */
+  isAlive: (pid: number, recordedStartTime: number | null) => boolean;
 }
 
 export interface CanonicalizeReport {
@@ -97,16 +103,16 @@ function distinctStoredPaths(db: Database.Database, tables: readonly string[]): 
 /** Whether a terminal row's process (its shellper, else the PTY child) is still running. */
 function terminalAlive(db: Database.Database, terminalId: string | null, opts: CanonicalizeOptions): boolean {
   if (!terminalId) return false;
-  const row = db.prepare('SELECT pid, shellper_pid FROM terminal_sessions WHERE id = ?').get(terminalId) as
-    | { pid: number | null; shellper_pid: number | null }
+  const row = db.prepare('SELECT pid, shellper_pid, shellper_start_time FROM terminal_sessions WHERE id = ?').get(terminalId) as
+    | { pid: number | null; shellper_pid: number | null; shellper_start_time: number | null }
     | undefined;
   if (!row) return false;
-  let pid = row.shellper_pid;
-  if (pid === null || pid === undefined) {
-    pid = row.pid;
+  if (row.shellper_pid !== null && row.shellper_pid !== undefined && row.shellper_pid > 0) {
+    return opts.isAlive(row.shellper_pid, row.shellper_start_time ?? null);
   }
-  if (pid === null || pid === undefined || pid <= 0) return false;
-  return opts.isAlive(pid);
+  // No shellper: the PTY child's pid, which carries no recorded start time.
+  if (row.pid === null || row.pid === undefined || row.pid <= 0) return false;
+  return opts.isAlive(row.pid, null);
 }
 
 function moveKnownWorkspace(db: Database.Database, from: string, to: string, report: CanonicalizeReport): void {

@@ -35,12 +35,13 @@ import type { WorkspaceTerminals, InstanceStatus } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { escapeHtml, readBody } from '../utils/server-utils.js';
 import { cloudMutationBlocked } from '../../lib/test-env.js';
+import type { WorkspaceKeyedMap } from './tower-terminals.js';
 
 /** Minimal dependencies required by the tunnel module */
 export interface TunnelDeps {
   port: number;
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
-  workspaceTerminals: Map<string, WorkspaceTerminals>;
+  workspaceTerminals: WorkspaceKeyedMap<WorkspaceTerminals>;
   terminalManager: TerminalManager | null;
 }
 
