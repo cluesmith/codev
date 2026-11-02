@@ -909,7 +909,7 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 Resolved: the cause was `os = "linux"` in the owner's user npm config, not a Codev or Windows
 defect.** Owner direction was to identify the cause before deciding on a solution.
 
-- Cause: `C:\Users\amr\.npmrc` contained a single line, `os = "linux"`. npm's `os` setting
+- Cause: the user-level `.npmrc` (`%USERPROFILE%\.npmrc`) contained a single line, `os = "linux"`. npm's `os` setting
   overrides the platform npm installs for. npm resolved and placed the SDK's optional
   `claude-agent-sdk-win32-x64` package (debug log: `placeDep ... OK`), then dropped it as a
   platform mismatch without logging a failure. `claude-agent-sdk-linux-x64` was skipped too,
