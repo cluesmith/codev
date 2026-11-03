@@ -148,6 +148,25 @@ export function readIdeConnectionToken(): string | null {
 }
 
 /**
+ * Write a fresh connection token (randomBytes(32) hex, 0600), replacing any
+ * existing one, and return it (Issue #1869). Called before every IDE server
+ * SPAWN (never on adopt: a live server keeps the token it was started with), so
+ * a token that ever leaked into a browser jar is valid only for that server's
+ * uptime. Tower reads the token from this file on every forwarded request and
+ * overwrites any browser-held copy, so rotation breaks no client.
+ */
+export function rotateIdeConnectionToken(): string {
+  const path = getIdeConnectionTokenPath();
+  if (!existsSync(AGENT_FARM_DIR)) {
+    mkdirSync(AGENT_FARM_DIR, { recursive: true, mode: 0o700 });
+  }
+  const token = randomBytes(32).toString('hex');
+  writeFileSync(path, token + '\n', { mode: 0o600 });
+  chmodSync(path, 0o600);
+  return token;
+}
+
+/**
  * Return the Tower-owned connection token, generating and persisting one (0600)
  * on first use. This token is the IDE server's own inner auth layer (passed via
  * `--connection-token-file`); it is NOT a substitute for Tower's key check on
