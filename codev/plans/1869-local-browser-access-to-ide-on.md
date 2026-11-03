@@ -87,6 +87,12 @@ requests Tower-side (`x-codev-tunnel-proxy: 1` → `403`), matching the marker's
   service worker), allowlist that exact origin; never drop the check. Expected: none, since
   server-web with `--server-base-path /ide` serves them same-origin under `/ide`; verified in
   the test plan.
+  **Resolved during implement (2026-11-03):** the extension-host worker iframe is same-origin
+  under `/ide`; no service worker registers on the Tower origin; the Codev sidebar webview
+  iframe loads from `https://<hash>.vscode-cdn.net` (upstream default webview host). That host
+  is cross-site, so the Strict cookie is never sent from it, and it talks to the workbench by
+  `postMessage`, not by requests to Tower. No allowlist entry is needed (confirmed by the
+  security review).
 - `isRequestAllowed`: if the pathname matches the IDE prefix (`/ide` or `/ide/…`), return
   `isForwardAuthorized(req)` instead of the header-only check. This keeps one decision for the
   forward (HTTP and WS identical) and leaves every other route header-only. To avoid a
@@ -269,3 +275,121 @@ Manual (worktree Tower + installed codev-ide), recorded in the review:
 - Cloud URL through the tunnel still opens the workbench (or, if no cloud registration is
   available locally, the existing tunnel-header tests stay green and this is flagged for the
   reviewer).
+
+## Amendment 1 (2026-11-03): the workbench bypassed Tower
+
+Found by the Playwright run at implement; approved as a plan amendment by the architect, with
+security conditions C1-C4, per-spawn rotation, and the local-only scope ruling.
+
+### Finding
+
+1. **`remoteAuthority` came from the rewritten Host.** `buildForwardHeaders` sets `Host` to the IDE
+   server's own `127.0.0.1:8200` and stamped `x-forwarded-*` only for tunnel-borne requests, so
+   locally the served page carried `remoteAuthority = 127.0.0.1:8200`. The workbench's WebSockets
+   and remote resources dialed `:8200` directly and never reached Tower's forward seam or the M1
+   guard.
+2. **The IDE server's token reached the browser.** Its responses carry
+   `Set-Cookie: vscode-tkn=<connection token>; Max-Age=604800; SameSite=Lax` (not HttpOnly), which
+   Tower relayed. After one Open IDE the browser held the IDE's own token for `127.0.0.1` /
+   `localhost`: sent to every port, and readable by any other localhost page through
+   `document.cookie` (it only needs a document at an `/ide` path on its own origin).
+3. **`:8200` does no Origin check.** A WebSocket upgrade with only that cookie and
+   `Origin: http://localhost:3000` got `101`.
+
+Together these let any page on another localhost port reach the remote protocol (a terminal)
+after the user's first Open IDE, bypassing M1. They also failed the acceptance line "WebSocket
+connections all succeed through `4100/ide/`".
+
+### Changes (all in `servers/ide-forward.ts` unless noted)
+
+- **(b) Tower's authority, locally.** For a non-tunnel request, stamp `x-forwarded-host` = the
+  incoming (Host-guarded) `Host` and `x-forwarded-proto: http`. No `x-forwarded-prefix` locally
+  (`/ide` is the server's own base path). The served `remoteAuthority` becomes Tower's, so every
+  workbench socket and remote resource comes back through Tower.
+- **(a') The token never enters the cookie jar; local only.** Stripping the Set-Cookie alone
+  (the original (a)) broke the workbench with "Unauthorized client refused: auth mismatch": the
+  client takes `connectionToken = options.connectionToken || cookie("vscode-tkn")` for the
+  remote-protocol handshake. So for local requests Tower both:
+  - drops every `vscode-tkn` Set-Cookie (name matched at the start of each value, array-safe;
+    header dropped when nothing remains) from HTTP responses and the rebuilt `101` (C3); and
+  - injects `"connectionToken":"<token>"` as the first key of the HTML-escaped JSON in
+    `<meta id="vscode-workbench-web-configuration" data-settings="{…">`, recomputing
+    `Content-Length`. Security's conditions on (a') (ruled acceptable, local only):
+    - Inject only when ALL hold: non-tunnel request, status 200, `Content-Type: text/html`, no
+      `Content-Encoding`, body within a fixed 2 MB bound (`MAX_WORKBENCH_HTML_BYTES`). Otherwise
+      relay unchanged and streaming. A declared `Content-Length` over the bound never buffers; a
+      chunked body that outgrows it mid-stream is relayed unchanged (buffered bytes, then a pipe).
+    - The token must match `^[A-Za-z0-9-]+$` before insertion.
+    - The empty object `{}` becomes `{"connectionToken":"x"}`, never with a trailing comma.
+    - Fail-safe: the configuration is decoded and must parse as a JSON object without a
+      `connectionToken`, and the rewritten configuration must decode to valid JSON carrying the
+      token. Otherwise the page is relayed unchanged (the workbench then fails visibly with
+      "auth mismatch", never silently).
+    - Rationale: same shape as Tower's same-origin key injection into the dashboard shell
+      (post-auth only, never cross-origin readable). Strictly tighter than the non-HttpOnly
+      cookie it replaces.
+  The token lives only in the workbench page's memory. The page is served only through the
+  forward seam and is never cross-origin readable (no `Access-Control-Allow-Credentials`, M2).
+  **Scope: local only.** The tunnel path relays the page and its Set-Cookie unchanged, so the
+  cloud path is byte-identical except C1/C2. The cloud variant ("move the cloud workbench to a
+  config-injected token") is a follow-up filed by the architect, to be tested against the real
+  cloud.
+- **Log hygiene (S4 extension).** The HTTP 401 WARN line logs the PATHNAME only for any `/ide`
+  request (the WebSocket line already did), so a token in a workbench query (`?tkn=`, a
+  reconnection token) can never land in Tower's log. Other routes keep the full target.
+- **C1.** `x-forwarded-host`, `-proto` and `-prefix` join `STRIP_BEFORE_FORWARD`, so the IDE
+  server only ever sees Tower's own stamps, on the local and tunnel paths.
+- **C2.** `mergeConnectionTokenCookie` replaces any incoming `vscode-tkn` with Tower's (never
+  merges around it) and keeps every other cookie. A browser-held copy (a hand-built `?tkn=` URL,
+  a pre-fix session, a token stale after rotation) is never authoritative.
+- **Rotation (`lib/ide-record.ts`, `servers/ide-server.ts`).** `rotateIdeConnectionToken()` writes
+  a fresh `randomBytes(32)` hex token (0600) before every IDE server spawn, including the
+  respawn. It never runs on adopt, so a live server keeps its token. Both forward paths read the
+  file per request and C2 makes stale browser copies harmless. This is the mitigation for the
+  residual below.
+
+### Residual (accepted, documented)
+
+A browser that already holds `vscode-tkn` (from a hand-built `?tkn=` URL or a session before
+this change) keeps it for up to 7 days, and `:8200` does no Origin check on it. Rotation bounds
+it to the current server's uptime: the next spawn invalidates it. The docs tell users never to
+build a `?tkn=` URL by hand.
+
+### Tests added
+
+- `buildForwardHeaders`: the local stamp (host, proto, no prefix); C1 spoofed `x-forwarded-*`
+  dropped on the local, tunnel, and tunnel-without-authority paths; C2 `vscode-tkn=stale; other=1`
+  becomes `other=1; vscode-tkn=<tower>`.
+- C3: `stripConnectionTokenSetCookie`, `copyResponseHeaders` and `rebuildUpgradeResponse` forward
+  only `other=1` from `[vscode-tkn=…; Max-Age=604800, other=1]` locally, and relay unchanged on
+  the tunnel path.
+- `injectWorkbenchConnectionToken`: the injected `data-settings` decodes to valid JSON with
+  `connectionToken`; `{}` gets no trailing comma; other character references decode; returns
+  null for a missing meta, an existing `connectionToken`, a malformed token, or an unparseable
+  configuration.
+- Integration: relayed unchanged when `Content-Encoding` is set, on a non-200, and past the 2 MB
+  bound (chunked); `Content-Length` matches the rewritten body.
+- Log hygiene: a refused `/ide` request with `?reconnectionToken=…&tkn=…` logs the pathname only;
+  a non-`/ide` request still logs its full target.
+- Integration through the real forward: the local workbench page gets the token in its
+  configuration, no Set-Cookie, correct `Content-Length`; the tunnel page is unchanged. Real
+  `setupUpgradeHandler`: the upstream sees `x-forwarded-host = Tower`, and the client's `101`
+  carries no `vscode-tkn`.
+- Rotation: two spawns yield two tokens (0600) and the spawn points at the token file; adopt
+  keeps the live token.
+
+## Acceptance
+
+- On a machine with Tower and the IDE server running, the local dashboard shows an Open IDE link
+  per workspace that opens the workbench with the Codev sidebar in a new tab, with no cloud
+  session and no hand-built URL.
+- **After Open IDE and after a reload, the browser jar holds only `codev-ide-session` and no
+  `vscode-tkn` cookie for `localhost` or `127.0.0.1` on any path** (Playwright:
+  `context.cookies()`).
+- **Every workbench WebSocket URL targets Tower's port; none targets `:8200`** (Playwright
+  assertion on the WebSocket request log). Assets load through Tower's `/ide/`.
+- A bare `curl http://127.0.0.1:4100/ide/` returns 401; a rebound Host fails the Host guard; a
+  page on another localhost port cannot use the cookie (WebSocket closed 4401).
+- The cloud URL still works; the tunnel path is byte-identical except C1/C2.
+- `agent-farm.md` (and the skeleton twin) describe the Open IDE link and the local URL as the
+  user path, with the trust notes.

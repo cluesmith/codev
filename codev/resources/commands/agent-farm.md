@@ -1046,6 +1046,11 @@ cookie set on `localhost` is not sent to `127.0.0.1`.
   it to the IDE server, which still requires its own connection token.
 - Revocation is rotating the local key (delete `~/.agent-farm/local-key` and restart Tower, or
   change `CODEV_TOWER_KEY`); every keyed client re-keys. There is no finer revocation.
+- Never build a `?tkn=` URL by hand (for example `http://127.0.0.1:8200/ide/?tkn=…`): it puts the
+  IDE server's own token in the browser's cookie jar for 7 days, for every `localhost` port,
+  and the IDE server does no Origin check on it. Use the Open IDE link; Tower hands the
+  workbench its token without a cookie, replaces any stale browser copy, and issues a fresh
+  token every time it starts the IDE server.
 - Tower's loopback trust boundary is the single-user machine; on a multi-user host another local
   user can reach Tower's listener and, via the `/ide` session cookie, can collect and replay this
   machine's IDE credential if you browse to their localhost port under `/ide`. Do not use the Open
@@ -1133,7 +1138,7 @@ show `unknown` for the version and extensions fields.
 **Files:**
 - `~/.agent-farm/ide-server.json` - Tower's record of the running server
 - `~/.agent-farm/ide-extensions/` - Tower-owned extensions directory (mode 0700)
-- `~/.agent-farm/ide-connection-token` - Token guarding direct access to the server port
+- `~/.agent-farm/ide-connection-token` - Token guarding direct access to the server port (regenerated on every IDE server start)
 
 ---
 
