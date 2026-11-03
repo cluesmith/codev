@@ -51,8 +51,40 @@ beforeAll(async () => {
   // Stub "IDE server": echoes the request, and stamps long-lived cache headers
   // the way the real server-web build serves its static assets.
   stub = http.createServer((req, res) => {
+    // A workbench page (Issue #1869): the real server embeds its configuration
+    // in this meta tag and sets its token as a cookie.
+    const page = '<html><head><meta id="vscode-workbench-web-configuration" data-settings="{&quot;remoteAuthority&quot;:&quot;localhost:4100&quot;}"></head></html>';
+    if (req.url?.startsWith('/ide/workbench-gzip')) {
+      res.setHeader('Content-Type', 'text/html');
+      res.setHeader('Content-Encoding', 'gzip');
+      res.end(page);
+      return;
+    }
+    if (req.url?.startsWith('/ide/workbench-404')) {
+      res.statusCode = 404;
+      res.setHeader('Content-Type', 'text/html');
+      res.end(page);
+      return;
+    }
+    if (req.url?.startsWith('/ide/workbench-huge')) {
+      res.setHeader('Content-Type', 'text/html');
+      // Chunked (no Content-Length), so the bound is hit mid-stream.
+      res.write(page);
+      res.end('x'.repeat(2 * 1024 * 1024 + 10));
+      return;
+    }
+    if (req.url?.startsWith('/ide/workbench')) {
+      res.setHeader('Content-Type', 'text/html');
+      res.setHeader('Set-Cookie', 'vscode-tkn=UPSTREAM-TOKEN; Max-Age=604800; SameSite=Lax');
+      res.end(page);
+      return;
+    }
+    // A misbehaving upstream must never get this header past Tower (Issue #1869, M2).
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Cache-Control', 'public, max-age=31536000');
     res.setHeader('ETag', '"boot-commit-abc"');
+    // The real server sets its connection token as a cookie (Issue #1869).
+    res.setHeader('Set-Cookie', ['vscode-tkn=UPSTREAM-TOKEN; Max-Age=604800; SameSite=Lax', 'other=keep']);
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ url: req.url, method: req.method, headers: req.headers }));
   });
@@ -135,6 +167,13 @@ describe('IDE HTTP forward (stub loopback)', () => {
     expect(echoed.headers['cookie']).toBe(`foo=bar; vscode-tkn=${token}`);
   });
 
+  it("replaces a browser-held vscode-tkn with Tower's (Issue #1869)", async () => {
+    writeIdeRecord(recordFor(stubPort));
+    const res = await get('/ide/', { cookie: 'vscode-tkn=stale; foo=bar' });
+    const echoed = JSON.parse(res.body) as { headers: Record<string, string> };
+    expect(echoed.headers['cookie']).toBe(`foo=bar; vscode-tkn=${token}`);
+  });
+
   it('returns 502 when no IDE server is registered', async () => {
     const res = await get('/ide/');
     expect(res.status).toBe(502);
@@ -175,5 +214,54 @@ describe('IDE WebSocket forward (stub loopback)', () => {
     expect(echoed).toBe('echo:hello');
     // The upgrade the stub received carried the injected connection-token cookie.
     expect(lastWsReqHeaders?.['cookie']).toContain(`vscode-tkn=${token}`);
+  });
+});
+
+describe('IDE HTTP forward never hands the browser the connection token (Issue #1869)', () => {
+  it('strips the vscode-tkn Set-Cookie and keeps other cookies', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    const res = await get('/ide/?folder=%2Fw', { host: 'localhost:4100' });
+    expect(res.status).toBe(200);
+    const setCookie = res.headers['set-cookie'] ?? [];
+    expect(setCookie.join('\n')).not.toContain('vscode-tkn');
+    expect(setCookie).toContain('other=keep');
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined();
+    // Tower's own authority is stamped for a local request.
+    expect(JSON.parse(res.body).headers['x-forwarded-host']).toBe('localhost:4100');
+  });
+
+  it('relays the tunnel path unchanged: Set-Cookie kept (cloud variant is a follow-up)', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    const res = await get('/ide/', { 'x-codev-tunnel-proxy': '1' });
+    expect((res.headers['set-cookie'] ?? []).join('\n')).toContain('vscode-tkn=UPSTREAM-TOKEN');
+  });
+});
+
+describe('IDE workbench page gets its token from configuration, not a cookie (Issue #1869)', () => {
+  it('locally: injects connectionToken into the configuration, strips the Set-Cookie, fixes Content-Length', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    const res = await get('/ide/workbench', { host: 'localhost:4100' });
+    expect(res.status).toBe(200);
+    expect(res.headers['set-cookie']).toBeUndefined();
+    expect(Number(res.headers['content-length'])).toBe(Buffer.byteLength(res.body));
+    const settings = /data-settings="([^"]*)"/.exec(res.body)?.[1].replace(/&quot;/g, '"');
+    expect(JSON.parse(settings as string)).toEqual({ connectionToken: token, remoteAuthority: 'localhost:4100' });
+  });
+
+  it('relays unchanged when Content-Encoding is set, on a non-200, or past the 2 MB bound', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    for (const path of ['/ide/workbench-gzip', '/ide/workbench-404', '/ide/workbench-huge']) {
+      const res = await get(path, { host: 'localhost:4100' });
+      expect(res.body).not.toContain('connectionToken');
+    }
+    const huge = await get('/ide/workbench-huge', { host: 'localhost:4100' });
+    expect(huge.body.length).toBeGreaterThan(2 * 1024 * 1024);
+  });
+
+  it('over the tunnel: the page and its Set-Cookie are relayed unchanged (local-only scope)', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    const res = await get('/ide/workbench', { 'x-codev-tunnel-proxy': '1' });
+    expect(res.body).not.toContain('connectionToken');
+    expect((res.headers['set-cookie'] ?? []).join('\n')).toContain('vscode-tkn=UPSTREAM-TOKEN');
   });
 });

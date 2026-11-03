@@ -29,7 +29,7 @@ import {
   readIdeRecord,
   writeIdeRecord,
   deleteIdeRecord,
-  ensureIdeConnectionToken,
+  rotateIdeConnectionToken,
   getIdeConnectionTokenPath,
 } from '../lib/ide-record.js';
 import {
@@ -180,7 +180,9 @@ async function spawnIdeServerUnlocked(opts: SpawnIdeOptions, log: LogFn): Promis
 
   const basePath = IDE_DEFAULT_PREFIX.replace(/\/$/, ''); // "/ide"
   const tokenFile = getIdeConnectionTokenPath();
-  ensureIdeConnectionToken();
+  // Fresh token per spawn (Issue #1869): bounds any leaked copy to this
+  // server's uptime. The adopt path above keeps the live server's token.
+  rotateIdeConnectionToken();
 
   const args = [
     '--host', '127.0.0.1',
