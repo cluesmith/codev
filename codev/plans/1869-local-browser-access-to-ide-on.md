@@ -122,6 +122,15 @@ the trust notes. Check `arch.md` for an IDE forward auth section and update it i
   CSRF-style requests into the workbench from another site are refused. Net trust equals the key
   header for this one prefix, which is what the issue asks.
 - **Risk: cookie leaks to the IDE server.** Stripped before forwarding (step 4); unit-tested.
+- **Risk: cookies are not port-scoped.** A cookie set by `localhost:4100` with `Path=/ide` is
+  also sent to any other `localhost` port on a path under `/ide`, including the IDE server at
+  `:8200` (which runs with `--server-base-path /ide`) on a direct navigation, or any other local
+  service that serves `/ide`. Tower's strip (step 4) covers only the forwarded path. Acceptable
+  because: the value is an HMAC derived from the key, not the key, and it grants `/ide/*` on Tower
+  only (nothing else accepts it and it cannot be inverted to the Tower key); the IDE server ignores
+  unknown cookies and still requires its own `vscode-tkn` connection token; and the `__Host-`
+  prefix is not an option because it forces `Path=/`, which would send the cookie to every Tower
+  route instead of narrowing it.
 - **Risk: popup blocking.** Pre-open the tab synchronously, then navigate it.
 - **Risk: workbench sub-resources (webview iframes, service worker) on a different path or
   origin.** They load under `/ide/…` same-origin in server-web with `--server-base-path /ide`;
@@ -159,6 +168,8 @@ Manual (worktree Tower + installed codev-ide), recorded in the review:
 - `curl -i http://127.0.0.1:4100/ide/` → 401.
 - `curl -i -H 'Host: evil.example' -H 'Cookie: codev-ide-session=<valid>' …/ide/` → 401.
 - `curl -i -b 'codev-ide-session=<valid>' http://127.0.0.1:4100/api/state` → 401 (cookie scoped).
+- `curl -i -b 'codev-ide-session=<valid>' http://127.0.0.1:8200/ide/` → 403 (the IDE server still
+  requires `vscode-tkn`; the cross-port cookie grants nothing there).
 - Browser (Playwright, per testing guide): load the dashboard, click **Open** on a workspace's
   IDE row → new tab opens the workbench for that folder with the Codev sidebar; network panel
   shows assets 200 and `?reconnectionToken=` WebSockets 101 through `4100/ide/`.
