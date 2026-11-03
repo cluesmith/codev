@@ -24,3 +24,15 @@ Playwright via harness (:4199, real handleRequest/setupUpgradeHandler, live Towe
 Fix (a), stripping the vscode-tkn Set-Cookie, broke the workbench with "auth mismatch": the client reads connectionToken from options first, then from the cookie. Replaced it with (a'): strip the cookie AND inject the token into the workbench config meta. Security ruled it acceptable for local requests only, with conditions: 200/text-html/uncompressed/2 MB bound, safe token, empty {} handled, JSON-validated, fail-safe unchanged. Also in: (b) stamp x-forwarded-host/proto with Tower's Host locally; C1 strip client x-forwarded-*; C2 Tower's vscode-tkn replaces the incoming one; C3 Set-Cookie strip on HTTP and 101; token rotation on every spawn (never on adopt); /ide 401 logs pathname only; docs line against hand-built ?tkn=.
 Playwright C4: the jar holds only codev-ide-session after Open IDE and after reload; both workbench WS go to Tower's port and stay open; a cross-port WS gets 4401. Cloud variant is a follow-up filed by main.
 Lesson: verify the third-party client's own credential path (here the workbench JS reads the token) before stripping a credential it hands out.
+
+## 2026-11-03 dev-approval pending
+Draft PR #1872 opened early at the architect's request; CI 7/7 green. Porch's local tests check failed only on protocol-drift-audit: a scoped @cluesmith:registry in the user npm config overrides the test's npm_config_registry (not the cache; an empty cache still failed). porch done was run with NPM_CONFIG_USERCONFIG pointed at an empty file, environment-only. Main is filing the test fix. Security approved 95c01b116; owner test steps were sent via main.
+
+## 2026-11-03 review / consultation
+The owner approved dev-approval on 2a9a55ae2, after asking for the IDE row to move above Overview. The review and lessons were written, and the draft PR #1872 was marked ready. Consultation: Gemini skipped (agy not signed in); Codex and Claude returned REQUEST_CHANGES. Fixed:
+- the forward no longer relays ACAC;
+- the mint awaits ensureIdeServerLive (503 if nothing can be made live);
+- the dashboard checks /api/ide on load and on visibility, not on the 5s poll (the blocking lsof);
+- the prefix moved to a dependency-free lib/ide-prefix.ts;
+- ensureIdeConnectionToken is marked as a test seam.
+Rebutted: hardcoded local x-forwarded-proto http (pre-existing; C1 forbids trusting the client) and the no-metadata cross-port GET (intended). Single-pass, so this goes to the human at the pr gate.
