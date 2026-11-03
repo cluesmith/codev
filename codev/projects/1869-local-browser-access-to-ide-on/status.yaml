@@ -1,7 +1,7 @@
 id: '1869'
 title: local-browser-access-to-ide-on
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-03T00:48:40.471Z'
-updated_at: '2026-11-03T02:23:46.763Z'
+updated_at: '2026-11-03T02:23:49.321Z'
