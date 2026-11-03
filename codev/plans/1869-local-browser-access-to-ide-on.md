@@ -143,7 +143,7 @@ been used once in that browser (it sets a session cookie scoped to `/ide`), and 
 the trust notes: it is a **full-trust credential for this machine**, scoped by route not by
 capability (the workbench has terminals and file access), so treat it like the key (M3);
 revocation is rotating the local key (`~/.agent-farm/local-key` or `CODEV_TOWER_KEY`), with no
-finer revocation (M4). Check `arch.md` for an IDE forward auth section and update it if present.
+finer revocation (M4). The trust notes also state, plainly and not as a footnote: "Tower's loopback trust boundary is the single-user machine; on a multi-user host another local user can reach Tower's listener and, via the `/ide` session cookie, can collect and replay this machine's IDE credential if you browse to their localhost port under `/ide`. Recommendation: do not use the Open IDE path on shared hosts." Check `arch.md` for an IDE forward auth section and update it if present.
 
 ## Files to Change
 
@@ -179,18 +179,20 @@ finer revocation (M4). Check `arch.md` for an IDE forward auth section and updat
 - **Accepted risk: revocation granularity (M4).** Stateless HMAC means the only revocation is
   rotating the local key, which also logs out every client. Acceptable for a single-user local
   credential whose issuance already requires the key.
-- **Accepted risk: replay on a multi-user host.** Another OS user's server on some localhost port
-  can collect the cookie if this user navigates to that port under `/ide`, then replay it from a
-  non-browser client (forging `Origin`, so M1 does not help). Today that user cannot read the
-  key file. Mitigations (expiry, revocable per-issue value) cost restart survival; accepted for
-  the default single-user machine and stated in the docs.
+- **Accepted risk: replay on a multi-user host (ruled accept-and-document by the security
+  review).** Tower's loopback trust boundary is the single-user machine; on a multi-user host another local user can reach Tower's listener and, via the `/ide` session cookie, can collect and replay this machine's IDE credential if you browse to their localhost port under `/ide`. Recommendation: do not use the Open IDE path on shared hosts. Mechanism: another OS user's server on some localhost port receives the
+  cookie (cookies are not port-scoped) and replays it from a non-browser client, forging
+  `Origin`, so M1 does not help; that user cannot read the 0600 key file today. Not mitigated in
+  this change; the same sentence goes into the docs trust notes (step 6). Peer-identity
+  verification for loopback connections and an independently rotatable IDE-session secret are a
+  follow-up filed by the architect ("Tower loopback trust on multi-user hosts").
 - **Risk: cookie leaks to the IDE server.** Stripped before forwarding (step 4); unit-tested.
 - **Risk: cookies are not port-scoped.** A cookie set by `localhost:4100` with `Path=/ide` is
   also sent to any other `localhost` port on a path under `/ide`, including the IDE server at
   `:8200` (which runs with `--server-base-path /ide`) on a direct navigation, or any other local
   service that serves `/ide`. Tower's strip (step 4) covers only the forwarded path. Acceptable
-  because: the value is an HMAC derived from the key, not the key, and it grants `/ide/*` on Tower
-  only (nothing else accepts it and it cannot be inverted to the Tower key); the IDE server ignores
+  because: the value is an HMAC derived from the key, not the key, and it is accepted by Tower only
+  under `/ide` (see the credential-power risk above; it cannot be inverted to the Tower key); the IDE server ignores
   unknown cookies and still requires its own `vscode-tkn` connection token; and the `__Host-`
   prefix is not an option because it forces `Path=/`, which would send the cookie to every Tower
   route instead of narrowing it.
