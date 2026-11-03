@@ -450,10 +450,37 @@ describe('tower-routes', () => {
 
       expect(statusCode()).toBe(401);
       const logged = (ctx.log as any).mock.calls.map((c: unknown[]) => String(c[1])).join('\n');
-      expect(logged).toContain('401 GET /ide/?folder=%2Fw');
+      // Pathname only for /ide: no query string ever reaches the log.
+      expect(logged).toContain('401 GET /ide/ —');
+      expect(logged).not.toContain('folder=');
       expect(logged).toContain('cross-origin');
       expect(logged).not.toContain(value);
       expect(logged).not.toContain('codev-ide-session=');
+    });
+
+    it('a refused /ide request with a token in the query logs the pathname only', async () => {
+      const { isRequestAllowed } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const req = makeReq('GET', '/ide/stable-x?reconnectionToken=SECRET-RT&tkn=SECRET-TKN');
+      const ctx = makeCtx();
+      const { res } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      const logged = (ctx.log as any).mock.calls.map((c: unknown[]) => String(c[1])).join('\n');
+      expect(logged).toContain('401 GET /ide/stable-x —');
+      expect(logged).not.toContain('SECRET');
+    });
+
+    it('a refused non-/ide request still logs its full target', async () => {
+      const { isRequestAllowed } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const req = makeReq('GET', '/api/terminals?x=1');
+      const ctx = makeCtx();
+      const { res } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      const logged = (ctx.log as any).mock.calls.map((c: unknown[]) => String(c[1])).join('\n');
+      expect(logged).toContain('401 GET /api/terminals?x=1 —');
     });
 
     it('INVARIANT: no response ever carries Access-Control-Allow-Credentials', async () => {

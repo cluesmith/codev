@@ -282,6 +282,23 @@ function unauthorizedReason(req: http.IncomingMessage): string {
 }
 
 /**
+ * The request target as it may appear in a log line. For the IDE forward this
+ * is the PATHNAME only (Issue #1869): the workbench's own requests can carry
+ * credentials in the query (`?tkn=`, a reconnection token), and none of that
+ * may land in Tower's log. Other routes keep the full target.
+ */
+function loggableTarget(req: http.IncomingMessage): string {
+  const target = req.url ?? '/';
+  try {
+    const { pathname } = new URL(target, 'http://localhost');
+    if (matchIdePrefix(pathname)) return pathname;
+  } catch {
+    return '(malformed URL)';
+  }
+  return target;
+}
+
+/**
  * `POST /api/ide/session`: set the `/ide` forward cookie (HttpOnly,
  * SameSite=Strict, Path=/ide). Reached only after isRequestAllowed, so the
  * caller already holds the key. Refuses tunnel-borne requests Tower-side as
@@ -350,7 +367,7 @@ export async function handleRequest(
     // key) is diagnosable — a bare 401 is indistinguishable from either side.
     // Path + reason only: never the Cookie header or any credential value.
     const reason = unauthorizedReason(req);
-    ctx.log('WARN', `401 ${req.method ?? 'GET'} ${req.url ?? '/'} — ${reason}`);
+    ctx.log('WARN', `401 ${req.method ?? 'GET'} ${loggableTarget(req)} — ${reason}`);
     res.writeHead(401, { 'Content-Type': 'text/plain' });
     res.end('Unauthorized');
     return;
