@@ -8,7 +8,7 @@ import type * as http from 'node:http';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, WS_MARKER_PROTOCOL, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
-import { matchIdePrefix } from '../lib/ide-record.js';
+import { matchIdePrefix } from '../lib/ide-prefix.js';
 
 /**
  * HTML-escape a string to prevent XSS

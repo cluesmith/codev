@@ -163,6 +163,13 @@ vi.mock('../utils/server-utils.js', async (importActual) => ({
   parseJsonBody: (...args: unknown[]) => mockParseJsonBody(...args),
 }));
 
+// Issue #1869: the /ide session mint makes sure the IDE server is live first.
+const { mockEnsureIdeServerLive } = vi.hoisted(() => ({ mockEnsureIdeServerLive: vi.fn() }));
+vi.mock('../servers/ide-server.js', async (importActual) => ({
+  ...(await importActual<typeof import('../servers/ide-server.js')>()),
+  ensureIdeServerLive: (...args: unknown[]) => mockEnsureIdeServerLive(...args),
+}));
+
 vi.mock('../servers/analytics.js', () => ({
   computeAnalytics: (...args: unknown[]) => mockComputeAnalytics(...args),
   clearAnalyticsCache: vi.fn(),
@@ -384,6 +391,7 @@ describe('tower-routes', () => {
     beforeEach(async () => {
       savedKey = process.env.CODEV_TOWER_KEY;
       process.env.CODEV_TOWER_KEY = KEY;
+      mockEnsureIdeServerLive.mockResolvedValue(8200);
       const { resetExpectedKeyCache } = await import('../utils/server-utils.js');
       resetExpectedKeyCache();
     });
@@ -405,6 +413,17 @@ describe('tower-routes', () => {
       expect(headers()['Set-Cookie']).toBe(`codev-ide-session=${ideForwardCookieValue()}; Path=/ide; HttpOnly; SameSite=Strict`);
       expect(headers()['Set-Cookie']).not.toContain(KEY);
       expect(body()).toBe('');
+    });
+
+    it('POST /api/ide/session waits for a live IDE server and 503s when none can be made live', async () => {
+      mockEnsureIdeServerLive.mockResolvedValueOnce(null);
+      const req = makeReq('POST', '/api/ide/session');
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(mockEnsureIdeServerLive).toHaveBeenCalled();
+      expect(statusCode()).toBe(503);
+      expect(headers()['Set-Cookie']).toBeUndefined();
     });
 
     it('POST /api/ide/session without the key is refused at the choke point', async () => {

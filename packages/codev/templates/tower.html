@@ -1062,6 +1062,16 @@
       // Subscribe to SSE for push notifications
       subscribeToEvents();
 
+      // IDE status is checked on load and when the tab comes back into view, never
+      // on the 5s poll: GET /api/ide probes the port with a blocking lsof in Tower
+      // (Issue #1869).
+      await refreshIdeStatus();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          refreshIdeStatus().then(render);
+        }
+      });
+
       await refresh();
       // Poll every 5 seconds
       setInterval(refresh, 5000);
@@ -1157,16 +1167,14 @@
     // Refresh data from API
     async function refresh() {
       try {
-        const [statusResponse, cloudStatus, ideStatus] = await Promise.all([
+        const [statusResponse, cloudStatus] = await Promise.all([
           authFetch('./api/status'),
           fetchCloudStatus(),
-          fetchIdeStatus(),
         ]);
 
         if (!statusResponse.ok) throw new Error('Failed to fetch status');
 
         const data = await statusResponse.json();
-        ideAvailable = !!(ideStatus && ideStatus.record);
         runningInstances = (data.instances || []).filter(i => i.running);
         recentInstances = (data.instances || []).filter(i => !i.running);
         render();
@@ -1218,15 +1226,20 @@
       }
     }
 
-    // GET /api/ide status, or null when unavailable (an older Tower, or this page
-    // reached over the tunnel, which blocks the local-only /api/ide endpoint).
-    async function fetchIdeStatus() {
+    // Update ideAvailable from GET /api/ide. Unavailable (an older Tower, or this
+    // page reached over the tunnel, which blocks the local-only /api/ide endpoint)
+    // means no IDE row.
+    async function refreshIdeStatus() {
       try {
         const response = await authFetch('./api/ide');
-        if (!response.ok) return null;
-        return await response.json();
+        if (!response.ok) {
+          ideAvailable = false;
+          return;
+        }
+        const status = await response.json();
+        ideAvailable = !!(status && status.record);
       } catch {
-        return null;
+        ideAvailable = false;
       }
     }
 

@@ -62,6 +62,14 @@ const STRIP_BEFORE_FORWARD = new Set([
   'host',
 ]);
 
+/**
+ * Response headers never relayed from the IDE server, on any path (Issue #1869):
+ * Tower must NEVER send `Access-Control-Allow-Credentials` (Tower reflects any
+ * loopback `Origin`, so with it another localhost page could read
+ * cookie-authorized `/ide` responses).
+ */
+const STRIP_FROM_RESPONSE = new Set(['access-control-allow-credentials']);
+
 /** The tunnel's public authority, for stamping `x-forwarded-*` on tunnel-borne requests. */
 export interface PublicAuthority {
   host: string;
@@ -226,6 +234,7 @@ export function copyResponseHeaders(
     if (value === undefined) continue;
     const lower = key.toLowerCase();
     if (HOP_BY_HOP.has(lower)) continue;
+    if (STRIP_FROM_RESPONSE.has(lower)) continue;
     if (stripTokenCookie && lower === 'set-cookie') {
       const kept = stripConnectionTokenSetCookie(value);
       if (kept) out[key] = kept;
@@ -512,6 +521,7 @@ export function rebuildUpgradeResponse(
   const statusLine = `HTTP/1.1 ${res.statusCode ?? 101} ${res.statusMessage ?? 'Switching Protocols'}`;
   const lines = [statusLine];
   for (const [key, raw] of Object.entries(res.headers)) {
+    if (STRIP_FROM_RESPONSE.has(key.toLowerCase())) continue;
     let value = raw;
     if (stripTokenCookie && key.toLowerCase() === 'set-cookie') value = stripConnectionTokenSetCookie(raw);
     if (value === undefined) continue;

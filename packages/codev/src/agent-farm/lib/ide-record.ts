@@ -25,18 +25,10 @@ import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { AGENT_FARM_DIR } from './tower-client.js';
 
-/** The fixed Tower prefix that routes to the IDE server (Issue #1668 §D1). */
-export const IDE_DEFAULT_PREFIX = '/ide/';
-
-/**
- * True if `pathname` targets the IDE forward prefix (`/ide` or `/ide/…`, never
- * `/ideas`). Pure, so both the auth seam (`server-utils`) and the forward
- * (`ide-forward`) share one definition without an import cycle.
- */
-export function matchIdePrefix(pathname: string): boolean {
-  const bare = IDE_DEFAULT_PREFIX.replace(/\/$/, ''); // "/ide"
-  return pathname === bare || pathname.startsWith(IDE_DEFAULT_PREFIX);
-}
+// The prefix and its matcher live in a dependency-free module so the auth seam
+// (`utils/server-utils.ts`) can use them without importing this file's
+// filesystem and tower-client dependencies (Issue #1869).
+export { IDE_DEFAULT_PREFIX, matchIdePrefix } from './ide-prefix.js';
 
 /** Default port the local IDE server listens on when `--port` is not given. */
 export const IDE_DEFAULT_PORT = 8200;
@@ -171,6 +163,10 @@ export function rotateIdeConnectionToken(): string {
  * on first use. This token is the IDE server's own inner auth layer (passed via
  * `--connection-token-file`); it is NOT a substitute for Tower's key check on
  * the forward (Issue #1668 §D2).
+ *
+ * TEST SEAM: production code no longer calls this. Every spawn uses
+ * `rotateIdeConnectionToken` (Issue #1869), and the forward only reads the
+ * file. Tests use it to provision a token without forcing a new one.
  */
 export function ensureIdeConnectionToken(): string {
   const path = getIdeConnectionTokenPath();

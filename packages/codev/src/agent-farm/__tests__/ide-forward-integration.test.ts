@@ -79,6 +79,8 @@ beforeAll(async () => {
       res.end(page);
       return;
     }
+    // A misbehaving upstream must never get this header past Tower (Issue #1869, M2).
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Cache-Control', 'public, max-age=31536000');
     res.setHeader('ETag', '"boot-commit-abc"');
     // The real server sets its connection token as a cookie (Issue #1869).
@@ -223,6 +225,7 @@ describe('IDE HTTP forward never hands the browser the connection token (Issue #
     const setCookie = res.headers['set-cookie'] ?? [];
     expect(setCookie.join('\n')).not.toContain('vscode-tkn');
     expect(setCookie).toContain('other=keep');
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined();
     // Tower's own authority is stamped for a local request.
     expect(JSON.parse(res.body).headers['x-forwarded-host']).toBe('localhost:4100');
   });

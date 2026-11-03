@@ -305,3 +305,25 @@ describe('injectWorkbenchConnectionToken (Issue #1869)', () => {
     expect(injectWorkbenchConnectionToken(META, 'a&quot;b')).toBeNull();
   });
 });
+
+describe('the forward never relays Access-Control-Allow-Credentials (Issue #1869, M2)', () => {
+  it('is dropped from HTTP responses on the local and tunnel paths', () => {
+    const upstream = { 'access-control-allow-credentials': 'true', 'content-type': 'text/plain' };
+    for (const local of [true, false]) {
+      const out = copyResponseHeaders(upstream, local);
+      expect(out['access-control-allow-credentials']).toBeUndefined();
+      expect(out['content-type']).toBe('text/plain');
+    }
+  });
+
+  it('is dropped from the rebuilt 101 on both paths', () => {
+    for (const local of [true, false]) {
+      const raw = rebuildUpgradeResponse(
+        { statusCode: 101, statusMessage: 'Switching Protocols', headers: { 'access-control-allow-credentials': 'true', upgrade: 'websocket' } },
+        local,
+      );
+      expect(raw.toLowerCase()).not.toContain('access-control-allow-credentials');
+      expect(raw).toContain('upgrade: websocket');
+    }
+  });
+});

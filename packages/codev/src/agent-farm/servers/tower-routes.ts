@@ -46,7 +46,7 @@ import {
   logSessionIdentity,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
-import { handleIdeApi } from './ide-server.js';
+import { handleIdeApi, ensureIdeServerLive } from './ide-server.js';
 import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
@@ -304,8 +304,18 @@ function loggableTarget(req: http.IncomingMessage): string {
  * caller already holds the key. Refuses tunnel-borne requests Tower-side as
  * well (belt-and-braces over the tunnel's api/ide/ block): the cloud has no use
  * for a loopback cookie. 204 with no body; the value is never logged.
+ *
+ * Before answering it makes sure the IDE server is live, respawning a recorded
+ * but dead server the same way the forward does. Otherwise the first navigation
+ * would land on a 502 while the forward's own respawn ran in the background.
+ * 503 when no server can be made live, so the dashboard shows an error instead
+ * of opening a dead tab.
  */
-function handleIdeSessionMint(req: http.IncomingMessage, res: http.ServerResponse): void {
+async function handleIdeSessionMint(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  log: RouteContext['log'],
+): Promise<void> {
   if (req.method !== 'POST') {
     res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'POST' });
     res.end(JSON.stringify({ error: 'Method not allowed' }));
@@ -320,6 +330,12 @@ function handleIdeSessionMint(req: http.IncomingMessage, res: http.ServerRespons
   if (!setCookie) {
     res.writeHead(503, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Local key unavailable' }));
+    return;
+  }
+  const port = await ensureIdeServerLive(log);
+  if (port === null) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'IDE server unavailable: run afx ide start' }));
     return;
   }
   res.writeHead(204, { 'Set-Cookie': setCookie });
@@ -395,7 +411,7 @@ export async function handleRequest(
     // IDE forward cookie mint: /api/ide/session (Issue #1869). Key-gated by
     // isRequestAllowed above and tunnel-blocked by the api/ide/ segment.
     if (url.pathname === IDE_SESSION_ROUTE) {
-      return handleIdeSessionMint(req, res);
+      return handleIdeSessionMint(req, res, ctx.log);
     }
 
     // IDE prefix forward: /ide/* → local IDE server (Issue #1668). A post-auth
