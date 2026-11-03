@@ -42,6 +42,7 @@
 ## Other fixes (dashboard, porch, infrastructure)
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
+- **Open the IDE from the local dashboard** (#1869, PR #1872). Each workspace card on Tower's home page now leads with an IDE row whose Open IDE action opens the Codev IDE workbench for that folder in a new tab, through Tower on port 4100, with no cloud session and no hand-built URL. Behind it, Tower accepts an origin-guarded session cookie for the `/ide/` prefix, routes the workbench and its WebSockets through itself, keeps the IDE server's connection token out of the browser's cookie jar, and rotates that token on every IDE server start. The trust notes in the `afx ide` reference describe the cookie and why the Open IDE path is for single-user machines.
 
 ## Breaking changes
 
