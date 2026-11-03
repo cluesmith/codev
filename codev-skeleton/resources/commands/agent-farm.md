@@ -788,9 +788,31 @@ afx tower status [options]
 ### afx ide
 
 Manage the Codev IDE server: a Codev-branded VS Code server-web build that Tower spawns, owns,
-and forwards at the `/ide/` prefix. One server serves any folder; open a workspace at
-`http://localhost:4100/ide/?folder=<absolute path>`. These commands drive Tower's local-only
-`/api/ide` endpoint, so Tower must be running.
+and forwards at the `/ide/` prefix. One server serves any folder. These commands drive Tower's
+local-only `/api/ide` endpoint, so Tower must be running.
+
+**Opening the IDE locally:** on the Tower dashboard (`http://localhost:4100/`), each running
+workspace card shows an **IDE** row with an **Open IDE** link once an IDE server is recorded
+(`afx ide start`). It opens the workbench for that workspace, with the Codev sidebar, in a new tab
+at `http://localhost:4100/ide/?folder=<absolute path>`. No Codev Cloud session or hand-built URL
+is needed. The link sets a browser-session cookie scoped to `/ide`, so after the first click that
+browser can also open or reload `http://localhost:4100/ide/?folder=<absolute path>` directly. A
+browser that has not used the link gets `401` there. Use the same host the dashboard is on: a
+cookie set on `localhost` is not sent to `127.0.0.1`.
+
+**Trust notes for the `/ide` session cookie:**
+- It is a **full-trust credential for this machine**, scoped by route, not by capability: the
+  workbench it opens has terminals and file access. Treat it like the Tower key.
+- Only a page that already holds the Tower key can get one (`POST /api/ide/session` requires the
+  key header and is blocked over the cloud tunnel). Tower accepts it only under `/ide`, refuses it
+  on requests initiated by another origin (including other `localhost` ports), and never forwards
+  it to the IDE server, which still requires its own connection token.
+- Revocation is rotating the local key (delete `~/.agent-farm/local-key` and restart Tower, or
+  change `CODEV_TOWER_KEY`); every keyed client re-keys. There is no finer revocation.
+- Tower's loopback trust boundary is the single-user machine; on a multi-user host another local
+  user can reach Tower's listener and, via the `/ide` session cookie, can collect and replay this
+  machine's IDE credential if you browse to their localhost port under `/ide`. Do not use the Open
+  IDE path on shared hosts.
 
 **Install:** `npm i -g @cluesmith/codev @cluesmith/codev-ide` (or `afx ide install` for the
 second package). `@cluesmith/codev` carries the Codev sidebar extension; `@cluesmith/codev-ide`
