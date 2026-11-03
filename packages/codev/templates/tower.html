@@ -989,6 +989,9 @@
     // State
     let runningInstances = [];
     let recentInstances = [];
+    // Whether Tower has a recorded IDE server (Issue #1869). A recorded-but-dead
+    // server still counts: the /ide/ forward respawns it on the first request.
+    let ideAvailable = false;
 
     // Auth helper: resolve the shared local key. Prefer the value Tower injects
     // same-origin at serve time (window.__CODEV_TOWER_KEY__); fall back to any
@@ -1154,14 +1157,16 @@
     // Refresh data from API
     async function refresh() {
       try {
-        const [statusResponse, cloudStatus] = await Promise.all([
+        const [statusResponse, cloudStatus, ideStatus] = await Promise.all([
           authFetch('./api/status'),
           fetchCloudStatus(),
+          fetchIdeStatus(),
         ]);
 
         if (!statusResponse.ok) throw new Error('Failed to fetch status');
 
         const data = await statusResponse.json();
+        ideAvailable = !!(ideStatus && ideStatus.record);
         runningInstances = (data.instances || []).filter(i => i.running);
         recentInstances = (data.instances || []).filter(i => !i.running);
         render();
@@ -1213,6 +1218,46 @@
       }
     }
 
+    // GET /api/ide status, or null when unavailable (an older Tower, or this page
+    // reached over the tunnel, which blocks the local-only /api/ide endpoint).
+    async function fetchIdeStatus() {
+      try {
+        const response = await authFetch('./api/ide');
+        if (!response.ok) return null;
+        return await response.json();
+      } catch {
+        return null;
+      }
+    }
+
+    // Open the IDE workbench for a workspace in a new tab (Issue #1869). The tab
+    // is opened synchronously so it stays tied to the click (popup blockers),
+    // then the key-gated mint sets the HttpOnly /ide forward cookie, and only
+    // then is the tab navigated. The folder is Tower's own workspace path.
+    async function openIde(workspacePath) {
+      const tab = window.open('about:blank', '_blank');
+      if (tab) {
+        tab.opener = null;
+      }
+      try {
+        const response = await authFetch('./api/ide/session', { method: 'POST' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const target = new URL('./ide/?folder=' + encodeURIComponent(workspacePath), location.href).href;
+        if (tab) {
+          tab.location.href = target;
+        } else {
+          window.open(target, '_blank', 'noopener');
+        }
+      } catch (err) {
+        if (tab) {
+          tab.close();
+        }
+        showToast('Failed to open IDE: ' + err.message, 'error');
+      }
+    }
+
     // Render a single workspace card
     function renderInstance(instance) {
       const statusClass = instance.running ? 'running' : 'stopped';
@@ -1235,6 +1280,22 @@
             </div>
           </div>
         `;
+
+        // Open IDE: the Codev IDE workbench for this workspace (Issue #1869).
+        // The path rides a data attribute, never an inline JS string.
+        if (ideAvailable) {
+          terminalsHtml += `
+            <div class="port-item">
+              <div class="port-info">
+                <span class="port-status active"></span>
+                <span class="port-type">IDE</span>
+              </div>
+              <div class="port-actions">
+                <a href="#" data-ide-path="${escapeHtml(instance.workspacePath)}" onclick="event.preventDefault(); openIde(this.dataset.idePath)" title="Open the Codev IDE for this workspace">Open IDE</a>
+              </div>
+            </div>
+          `;
+        }
 
         // Then show individual terminals (open full-screen terminal view)
         if (terminals.length > 0) {
