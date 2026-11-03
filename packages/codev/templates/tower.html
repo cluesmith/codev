@@ -1263,25 +1263,13 @@
       const statusClass = instance.running ? 'running' : 'stopped';
       const statusText = instance.running ? 'Running' : 'Stopped';
 
-      // Render terminals list - always show Overview first, then individual terminals
+      // Render terminals list: the IDE first (when recorded), then Overview, then
+      // individual terminals
       const terminals = instance.terminals || [];
       let terminalsHtml = '';
 
       if (instance.running) {
-        // Always show Overview link first (opens split view with Architect + Status panel)
-        terminalsHtml = `
-          <div class="port-item">
-            <div class="port-info">
-              <span class="port-status active"></span>
-              <span class="port-type">Overview</span>
-            </div>
-            <div class="port-actions">
-              <a href="${escapeHtml(relUrl(instance.proxyUrl))}" target="_blank">Open</a>
-            </div>
-          </div>
-        `;
-
-        // Open IDE: the Codev IDE workbench for this workspace (Issue #1869).
+        // Open IDE first: the Codev IDE workbench for this workspace (Issue #1869).
         // The path rides a data attribute, never an inline JS string.
         if (ideAvailable) {
           terminalsHtml += `
@@ -1296,6 +1284,19 @@
             </div>
           `;
         }
+
+        // Then the Overview link (opens split view with Architect + Status panel)
+        terminalsHtml += `
+          <div class="port-item">
+            <div class="port-info">
+              <span class="port-status active"></span>
+              <span class="port-type">Overview</span>
+            </div>
+            <div class="port-actions">
+              <a href="${escapeHtml(relUrl(instance.proxyUrl))}" target="_blank">Open</a>
+            </div>
+          </div>
+        `;
 
         // Then show individual terminals (open full-screen terminal view)
         if (terminals.length > 0) {

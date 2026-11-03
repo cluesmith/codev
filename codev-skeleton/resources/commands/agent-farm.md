@@ -792,8 +792,8 @@ and forwards at the `/ide/` prefix. One server serves any folder. These commands
 local-only `/api/ide` endpoint, so Tower must be running.
 
 **Opening the IDE locally:** on the Tower dashboard (`http://localhost:4100/`), each running
-workspace card shows an **IDE** row with an **Open IDE** link once an IDE server is recorded
-(`afx ide start`). It opens the workbench for that workspace, with the Codev sidebar, in a new tab
+workspace card shows an **IDE** row first, with an **Open IDE** link, once an IDE server is
+recorded (`afx ide start`). It opens the workbench for that workspace, with the Codev sidebar, in a new tab
 at `http://localhost:4100/ide/?folder=<absolute path>`. No Codev Cloud session or hand-built URL
 is needed. The link sets a browser-session cookie scoped to `/ide`, so after the first click that
 browser can also open or reload `http://localhost:4100/ide/?folder=<absolute path>` directly. A
