@@ -1,0 +1,18 @@
+id: '1869'
+title: local-browser-access-to-ide-on
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-03T00:48:40.471Z'
+updated_at: '2026-11-03T00:48:40.472Z'
