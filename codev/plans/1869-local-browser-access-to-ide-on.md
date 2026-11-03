@@ -26,14 +26,18 @@ Add to `server-utils.ts`:
 
 - `IDE_FORWARD_COOKIE = 'codev-ide-session'`.
 - `ideForwardCookieValue(): string | null`: `HMAC-SHA256(localKey, 'codev-ide-forward/v1')`,
-  hex. Returns null when the key is unavailable (fail closed).
+  hex. Returns null when the key is unavailable (fail closed). **It derives from
+  `getExpectedKey()` on every call (M4)**, never a module-load constant, so it honours
+  `resetExpectedKeyCache()` and the `CODEV_TOWER_KEY` override, and rotating the local key
+  invalidates every outstanding cookie.
 
 Why derived rather than the key itself or a random in-memory token:
-- **Not the key.** The cookie jar never holds the Tower key, so a leak of the cookie (devtools,
-  a misbehaving extension in the workbench reading `document.cookie` is already blocked by
-  `HttpOnly`, but defense in depth) grants `/ide/*` only, never the API.
+- **Not the key.** The cookie jar never holds the Tower key, so the cookie cannot be replayed
+  against Tower's API routes or inverted to the key. This narrows *which Tower routes* it opens,
+  not *what its holder can do*: see the credential-power risk below (M3).
 - **Stateless.** Survives a Tower restart, so an open workbench reconnects after
-  `afx tower stop/start` without re-clicking. Rotates automatically when the local key rotates.
+  `afx tower stop/start` without re-clicking. Revocation is rotating the local key; there is no
+  finer per-cookie revocation, and that is accepted (M4, see Risks).
 - Scope is enforced server-side: nothing outside the `/ide` prefix accepts it.
 
 ### 2. Mint endpoint: `POST /api/ide/session`
@@ -53,9 +57,33 @@ Only `POST`; other methods 405.
 
 ### 3. One authorization seam accepts the cookie
 
-- `isForwardAuthorized`: after the Host guard and key load, accept either the header (unchanged)
-  **or** a `codev-ide-session` cookie that constant-time-matches `ideForwardCookieValue()`.
+- `isForwardAuthorized` decides in a fixed order:
+  1. Host guard (unchanged).
+  2. **Header branch (unchanged):** a valid `codev-tower-key` / `codev-web-key` header is
+     allowed with no Origin / Fetch-Metadata check. Tunnel-borne requests (header stamped by
+     `TunnelClient`, `Origin` = the cloud host) are therefore unaffected.
+  3. **Cookie branch:** a `codev-ide-session` cookie that constant-time-matches
+     `ideForwardCookieValue()`, **and** passes the cross-port guard below (M1).
   Cookie parsing via a small `cookieValue(header, name)` helper (no new dependency).
+- **Cross-port guard, cookie branch only (M1).** `SameSite=Strict` separates *sites*, and ports
+  are not part of a site: `http://localhost:3000` and `http://localhost:4100` are the same site,
+  so a page on any other localhost port can open
+  `new WebSocket('ws://localhost:4100/ide/?reconnectionToken=…')`, the browser attaches the
+  cookie, CORS does not apply to WebSockets, and Tower would raw-pipe that page into the VS Code
+  remote protocol (a terminal). Today that page cannot obtain the key; without this guard the
+  cookie would hand it the same power. Rule, applied to HTTP and the WS upgrade alike:
+  - if `Origin` is present, it must equal `http://<Host>` / `https://<Host>` (the request's own
+    Host header) or exactly match an entry in `CODEV_TOWER_ALLOWED_ORIGINS`;
+  - if `Sec-Fetch-Site` is present, it must be `same-origin` or `none`; `same-site` and
+    `cross-site` are rejected;
+  - a request with neither header passes (top-level navigation, same-origin GETs from browsers
+    that omit them).
+  Implemented as a pure exported helper `isSameOriginForwardRequest(req)` so it is unit-testable
+  in isolation. The header branch never calls it.
+- If the workbench turns out to need a legitimately cross-origin surface (webview iframes,
+  service worker), allowlist that exact origin; never drop the check. Expected: none, since
+  server-web with `--server-base-path /ide` serves them same-origin under `/ide`; verified in
+  the test plan.
 - `isRequestAllowed`: if the pathname matches the IDE prefix (`/ide` or `/ide/…`), return
   `isForwardAuthorized(req)` instead of the header-only check. This keeps one decision for the
   forward (HTTP and WS identical) and leaves every other route header-only. To avoid a
@@ -97,7 +125,10 @@ the per-workspace surface the issue names.
 `### afx ide` intro (`:1027-1030`): describe the dashboard's **Open IDE** link as the user path,
 explain that a bare navigation to `http://localhost:4100/ide/?folder=…` works after the link has
 been used once in that browser (it sets a session cookie scoped to `/ide`), and add the cookie to
-the trust notes. Check `arch.md` for an IDE forward auth section and update it if present.
+the trust notes: it is a **full-trust credential for this machine**, scoped by route not by
+capability (the workbench has terminals and file access), so treat it like the key (M3);
+revocation is rotating the local key (`~/.agent-farm/local-key` or `CODEV_TOWER_KEY`), with no
+finer revocation (M4). Check `arch.md` for an IDE forward auth section and update it if present.
 
 ## Files to Change
 
@@ -107,7 +138,8 @@ the trust notes. Check `arch.md` for an IDE forward auth section and update it i
   avoid a cyclic import.
 - `packages/codev/src/agent-farm/servers/ide-forward.ts:115-150` — strip Tower cookie before
   forwarding; re-export `matchIdePrefix`.
-- `packages/codev/src/agent-farm/servers/tower-routes.ts:~317` — `POST /api/ide/session`.
+- `packages/codev/src/agent-farm/servers/tower-routes.ts:~317` — `POST /api/ide/session`;
+  `:265` comment pinning the no-`Access-Control-Allow-Credentials` invariant (M2).
 - `packages/codev/src/agent-farm/servers/tower-websocket.ts:242-251` — comment update only (the
   call is unchanged; behavior comes from `isForwardAuthorized`).
 - `packages/codev/templates/tower.html` — IDE row + click handler + status fetch.
@@ -116,11 +148,27 @@ the trust notes. Check `arch.md` for an IDE forward auth section and update it i
 
 ## Risks & Alternatives Considered
 
-- **Risk: widening `/ide/` to cookie-holders broadens the attack surface.** The cookie is
-  `HttpOnly; SameSite=Strict; Path=/ide`, obtainable only by a same-origin holder of the key, and
-  the Host guard still runs first. A cross-site page cannot make the browser send it (Strict), so
-  CSRF-style requests into the workbench from another site are refused. Net trust equals the key
-  header for this one prefix, which is what the issue asks.
+- **Risk: the credential's power (M3).** The cookie is a full-trust credential for this
+  machine: the workbench it opens has terminals and file access, so holding it means running
+  commands as the user. It is scoped by route (`/ide/*` on Tower only), not by capability. Treat
+  it exactly like the key. It is `HttpOnly; SameSite=Strict; Path=/ide` and obtainable only by a
+  same-origin holder of the key; the Host guard still runs first.
+- **Risk: cross-port localhost WebSocket hijack (M1).** `SameSite=Strict` does not stop another
+  localhost port (same site) from making the browser send the cookie, and WebSockets bypass CORS.
+  Closed by the cookie-branch cross-port guard (step 3): `Origin` must match Host or an
+  allowlisted origin, `Sec-Fetch-Site` must be `same-origin`/`none`.
+- **Invariant: Tower never sets `Access-Control-Allow-Credentials` (M2).** That absence is what
+  keeps a cookie-bearing cross-origin `fetch` from reading `/ide/` responses (the CORS block in
+  `tower-routes.ts:265` reflects loopback origins). Recorded as a comment at the CORS block and
+  pinned by a route-test assertion so a future change cannot add it silently.
+- **Accepted risk: revocation granularity (M4).** Stateless HMAC means the only revocation is
+  rotating the local key, which also logs out every client. Acceptable for a single-user local
+  credential whose issuance already requires the key.
+- **Accepted risk: replay on a multi-user host.** Another OS user's server on some localhost port
+  can collect the cookie if this user navigates to that port under `/ide`, then replay it from a
+  non-browser client (forging `Origin`, so M1 does not help). Today that user cannot read the
+  key file. Mitigations (expiry, revocable per-issue value) cost restart survival; accepted for
+  the default single-user machine and stated in the docs.
 - **Risk: cookie leaks to the IDE server.** Stripped before forwarding (step 4); unit-tested.
 - **Risk: cookies are not port-scoped.** A cookie set by `localhost:4100` with `Path=/ide` is
   also sent to any other `localhost` port on a path under `/ide`, including the IDE server at
@@ -141,6 +189,8 @@ the trust notes. Check `arch.md` for an IDE forward auth section and update it i
   the cookie jar for a prefix-scoped need.
 - **Alternative: random token held in Tower memory.** Rejected: a Tower restart would 401 every
   open workbench's reconnect and force a re-click; the HMAC gives the same scoping statelessly.
+- **Alternative: `__Host-` cookie prefix.** Rejected: it forces `Path=/`, sending the credential
+  to every Tower route.
 - **Alternative: make `/ide/` a public route and rely on the IDE's own connection token.**
   Rejected by the issue's non-goals (Tower injects `vscode-tkn`, so that would open the IDE to any
   loopback request).
@@ -154,6 +204,17 @@ Unit (`__tests__/server-utils.test.ts`, `ide-forward-auth.test.ts`, `ide-forward
 - `isForwardAuthorized`: header still accepted; valid cookie accepted; wrong/empty cookie
   rejected; valid cookie + rebound Host rejected; key unavailable → rejected; cookie among other
   cookies parsed.
+- Cross-port guard (M1), HTTP and WS upgrade:
+  - cookie + `Origin: http://localhost:3000` on the WS upgrade → 401;
+  - cookie + `Sec-Fetch-Site: same-site` → 401; `cross-site` → 401;
+  - cookie + `Origin` == `http://<Host>` → allowed; cookie + `Sec-Fetch-Site: same-origin` or
+    `none` → allowed; cookie with neither header → allowed;
+  - cookie + `Origin` in `CODEV_TOWER_ALLOWED_ORIGINS` → allowed.
+- Header branch unaffected: tunnel-stamped header + `Origin: https://<cloud host>` (and
+  `Sec-Fetch-Site: cross-site`) → allowed, HTTP and WS; `bugfix-1586-tunnel-auth` and
+  `ide-forward-auth` suites stay green.
+- Derivation (M4): changing `CODEV_TOWER_KEY` then `resetExpectedKeyCache()` changes
+  `ideForwardCookieValue()` and the old cookie is rejected.
 - `isRequestAllowed`: `/ide/` with valid cookie → allowed; `/ide/` bare → rejected;
   `/api/...` (any non-`/ide` route) with valid cookie and no header → rejected; `/ideas` is not
   treated as IDE prefix.
@@ -161,6 +222,8 @@ Unit (`__tests__/server-utils.test.ts`, `ide-forward-auth.test.ts`, `ide-forward
   preserved.
 - Route test: `POST /api/ide/session` without key → 401; with key → 204 + `Set-Cookie` carrying
   `Path=/ide; HttpOnly; SameSite=Strict`; `GET` → 405.
+- CORS invariant (M2): no response (preflight, keyed route, `/ide/` forward) carries
+  `Access-Control-Allow-Credentials`.
 - WS upgrade: `/ide/...` upgrade with the cookie and no header is authorized (integration test in
   `ide-forward-integration.test.ts` with a stub upstream, as existing tests do).
 
@@ -174,6 +237,11 @@ Manual (worktree Tower + installed codev-ide), recorded in the review:
   IDE row → new tab opens the workbench for that folder with the Codev sidebar; network panel
   shows assets 200 and `?reconnectionToken=` WebSockets 101 through `4100/ide/`.
 - Reload the workbench tab directly (no dashboard click) → still works (cookie held).
+- Workbench surfaces (M1 follow-through): open a webview (Codev sidebar) and confirm in devtools
+  that webview iframes and the service worker load from the Tower origin under `/ide`; any
+  cross-origin surface gets an exact-origin allowlist entry, never a dropped check.
+- Cross-port browser check: from a page served on another localhost port, `new
+  WebSocket('ws://localhost:4100/ide/…')` fails (401) while the cookie is held.
 - Cloud URL through the tunnel still opens the workbench (or, if no cloud registration is
   available locally, the existing tunnel-header tests stay green and this is flagged for the
   reviewer).
