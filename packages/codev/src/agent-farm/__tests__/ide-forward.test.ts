@@ -10,7 +10,7 @@ vi.mock('../lib/cloud-config.js', () => ({
   readCloudConfig: vi.fn(),
 }));
 
-import { buildForwardHeaders, mergeConnectionTokenCookie, matchIdePrefix, getPublicAuthority, type PublicAuthority } from '../servers/ide-forward.js';
+import { buildForwardHeaders, mergeConnectionTokenCookie, matchIdePrefix, getPublicAuthority, stripCookie, type PublicAuthority } from '../servers/ide-forward.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 
 const AUTHORITY: PublicAuthority = { host: 'cloud.codevos.ai', proto: 'https', prefix: '/t/mytower/ide' };
@@ -143,5 +143,40 @@ describe('getPublicAuthority', () => {
   it('returns null when the tower is not cloud-registered', () => {
     (readCloudConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue(null);
     expect(getPublicAuthority()).toBeNull();
+  });
+});
+
+describe('stripCookie / forward cookie never reaches the IDE server (Issue #1869)', () => {
+  const NAME = 'codev-ide-session';
+
+  it('removes the pair when first, middle, last, or the only pair', () => {
+    expect(stripCookie(`${NAME}=v; a=1; b=2`, NAME)).toBe('a=1; b=2');
+    expect(stripCookie(`a=1; ${NAME}=v; b=2`, NAME)).toBe('a=1; b=2');
+    expect(stripCookie(`a=1; b=2; ${NAME}=v`, NAME)).toBe('a=1; b=2');
+    expect(stripCookie(`${NAME}=v`, NAME)).toBe('');
+  });
+
+  it('handles the string[] shape and an absent header', () => {
+    expect(stripCookie(['a=1', `${NAME}=v`, 'b=2'], NAME)).toBe('a=1; b=2');
+    expect(stripCookie(undefined, NAME)).toBe('');
+  });
+
+  it('does not over-strip a name-prefixed cookie', () => {
+    expect(stripCookie(`${NAME}2=keep; ${NAME}=v`, NAME)).toBe(`${NAME}2=keep`);
+  });
+
+  it('buildForwardHeaders strips it, keeps other cookies, and still injects vscode-tkn', () => {
+    const out = buildForwardHeaders({ cookie: `a=1; ${NAME}=secret; b=2` }, 8200, null, 'TK');
+    expect(out['cookie']).toBe('a=1; b=2; vscode-tkn=TK');
+  });
+
+  it('buildForwardHeaders drops the Cookie header entirely when only the forward cookie was sent and no token exists', () => {
+    const out = buildForwardHeaders({ cookie: `${NAME}=secret` }, 8200, null, null);
+    expect(out['cookie']).toBeUndefined();
+  });
+
+  it('an existing vscode-tkn survives the strip unclobbered', () => {
+    const out = buildForwardHeaders({ cookie: `${NAME}=secret; vscode-tkn=MINE` }, 8200, null, 'TK');
+    expect(out['cookie']).toBe('vscode-tkn=MINE');
   });
 });

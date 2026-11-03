@@ -19,8 +19,9 @@ import { URL } from 'node:url';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER } from '@cluesmith/codev-types';
-import { IDE_DEFAULT_PREFIX, readIdeConnectionToken } from '../lib/ide-record.js';
+import { IDE_DEFAULT_PREFIX, matchIdePrefix, readIdeConnectionToken } from '../lib/ide-record.js';
 import { getRecordedIdePort, ensureIdeServerLive } from './ide-server.js';
+import { IDE_FORWARD_COOKIE } from '../utils/server-utils.js';
 
 /** Hop-by-hop headers not forwarded between connections (RFC 7230 §6.1). */
 const HOP_BY_HOP = new Set([
@@ -82,6 +83,27 @@ export function mergeConnectionTokenCookie(existing: string | string[] | undefin
 }
 
 /**
+ * Remove one cookie (exact name) from a Cookie header value, preserving every
+ * other pair in order. Accepts the string | string[] shape. Returns '' when no
+ * pair remains. Used to keep Tower's forward cookie (Issue #1869) away from the
+ * IDE server, the way the key header is stripped. Exported for testing.
+ */
+export function stripCookie(existing: string | string[] | undefined, name: string): string {
+  if (existing === undefined) return '';
+  const joined = Array.isArray(existing) ? existing.join('; ') : existing;
+  return joined
+    .split(';')
+    .map((pair) => pair.trim())
+    .filter((pair) => {
+      if (pair.length === 0) return false;
+      const eq = pair.indexOf('=');
+      const pairName = eq < 0 ? pair : pair.slice(0, eq).trim();
+      return pairName !== name;
+    })
+    .join('; ');
+}
+
+/**
  * Derive the tunnel's public authority from the cloud config, matching the
  * `accessUrl` Tower advertises (`tower-tunnel.ts`: `${server_url}/t/${tower_name}/`).
  * Returns null when the tower is not cloud-registered.
@@ -137,18 +159,20 @@ export function buildForwardHeaders(
   // spawned with `--connection-token-file` and 403s without it, and it cannot
   // ride the browser's cookie jar through the relay (Set-Cookie Path=/ide never
   // matches /t/<tower>/ide/), so Tower injects it here — merging with, never
-  // clobbering, any existing Cookie header (Issue #1668).
+  // clobbering, any existing Cookie header (Issue #1668). Tower's own forward
+  // cookie is stripped first: the IDE server must never see it (Issue #1869).
+  const cookie = stripCookie(incoming.cookie, IDE_FORWARD_COOKIE);
+  delete out['cookie'];
   if (connectionToken) {
-    out['cookie'] = mergeConnectionTokenCookie(incoming.cookie, connectionToken);
+    out['cookie'] = mergeConnectionTokenCookie(cookie, connectionToken);
+  } else if (cookie) {
+    out['cookie'] = cookie;
   }
   return out;
 }
 
-/** True if `pathname` targets the IDE forward prefix (`/ide` or `/ide/…`). */
-export function matchIdePrefix(pathname: string): boolean {
-  const bare = IDE_DEFAULT_PREFIX.replace(/\/$/, ''); // "/ide"
-  return pathname === bare || pathname.startsWith(IDE_DEFAULT_PREFIX);
-}
+/** True if `pathname` targets the IDE forward prefix; defined beside the prefix constant. */
+export { matchIdePrefix };
 
 /** Copy response headers, dropping hop-by-hop; preserves `Cache-Control` / `ETag`. */
 function copyResponseHeaders(headers: http.IncomingHttpHeaders): Record<string, string | string[] | number> {
