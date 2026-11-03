@@ -53,7 +53,10 @@ Set-Cookie: codev-ide-session=<hmac>; Path=/ide; HttpOnly; SameSite=Strict
 `isRequestAllowed`, so it requires the key header; a cross-origin page cannot read the key nor
 pass CORS with the custom header. The tunnel already blocks it: `BLOCKED_PATH_SEGMENT`
 (`lib/tunnel-client.ts:83`) matches `api/ide/`, so the cloud side can never mint a local cookie.
-Only `POST`; other methods 405.
+Only `POST`; other methods 405. Response is `204` with no body, and the cookie value is never
+logged (S1). Belt-and-braces on top of the tunnel block: the handler also refuses tunnel-borne
+requests Tower-side (`x-codev-tunnel-proxy: 1` → `403`), matching the marker's stated purpose
+(`lib/tunnel-client.ts:86-91`) (S1).
 
 ### 3. One authorization seam accepts the cookie
 
@@ -97,8 +100,17 @@ Only `POST`; other methods 405.
 
 `buildForwardHeaders` (`ide-forward.ts:115`): strip the `codev-ide-session` pair from the
 incoming `Cookie` header before `mergeConnectionTokenCookie` runs (new exported pure helper
-`stripCookie(header, name)`), mirroring how the key header is stripped. Applies to the WS
-forward too (it uses the same header builder; will confirm in implementation).
+`stripCookie(header, name)`, accepting the `string | string[]` shape and matching the exact
+cookie name only, so `codev-ide-session2` is not over-stripped) (S2), mirroring how the key
+header is stripped. `forwardIdeWebSocket` uses the same `buildForwardHeaders`
+(`ide-forward.ts` ~245, confirmed by the security review), so one strip covers HTTP and WS.
+
+### 4b. Logging (S4)
+
+The 401 WARN lines in `tower-routes.ts:288` and `tower-websocket.ts:247` keep logging method,
+path, and reason only; neither the `Cookie` header nor the cookie value is ever logged. The
+reason string distinguishes "disallowed Host", "missing or invalid credential", and "cookie
+refused: cross-origin" so a broken client stays diagnosable.
 
 ### 5. Open IDE link per workspace on the local dashboard
 
@@ -106,10 +118,13 @@ forward too (it uses the same header builder; will confirm in implementation).
 `port-item` shape as Overview) with an **Open** action, for running workspaces. Click handler:
 
 1. `const tab = window.open('about:blank', '_blank')` synchronously (keeps the popup tied to the
-   user gesture; Safari blocks a `window.open` after an `await`).
+   user gesture; Safari blocks a `window.open` after an `await`), then `tab.opener = null`
+   immediately (keeps the handle, drops the back-reference) (S3).
 2. `await authFetch('./api/ide/session', { method: 'POST' })`.
 3. `tab.location = './ide/?folder=' + encodeURIComponent(instance.workspacePath)` (relative, so
    the cookie origin `localhost` vs `127.0.0.1` always matches the dashboard's own origin).
+   `folder` comes only from Tower's own `instance.workspacePath`, so there is no open redirect
+   (S3).
 4. On failure: close the tab, toast the error.
 
 Visibility: the row shows when the IDE server has a record. `refresh()` adds one
@@ -189,6 +204,9 @@ finer revocation (M4). Check `arch.md` for an IDE forward auth section and updat
   the cookie jar for a prefix-scoped need.
 - **Alternative: random token held in Tower memory.** Rejected: a Tower restart would 401 every
   open workbench's reconnect and force a re-click; the HMAC gives the same scoping statelessly.
+- **Out of scope, flagged for a separate hygiene issue (S3):** the dashboard shell sets no
+  `X-Frame-Options` / `frame-ancestors`. A cross-site frame gains nothing for #1869 (Strict
+  cookie, CORS-stripped shell), so it is not addressed here.
 - **Alternative: `__Host-` cookie prefix.** Rejected: it forces `Path=/`, sending the credential
   to every Tower route.
 - **Alternative: make `/ide/` a public route and rely on the IDE's own connection token.**
@@ -218,10 +236,14 @@ Unit (`__tests__/server-utils.test.ts`, `ide-forward-auth.test.ts`, `ide-forward
 - `isRequestAllowed`: `/ide/` with valid cookie → allowed; `/ide/` bare → rejected;
   `/api/...` (any non-`/ide` route) with valid cookie and no header → rejected; `/ideas` is not
   treated as IDE prefix.
-- `buildForwardHeaders`: `codev-ide-session` removed from `Cookie`, other cookies and `vscode-tkn`
-  preserved.
+- `stripCookie` / `buildForwardHeaders` (S2): `codev-ide-session` removed when it is first,
+  middle, last, or the only pair, and from a `string[]` Cookie header; `codev-ide-session2`
+  untouched; other cookies and `vscode-tkn` preserved, HTTP and WS.
 - Route test: `POST /api/ide/session` without key → 401; with key → 204 + `Set-Cookie` carrying
-  `Path=/ide; HttpOnly; SameSite=Strict`; `GET` → 405.
+  `Path=/ide; HttpOnly; SameSite=Strict`, empty body; `GET` → 405; with key +
+  `x-codev-tunnel-proxy: 1` → 403 (S1).
+- Logging (S4): a refused cookie request's WARN line contains neither the Cookie header nor the
+  cookie value.
 - CORS invariant (M2): no response (preflight, keyed route, `/ide/` forward) carries
   `Access-Control-Allow-Credentials`.
 - WS upgrade: `/ide/...` upgrade with the cookie and no header is authorized (integration test in
