@@ -5,9 +5,10 @@
  */
 
 import type * as http from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, WS_MARKER_PROTOCOL, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
+import { matchIdePrefix } from '../lib/ide-record.js';
 
 /**
  * HTML-escape a string to prevent XSS
@@ -317,6 +318,10 @@ export function isRequestAllowed(req: http.IncomingMessage): boolean {
     return false;
   }
 
+  // The IDE forward has its own seam, which also accepts the header-free
+  // forward cookie (Issue #1869). Every other route stays header-only.
+  if (matchIdePrefix(pathname)) return isForwardAuthorized(req);
+
   if (isPublicRoute(method, pathname)) return true;
 
   const expected = getExpectedKey();
@@ -328,41 +333,161 @@ export function isRequestAllowed(req: http.IncomingMessage): boolean {
   return keysMatch(presented, expected);
 }
 
+// ============================================================================
+// IDE forward credential (Issue #1869)
+// ============================================================================
+//
+// A browser navigation to `/ide/`, the workbench's asset loads, and its
+// `?reconnectionToken=` WebSockets cannot attach the key header, so a loopback
+// browser gets a header-free credential for the `/ide` prefix: an HttpOnly,
+// SameSite=Strict, Path=/ide cookie minted by the key-gated
+// `POST /api/ide/session`.
+//
+// TRUST: this is a full-trust credential for this machine, scoped by ROUTE, not
+// by capability. `/ide/*` is the whole workbench (terminals, files), so holding
+// the cookie means running commands as the OS user. Treat it like the key.
+//
+// It is the first AMBIENT credential Tower accepts (the browser attaches it, not
+// key-holding script), so the cookie branch carries a cross-port guard: ports
+// are not part of a cookie "site", and any other localhost page could otherwise
+// open a cookie-bearing WebSocket into the workbench (CORS does not apply).
+
+/** Name of the forward cookie. Never forwarded to the IDE server. */
+export const IDE_FORWARD_COOKIE = 'codev-ide-session';
+
+/**
+ * Versioned purpose string for the derivation. Bumping the version invalidates
+ * every outstanding cookie without rotating the local key.
+ */
+const IDE_FORWARD_COOKIE_PURPOSE = 'codev-ide-forward/v1';
+
+/**
+ * The forward cookie's expected value: `HMAC-SHA256(localKey, purpose)`, hex.
+ * Derived from `getExpectedKey()` on EVERY call (never cached at module load),
+ * so the `CODEV_TOWER_KEY` override and `resetExpectedKeyCache()` are honoured
+ * and rotating the local key revokes every cookie. That rotation is the only
+ * revocation. The value cannot be inverted to the key, so it never grants
+ * Tower's API routes. Returns null (fail closed) when the key is unavailable.
+ */
+export function ideForwardCookieValue(): string | null {
+  const key = getExpectedKey();
+  if (!key) return null;
+  return createHmac('sha256', key).update(IDE_FORWARD_COOKIE_PURPOSE).digest('hex');
+}
+
+/** The `Set-Cookie` value `POST /api/ide/session` returns, or null when the key is unavailable. */
+export function ideForwardSetCookie(): string | null {
+  const value = ideForwardCookieValue();
+  if (!value) return null;
+  // No `Secure`: loopback is plain HTTP. No `Max-Age`: a browser-session cookie.
+  // `__Host-` is not usable: it forces `Path=/`, which would widen the scope.
+  return `${IDE_FORWARD_COOKIE}=${value}; Path=/ide; HttpOnly; SameSite=Strict`;
+}
+
+/**
+ * Read one cookie's value from a `Cookie` header (string or string[] shape), or
+ * null if absent. Exact-name match: `codev-ide-session2` is not `codev-ide-session`.
+ */
+export function cookieValue(header: string | string[] | undefined, name: string): string | null {
+  if (header === undefined) return null;
+  const joined = Array.isArray(header) ? header.join('; ') : header;
+  for (const pair of joined.split(';')) {
+    const eq = pair.indexOf('=');
+    if (eq < 0) continue;
+    if (pair.slice(0, eq).trim() !== name) continue;
+    const value = pair.slice(eq + 1).trim();
+    if (value.length > 0) return value;
+  }
+  return null;
+}
+
+/** True if `origin` is exactly an entry of `CODEV_TOWER_ALLOWED_ORIGINS`. */
+function isConfiguredOrigin(origin: string): boolean {
+  const configured = process.env.CODEV_TOWER_ALLOWED_ORIGINS;
+  if (!configured) return false;
+  for (const allowed of configured.split(',')) {
+    if (allowed.trim() === origin) return true;
+  }
+  return false;
+}
+
+/**
+ * Cross-port guard for the forward cookie (Issue #1869). A cookie-authorized
+ * request may proceed only when it is not initiated by another origin:
+ * - `Origin`, if present, must be this request's own origin
+ *   (`http(s)://<Host>`) or an exact `CODEV_TOWER_ALLOWED_ORIGINS` entry;
+ * - `Sec-Fetch-Site`, if present, must be `same-origin` or `none`
+ *   (`same-site` is exactly the other-localhost-port case and is refused).
+ * A request with neither header passes: top-level navigations and same-origin
+ * asset GETs may omit them, while browsers always send `Origin` on WebSocket
+ * upgrades and cross-origin fetches, which is the set this must refuse.
+ * Applied ONLY to the cookie branch; the key-header branch never calls it.
+ */
+export function isSameOriginForwardRequest(req: http.IncomingMessage): boolean {
+  const origin = headerValue(req.headers.origin);
+  if (origin !== null) {
+    const host = (req.headers.host ?? '').trim().toLowerCase();
+    const lowered = origin.toLowerCase();
+    const ownOrigin = host.length > 0 && (lowered === `http://${host}` || lowered === `https://${host}`);
+    if (!ownOrigin && !isConfiguredOrigin(origin)) return false;
+  }
+
+  const fetchSite = headerValue(req.headers['sec-fetch-site']);
+  if (fetchSite !== null && fetchSite !== 'same-origin' && fetchSite !== 'none') return false;
+
+  return true;
+}
+
+/** Outcome of the forward authorization decision, with a log-safe reason on refusal. */
+export type ForwardAuthDecision =
+  | { allowed: true; via: 'header' | 'cookie' }
+  | { allowed: false; reason: string };
+
 /**
  * Security: decide whether a request may proceed to the IDE prefix forward
- * (Issue #1668). This is the ONE authorization seam for the forward — both the
- * HTTP path (which also passes the general `isRequestAllowed` choke point) and
- * the WebSocket upgrade call it.
+ * (Issue #1668). This is the ONE authorization seam for the forward: the HTTP
+ * path (`isRequestAllowed` delegates every `/ide*` path here) and the WebSocket
+ * upgrade both call it.
  *
- * It reuses the exact primitives the HTTP choke point uses: the Host guard plus
- * a constant-time match of the shared local key from the `codev-tower-key`
- * header. That header is what `TunnelClient.stampLocalHeaders` stamps on every
- * tunnel-borne request (HTTP and WS-CONNECT alike, #1588), so a browser
- * arriving via the cloud proxy authenticates here without offering the WS
- * subprotocol key that the dashboard's `isWebSocketAllowed` requires (the IDE
- * workbench's own WebSockets are vanilla `?reconnectionToken=` connections that
- * offer no subprotocol).
+ * Fixed order:
+ * 1. Host guard (DNS rebinding).
+ * 2. Key header (`codev-tower-key` / legacy `codev-web-key`), constant-time.
+ *    This is what `TunnelClient.stampLocalHeaders` stamps on every tunnel-borne
+ *    request (#1588), so the cloud path authorizes here, with no origin check
+ *    (a cloud browser's `Origin` is the cloud host, never Tower's).
+ * 3. Forward cookie (Issue #1869), constant-time, AND the cross-port guard.
  *
  * There is deliberately NO per-folder logic: the IDE server offers no per-folder
- * isolation — any authenticated connection can open any path its OS user can
- * read (same trust as a terminal) — so authorization is a whole-boundary key +
- * Host decision and nothing finer (Issue #1668 §D2).
- *
- * This function is the swap point for #1589 (per-session remote credential): its
- * body can move from the local-key stamp to a per-session credential without
- * touching the proxying code, which calls it and only then strips/stamps headers.
- * Fails closed when the expected key is unavailable.
+ * isolation, so authorization is a whole-boundary decision (Issue #1668 §D2).
+ * This is the swap point for #1589 (per-session remote credential). Fails closed
+ * when the expected key is unavailable. Reasons never contain credential values.
  */
-export function isForwardAuthorized(req: http.IncomingMessage): boolean {
-  if (!isAllowedHost(req.headers.host)) return false;
+export function decideForwardAuthorization(req: http.IncomingMessage): ForwardAuthDecision {
+  if (!isAllowedHost(req.headers.host)) {
+    return { allowed: false, reason: `disallowed Host "${req.headers.host ?? ''}"` };
+  }
 
   const expected = getExpectedKey();
-  if (!expected) return false;
+  if (!expected) return { allowed: false, reason: 'local key unavailable' };
 
   const presented = presentedHttpKey(req);
-  if (!presented) return false;
+  if (presented && keysMatch(presented, expected)) return { allowed: true, via: 'header' };
 
-  return keysMatch(presented, expected);
+  const expectedCookie = ideForwardCookieValue();
+  const presentedCookie = cookieValue(req.headers.cookie, IDE_FORWARD_COOKIE);
+  if (expectedCookie && presentedCookie && keysMatch(presentedCookie, expectedCookie)) {
+    if (!isSameOriginForwardRequest(req)) {
+      return { allowed: false, reason: 'forward cookie refused: cross-origin request' };
+    }
+    return { allowed: true, via: 'cookie' };
+  }
+
+  return { allowed: false, reason: 'missing or invalid credential' };
+}
+
+/** Boolean form of `decideForwardAuthorization`. */
+export function isForwardAuthorized(req: http.IncomingMessage): boolean {
+  return decideForwardAuthorization(req).allowed;
 }
 
 /**

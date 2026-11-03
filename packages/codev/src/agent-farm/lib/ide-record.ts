@@ -28,6 +28,16 @@ import { AGENT_FARM_DIR } from './tower-client.js';
 /** The fixed Tower prefix that routes to the IDE server (Issue #1668 §D1). */
 export const IDE_DEFAULT_PREFIX = '/ide/';
 
+/**
+ * True if `pathname` targets the IDE forward prefix (`/ide` or `/ide/…`, never
+ * `/ideas`). Pure, so both the auth seam (`server-utils`) and the forward
+ * (`ide-forward`) share one definition without an import cycle.
+ */
+export function matchIdePrefix(pathname: string): boolean {
+  const bare = IDE_DEFAULT_PREFIX.replace(/\/$/, ''); // "/ide"
+  return pathname === bare || pathname.startsWith(IDE_DEFAULT_PREFIX);
+}
+
 /** Default port the local IDE server listens on when `--port` is not given. */
 export const IDE_DEFAULT_PORT = 8200;
 
