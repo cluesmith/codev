@@ -10,7 +10,18 @@ vi.mock('../lib/cloud-config.js', () => ({
   readCloudConfig: vi.fn(),
 }));
 
-import { buildForwardHeaders, mergeConnectionTokenCookie, matchIdePrefix, getPublicAuthority, stripCookie, type PublicAuthority } from '../servers/ide-forward.js';
+import {
+  buildForwardHeaders,
+  mergeConnectionTokenCookie,
+  matchIdePrefix,
+  getPublicAuthority,
+  stripCookie,
+  stripConnectionTokenSetCookie,
+  copyResponseHeaders,
+  rebuildUpgradeResponse,
+  injectWorkbenchConnectionToken,
+  type PublicAuthority,
+} from '../servers/ide-forward.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 
 const AUTHORITY: PublicAuthority = { host: 'cloud.codevos.ai', proto: 'https', prefix: '/t/mytower/ide' };
@@ -65,16 +76,31 @@ describe('buildForwardHeaders', () => {
     expect(out['cookie']).toBe('other=1');
   });
 
-  it('stamps x-forwarded-* from the public authority ONLY when tunnel-borne', () => {
-    const tunnelBorne = buildForwardHeaders({ 'x-codev-tunnel-proxy': '1', accept: '*/*' }, 8200, AUTHORITY, null);
+  it('stamps x-forwarded-* from the public authority when tunnel-borne', () => {
+    const tunnelBorne = buildForwardHeaders(
+      { 'x-codev-tunnel-proxy': '1', host: 'localhost:4100', accept: '*/*' },
+      8200,
+      AUTHORITY,
+      null,
+    );
     expect(tunnelBorne['x-forwarded-host']).toBe('cloud.codevos.ai');
     expect(tunnelBorne['x-forwarded-proto']).toBe('https');
     expect(tunnelBorne['x-forwarded-prefix']).toBe('/t/mytower/ide');
+  });
 
-    const local = buildForwardHeaders({ accept: '*/*' }, 8200, AUTHORITY, null);
-    expect(local['x-forwarded-host']).toBeUndefined();
-    expect(local['x-forwarded-proto']).toBeUndefined();
+  it("stamps Tower's own authority (the incoming Host) for a local request, with no prefix (Issue #1869)", () => {
+    // Without this the IDE server derives remoteAuthority from the rewritten
+    // Host (its own port) and the workbench dials it directly, bypassing Tower.
+    const local = buildForwardHeaders({ host: 'localhost:4100', accept: '*/*' }, 8200, AUTHORITY, null);
+    expect(local['host']).toBe('127.0.0.1:8200');
+    expect(local['x-forwarded-host']).toBe('localhost:4100');
+    expect(local['x-forwarded-proto']).toBe('http');
     expect(local['x-forwarded-prefix']).toBeUndefined();
+  });
+
+  it('a local request without a Host gets no x-forwarded-host', () => {
+    const local = buildForwardHeaders({ accept: '*/*' }, 8200, null, null);
+    expect(local['x-forwarded-host']).toBeUndefined();
   });
 
   it('does not stamp x-forwarded-* when tunnel-borne but no authority is known', () => {
@@ -118,8 +144,10 @@ describe('mergeConnectionTokenCookie', () => {
     expect(mergeConnectionTokenCookie('a=1; b=2', 'TK')).toBe('a=1; b=2; vscode-tkn=TK');
   });
 
-  it('never clobbers an already-present vscode-tkn', () => {
-    expect(mergeConnectionTokenCookie('vscode-tkn=already; x=1', 'TK')).toBe('vscode-tkn=already; x=1');
+  it("REPLACES an incoming vscode-tkn with Tower's, keeping other cookies (Issue #1869)", () => {
+    expect(mergeConnectionTokenCookie('vscode-tkn=stale; other=1', 'TK')).toBe('other=1; vscode-tkn=TK');
+    expect(mergeConnectionTokenCookie('vscode-tkn=stale', 'TK')).toBe('vscode-tkn=TK');
+    expect(mergeConnectionTokenCookie(['a=1', 'vscode-tkn=stale', 'vscode-tkn2=keep'], 'TK')).toBe('a=1; vscode-tkn2=keep; vscode-tkn=TK');
   });
 
   it('joins an array-valued Cookie header before merging', () => {
@@ -175,8 +203,105 @@ describe('stripCookie / forward cookie never reaches the IDE server (Issue #1869
     expect(out['cookie']).toBeUndefined();
   });
 
-  it('an existing vscode-tkn survives the strip unclobbered', () => {
-    const out = buildForwardHeaders({ cookie: `${NAME}=secret; vscode-tkn=MINE` }, 8200, null, 'TK');
-    expect(out['cookie']).toBe('vscode-tkn=MINE');
+  it("a browser-held vscode-tkn is replaced by Tower's and the forward cookie is gone", () => {
+    const out = buildForwardHeaders({ cookie: `${NAME}=secret; vscode-tkn=STALE; other=1` }, 8200, null, 'TK');
+    expect(out['cookie']).toBe('other=1; vscode-tkn=TK');
+  });
+
+  it('C1: client-supplied x-forwarded-* never reach the IDE server unless Tower set them', () => {
+    const spoof = { 'x-forwarded-host': 'evil.example', 'x-forwarded-proto': 'https', 'x-forwarded-prefix': '/evil' };
+    const local = buildForwardHeaders({ host: 'localhost:4100', ...spoof }, 8200, null, null);
+    expect(local['x-forwarded-host']).toBe('localhost:4100');
+    expect(local['x-forwarded-proto']).toBe('http');
+    expect(local['x-forwarded-prefix']).toBeUndefined();
+
+    const tunnelNoAuthority = buildForwardHeaders({ 'x-codev-tunnel-proxy': '1', ...spoof }, 8200, null, null);
+    expect(tunnelNoAuthority['x-forwarded-host']).toBeUndefined();
+    expect(tunnelNoAuthority['x-forwarded-proto']).toBeUndefined();
+    expect(tunnelNoAuthority['x-forwarded-prefix']).toBeUndefined();
+
+    const tunnel = buildForwardHeaders({ 'x-codev-tunnel-proxy': '1', ...spoof }, 8200, AUTHORITY, null);
+    expect(tunnel['x-forwarded-host']).toBe('cloud.codevos.ai');
+    expect(tunnel['x-forwarded-prefix']).toBe('/t/mytower/ide');
+  });
+});
+
+describe('the IDE connection token never reaches the browser (Issue #1869)', () => {
+  it('drops vscode-tkn Set-Cookie entries and keeps the others', () => {
+    expect(stripConnectionTokenSetCookie('vscode-tkn=T; Max-Age=604800; SameSite=Lax')).toBeUndefined();
+    expect(stripConnectionTokenSetCookie(['a=1; Path=/', 'vscode-tkn=T; SameSite=Lax', 'b=2'])).toEqual(['a=1; Path=/', 'b=2']);
+    expect(stripConnectionTokenSetCookie('vscode-tkn2=keep')).toEqual(['vscode-tkn2=keep']);
+    expect(stripConnectionTokenSetCookie(undefined)).toBeUndefined();
+  });
+
+  it('copyResponseHeaders strips it from HTTP responses and keeps caching headers', () => {
+    const upstream = {
+      'set-cookie': ['vscode-tkn=T; Max-Age=604800; SameSite=Lax', 'other=1'],
+      'cache-control': 'no-store',
+      etag: '"x"',
+      connection: 'keep-alive',
+    };
+    const out = copyResponseHeaders(upstream, true);
+    expect(out['set-cookie']).toEqual(['other=1']);
+    expect(copyResponseHeaders({ 'set-cookie': ['vscode-tkn=T; Max-Age=604800'] }, true)['set-cookie']).toBeUndefined();
+    // Tunnel path (local-only scope): relayed unchanged.
+    expect(copyResponseHeaders(upstream, false)['set-cookie']).toEqual(upstream['set-cookie']);
+    expect(out['cache-control']).toBe('no-store');
+    expect(out['etag']).toBe('"x"');
+    expect(out['connection']).toBeUndefined();
+  });
+
+  it('rebuildUpgradeResponse strips it from the 101 response', () => {
+    const raw = rebuildUpgradeResponse({
+      statusCode: 101,
+      statusMessage: 'Switching Protocols',
+      headers: { upgrade: 'websocket', 'set-cookie': ['vscode-tkn=T; SameSite=Lax', 'other=1'] },
+    }, true);
+    expect(raw).not.toContain('vscode-tkn');
+    expect(raw).toContain('set-cookie: other=1');
+    expect(raw).toContain('upgrade: websocket');
+    const tunnel = rebuildUpgradeResponse({ statusCode: 101, statusMessage: 'Switching Protocols', headers: { 'set-cookie': ['vscode-tkn=T'] } }, false);
+    expect(tunnel).toContain('set-cookie: vscode-tkn=T');
+  });
+});
+
+describe('injectWorkbenchConnectionToken (Issue #1869)', () => {
+  const META = '<meta id="vscode-workbench-web-configuration" data-settings="{&quot;remoteAuthority&quot;:&quot;127.0.0.1:4100&quot;}">';
+
+  it('inserts the token as the first key of the escaped configuration JSON', () => {
+    const out = injectWorkbenchConnectionToken(`<html><head>${META}</head></html>`, 'abc123');
+    expect(out).toContain('data-settings="{&quot;connectionToken&quot;:&quot;abc123&quot;,&quot;remoteAuthority&quot;');
+    const settings = /data-settings="([^"]*)"/.exec(out as string)?.[1].replace(/&quot;/g, '"');
+    expect(JSON.parse(settings as string)).toEqual({ connectionToken: 'abc123', remoteAuthority: '127.0.0.1:4100' });
+  });
+
+  it('returns null when the page carries no workbench configuration', () => {
+    expect(injectWorkbenchConnectionToken('<html>not the workbench</html>', 'abc')).toBeNull();
+  });
+
+  it('returns null when a connectionToken is already configured', () => {
+    const pre = META.replace('{&quot;', '{&quot;connectionToken&quot;:&quot;x&quot;,&quot;');
+    expect(injectWorkbenchConnectionToken(pre, 'abc')).toBeNull();
+  });
+
+  it('handles the empty-object configuration without a trailing comma', () => {
+    const out = injectWorkbenchConnectionToken('<meta id="vscode-workbench-web-configuration" data-settings="{}">', 'abc');
+    expect(out).toBe('<meta id="vscode-workbench-web-configuration" data-settings="{&quot;connectionToken&quot;:&quot;abc&quot;}">');
+  });
+
+  it('returns null when the configuration does not decode to a JSON object', () => {
+    expect(injectWorkbenchConnectionToken('<meta id="vscode-workbench-web-configuration" data-settings="{not json">', 'abc')).toBeNull();
+  });
+
+  it('decodes other character references in the configuration before validating', () => {
+    const meta = '<meta id="vscode-workbench-web-configuration" data-settings="{&quot;a&quot;:&quot;x&amp;y&#39;z&quot;}">';
+    const out = injectWorkbenchConnectionToken(meta, 'abc') as string;
+    const settings = /data-settings="([^"]*)"/.exec(out)?.[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#39;/g, "'");
+    expect(JSON.parse(settings as string)).toEqual({ connectionToken: 'abc', a: "x&y'z" });
+  });
+
+  it('refuses a token that could break out of the attribute', () => {
+    expect(injectWorkbenchConnectionToken(META, 'a"b')).toBeNull();
+    expect(injectWorkbenchConnectionToken(META, 'a&quot;b')).toBeNull();
   });
 });

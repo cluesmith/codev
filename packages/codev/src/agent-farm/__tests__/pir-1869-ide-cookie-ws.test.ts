@@ -53,6 +53,8 @@ let towerWss: WebSocketServer;
 let towerPort: number;
 let stubPort: number;
 let lastUpstreamCookie: string | undefined;
+let lastUpstreamForwardedHost: string | undefined;
+let lastClientSetCookie: string | string[] | undefined;
 
 function listen(server: http.Server): Promise<number> {
   return new Promise((resolve) => {
@@ -73,6 +75,9 @@ function connect(headers: Record<string, string>, origin?: string): Promise<Outc
   return new Promise((resolve) => {
     const ws = new WebSocket(`ws://localhost:${towerPort}/ide/?reconnectionToken=abc`, { headers, origin });
     const timer = setTimeout(() => resolve({ kind: 'error', message: 'timeout' }), 5000);
+    ws.on('upgrade', (res) => {
+      lastClientSetCookie = res.headers['set-cookie'];
+    });
     ws.on('open', () => ws.send('hello'));
     ws.on('message', (data) => {
       clearTimeout(timer);
@@ -94,8 +99,14 @@ beforeAll(async () => {
   resetExpectedKeyCache();
   stub = http.createServer((_req, res) => res.end('ok'));
   stubWss = new WebSocketServer({ server: stub });
+  // The real IDE server answers with its connection token as a cookie; Tower must
+  // never let that reach the browser.
+  stubWss.on('headers', (headers) => {
+    headers.push('Set-Cookie: vscode-tkn=UPSTREAM-TOKEN; Max-Age=604800; SameSite=Lax');
+  });
   stubWss.on('connection', (ws, req) => {
     lastUpstreamCookie = req.headers.cookie;
+    lastUpstreamForwardedHost = req.headers['x-forwarded-host'] as string | undefined;
     ws.on('message', (data) => ws.send(`echo:${data.toString()}`));
   });
   stubPort = await listen(stub);
@@ -119,6 +130,8 @@ afterEach(() => {
   deleteIdeRecord();
   logLines.length = 0;
   lastUpstreamCookie = undefined;
+  lastUpstreamForwardedHost = undefined;
+  lastClientSetCookie = undefined;
 });
 
 function recordStub(): void {
@@ -133,6 +146,11 @@ describe('IDE WS upgrade with the forward cookie', () => {
     // The IDE server sees its own token, never Tower's cookie.
     expect(lastUpstreamCookie).toContain('vscode-tkn=');
     expect(lastUpstreamCookie).not.toContain(IDE_FORWARD_COOKIE);
+    // The IDE server is told Tower's own authority, so the workbench's
+    // remoteAuthority (and every later socket) targets Tower, not its port.
+    expect(lastUpstreamForwardedHost).toBe(`localhost:${towerPort}`);
+    // The IDE server's token cookie is stripped from the 101 response.
+    expect(lastClientSetCookie).toBeUndefined();
   });
 
   it('a page on another localhost port cannot ride the cookie (cross-port WS hijack)', async () => {
