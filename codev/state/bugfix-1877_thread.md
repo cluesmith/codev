@@ -48,3 +48,12 @@ live reused pid as a live session. Same hazard class, not part of this issue.
   pass with the fix. The four #1686 live-pid tests now record the process's real start time — a
   genuine live shellper always has a matching one, and `Date.now()` would now (correctly) read as
   reused. Four direct helper tests cover the unknown-start-time edges.
+
+## PR (2026-11-04)
+
+- PR #1878 opened. CMAP (needed `--issue 1877`; without it consult could not pick a project):
+  codex=APPROVE, gemini=APPROVE, claude=APPROVE — all HIGH confidence, no blocking issues.
+- Claude asked that the deferred Phase 1 pre-filter hazard get a tracker before merge → filed
+  #1879 (area/tower), which also carries the non-blocking notes: #1809 `liveSessionsForWorkspace`,
+  the third tolerance constant in `shellper-husk-sweep.ts`, and the two-clock start-time recording.
+- Left as-is (non-blocking, cosmetic): reused-row deletions count under `cleaned`.
