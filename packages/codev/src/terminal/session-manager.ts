@@ -145,6 +145,35 @@ export const MAX_RECOVERY_ROUNDS = 3;
 export const ORPHAN_SWEEP_TIMEOUT_MS = 10_000;
 
 /**
+ * PID-reuse guard tolerance: a live process's start time must match the one
+ * recorded for its shellper within this window, or the pid belongs to a
+ * different process.
+ */
+export const PID_REUSE_TOLERANCE_MS = 2000;
+
+/**
+ * Bugfix #1877: positive proof that `pid` is no longer the shellper recorded
+ * with `recordedStartTime` — the live process under that pid started at a
+ * different time, so the OS reused the pid (typically after a reboot). An
+ * unknown start time on either side is NOT proof and returns false, so the
+ * caller keeps the #1686 "a live pid is never signaled" stance.
+ *
+ * The comparison is between two clocks: the shellper's own `Date.now()` at
+ * startup (recorded in the row) and the OS view from `getProcessStartTime`
+ * (`ps -o lstart`, truncated to the second on macOS; `/proc/<pid>` ctime on
+ * Linux). `PID_REUSE_TOLERANCE_MS` is the skew budget between them, not a
+ * magic number. Skew past it gives a false "reused" verdict, which now deletes
+ * the row instead of keeping and retrying it. That is bounded: nothing is
+ * signaled, and `reconnectSession` applies the same check, so such a row could
+ * never be reconnected anyway.
+ */
+export async function isShellperPidReused(pid: number, recordedStartTime: number | null): Promise<boolean> {
+  if (recordedStartTime === null) return false;
+  const actualStartTime = await getProcessStartTime(pid);
+  return actualStartTime !== null && Math.abs(actualStartTime - recordedStartTime) > PID_REUSE_TOLERANCE_MS;
+}
+
+/**
  * Issue #1149: true when the recorded failing-exit timestamps amount to a
  * crash loop (>= CRASH_LOOP_THRESHOLD failures inside the trailing
  * CRASH_LOOP_WINDOW_MS ending at `now`). Pure so the policy is testable
@@ -495,7 +524,7 @@ export class SessionManager extends EventEmitter {
   private async isShellperProcessCurrent(session: ManagedSession): Promise<boolean> {
     if (!this.isProcessAlive(session.pid)) return false;
     const actualStartTime = await getProcessStartTime(session.pid);
-    if (actualStartTime === null || Math.abs(actualStartTime - session.startTime) > 2000) {
+    if (actualStartTime === null || Math.abs(actualStartTime - session.startTime) > PID_REUSE_TOLERANCE_MS) {
       return false;
     }
     return true;
@@ -549,7 +578,7 @@ export class SessionManager extends EventEmitter {
 
     // Validate process start time to prevent PID reuse
     const actualStartTime = await getProcessStartTime(pid);
-    if (actualStartTime === null || Math.abs(actualStartTime - startTime) > 2000) {
+    if (actualStartTime === null || Math.abs(actualStartTime - startTime) > PID_REUSE_TOLERANCE_MS) {
       // Start time mismatch or couldn't determine — PID was reused
       this.log(`Session ${sessionId} reconnect failed: PID ${pid} reused (start time mismatch)`);
       return null;

@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import { SessionManager, StderrBuffer, getProcessStartTime, isCrashLooping, CRASH_LOOP_WINDOW_MS,
-  FAST_CLEAN_EXIT_MS, MAX_FAST_CLEAN_EXITS, type CreateSessionOptions } from '../session-manager.js';
+  FAST_CLEAN_EXIT_MS, MAX_FAST_CLEAN_EXITS, isShellperPidReused, type CreateSessionOptions } from '../session-manager.js';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
 import { ShellperClient } from '../shellper-client.js';
 
@@ -2366,6 +2366,29 @@ describe('getProcessStartTime', () => {
       // Should be very close (within 1 second)
       expect(Math.abs(t1 - t2)).toBeLessThan(1000);
     }
+  });
+});
+
+// Bugfix #1877: only a KNOWN start-time mismatch proves a pid reused. An
+// unknown start time on either side must not, or a transient `ps` failure
+// would turn the #1686 "never delete a live shellper row" rule off.
+describe('isShellperPidReused', () => {
+  it('is true when the live process started at a different time than recorded', async () => {
+    const startTime = (await getProcessStartTime(process.pid))!;
+    expect(await isShellperPidReused(process.pid, startTime - 24 * 60 * 60 * 1000)).toBe(true);
+  });
+
+  it('is false when the recorded start time matches the live process', async () => {
+    const startTime = (await getProcessStartTime(process.pid))!;
+    expect(await isShellperPidReused(process.pid, startTime)).toBe(false);
+  });
+
+  it('is false when no start time was recorded', async () => {
+    expect(await isShellperPidReused(process.pid, null)).toBe(false);
+  });
+
+  it('is false when the live start time cannot be read', async () => {
+    expect(await isShellperPidReused(999999, Date.now())).toBe(false);
   });
 });
 

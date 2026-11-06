@@ -52,7 +52,7 @@ function extractShellperSessionId(socketPath: string | null): string | null {
   const match = path.basename(socketPath).match(/^shellper-(.+)\.sock$/);
   return match ? match[1] : null;
 }
-import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
+import { isShellperPidReused, type SessionManager, type ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
 import {
@@ -953,6 +953,18 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     if (session.shellper_socket) {
       const shellperAlive = session.shellper_pid != null && processExists(session.shellper_pid);
       if (shellperAlive) {
+        // Bugfix #1877: a live pid whose start time does not match the recorded
+        // shellper's was reused by an unrelated process (typically after a
+        // reboot), so it is proven not ours: the row is stale and is deleted.
+        // The pid belongs to someone else, so it is never signaled — and this
+        // must `continue` before the stale-row branch below, which would
+        // SIGTERM `session.pid` (persisted equal to `shellper_pid`).
+        if (await isShellperPidReused(session.shellper_pid!, session.shellper_start_time)) {
+          _deps.log('INFO', `Shellper session ${session.id}: pid ${session.shellper_pid} was reused by another process (start time mismatch) — deleting stale row, pid not signaled (${session.type} for ${path.basename(session.workspace_path)})`);
+          db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
+          cleaned++;
+          continue;
+        }
         _deps.log('WARN', `Shellper session ${session.id} failed to reconnect but pid ${session.shellper_pid} is alive — leaving row untouched (a live pid is never signaled), retried next reconcile/adoption pass (${session.type} for ${path.basename(session.workspace_path)})`);
         unconfirmed++;
         continue;
@@ -1303,6 +1315,13 @@ export async function getTerminalsForWorkspace(
       if (dbSession.shellper_socket) {
         const shellperAlive = dbSession.shellper_pid != null && processExists(dbSession.shellper_pid);
         if (shellperAlive) {
+          // Bugfix #1877: same proof as reconcile Phase 2 — a reused pid is not
+          // our shellper, so the row is deleted and the pid is never signaled.
+          if (await isShellperPidReused(dbSession.shellper_pid!, dbSession.shellper_start_time)) {
+            _deps?.log('INFO', `On-the-fly reconnect for ${dbSession.id}: pid ${dbSession.shellper_pid} was reused by another process (start time mismatch) — deleting stale row, pid not signaled (${dbSession.type})`);
+            deleteTerminalSession(dbSession.id);
+            continue;
+          }
           _deps?.log('WARN', `On-the-fly reconnect for ${dbSession.id} failed but pid ${dbSession.shellper_pid} is alive — leaving row untouched (a live pid is never signaled), retried next reconcile/adoption pass (${dbSession.type})`);
           continue;
         }
