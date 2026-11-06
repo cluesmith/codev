@@ -157,6 +157,15 @@ export const PID_REUSE_TOLERANCE_MS = 2000;
  * different time, so the OS reused the pid (typically after a reboot). An
  * unknown start time on either side is NOT proof and returns false, so the
  * caller keeps the #1686 "a live pid is never signaled" stance.
+ *
+ * The comparison is between two clocks: the shellper's own `Date.now()` at
+ * startup (recorded in the row) and the OS view from `getProcessStartTime`
+ * (`ps -o lstart`, truncated to the second on macOS; `/proc/<pid>` ctime on
+ * Linux). `PID_REUSE_TOLERANCE_MS` is the skew budget between them, not a
+ * magic number. Skew past it gives a false "reused" verdict, which now deletes
+ * the row instead of keeping and retrying it. That is bounded: nothing is
+ * signaled, and `reconnectSession` applies the same check, so such a row could
+ * never be reconnected anyway.
  */
 export async function isShellperPidReused(pid: number, recordedStartTime: number | null): Promise<boolean> {
   if (recordedStartTime === null) return false;
