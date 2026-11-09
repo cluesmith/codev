@@ -324,6 +324,8 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
     // Copy: Cmd+C (Mac) or Ctrl+Shift+C (Linux/Windows) copies selection.
     // If no selection, let the key event pass through (sends SIGINT on Ctrl+C).
     // Paste: Cmd+V (Mac) or Ctrl+Shift+V (Linux/Windows)
+    // The mobile IME bridge, attached below once xterm's textarea exists (Issue #1883).
+    let imeBridge: ImeInputBridge | null = null;
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       // Mobile IME keystrokes belong to the IME bridge below (Issue #1883).
       if (imeBridge?.ownsKey(event)) return false;
@@ -645,7 +647,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
     // takes IME text away from them and sends each edit as DELs plus the new
     // text instead; xterm keeps real keys and paste. Desktop is unchanged.
     let imeEditInFlight = false;
-    const imeBridge: ImeInputBridge | null = isTouchDevice && textarea && containerRef.current
+    imeBridge = isTouchDevice && textarea && containerRef.current
       ? attachImeInput(textarea, containerRef.current, (edit) => {
           const ws = wsRef.current;
           if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -658,7 +660,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
           return true;
         })
       : null;
-    foreignInputRef.current = imeBridge ? () => imeBridge.noteForeignInput() : null;
+    foreignInputRef.current = imeBridge ? () => imeBridge?.noteForeignInput() : null;
 
     // Send user input to the PTY (uses wsRef so it works across reconnections)
     term.onData((data) => {

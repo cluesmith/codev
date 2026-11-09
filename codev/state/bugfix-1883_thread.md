@@ -106,3 +106,9 @@ The architect approved the extended fix with four conditions:
   3. **Soft backspace had no test.** It also turned up a real bug: with the single floor, a soft backspace right after any foreign input (a virtual Tab, an arrow) sent nothing. The delete-only case now sends one DEL per removed code point, bounded only by `deleteFloor`. Guarded at the unit, component and Playwright levels (`execCommand('delete')` after keydown 229).
   4. iOS/WebKit is the least-verified path. Documented in the PR; the owner's real-device check is the real acceptance test.
   5. The resync log now carries lengths, never the user's command line.
+- Second round, on d26a58fd1: gemini APPROVE, codex APPROVE, claude APPROVE. Claude's non-blocking points:
+  1. **Terminal replies count as foreign input.** In steady state xterm sends DA/CPR/DECRPM/OSC replies through `onData` (`wasUserInput=false`, which the public API doesn't expose), and the web client filters them only during `rc.initialPhase`. A reply mid-typing raises `replaceFloor`. The next autocorrect that reaches back then fails loud and leaves a duplicate for that one replace. Not silent, and far narrower than the original bug. The fix needs the reply table, which today lives only server-side (`packages/codev/src/terminal/terminal-replies.ts`; the client can't import it). That's a scope call, taken to the architect at the PR gate.
+  2. Typing during a reconnect logs "edit not delivered" per keystroke. Kept: those keystrokes really are dropped, and the condition is "never drop silently".
+  3. CJK IME on touch now streams kana, then DELs and the kanji, instead of buffering to `compositionend`. Converges in a line editor; untested on a real device.
+  4. TDZ hazard: `imeBridge` was a `const` used in the key handler before its declaration. Fixed by hoisting it as a `let`.
+  5. A real-phone check is still the acceptance gate (iOS especially).
