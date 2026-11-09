@@ -579,7 +579,7 @@ describe.skipIf(posixStubsOnly)('/api/ide', () => {
   });
 });
 
-describe('connection token rotation per spawn (Issue #1869)', () => {
+describe.skipIf(posixStubsOnly)('connection token rotation per spawn (Issue #1869)', () => {
   it('two spawns yield two different tokens, and the token Tower forwards is the new one', async () => {
     await spawnIdeServer({ serverPath: SERVER_PATH, port: 8200 }, log);
     const first = readIdeConnectionToken();

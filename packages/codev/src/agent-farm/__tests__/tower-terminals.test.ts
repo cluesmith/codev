@@ -90,8 +90,11 @@ function makeDeps(overrides: Partial<TerminalDeps> = {}): TerminalDeps {
  */
 async function realStartTime(pid: number): Promise<number> {
   const startTime = await getProcessStartTime(pid);
-  if (startTime === null) throw new Error(`cannot read start time of pid ${pid}`);
-  return startTime;
+  if (startTime !== null) return startTime;
+  // Spec 1658: Windows reads no start time here, so the guard never calls a pid
+  // reused and any recorded value models a live shellper.
+  if (process.platform === 'win32') return Date.now();
+  throw new Error(`cannot read start time of pid ${pid}`);
 }
 
 // ============================================================================
@@ -1209,7 +1212,9 @@ describe('tower-terminals', () => {
     // deleted, and the pid (someone else's) is never signaled. Shellper rows
     // persist `pid == shellper_pid`, so the stale-row SIGTERM branch must not be
     // reached either. Fails without the fix (row kept with the WARN).
-    describe('reused shellper pid (#1877)', () => {
+    // Spec 1658: reuse is proven by a start-time mismatch, which Windows cannot read
+    // here (its reconnect identity is the WELCOME check instead).
+    describe.skipIf(process.platform === 'win32')('reused shellper pid (#1877)', () => {
       const reusedId = 'bugfix-1877-reused-session';
       const socketPath = '/tmp/shellper-bugfix-1877.sock';
 
