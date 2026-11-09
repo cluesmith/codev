@@ -10,10 +10,11 @@
 
 import { existsSync, realpathSync } from 'node:fs';
 import * as path from 'node:path';
-import { win32 } from 'node:path';
+import type { BuilderWorktreeRef } from '../../agent-farm/utils/builder-worktree-identity.js';
 import type { HostPaths, WorkspacePathOps } from './host-paths.js';
 
-const defaultOps: WorkspacePathOps = {
+/** The real filesystem calls; the one home for the default ops (workspace-path uses them too). */
+export const defaultWorkspacePathOps: WorkspacePathOps = {
   realpath: (p) => realpathSync(p),
   realpathNative: (p) => realpathSync.native(p),
 };
@@ -24,7 +25,7 @@ const defaultOps: WorkspacePathOps = {
  * comparison is the same when a test forces the platform seam on a POSIX host.
  */
 export function sameWindowsPath(a: string, b: string): boolean {
-  return win32.resolve(a).toLowerCase() === win32.resolve(b).toLowerCase();
+  return path.win32.resolve(a).toLowerCase() === path.win32.resolve(b).toLowerCase();
 }
 
 /**
@@ -63,11 +64,11 @@ export function resetWindowsPathCacheForTests(): void {
  * (`realpathSync.native`: true case for every component, 8.3 names expanded,
  * subst and mapped drives resolved to their targets), else an earlier native
  * answer for the same case-folded path, else Node's JS realpath, else
- * `win32.resolve`. Every branch returns the plain Win32 spelling with an
+ * `path.win32.resolve`. Every branch returns the plain Win32 spelling with an
  * upper-case drive letter.
  */
 function canonicalWindowsPath(workspacePath: string, ops: WorkspacePathOps): string {
-  const folded = win32.resolve(workspacePath).toLowerCase();
+  const folded = path.win32.resolve(workspacePath).toLowerCase();
   try {
     const answer = plainWindowsSpelling(ops.realpathNative(workspacePath));
     nativeAnswers.set(folded, answer);
@@ -81,7 +82,7 @@ function canonicalWindowsPath(workspacePath: string, ops: WorkspacePathOps): str
   try {
     return plainWindowsSpelling(ops.realpath(workspacePath));
   } catch {
-    return plainWindowsSpelling(win32.resolve(workspacePath));
+    return plainWindowsSpelling(path.win32.resolve(workspacePath));
   }
 }
 
@@ -98,7 +99,7 @@ function isWindowsAbsolute(p: string): boolean {
 /** The canonical path for a drive-letter or UNC path, so any spelling finds the same entry. */
 function key(workspacePath: string): string {
   if (isWindowsAbsolute(workspacePath)) {
-    return canonicalWindowsPath(workspacePath, defaultOps);
+    return canonicalWindowsPath(workspacePath, defaultWorkspacePathOps);
   }
   return workspacePath;
 }
@@ -112,7 +113,7 @@ function isUnder(candidate: string, dir: string): boolean {
   return windowsComparable(candidate).startsWith(windowsComparable(dir) + '\\');
 }
 
-function splitBuilderWorktree(p: string): { workspacePath: string; worktreeDirName: string } | null {
+function splitBuilderWorktree(p: string): BuilderWorktreeRef | null {
   const match = p.match(/^(.+)[\\/]\.builders[\\/]([^\\/]+)/);
   if (!match) return null;
   return { workspacePath: match[1], worktreeDirName: match[2] };
@@ -183,7 +184,7 @@ export const windowsHostPaths: HostPaths = Object.freeze<HostPaths>({
   isAbsoluteBuilderWorktree(value) {
     // The spawn env carries a native path (`C:\repo\.builders\<id>`), so the
     // drive or UNC root and either separator are accepted.
-    return win32.isAbsolute(value) && splitBuilderWorktree(value) !== null;
+    return path.win32.isAbsolute(value) && splitBuilderWorktree(value) !== null;
   },
 
   sameDirectory: sameWindowsPath,

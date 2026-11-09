@@ -61,8 +61,6 @@ export function cmdlineHoldsSession(cmdline: string, sessionId: string): boolean
   return needles.some((needle) => cmdline.includes(needle));
 }
 
-
-
 export interface ArchitectIdentity {
   /** Absolute workspace path the shellper runs in (`cwd` in its config). */
   workspacePath: string;

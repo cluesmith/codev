@@ -22,16 +22,10 @@
  * importing from the server-layer tower-utils.
  */
 
-import { realpathSync } from 'node:fs';
 import { hostPaths, type WorkspacePathOps } from '../../lib/platform/host-paths.js';
-import { resetWindowsPathCacheForTests } from '../../lib/platform/host-paths.windows.js';
+import { defaultWorkspacePathOps, resetWindowsPathCacheForTests } from '../../lib/platform/host-paths.windows.js';
 
 export type { WorkspacePathOps };
-
-const defaultOps: WorkspacePathOps = {
-  realpath: (p) => realpathSync(p),
-  realpathNative: (p) => realpathSync.native(p),
-};
 
 /** Test-only: forget the Windows canonicalization cache. */
 export function resetWorkspacePathCacheForTests(): void {
@@ -44,7 +38,7 @@ export function normalizeWorkspacePathWith(workspacePath: string, ops: Workspace
 }
 
 export function normalizeWorkspacePath(workspacePath: string): string {
-  return normalizeWorkspacePathWith(workspacePath, defaultOps);
+  return normalizeWorkspacePathWith(workspacePath, defaultWorkspacePathOps);
 }
 
 /**

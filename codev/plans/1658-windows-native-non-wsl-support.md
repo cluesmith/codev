@@ -1333,6 +1333,10 @@ Recorded so the moves keep them, not fix them (ruling F). The architect rules on
 - `canvas-relay` falls back differently for a missing file on each platform.
 - `worktree-links.ts:253`'s POSIX side is unreachable in production (its one caller runs only on
   Windows).
+- The four builder-worktree matchers disagree: `workspaceOfBuilderCwd` (from
+  `notifications.ts`) matches `.builders` with an unescaped `.` and requires the worktree root
+  (`$`), so `/w/Xbuilders/x` matches it but not `splitBuilderWorktree`, `hasBuildersSegment` or
+  `lastBuildersMarkerIndex`. Kept verbatim; now side by side in `host-paths.*.ts`. Found in A2-2.
 - POSIX `workspaceKey` is identity while callers pre-apply `realpathSync`; folding `key` into
   `canonicalize` would change POSIX map keys (#1870 territory), so they stay separate methods.
 
@@ -1365,6 +1369,23 @@ interface as committed in `lib/platform/command-launch.ts` differs from A2.4:
   per group).
 - Product `isWindows()` calls: 103 before, 84 after, plus the accessor.
 - Noted, not changed: `utils/shell.ts` `spawnDetached` has no production caller.
+
+**A2-2, host paths (`6ae43b289`, CMAP 2-way while agy is unauthenticated: claude and codex
+APPROVE).** As committed in `lib/platform/host-paths.ts`, against A2.4:
+
+- `canonicalize(path, ops)` takes the injectable `WorkspacePathOps` (moved here from
+  `workspace-path.ts`, which re-exports the type); the default ops live once, in the Windows
+  implementation, and `workspace-path.ts` uses them.
+- Renamed: `same` to `sameDirectory`, `isAbsoluteWorktreeArgument` to `isAbsoluteBuilderWorktree`.
+- Added, for call sites A2.4 did not list: `lastBuildersMarkerIndex` (state.ts),
+  `workspaceOfBuilderCwd` (notifications.ts), `canonicalFilePath` (canvas-relay).
+- `sameDirectory` serves only `architect-session-holder`; `cleanup.ts` `killWindowsShellperProcesses`
+  and `isShellperInScope` keep calling `sameWindowsPath` directly (both run only on Windows).
+  `sameWindowsPath` now lives in the Windows implementation and is re-exported from
+  `shellper-cmdline.ts`.
+- `isShellperInScope` (`shellper-cmdline.ts`) stays a branch: its POSIX form is an argv
+  substring test, not a path comparison (add to the A2.5 one-offs).
+- Product `isWindows()` calls: 84 after A2-1, 69 after A2-2.
 
 ## Risks and Mitigation
 

@@ -9,6 +9,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { hostPaths, type WorkspacePathOps } from '../lib/platform/host-paths.js';
 import { posixHostPaths } from '../lib/platform/host-paths.posix.js';
 import { windowsHostPaths } from '../lib/platform/host-paths.windows.js';
@@ -74,6 +77,19 @@ describe('POSIX implementation: the pre-refactor forms, verbatim', () => {
     expect(p.isAbsoluteBuilderWorktree('w/.builders/x')).toBe(false);
   });
 
+  it('canonicalFilePath: realpath, else the real parent joined with the name, else resolve', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'spec1658-a22-')));
+    try {
+      const file = join(dir, 'a.md');
+      writeFileSync(file, 'x');
+      expect(p.canonicalFilePath(join(dir, '.', 'a.md'))).toBe(file);
+      expect(p.canonicalFilePath(join(dir, 'missing.md'))).toBe(join(dir, 'missing.md'));
+      expect(p.canonicalFilePath('/no/such/1658/dir/file.md')).toBe('/no/such/1658/dir/file.md');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('sameDirectory compares exact spellings (and realpaths)', () => {
     expect(p.sameDirectory('/no/such/a', '/no/such/a')).toBe(true);
     expect(p.sameDirectory('/no/such/A', '/no/such/a')).toBe(false);
@@ -111,6 +127,12 @@ describe('Windows implementation: either separator, case-insensitive', () => {
     expect(w.workspaceOfBuilderCwd('C:\\w/.builders\\x')).toBe('C:\\w');
     expect(w.isAbsoluteBuilderWorktree('C:\\w\\.builders\\x')).toBe(true);
     expect(w.isAbsoluteBuilderWorktree('w\\.builders\\x')).toBe(false);
+  });
+
+  it('canonicalFilePath canonicalizes the parent of a missing file and keeps the name', () => {
+    // The parent goes through `key` (upper-case drive, Win32 spelling); the join uses
+    // the host's own path module, as the call site did.
+    expect(w.canonicalFilePath('c:/no/such/1658/x.md')).toBe(join('C:\\no\\such\\1658', 'x.md'));
   });
 
   it('sameDirectory is case-insensitive with separators normalized', () => {

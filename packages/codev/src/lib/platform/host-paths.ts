@@ -13,6 +13,7 @@
  * both use it without a dependency cycle.
  */
 
+import type { BuilderWorktreeRef } from '../../agent-farm/utils/builder-worktree-identity.js';
 import { isWindows } from '../platform.js';
 import { posixHostPaths } from './host-paths.posix.js';
 import { windowsHostPaths } from './host-paths.windows.js';
@@ -21,12 +22,6 @@ import { windowsHostPaths } from './host-paths.windows.js';
 export interface WorkspacePathOps {
   realpath: (p: string) => string;
   realpathNative: (p: string) => string;
-}
-
-/** A path split at its builder-worktree segment. */
-export interface BuilderWorktreeSplit {
-  workspacePath: string;
-  worktreeDirName: string;
 }
 
 export interface HostPaths {
@@ -47,7 +42,7 @@ export interface HostPaths {
   /** A path with `/` separators (the form templates and project matchers are written in). */
   toForwardSlashes(path: string): string;
   /** Split `path` at its last `/.builders/<dir>` segment, or null outside a builder worktree. */
-  splitBuilderWorktree(path: string): BuilderWorktreeSplit | null;
+  splitBuilderWorktree(path: string): BuilderWorktreeRef | null;
   /** Whether `path` contains a `/.builders/` segment. */
   hasBuildersSegment(path: string): boolean;
   /** Index of the final `/.builders/` marker in `path` (either separator on Windows), or -1. */
