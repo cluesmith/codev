@@ -1348,7 +1348,7 @@
               <span class="port-type">New Shell</span>
             </div>
             <div class="port-actions">
-              <button class="btn btn-small" onclick="createShell('${escapeHtml(instance.workspacePath)}')">+ Create</button>
+              <button class="btn btn-small" data-workspace-path="${escapeHtml(instance.workspacePath)}" onclick="createShell(this.dataset.workspacePath)">+ Create</button>
             </div>
           </div>
         `;
@@ -1370,10 +1370,10 @@
             </div>
             <div class="instance-actions">
               ${instance.running ? `
-                <button class="btn btn-small" onclick="restartInstance('${escapeHtml(instance.workspacePath)}')">Restart</button>
-                <button class="btn btn-small btn-danger" onclick="stopInstance('${escapeHtml(instance.workspacePath)}')">Stop</button>
+                <button class="btn btn-small" data-workspace-path="${escapeHtml(instance.workspacePath)}" onclick="restartInstance(this.dataset.workspacePath)">Restart</button>
+                <button class="btn btn-small btn-danger" data-workspace-path="${escapeHtml(instance.workspacePath)}" onclick="stopInstance(this.dataset.workspacePath)">Stop</button>
               ` : `
-                <button class="btn btn-small btn-primary" onclick="launchPath('${escapeHtml(instance.workspacePath)}')">Start</button>
+                <button class="btn btn-small btn-primary" data-workspace-path="${escapeHtml(instance.workspacePath)}" onclick="launchPath(this.dataset.workspacePath)">Start</button>
               `}
             </div>
           </div>
@@ -1381,7 +1381,7 @@
             <span class="instance-path" title="${escapeHtml(instance.workspacePath)}">
               ${escapeHtml(instance.workspacePath)}
             </span>
-            <button class="copy-btn" onclick="copyPath('${escapeHtml(instance.workspacePath)}')" title="Copy path">📋</button>
+            <button class="copy-btn" data-workspace-path="${escapeHtml(instance.workspacePath)}" onclick="copyPath(this.dataset.workspacePath)" title="Copy path">📋</button>
           </div>
           <div class="instance-body">
             <div class="ports-list">
@@ -1400,14 +1400,14 @@
       const lastUsed = instance.lastUsed ? formatDate(instance.lastUsed) : 'Never';
 
       return `
-        <div class="recent-item" onclick="launchPath('${escapeHtml(instance.workspacePath)}')" title="Click to start ${escapeHtml(instance.workspaceName)}">
+        <div class="recent-item" data-workspace-path="${escapeHtml(instance.workspacePath)}" onclick="launchPath(this.dataset.workspacePath)" title="Click to start ${escapeHtml(instance.workspaceName)}">
           <div class="recent-info">
             <span class="recent-name">${escapeHtml(instance.workspaceName)}</span>
             <span class="recent-path">${escapeHtml(instance.workspacePath)}</span>
           </div>
           <div style="display: flex; align-items: center; gap: 16px;">
             <span class="recent-time">${lastUsed}</span>
-            <button class="btn btn-primary" onclick="event.stopPropagation(); launchPath('${escapeHtml(instance.workspacePath)}')">Start</button>
+            <button class="btn btn-primary" data-workspace-path="${escapeHtml(instance.workspacePath)}" onclick="event.stopPropagation(); launchPath(this.dataset.workspacePath)">Start</button>
           </div>
         </div>
       `;

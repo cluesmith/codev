@@ -25,7 +25,7 @@ describe('Spec 1658 M7: Open IDE folder is a URI path', () => {
   const ideFolderUriPath = loadIdeFolderUriPath();
 
   it('turns a Windows drive path into /C:/... with forward slashes', () => {
-    expect(ideFolderUriPath('C:\\repos\\testing\\project')).toBe('/C:/repos/testing/project');
+    expect(ideFolderUriPath('C:\\src\\tools\\project')).toBe('/C:/src/tools/project');
     expect(ideFolderUriPath('d:/work\\project')).toBe('/d:/work/project');
   });
 
@@ -38,7 +38,7 @@ describe('Spec 1658 M7: Open IDE folder is a URI path', () => {
   });
 
   it('is idempotent on input already in URI-path form', () => {
-    for (const input of ['C:\\repos\\project', '\\\\server\\share\\project', '/home/someone/project']) {
+    for (const input of ['C:\\src\\project', '\\\\server\\share\\project', '/home/someone/project']) {
       const once = ideFolderUriPath(input);
       expect(ideFolderUriPath(once)).toBe(once);
     }
