@@ -119,14 +119,17 @@ the owner's Windows machine, which CI cannot cover.
    - Re-checked on tarballs and the branch vsix packed from `1dfb17ccf` (reported 2026-11-10,
      product-identical to `7903facff`): scenarios 15 (sidebar actions on the branch vsix; the
      earlier Marketplace-extension run does not count), 15a and 3 pass. The re-check found M7.
-   - Still to do: one Open IDE click from the dashboard on the M7 head, confirming the workbench
-     opens the right folder. The ConPTY fixtures (item 1) remain open.
+   - M7 re-check on `7f776ca99` (reported 2026-11-10): Open IDE from the dashboard opens the
+     workspace folder. Pass. The same check found M8 (dashboard Start and Stop).
+   - Still to do, on the M8 head: Start, Stop, Restart, + Create and copy path from the dashboard,
+     plus one more Open IDE click. The ConPTY fixtures (item 1) remain open.
    - Findings, under "Manual pass findings": M1 (resolved: a machine npm setting, not a defect),
      M2 (double cursor, cosmetic follow-up), M3 (uninstall while Tower runs, docs follow-up), M4
      (codev-ide launcher window, fixed in codev-ide#66; console noise benign), M5 (stale tower
      name after a cloud re-registration, Tower-side: #1871 and codev-cloud#17), M6 (one workspace split by
      drive-letter case: fixed in this PR for Windows, macOS follow-up #1870), M7 (the
-     dashboard's Open IDE link sends a Windows path the IDE cannot resolve: fixed in this PR).
+     dashboard's Open IDE link sends a Windows path the IDE cannot resolve: fixed in this PR), M8
+     (dashboard workspace buttons mangle a Windows path in an inline JS string: fixed in this PR).
 3. The #1858 codex scope decision (owner): recorded scope amendment, or wait for #1858.
 4. The cwd-first executable lookup (Known gap below): a release blocker scheduled as the first
    follow-up after merge, while the README announces native Windows support. Owner's call
@@ -1263,6 +1266,32 @@ C:%5C<path>%5C<project>`.
   encodes the converted value. Negative control: with the drive branch returning its input, the
   drive-path test fails.
 - Codev Cloud's own IDE link is outside this repo; main is notifying the codev-cloud architect.
+- Owner confirmation of the fix: on `7f776ca99`, Open IDE from the dashboard opened the folder.
+
+**M8. Dashboard Start, Stop, Restart, + Create and copy path break on a Windows path (re-check,
+2026-11-10). Fixed in this PR (architect ruling).** Pre-existing in `tower.html`, not from #1869.
+From the Tower dashboard, Stop reported "No processes found to stop" and Start reported "Relative
+paths are not supported"; `afx workspace start` / `stop` from the CLI worked.
+
+- Cause: seven inline handlers embedded the path in a single-quoted JS string,
+  `onclick="stopInstance('${escapeHtml(instance.workspacePath)}')"`. `escapeHtml` leaves
+  backslashes alone, so JS read `C:\<path>\...` as escape sequences (`\r`, `\t`, ...). Start
+  received `C:` followed by a carriage return, a drive-relative path, so `path.isAbsolute`
+  failed; Stop received a path that matched no workspace. POSIX paths carry no backslashes. The
+  Open IDE link was unaffected because #1869 passed its path through a data attribute.
+- Sites (by grep): `createShell`, `restartInstance`, `stopInstance`, `launchPath` (three: the
+  instance card, the recent item, and its Start button) and `copyPath`.
+- Fix: each element carries `data-workspace-path` written through `escapeHtml`, and its handler
+  reads `this.dataset.workspacePath`, the pattern `openIde` already used. `escapeHtml` is
+  unchanged: the string-literal embedding was the defect, and the attribute also closes the latent
+  single-quote case. No server change.
+- Test: `spec-1658-dashboard-workspace-path.test.ts` renders the real `renderInstance` and
+  `renderRecentItem` from the template with `C:\src\tools\it's\project`, then asserts that no
+  `onclick` contains the path, that each handler reads `this.dataset.workspacePath`, and that every
+  `data-workspace-path` value decodes back to the exact path. Negative control: against the
+  pre-fix template all three fail.
+- Owner confirmation of the cause (the copy-path button pasting a mangled path) was requested and
+  had not arrived when this was written; the re-check on the M8 head covers the fixed buttons.
 
 ## Appendix: Implementation Notes by Phase
 
