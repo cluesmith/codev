@@ -155,6 +155,51 @@ jobs:
         working-directory: packages/artifact-canvas
         run: pnpm test:browser
 
+  web-browser:
+    name: Web Terminal Browser Tests
+    runs-on: ubuntu-latest
+    # Bounded like every job here (#1502). Healthy runs finish in ~3 min.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # The fixture page runs the dashboard under vite, which resolves these from their dist.
+      - name: Build types package
+        working-directory: packages/types
+        run: pnpm build
+
+      - name: Build sdk package
+        working-directory: packages/sdk
+        run: pnpm build
+
+      - name: Build artifact-canvas package
+        working-directory: packages/artifact-canvas
+        run: pnpm build
+
+      # No `--with-deps`: see the canvas-browser job above (#1502).
+      - name: Install Playwright Chromium
+        working-directory: apps/web
+        run: pnpm exec playwright install chromium
+
+      # Mobile IME regressions (#1883): jsdom has no IME, so soft-keyboard edits are
+      # driven through Chromium's own IME pipeline against the real xterm.js and Terminal.
+      - name: Run web browser tests
+        working-directory: apps/web
+        run: pnpm test:browser
+
   integration:
     name: Tower Integration Tests
     runs-on: ubuntu-latest

@@ -12,6 +12,7 @@ import { MOBILE_BREAKPOINT } from '../lib/constants.js';
 import { uploadPasteImage, getWebKey } from '../lib/api.js';
 import { ScrollController } from '../lib/scrollController.js';
 import { EscapeBuffer } from '../lib/escapeBuffer.js';
+import { attachImeInput, type ImeInputBridge } from '../lib/imeInput.js';
 import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-sdk/reconnect-policy';
 import { terminalWsProtocols } from '@cluesmith/codev-types';
 
@@ -216,6 +217,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
   const wsRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const modifierRef = useRef<ModifierState>({ ctrl: false, cmd: false, clearCallback: null });
+  const foreignInputRef = useRef<(() => void) | null>(null);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
   const [connStatus, setConnStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected');
   const reconnectRef = useRef<(() => void) | null>(null);
@@ -323,6 +325,8 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
     // If no selection, let the key event pass through (sends SIGINT on Ctrl+C).
     // Paste: Cmd+V (Mac) or Ctrl+Shift+V (Linux/Windows)
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      // Mobile IME keystrokes belong to the IME bridge below (Issue #1883).
+      if (imeBridge?.ownsKey(event)) return false;
       if (event.type !== 'keydown') return true;
 
       // Shift+Enter: insert backslash + newline for line continuation
@@ -635,22 +639,50 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       textarea.addEventListener('compositionend', onCompositionEnd);
     }
 
+    // Mobile IME edits as replaces (Issue #1883). A soft keyboard's
+    // autocomplete edits text it already committed, which xterm's textarea
+    // handlers send on as appended fragments. On a touch device the bridge
+    // takes IME text away from them and sends each edit as DELs plus the new
+    // text instead; xterm keeps real keys and paste. Desktop is unchanged.
+    let imeEditInFlight = false;
+    const imeBridge: ImeInputBridge | null = isTouchDevice && textarea && containerRef.current
+      ? attachImeInput(textarea, containerRef.current, (edit) => {
+          const ws = wsRef.current;
+          if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+          imeEditInFlight = true;
+          try {
+            term.input(edit, true);
+          } finally {
+            imeEditInFlight = false;
+          }
+          return true;
+        })
+      : null;
+    foreignInputRef.current = imeBridge ? () => imeBridge.noteForeignInput() : null;
+
     // Send user input to the PTY (uses wsRef so it works across reconnections)
     term.onData((data) => {
+      const fromIme = imeEditInFlight;
+      // Anything but the bridge's own edit moves the PTY line away from the textarea.
+      if (!fromIme) imeBridge?.noteForeignInput();
+
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
       // Suppress exact duplicate onData calls within 150ms when:
       // - We're in/near an IME composition (composing or <150ms after), OR
       // - This is a touch device (soft keyboard can produce late duplicates)
+      // A bridge edit is exact by construction and never a duplicate.
       const now = Date.now();
       const inCompositionWindow = isComposing || (now - compositionEndTime < 150);
-      if ((inCompositionWindow || isTouchDevice) &&
+      if (!fromIme && (inCompositionWindow || isTouchDevice) &&
           data === lastSentData && now - lastSentTime < 150) {
         return;
       }
-      lastSentData = data;
-      lastSentTime = now;
+      if (!fromIme) {
+        lastSentData = data;
+        lastSentTime = now;
+      }
 
       if (rc.initialPhase) {
         const filtered = data
@@ -664,6 +696,8 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       // Sticky modifier handling for mobile virtual keyboard
       const mod = modifierRef.current;
       if ((mod.ctrl || mod.cmd) && data.length === 1) {
+        // The typed character does not reach the PTY as itself.
+        imeBridge?.noteForeignInput();
         const charCode = data.charCodeAt(0);
         if (mod.ctrl) {
           if (charCode >= 0x61 && charCode <= 0x7a) {
@@ -759,6 +793,8 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
         textarea.removeEventListener('compositionstart', onCompositionStart);
         textarea.removeEventListener('compositionend', onCompositionEnd);
       }
+      imeBridge?.dispose();
+      foreignInputRef.current = null;
       scrollCtrl.dispose();
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
@@ -799,7 +835,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       />
       <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} connStatus={connStatus} toolbarExtra={toolbarExtra} onReconnect={() => reconnectRef.current?.()} />
       {isMobile && (
-        <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} />
+        <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} onKeySent={() => foreignInputRef.current?.()} />
       )}
     </div>
   );

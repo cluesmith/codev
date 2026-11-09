@@ -12,6 +12,8 @@ export interface ModifierState {
 interface VirtualKeyboardProps {
   wsRef: React.RefObject<WebSocket | null>;
   modifierRef: React.RefObject<ModifierState>;
+  /** Called after a key goes straight to the PTY, bypassing xterm (Issue #1883). */
+  onKeySent?: () => void;
 }
 
 /** Encode and send a data frame directly via WebSocket (avoids bracketed paste). */
@@ -29,7 +31,7 @@ function sendRawKey(ws: WebSocket | null, key: string): void {
  * Renders Esc, Tab, Ctrl (sticky), Cmd (sticky) above the terminal.
  * Uses onPointerDown with preventDefault to avoid stealing focus from xterm.
  */
-export function VirtualKeyboard({ wsRef, modifierRef }: VirtualKeyboardProps) {
+export function VirtualKeyboard({ wsRef, modifierRef, onKeySent }: VirtualKeyboardProps) {
   const [activeModifier, setActiveModifier] = useState<'ctrl' | 'cmd' | null>(null);
 
   useEffect(() => {
@@ -40,12 +42,14 @@ export function VirtualKeyboard({ wsRef, modifierRef }: VirtualKeyboardProps) {
   const handleEsc = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     sendRawKey(wsRef.current, '\x1b');
-  }, [wsRef]);
+    onKeySent?.();
+  }, [wsRef, onKeySent]);
 
   const handleTab = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     sendRawKey(wsRef.current, '\t');
-  }, [wsRef]);
+    onKeySent?.();
+  }, [wsRef, onKeySent]);
 
   const handleCtrl = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
