@@ -18,7 +18,7 @@
 import { join } from 'node:path';
 import { normalizeWorkspacePath } from './workspace-path.js';
 import { lastPathSegment } from '../../lib/host-paths.js';
-import { isWindows } from '../../lib/platform.js';
+import { hostPaths } from '../../lib/platform/host-paths.js';
 
 /** A builder worktree path split into its owning workspace and directory name. */
 export interface BuilderWorktreeRef {
@@ -39,14 +39,7 @@ export interface BuilderWorktreeRow {
  * `C:\repo\.builders\bugfix-42` splits the same way.
  */
 export function parseBuilderWorktreePath(path: string): BuilderWorktreeRef | null {
-  let match: RegExpMatchArray | null;
-  if (isWindows()) {
-    match = path.match(/^(.+)[\\/]\.builders[\\/]([^\\/]+)/);
-  } else {
-    match = path.match(/^(.+)\/\.builders\/([^/]+)/);
-  }
-  if (!match) return null;
-  return { workspacePath: match[1], worktreeDirName: match[2] };
+  return hostPaths().splitBuilderWorktree(path);
 }
 
 /**
@@ -54,10 +47,7 @@ export function parseBuilderWorktreePath(path: string): BuilderWorktreeRef | nul
  * or something inside one. On Windows `\` counts as a separator too.
  */
 export function containsBuildersSegment(path: string): boolean {
-  if (isWindows()) {
-    return /[\\/]\.builders[\\/]/.test(path);
-  }
-  return path.includes('/.builders/');
+  return hostPaths().hasBuildersSegment(path);
 }
 
 /**

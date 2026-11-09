@@ -15,8 +15,8 @@
  * values, so every matcher compares decoded values on both platforms.
  */
 
-import * as path from 'node:path';
 import { isWindows } from '../lib/platform.js';
+import { sameWindowsPath } from '../lib/platform/host-paths.windows.js';
 import { sessionJobName } from '../lib/windows-job.js';
 
 /** Marker identifying a Codev shellper process in a command line. */
@@ -109,14 +109,8 @@ export function readJsonStringField(text: string, key: string): string | null {
   }
 }
 
-/**
- * Compare two Windows paths the way the filesystem does: separators and `.`
- * segments normalized, case-insensitive. Uses `path.win32` explicitly so the
- * comparison is the same when a test forces the platform seam on a POSIX host.
- */
-export function sameWindowsPath(a: string, b: string): boolean {
-  return path.win32.resolve(a).toLowerCase() === path.win32.resolve(b).toLowerCase();
-}
+/** Windows path equality (case-insensitive, separators normalized); defined with the host paths capability. */
+export { sameWindowsPath };
 
 /**
  * True when `cmdline` belongs to a shellper launched by the Tower instance

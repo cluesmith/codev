@@ -20,14 +20,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
 import { isWindows } from '../../lib/platform.js';
+import { hostPaths } from '../../lib/platform/host-paths.js';
 import { killSessionTree } from '../../lib/process-tree.js';
 import { listProcessCensus } from './process-census.js';
 import {
   SHELLPER_MARKER,
   readJsonStringField,
-  sameWindowsPath,
   shellperArgvText,
   shellperTeardownIdentities,
 } from '../../terminal/shellper-cmdline.js';
@@ -62,14 +61,6 @@ export function cmdlineHoldsSession(cmdline: string, sessionId: string): boolean
   return needles.some((needle) => cmdline.includes(needle));
 }
 
-/** Canonicalize a path for comparison; fall back to the input when realpath fails. */
-function realpathOrSelf(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
-}
 
 
 export interface ArchitectIdentity {
@@ -96,13 +87,7 @@ export function isOwnArchitectShellper(cmdline: string, identity: ArchitectIdent
 
   const cfgCwd = readJsonStringField(cmdline, 'cwd');
   if (!cfgCwd) return false;
-  if (isWindows()) return sameWindowsPath(cfgCwd, identity.workspacePath);
-  const wanted = new Set([identity.workspacePath, realpathOrSelf(identity.workspacePath)]);
-  const got = new Set([cfgCwd, realpathOrSelf(cfgCwd)]);
-  const cwdMatches = [...got].some((g) => wanted.has(g));
-  if (!cwdMatches) return false;
-
-  return true;
+  return hostPaths().sameDirectory(cfgCwd, identity.workspacePath);
 }
 
 /**

@@ -46,6 +46,7 @@ import { isWindows } from '../../lib/platform.js';
 import { containsBuildersSegment } from '../../agent-farm/utils/builder-worktree-identity.js';
 import { findOnHostPath, spawnableOnHost } from '../../lib/shell-launch.js';
 import { commandLaunch } from '../../lib/platform/command-launch.js';
+import { hostPaths } from '../../lib/platform/host-paths.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -338,11 +339,8 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): Buil
     }
   } else if (projectDirs.length > 1) {
     // Multiple project dirs — try to disambiguate from worktree directory name
-    let cwd = process.cwd();
-    if (isWindows()) {
-      // The matchers below are written against '/' separators.
-      cwd = cwd.replace(/\\/g, '/');
-    }
+    // The matchers below are written against '/' separators.
+    const cwd = hostPaths().toForwardSlashes(process.cwd());
     // Tracker-key worktrees (#1740): .builders/pir-ENG-123[-slug]
     const keyMatch = cwd.match(new RegExp(`\\.builders/[a-z]+-(${ISSUE_KEY_SOURCE})(?:-|/|$)`, 'i'));
     const builderMatch = cwd.match(/\.builders\/[^/]*?-?(\d+)-([^/]+)/);

@@ -22,7 +22,7 @@ import { isPortConflictError } from './db/errors.js';
 // must agree on its exact form, so both layers normalize through this one leaf
 // helper (Bugfix #826 iter-6). Aliased to `canonicalize` for the local callsites.
 import { normalizeWorkspacePath as canonicalize, workspaceKey } from './utils/workspace-path.js';
-import { isWindows } from '../lib/platform.js';
+import { hostPaths } from '../lib/platform/host-paths.js';
 
 /**
  * Derive a builder's owning workspace from its worktree path (Issue #1118).
@@ -37,13 +37,9 @@ function deriveWorkspaceFromWorktree(worktree: string): string {
   // lastIndexOf, not indexOf: the workspace is the prefix before the FINAL
   // `/.builders/` — robust when the path itself contains an earlier `.builders`
   // segment (e.g. a builder worktree nested under another).
-  const marker = '/.builders/';
-  let idx = worktree.lastIndexOf(marker);
-  if (isWindows()) {
-    // A native Windows worktree uses `\` (or a mix): normalize the separators
-    // for the search only; the slice keeps the path as it was spelled.
-    idx = worktree.replace(/\\/g, '/').lastIndexOf(marker);
-  }
+  // On Windows either separator (or a mix) counts; the slice keeps the path as
+  // it was spelled.
+  const idx = hostPaths().lastBuildersMarkerIndex(worktree);
   let root: string;
   if (idx >= 0) {
     root = worktree.slice(0, idx);

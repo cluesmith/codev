@@ -6,7 +6,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { isWindows } from './platform.js';
+import { hostPaths } from './platform/host-paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -95,8 +95,7 @@ export const USER_DATA_PATTERNS = [
  * are returned as given.
  */
 function toPatternForm(relativePath: string): string {
-  if (isWindows()) return relativePath.split('\\').join('/');
-  return relativePath;
+  return hostPaths().toForwardSlashes(relativePath);
 }
 
 /**

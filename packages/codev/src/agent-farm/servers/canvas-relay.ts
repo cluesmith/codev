@@ -19,8 +19,6 @@
  */
 
 import type * as http from 'node:http';
-import * as path from 'node:path';
-import * as fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type {
   CanvasCommand,
@@ -31,8 +29,7 @@ import type {
   TraversalCommand,
 } from '@cluesmith/codev-types';
 import { parseJsonBody } from '../utils/server-utils.js';
-import { workspaceKey } from '../utils/workspace-path.js';
-import { isWindows } from '../../lib/platform.js';
+import { hostPaths } from '../../lib/platform/host-paths.js';
 
 // Wire names — the canonical contract lives in @cluesmith/codev-types
 // (CANVAS_COMMAND_ROUTE / CANVAS_VIEWS_ROUTE / CANVAS_COMMAND_EVENT) and must match these. They
@@ -157,24 +154,9 @@ export function shutdownCanvasRelay(): void {
  * exist, and finally to a plain absolute path.
  */
 function canonicalPath(raw: string): string {
-  if (isWindows()) {
-    // Spec 1658 (M6): Windows paths are case-insensitive, and the VS Code host (`c:\`)
-    // and the CLI controller (`C:\`) spell one directory differently, so both sides
-    // compare the canonical spelling (on-disk case, upper-case drive letter).
-    if (fs.existsSync(raw)) {
-      return workspaceKey(raw);
-    }
-    return path.join(workspaceKey(path.dirname(raw)), path.basename(raw));
-  }
-  try {
-    return fs.realpathSync(raw);
-  } catch {
-    try {
-      return path.join(fs.realpathSync(path.dirname(raw)), path.basename(raw));
-    } catch {
-      return path.resolve(raw);
-    }
-  }
+  // On Windows (Spec 1658, M6) the canonical spelling (on-disk case, upper-case
+  // drive letter), since the VS Code host and the CLI spell one directory differently.
+  return hostPaths().canonicalFilePath(raw);
 }
 
 /** Drop views whose lease has lapsed. Called on every access, so no timer is needed. */

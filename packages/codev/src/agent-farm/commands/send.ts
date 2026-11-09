@@ -9,7 +9,7 @@
 
 import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
-import { dirname, join, win32 } from 'node:path';
+import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import { openDatabase } from '../../lib/sqlite.js';
 import { rethrowIfNativeLoadFailure } from '../../lib/native-deps.js';
@@ -20,7 +20,7 @@ import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath, workspaceKey } from '../utils/workspace-path.js';
 import { matchBuilderRow, parseBuilderWorktreePath, type BuilderWorktreeRow } from '../utils/builder-worktree-identity.js';
 import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
-import { isWindows } from '../../lib/platform.js';
+import { hostPaths } from '../../lib/platform/host-paths.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
@@ -55,10 +55,7 @@ function identityPath(): string {
  * UNC root and either separator are accepted there.
  */
 function namesAbsoluteBuilderWorktree(value: string): boolean {
-  if (isWindows()) {
-    return win32.isAbsolute(value) && parseBuilderWorktreePath(value) !== null;
-  }
-  return /^\/.+\/\.builders\/[^/]+/.test(value);
+  return hostPaths().isAbsoluteBuilderWorktree(value);
 }
 
 /**
