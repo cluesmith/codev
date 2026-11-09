@@ -961,6 +961,378 @@ a global install with no toolchain, and the optional IDE dry run (15a with the r
 The builder supplies a checklist with expected results;
 results are recorded in the review.
 
+## Amendment 2 (2026-11-10): platform-seam refactor at the pr gate
+
+**Status.** Owner-directed at the pr gate, relayed via the builder, architect-approved for scope
+(ruling 2026-11-09). Plan approval is a human decision: no phase below starts before the owner's
+go word on this amendment, relayed by the architect. Porch stays in the review phase with the pr
+gate requested (no rollback, architect ruling E); these phases are recorded here and in the
+review's "Scope change at the pr gate" section, not in the machine-readable phase list above.
+
+**Owner direction (verbatim):** "we won't merge it like this, refactor properly first".
+
+### A2.1 Why
+
+On `84f1f75a1` the PR adds 103 `isWindows()` calls in 47 product files (`main` has none). They
+are mostly one-line forks, but they cluster: the same fork for "run a shell string" repeats at five
+sites, `session-manager.ts` carries nine, and the macOS/Linux behaviour of several operations is
+now readable only as the `else` of a Windows branch. The refactor puts each platform-dependent
+operation behind a capability with a POSIX and a Windows implementation, so shared code calls an
+operation instead of choosing a platform.
+
+### A2.2 Rules (architect ruling B, restated as acceptance criteria)
+
+1. **No behaviour change on any platform.** The POSIX implementation is today's macOS/Linux code
+   moved verbatim; the Windows implementation is the existing Windows modules behind adapters, not
+   rewritten. A behaviour change found while moving is a finding (M9+), recorded with cause and
+   site and reported to the architect; it is not fixed in the move.
+2. **Per-capability interfaces**, one file each under `packages/codev/src/lib/platform/`. The
+   capability is the unit of review and of test.
+3. **Selection** from `hostPlatform()` through one accessor per capability; implementations are
+   frozen objects built once. Product code never sets the platform.
+4. **Test seam:** explicit injection where a module already takes deps (process-tree, census, husk
+   sweep, workspace-path ops, worktree removal fs, Windows stop deps); one scoped test helper for
+   the rest (A2.6).
+5. **Server/client isolation holds:** nothing under `packages/sdk` imports the seam;
+   `executable.ts` keeps `platform` as a parameter.
+6. **A capability with a single call site gets no interface.** It stays a direct call and is
+   listed in A2.5 with the reason. One-offs (doctor sections, messages, install checks) stay plain
+   `isWindows()`.
+7. Role names, not shape names (no `WithX`, no `Impl` beyond the `.posix` / `.windows` files); no
+   ternaries; no `void` on fire-and-forget.
+8. The target is **no platform branch inside a shared capability call site**, not a number.
+
+### A2.3 File layout
+
+`lib/platform.ts` (the seam: `hostPlatform`, `isWindows`, System32 paths) stays where it is, so its
+95 importers (52 product files) do not move. The capabilities sit beside it:
+
+```
+packages/codev/src/lib/platform/
+  command-launch.ts           interface CommandLaunch + types; accessor commandLaunch()
+  command-launch.posix.ts     today's POSIX branches, verbatim
+  command-launch.windows.ts   adapters over shell-launch.ts, git-bash.ts, msys-path.ts, pty-command.ts
+  host-paths.ts               interface HostPaths; accessor hostPaths()
+  host-paths.posix.ts
+  host-paths.windows.ts       adapters over workspace-path.ts canonicalization, shellper-cmdline sameWindowsPath
+  processes.ts                interface Processes; accessor processes()
+  processes.posix.ts
+  processes.windows.ts        adapters over process-census, process-tree killWindowsTree, port, windows-job
+  shellper-transport.ts       interface ShellperTransport; accessor shellperTransport()
+  shellper-transport.posix.ts
+  shellper-transport.windows.ts  adapters over shellper-endpoint.ts pipe/secret code
+```
+
+Each accessor has the same shape:
+
+```ts
+export function processes(): Processes {
+  if (isWindows()) {
+    return windowsProcesses;
+  }
+  return posixProcesses;
+}
+```
+
+That `isWindows()` inside each accessor is the selection point (four in total).
+
+### A2.4 Capabilities and signatures
+
+Signatures name existing types where they exist (`Launch`, `SpawnableCommand`, `PtyCommand`,
+`ProcessCensusEntry`, `CensusReadOptions`, `KillSessionTreeOptions`, `KillSessionTreeResult`,
+`TreeSnapshot`, `WaitForTreeExitOptions`, `StartTimeLookup`, `ReconnectAuth`, `ShellperAuth`). A
+comment on each method names the call sites that justify it.
+
+**1. `CommandLaunch`** (about 30 sites)
+
+```ts
+/** The POSIX shell a shell string runs under; Windows always uses the resolved Git Bash. */
+export interface PosixShell { command: '/bin/sh' | '/bin/bash'; flag: '-c' | '-lc' }
+
+export interface ShellStringContext {
+  workspaceRoot?: string;            // locates the windows.gitBashPath override
+  posixDetached?: boolean;           // porch runCheck: POSIX is detached for the group kill
+  posixCollapseWhitespace?: boolean; // porch runCheck: POSIX re-joins split(/\s+/) (kept verbatim, see A2.9)
+}
+
+export interface ShellExecOptions {
+  cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number; maxBuffer?: number;
+  workspaceRoot?: string;
+  msysPathEnvKeys?: readonly string[]; // forge: env values Windows rewrites to MSYS form
+}
+
+export interface CommandLaunch {
+  // runStreaming (utils/shell.ts:57), porch runCheck (checks.ts:83)
+  spawnShellString(script: string, options: SpawnOptions, context: ShellStringContext): ChildProcess;
+  // forge executeForgeCommandDetailed (forge.ts:411)
+  execShellString(script: string, options: ShellExecOptions): Promise<{ stdout: string; stderr: string }>;
+  // forge executeForgeCommandSync (forge.ts:499)
+  execShellStringSync(script: string, options: ShellExecOptions): string;
+  // devCommandLaunch (dev.ts:129), startShellSession (spawn-worktree.ts:1287)
+  shellStringArgv(script: string, posixShell: PosixShell, workspaceRoot?: string): Launch;
+  // builderScriptLaunch (spawn-worktree.ts:1140, 2 callers), forge .sh scripts
+  scriptFileArgv(scriptPath: string, args: readonly string[], workspaceRoot?: string): Launch;
+  // spawnOnHost (11 callers), spawnSyncOnHost (2), spawnableOnHost (6, incl. tower.ts:363,
+  // consult agyRespondsToVersion, ide-version ideServerSpawnable, ide-server spawn)
+  spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess;
+  spawnSync(command: string, args: readonly string[], options: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string>;
+  toSpawnable(command: string, args: readonly string[], env?: NodeJS.ProcessEnv): SpawnableCommand;
+  // consult:438, doctor:666, import:325, bench:222, utils/shell.ts:152 (async wrapper)
+  commandExists(name: string): boolean;
+  // ptyCommand: pty-session.ts:284, shellper-main.ts:108
+  ptyCommand(command: string, args: string[], env: Record<string, string | undefined>): PtyCommand;
+  // pty-manager.ts:82 default shell, tower-routes.ts:3546 workspace shell, defaultInteractiveShell (3)
+  interactiveShell(configured: string | undefined, workspaceRoot?: string): Launch;
+  // pty-manager.ts:82 base env, ide-version.ts:104 node-first PATH
+  baseTerminalEnv(env: NodeJS.ProcessEnv): Record<string, string>;
+  withNodeFirstOnPath(env: Record<string, string>, nodeDir: string): Record<string, string>;
+}
+```
+
+**2. `HostPaths`** (about 25 sites)
+
+```ts
+export interface HostPaths {
+  // normalizeWorkspacePath (38 callers), state.ts:42 canonicalize, canvas-relay
+  canonicalize(path: string): string;
+  // workspaceKey (42 callers). POSIX: identity (NOT canonicalize; see A2.9)
+  key(path: string): string;
+  // sameWindowsPath (3), architect-session-holder:99, cleanup:159
+  same(a: string, b: string): boolean;
+  // host-paths isHostPathUnder (tower-utils x2), isHostPathAtOrUnder (doctor, tower-terminals x2)
+  isUnder(candidate: string, dir: string): boolean;
+  isAtOrUnder(candidate: string, dir: string): boolean;
+  // expandHomePath (3); home stays a parameter so tests keep injecting it
+  expandHome(input: string, home: string): string;
+  // lastPathSegment (4), endsWithHostSeparator (1, kept beside it: same separator rule)
+  lastSegment(input: string): string;
+  endsWithSeparator(input: string): boolean;
+  // templates toPatternForm (2), state.ts:42 search copy, consult:341
+  toForwardSlashes(relative: string): string;
+  // parseBuilderWorktreePath (5), containsBuildersSegment (8), notifications:39, send:58
+  splitBuilderWorktree(path: string): BuilderWorktreeRef | null;
+  hasBuildersSegment(path: string): boolean;
+  isAbsoluteWorktreeArgument(value: string): boolean;
+}
+```
+
+The Windows canonicalization cache stays in the Windows implementation (it owns
+`resetWorkspacePathCacheForTests`). `workspace-path.ts` keeps its exported names as thin wrappers
+over `hostPaths()`, so its 80 call sites do not change in this phase.
+
+**3. `Processes`** (about 30 sites)
+
+```ts
+export interface Processes {
+  // listProcessCensus (13 callers). POSIX returns [] on failure; Windows rejects (kept)
+  census(read?: CensusReadOptions): Promise<ProcessCensusEntry[]>;
+  // getProcessStartTime (session-manager x3, husk sweep). Owns the darwin/linux switch at
+  // session-manager.ts:1746, which today branches on process.platform, not isWindows()
+  startTime(pid: number): Promise<number | null>;
+  // startTimeLookupFor (4)
+  startTimeLookup(census: readonly ProcessCensusEntry[]): StartTimeLookup;
+  // getProcessesOnPort (6), getProcessesOnPortAsync (3). POSIX async stays sync lsof, never null
+  listeningPids(port: number): number[];
+  listeningPidsAsync(port: number): Promise<number[] | null>;
+  // killSessionTree (12). POSIX signals synchronously before the promise settles (kept)
+  killTree(rootPid: number, opts?: KillSessionTreeOptions): Promise<KillSessionTreeResult>;
+  // waitForTreeExit (3)
+  waitForTreeExit(rootPid: number, snapshot: TreeSnapshot, timeoutMs: number, opts?: WaitForTreeExitOptions): Promise<boolean>;
+  // isConsoleHostEntry (husk sweep); shellperArgvText (architect-session-holder)
+  isConsoleInfrastructure(entry: ProcessCensusEntry): boolean;
+  commandLineText(cmdline: string): string;
+  // orphanSweepBudgetMs, defaultHealthProbeBudgetMs: the census cost added to a base budget (POSIX 0)
+  readonly censusCostMs: number;
+}
+```
+
+`process-tree.ts`, `process-census.ts` and `shellper-husk-sweep.ts` keep their injected `census`,
+`kill`, `taskkill`, `terminateJob`, `getStartTime` options: the POSIX and Windows implementations
+call them with their own defaults, so existing tests keep injecting.
+
+**4. `ShellperTransport`** (about 20 sites; moved last)
+
+```ts
+export interface SpawnPreparation {
+  secret: string | null;                   // POSIX null
+  env: Record<string, string>;             // Windows: SHELLPER_SECRET_ENV
+  configFields: Record<string, unknown>;   // Windows: socketDir, sessionId, deferPty
+}
+
+export type ReconnectAdmission =
+  | { admitted: true; secret: string | null; shellperSessionId: string }
+  | { admitted: false; refusal: string | null }; // null: POSIX "return null"; string: Windows refuse(reason)
+
+export interface ShellperTransport {
+  // createSession:392
+  resolveEndpoint(socketDir: string, sessionId: string): string;
+  // createSession:403, reconnect suffix
+  logPath(endpoint: string, socketDir: string, sessionId: string): string;
+  // createSession:410-435 (secret mint, env, config fields)
+  prepareSpawn(socketDir: string, sessionId: string): SpawnPreparation;
+  // createSession:479
+  waitReady(endpoint: string, timeoutMs?: number): Promise<void>;
+  // canReachShellper:672
+  mayExist(endpoint: string): boolean;
+  // cleanupEndpoint:1313, shellper-main:218 and :280
+  removeStale(endpoint: string): void;
+  // isShellperProcessCurrent:658 (POSIX start time within PID_REUSE_TOLERANCE_MS; Windows true)
+  isProcessCurrent(pid: number, recordedStartTime: number): Promise<boolean>;
+  // reconnectSession:721-752, the pre-connect gate only (steps P1-P3 / W1-W2)
+  admitReconnect(input: { pid: number; startTime: number; endpoint: string; sessionId: string; auth?: ReconnectAuth }): Promise<ReconnectAdmission>;
+  // reconnectSession:765 (POSIX null; Windows a refusal reason on ENOENT)
+  connectErrorRefusal(err: unknown, endpoint: string): string | null;
+  // shellper-main:206 (POSIX mkdir + removeStale, returns null; Windows requires the secret)
+  prepareListen(endpoint: string, secret: string | undefined, sessionId: string | undefined): ShellperAuth | null;
+  // readShellperInfo:1356
+  readonly spawnInfoResolvesOnData: boolean;
+  // shellper-process listen:308 (POSIX chmod 0600 on the socket file)
+  afterListen(endpoint: string): void;
+  // attach.ts:146 (POSIX ~/.codev/run/*.sock scan; Windows none)
+  attachFallback(runDir: string): string | null;
+}
+```
+
+Stays inline because it depends on data, not platform: `clientAuthFor`, the `this.auth` and
+`secret !== null` checks in `ShellperClient` / `ShellperProcess` (POSIX HELLO and WELCOME bytes stay
+identical), the `ShellperIdentityError` to refusal mapping, and the row helpers in
+`tower-terminals.ts`. `reconnectSession` keeps steps 1-9 shared; only the gate and the ENOENT clause
+leave it.
+
+**Links and Tower lifecycle: no interface** (rule 6). `createWorktreeLink` already holds the one
+link branch for its four calls; worktree removal has one call site (`cleanup.ts:246`); Tower start
+(`tower.ts:318`) and stop (`tower.ts:442`) have one caller each and already call dedicated
+`tower-start-windows.ts` / `tower-stop-windows.ts` modules. They stay direct calls.
+
+### A2.5 What stays as written
+
+**Raw `process.platform` checks (10, all stay):** `packages/sdk/src/node/executable.ts` (7: compares
+the `platform` parameter, the sdk cannot import the seam); `agent-farm/utils/worktree-write-guard.ts`
+(2: inside the generated self-contained `.cjs` hook text); `lib/pty-command.ts:23`
+(`hostPlatform() !== 'win32'`, moves into `CommandLaunch.ptyCommand` and disappears). The
+extension's `fleet-order.ts` and `clipboard-image.ts` take `platform` as a parameter (a different
+package). The darwin/linux switch in `getProcessStartTime` moves into `Processes.startTime`.
+
+**`isWindows()` one-offs that stay (single site or not a capability):**
+
+| Site | Why it stays |
+|---|---|
+| `doctor.ts:1234`, `:1741`, `:1789` | Windows doctor sections and messages |
+| `native-deps.ts:52`, `:77` | Windows-only explanation of a native-binding load failure |
+| `init.ts:162`, `adopt.ts:224` | config default written at install time |
+| `bench.ts:45`, `:67` | host CPU/RAM description, one caller each |
+| `tower.ts:318` | CIM launch outside a session's job (Windows job containment) |
+| `tower.ts:442` | Tower stop, one caller, already a dedicated Windows module |
+| `tower.ts:593` | log follow (`tail -f` vs `followFile`), one caller |
+| `tower-server.ts:585`, `:588`, `:761` | boot: in-session warning, job helper start, Windows row canonicalization |
+| `tower-routes.ts:578` | `/health` diagnostic field |
+| `tower-routes.ts:1036` | `windowsShellRequest`, one site, POSIX no-op |
+| `cleanup.ts:246`, `worktree-links.ts:109`, `:253` | links (no interface, above) |
+| `session-manager.ts:845` | `killSession`: POSIX kills one pid (SIGTERM, 5 s, SIGKILL), not the group; one caller |
+| `session-manager.ts:1084` | logging when the sweep is disabled |
+| `checks.ts:122` | porch signal relay ordering after teardown |
+| `ide-server.ts:120`, `:373`, `:433`, `ide-version.ts:209` | IDE server stop/liveness, each one site with its own seams |
+| `ide.ts:122` | one site; its POSIX PATH scan differs from `which` |
+| `consult/index.ts:1021` | `command -v agy`, one site |
+| `cli-entry.ts:14`, `reset/context.ts:500`, `claude-session-discovery.ts:40` | entrypoint identity, executable-name parsing, Claude's own directory naming |
+| `tower-utils.ts:111`, `tower-terminals.ts:675`, `:273` | the two temp-root checks disagree on POSIX today (A2.9); home default |
+| `architect-session-holder.ts:347` | logging when the snapshot fails |
+
+Expected result: the four accessors plus about 35 one-offs above, none of them inside a shared call
+site of a capability. The count is an outcome, not the target.
+
+### A2.6 Test seam
+
+- Modules with injected deps keep them; their tests do not change.
+- One scoped helper replaces direct `setHostPlatformForTests` / `resetHostPlatformForTests` pairs:
+  `useHostPlatform(platform)` in `packages/codev/src/__tests__/helpers/host-platform.ts`, which
+  registers the set in `beforeEach` and the reset in `afterEach`. The underlying override in
+  `lib/platform.ts` keeps its test-runner guard; product code never calls it (verified: 0 product
+  callers today).
+- The 43 test files that call the pair migrate in the phase whose capability they exercise; any left
+  migrate in A2-4.
+- Each capability gets a contract test run against both implementations with fakes, plus the
+  existing real-host `*.windows.test.ts` files unchanged.
+
+### A2.7 Phases
+
+| Phase | Scope | Moves | Gate scenarios touched |
+|---|---|---|---|
+| A2-1 | `lib/platform/` scaffold, `useHostPlatform`, **CommandLaunch** | utils/shell, dev, spawn-worktree launches, porch runCheck, forge exec, spawnOnHost family, which-probes, ptyCommand, interactive shell, base env | 3 (shell), 8, 9, 10, 13, 15, 15a |
+| A2-2 | **HostPaths** | workspace-path, host-paths, templates, builder-worktree identity, state, canvas-relay, notifications, send | 6b, 9, 12, M6, M7, M8 |
+| A2-3 | **Processes** | census, start time, ports, killTree, waitForTreeExit, husk sweep lookups, budgets | 3, 4, 5, 6, 6a, 7, 15a |
+| A2-4 | Residue: links and Tower direct calls tidied (no interface), remaining test-helper migration, `arch.md` platform-layer section rewritten for the capabilities | worktree-links, cleanup, tower start/stop call sites | 3, 4, 6a, 11 |
+| A2-5 | **ShellperTransport** (riskiest, last) | session-manager gate/endpoint/log/spawn prep, shellper-main listen prep, shellper-process chmod, attach fallback | 3, 4, 5, 7, 12, 14, G |
+
+`main` is merged before A2-1 and again before A2-5 (session-manager and tower-terminals move on
+`main`). Each phase is its own commit series with `[Spec 1658][Phase: A2-n]` in the subject.
+
+**Per phase:**
+1. Moved-code proof: `git diff --color-moved=dimmed-zebra origin/main...HEAD` on the moved files,
+   plus, for `session-manager.ts` in A2-5, a per-function body comparison of every moved POSIX
+   block against `main`.
+2. Full local suite (codev, vscode, sdk, core), build, `check-types`.
+3. POSIX CI (all required checks) and a Windows dispatch with `suites=true` and the purpose
+   announced on the PR.
+4. CMAP (3-way) on the phase.
+5. Report the full head SHA and run ids to the architect, who reads each phase as it lands.
+
+### A2.8 Re-verification (replaces the review's current re-check list)
+
+**Windows manual pass by the owner, once, on the final head.** Proposed list (the owner trims it):
+
+| Scenario | Why | Capability |
+|---|---|---|
+| 3 Tower + terminals | start, PowerShell shell, stop/restart | launch, processes, transport |
+| 4 Persistence, at least 2 launchers | reconnect identity, same PID | transport, processes |
+| 6 / 6a Kill, cleanup, dev stop | no survivors, clean worktree removal | processes, links |
+| 9 Spawn to PR (6b folded in) | Git Bash builder, porch, forge | launch, paths |
+| 11 Developer Mode on and off | symlink vs junction / hard link | links |
+| 12 `afx send` | delivery and hold | transport, paths |
+| 13 Consult | 3-way from a Windows builder | launch |
+| 15 VS Code extension (branch vsix) | Tower start, spawn, terminal, reveal | launch, paths |
+| 15a IDE | start, Open IDE folder, stop | launch, processes, paths |
+| M6 | one workspace across `c:` / `C:` | paths |
+| M7 | Open IDE folder from the dashboard | paths (template) |
+| M8 | Start, Stop, Restart, + Create, copy from the dashboard | template |
+
+CI only (suites, targeted `windows.test`, probe, install guard): 1, 2, 5, 7, 8, 10, 14.
+
+**macOS/Linux smoke, run by the builder on an isolated Tower** (non-default port, isolated
+`CODEV_AGENT_FARM_DIR` and `SHELLPER_SOCKET_DIR`, as ruled for Phase 6), with evidence captured:
+
+| Row | Check |
+|---|---|
+| S1 | Upgrade with a live builder: start a builder on the published 3.3.7 in a scratch prefix, install the branch build, restart Tower, builder reconnects with replay and the same PID |
+| S2 | Dashboard Start, Stop, Restart, + Create, copy path, Open IDE |
+| S3 | `afx spawn`, `afx send` (idle and held), `afx cleanup` with no survivors |
+
+macOS runs locally; Linux is covered by the Ubuntu CI legs (no Linux host here). The owner's
+live-upgrade check on a daily machine remains the owner's option.
+
+**Reviews:** PR CMAP and the architect's high-tier integration review repeat on the final head; the
+pr gate word is asked once, on that head.
+
+### A2.9 Known divergences found by the inventory (preserved verbatim; reported as findings)
+
+Recorded so the moves keep them, not fix them (ruling F). The architect rules on each.
+
+- **M9** `db/consolidate.ts:58`: the legacy `state.db` consolidation finds a builder's workspace by
+  `/.builders/` only, so a Windows worktree row falls back to the database's own workspace (usually
+  the right answer). Not an `isWindows()` site; a latent gap.
+- POSIX porch `runCheck` collapses runs of whitespace (it splits on `/\s+/` and Node re-joins with
+  one space under `shell: true`), so quoted runs of spaces change; Windows passes the string intact.
+- POSIX `which` probes differ: consult and doctor run `` `which ${cmd}` `` through a shell without
+  sanitizing; `utils/shell.ts` sanitizes and spawns `which` directly; bench uses `stdio: 'ignore'`.
+  `commandExists` keeps the per-site POSIX forms until the architect rules on unifying them.
+- `isTempDirectory` (tower-utils) and `isTemporaryWorkspace` (tower-terminals) use different POSIX
+  roots and boundaries.
+- `canvas-relay` falls back differently for a missing file on each platform.
+- `worktree-links.ts:253`'s POSIX side is unreachable in production (its one caller runs only on
+  Windows).
+- POSIX `workspaceKey` is identity while callers pre-apply `realpathSync`; folding `key` into
+  `canonicalize` would change POSIX map keys (#1870 territory), so they stay separate methods.
+
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |

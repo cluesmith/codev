@@ -103,6 +103,18 @@ the owner's Windows machine, which CI cannot cover.
 - [x] DEPENDENCIES.md (both trees) presents native Windows and WSL 2 with limitations; Linux/WSL
   `build-essential` + `python3` stated (Phase 11).
 
+### Scope change at the pr gate (2026-11-10)
+
+The owner directed a refactor before merge: "we won't merge it like this, refactor properly
+first". The architect approved it for scope (2026-11-09) and lifted the M8 in-PR limit. The PR
+added 103 `isWindows()` calls in 47 product files; the platform-dependent operations move behind
+per-capability interfaces (command launch, host paths, processes, shellper transport) with the
+POSIX code moved verbatim and the existing Windows modules behind adapters. Plan Amendment 2
+carries the inventory, signatures, phases A2-1 to A2-5 and the re-verification plan. Porch stays
+in the review phase with the pr gate requested (no rollback). No phase starts before the owner's
+go word on the amendment. The re-check list below is superseded by Amendment 2's A2.8 table once
+the refactor lands.
+
 ### Open at the PR gate
 
 1. Claude ConPTY fixtures committed to `packages/codev/src/agent-farm/__tests__/fixtures/gate/conpty/`
@@ -121,8 +133,9 @@ the owner's Windows machine, which CI cannot cover.
      earlier Marketplace-extension run does not count), 15a and 3 pass. The re-check found M7.
    - M7 re-check on `7f776ca99` (reported 2026-11-10): Open IDE from the dashboard opens the
      workspace folder. Pass. The same check found M8 (dashboard Start and Stop).
-   - Still to do, on the M8 head: Start, Stop, Restart, + Create and copy path from the dashboard,
-     plus one more Open IDE click. The ConPTY fixtures (item 1) remain open.
+   - M8 on `84f1f75a1` (reported 2026-11-10): Start and Stop from the dashboard work. Restart,
+     + Create, copy path and Open IDE not yet reported; they fold into the A2.8 pass.
+   - The ConPTY fixtures (item 1) remain open.
    - Findings, under "Manual pass findings": M1 (resolved: a machine npm setting, not a defect),
      M2 (double cursor, cosmetic follow-up), M3 (uninstall while Tower runs, docs follow-up), M4
      (codev-ide launcher window, fixed in codev-ide#66; console noise benign), M5 (stale tower
