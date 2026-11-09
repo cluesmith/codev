@@ -48,33 +48,68 @@ describe('reconcileComposition', () => {
 });
 
 describe('TextareaMirror', () => {
-  it('keeps the PTY line equal to the textarea across appends and replaces', () => {
+  it('keeps the PTY line equal to the textarea across appends, replaces and deletes', () => {
     const mirror = new TextareaMirror();
     let pty = '';
-    for (const value of ['u', 'un', 'under ', 'under ciecu', 'under circumstances ', 'under circumstances. ']) {
-      pty = applyToLine(pty, mirror.sync(value));
+    for (const value of ['u', 'un', 'under ', 'under ciecu', 'under circumstances ', 'under circumstances. ', 'under circ']) {
+      const { edit, diverged } = mirror.sync(value);
+      pty = applyToLine(pty, edit);
       expect(pty).toBe(value);
+      expect(diverged).toBe(false);
     }
   });
 
-  it('after a rebase, never deletes text the PTY did not get from the textarea', () => {
+  it('a soft backspace after other input still deletes, as stock xterm does', () => {
     const mirror = new TextareaMirror();
-    // Context menu: xterm put the selection "selected" into the textarea.
-    mirror.rebase('selected');
-    // Appending sends only the new text.
-    expect(mirror.sync('selected x')).toBe(' x');
-    // Typing over the selection deletes only what we sent, then sends the rest.
-    expect(mirror.sync('y')).toBe(`${DEL.repeat(2)}y`);
-    // The baseline is gone now, so later edits are ordinary replaces.
-    expect(mirror.sync('yes')).toBe('es');
-    expect(mirror.sync('ye')).toBe(DEL);
+    mirror.sync('src/comp');
+    // Tab completion (or Esc, an arrow, a hardware key) reached the PTY.
+    mirror.afterForeignInput('src/comp');
+    expect(mirror.sync('src/com')).toEqual({ edit: DEL, diverged: false });
   });
 
-  it('rebases to an empty textarea after Enter clears it', () => {
+  it('a replace reaching back past other input does not delete that input, and says it diverged', () => {
+    const mirror = new TextareaMirror();
+    mirror.sync('src/comp');
+    mirror.afterForeignInput('src/comp');
+    // Typed after the Tab: replacing only that is an ordinary replace.
+    expect(mirror.sync('src/compx')).toEqual({ edit: 'x', diverged: false });
+    expect(mirror.sync('src/compy')).toEqual({ edit: `${DEL}y`, diverged: false });
+    // Reaching back into "src/comp": only the post-Tab "y" can be deleted.
+    expect(mirror.sync('src/camp')).toEqual({ edit: `${DEL}amp`, diverged: true });
+    // The mirror follows the textarea from here on.
+    expect(mirror.sync('src/camps')).toEqual({ edit: 's', diverged: false });
+  });
+
+  it('text that never reached the PTY is never deleted and never resent', () => {
+    const mirror = new TextareaMirror();
+    // Context menu: xterm put the selection "selected" into the textarea.
+    mirror.detach('selected');
+    expect(mirror.sync('selected x')).toEqual({ edit: ' x', diverged: false });
+    // Typing over the selection deletes only what was sent, then sends the rest.
+    expect(mirror.sync('y')).toEqual({ edit: `${DEL.repeat(2)}y`, diverged: false });
+    expect(mirror.sync('yes').edit).toBe('es');
+    expect(mirror.sync('ye').edit).toBe(DEL);
+  });
+
+  it('a soft backspace over a detached selection sends nothing', () => {
+    const mirror = new TextareaMirror();
+    mirror.detach('selected');
+    expect(mirror.sync('')).toEqual({ edit: '', diverged: false });
+  });
+
+  it('a paste is accepted as sent, so autocorrecting it replaces it', () => {
+    const mirror = new TextareaMirror();
+    mirror.accept('teh');
+    const { edit, diverged } = mirror.sync('the ');
+    expect(applyToLine('teh', edit)).toBe('the ');
+    expect(diverged).toBe(false);
+  });
+
+  it('starts clean after Enter clears the textarea', () => {
     const mirror = new TextareaMirror();
     mirror.sync('hello');
-    mirror.rebase('');
-    expect(mirror.sync('next')).toBe('next');
+    mirror.afterForeignInput('');
+    expect(mirror.sync('next')).toEqual({ edit: 'next', diverged: false });
   });
 });
 
@@ -141,11 +176,54 @@ describe('attachImeInput', () => {
     expect(bridge.ownsKey(new KeyboardEvent('keydown', { key: 'Backspace', keyCode: 8 }))).toBe(false);
   });
 
-  it('does not send a native paste insert; xterm sends the paste itself', () => {
+  /** xterm's paste handler: it emits the text, clears the textarea, and the browser inserts it again. */
+  async function xtermPaste(text: string) {
+    bridge.noteForeignInput();
+    textarea.value = '';
+    await Promise.resolve();
+    edit(text, 'insertFromPaste');
+  }
+
+  it('does not resend the browser\'s own paste insert; xterm sends the paste itself', async () => {
     edit('hi ');
-    edit('hi pasted', 'insertFromPaste');
-    edit('hi pasted!', 'insertText');
+    await xtermPaste('pasted');
+    edit('pasted!', 'insertText');
     expect(emitted).toEqual(['hi ', '!']);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('autocorrecting pasted text replaces it on the PTY (no tehthe)', async () => {
+    await xtermPaste('teh');
+    edit('the ', 'insertReplacementText');
+    expect(emitted).toEqual([`${DEL.repeat(2)}he `]);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('a multi-line paste leaves the submitted lines alone', async () => {
+    await xtermPaste('ls\nteh');
+    edit('ls\nthe ', 'insertReplacementText');
+    expect(emitted).toEqual([`${DEL.repeat(2)}he `]);
+    edit('', 'deleteContentBackward');
+    expect(emitted.at(-1)).toBe(DEL.repeat(4));
+  });
+
+  it('a soft backspace after other input deletes at the cursor', async () => {
+    edit('src/comp');
+    bridge.noteForeignInput(); // a virtual Tab
+    await Promise.resolve();
+    edit('src/com', 'deleteContentBackward');
+    expect(emitted).toEqual(['src/comp', DEL]);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('a replace reaching back past other input fails loud and deletes nothing it should not', async () => {
+    edit('src/comp');
+    bridge.noteForeignInput();
+    await Promise.resolve();
+    edit('src/camp', 'insertReplacementText');
+    expect(emitted).toEqual(['src/comp', 'amp']);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(String(errorSpy.mock.calls[0][0])).toMatch(/cannot be retracted/);
   });
 
   it('a textarea rewritten outside an input event fails loud and resyncs', () => {
@@ -154,8 +232,20 @@ describe('attachImeInput', () => {
     edit('unexpected!', 'insertText');
     expect(errorSpy).toHaveBeenCalledTimes(1);
     expect(String(errorSpy.mock.calls[0][0])).toMatch(/textarea changed outside an input event/);
+    // The log carries lengths, never the user's command line.
+    expect(JSON.stringify(errorSpy.mock.calls[0])).not.toMatch(/hello|unexpected/);
     // Nothing deleted, nothing resent: only the new character goes out.
     expect(emitted).toEqual(['hello', '!']);
+  });
+
+  it('xterm clearing the textarea on blur is not a desync', () => {
+    edit('hello');
+    // xterm's blur listener, registered before the bridge's, clears the textarea.
+    textarea.value = '';
+    textarea.dispatchEvent(new FocusEvent('blur'));
+    edit('n', 'insertText');
+    expect(emitted).toEqual(['hello', 'n']);
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it('an undelivered edit fails loud and is not resent later', () => {
@@ -163,6 +253,7 @@ describe('attachImeInput', () => {
     edit('lost');
     expect(errorSpy).toHaveBeenCalledTimes(1);
     expect(String(errorSpy.mock.calls[0][0])).toMatch(/edit not delivered/);
+    expect(JSON.stringify(errorSpy.mock.calls[0])).not.toMatch(/lost/);
     deliver = true;
     edit('lost+');
     expect(emitted).toEqual(['lost', '+']);
@@ -191,6 +282,7 @@ describe('attachImeInput', () => {
   it('stops listening on dispose', () => {
     bridge.dispose();
     edit('a', 'insertText');
+    textarea.dispatchEvent(new FocusEvent('blur'));
     expect(emitted).toEqual([]);
   });
 });

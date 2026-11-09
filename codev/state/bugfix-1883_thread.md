@@ -93,3 +93,16 @@ The architect approved the extended fix with four conditions:
   - CI: new `web-browser` job.
 - Environment note: Node 26's built-in `localStorage` shadows jsdom's and breaks every Terminal component test locally (pre-existing, not ours). Run with `NODE_OPTIONS=--no-experimental-webstorage`. CI uses Node 20.
 - Pre-existing, out of scope: on touch devices the #517 exact-dup guard (always on for `pointer: coarse`) would drop a repeated hardware-keyboard key within 150 ms (iPad key repeat). To be raised as a separate issue.
+
+## 2026-11-09 — PR review (CMAP)
+
+- First round: gemini APPROVE, codex APPROVE, claude COMMENT. Claude verified each xterm assumption against the installed 5.5 source and raised five points. All fixed or documented:
+  1. **xterm clears the textarea on blur** (`_handleTextAreaBlur`), so every keyboard dismissal on a phone would have tripped the desync alarm. The bridge now follows the clear with a blur listener on the textarea. It is registered after xterm's, so it runs after the clear. The Playwright guard fails without it (`expectedLength: 6, actualLength: 0`).
+  2. **A sub-floor replace diverged silently.** Example: paste `teh`, autocorrect to `the `, PTY shows `tehthe `. The mirror now has two floors:
+     - `replaceFloor`: a replace can't reach past other input;
+     - `deleteFloor`: text that never reached the PTY can't be deleted.
+
+     A paste is *accepted* as already on the PTY, last line only, so autocorrecting it replaces it. A replace that does reach back past other input now fails loud.
+  3. **Soft backspace had no test.** It also turned up a real bug: with the single floor, a soft backspace right after any foreign input (a virtual Tab, an arrow) sent nothing. The delete-only case now sends one DEL per removed code point, bounded only by `deleteFloor`. Guarded at the unit, component and Playwright levels (`execCommand('delete')` after keydown 229).
+  4. iOS/WebKit is the least-verified path. Documented in the PR; the owner's real-device check is the real acceptance test.
+  5. The resync log now carries lengths, never the user's command line.

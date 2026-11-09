@@ -67,6 +67,19 @@ class MobileKeyboard {
     await this.commit(text);
   }
 
+  /**
+   * The keyboard's backspace. Chrome on Android sends keydown 229 and deletes
+   * through the IME; `execCommand('delete')` is the same deleteContentBackward
+   * edit through the browser's own editing pipeline.
+   */
+  async backspace(): Promise<void> {
+    const key = { windowsVirtualKeyCode: 229, key: 'Unidentified' };
+    await this.cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key });
+    await this.page.evaluate(() => document.execCommand('delete'));
+    await this.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    await this.page.waitForTimeout(20);
+  }
+
   /** The keyboard replaces the last `n` characters with no composition (autocorrect, smart punctuation). */
   async replaceTail(n: number, text: string): Promise<void> {
     await this.page.evaluate((count) => {
@@ -166,6 +179,27 @@ test('Enter submits exactly what was typed, and the next line starts clean', asy
   await expect.poll(async () => (await pty(page)).submitted).toEqual(['what have you done since we last spoke. ']);
   await keyboard.words('ok');
   await expectLine(page, 'ok ');
+});
+
+test('the keyboard\'s backspace deletes one character per press', async ({ page }) => {
+  await keyboard.compose('helo');
+  await keyboard.commit('helo');
+  await keyboard.backspace();
+  await keyboard.backspace();
+  await keyboard.insert('llo');
+  await expectLine(page, 'hello');
+  expect((await pty(page)).frames).toEqual(['h', 'e', 'l', 'o', '\x7f', '\x7f', 'llo']);
+});
+
+test('dismissing the keyboard and typing again is not a desync', async ({ page }) => {
+  await keyboard.words('hello');
+  // xterm clears its textarea on blur, outside any input event.
+  const ta = page.locator('.xterm-helper-textarea');
+  await ta.blur();
+  await ta.focus();
+  await keyboard.words('world');
+  await expect.poll(async () => (await pty(page)).line).toBe('hello world ');
+  expect(await textarea(page)).toBe('world ');
 });
 
 test.describe('desktop (fine pointer)', () => {

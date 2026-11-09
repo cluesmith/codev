@@ -199,6 +199,25 @@ describe('Terminal mobile IME replace (Issue #1883)', () => {
       expect(dataFrames()).toEqual(['see ', 'pasted', '!']);
     });
 
+    it('the keyboard\'s backspace deletes, also right after a virtual Tab', async () => {
+      keyboardEdit('src/comp');
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Tab' }));
+      await nextEvent();
+      xtermKey({ keyCode: 229, key: 'Unidentified' }, 'should-not-send');
+      keyboardEdit('src/com', 'deleteContentBackward');
+      keyboardEdit('src/co', 'deleteContentBackward');
+      expect(dataFrames()).toEqual(['src/comp', '\t', DEL, DEL]);
+    });
+
+    it('xterm clearing the textarea when the keyboard is dismissed is not a desync', () => {
+      keyboardEdit('hello ');
+      // xterm's own blur listener runs first and clears the textarea.
+      mockTextarea.value = '';
+      mockTextarea.dispatchEvent(new FocusEvent('blur'));
+      keyboardEdit('w', 'insertText');
+      expect(dataFrames()).toEqual(['hello ', 'w']);
+    });
+
     it('virtual Esc and Tab pass through, and a later replace never deletes past them', async () => {
       keyboardEdit('src/comp');
       fireEvent.pointerDown(screen.getByRole('button', { name: 'Tab' }));

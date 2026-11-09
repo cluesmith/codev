@@ -34,14 +34,33 @@ export function reconcileComposition(sent: string, committed: string): string {
   return DEL.repeat(a.length - p) + b.slice(p).join('');
 }
 
+export interface SyncResult {
+  /** Bytes to send to the PTY. */
+  edit: string;
+  /**
+   * The keyboard replaced text that reached the PTY before some other input.
+   * That text cannot be retracted, so the PTY line no longer matches.
+   */
+  diverged: boolean;
+}
+
 /**
- * What the PTY holds of the textarea's text. The first `floor` code points of
- * `text` did not reach the PTY from the textarea (they were there before a
- * rebase), so no DEL may reach them: deleting there would hit unrelated input.
+ * What the PTY holds of the textarea's text, counted in code points.
+ *
+ * - Below `replaceFloor`, other input reached the PTY after the text (a key,
+ *   a virtual key, a paste). A replace cannot reach back past it, because its
+ *   DELs would hit that input instead. A soft backspace still deletes: the
+ *   user is deleting what the line shows at the cursor, as stock xterm does.
+ * - Below `deleteFloor`, the text never reached the PTY at all, for example
+ *   the selection xterm puts in the textarea for the context menu. Nothing
+ *   may DEL it.
+ *
+ * Invariant: `deleteFloor <= replaceFloor <= length of text`.
  */
 export class TextareaMirror {
   private text = '';
-  private floor = 0;
+  private replaceFloor = 0;
+  private deleteFloor = 0;
 
   /** The textarea value this mirror last accounted for. */
   get value(): string {
@@ -49,34 +68,60 @@ export class TextareaMirror {
   }
 
   /** The edit that brings the PTY in line with the textarea's new `value`. */
-  sync(value: string): string {
+  sync(value: string): SyncResult {
     const old = Array.from(this.text);
     const next = Array.from(value);
     const p = commonPrefixLength(old, next);
-    this.text = value;
-    if (p >= this.floor) {
-      return reconcileComposition(old.slice(this.floor).join(''), next.slice(this.floor).join(''));
+    let edit: string;
+    let diverged = false;
+    if (p === next.length) {
+      // Only deleted, like a soft backspace. One DEL per code point, where
+      // stock xterm sends a single DEL whatever the size of the deletion.
+      edit = DEL.repeat(old.length - Math.max(p, this.deleteFloor));
+    } else if (p >= this.replaceFloor) {
+      edit = reconcileComposition(old.slice(p).join(''), next.slice(p).join(''));
+    } else {
+      // A replace reaching back past other input: delete only what was sent
+      // since that input, then send everything from the change point on.
+      edit = DEL.repeat(old.length - this.replaceFloor) + next.slice(p).join('');
+      // Text that reached the PTY before that input stays there.
+      diverged = this.deleteFloor < this.replaceFloor;
     }
-    // The edit reaches into text the PTY never got from us: delete only what
-    // we sent, then send everything from the change point on.
-    const edit = DEL.repeat(old.length - this.floor) + next.slice(p).join('');
-    this.floor = p;
-    return edit;
+    this.text = value;
+    this.replaceFloor = Math.min(this.replaceFloor, p);
+    this.deleteFloor = Math.min(this.deleteFloor, p);
+    return { edit, diverged };
+  }
+
+  /** The PTY received other input after the textarea's current text. */
+  afterForeignInput(value: string): void {
+    this.deleteFloor = Math.min(this.deleteFloor, commonPrefixLength(Array.from(this.text), Array.from(value)));
+    this.text = value;
+    this.replaceFloor = Array.from(value).length;
   }
 
   /**
-   * Take `value` as the new baseline, none of it deletable. Used when input
-   * reached the PTY some other way, or the textarea was rewritten outside an
-   * input event.
+   * The PTY already holds `value`: xterm sent it as a paste and cleared the
+   * textarea, then the browser inserted it again. Text up to its last line
+   * break was submitted with it, so only the last line is editable.
    */
-  rebase(value: string): void {
+  accept(value: string): void {
+    const chars = Array.from(value);
+    let lineStart = chars.length;
+    while (lineStart > 0 && chars[lineStart - 1] !== '\n' && chars[lineStart - 1] !== '\r') lineStart--;
     this.text = value;
-    this.floor = Array.from(value).length;
+    this.replaceFloor = this.deleteFloor = lineStart;
+  }
+
+  /** The textarea now holds `value`, none of which reached the PTY. */
+  detach(value: string): void {
+    this.text = value;
+    this.replaceFloor = this.deleteFloor = Array.from(value).length;
   }
 }
 
-/** Textarea edits that are not typing; xterm or the browser handles them. */
-const NOT_TYPED = /^(insertFrom(Paste|PasteAsQuotation|Drop|Yank)$|deleteBy(Cut|Drag)$|history)/;
+/** Textarea edits that are not typing and never reach the PTY. */
+const NOT_TYPED = /^(insertFrom(Drop|Yank)$|deleteBy(Cut|Drag)$|history)/;
 
 export interface ImeInputBridge {
   /** True for a keydown the bridge handles; xterm must not process it. */
@@ -97,11 +142,11 @@ export function attachImeInput(
   emit: (edit: string) => boolean,
 ): ImeInputBridge {
   const mirror = new TextareaMirror();
-  mirror.rebase(textarea.value);
+  mirror.detach(textarea.value);
 
-  const resync = (reason: string, detail: Record<string, unknown>) => {
+  // Lengths only: the textarea holds the user's command line.
+  const alarm = (reason: string, detail: Record<string, number>) => {
     console.error(`[Terminal IME #1883] ${reason}; resyncing from the textarea`, detail);
-    mirror.rebase(textarea.value);
   };
 
   // xterm's composition and input handlers sit on the textarea. Stopping these
@@ -113,24 +158,43 @@ export function attachImeInput(
 
   const onBeforeInput = (e: Event) => {
     if (e.target !== textarea || textarea.value === mirror.value) return;
-    resync('textarea changed outside an input event', { expected: mirror.value, actual: textarea.value });
+    alarm('textarea changed outside an input event', {
+      expectedLength: mirror.value.length,
+      actualLength: textarea.value.length,
+    });
+    mirror.detach(textarea.value);
   };
 
   const onInput = (e: Event) => {
     if (e.target !== textarea) return;
     e.stopPropagation();
-    if (NOT_TYPED.test((e as InputEvent).inputType ?? '')) {
-      mirror.rebase(textarea.value);
+    const inputType = (e as InputEvent).inputType ?? '';
+    if (inputType.startsWith('insertFromPaste')) {
+      // The browser's own paste after xterm's: xterm already sent this text.
+      mirror.accept(textarea.value);
       return;
     }
-    const edit = mirror.sync(textarea.value);
+    if (NOT_TYPED.test(inputType)) {
+      mirror.detach(textarea.value);
+      return;
+    }
+    const { edit, diverged } = mirror.sync(textarea.value);
+    if (diverged) {
+      alarm('keyboard replaced text typed before other terminal input, which cannot be retracted', {
+        textareaLength: textarea.value.length,
+      });
+    }
     if (edit && !emit(edit)) {
-      resync('edit not delivered to the PTY', { edit });
+      alarm('edit not delivered to the PTY', { editLength: edit.length });
+      mirror.detach(textarea.value);
     }
   };
 
   // xterm's right-click handler puts the selection into the textarea.
-  const onContextMenu = () => mirror.rebase(textarea.value);
+  const onContextMenu = () => mirror.detach(textarea.value);
+  // xterm clears the textarea on blur. Registered after xterm's listener, so
+  // this runs after the clear.
+  const onBlur = () => mirror.detach(textarea.value);
 
   // xterm sizes the textarea in its composition handler, which is bypassed
   // now. Blink drops the caret to 0 on commit into a 0×0 textarea, so the
@@ -143,16 +207,18 @@ export function attachImeInput(
   container.addEventListener('beforeinput', onBeforeInput, true);
   container.addEventListener('input', onInput, true);
   container.addEventListener('contextmenu', onContextMenu);
+  textarea.addEventListener('blur', onBlur);
 
   return {
     ownsKey: (event) => event.type === 'keydown' && event.keyCode === 229,
     // Deferred: xterm clears the textarea right after it emits a paste.
-    noteForeignInput: () => queueMicrotask(() => mirror.rebase(textarea.value)),
+    noteForeignInput: () => queueMicrotask(() => mirror.afterForeignInput(textarea.value)),
     dispose: () => {
       for (const type of shielded) container.removeEventListener(type, shield, true);
       container.removeEventListener('beforeinput', onBeforeInput, true);
       container.removeEventListener('input', onInput, true);
       container.removeEventListener('contextmenu', onContextMenu);
+      textarea.removeEventListener('blur', onBlur);
     },
   };
 }
