@@ -305,16 +305,4 @@ describe('Terminal on a touch device: hardware keys are never deduplicated (Issu
 
     expect(getDataFrames()).toEqual(['\r', '\r']);
   });
-
-  it('allows same character after 150ms on touch device', () => {
-    const onData = renderAndGetOnData();
-
-    onData('l');
-    vi.advanceTimersByTime(200);
-    onData('l'); // intentional repeat — enough time has passed
-
-    const frames = getDataFrames();
-    expect(frames).toHaveLength(2);
-  });
-
 });

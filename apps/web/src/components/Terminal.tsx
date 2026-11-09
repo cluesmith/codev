@@ -635,7 +635,9 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
     // own edits exactly. What still reaches the guard there is hardware keys,
     // paste and terminal replies, where an always-on guard only dropped real
     // repeats: a held key's auto-repeat (~30-80ms apart) and fast double
-    // letters on an iPad keyboard (#1886). So it is composition-only now.
+    // letters on an iPad keyboard (#1886). So it is composition-only now,
+    // which on a touch device means off: the bridge shields composition
+    // events, so the composition window never opens there.
     const isTouchDevice = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
     const textarea = term.textarea;
     let isComposing = false;
