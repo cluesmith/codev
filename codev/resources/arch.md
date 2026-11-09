@@ -878,6 +878,7 @@ packages/codev/dashboard/
 - Canvas renderer with dark theme
 - **ScrollController** (Spec 627, `dashboard/src/lib/scrollController.ts`): Unified scroll state machine with lifecycle phases (`initial-load` → `buffer-replay` → `interactive`). Replaces the previous three competing mechanisms (safeFit, scroll monitor setInterval, post-flush setTimeout). Event-driven, no polling. Provides `safeFit()`, `beginReplay()`/`endReplay()`, `enterInteractive()`, `reset()` (for reconnection), and `suppressFit()`/`unsuppressFit()`.
 - **Persistent prop** (Spec 0104): Accepts `persistent?: boolean`. When `persistent === false`, renders a yellow warning banner: "Session persistence unavailable -- this terminal will not survive a restart". Prop flows from `/api/state` through `useTabs` hook → `Tab` interface → `App.tsx` → `Terminal.tsx`.
+- **Mobile IME bridge** (Issue #1883, `apps/web/src/lib/imeInput.ts`): on `(pointer: coarse)` the bridge, not xterm, sends soft-keyboard edits, as DELs plus new text against a mirror of what the PTY holds. **Invariant: every PTY writer that bypasses `term.onData` must call the bridge's `noteForeignInput()`** (as `VirtualKeyboard`'s Esc/Tab do via `onKeySent`). Otherwise a later autocorrect deletes or resends the wrong text. `onData` itself rebases only for input it actually sends, and never for terminal replies.
 
 **Tab System**:
 - Architect tab (always present when running)
