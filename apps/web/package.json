@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:browser": "playwright test",
+    "check-types": "tsc --noEmit",
     "test:watch": "vitest"
   },
   "dependencies": {

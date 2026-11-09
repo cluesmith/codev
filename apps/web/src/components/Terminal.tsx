@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -100,6 +100,19 @@ function TerminalControls({
 /** WebSocket frame prefixes matching packages/codev/src/terminal/ws-protocol.ts */
 const FRAME_CONTROL = 0x00;
 const FRAME_DATA = 0x01;
+
+/**
+ * xterm answers a TUI's queries through `onData`, the same event as typed
+ * input: DA (`ESC[?1;2c`), CPR (`ESC[12;40R`), DECRPM (`ESC[?2004$y`).
+ * Returns `data` without them. The server keeps the full table
+ * (packages/codev/src/terminal/terminal-replies.ts).
+ */
+function stripTerminalReplies(data: string): string {
+  return data
+    .replace(/\x1b\[[\?>][\d;]*c/g, '')
+    .replace(/\x1b\[\d+;\d+R/g, '')
+    .replace(/\x1b\[\?[\d;]*\$y/g, '');
+}
 
 /**
  * Grace window after a permanent (session-unknown) close before the terminal
@@ -218,6 +231,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
   const fitRef = useRef<FitAddon | null>(null);
   const modifierRef = useRef<ModifierState>({ ctrl: false, cmd: false, clearCallback: null });
   const foreignInputRef = useRef<(() => void) | null>(null);
+  const handleVirtualKeySent = useCallback(() => foreignInputRef.current?.(), []);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
   const [connStatus, setConnStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected');
   const reconnectRef = useRef<(() => void) | null>(null);
@@ -665,8 +679,6 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
     // Send user input to the PTY (uses wsRef so it works across reconnections)
     term.onData((data) => {
       const fromIme = imeEditInFlight;
-      // Anything but the bridge's own edit moves the PTY line away from the textarea.
-      if (!fromIme) imeBridge?.noteForeignInput();
 
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -687,10 +699,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       }
 
       if (rc.initialPhase) {
-        const filtered = data
-          .replace(/\x1b\[[\?>][\d;]*c/g, '')
-          .replace(/\x1b\[\d+;\d+R/g, '')
-          .replace(/\x1b\[\?[\d;]*\$y/g, '');
+        const filtered = stripTerminalReplies(data);
         if (!filtered) return;
         data = filtered;
       }
@@ -698,8 +707,8 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       // Sticky modifier handling for mobile virtual keyboard
       const mod = modifierRef.current;
       if ((mod.ctrl || mod.cmd) && data.length === 1) {
-        // The typed character does not reach the PTY as itself.
-        imeBridge?.noteForeignInput();
+        // A bridge edit's character does not reach the PTY as itself.
+        if (fromIme) imeBridge?.noteForeignInput();
         const charCode = data.charCodeAt(0);
         if (mod.ctrl) {
           if (charCode >= 0x61 && charCode <= 0x7a) {
@@ -735,6 +744,10 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
         }
       }
 
+      // Anything but the bridge's own edit moves the PTY line away from the
+      // textarea. Only input actually sent counts, and a terminal reply (a
+      // TUI's DA/CPR/DECRPM query answered by xterm) never touches the line.
+      if (!fromIme && stripTerminalReplies(data)) imeBridge?.noteForeignInput();
       sendData(ws, data);
     });
 
@@ -837,7 +850,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       />
       <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} connStatus={connStatus} toolbarExtra={toolbarExtra} onReconnect={() => reconnectRef.current?.()} />
       {isMobile && (
-        <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} onKeySent={() => foreignInputRef.current?.()} />
+        <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} onKeySent={handleVirtualKeySent} />
       )}
     </div>
   );

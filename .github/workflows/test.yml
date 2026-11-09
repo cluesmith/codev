@@ -189,6 +189,12 @@ jobs:
         working-directory: packages/artifact-canvas
         run: pnpm build
 
+      # Includes the Playwright harness (apps/web/tsconfig.json), which the test
+      # runner itself transpiles without type-checking.
+      - name: Type-check web app and browser test harness
+        working-directory: apps/web
+        run: pnpm check-types
+
       # No `--with-deps`: see the canvas-browser job above (#1502).
       - name: Install Playwright Chromium
         working-directory: apps/web

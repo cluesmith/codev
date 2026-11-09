@@ -181,6 +181,18 @@ test('Enter submits exactly what was typed, and the next line starts clean', asy
   await expectLine(page, 'ok ');
 });
 
+test('a TUI query answered mid-typing does not stop a later autocorrect from replacing', async ({ page }) => {
+  await keyboard.words('check');
+  await keyboard.compose('afain');
+  await keyboard.commit('afain');
+  // The app asks for the cursor position; xterm answers through onData.
+  await page.evaluate(() => (window as unknown as { __ptyWrite: (text: string) => void }).__ptyWrite('\x1b[6n'));
+  await expect.poll(async () => (await pty(page)).frames.some((f) => /^\x1b\[\d+;\d+R$/.test(f))).toBe(true);
+  await keyboard.replaceTail('afain'.length, 'again');
+  await keyboard.insert('. ');
+  await expectLine(page, 'check again. ');
+});
+
 test('the keyboard\'s backspace deletes one character per press', async ({ page }) => {
   await keyboard.compose('helo');
   await keyboard.commit('helo');
@@ -206,7 +218,12 @@ test.describe('desktop (fine pointer)', () => {
   test.use({ hasTouch: false, isMobile: false, viewport: { width: 1280, height: 800 } });
 
   test('IME input still goes through xterm, byte for byte as before', async ({ page }) => {
-    await keyboard.words('under', 'normal');
+    // Words through the IME; spaces as real keys, as a desktop keyboard sends them.
+    for (const word of ['under', 'normal']) {
+      await keyboard.compose(word);
+      await keyboard.commit(word);
+      await page.keyboard.press('Space');
+    }
     // xterm's composition handler sends each committed word whole; the touch
     // bridge would have sent it letter by letter.
     await expect.poll(async () => (await pty(page)).frames).toEqual(['under', ' ', 'normal', ' ']);

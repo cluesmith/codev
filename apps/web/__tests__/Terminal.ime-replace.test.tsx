@@ -115,6 +115,13 @@ function xtermPaste(text: string) {
 /** Let deferred bookkeeping run, as it would between two user events. */
 const nextEvent = () => Promise.resolve();
 
+/** The first output arrives and the Terminal leaves its initial (replay) phase. */
+async function goInteractive() {
+  const frame = new Uint8Array([0x01, ...new TextEncoder().encode('$ ')]);
+  (mockWs as unknown as { onmessage: (ev: { data: ArrayBuffer }) => void }).onmessage({ data: frame.buffer });
+  await new Promise((resolve) => setTimeout(resolve, 550));
+}
+
 describe('Terminal mobile IME replace (Issue #1883)', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -138,6 +145,8 @@ describe('Terminal mobile IME replace (Issue #1883)', () => {
     });
 
     afterEach(() => {
+      // Unmount first, so a failure here cannot leak this Terminal into the next test.
+      cleanup();
       // None of these paths may trip the desync alarm.
       expect(errorSpy).not.toHaveBeenCalled();
     });
@@ -197,6 +206,36 @@ describe('Terminal mobile IME replace (Issue #1883)', () => {
       keyboardEdit('pasted', 'insertFromPaste');
       keyboardEdit('pasted!', 'insertText');
       expect(dataFrames()).toEqual(['see ', 'pasted', '!']);
+    });
+
+    it('a terminal reply mid-typing does not stop a later autocorrect from replacing', async () => {
+      await goInteractive();
+      keyboardEdit('check afain');
+      // A TUI asked for the cursor position; xterm answers through onData.
+      capturedOnData?.('\x1b[12;40R');
+      await nextEvent();
+      keyboardEdit('check again', 'insertReplacementText');
+      expect(dataFrames()).toEqual(['check afain', '\x1b[12;40R', `${DEL.repeat(4)}gain`]);
+    });
+
+    it('a reply filtered out during the initial replay does not either', async () => {
+      keyboardEdit('check afain');
+      capturedOnData?.('\x1b[?1;2c');
+      await nextEvent();
+      keyboardEdit('check again', 'insertReplacementText');
+      expect(dataFrames()).toEqual(['check afain', `${DEL.repeat(4)}gain`]);
+    });
+
+    it('a key that reaches the PTY alongside a reply still counts as input', async () => {
+      await goInteractive();
+      keyboardEdit('check afain');
+      capturedOnData?.('\x1b[12;40R\x1b[D');
+      await nextEvent();
+      // The arrow moved the PTY cursor, so this replace cannot be done and must say so.
+      keyboardEdit('check again', 'insertReplacementText');
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(String(errorSpy.mock.calls[0][0])).toMatch(/cannot be retracted/);
+      errorSpy.mockClear();
     });
 
     it('the keyboard\'s backspace deletes, also right after a virtual Tab', async () => {

@@ -120,8 +120,6 @@ export class TextareaMirror {
   }
 }
 
-/** Textarea edits that are not typing and never reach the PTY. */
-const NOT_TYPED = /^(insertFrom(Drop|Yank)$|deleteBy(Cut|Drag)$|history)/;
 
 export interface ImeInputBridge {
   /** True for a keydown the bridge handles; xterm must not process it. */
@@ -135,6 +133,10 @@ export interface ImeInputBridge {
  * Take IME text input away from xterm's append-only handlers and send each
  * textarea edit through `emit` as a replace. `emit` returns whether the edit
  * reached the PTY.
+ *
+ * Every edit is synced: typing and autocomplete, and also cut, drag, drop,
+ * yank and undo/redo, which stock xterm never sent at all. The one exception
+ * is a paste, which xterm sends itself.
  */
 export function attachImeInput(
   textarea: HTMLTextAreaElement,
@@ -147,6 +149,10 @@ export function attachImeInput(
   // Lengths only: the textarea holds the user's command line.
   const alarm = (reason: string, detail: Record<string, number>) => {
     console.error(`[Terminal IME #1883] ${reason}; resyncing from the textarea`, detail);
+  };
+  // Not a desync: the socket is closed, as it is during a reconnect.
+  const notDelivered = (detail: Record<string, number>) => {
+    console.warn('[Terminal IME #1883] edit not delivered to the PTY (socket not open); resyncing from the textarea', detail);
   };
 
   // xterm's composition and input handlers sit on the textarea. Stopping these
@@ -174,18 +180,14 @@ export function attachImeInput(
       mirror.accept(textarea.value);
       return;
     }
-    if (NOT_TYPED.test(inputType)) {
-      mirror.detach(textarea.value);
-      return;
-    }
     const { edit, diverged } = mirror.sync(textarea.value);
     if (diverged) {
-      alarm('keyboard replaced text typed before other terminal input, which cannot be retracted', {
+      alarm('an edit replaced text sent before other terminal input, which cannot be retracted', {
         textareaLength: textarea.value.length,
       });
     }
     if (edit && !emit(edit)) {
-      alarm('edit not delivered to the PTY', { editLength: edit.length });
+      notDelivered({ editLength: edit.length });
       mirror.detach(textarea.value);
     }
   };

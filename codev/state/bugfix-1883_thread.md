@@ -112,3 +112,23 @@ The architect approved the extended fix with four conditions:
   3. CJK IME on touch now streams kana, then DELs and the kanji, instead of buffering to `compositionend`. Converges in a line editor; untested on a real device.
   4. TDZ hazard: `imeBridge` was a `const` used in the key handler before its declaration. Fixed by hoisting it as a `let`.
   5. A real-phone check is still the acceptance gate (iOS especially).
+
+## 2026-11-09 — integration review (architect)
+
+Architect's 3-way: gemini APPROVE, codex + claude REQUEST_CHANGES. The architect agreed and asked for three changes, which are done:
+
+1. **`noteForeignInput()` only for input actually sent.** It now runs after every drop point in `onData`: socket closed, the #517 dedup, the initial-phase filter, and the Cmd-C/Cmd-V sticky returns. It also skips payloads that are only terminal replies, using the three inline regexes, now shared as `stripTerminalReplies` with the initial-phase filter. Codex had traced a filtered DA reply during replay raising the floor. The jsdom tests for a CPR reply in steady state and a DA reply during replay both fail on ae8f93cfd. A Playwright test drives a real `ESC[6n` through the fake PTY and has real xterm answer it. Moving the table into codev-types is issue #1885.
+2. **No silent detach.** Cut, drag, drop, yank and undo/redo now sync like any other edit. A cut of sent text deletes it; a mid-line cut reaching back past other input fails loud. `NOT_TYPED` is gone; only paste stays special.
+3. **The Playwright harness is type-checked:** `apps/web/tsconfig.json` include, `pnpm check-types`, and a step in the `web-browser` job. Same precedent as artifact-canvas.
+
+Smaller items:
+- A closed-socket edit now logs `console.warn`, not `console.error`.
+- CJK behaviour on touch is stated in the PR body.
+- `arch.md` notes the invariant that every non-`onData` PTY writer must call `noteForeignInput()`.
+- `onKeySent` is a `useCallback`.
+- Filed issue #1886: the touch dedup drops repeated hardware keys.
+
+Test-harness fixes found along the way:
+- The phone `afterEach` now unmounts before asserting. A failing assertion there had skipped `cleanup()` and cascaded into unrelated failures, which made 7 tests look broken on the old code when only 2 were.
+- The desktop Playwright control flaked under 3× load. A keydown-229 space on desktop reaches stock xterm only through a `setTimeout(0)` diff, and real desktop keyboards don't send spaces that way. It now types spaces as real keys.
+- One unexplained `cdpSession.send: Target page… has been closed` on sample 2 in a single run. It has not recurred in 5 solo runs plus two full 3× runs.

@@ -1,7 +1,8 @@
 /**
  * The dashboard's real Terminal component against a PTY stand-in: a fake
  * WebSocket that records every data frame and echoes it like a line editor
- * (DEL erases one character). Tests read `window.__pty`.
+ * (DEL erases one character). Tests read `window.__pty`, and write terminal
+ * output, such as a TUI's queries, with `window.__ptyWrite`.
  */
 import { createRoot } from 'react-dom/client';
 import { Terminal } from '../../src/components/Terminal.js';
@@ -33,6 +34,7 @@ class FakePtySocket {
   onerror: ((ev: Event) => void) | null = null;
 
   constructor() {
+    (window as unknown as { __ptyWrite: (text: string) => void }).__ptyWrite = (text) => this.echo(text);
     setTimeout(() => {
       this.onopen?.(new Event('open'));
       this.echo('$ ');
@@ -45,7 +47,8 @@ class FakePtySocket {
     const text = new TextDecoder().decode(bytes.subarray(1));
     pty.frames.push(text);
     let echo = '';
-    for (const ch of Array.from(text)) {
+    // A cursor position report answers our own query; the line never sees it.
+    for (const ch of Array.from(text.replace(/\x1b\[\d+;\d+R/g, ''))) {
       if (ch === DEL) {
         if (pty.line) {
           pty.line = Array.from(pty.line).slice(0, -1).join('');

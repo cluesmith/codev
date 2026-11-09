@@ -120,6 +120,7 @@ describe('attachImeInput', () => {
   let deliver: boolean;
   let bridge: ImeInputBridge;
   let errorSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     container = document.createElement('div');
@@ -129,6 +130,7 @@ describe('attachImeInput', () => {
     emitted = [];
     deliver = true;
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     bridge = attachImeInput(textarea, container, (edit) => {
       emitted.push(edit);
       return deliver;
@@ -139,6 +141,7 @@ describe('attachImeInput', () => {
     bridge.dispose();
     container.remove();
     errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   /** The keyboard changes the textarea, the way the browser reports it. */
@@ -248,15 +251,57 @@ describe('attachImeInput', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it('an undelivered edit fails loud and is not resent later', () => {
+  it('an edit the closed socket could not take is reported, not resent later', () => {
     deliver = false;
     edit('lost');
-    expect(errorSpy).toHaveBeenCalledTimes(1);
-    expect(String(errorSpy.mock.calls[0][0])).toMatch(/edit not delivered/);
-    expect(JSON.stringify(errorSpy.mock.calls[0])).not.toMatch(/lost/);
+    // A reconnect, not a desync: a warning, never the desync alarm.
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0][0])).toMatch(/edit not delivered.*socket not open/);
+    expect(JSON.stringify(warnSpy.mock.calls[0])).not.toMatch(/lost/);
     deliver = true;
     edit('lost+');
     expect(emitted).toEqual(['lost', '+']);
+  });
+
+  it('cutting sent text deletes it on the PTY', () => {
+    edit('git status --short');
+    edit('git status', 'deleteByCut');
+    expect(emitted.at(-1)).toBe(DEL.repeat(8));
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('undo and redo reach the PTY as replaces', () => {
+    edit('check afain');
+    edit('check again', 'insertReplacementText');
+    edit('check afain', 'historyUndo');
+    edit('check again', 'historyRedo');
+    expect(emitted.slice(1)).toEqual([`${DEL.repeat(4)}gain`, `${DEL.repeat(4)}fain`, `${DEL.repeat(4)}gain`]);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('dropped text is sent like typed text', () => {
+    edit('cat ');
+    edit('cat notes.txt', 'insertFromDrop');
+    expect(emitted).toEqual(['cat ', 'notes.txt']);
+  });
+
+  it('a cut after other input deletes at the cursor, like a soft backspace', async () => {
+    edit('src/comp');
+    bridge.noteForeignInput(); // a virtual Tab
+    await Promise.resolve();
+    edit('src/', 'deleteByCut');
+    expect(emitted.at(-1)).toBe(DEL.repeat(4));
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('a mid-line cut reaching back past other input fails loud', async () => {
+    edit('git status --short');
+    bridge.noteForeignInput(); // an arrow key
+    await Promise.resolve();
+    edit('git --short', 'deleteByCut');
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(String(errorSpy.mock.calls[0][0])).toMatch(/cannot be retracted/);
   });
 
   it('foreign input rebases once xterm has cleared the textarea', async () => {
