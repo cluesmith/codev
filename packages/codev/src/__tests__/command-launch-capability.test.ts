@@ -9,6 +9,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const childProcess = vi.hoisted(() => ({
   spawn: vi.fn(),
@@ -29,6 +32,7 @@ import { posixCommandLaunch } from '../lib/platform/command-launch.posix.js';
 import { windowsCommandLaunch } from '../lib/platform/command-launch.windows.js';
 import { setGitBashForTests } from '../lib/shell-launch.js';
 import { useHostPlatform } from './helpers/host-platform.js';
+import { toMsysPath } from '../lib/msys-path.js';
 
 const GIT_BASH = {
   path: 'C:\\Program Files\\Git\\bin\\bash.exe',
@@ -148,6 +152,41 @@ describe('Windows implementation: Git Bash and the shim resolver', () => {
     expect(opts.env.B).toBe('2');
     expect(opts.env.MSYS_NO_PATHCONV).toBe('1');
     expect(opts.windowsHide).toBe(true);
+  });
+
+  it('execShellString: a bare path to an existing .sh file runs as a script, its path in POSIX form', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'spec1658-a21-'));
+    try {
+      const script = join(dir, 'issue-view.sh');
+      writeFileSync(script, '#!/bin/bash\n');
+      await windowsCommandLaunch.execShellString(script, { cwd: dir, env: {}, timeout: 30_000, maxBuffer: 10, workspaceRoot: dir });
+      const [file, args] = childProcess.execFile.mock.calls[0];
+      expect(file).toBe(GIT_BASH.path);
+      expect(args).toEqual([toMsysPath(script)]);
+      expect(args[0]).not.toBe('-c');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('execShellStringSync: Git Bash -c, utf-8, piped, hidden, MSYS conversion off', () => {
+    childProcess.execFileSync.mockReturnValue('sync-windows');
+    const out = windowsCommandLaunch.execShellStringSync('gh issue list', { cwd: 'C:\\w', env: { CODEV_OUTPUT_DIR: 'C:\\out' }, timeout: 30_000, maxBuffer: 10, workspaceRoot: 'C:\\w', msysPathEnvKeys: ['CODEV_OUTPUT_DIR'] });
+    expect(out).toBe('sync-windows');
+    const [file, args, opts] = childProcess.execFileSync.mock.calls[0];
+    expect(file).toBe(GIT_BASH.path);
+    expect(args).toEqual(['-c', 'gh issue list']);
+    expect(opts).toMatchObject({ cwd: 'C:\\w', encoding: 'utf-8', timeout: 30_000, maxBuffer: 10, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    expect(opts.env.CODEV_OUTPUT_DIR).toBe('/c/out');
+    expect(opts.env.MSYS_NO_PATHCONV).toBe('1');
+  });
+
+  it('terminalProfile: Windows PowerShell by default, the Windows base variables, no POSIX SHELL', () => {
+    const profile = windowsCommandLaunch.terminalProfile(undefined);
+    expect(profile.shell.toLowerCase()).toContain('powershell.exe');
+    expect(profile.baseEnv.TERM).toBe('xterm-256color');
+    expect(profile.baseEnv.SHELL).toBeUndefined();
+    expect(windowsCommandLaunch.terminalProfile('pwsh').shell).toBe('pwsh');
   });
 
   it('argv forms: Git Bash -c (no login shell) and MSYS script paths', () => {

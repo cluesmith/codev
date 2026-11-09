@@ -114,7 +114,7 @@ beforeEach(() => {
   process.env.HOME = path.join(testDir, 'fake-home');
   writeProtocol();
   // The spawn assertions are the POSIX launch shape; the Windows shim-resolving branch of
-  // spawnOnHost is covered in windows-shell-spawns.test.ts.
+  // commandLaunch().spawn is covered in windows-shell-spawns.test.ts.
   setHostPlatformForTests('linux');
 
   spawnMock.mockReset();

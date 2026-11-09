@@ -1336,6 +1336,36 @@ Recorded so the moves keep them, not fix them (ruling F). The architect rules on
 - POSIX `workspaceKey` is identity while callers pre-apply `realpathSync`; folding `key` into
   `canonicalize` would change POSIX map keys (#1870 territory), so they stay separate methods.
 
+### A2.10 As built (per phase)
+
+**A2-1, command launch (`aab6464ec`, CMAP: claude and codex APPROVE, gemini skipped).** The
+interface as committed in `lib/platform/command-launch.ts` differs from A2.4:
+
+- Added, to cover call sites A2.4 did not list: `commandExistsAsync` (the async `which` probe in
+  `utils/shell.ts`), `launchScriptPath`, `launchScriptExports` and `sessionIdMintFallback` (the
+  three platform branches that wrote launch-script text in `spawn-worktree.ts`), `terminalProfile`
+  (pty-manager's default program and base env, one method because they changed together), and
+  `workspaceShell` (takes the configured shell as a thunk so POSIX still never reads config).
+- `commandExists` takes the caller's POSIX probe (A2.9: the per-site `which` forms are kept).
+- `execShellString` resolves to stdout (the only field forge read), not `{ stdout, stderr }`.
+- Not added: `ptyCommand` (stays in `lib/pty-command.ts`: the shellper loads it and it must stay
+  config-free; its raw `win32` check became `isWindows()`); `toSpawnable` (`spawnableOnHost` has
+  no branch, it passes the platform to the sdk resolver); `interactiveShell` and
+  `defaultInteractiveShell` (the latter stays in `platform.ts`: moving it would create the cycle
+  config to command-launch to shell-launch to config); `baseTerminalEnv` and `withNodeFirstOnPath`
+  (folded into `terminalProfile`, or left below).
+- Left as one-offs, each a single site whose POSIX form differs from the shared one, so folding
+  it in would change behaviour: `ide-version.ts` `buildIdeServerEnv` (node-first `PATH`),
+  `ideServerSpawnable` and `runIdeServerCommand`'s `detached`, `ide-server.ts`
+  `spawnIdeServerProcess`, `tower.ts` daemon spawn, consult `agyRespondsToVersion` (POSIX runs
+  through a shell with `2>/dev/null`).
+- `spawnOnHost` / `spawnSyncOnHost` moved into the capability as `spawn` / `spawnSync`; their 13
+  callers call `commandLaunch()`.
+- Test-helper migration of existing suites moves to A2-4 (most force the platform per test, not
+  per group).
+- Product `isWindows()` calls: 103 before, 84 after, plus the accessor.
+- Noted, not changed: `utils/shell.ts` `spawnDetached` has no production caller.
+
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |
