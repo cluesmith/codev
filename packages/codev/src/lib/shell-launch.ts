@@ -7,13 +7,13 @@
  * bare `bash` (which can be the System32 WSL launcher). Bare-command spawns ask
  * it for a `CreateProcess`-ready form of `.cmd` shims.
  *
- * POSIX callers keep their existing argv: every site branches on `isWindows()`
- * and only the Windows branch calls in here.
+ * These are the Windows building blocks of the command launch capability
+ * (`platform/command-launch.ts`); shared code asks that capability, which uses
+ * them only in its Windows implementation (Spec 1658, Amendment 2).
  */
 
-import { spawn, spawnSync, type ChildProcess, type SpawnOptions, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from 'node:child_process';
 import { resolveSpawnable, findExecutable, type SpawnableCommand } from '@cluesmith/codev-sdk/node/executable';
-import { hostPlatform, isWindows, windowsPowerShellPath } from './platform.js';
+import { hostPlatform, windowsPowerShellPath } from './platform.js';
 import { loadConfig } from './config.js';
 import { resolveGitBash, GIT_BASH_ENV, type GitBash } from './git-bash.js';
 import { toMsysPath, MSYS_PATHCONV_OPT_OUT } from './msys-path.js';
@@ -90,36 +90,6 @@ export function gitBashEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  */
 export function spawnableOnHost(command: string, args: string[] = [], env: NodeJS.ProcessEnv = process.env): SpawnableCommand {
   return resolveSpawnable(command, args, { platform: hostPlatform(), env });
-}
-
-/**
- * `spawn` for a bare command (`afx`, `consult`, a reviewer CLI). POSIX spawns
- * exactly as given; on Windows a `.cmd` shim goes through the shim resolver
- * and no console window opens.
- */
-export function spawnOnHost(command: string, args: string[], options: SpawnOptions): ChildProcess {
-  if (!isWindows()) {
-    return spawn(command, args, options);
-  }
-  const spawnable = spawnableOnHost(command, args, options.env ?? process.env);
-  return spawn(spawnable.command, spawnable.args, {
-    ...options,
-    windowsHide: true,
-    windowsVerbatimArguments: spawnable.windowsVerbatimArguments,
-  });
-}
-
-/** `spawnSync` counterpart of `spawnOnHost`, for probes that read a CLI's output. */
-export function spawnSyncOnHost(command: string, args: string[], options: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> {
-  if (!isWindows()) {
-    return spawnSync(command, args, options);
-  }
-  const spawnable = spawnableOnHost(command, args, options.env ?? process.env);
-  return spawnSync(spawnable.command, spawnable.args, {
-    ...options,
-    windowsHide: true,
-    windowsVerbatimArguments: spawnable.windowsVerbatimArguments,
-  });
 }
 
 /** `which`-style lookup for the host platform, honoring `PATHEXT` on Windows. */

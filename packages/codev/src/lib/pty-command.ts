@@ -12,7 +12,7 @@
  */
 
 import { resolveSpawnable } from '@cluesmith/codev-sdk/node/executable';
-import { hostPlatform } from './platform.js';
+import { isWindows } from './platform.js';
 
 export interface PtyCommand {
   file: string;
@@ -20,7 +20,7 @@ export interface PtyCommand {
 }
 
 export function ptyCommand(command: string, args: string[], env: Record<string, string | undefined>): PtyCommand {
-  if (hostPlatform() !== 'win32') {
+  if (!isWindows()) {
     return { file: command, args };
   }
   const spawnable = resolveSpawnable(command, args, { platform: 'win32', env });

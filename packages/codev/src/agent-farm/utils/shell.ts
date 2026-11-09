@@ -4,8 +4,7 @@
 
 import { exec, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
-import { isWindows } from '../../lib/platform.js';
-import { gitBashCommand, findOnHostPath } from '../../lib/shell-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 
 const execAsync = promisify(exec);
 
@@ -53,23 +52,14 @@ export async function runStreaming(
   options: { cwd?: string; workspaceRoot?: string } = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    let child: ChildProcess;
-    if (isWindows()) {
-      // Spec 1658: the resolved Git Bash, never cmd.exe or System32's WSL bash.
-      // `workspaceRoot` locates its `windows.gitBashPath` override.
-      const launch = gitBashCommand(command, options.workspaceRoot ?? options.cwd);
-      child = spawn(launch.command, launch.args, {
-        cwd: options.cwd,
-        stdio: 'inherit',
-        windowsHide: true,
-      });
-    } else {
-      child = spawn(command, {
-        cwd: options.cwd,
-        shell: true,       // route through /bin/sh -c so shell features (cd, &&, $VAR) work
-        stdio: 'inherit',  // stream output straight to the parent terminal
-      });
-    }
+    // A shell string so shell features (cd, &&, $VAR) work: `/bin/sh -c` on
+    // POSIX, the resolved Git Bash on Windows (Spec 1658); output streams
+    // straight to the parent terminal.
+    const child = commandLaunch().spawnShellString(
+      command,
+      { cwd: options.cwd, stdio: 'inherit' },
+      { workspaceRoot: options.workspaceRoot ?? options.cwd },
+    );
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) {
@@ -149,15 +139,11 @@ export async function commandExists(command: string): Promise<boolean> {
     return false; // Command name contains invalid characters
   }
 
-  if (isWindows()) {
-    return findOnHostPath(command) !== null;
-  }
-
-  return new Promise((resolve) => {
+  return commandLaunch().commandExistsAsync(command, () => new Promise((resolve) => {
     const child = spawn('which', [command], { stdio: 'ignore' });
     child.on('close', (code) => resolve(code === 0));
     child.on('error', () => resolve(false));
-  });
+  }));
 }
 
 /**

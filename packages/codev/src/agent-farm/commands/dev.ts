@@ -20,8 +20,8 @@ import { getConfig, getWorktreeConfig } from '../utils/index.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { createPtySession } from './spawn-worktree.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
-import { isWindows } from '../../lib/platform.js';
-import { gitBashCommand, type Launch } from '../../lib/shell-launch.js';
+import type { Launch } from '../../lib/shell-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 
 export interface DevOptions {
   builderId?: string;
@@ -126,10 +126,7 @@ export async function dev(options: DevOptions): Promise<void> {
  * Teardown is Tower's PTY kill, which takes the whole tree on Windows.
  */
 export function devCommandLaunch(devCommand: string, workspaceRoot?: string): Launch {
-  if (isWindows()) {
-    return gitBashCommand(devCommand, workspaceRoot);
-  }
-  return { command: '/bin/sh', args: ['-lc', devCommand] };
+  return commandLaunch().shellStringArgv(devCommand, { command: '/bin/sh', flag: '-lc' }, workspaceRoot);
 }
 
 interface DevTerminal {

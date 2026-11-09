@@ -12,7 +12,7 @@ import { hostname as osHostname, cpus, totalmem } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { logger } from '../utils/logger.js';
 import { isWindows } from '../../lib/platform.js';
-import { findOnHostPath, spawnOnHost } from '../../lib/shell-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 
 const ENGINES = ['gemini', 'codex', 'claude'] as const;
 type Engine = (typeof ENGINES)[number];
@@ -97,7 +97,7 @@ export function runEngine(
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const proc = spawnOnHost('consult', ['-m', engine, '--prompt', prompt], {
+    const proc = commandLaunch().spawn('consult', ['-m', engine, '--prompt', prompt], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -219,18 +219,17 @@ export async function bench(options: BenchOptions): Promise<void> {
   }
 
   // Validate consult is available by checking PATH
-  if (isWindows()) {
-    if (findOnHostPath('consult') === null) {
-      logger.error("'consult' command not found on PATH");
-      process.exit(1);
-    }
-  } else {
+  const consultOnPath = commandLaunch().commandExists('consult', () => {
     try {
       execSync('which consult', { stdio: 'ignore' });
+      return true;
     } catch {
-      logger.error("'consult' command not found on PATH");
-      process.exit(1);
+      return false;
     }
+  });
+  if (!consultOnPath) {
+    logger.error("'consult' command not found on PATH");
+    process.exit(1);
   }
 
   const resultsDir = join(process.cwd(), 'codev', 'resources', 'bench-results');

@@ -5,7 +5,7 @@
  * with timeout support.
  */
 
-import { spawn, execFile, type ChildProcessByStdio } from 'node:child_process';
+import { execFile, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
@@ -13,7 +13,7 @@ import type { CheckResult, CheckDef } from './types.js';
 import type { ArtifactResolver } from './artifacts.js';
 import { executeForgeCommand, getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import { isWindows } from '../../lib/platform.js';
-import { gitBashCommand } from '../../lib/shell-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { killSessionTree, waitForTreeExit, type KillSessionTreeResult } from '../../lib/process-tree.js';
 
 const execFileAsync = promisify(execFile);
@@ -59,45 +59,24 @@ export async function runCheck(
     let stderr = '';
     let killed = false;
 
-    // Parse command into executable and args
-    const parts = command.split(/\s+/);
-    const executable = parts[0];
-    const args = parts.slice(1);
-
     // detached: the check leads its own process group, so a timeout can kill
     // the whole tree (#1814). Killing only the shell left its grandchildren
     // (test workers) holding stdout open, and 'close' never fired. detached
     // calls setsid, so the check also has no controlling terminal: one that
     // opens /dev/tty fails instead of prompting, which is intended.
     // On Windows there are no process groups (detached would only open a new
-    // console), so the check runs hidden and its tree is tracked from the
-    // teardown snapshot instead (Spec 1658).
+    // console), so the check runs hidden in the resolved Git Bash, never
+    // cmd.exe, and its tree is tracked from the teardown snapshot instead (Spec 1658).
     const checkEnv = {
       ...process.env,
       PROJECT_ID: env.PROJECT_ID,
       PROJECT_TITLE: env.PROJECT_TITLE,
     };
-    // On Windows the check string runs in the resolved Git Bash, never cmd.exe,
-    // so a check written for POSIX `sh` means the same thing (Spec 1658).
-    let proc: ChildProcessByStdio<null, Readable, Readable>;
-    if (isWindows()) {
-      const launch = gitBashCommand(command, cwd);
-      proc = spawn(launch.command, launch.args, {
-        cwd,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: checkEnv,
-      });
-    } else {
-      proc = spawn(executable, args, {
-        cwd,
-        shell: true,
-        detached: true,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: checkEnv,
-      });
-    }
+    const proc = commandLaunch().spawnShellString(
+      command,
+      { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: checkEnv },
+      { workspaceRoot: cwd, posixDetached: true, posixCollapseWhitespace: true },
+    ) as ChildProcessByStdio<null, Readable, Readable>;
 
     // The first teardown's snapshot is what the close handler waits on.
     let firstKill: Promise<KillSessionTreeResult | null> | null = null;

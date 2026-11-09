@@ -35,7 +35,7 @@ import { findClaudeSessionMarkers } from '../lib/agent-env.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { hostPlatform, isWindows } from '../lib/platform.js';
 import { isHostPathAtOrUnder } from '../lib/host-paths.js';
-import { findOnHostPath, spawnOnHost, spawnSyncOnHost } from '../lib/shell-launch.js';
+import { commandLaunch } from '../lib/platform/command-launch.js';
 import { getWorktreeConfig } from '../agent-farm/utils/config.js';
 import type { CodevConfig } from '../lib/config.js';
 import { resolveGitBash, GitBashError, type GitBash } from '../lib/git-bash.js';
@@ -663,15 +663,14 @@ function versionGte(v1: string, v2: string): boolean {
  * Check if a command exists
  */
 function commandExists(cmd: string): boolean {
-  if (isWindows()) {
-    return findOnHostPath(cmd) !== null;
-  }
-  try {
-    execSync(`which ${cmd}`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandLaunch().commandExists(cmd, () => {
+    try {
+      execSync(`which ${cmd}`, { stdio: 'pipe' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -679,7 +678,7 @@ function commandExists(cmd: string): boolean {
  */
 function runCommand(cmd: string, args: string[]): string | null {
   try {
-    const result = spawnSyncOnHost(cmd, args, { encoding: 'utf-8', timeout: 5000 });
+    const result = commandLaunch().spawnSync(cmd, args, { encoding: 'utf-8', timeout: 5000 });
     if (result.status === 0) {
       return result.stdout.trim();
     }
@@ -937,7 +936,7 @@ function verifyAiModel(modelName: string): CheckResult {
   }
 
   try {
-    const result = spawnSyncOnHost(config.command, config.args, {
+    const result = commandLaunch().spawnSync(config.command, config.args, {
       encoding: 'utf-8',
       timeout: config.timeout,
       stdio: 'pipe',
@@ -1028,7 +1027,7 @@ function verifyAgy(): Promise<CheckResult> {
   }
 
   return new Promise<CheckResult>((resolve) => {
-    const proc = spawnOnHost(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {
+    const proc = commandLaunch().spawn(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let settled = false;

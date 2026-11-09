@@ -12,8 +12,7 @@ import * as os from 'node:os';
 import { execSync } from 'node:child_process';
 import chalk from 'chalk';
 import { findWorkspaceRoot } from '../lib/skeleton.js';
-import { isWindows } from '../lib/platform.js';
-import { findOnHostPath, spawnOnHost } from '../lib/shell-launch.js';
+import { commandLaunch } from '../lib/platform/command-launch.js';
 
 interface ImportOptions {
   dryRun?: boolean;
@@ -290,7 +289,7 @@ export async function importCommand(source: string, options: ImportOptions = {})
 
     // Spawn interactive Claude session
     // We use -p to pass the initial prompt, but NOT --print so it stays interactive
-    const claudeProcess = spawnOnHost('claude', ['-p', prompt], {
+    const claudeProcess = commandLaunch().spawn('claude', ['-p', prompt], {
       stdio: 'inherit',
       cwd: workspaceRoot, // Run from workspace root so Claude can make edits
     });
@@ -322,13 +321,12 @@ export async function importCommand(source: string, options: ImportOptions = {})
 
 /** True when the `claude` CLI is on `PATH` (a PATHEXT lookup on Windows, where `which` does not exist). */
 function isClaudeOnPath(): boolean {
-  if (isWindows()) {
-    return findOnHostPath('claude') !== null;
-  }
-  try {
-    execSync('which claude', { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandLaunch().commandExists('claude', () => {
+    try {
+      execSync('which claude', { stdio: 'pipe' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }

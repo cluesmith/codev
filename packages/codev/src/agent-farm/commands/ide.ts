@@ -22,7 +22,8 @@ import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:
 import { fileURLToPath } from 'node:url';
 import { logger } from '../utils/logger.js';
 import { isWindows } from '../../lib/platform.js';
-import { findOnHostPath, spawnableOnHost, spawnOnHost } from '../../lib/shell-launch.js';
+import { findOnHostPath, spawnableOnHost } from '../../lib/shell-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import {
   IDE_SERVER_UPGRADE_COMMAND,
@@ -321,7 +322,7 @@ export async function ideStatus(): Promise<void> {
 /** Run `npm i -g @cluesmith/codev-ide` with npm's output on this terminal; resolves with its exit status. */
 function runNpmInstall(): Promise<number> {
   return new Promise((resolvePromise) => {
-    const child = spawnOnHost('npm', ['i', '-g', IDE_SERVER_PACKAGE], { stdio: 'inherit' });
+    const child = commandLaunch().spawn('npm', ['i', '-g', IDE_SERVER_PACKAGE], { stdio: 'inherit' });
     child.on('error', (error) => {
       logger.error(`Could not run npm: ${error.message}`);
       resolvePromise(1);

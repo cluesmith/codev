@@ -36,10 +36,8 @@ import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
 import { isIssueKey } from '../../lib/issue-id.js';
-import { isWindows } from '../../lib/platform.js';
-import { toMsysPath } from '../../lib/msys-path.js';
-import { gitBashFor, gitBashScript, gitBashCommand, type Launch } from '../../lib/shell-launch.js';
-import { GIT_BASH_ENV } from '../../lib/git-bash.js';
+import type { Launch } from '../../lib/shell-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { createWorktreeLink, type WorktreeLinkMethod } from '../lib/worktree-links.js';
 
 // =============================================================================
@@ -1108,20 +1106,14 @@ function builderIdentityExport(worktreePath: string): string {
  * harness (Claude Code reads `CLAUDE_CODE_GIT_BASH_PATH` to find its shell).
  */
 function launchScriptPrelude(worktreePath: string, workspaceRoot?: string): string {
-  if (!isWindows()) {
-    return `cd "${worktreePath}"\n${builderIdentityExport(worktreePath)}`;
-  }
-  const gitBash = gitBashFor(workspaceRoot);
-  return `cd "${toMsysPath(worktreePath)}"\n${builderIdentityExport(worktreePath)}`
-    + `export ${GIT_BASH_ENV}='${shellEscapeSingleQuote(gitBash.path)}'\n`;
+  const launch = commandLaunch();
+  return `cd "${launch.launchScriptPath(worktreePath)}"\n${builderIdentityExport(worktreePath)}`
+    + launch.launchScriptExports(workspaceRoot);
 }
 
 /** A path as the launch script's own commands (`cat`) read it: POSIX form under Git Bash. */
 function scriptLocalPath(path: string): string {
-  if (isWindows()) {
-    return toMsysPath(path);
-  }
-  return path;
+  return commandLaunch().launchScriptPath(path);
 }
 
 /**
@@ -1129,18 +1121,12 @@ function scriptLocalPath(path: string): string {
  * the Node executing this CLI, on Windows only (see `buildSessionLaunchLoop`).
  */
 export function sessionIdMintFallback(): string | undefined {
-  if (!isWindows()) {
-    return undefined;
-  }
-  return `'${shellEscapeSingleQuote(toMsysPath(process.execPath))}' -e 'process.stdout.write(require("crypto").randomUUID())'`;
+  return commandLaunch().sessionIdMintFallback();
 }
 
 /** How Tower runs a builder launch script: `/bin/bash <script>`, or the resolved Git Bash on Windows. */
 export function builderScriptLaunch(scriptPath: string, workspaceRoot?: string): Launch {
-  if (isWindows()) {
-    return gitBashScript(scriptPath, [], workspaceRoot);
-  }
-  return { command: '/bin/bash', args: [scriptPath] };
+  return commandLaunch().scriptFileArgv(scriptPath, [], workspaceRoot);
 }
 
 /**
@@ -1283,10 +1269,7 @@ export async function startShellSession(
 ): Promise<{ terminalId: string }> {
   // Create PTY session via REST API
   logger.info('Creating PTY terminal session for shell...');
-  let launch: Launch = { command: '/bin/bash', args: ['-c', baseCmd] };
-  if (isWindows()) {
-    launch = gitBashCommand(baseCmd, config.workspaceRoot);
-  }
+  const launch = commandLaunch().shellStringArgv(baseCmd, { command: '/bin/bash', flag: '-c' }, config.workspaceRoot);
   const { terminalId } = await createPtySession(
     config,
     launch.command,

@@ -7,14 +7,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawnSyncCalls = vi.hoisted(() => [] as { cmd: string; args: string[] }[]);
-vi.mock('../lib/shell-launch.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/shell-launch.js')>();
+vi.mock('../lib/platform/command-launch.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/platform/command-launch.js')>();
+  const recordingSpawnSync = (cmd: string, args: string[]) => {
+    spawnSyncCalls.push({ cmd, args });
+    return { status: 0, stdout: 'true\n', stderr: '' };
+  };
   return {
     ...actual,
-    spawnSyncOnHost: (cmd: string, args: string[]) => {
-      spawnSyncCalls.push({ cmd, args });
-      return { status: 0, stdout: 'true\n', stderr: '' };
-    },
+    commandLaunch: () => ({ ...actual.commandLaunch(), spawnSync: recordingSpawnSync }),
   };
 });
 import {

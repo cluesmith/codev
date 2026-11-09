@@ -55,7 +55,8 @@ import { logSafe } from '../utils/log-safe.js';
 import { handleIdeApi, ensureIdeServerLive } from './ide-server.js';
 import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
 import { getWorktreeConfig, getActivityHooks, getResolvedCommands } from '../utils/config.js';
-import { windowsInteractiveShell, windowsShellRequest } from '../../lib/shell-launch.js';
+import { windowsShellRequest } from '../../lib/shell-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { ensureCodevConfigWatcher } from './codev-config-watcher.js';
 import { handleDecisionsGet, handleDecisionsRule } from './decisions/routes.js';
 import { decisionsFilePresent } from './decisions/file.js';
@@ -3541,15 +3542,10 @@ async function handleWorkspaceShellCreate(
   try {
     const manager = getTerminalManager();
     const shellId = getNextShellId(workspacePath);
-    let shellCmd = process.env.SHELL || '/bin/bash';
-    let shellArgs: string[] = [];
-    if (isWindows()) {
-      // Spec 1658, Area F: the configured `shell.shell` (Windows PowerShell by
-      // default; `bash` means Git Bash, never System32's WSL launcher).
-      const launch = windowsInteractiveShell(getResolvedCommands(workspacePath).shell, workspacePath);
-      shellCmd = launch.command;
-      shellArgs = launch.args;
-    }
+    // `$SHELL` on POSIX; on Windows the configured `shell.shell` (Spec 1658, Area F).
+    const workspaceShell = commandLaunch().workspaceShell(workspacePath, () => getResolvedCommands(workspacePath).shell);
+    const shellCmd = workspaceShell.command;
+    const shellArgs = workspaceShell.args;
 
     let shellCreated = false;
 

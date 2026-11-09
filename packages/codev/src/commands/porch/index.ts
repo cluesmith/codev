@@ -694,8 +694,8 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
         console.log('');
         console.log(chalk.cyan('  Opening artifact for human review...'));
         // Use afx open to display in annotation viewer
-        const { spawnOnHost } = await import('../../lib/shell-launch.js');
-        spawnOnHost('afx', ['open', fullPath], {
+        const { commandLaunch } = await import('../../lib/platform/command-launch.js');
+        commandLaunch().spawn('afx', ['open', fullPath], {
           stdio: 'inherit',
           detached: true
         }).unref();

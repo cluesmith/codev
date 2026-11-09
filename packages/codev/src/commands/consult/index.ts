@@ -44,7 +44,8 @@ import {
 import { ISSUE_KEY_SOURCE } from '../../lib/issue-id.js';
 import { isWindows } from '../../lib/platform.js';
 import { containsBuildersSegment } from '../../agent-farm/utils/builder-worktree-identity.js';
-import { findOnHostPath, spawnableOnHost, spawnOnHost } from '../../lib/shell-launch.js';
+import { findOnHostPath, spawnableOnHost } from '../../lib/shell-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -435,15 +436,14 @@ function logQuery(workspaceRoot: string, model: string, query: string, duration?
  * Check if a command exists
  */
 function commandExists(cmd: string): boolean {
-  if (isWindows()) {
-    return findOnHostPath(cmd) !== null;
-  }
-  try {
-    execSync(`which ${cmd}`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandLaunch().commandExists(cmd, () => {
+    try {
+      execSync(`which ${cmd}`, { stdio: 'pipe' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -1199,7 +1199,7 @@ async function runAgyConsultation(
   };
 
   return new Promise<void>((resolve, reject) => {
-    const proc = spawnOnHost(bin, args, {
+    const proc = commandLaunch().spawn(bin, args, {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -1539,7 +1539,7 @@ async function dispatchConsultation(
   const startTime = Date.now();
 
   return new Promise((resolve, reject) => {
-    const proc = spawnOnHost(cmd[0], cmd.slice(1), {
+    const proc = commandLaunch().spawn(cmd[0], cmd.slice(1), {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'inherit'],
     });

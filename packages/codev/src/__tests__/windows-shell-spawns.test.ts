@@ -18,7 +18,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 import { runStreaming, commandExists } from '../agent-farm/utils/shell.js';
 import { runCheck } from '../commands/porch/checks.js';
-import { spawnOnHost, spawnSyncOnHost } from '../lib/shell-launch.js';
+import { commandLaunch } from '../lib/platform/command-launch.js';
 import { windowsPrereqDeps } from '../commands/doctor.js';
 import { setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
 import { setGitBashForTests } from '../lib/shell-launch.js';
@@ -84,9 +84,11 @@ describe('porch shell-string checks', () => {
     setHostPlatformForTests('linux');
     const result = await runCheck('build', 'npm run build', '/ws', env);
     expect(result.passed).toBe(true);
-    const [file, args, opts] = childProcess.spawn.mock.calls[0];
-    expect(file).toBe('npm');
-    expect(args).toEqual(['run', 'build']);
+    // Under `shell: true` Node runs `/bin/sh -c [file, ...args].join(' ')`, so
+    // the pre-refactor spawn('npm', ['run', 'build']) and this joined string are
+    // the same shell command (Spec 1658, Amendment 2: moved verbatim).
+    const [command, opts] = childProcess.spawn.mock.calls[0];
+    expect(command).toBe('npm run build');
     expect(opts).toMatchObject({ cwd: '/ws', shell: true, detached: true });
   });
 
@@ -124,16 +126,16 @@ describe('commandExists', () => {
   });
 });
 
-describe('spawnOnHost', () => {
+describe('commandLaunch().spawn', () => {
   it('POSIX: spawns exactly as given', () => {
     setHostPlatformForTests('darwin');
-    spawnOnHost('afx', ['open', '/x'], { stdio: 'inherit', detached: true });
+    commandLaunch().spawn('afx', ['open', '/x'], { stdio: 'inherit', detached: true });
     expect(childProcess.spawn).toHaveBeenCalledWith('afx', ['open', '/x'], { stdio: 'inherit', detached: true });
   });
 
   it('Windows: hidden, through the shim resolver (unresolved names pass through)', () => {
     setHostPlatformForTests('win32');
-    spawnOnHost('no-such-cli', ['a'], { stdio: 'inherit', env: { PATH: '' } });
+    commandLaunch().spawn('no-such-cli', ['a'], { stdio: 'inherit', env: { PATH: '' } });
     expect(childProcess.spawn).toHaveBeenCalledWith('no-such-cli', ['a'], {
       stdio: 'inherit',
       env: { PATH: '' },
@@ -143,16 +145,16 @@ describe('spawnOnHost', () => {
   });
 });
 
-describe('spawnSyncOnHost (doctor CLI probes)', () => {
+describe('commandLaunch().spawnSync (doctor CLI probes)', () => {
   it('POSIX: spawnSync exactly as given', () => {
     setHostPlatformForTests('linux');
-    spawnSyncOnHost('codex', ['--version'], { encoding: 'utf-8', timeout: 5000 });
+    commandLaunch().spawnSync('codex', ['--version'], { encoding: 'utf-8', timeout: 5000 });
     expect(childProcess.spawnSync).toHaveBeenCalledWith('codex', ['--version'], { encoding: 'utf-8', timeout: 5000 });
   });
 
   it('Windows: hidden, through the shim resolver', () => {
     setHostPlatformForTests('win32');
-    spawnSyncOnHost('codex', ['--version'], { encoding: 'utf-8', env: { PATH: '' } });
+    commandLaunch().spawnSync('codex', ['--version'], { encoding: 'utf-8', env: { PATH: '' } });
     expect(childProcess.spawnSync).toHaveBeenCalledWith('codex', ['--version'], {
       encoding: 'utf-8',
       env: { PATH: '' },
