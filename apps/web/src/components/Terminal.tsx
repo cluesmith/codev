@@ -622,21 +622,22 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       };
     };
 
-    // Mobile/IME input deduplication (Issue #253, #517)
+    // IME input deduplication (Issue #253, #517, #1886)
     //
-    // On mobile browsers, all keyboard input goes through IME composition.
-    // xterm.js has multiple code paths (keydown, compositionend, input event)
-    // that can each fire onData for the same keystroke, causing duplicates.
+    // xterm.js has several code paths (keydown, compositionend, input event)
+    // that can each fire onData for one IME keystroke. Composition tracking
+    // drops an exact repeat during or just after a composition, on any device
+    // (desktop CJK input included).
     //
-    // Strategy: Two complementary dedup triggers:
-    // 1. Composition tracking — dedup during/after IME composition on ANY
-    //    device (catches mobile + desktop CJK input)
-    // 2. Touch device detection — always-on dedup for soft keyboard devices
-    //    where delayed duplicates can arrive outside the composition window
-    //    (e.g. near line wraps). Uses pointer:coarse media query instead of
-    //    UA string to correctly detect iPads (iPadOS sends desktop UA).
-    //    Tradeoff: iPad + external keyboard would still get dedup, but
-    //    default keyboard repeat rates (>250ms) are above the 150ms window.
+    // #517 also made the guard always on for touch devices (pointer: coarse),
+    // against late duplicates from those paths. On a touch device the IME
+    // bridge below now keeps soft-keyboard input away from them and sends its
+    // own edits exactly. What still reaches the guard there is hardware keys,
+    // paste and terminal replies, where an always-on guard only dropped real
+    // repeats: a held key's auto-repeat (~30-80ms apart) and fast double
+    // letters on an iPad keyboard (#1886). So it is composition-only now,
+    // which on a touch device means off: the bridge shields composition
+    // events, so the composition window never opens there.
     const isTouchDevice = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
     const textarea = term.textarea;
     let isComposing = false;
@@ -683,14 +684,12 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-      // Suppress exact duplicate onData calls within 150ms when:
-      // - We're in/near an IME composition (composing or <150ms after), OR
-      // - This is a touch device (soft keyboard can produce late duplicates)
-      // A bridge edit is exact by construction and never a duplicate.
+      // Suppress an exact duplicate within 150ms while in or near an IME
+      // composition (composing, or <150ms after). A bridge edit is exact by
+      // construction and never a duplicate.
       const now = Date.now();
       const inCompositionWindow = isComposing || (now - compositionEndTime < 150);
-      if (!fromIme && (inCompositionWindow || isTouchDevice) &&
-          data === lastSentData && now - lastSentTime < 150) {
+      if (!fromIme && inCompositionWindow && data === lastSentData && now - lastSentTime < 150) {
         return;
       }
       if (!fromIme) {

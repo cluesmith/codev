@@ -239,6 +239,19 @@ test('dismissing the keyboard and typing again is not a desync', async ({ page }
   expect(await textarea(page)).toBe('world ');
 });
 
+test('a hardware keyboard on a touch device: fast double letters and held keys all arrive once each', async ({ page }) => {
+  // Issue #1886. Real keydowns, as from an iPad's keyboard: xterm sends each
+  // key itself and cancels the event, so the IME bridge must not send it too.
+  await page.keyboard.type('hello');
+  await page.keyboard.down('Backspace');
+  await page.keyboard.down('Backspace'); // auto-repeat
+  await page.keyboard.down('Backspace');
+  await page.keyboard.up('Backspace');
+  await page.keyboard.type('p!');
+  await expect.poll(async () => (await pty(page)).line).toBe('hep!');
+  expect((await pty(page)).frames).toEqual(['h', 'e', 'l', 'l', 'o', '\x7f', '\x7f', '\x7f', 'p', '!']);
+});
+
 test.describe('desktop (fine pointer)', () => {
   test.use({ hasTouch: false, isMobile: false, viewport: { width: 1280, height: 800 } });
 
