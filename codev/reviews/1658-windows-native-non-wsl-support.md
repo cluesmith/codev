@@ -116,17 +116,17 @@ the owner's Windows machine, which CI cannot cover.
    - Passed on tarballs packed from `efd1db9f1` (reported 2026-11-09, one real project with a
      private GitHub remote, cases A to H of the owner's test list): scenarios 4, 6b, 8, 9, 11,
      12 and 13.
-   - Not verified: scenario 15. The owner's run used the Marketplace extension (`main`'s code),
-     so the `.cmd` shim fix in `apps/vscode/src/cli-process.ts` was never exercised; its sidebar
-     actions reported "CLI not installed", the defect that fix addresses.
-   - Owner re-check on the final head (after the `main` merge), with re-packed tarballs and the
-     branch vsix: 15 (sidebar actions on the branch vsix), 15a and 3. The ConPTY fixtures (item 1)
-     remain open.
+   - Re-checked on tarballs and the branch vsix packed from `1dfb17ccf` (reported 2026-11-10,
+     product-identical to `7903facff`): scenarios 15 (sidebar actions on the branch vsix; the
+     earlier Marketplace-extension run does not count), 15a and 3 pass. The re-check found M7.
+   - Still to do: one Open IDE click from the dashboard on the M7 head, confirming the workbench
+     opens the right folder. The ConPTY fixtures (item 1) remain open.
    - Findings, under "Manual pass findings": M1 (resolved: a machine npm setting, not a defect),
      M2 (double cursor, cosmetic follow-up), M3 (uninstall while Tower runs, docs follow-up), M4
      (codev-ide launcher window, fixed in codev-ide#66; console noise benign), M5 (stale tower
      name after a cloud re-registration, Tower-side: #1871 and codev-cloud#17), M6 (one workspace split by
-     drive-letter case: fixed in this PR for Windows, macOS follow-up #1870).
+     drive-letter case: fixed in this PR for Windows, macOS follow-up #1870), M7 (the
+     dashboard's Open IDE link sends a Windows path the IDE cannot resolve: fixed in this PR).
 3. The #1858 codex scope decision (owner): recorded scope amendment, or wait for #1858.
 4. The cwd-first executable lookup (Known gap below): a release blocker scheduled as the first
    follow-up after merge, while the README announces native Windows support. Owner's call
@@ -910,6 +910,15 @@ and which scenarios ran before M6.
   the cause #1869 recorded in lessons-learned (a scoped `@cluesmith` registry overrides the test's
   registry), not the npm cache this note first blamed. CI passes. Not a code defect; left alone.
 
+- **Windows run 42547114468 (head `1dfb17ccf`, after the `main` merge): two one-off unit
+  intermittents, none skipped.** In files the merge did not touch, on the Node 24 leg (the Node 22
+  log was not retrievable): `pir-1233-session-launch-loop.test.ts` "recover-path entry uses the
+  provided initial command" (the Git Bash launch of the test's `start.sh` exited non-zero) and
+  `process-tree.windows.test.ts` scenario 6 ("timed out waiting for session tree to start"). Both
+  passed on both legs of the next run, 42551557753. First sightings; recorded so a recurrence
+  starts from here. The run's other eight failures were tests the merge brought in (#1877's
+  start-time tests, #1869's `#!/bin/sh` token-rotation stubs), fixed in `7903facff`.
+
 - **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
   run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:
   - The Phase 10 drive-root regression test (`findWorkspaceRoot.test.ts`) ran its child against
@@ -971,7 +980,7 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 | # | Scenario | Steps | Expected | Result |
 |---|---|---|---|---|
 | 1 | Fresh install | Git for Windows, jq, Node 22 or 24; no Visual Studio Build Tools. `npm install -g` the packed tarballs; `codev --version`; `codev doctor`; `codev init` in an empty folder. | Install needs no toolchain. `--version` prints the version (not empty). Doctor's "Windows Prerequisites" is green (Git Bash path and version, jq). `init` creates the project. | Pass (2026-11-02, Windows 11 26H2 build 26300.9711, Node 24.13.0, npm 11.6.2, tarballs packed from 793332c6e). No toolchain needed; `--version`, doctor and `init` as expected. Doctor's Claude check first failed: finding M1 (a machine npm setting, not a Codev defect). `init` must not target `%TEMP%`: Tower's home page hides temp-folder workspaces by design. |
-| 3 | Tower + terminals | `afx tower start`; open the dashboard; type in the architect terminal; open a new shell; resize the window; `afx tower stop`. | Ready in seconds. The architect runs `claude` and takes input. The new shell is PowerShell. Resize reflows. Stop exits 0, `afx tower status` says not running, a second start succeeds (owner lock released). | Pass (2026-11-02). Architect `claude` starts and responds, the new shell is PowerShell, resize reflows, stop exits 0, status reports not running, restart succeeds. Cosmetic: two cursors in the architect terminal, finding M2. |
+| 3 | Tower + terminals | `afx tower start`; open the dashboard; type in the architect terminal; open a new shell; resize the window; `afx tower stop`. | Ready in seconds. The architect runs `claude` and takes input. The new shell is PowerShell. Resize reflows. Stop exits 0, `afx tower status` says not running, a second start succeeds (owner lock released). | Pass (2026-11-02). Architect `claude` starts and responds, the new shell is PowerShell, resize reflows, stop exits 0, status reports not running, restart succeeds. Cosmetic: two cursors in the architect terminal, finding M2. Re-check after the M6 fix and the `main` merge: Pass (reported 2026-11-10, tarballs and vsix packed from 1dfb17ccf, product-identical to 7903facff); the Agents view shows one entry per workspace. |
 | 4 | Persistence, three launchers | Run from Windows Terminal, the PowerShell console, and the VS Code terminal: spawn a builder, note its agent PID (`Get-Process claude`), `afx tower stop`, `afx tower start`. | The builder terminal reconnects with replayed output, same PID, input still works. In each launcher. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case D). From Windows Terminal, the PowerShell console and the VS Code terminal: after `afx tower stop` + `afx tower start` the builder terminal replays its output, keeps the same `claude.exe` PID, and takes input. |
 | 6b | Long paths | Workspace at `C:\Users\<name>\src\<repo>`, `LongPathsEnabled` off; spawn a builder; `npm install` in its worktree. | Install completes. Doctor reports workspace depth and `core.longpaths`. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, cases A and C). `LongPathsEnabled` 0; doctor reports the workspace depth and `core.longpaths`; `npm install` completes in the builder worktree under `.builders\`. |
 | 8 | Forge, live | From a builder: `afx` / porch actions that list issues, view an issue, create and view a PR, and comment (all GitHub concepts). | Each succeeds; `/repos/...` style arguments are not mangled into `C:/Program Files/Git/repos/...`. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, cases B and C). Issue create, list, view and comment from the architect, and the builder's PR, all succeed; no MSYS-mangled `C:/Program Files/Git/...` arguments. |
@@ -979,8 +988,8 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 | 11 | Developer Mode on | Enable Developer Mode; spawn a builder in a repo with `worktree.symlinks` configured. | Real symlinks (`Get-Item <link>` shows `SymbolicLink`). With it off, directories are junctions and files hard links or copies (a copy warns). | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case F, Developer Mode on). `.env` in the builder worktree is a `SymbolicLink` to the main checkout's `.env`. The Developer Mode off path (hard link, or a copy with a warning) is covered by Windows CI, whose runners cannot create symlinks; not re-run on the owner machine. |
 | 12 | `afx send` live | `scripts/bugfix-1664-streaming-delivery-harness.mts --scenario streaming`, then `--scenario draft` (from `packages/codev`). | Streaming with an empty composer: delivered. Typed draft: held (`user-text`). Idle: delivered. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case E, live agents rather than the harness script). Idle builder: delivered at once. Typed draft: held, then delivered once the draft was cleared. Builder mid-answer: delivered without corrupting its output. |
 | 13 | Consult | From a Windows builder, a 3-way consult (porch-run, or `consult -m codex` / `-m claude` directly). | codex and claude return; an unauthenticated agy skips without blocking. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case G). `consult -m claude` and `-m codex` answer from Windows; gemini (agy) does not block; the porch-run 3-way consult on the case C builder's PR completes. |
-| 15 | VS Code extension | In VS Code on Windows: start Tower from the extension, spawn a builder, open its terminal, reveal a file. | Each works; no console windows flash. | **Pending re-run with the branch vsix.** The owner's run (reported 2026-11-09) used the Marketplace extension, which carries `main`'s code: its sidebar actions report "Codev: CLI not installed / outdated" because it spawns `codev` / `afx` without a shell, which cannot run the npm `.cmd` shim on Windows. That is the defect this PR's `apps/vscode/src/cli-process.ts` fixes, so the branch fix was never exercised. Views rendered correctly (they read Tower over HTTP). Re-run: install the vsix from the packed tarball (`code --install-extension ... --force`), then start Tower, spawn a builder, open its terminal and reveal a file from the sidebar. |
-| 15a | IDE server (optional dry run) | With the real `@cluesmith/codev-ide-server` installed: `afx ide start`, open `/ide/?folder=<repo>`, `afx ide stop`. | Found via `PATH`, passes the 1.128.0 floor, serves the folder, installs the sidebar extension; stop leaves no `codev-ide-server` or extension host process. | Pass (2026-11-02, published `@cluesmith/codev-ide` 1.0.0 and `@cluesmith/codev-ide-win32-x64` 1.0.0 via `afx ide install`; the package is now `@cluesmith/codev-ide`, not the name in Steps). The workbench loads and works through Codev Cloud, with the CODEV and CODEV TOWER views. A blank console window and some console errors belong to the codev-ide package (finding M4); asset 502s after a Tower re-registration are a Tower tunnel filing candidate (finding M5). Codev's own spawn is clean. |
+| 15 | VS Code extension | In VS Code on Windows: start Tower from the extension, spawn a builder, open its terminal, reveal a file. | Each works; no console windows flash. | Pass on the branch vsix (reported 2026-11-10, tarballs and vsix packed from 1dfb17ccf, product-identical to 7903facff). The Codev output channel showed `[Preflight] status=ok cli=3.3.7 ext=3.3.7`; from the sidebar, start Tower, spawn a builder, open its terminal and reveal a file all work, with no "CLI not installed" warning and no console window. The first attempt (reported 2026-11-09) used the Marketplace extension, `main`'s code, whose shell-less spawn cannot run the npm `.cmd` shim, the defect `apps/vscode/src/cli-process.ts` fixes; it is not counted. |
+| 15a | IDE server (optional dry run) | With the real `@cluesmith/codev-ide-server` installed: `afx ide start`, open `/ide/?folder=<repo>`, `afx ide stop`. | Found via `PATH`, passes the 1.128.0 floor, serves the folder, installs the sidebar extension; stop leaves no `codev-ide-server` or extension host process. | Pass (2026-11-02, published `@cluesmith/codev-ide` 1.0.0 and `@cluesmith/codev-ide-win32-x64` 1.0.0 via `afx ide install`; the package is now `@cluesmith/codev-ide`, not the name in Steps). The workbench loads and works through Codev Cloud, with the CODEV and CODEV TOWER views. A blank console window and some console errors belong to the codev-ide package (finding M4); asset 502s after a Tower re-registration are a Tower tunnel filing candidate (finding M5). Codev's own spawn is clean. Re-check: Pass (reported 2026-11-10, tarballs and vsix packed from 1dfb17ccf, product-identical to 7903facff). The dashboard's Open IDE link (new with #1869 via the `main` merge) opened the workbench without the folder: finding M7, fixed in this PR. |
 | G | ConPTY fixtures (gate condition) | Capture recipe in `audit.md` "ConPTY → Phase 8": `node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app claude --state all -- --model haiku` (and codex once #1858 lands). | Four `conpty-claude-*.capture.jsonl.gz` files, committed to `__tests__/fixtures/gate/conpty/`; the replay suite runs them instead of skipping: idle, midturn and resize delivered, draft held. | |
 
 ### Manual pass findings
@@ -1234,6 +1243,26 @@ Linux follow up in #1870.**
     recompute, worktrees rewrite, a second run is a no-op). Extension:
     `fleet-current-workspace.test.ts` (3). Negative control: without the drive-letter step, 4
     Windows tests fail.
+
+**M7. The dashboard's Open IDE link does not open a Windows folder (re-check of 15a,
+2026-11-10). Fixed in this PR (architect ruling).** The link arrived with the `main` merge
+(#1869): `openIde` in `packages/codev/templates/tower.html` built `./ide/?folder=` from the raw
+workspace path. The workbench launched but reported `Unable to resolve resource
+C:%5C<path>%5C<project>`.
+
+- Cause: the workbench reads `?folder=` as the path part of a URI. A POSIX workspace path already
+  is one; a Windows path is not, since `\` is not a URI separator and a bare `C:` reads as a
+  scheme. Owner confirmation: the same request with `/C:/<path>/<project>` (leading slash,
+  forward slashes) opened the folder.
+- Fix: `ideFolderUriPath` in `tower.html` turns a drive path (`C:\a\b`) into `/C:/a/b` and a UNC
+  path (`\\server\share\x`) into `//server/share/x`; POSIX paths and input already in URI-path
+  form pass through. `openIde` encodes the converted value. `ide-forward.ts` and the tunnel path
+  are unchanged. It was the only site in this repo that builds `?folder=`.
+- Test: `spec-1658-ide-folder-uri.test.ts` evaluates the function's real source from the
+  template: drive path, UNC, POSIX absolute, idempotence on converted input, and that `openIde`
+  encodes the converted value. Negative control: with the drive branch returning its input, the
+  drive-path test fails.
+- Codev Cloud's own IDE link is outside this repo; main is notifying the codev-cloud architect.
 
 ## Appendix: Implementation Notes by Phase
 
