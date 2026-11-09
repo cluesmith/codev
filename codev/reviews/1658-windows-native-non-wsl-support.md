@@ -935,6 +935,15 @@ and which scenarios ran before M6.
   starts from here. The run's other eight failures were tests the merge brought in (#1877's
   start-time tests, #1869's `#!/bin/sh` token-rotation stubs), fixed in `7903facff`.
 
+- **`spec-1280-measurement-instrument` on Windows: second sighting of the family (architect:
+  record, no diagnosis yet; a third sighting changes the ruling).** T12 failed in run 39927653580
+  (attempt 1, Node 24); T11 failed in run 42715696142 (head `84f1f75a1`, Node 24): `bash
+  scripts/measure-prompt-surface.sh` exited non-zero with Python's `Exception ignored in:
+  <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'> OSError: [Errno 22] Invalid
+  argument` at exit. Unrelated to the change under test in both runs. Held by main as a filing
+  candidate (Windows CI leg hygiene); any recurrence during the Amendment 2 dispatches is counted
+  and reported.
+
 - **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
   run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:
   - The Phase 10 drive-root regression test (`findWorkspaceRoot.test.ts`) ran its child against

@@ -1051,8 +1051,10 @@ export interface PosixShell { command: '/bin/sh' | '/bin/bash'; flag: '-c' | '-l
 
 export interface ShellStringContext {
   workspaceRoot?: string;            // locates the windows.gitBashPath override
+  // Exists only to keep porch runCheck's A2.9 behaviour verbatim; retired when that divergence is fixed.
   posixDetached?: boolean;           // porch runCheck: POSIX is detached for the group kill
-  posixCollapseWhitespace?: boolean; // porch runCheck: POSIX re-joins split(/\s+/) (kept verbatim, see A2.9)
+  // Exists only to keep porch runCheck's A2.9 behaviour verbatim; retired when that divergence is fixed.
+  posixCollapseWhitespace?: boolean; // porch runCheck: POSIX re-joins split(/\s+/)
 }
 
 export interface ShellExecOptions {
@@ -1307,7 +1309,8 @@ CI only (suites, targeted `windows.test`, probe, install guard): 1, 2, 5, 7, 8, 
 | S2 | Dashboard Start, Stop, Restart, + Create, copy path, Open IDE |
 | S3 | `afx spawn`, `afx send` (idle and held), `afx cleanup` with no survivors |
 
-macOS runs locally; Linux is covered by the Ubuntu CI legs (no Linux host here). The owner's
+macOS runs locally. Linux coverage is CI-only (the Ubuntu legs): neither the owner nor the
+builder has a Linux host. The owner's
 live-upgrade check on a daily machine remains the owner's option.
 
 **Reviews:** PR CMAP and the architect's high-tier integration review repeat on the final head; the
