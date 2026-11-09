@@ -43,6 +43,11 @@ Releases group projects into deployable units with semantic versioning:
 
 ```yaml
 releases:
+  - version: "v3.3.7"
+    name: "Luxor"
+    status: released
+    target_date: "2026-11-03"
+    notes: "Single-patch release: the Codev IDE opens from Tower's local dashboard (#1869/PR #1872). Each workspace card leads with an IDE row whose Open IDE action opens the workbench through Tower on port 4100; Tower accepts an origin-guarded /ide session cookie, routes the workbench and its WebSockets through itself, keeps the IDE server's connection token out of the browser and rotates it on every start. Plan and implementation had a dedicated security-architect review. Extension unchanged; Marketplace stays at 3.3.6. Contributors: Amr Elsayed."
   - version: "v1.0.0"           # Semantic version (required)
     name: "Optional codename"   # Optional friendly name
     status: planning|active|released|archived

@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const TMP_DIR = await vi.hoisted(async () => {
@@ -90,6 +90,8 @@ import {
   readIdeRecord,
   deleteIdeRecord,
   getIdeRecordPath,
+  readIdeConnectionToken,
+  getIdeConnectionTokenPath,
   type IdeServerRecord,
 } from '../lib/ide-record.js';
 import { IdeServerVersionError } from '../lib/ide-version.js';
@@ -574,5 +576,34 @@ describe.skipIf(posixStubsOnly)('/api/ide', () => {
 
     expect(status).toBe(500);
     expect(String(json.error)).toMatch(/below the supported floor/);
+  });
+});
+
+describe('connection token rotation per spawn (Issue #1869)', () => {
+  it('two spawns yield two different tokens, and the token Tower forwards is the new one', async () => {
+    await spawnIdeServer({ serverPath: SERVER_PATH, port: 8200 }, log);
+    const first = readIdeConnectionToken();
+    await stopIdeServer(log);
+
+    await spawnIdeServer({ serverPath: SERVER_PATH, port: 8200 }, log);
+    const second = readIdeConnectionToken();
+
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(second).toMatch(/^[0-9a-f]{64}$/);
+    expect(second).not.toBe(first);
+    // The forward reads the file on every request, so a request after the
+    // second spawn carries the new token; the spawn points the server at it.
+    expect(argValue(fakes.spawnCalls[1].args, '--connection-token-file')).toBe(getIdeConnectionTokenPath());
+    expect(statSync(getIdeConnectionTokenPath()).mode & 0o777).toBe(0o600);
+  });
+
+  it('adopting a live server keeps its token (never rotates under a running server)', async () => {
+    await spawnIdeServer({ serverPath: SERVER_PATH, port: 8200 }, log);
+    const live = readIdeConnectionToken();
+
+    await spawnIdeServer({ serverPath: SERVER_PATH, port: 8200 }, log);
+
+    expect(fakes.spawnCalls).toHaveLength(1);
+    expect(readIdeConnectionToken()).toBe(live);
   });
 });

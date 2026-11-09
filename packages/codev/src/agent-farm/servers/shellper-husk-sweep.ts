@@ -24,7 +24,7 @@
 
 import type Database from 'better-sqlite3';
 import { listProcessCensus, type ProcessCensusEntry } from './process-census.js';
-import { getProcessStartTime } from '../../terminal/session-manager.js';
+import { getProcessStartTime, PID_REUSE_TOLERANCE_MS } from '../../terminal/session-manager.js';
 import { reapShellpers } from './architect-session-holder.js';
 import { isWindows } from '../../lib/platform.js';
 import { SHELLPER_MARKER, isShellperInScope, shellperTeardownIdentities } from '../../terminal/shellper-cmdline.js';
@@ -70,15 +70,6 @@ export function startTimeLookupFor(census: ProcessCensusEntry[]): StartTimeLooku
   if (isWindows()) return censusStartTimeLookup(census);
   return getProcessStartTime;
 }
-
-/**
- * Same tolerance `SessionManager.reconnectSession` uses
- * (`../../terminal/session-manager.ts:471`) to detect PID reuse: a live
- * process's actual start time must match the DB-recorded one within this
- * window, or the DB row is stale (its PID was reused by an unrelated
- * process) and must not count as "registered".
- */
-const PID_REUSE_TOLERANCE_MS = 2000;
 
 /**
  * True when a live PID is still the process a row recorded: its actual start time

@@ -25,8 +25,10 @@ import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { AGENT_FARM_DIR } from './tower-client.js';
 
-/** The fixed Tower prefix that routes to the IDE server (Issue #1668 §D1). */
-export const IDE_DEFAULT_PREFIX = '/ide/';
+// The prefix and its matcher live in a dependency-free module so the auth seam
+// (`utils/server-utils.ts`) can use them without importing this file's
+// filesystem and tower-client dependencies (Issue #1869).
+export { IDE_DEFAULT_PREFIX, matchIdePrefix } from './ide-prefix.js';
 
 /** Default port the local IDE server listens on when `--port` is not given. */
 export const IDE_DEFAULT_PORT = 8200;
@@ -138,10 +140,33 @@ export function readIdeConnectionToken(): string | null {
 }
 
 /**
+ * Write a fresh connection token (randomBytes(32) hex, 0600), replacing any
+ * existing one, and return it (Issue #1869). Called before every IDE server
+ * SPAWN (never on adopt: a live server keeps the token it was started with), so
+ * a token that ever leaked into a browser jar is valid only for that server's
+ * uptime. Tower reads the token from this file on every forwarded request and
+ * overwrites any browser-held copy, so rotation breaks no client.
+ */
+export function rotateIdeConnectionToken(): string {
+  const path = getIdeConnectionTokenPath();
+  if (!existsSync(AGENT_FARM_DIR)) {
+    mkdirSync(AGENT_FARM_DIR, { recursive: true, mode: 0o700 });
+  }
+  const token = randomBytes(32).toString('hex');
+  writeFileSync(path, token + '\n', { mode: 0o600 });
+  chmodSync(path, 0o600);
+  return token;
+}
+
+/**
  * Return the Tower-owned connection token, generating and persisting one (0600)
  * on first use. This token is the IDE server's own inner auth layer (passed via
  * `--connection-token-file`); it is NOT a substitute for Tower's key check on
  * the forward (Issue #1668 §D2).
+ *
+ * TEST SEAM: production code no longer calls this. Every spawn uses
+ * `rotateIdeConnectionToken` (Issue #1869), and the forward only reads the
+ * file. Tests use it to provision a token without forcing a new one.
  */
 export function ensureIdeConnectionToken(): string {
   const path = getIdeConnectionTokenPath();

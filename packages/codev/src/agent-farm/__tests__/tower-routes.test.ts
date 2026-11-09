@@ -167,6 +167,13 @@ vi.mock('../utils/server-utils.js', async (importActual) => ({
   parseJsonBody: (...args: unknown[]) => mockParseJsonBody(...args),
 }));
 
+// Issue #1869: the /ide session mint makes sure the IDE server is live first.
+const { mockEnsureIdeServerLive } = vi.hoisted(() => ({ mockEnsureIdeServerLive: vi.fn() }));
+vi.mock('../servers/ide-server.js', async (importActual) => ({
+  ...(await importActual<typeof import('../servers/ide-server.js')>()),
+  ensureIdeServerLive: (...args: unknown[]) => mockEnsureIdeServerLive(...args),
+}));
+
 vi.mock('../servers/analytics.js', () => ({
   computeAnalytics: (...args: unknown[]) => mockComputeAnalytics(...args),
   clearAnalyticsCache: vi.fn(),
@@ -374,6 +381,145 @@ describe('tower-routes', () => {
       await handleRequest(req, res, makeCtx());
 
       expect(statusCode()).toBe(200);
+    });
+  });
+
+  // =========================================================================
+  // IDE forward cookie (Issue #1869)
+  // =========================================================================
+
+  describe('IDE forward cookie (Issue #1869)', () => {
+    const KEY = 'd'.repeat(64);
+    let savedKey: string | undefined;
+
+    beforeEach(async () => {
+      savedKey = process.env.CODEV_TOWER_KEY;
+      process.env.CODEV_TOWER_KEY = KEY;
+      mockEnsureIdeServerLive.mockResolvedValue(8200);
+      const { resetExpectedKeyCache } = await import('../utils/server-utils.js');
+      resetExpectedKeyCache();
+    });
+
+    afterEach(async () => {
+      if (savedKey === undefined) delete process.env.CODEV_TOWER_KEY;
+      else process.env.CODEV_TOWER_KEY = savedKey;
+      const { resetExpectedKeyCache } = await import('../utils/server-utils.js');
+      resetExpectedKeyCache();
+    });
+
+    it('POST /api/ide/session mints the HttpOnly, SameSite=Strict, Path=/ide cookie with an empty 204', async () => {
+      const { ideForwardCookieValue } = await import('../utils/server-utils.js');
+      const req = makeReq('POST', '/api/ide/session');
+      const { res, statusCode, headers, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(204);
+      expect(headers()['Set-Cookie']).toBe(`codev-ide-session=${ideForwardCookieValue()}; Path=/ide; HttpOnly; SameSite=Strict`);
+      expect(headers()['Set-Cookie']).not.toContain(KEY);
+      expect(body()).toBe('');
+    });
+
+    it('POST /api/ide/session waits for a live IDE server and 503s when none can be made live', async () => {
+      mockEnsureIdeServerLive.mockResolvedValueOnce(null);
+      const req = makeReq('POST', '/api/ide/session');
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(mockEnsureIdeServerLive).toHaveBeenCalled();
+      expect(statusCode()).toBe(503);
+      expect(headers()['Set-Cookie']).toBeUndefined();
+    });
+
+    it('POST /api/ide/session without the key is refused at the choke point', async () => {
+      const { isRequestAllowed } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const req = makeReq('POST', '/api/ide/session');
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(401);
+      expect(headers()['Set-Cookie']).toBeUndefined();
+    });
+
+    it('POST /api/ide/session refuses a tunnel-borne request Tower-side', async () => {
+      const req = makeReq('POST', '/api/ide/session', { 'x-codev-tunnel-proxy': '1' });
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(403);
+      expect(headers()['Set-Cookie']).toBeUndefined();
+    });
+
+    it('GET /api/ide/session is 405', async () => {
+      const req = makeReq('GET', '/api/ide/session');
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(405);
+      expect(headers()['Set-Cookie']).toBeUndefined();
+    });
+
+    it('a refused /ide request logs path and reason, never the cookie value', async () => {
+      const { isRequestAllowed, ideForwardCookieValue } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const value = ideForwardCookieValue() as string;
+      const req = makeReq('GET', '/ide/?folder=%2Fw', {
+        cookie: `codev-ide-session=${value}`,
+        origin: 'http://localhost:3000',
+      });
+      const ctx = makeCtx();
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      expect(statusCode()).toBe(401);
+      const logged = (ctx.log as any).mock.calls.map((c: unknown[]) => String(c[1])).join('\n');
+      // Pathname only for /ide: no query string ever reaches the log.
+      expect(logged).toContain('401 GET /ide/ —');
+      expect(logged).not.toContain('folder=');
+      expect(logged).toContain('cross-origin');
+      expect(logged).not.toContain(value);
+      expect(logged).not.toContain('codev-ide-session=');
+    });
+
+    it('a refused /ide request with a token in the query logs the pathname only', async () => {
+      const { isRequestAllowed } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const req = makeReq('GET', '/ide/stable-x?reconnectionToken=SECRET-RT&tkn=SECRET-TKN');
+      const ctx = makeCtx();
+      const { res } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      const logged = (ctx.log as any).mock.calls.map((c: unknown[]) => String(c[1])).join('\n');
+      expect(logged).toContain('401 GET /ide/stable-x —');
+      expect(logged).not.toContain('SECRET');
+    });
+
+    it('a refused non-/ide request still logs its full target', async () => {
+      const { isRequestAllowed } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const req = makeReq('GET', '/api/terminals?x=1');
+      const ctx = makeCtx();
+      const { res } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      const logged = (ctx.log as any).mock.calls.map((c: unknown[]) => String(c[1])).join('\n');
+      expect(logged).toContain('401 GET /api/terminals?x=1 —');
+    });
+
+    it('INVARIANT: no response ever carries Access-Control-Allow-Credentials', async () => {
+      const cases: Array<[string, string]> = [
+        ['OPTIONS', '/ide/'],
+        ['OPTIONS', '/api/ide/session'],
+        ['POST', '/api/ide/session'],
+        ['GET', '/health'],
+      ];
+      for (const [method, url] of cases) {
+        const req = makeReq(method, url, { origin: 'http://localhost:3000' });
+        const { res, headers } = makeRes();
+        await handleRequest(req, res, makeCtx());
+        const names = Object.keys(headers()).map((h) => h.toLowerCase());
+        expect(names).not.toContain('access-control-allow-credentials');
+      }
     });
   });
 

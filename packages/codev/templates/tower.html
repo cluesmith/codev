@@ -989,6 +989,9 @@
     // State
     let runningInstances = [];
     let recentInstances = [];
+    // Whether Tower has a recorded IDE server (Issue #1869). A recorded-but-dead
+    // server still counts: the /ide/ forward respawns it on the first request.
+    let ideAvailable = false;
 
     // Auth helper: resolve the shared local key. Prefer the value Tower injects
     // same-origin at serve time (window.__CODEV_TOWER_KEY__); fall back to any
@@ -1058,6 +1061,16 @@
 
       // Subscribe to SSE for push notifications
       subscribeToEvents();
+
+      // IDE status is checked on load and when the tab comes back into view, never
+      // on the 5s poll: GET /api/ide probes the port with a blocking lsof in Tower
+      // (Issue #1869).
+      await refreshIdeStatus();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          refreshIdeStatus().then(render);
+        }
+      });
 
       await refresh();
       // Poll every 5 seconds
@@ -1213,18 +1226,80 @@
       }
     }
 
+    // Update ideAvailable from GET /api/ide. Unavailable (an older Tower, or this
+    // page reached over the tunnel, which blocks the local-only /api/ide endpoint)
+    // means no IDE row.
+    async function refreshIdeStatus() {
+      try {
+        const response = await authFetch('./api/ide');
+        if (!response.ok) {
+          ideAvailable = false;
+          return;
+        }
+        const status = await response.json();
+        ideAvailable = !!(status && status.record);
+      } catch {
+        ideAvailable = false;
+      }
+    }
+
+    // Open the IDE workbench for a workspace in a new tab (Issue #1869). The tab
+    // is opened synchronously so it stays tied to the click (popup blockers),
+    // then the key-gated mint sets the HttpOnly /ide forward cookie, and only
+    // then is the tab navigated. The folder is Tower's own workspace path.
+    async function openIde(workspacePath) {
+      const tab = window.open('about:blank', '_blank');
+      if (tab) {
+        tab.opener = null;
+      }
+      try {
+        const response = await authFetch('./api/ide/session', { method: 'POST' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const target = new URL('./ide/?folder=' + encodeURIComponent(workspacePath), location.href).href;
+        if (tab) {
+          tab.location.href = target;
+        } else {
+          window.open(target, '_blank', 'noopener');
+        }
+      } catch (err) {
+        if (tab) {
+          tab.close();
+        }
+        showToast('Failed to open IDE: ' + err.message, 'error');
+      }
+    }
+
     // Render a single workspace card
     function renderInstance(instance) {
       const statusClass = instance.running ? 'running' : 'stopped';
       const statusText = instance.running ? 'Running' : 'Stopped';
 
-      // Render terminals list - always show Overview first, then individual terminals
+      // Render terminals list: the IDE first (when recorded), then Overview, then
+      // individual terminals
       const terminals = instance.terminals || [];
       let terminalsHtml = '';
 
       if (instance.running) {
-        // Always show Overview link first (opens split view with Architect + Status panel)
-        terminalsHtml = `
+        // Open IDE first: the Codev IDE workbench for this workspace (Issue #1869).
+        // The path rides a data attribute, never an inline JS string.
+        if (ideAvailable) {
+          terminalsHtml += `
+            <div class="port-item">
+              <div class="port-info">
+                <span class="port-status active"></span>
+                <span class="port-type">IDE</span>
+              </div>
+              <div class="port-actions">
+                <a href="#" data-ide-path="${escapeHtml(instance.workspacePath)}" onclick="event.preventDefault(); openIde(this.dataset.idePath)" title="Open the Codev IDE for this workspace">Open IDE</a>
+              </div>
+            </div>
+          `;
+        }
+
+        // Then the Overview link (opens split view with Architect + Status panel)
+        terminalsHtml += `
           <div class="port-item">
             <div class="port-info">
               <span class="port-status active"></span>

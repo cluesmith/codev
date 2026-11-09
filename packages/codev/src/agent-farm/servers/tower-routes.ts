@@ -34,7 +34,7 @@ import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
-import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
+import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml, decideForwardAuthorization, ideForwardSetCookie } from '../utils/server-utils.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
 import { isWindows } from '../../lib/platform.js';
 import { workspaceKey } from '../utils/workspace-path.js';
@@ -52,7 +52,7 @@ import {
 import { handleTunnelEndpoint } from './tower-tunnel.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 import { logSafe } from '../utils/log-safe.js';
-import { handleIdeApi } from './ide-server.js';
+import { handleIdeApi, ensureIdeServerLive } from './ide-server.js';
 import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
 import { getWorktreeConfig, getActivityHooks, getResolvedCommands } from '../utils/config.js';
 import { windowsInteractiveShell, windowsShellRequest } from '../../lib/shell-launch.js';
@@ -269,6 +269,94 @@ function respondStartingUp(res: http.ServerResponse): void {
 }
 
 // ============================================================================
+// IDE forward cookie (Issue #1869)
+// ============================================================================
+
+/** Mints the header-free `/ide` forward credential for a local browser. */
+const IDE_SESSION_ROUTE = '/api/ide/session';
+
+/**
+ * The log-safe reason for a 401 at the HTTP choke point. `/ide*` paths report
+ * the forward seam's own reason (Host, credential, or cross-origin cookie);
+ * every other route distinguishes Host from key. Never includes credentials.
+ */
+function unauthorizedReason(req: http.IncomingMessage): string {
+  let pathname = '/';
+  try {
+    pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  } catch {
+    return 'malformed URL';
+  }
+  if (matchIdePrefix(pathname)) {
+    const decision = decideForwardAuthorization(req);
+    if (!decision.allowed) return decision.reason;
+  }
+  if (!isAllowedHost(req.headers.host)) return `disallowed Host "${req.headers.host ?? ''}"`;
+  return 'missing or invalid key';
+}
+
+/**
+ * The request target as it may appear in a log line. For the IDE forward this
+ * is the PATHNAME only (Issue #1869): the workbench's own requests can carry
+ * credentials in the query (`?tkn=`, a reconnection token), and none of that
+ * may land in Tower's log. Other routes keep the full target.
+ */
+function loggableTarget(req: http.IncomingMessage): string {
+  const target = req.url ?? '/';
+  try {
+    const { pathname } = new URL(target, 'http://localhost');
+    if (matchIdePrefix(pathname)) return pathname;
+  } catch {
+    return '(malformed URL)';
+  }
+  return target;
+}
+
+/**
+ * `POST /api/ide/session`: set the `/ide` forward cookie (HttpOnly,
+ * SameSite=Strict, Path=/ide). Reached only after isRequestAllowed, so the
+ * caller already holds the key. Refuses tunnel-borne requests Tower-side as
+ * well (belt-and-braces over the tunnel's api/ide/ block): the cloud has no use
+ * for a loopback cookie. 204 with no body; the value is never logged.
+ *
+ * Before answering it makes sure the IDE server is live, respawning a recorded
+ * but dead server the same way the forward does. Otherwise the first navigation
+ * would land on a 502 while the forward's own respawn ran in the background.
+ * 503 when no server can be made live, so the dashboard shows an error instead
+ * of opening a dead tab.
+ */
+async function handleIdeSessionMint(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  log: RouteContext['log'],
+): Promise<void> {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'POST' });
+    res.end(JSON.stringify({ error: 'Method not allowed' }));
+    return;
+  }
+  if (req.headers[TUNNEL_PROXY_HEADER] === '1') {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not available over the tunnel' }));
+    return;
+  }
+  const setCookie = ideForwardSetCookie();
+  if (!setCookie) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Local key unavailable' }));
+    return;
+  }
+  const port = await ensureIdeServerLive(log);
+  if (port === null) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'IDE server unavailable: run afx ide start' }));
+    return;
+  }
+  res.writeHead(204, { 'Set-Cookie': setCookie });
+  res.end();
+}
+
+// ============================================================================
 // Main request handler
 // ============================================================================
 
@@ -278,6 +366,10 @@ export async function handleRequest(
   ctx: RouteContext,
 ): Promise<void> {
   // CORS headers — reflect only allowlisted origins (advisory Layer 3).
+  // INVARIANT (Issue #1869): Tower NEVER sets Access-Control-Allow-Credentials.
+  // isAllowedOrigin reflects any http://localhost:<port>, so adding it would let
+  // any localhost page READ responses authorized by the ambient /ide forward
+  // cookie. Pinned by a route test.
   const origin = req.headers.origin;
   if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -303,10 +395,9 @@ export async function handleRequest(
   if (!isRequestAllowed(req)) {
     // Log the reason so a broken legitimate client (disallowed Host vs missing
     // key) is diagnosable — a bare 401 is indistinguishable from either side.
-    const reason = isAllowedHost(req.headers.host)
-      ? 'missing or invalid key'
-      : `disallowed Host "${req.headers.host ?? ''}"`;
-    ctx.log('WARN', `401 ${req.method ?? 'GET'} ${req.url ?? '/'} — ${reason}`);
+    // Path + reason only: never the Cookie header or any credential value.
+    const reason = unauthorizedReason(req);
+    ctx.log('WARN', `401 ${req.method ?? 'GET'} ${loggableTarget(req)} — ${reason}`);
     res.writeHead(401, { 'Content-Type': 'text/plain' });
     res.end('Unauthorized');
     return;
@@ -329,6 +420,12 @@ export async function handleRequest(
     // the isRequestAllowed key check above. Drives the IDE server lifecycle.
     if (url.pathname === '/api/ide') {
       return await handleIdeApi(req, res, ctx.log);
+    }
+
+    // IDE forward cookie mint: /api/ide/session (Issue #1869). Key-gated by
+    // isRequestAllowed above and tunnel-blocked by the api/ide/ segment.
+    if (url.pathname === IDE_SESSION_ROUTE) {
+      return handleIdeSessionMint(req, res, ctx.log);
     }
 
     // IDE prefix forward: /ide/* → local IDE server (Issue #1668). A post-auth

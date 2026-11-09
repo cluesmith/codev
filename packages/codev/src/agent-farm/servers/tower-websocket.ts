@@ -10,7 +10,7 @@ import http from 'node:http';
 import type net from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import { WS_CLOSE_SESSION_UNKNOWN, WS_CLOSE_UNAUTHORIZED } from '../lib/reconnect-backoff.js';
-import { isWebSocketAllowed, isForwardAuthorized } from '../utils/server-utils.js';
+import { isWebSocketAllowed, decideForwardAuthorization } from '../utils/server-utils.js';
 import { matchIdePrefix, forwardIdeWebSocket } from './ide-forward.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import type { PtySession } from '../../terminal/pty-session.js';
@@ -239,13 +239,17 @@ export function setupUpgradeHandler(
     // IDE prefix WebSocket forward (Issue #1668). Checked BEFORE the generic
     // isWebSocketAllowed gate below, which requires the `codev-key` SUBPROTOCOL
     // that the IDE workbench's vanilla `?reconnectionToken=` sockets never offer.
-    // Authorized instead by isForwardAuthorized (Host guard + the tunnel-stamped
-    // `codev-tower-key` header) — the same whole-boundary key check the HTTP
-    // forward uses, with no per-folder logic (§D2). Then raw-piped to the local
-    // IDE server; Tower never parses the workbench's own protocol.
+    // Authorized instead by the forward seam (Host guard, then the tunnel-stamped
+    // `codev-tower-key` header, then the local browser's `/ide` forward cookie
+    // behind its cross-port Origin guard, Issue #1869) — the same whole-boundary
+    // decision the HTTP forward uses, with no per-folder logic (§D2). Then
+    // raw-piped to the local IDE server; Tower never parses the workbench's own
+    // protocol.
     if (matchIdePrefix(reqUrl.pathname)) {
-      if (!isForwardAuthorized(req)) {
-        logTerminal('WARN', `IDE WS upgrade 401 ${reqUrl.pathname} — disallowed Host or missing/invalid key`);
+      const decision = decideForwardAuthorization(req);
+      if (!decision.allowed) {
+        // Path + reason only: never the Cookie header or any credential value.
+        logTerminal('WARN', `IDE WS upgrade 401 ${reqUrl.pathname} — ${decision.reason}`);
         rejectUnauthorized(req, socket, head, wss);
         return;
       }
