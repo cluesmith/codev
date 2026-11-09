@@ -197,6 +197,35 @@ describe('Terminal mobile IME replace (Issue #1883)', () => {
       expect(dataFrames()).toEqual(['ls ', '\x03', ' ']);
     });
 
+    it('a soft-keyboard Cmd-C copies, and backspacing the swallowed c sends nothing', () => {
+      keyboardEdit('ls ');
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Cmd' }));
+      keyboardEdit('ls c');
+      keyboardEdit('ls ', 'deleteContentBackward');
+      keyboardEdit('ls -l', 'insertText');
+      // The bridge's "c" reaches onData and is swallowed there; only "ls " and "-l" reach the PTY.
+      expect(dataFrames()).toEqual(['ls ', '-l']);
+    });
+
+    it('a soft-keyboard Cmd-V with no clipboard text sends nothing, and backspacing the v sends nothing', () => {
+      keyboardEdit('cat ');
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Cmd' }));
+      keyboardEdit('cat v');
+      keyboardEdit('cat ', 'deleteContentBackward');
+      keyboardEdit('cat x', 'insertText');
+      expect(dataFrames()).toEqual(['cat ', 'x']);
+    });
+
+    it('a virtual key dropped by a closed socket does not count as input', async () => {
+      keyboardEdit('check afain');
+      mockWs.readyState = 3;
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Tab' }));
+      mockWs.readyState = 1;
+      await nextEvent();
+      keyboardEdit('check again', 'insertReplacementText');
+      expect(dataFrames()).toEqual(['check afain', `${DEL.repeat(4)}gain`]);
+    });
+
     it('paste is sent once, and the browser inserting it into the textarea sends nothing', async () => {
       keyboardEdit('see ');
       // xterm's paste handler emits the text and clears the textarea, then the

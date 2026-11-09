@@ -12,18 +12,22 @@ export interface ModifierState {
 interface VirtualKeyboardProps {
   wsRef: React.RefObject<WebSocket | null>;
   modifierRef: React.RefObject<ModifierState>;
-  /** Called after a key goes straight to the PTY, bypassing xterm (Issue #1883). */
+  /** Called after a key went straight to the PTY, bypassing xterm (Issue #1883); not when the socket was closed. */
   onKeySent?: () => void;
 }
 
-/** Encode and send a data frame directly via WebSocket (avoids bracketed paste). */
-function sendRawKey(ws: WebSocket | null, key: string): void {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+/**
+ * Encode and send a data frame directly via WebSocket (avoids bracketed paste).
+ * Returns whether it was sent.
+ */
+function sendRawKey(ws: WebSocket | null, key: string): boolean {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   const encoded = new TextEncoder().encode(key);
   const frame = new Uint8Array(1 + encoded.length);
   frame[0] = FRAME_DATA;
   frame.set(encoded, 1);
   ws.send(frame.buffer);
+  return true;
 }
 
 /**
@@ -41,14 +45,12 @@ export function VirtualKeyboard({ wsRef, modifierRef, onKeySent }: VirtualKeyboa
 
   const handleEsc = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
-    sendRawKey(wsRef.current, '\x1b');
-    onKeySent?.();
+    if (sendRawKey(wsRef.current, '\x1b')) onKeySent?.();
   }, [wsRef, onKeySent]);
 
   const handleTab = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
-    sendRawKey(wsRef.current, '\t');
-    onKeySent?.();
+    if (sendRawKey(wsRef.current, '\t')) onKeySent?.();
   }, [wsRef, onKeySent]);
 
   const handleCtrl = useCallback((e: React.PointerEvent) => {

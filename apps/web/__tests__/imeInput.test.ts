@@ -64,7 +64,24 @@ describe('TextareaMirror', () => {
     mirror.sync('src/comp');
     // Tab completion (or Esc, an arrow, a hardware key) reached the PTY.
     mirror.afterForeignInput('src/comp');
-    expect(mirror.sync('src/com')).toEqual({ edit: DEL, diverged: false });
+    expect(mirror.sync('src/com', true)).toEqual({ edit: DEL, diverged: false });
+  });
+
+  it('a cut or undo reaching back past other input deletes nothing there, and says it diverged', () => {
+    const mirror = new TextareaMirror();
+    mirror.sync('src/comp');
+    mirror.afterForeignInput('src/comp');
+    mirror.sync('src/compx');
+    // Only the "x" sent after the Tab can be deleted.
+    expect(mirror.sync('src/')).toEqual({ edit: DEL, diverged: true });
+  });
+
+  it('a deletion that stays after other input is an ordinary delete', () => {
+    const mirror = new TextareaMirror();
+    mirror.sync('src/comp');
+    mirror.afterForeignInput('src/comp');
+    mirror.sync('src/comp --all');
+    expect(mirror.sync('src/comp')).toEqual({ edit: DEL.repeat(6), diverged: false });
   });
 
   it('a replace reaching back past other input does not delete that input, and says it diverged', () => {
@@ -286,12 +303,34 @@ describe('attachImeInput', () => {
     expect(emitted).toEqual(['cat ', 'notes.txt']);
   });
 
-  it('a cut after other input deletes at the cursor, like a soft backspace', async () => {
+  it('a cut reaching back past other input fails loud and deletes nothing it should not', async () => {
     edit('src/comp');
     bridge.noteForeignInput(); // a virtual Tab
     await Promise.resolve();
     edit('src/', 'deleteByCut');
-    expect(emitted.at(-1)).toBe(DEL.repeat(4));
+    // The Tab's completion sits after "src/comp" on the line; DELs would hit it.
+    expect(emitted).toEqual(['src/comp']);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(String(errorSpy.mock.calls[0][0])).toMatch(/cannot be retracted/);
+  });
+
+  it('a long-press backspace after other input deletes at the cursor', async () => {
+    edit('git status');
+    bridge.noteForeignInput();
+    await Promise.resolve();
+    edit('git ', 'deleteWordBackward');
+    expect(emitted.at(-1)).toBe(DEL.repeat(6));
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('a swallowed edit is never deleted, and nothing typed before it either', () => {
+    edit('ls ');
+    edit('ls c', 'insertText');
+    // A sticky Cmd turned the "c" into a copy; the PTY never got it.
+    bridge.noteSwallowedEdit();
+    edit('ls ', 'deleteContentBackward');
+    edit('ls x', 'insertText');
+    expect(emitted).toEqual(['ls ', 'c', 'x']);
     expect(errorSpy).not.toHaveBeenCalled();
   });
 

@@ -49,8 +49,9 @@ export interface SyncResult {
  *
  * - Below `replaceFloor`, other input reached the PTY after the text (a key,
  *   a virtual key, a paste). A replace cannot reach back past it, because its
- *   DELs would hit that input instead. A soft backspace still deletes: the
- *   user is deleting what the line shows at the cursor, as stock xterm does.
+ *   DELs would hit that input instead. Only a backspace still deletes there:
+ *   the user is deleting what the line shows at the cursor, as stock xterm
+ *   does. A cut or undo of hidden textarea text cannot, and fails loud.
  * - Below `deleteFloor`, the text never reached the PTY at all, for example
  *   the selection xterm puts in the textarea for the context menu. Nothing
  *   may DEL it.
@@ -67,16 +68,20 @@ export class TextareaMirror {
     return this.text;
   }
 
-  /** The edit that brings the PTY in line with the textarea's new `value`. */
-  sync(value: string): SyncResult {
+  /**
+   * The edit that brings the PTY in line with the textarea's new `value`.
+   * `backspace` marks a deletion the user made at the cursor (the keyboard's
+   * backspace key) rather than a cut, drag or undo.
+   */
+  sync(value: string, backspace = false): SyncResult {
     const old = Array.from(this.text);
     const next = Array.from(value);
     const p = commonPrefixLength(old, next);
     let edit: string;
     let diverged = false;
-    if (p === next.length) {
-      // Only deleted, like a soft backspace. One DEL per code point, where
-      // stock xterm sends a single DEL whatever the size of the deletion.
+    if (backspace && p === next.length) {
+      // The backspace key. One DEL per code point, where stock xterm sends a
+      // single DEL whatever the size of the deletion.
       edit = DEL.repeat(old.length - Math.max(p, this.deleteFloor));
     } else if (p >= this.replaceFloor) {
       edit = reconcileComposition(old.slice(p).join(''), next.slice(p).join(''));
@@ -126,8 +131,16 @@ export interface ImeInputBridge {
   ownsKey(event: KeyboardEvent): boolean;
   /** Input reached the PTY outside the textarea (a key, a paste, a virtual key). */
   noteForeignInput(): void;
+  /**
+   * The bridge's last edit never reached the PTY as itself: a sticky modifier
+   * swallowed it, or turned it into a control character.
+   */
+  noteSwallowedEdit(): void;
   dispose(): void;
 }
+
+/** The keyboard's backspace key, as the browser reports it. */
+const BACKSPACE = /^delete(Content|Word|SoftLine|HardLine)Backward$/;
 
 /**
  * Take IME text input away from xterm's append-only handlers and send each
@@ -180,7 +193,7 @@ export function attachImeInput(
       mirror.accept(textarea.value);
       return;
     }
-    const { edit, diverged } = mirror.sync(textarea.value);
+    const { edit, diverged } = mirror.sync(textarea.value, BACKSPACE.test(inputType));
     if (diverged) {
       alarm('an edit replaced text sent before other terminal input, which cannot be retracted', {
         textareaLength: textarea.value.length,
@@ -215,6 +228,9 @@ export function attachImeInput(
     ownsKey: (event) => event.type === 'keydown' && event.keyCode === 229,
     // Deferred: xterm clears the textarea right after it emits a paste.
     noteForeignInput: () => queueMicrotask(() => mirror.afterForeignInput(textarea.value)),
+    // What the line holds after a control character is unknown, so nothing
+    // typed before it may be deleted or replaced.
+    noteSwallowedEdit: () => mirror.detach(textarea.value),
     dispose: () => {
       for (const type of shielded) container.removeEventListener(type, shield, true);
       container.removeEventListener('beforeinput', onBeforeInput, true);

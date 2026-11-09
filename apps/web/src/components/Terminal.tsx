@@ -707,8 +707,10 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       // Sticky modifier handling for mobile virtual keyboard
       const mod = modifierRef.current;
       if ((mod.ctrl || mod.cmd) && data.length === 1) {
-        // A bridge edit's character does not reach the PTY as itself.
-        if (fromIme) imeBridge?.noteForeignInput();
+        const typed = data;
+        // A soft-keyboard character the modifier swallows, or turns into a
+        // control character, sits in the textarea but never reached the PTY.
+        const swallowed = () => { if (fromIme) imeBridge?.noteSwallowedEdit(); };
         const charCode = data.charCodeAt(0);
         if (mod.ctrl) {
           if (charCode >= 0x61 && charCode <= 0x7a) {
@@ -728,6 +730,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
             mod.ctrl = false;
             mod.cmd = false;
             mod.clearCallback?.();
+            swallowed();
             return;
           }
           if (key === 'c') {
@@ -736,12 +739,14 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
             mod.ctrl = false;
             mod.cmd = false;
             mod.clearCallback?.();
+            swallowed();
             return;
           }
           mod.ctrl = false;
           mod.cmd = false;
           mod.clearCallback?.();
         }
+        if (data !== typed) swallowed();
       }
 
       // Anything but the bridge's own edit moves the PTY line away from the

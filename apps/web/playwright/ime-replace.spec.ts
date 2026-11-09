@@ -80,6 +80,18 @@ class MobileKeyboard {
     await this.page.waitForTimeout(20);
   }
 
+  /**
+   * A native paste, such as the long-press menu's Paste: a trusted `paste`
+   * event (xterm sends the text and clears its textarea), then the browser's
+   * own insert of the clipboard into the textarea.
+   */
+  async paste(): Promise<void> {
+    const key = { windowsVirtualKeyCode: 229, key: 'Unidentified' };
+    await this.cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key, commands: ['paste'] });
+    await this.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    await this.page.waitForTimeout(20);
+  }
+
   /** The keyboard replaces the last `n` characters with no composition (autocorrect, smart punctuation). */
   async replaceTail(n: number, text: string): Promise<void> {
     await this.page.evaluate((count) => {
@@ -191,6 +203,19 @@ test('a TUI query answered mid-typing does not stop a later autocorrect from rep
   await keyboard.replaceTail('afain'.length, 'again');
   await keyboard.insert('. ');
   await expectLine(page, 'check again. ');
+});
+
+test('a native paste is sent once, and autocorrecting the pasted word replaces it', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await keyboard.words('see');
+  await page.evaluate(() => navigator.clipboard.writeText('teh'));
+  await keyboard.paste();
+  await expect.poll(async () => (await pty(page)).line).toBe('see teh');
+  // The browser inserted the clipboard after xterm cleared the textarea.
+  expect(await textarea(page)).toBe('teh');
+  await keyboard.replaceTail('teh'.length, 'the ');
+  await expect.poll(async () => (await pty(page)).line).toBe('see the ');
+  expect((await pty(page)).frames.filter((f) => f.includes('teh'))).toEqual(['teh']);
 });
 
 test('the keyboard\'s backspace deletes one character per press', async ({ page }) => {
