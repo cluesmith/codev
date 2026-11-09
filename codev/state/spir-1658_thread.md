@@ -236,3 +236,10 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 
 - Scenarios 1, 3 and 15a pass. Findings recorded in the review: M1 (owner npmrc `os=linux`, not a defect), M2 (double cursor, follow-up), M3 (uninstall while Tower runs, docs follow-up), M4 (codev-ide launcher window, fixed in codev-ide#66), M5 (stale tower-name prefix after re-registration, main files under area/tower).
 - M6, functional: VS Code (`c:\`) and Git Bash (`C:\`) split one Windows workspace into two. Owner ruled a Windows-only fix in this PR (realpathSync.native, canonical keys at every entry point, boot canonicalization of stored rows); macOS/Linux follow-up filed as #1870. Architect required a CMAP first: claude and codex both REQUEST_CHANGES (liveness-blind collision rule, unstable fallback keys, missed sites incl. canvas-relay and the VS Code fleet comparison); all addressed but one rebuttal (no boot failure on canonicalization error). Commit a99ffa351.
+
+## 2026-11-09: owner pass done, main merged
+
+- M6 verified on the owner machine: boot logged the canonicalized workspace rows and the Agents view showed one workspace. M5 filed by main as #1871 (Tower) and codev-cloud#17.
+- Owner ran cases A to H on one real project at efd1db9f1: scenarios 4, 6b, 8, 9, 11 (Developer Mode on), 12 and 13 pass. Scenario 15 is not verified: the owner used the Marketplace extension (main's code), whose sidebar actions say "CLI not installed" because it spawns the npm `.cmd` shim without a shell. That is exactly what this PR's cli-process.ts fixes, so the re-check is on the branch vsix.
+- Architect released the hold. Merged main (50 commits: #1869 Open IDE, v3.3.7, #1877 pid-reuse row deletion). Seven conflicts. husk sweep: startTimeMatches now uses #1877's PID_REUSE_TOLERANCE_MS, one constant; #1877's row deletion kept as is. reconnect's POSIX branch uses the same constant. #1877's isShellperPidReused tests that need a real start time skip on win32 (getProcessStartTime reads none there; the Windows identity is the WELCOME check).
+- Owner re-check on the merged head: 15 (branch vsix), 15a and 3.
