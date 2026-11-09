@@ -1,7 +1,7 @@
 id: bugfix-1883
 title: mobile-terminal-autocomplete-r
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-09T15:19:38.686Z'
-updated_at: '2026-11-09T21:43:53.756Z'
+updated_at: '2026-11-09T21:43:56.293Z'
 pr_ready_for_human: false
