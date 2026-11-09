@@ -1243,6 +1243,20 @@
       }
     }
 
+    // The IDE reads ?folder= as the path part of a URI (Spec 1658, M7). A POSIX
+    // path already is one; a Windows drive path (C:\a\b) becomes /C:/a/b and a
+    // UNC path (\\server\share\x) becomes //server/share/x. Input already in
+    // URI-path form passes through unchanged.
+    function ideFolderUriPath(workspacePath) {
+      if (/^[A-Za-z]:[\\/]/.test(workspacePath)) {
+        return '/' + workspacePath.replace(/\\/g, '/');
+      }
+      if (/^\\\\[^\\]/.test(workspacePath)) {
+        return workspacePath.replace(/\\/g, '/');
+      }
+      return workspacePath;
+    }
+
     // Open the IDE workbench for a workspace in a new tab (Issue #1869). The tab
     // is opened synchronously so it stays tied to the click (popup blockers),
     // then the key-gated mint sets the HttpOnly /ide forward cookie, and only
@@ -1257,7 +1271,7 @@
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
-        const target = new URL('./ide/?folder=' + encodeURIComponent(workspacePath), location.href).href;
+        const target = new URL('./ide/?folder=' + encodeURIComponent(ideFolderUriPath(workspacePath)), location.href).href;
         if (tab) {
           tab.location.href = target;
         } else {
