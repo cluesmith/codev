@@ -39,6 +39,7 @@ import {
   waitForEndpoint,
 } from './shellper-endpoint.js';
 import { isWindows } from '../lib/platform.js';
+import { processes } from '../lib/platform/processes.js';
 import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
 import { getTowerJobHelper, sessionJobName, type JobAssignOutcome, type WindowsJobHelper } from '../lib/windows-job.js';
 import { WINDOWS_CENSUS_TIMEOUT_MS, listProcessCensus } from '../agent-farm/servers/process-census.js';
@@ -1744,62 +1745,5 @@ export class SessionManager extends EventEmitter {
  * - Linux: read `/proc/{pid}/stat` field 22 (starttime in clock ticks)
  */
 export function getProcessStartTime(pid: number): Promise<number | null> {
-  return new Promise((resolve) => {
-    try {
-    if (process.platform === 'darwin') {
-      // macOS: use ps to get launch time
-      execFile('ps', ['-p', String(pid), '-o', 'lstart='], (err, stdout) => {
-        if (err || !stdout.trim()) {
-          resolve(null);
-          return;
-        }
-        const date = new Date(stdout.trim());
-        if (isNaN(date.getTime())) {
-          resolve(null);
-          return;
-        }
-        resolve(date.getTime());
-      });
-    } else if (process.platform === 'linux') {
-      // Linux: read /proc/{pid}/stat and parse starttime (field 22)
-      fs.readFile(`/proc/${pid}/stat`, 'utf-8', (err, data) => {
-        if (err) {
-          resolve(null);
-          return;
-        }
-        // Fields in /proc/PID/stat are space-separated, but field 2 (comm) may
-        // contain spaces in parentheses. Find the last ')' to skip past it.
-        const closeParenIdx = data.lastIndexOf(')');
-        if (closeParenIdx === -1) {
-          resolve(null);
-          return;
-        }
-        const fields = data.substring(closeParenIdx + 2).split(' ');
-        // Field 22 is starttime, but after stripping comm it's at index 19
-        // (fields 3-51, so starttime = field 22 → index 22-3 = 19)
-        const startTimeTicks = parseInt(fields[19], 10);
-        if (isNaN(startTimeTicks)) {
-          resolve(null);
-          return;
-        }
-        // Convert clock ticks to ms: we need the system boot time + starttime
-        // This is complex — use a simpler approach via /proc/PID/stat creation time
-        fs.stat(`/proc/${pid}`, (statErr, stat) => {
-          if (statErr) {
-            resolve(null);
-            return;
-          }
-          // /proc/PID directory creation time approximates process start time
-          resolve(stat.ctimeMs);
-        });
-      });
-    } else {
-      resolve(null);
-    }
-    } catch {
-      // Defensive: if execFile/readFile throws synchronously (e.g., EPERM
-      // in restricted environments), return null instead of rejecting.
-      resolve(null);
-    }
-  });
+  return processes().startTime(pid);
 }

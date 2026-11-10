@@ -5,14 +5,13 @@
  * (#1219), and reaching into `agent-farm/commands/tower.ts` for it would drag
  * that command's whole import graph — `promisify(exec)` at module scope
  * included — into the doctor tests. `commands/tower.ts` re-exports it, so its
- * existing consumers are unaffected. On Windows the lookup is `Get-NetTCPConnection`.
+ * existing consumers are unaffected. On Windows the lookup is `Get-NetTCPConnection` (`port-windows.ts`); the
+ * platform choice is the processes capability's (Spec 1658, Amendment 2).
  */
 
-import { execFile, execFileSync, execSync } from 'node:child_process';
-import { isWindows, windowsPowerShellPath } from '../../lib/platform.js';
+import { processes } from '../../lib/platform/processes.js';
 
-/** Windows: `Get-NetTCPConnection` in a cold PowerShell takes a few seconds; bound it. */
-const WINDOWS_PORT_QUERY_TIMEOUT_MS = 15_000;
+export { parsePidLines } from './port-windows.js';
 
 /**
  * Get the PID(s) of the process *listening* on a port (the server), not its
@@ -26,51 +25,7 @@ const WINDOWS_PORT_QUERY_TIMEOUT_MS = 15_000;
  * terminal with it), not just the Tower server.
  */
 export function getProcessesOnPort(port: number): number[] {
-  if (isWindows()) return getWindowsProcessesOnPort(port);
-  try {
-    const result = execSync(`lsof -ti :${port} -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8' });
-    return result
-      .trim()
-      .split('\n')
-      .map((line) => parseInt(line, 10))
-      .filter((pid) => !isNaN(pid));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Windows (Spec 1658): there is no `lsof`. `Get-NetTCPConnection -State Listen`
- * is the listener-only equivalent of `-sTCP:LISTEN`, so a client holding an
- * established socket to the port (the VS Code extension host) is never
- * returned. The port is a number, so nothing user-supplied reaches the
- * command. A failed or timed-out query returns `[]`, as the POSIX branch does.
- */
-function getWindowsProcessesOnPort(port: number): number[] {
-  if (!isValidPort(port)) return [];
-  try {
-    const result = execFileSync(windowsPowerShellPath(), windowsPortQueryArgs(port), {
-      encoding: 'utf-8',
-      timeout: WINDOWS_PORT_QUERY_TIMEOUT_MS,
-      windowsHide: true,
-    });
-    return parsePidLines(result);
-  } catch {
-    return [];
-  }
-}
-
-function isValidPort(port: number): boolean {
-  return Number.isInteger(port) && port > 0 && port <= 65535;
-}
-
-function windowsPortQueryArgs(port: number): string[] {
-  return [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    `Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`,
-  ];
+  return processes().listeningPids(port);
 }
 
 /**
@@ -82,30 +37,5 @@ function windowsPortQueryArgs(port: number): string[] {
  * listening"; POSIX keeps `lsof`'s `[]` for both.
  */
 export function getProcessesOnPortAsync(port: number): Promise<number[] | null> {
-  if (!isWindows()) return Promise.resolve(getProcessesOnPort(port));
-  if (!isValidPort(port)) return Promise.resolve([]);
-  return new Promise((resolve) => {
-    execFile(
-      windowsPowerShellPath(),
-      windowsPortQueryArgs(port),
-      { encoding: 'utf-8', timeout: WINDOWS_PORT_QUERY_TIMEOUT_MS, windowsHide: true },
-      (error, stdout) => {
-        if (error) {
-          resolve(null);
-          return;
-        }
-        resolve(parsePidLines(stdout));
-      },
-    );
-  });
-}
-
-/** One pid per line; blank lines, non-numbers and pid 0 (the idle process) are dropped. */
-export function parsePidLines(output: string): number[] {
-  const pids: number[] = [];
-  for (const line of output.split(/\r?\n/)) {
-    const pid = parseInt(line.trim(), 10);
-    if (!isNaN(pid) && pid > 0 && !pids.includes(pid)) pids.push(pid);
-  }
-  return pids;
+  return processes().listeningPidsAsync(port);
 }

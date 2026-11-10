@@ -26,7 +26,8 @@ import type Database from 'better-sqlite3';
 import { listProcessCensus, type ProcessCensusEntry } from './process-census.js';
 import { getProcessStartTime, PID_REUSE_TOLERANCE_MS } from '../../terminal/session-manager.js';
 import { reapShellpers } from './architect-session-holder.js';
-import { isWindows } from '../../lib/platform.js';
+import { processes, type StartTimeLookup } from '../../lib/platform/processes.js';
+import { censusStartTimeLookup } from '../../lib/platform/processes.windows.js';
 import { SHELLPER_MARKER, isShellperInScope, shellperTeardownIdentities } from '../../terminal/shellper-cmdline.js';
 
 export { SHELLPER_MARKER };
@@ -40,26 +41,11 @@ export { SHELLPER_MARKER };
  * husk's tree takes it down too.
  */
 export function isConsoleHostEntry(entry: ProcessCensusEntry): boolean {
-  if (!isWindows()) return false;
-  const cmdline = entry.cmdline.toLowerCase();
-  return cmdline.includes('--headless') && (cmdline.includes('conhost.exe') || cmdline.includes('openconsole.exe'));
+  return processes().isConsoleInfrastructure(entry);
 }
 
-/** Looks up a process's start time (epoch ms), or null when it cannot be read. */
-export type StartTimeLookup = (pid: number) => Promise<number | null>;
-
-/**
- * A start-time lookup answered from an existing census snapshot's creation
- * times, with no process spawned per PID. A PID absent from the snapshot, or
- * without a creation time, reads as unknown (null).
- */
-export function censusStartTimeLookup(census: ProcessCensusEntry[]): StartTimeLookup {
-  const created = new Map<number, number>();
-  for (const entry of census) {
-    if (entry.creationTime !== undefined) created.set(entry.pid, entry.creationTime);
-  }
-  return async (pid) => created.get(pid) ?? null;
-}
+export type { StartTimeLookup };
+export { censusStartTimeLookup };
 
 /**
  * The start-time source for a sweep over `census`. On Windows the census
@@ -67,8 +53,7 @@ export function censusStartTimeLookup(census: ProcessCensusEntry[]): StartTimeLo
  * 1658); POSIX keeps its per-PID `getProcessStartTime`.
  */
 export function startTimeLookupFor(census: ProcessCensusEntry[]): StartTimeLookup {
-  if (isWindows()) return censusStartTimeLookup(census);
-  return getProcessStartTime;
+  return processes().startTimeLookup(census);
 }
 
 /**
