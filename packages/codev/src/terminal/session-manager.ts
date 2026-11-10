@@ -31,15 +31,15 @@ import {
 import {
   SHELLPER_SECRET_ENV,
   endpointMayExist,
-  generateShellperSecret,
   probeEndpoint,
   removeStaleEndpoint,
-  resolveShellperEndpoint,
   shellperLogPath,
   waitForEndpoint,
 } from './shellper-endpoint.js';
 import { isWindows } from '../lib/platform.js';
 import { processes } from '../lib/platform/processes.js';
+import { shellperTransport } from '../lib/platform/shellper-transport.js';
+import { PID_REUSE_TOLERANCE_MS } from './pid-reuse.js';
 import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
 import { getTowerJobHelper, sessionJobName, type JobAssignOutcome, type WindowsJobHelper } from '../lib/windows-job.js';
 import { WINDOWS_CENSUS_TIMEOUT_MS, listProcessCensus } from '../agent-farm/servers/process-census.js';
@@ -211,12 +211,7 @@ export function orphanSweepBudgetMs(): number {
   return ORPHAN_SWEEP_TIMEOUT_MS;
 }
 
-/**
- * PID-reuse guard tolerance: a live process's start time must match the one
- * recorded for its shellper within this window, or the pid belongs to a
- * different process.
- */
-export const PID_REUSE_TOLERANCE_MS = 2000;
+export { PID_REUSE_TOLERANCE_MS };
 
 /**
  * Bugfix #1877: positive proof that `pid` is no longer the shellper recorded
@@ -390,7 +385,7 @@ export class SessionManager extends EventEmitter {
    * Returns the connected client.
    */
   async createSession(opts: CreateSessionOptions): Promise<IShellperClient> {
-    const socketPath = resolveShellperEndpoint(this.config.socketDir, opts.sessionId);
+    const socketPath = shellperTransport().resolveEndpoint(this.config.socketDir, opts.sessionId);
     this.log(`Creating session ${opts.sessionId}: command=${opts.command}, socket=${socketPath}`);
 
     // Ensure socket directory exists with 0700 permissions (it also holds the
@@ -408,10 +403,9 @@ export class SessionManager extends EventEmitter {
 
     // Spec 1658: a Windows shellper's pipe is gated on a per-session secret.
     // It travels in the shellper's environment, never its argv.
-    let secret: string | null = null;
+    const secret = shellperTransport().mintSecret();
     const shellperEnv = sanitizeAgentEnv(process.env);
-    if (isWindows()) {
-      secret = generateShellperSecret();
+    if (secret !== null) {
       shellperEnv[SHELLPER_SECRET_ENV] = secret;
     }
 
@@ -656,12 +650,7 @@ export class SessionManager extends EventEmitter {
    */
   private async isShellperProcessCurrent(session: ManagedSession): Promise<boolean> {
     if (!this.isProcessAlive(session.pid)) return false;
-    if (isWindows()) return true;
-    const actualStartTime = await getProcessStartTime(session.pid);
-    if (actualStartTime === null || Math.abs(actualStartTime - session.startTime) > PID_REUSE_TOLERANCE_MS) {
-      return false;
-    }
-    return true;
+    return shellperTransport().isProcessCurrent(session.pid, session.startTime);
   }
 
   /**
@@ -717,40 +706,23 @@ export class SessionManager extends EventEmitter {
       return { identityRefused: true, reason };
     };
 
-    let secret: string | null = null;
-    let shellperSessionId = sessionId;
-    if (isWindows()) {
-      // The row must carry what the identity check needs; without it this
-      // endpoint can never be authenticated.
-      if (!auth?.secret || !auth.shellperSessionId) {
-        return refuse('row has no shellper secret or session id');
+    // The pre-connect gate: POSIX checks the start time and the socket file;
+    // Windows needs the row's secret and session id (Spec 1658).
+    const admission = await shellperTransport().admitReconnect({
+      sessionId,
+      socketPath,
+      pid,
+      startTime,
+      auth,
+      log: (message) => this.log(message),
+    });
+    if (!admission.admitted) {
+      if (admission.refusal !== null) {
+        return refuse(admission.refusal);
       }
-      secret = auth.secret;
-      shellperSessionId = auth.shellperSessionId;
-    } else {
-      // Validate process start time to prevent PID reuse
-      const actualStartTime = await getProcessStartTime(pid);
-      if (actualStartTime === null || Math.abs(actualStartTime - startTime) > PID_REUSE_TOLERANCE_MS) {
-        // Start time mismatch or couldn't determine — PID was reused
-        this.log(`Session ${sessionId} reconnect failed: PID ${pid} reused (start time mismatch)`);
-        return null;
-      }
-
-      // Check socket file exists
-      try {
-        const stat = fs.lstatSync(socketPath);
-        if (!stat.isSocket()) {
-          this.log(`Session ${sessionId} reconnect failed: socket not a socket file`);
-          return null;
-        }
-      } catch {
-        this.log(`Session ${sessionId} reconnect failed: socket missing or lstat error`);
-        return null;
-      }
-      if (auth?.shellperSessionId) {
-        shellperSessionId = auth.shellperSessionId;
-      }
+      return null;
     }
+    const { secret, shellperSessionId } = admission;
 
     // Connect client
     const client = new ShellperClient(socketPath, 'tower', clientAuthFor(secret, shellperSessionId, pid));
@@ -760,11 +732,10 @@ export class SessionManager extends EventEmitter {
       if (err instanceof ShellperIdentityError) {
         return refuse(err.message);
       }
-      // A named pipe exists exactly as long as its server listens, and a
-      // shellper listens for its whole life. No pipe means no shellper, so the
-      // live PID is someone else's.
-      if (isWindows() && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return refuse(`pipe ${socketPath} does not exist`);
+      // On Windows a missing pipe means no shellper, so the live PID is someone else's.
+      const refusal = shellperTransport().connectErrorRefusal(err, socketPath);
+      if (refusal !== null) {
+        return refuse(refusal);
       }
       this.log(`Session ${sessionId} reconnect failed: connect error: ${(err as Error).message}`);
       return null;
@@ -1350,11 +1321,9 @@ export class SessionManager extends EventEmitter {
       };
 
       // On Windows, resolve as soon as the complete info object has arrived
-      // rather than on EOF: the shellper's `closeSync(1)` does not close the
-      // pipe Tower reads (libuv keeps its own handle), so 'end' never fires
-      // there (Spec 1658). Our end of the pipe is released once the info is in.
-      // POSIX keeps the EOF read below unchanged.
-      const resolveOnData = isWindows();
+      // rather than on EOF (Spec 1658; see the transport). Our end of the pipe
+      // is released once the info is in. POSIX keeps the EOF read below unchanged.
+      const resolveOnData = shellperTransport().spawnInfoResolvesOnData;
       child.stdout!.on('data', (chunk: Buffer) => {
         data += chunk.toString();
         if (settled || !resolveOnData) return;

@@ -14,15 +14,14 @@
  * owner-only `0600` socket and carries no secret.
  *
  * Imported by the standalone shellper process, so it depends only on Node
- * built-ins and the platform seam.
+ * built-ins. Which endpoint a new session gets is the shellper transport's
+ * choice (`lib/platform/shellper-transport.ts`, Spec 1658 Amendment 2).
  */
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
-import { isWindows } from '../lib/platform.js';
 
 /**
  * Environment variable that carries the per-session secret from Tower to a
@@ -54,29 +53,6 @@ const PIPE_PREFIXES = ['\\\\.\\pipe\\', '\\\\?\\pipe\\'];
 export function isPipeEndpoint(endpoint: string): boolean {
   const lower = endpoint.toLowerCase();
   return PIPE_PREFIXES.some((prefix) => lower.startsWith(prefix));
-}
-
-/** The current user's name, reduced to characters safe in a pipe name. */
-function pipeUserSegment(): string {
-  let name = '';
-  try {
-    name = os.userInfo().username;
-  } catch {
-    name = process.env.USERNAME ?? '';
-  }
-  const safe = name.replace(/[^A-Za-z0-9._-]/g, '_');
-  if (safe) {
-    return safe;
-  }
-  return 'user';
-}
-
-/** Resolve a new session's endpoint. */
-export function resolveShellperEndpoint(socketDir: string, sessionId: string): string {
-  if (isWindows()) {
-    return `\\\\.\\pipe\\codev-shellper-${pipeUserSegment()}-${crypto.randomUUID()}`;
-  }
-  return path.join(socketDir, `shellper-${sessionId}.sock`);
 }
 
 /**

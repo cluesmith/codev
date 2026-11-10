@@ -3,7 +3,7 @@
  *
  * The product hands one resolved endpoint string to both the shellper (listen)
  * and the client (connect): a socket file on POSIX, a `\\.\pipe\` name on
- * Windows (see `resolveShellperEndpoint`). Node's net layer on Windows listens
+ * Windows (see the shellper transport's `resolveEndpoint`). Node's net layer on Windows listens
  * only on named pipes, so a test that binds a `.sock` file path there never
  * listens and its client fails with `connect ENOENT`. These helpers give a test
  * the address the real host transport accepts, used for both sides.

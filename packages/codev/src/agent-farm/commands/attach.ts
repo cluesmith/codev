@@ -7,8 +7,6 @@
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
-import { homedir } from 'node:os';
 import type { Builder } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getTypeColor } from '../utils/display.js';
@@ -18,7 +16,7 @@ import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { ShellperClient, DEFAULT_REPLAY_TIMEOUT_MS, type ShellperClientAuth } from '../../terminal/shellper-client.js';
 import { isPipeEndpoint } from '../../terminal/shellper-endpoint.js';
-import { isWindows } from '../../lib/platform.js';
+import { shellperTransport } from '../../lib/platform/shellper-transport.js';
 import type { DbTerminalSession } from '../servers/tower-types.js';
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
 import { getGlobalDb } from '../db/index.js';
@@ -143,32 +141,12 @@ export function findShellperAttachTarget(builder: Builder): ShellperAttachTarget
     // SQLite unavailable — fall through to scan
   }
 
-  if (isWindows()) {
+  // 2. Fallback: scan ~/.codev/run/ for matching sockets (POSIX only: a pipe has no file).
+  const scanned = shellperTransport().scanForAttachEndpoint();
+  if (scanned === null) {
     return null;
   }
-
-  // 2. Fallback: scan ~/.codev/run/ for matching sockets
-  const runDir = path.join(homedir(), '.codev', 'run');
-  try {
-    if (!fs.existsSync(runDir)) return null;
-    const files = fs.readdirSync(runDir);
-    for (const file of files) {
-      if (file.startsWith('shellper-') && file.endsWith('.sock')) {
-        const sockPath = path.join(runDir, file);
-        // Check if socket file exists and is accessible
-        try {
-          fs.accessSync(sockPath, fs.constants.R_OK | fs.constants.W_OK);
-          return { endpoint: sockPath, auth: null };
-        } catch {
-          continue;
-        }
-      }
-    }
-  } catch {
-    // Directory not readable
-  }
-
-  return null;
+  return { endpoint: scanned, auth: null };
 }
 
 const DETACH_KEY = 0x1c; // Ctrl-\

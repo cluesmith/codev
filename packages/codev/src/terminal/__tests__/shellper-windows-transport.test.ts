@@ -39,12 +39,12 @@ import {
   endpointMayExist,
   isPipeEndpoint,
   removeStaleEndpoint,
-  resolveShellperEndpoint,
   secretsMatch,
   shellperLogPath,
 } from '../shellper-endpoint.js';
 import { SessionManager, getProcessStartTime, isIdentityRefused } from '../session-manager.js';
 import { testEndpointIn } from './shellper-test-endpoint.js';
+import { shellperTransport } from '../../lib/platform/shellper-transport.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const SECRET = 'f'.repeat(64);
@@ -157,7 +157,7 @@ afterEach(() => {
 describe('endpoint resolution', () => {
   it('POSIX: the socket path and log path are unchanged', () => {
     forceHostPlatform('linux');
-    const endpoint = resolveShellperEndpoint('/run/dir', 'abc');
+    const endpoint = shellperTransport().resolveEndpoint('/run/dir', 'abc');
     expect(endpoint).toBe(path.join('/run/dir', 'shellper-abc.sock'));
     expect(isPipeEndpoint(endpoint)).toBe(false);
     expect(shellperLogPath(endpoint, '/run/dir', 'abc')).toBe(path.join('/run/dir', 'shellper-abc.log'));
@@ -168,8 +168,8 @@ describe('endpoint resolution', () => {
 
   it('Windows: a user-namespaced pipe with a fresh UUID; log in the socket dir', () => {
     forceHostPlatform('win32');
-    const first = resolveShellperEndpoint('C:\\run', 'abc');
-    const second = resolveShellperEndpoint('C:\\run', 'abc');
+    const first = shellperTransport().resolveEndpoint('C:\\run', 'abc');
+    const second = shellperTransport().resolveEndpoint('C:\\run', 'abc');
     expect(first).toMatch(/^\\\\\.\\pipe\\codev-shellper-[A-Za-z0-9._-]+-[0-9a-f-]{36}$/);
     expect(second).not.toBe(first);
     expect(isPipeEndpoint(first)).toBe(true);

@@ -1431,6 +1431,31 @@ REQUEST_CHANGES on the two items below).** As committed in `lib/platform/process
   process modules.
 - No product code changed; product `isWindows()` calls stay at 63.
 
+**A2-5, shellper transport** (after merging `main`, `c7ed6dc99`). As committed in
+`lib/platform/shellper-transport.ts`, against A2.4:
+
+- Methods: `resolveEndpoint`, `mintSecret` (A2.4's `prepareSpawn`, reduced to the secret: the
+  extra config fields already key off `secret !== null`), `isProcessCurrent`, `admitReconnect`
+  (returns admitted with secret and session id, or not admitted with a refusal reason on Windows
+  and none on POSIX, whose gate logs as before), `connectErrorRefusal`,
+  `spawnInfoResolvesOnData`, `commandLineText` (moved here per the A2-3 ruling),
+  `sessionJobName` (the Windows half of `shellperTeardownIdentities`) and
+  `scanForAttachEndpoint` (A2.4's `attachFallback`).
+- Not added: `logPath`, `waitReady`, `mayExist`, `removeStale`, `prepareListen`, `afterListen`.
+  Their branches are on the endpoint's form (`isPipeEndpoint`) or on whether a secret exists,
+  which is data, not platform; they stay in `shellper-endpoint.ts`, `shellper-main.ts` and
+  `shellper-process.ts`.
+- `resolveShellperEndpoint` and `pipeUserSegment` left `shellper-endpoint.ts` (the shellper
+  process loads it; it keeps only node builtins). `PID_REUSE_TOLERANCE_MS` moved to the leaf
+  `terminal/pid-reuse.ts` and `unquoteWindowsCommandLine` / `readJsonStringField` to the leaf
+  `terminal/shellper-cmdline-parse.ts`, both re-exported from their old homes, so the transport
+  implementations import no module that reaches back (no cycle).
+- `reconnectSession` keeps its shared steps (liveness, the connect, the `ShellperIdentityError`
+  refusal, the session record); only the gate and the ENOENT clause left it.
+- Stays `isWindows()` (one-offs, as recorded): `session-manager.ts` `orphanSweepBudgetMs`,
+  `killSession`, the sweep-disabled log and `findShellperProcesses`; `isShellperInScope`.
+- Product `isWindows()` calls: 63 after A2-4, 55 after A2-5.
+
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |
