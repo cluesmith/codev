@@ -55,6 +55,15 @@ gh run list --branch main --limit 5
 
 **Stop if**: Any check on that commit failed. Fix issues before proceeding.
 
+Native Windows has no automatic CI. Dispatch the on-demand Windows workflow against that same `main` commit and wait for it (the full suites take about an hour):
+
+```bash
+gh workflow run windows.yml --ref main -f purpose='Release vX.Y.Z' -f suites=true -f install_guard=true
+gh run list --workflow windows.yml --limit 1
+```
+
+**Stop if**: Any Windows job failed. Fix issues before proceeding.
+
 ### 4. Update Version and Tag
 
 **Normal releases — use lockstep bump.** Run `pnpm bump-version` from the repo root to set every version-aligned package (`@cluesmith/codev`, `@cluesmith/codev-core`, `@cluesmith/codev-sdk`, `@cluesmith/codev-types`, `@cluesmith/codev-artifact-canvas`, the VS Code extension, and the Stream Deck plugin) to the same version in one shot. This keeps every workspace package on the same version, preventing the class of drift bug where a release ships pointing at outdated internal dependencies and end users hit runtime API mismatches. (`@cluesmith/codev-artifact-canvas` is version-aligned for consistency but is consumed by hosts via `workspace:*` and bundled by them — **not independently npm-published in v1** per spec-945, so it appears in the bump/commit steps below but not in the `pnpm publish` step.)
@@ -165,7 +174,7 @@ cd packages/codev && pnpm publish --tag next --no-git-checks # RC → tag next
 
 **When to bump workspace dep versions:** unnecessary if step 4 used `pnpm bump-version` (lockstep already bumped core, sdk, and types). If you took the backport path and `packages/core/src/**`, `packages/sdk/src/**`, or `packages/types/src/**` changed since the last release, bump that package's version (`pnpm --filter @cluesmith/codev-core version patch`) before publishing — otherwise the publish step will skip it (existing version) and consumers will get the old code.
 
-**Verification:** the `Post-Release E2E Verification` GitHub Actions workflow (triggered automatically on release) installs the published tarball on macOS and Ubuntu. If it fails with E404 on a `@cluesmith/*` package, that workspace dep is missing from npm — publish it and re-run the workflow with `gh workflow run "Post-Release E2E Verification" -f version=X.Y.Z`.
+**Verification:** the `Post-Release E2E Verification` GitHub Actions workflow (triggered automatically on release) installs the published tarball on macOS and Ubuntu. If it fails with E404 on a `@cluesmith/*` package, that workspace dep is missing from npm — publish it and re-run the workflow with `gh workflow run "Post-Release E2E Verification" -f version=X.Y.Z`. Windows is not part of that workflow: verify the published install there with `gh workflow run windows.yml --ref main -f purpose='Post-release vX.Y.Z' -f version=X.Y.Z`.
 
 ### 8. Post to Discussion Forum
 

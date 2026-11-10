@@ -3,6 +3,8 @@
  * Spec 0110: Messaging Infrastructure — Phase 1
  */
 
+// spec-1658-tmp: opaque (/tmp/.builders/<id> is a fake worktree field on in-memory Builder objects for name resolution; nothing touches the disk)
+
 import { describe, it, expect } from 'vitest';
 import {
   buildAgentName,

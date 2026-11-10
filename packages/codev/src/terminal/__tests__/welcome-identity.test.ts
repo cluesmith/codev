@@ -18,7 +18,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import {
   FrameType,
   PROTOCOL_VERSION,
@@ -32,6 +31,7 @@ import {
 } from '../shellper-protocol.js';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
 import { ShellperClient } from '../shellper-client.js';
+import { tmpTestEndpoint } from './shellper-test-endpoint.js';
 
 // --- Harness ---
 
@@ -55,9 +55,9 @@ class MockPty implements IShellperPty {
   }
 }
 
+// A named pipe on a Windows host, where Node cannot listen on a socket file.
 function tmpSocketPath(prefix: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  return path.join(dir, 'test.sock');
+  return tmpTestEndpoint(prefix);
 }
 
 /** HELLO/WELCOME against a real ShellperProcess; resolves the parsed WELCOME. */

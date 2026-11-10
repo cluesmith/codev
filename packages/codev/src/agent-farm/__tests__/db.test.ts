@@ -2,6 +2,8 @@
  * Tests for database layer
  */
 
+// spec-1658-tmp: opaque (every /tmp is a worktree or workspace_path column value in SQLite rows; the DB itself lives under process.cwd())
+
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';

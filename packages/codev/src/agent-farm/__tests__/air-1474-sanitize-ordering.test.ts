@@ -24,6 +24,12 @@ const SANITIZE = fileURLToPath(
 /** python3 is present on every GitHub runner; a dev box without it skips rather than fails. */
 const hasPython = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
 
+/** A Python process start on a loaded Windows runner can take seconds (seen at 13 s), past vitest's 5 s default. */
+function selftestTimeoutMs(): number {
+  if (process.platform === 'win32') return 60_000;
+  return 5_000;
+}
+
 describe('air-1474 capture harness — sanitize.py refuses before writing', () => {
   it.runIf(hasPython)('passes its own selftest (leak ⇒ no file on disk)', () => {
     const run = spawnSync('python3', [SANITIZE, '--selftest'], { encoding: 'utf8' });
@@ -31,5 +37,5 @@ describe('air-1474 capture harness — sanitize.py refuses before writing', () =
     // name which property broke, which a bare exit code would throw away.
     expect(`${run.stdout}${run.stderr}`.trim(), `${run.stdout}${run.stderr}`).toContain('selftest: ok');
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-  });
+  }, selftestTimeoutMs());
 });

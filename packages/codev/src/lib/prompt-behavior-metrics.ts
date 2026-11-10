@@ -234,14 +234,16 @@ function collectScarHits(root: string, excludeBasenamePrefixes: string[]) {
 
   const hits: ScarHit[] = [];
   for (const file of targets) {
-    const lines = fs.readFileSync(file, 'utf-8').split('\n');
+    // CRLF-tolerant: a Windows checkout or editor writes CRLF, and the report is the same.
+    const lines = fs.readFileSync(file, 'utf-8').split(/\r?\n/);
     lines.forEach((line, i) => {
       if (DOCUMENTATION_MARKERS.test(line)) return; // prescriptive, not a breach report
       for (const { rule, re } of SCAR_PATTERNS) {
         if (re.test(line)) {
           hits.push({
             rule,
-            file: path.relative(root, file),
+            // Repo-relative with '/' on every host, so the report does not depend on it.
+            file: path.relative(root, file).split(path.sep).join('/'),
             line: i + 1,
             excerpt: line.trim().slice(0, 200),
           });

@@ -2,6 +2,8 @@
  * Tests for state management with SQLite
  */
 
+// spec-1658-tmp: opaque (the only /tmp is inside a comment about realpath canonicalization; the test dir is under cwd)
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';

@@ -6,6 +6,8 @@
  * reference the path, NOT inline the raw diff in the prompt.
  */
 
+// spec-1658-tmp: opaque (the only /tmp is a diffPath string asserted inside the composed prompt text)
+
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -86,9 +88,13 @@ describe('buildPRQuery temp-file security contract (#684)', () => {
       expect(diffDir.startsWith(tmpdir())).toBe(true);
       expect(path.basename(diffDir)).toMatch(/^codev-pr-/);
 
-      const stat = fs.statSync(diffPath);
-      // Verify owner-only bits; strip the file-type bits so we can compare permissions.
-      expect(stat.mode & 0o777).toBe(0o600);
+      // POSIX-only assertion: checks the 0600 owner-only mode bits, which NTFS does not carry.
+      // The rest of the contract (dedicated dir, 'wx' refusing an existing file) runs everywhere.
+      if (process.platform !== 'win32') {
+        const stat = fs.statSync(diffPath);
+        // Verify owner-only bits; strip the file-type bits so we can compare permissions.
+        expect(stat.mode & 0o777).toBe(0o600);
+      }
       expect(fs.readFileSync(diffPath, 'utf-8')).toBe('fake diff');
 
       // Second write must refuse (would-overwrite), confirming flag 'wx' is

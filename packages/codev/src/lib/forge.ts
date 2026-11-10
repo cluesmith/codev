@@ -5,22 +5,20 @@
  * external commands. Default commands wrap the `gh` CLI for GitHub repos.
  * Projects override commands via the `forge` section in .codev/config.json.
  *
- * Concept commands are executed via shell (`sh -c`) to support pipes,
- * redirects, and variable expansion in user-configured commands.
+ * Concept commands are executed via shell (`sh -c`; the resolved Git Bash on
+ * native Windows) to support pipes, redirects, and variable expansion in
+ * user-configured commands.
  * Environment variables (CODEV_*) are set before invocation.
  *
  * @see codev/specs/589-non-github-repository-support.md
  */
 
-import { exec, execSync } from 'node:child_process';
-import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { IssueIdKind } from '@cluesmith/codev-types';
 import { loadConfig as loadCodevConfig } from './config.js';
-
-const execAsync = promisify(exec);
+import { commandLaunch } from './platform/command-launch.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -401,11 +399,15 @@ export async function executeForgeCommandDetailed(
       return { data: null, error: { message: `concept '${concept}' is disabled or unknown`, stderr: '', exitCode: null } };
     }
 
-    const { stdout } = await execAsync(command, {
+    const execEnv = { ...process.env, ...buildForgeEnv(forgeConfig), ...env };
+    const maxBuffer = options?.maxBuffer ?? DEFAULT_MAX_BUFFER;
+    const stdout = await commandLaunch().execShellString(command, {
       cwd: options?.cwd,
-      env: { ...process.env, ...buildForgeEnv(forgeConfig), ...env },
+      env: execEnv,
       timeout: 30_000,
-      maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
+      maxBuffer,
+      workspaceRoot: options?.workspaceRoot ?? options?.cwd,
+      msysPathEnvKeys: PATH_INPUTS,
     });
     return { data: parseOutput(stdout, options?.raw), error: null };
   } catch (err: unknown) {
@@ -476,13 +478,15 @@ export function executeForgeCommandSync(
   const forgeEnv = buildForgeEnv(forgeConfig);
 
   try {
-    const stdout = execSync(command, {
+    const execEnv = { ...process.env, ...forgeEnv, ...env };
+    const maxBuffer = options?.maxBuffer ?? DEFAULT_MAX_BUFFER;
+    const stdout = commandLaunch().execShellStringSync(command, {
       cwd: options?.cwd,
-      env: { ...process.env, ...forgeEnv, ...env },
-      encoding: 'utf-8',
+      env: execEnv,
       timeout: 30_000,
-      maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer,
+      workspaceRoot: options?.workspaceRoot ?? options?.cwd,
+      msysPathEnvKeys: PATH_INPUTS,
     });
 
     return parseOutput(stdout, options?.raw);
@@ -497,6 +501,14 @@ export function executeForgeCommandSync(
 // =============================================================================
 
 const _knownConceptSet = new Set<string>(KNOWN_CONCEPTS);
+
+/**
+ * Concept inputs that carry a local path. Scripts hand them to MSYS tools
+ * (`tar -C`), which need POSIX form. Add any new CODEV_* input whose value is a
+ * host file-system path; identifiers, URLs and API paths stay out (they must
+ * pass through unchanged).
+ */
+const PATH_INPUTS: readonly string[] = ['CODEV_OUTPUT_DIR'];
 
 /**
  * Build environment variables from non-concept forge config keys.

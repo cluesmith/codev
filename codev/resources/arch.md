@@ -1018,6 +1018,62 @@ git worktree prune
 
 This catches orphaned worktrees from crashes, manual kills, or incomplete cleanups.
 
+### Platform Layer (Spec 1658)
+
+Native Windows runs behind one seam, so POSIX behavior stays byte-identical and the Windows
+branches are testable on macOS/Linux.
+
+- **Seam**: `lib/platform.ts` (`hostPlatform()`, `isWindows()`). Runtime Windows branches ask it,
+  never `process.platform`. Tests force it per test with `forceHostPlatform()` or per `describe`
+  with `useHostPlatform()` (`src/__tests__/helpers/host-platform.ts`, both reset when the test
+  finishes) and inject exec/fs. Real-Windows behavior is covered by the on-demand `windows.yml`
+  workflow (dispatch only, never required).
+- **Capabilities** (Spec 1658 Amendment 2): shared code does not branch on the platform; it asks a
+  capability, each an interface in `lib/platform/<capability>.ts` with a `.posix.ts` and a
+  `.windows.ts` implementation and one accessor that picks by the seam:
+  `commandLaunch()` (shell strings, scripts, bare-command spawns, which-probes, the terminal
+  profile), `hostPaths()` (workspace canonicalization and keys, separators, builder-worktree
+  matchers), `processes()` (census, start times, listening ports, session-tree teardown),
+  `shellperTransport()` (endpoint, per-session secret, the reconnect gate, how a shellper's
+  command line reads).
+  The POSIX implementations are the pre-refactor macOS/Linux code, moved verbatim; site-specific
+  POSIX forms are passed in by the caller rather than unified. The Windows implementations are
+  adapters over the Windows modules below, which never import an accessor (no cycles). Existing
+  entry points (`listProcessCensus`, `killSessionTree`, `workspaceKey`, `expandHomePath`, ...)
+  keep their names and delegate. A platform branch that has one call site stays a plain
+  `isWindows()` one-off (doctor sections, install checks, Tower start/stop, worktree links).
+- **Endpoint**: chosen by `shellperTransport()`; `terminal/shellper-endpoint.ts` holds the
+  helpers that branch on the endpoint's form. POSIX: Unix socket `shellper-<id>.sock` (0600),
+  reconnect gated on the start time and the socket file. Windows: named pipe
+  `\\.\pipe\codev-shellper-<user>-<uuid>`, every connection gated on a per-session secret
+  (other users can open a pipe by name), reconnect identity proven by the WELCOME.
+- **Process tree**: `lib/process-tree.ts` `killSessionTree` / `waitForTreeExit` replace
+  `process.kill(-pid)` (through `processes()`). Windows (`lib/process-tree-windows.ts`): a fresh
+  census snapshot (`servers/process-census-windows.ts`, CIM via PowerShell; other callers share a
+  short-TTL cached, coalesced read), then the session's Job Object (`lib/windows-job.ts`, one
+  in-memory PowerShell helper per Tower, never KILL_ON_JOB_CLOSE), then `taskkill /T /F`, then the
+  recorded survivors. `servers/architect-session-holder.ts` keeps its own `ps` listing on POSIX
+  rather than the census, so its entries carry a creation time, and its pre-reap PID-reuse check
+  runs, on Windows only.
+- **Resolvers**: `lib/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the
+  System32 WSL launcher), `codev-sdk/node/executable` (`findExecutable` with `PATHEXT`,
+  `resolveSpawnable` turns `.cmd` shims into `node <entry>` or `%COMSPEC% /d /s /c`),
+  `lib/shell-launch.ts` (every plumbing launch site routes through it), `lib/msys-path.ts` (path
+  translation across the Git Bash boundary), `lib/host-paths.ts`, and
+  `agent-farm/lib/worktree-links.ts` (symlink, else junction / hard link / copy).
+- **Install**: Windows Node 22/24 only (better-sqlite3 prebuilds); a preinstall gate fails other
+  versions with that message instead of a node-gyp build. `engines.node` stays `>=20` for POSIX.
+- **Workspace keys** (finding M6): Windows paths are case-insensitive but every workspace key
+  (Tower's registry, `workspace_path` in global.db) is an exact string, and VS Code (`c:\`) and
+  Git Bash (`C:\`) spell one directory differently. Invariant: every raw workspace path that
+  keys anything goes through `workspaceKey()` (`agent-farm/utils/workspace-path.ts`: on Windows
+  `realpathSync.native`, upper-case drive, per-process cache; identity on POSIX); every
+  workspace-keyed in-memory collection is a `WorkspaceKeyedMap` (`servers/tower-terminals.ts`),
+  which applies it in its accessors; and on Windows boot Tower collapses stored spellings onto
+  the canonical key (`db/canonicalize-workspace-paths.ts`) without ever deleting a row whose
+  process is still running (liveness is PID-reuse checked against the recorded start time).
+  POSIX is unchanged; macOS case-insensitivity is #1870.
+
 ### Security Model
 
 Agent Farm is designed for local development use only. Understanding the security model is critical for safe operation.
@@ -1137,7 +1193,7 @@ const CONFIG = {
 ### Agent-Farm CLI (TypeScript)
 - **commander.js**: CLI argument parsing and command structure
 - **better-sqlite3**: SQLite database for atomic state management (WAL mode, `synchronous = FULL` — commits fsync before acknowledging, so a committed removal can't be rolled back by OS crash; ~26µs/commit on SSD, acceptable at global.db's lifecycle-event write rate — Issue #1150)
-- **tree-kill**: Process cleanup and termination
+- **Session-tree teardown**: `lib/process-tree.ts` (`killSessionTree`; see Platform Layer), which replaced `tree-kill`
 - **Shellper processes**: Detached Node.js processes for terminal session persistence (Spec 0104)
 - **node-pty**: Native PTY sessions with WebSocket multiplexing (Spec 0085)
 - **React 19 + Vite 6**: Dashboard SPA at `apps/web/` (standalone workspace member)
@@ -1162,10 +1218,11 @@ const CONFIG = {
 
 ### Supported Platforms
 - macOS (Darwin)
-- Linux (GNU/Linux)
-- Requires: Node.js 18+, Bash 4.0+, Git 2.5+ (worktree support), standard Unix utilities
-- Native addon: node-pty (compiled during npm install, may need `npm rebuild node-pty`)
-- Runtime directory: `~/.codev/run/` for shellper Unix sockets (created automatically with `0700` permissions)
+- Linux (GNU/Linux), including WSL 2
+- Native Windows 10/11, x64 and ARM64 (Spec 1658; see Platform Layer)
+- Requires: Node.js 20+ (native Windows: 22 or 24), Bash 4.0+ (Git Bash on Windows), Git 2.5+ (worktree support), standard Unix utilities (plus `jq` on Windows)
+- Native addon: node-pty (compiled during npm install on Linux, may need `npm rebuild node-pty`; prebuilt on Windows)
+- Runtime directory: `~/.codev/run/` for shellper Unix sockets (created automatically with `0700` permissions); Windows uses named pipes
 
 ## Monorepo Structure
 
@@ -1176,7 +1233,7 @@ live in `packages/`; end-user client surfaces live in `apps/`:
 |---------|----------|---------|
 | `packages/codev` | `@cluesmith/codev` | CLI + Tower server (published to npm) |
 | `packages/core` | `@cluesmith/codev-core` | Server-side runtime: local-key issuance, homedir paths (published to npm) |
-| `packages/sdk` | `@cluesmith/codev-sdk` | Client SDK for Tower: TowerClient, workspace encoding, EscapeBuffer, ReconnectPolicy, SSE, pure grouping/naming helpers. Environment-agnostic (browser / Node / React Native): zero runtime deps, injected auth + transport, CI-enforced import boundary. Never imports codev-core (published to npm) |
+| `packages/sdk` | `@cluesmith/codev-sdk` | Client SDK for Tower: TowerClient, workspace encoding, EscapeBuffer, ReconnectPolicy, SSE, pure grouping/naming helpers. Environment-agnostic (browser / Node / React Native): zero runtime deps, injected auth + transport, CI-enforced import boundary. Its `/node` subpaths also host shared Node-side utilities (see the charter below). Never imports codev-core (published to npm) |
 | `packages/types` | `@cluesmith/codev-types` | Shared TypeScript types: WebSocket protocol, API shapes, SSE events (dev dependency only) |
 | `packages/config` | `@cluesmith/codev-config` | Shared tsconfig base (cross-project) |
 | `packages/artifact-canvas` | `@cluesmith/codev-artifact-canvas` | Reusable React surface for rendering/reviewing Codev markdown artifacts |
@@ -1207,6 +1264,15 @@ and `packages/core/src/__tests__/no-sdk-import.test.ts`). The one sanctioned
 duplication: Tower's own reconnect backoff + WS close code live in a private
 copy at `packages/codev/src/agent-farm/lib/reconnect-backoff.ts` because the
 server must not import the client sdk.
+
+**sdk charter (#1658 integration review).** The sdk has two roles. Its environment-agnostic
+graph is the single implementation of how anything talks to Tower. Its `/node` subpaths
+(`./node`, `./node/executable`) are the home for **Node-side utilities shared by Tower's clients
+and the CLI**, whether or not they talk to Tower: `node` holds local-key auth, and
+`node/executable` holds `PATHEXT` executable and `.cmd` shim resolution, used by the CLI, Tower and
+the VS Code extension alike. A new shared Node utility lands under a `/node` subpath by this
+decision; it still follows the isolation invariant (no codev-core import, zero runtime deps) and
+never leaks into the environment-agnostic graph.
 
 **Build order:** `pnpm build` from root builds artifact-canvas (consumed by the VS Code extension; zero workspace deps, so no ordering hazard) and then `@cluesmith/codev`, whose own build script first builds its graph-derived workspace-dependency closure via `pnpm --filter "@cluesmith/codev^..." build` (types, sdk, core, apps/web in topological order, then the dashboard copy — Issue #1352, replacing the drift-prone hand-list). The closure guarantees `types/dist` exists, which the VS Code extension's esbuild bundle needs: it resolves the package's runtime `exports.default` (`./dist/index.js`), and a missing `types/dist` breaks the extension build even though tsc and vite resolve it from source via `exports.types` (`./src/index.ts`).
 

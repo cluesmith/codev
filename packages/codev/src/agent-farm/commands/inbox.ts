@@ -18,6 +18,7 @@ import { logger, fatal } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
 import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
+import { lastPathSegment } from '../../lib/host-paths.js';
 
 /** One held row as returned by GET /api/inbox — metadata only, never the body. */
 interface InboxRow {
@@ -181,7 +182,7 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
         ? 'scheduled'
         : `${formatVerdict(row.reason, row.detail)}${row.escalated ? '!' : ''}`,
       fromTo: `${row.fromAgent ?? '?'} → ${row.toAgent}`,
-      workspace: row.workspacePath.split('/').pop() || row.workspacePath,
+      workspace: lastPathSegment(row.workspacePath) || row.workspacePath,
     };
   });
 

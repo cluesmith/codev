@@ -18,7 +18,8 @@ import { WebSocketServer } from 'ws';
 import { SessionManager, ORPHAN_SWEEP_TIMEOUT_MS } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup, persistableCommand, logSessionIdentity } from './tower-utils.js';
-import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
+import { sweepShellperHusks, resolveHuskGraceMs, livenessFromStartTimes } from './shellper-husk-sweep.js';
+import { listProcessCensus } from './process-census.js';
 import {
   sweepSessionLogs,
   measureSessionLogs,
@@ -31,7 +32,7 @@ import {
   initTunnel,
   shutdownTunnel,
 } from './tower-tunnel.js';
-import { initCron, shutdownCron } from './tower-cron.js';
+import { initCron, shutdownCron, getTaskId } from './tower-cron.js';
 import { reconcileIdeServer } from './ide-server.js';
 import {
   initInstances,
@@ -55,6 +56,7 @@ import {
   getTerminalsForWorkspace,
   reconcileTerminalSessions,
   pruneBuilderWorktreeWorkspaces,
+  processExists,
 } from './tower-terminals.js';
 import {
   setupUpgradeHandler,
@@ -76,9 +78,13 @@ import {
   releaseTowerOwnerIfMine,
 } from '../db/tower-owner.js';
 import { runBootConsolidation } from '../db/consolidate.js';
+import { canonicalizeWorkspacePathRows } from '../db/canonicalize-workspace-paths.js';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/server-utils.js';
 import { version } from '../../version.js';
+import { isWindows } from '../../lib/platform.js';
+import { WindowsJobHelper, getTowerJobHelper, setTowerJobHelper } from '../../lib/windows-job.js';
+import { towerBootSessionWarning } from '../commands/tower-start-windows.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -178,7 +184,12 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Graceful shutdown handler (Phase 2 - Spec 0090)
+let shutdownStarted = false;
+
 async function gracefulShutdown(signal: string): Promise<void> {
+  // A signal and a shutdown request (Spec 1658) can both arrive; run once.
+  if (shutdownStarted) return;
+  shutdownStarted = true;
   log('INFO', `Received ${signal}, starting graceful shutdown...`);
 
   // 1. Stop accepting new connections
@@ -241,6 +252,10 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   // 8. Tear down terminal module (Spec 0105 Phase 4) — shuts down terminal manager
   shutdownTerminals();
+
+  // 8b. Spec 1658 Phase 3b: stop the job helper. Session jobs carry no
+  // kill-on-close, so this never touches a session.
+  getTowerJobHelper()?.stop();
 
   // 9. Issue #1629: release our global.db owner lock so the next start sees an
   // unowned DB. Best-effort and pid-scoped (never removes a lock we don't own);
@@ -407,6 +422,9 @@ const routeCtx: RouteContext = {
       sseClients.splice(index, 1);
     }
   },
+  requestShutdown: (reason: string) => {
+    gracefulShutdown(reason);
+  },
 };
 
 // Wire the broadcast function into the codev config-file watcher so edits
@@ -556,6 +574,24 @@ async function bootSequence(): Promise<void> {
     process.exit(1);
   }
   log('INFO', `Claimed global.db ownership (pid ${process.pid}, port ${port}) at ${AGENT_FARM_DIR}`);
+
+  // Spec 1658 Phase 3b: one job helper per Tower, started now so the first
+  // session create finds it warm. It never wraps Tower: it only puts shellper
+  // pids in per-session jobs. A failure to bind is logged by the helper once;
+  // sessions then start without a job.
+  // Spec 1658 Phase 4: a Tower inside a codev session's job stops when that
+  // session is torn down. Warn, never refuse: the marker is inherited and can
+  // be stale. The launcher is what refuses (tower-start-windows.ts).
+  const sessionWarning = towerBootSessionWarning(process.env, isWindows());
+  if (sessionWarning !== null) log('WARN', sessionWarning);
+
+  if (isWindows()) {
+    const jobHelper = new WindowsJobHelper({ log: (msg: string) => log('WARN', msg) });
+    setTowerJobHelper(jobHelper);
+    jobHelper.start().then((failure) => {
+      if (failure === null) log('INFO', 'Per-session job objects available');
+    });
+  }
 
   // Initialize shellper session manager for persistent terminals
   const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.codev', 'run');
@@ -716,6 +752,42 @@ async function bootSequence(): Promise<void> {
     }
   } catch (err) {
     log('ERROR', `state.db consolidation failed: ${(err as Error).message}`);
+  }
+
+  // Spec 1658 (M6): on Windows, collapse every stored spelling of a workspace path
+  // (VS Code's `c:\`, Git Bash's `C:\`, any other case) onto its canonical key,
+  // BEFORE reconcile and initInstances() read the rows. Every boot, idempotent.
+  // POSIX keeps its keys exactly as written (#1870).
+  if (isWindows()) {
+    try {
+      // Liveness must survive PID reuse (a recorded pid now owned by an unrelated
+      // process reads as dead), so take one census for start times up front: the
+      // canonicalization itself runs synchronously in a transaction.
+      const census = await listProcessCensus({ fresh: true });
+      const startTimes = new Map<number, number>();
+      for (const entry of census) {
+        if (entry.creationTime !== undefined) startTimes.set(entry.pid, entry.creationTime);
+      }
+      const report = canonicalizeWorkspacePathRows(getGlobalDb(), {
+        canonicalize: normalizeWorkspacePath,
+        cronTaskId: getTaskId,
+        isAlive: livenessFromStartTimes(startTimes, processExists),
+      });
+      for (const move of report.moved) {
+        log('INFO', `workspace path canonicalized: ${move.from} -> ${move.to}`);
+      }
+      for (const drop of report.dropped) {
+        log('WARN', `workspace path canonicalization dropped a duplicate ${drop.table} row (${drop.key}); the canonical row was kept`);
+      }
+      for (const terminalId of report.droppedTerminalIds) {
+        log('INFO', `terminal ${terminalId}: duplicate row dropped, its process had already exited`);
+      }
+      for (const dup of report.liveDuplicates) {
+        log('ERROR', `workspace ${dup.workspace}: ${dup.terminalIds.length} live ${dup.type} sessions claim role ${dup.roleId ?? '(none)'} (terminals ${dup.terminalIds.join(', ')}); both kept, only one is addressable; stop the one you do not want`);
+      }
+    } catch (err) {
+      log('ERROR', `workspace path canonicalization failed: ${(err as Error).message}`);
+    }
   }
 
   // TICK-001: Reconcile terminal sessions from previous run.

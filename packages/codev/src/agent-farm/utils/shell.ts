@@ -4,6 +4,7 @@
 
 import { exec, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 
 const execAsync = promisify(exec);
 
@@ -48,14 +49,17 @@ export async function run(
  */
 export async function runStreaming(
   command: string,
-  options: { cwd?: string } = {},
+  options: { cwd?: string; workspaceRoot?: string } = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, {
-      cwd: options.cwd,
-      shell: true,       // route through /bin/sh -c so shell features (cd, &&, $VAR) work
-      stdio: 'inherit',  // stream output straight to the parent terminal
-    });
+    // A shell string so shell features (cd, &&, $VAR) work: `/bin/sh -c` on
+    // POSIX, the resolved Git Bash on Windows (Spec 1658); output streams
+    // straight to the parent terminal.
+    const child = commandLaunch().spawnShellString(
+      command,
+      { cwd: options.cwd, stdio: 'inherit' },
+      { workspaceRoot: options.workspaceRoot ?? options.cwd },
+    );
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) {
@@ -135,11 +139,11 @@ export async function commandExists(command: string): Promise<boolean> {
     return false; // Command name contains invalid characters
   }
 
-  return new Promise((resolve) => {
+  return commandLaunch().commandExistsAsync(command, () => new Promise((resolve) => {
     const child = spawn('which', [command], { stdio: 'ignore' });
     child.on('close', (code) => resolve(code === 0));
     child.on('error', () => resolve(false));
-  });
+  }));
 }
 
 /**
@@ -184,55 +188,6 @@ export async function isProcessRunning(pid: number): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * Kill a single process with SIGTERM → wait → SIGKILL escalation.
- * Does NOT walk the process tree — safe for shellper/session processes
- * where tree-kill could kill siblings across projects.
- */
-export async function killProcess(pid: number): Promise<void> {
-  // Send SIGTERM
-  try {
-    process.kill(pid, 'SIGTERM');
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ESRCH') return; // already gone
-    throw err;
-  }
-
-  // Wait up to 3s for process to exit, then escalate to SIGKILL
-  for (let i = 0; i < 6; i++) {
-    await new Promise((r) => setTimeout(r, 500));
-    if (!(await isProcessRunning(pid))) return;
-  }
-
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ESRCH') return;
-    throw err;
-  }
-}
-
-/**
- * Kill a process tree (all children). Use for annotation servers and
- * dashboard servers where children must also die.
- */
-export async function killProcessTree(pid: number): Promise<void> {
-  const treeKill = (await import('tree-kill')).default;
-
-  return new Promise((resolve, reject) => {
-    treeKill(pid, 'SIGTERM', (err) => {
-      if (err) {
-        treeKill(pid, 'SIGKILL', (err2) => {
-          if (err2) reject(err2);
-          else resolve();
-        });
-      } else {
-        resolve();
-      }
-    });
-  });
 }
 
 /**

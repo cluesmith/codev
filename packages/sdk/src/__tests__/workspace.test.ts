@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { encodeWorkspacePath, decodeWorkspacePath } from '../workspace.js';
+// spec-1658-tmp: opaque (every /tmp is a path string fed to the base64url codec)
 
 /**
  * The codec replaced `Buffer.toString('base64url')` with a dependency-free

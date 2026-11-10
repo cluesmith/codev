@@ -146,6 +146,15 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
+
+/**
+ * Spec 1658: tests marked with this drive `#!/bin/sh` stub servers, or assert
+ * POSIX modes, paths or the `:` separator, so they cannot run on native
+ * Windows. The Windows behavior they stand for is covered natively by
+ * `ide-server-stub.windows.test.ts` (.cmd stubs) and `ide-server-windows.test.ts`.
+ */
+const posixStubsOnly = process.platform === 'win32';
+
 describe('resolveIdeServerPath', () => {
   it('--server-path wins without consulting PATH (Scenario 3)', async () => {
     const pathDir = dir('path');
@@ -165,7 +174,7 @@ describe('resolveIdeServerPath', () => {
     );
   });
 
-  it('resolves codev-ide-server on PATH, skipping entries without an executable one (Scenario 4)', async () => {
+  it.skipIf(posixStubsOnly)('resolves codev-ide-server on PATH, skipping entries without an executable one (Scenario 4)', async () => {
     const empty = dir('empty');
     const notExecutable = dir('not-executable');
     writeFileSync(join(notExecutable, 'codev-ide-server'), '#!/bin/sh\n');
@@ -180,7 +189,7 @@ describe('resolveIdeServerPath', () => {
     expect(found).toBe(server);
   });
 
-  it('returns the PATH bin link itself, not its real path, so in-place upgrades apply', async () => {
+  it.skipIf(posixStubsOnly)('returns the PATH bin link itself, not its real path, so in-place upgrades apply', async () => {
     const real = fakeIdePackage(dir('lib', 'node_modules', '@cluesmith', 'codev-ide'));
     const binDir = dir('bin');
     const link = join(binDir, 'codev-ide-server');
@@ -201,7 +210,7 @@ describe('resolveIdeServerPath', () => {
     expect(found).toBe(bin);
   });
 
-  it('falls back to npm root -g when there is no sibling', async () => {
+  it.skipIf(posixStubsOnly)('falls back to npm root -g when there is no sibling', async () => {
     const globalRoot = dir('global', 'node_modules');
     const bin = fakeIdePackage(join(globalRoot, '@cluesmith', 'codev-ide'));
     const npmDir = dir('npm-bin');
@@ -251,7 +260,7 @@ describe('ideStart', () => {
     expect(printed()).toContain(`IDE server binary not found at ${missing}`);
   });
 
-  it('sends the discovered path and prints the versions with no restart hint', async () => {
+  it.skipIf(posixStubsOnly)('sends the discovered path and prints the versions with no restart hint', async () => {
     const pathDir = dir('path');
     const server = fakeServer(join(pathDir, 'codev-ide-server'));
     process.env.PATH = pathDir;
@@ -380,7 +389,7 @@ describe('ideInstall (Scenario 24)', () => {
     writeExecutable(join(binDir, 'npm'), `#!/bin/sh\nif [ "$1" = i ]; then\n${install}\nfi\nexit 1\n`);
   }
 
-  it('reports the installed server version on success', async () => {
+  it.skipIf(posixStubsOnly)('reports the installed server version on success', async () => {
     const binDir = dir('npm-bin');
     fakeNpmInstall(binDir);
     process.env.PATH = binDir;
@@ -392,7 +401,7 @@ describe('ideInstall (Scenario 24)', () => {
     expect(h.tower.calls).toHaveLength(0);
   });
 
-  it("exits with npm's non-zero status on failure", async () => {
+  it.skipIf(posixStubsOnly)("exits with npm's non-zero status on failure", async () => {
     const binDir = dir('npm-bin');
     fakeNpmInstall(binDir, 243);
     process.env.PATH = binDir;

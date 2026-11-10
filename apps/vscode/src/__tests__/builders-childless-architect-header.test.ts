@@ -12,6 +12,7 @@
  * the worst-of tri-state green/yellow. They also pin that stage/area axes are
  * unaffected (roster ignored). Mocks `vscode` per the `__tests__` pattern.
  */
+// spec-1658-tmp: opaque (/tmp/wt is a worktreePath field in fake builder rows; only group headers render, so no builder row probes the disk)
 
 import { describe, it, expect, vi } from 'vitest';
 import type { ArchitectState, OverviewBuilder, OverviewData } from '@cluesmith/codev-types';

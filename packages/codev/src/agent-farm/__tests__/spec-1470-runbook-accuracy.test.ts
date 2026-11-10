@@ -31,7 +31,9 @@ import {
 const repoRoot = path.resolve(__dirname, '../../../../../');
 const RUNBOOK = 'codev/projects/1470-automatic-builder-context-refr/1470-live-run-runbook.md';
 
-const runbook = (): string => fs.readFileSync(path.join(repoRoot, RUNBOOK), 'utf-8');
+// LF-normalized: the fence and line-continuation patterns below are LF, and a CRLF
+// checkout (core.autocrlf on Windows) would hide every code block from them.
+const runbook = (): string => fs.readFileSync(path.join(repoRoot, RUNBOOK), 'utf-8').replace(/\r\n/g, '\n');
 
 /**
  * Markdown wraps prose, so a claim can be split across a line break. Asserting

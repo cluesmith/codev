@@ -14,6 +14,8 @@ import {
   type CustomHarnessConfig,
 } from '../utils/harness.js';
 
+// spec-1658-tmp: opaque (/tmp/workspace/.builder-role.md is a role-file string interpolated into harness args and fragments; nothing touches the disk)
+
 // Capture whether resolveHarness returned a provider or threw — lets a test
 // assert a retired path returns NEITHER a provider NOR undefined (it throws).
 function resolveResult(fn: () => unknown): { returned?: unknown; threw?: Error } {
@@ -467,6 +469,16 @@ describe('harness', () => {
 
     it('detects from full path', () => {
       expect(detectHarnessFromCommand('/opt/homebrew/bin/codex')).toBe('codex');
+    });
+
+    it('reads a Windows path by its basename, not by a directory name (Spec 1658)', () => {
+      expect(detectHarnessFromCommand('C:\\Users\\claude\\AppData\\Roaming\\npm\\codex.cmd')).toBe('codex');
+      expect(detectHarnessFromCommand('C:\\Users\\codex\\.local\\bin\\claude.exe --model haiku')).toBe('claude');
+      expect(detectHarnessFromCommand('C:\\Users\\claude\\Git\\bin\\bash.exe')).toBeUndefined();
+    });
+
+    it('takes a quoted Windows path with spaces as one token (Spec 1658)', () => {
+      expect(detectHarnessFromCommand('"C:\\Program Files\\Claude\\claude.exe" --model haiku')).toBe('claude');
     });
 
     it('detects from command with flags', () => {

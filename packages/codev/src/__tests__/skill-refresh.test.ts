@@ -67,7 +67,9 @@ describe('skill hashing', () => {
       .toBe('not-regular');
   });
 
-  it.skipIf(process.getuid?.() === 0)('an unreadable skill directory is not-regular, not a thrown update', () => {
+  // POSIX-only assertion: makes the directory unreadable with mode 0o000, which NTFS ignores
+  // (chmod on Windows only toggles the read-only attribute).
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')('an unreadable skill directory is not-regular, not a thrown update', () => {
     write(project, '.claude/skills/demo/SKILL.md', NEW);
     const locked = path.join(project, '.claude/skills/demo');
     fs.chmodSync(locked, 0o000);

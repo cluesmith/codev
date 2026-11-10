@@ -17,7 +17,6 @@ import {
   readFileSync,
   writeFileSync,
   chmodSync,
-  symlinkSync,
   readdirSync,
   mkdirSync,
   copyFileSync,
@@ -37,6 +36,9 @@ import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
 import { isIssueKey } from '../../lib/issue-id.js';
+import type { Launch } from '../../lib/shell-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
+import { createWorktreeLink, type WorktreeLinkMethod } from '../lib/worktree-links.js';
 
 // =============================================================================
 // Dependency Checks
@@ -73,6 +75,19 @@ function pathOccupied(p: string): boolean {
 }
 
 /**
+ * Log a link made into the worktree. A copy (native Windows, when neither a
+ * symlink nor a hard link could be made) is reported as a warning: edits in the
+ * worktree do not reach the workspace root.
+ */
+function reportLink(label: string, method: WorktreeLinkMethod): void {
+  if (method === 'copy') {
+    logger.warn(`Copied ${label} from workspace root (no link possible here); edits will not write through`);
+    return;
+  }
+  logger.info(`Linked ${label} from workspace root`);
+}
+
+/**
  * Symlink config files from workspace root into a worktree (if they exist).
  * Shared by createWorktree() and createWorktreeFromBranch().
  *
@@ -93,8 +108,7 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
   const envWorktree = resolve(worktreePath, '.env');
   if (existsSync(envRoot) && !existsSync(envWorktree)) {
     try {
-      symlinkSync(envRoot, envWorktree);
-      logger.info(`Linked .env from workspace root`);
+      reportLink('.env', createWorktreeLink(envRoot, envWorktree, 'file'));
     } catch (error) {
       logger.debug(`Failed to symlink .env: ${error}`);
     }
@@ -110,8 +124,7 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
     const configWorktree = resolve(codevDir, 'config.json');
     if (!existsSync(configWorktree)) {
       try {
-        symlinkSync(configRoot, configWorktree);
-        logger.info(`Linked .codev/config.json from workspace root`);
+        reportLink('.codev/config.json', createWorktreeLink(configRoot, configWorktree, 'file'));
       } catch (error) {
         logger.debug(`Failed to symlink .codev/config.json: ${error}`);
       }
@@ -134,15 +147,13 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
       const srcAbs = resolve(config.workspaceRoot, rel);
       mkdirSync(dirname(target), { recursive: true });
       const isDir = existsSync(srcAbs) && statSync(srcAbs).isDirectory();
-      symlinkSync(srcAbs, target, isDir ? 'dir' : undefined);
-      logger.info(`Linked directory ${rel}/ from workspace root`);
+      reportLink(`directory ${rel}/`, createWorktreeLink(srcAbs, target, 'directory', isDir ? 'dir' : undefined));
     } else {
       for (const rel of globSync(pattern, { cwd: config.workspaceRoot, dot: true, nodir: true })) {
         const target = resolve(worktreePath, rel);
         if (existsSync(target)) continue;
         mkdirSync(dirname(target), { recursive: true });
-        symlinkSync(resolve(config.workspaceRoot, rel), target);
-        logger.info(`Linked ${rel} from workspace root`);
+        reportLink(rel, createWorktreeLink(resolve(config.workspaceRoot, rel), target, 'file'));
       }
     }
   }
@@ -181,7 +192,8 @@ export function syncLocalConfigSnapshot(config: Config, worktreePath: string): b
 /**
  * Run user-configured post-spawn commands inside a freshly-created worktree.
  *
- * Each command runs sequentially in its own `bash -c` subshell with cwd =
+ * Each command runs sequentially in its own `bash -c` subshell (the resolved
+ * Git Bash on native Windows) with cwd =
  * worktreePath — so `cd` inside one command (e.g. `cd apps/foo && uv sync`)
  * doesn't carry over into the next. Output streams live via runStreaming
  * so users see install progress in real time. A non-zero exit aborts the
@@ -190,10 +202,11 @@ export function syncLocalConfigSnapshot(config: Config, worktreePath: string): b
 export async function runPostSpawnHooks(
   worktreePath: string,
   commands: string[],
+  workspaceRoot?: string,
 ): Promise<void> {
   for (const cmd of commands) {
     logger.info(`Running post-spawn hook: ${cmd}`);
-    await runStreaming(cmd, { cwd: worktreePath });
+    await runStreaming(cmd, { cwd: worktreePath, workspaceRoot });
   }
 }
 
@@ -220,7 +233,7 @@ export async function createWorktree(config: Config, branchName: string, worktre
 
   symlinkConfigFiles(config, worktreePath);
   syncLocalConfigSnapshot(config, worktreePath);
-  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn);
+  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn, config.workspaceRoot);
 }
 
 /**
@@ -453,7 +466,7 @@ export async function createWorktreeFromBranch(
 
   symlinkConfigFiles(config, worktreePath);
   syncLocalConfigSnapshot(config, worktreePath);
-  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn);
+  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn, config.workspaceRoot);
 }
 
 /**
@@ -966,8 +979,18 @@ export function buildSessionLaunchLoop(opts: {
   unpinnedFresh: string;
   /** Resume $codev_session_id with the crash-resume nudge. */
   resume: string;
+  /**
+   * Last-resort minting command, printing one uuid (Spec 1658). Git Bash has
+   * neither `uuidgen` nor `/proc/sys/kernel/random/uuid`, so Windows scripts
+   * mint through Node. Omitted on POSIX, where the script is unchanged.
+   */
+  mintFallback?: string;
 }): string {
   const entry = opts.initial ?? opts.pinnedFresh;
+  let mintFallback = '';
+  if (opts.mintFallback) {
+    mintFallback = `  else\n    ${opts.mintFallback}\n`;
+  }
   return `codev_session_id='${shellEscapeSingleQuote(opts.sessionId)}'
 codev_fast_fail_secs="\${CODEV_LAUNCH_FAST_FAIL_SECS:-15}"
 codev_mint_session_id() {
@@ -975,7 +998,7 @@ codev_mint_session_id() {
     uuidgen | tr '[:upper:]' '[:lower:]'
   elif [ -r /proc/sys/kernel/random/uuid ]; then
     cat /proc/sys/kernel/random/uuid
-  fi
+${mintFallback}  fi
 }
 codev_persist_session_id() {
   printf '%s\\n' "$codev_session_id" > '.builder-session-id'
@@ -1076,6 +1099,37 @@ function builderIdentityExport(worktreePath: string): string {
 }
 
 /**
+ * The first lines of a builder launch script: enter the worktree and export the
+ * builder's identity. On native Windows (Spec 1658) the script runs under Git
+ * Bash, so `cd` takes the worktree in POSIX form, while the identity stays
+ * native because Node reads it; the resolved Git Bash is exported for the
+ * harness (Claude Code reads `CLAUDE_CODE_GIT_BASH_PATH` to find its shell).
+ */
+function launchScriptPrelude(worktreePath: string, workspaceRoot?: string): string {
+  const launch = commandLaunch();
+  return `cd "${launch.launchScriptPath(worktreePath)}"\n${builderIdentityExport(worktreePath)}`
+    + launch.launchScriptExports(workspaceRoot);
+}
+
+/** A path as the launch script's own commands (`cat`) read it: POSIX form under Git Bash. */
+function scriptLocalPath(path: string): string {
+  return commandLaunch().launchScriptPath(path);
+}
+
+/**
+ * The minting fallback for the session-aware loop: Node's `randomUUID`, run by
+ * the Node executing this CLI, on Windows only (see `buildSessionLaunchLoop`).
+ */
+export function sessionIdMintFallback(): string | undefined {
+  return commandLaunch().sessionIdMintFallback();
+}
+
+/** How Tower runs a builder launch script: `/bin/bash <script>`, or the resolved Git Bash on Windows. */
+export function builderScriptLaunch(scriptPath: string, workspaceRoot?: string): Launch {
+  return commandLaunch().scriptFileArgv(scriptPath, [], workspaceRoot);
+}
+
+/**
  * Start a terminal session for a builder.
  *
  * When `resume` is provided, the launch script *enters* on the harness's resume
@@ -1155,7 +1209,7 @@ export async function startBuilderSession(
   // double space included, so session-less scripts stay byte-identical.
   const withRole = roleContent ? `${launchCmd} ${roleFragment}` : launchCmd;
   const envBlock = envExportBlock({ ...roleEnv, ...reporter.env });
-  const promptArg = `"$(cat '${promptFile}')"`;
+  const promptArg = `"$(cat '${scriptLocalPath(promptFile)}')"`;
   const freshCommand = `${withRole} ${promptArg}`;
 
   if (resume) {
@@ -1176,6 +1230,7 @@ export async function startBuilderSession(
       pinnedFresh: `${withRole} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)} ${promptArg}`,
       unpinnedFresh: freshCommand,
       resume: `${launchCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+      mintFallback: sessionIdMintFallback(),
     });
   } else {
     // Session-less harness (codex/gemini/opencode/custom): historical loop,
@@ -1185,18 +1240,18 @@ export async function startBuilderSession(
   }
 
   const scriptContent = `#!/bin/bash
-cd "${worktreePath}"
-${builderIdentityExport(worktreePath)}${envBlock}${loop}`;
+${launchScriptPrelude(worktreePath, config.workspaceRoot)}${envBlock}${loop}`;
 
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
 
   // Create PTY session via Tower REST API (shellper for persistence)
   logger.info('Creating PTY terminal session...');
+  const launch = builderScriptLaunch(scriptPath, config.workspaceRoot);
   const { terminalId } = await createPtySession(
     config,
-    '/bin/bash',
-    [scriptPath],
+    launch.command,
+    launch.args,
     worktreePath,
     { workspacePath: config.workspaceRoot, type: 'builder', roleId: builderId },
   );
@@ -1214,10 +1269,11 @@ export async function startShellSession(
 ): Promise<{ terminalId: string }> {
   // Create PTY session via REST API
   logger.info('Creating PTY terminal session for shell...');
+  const launch = commandLaunch().shellStringArgv(baseCmd, { command: '/bin/bash', flag: '-c' }, config.workspaceRoot);
   const { terminalId } = await createPtySession(
     config,
-    '/bin/bash',
-    ['-c', baseCmd],
+    launch.command,
+    launch.args,
     config.workspaceRoot,
     { workspacePath: config.workspaceRoot, type: 'shell', roleId: shellId },
   );
@@ -1272,10 +1328,10 @@ export function buildWorktreeLaunchScript(
       pinnedFresh: `${command} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)}`,
       unpinnedFresh: command,
       resume: `${launchCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+      mintFallback: sessionIdMintFallback(),
     })
     : buildLaunchLoop(command, command);
 
   return `#!/bin/bash
-cd "${worktreePath}"
-${builderIdentityExport(worktreePath)}${envBlock}${loop}`;
+${launchScriptPrelude(worktreePath, workspaceRoot)}${envBlock}${loop}`;
 }

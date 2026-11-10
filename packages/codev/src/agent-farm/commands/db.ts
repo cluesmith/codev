@@ -10,6 +10,7 @@
 import { existsSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
 import { getDb, getGlobalDb, getDbPath, getGlobalDbPath, closeDb, closeGlobalDb } from '../db/index.js';
 import { planMigration, applyMigration } from '../db/consolidate.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -203,10 +204,10 @@ export function dbConsolidate(stateDbPath: string, options: { apply?: boolean } 
   if (options.apply) {
     db = getGlobalDb();
   } else if (existsSync(globalDbPath)) {
-    db = new Database(globalDbPath, { readonly: true });
+    db = openDatabase(globalDbPath, { readonly: true });
     closeAfter = true;
   } else {
-    db = new Database(':memory:');
+    db = openDatabase(':memory:');
     closeAfter = true;
   }
 

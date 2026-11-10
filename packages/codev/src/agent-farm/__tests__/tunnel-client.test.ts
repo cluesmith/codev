@@ -160,6 +160,19 @@ describe('tunnel-client unit tests', () => {
       expect(isBlockedPath('/api/ideas')).toBe(false);
     });
 
+    // Spec 1658 Phase 4: /api/shutdown stops Tower, so it never leaves the proxy.
+    it('blocks /api/shutdown, workspace-scoped and encoded forms included', () => {
+      expect(isBlockedPath('/api/shutdown')).toBe(true);
+      expect(isBlockedPath('/api/shutdown/')).toBe(true);
+      expect(isBlockedPath('/workspace/L1VzZXJzL21l/api/shutdown')).toBe(true);
+      expect(isBlockedPath('/api%2Fshutdown')).toBe(true);
+      expect(isBlockedPath('/x/../api/shutdown')).toBe(true);
+    });
+
+    it('does not over-block a /api/shutdown lookalike', () => {
+      expect(isBlockedPath('/api/shutdowns')).toBe(false);
+    });
+
     // Spec 1595: the lifecycle reporter posts only to 127.0.0.1, so a
     // tunnel-proxied report could only spoof an agent's attention state.
     it('blocks /api/agent-lifecycle, bare and workspace-scoped', () => {

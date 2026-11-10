@@ -6,6 +6,8 @@
  * respawnEnv) is Issue #1140.
  */
 
+// spec-1658-tmp: opaque (the only /tmp is a shellper_socket in a fake DbTerminalSession; socketExists is an injected stub)
+
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

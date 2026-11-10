@@ -7,7 +7,7 @@
 
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawn, ChildProcess } from 'node:child_process';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import {
@@ -17,6 +17,7 @@ import {
   createIsolatedAgentFarmDir,
   removeIsolatedAgentFarmDir,
 } from './helpers/tower-test-utils.js';
+import { socketTempRoot } from './helpers/socket-temp-root.js';
 
 const TEST_TOWER_PORT = 14800;
 // 3 levels up from src/agent-farm/__tests__/ to packages/codev/
@@ -138,7 +139,7 @@ describe('Tower stop/start reconnection (Spec 0122)', () => {
 
   it('reconnects shellper sessions after Tower restart', async () => {
     // ---- Setup ----
-    socketDir = mkdtempSync('/tmp/codev-sock-reconnect-');
+    socketDir = mkdtempSync(join(socketTempRoot(), 'codev-sock-reconnect-'));
     workspacePath = createTestWorkspace();
     const encoded = encodeWorkspacePath(workspacePath);
 

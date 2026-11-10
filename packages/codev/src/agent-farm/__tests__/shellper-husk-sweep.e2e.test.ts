@@ -18,6 +18,10 @@ import {
   removeIsolatedAgentFarmDir,
 } from './helpers/tower-test-utils.js';
 
+// spec-1658-tmp: posix-only (every suite is skipped on win32 via skipOnWindows; /tmp is the session cwd)
+// POSIX-only assertions: Tower spawns /bin/echo and /bin/sleep sessions and pgrep for the PTY child, with cwd /tmp.
+const skipOnWindows = process.platform === 'win32';
+
 const TEST_TOWER_PORT = 14710;
 // Short interval + zero grace so a genuine husk (created below) is reaped on
 // the very next tick, without waiting anywhere near the 1-hour production default.
@@ -89,7 +93,7 @@ function isAlive(pid: number): boolean {
   }
 }
 
-describe('Issue #1227: husk-sweep periodic timer E2E', () => {
+describe.skipIf(skipOnWindows)('Issue #1227: husk-sweep periodic timer E2E', () => {
   beforeAll(async () => {
     tower = await startTower(TEST_TOWER_PORT, {
       SHELLPER_HUSK_SWEEP_INTERVAL_MS: HUSK_SWEEP_INTERVAL_MS,
@@ -150,7 +154,7 @@ describe('Issue #1227: husk-sweep periodic timer E2E', () => {
   }, 30_000);
 });
 
-describe('Issue #1227: husk-sweep graceful shutdown', () => {
+describe.skipIf(skipOnWindows)('Issue #1227: husk-sweep graceful shutdown', () => {
   it('completes without hanging (validates the new interval is cleared)', async () => {
     const port = 14711;
     const handle = await startTower(port, {

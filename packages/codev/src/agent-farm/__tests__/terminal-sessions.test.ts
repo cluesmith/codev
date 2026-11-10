@@ -2,6 +2,8 @@
  * Tests for terminal session persistence and reconciliation (Spec 0090 TICK-001)
  */
 
+// spec-1658-tmp: opaque (every /tmp is a shellper_socket column value in test DB rows; the DB itself lives under os.tmpdir())
+
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';

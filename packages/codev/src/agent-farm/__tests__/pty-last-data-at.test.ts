@@ -4,6 +4,7 @@
  * Tests lastDataAt initialization and update behavior via the private
  * onPtyData method, without needing to spawn a real PTY process.
  */
+// spec-1658-tmp: opaque (cwd and logDir /tmp go to a PtySession whose spawn is never called and node-pty is mocked, so no log file is opened)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 

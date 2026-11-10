@@ -1,14 +1,22 @@
 /**
  * Port → PID lookup.
  *
- * A leaf module on purpose: `codev doctor` needs this to find the running Tower
- * (#1219), and reaching into `agent-farm/commands/tower.ts` for it would drag
- * that command's whole import graph — `promisify(exec)` at module scope
+ * Kept out of `agent-farm/commands/tower.ts` on purpose: `codev doctor` needs
+ * this to find the running Tower (#1219), and reaching into that command for it
+ * would drag its whole import graph — `promisify(exec)` at module scope
  * included — into the doctor tests. `commands/tower.ts` re-exports it, so its
  * existing consumers are unaffected.
+ *
+ * The lookup itself is the processes capability's (Spec 1658, Amendment 2):
+ * `lsof` on POSIX, `Get-NetTCPConnection` on Windows (`port-windows.ts`).
+ * Importing it loads both implementations and the Windows census, teardown
+ * and job modules; none of them spawns anything or promisifies at module
+ * scope, so the #1219 property holds.
  */
 
-import { execSync } from 'node:child_process';
+import { processes } from '../../lib/platform/processes.js';
+
+export { parsePidLines } from './port-windows.js';
 
 /**
  * Get the PID(s) of the process *listening* on a port (the server), not its
@@ -22,14 +30,17 @@ import { execSync } from 'node:child_process';
  * terminal with it), not just the Tower server.
  */
 export function getProcessesOnPort(port: number): number[] {
-  try {
-    const result = execSync(`lsof -ti :${port} -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8' });
-    return result
-      .trim()
-      .split('\n')
-      .map((line) => parseInt(line, 10))
-      .filter((pid) => !isNaN(pid));
-  } catch {
-    return [];
-  }
+  return processes().listeningPids(port);
+}
+
+/**
+ * `getProcessesOnPort` for callers inside Tower's event loop. POSIX: the same
+ * `lsof` lookup. Windows: the same query, run asynchronously, because it takes
+ * seconds and the synchronous form would stall every terminal and request
+ * while it runs (Spec 1658 Phase 9). Windows resolves null when the query
+ * itself fails or times out, so a caller can tell "unknown" from "nothing
+ * listening"; POSIX keeps `lsof`'s `[]` for both.
+ */
+export function getProcessesOnPortAsync(port: number): Promise<number[] | null> {
+  return processes().listeningPidsAsync(port);
 }

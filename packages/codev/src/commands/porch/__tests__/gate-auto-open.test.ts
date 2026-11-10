@@ -19,6 +19,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 import { gate } from '../index.js';
 import { getStatusPath, readState, writeState } from '../state.js';
 import type { ProjectState } from '../types.js';
+import { forceHostPlatform } from '../../../__tests__/helpers/host-platform.js';
 
 type ArtifactPhase = 'specify' | 'plan' | 'review';
 
@@ -112,6 +113,9 @@ beforeEach(() => {
   originalHome = process.env.HOME;
   process.env.HOME = path.join(testDir, 'fake-home');
   writeProtocol();
+  // The spawn assertions are the POSIX launch shape; the Windows shim-resolving branch of
+  // commandLaunch().spawn is covered in windows-shell-spawns.test.ts.
+  forceHostPlatform('linux');
 
   spawnMock.mockReset();
   unrefMock.mockReset();
@@ -160,7 +164,8 @@ describe('porch gate artifact auto-open', () => {
 
       expect(spawnMock).not.toHaveBeenCalled();
       expect(unrefMock).not.toHaveBeenCalled();
-      expect(output()).toContain(`Artifact: ${path.relative(testDir, artifactPath)}`);
+      // Printed workspace-relative with '/' on every host, the way the repo spells the path.
+      expect(output()).toContain(`Artifact: codev/${directory}/${path.basename(artifactPath)}`);
       expect(output()).not.toContain('Opening artifact for human review...');
       expect(output()).toContain('Human approval required. STOP and wait.');
       expect(output()).toContain(`To approve: porch approve 1216 ${gateName}`);

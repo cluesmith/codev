@@ -16,6 +16,10 @@ import {
   listCanvasViewsForTest,
   CANVAS_VIEW_LEASE_MS,
 } from '../servers/canvas-relay.js';
+import { tmpdir } from 'node:os';
+
+/** Fixture root: the host temp dir (paths are canonicalized through realpath, never written). */
+const TMP = tmpdir();
 
 /** A settable clock so lease expiry is a matter of arithmetic, not waiting. */
 let now = 1_000_000;
@@ -70,7 +74,7 @@ async function call(method: string, pathname: string, payload?: unknown): Promis
   return captured;
 }
 
-const WS = '/tmp/ws-canvas-relay';
+const WS = `${TMP}/ws-canvas-relay`;
 
 async function register(file: string, workspace = WS): Promise<string> {
   const out = await call('POST', '/api/canvas/views', { workspace, file });
@@ -92,15 +96,15 @@ const sendCommand = (payload: unknown) => call('POST', '/api/canvas/command', pa
 
 describe('canvas view registry', () => {
   it('mints a distinct id per view, including two views of the SAME file', async () => {
-    const a = await register('/tmp/doc.md');
-    const b = await register('/tmp/doc.md');
+    const a = await register(`${TMP}/doc.md`);
+    const b = await register(`${TMP}/doc.md`);
 
     expect(a).not.toBe(b);
     expect(listCanvasViewsForTest()).toHaveLength(2);
   });
 
   it('unregisters a view, and reports an unknown id', async () => {
-    const viewId = await register('/tmp/doc.md');
+    const viewId = await register(`${TMP}/doc.md`);
 
     expect((await call('DELETE', `/api/canvas/views/${viewId}`)).status).toBe(200);
     expect(listCanvasViewsForTest()).toHaveLength(0);
@@ -113,7 +117,7 @@ describe('canvas view registry', () => {
   });
 
   it('keeps a view alive across the lease while heartbeats continue', async () => {
-    const viewId = await register('/tmp/doc.md');
+    const viewId = await register(`${TMP}/doc.md`);
 
     for (let i = 0; i < 5; i += 1) {
       now += CANVAS_VIEW_LEASE_MS - 1_000;
@@ -123,7 +127,7 @@ describe('canvas view registry', () => {
   });
 
   it('expires a view whose host died without unregistering', async () => {
-    await register('/tmp/doc.md');
+    await register(`${TMP}/doc.md`);
 
     now += CANVAS_VIEW_LEASE_MS + 1;
     const out = await sendCommand({ workspace: WS, command: 'block-next' });
@@ -144,17 +148,17 @@ describe('target resolution', () => {
   });
 
   it('answers no-canvas for a workspace with no views, even when another workspace has one', async () => {
-    await register('/tmp/doc.md', '/tmp/other-ws');
+    await register(`${TMP}/doc.md`, `${TMP}/other-ws`);
 
     const out = await sendCommand({ workspace: WS, command: 'block-next' });
     expect(out.body.code).toBe('no-canvas');
   });
 
   it('delivers to the only matching view and names it', async () => {
-    // Assert against the path Tower canonicalized to, not the spelling we sent: on macOS /tmp is
-    // a symlink to /private/tmp, so pinning the pre-canonical spelling would assert the ABSENCE
+    // Assert against the path Tower canonicalized to, not the spelling we sent: on macOS the temp
+    // dir sits behind a symlink (/var to /private/var), so pinning the pre-canonical spelling would assert the ABSENCE
     // of the canonicalization this route depends on.
-    const { viewId, file } = await registerCanonical('/tmp/doc.md');
+    const { viewId, file } = await registerCanonical(`${TMP}/doc.md`);
 
     const out = await sendCommand({ workspace: WS, command: 'comment-next' });
 
@@ -170,7 +174,7 @@ describe('target resolution', () => {
   // other member; without the entry in canvas-relay's CANVAS_COMMANDS it would 400 before the
   // canvas ever saw it.
   it('relays the context-aware composer command (#1420)', async () => {
-    const { viewId } = await registerCanonical('/tmp/doc.md');
+    const { viewId } = await registerCanonical(`${TMP}/doc.md`);
 
     const out = await sendCommand({ workspace: WS, command: 'composer-open-or-submit' });
 
@@ -182,8 +186,8 @@ describe('target resolution', () => {
   });
 
   it('delivers to exactly ONE view when several match, never fanning out', async () => {
-    await register('/tmp/doc.md');
-    const second = await register('/tmp/doc.md');
+    await register(`${TMP}/doc.md`);
+    const second = await register(`${TMP}/doc.md`);
 
     const out = await sendCommand({ workspace: WS, command: 'composer-submit' });
 
@@ -193,8 +197,8 @@ describe('target resolution', () => {
   });
 
   it('follows the most recently active view, and focus flips it', async () => {
-    const first = await register('/tmp/a.md');
-    const second = await register('/tmp/b.md');
+    const first = await register(`${TMP}/a.md`);
+    const second = await register(`${TMP}/b.md`);
 
     now += 1_000;
     await call('POST', `/api/canvas/views/${first}/heartbeat`, { focused: true });
@@ -209,8 +213,8 @@ describe('target resolution', () => {
   });
 
   it('does not let a plain heartbeat steal MRU from a focused view', async () => {
-    const focused = await register('/tmp/a.md');
-    const other = await register('/tmp/b.md');
+    const focused = await register(`${TMP}/a.md`);
+    const other = await register(`${TMP}/b.md`);
 
     now += 1_000;
     await call('POST', `/api/canvas/views/${focused}/heartbeat`, { focused: true });
@@ -222,43 +226,43 @@ describe('target resolution', () => {
   });
 
   it('routes a file-qualified command to that file, both ways', async () => {
-    const a = await register('/tmp/a.md');
-    const b = await register('/tmp/b.md');
+    const a = await register(`${TMP}/a.md`);
+    const b = await register(`${TMP}/b.md`);
 
     expect(
-      (await sendCommand({ workspace: WS, file: '/tmp/a.md', command: 'block-next' })).body.target,
+      (await sendCommand({ workspace: WS, file: `${TMP}/a.md`, command: 'block-next' })).body.target,
     ).toMatchObject({ viewId: a });
     expect(
-      (await sendCommand({ workspace: WS, file: '/tmp/b.md', command: 'block-next' })).body.target,
+      (await sendCommand({ workspace: WS, file: `${TMP}/b.md`, command: 'block-next' })).body.target,
     ).toMatchObject({ viewId: b });
   });
 
   it('answers no-canvas when the workspace has views but not for that file', async () => {
-    await register('/tmp/a.md');
+    await register(`${TMP}/a.md`);
 
-    const out = await sendCommand({ workspace: WS, file: '/tmp/missing.md', command: 'block-next' });
+    const out = await sendCommand({ workspace: WS, file: `${TMP}/missing.md`, command: 'block-next' });
     expect(out.body.code).toBe('no-canvas');
   });
 
   it('matches the same file spelled differently, while keeping the views distinct', async () => {
-    const a = await registerCanonical('/tmp/nested/../doc.md');
-    const b = await registerCanonical('/tmp/doc.md');
+    const a = await registerCanonical(`${TMP}/nested/../doc.md`);
+    const b = await registerCanonical(`${TMP}/doc.md`);
 
     expect(a.viewId).not.toBe(b.viewId); // two views...
     expect(a.file).toBe(b.file); // ...collapsed to one file identity
-    const out = await sendCommand({ workspace: WS, file: '/tmp/./doc.md', command: 'block-next' });
+    const out = await sendCommand({ workspace: WS, file: `${TMP}/./doc.md`, command: 'block-next' });
     expect(out.status).toBe(200); // ...which a third spelling also matches
     expect(out.body.target).toMatchObject({ file: b.file });
   });
 
   it('treats a delivered command as activity, so follow-ups stay on the same view', async () => {
-    const first = await register('/tmp/a.md');
-    const second = await register('/tmp/b.md');
+    const first = await register(`${TMP}/a.md`);
+    const second = await register(`${TMP}/b.md`);
 
     now += 1_000;
     await call('POST', `/api/canvas/views/${first}/heartbeat`, { focused: true });
     now += 1_000;
-    await sendCommand({ workspace: WS, file: '/tmp/b.md', command: 'block-next' }); // drives `second`
+    await sendCommand({ workspace: WS, file: `${TMP}/b.md`, command: 'block-next' }); // drives `second`
 
     const followUp = await sendCommand({ workspace: WS, command: 'block-next' });
     expect(followUp.body.target).toMatchObject({ viewId: second });
@@ -267,7 +271,7 @@ describe('target resolution', () => {
 
 describe('command validation', () => {
   beforeEach(async () => {
-    await register('/tmp/doc.md');
+    await register(`${TMP}/doc.md`);
   });
 
   it('rejects an unknown command', async () => {
@@ -333,7 +337,7 @@ describe('command validation', () => {
 
 describe('lease integrity', () => {
   it('does NOT let command traffic keep a dead host\'s view alive', async () => {
-    await register('/tmp/doc.md');
+    await register(`${TMP}/doc.md`);
 
     // Drive the view steadily, without any heartbeat: this is exactly the shape of a controller
     // still sending to a host that has died. Delivery is fire-and-forget over SSE and proves
@@ -350,7 +354,7 @@ describe('lease integrity', () => {
   });
 
   it('does not renew the lease on a malformed heartbeat', async () => {
-    const viewId = await register('/tmp/doc.md');
+    const viewId = await register(`${TMP}/doc.md`);
 
     now += CANVAS_VIEW_LEASE_MS - 1_000;
     const bad = await call('POST', `/api/canvas/views/${viewId}/heartbeat`, null);
@@ -370,7 +374,7 @@ describe('lease integrity', () => {
   // Accepting it would buy liveness for a payload that does not meet the contract, and would be
   // inconsistent with the command route, which rejects a bad `count` outright.
   it('rejects a heartbeat whose focused field is not a boolean, and grants it no lease', async () => {
-    const viewId = await register('/tmp/doc.md');
+    const viewId = await register(`${TMP}/doc.md`);
 
     now += CANVAS_VIEW_LEASE_MS - 1_000;
     for (const focused of ['yes', 1, null, {}]) {
@@ -383,7 +387,7 @@ describe('lease integrity', () => {
   });
 
   it('still accepts a heartbeat that omits focused entirely', async () => {
-    const viewId = await register('/tmp/doc.md');
+    const viewId = await register(`${TMP}/doc.md`);
     expect((await call('POST', `/api/canvas/views/${viewId}/heartbeat`, {})).status).toBe(200);
     expect((await call('POST', `/api/canvas/views/${viewId}/heartbeat`, { focused: false })).status).toBe(200);
   });

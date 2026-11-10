@@ -29,6 +29,11 @@ command. Opt-in via `.codev/config.json`; unconfigured repos see zero behavior c
   **unless** the entry ends in a slash: `".local-user-data/"` is treated as a literal path and
   links the directory whole — shared with the parent, not branch-isolated. A dangling link is
   fine if the source does not exist yet.
+  **Native Windows:** links are real symlinks when Developer Mode is on. Otherwise a directory
+  becomes a junction and a file a hard link, or a copy when no hard link can be made (another
+  volume); a copy does not reflect later edits, and `afx spawn` warns when it makes one.
+- **Scripts on Windows** — `postSpawn` and `devCommand` run under Git Bash, so a script file
+  they call needs LF line endings (`codev doctor` warns about CRLF ones).
 - **`postSpawn`** — commands run sequentially with `cwd` = worktree path. A non-zero exit aborts
   the spawn loudly; the half-built worktree stays for inspection.
 - **`devCommand`** — the foreground command that starts your dev process. Required for

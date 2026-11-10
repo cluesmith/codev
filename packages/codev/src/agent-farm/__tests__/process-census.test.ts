@@ -7,9 +7,10 @@
  * async-execFile convention.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
 import { listProcessCensus } from '../servers/process-census.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -39,6 +40,13 @@ function simulatePsError(): void {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+// These tests drive the POSIX branch (ps output from a mocked execFile), so
+// force the platform seam to linux; on a win32 host the code would otherwise take its
+// Windows branch.
+beforeEach(() => {
+  forceHostPlatform('linux');
 });
 
 describe('listProcessCensus (Issue #1227)', () => {
