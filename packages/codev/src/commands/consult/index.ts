@@ -11,6 +11,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { tmpdir, homedir } from 'node:os';
+import { createRequire } from 'node:module';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { Codex } from '@openai/codex-sdk';
@@ -590,21 +591,26 @@ export function resolveOptionalLaneModelChoice(
  * loudly. The provider's own text is preserved verbatim and merely annotated, because paraphrasing
  * a provider error is how you lose the one detail that identifies the real problem.
  */
-function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice): unknown {
-  // A shipped default can't be misconfigured by the user — nothing useful to add.
-  if (choice.key === null) return err;
+function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice, ranBinary?: string): unknown {
+  const notes: string[] = [];
+  // A shipped default can't be misconfigured by the user — nothing useful to add about the id.
+  if (choice.key !== null) {
+    const where = choice.fromFlag
+      ? 'passed via --model-id'
+      : `from \`${choice.key}\`${choice.source ? ` in ${choice.source}` : ''}`;
+    notes.push(
+      `The ${lane} lane requested model "${choice.id}" (${where}).\n` +
+      `If the provider rejected that id, correct it at the source above. ` +
+      `Codev does not fall back to a default model.`
+    );
+  }
+  // A provider can reject a valid id because the client is too old ("requires a newer version of
+  // Codex", #1880) — so name the client, which is otherwise invisible to the user.
+  if (ranBinary) notes.push(`The ${lane} lane ran ${ranBinary}.`);
+  if (notes.length === 0) return err;
 
   const providerText = err instanceof Error ? err.message : String(err);
-  const where = choice.fromFlag
-    ? 'passed via --model-id'
-    : `from \`${choice.key}\`${choice.source ? ` in ${choice.source}` : ''}`;
-
-  const annotated = new Error(
-    `${providerText}\n\n` +
-    `The ${lane} lane requested model "${choice.id}" (${where}).\n` +
-    `If the provider rejected that id, correct it at the source above. ` +
-    `Codev does not fall back to a default model.`
-  );
+  const annotated = new Error(`${providerText}\n\n${notes.join('\n')}`);
   if (err instanceof Error && err.stack) annotated.stack = err.stack;
   return annotated;
 }
@@ -616,6 +622,69 @@ function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice)
  */
 export function describeCodexAuth(env: NodeJS.ProcessEnv, fromDotenv: ReadonlySet<string>): string {
   return env.CODEX_API_KEY ? credentialOrigin('CODEX_API_KEY', fromDotenv) : 'stored codex login (no CODEX_API_KEY)';
+}
+
+/** The codex binary the codex lane runs, and how to say so. */
+export interface CodexBinary {
+  /** Passed to the SDK as `codexPathOverride`; undefined runs the SDK's bundled CLI. */
+  pathOverride?: string;
+  /** Which binary, which version, and where that choice came from. */
+  description: string;
+}
+
+/**
+ * The version of the Codex CLI the SDK runs when no override is set.
+ *
+ * The SDK resolves `@openai/codex` from its OWN install location — never PATH — and pins it to its
+ * own version, so upgrading the user's `codex` changes nothing (#1880). Resolved the same way here.
+ */
+export function bundledCodexVersion(): string {
+  const localRequire = createRequire(import.meta.url);
+  for (const dir of localRequire.resolve.paths('@openai/codex-sdk') ?? []) {
+    const sdkPackageJson = path.join(dir, '@openai', 'codex-sdk', 'package.json');
+    if (!fs.existsSync(sdkPackageJson)) continue;
+    // realpath: under pnpm the SDK is a symlink, and its `@openai/codex` sits beside the real path.
+    const sdkRequire = createRequire(fs.realpathSync(sdkPackageJson));
+    const codexPackageJson = sdkRequire.resolve('@openai/codex/package.json');
+    return JSON.parse(fs.readFileSync(codexPackageJson, 'utf-8')).version;
+  }
+  throw new Error('Cannot locate @openai/codex-sdk to read the version of its bundled Codex CLI.');
+}
+
+/**
+ * Pick the codex binary: `consult.codexPath` if set, else the SDK's bundled CLI.
+ *
+ * A configured path is run once with `--version` before the consultation. That reports the version
+ * actually in use and makes a missing or non-executable path fail here, loudly — Codev never falls
+ * back to the bundled CLI, which is exactly the binary the user configured their way around.
+ */
+export function resolveCodexBinary(workspaceRoot: string): CodexBinary {
+  const codexPath = loadConfig(workspaceRoot).consult?.codexPath;
+  if (codexPath === undefined) {
+    return {
+      description: `Codex CLI ${bundledCodexVersion()} bundled with codev ` +
+        `(set \`consult.codexPath\` to run your own codex)`,
+    };
+  }
+
+  const source = findConfigSource(workspaceRoot, ['consult', 'codexPath']);
+  const from = `from \`consult.codexPath\`${source ? ` in ${source}` : ''}`;
+  let version: string;
+  try {
+    version = execFileSync(codexPath, ['--version'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+    }).trim();
+  } catch (err) {
+    throw new Error(
+      `Cannot run the codex binary ${codexPath} (${from}): ` +
+      `${err instanceof Error ? err.message : String(err)}\n` +
+      `Point consult.codexPath at an executable codex, or remove it to use the bundled CLI. ` +
+      `Codev does not fall back to the bundled CLI.`
+    );
+  }
+  return { pathOverride: codexPath, description: `${codexPath}, ${version} (${from})` };
 }
 
 /**
@@ -644,13 +713,18 @@ export async function runCodexConsultation(
   let exitCode = 0;
 
   console.error(`[CODEX] auth: ${describeCodexAuth(process.env, dotenvKeys)}`);
+  const binary = resolveCodexBinary(workspaceRoot);
+  console.error(`[CODEX] binary: ${binary.description}`);
 
   // Write role to temp file — SDK requires file path for instructions
   const tempFile = path.join(tmpdir(), `codev-role-${Date.now()}.md`);
   fs.writeFileSync(tempFile, role);
 
   try {
+    // Never pass `apiKey`: the SDK would export it as CODEX_API_KEY and move the lane off the
+    // stored ChatGPT login onto metered API billing.
     const codex = new Codex({
+      codexPathOverride: binary.pathOverride,
       config: {
         model_instructions_file: tempFile,
       },
@@ -707,7 +781,7 @@ export async function runCodexConsultation(
       exitCode = 1;
     }
     discardStaleOutput(outputPath);
-    throw annotateModelError(err, 'codex', choice);
+    throw annotateModelError(err, 'codex', choice, binary.description);
   } finally {
     // Clean up temp file
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
