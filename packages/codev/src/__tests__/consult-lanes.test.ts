@@ -150,13 +150,13 @@ describe('consult.reasoningEffort key/value space (scenarios 3, 18)', () => {
   // consult-lanes.ts. No runtime test can enumerate a union that only exists at compile time —
   // trying to is exactly what made the old test circular.
   it('accepts each documented effort value for codex', () => {
-    for (const effort of ['minimal', 'low', 'medium', 'high', 'xhigh'] as const) {
+    for (const effort of ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'persistent'] as const) {
       expect(() => validateReasoningEffort({ codex: effort })).not.toThrow();
     }
   });
 
-  it('the accepted set is exactly the documented five', () => {
-    expect([...REASONING_EFFORTS]).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
+  it('the accepted set is exactly the documented eight', () => {
+    expect([...REASONING_EFFORTS]).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'persistent']);
   });
 
   it('rejects claude — key space is narrower than consult.models', () => {

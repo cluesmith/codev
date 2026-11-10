@@ -45,7 +45,7 @@
     "@cluesmith/codev-sdk": "workspace:*",
     "@cluesmith/codev-types": "workspace:*",
     "@google/genai": "^1.0.0",
-    "@openai/codex-sdk": "^0.146.0",
+    "@openai/codex-sdk": "^0.167.0",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
     "better-sqlite3": "^12.10.0",

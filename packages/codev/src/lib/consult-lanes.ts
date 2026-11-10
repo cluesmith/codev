@@ -18,6 +18,7 @@
  *    file stops compiling rather than silently diverging.
  */
 
+import { isAbsolute } from 'node:path';
 import type { ModelReasoningEffort } from '@openai/codex-sdk';
 import { canonicalProtocolName, listProtocolNames, listReviewTypes } from './skeleton.js';
 
@@ -49,7 +50,7 @@ export const REASONING_EFFORT_LANES = ['codex'] as const;
  * test this replaced.
  */
 export const REASONING_EFFORTS = [
-  'minimal', 'low', 'medium', 'high', 'xhigh',
+  'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'persistent',
 ] as const satisfies readonly ModelReasoningEffort[];
 
 type UncoveredEffort = Exclude<ModelReasoningEffort, (typeof REASONING_EFFORTS)[number]>;
@@ -204,6 +205,22 @@ export function validateReasoningEffort(effort: unknown): void {
         `Valid values: ${quoted(REASONING_EFFORTS)}.`
       );
     }
+  }
+}
+
+/**
+ * `consult.codexPath` — run this codex binary instead of the CLI bundled with the SDK (#1880).
+ *
+ * Syntax only, at load time. Whether the binary actually runs is checked when the codex lane
+ * starts, and a failure there is fatal: there is no fallback to the bundled CLI.
+ */
+export function validateCodexPath(codexPath: unknown): void {
+  if (codexPath === undefined) return;
+  if (typeof codexPath !== 'string' || !isAbsolute(codexPath)) {
+    fail(
+      `Invalid consult.codexPath in Codev config: expected an absolute path to a codex binary ` +
+      `(e.g. the output of \`which codex\`), got ${JSON.stringify(codexPath)}.`
+    );
   }
 }
 

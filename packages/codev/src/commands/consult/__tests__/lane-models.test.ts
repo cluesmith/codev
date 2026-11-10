@@ -362,12 +362,14 @@ describe('provider rejection fails loudly with no fallback (scenario 3)', () => 
     expect(err.message).not.toContain('consult.models.codex');
   });
 
-  it('leaves a default-model failure unannotated — the user configured nothing to fix', async () => {
+  it('adds no model provenance to a default-model failure — the user configured nothing to fix', async () => {
     mockCodexEvents = [{ type: 'turn.failed', error: { message: 'transient upstream outage' } }];
 
     const err = await runCodexConsultation('q', 'role', tmpDir).catch((e: unknown) => e as Error);
 
-    expect(err.message).toBe('transient upstream outage');
+    // Only the binary that ran is named (#1880) — a too-old CLI rejects even the default model.
+    expect(err.message).toMatch(/^transient upstream outage\n\nThe codex lane ran Codex CLI \S+ bundled with codev/);
+    expect(err.message).not.toContain('requested model');
     expect(err.message).not.toContain('consult.models');
   });
 });
