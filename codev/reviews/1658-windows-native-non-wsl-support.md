@@ -103,17 +103,29 @@ the owner's Windows machine, which CI cannot cover.
 - [x] DEPENDENCIES.md (both trees) presents native Windows and WSL 2 with limitations; Linux/WSL
   `build-essential` + `python3` stated (Phase 11).
 
-### Scope change at the pr gate (2026-11-10)
+### Scope change at the pr gate: Amendment 2 (2026-11-10, complete)
 
 The owner directed a refactor before merge: "we won't merge it like this, refactor properly
-first". The architect approved it for scope (2026-11-09) and lifted the M8 in-PR limit. The PR
-added 103 `isWindows()` calls in 47 product files; the platform-dependent operations move behind
-per-capability interfaces (command launch, host paths, processes, shellper transport) with the
-POSIX code moved verbatim and the existing Windows modules behind adapters. Plan Amendment 2
-carries the inventory, signatures, phases A2-1 to A2-5 and the re-verification plan. Porch stays
-in the review phase with the pr gate requested (no rollback). No phase starts before the owner's
-go word on the amendment. The re-check list below is superseded by Amendment 2's A2.8 table once
-the refactor lands.
+first". The architect approved it for scope (2026-11-09) and the owner approved Plan Amendment 2
+("approve amendment"). The PR had added 103 `isWindows()` calls in 47 product files. Shared code now
+asks one of four capabilities instead of choosing a platform: command launch, host paths, processes
+and shellper transport (`lib/platform/<capability>.ts`, each with `.posix.ts` and `.windows.ts`).
+The POSIX implementations are the pre-refactor macOS/Linux code moved verbatim (checked per phase
+by a scripted body comparison against `origin/main` or the pre-phase head); the Windows
+implementations are the existing Windows modules behind adapters. Product `isWindows()` calls:
+103 before, 56 after, counting the four accessors; each remaining one is listed with its reason in
+the plan (A2.5, A2.10). Porch stayed in the review phase with the pr gate requested.
+
+| Phase | Code head | Final head | Windows runs | CMAP (2-way: agy unauthenticated) | Architect |
+|---|---|---|---|---|---|
+| A2-1 command launch | `aab6464ec` | `a1d490a90` | 42721453027 green | claude APPROVE, codex APPROVE | read clean |
+| A2-2 host paths | `6ae43b289` | `5181b1731` | 42723626188 failed (a host-dependent expectation in a new test), 42724670615 cancelled (superseded), 42725237076 green | claude APPROVE, codex APPROVE | read clean |
+| A2-3 processes | `664b5787d` | `cf3e9ad30` | 42727164591, 42728346609 green | claude APPROVE, codex REQUEST_CHANGES (`censusCostMs`, `commandLineText`; ruled for the builder, A2.10) | read clean |
+| A2-4 test helpers, docs | `6b6f1e260` | `979c70230` | 42729768268, 42731014563 green | claude APPROVE, codex COMMENT | read clean |
+| A2-5 shellper transport | `5f15146a6` (after merging `main`, `c7ed6dc99`) | `5bc668fb1` | 42732747693 failed (a new test opened a real Unix socket on the runner; spec-1280), 42734331206 (spec-1280 on the pre-skip head), 42734572993 green (attempt 2, after a vitest worker exit) | claude APPROVE, codex COMMENT | read clean |
+
+Every finding from the phase reviews was addressed in the phase's follow-up commit or recorded
+with a ruling in A2.10. Divergences the moves preserved verbatim are listed in A2.9.
 
 ### Open at the PR gate
 
@@ -135,6 +147,9 @@ the refactor lands.
      workspace folder. Pass. The same check found M8 (dashboard Start and Stop).
    - M8 on `84f1f75a1` (reported 2026-11-10): Start and Stop from the dashboard work. Restart,
      + Create, copy path and Open IDE not yet reported; they fold into the A2.8 pass.
+   - Still to do, on the final head after Amendment 2: the owner's Windows pass from the A2.8
+     table (3, 4 from two launchers, 6/6a, 9 with 6b, 11 on and off, 12, 13, 15 on the branch
+     vsix, 15a, M6, M7, M8; the owner trims it), on tarballs and a vsix packed from that head.
    - The ConPTY fixtures (item 1) remain open.
    - Findings, under "Manual pass findings": M1 (resolved: a machine npm setting, not a defect),
      M2 (double cursor, cosmetic follow-up), M3 (uninstall while Tower runs, docs follow-up), M4
@@ -149,6 +164,21 @@ the refactor lands.
    whether the README wording is softened in this PR or the follow-up lands before release.
 5. Integration review: round 1's three must-fixes and round 2's four (PID-reuse-safe boot
    liveness, the documented invariant, `WorkspaceKeyedMap` typing, this section) are addressed.
+
+### macOS smoke on an isolated Tower (A2.8, builder, 2026-11-10, head `5bc668fb1`)
+
+Run on macOS (Node 22.19) against a Tower on a non-default port with its own
+`CODEV_AGENT_FARM_DIR` and `SHELLPER_SOCKET_DIR`, driven over its HTTP and WebSocket API and, for
+S2, in Chromium (Playwright); the live Tower on 4100 was not touched. A throwaway workspace was made
+with the published `codev init`; its architect and builder ran a flag-tolerant interactive shell
+stand-in, so the sessions are real shellper sessions without starting an agent. Linux coverage is
+CI-only (no Linux host on either side).
+
+| Row | Check | Result |
+|---|---|---|
+| S1 | Upgrade with a live session: published 3.3.7 installed into a scratch prefix, Tower started, workspace launched, a shell created and a marker typed into it (shellper 60739, shell 60741); Tower stopped, the branch packed from `5bc668fb1` installed over 3.3.7 in the same prefix, Tower started from the branch | **Pass.** The branch Tower logged `reconnected: pid=60739` (and the architect's); the replay still showed the pre-upgrade marker; new input ran; the shell was the same process (60741) under the same shellper and recorded start time; no ERROR in the log. |
+| S2 | Dashboard buttons in Chromium: copy path, + Create, Restart, Open IDE, Stop, Start | **Pass** in three consecutive runs: every `data-workspace-path` equals the workspace path; the clipboard holds the exact path; + Create adds a shellper-backed shell; Restart refreshes; Stop toasts "Workspace stopped"; Start relaunches and the workspace stays running. Open IDE is not rendered here (no IDE server in the isolated state dir); its Windows path is M7's unit test and the owner's 15a. A first run that clicked Start without waiting for Stop's response lost the new session: finding M10. |
+| S3 | `afx spawn` / `send` / `cleanup` | **Partial, by ruling (a):** the `afx` CLI cannot target a non-default Tower port (finding M12). `send` via `POST /api/send` to the architect: accepted, persisted to the mailbox and **held** with reason `no-profile` (the delivery gate delivers only to apps with a gate profile; the stand-in has none). Delivery to a real harness: the Ubuntu Tower Integration job's `send-integration.e2e.test.ts` (run 42734568847: "sends to builder via POST /api/send...", "holds a NORMAL (gated) send to an inert terminal...", "#1265 full cycle: a draft holds the send...") and the owner's scenario 12. `spawn` and `cleanup`: the macOS CLI job (`CLI Tests (macos-latest)`, run 42734569050, `src/__tests__/cli/af.e2e.test.ts`) covers argument handling only ("spawn --help shows options", "cleanup --help shows options", "spawn without project ID shows error", the `--branch` / `--remote` rejections); no CI job spawns a real worktree. |
 
 ### Known gap: codex agents and the render gate (#1858)
 
@@ -856,6 +886,28 @@ and which scenarios ran before M6.
 - Hot tier unchanged: `lessons-critical.md` is at its cap, and its existing entries ("tests pass
   is not it works", "build a minimal repro") already carry the cross-cutting form of these.
 
+### Amendment 2 phases (2-way while agy is unauthenticated)
+
+Per-phase verdicts and what was done with each finding are in the plan's A2.10 and the table under
+"Scope change at the pr gate". Summary: claude approved all five phases; codex approved A2-1 and
+A2-2, commented on A2-4 and A2-5, and requested changes on A2-3 (`censusCostMs`,
+`commandLineText`), ruled for the builder by the architect. No phase review found a behaviour
+change on either platform.
+
+### Review (PR) Round 4 (final head `5bc668fb1`, 2-way while agy is unauthenticated)
+
+- **claude: REQUEST_CHANGES, no code change needed.** Verified CI green on the exact head (all
+  POSIX checks; Windows 42734572993 on every leg and probe) and the POSIX-verbatim reconnect gate
+  against `origin/main`. Asked for: the PR body (it pinned testing to a pre-refactor head and said
+  no Windows suite was skipped); the macOS smoke evidence; the review's Amendment 2 record; five
+  untracked porch rebuttal files; A2-4's CMAP verdict in A2.10. **Addressed**: PR body rewritten,
+  smoke recorded above, this section and the Amendment 2 table added, rebuttals committed, A2.10
+  entry added. The note that the skipped spec-1280 file holds a host-portability block goes to
+  main for the follow-up issue.
+- **codex: REQUEST_CHANGES.** The ConPTY fixtures, the #1858 decision and the cwd-first blocker are
+  open gate items (owner and architect), listed above; the final-head Windows run is green on
+  attempt 2 (codex read the first attempt). The macOS smoke is now recorded.
+
 ## Flaky Tests
 
 - **`session-manager.test.ts` "respects maxRestarts limit" (#1800, recurred in Phase 10; now
@@ -955,6 +1007,12 @@ and which scenarios ran before M6.
   `describe.skipIf(process.platform === 'win32')` naming the three runs; both POSIX legs run it in
   full. No other suite is skipped under this ruling. Main files the follow-up issue after the
   owner's word.
+
+- **Vitest pool "Worker exited unexpectedly" on Windows (second sighting; architect: rerun
+  accepted).** Run 39927082964 (Node 22, a worker exiting without output in
+  `agy-lane-model.test.ts`) and run 42734572993 attempt 1 (Node 22, head `5bc668fb1`: all 389 files
+  and 7667 tests passed, then the pool reported an unhandled "Worker exited unexpectedly" with no
+  test attributed). Attempt 2 was green. Recorded; not skipped (nothing to skip).
 
 - **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
   run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:
@@ -1326,6 +1384,26 @@ paths are not supported"; `afx workspace start` / `stop` from the CLI worked.
   pre-fix template all three fail.
 - Owner confirmation of the cause (the copy-path button pasting a mangled path) was requested and
   had not arrived when this was written; the re-check on the M8 head covers the fixed buttons.
+
+**M10. A workspace launch made while a stop is still in flight is wiped when the stop finishes
+(macOS smoke, 2026-11-10). Pre-existing; recorded, not fixed (Amendment 2 rule F).**
+`stopInstance` awaits each terminal's exit (up to 5 s per terminal), then deletes the workspace's
+registry entry and every `terminal_sessions` row for it. A launch that lands in that window
+reports success and is then erased: the workspace reads not running while its new architect was
+just created. Reproduced 3 of 3 times on published 3.3.7 and 3 of 3 on the branch (launch 50 ms
+into a stop). Reachable from the dashboard (Start clicked before Stop's response). Follow-up
+candidate for main.
+
+**M11. After a Tower restart, a workspace stop leaves its reconnected shellpers running (macOS
+smoke, 2026-11-10). Pre-existing; recorded, not fixed.** The stop response lists the reconnected
+shellper PIDs as stopped, but no kill is logged and both shellpers stay alive (the orphan sweep at
+the next Tower start reaps them). Identical on published 3.3.7 and on the branch (2 of 2 shellpers
+survive in each). Follow-up candidate for main.
+
+**M12. The `afx` CLI cannot target a Tower on a non-default port (macOS smoke, 2026-11-10).
+Recorded; umbrella follow-up (architect ruling).** Only `afx tower` and `afx cron` take `-p`;
+`spawn`, `send`, `cleanup`, `status` and `workspace` always use 4100, so an isolated Tower can be
+driven over its API only.
 
 ## Appendix: Implementation Notes by Phase
 

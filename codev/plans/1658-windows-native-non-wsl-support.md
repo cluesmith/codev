@@ -1414,7 +1414,8 @@ REQUEST_CHANGES on the two items below).** As committed in `lib/platform/process
   teardown and job modules (none spawns or promisifies at module scope). Its header says so.
 - Product `isWindows()` calls: 69 after A2-2, 63 after A2-3.
 
-**A2-4, residue.**
+**A2-4, residue** (`6b6f1e260`, CMAP 2-way while agy is unauthenticated: claude APPROVE, codex
+COMMENT; follow-ups in `979c70230`).
 
 - Test overrides: `forceHostPlatform(platform)` joins `useHostPlatform(platform)` in
   `src/__tests__/helpers/host-platform.ts` (set now, reset via `onTestFinished`, usable in a test
