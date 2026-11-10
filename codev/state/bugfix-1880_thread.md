@@ -51,3 +51,23 @@ widening, so `REASONING_EFFORTS` (+ its test + both consult.md copies) must grow
   `consult.codexPath=/opt/homebrew/bin/codex`; a missing path exits 1 naming ENOENT and the
   config file. (Used a temporary `.codev/config.local.json` edit, restored byte-for-byte.)
 - Full codev suite: 7237 passed, 49 skipped.
+
+## CMAP on PR #1889 (2026-11-10 UTC)
+
+First dispatch failed in all three lanes: "Multiple projects found". From a builder worktree,
+`consult --type pr` needs `--issue 1880`.
+
+- **gemini: APPROVE** (HIGH), no issues.
+- **codex: REQUEST_CHANGES → APPROVE.** Real bug: `resolveCodexBinary()` ran before the guarded
+  `try`, so a bad `codexPath` skipped `discardStaleOutput` + failure metrics and a stale review
+  file could be read as current. Moved the preflight inside the try; added a test that fails
+  without the move. Re-review: APPROVE (HIGH), no issues.
+- **claude: APPROVE** (HIGH). Its "REPOSITORY MOVED" tripwire was my own fix commit landing
+  mid-review (reflog shows only my commits); it reviewed that head. Minors:
+  1. "use `require.resolve` instead of the paths walk": refuted, it throws
+     ERR_PACKAGE_PATH_NOT_EXPORTED (SDK exports only `import`). Added a comment saying so.
+  2. `codexPath` missing from the fail-fast contract table: added a row (both consult.md).
+  3. `codexPath` absent from `ConsultLaneConfig`: left as is; that type is the input to the
+     model/effort resolvers, which don't read it.
+  4. Real-CLI coverage is one manual e2e: noted. That run went through the branch's real SDK
+     path (stream, usage, completion), on both the bundled CLI and the override.

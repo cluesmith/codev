@@ -639,6 +639,8 @@ export interface CodexBinary {
  * own version, so upgrading the user's `codex` changes nothing (#1880). Resolved the same way here.
  */
 export function bundledCodexVersion(): string {
+  // Walk the lookup paths rather than `require.resolve('@openai/codex-sdk')`: the SDK exports only
+  // an `import` condition, so require-resolution throws ERR_PACKAGE_PATH_NOT_EXPORTED.
   const localRequire = createRequire(import.meta.url);
   for (const dir of localRequire.resolve.paths('@openai/codex-sdk') ?? []) {
     const sdkPackageJson = path.join(dir, '@openai', 'codex-sdk', 'package.json');

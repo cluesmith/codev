@@ -220,12 +220,13 @@ the protocol file.
 Config errors are raised when config is **loaded** — before any consultation starts — and name the
 offending key and the valid alternatives. Nothing falls back to a default on error.
 
-**The asymmetry worth knowing about:** these two are validated very differently.
+**The asymmetry worth knowing about:** these are validated very differently.
 
 | | Validated by | When you find out |
 |---|---|---|
 | `reasoningEffort` | **Codev**, against a closed enum | Config load, before anything runs |
 | Model ids | **The provider** | When the lane runs |
+| `codexPath` | **Codev**: absolute-path syntax, then `<path> --version` | Syntax at config load; a binary that doesn't run, when the codex lane starts |
 
 Codev checks a model id's *syntax* only (ASCII alphanumerics plus `. _ : / @ + -`, 1–200 characters,
 no leading punctuation) — never its existence. **There is no allowlist of model ids anywhere in
