@@ -13,10 +13,20 @@ const childProcess = vi.hoisted(() => ({
   execFile: vi.fn(),
   execSync: vi.fn(),
 }));
+const fsStub = vi.hoisted(() => ({
+  readFile: vi.fn(),
+  stat: vi.fn(),
+}));
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return { ...actual, ...childProcess };
+});
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const merged = { ...actual, ...fsStub };
+  return { ...merged, default: merged };
 });
 
 import { processes } from '../lib/platform/processes.js';
@@ -99,6 +109,39 @@ describe('POSIX: the pre-refactor forms', () => {
       throw new Error('no lsof');
     });
     await expect(posixProcesses.listeningPidsAsync(4100)).resolves.toEqual([]);
+  });
+
+  it('startTime on macOS parses `ps -o lstart=`', async () => {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    try {
+      childProcess.execFile.mockImplementation((_file: string, _args: string[], cb: (err: Error | null, stdout: string) => void) => {
+        cb(null, 'Tue Nov 10 09:00:00 2026\n');
+      });
+      await expect(posixProcesses.startTime(42)).resolves.toBe(new Date('Tue Nov 10 09:00:00 2026').getTime());
+      expect(childProcess.execFile.mock.calls[0].slice(0, 2)).toEqual(['ps', ['-p', '42', '-o', 'lstart=']]);
+    } finally {
+      Object.defineProperty(process, 'platform', original);
+    }
+  });
+
+  it('startTime on Linux uses the /proc/<pid> ctime after a parseable stat line', async () => {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      const fields = Array.from({ length: 30 }, (_v, i) => String(i));
+      fsStub.readFile.mockImplementation((_p: string, _enc: string, cb: (err: Error | null, data: string) => void) => {
+        cb(null, `42 (node) ${fields.join(' ')}`);
+      });
+      fsStub.stat.mockImplementation((_p: string, cb: (err: Error | null, st: { ctimeMs: number }) => void) => {
+        cb(null, { ctimeMs: 5555 });
+      });
+      await expect(posixProcesses.startTime(42)).resolves.toBe(5555);
+      expect(fsStub.readFile.mock.calls[0][0]).toBe('/proc/42/stat');
+      expect(fsStub.stat.mock.calls[0][0]).toBe('/proc/42');
+    } finally {
+      Object.defineProperty(process, 'platform', original);
+    }
   });
 
   it('no census entry is console infrastructure', () => {

@@ -1387,6 +1387,29 @@ APPROVE).** As committed in `lib/platform/host-paths.ts`, against A2.4:
   substring test, not a path comparison (add to the A2.5 one-offs).
 - Product `isWindows()` calls: 84 after A2-1, 69 after A2-2.
 
+**A2-3, processes (`664b5787d`, CMAP 2-way while agy is unauthenticated: claude APPROVE, codex
+REQUEST_CHANGES on the two items below).** As committed in `lib/platform/processes.ts`:
+
+- The existing entry points keep their names and delegate (`listProcessCensus`,
+  `getProcessStartTime`, `getProcessesOnPort` / `Async`, `killSessionTree`, `waitForTreeExit`,
+  `isConsoleHostEntry`, `startTimeLookupFor`), so no caller changed.
+- The Windows census, teardown and port query moved unchanged into `process-census-windows.ts`,
+  `process-tree-windows.ts` and `port-windows.ts`; they import only types back, so there is no
+  import cycle. One edit: the Windows teardown's `freshCensus` calls the Windows census directly
+  instead of `listProcessCensus({ fresh: true })` (the same function on Windows).
+- `getProcessStartTime`'s own `process.platform` switch (darwin / linux / null) is the POSIX
+  `startTime`; Windows returns null, as the switch did there. Under a test that forces the seam to
+  `win32` on a POSIX host it now answers null instead of the host's value (no test relied on it).
+- Not added, recorded instead (codex must-fix): `censusCostMs`. The two budgets it was for
+  (`session-manager.ts` `orphanSweepBudgetMs`, `tower-owner.ts` `defaultHealthProbeBudgetMs`) have
+  one call site each, and the health-probe budget is not "base plus census cost" (POSIX 6000;
+  Windows census timeout plus 2000), so one shared cost would need a branch on its value. Both stay
+  `isWindows()` one-offs (rule 6). `commandLineText` (`shellperArgvText`) is shellper command-line
+  parsing and moves with the shellper transport in A2-5.
+- `port.ts` is no longer two imports deep: it loads both implementations and the Windows census,
+  teardown and job modules (none spawns or promisifies at module scope). Its header says so.
+- Product `isWindows()` calls: 69 after A2-2, 63 after A2-3.
+
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |

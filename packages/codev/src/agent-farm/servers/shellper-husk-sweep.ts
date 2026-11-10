@@ -27,7 +27,6 @@ import { listProcessCensus, type ProcessCensusEntry } from './process-census.js'
 import { getProcessStartTime, PID_REUSE_TOLERANCE_MS } from '../../terminal/session-manager.js';
 import { reapShellpers } from './architect-session-holder.js';
 import { processes, type StartTimeLookup } from '../../lib/platform/processes.js';
-import { censusStartTimeLookup } from '../../lib/platform/processes.windows.js';
 import { SHELLPER_MARKER, isShellperInScope, shellperTeardownIdentities } from '../../terminal/shellper-cmdline.js';
 
 export { SHELLPER_MARKER };
@@ -45,7 +44,6 @@ export function isConsoleHostEntry(entry: ProcessCensusEntry): boolean {
 }
 
 export type { StartTimeLookup };
-export { censusStartTimeLookup };
 
 /**
  * The start-time source for a sweep over `census`. On Windows the census

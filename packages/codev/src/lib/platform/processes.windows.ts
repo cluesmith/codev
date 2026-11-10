@@ -19,7 +19,7 @@ import type { Processes, StartTimeLookup } from './processes.js';
  * times, with no process spawned per PID. A PID absent from the snapshot, or
  * without a creation time, reads as unknown (null).
  */
-export function censusStartTimeLookup(census: ProcessCensusEntry[]): StartTimeLookup {
+function censusStartTimeLookup(census: ProcessCensusEntry[]): StartTimeLookup {
   const created = new Map<number, number>();
   for (const entry of census) {
     if (entry.creationTime !== undefined) created.set(entry.pid, entry.creationTime);

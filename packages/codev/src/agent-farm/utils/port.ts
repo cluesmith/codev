@@ -1,12 +1,17 @@
 /**
  * Port → PID lookup.
  *
- * A leaf module on purpose: `codev doctor` needs this to find the running Tower
- * (#1219), and reaching into `agent-farm/commands/tower.ts` for it would drag
- * that command's whole import graph — `promisify(exec)` at module scope
+ * Kept out of `agent-farm/commands/tower.ts` on purpose: `codev doctor` needs
+ * this to find the running Tower (#1219), and reaching into that command for it
+ * would drag its whole import graph — `promisify(exec)` at module scope
  * included — into the doctor tests. `commands/tower.ts` re-exports it, so its
- * existing consumers are unaffected. On Windows the lookup is `Get-NetTCPConnection` (`port-windows.ts`); the
- * platform choice is the processes capability's (Spec 1658, Amendment 2).
+ * existing consumers are unaffected.
+ *
+ * The lookup itself is the processes capability's (Spec 1658, Amendment 2):
+ * `lsof` on POSIX, `Get-NetTCPConnection` on Windows (`port-windows.ts`).
+ * Importing it loads both implementations and the Windows census, teardown
+ * and job modules; none of them spawns anything or promisifies at module
+ * scope, so the #1219 property holds.
  */
 
 import { processes } from '../../lib/platform/processes.js';
