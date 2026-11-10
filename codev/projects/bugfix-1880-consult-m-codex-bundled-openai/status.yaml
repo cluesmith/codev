@@ -1,7 +1,7 @@
 id: bugfix-1880
 title: consult-m-codex-bundled-openai
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-10T04:32:52.263Z'
-updated_at: '2026-11-10T04:32:52.264Z'
+updated_at: '2026-11-10T04:35:54.768Z'
