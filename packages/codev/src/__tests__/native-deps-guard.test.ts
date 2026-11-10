@@ -24,13 +24,10 @@ import {
   withNativeLoadExplanation,
   unsupportedWindowsNodeMessage,
 } from '../lib/native-deps.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../lib/platform.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 const codevPkgRoot = resolve(__dirname, '..', '..');
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 describe('checkWindowsNodeForPrebuilds', () => {
   it('passes every non-Windows platform, whatever the Node', () => {
@@ -71,10 +68,10 @@ describe('runtime twin of the message', () => {
     expect(isNativeBindingLoadFailure(loadFailure)).toBe(true);
     expect(isNativeBindingLoadFailure(new Error('SQLITE_BUSY: database is locked'))).toBe(false);
 
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     expect(explainNativeLoadFailure(loadFailure)).toBe(loadFailure);
 
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const explained = explainNativeLoadFailure(loadFailure) as Error;
     expect(explained.message).toContain('native Windows needs Node.js 22 or 24');
     expect(explained.message).toContain('NODE_MODULE_VERSION 115');
@@ -92,7 +89,7 @@ describe('node-pty binding load failures', () => {
   });
 
   it('withNativeLoadExplanation rethrows a load failure explained on Windows, anything else as is', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(() => withNativeLoadExplanation(() => { throw new Error('Failed to load native module: conpty.node'); }))
       .toThrow('native Windows needs Node.js 22 or 24');
     expect(() => withNativeLoadExplanation(() => { throw new Error('boom'); })).toThrow(/^boom$/);

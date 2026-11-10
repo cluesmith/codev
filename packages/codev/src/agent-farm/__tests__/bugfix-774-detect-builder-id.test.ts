@@ -20,10 +20,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import { parseBuilderWorktreePath, containsBuildersSegment } from '../utils/builder-worktree-identity.js';
 // Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 // Issue #1118: detectCurrentBuilderId reads global.db at getGlobalDbPath();
 // redirect it to a per-test temp file.
@@ -168,12 +168,9 @@ describe('describeStateDbOpenFailure — issue #1094 actionable messages', () =>
 });
 
 describe('builder worktree path parsing on Windows (Spec 1658)', () => {
-  afterEach(() => {
-    resetHostPlatformForTests();
-  });
 
   it('splits a native backslash path, a mixed path, and the inner worktree of a nested one', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(parseBuilderWorktreePath('C:\\repo\\.builders\\bugfix-42\\src')).toEqual({
       workspacePath: 'C:\\repo',
       worktreeDirName: 'bugfix-42',
@@ -192,7 +189,7 @@ describe('builder worktree path parsing on Windows (Spec 1658)', () => {
   });
 
   it('keeps POSIX on `/` alone: a backslash is a filename byte there', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     expect(parseBuilderWorktreePath('/repo/.builders/bugfix-42/src')).toEqual({
       workspacePath: '/repo',
       worktreeDirName: 'bugfix-42',

@@ -18,9 +18,10 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import { BUILDER_WORKTREE_ENV, sanitizeAgentEnv } from '../../lib/agent-env.js';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
+import { resetHostPlatformForTests } from '../../lib/platform.js';
 // Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const dbState = vi.hoisted(() => ({ globalDbPath: '' }));
 vi.mock('../db/index.js', async (importOriginal) => {
@@ -123,7 +124,7 @@ describe('builder identity from the spawn environment — issue #1783', () => {
   });
 
   it('on Windows, a native drive-rooted env worktree names the builder; a relative one does not (Spec 1658)', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     try {
       process.env[BUILDER_WORKTREE_ENV] = 'C:\\repo\\.builders\\bugfix-42';
       expect(detectWorkspaceRoot()).toBe('C:\\repo');

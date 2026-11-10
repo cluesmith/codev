@@ -7,7 +7,7 @@ import { execSync, spawnSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 // These tests call vi.resetModules() and re-import doctor, which loads a fresh
 // platform module with no override; pin every instance to POSIX so a win32 host
@@ -134,13 +134,12 @@ describe('doctor command', () => {
     // These are the POSIX doctor's checks (which/--version probes through the mocked
     // child_process); force the seam so a win32 host does not take the Windows sections
     // (process census, job helper, Windows prerequisites), which have their own tests.
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     // Suppress console output during tests
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    resetHostPlatformForTests();
     vi.restoreAllMocks();
   });
 

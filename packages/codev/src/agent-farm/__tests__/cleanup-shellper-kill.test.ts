@@ -12,9 +12,9 @@
 // spec-1658-tmp: opaque (every /tmp socket is inside fake ps output from a mocked execFile; nothing touches the disk)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import { killShellperProcesses } from '../commands/cleanup.js';
 import { execFile } from 'node:child_process';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 // Mock execFile to simulate ps output
 vi.mock('node:child_process', async () => {
@@ -38,12 +38,9 @@ afterEach(() => {
 // force the platform seam to linux; on a win32 host the code would otherwise take its
 // Windows branch.
 beforeEach(() => {
-  setHostPlatformForTests('linux');
+  forceHostPlatform('linux');
 });
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 describe('killShellperProcesses (Bugfix #389)', () => {
   const worktree = '/workspace/.builders/bugfix-42-login-fails';

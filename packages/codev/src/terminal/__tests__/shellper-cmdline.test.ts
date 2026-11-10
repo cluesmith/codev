@@ -15,12 +15,9 @@ import {
   shellperArgvText,
   unquoteWindowsCommandLine,
 } from '../shellper-cmdline.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 import { windowsShellperCmdline } from './windows-cmdline-fixtures.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 const WIN_SOCKET_DIR = 'C:\\Users\\me\\.agent-farm\\run';
 
@@ -65,20 +62,20 @@ describe('readJsonStringField', () => {
 
 describe('shellperArgvText', () => {
   it('is the identity on POSIX', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const line = 'node shellper-main.js {"cwd":"a\\"b"}';
     expect(shellperArgvText(line)).toBe(line);
   });
 
   it('unquotes on Windows', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(shellperArgvText(windowsShellperCmdline({ cwd: 'C:\\ws' }))).toContain('{"cwd":"C:\\\\ws"}');
   });
 });
 
 describe('isShellperInScope', () => {
   it('POSIX: matches the socketDir marker with a trailing separator only', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const line = 'node shellper-main.js {"socketPath":"/run/s.sock"}';
     expect(isShellperInScope(line, '/run')).toBe(true);
     expect(isShellperInScope(line, '/run/')).toBe(true);
@@ -86,14 +83,14 @@ describe('isShellperInScope', () => {
   });
 
   it('Windows: matches the decoded socketDir field, case-insensitively', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const line = windowsShellperCmdline({ socketPath: '\\\\.\\pipe\\codev-shellper-me-1', socketDir: WIN_SOCKET_DIR });
     expect(isShellperInScope(line, WIN_SOCKET_DIR)).toBe(true);
     expect(isShellperInScope(line, 'c:\\users\\ME\\.agent-farm\\run\\')).toBe(true);
   });
 
   it('Windows: rejects another instance\'s directory, including a prefix', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const line = windowsShellperCmdline({ socketDir: `${WIN_SOCKET_DIR}2` });
     expect(isShellperInScope(line, WIN_SOCKET_DIR)).toBe(false);
     expect(isShellperInScope(windowsShellperCmdline({ cwd: 'C:\\ws' }), WIN_SOCKET_DIR)).toBe(false);
@@ -115,14 +112,14 @@ describe('shellperTeardownIdentities', () => {
   ];
 
   it('Windows: creation times and session job names for the reaped pids only', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const { startTimes, jobNames } = shellperTeardownIdentities(entries, [1, 2]);
     expect(startTimes).toEqual(new Map([[1, 10], [2, 20]]));
     expect(jobNames).toEqual(new Map([[1, 'Local\\codev-session-abc']]));
   });
 
   it('POSIX: no job names', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const { jobNames } = shellperTeardownIdentities([{ pid: 1, cmdline: 'node shellper-main.js {"sessionId":"abc"}' }], [1]);
     expect(jobNames.size).toBe(0);
   });

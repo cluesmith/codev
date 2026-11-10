@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ProcessCensusEntry } from '../../agent-farm/servers/process-census.js';
 import { windowsShellperCmdline } from './windows-cmdline-fixtures.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const censusMock = vi.hoisted(() => ({ list: vi.fn() }));
 const treeMock = vi.hoisted(() => ({ kill: vi.fn(), wait: vi.fn() }));
@@ -26,7 +27,6 @@ vi.mock('../../lib/process-tree.js', async (importOriginal) => {
 });
 
 const { SessionManager } = await import('../session-manager.js');
-const { resetHostPlatformForTests, setHostPlatformForTests } = await import('../../lib/platform.js');
 
 const SOCKET_DIR = 'C:\\Users\\me\\.agent-farm\\run';
 
@@ -45,13 +45,12 @@ function newManager(logs: string[]) {
 }
 
 beforeEach(() => {
-  setHostPlatformForTests('win32');
+  forceHostPlatform('win32');
   treeMock.kill.mockResolvedValue({ signaled: true, snapshot: { rootPid: 0, members: [] } });
   treeMock.wait.mockResolvedValue(true);
 });
 
 afterEach(() => {
-  resetHostPlatformForTests();
   vi.clearAllMocks();
 });
 

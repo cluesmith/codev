@@ -14,7 +14,6 @@ import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync, realpathSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, win32 } from 'node:path';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import {
   normalizeWorkspacePath,
   normalizeWorkspacePathWith,
@@ -26,6 +25,7 @@ import { WorkspaceKeyedMap } from '../servers/tower-terminals.js';
 import { canonicalizeWorkspacePathRows } from '../db/canonicalize-workspace-paths.js';
 import { livenessFromStartTimes } from '../servers/shellper-husk-sweep.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 /** Ops that record which calls were made and answer from the given functions. */
 function recordingOps(realpath: (p: string) => string, realpathNative: (p: string) => string) {
@@ -48,13 +48,12 @@ function throwing(): never {
 }
 
 afterEach(() => {
-  resetHostPlatformForTests();
   resetWorkspacePathCacheForTests();
 });
 
 describe('normalizeWorkspacePath on POSIX (unchanged behaviour)', () => {
   beforeEach(() => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
   });
 
   it('uses only the JS realpath, never the native one, and returns its answer as is', () => {
@@ -88,7 +87,7 @@ describe('normalizeWorkspacePath on POSIX (unchanged behaviour)', () => {
 
 describe('normalizeWorkspacePath on Windows', () => {
   beforeEach(() => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
   });
 
   it('returns the native (on-disk) spelling first', () => {
@@ -168,7 +167,7 @@ describe('normalizeWorkspacePath on Windows', () => {
 
 describe('WorkspaceKeyedMap on POSIX', () => {
   it('behaves like a plain Map (keys exactly as given)', () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     const map = new WorkspaceKeyedMap<string>();
     map.set('/Users/x/Repo', 'a');
     expect(map.get('/Users/x/Repo')).toBe('a');

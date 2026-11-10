@@ -11,8 +11,8 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import type { ProcessCensusEntry } from '../servers/process-census.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 import { windowsShellperCmdline } from '../../terminal/__tests__/windows-cmdline-fixtures.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const censusMock = vi.hoisted(() => ({ list: vi.fn() }));
 const treeMock = vi.hoisted(() => ({ kill: vi.fn() }));
@@ -58,12 +58,11 @@ function emptyDb(): Database.Database {
 }
 
 beforeEach(() => {
-  setHostPlatformForTests('win32');
+  forceHostPlatform('win32');
   treeMock.kill.mockResolvedValue({ signaled: true, snapshot: { rootPid: 0, members: [] } });
 });
 
 afterEach(() => {
-  resetHostPlatformForTests();
   vi.clearAllMocks();
 });
 

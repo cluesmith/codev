@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { JobAssignOutcome, WindowsJobHelper } from '../../lib/windows-job.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const events: string[] = [];
 const launches: Array<Record<string, unknown>> = [];
@@ -57,7 +58,6 @@ vi.mock('../shellper-client.js', async (importOriginal) => {
 });
 
 const { SessionManager, JOB_ASSIGN_BUDGET_MS } = await import('../session-manager.js');
-const { resetHostPlatformForTests, setHostPlatformForTests } = await import('../../lib/platform.js');
 
 let socketDir: string;
 
@@ -88,13 +88,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetHostPlatformForTests();
   fs.rmSync(socketDir, { recursive: true, force: true });
 });
 
 describe('SessionManager per-session job (Windows)', () => {
   it('launches with deferPty and assigns the job before connecting', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const { helper } = fakeHelper({ assigned: true });
     const manager = newManager([], helper);
 
@@ -105,7 +104,7 @@ describe('SessionManager per-session job (Windows)', () => {
   });
 
   it('a per-session refusal is logged and the session is still created', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const { helper } = fakeHelper({ assigned: false, reason: 'job name already exists (Win32 error 183)', helperFailure: false });
     const logs: string[] = [];
     const manager = newManager(logs, helper);
@@ -119,7 +118,7 @@ describe('SessionManager per-session job (Windows)', () => {
   });
 
   it('a helper-wide failure (timeout, disabled) is not logged per session', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const { helper } = fakeHelper({ assigned: false, reason: 'no answer within 5000ms', helperFailure: true });
     const logs: string[] = [];
     await newManager(logs, helper).createSession(createOpts());
@@ -128,7 +127,7 @@ describe('SessionManager per-session job (Windows)', () => {
   });
 
   it('an assign that outlasts the budget is abandoned: the session connects in time, logged', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const helper = { assign: vi.fn(() => new Promise(() => {})) } as unknown as WindowsJobHelper;
@@ -144,7 +143,7 @@ describe('SessionManager per-session job (Windows)', () => {
   });
 
   it('with no helper, sessions start without a job and that is logged once', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const logs: string[] = [];
     const manager = newManager(logs, null);
     await manager.createSession(createOpts());
@@ -155,7 +154,7 @@ describe('SessionManager per-session job (Windows)', () => {
 
 describe('SessionManager per-session job (POSIX)', () => {
   it('never asks for a job and launches without deferPty', async () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const { helper, assign } = fakeHelper({ assigned: true });
     await newManager([], helper).createSession(createOpts());
     expect(assign).not.toHaveBeenCalled();

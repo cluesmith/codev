@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vites
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const h = vi.hoisted(() => {
   const nodeOs = require('node:os') as typeof import('node:os');
@@ -68,7 +69,6 @@ vi.mock('../commands/tower-start-windows.js', async (importOriginal) => {
 });
 
 const { towerStart } = await import('../commands/tower.js');
-const { resetHostPlatformForTests, setHostPlatformForTests } = await import('../../lib/platform.js');
 const {
   SUPPORTED_TOWER_LAUNCH_PATHS,
   cimRefusalMessage,
@@ -96,7 +96,6 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env = savedEnv;
-  resetHostPlatformForTests();
   vi.restoreAllMocks();
 });
 
@@ -106,7 +105,7 @@ afterAll(() => {
 
 describe('afx tower start launch path on Windows', () => {
   it('inside a codev session: creates the daemon through CIM, without the marker, and never spawns it', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     process.env[SHELLPER_SESSION_ENV] = 'sess-1';
     process.env.KEEP_ME = 'yes';
 
@@ -124,7 +123,7 @@ describe('afx tower start launch path on Windows', () => {
   });
 
   it('inside a codev session with CIM unavailable: refuses and names the supported paths', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     process.env[SHELLPER_SESSION_ENV] = 'sess-1';
     h.cimResult = { error: 'Access denied' };
 
@@ -137,7 +136,7 @@ describe('afx tower start launch path on Windows', () => {
   });
 
   it('outside a session: spawns the daemon detached with no console window', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     delete process.env[SHELLPER_SESSION_ENV];
 
     await expect(towerStart({ wait: true })).rejects.toThrow('process.exit:1');
@@ -149,7 +148,7 @@ describe('afx tower start launch path on Windows', () => {
   });
 
   it('dev mode (tower-server.ts present) goes through cmd.exe so npx resolves', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     process.env[SHELLPER_SESSION_ENV] = 'sess-1';
     const tsServer = path.join(h.agentFarmDir, 'tower-server.ts');
     fs.writeFileSync(tsServer, '// stub');
@@ -165,7 +164,7 @@ describe('afx tower start launch path on Windows', () => {
   });
 
   it('POSIX ignores the marker and spawns as before', async () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     process.env[SHELLPER_SESSION_ENV] = 'sess-1';
     await expect(towerStart({ wait: true })).rejects.toThrow('process.exit:1');
     expect(h.cimCalls).toHaveLength(0);

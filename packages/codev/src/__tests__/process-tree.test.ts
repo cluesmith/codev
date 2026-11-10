@@ -16,11 +16,10 @@ import {
   waitForTreeExit,
   type TreeSnapshot,
 } from '../lib/process-tree.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../lib/platform.js';
 import type { ProcessCensusEntry } from '../agent-farm/servers/process-census.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 afterEach(() => {
-  resetHostPlatformForTests();
   vi.useRealTimers();
 });
 
@@ -34,7 +33,7 @@ function entry(pid: number, ppid: number, creationTime: number): ProcessCensusEn
 
 describe('killSessionTree on POSIX', () => {
   beforeEach(() => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
   });
 
   it('sends SIGTERM to the process group and nothing else by default', async () => {
@@ -96,7 +95,7 @@ describe('killSessionTree on POSIX', () => {
 
 describe('waitForTreeExit on POSIX', () => {
   beforeEach(() => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
   });
 
   it('probes the process group with signal 0 until it is empty', async () => {
@@ -168,7 +167,7 @@ describe('killSessionTree on Windows', () => {
   }
 
   it('snapshots the tree before taskkill, then kills a descendant taskkill missed', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     // root 10 -> intermediate 11 -> grandchild 12. The intermediate exits
     // after the snapshot, so taskkill /T cannot walk to 12.
     const before = [entry(10, 1, 100), entry(11, 10, 110), entry(12, 11, 120)];
@@ -183,7 +182,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('clears the recorded descendants when the root is already dead, without taskkill on its pid', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const census = [entry(21, 20, 210), entry(22, 21, 220)];
     const h = windowsHarness({ censuses: [census, census], alive: new Set([21, 22]) });
 
@@ -194,7 +193,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('kills nothing when the root pid was reused (creation time differs from the known start)', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const census = [entry(25, 1, 900_000), entry(26, 25, 900_100)];
     const h = windowsHarness({ censuses: [census], alive: new Set([25, 26]) });
 
@@ -205,7 +204,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('fails closed and rejects, naming pid and cause, when the root has no creation time to check against the known start', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const root: ProcessCensusEntry = { pid: 24, ppid: 1, rssKb: 0, cmdline: 'proc-24' };
     const h = windowsHarness({ censuses: [[root, entry(31, 24, 900)]], alive: new Set([24, 31]) });
 
@@ -218,7 +217,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('accepts a root whose creation time is within tolerance of the known start', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const census = [entry(27, 1, 101_500)];
     const h = windowsHarness({ censuses: [census], alive: new Set() });
     await killSessionTree(27, { census: h.census, taskkill: h.taskkill, kill: h.kill, rootStartTime: 100_000 });
@@ -226,7 +225,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('for a dead root with a known start, skips ppid matches created before it', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     // 29 predates the root's start: its ppid names an earlier holder of pid 28.
     const census = [entry(29, 28, 50_000), entry(30, 28, 100_500)];
     const h = windowsHarness({ censuses: [census, census], alive: new Set([29, 30]) });
@@ -238,7 +237,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('takes the snapshot before terminating the session job, then runs the kill pass', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const census = [entry(40, 1, 100), entry(41, 40, 110)];
     const h = windowsHarness({ censuses: [census, census], alive: new Set([41]) });
     const terminateJob = vi.fn(async (name: string, rootPid: number) => {
@@ -254,7 +253,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('skips taskkill on the root when its pid was reused during the job round trip', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const before = [entry(60, 1, 100), entry(61, 60, 110)];
     // The job took the root and its child; an unrelated process now holds pid 60.
     const after = [entry(60, 7, 5000), entry(62, 60, 5100)];
@@ -272,7 +271,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('kills a descendant that broke away from the job after the job took its parents', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     // 50 root, 51 bash inside the job, 52 a native child that broke away.
     const before = [entry(50, 1, 100), entry(51, 50, 110), entry(52, 51, 120)];
     // After the job ends: only the breakaway child is left, its parent gone.
@@ -291,7 +290,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('counts a terminated job as signaled even when the census then finds nothing', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const h = windowsHarness({ censuses: [[]], alive: new Set() });
     const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
     const result = await killSessionTree(45, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
@@ -303,7 +302,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('does not report a job error when jobs are disabled (reported once already)', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const h = windowsHarness({ censuses: [[entry(47, 1, 100)]], alive: new Set() });
     const terminateJob = vi.fn(async () => ({ ok: false, error: 'Per-session job objects disabled', helperFailure: true, disabled: true }));
     const result = await killSessionTree(47, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
@@ -311,7 +310,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('reports a failed job terminate and still runs the snapshot pass', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const census = [entry(42, 1, 100)];
     const h = windowsHarness({ censuses: [census], alive: new Set() });
     const terminateJob = vi.fn(async () => ({ ok: false, error: 'TerminateJobObject failed', code: 5 }));
@@ -323,7 +322,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('terminates the job even when the root pid was reused, and names it in a refusal or census failure', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
     const reused = windowsHarness({ censuses: [[entry(43, 1, 900_000)]], alive: new Set([43]) });
     const refused = await killSessionTree(43, { census: reused.census, taskkill: reused.taskkill, kill: reused.kill, rootStartTime: 100_000, jobName: 'J', terminateJob });
@@ -337,7 +336,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('ignores the job name on POSIX', async () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const kill = vi.fn();
     const terminateJob = vi.fn();
     await killSessionTree(4321, { kill, jobName: 'J', terminateJob });
@@ -345,7 +344,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('spares a recorded pid whose creation time no longer matches (pid reused)', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const before = [entry(30, 1, 300), entry(31, 30, 310)];
     const after = [entry(31, 5, 999)];
     const h = windowsHarness({ censuses: [before, after], alive: new Set([31]) });
@@ -356,7 +355,7 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('skips the second census when taskkill left nothing alive', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const h = windowsHarness({ censuses: [[entry(40, 1, 400), entry(41, 40, 410)]], alive: new Set() });
 
     await killSessionTree(40, { census: h.census, taskkill: h.taskkill, kill: h.kill });
@@ -365,14 +364,14 @@ describe('killSessionTree on Windows', () => {
   });
 
   it('reports nothing signaled when the census shows no tree', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const h = windowsHarness({ censuses: [[entry(99, 1, 1)]], alive: new Set() });
     const result = await killSessionTree(50, { census: h.census, taskkill: h.taskkill, kill: h.kill });
     expect(result.signaled).toBe(false);
   });
 
   it('on a census failure still runs taskkill on the root, then rejects', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const h = windowsHarness({ censuses: [new Error('CIM blocked by policy')], alive: new Set() });
 
     await expect(killSessionTree(60, { census: h.census, taskkill: h.taskkill, kill: h.kill }))
@@ -388,7 +387,7 @@ describe('waitForTreeExit on Windows', () => {
   };
 
   it('polls the snapshot members until none answers', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const alive = new Set([70, 71]);
     let polls = 0;
     const kill = vi.fn((pid: number) => {
@@ -401,7 +400,7 @@ describe('waitForTreeExit on Windows', () => {
   });
 
   it('treats a survivor whose creation time changed as gone (pid reused)', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const kill = vi.fn();
     const census = vi.fn(async () => [entry(70, 1, 1234), entry(71, 1, 5678)]);
     expect(await waitForTreeExit(70, snapshot, 10, { kill, pollMs: 2, census })).toBe(true);
@@ -409,7 +408,7 @@ describe('waitForTreeExit on Windows', () => {
   });
 
   it('resolves false when a member is still the same process at the deadline', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const kill = vi.fn();
     const census = vi.fn(async () => [entry(71, 70, 710)]);
     expect(await waitForTreeExit(70, snapshot, 10, { kill, pollMs: 2, census })).toBe(false);

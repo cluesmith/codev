@@ -16,7 +16,7 @@ import {
   findLatestSessionId,
   verifySessionOwnership,
 } from '../utils/claude-session-discovery.js';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 describe('encodeClaudeProjectDir', () => {
   it('replaces / with -', () => {
@@ -40,8 +40,7 @@ describe('encodeClaudeProjectDir', () => {
   });
 
   describe('on Windows (Spec 1658)', () => {
-    beforeEach(() => setHostPlatformForTests('win32'));
-    afterEach(() => resetHostPlatformForTests());
+    beforeEach(() => forceHostPlatform('win32'));
 
     it('replaces the drive colon and backslashes with -', () => {
       expect(encodeClaudeProjectDir('C:\\Users\\x\\repo')).toBe('C--Users-x-repo');

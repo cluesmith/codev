@@ -69,7 +69,7 @@ import {
 import { getIdeConnectionTokenPath, readIdeRecord, writeIdeRecord, type IdeServerRecord } from '../lib/ide-record.js';
 import { buildIdeServerEnv, ideServerSpawnable } from '../lib/ide-version.js';
 import { resolveIdeServerPath } from '../commands/ide.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 function entry(pid: number, ppid: number, creationTime: number): ProcessCensusEntry {
   return { pid, ppid, rssKb: 1, cmdline: `proc-${pid}`, creationTime };
@@ -82,7 +82,6 @@ function record(pid: number, port = 8200): IdeServerRecord {
 const noopLog = (): void => {};
 
 afterEach(() => {
-  resetHostPlatformForTests();
   vi.clearAllMocks();
   spawnableOnHostMock.mockReset();
   findOnHostPathMock.mockReset();
@@ -98,7 +97,7 @@ describe('spawnIdeServerProcess', () => {
   const options = { detached: true, stdio: 'ignore' as const, env };
 
   it('Windows: spawns the resolved form, no console window, the arguments unaltered', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const longDir = `C:\\Users\\dev\\${'nested-folder\\'.repeat(20)}`;
     const args = ['--extensions-dir', `${longDir}ide-extensions`];
     expect(args[1].length).toBeGreaterThan(260);
@@ -114,7 +113,7 @@ describe('spawnIdeServerProcess', () => {
   });
 
   it('POSIX: the plain spawn, exactly as before', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     spawnIdeServerProcess('/opt/codev-ide/bin/server', ['--port', '8200'], options);
     expect(spawnMock).toHaveBeenCalledWith('/opt/codev-ide/bin/server', ['--port', '8200'], options);
     expect(spawnableOnHostMock).not.toHaveBeenCalled();
@@ -125,7 +124,7 @@ describe('ideServerSpawnable', () => {
   const env = { Path: 'C:\\Windows' };
 
   it('Windows: a JS launcher runs under the Node running Tower', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const launcher = 'C:\\Users\\dev\\AppData\\Roaming\\npm\\node_modules\\@cluesmith\\codev-ide\\bin\\codev-ide-server.js';
     expect(ideServerSpawnable(launcher, ['--version'], env)).toEqual({
       command: process.execPath,
@@ -136,14 +135,14 @@ describe('ideServerSpawnable', () => {
   });
 
   it('Windows: a .cmd shim goes through the shim resolver', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const resolved = { command: 'node.exe', args: ['entry.js', '--version'], windowsVerbatimArguments: false };
     spawnableOnHostMock.mockReturnValue(resolved);
     expect(ideServerSpawnable('C:\\npm\\codev-ide-server.cmd', ['--version'], env)).toBe(resolved);
   });
 
   it('POSIX: as given, even a .js path (its shebang finds Node)', () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     expect(ideServerSpawnable('/usr/lib/codev-ide/bin/server.js', ['--version'], env)).toEqual({
       command: '/usr/lib/codev-ide/bin/server.js',
       args: ['--version'],
@@ -154,7 +153,7 @@ describe('ideServerSpawnable', () => {
 
 describe('buildIdeServerEnv on Windows', () => {
   it('puts Node first under the inherited Path key, never a second PATH', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const nodeDir = path.dirname(process.execPath);
     const env = buildIdeServerEnv({ Path: `C:\\Windows;${nodeDir.toUpperCase()};C:\\Git\\cmd`, USERPROFILE: 'C:\\Users\\dev' });
     expect(Object.keys(env).filter((key) => key.toUpperCase() === 'PATH')).toEqual(['Path']);
@@ -162,7 +161,7 @@ describe('buildIdeServerEnv on Windows', () => {
   });
 
   it('folds case-variant duplicates into one key', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const env = buildIdeServerEnv({ Path: 'C:\\A', PATH: 'C:\\B' });
     const keys = Object.keys(env).filter((key) => key.toUpperCase() === 'PATH');
     expect(keys).toHaveLength(1);
@@ -170,7 +169,7 @@ describe('buildIdeServerEnv on Windows', () => {
   });
 
   it('POSIX: unchanged', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const nodeDir = path.dirname(process.execPath);
     expect(buildIdeServerEnv({ PATH: '/usr/bin' }).PATH).toBe(`${nodeDir}${path.delimiter}/usr/bin`);
   });
@@ -178,7 +177,7 @@ describe('buildIdeServerEnv on Windows', () => {
 
 describe('resolveIdeServerPath on Windows', () => {
   it('looks codev-ide-server up through the shared resolver (PATHEXT)', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const env = { Path: 'C:\\Users\\dev\\AppData\\Roaming\\npm', PATHEXT: '.COM;.EXE;.BAT;.CMD' };
     findOnHostPathMock.mockReturnValue('C:\\Users\\dev\\AppData\\Roaming\\npm\\codev-ide-server.cmd');
     const found = await resolveIdeServerPath({ env });
@@ -187,7 +186,7 @@ describe('resolveIdeServerPath on Windows', () => {
   });
 
   it('POSIX: the direct PATH scan, not the shared resolver', async () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     spawnableOnHostMock.mockImplementation((command: string, args: string[]) => ({ command, args, windowsVerbatimArguments: false }));
     await resolveIdeServerPath({ env: { PATH: '' }, codevRoot: TMP_DIR });
     expect(findOnHostPathMock).not.toHaveBeenCalled();
@@ -345,7 +344,7 @@ describe('stopUnreadyIdeServer on Windows', () => {
   const snapshot = { rootPid: 20, members: [{ pid: 20, creationTime: 2000 }] };
 
   it('reports stopped only once the snapshot has exited', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const waitExit = vi.fn(async () => true);
     const stopped = await stopUnreadyIdeServer(20, noopLog, { killTree: async () => ({ signaled: true, snapshot }), waitExit });
     expect(stopped).toBe(true);
@@ -353,7 +352,7 @@ describe('stopUnreadyIdeServer on Windows', () => {
   });
 
   it('a tree that outlives the kill (taskkill failed silently) is reported not stopped', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const log = vi.fn();
     const stopped = await stopUnreadyIdeServer(20, log, { killTree: async () => ({ signaled: true, snapshot }), waitExit: async () => false });
     expect(stopped).toBe(false);
@@ -361,7 +360,7 @@ describe('stopUnreadyIdeServer on Windows', () => {
   });
 
   it('a kill that throws is reported not stopped', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const stopped = await stopUnreadyIdeServer(20, noopLog, {
       killTree: async () => {
         throw new Error('census unavailable');
@@ -381,7 +380,7 @@ describe('windowsIdeRecordedServerPlan', () => {
 
 describe('stopIdeServer routing', () => {
   it('Windows: tree kill, no signals', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     writeIdeRecord(record(999_990));
     portPids.value = [999_991];
     const signal = vi.spyOn(process, 'kill');
@@ -392,7 +391,7 @@ describe('stopIdeServer routing', () => {
   });
 
   it('POSIX: SIGTERM per listener pid, no tree kill', async () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     writeIdeRecord(record(999_990));
     portPids.value = [999_991];
     const signal = vi.spyOn(process, 'kill').mockImplementation(((pid: number, sig?: string | number) => {

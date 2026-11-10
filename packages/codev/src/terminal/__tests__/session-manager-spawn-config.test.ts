@@ -17,6 +17,7 @@ import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 interface SpawnCall {
   args: string[];
@@ -51,7 +52,6 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 const { SessionManager } = await import('../session-manager.js');
 const { SHELLPER_SECRET_ENV, isPipeEndpoint } = await import('../shellper-endpoint.js');
-const { resetHostPlatformForTests, setHostPlatformForTests } = await import('../../lib/platform.js');
 
 let socketDir: string;
 
@@ -82,13 +82,12 @@ beforeEach(() => {
 
 afterEach(() => {
   stdoutChunks = defaultStdout;
-  resetHostPlatformForTests();
   fs.rmSync(socketDir, { recursive: true, force: true });
 });
 
 describe('SessionManager.createSession launch config', () => {
   it('POSIX: argv JSON is the unchanged shape, and no secret is minted', async () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const { config, env } = await captureLaunch();
     expect(Object.keys(config)).toEqual(['command', 'args', 'cwd', 'env', 'cols', 'rows', 'socketPath']);
     expect(config.socketPath).toBe(path.join(socketDir, 'shellper-sess-1658.sock'));
@@ -96,7 +95,7 @@ describe('SessionManager.createSession launch config', () => {
   });
 
   it('Windows: pipe endpoint, scope marker in argv, secret only in the environment', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const { config, argvJson, env } = await captureLaunch();
 
     expect(isPipeEndpoint(config.socketPath as string)).toBe(true);
@@ -113,7 +112,7 @@ describe('SessionManager.createSession launch config', () => {
   });
 
   it('Windows: every session gets its own secret', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const first = (await captureLaunch()).env[SHELLPER_SECRET_ENV];
     spawnCalls.length = 0;
     const second = (await captureLaunch()).env[SHELLPER_SECRET_ENV];
@@ -126,7 +125,7 @@ describe('SessionManager shellper info read', () => {
     // Windows resolves on the first complete info object because 'end' never
     // fires there. POSIX keeps the pre-1658 EOF read: trailing bytes after a
     // valid object make the whole stdout invalid, so creation must fail here.
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     stdoutChunks = ['{"pid":4242,"startTime":1}', ' trailing'];
     const manager = new SessionManager({ socketDir, shellperScript: '/nonexistent.js', nodeExecutable: process.execPath });
     await expect(manager.createSession(createOpts())).rejects.toThrow('Invalid shellper info JSON');

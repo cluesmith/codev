@@ -6,7 +6,6 @@
 // spec-1658-tmp: opaque (every /tmp is an input to pure string path comparisons under a forced platform; nothing touches the disk)
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../lib/platform.js';
 import {
   endsWithHostSeparator,
   expandHomePath,
@@ -14,14 +13,12 @@ import {
   isHostPathUnder,
   lastPathSegment,
 } from '../lib/host-paths.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 describe('expandHomePath', () => {
   it('expands ~ and ~/ on POSIX and leaves other input alone', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     expect(expandHomePath('~', '/home/a')).toBe('/home/a');
     expect(expandHomePath('~/src/repo', '/home/a')).toBe('/home/a/src/repo');
     expect(expandHomePath('~/', '/home/a')).toBe('/home/a/');
@@ -31,7 +28,7 @@ describe('expandHomePath', () => {
   });
 
   it('also expands ~\\ on Windows', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(expandHomePath('~\\src\\repo', 'C:\\Users\\a')).toBe('C:\\Users\\a\\src\\repo');
     expect(expandHomePath('~/src', 'C:\\Users\\a')).toBe('C:\\Users\\a/src');
     expect(expandHomePath('~', 'C:\\Users\\a')).toBe('C:\\Users\\a');
@@ -40,10 +37,10 @@ describe('expandHomePath', () => {
 
 describe('endsWithHostSeparator', () => {
   it('accepts a backslash only on Windows', () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     expect(endsWithHostSeparator('/a/')).toBe(true);
     expect(endsWithHostSeparator('a\\')).toBe(false);
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(endsWithHostSeparator('C:\\a\\')).toBe(true);
     expect(endsWithHostSeparator('C:/a/')).toBe(true);
     expect(endsWithHostSeparator('C:\\a')).toBe(false);
@@ -52,14 +49,14 @@ describe('endsWithHostSeparator', () => {
 
 describe('lastPathSegment', () => {
   it('splits on / only on POSIX', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     expect(lastPathSegment('/home/a/repo')).toBe('repo');
     expect(lastPathSegment('/home/a/repo/')).toBe('');
     expect(lastPathSegment('dir\\name')).toBe('dir\\name');
   });
 
   it('splits on both separators on Windows', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(lastPathSegment('C:\\Users\\a\\repo')).toBe('repo');
     expect(lastPathSegment('C:/Users/a/repo')).toBe('repo');
     expect(lastPathSegment('C:\\Users\\a\\repo\\')).toBe('');
@@ -68,7 +65,7 @@ describe('lastPathSegment', () => {
 
 describe('isHostPathUnder / isHostPathAtOrUnder', () => {
   it('compares bytes with a / boundary on POSIX', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     expect(isHostPathUnder('/tmp/x', '/tmp')).toBe(true);
     expect(isHostPathUnder('/tmp', '/tmp')).toBe(false);
     expect(isHostPathUnder('/tmp2/x', '/tmp')).toBe(false);
@@ -79,7 +76,7 @@ describe('isHostPathUnder / isHostPathAtOrUnder', () => {
   });
 
   it('ignores case and separator style on Windows', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const temp = 'C:\\Users\\a\\AppData\\Local\\Temp';
     expect(isHostPathUnder('c:\\users\\A\\appdata\\local\\temp\\ws', temp)).toBe(true);
     expect(isHostPathUnder('C:/Users/a/AppData/Local/Temp/ws', temp)).toBe(true);

@@ -17,9 +17,9 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { gate } from '../index.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../../lib/platform.js';
 import { getStatusPath, readState, writeState } from '../state.js';
 import type { ProjectState } from '../types.js';
+import { forceHostPlatform } from '../../../__tests__/helpers/host-platform.js';
 
 type ArtifactPhase = 'specify' | 'plan' | 'review';
 
@@ -115,7 +115,7 @@ beforeEach(() => {
   writeProtocol();
   // The spawn assertions are the POSIX launch shape; the Windows shim-resolving branch of
   // commandLaunch().spawn is covered in windows-shell-spawns.test.ts.
-  setHostPlatformForTests('linux');
+  forceHostPlatform('linux');
 
   spawnMock.mockReset();
   unrefMock.mockReset();
@@ -124,7 +124,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetHostPlatformForTests();
   logSpy.mockRestore();
   process.env.HOME = originalHome;
   fs.rmSync(testDir, { recursive: true, force: true });

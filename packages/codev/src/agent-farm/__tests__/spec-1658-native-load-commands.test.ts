@@ -23,7 +23,7 @@ vi.mock('better-sqlite3', () => ({
 
 import { resolveIdentity } from '../commands/whoami.js';
 import { openDatabase } from '../../lib/sqlite.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 describe('a better-sqlite3 binding that cannot load', () => {
   let dir: string;
@@ -37,11 +37,10 @@ describe('a better-sqlite3 binding that cannot load', () => {
   afterEach(() => {
     process.chdir(origCwd);
     rmSync(dir, { recursive: true, force: true });
-    resetHostPlatformForTests();
   });
 
   it('openDatabase explains it on Windows and keeps the loader error as the cause', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     let caught: Error | null = null;
     try {
       openDatabase(join(dir, 'x.db'));
@@ -53,12 +52,12 @@ describe('a better-sqlite3 binding that cannot load', () => {
   });
 
   it('Windows: afx whoami fails with the supported-versions message instead of degrading', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(() => resolveIdentity({ CODEV_ARCHITECT_NAME: 'main' })).toThrow('native Windows needs Node.js 22 or 24');
   });
 
   it('POSIX: afx whoami keeps its degrade path (no database, identity from the env)', () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     expect(resolveIdentity({ CODEV_ARCHITECT_NAME: 'main' })).toMatchObject({ type: 'architect', name: 'main' });
   });
 });

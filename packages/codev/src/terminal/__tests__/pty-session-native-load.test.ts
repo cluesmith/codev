@@ -18,7 +18,7 @@ vi.mock('../../lib/pty-command.js', () => ({
 }));
 
 import { PtySession } from '../pty-session.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 function session(): PtySession {
   return new PtySession({
@@ -37,13 +37,10 @@ function session(): PtySession {
   });
 }
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 describe('PtySession.spawn with a binding that cannot load', () => {
   it('Windows: names the supported Node versions and keeps the loader error', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     spawnImpl.fn = () => { throw new Error(CONPTY_LOAD_ERROR); };
     const err = await session().spawn().then(() => null, (e: Error) => e);
     expect(err?.message).toContain('native Windows needs Node.js 22 or 24');
@@ -52,13 +49,13 @@ describe('PtySession.spawn with a binding that cannot load', () => {
   });
 
   it('POSIX: the loader error is unchanged', async () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     spawnImpl.fn = () => { throw new Error(CONPTY_LOAD_ERROR); };
     await expect(session().spawn()).rejects.toThrow(/^Failed to load native module/);
   });
 
   it('an unrelated spawn error is unchanged on Windows', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     spawnImpl.fn = () => { throw new Error('File not found: '); };
     await expect(session().spawn()).rejects.toThrow(/^File not found/);
   });

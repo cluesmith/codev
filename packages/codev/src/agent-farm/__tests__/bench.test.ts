@@ -19,7 +19,6 @@ import {
   DEFAULT_TIMEOUT,
 } from '../commands/bench.js';
 import type { EngineResult } from '../commands/bench.js';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 
 // Mock child_process
 vi.mock('node:child_process', () => ({
@@ -55,6 +54,7 @@ vi.mock('../utils/logger.js', () => ({
 import { spawn as spawnMock, execSync as execSyncMock } from 'node:child_process';
 import { writeFileSync as writeFileSyncMock, mkdirSync as mkdirSyncMock } from 'node:fs';
 import { logger as loggerMock } from '../utils/logger.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 /** Create a mock child process that emits events. */
 function createMockProcess(exitCode: number, delay = 0) {
@@ -108,12 +108,9 @@ describe('afx bench', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     // The suite pins the POSIX probes (sysctl / lscpu / which); the Windows branch
     // (node:os cpus/totalmem) is pinned by the win32 cases, which force the seam themselves.
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
   });
 
-  afterEach(() => {
-    resetHostPlatformForTests();
-  });
 
   describe('computeStats', () => {
     it('should compute avg/min/max/stddev for multiple values', () => {
@@ -215,7 +212,7 @@ describe('afx bench', () => {
     });
 
     it('reads the CPU model from node:os on Windows, with no shell probe', () => {
-      setHostPlatformForTests('win32');
+      forceHostPlatform('win32');
       expect(detectCpu()).toBe('Intel Core i7');
       expect(execSyncMock).not.toHaveBeenCalled();
     });
@@ -244,7 +241,7 @@ describe('afx bench', () => {
     });
 
     it('reads total memory from node:os on Windows, with no shell probe', () => {
-      setHostPlatformForTests('win32');
+      forceHostPlatform('win32');
       expect(detectRam()).toBe('16 GB');
       expect(execSyncMock).not.toHaveBeenCalled();
     });

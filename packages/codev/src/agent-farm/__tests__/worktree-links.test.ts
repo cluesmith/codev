@@ -16,7 +16,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 
 const fsCalls = vi.hoisted(() => ({
   symlinkSync: null as null | ((...args: unknown[]) => void),
@@ -48,6 +47,7 @@ import {
   WorktreeRemovalError,
   type RemovalFs,
 } from '../lib/worktree-links.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 function errno(code: string): NodeJS.ErrnoException {
   const error = new Error(code) as NodeJS.ErrnoException;
@@ -69,7 +69,6 @@ afterEach(() => {
   fsCalls.symlinkSync = null;
   fsCalls.linkSync = null;
   fsCalls.copyFileSync = null;
-  resetHostPlatformForTests();
   fs.rmSync(workDir, { recursive: true, force: true });
 });
 
@@ -100,7 +99,7 @@ describe('createWorktreeLink on Windows (seam)', () => {
   const sourceFile = () => path.join(workDir, 'src.env');
 
   beforeEach(() => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     fs.mkdirSync(sourceDir());
     fs.writeFileSync(sourceFile(), 'A=1');
   });
@@ -232,7 +231,7 @@ const file = (): Node => ({ kind: 'file' });
 const link = (): Node => ({ kind: 'link' });
 
 describe('removeWorktreeDirectory (seam win32, injected fs)', () => {
-  beforeEach(() => setHostPlatformForTests('win32'));
+  beforeEach(() => forceHostPlatform('win32'));
 
   it('unlinks a junction entry and never reads or deletes behind it', async () => {
     const root = tree({ wt: dir({ src: dir({ 'a.ts': file() }), data: link(), '.env': link() }) });

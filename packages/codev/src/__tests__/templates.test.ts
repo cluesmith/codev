@@ -16,7 +16,7 @@ import {
   copyTemplateDir,
   getTemplateFiles,
 } from '../lib/templates.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../lib/platform.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 describe('template utilities', () => {
   const testDir = path.join(tmpdir(), `codev-test-${Date.now()}`);
@@ -120,10 +120,9 @@ describe('template utilities', () => {
   });
 
   describe('backslash-separated paths (Windows path.join)', () => {
-    afterEach(() => resetHostPlatformForTests());
 
     it('match the same patterns on Windows', () => {
-      setHostPlatformForTests('win32');
+      forceHostPlatform('win32');
       expect(isUserDataPath('specs\\0001-feature.md')).toBe(true);
       expect(isUserDataPath('codev\\resources\\arch.md')).toBe(true);
       expect(isUserDataPath('protocols\\spir\\protocol.md')).toBe(false);
@@ -133,7 +132,7 @@ describe('template utilities', () => {
     });
 
     it('are taken as written on POSIX, where a backslash is a filename character', () => {
-      setHostPlatformForTests('linux');
+      forceHostPlatform('linux');
       expect(isUserDataPath('specs\\0001-feature.md')).toBe(false);
       expect(isUpdatableFile('protocols\\spir\\protocol.md')).toBe(false);
     });

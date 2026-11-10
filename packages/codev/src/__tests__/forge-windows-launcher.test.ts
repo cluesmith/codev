@@ -20,9 +20,9 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { executeForgeCommand, executeForgeCommandSync, getForgeCommand, getKnownProviders } from '../lib/forge.js';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
 import { setGitBashForTests } from '../lib/shell-launch.js';
 import { toMsysPath } from '../lib/msys-path.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 const GIT_BASH = {
   path: 'C:\\Program Files\\Git\\bin\\bash.exe',
@@ -56,13 +56,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetHostPlatformForTests();
   setGitBashForTests(null);
 });
 
 describe('forge concepts on native Windows', () => {
   beforeEach(() => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     setGitBashForTests(GIT_BASH);
   });
 
@@ -133,7 +132,7 @@ describe('forge concepts on native Windows', () => {
 
 describe('forge concepts on POSIX', () => {
   it('runs the command string through exec, with no MSYS variables', async () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const forgeConfig = { provider: 'github' };
     const script = getForgeCommand('issue-view', forgeConfig);
     await executeForgeCommand('issue-view', { CODEV_ISSUE_ID: '1' }, { cwd: '/repo', forgeConfig });

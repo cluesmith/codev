@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { deepMerge, loadConfig, resolveProjectConfigPath, resolveLocalConfigPath } from '../lib/config.js';
 import { getActivityHooks } from '../agent-farm/utils/config.js';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 // Helpers
 let tmpDir: string;
@@ -40,7 +40,6 @@ beforeEach(() => {
 afterEach(() => {
   restoreEnv('HOME', origHome);
   restoreEnv('USERPROFILE', origUserProfile);
-  resetHostPlatformForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -158,7 +157,7 @@ describe('loadConfig', () => {
   it('returns defaults when no config files exist', () => {
     // The POSIX defaults; the Windows default shell (powershell.exe) is covered by
     // shell-launch.test.ts 'defaultInteractiveShell'.
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const config = loadConfig(tmpDir);
     expect(config.shell?.architect).toBe('claude');
     expect(config.shell?.builder).toBe('claude');

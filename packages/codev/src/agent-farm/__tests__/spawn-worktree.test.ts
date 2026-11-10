@@ -20,7 +20,6 @@ import {
 } from '../commands/spawn-worktree.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { join, resolve } from 'node:path';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 import { LIFECYCLE_REPORTER_SETTINGS_NAME, lifecycleReporterDir } from '../utils/lifecycle-reporter.js';
 // node:fs is mocked below; import writeFileSync so resume-script assertions can
 // read its captured calls without a per-test dynamic import.
@@ -76,6 +75,7 @@ vi.mock('../../lib/forge.js', () => ({
 
 // Mock the harness resolution to return claude harness by default
 import { CLAUDE_HARNESS, CODEX_HARNESS, OPENCODE_HARNESS, toShellPath } from '../utils/harness.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 const getBuilderHarnessMock = vi.fn(() => CLAUDE_HARNESS);
 const getWorktreeConfigMock = vi.fn(() => ({ symlinks: [], postSpawn: [], devCommand: null, devUrls: [] }));
 vi.mock('../utils/config.js', () => ({
@@ -110,10 +110,7 @@ vi.mock('../lib/tower-client.js', async (importOriginal) => {
  */
 function pinPosixHost(): void {
   beforeEach(() => {
-    setHostPlatformForTests('linux');
-  });
-  afterEach(() => {
-    resetHostPlatformForTests();
+    forceHostPlatform('linux');
   });
 }
 

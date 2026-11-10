@@ -33,8 +33,9 @@ import {
   windowsShellRequest,
 } from '../lib/shell-launch.js';
 import { ptyCommand, windowsPtyBaseEnv } from '../lib/pty-command.js';
-import { defaultInteractiveShell, setHostPlatformForTests, resetHostPlatformForTests, windowsSystem32Path } from '../lib/platform.js';
+import { defaultInteractiveShell, windowsSystem32Path } from '../lib/platform.js';
 import { getDefaultConfig } from '../lib/config.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 const GIT_BASH = {
   path: 'C:\\Program Files\\Git\\bin\\bash.exe',
@@ -54,7 +55,6 @@ beforeEach(() => {
 
 afterEach(() => {
   setGitBashForTests(null);
-  resetHostPlatformForTests();
   fs.rmSync(workDir, { recursive: true, force: true });
 });
 
@@ -153,13 +153,13 @@ describe('windowsSystem32Path', () => {
 
 describe('defaultInteractiveShell', () => {
   it('is bash on POSIX', () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     expect(defaultInteractiveShell()).toBe('bash');
     expect(getDefaultConfig().shell?.shell).toBe('bash');
   });
 
   it('is Windows PowerShell on Windows', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(defaultInteractiveShell()).toBe('powershell.exe');
     expect(getDefaultConfig().shell?.shell).toBe('powershell.exe');
   });
@@ -167,12 +167,12 @@ describe('defaultInteractiveShell', () => {
 
 describe('ptyCommand', () => {
   it('is the identity on POSIX', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     expect(ptyCommand('claude', ['--x'], {})).toEqual({ file: 'claude', args: ['--x'] });
   });
 
   it('spawns the resolved .exe form with an argv array on Windows', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     sdk.resolveSpawnable.mockReturnValueOnce({
       command: 'C:\\Program Files\\nodejs\\node.exe',
       args: ['C:\\npm\\node_modules\\cli\\bin.js', '--resume', 'abc'],
@@ -187,7 +187,7 @@ describe('ptyCommand', () => {
   });
 
   it('hands a pre-quoted cmd.exe line to node-pty as its string args form', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     sdk.resolveSpawnable.mockReturnValueOnce({
       command: 'C:\\Windows\\system32\\cmd.exe',
       args: ['/d', '/s', '/c', '"C:\\tools\\agent.cmd ^"a b^""'],
@@ -200,7 +200,7 @@ describe('ptyCommand', () => {
   });
 
   it('leaves an unresolvable Windows command unchanged so the spawn fails with ENOENT', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(ptyCommand('no-such-cli', [], { PATH: '' })).toEqual({ file: 'no-such-cli', args: [] });
   });
 });

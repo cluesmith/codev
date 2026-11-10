@@ -45,9 +45,9 @@ import {
   buildSessionLaunchLoop,
 } from '../commands/spawn-worktree.js';
 import { devCommandLaunch } from '../commands/dev.js';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import { setGitBashForTests } from '../../lib/shell-launch.js';
 import { toMsysPath } from '../../lib/msys-path.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const GIT_BASH = {
   path: 'C:\\Program Files\\Git\\bin\\bash.exe',
@@ -70,13 +70,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetHostPlatformForTests();
   setGitBashForTests(null);
 });
 
 describe('builder launch script', () => {
   it('POSIX: /bin/bash runs the script; the script is unchanged', async () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     await startBuilderSession({ workspaceRoot: '/ws' } as any, 'spir-1', '/ws/.builders/spir-1', 'claude', 'PROMPT', 'ROLE', 'codev');
     const script = writtenFile('.builder-start.sh');
     expect(createTerminalMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -91,7 +90,7 @@ describe('builder launch script', () => {
   });
 
   it('Windows: the resolved Git Bash runs the script by its POSIX path', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const worktree = 'C:\\ws\\.builders\\spir-1';
     await startBuilderSession({ workspaceRoot: 'C:\\ws' } as any, 'spir-1', worktree, 'claude', 'PROMPT', 'ROLE', 'codev');
     const script = writtenFile('.builder-start.sh');
@@ -108,7 +107,7 @@ describe('builder launch script', () => {
   });
 
   it('Windows: relaunch ids are minted through Node when Git Bash has no uuid source', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     await startBuilderSession({ workspaceRoot: 'C:\\ws' } as any, 'spir-1', 'C:\\ws\\.builders\\spir-1', 'claude', 'PROMPT', null, null);
     const script = writtenFile('.builder-start.sh').content;
     const mint = script.match(/codev_mint_session_id\(\) \{\n([\s\S]*?)\n\}/)?.[1] ?? '';
@@ -124,29 +123,29 @@ describe('builder launch script', () => {
   });
 
   it('worktree-mode script gets the same Windows prelude', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const script = buildWorktreeLaunchScript('C:\\ws\\.builders\\task-x', 'claude', null, 'C:\\ws');
     expect(script).toContain('cd "/c/ws/.builders/task-x"\n');
     expect(script).toContain('export CLAUDE_CODE_GIT_BASH_PATH=');
   });
 
   it('builderScriptLaunch: /bin/bash on POSIX, Git Bash with a POSIX path on Windows', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     expect(builderScriptLaunch('/ws/x/.builder-start.sh')).toEqual({ command: '/bin/bash', args: ['/ws/x/.builder-start.sh'] });
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(builderScriptLaunch('C:\\ws\\x\\.builder-start.sh')).toEqual({ command: GIT_BASH.path, args: ['/c/ws/x/.builder-start.sh'] });
   });
 });
 
 describe('shell session (afx spawn --shell)', () => {
   it('POSIX: /bin/bash -c <command>', async () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     await startShellSession({ workspaceRoot: '/ws' } as any, 'abc', 'claude --x');
     expect(createTerminalMock).toHaveBeenCalledWith(expect.objectContaining({ command: '/bin/bash', args: ['-c', 'claude --x'] }));
   });
 
   it('Windows: Git Bash -c <command>', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     await startShellSession({ workspaceRoot: 'C:\\ws' } as any, 'abc', 'claude --x');
     expect(createTerminalMock).toHaveBeenCalledWith(expect.objectContaining({ command: GIT_BASH.path, args: ['-c', 'claude --x'] }));
   });
@@ -154,12 +153,12 @@ describe('shell session (afx spawn --shell)', () => {
 
 describe('afx dev', () => {
   it('POSIX: /bin/sh -lc <devCommand>', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     expect(devCommandLaunch('pnpm dev')).toEqual({ command: '/bin/sh', args: ['-lc', 'pnpm dev'] });
   });
 
   it('Windows: Git Bash -c <devCommand>, no login profile', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(devCommandLaunch('pnpm dev')).toEqual({ command: GIT_BASH.path, args: ['-c', 'pnpm dev'] });
   });
 });

@@ -1406,9 +1406,29 @@ REQUEST_CHANGES on the two items below).** As committed in `lib/platform/process
   Windows census timeout plus 2000), so one shared cost would need a branch on its value. Both stay
   `isWindows()` one-offs (rule 6). `commandLineText` (`shellperArgvText`) is shellper command-line
   parsing and moves with the shellper transport in A2-5.
+  **Architect ruling (2026-11-10) on codex's objection:** the builder's answer stands. The two
+  budgets have one call site each and different shapes (6000 vs census timeout + 2000; census
+  timeout + sweep timeout), so a shared `censusCostMs` would reintroduce a branch on its value; they
+  stay `isWindows()` one-offs. `commandLineText` moves with the transport in A2-5.
 - `port.ts` is no longer two imports deep: it loads both implementations and the Windows census,
   teardown and job modules (none spawns or promisifies at module scope). Its header says so.
 - Product `isWindows()` calls: 69 after A2-2, 63 after A2-3.
+
+**A2-4, residue.**
+
+- Test overrides: `forceHostPlatform(platform)` joins `useHostPlatform(platform)` in
+  `src/__tests__/helpers/host-platform.ts` (set now, reset via `onTestFinished`, usable in a test
+  or a `beforeEach`). 41 suites migrated: every `setHostPlatformForTests` call became
+  `forceHostPlatform`, every `afterEach` reset was removed. Kept as written: `platform.test.ts`
+  (it tests the override API), the two `vi.mock` factories that pin `linux` at module-mock time
+  (`consult.test.ts`, `doctor.test.ts`), and six mid-test resets (they switch platform inside one
+  test). `host-platform-helpers.test.ts` proves an override does not leak into the next test.
+- Links and Tower start/stop: nothing to tidy. Each platform branch there is already one direct
+  call (`createWorktreeLink`'s symlink probe, `cleanup.ts` worktree removal, `tower.ts` start and
+  stop into `tower-start-windows.ts` / `tower-stop-windows.ts`), as A2.4 recorded.
+- `arch.md` Platform Layer: the capability layout, the two test helpers and the split Windows
+  process modules.
+- No product code changed; product `isWindows()` calls stay at 63.
 
 ## Risks and Mitigation
 

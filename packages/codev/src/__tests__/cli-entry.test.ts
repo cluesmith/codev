@@ -6,18 +6,15 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { isCodevEntrypoint } from '../lib/cli-entry.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../lib/platform.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 const CLI_URL_POSIX = 'file:///usr/lib/node_modules/@cluesmith/codev/dist/cli.js';
 const CLI_URL_WIN = 'file:///C:/Users/me/AppData/Roaming/npm/node_modules/@cluesmith/codev/dist/cli.js';
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 describe('isCodevEntrypoint', () => {
   it('POSIX: the bin path and a bare codev symlink are the entry; an importer is not', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     expect(isCodevEntrypoint('/usr/lib/node_modules/@cluesmith/codev/bin/codev.js', CLI_URL_POSIX)).toBe(true);
     expect(isCodevEntrypoint('/usr/local/bin/codev', CLI_URL_POSIX)).toBe(true);
     expect(isCodevEntrypoint('/usr/lib/node_modules/@cluesmith/codev/dist/cli.js', CLI_URL_POSIX)).toBe(true);
@@ -26,7 +23,7 @@ describe('isCodevEntrypoint', () => {
   });
 
   it('Windows: the npm shim runs bin\\codev.js with a backslash path', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(isCodevEntrypoint('C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@cluesmith\\codev\\bin\\codev.js', CLI_URL_WIN)).toBe(true);
     expect(isCodevEntrypoint('C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@cluesmith\\codev\\bin\\CODEV.JS', CLI_URL_WIN)).toBe(true);
     expect(isCodevEntrypoint('C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@cluesmith\\codev\\bin\\consult.js', CLI_URL_WIN)).toBe(false);

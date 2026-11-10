@@ -17,7 +17,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
 import { handleRequest } from '../servers/tower-routes.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
+import { resetHostPlatformForTests } from '../../lib/platform.js';
 import { setGitBashForTests } from '../../lib/shell-launch.js';
 import { getWorkspaceTerminals } from '../servers/tower-terminals.js';
 import type { DbMailbox } from '../db/types.js';
@@ -40,6 +40,7 @@ import type { IShellperClient } from '../../terminal/shellper-client.js';
 // shutdown-during-lock-wait window deterministically.
 import { shutdownDelayedSends } from '../servers/delayed-send.js';
 import { submitToSession, trySubmitToSession, resetSubmissionChains } from '../servers/session-submit.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 // ============================================================================
 // Mocks
@@ -607,7 +608,7 @@ describe('tower-routes', () => {
   describe('GET /health on Windows (Spec 1658 Phase 4)', () => {
     it('reports whether Tower runs inside a codev session; POSIX omits the field', async () => {
       mockGetInstances.mockResolvedValue([]);
-      setHostPlatformForTests('linux');
+      forceHostPlatform('linux');
       try {
         const posix = makeRes();
         await handleRequest(makeReq('GET', '/health'), posix.res, makeCtx());
@@ -616,7 +617,7 @@ describe('tower-routes', () => {
         resetHostPlatformForTests();
       }
 
-      setHostPlatformForTests('win32');
+      forceHostPlatform('win32');
       try {
         const saved = process.env.CODEV_SHELLPER_SESSION;
         process.env.CODEV_SHELLPER_SESSION = 'sess-1';
@@ -3058,7 +3059,6 @@ describe('tower-routes', () => {
     });
 
     afterEach(() => {
-      resetHostPlatformForTests();
       setGitBashForTests(null);
       fs.rmSync(workspace, { recursive: true, force: true });
     });
@@ -3076,7 +3076,7 @@ describe('tower-routes', () => {
     }
 
     it('a new dashboard shell opens Windows PowerShell by default', async () => {
-      setHostPlatformForTests('win32');
+      forceHostPlatform('win32');
       // A user-global ~/.codev/config.json may set shell.shell; keep the test hermetic.
       const previousHome = process.env.HOME;
       process.env.HOME = workspace;
@@ -3091,7 +3091,7 @@ describe('tower-routes', () => {
     });
 
     it('an existing shell.shell "bash" opens Git Bash, never System32 bash.exe', async () => {
-      setHostPlatformForTests('win32');
+      forceHostPlatform('win32');
       writeShellConfig('bash');
       await createShell();
       const req = createSession.mock.calls[0][0];
@@ -3100,7 +3100,7 @@ describe('tower-routes', () => {
     });
 
     it('POSIX keeps $SHELL with no arguments', async () => {
-      setHostPlatformForTests('darwin');
+      forceHostPlatform('darwin');
       const previous = process.env.SHELL;
       process.env.SHELL = '/bin/zsh';
       try {
@@ -3114,7 +3114,7 @@ describe('tower-routes', () => {
     });
 
     it('a client /bin/sh -lc terminal runs in Git Bash -c on Windows', async () => {
-      setHostPlatformForTests('win32');
+      forceHostPlatform('win32');
       mockParseJsonBody.mockResolvedValueOnce({ command: '/bin/sh', args: ['-lc', 'pnpm dev'], cwd: 'C:\\ws', type: 'dev' });
       const { res, statusCode } = makeRes();
       await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx());
@@ -3123,7 +3123,7 @@ describe('tower-routes', () => {
     });
 
     it('the same request is untouched on POSIX', async () => {
-      setHostPlatformForTests('linux');
+      forceHostPlatform('linux');
       mockParseJsonBody.mockResolvedValueOnce({ command: '/bin/sh', args: ['-lc', 'pnpm dev'], cwd: '/ws', type: 'dev' });
       const { res } = makeRes();
       await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx());

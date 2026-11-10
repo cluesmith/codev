@@ -44,8 +44,8 @@ import {
   shellperLogPath,
 } from '../shellper-endpoint.js';
 import { SessionManager, getProcessStartTime, isIdentityRefused } from '../session-manager.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 import { testEndpointIn } from './shellper-test-endpoint.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const SECRET = 'f'.repeat(64);
 
@@ -151,13 +151,12 @@ afterEach(() => {
   while (cleanups.length > 0) {
     cleanups.pop()!();
   }
-  resetHostPlatformForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe('endpoint resolution', () => {
   it('POSIX: the socket path and log path are unchanged', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const endpoint = resolveShellperEndpoint('/run/dir', 'abc');
     expect(endpoint).toBe(path.join('/run/dir', 'shellper-abc.sock'));
     expect(isPipeEndpoint(endpoint)).toBe(false);
@@ -168,7 +167,7 @@ describe('endpoint resolution', () => {
   });
 
   it('Windows: a user-namespaced pipe with a fresh UUID; log in the socket dir', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const first = resolveShellperEndpoint('C:\\run', 'abc');
     const second = resolveShellperEndpoint('C:\\run', 'abc');
     expect(first).toMatch(/^\\\\\.\\pipe\\codev-shellper-[A-Za-z0-9._-]+-[0-9a-f-]{36}$/);
@@ -360,7 +359,7 @@ describe('SessionManager.reconnectSession on Windows (seam forced to win32)', ()
 
   it('reconnects on a matching WELCOME without consulting process start time', async () => {
     await startShellper(socketPath, { secret: SECRET, sessionId: 'sess-1', shellperPid: process.pid });
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     // startTime 0 would fail the POSIX check; on Windows the WELCOME is the proof.
     const result = await makeManager().reconnectSession('term-1', socketPath, process.pid, 0, undefined, {
       shellperSessionId: 'sess-1',
@@ -372,7 +371,7 @@ describe('SessionManager.reconnectSession on Windows (seam forced to win32)', ()
 
   it('is identity-refused when WELCOME names another session', async () => {
     await startShellper(socketPath, { secret: SECRET, sessionId: 'sess-other', shellperPid: process.pid });
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const result = await makeManager().reconnectSession('term-1', socketPath, process.pid, 0, undefined, {
       shellperSessionId: 'sess-1',
       secret: SECRET,
@@ -382,7 +381,7 @@ describe('SessionManager.reconnectSession on Windows (seam forced to win32)', ()
 
   it('is identity-refused when WELCOME names another shellper pid (PID reuse)', async () => {
     await startShellper(socketPath, { secret: SECRET, sessionId: 'sess-1', shellperPid: process.ppid });
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const result = await makeManager().reconnectSession('term-1', socketPath, process.pid, 0, undefined, {
       shellperSessionId: 'sess-1',
       secret: SECRET,
@@ -391,7 +390,7 @@ describe('SessionManager.reconnectSession on Windows (seam forced to win32)', ()
   });
 
   it('is identity-refused when the endpoint does not exist but the pid is alive', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const result = await makeManager().reconnectSession('term-1', path.join(tmpDir, 'gone.sock'), process.pid, 0, undefined, {
       shellperSessionId: 'sess-1',
       secret: SECRET,
@@ -401,7 +400,7 @@ describe('SessionManager.reconnectSession on Windows (seam forced to win32)', ()
 
   it('is identity-refused when the row carries no secret', async () => {
     await startShellper(socketPath, { secret: SECRET, sessionId: 'sess-1', shellperPid: process.pid });
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const result = await makeManager().reconnectSession('term-1', socketPath, process.pid, 0, undefined, {
       shellperSessionId: 'sess-1',
       secret: null,
@@ -411,7 +410,7 @@ describe('SessionManager.reconnectSession on Windows (seam forced to win32)', ()
 
   it('a dropped connection (wrong secret) stays a transient null, not a verdict', async () => {
     await startShellper(socketPath, { secret: SECRET, sessionId: 'sess-1', shellperPid: process.pid });
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const result = await makeManager().reconnectSession('term-1', socketPath, process.pid, 0, undefined, {
       shellperSessionId: 'sess-1',
       secret: 'e'.repeat(64),
@@ -420,7 +419,7 @@ describe('SessionManager.reconnectSession on Windows (seam forced to win32)', ()
   });
 
   it('a dead pid is null, as on POSIX', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const result = await makeManager().reconnectSession('term-1', socketPath, 2 ** 22 + 12345, 0, undefined, {
       shellperSessionId: 'sess-1',
       secret: SECRET,

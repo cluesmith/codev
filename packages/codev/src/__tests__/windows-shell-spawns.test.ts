@@ -20,8 +20,8 @@ import { runStreaming, commandExists } from '../agent-farm/utils/shell.js';
 import { runCheck } from '../commands/porch/checks.js';
 import { commandLaunch } from '../lib/platform/command-launch.js';
 import { windowsPrereqDeps } from '../commands/doctor.js';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../lib/platform.js';
 import { setGitBashForTests } from '../lib/shell-launch.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 const GIT_BASH = {
   path: 'C:\\Program Files\\Git\\bin\\bash.exe',
@@ -51,13 +51,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetHostPlatformForTests();
   setGitBashForTests(null);
 });
 
 describe('postSpawn (runStreaming)', () => {
   it('POSIX: shell: true, exactly as before', async () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     await runStreaming('cd apps/web && pnpm install', { cwd: '/ws/.builders/x', workspaceRoot: '/ws' });
     expect(childProcess.spawn).toHaveBeenCalledWith('cd apps/web && pnpm install', {
       cwd: '/ws/.builders/x',
@@ -67,7 +66,7 @@ describe('postSpawn (runStreaming)', () => {
   });
 
   it('Windows: Git Bash -c in the worktree, hidden', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     await runStreaming('cd apps/web && pnpm install', { cwd: 'C:\\ws\\.builders\\x', workspaceRoot: 'C:\\ws' });
     expect(childProcess.spawn).toHaveBeenCalledWith(GIT_BASH.path, ['-c', 'cd apps/web && pnpm install'], {
       cwd: 'C:\\ws\\.builders\\x',
@@ -81,7 +80,7 @@ describe('porch shell-string checks', () => {
   const env = { PROJECT_ID: '42', PROJECT_TITLE: 'demo' };
 
   it('POSIX: shell: true in its own process group', async () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const result = await runCheck('build', 'npm run build', '/ws', env);
     expect(result.passed).toBe(true);
     // Under `shell: true` Node runs `/bin/sh -c [file, ...args].join(' ')`, so
@@ -93,7 +92,7 @@ describe('porch shell-string checks', () => {
   });
 
   it('Windows: Git Bash -c with the check string intact, no shell: true', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const result = await runCheck('tests', 'npm test -- --exclude=\'**/e2e/**\'', 'C:\\ws', env);
     expect(result.passed).toBe(true);
     const [file, args, opts] = childProcess.spawn.mock.calls[0];
@@ -108,13 +107,13 @@ describe('porch shell-string checks', () => {
 
 describe('commandExists', () => {
   it('POSIX: spawns which', async () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     await commandExists('git');
     expect(childProcess.spawn).toHaveBeenCalledWith('which', ['git'], { stdio: 'ignore' });
   });
 
   it('Windows: a PATHEXT lookup, no which', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const previous = process.env.PATH;
     process.env.PATH = '';
     try {
@@ -128,13 +127,13 @@ describe('commandExists', () => {
 
 describe('commandLaunch().spawn', () => {
   it('POSIX: spawns exactly as given', () => {
-    setHostPlatformForTests('darwin');
+    forceHostPlatform('darwin');
     commandLaunch().spawn('afx', ['open', '/x'], { stdio: 'inherit', detached: true });
     expect(childProcess.spawn).toHaveBeenCalledWith('afx', ['open', '/x'], { stdio: 'inherit', detached: true });
   });
 
   it('Windows: hidden, through the shim resolver (unresolved names pass through)', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     commandLaunch().spawn('no-such-cli', ['a'], { stdio: 'inherit', env: { PATH: '' } });
     expect(childProcess.spawn).toHaveBeenCalledWith('no-such-cli', ['a'], {
       stdio: 'inherit',
@@ -147,13 +146,13 @@ describe('commandLaunch().spawn', () => {
 
 describe('commandLaunch().spawnSync (doctor CLI probes)', () => {
   it('POSIX: spawnSync exactly as given', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     commandLaunch().spawnSync('codex', ['--version'], { encoding: 'utf-8', timeout: 5000 });
     expect(childProcess.spawnSync).toHaveBeenCalledWith('codex', ['--version'], { encoding: 'utf-8', timeout: 5000 });
   });
 
   it('Windows: hidden, through the shim resolver', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     commandLaunch().spawnSync('codex', ['--version'], { encoding: 'utf-8', env: { PATH: '' } });
     expect(childProcess.spawnSync).toHaveBeenCalledWith('codex', ['--version'], {
       encoding: 'utf-8',
@@ -164,7 +163,7 @@ describe('commandLaunch().spawnSync (doctor CLI probes)', () => {
   });
 
   it('doctor version probes go through it on Windows', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     // An empty PATH keeps the shim resolver from turning 'jq' into a host jq.exe's full path
     // (a real Windows runner with jq installed resolves it), so the name passes through.
     const previous = process.env.PATH;

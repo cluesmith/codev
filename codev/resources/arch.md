@@ -1024,14 +1024,29 @@ Native Windows runs behind one seam, so POSIX behavior stays byte-identical and 
 branches are testable on macOS/Linux.
 
 - **Seam**: `lib/platform.ts` (`hostPlatform()`, `isWindows()`). Runtime Windows branches ask it,
-  never `process.platform`; tests force it to `win32` and inject exec/fs. Real-Windows behavior is
-  covered by the on-demand `windows.yml` workflow (dispatch only, never required).
+  never `process.platform`. Tests force it per test with `forceHostPlatform()` or per `describe`
+  with `useHostPlatform()` (`src/__tests__/helpers/host-platform.ts`, both reset when the test
+  finishes) and inject exec/fs. Real-Windows behavior is covered by the on-demand `windows.yml`
+  workflow (dispatch only, never required).
+- **Capabilities** (Spec 1658 Amendment 2): shared code does not branch on the platform; it asks a
+  capability, each an interface in `lib/platform/<capability>.ts` with a `.posix.ts` and a
+  `.windows.ts` implementation and one accessor that picks by the seam:
+  `commandLaunch()` (shell strings, scripts, bare-command spawns, which-probes, the terminal
+  profile), `hostPaths()` (workspace canonicalization and keys, separators, builder-worktree
+  matchers), `processes()` (census, start times, listening ports, session-tree teardown).
+  The POSIX implementations are the pre-refactor macOS/Linux code, moved verbatim; site-specific
+  POSIX forms are passed in by the caller rather than unified. The Windows implementations are
+  adapters over the Windows modules below, which never import an accessor (no cycles). Existing
+  entry points (`listProcessCensus`, `killSessionTree`, `workspaceKey`, `expandHomePath`, ...)
+  keep their names and delegate. A platform branch that has one call site stays a plain
+  `isWindows()` one-off (doctor sections, install checks, Tower start/stop, worktree links).
 - **Endpoint**: `terminal/shellper-endpoint.ts`. POSIX: Unix socket `shellper-<id>.sock` (0600).
   Windows: named pipe `\\.\pipe\codev-shellper-<user>-<uuid>`, every connection gated on a
   per-session secret (other users can open a pipe by name).
 - **Process tree**: `lib/process-tree.ts` `killSessionTree` / `waitForTreeExit` replace
-  `process.kill(-pid)`. Windows: census snapshot (`servers/process-census.ts`, CIM via
-  PowerShell, cached and coalesced), then the session's Job Object (`lib/windows-job.ts`, one
+  `process.kill(-pid)` (through `processes()`). Windows (`lib/process-tree-windows.ts`): census
+  snapshot (`servers/process-census-windows.ts`, CIM via PowerShell, cached and coalesced), then
+  the session's Job Object (`lib/windows-job.ts`, one
   in-memory PowerShell helper per Tower, never KILL_ON_JOB_CLOSE), then `taskkill /T /F`, then the
   recorded survivors.
 - **Resolvers**: `lib/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the

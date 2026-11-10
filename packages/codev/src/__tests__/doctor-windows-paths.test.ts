@@ -25,7 +25,7 @@ import {
   type WindowsPathDeps,
   windowsPathDeps,
 } from '../commands/doctor.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../lib/platform.js';
+import { forceHostPlatform } from './helpers/host-platform.js';
 
 const TYPICAL_ROOT = 'C:\\Users\\alexandra\\src\\my-project';
 
@@ -40,12 +40,9 @@ function deps(overrides: Partial<WindowsPathDeps>): WindowsPathDeps {
 }
 
 beforeEach(() => {
-  setHostPlatformForTests('win32');
+  forceHostPlatform('win32');
 });
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 describe('checkWindowsPathsAndState', () => {
   it('keeps the budgets inside MAX_PATH and accepts a typical-depth root', () => {

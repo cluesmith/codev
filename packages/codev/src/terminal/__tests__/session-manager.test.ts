@@ -8,8 +8,9 @@ import { SessionManager, StderrBuffer, getProcessStartTime, isCrashLooping, CRAS
   FAST_CLEAN_EXIT_MS, MAX_FAST_CLEAN_EXITS, isShellperPidReused, type CreateSessionOptions, type ReconnectAuth } from '../session-manager.js';
 import { ShellperProcess, type IShellperPty, type PtyOptions, type ShellperAuth } from '../shellper-process.js';
 import { ShellperClient } from '../shellper-client.js';
-import { isWindows, resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
+import { isWindows, resetHostPlatformForTests } from '../../lib/platform.js';
 import { testEndpointIn } from './shellper-test-endpoint.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 // spec-1658-tmp: posix-only (real disk and process uses of /tmp sit in the real-shellper tests, skipped on win32 by skipRealShellper; the rest are mock cwd strings)
 // Real-shellper tests are skipped in CI, where the child cannot resolve the
@@ -111,11 +112,10 @@ describe('SessionManager', () => {
     // admission, process-group kills), so pin the seam on every host. The
     // Windows branch has its own tests (shellper-windows-transport.test.ts,
     // session-manager-windows-teardown.test.ts) and the win32-forced ones here.
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
   });
 
   afterEach(async () => {
-    resetHostPlatformForTests();
     for (const fn of cleanupFns) {
       try { await fn(); } catch { /* noop */ }
     }
@@ -1270,7 +1270,7 @@ describe('SessionManager', () => {
       // Spec 1658: the Windows recovery path admits by the authenticated
       // WELCOME (no start time, no socket file check), and every in-place
       // reconnect presents the session secret again.
-      setHostPlatformForTests('win32');
+      forceHostPlatform('win32');
       const socketPath = testEndpointIn(socketDir, 'shellper-recover-win.sock');
       const auth: ShellperAuth = { secret: HOST_TEST_SECRET, sessionId: 'recover-win', shellperPid: process.pid };
       const shellper = new ShellperProcess(() => new MockPty(), socketPath, 100, () => {}, undefined, auth);
@@ -2575,7 +2575,7 @@ describe('crash-loop give-up (Issue #1224)', () => {
   it('SIGTERMs the shellper process group on give-up', () => {
     // Spec 1658: the POSIX branch's group signal; pin the seam on every host.
     // The Windows give-up reaps the session tree instead (process-tree tests).
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     const socketDir = tmpDir();
     const HUSK_PID = 424242;
     const manager = new SessionManager({

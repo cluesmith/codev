@@ -16,7 +16,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Builder, Config } from '../types.js';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 vi.mock('../db/index.js', () => {
   const db = { prepare: () => ({ run: () => ({ changes: 0 }), all: () => [] }) };
@@ -133,9 +133,6 @@ describe('Spec 1658: cleanup removes an ephemeral worktree', () => {
     }) as unknown as typeof execFile);
   });
 
-  afterEach(() => {
-    resetHostPlatformForTests();
-  });
 
   it.skipIf(process.platform === 'win32')('POSIX: runs git worktree remove --force, unchanged', async () => {
     await cleanup({ issue: 7 });
@@ -144,7 +141,7 @@ describe('Spec 1658: cleanup removes an ephemeral worktree', () => {
   });
 
   it('Windows: kills the session tree, removes without git, prunes, then deletes the branch', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     await cleanup({ issue: 7 });
 
     expect(steps.some((s) => s.startsWith('git worktree remove'))).toBe(false);
@@ -159,7 +156,7 @@ describe('Spec 1658: cleanup removes an ephemeral worktree', () => {
   });
 
   it('Windows: a failed removal names the blocking path and stops before the branch and state', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     mockRemoveWorktreeDirectory.mockRejectedValueOnce(
       new Error(`Could not remove ${worktree}\\node_modules\\x.node (EBUSY): a process may still have it open`),
     );

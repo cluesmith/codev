@@ -9,14 +9,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
 import { isTempDirectory } from '../servers/tower-utils.js';
 import { harnessFromLaunchScript, type ContextFsPort } from '../commands/reset/context.js';
 import { matchBuilderRow } from '../utils/builder-worktree-identity.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 function launchScript(content: string): ContextFsPort {
   return { read: () => content } as unknown as ContextFsPort;
@@ -24,7 +21,7 @@ function launchScript(content: string): ContextFsPort {
 
 describe('isTempDirectory on Windows', () => {
   it('counts the host temp dir, case-insensitively, and not the POSIX roots', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     expect(isTempDirectory(path.join(tmpdir(), 'ws'))).toBe(true);
     expect(isTempDirectory(path.join(tmpdir(), 'ws').toUpperCase())).toBe(true);
     // The POSIX roots are not temp dirs to a Windows host, unless this host's own
@@ -41,13 +38,13 @@ describe('isTempDirectory on Windows', () => {
 
 describe('harnessFromLaunchScript with a Windows command path', () => {
   it('reads C:\\tools\\claude.exe as claude on Windows', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const script = '#!/bin/bash\ncd /c/ws\n"C:\\tools\\claude.exe" --model x\n';
     expect(harnessFromLaunchScript(launchScript(script), 'C:\\ws')).toBe('claude');
   });
 
   it('keeps the POSIX basename rule on POSIX', () => {
-    setHostPlatformForTests('linux');
+    forceHostPlatform('linux');
     expect(harnessFromLaunchScript(launchScript('/usr/local/bin/codex --x\n'), '/ws')).toBe('codex');
     expect(harnessFromLaunchScript(launchScript('claude.exe --x\n'), '/ws')).toBeNull();
   });
@@ -55,7 +52,7 @@ describe('harnessFromLaunchScript with a Windows command path', () => {
 
 describe('matchBuilderRow legacy tail match on Windows', () => {
   it('matches a backslash worktree path by its last segment', () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     const rows = [{ id: 'b1', worktree: 'D:\\elsewhere\\.builders\\spir-7' }];
     const row = matchBuilderRow(rows, { workspacePath: 'C:\\ws', worktreeDirName: 'spir-7' });
     expect(row).toBe(rows[0]);

@@ -7,7 +7,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import {
   findHuskShellpers,
   computeRegisteredShellperPids,
@@ -15,6 +14,7 @@ import {
   type FindHuskShellpersOptions,
 } from '../servers/shellper-husk-sweep.js';
 import type { ProcessCensusEntry } from '../servers/process-census.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const SOCKET_DIR = '/Users/x/.codev/run';
 const OTHER_SOCKET_DIR = '/Users/x/.codev/run-e2e-test';
@@ -56,12 +56,9 @@ function baseOpts(overrides: Partial<FindHuskShellpersOptions> = {}): FindHuskSh
 // force the platform seam to linux; on a win32 host the code would otherwise take its
 // Windows branch.
 beforeEach(() => {
-  setHostPlatformForTests('linux');
+  forceHostPlatform('linux');
 });
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 describe('findHuskShellpers (Issue #1227)', () => {
   it('sweeps a shellper that is unregistered AND childless AND aged', async () => {

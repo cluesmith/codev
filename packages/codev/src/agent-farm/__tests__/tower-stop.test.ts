@@ -9,7 +9,7 @@
  * This pins the LISTEN filter so a future edit can't silently drop it.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const execSyncMock = vi.fn(() => '');
 // Spread the real module and override only execSync — other transitive imports
@@ -25,12 +25,9 @@ const { getProcessesOnPort } = await import('../commands/tower.js');
 // force the platform seam to linux; on a win32 host the code would otherwise take its
 // Windows branch.
 beforeEach(() => {
-  setHostPlatformForTests('linux');
+  forceHostPlatform('linux');
 });
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 describe('getProcessesOnPort — LISTENer only (#991)', () => {
   beforeEach(() => execSyncMock.mockClear());

@@ -16,7 +16,8 @@ import type { TowerOwner } from '../db/tower-owner.js';
 import { checkWindowsTowerSession } from '../../commands/doctor.js';
 import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING, towerBootSessionWarning } from '../commands/tower-start-windows.js';
 import { windowsShellperCmdline } from '../../terminal/__tests__/windows-cmdline-fixtures.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
+import { resetHostPlatformForTests } from '../../lib/platform.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 function owner(pid: number, port = 4100): TowerOwner {
   return { pid, port, hostname: 'h', startedAt: 1, dbDir: 'C:\\af', bindHost: '127.0.0.1' };
@@ -112,7 +113,7 @@ describe('stopTowerWindows', () => {
 
 describe('forceKillTowerWindows', () => {
   it('kills every shellper session tree with its job, then Tower\'s tree', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     try {
       const census = [
         { pid: 500, ppid: 1, rssKb: 1, cmdline: 'node tower-server.js 4100', creationTime: 5 },

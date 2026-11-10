@@ -15,7 +15,7 @@ import {
   listProcessCensus,
   parseWindowsCensus,
 } from '../servers/process-census.js';
-import { resetHostPlatformForTests, setHostPlatformForTests } from '../../lib/platform.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -25,7 +25,6 @@ vi.mock('node:child_process', async () => {
 const mockExecFile = vi.mocked(execFile);
 
 afterEach(() => {
-  resetHostPlatformForTests();
   vi.clearAllMocks();
 });
 
@@ -159,7 +158,7 @@ describe('createWindowsCensusProvider', () => {
 
 describe('listProcessCensus on Windows', () => {
   it('rejects when PowerShell fails, never resolving to an empty table', async () => {
-    setHostPlatformForTests('win32');
+    forceHostPlatform('win32');
     mockExecFile.mockImplementation((_cmd, _args, _opts, callback) => {
       (callback as (err: Error | null, stdout: string) => void)(new Error('powershell.exe ENOENT'), '');
       return {} as ReturnType<typeof execFile>;

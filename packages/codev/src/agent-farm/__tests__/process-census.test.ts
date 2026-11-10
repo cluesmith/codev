@@ -8,9 +8,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { setHostPlatformForTests, resetHostPlatformForTests } from '../../lib/platform.js';
 import { execFile, execFileSync } from 'node:child_process';
 import { listProcessCensus } from '../servers/process-census.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -46,12 +46,9 @@ afterEach(() => {
 // force the platform seam to linux; on a win32 host the code would otherwise take its
 // Windows branch.
 beforeEach(() => {
-  setHostPlatformForTests('linux');
+  forceHostPlatform('linux');
 });
 
-afterEach(() => {
-  resetHostPlatformForTests();
-});
 
 describe('listProcessCensus (Issue #1227)', () => {
   it('parses pid, ppid, rss, and full argv from ps output', async () => {
