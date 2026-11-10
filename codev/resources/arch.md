@@ -1052,7 +1052,9 @@ branches are testable on macOS/Linux.
   census snapshot (`servers/process-census-windows.ts`, CIM via PowerShell; other callers share a
   short-TTL cached, coalesced read), then the session's Job Object (`lib/windows-job.ts`, one
   in-memory PowerShell helper per Tower, never KILL_ON_JOB_CLOSE), then `taskkill /T /F`, then the
-  recorded survivors.
+  recorded survivors. `servers/architect-session-holder.ts` keeps its own `ps` listing on POSIX
+  rather than the census, so its entries carry a creation time, and its pre-reap PID-reuse check
+  runs, on Windows only.
 - **Resolvers**: `lib/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the
   System32 WSL launcher), `codev-sdk/node/executable` (`findExecutable` with `PATHEXT`,
   `resolveSpawnable` turns `.cmd` shims into `node <entry>` or `%COMSPEC% /d /s /c`),

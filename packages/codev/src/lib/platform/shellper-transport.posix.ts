@@ -5,6 +5,9 @@
  * `0600`), and a reconnect gate on the process start time and the socket file.
  * Each method is the POSIX branch its call site used to carry, moved verbatim.
  * See `shellper-transport.ts` for the contract.
+ *
+ * The value import of `processes()` is deliberate and not a cycle: the
+ * processes capability imports nothing from the shellper transport.
  */
 
 import fs from 'node:fs';
