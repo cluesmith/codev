@@ -946,8 +946,15 @@ and which scenarios ran before M6.
   **Third sighting** (run 42732747693, head `5f15146a6`, Node 24, T3 "reports every protocol found
   on disk"): `bash scripts/measure-prompt-surface.sh` failed with Git Bash's `*** fatal error in
   forked process - WFSO timed out after longjmp` (an MSYS fork failure, a different symptom from the
-  Python stdout `OSError`). Node 22 passed in the same run. Reported to main, whose ruling changes
-  at the third sighting.
+  Python stdout `OSError`). Node 22 passed in the same run.
+  **Ruling (architect, 2026-11-10): skipped on native Windows as one suite.** Runs 39927653580,
+  42715696142 and 42732747693; three symptoms (non-zero exit with no stderr; Python stdout
+  `OSError`; MSYS `WFSO timed out after longjmp`), one cause class: MSYS fork emulation failing
+  under runner load, a Git Bash limitation rather than a Codev code path, in a repo instrument
+  rather than a shipped Windows feature. `spec-1280-measurement-instrument.test.ts` carries one
+  `describe.skipIf(process.platform === 'win32')` naming the three runs; both POSIX legs run it in
+  full. No other suite is skipped under this ruling. Main files the follow-up issue after the
+  owner's word.
 
 - **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
   run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:
