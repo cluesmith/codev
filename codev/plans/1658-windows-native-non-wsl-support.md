@@ -1454,7 +1454,15 @@ REQUEST_CHANGES on the two items below).** As committed in `lib/platform/process
   refusal, the session record); only the gate and the ENOENT clause left it.
 - Stays `isWindows()` (one-offs, as recorded): `session-manager.ts` `orphanSweepBudgetMs`,
   `killSession`, the sweep-disabled log and `findShellperProcesses`; `isShellperInScope`.
-- Product `isWindows()` calls: 63 after A2-4, 55 after A2-5.
+- Product `isWindows()` calls: 63 after A2-4, 56 after A2-5, counting the four capability
+  accessors (each one `isWindows()`); 103 before Amendment 2.
+- CMAP 2-way while agy is unauthenticated: claude APPROVE (byte comparison against `origin/main`
+  for each moved POSIX block, a value-import cycle scan finding only two pre-existing unrelated
+  cycles, the standalone shellper's import closure unchanged), codex COMMENT. Done from both: the
+  POSIX `scanForAttachEndpoint` success path and the unreadable-start-time rejection are now
+  tested, the Windows refusal text is pinned exactly, and the blank lines left in
+  `shellper-cmdline.ts` are gone. The first Windows run failed on a test of mine that opened a
+  real Unix socket on the Windows runner; it now skips there like the other real-socket tests.
 
 ## Risks and Mitigation
 

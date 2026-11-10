@@ -50,7 +50,6 @@ export function quoteWindowsArg(arg: string): string {
   return out + '\\'.repeat(backslashes * 2) + '"';
 }
 
-
 /**
  * The command line as matchers should read it: the raw `ps` argv on POSIX, the
  * argv-unquoted text on Windows.
@@ -58,7 +57,6 @@ export function quoteWindowsArg(arg: string): string {
 export function shellperArgvText(cmdline: string): string {
   return shellperTransport().commandLineText(cmdline);
 }
-
 
 /** Windows path equality (case-insensitive, separators normalized); defined with the host paths capability. */
 export { sameWindowsPath };

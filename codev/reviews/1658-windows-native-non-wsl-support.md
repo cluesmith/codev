@@ -943,6 +943,11 @@ and which scenarios ran before M6.
   argument` at exit. Unrelated to the change under test in both runs. Held by main as a filing
   candidate (Windows CI leg hygiene); any recurrence during the Amendment 2 dispatches is counted
   and reported.
+  **Third sighting** (run 42732747693, head `5f15146a6`, Node 24, T3 "reports every protocol found
+  on disk"): `bash scripts/measure-prompt-surface.sh` failed with Git Bash's `*** fatal error in
+  forked process - WFSO timed out after longjmp` (an MSYS fork failure, a different symptom from the
+  Python stdout `OSError`). Node 22 passed in the same run. Reported to main, whose ruling changes
+  at the third sighting.
 
 - **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
   run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:

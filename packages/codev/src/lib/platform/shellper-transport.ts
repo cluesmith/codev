@@ -52,7 +52,7 @@ export interface ShellperTransport {
   commandLineText(cmdline: string): string;
   /** The session Job Object name a shellper's command line names, or null (POSIX: none). */
   sessionJobName(cmdline: string): string | null;
-  /** `afx attach`'s last resort: a shellper socket found by scanning `~/.codev/run`, or null. */
+  /** `afx attach`'s last resort: a shellper endpoint found without the database, or null (POSIX scans `~/.codev/run`; Windows has nothing to scan). */
   scanForAttachEndpoint(): string | null;
 }
 

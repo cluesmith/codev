@@ -96,7 +96,8 @@ describe('POSIX: socket file, no secret, start-time gate', () => {
     expect(log).toHaveBeenCalledWith('Session s3 reconnect failed: socket not a socket file');
   });
 
-  it('a live socket within the tolerance is admitted, with no secret and the row session id', async () => {
+  // A real Unix socket: the POSIX implementation never runs on a Windows host.
+  it.skipIf(process.platform === 'win32')('a live socket within the tolerance is admitted, with no secret and the row session id', async () => {
     startTime.mockResolvedValue(5000);
     const socketPath = path.join(dir, 'live.sock');
     server = net.createServer();
@@ -107,6 +108,30 @@ describe('POSIX: socket file, no secret, start-time gate', () => {
     const withRowId = await posixShellperTransport.admitReconnect({ sessionId: 's4', socketPath, pid: 42, startTime: 5000, auth: { shellperSessionId: 'row-id', secret: null }, log });
     expect(withRowId).toEqual({ admitted: true, secret: null, shellperSessionId: 'row-id' });
     expect(log).not.toHaveBeenCalled();
+  });
+
+  it('an unreadable start time is rejected (it cannot prove the pid is the same process)', async () => {
+    startTime.mockResolvedValue(null);
+    const log = vi.fn();
+    await expect(posixShellperTransport.isProcessCurrent(42, 5000)).resolves.toBe(false);
+    await expect(posixShellperTransport.admitReconnect({ sessionId: 's5', socketPath: '/no/such.sock', pid: 42, startTime: 5000, log })).resolves.toEqual({ admitted: false, refusal: null });
+    expect(log).toHaveBeenCalledWith('Session s5 reconnect failed: PID 42 reused (start time mismatch)');
+  });
+
+  it.skipIf(process.platform === 'win32')('scanForAttachEndpoint returns the first accessible shellper socket under ~/.codev/run', () => {
+    const runDir = path.join(dir, '.codev', 'run');
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'other.sock'), '');
+    fs.writeFileSync(path.join(runDir, 'shellper-abc.sock'), '');
+    const previousHome = process.env.HOME;
+    process.env.HOME = dir;
+    try {
+      expect(posixShellperTransport.scanForAttachEndpoint()).toBe(path.join(runDir, 'shellper-abc.sock'));
+      fs.rmSync(runDir, { recursive: true, force: true });
+      expect(posixShellperTransport.scanForAttachEndpoint()).toBeNull();
+    } finally {
+      process.env.HOME = previousHome;
+    }
   });
 
   it('isProcessCurrent compares the start time within the tolerance', async () => {
@@ -130,7 +155,7 @@ describe('Windows: named pipe, per-session secret, row-identity gate', () => {
     const log = vi.fn();
     const base = { sessionId: 's', socketPath: '\\\\.\\pipe\\x', pid: 1, startTime: 0, log };
     await expect(windowsShellperTransport.admitReconnect(base)).resolves.toEqual({ admitted: false, refusal: 'row has no shellper secret or session id' });
-    await expect(windowsShellperTransport.admitReconnect({ ...base, auth: { secret: 'k', shellperSessionId: null } })).resolves.toMatchObject({ admitted: false });
+    await expect(windowsShellperTransport.admitReconnect({ ...base, auth: { secret: 'k', shellperSessionId: null } })).resolves.toEqual({ admitted: false, refusal: 'row has no shellper secret or session id' });
     await expect(windowsShellperTransport.admitReconnect({ ...base, auth: { secret: 'k', shellperSessionId: 'id' } })).resolves.toEqual({ admitted: true, secret: 'k', shellperSessionId: 'id' });
     expect(log).not.toHaveBeenCalled();
     await expect(windowsShellperTransport.isProcessCurrent(1, 0)).resolves.toBe(true);
