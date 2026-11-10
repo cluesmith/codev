@@ -157,6 +157,15 @@ describe('consult.codexPath (#1880)', () => {
     expect(mockConstructorArgs).toBeUndefined();
   });
 
+  it('a failed preflight discards a stale review file, like any failed consultation', async () => {
+    writeConfig({ consult: { codexPath: join(tmpDir, 'no-such-codex') } });
+    const outputPath = join(tmpDir, 'review.md');
+    writeFileSync(outputPath, 'VERDICT: APPROVE (from an earlier run)');
+
+    await expect(runCodexConsultation('q', 'role', tmpDir, outputPath)).rejects.toThrow(/ENOENT/);
+    expect(existsSync(outputPath)).toBe(false);
+  });
+
   it('must be an absolute path', () => {
     expect(() => validateCodexPath(undefined)).not.toThrow();
     expect(() => validateCodexPath('/opt/homebrew/bin/codex')).not.toThrow();

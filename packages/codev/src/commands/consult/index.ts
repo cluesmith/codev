@@ -713,14 +713,18 @@ export async function runCodexConsultation(
   let exitCode = 0;
 
   console.error(`[CODEX] auth: ${describeCodexAuth(process.env, dotenvKeys)}`);
-  const binary = resolveCodexBinary(workspaceRoot);
-  console.error(`[CODEX] binary: ${binary.description}`);
 
   // Write role to temp file — SDK requires file path for instructions
   const tempFile = path.join(tmpdir(), `codev-role-${Date.now()}.md`);
   fs.writeFileSync(tempFile, role);
 
+  let binary: CodexBinary | undefined;
   try {
+    // Inside the guarded lifecycle: a binary that fails its preflight must still discard a stale
+    // review file and record the failure, like any other failed consultation.
+    binary = resolveCodexBinary(workspaceRoot);
+    console.error(`[CODEX] binary: ${binary.description}`);
+
     // Never pass `apiKey`: the SDK would export it as CODEX_API_KEY and move the lane off the
     // stored ChatGPT login onto metered API billing.
     const codex = new Codex({
@@ -781,7 +785,8 @@ export async function runCodexConsultation(
       exitCode = 1;
     }
     discardStaleOutput(outputPath);
-    throw annotateModelError(err, 'codex', choice, binary.description);
+    // A binary that never started cannot have rejected the model, so there is nothing to annotate.
+    throw binary ? annotateModelError(err, 'codex', choice, binary.description) : err;
   } finally {
     // Clean up temp file
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
