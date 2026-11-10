@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { hostPaths, type WorkspacePathOps } from '../lib/platform/host-paths.js';
 import { posixHostPaths } from '../lib/platform/host-paths.posix.js';
 import { windowsHostPaths } from '../lib/platform/host-paths.windows.js';
@@ -46,7 +46,8 @@ describe('POSIX implementation: the pre-refactor forms, verbatim', () => {
 
   it('key is the path exactly as given; canonicalize falls back to resolve', () => {
     expect(p.key('/Repo/./x')).toBe('/Repo/./x');
-    expect(p.canonicalize('/repo/a/../b', failingOps)).toBe('/repo/b');
+    // The fallback is the host's own `path.resolve`, as the call site used.
+    expect(p.canonicalize('/repo/a/../b', failingOps)).toBe(resolve('/repo/a/../b'));
   });
 
   it('separators are `/` only', () => {
@@ -84,7 +85,7 @@ describe('POSIX implementation: the pre-refactor forms, verbatim', () => {
       writeFileSync(file, 'x');
       expect(p.canonicalFilePath(join(dir, '.', 'a.md'))).toBe(file);
       expect(p.canonicalFilePath(join(dir, 'missing.md'))).toBe(join(dir, 'missing.md'));
-      expect(p.canonicalFilePath('/no/such/1658/dir/file.md')).toBe('/no/such/1658/dir/file.md');
+      expect(p.canonicalFilePath('/no/such/1658/dir/file.md')).toBe(resolve('/no/such/1658/dir/file.md'));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
