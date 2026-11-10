@@ -20,9 +20,17 @@ export function useHostPlatform(platform: NodeJS.Platform): void {
   });
 }
 
+/**
+ * Force the seam for the running test (call it in the test or a `beforeEach`).
+ * The reset is registered first, so a misuse outside a test fails before the
+ * seam is forced. It runs after the `afterEach` hooks, so their cleanup still
+ * sees the forced platform. A test that cancels itself with a dynamic
+ * `ctx.skip()` gets no `onTestFinished`; such a suite should use
+ * `useHostPlatform` instead.
+ */
 export function forceHostPlatform(platform: NodeJS.Platform): void {
-  setHostPlatformForTests(platform);
   onTestFinished(() => {
     resetHostPlatformForTests();
   });
+  setHostPlatformForTests(platform);
 }

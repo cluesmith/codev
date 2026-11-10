@@ -5,7 +5,7 @@
  * its ConPTY binding inside `spawn`, so the spawn is a load point.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -36,7 +36,6 @@ function session(): PtySession {
     reconnectTimeoutMs: 1000,
   });
 }
-
 
 describe('PtySession.spawn with a binding that cannot load', () => {
   it('Windows: names the supported Node versions and keeps the loader error', async () => {

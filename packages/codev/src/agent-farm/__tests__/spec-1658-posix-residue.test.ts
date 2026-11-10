@@ -5,7 +5,7 @@
  */
 // spec-1658-tmp: opaque (/tmp/ws and /private/tmp/ws are strings fed to isTempDirectory, which compares them with string ops)
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,7 +13,6 @@ import { isTempDirectory } from '../servers/tower-utils.js';
 import { harnessFromLaunchScript, type ContextFsPort } from '../commands/reset/context.js';
 import { matchBuilderRow } from '../utils/builder-worktree-identity.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
-
 
 function launchScript(content: string): ContextFsPort {
   return { read: () => content } as unknown as ContextFsPort;

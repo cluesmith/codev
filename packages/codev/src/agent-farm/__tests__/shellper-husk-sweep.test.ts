@@ -6,7 +6,7 @@
  * the ps invocation itself (covered by process-census.test.ts) — is under test.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   findHuskShellpers,
   computeRegisteredShellperPids,
@@ -58,7 +58,6 @@ function baseOpts(overrides: Partial<FindHuskShellpersOptions> = {}): FindHuskSh
 beforeEach(() => {
   forceHostPlatform('linux');
 });
-
 
 describe('findHuskShellpers (Issue #1227)', () => {
   it('sweeps a shellper that is unregistered AND childless AND aged', async () => {

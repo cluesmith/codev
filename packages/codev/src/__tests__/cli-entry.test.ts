@@ -4,13 +4,12 @@
  * POSIX-shaped paths only.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { isCodevEntrypoint } from '../lib/cli-entry.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
 
 const CLI_URL_POSIX = 'file:///usr/lib/node_modules/@cluesmith/codev/dist/cli.js';
 const CLI_URL_WIN = 'file:///C:/Users/me/AppData/Roaming/npm/node_modules/@cluesmith/codev/dist/cli.js';
-
 
 describe('isCodevEntrypoint', () => {
   it('POSIX: the bin path and a bare codev symlink are the entry; an importer is not', () => {

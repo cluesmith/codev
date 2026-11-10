@@ -1044,9 +1044,9 @@ branches are testable on macOS/Linux.
   Windows: named pipe `\\.\pipe\codev-shellper-<user>-<uuid>`, every connection gated on a
   per-session secret (other users can open a pipe by name).
 - **Process tree**: `lib/process-tree.ts` `killSessionTree` / `waitForTreeExit` replace
-  `process.kill(-pid)` (through `processes()`). Windows (`lib/process-tree-windows.ts`): census
-  snapshot (`servers/process-census-windows.ts`, CIM via PowerShell, cached and coalesced), then
-  the session's Job Object (`lib/windows-job.ts`, one
+  `process.kill(-pid)` (through `processes()`). Windows (`lib/process-tree-windows.ts`): a fresh
+  census snapshot (`servers/process-census-windows.ts`, CIM via PowerShell; other callers share a
+  short-TTL cached, coalesced read), then the session's Job Object (`lib/windows-job.ts`, one
   in-memory PowerShell helper per Tower, never KILL_ON_JOB_CLOSE), then `taskkill /T /F`, then the
   recorded survivors.
 - **Resolvers**: `lib/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the

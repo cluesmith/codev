@@ -6,7 +6,7 @@
  */
 // spec-1658-tmp: opaque (the /tmp socket path is a JSON string parsed with string ops)
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   shellperTeardownIdentities,
   isShellperInScope,
@@ -17,7 +17,6 @@ import {
 } from '../shellper-cmdline.js';
 import { windowsShellperCmdline } from './windows-cmdline-fixtures.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
-
 
 const WIN_SOCKET_DIR = 'C:\\Users\\me\\.agent-farm\\run';
 

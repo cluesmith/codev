@@ -1418,10 +1418,11 @@ REQUEST_CHANGES on the two items below).** As committed in `lib/platform/process
 
 - Test overrides: `forceHostPlatform(platform)` joins `useHostPlatform(platform)` in
   `src/__tests__/helpers/host-platform.ts` (set now, reset via `onTestFinished`, usable in a test
-  or a `beforeEach`). 41 suites migrated: every `setHostPlatformForTests` call became
-  `forceHostPlatform`, every `afterEach` reset was removed. Kept as written: `platform.test.ts`
-  (it tests the override API), the two `vi.mock` factories that pin `linux` at module-mock time
-  (`consult.test.ts`, `doctor.test.ts`), and six mid-test resets (they switch platform inside one
+  or a `beforeEach`; the reset runs after the `afterEach` hooks). 41 suites migrated: every
+  `setHostPlatformForTests` call became `forceHostPlatform`, every `afterEach` reset was removed
+  (no migrated suite needed `useHostPlatform`). Kept as written: `platform.test.ts` (it tests the
+  override API), the two `vi.mock` factories that pin `linux` at module-mock time
+  (`consult.test.ts`, `doctor.test.ts`), and five mid-test resets (they switch platform inside one
   test). `host-platform-helpers.test.ts` proves an override does not leak into the next test.
 - Links and Tower start/stop: nothing to tidy. Each platform branch there is already one direct
   call (`createWorktreeLink`'s symlink probe, `cleanup.ts` worktree removal, `tower.ts` start and

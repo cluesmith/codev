@@ -5,7 +5,7 @@
  * is the `install-guard` job of windows.yml.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -27,7 +27,6 @@ import {
 import { forceHostPlatform } from './helpers/host-platform.js';
 
 const codevPkgRoot = resolve(__dirname, '..', '..');
-
 
 describe('checkWindowsNodeForPrebuilds', () => {
   it('passes every non-Windows platform, whatever the Node', () => {

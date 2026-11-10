@@ -5,7 +5,7 @@
 
 // spec-1658-tmp: opaque (every /tmp is an input to pure string path comparisons under a forced platform; nothing touches the disk)
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   endsWithHostSeparator,
   expandHomePath,
@@ -14,7 +14,6 @@ import {
   lastPathSegment,
 } from '../lib/host-paths.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
-
 
 describe('expandHomePath', () => {
   it('expands ~ and ~/ on POSIX and leaves other input alone', () => {

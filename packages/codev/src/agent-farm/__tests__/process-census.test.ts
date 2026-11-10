@@ -49,7 +49,6 @@ beforeEach(() => {
   forceHostPlatform('linux');
 });
 
-
 describe('listProcessCensus (Issue #1227)', () => {
   it('parses pid, ppid, rss, and full argv from ps output', async () => {
     simulatePsOutput(

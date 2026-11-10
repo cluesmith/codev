@@ -111,7 +111,6 @@ describe('afx bench', () => {
     forceHostPlatform('linux');
   });
 
-
   describe('computeStats', () => {
     it('should compute avg/min/max/stddev for multiple values', () => {
       const stats = computeStats([10, 20, 30]);

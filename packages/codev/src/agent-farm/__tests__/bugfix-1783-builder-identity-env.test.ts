@@ -43,7 +43,6 @@ function seedBuilder(workspacePath: string, id: string, worktree: string): void 
   db.close();
 }
 
-
 /**
  * The first test's hook opens the first better-sqlite3 database in a fresh
  * worker, which cold-loads the native binding: past vitest's 10 s hook default

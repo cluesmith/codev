@@ -8,7 +8,7 @@
  * extension host (and every open terminal with it), not just the Tower server.
  * This pins the LISTEN filter so a future edit can't silently drop it.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const execSyncMock = vi.fn(() => '');
@@ -27,7 +27,6 @@ const { getProcessesOnPort } = await import('../commands/tower.js');
 beforeEach(() => {
   forceHostPlatform('linux');
 });
-
 
 describe('getProcessesOnPort — LISTENer only (#991)', () => {
   beforeEach(() => execSyncMock.mockClear());

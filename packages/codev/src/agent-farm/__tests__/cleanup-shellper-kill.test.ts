@@ -41,7 +41,6 @@ beforeEach(() => {
   forceHostPlatform('linux');
 });
 
-
 describe('killShellperProcesses (Bugfix #389)', () => {
   const worktree = '/workspace/.builders/bugfix-42-login-fails';
 

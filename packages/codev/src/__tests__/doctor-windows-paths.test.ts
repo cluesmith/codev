@@ -4,7 +4,7 @@
  * values. The section only prints on Windows (doctor.ts).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawnSyncCalls = vi.hoisted(() => [] as { cmd: string; args: string[] }[]);
 vi.mock('../lib/platform/command-launch.js', async (importOriginal) => {
@@ -42,7 +42,6 @@ function deps(overrides: Partial<WindowsPathDeps>): WindowsPathDeps {
 beforeEach(() => {
   forceHostPlatform('win32');
 });
-
 
 describe('checkWindowsPathsAndState', () => {
   it('keeps the budgets inside MAX_PATH and accepts a typical-depth root', () => {

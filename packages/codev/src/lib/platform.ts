@@ -30,8 +30,10 @@ export function isWindows(): boolean {
 }
 
 /**
- * Force the seam to a platform for the duration of a test. Pair every call
- * with `resetHostPlatformForTests()` (typically in `afterEach`).
+ * Force the seam to a platform for the duration of a test. Tests use the
+ * scoped helpers in `src/__tests__/helpers/host-platform.ts` (`forceHostPlatform`
+ * per test, `useHostPlatform` per describe), which pair it with
+ * `resetHostPlatformForTests()` automatically.
  *
  * Throws outside a test runner, so production code cannot flip a real host's
  * platform. The override is module state in the current process only: it does

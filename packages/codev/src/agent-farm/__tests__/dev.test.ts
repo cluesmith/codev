@@ -6,7 +6,7 @@
  * already-running same-builder, swap accept/decline, and --stop.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Builder } from '../types.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
@@ -98,7 +98,6 @@ beforeEach(() => {
   killTerminalMock.mockResolvedValue(true);
   getWorktreeConfigMock.mockReturnValue({ symlinks: [], postSpawn: [], devCommand: 'pnpm dev', devUrls: [] });
 });
-
 
 // ─── Tests ──────────────────────────────────────────────────────────────
 

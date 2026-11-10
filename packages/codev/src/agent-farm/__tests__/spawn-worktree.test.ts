@@ -6,7 +6,7 @@
  */
 // spec-1658-tmp: opaque (every /tmp worktree path goes to mocked node:fs, mocked run/runStreaming or a launch-script string assertion)
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   slugify, buildWorktreeLaunchScript, startBuilderSession,
   checkDependencies, createWorktree, createWorktreeFromBranch,
@@ -1277,7 +1277,6 @@ describe('spawn-worktree', () => {
   describe('symlinkConfigFiles', () => {
     const config = { workspaceRoot: '/projects/test' } as any;
     pinPosixHost();
-
 
     it('symlinks .env and .codev/config.json when they exist at root', async () => {
       const { existsSync, symlinkSync, mkdirSync } = await import('node:fs');

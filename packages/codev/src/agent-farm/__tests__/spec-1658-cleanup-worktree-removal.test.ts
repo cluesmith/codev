@@ -10,7 +10,7 @@
  *   builder state are touched.
  */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -132,7 +132,6 @@ describe('Spec 1658: cleanup removes an ephemeral worktree', () => {
       return {} as ReturnType<typeof execFile>;
     }) as unknown as typeof execFile);
   });
-
 
   it.skipIf(process.platform === 'win32')('POSIX: runs git worktree remove --force, unchanged', async () => {
     await cleanup({ issue: 7 });
