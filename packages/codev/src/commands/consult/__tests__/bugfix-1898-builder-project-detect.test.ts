@@ -70,6 +70,13 @@ describe('getBuilderProjectState — worktree auto-detect (#1898)', () => {
     inCwd('.builders/pir-ENG-123/src');
     expect(getBuilderProjectState(ws).id).toBe('ENG-123');
   });
+
+  it('a name-matching dir without status.yaml does not shadow the real project (as in porch)', () => {
+    addProject('bugfix-7438');
+    inCwd('.builders/bugfix-7438');
+    expect(getBuilderProjectState(ws).id).toBe('bugfix-7438');
+    expect(getBuilderProjectState(ws).projectDir).toBe(join(ws, 'codev', 'projects', 'bugfix-7438-the-bug'));
+  });
 });
 
 describe('getBuilderProjectState — errors never list the projects (#1898)', () => {
@@ -85,7 +92,7 @@ describe('getBuilderProjectState — errors never list the projects (#1898)', ()
   }
 
   beforeEach(() => {
-    for (let i = 0; i < 2300; i++) addProject(`bugfix-${10000 + i}-some-long-project-slug-here`);
+    for (let i = 0; i < 2300; i++) addProject(`bugfix-${10000 + i}-some-long-project-slug-here`, `bugfix-${10000 + i}`);
   });
 
   it('a worktree ID with no matching project: one short line naming the ID and the escape hatch', () => {

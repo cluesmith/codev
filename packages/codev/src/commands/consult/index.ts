@@ -316,9 +316,10 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): Buil
     throw new Error('No project state found. Are you in a builder worktree?');
   }
 
+  // As porch's findProjectInDir: a project dir is one holding a status.yaml.
   const entries = fs.readdirSync(projectsDir);
   const projectDirs = entries.filter(e => {
-    return fs.statSync(path.join(projectsDir, e)).isDirectory();
+    return fs.statSync(path.join(projectsDir, e)).isDirectory() && fs.existsSync(path.join(projectsDir, e, 'status.yaml'));
   });
 
   if (projectDirs.length === 0) {
@@ -336,7 +337,9 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): Buil
   };
   let dir: string;
   if (projectId) {
-    // Direct lookup by project ID (passed via --project-id from porch)
+    // Direct lookup by project ID (passed via --project-id from porch). A hand-typed bare
+    // number may mean a bugfix project, so fall back to `bugfix-<id>`; a worktree-derived ID
+    // below is already exact and gets no fallback.
     const matched = dirFor(projectId) ?? dirFor(`bugfix-${projectId}`);
     if (!matched) {
       throw new Error(`Project ${projectId} not found (${hint})`);

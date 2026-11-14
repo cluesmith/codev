@@ -52,3 +52,27 @@ first, so a SPIR project with the same number would have won.
   `.builders/experiment-12-slug`) used to match consult's generic regex; now they get the short
   error, same as porch itself. All Spec 653 worktrees are ID-only, so the generic regex matched
   nothing current anyway.
+
+## PR #1899 + CMAP (2026-11-14)
+
+CMAP run with the **fixed local build** (dogfooding the exact adopter path, no `--issue`): auto-persist
+landed in `codev/projects/bugfix-1898-…/` for every lane, so the fix works end to end.
+
+- gemini: APPROVE (HIGH), no issues.
+- codex: APPROVE (HIGH), no issues.
+- claude: APPROVE (HIGH). Local-build lane first failed with API 400 `"thinking.type.enabled" is not
+  supported for this model`: the worktree lockfile installs `@anthropic-ai/claude-agent-sdk` 0.2.105,
+  the installed consult ships 0.2.141. Unrelated to this PR; re-ran with the installed consult +
+  `--project-id bugfix-1898`. Flagged to the architect, not fixed here (repo-wide dependency bump).
+
+Claude's two non-blocking notes, both taken:
+1. `dirFor` didn't require `status.yaml` where porch's `findProjectInDir` does, so a leftover
+   name-matching dir could shadow the real project and the hint's count included non-project dirs.
+   `projectDirs` now keeps only dirs holding a `status.yaml`; new test pins it (fails without).
+2. The `--project-id` → `bugfix-<id>` fallback vs exact worktree ID asymmetry is now commented.
+
+Full suite after the follow-ups: 7,247 passed, 0 failed, but vitest exited 1 on one unhandled
+`ERR_INTERNAL_ASSERTION` (Node http2 `JSStreamSocket.doWrite`) from
+`agent-farm/__tests__/tunnel-edge-cases.test.ts` teardown (`MockTunnelServer.stop` → `session.destroy()`),
+"handles 10 rapid connect/disconnect cycles". Unrelated to consult; 5/5 clean re-runs in isolation and
+two earlier full runs clean. Left unskipped and reported as a flake rather than skipping a tunnel test.
