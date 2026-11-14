@@ -42,7 +42,7 @@ import {
   formatSnapshotLostWarning,
   appendTreeChangeWarningToOutput,
 } from './tree-tripwire.js';
-import { ISSUE_KEY_SOURCE } from '../../lib/issue-id.js';
+import { detectProjectIdFromCwd } from '../../lib/worktree-project-id.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -324,40 +324,37 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): Buil
   if (projectDirs.length === 0) {
     throw new Error('No project found in codev/projects/');
   }
+  // Never list the project dirs in an error: a long-lived repo has thousands (#1898).
+  const hint = `${projectDirs.length} projects in codev/projects/; pass --issue <N> or --project-id <id>`;
+  // Same rule as porch's findProjectInDir: the dir is `<id>` or `<id>-<slug>`.
+  const dirFor = (id: string): string | undefined => {
+    const lower = id.toLowerCase();
+    return projectDirs.find(d => {
+      const name = d.toLowerCase();
+      return name === lower || name.startsWith(`${lower}-`);
+    });
+  };
   let dir: string;
   if (projectId) {
     // Direct lookup by project ID (passed via --project-id from porch)
-    const matched = projectDirs.find(d => d.startsWith(`${projectId}-`) || d.startsWith(`bugfix-${projectId}-`));
-    if (matched) {
-      dir = matched;
-    } else {
-      throw new Error(`Project ${projectId} not found in codev/projects/. Available: ${projectDirs.join(', ')}`);
+    const matched = dirFor(projectId) ?? dirFor(`bugfix-${projectId}`);
+    if (!matched) {
+      throw new Error(`Project ${projectId} not found (${hint})`);
     }
+    dir = matched;
   } else if (projectDirs.length > 1) {
-    // Multiple project dirs — try to disambiguate from worktree directory name
+    // Multiple project dirs — resolve the worktree's project exactly as porch does,
+    // which covers slugless worktrees (.builders/bugfix-N), subdirs, and tracker keys.
     const cwd = process.cwd();
-    // Tracker-key worktrees (#1740): .builders/pir-ENG-123[-slug]
-    const keyMatch = cwd.match(new RegExp(`\\.builders/[a-z]+-(${ISSUE_KEY_SOURCE})(?:-|/|$)`, 'i'));
-    const builderMatch = cwd.match(/\.builders\/[^/]*?-?(\d+)-([^/]+)/);
-    if (keyMatch) {
-      const key = keyMatch[1].toLowerCase();
-      const matched = projectDirs.find(d => d.toLowerCase().startsWith(`${key}-`) || d.toLowerCase().startsWith(`bugfix-${key}-`));
-      if (matched) {
-        dir = matched;
-      } else {
-        throw new Error(`Multiple projects found and none match worktree ID ${keyMatch[1]}: ${projectDirs.join(', ')}`);
-      }
-    } else if (builderMatch) {
-      const worktreeId = builderMatch[1];
-      const matched = projectDirs.find(d => d.startsWith(`${worktreeId}-`) || d.startsWith(`bugfix-${worktreeId}-`));
-      if (matched) {
-        dir = matched;
-      } else {
-        throw new Error(`Multiple projects found and none match worktree ID ${worktreeId}: ${projectDirs.join(', ')}`);
-      }
-    } else {
-      throw new Error(`Multiple projects found: ${projectDirs.join(', ')}`);
+    const worktreeId = detectProjectIdFromCwd(cwd);
+    if (!worktreeId) {
+      throw new Error(`Multiple projects found and no project ID in worktree path ${cwd} (${hint})`);
     }
+    const matched = dirFor(worktreeId);
+    if (!matched) {
+      throw new Error(`Multiple projects found and none match worktree ID ${worktreeId} (${hint})`);
+    }
+    dir = matched;
   } else {
     dir = projectDirs[0];
   }
@@ -2657,6 +2654,7 @@ export {
   resolveIntegrationBase as _resolveIntegrationBase,
   resolveArchitectQuery as _resolveArchitectQuery,
   computePersistentOutputPath as _computePersistentOutputPath,
+  getBuilderProjectState as _getBuilderProjectState,
   MODEL_CONFIGS as _MODEL_CONFIGS,
   MODEL_ALIASES as _MODEL_ALIASES,
   runAgyConsultation as _runAgyConsultation,
