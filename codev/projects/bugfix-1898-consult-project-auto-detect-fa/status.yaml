@@ -1,7 +1,7 @@
 id: bugfix-1898
 title: consult-project-auto-detect-fa
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-14T18:46:52.029Z'
-updated_at: '2026-11-14T18:48:36.488Z'
+updated_at: '2026-11-14T18:55:48.556Z'
