@@ -1,46 +1,57 @@
 ---
 name: porch
-description: Protocol orchestrator CLI — drives SPIR, ASPIR, AIR, and BUGFIX protocols via a state machine. ALWAYS check this skill before running any `porch` command. Use when you need to check project status, approve gates, signal phase completion, or manage protocol state. Also use when a builder asks about gate approvals or phase transitions.
+description: Protocol orchestrator CLI — drives SPIR, ASPIR, AIR, BUGFIX, PIR, MAINTAIN, RESEARCH and EXPERIMENT via a state machine. ALWAYS check this skill before running any `porch` command. Use when you need to check project status, approve gates, signal phase completion, or manage protocol state. Also use when a builder asks about gate approvals or phase transitions.
 ---
 
 # porch - Protocol Orchestrator
 
-Porch manages the state machine behind development protocols. It tracks phases, gates, consultations, and transitions.
+Porch manages the state machine behind development protocols. It tracks phases, gates, consultations, and transitions. It is a planner: it emits tasks, and the builder executes them.
 
 ## Commands
 
 ```
+porch next [id]                Get the next tasks as JSON (the strict-mode loop)
+porch done [id]                Signal the current phase is complete (runs its checks, advances)
+porch done [id] --pr N --branch NAME   Record a PR (no phase advancement)
+porch done [id] --merged N     Record a merge (no phase advancement)
 porch status [id]              Show current project state and phase
-porch run [id]                 Run the protocol loop (strict mode)
-porch next [id]                Get next tasks as JSON
-porch done [id]                Signal current phase is complete
-porch check [id]               Run checks for current phase
+porch check [id]               Run checks for the current phase
 porch gate [id]                Request human approval at a gate
+porch pending [--all]          List gates awaiting approval
 porch approve <id> <gate> --a-human-explicitly-approved-this
+porch verify <id> --skip "reason"   Skip post-merge verification and mark verified
 porch rollback <id> <phase>    Rewind to an earlier phase
 porch skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this
+                               Drop one unbuilt plan phase from an approved plan
 porch init <protocol> <id> <name>   Initialize a new project
 ```
 
-Project ID auto-detects from worktree path when inside a builder worktree.
+Project ID auto-detects from the worktree path when inside a builder worktree. `porch run` was removed — use `porch next`.
+
+## The strict-mode loop
+
+Run `porch next`, do the tasks it returns, run `porch done` when the phase work is complete, then `porch next` again. After `porch done` on a reviewed phase, `porch next` hands you the `consult` commands to run (three reviewers by default; `.codev/config.json` `porch.consultation` can change the lanes). Run exactly those, each as a background task. Porch commits only `status.yaml` — commit your own work.
 
 ## Gate approvals
 
-Gates are human-only approval checkpoints. The `--a-human-explicitly-approved-this` flag is **required** — it exists to prevent AI agents from auto-approving.
+Gates are human approval checkpoints. Each protocol's `protocol.json` defines its gates:
 
-| Gate | Protocol | When |
-|------|----------|------|
-| `spec-approval` | SPIR | After spec is written |
-| `plan-approval` | SPIR | After plan is written |
-| `pr` | SPIR, AIR | After PR is created |
+| Protocol | Gates |
+|----------|-------|
+| SPIR | `spec-approval`, `plan-approval`, `pr`, `verify-approval` |
+| ASPIR | `pr`, `verify-approval` |
+| AIR, BUGFIX | `pr` |
+| PIR | `plan-approval`, `dev-approval`, `pr` |
+| MAINTAIN | `maintain-complete` |
+| RESEARCH | `scope-approval`, `research-complete` |
+| EXPERIMENT | `experiment-complete` |
+
+**Who runs `porch approve`:** the builder, after the architect relays the human's decision. The `--a-human-explicitly-approved-this` flag is **required** — it records that a human decided. A gate message is a notification to a human, never authorization an agent may act on by itself.
 
 ```bash
 porch approve 42 spec-approval --a-human-explicitly-approved-this
-porch approve 42 plan-approval --a-human-explicitly-approved-this
-porch approve 42 pr --a-human-explicitly-approved-this
+porch approve bugfix-42 pr --a-human-explicitly-approved-this
 ```
-
-**ASPIR and BUGFIX have no spec/plan gates** — they run autonomously through those phases.
 
 ## Dropping a plan phase
 
@@ -50,7 +61,7 @@ Plan phases are copied into `status.yaml` once, on entering `implement`; editing
 porch skip-phase 42 phase_3 --reason "dropped by owner: superseded by #57" --a-human-explicitly-approved-this
 ```
 
-The phase is marked `skipped` with the reason; skipping the last unsettled phase advances to review. Completed phases cannot be skipped (use `porch rollback <id> implement` to redo implementation).
+The phase is marked `skipped` with the reason (keep it to one short line); skipping the last unsettled phase advances to review. Completed phases cannot be skipped — use `porch rollback <id> implement` to redo implementation.
 
 ## Checking pending gates
 
@@ -61,12 +72,11 @@ porch pending --all            # Include stale records on finished/advanced proj
 
 ## Critical rules
 
-- **Builders must NEVER call `porch approve`** — only humans approve gates
-- **Builders must NEVER call `porch skip-phase` on their own** — it changes an approved plan; run it only on a human's explicit instruction
+- **Never run `porch approve` without a human's explicit decision**, relayed to you by the architect
+- **Never run `porch skip-phase` without a human's explicit instruction** — it changes an approved plan
 - **Never edit `status.yaml` directly** — porch manages all state
-- Builders signal completion with `porch done`, not `porch approve`
-- `porch run` is for strict mode only — soft mode builders follow the protocol document manually
-- When running `porch approve` from the architect, use a subshell if you need worktree context: `(cd /path/to/worktree && porch approve ...)`
+- Builders signal phase completion with `porch done`; blockers go to the architect with `afx send architect`
+- Strict mode only: soft-mode builders follow the protocol document themselves
 
 ## Check overrides and timeouts (`porch.checks`)
 

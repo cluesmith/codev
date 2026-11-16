@@ -18,7 +18,7 @@ Find the last run number and its base commit. Then see what changed:
 git log --oneline <base-commit>..HEAD
 ```
 
-Create your maintenance run file: `codev/maintain/NNNN.md` (next number in sequence).
+Create your maintenance run file: `codev/maintain/NNNN.md` — the next number in sequence, four digits, zero-padded (`0008.md`). Run files are the one place Codev zero-pads; project and issue ids never are.
 
 ## Step 2: Audit
 
@@ -43,8 +43,8 @@ Record all findings in the maintenance run file.
 
 For each audit finding:
 1. Verify it's truly unused (grep the codebase)
-2. Remove with `git rm` (tracked) or move to `codev/maintain/.trash/$(date +%Y-%m-%d)/` (untracked)
-3. Build and test: `cd packages/codev && pnpm build && pnpm test`
+2. Remove with `git rm` (tracked — git history keeps it recoverable) or move to `codev/maintain/.trash/$(date +%Y-%m-%d)/` (untracked — nothing else would keep it)
+3. Run the project's build and tests (porch's `build` and `tests` checks: `pnpm build` / `pnpm test` unless `.codev/config.json` `porch.checks` overrides them)
 4. Commit: `git add <specific-files> && git commit -m "[Maintain] Remove unused X"`
 
 One removal at a time, verified after each — staging only the specific files that removal touched.
@@ -68,22 +68,10 @@ git commit -m "[Maintain] Update governance docs (hot + cold tiers)"
 
 ## Step 5: Final Checks
 
-```bash
-cd packages/codev && pnpm build && pnpm test
-```
+Run the project's build and tests (porch's `build` and `tests` checks: `pnpm build` / `pnpm test` unless `.codev/config.json` `porch.checks` overrides them). Both must pass. Update the maintenance run file with a summary of everything done.
 
-Both must pass. Update the maintenance run file with a summary of everything done.
+## When you finish
 
-## Signals
-
-When all work is complete and build/tests pass:
-
-```
-<signal>PHASE_COMPLETE</signal>
-```
-
-If blocked:
-
-```
-<signal>BLOCKED:reason</signal>
-```
+- **All work committed, build and tests passing:** run `porch done`. Porch runs its checks, then
+  `porch next` hands you the consultation commands to run.
+- **Blocked:** do not run `porch done`. `afx send architect` the specifics, then stop and wait.

@@ -29,7 +29,7 @@ gh pr view <N> --json files | jq '.files[].path'
 | Risk | Action | Cost |
 |------|--------|------|
 | **Low** | Read PR, summarize, tell builder to merge | $0 |
-| **Medium** | `consult -m claude --type integration pr N` | ~$1-2 |
+| **Medium** | `consult -m claude --type integration --issue <N>` | ~$1-2 |
 | **High** | 3-way CMAP (Gemini + Codex + Claude in parallel) | ~$4-5 |
 
 ## Subsystem Path Mappings
@@ -77,7 +77,7 @@ Low-risk test fix. Corrects assertion in foo.test.ts.
 ---
 Architect review"
 
-afx send 0042 "PR approved, please merge"
+afx send spir-42 "PR approved, please merge"
 ```
 
 ### Medium Risk: New Feature (180 lines, 3 files, commands/)
@@ -90,22 +90,21 @@ $ gh pr diff --stat 121
  3 files changed, 180 insertions(+)
 
 # Medium risk — single-model review
-consult -m claude --type integration pr 121
+consult -m claude --type integration --issue 121
 ```
 
 ### High Risk: Protocol Change (650 lines, 14 files, porch/)
 
 ```bash
 $ gh pr diff --stat 122
- packages/codev/src/commands/porch/run.ts     | 200 ++++++++++++------
+ packages/codev/src/commands/porch/checks.ts  | 200 ++++++++++++------
  packages/codev/src/commands/porch/next.ts     | 150 ++++++++++----
  packages/codev/src/state/project.ts           |  80 +++++---
  ... 11 more files
  14 files changed, 420 insertions(+), 230 deletions(-)
 
-# High risk — full 3-way CMAP
-consult -m gemini --type integration pr 122 &
-consult -m codex --type integration pr 122 &
-consult -m claude --type integration pr 122 &
-wait
+# High risk — full 3-way CMAP, each as its own background task
+consult -m gemini --type integration --issue 122
+consult -m codex --type integration --issue 122
+consult -m claude --type integration --issue 122
 ```

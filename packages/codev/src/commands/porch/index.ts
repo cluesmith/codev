@@ -319,7 +319,7 @@ export async function status(
     console.log(section('STATUS', chalk.yellow('WAITING FOR HUMAN APPROVAL')));
     console.log(`\n  Gate: ${gate}`);
     console.log('  Do not proceed until gate is approved.');
-    console.log(`\n  To approve: porch approve ${state.id} ${gate}`);
+    console.log(`\n  To approve: porch approve ${state.id} ${gate} --a-human-explicitly-approved-this`);
   } else {
     console.log(section('INSTRUCTIONS', getInstructions(state, protocol)));
   }
@@ -710,7 +710,7 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
   console.log('');
   console.log(chalk.bold('STATUS: WAITING FOR HUMAN APPROVAL'));
   console.log('');
-  console.log(chalk.dim(`  To approve: porch approve ${state.id} ${gateName}`));
+  console.log(chalk.dim(`  To approve: porch approve ${state.id} ${gateName} --a-human-explicitly-approved-this`));
   console.log('');
 }
 
@@ -1251,8 +1251,42 @@ function getArtifactForPhase(workspaceRoot: string, state: ProjectState, resolve
 // CLI
 // ============================================================================
 
+function printHelp(): void {
+  console.log('porch - Protocol Orchestrator');
+  console.log('');
+  console.log('Commands:');
+  console.log('  next [id]                Emit next tasks as JSON (planner mode)');
+  console.log('  status [id]              Show current state and instructions');
+  console.log('  check [id]               Run checks for current phase');
+  console.log('  done [id]                Signal build complete (validates checks, advances)');
+  console.log('  done [id] --pr N --branch NAME   Record PR creation (no phase advancement)');
+  console.log('  done [id] --merged N             Mark PR as merged (no phase advancement)');
+  console.log('  gate [id]                Request human approval');
+  console.log('  pending [--all]          List gates awaiting approval across projects (--all includes stale records on finished projects)');
+  console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
+  console.log('  verify <id> --skip "reason"      Skip verification and mark as verified');
+  console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
+  console.log('  skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this');
+  console.log('                           Drop one unbuilt plan phase from an approved plan');
+  console.log('  init <protocol> <id> <name>  Initialize a new project');
+  console.log('');
+  console.log('Flags:');
+  console.log('  --version, -v            Print porch (codev) version');
+  console.log('');
+  console.log('Project ID is auto-detected from worktree path or when exactly one project exists.');
+  console.log('');
+}
+
 export async function cli(args: string[]): Promise<void> {
   const [command, ...rest] = args;
+
+  // `porch <command> --help` prints help and exits. Without this, the subcommand ran:
+  // `porch done --help` executed `porch done` on the auto-detected project — checks and all —
+  // and `porch gate --help` requested a gate (#1902).
+  if (command && (rest.includes('--help') || rest.includes('-h'))) {
+    printHelp();
+    return;
+  }
 
   // Handle --version / -v before any project resolution — version output
   // must work from any directory and never require a project context.
@@ -1395,29 +1429,7 @@ export async function cli(args: string[]): Promise<void> {
         break;
 
       default:
-        console.log('porch - Protocol Orchestrator');
-        console.log('');
-        console.log('Commands:');
-        console.log('  next [id]                Emit next tasks as JSON (planner mode)');
-        console.log('  status [id]              Show current state and instructions');
-        console.log('  check [id]               Run checks for current phase');
-        console.log('  done [id]                Signal build complete (validates checks, advances)');
-        console.log('  done [id] --pr N --branch NAME   Record PR creation (no phase advancement)');
-        console.log('  done [id] --merged N             Mark PR as merged (no phase advancement)');
-        console.log('  gate [id]                Request human approval');
-        console.log('  pending [--all]          List gates awaiting approval across projects (--all includes stale records on finished projects)');
-        console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
-        console.log('  verify <id> --skip "reason"      Skip verification and mark as verified');
-        console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
-        console.log('  skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this');
-        console.log('                           Drop one unbuilt plan phase from an approved plan');
-        console.log('  init <protocol> <id> <name>  Initialize a new project');
-        console.log('');
-        console.log('Flags:');
-        console.log('  --version, -v            Print porch (codev) version');
-        console.log('');
-        console.log('Project ID is auto-detected from worktree path or when exactly one project exists.');
-        console.log('');
+        printHelp();
         process.exit(command && command !== '--help' && command !== '-h' ? 1 : 0);
     }
 

@@ -39,9 +39,12 @@ Each SDK lane prints what it authenticates with, e.g. `[CLAUDE] auth: CLAUDE_COD
 -m, --model <model>         Model to use (required except stats)
 --prompt <text>              Inline prompt (general mode)
 --prompt-file <path>         Prompt file path (general mode)
---protocol <name>            Protocol: spir, aspir, air, bugfix, maintain
+--protocol <name>            Protocol: spir, aspir, air, bugfix, pir, maintain
 -t, --type <type>            Review type (see below)
---issue <number>             Issue number (required in architect context)
+--issue <number>             Issue or PR number (required in architect context)
+--branch <ref>               Read spec/plan from this git ref instead of the workspace
+--base <ref>                 --type integration only: diff against this base branch
+--model-id <id>              Override the lane's provider model id for this call
 --output <path>              Save result to file
 --plan-phase <phase>         Scope review to a plan phase (porch use)
 --context <path>             Context file with feedback (porch use)
@@ -63,6 +66,9 @@ Each SDK lane prints what it authenticates with, e.g. `[CLAUDE] auth: CLAUDE_COD
 | `phase` | Phase-scoped review (builder context only) |
 | `integration` | Architect's integration review of a PR |
 
+`spec`, `plan`, `impl`, `pr` and `phase` need `--protocol` — their prompts live under
+`protocols/<name>/consult-types/`. Only `integration` works without it.
+
 ## Usage patterns
 
 **General query:**
@@ -73,20 +79,24 @@ consult -m codex --prompt-file review-checklist.md
 
 **Protocol review:**
 ```bash
-consult -m gemini --type spec --issue 42
-consult -m codex --type plan --issue 42
+consult -m gemini --protocol spir --type spec --issue 42
+consult -m codex --protocol spir --type plan --issue 42
 consult -m claude --type integration --issue 42
 ```
 
 **3-way parallel review (cmap):**
-Always use `--output` for background runs — without it, results go to a temp file that may be garbage-collected.
+Run each command as its own background task (in Claude Code, `run_in_background: true`, not a
+trailing `&`), so the turn ends and you are notified as each finishes. Always use `--output` for
+background runs — without it, results go to a temp file that may be garbage-collected.
 
 ```bash
-consult -m gemini --type integration --issue 42 --output /tmp/cmap-gemini-42.md &
-consult -m codex --type integration --issue 42 --output /tmp/cmap-codex-42.md &
-consult -m claude --type integration --issue 42 --output /tmp/cmap-claude-42.md &
-wait
+consult -m gemini --type integration --issue 42 --output /tmp/cmap-gemini-42.md
+consult -m codex --type integration --issue 42 --output /tmp/cmap-codex-42.md
+consult -m claude --type integration --issue 42 --output /tmp/cmap-claude-42.md
 ```
+
+In a strict-mode builder, porch emits the review commands itself — run those rather than
+composing your own.
 
 **Stats:**
 ```bash
@@ -100,6 +110,6 @@ consult stats --project 42        # Filter by project
 - `-m` is required for all non-stats commands
 - `--prompt` and `--type` are mutually exclusive (different modes)
 - `--prompt` and `--prompt-file` are mutually exclusive
-- `--protocol` requires `--type`
+- `--protocol` requires `--type`; every type except `integration` requires `--protocol`
 - From architect context (outside `.builders/`), `--issue` is required for protocol reviews
 - From builder context (inside `.builders/`), project auto-detects from porch state

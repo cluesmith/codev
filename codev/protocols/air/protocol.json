@@ -41,8 +41,7 @@
         }
       },
       "transition": {
-        "on_complete": "pr",
-        "on_too_complex": "escalate"
+        "on_complete": "pr"
       }
     },
     {
@@ -57,11 +56,8 @@
         "notify_architect"
       ],
       "consultation": {
-        "on": "review",
-        "models": ["gemini", "codex"],
-        "type": "impl",
-        "parallel": true,
-        "max_rounds": 1
+        "models": ["gemini", "codex", "claude"],
+        "type": "pr"
       },
       "checks": {
         "pr_exists": {
@@ -80,27 +76,8 @@
       }
     }
   ],
-  "signals": {
-    "PHASE_COMPLETE": {
-      "description": "Signal current phase is complete",
-      "transitions_to": "next_phase"
-    },
-    "TOO_COMPLEX": {
-      "description": "Feature is too complex for AIR, escalate to ASPIR",
-      "transitions_to": "escalate"
-    },
-    "BLOCKED": {
-      "description": "Signal implementation is blocked",
-      "requires": "reason"
-    }
-  },
   "defaults": {
     "mode": "strict",
-    "consultation": {
-      "enabled": true,
-      "models": ["gemini", "codex"],
-      "parallel": true
-    },
     "checks": {
       "build": "npm run build",
       "test": "npm test"

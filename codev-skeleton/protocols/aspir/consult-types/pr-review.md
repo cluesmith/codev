@@ -6,8 +6,8 @@ You are performing the final self-check during the Review phase — the builder 
 
 ## Focus Areas
 
-- **Completeness** — all spec requirements implemented, all plan phases complete, the review document written (`codev/reviews/XXXX-name.md`), and commits in the `[Spec XXXX][Phase]` format.
-- **Test Status** — all tests pass, coverage is adequate for the changes, and any skipped/flaky tests are accounted for.
+- **Completeness** — all spec requirements implemented, all plan phases complete, the review document written (`codev/reviews/<id>-<name>.md`), and commits in the `[Spec <id>][Phase: <plan-phase>]` format.
+- **Test Status** — all tests pass, coverage is adequate for the changes, and any flaky pre-existing test is named under Flaky Tests (reported and left running, not skipped).
 - **Code Cleanliness** — no debug code, no stray `TODO` / `// REVIEW:` left unaddressed, code properly formatted.
 - **Documentation** — inline comments clear where needed, the review document comprehensive, new APIs documented.
 - **PR Readiness** — the branch is up to date with its base (the integration branch the PR targets), commits are atomic and well-described, and the diff size is reasonable.

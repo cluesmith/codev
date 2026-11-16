@@ -19,24 +19,18 @@ If two baked decisions contradict each other, do not pick one — pause, flag th
 
 ## What must be true when you finish
 
-- **The feature matches the issue.** You have read it fully — desired behavior, acceptance criteria, any examples — and implemented exactly what it describes: no refactoring of surrounding code, no features beyond the issue, no unrelated bug fixes (file separate issues for those). Self-documenting code, no debug or commented-out code, existing project conventions.
+- **The feature matches the issue.** You have read it fully — desired behavior, acceptance criteria, any examples — and implemented exactly what it describes: no refactoring of surrounding code, no features beyond the issue. **Fix in place:** a small adjacent bug you notice is fixed in this PR and named in its body; a follow-up issue is only for work that needs something unavailable now (a device, an owner decision), touches a different subsystem, or is a large refactor. Self-documenting code, no debug or commented-out code, existing project conventions.
 - **Tests exist.** They cover the happy path and the key edge cases, and are deterministic. (Purely declarative changes — config only — may not need them; say so.)
 - **Build and tests pass.** Confirm the real project commands (check `package.json` if unsure) and run them; fix failures before signaling.
-- **The change stays within AIR scope.** If it grows past ~300 LOC or turns architectural, signal `TOO_COMPLEX` rather than pressing on.
+- **The change stays within AIR scope.** ~300 LOC is a guideline. If the change turns architectural or needs a decision the issue does not make, tell the architect and recommend escalating to SPIR or ASPIR rather than pressing on.
 
 Commit with an explicit staged path and the message `[Air #{{issue.number}}] feat: <brief description>`.
 
-## Signals
+## When you finish
 
-- Implementation and tests complete and passing:
-  ```
-  <signal>PHASE_COMPLETE</signal>
-  ```
-- Too complex for AIR (> ~300 LOC or architectural):
-  ```
-  <signal>TOO_COMPLEX</signal>
-  ```
-- Blocked (missing context, unclear requirements):
-  ```
-  <signal>BLOCKED:reason goes here</signal>
+- **Implementation and tests committed and passing:** run the `porch done` command porch gives you below.
+- **Too large for AIR, or blocked** (missing context, unclear requirements): do not run `porch done`.
+  Send the specifics, then stop and wait:
+  ```bash
+  afx send architect "Issue #<N>: <what you found>. Recommend escalating to SPIR or ASPIR."   # or: Blocked on <X>
   ```

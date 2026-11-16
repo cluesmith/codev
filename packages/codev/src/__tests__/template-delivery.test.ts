@@ -152,24 +152,9 @@ export function findUnresolvedIncludeSites(treeRoot: string): string[] {
   return bad.sort();
 }
 
-/**
- * Two local-only maintain templates in `codev/` have no skeleton counterpart and
- * no consumer. They are exempt here rather than deleted: the Spec 1252
- * shadow-tree audit records an explicit architect ruling (T8) preserving them,
- * and reversing that ruling is not this fix's call. Flagged as follow-up.
- */
-const CODEV_LOCAL_ONLY_EXEMPT = [
-  'protocols/maintain/templates/audit-report.md',
-  'protocols/maintain/templates/lessons-learned.md',
-] as const;
-
-function exemptFor(tree: string): readonly string[] {
-  return tree === 'codev' ? CODEV_LOCAL_ONLY_EXEMPT : [];
-}
-
 describe('#1279 — every protocol template has an owning consumer', () => {
   it.each(TREES)('%s: no template is orphaned', (tree) => {
-    const orphans = findOrphanedTemplates(join(REPO_ROOT, tree), exemptFor(tree));
+    const orphans = findOrphanedTemplates(join(REPO_ROOT, tree));
     expect(
       orphans,
       `Orphaned template(s) in ${tree}/ — no prompt or protocol.md delivers them via a `
@@ -197,10 +182,11 @@ describe('#1279 — every protocol template has an owning consumer', () => {
     expect(findUnresolvedIncludeSites(join(REPO_ROOT, tree))).toEqual([]);
   });
 
-  it('the two trees ship the same set of templates (mirror parity, minus known local-only files)', () => {
+  it('the two trees ship the same set of templates (mirror parity)', () => {
+    // #1902 deleted the two codev-local maintain templates (audit-report.md, lessons-learned.md)
+    // this test used to exempt: nothing delivered them.
     const skeleton = listTemplates(join(REPO_ROOT, 'codev-skeleton'));
-    const local = listTemplates(join(REPO_ROOT, 'codev'))
-      .filter(t => !CODEV_LOCAL_ONLY_EXEMPT.includes(t as typeof CODEV_LOCAL_ONLY_EXEMPT[number]));
+    const local = listTemplates(join(REPO_ROOT, 'codev'));
     expect(local).toEqual(skeleton);
   });
 });

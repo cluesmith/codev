@@ -19,10 +19,10 @@ vi.mock('../../../lib/github.js', () => ({ fetchIssue }));
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..', '..', '..');
 
-function protocolFor(name: string, phase: string, prompt: string): Protocol {
+function protocolFor(name: string, phase: string, prompt: string, consultation?: unknown): Protocol {
   return {
     name,
-    phases: [{ id: phase, name: phase, type: 'once', build: { prompt } }],
+    phases: [{ id: phase, name: phase, type: 'once', build: { prompt }, ...(consultation ? { consultation } : {}) }],
   } as unknown as Protocol;
 }
 
@@ -144,7 +144,11 @@ describe('#1903 — porch substitutes {{issue.number}} and {{issue.title}}', () 
     const source = fs.readFileSync(path.join(repoRoot, tree, 'protocols', proto, 'prompts', file), 'utf-8');
     writePrompt(proto, file, source);
 
-    const prompt = await buildPhasePrompt(tmp, stateFor(id, proto, phase), protocolFor(proto, phase, file));
+    // The shipped phase's consultation block, so a prompt using {{consult_commands}} renders as
+    // porch renders it (porch refuses to leave that token unrendered, #1902).
+    const shipped = JSON.parse(fs.readFileSync(path.join(repoRoot, tree, 'protocols', proto, 'protocol.json'), 'utf-8'))
+      .phases.find((p: { id: string }) => p.id === phase);
+    const prompt = await buildPhasePrompt(tmp, stateFor(id, proto, phase), protocolFor(proto, phase, file, shipped?.consultation));
 
     expect(prompt).not.toMatch(ISSUE_TAG);
     if (ISSUE_TAG.test(source)) expect(prompt).toContain('1234');

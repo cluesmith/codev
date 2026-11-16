@@ -10,7 +10,7 @@
  *   1. Diverge from their SPIR counterparts
  *   2. Do not reference SPIR-only artifacts as review criteria
  *   3. Explicitly call out the BUGFIX-relevant artifacts (issue + regression
- *      test + `Fix #N` commits)
+ *      test + `[Bugfix #N] Fix:` commits — the format #1902 settled on)
  *   4. Stay in sync between codev/ (self-hosted) and codev-skeleton/ (shipped
  *      template)
  */
@@ -103,8 +103,9 @@ describe('BUGFIX consult templates (#742)', () => {
       expect(content).toMatch(/BUGFIX/);
     });
 
-    it('mentions the BUGFIX commit format `Fix #N`', () => {
-      expect(content).toMatch(/Fix\s+#/);
+    it('mentions the BUGFIX commit format `[Bugfix #N] Fix:`', () => {
+      // #1902 settled the three competing formats on `[Bugfix #N] Fix:` / `Test:`.
+      expect(content).toMatch(/\[Bugfix #[^\]]+\] Fix:/);
     });
 
     it('mentions the regression test as a required BUGFIX artifact', () => {

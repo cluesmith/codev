@@ -48,6 +48,17 @@ export interface ProtocolPhase {
   gate?: string;                 // Gate name that blocks after this phase
   checks?: string[];             // Check names to run (keys into protocol.checks)
   next?: string | null;          // Next phase id, or null if terminal
+  consultation?: PhaseConsultationConfig; // Builder-run review in a once phase (BUGFIX/AIR PR phase)
+}
+
+/**
+ * A review the builder runs from the phase prompt, rather than one porch runs in a verify step.
+ * `models` is the protocol default; `.codev/config.json` `porch.consultation` overrides it, the
+ * same way it overrides a verify step's lanes. Rendered into the prompt as `{{consult_commands}}`.
+ */
+export interface PhaseConsultationConfig {
+  type: string;     // consult review type, e.g. 'pr'
+  models: string[]; // default lanes
 }
 
 /**

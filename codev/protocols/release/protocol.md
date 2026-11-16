@@ -85,6 +85,9 @@ git tag -a vX.Y.Z -m "vX.Y.Z Codename - Brief description"
 git push && git push origin vX.Y.Z
 ```
 
+This commit and tag go straight to the default branch: the one exception to the architect's
+"don't commit to the default branch" rule. Make them only after the owner's go.
+
 **Backport path (single-package patch on a release branch)** — use `pnpm version` directly:
 
 ```bash
@@ -105,7 +108,9 @@ git push && git push origin vX.Y.Z
 
 ### 5. Write Release Notes
 
-Create `docs/releases/vX.Y.Z.md`:
+Create `docs/releases/vX.Y.Z-<codename>.md`, with the codename lowercased and hyphenated (`v3.3.0-luxor.md`,
+`v2.0.0-hagia-sophia.md`). If the cycle kept a `docs/releases/UNRELEASED.md`, `git mv` it to that name
+instead of starting from scratch:
 
 ```markdown
 # vX.Y.Z Codename
@@ -142,7 +147,7 @@ Brief overview of this release.
 ### 6. Create GitHub Release
 
 ```bash
-gh release create vX.Y.Z --title "vX.Y.Z Codename" --notes-file docs/releases/vX.Y.Z.md
+gh release create vX.Y.Z --title "vX.Y.Z Codename" --notes-file docs/releases/vX.Y.Z-<codename>.md
 ```
 
 ### 7. Publish to npm
@@ -206,12 +211,24 @@ releases:
 
 Codev releases are named after **great examples of architecture** from around the world:
 
+One codename per minor line, taken from the release notes in `docs/releases/`. A blank cell means
+the notes do not record it.
+
 | Version | Codename | Inspiration |
 |---------|----------|-------------|
-| 1.0.0 | Alhambra | Moorish palace complex in Granada, Spain |
-| 1.1.0 | Bauhaus | German art school, functional modernism |
-| 1.2.0 | Cordoba | Great Mosque of Cordoba, Spain |
-| 1.3.0 | Doric | Ancient Greek column order, simplicity |
+| 1.0.x | Alhambra | Moorish palace complex in Granada, Spain |
+| 1.1.x | Bauhaus | German art school, functional modernism |
+| 1.2.x | Cordoba | Great Mosque of Cordoba, Spain |
+| 1.3.x | Doric | Ancient Greek column order, simplicity |
+| 1.4.x | Eichler | Joseph Eichler's mid-century modern California homes |
+| 1.5.x | Florence | |
+| 1.6.x | Gothic | |
+| 2.0.x | Hagia Sophia | The Istanbul landmark, standing for 1,500 years |
+| 2.1.x | | |
+| 3.0.x | Ionic | Greek column order whose hallmark is the volute |
+| 3.1.x | Jacobean | |
+| 3.2.x | Karnak | |
+| 3.3.x | Luxor | |
 
 Future releases continue this tradition, drawing from architectural wonders across cultures and eras.
 
