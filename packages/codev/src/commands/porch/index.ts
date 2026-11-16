@@ -316,7 +316,7 @@ export async function status(
     console.log(section('STATUS', chalk.yellow('WAITING FOR HUMAN APPROVAL')));
     console.log(`\n  Gate: ${gate}`);
     console.log('  Do not proceed until gate is approved.');
-    console.log(`\n  To approve: porch approve ${state.id} ${gate}`);
+    console.log(`\n  To approve: porch approve ${state.id} ${gate} --a-human-explicitly-approved-this`);
   } else {
     console.log(section('INSTRUCTIONS', getInstructions(state, protocol)));
   }
@@ -707,7 +707,7 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
   console.log('');
   console.log(chalk.bold('STATUS: WAITING FOR HUMAN APPROVAL'));
   console.log('');
-  console.log(chalk.dim(`  To approve: porch approve ${state.id} ${gateName}`));
+  console.log(chalk.dim(`  To approve: porch approve ${state.id} ${gateName} --a-human-explicitly-approved-this`));
   console.log('');
 }
 

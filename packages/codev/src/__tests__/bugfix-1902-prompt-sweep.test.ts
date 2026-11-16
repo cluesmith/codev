@@ -137,6 +137,20 @@ describe('#1902 B — the builder runs porch approve, with the human-approval fl
     );
   });
 
+  it('every approve hint porch itself prints carries the flag', () => {
+    // An agent copies what porch prints; a hint without the flag gets a refusal instead.
+    const dir = 'packages/codev/src/commands/porch';
+    const hits: string[] = [];
+    for (const f of fs.readdirSync(path.join(repoRoot, dir)).filter((n) => n.endsWith('.ts'))) {
+      read(`${dir}/${f}`).split('\n').forEach((line, i) => {
+        if (/porch approve \$\{[^}]+\} \$\{[^}]+\}/.test(line) && !line.includes('--a-human-explicitly-approved-this')) {
+          hits.push(`${dir}/${f}:${i + 1}  ${line.trim()}`);
+        }
+      });
+    }
+    expect(hits, hits.join('\n')).toEqual([]);
+  });
+
   it('no text tells builders never to run porch approve', () => {
     expectNone(/Builders? (must )?NEVER (call|run) `?porch approve/i, 'The builder runs porch approve (#1902 B).');
   });
