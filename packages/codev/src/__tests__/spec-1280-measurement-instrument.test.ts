@@ -57,15 +57,14 @@ function makeFixture(): string {
   return dir;
 }
 
-// FLAKY on native Windows, skipped there as one suite (architect ruling, 2026-11-10; see the
-// review's Flaky Tests entry, Spec 1658). Three runs, three symptoms, all inside
-// scripts/measure-prompt-surface.sh under Git Bash:
-//   - run 39927653580: T12 failed, the script exited non-zero with no stderr;
-//   - run 42715696142: T11 failed, Python "OSError: [Errno 22] Invalid argument" on stdout at exit;
-//   - run 42732747693: T3 failed, Git Bash "fatal error in forked process - WFSO timed out after longjmp".
-// Cause class: MSYS fork emulation failing under runner load (a Git Bash limitation, not a Codev
-// code path; the script is a repo instrument, not a shipped Windows feature). Both POSIX legs
-// run the suite in full. Follow-up issue: filed by main after the owner's word.
+// Skipped on the Windows runner: MSYS fork emulation under load fails the measurement suite
+// (runs 39927653580, 42715696142, 42732747693); a platform-runner decision (architect ruling,
+// 2026-11-10, Spec 1658), not a flake quarantine. Each run failed inside
+// scripts/measure-prompt-surface.sh under Git Bash with a different symptom (a non-zero exit with
+// no stderr; Python "OSError: [Errno 22] Invalid argument" on stdout at exit; "fatal error in
+// forked process - WFSO timed out after longjmp"). The script is a repo instrument, not a shipped
+// Windows feature. Both POSIX legs run the suite in full. Tracked in a follow-up, filed by main
+// after the owner's word.
 describe.skipIf(process.platform === 'win32')('spec-1280 measurement instrument', () => {
   describe('T1 — the instrument sources the directory the runtime actually loads', () => {
     it('reads protocols/<p>/prompts/, not the dead porch/prompts tree', () => {

@@ -995,11 +995,32 @@ change on either platform.
     moved `shellEscapeSingleQuote` byte for byte. Attempt 2 passed every job.
   - `metrics-model-id` timeout, first sighting: run 43784864166 attempt 1; attempt 2 passed.
   - The ARM64 probe's CIM census, second sighting: run 43783831790.
-  - Main's #1880 brought three tests that run a `#!/bin/sh` stand-in codex; they skip on win32
-    (finding M13).
 
-- **`spec-1280-measurement-instrument` on Windows: second sighting of the family (architect:
-  record, no diagnosis yet; a third sighting changes the ruling).** T12 failed in run 39927653580
+- **Vitest pool "Worker exited unexpectedly" on Windows (second sighting; architect: rerun
+  accepted).** Run 39927082964 (Node 22, a worker exiting without output in
+  `agy-lane-model.test.ts`) and run 42734572993 attempt 1 (Node 22, head `5bc668fb1`: all 389 files
+  and 7667 tests passed, then the pool reported an unhandled "Worker exited unexpectedly" with no
+  test attributed). Attempt 2 was green. Recorded; not skipped (nothing to skip).
+
+- **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
+  run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:
+  - The Phase 10 drive-root regression test (`findWorkspaceRoot.test.ts`) ran its child against
+    `dist/`, which the Ubuntu unit job does not build. It now runs the source under `tsx`.
+  - `spec-1658-posix-residue` "isTempDirectory on Windows" assumed the host temp dir is not under
+    `/tmp`. On Ubuntu, `os.tmpdir()` is `/tmp`. The POSIX-root assertions now apply only when the
+    host temp dir, as given or resolved, is not under that root.
+  Both green on the PR's `test.yml` (head 91ea359df) and on Windows (targeted runs 39930623116
+  and 39930636358).
+
+## Platform Skips
+
+Tests that do not run on native Windows because the platform or the Windows runner cannot run them,
+by ruling. These are not flaky-test quarantines; intermittents stay running and are listed under
+Flaky Tests (main's #1902 rule).
+
+- **`spec-1280-measurement-instrument`: skipped on the Windows runner (a platform-runner
+  decision, not a flake quarantine).** History: first and second sightings (architect: record, no
+  diagnosis yet; a third sighting changes the ruling). T12 failed in run 39927653580
   (attempt 1, Node 24); T11 failed in run 42715696142 (head `84f1f75a1`, Node 24): `bash
   scripts/measure-prompt-surface.sh` exited non-zero with Python's `Exception ignored in:
   <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'> OSError: [Errno 22] Invalid
@@ -1019,21 +1040,9 @@ change on either platform.
   full. No other suite is skipped under this ruling. Main files the follow-up issue after the
   owner's word.
 
-- **Vitest pool "Worker exited unexpectedly" on Windows (second sighting; architect: rerun
-  accepted).** Run 39927082964 (Node 22, a worker exiting without output in
-  `agy-lane-model.test.ts`) and run 42734572993 attempt 1 (Node 22, head `5bc668fb1`: all 389 files
-  and 7667 tests passed, then the pool reported an unhandled "Worker exited unexpectedly" with no
-  test attributed). Attempt 2 was green. Recorded; not skipped (nothing to skip).
-
-- **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
-  run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:
-  - The Phase 10 drive-root regression test (`findWorkspaceRoot.test.ts`) ran its child against
-    `dist/`, which the Ubuntu unit job does not build. It now runs the source under `tsx`.
-  - `spec-1658-posix-residue` "isTempDirectory on Windows" assumed the host temp dir is not under
-    `/tmp`. On Ubuntu, `os.tmpdir()` is `/tmp`. The POSIX-root assertions now apply only when the
-    host temp dir, as given or resolved, is not under that root.
-  Both green on the PR's `test.yml` (head 91ea359df) and on Windows (targeted runs 39930623116
-  and 39930636358).
+- **Main's #1880: three tests that run a `#!/bin/sh` stand-in codex skip on win32**
+  (`__tests__/bugfix-1880-codex-binary.test.ts`): a shebang script cannot be executed on Windows. Finding
+  M13 covers the product side (`consult.codexPath` with an npm `.cmd` shim).
 
 ## Follow-up Items
 
