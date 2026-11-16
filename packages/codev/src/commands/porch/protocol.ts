@@ -366,6 +366,17 @@ function normalizePhase(p: unknown): ProtocolPhase {
     if (typeof type !== 'string' || !Array.isArray(models) || !models.every(m => typeof m === 'string')) {
       throw new Error(`Invalid protocol phase "${phase.id}": consultation needs a string "type" and a "models" string array`);
     }
+    // `enabled` / `parallel` are not read for a phase block. A `false` is an intent porch would
+    // silently drop, so it fails here; a legacy `true` is a no-op and tolerated (older local copies
+    // of RESEARCH carried one).
+    for (const key of ['enabled', 'parallel'] as const) {
+      if (consultationRaw[key] === false) {
+        throw new Error(
+          `Invalid protocol phase "${phase.id}": consultation "${key}": false is not supported — porch does not read it. ` +
+            'To change or turn off a phase\'s reviewers, set porch.consultation in .codev/config.json (e.g. "none").',
+        );
+      }
+    }
     consultation = { type, models: models as string[] };
   }
 

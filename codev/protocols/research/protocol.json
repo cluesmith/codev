@@ -42,9 +42,7 @@
         "collect_all_reports"
       ],
       "consultation": {
-        "enabled": true,
         "models": ["gemini", "codex", "claude"],
-        "parallel": true,
         "type": "investigation"
       },
       "transition": {
@@ -79,9 +77,7 @@
         "finalize_report"
       ],
       "consultation": {
-        "enabled": true,
         "models": ["gemini", "codex", "claude"],
-        "parallel": true,
         "type": "critique"
       },
       "gate": {

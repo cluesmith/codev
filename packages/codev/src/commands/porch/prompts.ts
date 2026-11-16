@@ -176,9 +176,23 @@ function substituteVariables(
   }
 
   // Replace {{variable}} with values
-  return prompt.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
+  const result = prompt.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
     return variables[varName] || match;
   });
+
+  // A prompt that asks for reviewers but got none rendered would hand the builder a PR step with
+  // no consult commands. The usual cause is a local protocol.json older than its prompt (no
+  // `consultation` block on the phase), so fail here instead of shipping the literal token.
+  const unrendered = result.match(/\{\{consult_(?:commands|verdicts)\}\}/);
+  if (unrendered) {
+    throw new Error(
+      `Protocol "${state.protocol}", phase "${state.phase}": the prompt uses ${unrendered[0]} but the phase ` +
+        'declares no "consultation" block in protocol.json, so it would reach the builder with no reviewers. ' +
+        'Add "consultation": {"type": "<review type>", "models": [...]} to that phase (a local protocol.json ' +
+        'older than its prompt is the usual cause).',
+    );
+  }
+  return result;
 }
 
 /**

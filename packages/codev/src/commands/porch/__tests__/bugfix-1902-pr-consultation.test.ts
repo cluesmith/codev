@@ -147,6 +147,35 @@ describe('#1902 — PR-phase consultation honours porch.consultation', () => {
     });
   });
 
+  it('a prompt using a consult token in a phase with no consultation block fails fast', async () => {
+    // A local protocol.json older than its prompt: the token would otherwise reach the builder raw.
+    const file = path.join(tmp, 'codev', 'protocols', 'bugfix', 'protocol.json');
+    const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    delete json.phases.find((p: { id: string }) => p.id === 'pr').consultation;
+    fs.writeFileSync(file, JSON.stringify(json));
+    const protocol = loadProtocol(tmp, 'bugfix');
+    await expect(buildPhasePrompt(tmp, stateFor('bugfix', 'bugfix-1902'), protocol)).rejects.toThrow(
+      /phase "pr": the prompt uses \{\{consult_commands\}\} but the phase declares no "consultation" block/,
+    );
+  });
+
+  it.each(['enabled', 'parallel'])('consultation "%s": false is an error, not silently ignored', (key) => {
+    const file = path.join(tmp, 'codev', 'protocols', 'bugfix', 'protocol.json');
+    const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    json.phases.find((p: { id: string }) => p.id === 'pr').consultation = { type: 'pr', models: THREE, [key]: false };
+    fs.writeFileSync(file, JSON.stringify(json));
+    expect(() => loadProtocol(tmp, 'bugfix')).toThrow(new RegExp(`consultation "${key}": false is not supported`));
+  });
+
+  it('a legacy enabled/parallel: true is a tolerated no-op', () => {
+    const file = path.join(tmp, 'codev', 'protocols', 'bugfix', 'protocol.json');
+    const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    json.phases.find((p: { id: string }) => p.id === 'pr').consultation = { type: 'pr', models: THREE, enabled: true, parallel: true };
+    fs.writeFileSync(file, JSON.stringify(json));
+    const phase = loadProtocol(tmp, 'bugfix').phases.find((p) => p.id === 'pr');
+    expect(phase?.consultation).toEqual({ type: 'pr', models: THREE });
+  });
+
   it('a malformed consultation block is an error, not a silent skip', () => {
     const file = path.join(tmp, 'codev', 'protocols', 'bugfix', 'protocol.json');
     const json = JSON.parse(fs.readFileSync(file, 'utf-8'));

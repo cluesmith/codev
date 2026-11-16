@@ -24,7 +24,12 @@ const forgeScripts = path.resolve(import.meta.dirname, '..', '..', '..', '..', '
 
 const protocol = {
   name: 'bugfix',
-  phases: [{ id: 'pr', name: 'PR', type: 'once', build: { prompt: 'pr.md' } }],
+  // The consultation block the shipped BUGFIX PR phase declares: one test renders the real pr.md,
+  // whose {{consult_commands}} porch refuses to leave unrendered (#1902).
+  phases: [{
+    id: 'pr', name: 'PR', type: 'once', build: { prompt: 'pr.md' },
+    consultation: { type: 'pr', models: ['gemini', 'codex', 'claude'] },
+  }],
 } as unknown as Protocol;
 
 const state = {

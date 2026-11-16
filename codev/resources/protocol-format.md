@@ -54,7 +54,7 @@ Each phase in the `phases` array:
 | `checks` | object | No | Validation checks |
 | `gate` | object | No | Human approval gate |
 | `transition` | object | No | State transitions |
-| `consultation` | object | No | `{type, models}` for a review the builder runs from a `once` phase's prompt (BUGFIX/AIR PR phase); porch renders it into `{{consult_commands}}`, applying `.codev/config.json` `porch.consultation` |
+| `consultation` | object | No | `{type, models}` for a review the builder runs from a `once` phase's prompt (BUGFIX/AIR PR phase); porch renders it into `{{consult_commands}}`, applying `.codev/config.json` `porch.consultation`. No `enabled`/`parallel` switch (a `false` is rejected at load); a prompt using the token in a phase without the block fails at `porch next` |
 
 ### Phase Types
 

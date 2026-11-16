@@ -287,15 +287,9 @@
                 "type": "string"
               },
               "minItems": 1
-            },
-            "enabled": {
-              "type": "boolean"
-            },
-            "parallel": {
-              "type": "boolean"
             }
           },
-          "description": "Consultation the builder runs from a once phase's prompt (BUGFIX/AIR PR phase). Porch renders the commands into {{consult_commands}}, applying .codev/config.json porch.consultation."
+          "description": "Consultation the builder runs from a once phase's prompt (BUGFIX/AIR PR phase). Porch renders the commands into {{consult_commands}}, applying .codev/config.json porch.consultation. There is no enabled or parallel switch: turn reviewers off or change them in porch.consultation."
         },
         "max_iterations": {
           "type": "integer",
