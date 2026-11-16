@@ -143,6 +143,9 @@ disabled, unless it says otherwise.
   mid-turn or a human is typing, and delivered at an empty prompt. This rests on render-gate
   validation captures from real ConPTY sessions of each supported harness (at minimum claude and
   codex). Gate profiles are adjusted where those captures show different timing.
+  *Scope amendment (owner, 2026-11-17): met for claude in this spec. The codex half moves to
+  #1858: codex's status line defeats the gate's composer detection on every platform, so no codex
+  capture can be recorded until it is fixed; #1858 carries the codex captures.*
 
 **Persistence and lifecycle (the load-bearing guarantee)**
 - [ ] A spawned builder survives `afx tower stop` followed by `afx tower start`. Tower

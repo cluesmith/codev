@@ -160,10 +160,11 @@ with a ruling in A2.10. Divergences the moves preserved verbatim are listed in A
      drive-letter case: fixed in this PR for Windows, macOS follow-up #1870), M7 (the
      dashboard's Open IDE link sends a Windows path the IDE cannot resolve: fixed in this PR), M8
      (dashboard workspace buttons mangle a Windows path in an inline JS string: fixed in this PR).
-3. The #1858 codex scope decision (owner): recorded scope amendment, or wait for #1858.
+3. The #1858 codex scope decision (owner): **decided 2026-11-17, recorded scope amendment** (plan
+   Amendment 4; spec criterion annotated). The codex half of the capture criterion moves to #1858.
 4. The cwd-first executable lookup (Known gap below): a release blocker scheduled as the first
-   follow-up after merge, while the README announces native Windows support. Owner's call
-   whether the README wording is softened in this PR or the follow-up lands before release.
+   follow-up after merge. **Decided 2026-11-17: native Windows ships as a preview** (README and
+   both `DEPENDENCIES.md` copies say so and why); the follow-up removes the preview wording.
 5. Integration review: round 1's three must-fixes and round 2's four (PID-reuse-safe boot
    liveness, the documented invariant, `WorkspaceKeyedMap` typing, this section) are addressed.
 
@@ -189,8 +190,8 @@ composer region-end pattern matches only lowercase `gpt` / `high:`. Every codex 
 classifies `no-region-end`, so **all `afx send` mail to a codex agent holds, on every platform**,
 Windows included. This is not a Windows defect and is not fixed here (filed as #1858). Until it
 is fixed and codex ConPTY captures are recorded, the spec's "at minimum claude and codex"
-validation is met for claude only. Whether that ships as a recorded scope amendment or waits on
-#1858 is the owner's decision, pending at the time of writing.
+validation is met for claude only. **Owner decision (2026-11-17): a recorded scope amendment**
+(plan Amendment 4): the codex half, with the codex captures, moves to #1858.
 
 ### Known gap: bare user-tool spawns find a program in the cwd first (Windows release blocker)
 

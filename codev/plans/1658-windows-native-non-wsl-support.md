@@ -701,7 +701,7 @@ assumptions (#1567).
 
 #### Deliverables
 
-- [ ] ConPTY fixtures for claude and codex (agy if available on the owner's machine).
+- [ ] ConPTY fixtures for claude (codex moved to #1858 by Amendment 4; agy if available on the owner's machine).
 - [ ] Replay tests asserting held/delivered for each state.
 - [ ] Gate profile adjustments, if any, with POSIX behavior unchanged.
 
@@ -1510,6 +1510,24 @@ follow-up.
 the only non-import lines changed are the two splits, the merge, the census-type move, test mock
 paths, and comments naming old paths. check-types, full suites, POSIX CI, a Windows
 dispatch, repack.
+
+## Amendment 4 (2026-11-17): PR-gate decisions
+
+Owner decisions on the three open PR-gate items, taking the builder's recommendations:
+
+1. **Claude ConPTY fixtures: recorded before merge.** The owner records them on a Windows machine
+   with `scripts/spec-1658-conpty-capture.mts` run from inside the installed package; the builder
+   commits the four `conpty-claude-*.capture.jsonl.gz` files to
+   `__tests__/fixtures/gate/conpty/` and the replay suite runs them.
+2. **#1858 scope: recorded scope amendment.** The spec's "at minimum claude and codex" capture
+   criterion is met for claude here; the codex half, including codex captures, moves to #1858
+   (codex's status line defeats the gate's composer detection on every platform, so it is not a
+   Windows defect and no codex capture is possible until it is fixed).
+3. **cwd-first lookup vs the README: native Windows ships as a preview.** README and both
+   `DEPENDENCIES.md` copies say so and explain why (a bare-name user tool is found in the current
+   folder before `PATH`). The first follow-up after this PR routes those sites through the
+   `PATH`-only resolver and removes the preview wording. The architect's release-blocker ruling
+   stands for announcing full support; the preview wording keeps `main` releasable meanwhile.
 
 ## Risks and Mitigation
 
