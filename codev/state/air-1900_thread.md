@@ -44,3 +44,12 @@ fixture had `next: 'review'` and hid it. Fix: target `'review'` like handleVerif
 
 End to end, against the built `bin/porch.js` with a bare remote: skip → `implement → review`;
 `porch next` emits review tasks; `porch status` shows `⊘ phase_3: UI (skipped: <reason>)`.
+
+## Full-suite run (porch done #1)
+One failure: `src/__tests__/skill-refresh.test.ts`. Editing a shipped skill (porch SKILL.md)
+requires regenerating `src/lib/shipped-skill-hashes.ts`
+(`pnpm --filter @cluesmith/codev generate-skill-hashes`). Regenerated. I found the failing
+file in vitest's results cache (`node_modules/.vite/vitest/*/results.json`), not by
+re-running the suite; porch's check output truncates to `...`. Porch's strict check re-runs
+the full suite to advance, so that's a second full run, which can't be avoided without
+bypassing a check.
