@@ -31,12 +31,14 @@ const ROOTS = [
   '.codex/skills',
   'CLAUDE.md',
   'AGENTS.md',
+  'docs', // live user-facing pages (faq, tips, ...); release notes are history, excluded below
 ];
 
 const EXCLUDED = [
   /(^|\/)protocols\/pir\//, // out of scope for #1902
   /(^|\/)protocols\/release\//, // RELEASE problems are flagged to the architect, not rewritten
   /\/evals\//,
+  /^docs\/releases\//, // historical release notes describe what shipped then
 ];
 
 function walk(rel: string): string[] {
@@ -124,7 +126,9 @@ describe('#1902 A — commands that failed as written', () => {
   });
 
   it('no trailing-`&` consult backgrounding (run each as a background task instead)', () => {
-    expectNone(/^\s*consult\s.*\s&\s*$/, 'Use run_in_background tasks, not `&` + `wait`.');
+    // Agent-facing only: a human at a shell (docs/ pages) backgrounds with `&` + `wait`, correctly.
+    const hits = scan(/^\s*consult\s.*\s&\s*$/).filter((h) => !h.file.startsWith('docs/'));
+    expect(hits, `Use run_in_background tasks, not \`&\` + \`wait\`.\n${fmt(hits)}`).toEqual([]);
   });
 });
 
@@ -286,17 +290,39 @@ describe('#1902 D — dead machinery and stale text', () => {
     expectNone(/cd packages\/codev/, 'MAINTAIN must not hardcode this repo\'s package path.');
   });
 
-  it('gate lists match protocol.json wherever a protocol\'s gates are enumerated', () => {
-    // Derive the truth from the JSON, then check the porch skill's table against it.
+  const GATE_PROTOCOLS = ['spir', 'aspir', 'air', 'bugfix', 'pir', 'maintain', 'research', 'experiment'];
+  const gatesOf = (name: string): string[] =>
+    protocolJson('codev-skeleton', name)
+      .phases.map((p: { gate?: string | { name: string } }) => (typeof p.gate === 'string' ? p.gate : p.gate?.name))
+      .filter(Boolean) as string[];
+
+  it('the porch skill\'s gate table matches protocol.json row by row', () => {
     const skill = read('.claude/skills/porch/SKILL.md');
-    for (const name of ['spir', 'aspir', 'air', 'bugfix', 'maintain', 'research', 'experiment']) {
-      const json = protocolJson('codev-skeleton', name);
-      const gates = json.phases
-        .map((p: { gate?: string | { name: string } }) => (typeof p.gate === 'string' ? p.gate : p.gate?.name))
-        .filter(Boolean) as string[];
-      const row = skill.split('\n').find((l) => l.startsWith('|') && l.split('|')[1].toLowerCase().split(',').map((s) => s.trim()).includes(name));
+    for (const name of GATE_PROTOCOLS) {
+      const row = skill.split('\n').find((l) => l.startsWith('|') && l.split('|')[1].toLowerCase().split(',').map((x) => x.trim()).includes(name));
       expect(row, `porch skill has no gate row for ${name}`).toBeTruthy();
-      for (const gate of gates) expect(row, `${name}: ${gate}`).toContain(`\`${gate}\``);
+      for (const gate of gatesOf(name)) expect(row, `${name}: ${gate}`).toContain(`\`${gate}\``);
     }
+  });
+
+  it.each([
+    'codev-skeleton/roles/builder.md',
+    'codev/roles/builder.md',
+    'codev-skeleton/templates/lifecycle.md',
+    'codev/templates/lifecycle.md',
+    'CLAUDE.md',
+  ])('%s names every gate of every protocol', (doc) => {
+    // Each of these enumerates the gates per protocol; an omitted protocol is the drift #1902 fixed.
+    const body = read(doc);
+    for (const name of GATE_PROTOCOLS) {
+      for (const gate of gatesOf(name)) expect(body, `${doc} omits ${name}'s ${gate}`).toContain(`\`${gate}\``);
+    }
+  });
+
+  it.each(['codev-skeleton', 'codev'])('%s builder.md: "ready for cleanup" never precedes SPIR/ASPIR verification', (tree) => {
+    const lines = read(`${tree}/roles/builder.md`).split('\n').filter((l) => /Ready for cleanup/.test(l));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line, line).toMatch(/no `verify` phase|Verified/);
+    expect(read(`${tree}/roles/builder.md`)).toMatch(/PR merged — SPIR, ASPIR \| `afx send architect "Project <id>: PR merged\. Entering verify\."`/);
   });
 });

@@ -19,7 +19,9 @@ Never hand-edit `status.yaml` — only porch commands modify project state.
 
 Porch stops at the human approval gates your protocol defines — SPIR: `spec-approval`,
 `plan-approval`, `pr`, `verify-approval`; ASPIR: `pr`, `verify-approval`; AIR and BUGFIX: `pr`;
-MAINTAIN: `maintain-complete`. When it does: say so, **stop**, and wait.
+PIR: `plan-approval`, `dev-approval`, `pr`; MAINTAIN: `maintain-complete`; RESEARCH:
+`scope-approval`, `research-complete`; EXPERIMENT: `experiment-complete`. When it does: say so,
+**stop**, and wait.
 
 Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
 
@@ -54,11 +56,14 @@ They are not watching. Send a message at each of these:
 |---|---|
 | Gate reached | `afx send architect "Project <id>: <gate> ready for approval"` |
 | PR ready | `afx send architect "PR #N ready for review"` |
-| PR merged | `afx send architect "Project <id> complete. PR merged. Ready for cleanup."` |
+| PR merged — protocols with no `verify` phase (BUGFIX, AIR, PIR, MAINTAIN) | `afx send architect "Project <id> complete. PR merged. Ready for cleanup."` |
+| PR merged — SPIR, ASPIR | `afx send architect "Project <id>: PR merged. Entering verify."` |
+| Verified — SPIR, ASPIR, after `verify-approval` | `afx send architect "Project <id> verified. Ready for cleanup."` |
 | Blocked | `afx send architect "Blocked on X — need guidance"` |
 
 SPIR and ASPIR merge inside their `verify` phase: after merging, run `porch done <id>`; porch then
-stops at `verify-approval`, which is a gate like any other.
+stops at `verify-approval`, which is a gate like any other. Do not announce "ready for cleanup"
+before that gate is approved — the worktree is still needed for verification.
 
 When blocked, state the problem and the options you see, then wait. Don't guess past a decision
 that isn't yours.
