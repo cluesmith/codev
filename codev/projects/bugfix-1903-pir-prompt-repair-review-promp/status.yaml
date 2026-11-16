@@ -1,0 +1,14 @@
+id: bugfix-1903
+title: pir-prompt-repair-review-promp
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-16T05:15:32.667Z'
+updated_at: '2026-11-16T05:15:32.669Z'
