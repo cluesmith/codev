@@ -21,7 +21,6 @@ import type { BuilderFileChange } from '../views/builder-diff-cache.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// spec-1658-tmp: opaque (the remaining /tmp/wt strings are labels on BuilderFileTreeItem, never read from disk)
 /** A worktree path that does not exist: the review-file probe (existsSync) finds nothing. */
 const MISSING_WORKTREE = join(tmpdir(), 'codev-test-missing-worktree');
 

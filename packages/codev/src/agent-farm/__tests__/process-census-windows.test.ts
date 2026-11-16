@@ -9,12 +9,12 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { execFile } from 'node:child_process';
+import { listProcessCensus } from '../servers/process-census.js';
 import {
   WINDOWS_CENSUS_QUERY,
   createWindowsCensusProvider,
-  listProcessCensus,
   parseWindowsCensus,
-} from '../servers/process-census.js';
+} from '../servers/process-census-windows.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 vi.mock('node:child_process', async () => {

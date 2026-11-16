@@ -9,8 +9,6 @@
  * JSON config contains the worktree path, killing them via process group signal.
  */
 
-// spec-1658-tmp: opaque (every /tmp socket is inside fake ps output from a mocked execFile; nothing touches the disk)
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { killShellperProcesses } from '../commands/cleanup.js';
 import { execFile } from 'node:child_process';

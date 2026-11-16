@@ -13,7 +13,8 @@ import { createHmac } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TMPDIR || '/tmp'}/pir-1869-ws-${process.pid}-${Date.now()}`);
+// os.tmpdir() is TMPDIR or /tmp on POSIX (as before) and a real directory on Windows.
+const TMP_DIR = vi.hoisted(() => `${require('node:os').tmpdir()}/pir-1869-ws-${process.pid}-${Date.now()}`);
 const KEY = 'c'.repeat(64);
 const { logLines } = vi.hoisted(() => ({ logLines: [] as string[] }));
 

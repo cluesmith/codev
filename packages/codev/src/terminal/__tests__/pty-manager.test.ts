@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
 import { TerminalManager } from '../pty-manager.js';
-// spec-1658-tmp: opaque (the /tmp workspaceRoot only reaches the mocked node-pty spawn, and disk logging is off)
 
 // Mock node-pty
 const mockPty = {

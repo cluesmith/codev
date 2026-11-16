@@ -96,8 +96,8 @@ the owner's Windows machine, which CI cannot cover.
   never required (Phases 1, 11).
 - [x] POSIX shellper endpoint, handshake and no-secret path unchanged (Phase 2).
 - [x] No hardcoded `/tmp` in Windows-meant tests; POSIX-only tests skip on win32 naming the
-  assumption; `sun_path`-motivated `/tmp` kept on POSIX (Phase 10, checked by
-  `scripts/spec-1658-tmp-residue-check.mjs`).
+  assumption; `sun_path`-motivated `/tmp` kept on POSIX (Phase 10; checked in CI by
+  `scripts/tmp-residue-check.mjs` against `scripts/tmp-residue-allowlist.json`).
 
 **Docs**
 - [x] DEPENDENCIES.md (both trees) presents native Windows and WSL 2 with limitations; Linux/WSL

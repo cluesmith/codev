@@ -3,7 +3,6 @@
  * through the platform seam. POSIX behavior is covered by each site's own
  * existing tests.
  */
-// spec-1658-tmp: opaque (/tmp/ws and /private/tmp/ws are strings fed to isTempDirectory, which compares them with string ops)
 
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';

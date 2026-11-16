@@ -12,7 +12,6 @@ import Database from 'better-sqlite3';
 import type { TowerHandle } from './helpers/tower-test-utils.js';
 import { startTower, cleanupAllTerminals, cleanupTestDb } from './helpers/tower-test-utils.js';
 
-// spec-1658-tmp: posix-only (every suite is skipped on win32 via skipOnWindows; /tmp is the session cwd)
 // POSIX-only assertions: Tower spawns /bin/echo and /bin/sleep sessions and pgrep for the PTY child, with cwd /tmp.
 const skipOnWindows = process.platform === 'win32';
 

@@ -13,8 +13,6 @@
  * only `CLAUDECODE`, so each of the assertions below on a real spawn path failed.
  */
 
-// spec-1658-tmp: opaque (every /tmp is a fake env var value fed to sanitizeAgentEnv and marker detection; nothing touches the disk)
-
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

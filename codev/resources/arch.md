@@ -1267,10 +1267,9 @@ server must not import the client sdk.
 
 **sdk charter (#1658 integration review).** The sdk has two roles. Its environment-agnostic
 graph is the single implementation of how anything talks to Tower. Its `/node` subpaths
-(`./node`, `./node/executable`) are the home for **Node-side utilities shared by Tower's clients
-and the CLI**, whether or not they talk to Tower: `node` holds local-key auth, and
-`node/executable` holds `PATHEXT` executable and `.cmd` shim resolution, used by the CLI, Tower and
-the VS Code extension alike. A new shared Node utility lands under a `/node` subpath by this
+(`./node`, `./node/executable`) hold **small Node-only helpers that the CLI, Tower and the VS Code
+extension all need, even ones unrelated to Tower**: `node` holds local-key auth, and
+`node/executable` holds `PATHEXT` executable and `.cmd` shim resolution. A new shared Node utility lands under a `/node` subpath by this
 decision; it still follows the isolation invariant (no codev-core import, zero runtime deps) and
 never leaks into the environment-agnostic graph.
 

@@ -43,16 +43,6 @@ export interface CensusReadOptions {
   fresh?: boolean;
 }
 
-export {
-  WINDOWS_CENSUS_QUERY,
-  WINDOWS_CENSUS_TIMEOUT_MS,
-  WINDOWS_CENSUS_TTL_MS,
-  parseWindowsCensus,
-  createWindowsCensusProvider,
-  type PowerShellExec,
-  type WindowsCensusProviderOptions,
-} from './process-census-windows.js';
-
 /**
  * Snapshot every running process. POSIX resolves to `[]` when `ps` fails. On
  * Windows a failure REJECTS: the census is load-bearing for teardown and the

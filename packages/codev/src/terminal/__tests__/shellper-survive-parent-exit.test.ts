@@ -12,7 +12,6 @@
  * 1. Shellper spawned with file-based stderr (not a pipe) survives parent exit
  * 2. The stderr log file receives diagnostic output
  */
-// spec-1658-tmp: posix-only (the suite is skipped on win32; the reason is at the skip)
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawn as cpSpawn } from 'node:child_process';

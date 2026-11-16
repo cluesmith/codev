@@ -11,8 +11,6 @@
  * function was called.
  */
 
-// spec-1658-tmp: opaque (WORKTREE is a key in the in-memory FakeFs and fake git/terminal ports; nothing touches the disk)
-
 import type {
   SelfRefreshClockPort,
   SelfRefreshFsPort,

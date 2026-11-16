@@ -22,8 +22,6 @@ import { test, expect } from '@playwright/test';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-// spec-1658-tmp: opaque (the /tmp worktreePath is a field in the mocked /api/overview response)
-
 const TOWER_URL = `http://localhost:${process.env.TOWER_TEST_PORT || '4100'}`;
 const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../../');
 const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');

@@ -3,8 +3,6 @@
  * Tests recordUserInput(), isUserIdle(), and lastInputAt.
  */
 
-// spec-1658-tmp: opaque (cwd and logDir /tmp are config strings for a PtySession whose node-pty and fs log calls are mocked)
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock node-pty so PtySession can be instantiated without a real PTY

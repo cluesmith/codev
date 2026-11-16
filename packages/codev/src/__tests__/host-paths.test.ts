@@ -3,8 +3,6 @@
  * old behavior; the Windows branch is forced through the platform seam.
  */
 
-// spec-1658-tmp: opaque (every /tmp is an input to pure string path comparisons under a forced platform; nothing touches the disk)
-
 import { describe, expect, it } from 'vitest';
 import {
   endsWithHostSeparator,

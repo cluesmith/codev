@@ -21,7 +21,6 @@ import {
 } from '../shellper-protocol.js';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
 import { testEndpointIn } from './shellper-test-endpoint.js';
-// spec-1658-tmp: opaque (every /tmp is a cwd handed to a MockPty or carried in a SPAWN frame; the real socket lives under os.tmpdir())
 
 // --- Mock PTY ---
 

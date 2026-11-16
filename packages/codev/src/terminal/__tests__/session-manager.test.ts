@@ -12,7 +12,6 @@ import { isWindows, resetHostPlatformForTests } from '../../lib/platform.js';
 import { testEndpointIn } from './shellper-test-endpoint.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
-// spec-1658-tmp: posix-only (real disk and process uses of /tmp sit in the real-shellper tests, skipped on win32 by skipRealShellper; the rest are mock cwd strings)
 // Real-shellper tests are skipped in CI, where the child cannot resolve the
 // node-pty binding, and on win32: they run /bin/echo, /bin/sh, /bin/cat and
 // /bin/bash under a Unix-socket shellper with cwd /tmp (POSIX-only).
