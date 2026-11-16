@@ -36,3 +36,19 @@ install whose own lockfile already resolved an old 0.2.x — the floor raise clo
 **Fix scope.** Floor → `^0.2.141` (the version every fresh install already runs), refresh the
 lockfile, regression test pinning both the declared floor and the installed version (same shape as
 #1880's codex-CLI floor test). Well under BUGFIX's ceiling. 0.3.x is out of scope.
+
+## Fix + PR #1907 (2026-11-16)
+
+- Floor `^0.2.41` → `^0.2.141`; lockfile refreshed (diff confined to the SDK subtree: SDK + per-platform
+  native-binary packages, `@anthropic-ai/sdk` 0.81→0.93, `@img/sharp-*` optionals dropped).
+- Regression test `consult/__tests__/bugfix-1906-claude-sdk-floor.test.ts` (installed version ≥ 0.2.141,
+  declared floor ≥ 0.2.141, default model pinned). Proven to fail on main's manifest+lockfile (2 failed)
+  and pass with the fix.
+- E2E: worktree `consult -m claude` on claude-opus-5 over the API key — 400 before, review after.
+- Per architect instruction, ran only the touched test while iterating; the full suite ran once, via
+  porch's fix-phase `tests` check (pass).
+- CMAP (repo lanes codex + claude; agy skipped, broken for `--type` reviews): codex=APPROVE (HIGH),
+  claude=APPROVE (HIGH). The claude review itself ran on the worktree build — the path that used to 400.
+  Non-blocking notes, not taken (BUGFIX minimal scope), surfaced to the architect: log the SDK
+  version on the claude lane like #1880 does for codex; open a 0.3.x migration follow-up (0.2.141 is
+  the last 0.2.x, so the caret is now effectively a pin).
