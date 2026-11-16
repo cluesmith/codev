@@ -20,6 +20,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     'fac0620bac39b8434450a6557bb8a42dedfe3b100f46d2fed337de03ebb5a0e9',
   ],
   '.claude/skills/afx': [
+    '14f2d63a22ead8f3cc0a51e05230594a050761ede76257b830ecb5328846de98',
     '1bfa5b78353707681e5a5236c9830a120b5c22dc42dec3b6f9d3db6c20d14907',
     '2df1b560a49af9108c2fa668d8cf5978640747ad4c5bd598d52e1335f74447b5',
     '51124491de1c1d9c64685941661f749621e35395000d8012c38f5e9f6004f7f4',
@@ -67,6 +68,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     'ab303b1ef6fe0b0b45cff515414b74417b1e5dbf7df17ed23e972ff382d3333e',
   ],
   '.claude/skills/codev': [
+    '101ce03a54139bf7fab1ec95b9ba8c686b4b5dcad88bb1ae4242c7d318bff3a7',
     '13f4f981eb1b4e2fb42a76551f84e3f756fc610fde6a96944885a8cee7b40d67',
     '177bd31ba5df1fea19761061ff1a0684d1792f5aaf29a24c158b94212b0a83b2',
     '445ddbf99fd54dc14418fd1920d93448978692199e968b2e92037402b4950862',
@@ -83,6 +85,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     '253bf8b698f0fef437552a0dc81e52764d1c6b25994fab0820edd17f829fa0a5',
     '8824d4c16d933e4c284a52dc1755b49a842fe30cece2cb0bede32a0364d37554',
     '8a8476ac7360644ac6a22e2ffd1ac057baee63d3417300dd24411e9d580eaf6e',
+    '9d75d339dc41ecec2912f522f8937ea41f13d34cbae5668a7a72cf57f9b4e886',
     'aaf54b22ca4c6d39497934b29407fe97f3580f9c866e4706a7827fa812e44e28',
     'c2697868ed6a0f25d4e116877bd7699aef9259e11f3e27131e2c01af4c4a5f61',
     'dfa095714c460375c900d7491ba6e045136594d211381cf78cb15b8356c90041',
@@ -100,6 +103,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     '6dfe37f372f890f9f1bbfb531f3a7684a5d1bceb0c568f9e67ff190549b07ab4',
     '7b56d9fcbded52b062bddd5c889d41c571f2f7e3b3696eca2239af46c3d16691',
     'b1f49ca7947d0216a150c9160c0e1ca3720904b5a727c4d438520462dde9aa0d',
+    'b811a74a097a7b9ddf00b7f30a907186026220d09625a675dfa805e6bdf2128f',
     'cbea3254263c98713076ebf666e0805e029cfc809229e7fbf1f71c87dd5a0767',
   ],
   '.claude/skills/runnable-worktrees': [
@@ -117,6 +121,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     'e1e75902421117e7de766ea88693d32499a7367d282de9aeff7da0b01745ad44',
   ],
   '.codex/skills/afx': [
+    '14f2d63a22ead8f3cc0a51e05230594a050761ede76257b830ecb5328846de98',
     '2df1b560a49af9108c2fa668d8cf5978640747ad4c5bd598d52e1335f74447b5',
     '554a152d3b11a51eb93000c6ad2520f49c8d153d89d88105cd5cbee4bad74c5c',
     '69af469e4fd5a31a9ce2c4944e4231486072cf33e4e8aaf79451951589f658ea',
@@ -160,6 +165,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     'ab303b1ef6fe0b0b45cff515414b74417b1e5dbf7df17ed23e972ff382d3333e',
   ],
   '.codex/skills/codev': [
+    '101ce03a54139bf7fab1ec95b9ba8c686b4b5dcad88bb1ae4242c7d318bff3a7',
     '177bd31ba5df1fea19761061ff1a0684d1792f5aaf29a24c158b94212b0a83b2',
     '60c64eb94401c1e89c3b48f7e7f809c269c0e7cda534177127c5db3d59f3487f',
     '9039170e6dae4b3041ad573695dedbb0cad3aa55a2ff4086e5916bb6e7f88800',
@@ -167,6 +173,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     'e77f9ad767b7eb2f174839498851097950db72c467490b23d0bfadb0bb64a57a',
   ],
   '.codex/skills/consult': [
+    '9d75d339dc41ecec2912f522f8937ea41f13d34cbae5668a7a72cf57f9b4e886',
     'dfa095714c460375c900d7491ba6e045136594d211381cf78cb15b8356c90041',
     'f7007e62436ad1c048ea9044b49d25ab5d21b438f844dc1170885d6d531c2156',
   ],
@@ -180,6 +187,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     '59feb29e6855f49678770266c054a3d2040a88d99c22a14fa75670f0c4b4f9da',
     '6dfe37f372f890f9f1bbfb531f3a7684a5d1bceb0c568f9e67ff190549b07ab4',
     'b1f49ca7947d0216a150c9160c0e1ca3720904b5a727c4d438520462dde9aa0d',
+    'b811a74a097a7b9ddf00b7f30a907186026220d09625a675dfa805e6bdf2128f',
   ],
   '.codex/skills/runnable-worktrees': [
     '8d52f4b10829b1d2d81774dcc39c10948c33c42202f2f0a8efb6e02d8d913db8',

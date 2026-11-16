@@ -17,28 +17,30 @@ afx spawn [number] [options]
 
 | Flag | Description |
 |------|-------------|
-| `--protocol <name>` | Protocol: spir, aspir, air, bugfix, tick, maintain, experiment. **Required for numbered spawns.** |
+| `--protocol <name>` | Protocol: spir, aspir, air, bugfix, pir, maintain, experiment. **Required for numbered spawns.** |
 | `--task <text>` | Ad-hoc task (no issue number needed) |
 | `--shell` | Bare Claude session |
 | `--worktree` | Bare worktree session |
-| `--amends <number>` | Original spec number (TICK only) |
 | `--files <files>` | Context files, comma-separated. **Requires `--task`.** |
 | `--no-comment` | Skip commenting on the GitHub issue |
 | `--force` | Skip dirty-worktree and collision checks |
 | `--soft` | Soft mode (AI follows protocol, you verify) |
 | `--strict` | Strict mode (porch orchestrates) — this is the default |
 | `--resume` | Resume builder in existing worktree |
+| `--branch <name>` | Build on an existing remote branch instead of creating one. **Requires `--protocol`.** |
+| `--remote <name>` | Remote to fetch the `--branch` from (fork PRs) |
 | `--no-role` | Skip loading role prompt |
 
-**There is NO `-t`, `--title`, `--name`, or `--branch` flag.** The branch name is auto-generated from the issue title.
+**There is NO `-t`, `--title`, or `--name` flag.** The worktree is `.builders/<protocol>-<id>` and the branch `builder/<protocol>-<id>`, unless `--branch` reuses an existing one.
 
 **Examples:**
 ```bash
 afx spawn 42 --protocol spir           # SPIR builder for issue #42
-afx spawn 42 --protocol aspir          # ASPIR (autonomous, no human gates)
+afx spawn 42 --protocol aspir          # ASPIR (no spec/plan gates)
 afx spawn 42 --protocol air            # AIR (small features)
 afx spawn 42 --protocol bugfix         # Bugfix
-afx spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
+afx spawn 42 --protocol pir            # PIR (plan, dev and pr gates)
+afx spawn 42 --protocol spir --branch fix/foo --remote fork   # Reuse a contributor's branch
 afx spawn 42 --protocol spir --soft    # Soft mode
 afx spawn 42 --resume                  # Resume existing builder
 afx spawn --task "fix the flaky test"  # Ad-hoc task (no issue)
@@ -52,7 +54,7 @@ afx spawn 42 --protocol spir --force   # Skip dirty-worktree check
 
 ## afx send
 
-Sends a message to a running builder.
+Sends a message to a builder or an architect (see the addressing forms below).
 
 ```
 afx send [builder] [message]
@@ -65,17 +67,21 @@ afx send [builder] [message]
 | `--interrupt` | Send Ctrl+C first |
 | `--raw` | Skip structured formatting |
 | `--no-enter` | Don't press Enter after message |
+| `--delay <seconds>` | Deliver after N seconds (persisted; survives a Tower restart, except a delayed `--interrupt` ^C) |
 
 ```bash
-afx send 0042 "PR approved, please merge"
-afx send 0585 "check the test output" --file /tmp/test-results.txt
+afx send spir-42 "PR approved, please merge"
+afx send 585 "check the test output" --file /tmp/test-results.txt
 ```
+
+The reply is `delivered`, or `held` with a reason: a held message waits in Tower's mailbox and
+delivers once the recipient's prompt is clear. See `afx inbox`.
 
 **Addressing forms** — the recipient isn't only a builder ID:
 
 | Form | Routes to |
 |------|-----------|
-| `afx send 0585 "…"` | Builder `0585` (zero-padded). |
+| `afx send spir-585 "…"` | Builder `spir-585`. A bare `585` also works when exactly one builder id ends in it; leading zeros are ignored. |
 | `afx send architect "…"` | From a builder: its spawning architect. From an architect: the `main` architect (else first registered). |
 | `afx send architect:<name> "…"` | A specific named architect (sibling-architect messaging). Architects can address any architect; a builder may only use its own `spawnedByArchitect`. |
 | `afx send <workspace>:architect "…"` | The architect in **another workspace** (cross-workspace). |
@@ -107,8 +113,8 @@ A builder chaining foreground waits inside one turn queues every `afx send` unre
 to stop. ESC ends the turn so the queue processes. Distinct from `afx send --interrupt` (Ctrl+C).
 
 ```bash
-afx interrupt 0042
-afx send 0042 "That producer died — stop waiting and report."
+afx interrupt spir-42
+afx send spir-42 "That producer died — stop waiting and report."
 ```
 
 ## afx refresh
@@ -139,10 +145,35 @@ naming the gate. Requires a harness with in-session context clearing (Claude Cod
 in a future release.
 
 ```bash
-afx refresh 0042 --dry-run                # inspect first — touches nothing
-afx refresh 0042
-afx refresh 0042 --note "PR #90 merged while you were mid-phase. Rebase first."
-afx refresh 0042 --interrupt-first        # builder is wedged mid-turn
+afx refresh spir-42 --dry-run                # inspect first — touches nothing
+afx refresh spir-42
+afx refresh spir-42 --note "PR #90 merged while you were mid-phase. Rebase first."
+afx refresh spir-42 --interrupt-first        # builder is wedged mid-turn
+```
+
+## afx self-refresh
+
+A builder refreshes **its own** context at a protocol boundary: save state, verify it, clear,
+re-orient. Two steps — `--begin` issues the challenge and prints what to save, then a second
+call verifies the saved state and clears. Porch chooses the moment (a context-refresh task);
+the `builder-refresh` skill carries the procedure.
+
+| Flag | Description |
+|------|-------------|
+| `--begin` | Issue the challenge and print what to save (step 1 of 2) |
+| `--boundary <id>` | Protocol boundary this refresh is for (e.g. `enter:review`) |
+| `--note <text>` | Addendum appended to the re-orientation |
+| `--dry-run` | Verify and assemble; send and clear nothing |
+| `--delay <seconds>` | Seconds Tower holds the re-entry before delivering it |
+
+## afx inbox
+
+Held (undelivered) messages for this workspace.
+
+```bash
+afx inbox                       # List held messages
+afx inbox show <id>             # One message, including its body
+afx inbox dismiss <id>          # Mark it dismissed; it is never delivered
 ```
 
 ## afx cleanup
@@ -165,7 +196,7 @@ afx cleanup -p 585              # Clean up project 585
 afx cleanup -p 585 -f           # Force (unmerged branch)
 ```
 
-**Note:** `afx cleanup` uses plain numbers (`585`), not zero-padded (`0585`). But `afx send` uses zero-padded IDs (`0585`).
+**Note:** `afx cleanup -p` takes the plain number (`585`), not a zero-padded one (`0585`). `afx send` takes the full builder id (`spir-585`) or the bare number.
 
 ## afx status
 
@@ -294,4 +325,6 @@ afx attach                      # Attach to running builder terminal
 afx rename <name>               # Rename current shell session
 afx decisions init              # Create the decisions file; turns on the Decisions tab
 afx architect                   # Start architect session in current terminal
+afx dev [builder-id]            # Run a builder's dev server (see the runnable-worktrees skill)
+afx setup [builder-id]          # Re-run worktree.postSpawn for an existing builder
 ```
