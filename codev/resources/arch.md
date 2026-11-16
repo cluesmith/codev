@@ -1046,10 +1046,8 @@ branches are testable on macOS/Linux.
 - **Layout** (Amendment 3): platform-specific code lives in a `posix/` or `windows/` folder of
   its own layer: `lib/platform/{posix,windows}/` for mechanism, `agent-farm/commands/windows/`
   for Tower's Windows start/stop (`tower-lifecycle.ts`). Everything outside those folders is
-  shared. `lib/` does not import `agent-farm/`, except three known residuals:
-  `lib/platform/windows/command-launch.ts` (`shellEscapeSingleQuote`), `lib/platform/host-paths.ts`
-  and `windows/host-paths.ts` (the `BuilderWorktreeRef` type), and the older `lib/config.ts`
-  (`validateCustomHarnessConfig`).
+  shared. `lib/` does not import `agent-farm/`, except the older `lib/config.ts`
+  (`validateCustomHarnessConfig`, a known residual).
 - **Endpoint**: chosen by `shellperTransport()`; `terminal/shellper-endpoint.ts` holds the
   helpers that branch on the endpoint's form. POSIX: Unix socket `shellper-<id>.sock` (0600),
   reconnect gated on the start time and the socket file. Windows: named pipe

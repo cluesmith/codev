@@ -10,8 +10,7 @@
 
 import { existsSync, realpathSync } from 'node:fs';
 import * as path from 'node:path';
-import type { BuilderWorktreeRef } from '../../../agent-farm/utils/builder-worktree-identity.js';
-import type { HostPaths, WorkspacePathOps } from '../host-paths.js';
+import type { BuilderWorktreeRef, HostPaths, WorkspacePathOps } from '../host-paths.js';
 
 /** The real filesystem calls; the one home for the default ops (workspace-path uses them too). */
 export const defaultWorkspacePathOps: WorkspacePathOps = {

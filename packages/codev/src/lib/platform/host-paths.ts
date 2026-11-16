@@ -13,7 +13,6 @@
  * both use it without a dependency cycle.
  */
 
-import type { BuilderWorktreeRef } from '../../agent-farm/utils/builder-worktree-identity.js';
 import { isWindows } from '../platform.js';
 import { posixHostPaths } from './posix/host-paths.js';
 import { windowsHostPaths } from './windows/host-paths.js';
@@ -22,6 +21,12 @@ import { windowsHostPaths } from './windows/host-paths.js';
 export interface WorkspacePathOps {
   realpath: (p: string) => string;
   realpathNative: (p: string) => string;
+}
+
+/** A builder worktree path split into its owning workspace and directory name. */
+export interface BuilderWorktreeRef {
+  workspacePath: string;
+  worktreeDirName: string;
 }
 
 export interface HostPaths {

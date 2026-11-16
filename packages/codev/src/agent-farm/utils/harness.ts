@@ -17,6 +17,7 @@
  * @see codev/specs/591-af-workspace-failure-with-code.md
  */
 
+import { shellEscapeSingleQuote } from '../../lib/shell-quote.js';
 import { findLatestSessionId, verifySessionOwnership } from './claude-session-discovery.js';
 import { buildWorktreeGuardFiles } from './worktree-write-guard.js';
 
@@ -465,14 +466,6 @@ function expandTemplateVars(template: string, roleContent: string, roleFilePath:
  */
 export function toShellPath(path: string): string {
   return path.replace(/\\/g, '/');
-}
-
-/**
- * Escape a string for safe inclusion inside single quotes in bash.
- * Replaces ' with '\'' (end quote, escaped quote, start quote).
- */
-export function shellEscapeSingleQuote(value: string): string {
-  return value.replace(/'/g, "'\\''");
 }
 
 // =============================================================================

@@ -1499,10 +1499,12 @@ in product code (`*.windows.test.ts` keeps its meaning: a test that runs only on
 `collectTree`, `ROOT_START_TOLERANCE_MS`; `port`'s `parsePidLines`; `shell-launch`'s
 `windowsPowerShellPath`; the start module's `isInsideCodevSession`.
 
-**Known residual `lib/` to `agent-farm/` imports, not chased here:**
-`lib/platform/windows/command-launch.ts` (`shellEscapeSingleQuote`, value),
-`lib/platform/host-paths.ts` and `windows/host-paths.ts` (`BuilderWorktreeRef`, type only), and
-`lib/config.ts` (`validateCustomHarnessConfig`, on `main` before this PR).
+**`lib/` to `agent-farm/` imports.** Two of the three residuals were then removed (owner choice,
+2026-11-16): `shellEscapeSingleQuote` moved to `lib/shell-quote.ts` (its four users import it
+there), and `BuilderWorktreeRef` is defined with the host paths capability
+(`lib/platform/host-paths.ts`; `builder-worktree-identity.ts` re-exports it). The one left is
+`lib/config.ts` (`validateCustomHarnessConfig`), which predates this PR and is not Windows code: a
+follow-up.
 
 **Verification.** Imports were recomputed by script from the committed files, not edited by hand;
 the only non-import lines changed are the two splits, the merge, the census-type move, test mock

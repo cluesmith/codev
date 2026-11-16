@@ -18,13 +18,10 @@
 import { join } from 'node:path';
 import { normalizeWorkspacePath } from './workspace-path.js';
 import { lastPathSegment } from '../../lib/host-paths.js';
-import { hostPaths } from '../../lib/platform/host-paths.js';
+import { hostPaths, type BuilderWorktreeRef } from '../../lib/platform/host-paths.js';
 
-/** A builder worktree path split into its owning workspace and directory name. */
-export interface BuilderWorktreeRef {
-  workspacePath: string;
-  worktreeDirName: string;
-}
+// Defined with the host paths capability that produces it; re-exported for this module's callers.
+export type { BuilderWorktreeRef };
 
 /** The builder row columns the matcher reads. */
 export interface BuilderWorktreeRow {

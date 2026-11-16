@@ -17,7 +17,7 @@ import { windowsPtyBaseEnv } from './pty-env.js';
 import { findOnHostPath, spawnableOnHost, type Launch } from '../../host-executable.js';
 import { gitBashCommand, gitBashEnv, gitBashFor, gitBashScript, windowsInteractiveShell } from './git-bash-launch.js';
 import { windowsPowerShellPath } from '../../platform.js';
-import { shellEscapeSingleQuote } from '../../../agent-farm/utils/harness.js';
+import { shellEscapeSingleQuote } from '../../shell-quote.js';
 import type { CommandLaunch, ShellExecOptions } from '../command-launch.js';
 
 /**
