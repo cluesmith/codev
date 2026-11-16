@@ -4,7 +4,8 @@
  * Extracts implementation phases from plan.md files.
  * Looks for `### Phase N: <title>` headers or JSON phases block.
  *
- * Plan phases are simple: pending → in_progress → complete.
+ * Plan phases are simple: pending → in_progress → complete. A human can drop
+ * an unbuilt phase with `porch skip-phase` (status `skipped`, #1900).
  * All checks (implement, defend, evaluate) run together at the end.
  */
 
@@ -153,15 +154,24 @@ export function isPlanPhaseComplete(phase: PlanPhase): boolean {
 }
 
 /**
- * Get the current plan phase (first non-complete phase)
+ * Check if a plan phase is settled — built (`complete`) or dropped from the plan
+ * by a human (`skipped`, #1900). Either way there is nothing left to build, so
+ * navigation treats both the same.
+ */
+export function isPlanPhaseSettled(phase: PlanPhase): boolean {
+  return phase.status === 'complete' || phase.status === 'skipped';
+}
+
+/**
+ * Get the current plan phase (first unsettled phase)
  */
 export function getCurrentPlanPhase(phases: PlanPhase[]): PlanPhase | null {
   for (const phase of phases) {
-    if (phase.status !== 'complete') {
+    if (!isPlanPhaseSettled(phase)) {
       return phase;
     }
   }
-  return null; // All phases complete
+  return null; // All phases complete or skipped
 }
 
 /**
@@ -176,10 +186,10 @@ export function getNextPlanPhase(phases: PlanPhase[], currentPhaseId: string): P
 }
 
 /**
- * Check if all plan phases are complete
+ * Check if all plan phases are settled (complete or skipped)
  */
 export function allPlanPhasesComplete(phases: PlanPhase[]): boolean {
-  return phases.every(isPlanPhaseComplete);
+  return phases.every(isPlanPhaseSettled);
 }
 
 /**
@@ -196,20 +206,64 @@ export function advancePlanPhase(
     return { phases, moveToReview: false };
   }
 
-  const updatedPhases = phases.map((p, i) => {
-    if (i === phaseIndex) {
-      return { ...p, status: 'complete' as const };
-    }
-    if (i === phaseIndex + 1) {
-      return { ...p, status: 'in_progress' as const };
-    }
-    return p;
-  });
+  const updatedPhases = phases.map((p, i) =>
+    i === phaseIndex ? { ...p, status: 'complete' as const } : p,
+  );
 
-  // Check if all phases are now complete
-  const moveToReview = updatedPhases.every(p => p.status === 'complete');
+  // Hand in_progress to the next unsettled phase, stepping over skipped ones
+  // (#1900) — marking `phaseIndex + 1` blindly would resurrect a skipped phase.
+  const nextIndex = updatedPhases.findIndex((p, i) => i > phaseIndex && !isPlanPhaseSettled(p));
+  if (nextIndex >= 0) {
+    updatedPhases[nextIndex] = { ...updatedPhases[nextIndex], status: 'in_progress' as const };
+  }
+
+  // Check if all phases are now settled
+  const moveToReview = updatedPhases.every(isPlanPhaseSettled);
 
   return { phases: updatedPhases, moveToReview };
+}
+
+/**
+ * Mark one plan phase as skipped — a human dropped it from the approved plan
+ * after implement started (#1900). Plan phases are snapshotted into state once,
+ * so editing the plan has no effect; this is the state-side way to drop one.
+ *
+ * Refuses unknown, complete, and already-skipped phases. If the skipped phase
+ * was the one in progress, in_progress moves to the next unsettled phase.
+ * `moveToReview` is true when nothing is left to build.
+ */
+export function skipPlanPhase(
+  phases: PlanPhase[],
+  phaseId: string,
+  reason: string,
+  now: string,
+): { phases: PlanPhase[]; moveToReview: boolean } {
+  const target = phases.find(p => p.id === phaseId);
+  if (!target) {
+    throw new Error(`Unknown plan phase: ${phaseId}\nPlan phases: ${phases.map(p => p.id).join(', ')}`);
+  }
+  if (target.status === 'complete') {
+    throw new Error(
+      `Plan phase ${phaseId} is already complete — a built phase cannot be skipped.\n` +
+      `To redo implementation, use: porch rollback <id> implement`,
+    );
+  }
+  if (target.status === 'skipped') {
+    throw new Error(`Plan phase ${phaseId} is already skipped (reason: ${target.skip_reason ?? 'none recorded'}).`);
+  }
+
+  const updated = phases.map(p =>
+    p.id === phaseId ? { ...p, status: 'skipped' as const, skip_reason: reason, skipped_at: now } : p,
+  );
+
+  if (target.status === 'in_progress') {
+    const nextIndex = updated.findIndex(p => !isPlanPhaseSettled(p));
+    if (nextIndex >= 0) {
+      updated[nextIndex] = { ...updated[nextIndex], status: 'in_progress' as const };
+    }
+  }
+
+  return { phases: updated, moveToReview: updated.every(isPlanPhaseSettled) };
 }
 
 /**

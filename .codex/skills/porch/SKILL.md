@@ -18,6 +18,7 @@ porch check [id]               Run checks for current phase
 porch gate [id]                Request human approval at a gate
 porch approve <id> <gate> --a-human-explicitly-approved-this
 porch rollback <id> <phase>    Rewind to an earlier phase
+porch skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this
 porch init <protocol> <id> <name>   Initialize a new project
 ```
 
@@ -41,6 +42,16 @@ porch approve 42 pr --a-human-explicitly-approved-this
 
 **ASPIR and BUGFIX have no spec/plan gates** — they run autonomously through those phases.
 
+## Dropping a plan phase
+
+Plan phases are copied into `status.yaml` once, on entering `implement`; editing the plan afterwards changes nothing. When a human drops an unbuilt phase from an approved plan, record it with:
+
+```bash
+porch skip-phase 42 phase_3 --reason "dropped by owner: superseded by #57" --a-human-explicitly-approved-this
+```
+
+The phase is marked `skipped` with the reason; skipping the last unsettled phase advances to review. Completed phases cannot be skipped (use `porch rollback <id> implement` to redo implementation).
+
 ## Checking pending gates
 
 ```bash
@@ -51,6 +62,7 @@ porch pending --all            # Include stale records on finished/advanced proj
 ## Critical rules
 
 - **Builders must NEVER call `porch approve`** — only humans approve gates
+- **Builders must NEVER call `porch skip-phase` on their own** — it changes an approved plan; run it only on a human's explicit instruction
 - **Never edit `status.yaml` directly** — porch manages all state
 - Builders signal completion with `porch done`, not `porch approve`
 - `porch run` is for strict mode only — soft mode builders follow the protocol document manually

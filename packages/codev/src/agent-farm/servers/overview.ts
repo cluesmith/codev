@@ -281,7 +281,8 @@ function calculateSpirProgress(parsed: ParsedStatus): number {
     case 'implement': {
       const total = parsed.planPhases.length;
       if (total === 0) return 70;
-      const completed = parsed.planPhases.filter(p => p.status === 'complete').length;
+      // A phase a human skipped (#1900) is as settled as a built one.
+      const completed = parsed.planPhases.filter(p => p.status === 'complete' || p.status === 'skipped').length;
       return 50 + Math.round((completed / total) * 40);
     }
     case 'review':
