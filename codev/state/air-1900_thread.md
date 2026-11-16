@@ -53,3 +53,13 @@ file in vitest's results cache (`node_modules/.vite/vitest/*/results.json`), not
 re-running the suite; porch's check output truncates to `...`. Porch's strict check re-runs
 the full suite to advance, so that's a second full run, which can't be avoided without
 bypassing a check.
+
+## Full-suite run (porch done #2): load-induced failures, not mine
+Build ✓. Tests ✗ in two files that passed in run #1 and don't touch porch:
+`src/__tests__/bootstrap-docs.test.ts` (93s) and
+`src/__tests__/bugfix-1113-integration-base.test.ts` (32s). Load average was ~20 during the
+run. Run alone, both pass (65/65). A third full run is a load decision for the owner, so I
+asked the architect instead of re-running or skip-annotating whole healthy files.
+Architect ruled option (a): re-run porch done once. Never skip-annotate: the owner ruled
+that flaky pre-existing tests are reported and left running. If it fails again on timeouts
+only, stop and report; name the flaky files in the PR body.
