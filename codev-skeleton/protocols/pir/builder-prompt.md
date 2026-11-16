@@ -20,6 +20,18 @@ hand-edit `status.yaml` — only porch commands modify project state.
 The full protocol text is inlined below under **## Protocol Reference (full text)** — you do not
 need to fetch it.
 
+## Baked Decisions
+
+If the issue body contains a section named "Baked Decisions" (any heading level,
+case-insensitive), treat its contents as fixed architectural decisions baked in by the
+architect. Do not autonomously override them in your plan or implementation. If you
+discover a serious reason to question a baked decision, surface that concern to the architect
+via `afx send` rather than relitigating it inside the plan/review.
+
+If the architect's baked-decisions section contains internal contradictions (e.g., two different
+language choices), do not pick one — pause, flag the contradiction to the architect via
+`afx send`, and wait for resolution before proceeding.
+
 {{#if issue}}
 ## Issue #{{issue.number}}
 **Title**: {{issue.title}}
@@ -32,10 +44,11 @@ need to fetch it.
 
 PIR has two pre-PR human gates. When you reach one:
 
-1. Finish the phase work and run `porch done <id>`
-2. Run `porch next <id>` — you get a `gate_pending` response
-3. End your turn with a short summary: what you wrote, where it lives, how to approve
-4. **Stay in the interactive session. Do not exit.** Wait for the next message.
+1. Finish the phase work and run `porch done {{project_id}}`
+2. Run `porch next {{project_id}}` — you get a `gate_pending` response
+3. Tell the architect — porch does not: `afx send architect "Project {{project_id}}: <gate> ready for approval"`
+4. End your turn with a short summary: what you wrote and where it lives
+5. **Stay in the interactive session. Do not exit.** Wait for the next message.
 
 Feedback can arrive four ways, and all of them reach you: the reviewer editing the plan file or
 the code directly in the worktree (you see it via `git diff`), typing into your PTY pane (live),
@@ -44,7 +57,7 @@ the code directly in the worktree (you see it via `git diff`), typing into your 
 
 Revise, recommit, ask whether more remains. **The gate stays pending until the human approves. When
 the architect relays that approval, run `porch approve <id> <gate> --a-human-explicitly-approved-this`
-to record it and continue — never on your own initiative.**
+to record it, then `porch next {{project_id}}` to continue — never on your own initiative.**
 
 ## Resumption After Crash
 

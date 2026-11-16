@@ -36,6 +36,8 @@ gh issue view {{issue.number}}
 
 Understand what's being asked. For a bug, identify the symptom. For a feature, identify the desired outcome.
 
+**Baked Decisions are fixed.** If the issue body has a "Baked Decisions" section (any heading level, case-insensitive), plan within each listed decision — do not autonomously substitute alternate languages, frameworks, or dependencies. Raise a serious problem with one via `afx send architect` rather than planning around it. If two contradict each other, do not pick one — flag the contradiction via `afx send` and wait.
+
 ### 2. Investigate the Codebase
 
 - Use Glob / Grep / Read to find the relevant code
@@ -45,7 +47,7 @@ Understand what's being asked. For a bug, identify the symptom. For a feature, i
 
 ### 3. Write the Plan
 
-Create `codev/plans/{{artifact_name}}.md` where `<slug>` is a short kebab-case description of the change. Use this structure:
+Create `codev/plans/{{artifact_name}}.md` (porch chose this name; the checks look for it). Use this structure:
 
 ```markdown
 # PIR Plan: <Short Title>
@@ -94,20 +96,26 @@ porch done {{project_id}}
 porch next {{project_id}}
 ```
 
-`porch next` will respond with `gate_pending` on the `plan-approval` gate. Porch automatically notifies the architect.
+`porch next` will respond with `gate_pending` on the `plan-approval` gate. Porch does not notify the architect — tell them:
+
+```bash
+afx send architect "Project {{project_id}}: plan-approval ready for approval (plan at codev/plans/{{artifact_name}}.md)"
+```
 
 ### 6. End Your Turn With a Prose Summary
 
 Output something like:
 
-> Plan written to `codev/plans/{{artifact_name}}.md` and committed. Ready for review — type any feedback here, edit the plan file directly in VSCode, or approve with `porch approve {{project_id}} plan-approval --a-human-explicitly-approved-this` (Cmd+K G in VSCode).
+> Plan written to `codev/plans/{{artifact_name}}.md` and committed. Ready for review — type any feedback here or edit the plan file directly in VSCode. Once the human approves, the architect relays it and I record it with `porch approve`.
 
-Then **stay in the interactive session**. Do not exit. Wait for the user's next message.
+Then **stay in the interactive session**. Do not exit. Wait for the next message. When the architect relays the human's approval, run `porch approve {{project_id}} plan-approval --a-human-explicitly-approved-this`, then `porch next {{project_id}}` to start the implement phase.
 
 ## Signals
 
+Signals are informational — `porch done` is what moves porch.
+
 ```
-<signal>PHASE_COMPLETE</signal>          # Plan drafted (informational; the real signal is porch done)
+<signal>PHASE_COMPLETE</signal>          # Plan committed and porch done run
 <signal>BLOCKED:reason</signal>          # Cannot proceed
 ```
 
