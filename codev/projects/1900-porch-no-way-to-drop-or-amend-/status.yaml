@@ -1,7 +1,7 @@
 id: '1900'
 title: porch-no-way-to-drop-or-amend-
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-16T21:52:32.406Z'
-updated_at: '2026-11-16T21:52:32.407Z'
+updated_at: '2026-11-16T22:10:00.584Z'
