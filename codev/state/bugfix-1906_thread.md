@@ -52,3 +52,11 @@ lockfile, regression test pinning both the declared floor and the installed vers
   Non-blocking notes, not taken (BUGFIX minimal scope), surfaced to the architect: log the SDK
   version on the claude lane like #1880 does for codex; open a 0.3.x migration follow-up (0.2.141 is
   the last 0.2.x, so the caret is now effectively a pin).
+
+## Fold-in (architect, 2026-11-16)
+
+Architect asked (owner's fix-in-place rule) to take CMAP note (1): the claude lane now logs
+`[CLAUDE] agent sdk: @anthropic-ai/claude-agent-sdk <version> bundled with codev` beside the auth line,
+via an exported `bundledClaudeAgentSdkVersion()` (same lookup-path walk as `bundledCodexVersion`). The
+floor test now uses that helper and pins the line. Verified live: worktree build prints
+`… 0.2.141 bundled with codev` and returns a review. 0.3.x migration stays a follow-up.

@@ -13,15 +13,24 @@
  *  - the SDK consult actually imports is at least the oldest version observed serving
  *    claude-opus-5 — this is what the lockfile installs;
  *  - the range `packages/codev/package.json` declares cannot resolve anything older — this is
- *    what a published install, or an adopter's own lockfile, resolves.
+ *    what a published install, or an adopter's own lockfile, resolves;
+ *  - the claude lane names the SDK version on stderr, so the next skew is visible in the output.
  */
 
-import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_CLAUDE_MODEL } from '../index.js';
+
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: () => (async function* () {
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }] } };
+    yield { type: 'result', subtype: 'success', is_error: false, result: 'ok' };
+  })(),
+}));
+
+const { DEFAULT_CLAUDE_MODEL, bundledClaudeAgentSdkVersion, runClaudeConsultation } = await import('../index.js');
 
 const SDK = '@anthropic-ai/claude-agent-sdk';
 
@@ -42,17 +51,6 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Version of the SDK that `import ... from '@anthropic-ai/claude-agent-sdk'` resolves to here. */
-function installedSdkVersion(): string {
-  // Walk the lookup paths rather than `require.resolve(`${SDK}/package.json`)`: the SDK's
-  // `exports` map does not expose package.json, so that throws ERR_PACKAGE_PATH_NOT_EXPORTED.
-  for (const dir of createRequire(import.meta.url).resolve.paths(SDK) ?? []) {
-    const packageJson = join(dir, SDK, 'package.json');
-    if (existsSync(packageJson)) return JSON.parse(readFileSync(packageJson, 'utf-8')).version;
-  }
-  throw new Error(`Cannot locate ${SDK} from ${fileURLToPath(import.meta.url)}`);
-}
-
 /** The lowest version the declared range admits; only plain `^x.y.z` / `~x.y.z` are accepted. */
 function declaredFloor(): string {
   const manifest = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'package.json');
@@ -69,10 +67,39 @@ describe('claude lane Agent SDK floor (#1906)', () => {
   });
 
   it('installs an Agent SDK new enough to serve claude-opus-5', () => {
-    expect(compareVersions(installedSdkVersion(), OLDEST_SDK_SERVING_CLAUDE_OPUS_5)).toBeGreaterThanOrEqual(0);
+    expect(compareVersions(bundledClaudeAgentSdkVersion(), OLDEST_SDK_SERVING_CLAUDE_OPUS_5)).toBeGreaterThanOrEqual(0);
   });
 
   it('declares a range that cannot resolve an older Agent SDK', () => {
     expect(compareVersions(declaredFloor(), OLDEST_SDK_SERVING_CLAUDE_OPUS_5)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('[CLAUDE] agent sdk line (#1906)', () => {
+  let tmpDir: string;
+  let origHome: string | undefined;
+  let stderr: string[];
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'bugfix-1906-'));
+    // A real ~/.codev/config.json (which may set consult.models.claude) must not leak in.
+    origHome = process.env.HOME;
+    process.env.HOME = join(tmpDir, 'fake-home');
+    stderr = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      stderr.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    process.env.HOME = origHome;
+    vi.restoreAllMocks();
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('names the Agent SDK version the lane runs', async () => {
+    await runClaudeConsultation('q', 'role', tmpDir);
+    expect(stderr).toContain(`[CLAUDE] agent sdk: ${SDK} ${bundledClaudeAgentSdkVersion()} bundled with codev`);
   });
 });

@@ -871,6 +871,21 @@ export function describeClaudeAuth(env: Record<string, string>, fromDotenv: Read
 }
 
 /**
+ * Version of the Agent SDK the claude lane imports. The SDK bundles the Claude Code CLI that builds
+ * the API request, so a too-old SDK fails on a newer model (#1906: thinking.type.enabled on
+ * claude-opus-5) — logged so that skew shows in the output.
+ */
+export function bundledClaudeAgentSdkVersion(): string {
+  // Walk the lookup paths rather than `require.resolve('…/package.json')`: the SDK's `exports` map
+  // does not expose package.json, so that throws ERR_PACKAGE_PATH_NOT_EXPORTED.
+  for (const dir of createRequire(import.meta.url).resolve.paths('@anthropic-ai/claude-agent-sdk') ?? []) {
+    const sdkPackageJson = path.join(dir, '@anthropic-ai', 'claude-agent-sdk', 'package.json');
+    if (fs.existsSync(sdkPackageJson)) return JSON.parse(fs.readFileSync(sdkPackageJson, 'utf-8')).version;
+  }
+  throw new Error('Cannot locate @anthropic-ai/claude-agent-sdk to read its version.');
+}
+
+/**
  * Run Claude consultation via Agent SDK.
  * Uses the SDK's query() function instead of CLI subprocess.
  * This avoids the CLAUDECODE nesting guard and enables tool use during reviews.
@@ -901,6 +916,7 @@ export async function runClaudeConsultation(
   const env = buildClaudeConsultEnv(process.env);
   const auth = describeClaudeAuth(env, dotenvKeys);
   console.error(`[CLAUDE] auth: ${auth}`);
+  console.error(`[CLAUDE] agent sdk: @anthropic-ai/claude-agent-sdk ${bundledClaudeAgentSdkVersion()} bundled with codev`);
 
   try {
     const session = claudeQuery({
