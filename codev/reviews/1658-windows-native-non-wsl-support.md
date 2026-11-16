@@ -1458,9 +1458,9 @@ parentless: `find / -path *protocols/experiment/protocol.md`, `find / -path
   parentless. POSIX harnesses kill the process group. Codev's session Job Object ends them with
   the session, not before. Harness behaviour, not Codev code.
 
-Follow-up candidate for main: word those prompt lines as "delivered to you" (or render the content
-through the resolver), never as a workspace path to open, per the repo rule "deliver framework
-content; don't instruct an agent to fetch it by path".
+Follow-up: #1910 (filed by main). Word those prompt lines as "delivered to you" (or render the
+content through the resolver), never as a workspace path to open, per the repo rule "deliver
+framework content; don't instruct an agent to fetch it by path".
 
 ## Appendix: Implementation Notes by Phase
 
