@@ -987,6 +987,17 @@ change on either platform.
   starts from here. The run's other eight failures were tests the merge brought in (#1877's
   start-time tests, #1869's `#!/bin/sh` token-rotation stubs), fixed in `7903facff`.
 
+- **Late intermittents on Windows (after the Amendment 2 review rounds), none skipped:**
+  - `pir-1233-session-launch-loop.test.ts`, second sighting (first: run 42547114468): "degrades to a
+    prompt-replay fresh launch under a new id after 3 consecutive fast resume failures" failed in
+    run 43799292699 attempt 1 (head `54b1347`, Node 24; Node 22 passed) with the same symptom as
+    the first, the Git Bash launch of the test's `start.sh` exiting non-zero. The commit under test
+    moved `shellEscapeSingleQuote` byte for byte. Attempt 2 passed every job.
+  - `metrics-model-id` timeout, first sighting: run 43784864166 attempt 1; attempt 2 passed.
+  - The ARM64 probe's CIM census, second sighting: run 43783831790.
+  - Main's #1880 brought three tests that run a `#!/bin/sh` stand-in codex; they skip on win32
+    (finding M13).
+
 - **`spec-1280-measurement-instrument` on Windows: second sighting of the family (architect:
   record, no diagnosis yet; a third sighting changes the ruling).** T12 failed in run 39927653580
   (attempt 1, Node 24); T11 failed in run 42715696142 (head `84f1f75a1`, Node 24): `bash
