@@ -177,6 +177,31 @@ describe('#1902 C — owner rulings', () => {
     }
   });
 
+  it.each(['codev-skeleton', 'codev'])('C2: %s — a prompt using {{consult_*}} belongs to a phase declaring consultation', (tree) => {
+    // The converse of the check above: porch renders {{consult_commands}} / {{consult_verdicts}}
+    // only for a phase with a `consultation` block, so a prompt elsewhere would reach the builder
+    // as a literal, unrendered token.
+    const offenders: string[] = [];
+    const visited: string[] = [];
+    for (const name of fs.readdirSync(path.join(repoRoot, tree, 'protocols'))) {
+      const file = `${tree}/protocols/${name}/protocol.json`;
+      if (!fs.existsSync(path.join(repoRoot, file))) continue;
+      for (const phase of JSON.parse(read(file)).phases as Array<{ id: string; build?: { prompt?: string }; consultation?: unknown }>) {
+        // Porch's own lookup: build.prompt, else `<phase id>.md` (prompts.ts).
+        const prompt = `${tree}/protocols/${name}/prompts/${phase.build?.prompt ?? `${phase.id}.md`}`;
+        if (!fs.existsSync(path.join(repoRoot, prompt))) continue;
+        visited.push(prompt);
+        if (/\{\{consult_(commands|verdicts)\}\}/.test(read(prompt)) && !phase.consultation) {
+          offenders.push(`${prompt} (phase ${phase.id} has no consultation block)`);
+        }
+      }
+    }
+    expect(visited, 'the guard must actually see the BUGFIX/AIR PR prompts').toEqual(
+      expect.arrayContaining([`${tree}/protocols/bugfix/prompts/pr.md`, `${tree}/protocols/air/prompts/pr.md`]),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it.each(['codev-skeleton', 'codev'])('C3: %s roles carry the fix-in-place rule', (tree) => {
     for (const role of ['builder', 'architect']) {
       expect(read(`${tree}/roles/${role}.md`), role).toMatch(/\*\*Fix in place\.\*\*/);
