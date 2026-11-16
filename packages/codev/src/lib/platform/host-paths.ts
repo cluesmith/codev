@@ -15,8 +15,8 @@
 
 import type { BuilderWorktreeRef } from '../../agent-farm/utils/builder-worktree-identity.js';
 import { isWindows } from '../platform.js';
-import { posixHostPaths } from './host-paths.posix.js';
-import { windowsHostPaths } from './host-paths.windows.js';
+import { posixHostPaths } from './posix/host-paths.js';
+import { windowsHostPaths } from './windows/host-paths.js';
 
 /** The filesystem calls canonicalization uses; injectable for tests. */
 export interface WorkspacePathOps {

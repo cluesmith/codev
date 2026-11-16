@@ -20,7 +20,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { gitBashEnv, gitBashScript } from '../lib/shell-launch.js';
+import { gitBashEnv, gitBashScript } from '../lib/platform/windows/git-bash-launch.js';
 
 const jiraDir = resolve(__dirname, '..', '..', 'scripts', 'forge', 'jira');
 

@@ -7,8 +7,8 @@
  */
 
 import { execFile } from 'node:child_process';
-import { windowsPowerShellPath } from '../../lib/platform.js';
-import type { CensusReadOptions, ProcessCensusEntry } from './process-census.js';
+import { windowsPowerShellPath } from '../../platform.js';
+import type { CensusReadOptions, ProcessCensusEntry } from '../processes.js';
 
 /**
  * Inline CIM query: pid, ppid, command line, creation time (UTC ISO-8601) and

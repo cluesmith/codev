@@ -2,17 +2,17 @@
  * Processes on native Windows (Spec 1658, Amendment 2, phase A2-3).
  *
  * Adapters over the existing Windows modules: the CIM census with its TTL cache
- * (`process-census-windows.ts`), Job Object and `taskkill` teardown
- * (`process-tree-windows.ts`) and the `Get-NetTCPConnection` listener query
- * (`port-windows.ts`). None of them imports back into the capability. See
+ * (`process-census.ts`), Job Object and `taskkill` teardown
+ * (`process-tree.ts`) and the `Get-NetTCPConnection` listener query
+ * (`port-query.ts`), all beside it. None of them imports back into the capability except for its census types. See
  * `processes.ts` for the contract.
  */
 
-import type { ProcessCensusEntry } from '../../agent-farm/servers/process-census.js';
-import { windowsCensus } from '../../agent-farm/servers/process-census-windows.js';
-import { getWindowsProcessesOnPort, getWindowsProcessesOnPortAsync } from '../../agent-farm/utils/port-windows.js';
-import { killWindowsTree, waitForWindowsTreeExit } from '../process-tree-windows.js';
-import type { Processes, StartTimeLookup } from './processes.js';
+import type { ProcessCensusEntry } from '../processes.js';
+import { windowsCensus } from './process-census.js';
+import { getWindowsProcessesOnPort, getWindowsProcessesOnPortAsync } from './port-query.js';
+import { killWindowsTree, waitForWindowsTreeExit } from './process-tree.js';
+import type { Processes, StartTimeLookup } from '../processes.js';
 
 /**
  * A start-time lookup answered from an existing census snapshot's creation

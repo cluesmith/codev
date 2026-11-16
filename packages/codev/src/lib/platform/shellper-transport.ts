@@ -16,8 +16,8 @@
 
 import type { ReconnectAuth } from '../../terminal/session-manager.js';
 import { isWindows } from '../platform.js';
-import { posixShellperTransport } from './shellper-transport.posix.js';
-import { windowsShellperTransport } from './shellper-transport.windows.js';
+import { posixShellperTransport } from './posix/shellper-transport.js';
+import { windowsShellperTransport } from './windows/shellper-transport.js';
 
 /** The outcome of the pre-connect reconnect gate. */
 export type ReconnectAdmission =

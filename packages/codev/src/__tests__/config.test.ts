@@ -156,7 +156,7 @@ describe('resolveLocalConfigPath', () => {
 describe('loadConfig', () => {
   it('returns defaults when no config files exist', () => {
     // The POSIX defaults; the Windows default shell (powershell.exe) is covered by
-    // shell-launch.test.ts 'defaultInteractiveShell'.
+    // shell-launch.test.ts 'defaultInteractiveShell' (lib/platform/windows/git-bash-launch.ts).
     forceHostPlatform('linux');
     const config = loadConfig(tmpDir);
     expect(config.shell?.architect).toBe('claude');

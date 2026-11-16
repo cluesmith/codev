@@ -41,10 +41,12 @@ import { processes } from '../lib/platform/processes.js';
 import { shellperTransport } from '../lib/platform/shellper-transport.js';
 import { PID_REUSE_TOLERANCE_MS } from './pid-reuse.js';
 import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
-import { getTowerJobHelper, sessionJobName, type JobAssignOutcome, type WindowsJobHelper } from '../lib/windows-job.js';
+import { getTowerJobHelper, sessionJobName, type JobAssignOutcome, type WindowsJobHelper } from '../lib/platform/windows/job-objects.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
-import { WINDOWS_CENSUS_TIMEOUT_MS } from '../agent-farm/servers/process-census-windows.js';
-import { SHELLPER_MARKER, isShellperInScope, readJsonStringField, unquoteWindowsCommandLine } from './shellper-cmdline.js';
+import { WINDOWS_CENSUS_TIMEOUT_MS } from '../lib/platform/windows/process-census.js';
+import { SHELLPER_MARKER, isShellperInScope } from './shellper-cmdline.js';
+import { readJsonStringField } from './shellper-config-field.js';
+import { unquoteWindowsCommandLine } from '../lib/platform/windows/command-line.js';
 import { isDeliberateExit, type ExitMessage } from './shellper-protocol.js';
 import { DEFER_PTY_DEADLINE_MS } from './shellper-process.js';
 

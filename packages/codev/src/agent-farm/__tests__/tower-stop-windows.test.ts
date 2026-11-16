@@ -11,10 +11,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { forceKillTowerWindows, stopTowerWindows, WINDOWS_STOP_EXIT_TIMEOUT_MS, type WindowsStopDeps } from '../commands/tower-stop-windows.js';
+import { forceKillTowerWindows, stopTowerWindows, WINDOWS_STOP_EXIT_TIMEOUT_MS, type WindowsStopDeps } from '../commands/windows/tower-lifecycle.js';
 import type { TowerOwner } from '../db/tower-owner.js';
 import { checkWindowsTowerSession } from '../../commands/doctor.js';
-import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING, towerBootSessionWarning } from '../commands/tower-start-windows.js';
+import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING, towerBootSessionWarning } from '../commands/windows/tower-lifecycle.js';
 import { windowsShellperCmdline } from '../../terminal/__tests__/windows-cmdline-fixtures.js';
 import { resetHostPlatformForTests } from '../../lib/platform.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';

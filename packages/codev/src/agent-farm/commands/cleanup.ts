@@ -21,14 +21,12 @@ import { sameIssueId } from '../../lib/issue-id.js';
 import { isWindows } from '../../lib/platform.js';
 import { killSessionTree, type KillSessionTreeOptions } from '../../lib/process-tree.js';
 import { removeWorktreeDirectory } from '../lib/worktree-links.js';
-import { WindowsJobHelper, sessionJobName } from '../../lib/windows-job.js';
+import { WindowsJobHelper, sessionJobName } from '../../lib/platform/windows/job-objects.js';
 import { listProcessCensus, type ProcessCensusEntry } from '../servers/process-census.js';
-import {
-  SHELLPER_MARKER,
-  readJsonStringField,
-  sameWindowsPath,
-  unquoteWindowsCommandLine,
-} from '../../terminal/shellper-cmdline.js';
+import { SHELLPER_MARKER } from '../../terminal/shellper-cmdline.js';
+import { readJsonStringField } from '../../terminal/shellper-config-field.js';
+import { sameWindowsPath } from '../../lib/platform/windows/host-paths.js';
+import { unquoteWindowsCommandLine } from '../../lib/platform/windows/command-line.js';
 
 /**
  * Clean porch review artifacts for a project from codev/projects/,

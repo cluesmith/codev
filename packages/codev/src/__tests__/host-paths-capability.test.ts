@@ -13,8 +13,8 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { hostPaths, type WorkspacePathOps } from '../lib/platform/host-paths.js';
-import { posixHostPaths } from '../lib/platform/host-paths.posix.js';
-import { windowsHostPaths } from '../lib/platform/host-paths.windows.js';
+import { posixHostPaths } from '../lib/platform/posix/host-paths.js';
+import { windowsHostPaths } from '../lib/platform/windows/host-paths.js';
 import { useHostPlatform } from './helpers/host-platform.js';
 
 const failingOps: WorkspacePathOps = {

@@ -83,8 +83,8 @@ import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/server-utils.js';
 import { version } from '../../version.js';
 import { isWindows } from '../../lib/platform.js';
-import { WindowsJobHelper, getTowerJobHelper, setTowerJobHelper } from '../../lib/windows-job.js';
-import { towerBootSessionWarning } from '../commands/tower-start-windows.js';
+import { WindowsJobHelper, getTowerJobHelper, setTowerJobHelper } from '../../lib/platform/windows/job-objects.js';
+import { towerBootSessionWarning } from '../commands/windows/tower-lifecycle.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -581,7 +581,7 @@ async function bootSequence(): Promise<void> {
   // sessions then start without a job.
   // Spec 1658 Phase 4: a Tower inside a codev session's job stops when that
   // session is torn down. Warn, never refuse: the marker is inherited and can
-  // be stale. The launcher is what refuses (tower-start-windows.ts).
+  // be stale. The launcher is what refuses (commands/windows/tower-lifecycle.ts).
   const sessionWarning = towerBootSessionWarning(process.env, isWindows());
   if (sessionWarning !== null) log('WARN', sessionWarning);
 

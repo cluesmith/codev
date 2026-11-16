@@ -7,7 +7,7 @@
 
 import { exec, execSync, spawn, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { CommandLaunch } from './command-launch.js';
+import type { CommandLaunch } from '../command-launch.js';
 
 export const posixCommandLaunch: CommandLaunch = Object.freeze<CommandLaunch>({
   spawnShellString(script, options, context) {

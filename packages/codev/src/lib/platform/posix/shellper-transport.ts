@@ -13,9 +13,9 @@
 import fs from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { PID_REUSE_TOLERANCE_MS } from '../../terminal/pid-reuse.js';
-import { processes } from './processes.js';
-import type { ShellperTransport } from './shellper-transport.js';
+import { PID_REUSE_TOLERANCE_MS } from '../../../terminal/pid-reuse.js';
+import { processes } from '../processes.js';
+import type { ShellperTransport } from '../shellper-transport.js';
 
 export const posixShellperTransport: ShellperTransport = Object.freeze<ShellperTransport>({
   resolveEndpoint(socketDir, sessionId) {

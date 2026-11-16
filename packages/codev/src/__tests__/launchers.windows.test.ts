@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { executeForgeCommand, executeForgeCommandDetailed } from '../lib/forge.js';
-import { resolveGitBash } from '../lib/git-bash.js';
+import { resolveGitBash } from '../lib/platform/windows/git-bash.js';
 import { runPostSpawnHooks } from '../agent-farm/commands/spawn-worktree.js';
 import { findCrlfHookScripts } from '../commands/doctor.js';
 import { killSessionTree } from '../lib/process-tree.js';

@@ -22,7 +22,7 @@ import { spawn } from 'node:child_process';
 import { delimiter, dirname, extname } from 'node:path';
 import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 import { isWindows } from '../../lib/platform.js';
-import { spawnableOnHost } from '../../lib/shell-launch.js';
+import { spawnableOnHost } from '../../lib/host-executable.js';
 import { killSessionTree } from '../../lib/process-tree.js';
 
 /** Log sink shared by the IDE lifecycle modules; Tower passes its own logger. */

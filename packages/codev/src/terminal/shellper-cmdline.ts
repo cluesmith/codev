@@ -16,39 +16,13 @@
  */
 
 import { isWindows } from '../lib/platform.js';
-import { sameWindowsPath } from '../lib/platform/host-paths.windows.js';
-import { readJsonStringField, unquoteWindowsCommandLine } from './shellper-cmdline-parse.js';
+import { sameWindowsPath } from '../lib/platform/windows/host-paths.js';
+import { readJsonStringField } from './shellper-config-field.js';
+import { unquoteWindowsCommandLine } from '../lib/platform/windows/command-line.js';
 import { shellperTransport } from '../lib/platform/shellper-transport.js';
-
-export { readJsonStringField, unquoteWindowsCommandLine };
 
 /** Marker identifying a Codev shellper process in a command line. */
 export const SHELLPER_MARKER = 'shellper-main.js';
-
-/**
- * Quote one argument the way Node (libuv) does when it builds a Windows
- * command line, so `CommandLineToArgvW` reads it back unchanged: the inverse
- * of `unquoteWindowsCommandLine` for a single argument.
- */
-export function quoteWindowsArg(arg: string): string {
-  if (arg === '') return '""';
-  if (!/[\s"]/.test(arg)) return arg;
-  let out = '"';
-  let backslashes = 0;
-  for (const ch of arg) {
-    if (ch === '\\') {
-      backslashes++;
-      continue;
-    }
-    if (ch === '"') {
-      out += '\\'.repeat(backslashes * 2 + 1) + '"';
-    } else {
-      out += '\\'.repeat(backslashes) + ch;
-    }
-    backslashes = 0;
-  }
-  return out + '\\'.repeat(backslashes * 2) + '"';
-}
 
 /**
  * The command line as matchers should read it: the raw `ps` argv on POSIX, the
@@ -57,9 +31,6 @@ export function quoteWindowsArg(arg: string): string {
 export function shellperArgvText(cmdline: string): string {
   return shellperTransport().commandLineText(cmdline);
 }
-
-/** Windows path equality (case-insensitive, separators normalized); defined with the host paths capability. */
-export { sameWindowsPath };
 
 /**
  * True when `cmdline` belongs to a shellper launched by the Tower instance

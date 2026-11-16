@@ -1,8 +1,7 @@
 /**
- * Pure parsers for a shellper's command line (Spec 1658): Windows argv
- * unquoting and the JSON config field reader. A leaf module (no imports), so
- * the shellper transport's Windows implementation can use them without a
- * cycle; `shellper-cmdline.ts` re-exports both.
+ * Windows command-line quoting (Spec 1658): reading a raw command line back
+ * as `CommandLineToArgvW` would, and quoting one argument as Node does. A leaf
+ * module (no imports).
  */
 
 /**
@@ -40,20 +39,26 @@ export function unquoteWindowsCommandLine(cmdline: string): string {
 }
 
 /**
- * Extract and JSON-decode a `"key":"value"` string field from text holding a
- * shellper's JSON config. Regex rather than JSON.parse of the whole blob: the
- * config embeds the full process env, so a partial or unusual line must
- * degrade to "field absent" (null) rather than throw. An empty value also
- * reads as absent.
+ * Quote one argument the way Node (libuv) does when it builds a Windows
+ * command line, so `CommandLineToArgvW` reads it back unchanged: the inverse
+ * of `unquoteWindowsCommandLine` for a single argument.
  */
-export function readJsonStringField(text: string, key: string): string | null {
-  const match = text.match(new RegExp(`"${key}"\\s*:\\s*("(?:[^"\\\\]|\\\\.)*")`));
-  if (!match) return null;
-  try {
-    const value: unknown = JSON.parse(match[1]);
-    if (typeof value !== 'string' || value === '') return null;
-    return value;
-  } catch {
-    return null;
+export function quoteWindowsArg(arg: string): string {
+  if (arg === '') return '""';
+  if (!/[\s"]/.test(arg)) return arg;
+  let out = '"';
+  let backslashes = 0;
+  for (const ch of arg) {
+    if (ch === '\\') {
+      backslashes++;
+      continue;
+    }
+    if (ch === '"') {
+      out += '\\'.repeat(backslashes * 2 + 1) + '"';
+    } else {
+      out += '\\'.repeat(backslashes) + ch;
+    }
+    backslashes = 0;
   }
+  return out + '\\'.repeat(backslashes * 2) + '"';
 }

@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { resolveGitBash } from '../../lib/git-bash.js';
+import { resolveGitBash } from '../../lib/platform/windows/git-bash.js';
 import {
   LIFECYCLE_REPORTER_SCRIPT_NAME,
   ensureLifecycleReporterInstalled,

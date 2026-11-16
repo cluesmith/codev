@@ -21,8 +21,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { shellperTransport } from '../lib/platform/shellper-transport.js';
-import { posixShellperTransport } from '../lib/platform/shellper-transport.posix.js';
-import { windowsShellperTransport } from '../lib/platform/shellper-transport.windows.js';
+import { posixShellperTransport } from '../lib/platform/posix/shellper-transport.js';
+import { windowsShellperTransport } from '../lib/platform/windows/shellper-transport.js';
 import { useHostPlatform } from './helpers/host-platform.js';
 
 describe('shellperTransport() follows the host seam', () => {

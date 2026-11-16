@@ -35,7 +35,7 @@ import {
 import { buildWorktreeGuardFiles } from '../agent-farm/utils/worktree-write-guard.js';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import { parseLifecycleEvent } from '../agent-farm/servers/agent-state/route.js';
-import { findOnHostPath } from '../lib/shell-launch.js';
+import { findOnHostPath } from '../lib/host-executable.js';
 
 const KEY = 'a'.repeat(64);
 const WORKTREE = '/repo/.builders/spir-1595';

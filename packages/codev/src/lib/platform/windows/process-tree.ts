@@ -9,17 +9,17 @@
  */
 
 import { execFile } from 'node:child_process';
-import { windowsSystem32Path } from './platform.js';
-import { windowsCensus } from '../agent-farm/servers/process-census-windows.js';
-import type { ProcessCensusEntry } from '../agent-farm/servers/process-census.js';
-import { terminateSessionJob } from './windows-job.js';
+import { windowsSystem32Path } from '../../platform.js';
+import { windowsCensus } from './process-census.js';
+import type { ProcessCensusEntry } from '../processes.js';
+import { terminateSessionJob } from './job-objects.js';
 import type {
   KillSessionTreeOptions,
   KillSessionTreeResult,
   TreeMember,
   TreeSnapshot,
   WaitForTreeExitOptions,
-} from './process-tree.js';
+} from '../../process-tree.js';
 
 const TASKKILL_TIMEOUT_MS = 10_000;
 

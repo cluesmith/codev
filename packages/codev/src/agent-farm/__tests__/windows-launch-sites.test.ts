@@ -45,8 +45,8 @@ import {
   buildSessionLaunchLoop,
 } from '../commands/spawn-worktree.js';
 import { devCommandLaunch } from '../commands/dev.js';
-import { setGitBashForTests } from '../../lib/shell-launch.js';
-import { toMsysPath } from '../../lib/msys-path.js';
+import { setGitBashForTests } from '../../lib/platform/windows/git-bash-launch.js';
+import { toMsysPath } from '../../lib/platform/windows/msys-path.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const GIT_BASH = {

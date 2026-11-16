@@ -20,11 +20,8 @@
  *   no parent link leads to.
  */
 
-import { processes } from './platform/processes.js';
-import type { ProcessCensusEntry } from '../agent-farm/servers/process-census.js';
-import type { JobResult } from './windows-job.js';
-
-export { collectTree, ROOT_START_TOLERANCE_MS } from './process-tree-windows.js';
+import { processes, type ProcessCensusEntry } from './platform/processes.js';
+import type { JobResult } from './platform/windows/job-objects.js';
 
 /** A process recorded by a teardown snapshot. */
 export interface TreeMember {

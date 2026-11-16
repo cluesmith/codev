@@ -3,7 +3,7 @@
  * reports them, built with the same argv quoting Node uses on Windows.
  */
 
-import { quoteWindowsArg } from '../shellper-cmdline.js';
+import { quoteWindowsArg } from '../../lib/platform/windows/command-line.js';
 
 export { quoteWindowsArg };
 

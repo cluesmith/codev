@@ -1465,6 +1465,50 @@ COMMENT; follow-ups in `979c70230`).
   `shellper-cmdline.ts` are gone. The first Windows run failed on a test of mine that opened a
   real Unix socket on the Windows runner; it now skips there like the other real-socket tests.
 
+## Amendment 3 (2026-11-16): platform code by folder
+
+Owner direction after Amendment 2 ("layout B", approved 2026-11-16, architect read with two
+layering corrections). Structure only; no behaviour change.
+
+**Rule.** Platform-specific code lives in a `posix/` or `windows/` folder of its own layer;
+everything else is shared. No `.posix.ts`, `.windows.ts`, `-windows.ts` or `windows-` names remain
+in product code (`*.windows.test.ts` keeps its meaning: a test that runs only on a Windows host).
+
+**Moves.**
+
+| Before | After |
+|---|---|
+| `lib/platform/<capability>.posix.ts` (4) | `lib/platform/posix/<capability>.ts` |
+| `lib/platform/<capability>.windows.ts` (4) | `lib/platform/windows/<capability>.ts` |
+| `lib/git-bash.ts`, `lib/msys-path.ts` | `lib/platform/windows/git-bash.ts`, `msys-path.ts` |
+| `lib/shell-launch.ts` | split: `lib/platform/windows/git-bash-launch.ts` (Git Bash launches, interactive shells) and shared `lib/host-executable.ts` (`Launch`, `spawnableOnHost`, `findOnHostPath`) |
+| `windowsPtyBaseEnv` in `lib/pty-command.ts` | `lib/platform/windows/pty-env.ts` |
+| `lib/windows-job.ts` | `lib/platform/windows/job-objects.ts` |
+| `lib/process-tree-windows.ts` | `lib/platform/windows/process-tree.ts` |
+| `agent-farm/servers/process-census-windows.ts` | `lib/platform/windows/process-census.ts` |
+| `agent-farm/utils/port-windows.ts` | `lib/platform/windows/port-query.ts` |
+| `terminal/shellper-cmdline-parse.ts` + `quoteWindowsArg` | `lib/platform/windows/command-line.ts`; `readJsonStringField` to shared `terminal/shellper-config-field.ts` |
+| `agent-farm/commands/tower-start-windows.ts` + `tower-stop-windows.ts` | merged: `agent-farm/commands/windows/tower-lifecycle.ts` (Tower command flow stays in agent-farm, per the architect) |
+
+**Census types.** `ProcessCensusEntry` and `CensusReadOptions` move into the processes contract
+(`lib/platform/processes.ts`); `agent-farm/servers/process-census.ts` stays the facade
+(`listProcessCensus`, type re-exports for its callers).
+
+**Re-exports dropped** (internal only; importers point at the real module): `shellper-cmdline`'s
+`readJsonStringField`, `unquoteWindowsCommandLine`, `sameWindowsPath`; `process-tree`'s
+`collectTree`, `ROOT_START_TOLERANCE_MS`; `port`'s `parsePidLines`; `shell-launch`'s
+`windowsPowerShellPath`; the start module's `isInsideCodevSession`.
+
+**Known residual `lib/` to `agent-farm/` imports, not chased here:**
+`lib/platform/windows/command-launch.ts` (`shellEscapeSingleQuote`, value),
+`lib/platform/host-paths.ts` and `windows/host-paths.ts` (`BuilderWorktreeRef`, type only), and
+`lib/config.ts` (`validateCustomHarnessConfig`, on `main` before this PR).
+
+**Verification.** Imports were recomputed by script from the committed files, not edited by hand;
+the only non-import lines changed are the two splits, the merge, the census-type move, test mock
+paths, and comments naming old paths. check-types, full suites, POSIX CI, a Windows
+dispatch, repack.
+
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |

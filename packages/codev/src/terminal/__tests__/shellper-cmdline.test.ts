@@ -6,14 +6,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  shellperTeardownIdentities,
-  isShellperInScope,
-  readJsonStringField,
-  sameWindowsPath,
-  shellperArgvText,
-  unquoteWindowsCommandLine,
-} from '../shellper-cmdline.js';
+import { shellperTeardownIdentities, isShellperInScope, shellperArgvText } from '../shellper-cmdline.js';
+import { readJsonStringField } from '../shellper-config-field.js';
+import { sameWindowsPath } from '../../lib/platform/windows/host-paths.js';
+import { unquoteWindowsCommandLine } from '../../lib/platform/windows/command-line.js';
 import { windowsShellperCmdline } from './windows-cmdline-fixtures.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 

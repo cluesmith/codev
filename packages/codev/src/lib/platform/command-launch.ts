@@ -5,7 +5,7 @@
  * `commandLaunch()` instead of choosing a platform: the POSIX implementation is
  * the macOS/Linux code that used to sit in each call site's `else` branch,
  * moved verbatim; the Windows implementation routes through the resolved Git
- * Bash and the `.cmd` shim resolver in `shell-launch.ts`.
+ * Bash and the `.cmd` shim resolver in `windows/git-bash-launch.ts` and `../host-executable.ts`.
  *
  * Site-specific POSIX forms that predate the refactor are kept, not unified:
  * those are passed in by the caller (`posixShell`, `posixProbe`, the porch
@@ -14,9 +14,9 @@
 
 import type { ChildProcess, SpawnOptions, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from 'node:child_process';
 import { isWindows } from '../platform.js';
-import type { Launch } from '../shell-launch.js';
-import { posixCommandLaunch } from './command-launch.posix.js';
-import { windowsCommandLaunch } from './command-launch.windows.js';
+import type { Launch } from '../host-executable.js';
+import { posixCommandLaunch } from './posix/command-launch.js';
+import { windowsCommandLaunch } from './windows/command-launch.js';
 
 /** The POSIX shell a shell string runs under. Windows always uses the resolved Git Bash. */
 export interface PosixShell {

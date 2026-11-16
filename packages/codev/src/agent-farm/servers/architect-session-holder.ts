@@ -24,12 +24,8 @@ import { isWindows } from '../../lib/platform.js';
 import { hostPaths } from '../../lib/platform/host-paths.js';
 import { killSessionTree } from '../../lib/process-tree.js';
 import { listProcessCensus } from './process-census.js';
-import {
-  SHELLPER_MARKER,
-  readJsonStringField,
-  shellperArgvText,
-  shellperTeardownIdentities,
-} from '../../terminal/shellper-cmdline.js';
+import { SHELLPER_MARKER, shellperArgvText, shellperTeardownIdentities } from '../../terminal/shellper-cmdline.js';
+import { readJsonStringField } from '../../terminal/shellper-config-field.js';
 
 export interface ProcessEntry {
   pid: number;

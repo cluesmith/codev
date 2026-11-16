@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildLaunchLoop, builderScriptLaunch } from '../commands/spawn-worktree.js';
-import { toMsysPath } from '../../lib/msys-path.js';
+import { toMsysPath } from '../../lib/platform/windows/msys-path.js';
 import { harnessFromLaunchScript } from '../commands/reset/context.js';
 
 let dir: string;

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { resolveGitBash, isWslLauncher, GitBashError, type GitBashHost } from '../lib/git-bash.js';
+import { resolveGitBash, isWslLauncher, GitBashError, type GitBashHost } from '../lib/platform/windows/git-bash.js';
 
 const PROGRAM_FILES_GIT = 'C:\\Program Files\\Git';
 const LOCAL_GIT = 'C:\\Users\\dev\\AppData\\Local\\Programs\\Git';

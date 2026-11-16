@@ -19,10 +19,11 @@ import { activeStateDbPath, planMigration } from '../db/consolidate.js';
 import { sanitizeAgentEnv, findClaudeSessionMarkers } from '../../lib/agent-env.js';
 import { getProcessesOnPort } from '../utils/port.js';
 import { isWindows, windowsSystem32Path } from '../../lib/platform.js';
-import { spawnableOnHost } from '../../lib/shell-launch.js';
+import { spawnableOnHost } from '../../lib/host-executable.js';
 import { followFile } from '../../lib/file-follow.js';
-import { defaultWindowsStopDeps, forceKillTowerWindows, pidList, stopTowerWindows } from './tower-stop-windows.js';
-import { cimRefusalMessage, daemonEnvironment, isInsideCodevSession, launchViaCim } from './tower-start-windows.js';
+import { defaultWindowsStopDeps, forceKillTowerWindows, pidList, stopTowerWindows } from './windows/tower-lifecycle.js';
+import { cimRefusalMessage, daemonEnvironment, launchViaCim } from './windows/tower-lifecycle.js';
+import { isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
 
 // Log file location
 const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
@@ -546,7 +547,7 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
   }
 }
 
-/** Windows: graceful stop over HTTP, single-pid fallback; see tower-stop-windows.ts. */
+/** Windows: graceful stop over HTTP, single-pid fallback; see windows/tower-lifecycle.ts. */
 async function towerStopWindows(port: number, forceKill: boolean): Promise<void> {
   const deps = defaultWindowsStopDeps({
     info: (m) => logger.info(m),

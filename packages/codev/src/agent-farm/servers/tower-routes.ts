@@ -55,7 +55,7 @@ import { logSafe } from '../utils/log-safe.js';
 import { handleIdeApi, ensureIdeServerLive } from './ide-server.js';
 import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
 import { getWorktreeConfig, getActivityHooks, getResolvedCommands } from '../utils/config.js';
-import { windowsShellRequest } from '../../lib/shell-launch.js';
+import { windowsShellRequest } from '../../lib/platform/windows/git-bash-launch.js';
 import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { ensureCodevConfigWatcher } from './codev-config-watcher.js';
 import { handleDecisionsGet, handleDecisionsRule } from './decisions/routes.js';

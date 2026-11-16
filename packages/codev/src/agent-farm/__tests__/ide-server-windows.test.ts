@@ -40,8 +40,8 @@ vi.mock('node:child_process', async (importActual) => {
   const actual = await importActual<typeof import('node:child_process')>();
   return { ...actual, spawn: spawnMock };
 });
-vi.mock('../../lib/shell-launch.js', async (importActual) => {
-  const actual = await importActual<typeof import('../../lib/shell-launch.js')>();
+vi.mock('../../lib/host-executable.js', async (importActual) => {
+  const actual = await importActual<typeof import('../../lib/host-executable.js')>();
   return { ...actual, spawnableOnHost: spawnableOnHostMock, findOnHostPath: findOnHostPathMock };
 });
 vi.mock('../utils/port.js', async (importActual) => {

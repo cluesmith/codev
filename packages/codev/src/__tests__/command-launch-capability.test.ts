@@ -28,11 +28,11 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { commandLaunch } from '../lib/platform/command-launch.js';
-import { posixCommandLaunch } from '../lib/platform/command-launch.posix.js';
-import { windowsCommandLaunch } from '../lib/platform/command-launch.windows.js';
-import { setGitBashForTests } from '../lib/shell-launch.js';
+import { posixCommandLaunch } from '../lib/platform/posix/command-launch.js';
+import { windowsCommandLaunch } from '../lib/platform/windows/command-launch.js';
+import { setGitBashForTests } from '../lib/platform/windows/git-bash-launch.js';
 import { useHostPlatform } from './helpers/host-platform.js';
-import { toMsysPath } from '../lib/msys-path.js';
+import { toMsysPath } from '../lib/platform/windows/msys-path.js';
 
 const GIT_BASH = {
   path: 'C:\\Program Files\\Git\\bin\\bash.exe',

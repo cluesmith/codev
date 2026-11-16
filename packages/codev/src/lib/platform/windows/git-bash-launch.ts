@@ -1,29 +1,23 @@
 /**
- * Launcher routing for native Windows (Spec 1658, Areas D and F).
+ * Git Bash launches on native Windows (Spec 1658, Areas D and F).
  *
  * Every plumbing launch site (forge concepts, the builder launch script,
  * `postSpawn`, `devCommand`, shell-string porch checks) asks this module how to
  * run bash on Windows, so each site gets the one resolved Git Bash and never a
- * bare `bash` (which can be the System32 WSL launcher). Bare-command spawns ask
- * it for a `CreateProcess`-ready form of `.cmd` shims.
+ * bare `bash` (which can be the System32 WSL launcher).
  *
  * These are the Windows building blocks of the command launch capability
  * (`platform/command-launch.ts`); shared code asks that capability, which uses
  * them only in its Windows implementation (Spec 1658, Amendment 2).
  */
 
-import { resolveSpawnable, findExecutable, type SpawnableCommand } from '@cluesmith/codev-sdk/node/executable';
-import { hostPlatform, windowsPowerShellPath } from './platform.js';
-import { loadConfig } from './config.js';
+import { resolveSpawnable } from '@cluesmith/codev-sdk/node/executable';
+import { windowsPowerShellPath } from '../../platform.js';
+import type { Launch } from '../../host-executable.js';
+import { loadConfig } from '../../config.js';
 import { resolveGitBash, GIT_BASH_ENV, type GitBash } from './git-bash.js';
 import { toMsysPath, MSYS_PATHCONV_OPT_OUT } from './msys-path.js';
-import { isUnderTestRunner } from './test-env.js';
-
-/** A program and its arguments, ready for `child_process.spawn` without `shell`. */
-export interface Launch {
-  command: string;
-  args: string[];
-}
+import { isUnderTestRunner } from '../../test-env.js';
 
 const gitBashCache = new Map<string, GitBash>();
 let gitBashOverride: GitBash | null = null;
@@ -83,25 +77,9 @@ export function gitBashEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return { ...env, ...MSYS_PATHCONV_OPT_OUT };
 }
 
-/**
- * `command` in a form the host can spawn without a shell. On Windows a `.cmd`
- * shim becomes the `node <entry>` it wraps, or a `cmd.exe /d /s /c` line; on
- * POSIX the input comes back unchanged.
- */
-export function spawnableOnHost(command: string, args: string[] = [], env: NodeJS.ProcessEnv = process.env): SpawnableCommand {
-  return resolveSpawnable(command, args, { platform: hostPlatform(), env });
-}
-
-/** `which`-style lookup for the host platform, honoring `PATHEXT` on Windows. */
-export function findOnHostPath(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
-  return findExecutable(name, { platform: hostPlatform(), env });
-}
-
 // =============================================================================
 // Interactive shells (Area F)
 // =============================================================================
-
-export { windowsPowerShellPath };
 
 const BASH_NAMES = new Set(['bash', 'bash.exe', '/bin/bash', '/usr/bin/bash']);
 const POWERSHELL_NAMES = new Set(['powershell', 'powershell.exe']);

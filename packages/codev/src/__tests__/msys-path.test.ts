@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { toMsysPath, fromMsysPath, MSYS_PATHCONV_OPT_OUT, withoutMsysPathConversion } from '../lib/msys-path.js';
+import { toMsysPath, fromMsysPath, MSYS_PATHCONV_OPT_OUT, withoutMsysPathConversion } from '../lib/platform/windows/msys-path.js';
 
 describe('MSYS path round trip', () => {
   it.each([

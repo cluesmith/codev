@@ -11,10 +11,11 @@
 
 import crypto from 'node:crypto';
 import os from 'node:os';
-import { generateShellperSecret } from '../../terminal/shellper-endpoint.js';
-import { readJsonStringField, unquoteWindowsCommandLine } from '../../terminal/shellper-cmdline-parse.js';
-import { sessionJobName } from '../windows-job.js';
-import type { ShellperTransport } from './shellper-transport.js';
+import { generateShellperSecret } from '../../../terminal/shellper-endpoint.js';
+import { readJsonStringField } from '../../../terminal/shellper-config-field.js';
+import { unquoteWindowsCommandLine } from './command-line.js';
+import { sessionJobName } from './job-objects.js';
+import type { ShellperTransport } from '../shellper-transport.js';
 
 /** The current user's name, reduced to characters safe in a pipe name. */
 function pipeUserSegment(): string {

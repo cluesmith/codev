@@ -30,8 +30,8 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { existsSync } from 'node:fs';
 import { getProcessesOnPort, getProcessesOnPortAsync } from '../utils/port.js';
 import { isWindows } from '../../lib/platform.js';
+import { collectTree } from '../../lib/platform/windows/process-tree.js';
 import {
-  collectTree,
   killSessionTree,
   waitForTreeExit,
   type KillSessionTreeResult,

@@ -36,7 +36,7 @@ import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
 import { isIssueKey } from '../../lib/issue-id.js';
-import type { Launch } from '../../lib/shell-launch.js';
+import type { Launch } from '../../lib/host-executable.js';
 import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { createWorktreeLink, type WorktreeLinkMethod } from '../lib/worktree-links.js';
 

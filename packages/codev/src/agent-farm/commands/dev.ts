@@ -20,7 +20,7 @@ import { getConfig, getWorktreeConfig } from '../utils/index.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { createPtySession } from './spawn-worktree.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
-import type { Launch } from '../../lib/shell-launch.js';
+import type { Launch } from '../../lib/host-executable.js';
 import { commandLaunch } from '../../lib/platform/command-launch.js';
 
 export interface DevOptions {

@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import { checkWindowsPrerequisites, findCrlfHookScripts, splitShellWords, type WindowsPrereqDeps } from '../commands/doctor.js';
-import { resolveGitBash, type GitBashHost } from '../lib/git-bash.js';
+import { resolveGitBash, type GitBashHost } from '../lib/platform/windows/git-bash.js';
 
 const SYSTEM32_BASH = 'C:\\Windows\\System32\\bash.exe';
 const GIT = 'C:\\Program Files\\Git';

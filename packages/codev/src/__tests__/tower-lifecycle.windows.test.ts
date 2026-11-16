@@ -24,7 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
-import { WindowsJobHelper, sessionJobName } from '../lib/windows-job.js';
+import { WindowsJobHelper, sessionJobName } from '../lib/platform/windows/job-objects.js';
 import { killSessionTree } from '../lib/process-tree.js';
 
 const onWindows = process.platform === 'win32';

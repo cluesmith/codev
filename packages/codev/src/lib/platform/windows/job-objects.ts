@@ -28,7 +28,7 @@
 
 import { spawn } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
-import { windowsPowerShellPath } from './platform.js';
+import { windowsPowerShellPath } from '../../platform.js';
 
 /** Job names live in the session-local namespace: Tower and `afx` share a logon session. */
 export function sessionJobName(shellperSessionId: string): string {

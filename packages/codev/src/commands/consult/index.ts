@@ -44,7 +44,7 @@ import {
 } from './tree-tripwire.js';
 import { isWindows } from '../../lib/platform.js';
 import { containsBuildersSegment } from '../../agent-farm/utils/builder-worktree-identity.js';
-import { findOnHostPath, spawnableOnHost } from '../../lib/shell-launch.js';
+import { findOnHostPath, spawnableOnHost } from '../../lib/host-executable.js';
 import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { detectProjectIdFromCwd } from '../../lib/worktree-project-id.js';
 

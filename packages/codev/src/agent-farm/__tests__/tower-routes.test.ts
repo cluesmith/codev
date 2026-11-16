@@ -16,7 +16,7 @@ import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
 import { handleRequest } from '../servers/tower-routes.js';
 import { resetHostPlatformForTests } from '../../lib/platform.js';
-import { setGitBashForTests } from '../../lib/shell-launch.js';
+import { setGitBashForTests } from '../../lib/platform/windows/git-bash-launch.js';
 import { getWorkspaceTerminals } from '../servers/tower-terminals.js';
 import type { DbMailbox } from '../db/types.js';
 import { setArchitectByName } from '../state.js';

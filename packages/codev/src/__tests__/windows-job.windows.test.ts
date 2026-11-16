@@ -19,7 +19,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { WindowsJobHelper, sessionJobName } from '../lib/windows-job.js';
+import { WindowsJobHelper, sessionJobName } from '../lib/platform/windows/job-objects.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
 
 const onWindows = process.platform === 'win32';

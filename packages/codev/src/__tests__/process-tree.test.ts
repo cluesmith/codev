@@ -10,12 +10,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  collectTree,
-  killSessionTree,
-  waitForTreeExit,
-  type TreeSnapshot,
-} from '../lib/process-tree.js';
+import { collectTree } from '../lib/platform/windows/process-tree.js';
+import { killSessionTree, waitForTreeExit, type TreeSnapshot } from '../lib/process-tree.js';
 import type { ProcessCensusEntry } from '../agent-farm/servers/process-census.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
 

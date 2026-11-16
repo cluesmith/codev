@@ -14,7 +14,7 @@ import {
   WINDOWS_CENSUS_QUERY,
   createWindowsCensusProvider,
   parseWindowsCensus,
-} from '../servers/process-census-windows.js';
+} from '../../lib/platform/windows/process-census.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 vi.mock('node:child_process', async () => {

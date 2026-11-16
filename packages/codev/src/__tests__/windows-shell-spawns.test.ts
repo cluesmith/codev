@@ -20,7 +20,7 @@ import { runStreaming, commandExists } from '../agent-farm/utils/shell.js';
 import { runCheck } from '../commands/porch/checks.js';
 import { commandLaunch } from '../lib/platform/command-launch.js';
 import { windowsPrereqDeps } from '../commands/doctor.js';
-import { setGitBashForTests } from '../lib/shell-launch.js';
+import { setGitBashForTests } from '../lib/platform/windows/git-bash-launch.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
 
 const GIT_BASH = {

@@ -7,7 +7,7 @@
 
 import { realpathSync } from 'node:fs';
 import * as path from 'node:path';
-import type { HostPaths } from './host-paths.js';
+import type { HostPaths } from '../host-paths.js';
 
 function realpathOrSelf(p: string): string {
   try {

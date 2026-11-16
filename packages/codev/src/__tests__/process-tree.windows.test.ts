@@ -24,7 +24,7 @@ import { killSessionTree, waitForTreeExit } from '../lib/process-tree.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
 import { isConsoleHostEntry, sweepShellperHusks } from '../agent-farm/servers/shellper-husk-sweep.js';
 import { SessionManager } from '../terminal/session-manager.js';
-import { WindowsJobHelper } from '../lib/windows-job.js';
+import { WindowsJobHelper } from '../lib/platform/windows/job-objects.js';
 import { runCheck } from '../commands/porch/checks.js';
 
 const onWindows = process.platform === 'win32';

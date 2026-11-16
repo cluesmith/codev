@@ -16,7 +16,7 @@ import {
   sessionJobName,
   terminateSessionJob,
   type HelperProcess,
-} from '../lib/windows-job.js';
+} from '../lib/platform/windows/job-objects.js';
 import { JOB_ASSIGN_BUDGET_MS } from '../terminal/session-manager.js';
 import { DEFER_PTY_DEADLINE_MS } from '../terminal/shellper-process.js';
 

@@ -16,7 +16,7 @@ import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { JobAssignOutcome, WindowsJobHelper } from '../../lib/windows-job.js';
+import type { JobAssignOutcome, WindowsJobHelper } from '../../lib/platform/windows/job-objects.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const events: string[] = [];

@@ -30,8 +30,8 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 import { processes } from '../lib/platform/processes.js';
-import { posixProcesses } from '../lib/platform/processes.posix.js';
-import { windowsProcesses } from '../lib/platform/processes.windows.js';
+import { posixProcesses } from '../lib/platform/posix/processes.js';
+import { windowsProcesses } from '../lib/platform/windows/processes.js';
 import { useHostPlatform } from './helpers/host-platform.js';
 
 beforeEach(() => {

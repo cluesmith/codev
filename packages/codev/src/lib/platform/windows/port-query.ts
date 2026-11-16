@@ -6,7 +6,7 @@
  */
 
 import { execFile, execFileSync } from 'node:child_process';
-import { windowsPowerShellPath } from '../../lib/platform.js';
+import { windowsPowerShellPath } from '../../platform.js';
 
 /** Windows: `Get-NetTCPConnection` in a cold PowerShell takes a few seconds; bound it. */
 const WINDOWS_PORT_QUERY_TIMEOUT_MS = 15_000;

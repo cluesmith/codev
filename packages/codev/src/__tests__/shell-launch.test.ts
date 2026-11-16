@@ -17,8 +17,8 @@ vi.mock('@cluesmith/codev-sdk/node/executable', async (importOriginal) => {
   sdk.resolveSpawnable.mockImplementation(actual.resolveSpawnable);
   return { ...actual, resolveSpawnable: sdk.resolveSpawnable };
 });
-vi.mock('../lib/git-bash.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/git-bash.js')>();
+vi.mock('../lib/platform/windows/git-bash.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/platform/windows/git-bash.js')>();
   return { ...actual, resolveGitBash: gitBashModule.resolveGitBash };
 });
 
@@ -29,10 +29,11 @@ import {
   gitBashEnv,
   setGitBashForTests,
   windowsInteractiveShell,
-  windowsPowerShellPath,
   windowsShellRequest,
-} from '../lib/shell-launch.js';
-import { ptyCommand, windowsPtyBaseEnv } from '../lib/pty-command.js';
+} from '../lib/platform/windows/git-bash-launch.js';
+import { windowsPowerShellPath } from '../lib/platform.js';
+import { ptyCommand } from '../lib/pty-command.js';
+import { windowsPtyBaseEnv } from '../lib/platform/windows/pty-env.js';
 import { defaultInteractiveShell, windowsSystem32Path } from '../lib/platform.js';
 import { getDefaultConfig } from '../lib/config.js';
 import { forceHostPlatform } from './helpers/host-platform.js';

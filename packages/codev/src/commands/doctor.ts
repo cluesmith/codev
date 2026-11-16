@@ -38,11 +38,11 @@ import { isHostPathAtOrUnder } from '../lib/host-paths.js';
 import { commandLaunch } from '../lib/platform/command-launch.js';
 import { getWorktreeConfig } from '../agent-farm/utils/config.js';
 import type { CodevConfig } from '../lib/config.js';
-import { resolveGitBash, GitBashError, type GitBash } from '../lib/git-bash.js';
+import { resolveGitBash, GitBashError, type GitBash } from '../lib/platform/windows/git-bash.js';
 import { findExecutable } from '@cluesmith/codev-sdk/node/executable';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
-import { WindowsJobHelper } from '../lib/windows-job.js';
-import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING } from '../agent-farm/commands/tower-start-windows.js';
+import { WindowsJobHelper } from '../lib/platform/windows/job-objects.js';
+import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING } from '../agent-farm/commands/windows/tower-lifecycle.js';
 import http from 'node:http';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import {

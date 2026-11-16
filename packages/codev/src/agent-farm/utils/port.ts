@@ -8,15 +8,13 @@
  * existing consumers are unaffected.
  *
  * The lookup itself is the processes capability's (Spec 1658, Amendment 2):
- * `lsof` on POSIX, `Get-NetTCPConnection` on Windows (`port-windows.ts`).
+ * `lsof` on POSIX, `Get-NetTCPConnection` on Windows (`lib/platform/windows/port-query.ts`).
  * Importing it loads both implementations and the Windows census, teardown
  * and job modules; none of them spawns anything or promisifies at module
  * scope, so the #1219 property holds.
  */
 
 import { processes } from '../../lib/platform/processes.js';
-
-export { parsePidLines } from './port-windows.js';
 
 /**
  * Get the PID(s) of the process *listening* on a port (the server), not its

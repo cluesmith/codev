@@ -17,8 +17,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { findExecutable, resolveSpawnable } from '@cluesmith/codev-sdk/node/executable';
-import { resolveGitBash, isWslLauncher } from '../lib/git-bash.js';
-import { toMsysPath, fromMsysPath, withoutMsysPathConversion } from '../lib/msys-path.js';
+import { resolveGitBash, isWslLauncher } from '../lib/platform/windows/git-bash.js';
+import { toMsysPath, fromMsysPath, withoutMsysPathConversion } from '../lib/platform/windows/msys-path.js';
 import { checkWindowsPrerequisites, windowsPrereqDeps } from '../commands/doctor.js';
 
 const onWindows = process.platform === 'win32';

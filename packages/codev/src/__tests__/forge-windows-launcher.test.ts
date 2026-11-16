@@ -20,8 +20,8 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { executeForgeCommand, executeForgeCommandSync, getForgeCommand, getKnownProviders } from '../lib/forge.js';
-import { setGitBashForTests } from '../lib/shell-launch.js';
-import { toMsysPath } from '../lib/msys-path.js';
+import { setGitBashForTests } from '../lib/platform/windows/git-bash-launch.js';
+import { toMsysPath } from '../lib/platform/windows/msys-path.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
 
 const GIT_BASH = {

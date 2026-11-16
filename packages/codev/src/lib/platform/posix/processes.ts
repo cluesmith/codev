@@ -8,9 +8,9 @@
 
 import { execFile, execSync } from 'node:child_process';
 import fs from 'node:fs';
-import type { ProcessCensusEntry } from '../../agent-farm/servers/process-census.js';
-import type { KillSessionTreeOptions, KillSessionTreeResult } from '../process-tree.js';
-import type { Processes } from './processes.js';
+import type { ProcessCensusEntry } from '../processes.js';
+import type { KillSessionTreeOptions, KillSessionTreeResult } from '../../process-tree.js';
+import type { Processes } from '../processes.js';
 
 function defaultKill(pid: number, signal: NodeJS.Signals | 0): void {
   process.kill(pid, signal);

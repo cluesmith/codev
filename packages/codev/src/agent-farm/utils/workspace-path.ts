@@ -23,7 +23,7 @@
  */
 
 import { hostPaths, type WorkspacePathOps } from '../../lib/platform/host-paths.js';
-import { defaultWorkspacePathOps, resetWindowsPathCacheForTests } from '../../lib/platform/host-paths.windows.js';
+import { defaultWorkspacePathOps, resetWindowsPathCacheForTests } from '../../lib/platform/windows/host-paths.js';
 
 export type { WorkspacePathOps };
 

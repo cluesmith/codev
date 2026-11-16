@@ -57,8 +57,8 @@ vi.mock('node:child_process', async () => {
     }),
   };
 });
-vi.mock('../commands/tower-start-windows.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../commands/tower-start-windows.js')>();
+vi.mock('../commands/windows/tower-lifecycle.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../commands/windows/tower-lifecycle.js')>();
   return {
     ...actual,
     launchViaCim: vi.fn(async (req: { command: string; args: string[]; cwd: string; env: Record<string, string> }) => {
@@ -73,10 +73,9 @@ const {
   SUPPORTED_TOWER_LAUNCH_PATHS,
   cimRefusalMessage,
   daemonEnvironment,
-  isInsideCodevSession,
   launchViaCim: realLaunchViaCim,
-} = await vi.importActual<typeof import('../commands/tower-start-windows.js')>('../commands/tower-start-windows.js');
-const { SHELLPER_SESSION_ENV } = await import('../../terminal/shellper-endpoint.js');
+} = await vi.importActual<typeof import('../commands/windows/tower-lifecycle.js')>('../commands/windows/tower-lifecycle.js');
+const { SHELLPER_SESSION_ENV, isInsideCodevSession } = await import('../../terminal/shellper-endpoint.js');
 
 let savedEnv: NodeJS.ProcessEnv;
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>;

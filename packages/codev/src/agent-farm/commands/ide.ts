@@ -22,7 +22,7 @@ import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:
 import { fileURLToPath } from 'node:url';
 import { logger } from '../utils/logger.js';
 import { isWindows } from '../../lib/platform.js';
-import { findOnHostPath, spawnableOnHost } from '../../lib/shell-launch.js';
+import { findOnHostPath, spawnableOnHost } from '../../lib/host-executable.js';
 import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import {

@@ -29,7 +29,7 @@
 
 import http from 'node:http';
 import { isWindows } from '../../lib/platform.js';
-import { WINDOWS_CENSUS_TIMEOUT_MS } from '../servers/process-census-windows.js';
+import { WINDOWS_CENSUS_TIMEOUT_MS } from '../../lib/platform/windows/process-census.js';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
