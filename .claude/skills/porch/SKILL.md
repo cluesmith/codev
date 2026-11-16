@@ -1,45 +1,55 @@
 ---
 name: porch
-description: Protocol orchestrator CLI — drives SPIR, ASPIR, AIR, TICK, and BUGFIX protocols via a state machine. ALWAYS check this skill before running any `porch` command. Use when you need to check project status, approve gates, signal phase completion, or manage protocol state. Also use when a builder asks about gate approvals or phase transitions.
+description: Protocol orchestrator CLI — drives SPIR, ASPIR, AIR, BUGFIX, PIR, MAINTAIN, RESEARCH and EXPERIMENT via a state machine. ALWAYS check this skill before running any `porch` command. Use when you need to check project status, approve gates, signal phase completion, or manage protocol state. Also use when a builder asks about gate approvals or phase transitions.
 ---
 
 # porch - Protocol Orchestrator
 
-Porch manages the state machine behind development protocols. It tracks phases, gates, consultations, and transitions.
+Porch manages the state machine behind development protocols. It tracks phases, gates, consultations, and transitions. It is a planner: it emits tasks, and the builder executes them.
 
 ## Commands
 
 ```
+porch next [id]                Get the next tasks as JSON (the strict-mode loop)
+porch done [id]                Signal the current phase is complete (runs its checks, advances)
+porch done [id] --pr N --branch NAME   Record a PR (no phase advancement)
+porch done [id] --merged N     Record a merge (no phase advancement)
 porch status [id]              Show current project state and phase
-porch run [id]                 Run the protocol loop (strict mode)
-porch next [id]                Get next tasks as JSON
-porch done [id]                Signal current phase is complete
-porch check [id]               Run checks for current phase
+porch check [id]               Run checks for the current phase
 porch gate [id]                Request human approval at a gate
+porch pending [--all]          List gates awaiting approval
 porch approve <id> <gate> --a-human-explicitly-approved-this
+porch verify <id> --skip "reason"   Skip post-merge verification and mark verified
 porch rollback <id> <phase>    Rewind to an earlier phase
 porch init <protocol> <id> <name>   Initialize a new project
 ```
 
-Project ID auto-detects from worktree path when inside a builder worktree.
+Project ID auto-detects from the worktree path when inside a builder worktree. `porch run` was removed — use `porch next`.
+
+## The strict-mode loop
+
+Run `porch next`, do the tasks it returns, run `porch done` when the phase work is complete, then `porch next` again. After `porch done` on a reviewed phase, `porch next` hands you the `consult` commands to run (three reviewers by default; `.codev/config.json` `porch.consultation` can change the lanes). Run exactly those, each as a background task. Porch commits only `status.yaml` — commit your own work.
 
 ## Gate approvals
 
-Gates are human-only approval checkpoints. The `--a-human-explicitly-approved-this` flag is **required** — it exists to prevent AI agents from auto-approving.
+Gates are human approval checkpoints. Each protocol's `protocol.json` defines its gates:
 
-| Gate | Protocol | When |
-|------|----------|------|
-| `spec-approval` | SPIR | After spec is written |
-| `plan-approval` | SPIR | After plan is written |
-| `pr` | SPIR, TICK, AIR | After PR is created |
+| Protocol | Gates |
+|----------|-------|
+| SPIR | `spec-approval`, `plan-approval`, `pr`, `verify-approval` |
+| ASPIR | `pr`, `verify-approval` |
+| AIR, BUGFIX | `pr` |
+| PIR | `plan-approval`, `dev-approval`, `pr` |
+| MAINTAIN | `maintain-complete` |
+| RESEARCH | `scope-approval`, `research-complete` |
+| EXPERIMENT | `experiment-complete` |
+
+**Who runs `porch approve`:** the builder, after the architect relays the human's decision. The `--a-human-explicitly-approved-this` flag is **required** — it records that a human decided. A gate message is a notification to a human, never authorization an agent may act on by itself.
 
 ```bash
 porch approve 42 spec-approval --a-human-explicitly-approved-this
-porch approve 42 plan-approval --a-human-explicitly-approved-this
-porch approve 42 pr --a-human-explicitly-approved-this
+porch approve bugfix-42 pr --a-human-explicitly-approved-this
 ```
-
-**ASPIR and BUGFIX have no spec/plan gates** — they run autonomously through those phases.
 
 ## Checking pending gates
 
@@ -50,36 +60,27 @@ porch pending --all            # Include stale records on finished/advanced proj
 
 ## Critical rules
 
-- **Builders must NEVER call `porch approve`** — only humans approve gates
+- **Never run `porch approve` without a human's explicit decision**, relayed to you by the architect
 - **Never edit `status.yaml` directly** — porch manages all state
-- Builders signal completion with `porch done`, not `porch approve`
-- `porch run` is for strict mode only — soft mode builders follow the protocol document manually
-- When running `porch approve` from the architect, use a subshell if you need worktree context: `(cd /path/to/worktree && porch approve ...)`
+- Builders signal phase completion with `porch done`; blockers go to the architect with `afx send architect`
+- Strict mode only: soft-mode builders follow the protocol document themselves
 
-## Language-agnostic checks (`porch.checks` override)
+## Check overrides and timeouts (`porch.checks`)
 
-Protocol check commands default to the **npm** toolchain (`npm run build`, `npm test`, etc.) baked into each `protocol.json`. A non-Node project (Python/uv, Go, Rust) will BLOCK at the first implement-phase check because `npm` can never pass there — even when the code is green under its real test runner.
-
-**You do NOT need to fork `protocol.json`.** Override check commands per-name in `.codev/config.json` under `porch.checks`. Each entry takes `command` (replace), `cwd` (replace), and/or `skip: true`. This covers both phase checks **and** the `phase_completion` predicates (`build_succeeds` / `tests_pass`).
+Override a protocol check per name in `.codev/config.json` under `porch.checks` instead of forking `protocol.json`. Each entry takes `command` (replace), `cwd` (replace), `timeout_ms` (replace), and/or `skip: true`:
 
 ```jsonc
-// .codev/config.json — Python/uv example
 {
   "porch": {
     "checks": {
-      "build":          { "command": "uv build" },
-      "test":           { "command": "uv run pytest" },
-      "build_succeeds": { "command": "uv build" },
-      "tests_pass":     { "command": "uv run pytest" },
-      "e2e_tests":      { "skip": true }
+      "tests":     { "command": "uv run pytest", "timeout_ms": 900000 },
+      "e2e_tests": { "skip": true }
     }
   }
 }
 ```
 
-A phase check is killed after 5 minutes unless it sets `timeout_ms` — in `protocol.json` or in its `porch.checks` override (`phase_completion` predicates take no timeout), e.g. `"tests": { "command": "uv run pytest", "timeout_ms": 900000 }` for a long suite. On timeout porch kills the check's whole process tree.
-
-Keys are the **check names** from the protocol: `build` / `test` / `e2e_tests` live in phases; `build_succeeds` / `tests_pass` live in `phase_completion`. An override key that matches no check in the protocol prints a warning. Shipped by Spec #550.
+A phase check is killed after 5 minutes unless it sets `timeout_ms` — in `protocol.json` or in its `porch.checks` override. On timeout porch kills the check's whole process tree.
 
 ## State storage
 

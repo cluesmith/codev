@@ -33,10 +33,9 @@ afx workspace start [options]
 ```
 
 **Options:**
-- `-c, --cmd <command>` - Command to run in architect terminal
-- `-p, --port <port>` - Port for architect terminal
-- `--no-role` - Skip loading architect role prompt
 - `--no-browser` - Skip opening browser after start
+
+To change the architect command, use the global `--architect-cmd <command>` option (`afx --architect-cmd "claude --model opus" workspace start`) or `shell.architect` in `.codev/config.json`.
 - `-r, --remote <target>` - Start Agent Farm on remote machine (see below)
 - `--allow-insecure-remote` - Bind to 0.0.0.0 for remote access (deprecated)
 
@@ -47,7 +46,7 @@ Starts the workspace with:
 - Web-based UI for monitoring builders
 - Shellper session management
 
-The workspace overview is accessible via browser at `http://localhost:<port>`.
+The workspace overview is served by Tower at `http://localhost:4100`.
 
 **Examples:**
 
@@ -55,49 +54,11 @@ The workspace overview is accessible via browser at `http://localhost:<port>`.
 # Start with defaults
 afx workspace start
 
-# Start with custom port
-afx workspace start -p 4300
-
-# Start with specific command
-afx workspace start -c "claude --model opus"
-
-# Start on remote machine
-afx workspace start --remote user@host
+# Start without opening a browser
+afx workspace start --no-browser
 ```
 
-#### Remote Access
-
-Start Agent Farm on a remote machine and access it from your local workstation with a single command:
-
-```bash
-# On your local machine - one command does everything:
-afx workspace start --remote user@remote-host
-
-# Or with explicit project path:
-afx workspace start --remote user@remote-host:/path/to/project
-
-# With custom port:
-afx workspace start --remote user@remote-host --port 4300
-```
-
-This single command:
-1. Checks passwordless SSH is configured
-2. Verifies CLI versions match between local and remote
-3. SSHs into the remote machine
-4. Starts Agent Farm there with matching port
-5. Sets up SSH tunnel back to your local machine
-6. Opens the workspace overview in your browser
-
-The workspace and all terminals work identically to local development. Press Ctrl+C to disconnect.
-
-**Port Selection:**
-
-The port is determined by the global port registry (`afx ports list`). Each project gets a consistent 100-port block (e.g., 4200-4299, 4600-4699). The same port is used on both local and remote ends for the SSH tunnel.
-
-```bash
-# Check your project's port allocation
-afx ports list
-```
+All workspaces share one Tower on port 4100; there are no per-project port blocks.
 
 **Prerequisites:**
 - SSH server must be running on the remote machine
@@ -273,18 +234,20 @@ afx spawn [number] --protocol <name> [options]
 - `[number]` - Issue number (positional)
 
 **Required:**
-- `--protocol <name>` - Protocol to use: spir, bugfix, tick, maintain, experiment. **REQUIRED** for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip this flag.
+- `--protocol <name>` - Protocol to use: spir, aspir, air, bugfix, pir, maintain, experiment. **REQUIRED** for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip this flag.
 
 **Options:**
 - `--task <text>` - Spawn builder with a task description (no `--protocol` needed)
-- `--amends <number>` - Original spec number for TICK amendments
 - `--shell` - Spawn a bare Claude session (no `--protocol` needed)
 - `--worktree` - Spawn worktree session (no `--protocol` needed)
-- `--files <files>` - Context files (comma-separated)
+- `--files <files>` - Context files (comma-separated; requires `--task`)
+- `--no-comment` - Skip commenting on the issue
 - `--soft` - Use soft mode (AI follows protocol, you verify compliance)
 - `--strict` - Use strict mode (porch orchestrates, default)
 - `--resume` - Resume an existing builder worktree
 - `--force` - Skip safety checks (dirty worktree, collision detection)
+- `--branch <name>` - Build on an existing remote branch instead of creating one (requires `--protocol`)
+- `--remote <name>` - Remote to fetch the `--branch` from (fork PRs)
 - `--no-role` - Skip loading role prompt
 
 **Preconditions:**
@@ -311,9 +274,6 @@ afx spawn 42 --protocol spir
 # Spawn builder for a bugfix
 afx spawn 42 --protocol bugfix
 
-# Spawn TICK amendment to spec 30
-afx spawn 42 --protocol tick --amends 30
-
 # Spawn with task description (no --protocol needed)
 afx spawn --task "Fix login bug in auth module"
 
@@ -331,7 +291,7 @@ afx spawn 42 --resume
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Missing required flag: --protocol" | Forgot `--protocol` | Add `--protocol spir` (or bugfix, tick, etc.) |
+| "Missing required flag: --protocol" | Forgot `--protocol` | Add `--protocol spir` (or bugfix, air, etc.) |
 | "Dirty worktree" | Uncommitted changes | Run `git status`, commit changes, retry |
 | "Builder already exists" | Worktree collision | Use `--resume` to resume, or `afx cleanup` first |
 
@@ -596,7 +556,7 @@ line-by-line shape (also chunked) because its paste handling has not been measur
 
 ```bash
 # Send message to builder in current workspace
-afx send 0042 "Focus on the auth module first"
+afx send spir-42 "Focus on the auth module first"
 
 # Send to architect in current workspace
 afx send architect "PR #42 has been merged"
@@ -612,13 +572,13 @@ afx send architect:ob-refine "PR-iter-2 feedback ready"
 afx send marketmaker:architect "R4 report updated with cost analysis"
 
 # Interrupt and send new instructions
-afx send 0042 --interrupt "Stop that. Try a different approach."
+afx send spir-42 --interrupt "Stop that. Try a different approach."
 
 # Send to all builders
 afx send --all "Time to wrap up, create PRs"
 
 # Include file content
-afx send 0042 --file src/api.ts "Review this implementation"
+afx send spir-42 --file src/api.ts "Review this implementation"
 ```
 
 **Discovering active agents** (Spec 823):
@@ -727,7 +687,7 @@ Distinct from `afx send --interrupt`, which sends Ctrl+C.
 afx interrupt 0042
 
 # Then the queued instruction lands
-afx send 0042 "That producer died — stop waiting and report."
+afx send spir-42 "That producer died — stop waiting and report."
 ```
 
 ---
@@ -888,37 +848,6 @@ afx rename "monitoring"
 # Name will be deduped if it conflicts
 afx rename "testing"   # → "testing-1" if "testing" already exists
 ```
-
----
-
-### afx ports
-
-Manage global port registry.
-
-#### afx ports list
-
-List all port allocations.
-
-```bash
-afx ports list
-```
-
-Shows port blocks allocated to different projects:
-```
-Port Allocations
-4200-4299: /Users/me/project-a
-4300-4399: /Users/me/project-b
-```
-
-#### afx ports cleanup
-
-Remove stale port allocations.
-
-```bash
-afx ports cleanup
-```
-
-Removes entries for projects that no longer exist.
 
 ---
 

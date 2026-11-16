@@ -2,12 +2,12 @@
 
 ## Context
 
-You are performing the final self-check during the Review phase — the builder has completed all implementation phases and is about to open the PR. This is the last check before the work goes to the architect for integration review.
+You are performing the final self-check during the Review phase — the builder has completed all implementation phases, written the review document, and opened the PR you are reviewing. This is the last check before the work goes to the architect for integration review.
 
 ## Focus Areas
 
-- **Completeness** — all spec requirements implemented, all plan phases complete, the review document written (`codev/reviews/XXXX-name.md`), and commits in the `[Spec XXXX][Phase]` format.
-- **Test Status** — all tests pass, coverage is adequate for the changes, and any skipped/flaky tests are accounted for.
+- **Completeness** — all spec requirements implemented, all plan phases complete, the review document written (`codev/reviews/<id>-<name>.md`), and commits in the `[Spec <id>][Phase: <plan-phase>]` format.
+- **Test Status** — all tests pass, coverage is adequate for the changes, and any flaky pre-existing test is named under Flaky Tests (reported and left running, not skipped).
 - **Code Cleanliness** — no debug code, no stray `TODO` / `// REVIEW:` left unaddressed, code properly formatted.
 - **Documentation** — inline comments clear where needed, the review document comprehensive, new APIs documented.
 - **PR Readiness** — the branch is up to date with its base (the integration branch the PR targets), commits are atomic and well-described, and the diff size is reasonable.
@@ -43,8 +43,8 @@ PR_SUMMARY: |
   - [How to test]
 ```
 
-- `APPROVE`: ready to create the PR.
-- `REQUEST_CHANGES`: issues to fix before PR creation.
-- `COMMENT`: minor items; can create the PR but note the feedback.
+- `APPROVE`: ready for the architect's review.
+- `REQUEST_CHANGES`: issues to fix on the PR before the architect reviews it.
+- `COMMENT`: minor items; can proceed but note the feedback.
 
 The `PR_SUMMARY` block can be used directly as the PR description.

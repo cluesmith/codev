@@ -3,7 +3,7 @@
 Use this template to prepare context for architect-mediated PR reviews.
 
 ## PR Info
-- **Number**: #NNN
+- **Number**: #<N>
 - **Title**: [PR Title]
 - **Branch**: [branch-name]
 - **Author**: [author]
@@ -53,21 +53,19 @@ Use this template to prepare context for architect-mediated PR reviews.
 
 ## Usage
 
-To use this template for architect-mediated reviews:
+To use this template for an architect-mediated review, fill it out, save it as `overview.md`,
+and pass it as the prompt of a general-mode consultation:
 
 ```bash
-# Fill out this template and save as overview.md, then:
-consult -m gemini --type pr --context overview.md
-
-# Or pipe directly:
-cat overview.md | consult -m gemini --type pr --context -
-
-# For 3-way parallel reviews:
-consult -m gemini --type pr --context overview.md &
-consult -m codex --type pr --context overview.md &
-consult -m claude --type pr --context overview.md &
-wait
+consult -m gemini --prompt-file overview.md
 ```
 
-The consultant will analyze the provided context WITHOUT accessing the filesystem,
-resulting in faster and more consistent reviews.
+For a 3-way review, run the same command with `-m codex` and `-m claude`, each as its own
+background task (in Claude Code, `run_in_background: true`, not a trailing `&`). The consultant
+can still read the repository; the overview tells it where to look.
+
+For a review of the PR itself, without an overview, use the integration review:
+
+```bash
+consult -m claude --type integration --issue <N>
+```

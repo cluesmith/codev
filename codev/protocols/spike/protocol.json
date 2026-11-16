@@ -16,15 +16,6 @@
       "type": "once"
     }
   ],
-  "signals": {
-    "PHASE_COMPLETE": {
-      "description": "Signal spike is complete"
-    },
-    "BLOCKED": {
-      "description": "Signal spike is blocked",
-      "requires": "reason"
-    }
-  },
   "defaults": {
     "mode": "soft",
     "consultation": {

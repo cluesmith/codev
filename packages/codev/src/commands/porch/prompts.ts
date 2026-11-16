@@ -10,7 +10,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord } from './types.js';
+import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord, PhaseConsultationConfig } from './types.js';
 import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './protocol.js';
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
@@ -20,6 +20,7 @@ import { issueNumberFromPorchId } from '../../lib/issue-id.js';
 import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import { resolveCodevFile, resolveCodevIncludes } from '../../lib/skeleton.js';
 import { readHotTierFiles } from '../../lib/managed-block.js';
+import { resolveConsultationModels } from './config.js';
 
 /**
  * Get project summary from GitHub Issues, with spec-file fallback.
@@ -119,6 +120,38 @@ interface PromptIssue {
 }
 
 /**
+ * Render a builder-run consultation (`{{consult_commands}}` / `{{consult_verdicts}}`).
+ *
+ * The lanes come from `resolveConsultationModels` — the resolver `porch next` uses for a verify
+ * step — so `.codev/config.json` `porch.consultation` decides what the builder runs here too.
+ * Before this, the BUGFIX/AIR PR prompts hardcoded three `consult` lines and the project's lane
+ * list was silently ignored (#1902).
+ */
+export function renderConsultation(
+  workspaceRoot: string,
+  protocol: string,
+  consultation: PhaseConsultationConfig,
+): { commands: string; verdicts: string } {
+  const { models, mode } = resolveConsultationModels(workspaceRoot, consultation.models, protocol, consultation.type);
+  if (mode === 'none') {
+    return {
+      commands: '# .codev/config.json sets porch.consultation to "none": this project runs no consultation.',
+      verdicts: 'none (porch.consultation is "none")',
+    };
+  }
+  if (mode === 'parent') {
+    return {
+      commands: '# .codev/config.json sets porch.consultation to "parent": the architect reviews directly; run no consult.',
+      verdicts: 'architect review (porch.consultation is "parent")',
+    };
+  }
+  return {
+    commands: models.map(m => `consult -m ${m} --protocol ${protocol} --type ${consultation.type}`).join('\n'),
+    verdicts: models.map(m => `${m}=<APPROVE|REQUEST_CHANGES>`).join(', '),
+  };
+}
+
+/**
  * Substitute template variables in a prompt.
  *
  * Names are `\w+` or dotted (`{{issue.number}}`). An unknown name is left as written.
@@ -131,6 +164,7 @@ function substituteVariables(
   planPhase?: PlanPhase | null,
   summary?: string | null,
   issue?: PromptIssue | null,
+  consultation?: PhaseConsultationConfig,
 ): string {
   const variables: Record<string, string> = {
     project_id: state.id,
@@ -141,6 +175,12 @@ function substituteVariables(
     pr_create_command: resolveConceptCommand(workspaceRoot, 'pr-create', 'open the PR manually'),
     pr_merge_command: resolveConceptCommand(workspaceRoot, 'pr-merge', 'merge the PR manually'),
   };
+
+  if (consultation) {
+    const rendered = renderConsultation(workspaceRoot, state.protocol, consultation);
+    variables.consult_commands = rendered.commands;
+    variables.consult_verdicts = rendered.verdicts;
+  }
 
   // Add summary/goal if available
   if (summary) {
@@ -159,9 +199,23 @@ function substituteVariables(
   }
 
   // Replace {{variable}} / {{dotted.variable}} with values
-  return prompt.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (match, varName) => {
+  const result = prompt.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (match, varName) => {
     return variables[varName] || match;
   });
+
+  // A prompt that asks for reviewers but got none rendered would hand the builder a PR step with
+  // no consult commands. The usual cause is a local protocol.json older than its prompt (no
+  // `consultation` block on the phase), so fail here instead of shipping the literal token.
+  const unrendered = result.match(/\{\{consult_(?:commands|verdicts)\}\}/);
+  if (unrendered) {
+    throw new Error(
+      `Protocol "${state.protocol}", phase "${state.phase}": the prompt uses ${unrendered[0]} but the phase ` +
+        'declares no "consultation" block in protocol.json, so it would reach the builder with no reviewers. ' +
+        'Add "consultation": {"type": "<review type>", "models": [...]} to that phase (a local protocol.json ' +
+        'older than its prompt is the usual cause).',
+    );
+  }
+  return result;
 }
 
 /**
@@ -323,7 +377,7 @@ export async function buildPhasePrompt(
 
     const promptContent = loadPromptFile(workspaceRoot, state.protocol, promptFileName);
     if (promptContent) {
-      let result = substituteVariables(promptContent, state, artifactBaseName, workspaceRoot, currentPlanPhase, summary, issue);
+      let result = substituteVariables(promptContent, state, artifactBaseName, workspaceRoot, currentPlanPhase, summary, issue, phaseConfig.consultation);
 
       // Add goal/summary header if available
       if (summary) {

@@ -46,10 +46,10 @@ and committable as a unit. Note dependencies inline. **No time estimates.** Deli
 depends on iteration cycles, not calendar time, and an estimate in an AI-driven project is noise
 that later gets quoted back as a commitment.
 
-**Implement** — one build-verify cycle per plan phase: build, verify by 3-way consultation,
-address what reviewers find, commit. The commit is what makes the next phase safe to begin; a
+**Implement** — one build-verify cycle per plan phase: build, commit, verify by 3-way
+consultation, address what reviewers find. Porch never commits your work — you do. The commit is what makes the next phase safe to begin; a
 phase that is "done but uncommitted" can vanish. If verification exposes a flaw in the *plan*
-rather than the code, mark the phase blocked and revise the plan — implementing around a
+rather than the code, stop, tell the architect, and revise the plan — implementing around a
 known-wrong plan is how a project ships the wrong thing carefully.
 
 Tests belong to the phase that creates the behaviour, not to a cleanup pass at the end.
@@ -64,15 +64,19 @@ detail to `arch.md` / `lessons-learned.md`. The `update-arch-docs` skill encodes
 ## Consultation
 
 3-way consultation (Gemini, Codex, Claude) is **on by default** and runs at each phase's verify
-step. Disable it only when the human explicitly asks.
+step: after `porch done`, `porch next` hands you the `consult` commands and you run them. A
+project can narrow the lanes in `.codev/config.json` under `porch.consultation`. Disable it only
+when the human explicitly asks.
 
 It is not a formality: it reliably catches security, design and protocol problems that solo
 review misses, and the cost of skipping it is paid later by someone with less context.
 
 ## Gates
 
-`spec-approval`, `plan-approval` and `pr` are **human** decisions. Stop and wait. A gate message
-is a notification to a human, not authorization to proceed.
+`spec-approval`, `plan-approval`, `pr` and `verify-approval` are **human** decisions. Stop and
+wait. A gate message is a notification to a human, not authorization to proceed. When the
+architect relays the human's decision, you run
+`porch approve <id> <gate> --a-human-explicitly-approved-this` yourself.
 
 ## Baked Decisions
 
@@ -98,11 +102,8 @@ respawning, or by sending the builder a direct instruction via `afx send`.
 [Spec 42][Phase: user-auth] feat: Add password hashing service
 ```
 
-Branches: `spir/42-feature-name/phase-name`.
+Branch: `builder/spir-42`, created by `afx spawn`. All plan phases are commits on that one
+branch, in one PR.
 
-Each implement phase ends in one atomic commit before the next begins.
-
-## Phase status
-
-Tracked per phase inside the plan document, not per document: `pending`, `in-progress`,
-`completed`, `blocked`.
+Each implement phase ends in one atomic commit before the next begins. Porch tracks which plan
+phase is current (`porch status`); the plan document carries no status field.

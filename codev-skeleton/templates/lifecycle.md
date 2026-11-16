@@ -16,9 +16,9 @@ conceived → specified → planned → implementing → implemented → committ
 
 **Who does it:** Anyone can conceive a project by describing what they want to build.
 
-**What happens next:** The Architect (AI) writes a specification. The human reviews and approves it.
+**What happens next:** A Builder (AI) writes the specification; the Architect reviews it at the spec gate and the human approves it.
 
-**Artifact:** Draft specification in `codev/specs/NNN-name.md`
+**Artifact:** Draft specification in `codev/specs/<id>-<name>.md`
 
 ---
 
@@ -28,9 +28,9 @@ conceived → specified → planned → implementing → implemented → committ
 
 **Who does it:** Only a human can approve a specification and mark it as specified.
 
-**What happens next:** The Architect creates an implementation plan.
+**What happens next:** The Builder writes an implementation plan.
 
-**Artifact:** Approved specification in `codev/specs/NNN-name.md`
+**Artifact:** Approved specification in `codev/specs/<id>-<name>.md`
 
 ---
 
@@ -38,11 +38,11 @@ conceived → specified → planned → implementing → implemented → committ
 
 **What it means:** An implementation plan exists that describes how to build the feature.
 
-**Who does it:** The Architect (AI) creates the plan, human reviews it.
+**Who does it:** The Builder (AI) writes the plan; the Architect reviews it at the plan gate and the human approves it.
 
-**What happens next:** A Builder is spawned to implement the plan.
+**What happens next:** The same Builder implements the plan.
 
-**Artifact:** Implementation plan in `codev/plans/NNN-name.md`
+**Artifact:** Implementation plan in `codev/plans/<id>-<name>.md`
 
 ---
 
@@ -90,7 +90,7 @@ conceived → specified → planned → implementing → implemented → committ
 
 **What happens next:** Nothing - the project is complete! A review document captures lessons learned.
 
-**Artifact:** Review document in `codev/reviews/NNN-name.md`
+**Artifact:** Review document in `codev/reviews/<id>-<name>.md`
 
 ---
 
@@ -110,16 +110,28 @@ The project is temporarily paused but may resume later. The notes field should e
 
 ## Human Approval Gates
 
-Two stages require explicit human approval - AI agents cannot bypass these:
+Porch stops at each protocol's human gates — AI agents cannot bypass them. Each protocol's
+`protocol.json` defines its gates:
 
-| Gate | Transition | Why |
-|------|------------|-----|
-| **Spec Approval** | conceived → specified | Humans must approve what gets built |
-| **Production Validation** | committed → integrated | Humans must verify it works in production |
+| Protocol | Gates |
+|----------|-------|
+| SPIR | `spec-approval`, `plan-approval`, `pr`, `verify-approval` |
+| ASPIR | `pr`, `verify-approval` |
+| AIR, BUGFIX | `pr` |
+| PIR | `plan-approval`, `dev-approval`, `pr` |
+| MAINTAIN | `maintain-complete` |
+| RESEARCH | `scope-approval`, `research-complete` |
+| EXPERIMENT | `experiment-complete` |
+
+In lifecycle terms, SPIR's `spec-approval` moves a project from conceived to specified, and
+`verify-approval` (post-merge validation) from committed to integrated:
 
 ```
-conceived → [HUMAN APPROVES] → specified → planned → implementing → implemented → committed → [HUMAN VALIDATES] → integrated
+conceived → [spec-approval] → specified → [plan-approval] → planned → implementing → implemented → [pr] → committed → [verify-approval] → integrated
 ```
+
+The human decides; the Architect relays the decision to the Builder, and the Builder runs
+`porch approve <id> <gate> --a-human-explicitly-approved-this`.
 
 ---
 
@@ -129,7 +141,7 @@ Project tracking uses **GitHub Issues**. To manage projects:
 
 - **Add a project:** Create a GitHub Issue describing what you want to build
 - **Update status:** Update issue labels and comments as work progresses
-- **Approve stages:** Review the spec/plan and tell the Architect to mark it approved
+- **Approve stages:** Review the spec/plan/PR and give the Architect your decision; the Architect relays it and the Builder runs `porch approve`
 - **View progress:** Check the Work tab in the dashboard or `gh issue list`
 
 ---
@@ -138,9 +150,9 @@ Project tracking uses **GitHub Issues**. To manage projects:
 
 | Stage | Artifact | Who Advances |
 |-------|----------|--------------|
-| Conceived | Draft spec | AI writes, human approves |
-| Specified | Approved spec | AI creates plan |
-| Planned | Implementation plan | AI spawns builder |
+| Conceived | Draft spec | Builder writes, Architect reviews, human approves |
+| Specified | Approved spec | Builder writes the plan |
+| Planned | Implementation plan | Builder implements |
 | Implementing | WIP code | Builder completes |
 | Implemented | Open PR | Architect reviews, Builder merges |
 | Committed | Merged PR | Human validates |

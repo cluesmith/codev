@@ -6,6 +6,7 @@ You are implementing {{input_description}}.
 ## Mode: SOFT
 
 You follow the protocol yourself; the architect verifies compliance.
+Run consultations where the protocol calls for them.
 {{/if}}
 
 {{#if mode_strict}}
@@ -13,6 +14,9 @@ You follow the protocol yourself; the architect verifies compliance.
 
 Porch orchestrates. `porch next` gives you tasks; `porch done` signals completion. Never
 hand-edit `status.yaml` — only porch commands modify project state.
+
+Do not hand-run consultations porch would run, advance plan phases yourself, or skip the 3-way
+review.
 {{/if}}
 
 ## Protocol
@@ -50,17 +54,23 @@ Follow the implementation plan at: `{{plan.path}}`
 {{issue.body}}
 {{/if}}
 
+{{#if task}}
+## Task
+{{task_text}}
+{{/if}}
+
 ## PR Strategy
 
 **Do not autonomously open a PR per implementation phase.** Plan phases ship as git commits
 within a single PR, not as separate PRs. The plan's instruction that "each phase commits
 independently" refers to git commits, not PRs.
 
-By default, the PR is opened during/after the final implement phase, with all phase-commits
-already on the branch.
+By default, you open the PR in the Review phase, once every implement phase is committed — the
+Review phase's `pr_exists` check requires it before `porch done` passes.
 
 The architect MAY request a PR at any point — follow that direction when they do; the
 prohibition is on *you* deciding to open per-phase PRs unasked.
+They may want one for mid-implementation feedback, or to slice a large spec into shippable pieces.
 
 Record them: `porch done {{project_id}} --pr <N> --branch <name>`, and
 `porch done {{project_id}} --merged <N>`.

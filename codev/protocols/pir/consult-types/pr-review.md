@@ -13,7 +13,7 @@ If the baked decisions themselves contradict each other, do not pick one — `RE
 ## Focus Areas
 
 - **Completeness** — the PR body is the review-file content plus `Fixes #<N>`; commits are formatted `[PIR #<N>] ...`; the diff matches what the review file describes.
-- **Test Status** — all tests pass on the branch, coverage is adequate, and skipped/flaky tests are documented.
+- **Test Status** — all tests pass on the branch, coverage is adequate, and any flaky pre-existing test is named under Flaky Tests (reported and left running, not skipped).
 - **Code Quality** — no debug code, no stray `TODO` or unaddressed `// REVIEW:` markers.
 - **Branch Hygiene** — the branch is up to date with the default branch (whatever `git symbolic-ref --short refs/remotes/origin/HEAD` reports — typically `main`, sometimes `dev`/`ci`); commits are atomic; the diff size is reasonable for the issue.
 - **Issue Linkage** — the PR body carries `Fixes #<N>` (or `Refs #<N>` for a partial fix), without which GitHub won't auto-close the issue on merge.

@@ -27,8 +27,8 @@
     },
     {
       "id": 5,
-      "prompt": "Spawn a TICK builder for issue 88 that amends spec 45. There are uncommitted changes but they're not relevant.",
-      "expected_output": "Should run `af spawn 88 --protocol tick --amends 45 --force`. Must include both --amends and --force.",
+      "prompt": "Spawn a builder for issue 88 that continues work on the contributor branch fix/login-redirect from the remote 'fork'. There are uncommitted changes but they're not relevant.",
+      "expected_output": "Should run `afx spawn 88 --protocol <name> --branch fix/login-redirect --remote fork --force`. Must include --protocol (required with --branch), --branch, --remote and --force.",
       "files": []
     }
   ]

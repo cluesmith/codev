@@ -51,8 +51,8 @@ Roles → Protocols → Subagents → Skills
 - Purpose: Sequences work, decides *when* to call subagents
 
 **Examples in Codev:**
-- **SPIR**: Specify → Plan → Implement → Defend → Evaluate → Review (heavy-duty for complex features)
-- **TICK**: Triage → Implement → Check → Klose (lightweight for quick tasks)
+- **SPIR**: Specify → Plan → Implement → Review → Verify (heavy-duty for complex features)
+- **BUGFIX**: Investigate → Fix → PR (lightweight, for bugs from GitHub issues)
 - **EXPERIMENT**: Hypothesis → Test → Analyze → Conclude (for research spikes)
 
 **Location:** `codev/protocols/`
@@ -111,7 +111,7 @@ Roles decide which protocol to run based on the situation:
 
 ```
 Architect (Role) → initiates SPIR (Protocol) for new feature
-Builder (Role) → initiates TICK (Protocol) for quick fix
+Builder (Role) → runs BUGFIX (Protocol) for a quick fix
 Architect (Role) → initiates CLEANUP (Protocol) for maintenance
 ```
 
@@ -284,7 +284,7 @@ Codev uses a **transpilation approach** rather than a runtime wrapper:
 │   └── builder.md               # Builder persona
 ├── protocols/
 │   ├── spir.yaml                # SPIR workflow definition
-│   ├── tick.yaml                # TICK workflow definition
+│   ├── bugfix.yaml              # BUGFIX workflow definition
 │   └── cleanup.yaml             # CLEANUP workflow definition
 └── skills/
     └── shared scripts           # Platform-agnostic scripts

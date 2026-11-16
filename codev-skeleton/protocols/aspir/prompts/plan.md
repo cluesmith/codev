@@ -4,7 +4,7 @@ You are executing the **PLAN** phase of the ASPIR protocol.
 
 ## Goal
 
-Turn the approved spec into an executable plan at `codev/plans/{{artifact_name}}.md`: a phase breakdown a builder can implement one phase at a time.
+Turn the spec into an executable plan at `codev/plans/{{artifact_name}}.md`: a phase breakdown a builder can implement one phase at a time.
 
 ## Context
 
@@ -33,12 +33,9 @@ Write the plan to `codev/plans/{{artifact_name}}.md` using the template below as
 
 {{> protocols/spir/templates/plan.md}}
 
-## Signals
+## When you finish
 
-- Draft done:
-  ```
-  <signal>PLAN_DRAFTED</signal>
-  ```
+Commit the plan (below), then run `porch done {{project_id}}`.
 
 ## Commit cadence
 
@@ -48,7 +45,7 @@ git add codev/plans/{{artifact_name}}.md
 ```
 1. `[Spec {{project_id}}] Initial implementation plan`
 2. `[Spec {{project_id}}] Plan with multi-agent review`
-3. `[Spec {{project_id}}] Plan with user feedback`
-4. `[Spec {{project_id}}] Final approved plan`
 
-Porch runs the 3-way consultation itself after you signal — do not run `consult`. This is the Plan phase: decompose and sequence the work, do not write code, and do not estimate time.
+ASPIR has no human plan gate: once the consultation approves, porch moves straight to Implement.
+
+After `porch done`, `porch next` hands you the consultation commands for this phase — three reviewers by default, or your project's `.codev/config.json` `porch.consultation` lanes. Run exactly those, each as a background task, then `porch next` again. Do not run any other `consult`. This is the Plan phase: decompose and sequence the work, do not write code, and do not estimate time.
