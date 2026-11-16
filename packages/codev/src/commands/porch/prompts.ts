@@ -15,7 +15,8 @@ import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './proto
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
 import type { ArtifactResolver } from './artifacts.js';
-import { fetchIssue } from '../../lib/github.js';
+import { fetchIssue, type ForgeIssue } from '../../lib/github.js';
+import { issueNumberFromPorchId } from '../../lib/issue-id.js';
 import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import { resolveCodevFile, resolveCodevIncludes } from '../../lib/skeleton.js';
 import { readHotTierFiles } from '../../lib/managed-block.js';
@@ -29,9 +30,16 @@ import { resolveConsultationModels } from './config.js';
  * 2. Spec file first heading — fallback for legacy/offline specs
  * 3. Project title from status.yaml — last resort
  */
-export async function getProjectSummary(workspaceRoot: string, projectId: string, projectTitle?: string): Promise<string | null> {
-  // 1. Try forge issue lookup (supports numeric and alphanumeric IDs like "ENG-123")
-  const issue = await fetchIssue(projectId);
+export async function getProjectSummary(
+  workspaceRoot: string,
+  projectId: string,
+  projectTitle?: string,
+  prefetchedIssue?: ForgeIssue | null,
+): Promise<string | null> {
+  // 1. Try forge issue lookup (supports numeric and alphanumeric IDs like "ENG-123").
+  // A caller that already fetched the issue passes it (null = fetched, not found).
+  // `cwd` makes the lookup use the workspace's configured forge, not the GitHub default.
+  const issue = prefetchedIssue !== undefined ? prefetchedIssue : await fetchIssue(projectId, { cwd: workspaceRoot });
   if (issue?.title) {
     return issue.title;
   }
@@ -89,20 +97,26 @@ function loadPromptFile(workspaceRoot: string, protocolName: string, promptFile:
 }
 
 /**
- * Resolve the `pr-create` concept command for the PR-opening prompts.
+ * Resolve a forge concept command for a prompt: `pr-create` for the PR-opening
+ * prompts (#1455), `pr-merge` for PIR's merge step (#1903).
  *
  * Mirrors the `pr-merge` injection in porch/next.ts. Prompts must not hardcode
- * `gh pr create`: a project with `forge.provider` set would otherwise shell out
- * to `gh` at the single most important write in the protocol (#1455).
+ * `gh pr create` / `gh pr merge`: a project with `forge.provider` set would
+ * otherwise shell out to `gh` at the protocol's most important writes.
  */
-function resolvePrCreateCommand(workspaceRoot: string): string {
-  const command = getForgeCommand('pr-create', loadForgeConfig(workspaceRoot));
+function resolveConceptCommand(workspaceRoot: string, concept: 'pr-create' | 'pr-merge', manual: string): string {
+  const command = getForgeCommand(concept, loadForgeConfig(workspaceRoot));
   // The disabled form must FAIL, not comment: a `# …` line is valid shell that
   // exits 0, so an agent running the block would read "PR opened" from silence.
-  return (
-    command ??
-    "{ echo 'pr-create is disabled for this forge — open the PR manually' >&2; false; }"
-  );
+  return command ?? `{ echo '${concept} is disabled for this forge — ${manual}' >&2; false; }`;
+}
+
+/**
+ * The issue a project is driven by, for the `{{issue.*}}` variables (#1903).
+ */
+interface PromptIssue {
+  number: string;
+  title?: string;
 }
 
 /**
@@ -139,6 +153,8 @@ export function renderConsultation(
 
 /**
  * Substitute template variables in a prompt.
+ *
+ * Names are `\w+` or dotted (`{{issue.number}}`). An unknown name is left as written.
  */
 function substituteVariables(
   prompt: string,
@@ -147,6 +163,7 @@ function substituteVariables(
   workspaceRoot: string,
   planPhase?: PlanPhase | null,
   summary?: string | null,
+  issue?: PromptIssue | null,
   consultation?: PhaseConsultationConfig,
 ): string {
   const variables: Record<string, string> = {
@@ -155,7 +172,8 @@ function substituteVariables(
     artifact_name: artifactBaseName,
     current_state: state.phase,
     protocol: state.protocol,
-    pr_create_command: resolvePrCreateCommand(workspaceRoot),
+    pr_create_command: resolveConceptCommand(workspaceRoot, 'pr-create', 'open the PR manually'),
+    pr_merge_command: resolveConceptCommand(workspaceRoot, 'pr-merge', 'merge the PR manually'),
   };
 
   if (consultation) {
@@ -175,8 +193,13 @@ function substituteVariables(
     variables.plan_phase_title = planPhase.title;
   }
 
-  // Replace {{variable}} with values
-  const result = prompt.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
+  if (issue) {
+    variables['issue.number'] = issue.number;
+    if (issue.title) variables['issue.title'] = issue.title;
+  }
+
+  // Replace {{variable}} / {{dotted.variable}} with values
+  const result = prompt.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (match, varName) => {
     return variables[varName] || match;
   });
 
@@ -308,8 +331,14 @@ export async function buildPhasePrompt(
     return hotTier + buildFallbackPrompt(state, 'unknown');
   }
 
+  // The driving issue, fetched once: it feeds the `{{issue.*}}` variables and the Goal
+  // header. The porch id is not always the issue id (BUGFIX uses `bugfix-<N>`), so derive it.
+  const issueNumber = issueNumberFromPorchId(state.id);
+  const forgeIssue = issueNumber ? await fetchIssue(issueNumber, { cwd: workspaceRoot }) : null;
+  const issue: PromptIssue | null = issueNumber ? { number: issueNumber, title: forgeIssue?.title } : null;
+
   // Get project summary from GitHub Issues (with spec-file fallback)
-  const summary = await getProjectSummary(workspaceRoot, state.id, state.title);
+  const summary = await getProjectSummary(workspaceRoot, state.id, state.title, issueNumber ? forgeIssue : undefined);
 
   // Get current plan phase for phased protocols
   let currentPlanPhase: PlanPhase | null = null;
@@ -348,7 +377,7 @@ export async function buildPhasePrompt(
 
     const promptContent = loadPromptFile(workspaceRoot, state.protocol, promptFileName);
     if (promptContent) {
-      let result = substituteVariables(promptContent, state, artifactBaseName, workspaceRoot, currentPlanPhase, summary, phaseConfig.consultation);
+      let result = substituteVariables(promptContent, state, artifactBaseName, workspaceRoot, currentPlanPhase, summary, issue, phaseConfig.consultation);
 
       // Add goal/summary header if available
       if (summary) {

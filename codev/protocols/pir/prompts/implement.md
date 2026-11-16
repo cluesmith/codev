@@ -44,6 +44,8 @@ cat codev/plans/{{artifact_name}}.md
 
 The plan is your authoritative scope. Stick to it. If you discover the plan is wrong while implementing, stop and signal `BLOCKED` rather than silently deviating.
 
+**Baked Decisions stay fixed.** If the issue body has a "Baked Decisions" section (any heading level, case-insensitive), treat each listed decision as fixed during implementation — do not autonomously substitute alternate languages, frameworks, or dependencies. Raise a serious problem with one via `afx send architect` rather than working around it. If two contradict each other, do not pick one — pause, flag the contradiction via `afx send`, and wait.
+
 ### 2. Implement the Code
 
 Follow the plan's "Files to Change" section. Apply the changes.
@@ -107,7 +109,11 @@ porch done {{project_id}}
 porch next {{project_id}}
 ```
 
-PIR's `implement` phase has no AI consult — the `dev-approval` gate becomes pending immediately, and the human is the sole reviewer of the running code. (The 3-way consultation runs later, in the `review` phase, after the human approves the gate and the PR is opened.)
+PIR's `implement` phase has no AI consult — the `dev-approval` gate becomes pending immediately, and the human is the sole reviewer of the running code. (The consultation runs later, in the `review` phase, after the human approves the gate and the PR is opened.) Porch does not notify the architect — tell them:
+
+```bash
+afx send architect "Project {{project_id}}: dev-approval ready for approval (run it with: afx dev pir-{{project_id}})"
+```
 
 ### 7. End Your Turn With a Code-Review Summary (Prose, Not a File)
 
@@ -123,22 +129,24 @@ When the gate goes pending, output a short prose summary in the pane to orient t
 >
 > **How to test locally**: VSCode → right-click builder → **Run Dev**, or `afx dev pir-{{project_id}}`. View diff via VSCode → **View Diff** (auto-detects the repo's default branch).
 >
-> Ready for review — type feedback here, or approve with `porch approve {{project_id}} dev-approval --a-human-explicitly-approved-this` (Cmd+K G in VSCode).
+> Ready for review — type feedback here. Once the human approves, the architect relays it and I record it with `porch approve`.
 
-Then **stay in the interactive session**. Do not exit. Wait for the user's next message.
+Then **stay in the interactive session**. Do not exit. Wait for the next message. When the architect relays the human's approval, run `porch approve {{project_id}} dev-approval --a-human-explicitly-approved-this`, then `porch next {{project_id}}` to start the review phase.
 
 (Optional: if your team prefers an issue-thread record, you can also post a one-line comment on the GitHub issue pointing reviewers at the worktree branch. The summary itself stays in the pane — don't duplicate it as a committed file. That's the next phase's job, and that file will be a proper retrospective with arch + lessons updates, not a transient dev-approval note.)
 
 ## Signals
 
+Signals are informational — `porch done` is what moves porch.
+
 ```
-<signal>PHASE_COMPLETE</signal>          # Implementation + tests done; dev-approval gate becomes pending
+<signal>PHASE_COMPLETE</signal>          # Implementation + tests done and porch done run
 <signal>BLOCKED:reason</signal>          # Cannot proceed
 ```
 
 ## What NOT to Do
 
-- **Don't write `codev/reviews/<id>-<slug>.md` in this phase** — it's the next phase's artifact, with a different shape (retrospective with arch + lessons updates)
+- **Don't write `codev/reviews/{{artifact_name}}.md` in this phase** — it's the next phase's artifact, with a different shape (retrospective with arch + lessons updates)
 - Don't add features not in the plan — scope creep is a `BLOCKED` signal, not a free expansion
 - Don't run `porch approve` on your own initiative — only when the architect relays the human's approval
 - Don't push to the default branch — only to your builder branch
@@ -150,7 +158,7 @@ Then **stay in the interactive session**. Do not exit. Wait for the user's next 
 
 The reviewer will run your code via `afx dev` and test it. They may:
 
-- Approve immediately → porch advances to the `review` phase
+- Approve immediately → the architect relays it; you record it with `porch approve` and move to the `review` phase
 - Type feedback in the pane / send via `afx send` / edit code in the worktree / comment on the issue
 - Ask clarifying questions about specific files or behaviors
 
@@ -158,6 +166,6 @@ When they provide feedback:
 
 1. If it's code feedback: make the change, run build + tests, recommit
 2. If it's a discussion question: answer it in the pane
-3. Don't re-run `porch done` unless porch's `verify` block needs to re-validate — porch will tell you
+3. Push. No porch command is needed — the phase has no consultation to re-run, and the gate stays pending
 
 The gate stays pending until the human approves.
