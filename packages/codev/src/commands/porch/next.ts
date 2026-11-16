@@ -351,7 +351,8 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         tasks: [{
           subject: `Request human approval: ${gateName}`,
           activeForm: `Requesting ${gateName} approval`,
-          description: `Gate ${gateName} is pending. The architect has already been notified.\n\nSTOP and wait for human approval before proceeding.`,
+          // Porch does not notify the architect at a gate (notify.ts) — the builder does.
+          description: `Gate ${gateName} is pending. Porch does not notify the architect; if you have not told them yet, run:\n\nafx send architect "Project ${state.id}: ${gateName} ready for approval"\n\nSTOP and wait for human approval before proceeding. When the architect relays it, run: porch approve ${state.id} ${gateName} --a-human-explicitly-approved-this`,
         }],
       };
     }
