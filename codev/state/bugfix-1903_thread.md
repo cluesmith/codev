@@ -60,3 +60,15 @@ Deleting `pir/consult-types/impl-review.md` (dead after `type: pr`).
   reaches the gate directly — no stall there. Old verdict grep returned UNKNOWN on a real
   `VERDICT: REQUEST_CHANGES` file, as the issue said.
 - Not touched (outside scope, sibling builder): `consult` skill's `--protocol` list omits pir.
+
+## 2026-11-15 — pr
+
+- PR #1904. Installed `consult` couldn't auto-detect the project ("Multiple projects found" —
+  the bug bugfix-1898 fixed, not yet in the installed release); re-ran with `--project-id`.
+- CMAP: gemini COMMENT (agy exit 3, skipped). codex REQUEST_CHANGES → fixed → APPROVE:
+  `fetchIssue` ignored a configured non-GitHub forge (pre-existing in `getProjectSummary` too) →
+  pass `cwd: workspaceRoot`, unmocked forge test; plus a guard on PIR `protocol.json` + tree
+  identity. claude APPROVE; applied its two nits (porch's own gate-approved wake-up; `porch done`
+  not `porch next` after a rebuttal, to avoid a `force_advanced` record).
+- Flake: one `porch done` test check failed on the known unhandled `ERR_INTERNAL_ASSERTION` from
+  `tunnel-edge-cases.test.ts` teardown (same as bugfix-1898 saw); all tests green, clean on retry.
