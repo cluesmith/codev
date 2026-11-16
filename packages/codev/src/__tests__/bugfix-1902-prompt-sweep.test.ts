@@ -171,6 +171,27 @@ describe('#1902 B — the builder runs porch approve, with the human-approval fl
     }
   });
 
+  it('RELEASE: notes filename and codename table match docs/releases/; the architect exception is written down', () => {
+    // Owner ruling main-17: RELEASE keeps its direct commit and tag to main, as the architect
+    // role's one written exception. Its two stale facts are pinned to the real notes files.
+    const release = read('codev/protocols/release/protocol.md');
+    expect(release).not.toMatch(/docs\/releases\/vX\.Y\.Z\.md/);
+    expect(release).toContain('docs/releases/vX.Y.Z-<codename>.md');
+    const titleCase = (slug: string) => slug.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+    const seen = new Set<string>();
+    for (const f of fs.readdirSync(path.join(repoRoot, 'docs/releases'))) {
+      const m = f.match(/^v(\d+)\.(\d+)\.\d+-([a-z]+(?:-[a-z]+)*)\.md$/);
+      if (!m || m[3].startsWith('rc')) continue;
+      const row = `| ${m[1]}.${m[2]}.x | ${titleCase(m[3])} |`;
+      seen.add(row);
+      expect(release, `RELEASE codename table lacks ${row} (from docs/releases/${f})`).toContain(row);
+    }
+    expect(seen.size).toBeGreaterThan(5);
+    for (const tree of ['codev-skeleton', 'codev']) {
+      expect(read(`${tree}/roles/architect.md`)).toMatch(/one\s+exception: the release commit and tag, made by the architect under the RELEASE protocol after\s+the owner's go/);
+    }
+  });
+
   it('no text tells builders never to run porch approve', () => {
     expectNone(/Builders? (must )?NEVER (call|run) `?porch approve/i, 'The builder runs porch approve (#1902 B).');
   });

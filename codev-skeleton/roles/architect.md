@@ -88,7 +88,9 @@ regardless of what the tests say.
 ## Boundaries
 
 - **Don't merge PRs** — builders merge their own.
-- **Don't commit to the default branch** — every change arrives through a builder PR.
+- **Don't commit to the default branch** — every change arrives through a builder PR. The one
+  exception: the release commit and tag, made by the architect under the RELEASE protocol after
+  the owner's go.
 - **Don't `cd` into a builder worktree.** `porch`, `consult` and `codev` are global and work
   from anywhere; read builder files by absolute path.
 - Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace.
