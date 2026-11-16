@@ -7,7 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, CheckDef, CheckOverrides, ContextRefreshConfig } from './types.js';
+import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, PhaseConsultationConfig, CheckDef, CheckOverrides, ContextRefreshConfig } from './types.js';
 import { resolveCodevFile, getSkeletonDir } from '../../lib/skeleton.js';
 
 // ============================================================================
@@ -357,6 +357,18 @@ function normalizePhase(p: unknown): ProtocolPhase {
     };
   }
 
+  // Parse a builder-run consultation (once phases). Malformed is an error, not a silent skip:
+  // a dropped block would quietly render no review commands into the prompt.
+  let consultation: PhaseConsultationConfig | undefined;
+  const consultationRaw = phase.consultation as Record<string, unknown> | undefined;
+  if (consultationRaw !== undefined) {
+    const { type, models } = consultationRaw;
+    if (typeof type !== 'string' || !Array.isArray(models) || !models.every(m => typeof m === 'string')) {
+      throw new Error(`Invalid protocol phase "${phase.id}": consultation needs a string "type" and a "models" string array`);
+    }
+    consultation = { type, models: models as string[] };
+  }
+
   // Parse on_complete config
   let on_complete: OnCompleteConfig | undefined;
   const onCompleteRaw = phase.on_complete as Record<string, unknown> | undefined;
@@ -376,6 +388,7 @@ function normalizePhase(p: unknown): ProtocolPhase {
     max_iterations: (phase.max_iterations as number) ?? 8,
     on_complete,
     gate: gateName,
+    consultation,
     checks: checks.length > 0 ? checks : undefined,
     next,
   };

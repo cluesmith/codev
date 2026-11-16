@@ -10,7 +10,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord } from './types.js';
+import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord, PhaseConsultationConfig } from './types.js';
 import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './protocol.js';
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
@@ -19,6 +19,7 @@ import { fetchIssue } from '../../lib/github.js';
 import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import { resolveCodevFile, resolveCodevIncludes } from '../../lib/skeleton.js';
 import { readHotTierFiles } from '../../lib/managed-block.js';
+import { resolveConsultationModels } from './config.js';
 
 /**
  * Get project summary from GitHub Issues, with spec-file fallback.
@@ -105,6 +106,38 @@ function resolvePrCreateCommand(workspaceRoot: string): string {
 }
 
 /**
+ * Render a builder-run consultation (`{{consult_commands}}` / `{{consult_verdicts}}`).
+ *
+ * The lanes come from `resolveConsultationModels` — the resolver `porch next` uses for a verify
+ * step — so `.codev/config.json` `porch.consultation` decides what the builder runs here too.
+ * Before this, the BUGFIX/AIR PR prompts hardcoded three `consult` lines and the project's lane
+ * list was silently ignored (#1902).
+ */
+export function renderConsultation(
+  workspaceRoot: string,
+  protocol: string,
+  consultation: PhaseConsultationConfig,
+): { commands: string; verdicts: string } {
+  const { models, mode } = resolveConsultationModels(workspaceRoot, consultation.models, protocol, consultation.type);
+  if (mode === 'none') {
+    return {
+      commands: '# .codev/config.json sets porch.consultation to "none": this project runs no consultation.',
+      verdicts: 'none (porch.consultation is "none")',
+    };
+  }
+  if (mode === 'parent') {
+    return {
+      commands: '# .codev/config.json sets porch.consultation to "parent": the architect reviews directly; run no consult.',
+      verdicts: 'architect review (porch.consultation is "parent")',
+    };
+  }
+  return {
+    commands: models.map(m => `consult -m ${m} --protocol ${protocol} --type ${consultation.type}`).join('\n'),
+    verdicts: models.map(m => `${m}=<APPROVE|REQUEST_CHANGES>`).join(', '),
+  };
+}
+
+/**
  * Substitute template variables in a prompt.
  */
 function substituteVariables(
@@ -113,7 +146,8 @@ function substituteVariables(
   artifactBaseName: string,
   workspaceRoot: string,
   planPhase?: PlanPhase | null,
-  summary?: string | null
+  summary?: string | null,
+  consultation?: PhaseConsultationConfig,
 ): string {
   const variables: Record<string, string> = {
     project_id: state.id,
@@ -123,6 +157,12 @@ function substituteVariables(
     protocol: state.protocol,
     pr_create_command: resolvePrCreateCommand(workspaceRoot),
   };
+
+  if (consultation) {
+    const rendered = renderConsultation(workspaceRoot, state.protocol, consultation);
+    variables.consult_commands = rendered.commands;
+    variables.consult_verdicts = rendered.verdicts;
+  }
 
   // Add summary/goal if available
   if (summary) {
@@ -294,7 +334,7 @@ export async function buildPhasePrompt(
 
     const promptContent = loadPromptFile(workspaceRoot, state.protocol, promptFileName);
     if (promptContent) {
-      let result = substituteVariables(promptContent, state, artifactBaseName, workspaceRoot, currentPlanPhase, summary);
+      let result = substituteVariables(promptContent, state, artifactBaseName, workspaceRoot, currentPlanPhase, summary, phaseConfig.consultation);
 
       // Add goal/summary header if available
       if (summary) {
