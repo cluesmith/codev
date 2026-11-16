@@ -13,7 +13,7 @@ You are performing the final self-check during the PR phase of the **BUGFIX prot
 - **Scope discipline** — focused on the root cause, no unrelated refactors or features. A small adjacent bug fixed in the same PR is expected (BUGFIX fixes in place) as long as the PR body names it. ~300 LOC net diff is a guideline; a change that turned architectural should have escalated to SPIR.
 - **Code cleanliness** — no debug code, `console.log`, commented-out blocks, or stray TODOs; follows project conventions.
 - **Test status** — existing tests and the build pass; no new flaky tests.
-- **PR hygiene** — commits use `[Bugfix #<N>] Fix: ...` / `[Bugfix #<N>] Test: ...` (**not** `[Spec <N>][Phase]`), the branch is current with its base, and the PR is linked to the issue.
+- **PR hygiene** — every commit starts with `[Bugfix #<N>]` — `Fix:` / `Test:` for the fix and the regression test, a short label such as `CMAP:` or `Thread:` for the rest (**not** `[Spec <N>][Phase]`), the branch is current with its base, and the PR is linked to the issue.
 
 ## Out of Scope (Do NOT request changes for)
 

@@ -33,6 +33,10 @@ Commit format:
 [Bugfix #42] Test: regression for unencoded username
 ```
 
+Every commit on the branch starts with `[Bugfix #<N>]`. `Fix:` and `Test:` label the fix and the
+regression test; other commits use a short label of their own (`[Bugfix #42] CMAP: …` for review
+follow-ups, `[Bugfix #42] Thread: …` for the thread log).
+
 **PR** — open with the `pr-create` forge concept command the PR-phase prompt hands you (`gh
 pr create` on GitHub), body carrying Summary, Root Cause, Fix and Test Plan plus
 `Fixes #<N>` so the issue closes on merge. Run one CMAP pass with the reviewers the PR-phase prompt
