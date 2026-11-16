@@ -382,7 +382,7 @@ Templates in `codev/protocols/spir/templates/` can be modified to fit your team'
 
 ## Agent Farm (Optional)
 
-Agent Farm is an optional companion tool for Codev that provides a web-based dashboard for managing multiple AI agents working in parallel. **You can use Codev without Agent Farm** - all protocols (SPIR, TICK, etc.) work perfectly in any AI coding assistant.
+Agent Farm is an optional companion tool for Codev that provides a web-based dashboard for managing multiple AI agents working in parallel. **You can use Codev without Agent Farm** - all protocols (SPIR, BUGFIX, etc.) work perfectly in any AI coding assistant.
 
 **Why use Agent Farm?**
 - **Web dashboard** for monitoring multiple builders at once
