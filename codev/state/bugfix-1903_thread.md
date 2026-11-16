@@ -72,3 +72,14 @@ Deleting `pir/consult-types/impl-review.md` (dead after `type: pr`).
   not `porch next` after a rebuttal, to avoid a `force_advanced` record).
 - Flake: one `porch done` test check failed on the known unhandled `ERR_INTERNAL_ASSERTION` from
   `tunnel-edge-cases.test.ts` teardown (same as bugfix-1898 saw); all tests green, clean on retry.
+
+## 2026-11-16 — architect fold-ins (a84783586)
+
+1. PIR prompts pinned: deletion guard (builder-prompt + plan/implement/review/pr-review, fresh
+   baselines; review.md's anti-vacuity is the pr-gate rule + both forge concepts) and
+   baked-decisions Phases 1–4 + smoke (baselineName null — PIR postdates 746). No retirement entry:
+   nothing removed. Both guards checked to bite (deleted a review.md line; dropped the variable).
+2. `{{pr_merge_command}}` added in porch (one resolver with pr_create); review.md step 9 uses it.
+3. `issueNumberFromPorchId` docstring tightened rather than generalising the prefix: `eng-123` →
+   `ENG-123` is pinned behaviour a generic `<word>-<N>` strip would break.
+4. Shipped-prompt test lists the prompt dirs instead of a hand-kept list.
