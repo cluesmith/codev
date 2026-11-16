@@ -15,7 +15,8 @@ import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './proto
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
 import type { ArtifactResolver } from './artifacts.js';
-import { fetchIssue } from '../../lib/github.js';
+import { fetchIssue, type ForgeIssue } from '../../lib/github.js';
+import { issueNumberFromPorchId } from '../../lib/issue-id.js';
 import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import { resolveCodevFile, resolveCodevIncludes } from '../../lib/skeleton.js';
 import { readHotTierFiles } from '../../lib/managed-block.js';
@@ -28,9 +29,15 @@ import { readHotTierFiles } from '../../lib/managed-block.js';
  * 2. Spec file first heading — fallback for legacy/offline specs
  * 3. Project title from status.yaml — last resort
  */
-export async function getProjectSummary(workspaceRoot: string, projectId: string, projectTitle?: string): Promise<string | null> {
-  // 1. Try forge issue lookup (supports numeric and alphanumeric IDs like "ENG-123")
-  const issue = await fetchIssue(projectId);
+export async function getProjectSummary(
+  workspaceRoot: string,
+  projectId: string,
+  projectTitle?: string,
+  prefetchedIssue?: ForgeIssue | null,
+): Promise<string | null> {
+  // 1. Try forge issue lookup (supports numeric and alphanumeric IDs like "ENG-123").
+  // A caller that already fetched the issue passes it (null = fetched, not found).
+  const issue = prefetchedIssue !== undefined ? prefetchedIssue : await fetchIssue(projectId);
   if (issue?.title) {
     return issue.title;
   }
@@ -105,7 +112,17 @@ function resolvePrCreateCommand(workspaceRoot: string): string {
 }
 
 /**
+ * The issue a project is driven by, for the `{{issue.*}}` variables (#1903).
+ */
+interface PromptIssue {
+  number: string;
+  title?: string;
+}
+
+/**
  * Substitute template variables in a prompt.
+ *
+ * Names are `\w+` or dotted (`{{issue.number}}`). An unknown name is left as written.
  */
 function substituteVariables(
   prompt: string,
@@ -113,7 +130,8 @@ function substituteVariables(
   artifactBaseName: string,
   workspaceRoot: string,
   planPhase?: PlanPhase | null,
-  summary?: string | null
+  summary?: string | null,
+  issue?: PromptIssue | null,
 ): string {
   const variables: Record<string, string> = {
     project_id: state.id,
@@ -135,8 +153,13 @@ function substituteVariables(
     variables.plan_phase_title = planPhase.title;
   }
 
-  // Replace {{variable}} with values
-  return prompt.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
+  if (issue) {
+    variables['issue.number'] = issue.number;
+    if (issue.title) variables['issue.title'] = issue.title;
+  }
+
+  // Replace {{variable}} / {{dotted.variable}} with values
+  return prompt.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (match, varName) => {
     return variables[varName] || match;
   });
 }
@@ -254,8 +277,14 @@ export async function buildPhasePrompt(
     return hotTier + buildFallbackPrompt(state, 'unknown');
   }
 
+  // The driving issue, fetched once: it feeds the `{{issue.*}}` variables and the Goal
+  // header. The porch id is not always the issue id (BUGFIX uses `bugfix-<N>`), so derive it.
+  const issueNumber = issueNumberFromPorchId(state.id);
+  const forgeIssue = issueNumber ? await fetchIssue(issueNumber) : null;
+  const issue: PromptIssue | null = issueNumber ? { number: issueNumber, title: forgeIssue?.title } : null;
+
   // Get project summary from GitHub Issues (with spec-file fallback)
-  const summary = await getProjectSummary(workspaceRoot, state.id, state.title);
+  const summary = await getProjectSummary(workspaceRoot, state.id, state.title, issueNumber ? forgeIssue : undefined);
 
   // Get current plan phase for phased protocols
   let currentPlanPhase: PlanPhase | null = null;
@@ -294,7 +323,7 @@ export async function buildPhasePrompt(
 
     const promptContent = loadPromptFile(workspaceRoot, state.protocol, promptFileName);
     if (promptContent) {
-      let result = substituteVariables(promptContent, state, artifactBaseName, workspaceRoot, currentPlanPhase, summary);
+      let result = substituteVariables(promptContent, state, artifactBaseName, workspaceRoot, currentPlanPhase, summary, issue);
 
       // Add goal/summary header if available
       if (summary) {

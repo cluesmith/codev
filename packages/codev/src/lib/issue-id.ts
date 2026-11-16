@@ -61,3 +61,23 @@ export function issueRef(id: number | string): string {
   if (isIssueKey(text)) return canonicalIssueId(text);
   return `#${text}`;
 }
+
+/**
+ * Recover an issue id from a porch project id.
+ *
+ * Porch ids are not uniformly numeric. PIR, AIR and SPIR use the bare issue number;
+ * **BUGFIX deliberately uses `<prefix>-<N>`** (spawn.ts, "historical, kept untouched").
+ *
+ * Accepts a bare number, `bugfix-<N>`, or a tracker key (`ENG-123`, `bugfix-ENG-123`,
+ * #1740), which is the issue id itself, not its trailing digits. Rejects anything else,
+ * so an ad-hoc task id (`builder-task-abc`) cannot masquerade as an issue.
+ */
+export function issueNumberFromPorchId(projectId?: string): string | undefined {
+  if (!projectId) return undefined;
+  if (/^\d+$/.test(projectId)) return projectId;
+  const bugfix = projectId.match(/^bugfix-(\d+)$/i);
+  if (bugfix) return bugfix[1];
+  const id = projectId.replace(/^bugfix-/i, '');
+  if (isIssueKey(id)) return canonicalIssueId(id);
+  return undefined;
+}
