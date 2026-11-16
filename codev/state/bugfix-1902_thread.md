@@ -59,3 +59,57 @@ protocol.json.
 `codev/protocols/release/protocol.md` has the architect `git commit` + `git push` to main
 (lines ~21-23, 83-85, 101-103), names notes `docs/releases/vX.Y.Z.md` while the real files are
 `vX.Y.Z-<codename>.md`, and its codename table stops at 1.3.0 Doric.
+
+## Fix (2026-11-15/16)
+
+Done, in five commits on the branch (porch code; protocols; roles/templates/resources/root docs;
+skills; regression sweep).
+
+### Decisions
+
+- **C2 mechanism**: a once phase can declare `consultation: {type, models}`; porch renders
+  `{{consult_commands}}` / `{{consult_verdicts}}` through `resolveConsultationModels`. BUGFIX and AIR
+  PR phases declare `{type: pr, models: [gemini, codex, claude]}`. A malformed block throws at load
+  (no shipped protocol.json, past or present, has one). AIR's CMAP stays optional, but uses the
+  configured lanes when it runs.
+- **Commit format**: `[Bugfix #N] Fix:` / `Test:` everywhere (matches root CLAUDE.md).
+- **PR timing (SPIR/ASPIR)**: opened in the Review phase; its `pr_exists` check requires it.
+- **MAINTAIN removals**: `git rm` for tracked files, `.trash/<date>/` for untracked, never committed.
+- **Escalation target (AIR)**: "SPIR or ASPIR".
+- **A6**: the `afx spawn --help` protocol check is dropped. Unrecognised names: look in the three
+  protocol dirs, else ask.
+- **Schema**: one draft-07 schema, three identical copies, `context_refresh` block verbatim; a test
+  validates all 18 protocol.json files (PIR included, read-only) with a small in-test validator
+  (no ajv in the tree; unsupported keywords throw).
+
+### Surprises
+
+- **`porch <cmd> --help` executed the command.** Verifying prompts with `--help` ran
+  `porch done --help`, i.e. `porch done bugfix-1902`, checks and all. I stopped it before it
+  finished; porch state was untouched (still `fix`). Fixed in place: `--help`/`-h` after any
+  subcommand prints help and returns, with a regression test. The globally installed porch still
+  has the bug until the next release.
+- **Spec 1280 deletion guard** tripped on 10 prompts (removals the issue requires). Its register
+  needs architect approval, so I asked instead of re-baselining. The architect (main) approved R7
+  on 2026-11-16 after checking the porch-source claims. Re-baselined, guard kept. I kept every
+  baseline line that didn't have to go (ASPIR builder-prompt lines restored verbatim).
+- `codev/resources/commands/agent-farm.md` documented `afx ports`, `workspace start -p/-c/--remote`,
+  none of which exist. Removed in both trees.
+
+### Left alone (out of scope, flagged)
+
+- `INSTALL.md` is pre-v2 throughout (SPIDER, Ruler, copying protocols, TICK); a single-line fix
+  would not help. Candidate for its own issue.
+- The two `resources/commands/*.md` trees have drifted heavily (codev/ has porch, team,
+  add-architect sections the skeleton lacks). I fixed what was broken in both; syncing them is a
+  separate job.
+- RELEASE: see above, for the architect.
+
+### Verification
+
+- Every command the prompts name: `--help` through this branch's binaries (32 invocations, all
+  exit 0), and each documented flag grep-checked in the help text. Negative probes: the old
+  `--type integration pr 1` and `--prompt` + `--prompt-file` forms fail with the errors the issue
+  described.
+- `bugfix-1902-prompt-sweep.test.ts`: 29 checks, 28 of which fail against a HEAD snapshot of
+  the pre-fix tree.
