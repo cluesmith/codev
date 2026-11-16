@@ -229,7 +229,7 @@ export function advancePlanPhase(
  * so editing the plan has no effect; this is the state-side way to drop one.
  *
  * Refuses unknown, complete, and already-skipped phases. If the skipped phase
- * was the one in progress, in_progress moves to the next unsettled phase.
+ * was the current one, in_progress moves to the next unsettled phase.
  * `moveToReview` is true when nothing is left to build.
  */
 export function skipPlanPhase(
@@ -253,12 +253,14 @@ export function skipPlanPhase(
   }
 
   const targetIndex = phases.indexOf(target);
+  const wasCurrent = getCurrentPlanPhase(phases) === target;
   const updated = phases.map((p, i) =>
     i === targetIndex ? { ...p, status: 'skipped' as const, skip_reason: reason, skipped_at: now } : p,
   );
 
-  // Hand in_progress forward, as advancePlanPhase does — never back to an earlier phase.
-  if (target.status === 'in_progress') {
+  // Skipping the current phase hands in_progress forward, as advancePlanPhase
+  // does — never back to an earlier phase.
+  if (wasCurrent) {
     const nextIndex = updated.findIndex((p, i) => i > targetIndex && !isPlanPhaseSettled(p));
     if (nextIndex >= 0) {
       updated[nextIndex] = { ...updated[nextIndex], status: 'in_progress' as const };

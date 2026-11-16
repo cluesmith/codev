@@ -129,6 +129,30 @@ describe('porch skip-phase (issue #1900)', () => {
     expect(moveToReview).toBe(false);
   });
 
+  it('skipping a pending current phase hands in_progress to its successor', async () => {
+    seed({ plan_phases: phases('complete', 'pending', 'pending'), current_plan_phase: 'phase_2' });
+
+    await skipPhase(testDir, '0042', 'phase_2', 'not needed', HUMAN);
+
+    const s = readState(statusPath);
+    expect(s.current_plan_phase).toBe('phase_3');
+    expect(s.plan_phases.map(p => p.status)).toEqual(['complete', 'skipped', 'in_progress']);
+  });
+
+  it('refuses to skip the last phase when the protocol has no review phase, and writes nothing', async () => {
+    const dir = path.join(testDir, 'codev', 'protocols', 'noreview');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'protocol.json'), JSON.stringify({
+      name: 'noreview', version: '1.0.0',
+      phases: [{ id: 'implement', name: 'Implement', type: 'per_plan_phase' }],
+    }));
+    seed({ protocol: 'noreview', plan_phases: phases('complete', 'in_progress'), current_plan_phase: 'phase_2' });
+    const before = fs.readFileSync(statusPath, 'utf-8');
+
+    await expect(skipPhase(testDir, '0042', 'phase_2', 'dropped', HUMAN)).rejects.toThrow("no 'review' phase");
+    expect(fs.readFileSync(statusPath, 'utf-8')).toBe(before);
+  });
+
   it('refuses to skip a completed phase', async () => {
     seed();
     await expect(skipPhase(testDir, '0042', 'phase_1', 'oops', HUMAN)).rejects.toThrow('already complete');

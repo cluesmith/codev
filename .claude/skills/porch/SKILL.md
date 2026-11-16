@@ -63,6 +63,8 @@ porch skip-phase 42 phase_3 --reason "dropped by owner: superseded by #57" --a-h
 
 The phase is marked `skipped` with the reason (keep it to one short line); skipping the last unsettled phase advances to review. Completed phases cannot be skipped — use `porch rollback <id> implement` to redo implementation.
 
+Run it from the builder's worktree, as with `porch approve` — e.g. `(cd .builders/<id> && porch skip-phase …)`. Porch commits and pushes `status.yaml` in whichever checkout it runs from; from the main workspace root that can land on `main`.
+
 ## Checking pending gates
 
 ```bash

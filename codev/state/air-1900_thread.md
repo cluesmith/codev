@@ -81,3 +81,17 @@ re-ran with `--issue 1900`.
   site hardcodes `'review'`. It would touch the working handleVerifyApproved refresh path.
 Locally: typecheck clean; touched files 281/281. CI on GitHub runs the full suite (no local
 full run after the merge, given the owner's load concern).
+
+## CMAP round 2 (merged branch): codex APPROVE, claude APPROVE
+Claude reported all 8 CI checks green on e02debe8. Its non-blocking polish, fixed in place:
+- Skill doc: run skip-phase from the builder's worktree. Porch commits and pushes
+  status.yaml in whatever checkout it runs from, so from the main root it could land on main.
+- Guard: refuse (writing nothing) when the protocol has no `review` phase, instead of
+  writing a phase `next` would read as "protocol complete".
+- Skipping a *pending* current phase now hands in_progress forward too.
+- The `porch status` "DO NOT start <next>" banner no longer names a skipped phase.
+- A bare `porch skip-phase <id> <phase>` reports the missing human flag before the
+  missing reason.
+Not done: a unit test of the CLI arg branch (covered by the manual CLI run), and rejecting
+newlines in --reason (the doc covers it; claude traced that folding is harmless).
+Touched tests 65/65, typecheck clean, hashes regenerated.

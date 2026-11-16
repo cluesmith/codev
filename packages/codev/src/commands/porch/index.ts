@@ -41,6 +41,7 @@ import {
   getPhaseContent,
   allPlanPhasesComplete,
   isPlanPhaseComplete,
+  isPlanPhaseSettled,
   skipPlanPhase,
 } from './plan.js';
 import { getResolver, LocalResolver, type ArtifactResolver } from './artifacts.js';
@@ -289,7 +290,7 @@ export async function status(
 
       // Find the next phase name for the warning
       const currentIdx = state.plan_phases.findIndex(p => p.id === currentPlanPhase.id);
-      const nextPlanPhase = state.plan_phases[currentIdx + 1];
+      const nextPlanPhase = state.plan_phases.find((p, i) => i > currentIdx && !isPlanPhaseSettled(p));
 
       console.log('');
       console.log(chalk.red.bold('╔══════════════════════════════════════════════════════════════╗'));
@@ -993,6 +994,9 @@ export async function skipPhase(
     // is hardcoded there too, because normalizePhase maps a per_plan_phase phase's
     // `transition.on_complete` (itself) to `next` — getNextPhase would loop back
     // to implement. Change the two together.
+    if (!getPhaseConfig(protocol, 'review')) {
+      throw new Error(`Protocol ${state.protocol} has no 'review' phase to advance to after the last plan phase; skip-phase supports SPIR/ASPIR-shaped protocols only.`);
+    }
     state.phase = 'review';
     state.current_plan_phase = null;
   } else {
@@ -1393,8 +1397,9 @@ export async function cli(args: string[]): Promise<void> {
         const usage = 'Usage: porch skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this';
         if (!rest[0] || !rest[1] || rest[0].startsWith('--') || rest[1].startsWith('--')) throw new Error(usage);
         const reasonIdx = rest.indexOf('--reason');
-        const skipPhaseReason = reasonIdx !== -1 ? rest[reasonIdx + 1] : undefined;
-        if (!skipPhaseReason || skipPhaseReason.startsWith('--')) throw new Error(`--reason requires a reason\n${usage}`);
+        const reasonArg = reasonIdx !== -1 ? rest[reasonIdx + 1] : undefined;
+        // A missing reason is reported by skipPhase AFTER the human-flag check — the more useful error first.
+        const skipPhaseReason = reasonArg && !reasonArg.startsWith('--') ? reasonArg : undefined;
         await skipPhase(workspaceRoot, rest[0], rest[1], skipPhaseReason, rest.includes('--a-human-explicitly-approved-this'));
         break;
       }
