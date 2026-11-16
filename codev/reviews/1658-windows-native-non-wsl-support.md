@@ -147,9 +147,11 @@ with a ruling in A2.10. Divergences the moves preserved verbatim are listed in A
      workspace folder. Pass. The same check found M8 (dashboard Start and Stop).
    - M8 on `84f1f75a1` (reported 2026-11-10): Start and Stop from the dashboard work. Restart,
      + Create, copy path and Open IDE not yet reported; they fold into the A2.8 pass.
-   - Still to do, on the final head after Amendment 2: the owner's Windows pass from the A2.8
-     table (3, 4 from two launchers, 6/6a, 9 with 6b, 11 on and off, 12, 13, 15 on the branch
-     vsix, 15a, M6, M7, M8; the owner trims it), on tarballs and a vsix packed from that head.
+   - Final Windows pass after Amendments 2 and 3 (RECHECK.txt, the A2.8 list): **Pass**,
+     reported by the owner 2026-11-17 on tarballs and the branch vsix packed from `a6af2c93a`
+     (product-identical to `54b134795`, the Amendment 3 code head). The later `main` merge
+     (`be68f7c58`, #1902/#1903: porch prompt rendering and agent-facing docs, plus one import
+     conflict in `reset/context.ts`) touches no platform code; CI covers it.
    - The ConPTY fixtures (item 1) remain open.
    - Findings, under "Manual pass findings": M1 (resolved: a machine npm setting, not a defect),
      M2 (double cursor, cosmetic follow-up), M3 (uninstall while Tower runs, docs follow-up), M4
