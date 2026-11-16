@@ -1,7 +1,7 @@
 id: bugfix-1903
 title: pir-prompt-repair-review-promp
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-16T05:15:32.667Z'
-updated_at: '2026-11-16T21:51:37.812Z'
+updated_at: '2026-11-16T21:51:40.702Z'
 pr_history:
   - phase: pr
     pr_number: 1904
