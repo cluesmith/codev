@@ -36,7 +36,7 @@ gh issue view {{issue.number}}
 
 Understand what's being asked. For a bug, identify the symptom. For a feature, identify the desired outcome.
 
-**Baked Decisions are fixed.** If the issue body has a "Baked Decisions" section (any heading level, case-insensitive), plan within each listed decision — do not autonomously substitute alternate languages, frameworks, or dependencies. Raise a serious problem with one via `afx send architect` rather than planning around it. If two contradict each other, do not pick one — flag the contradiction via `afx send` and wait.
+**Baked Decisions are fixed.** If the issue body has a "Baked Decisions" section (any heading level, case-insensitive), plan within each listed decision — do not autonomously substitute alternate languages, frameworks, or dependencies. Raise a serious problem with one via `afx send architect` rather than planning around it. If two contradict each other, do not pick one — pause, flag the contradiction via `afx send`, and wait.
 
 ### 2. Investigate the Codebase
 

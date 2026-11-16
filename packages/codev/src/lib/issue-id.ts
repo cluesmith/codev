@@ -68,9 +68,16 @@ export function issueRef(id: number | string): string {
  * Porch ids are not uniformly numeric. PIR, AIR and SPIR use the bare issue number;
  * **BUGFIX deliberately uses `<prefix>-<N>`** (spawn.ts, "historical, kept untouched").
  *
- * Accepts a bare number, `bugfix-<N>`, or a tracker key (`ENG-123`, `bugfix-ENG-123`,
- * #1740), which is the issue id itself, not its trailing digits. Rejects anything else,
- * so an ad-hoc task id (`builder-task-abc`) cannot masquerade as an issue.
+ * - a bare number → itself (`1234`, `0042` unchanged);
+ * - `bugfix-<N>` → `<N>`;
+ * - anything else shaped `<word>-<N>`, with or without a `bugfix-` prefix → that tracker
+ *   key, upper-cased (`ENG-123`, `eng-123`, `bugfix-ENG-123` → `ENG-123`; #1740);
+ * - everything else → undefined (`builder-task-abc`).
+ *
+ * The key rule cannot tell a tracker key from another protocol's `<prefix>-<N>` id:
+ * `secfix-1234` comes back as `SECFIX-1234`, not `1234`. Callers must tolerate an id the
+ * forge does not know — porch's prompt renderer does: the lookup fails, `{{issue.number}}`
+ * renders as the key, and `{{issue.title}}` is left unrendered.
  */
 export function issueNumberFromPorchId(projectId?: string): string | undefined {
   if (!projectId) return undefined;

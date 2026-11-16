@@ -96,20 +96,18 @@ function loadPromptFile(workspaceRoot: string, protocolName: string, promptFile:
 }
 
 /**
- * Resolve the `pr-create` concept command for the PR-opening prompts.
+ * Resolve a forge concept command for a prompt: `pr-create` for the PR-opening
+ * prompts (#1455), `pr-merge` for PIR's merge step (#1903).
  *
  * Mirrors the `pr-merge` injection in porch/next.ts. Prompts must not hardcode
- * `gh pr create`: a project with `forge.provider` set would otherwise shell out
- * to `gh` at the single most important write in the protocol (#1455).
+ * `gh pr create` / `gh pr merge`: a project with `forge.provider` set would
+ * otherwise shell out to `gh` at the protocol's most important writes.
  */
-function resolvePrCreateCommand(workspaceRoot: string): string {
-  const command = getForgeCommand('pr-create', loadForgeConfig(workspaceRoot));
+function resolveConceptCommand(workspaceRoot: string, concept: 'pr-create' | 'pr-merge', manual: string): string {
+  const command = getForgeCommand(concept, loadForgeConfig(workspaceRoot));
   // The disabled form must FAIL, not comment: a `# …` line is valid shell that
   // exits 0, so an agent running the block would read "PR opened" from silence.
-  return (
-    command ??
-    "{ echo 'pr-create is disabled for this forge — open the PR manually' >&2; false; }"
-  );
+  return command ?? `{ echo '${concept} is disabled for this forge — ${manual}' >&2; false; }`;
 }
 
 /**
@@ -140,7 +138,8 @@ function substituteVariables(
     artifact_name: artifactBaseName,
     current_state: state.phase,
     protocol: state.protocol,
-    pr_create_command: resolvePrCreateCommand(workspaceRoot),
+    pr_create_command: resolveConceptCommand(workspaceRoot, 'pr-create', 'open the PR manually'),
+    pr_merge_command: resolveConceptCommand(workspaceRoot, 'pr-merge', 'merge the PR manually'),
   };
 
   // Add summary/goal if available

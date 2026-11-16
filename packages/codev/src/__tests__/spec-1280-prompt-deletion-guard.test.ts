@@ -35,7 +35,8 @@ import * as path from 'node:path';
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 const baselineDir = path.join(repoRoot, 'packages/codev/src/__tests__/fixtures/spec-1280-baselines');
 
-const GUARDED = ['spir', 'aspir', 'air'] as const;
+// pir added by #1903 (post-#1903 baseline): PIR's builder-prompt gained Baked Decisions there.
+const GUARDED = ['spir', 'aspir', 'air', 'pir'] as const;
 const baselinePath = (p: string) => path.join(baselineDir, `${p}-builder-prompt.md.baseline`);
 const currentPath = (p: string) =>
   path.join(repoRoot, 'codev/protocols', p, 'builder-prompt.md');
@@ -260,6 +261,51 @@ describe('Spec 1280 — aspir/air consult-types do not silently lose content (re
           path.join(repoRoot, 'codev-skeleton/protocols', proto, 'consult-types', `${name}.md`),
           'utf-8',
         );
+        expect(skeleton).toBe(ours);
+      });
+    });
+  }
+});
+
+// #1903: the PIR prompts, anchored on baselines captured from #1903's rewrite. Not a Spec 1280
+// retirement — these files had no guard before. Each anti-vacuity string is content the file
+// must keep: the Baked Decisions carveout where #1903 added one, and for review.md (no Baked
+// Decisions) the pr-gate rule and the forge concepts it routes through.
+const GUARDED_PIR: Array<{ name: string; rel: string; mustContain: string[] }> = [
+  { name: 'plan', rel: 'prompts/plan.md', mustContain: ['Baked Decisions', 'do not autonomously'] },
+  { name: 'implement', rel: 'prompts/implement.md', mustContain: ['Baked Decisions', 'do not autonomously'] },
+  {
+    name: 'review',
+    rel: 'prompts/review.md',
+    mustContain: ['porch approve {{project_id}} pr --a-human-explicitly-approved-this', '{{pr_create_command}}', '{{pr_merge_command}}'],
+  },
+  { name: 'pr-review', rel: 'consult-types/pr-review.md', mustContain: ['Baked Decisions', 'do not autonomously'] },
+];
+
+describe('#1903 — PIR prompts do not silently lose content', () => {
+  for (const { name, rel, mustContain } of GUARDED_PIR) {
+    const baseline = path.join(baselineDir, `pir-${name}.md.baseline`);
+    const current = path.join(repoRoot, 'codev/protocols/pir', rel);
+    describe(`pir ${rel}`, () => {
+      it('has a baseline committed', () => {
+        expect(
+          fs.existsSync(baseline),
+          `missing baseline for pir ${rel}; the guard cannot protect what it has no reference for`,
+        ).toBe(true);
+      });
+
+      it('anti-vacuity: the baseline carries the content the file must keep', () => {
+        const b = fs.readFileSync(baseline, 'utf-8').toLowerCase();
+        for (const s of mustContain) expect(b).toContain(s.toLowerCase());
+      });
+
+      it('no baseline line has been deleted', () => {
+        expectNoDeletion(`pir ${rel}`, fs.readFileSync(baseline, 'utf-8'), fs.readFileSync(current, 'utf-8'));
+      });
+
+      it('the skeleton twin still matches', () => {
+        const ours = fs.readFileSync(current, 'utf-8');
+        const skeleton = fs.readFileSync(path.join(repoRoot, 'codev-skeleton/protocols/pir', rel), 'utf-8');
         expect(skeleton).toBe(ours);
       });
     });

@@ -44,7 +44,7 @@ cat codev/plans/{{artifact_name}}.md
 
 The plan is your authoritative scope. Stick to it. If you discover the plan is wrong while implementing, stop and signal `BLOCKED` rather than silently deviating.
 
-**Baked Decisions stay fixed.** If the issue body has a "Baked Decisions" section (any heading level, case-insensitive), treat each listed decision as fixed during implementation — do not autonomously substitute alternate languages, frameworks, or dependencies. Raise a serious problem with one via `afx send architect` rather than working around it. If two contradict each other, do not pick one — flag the contradiction via `afx send` and wait.
+**Baked Decisions stay fixed.** If the issue body has a "Baked Decisions" section (any heading level, case-insensitive), treat each listed decision as fixed during implementation — do not autonomously substitute alternate languages, frameworks, or dependencies. Raise a serious problem with one via `afx send architect` rather than working around it. If two contradict each other, do not pick one — pause, flag the contradiction via `afx send`, and wait.
 
 ### 2. Implement the Code
 

@@ -4,6 +4,7 @@
  * Verifies that the SPIR/ASPIR/AIR builder-prompts (and their codev-skeleton
  * mirrors) include the "Baked Decisions" instruction paragraph after their
  * `## Protocol` section, with carveout + contradiction-handling wording.
+ * #1903 added PIR's files to every phase's enumeration (no pre-746 baselines).
  *
  * Two test families:
  *   1. Grep regression: each touched file contains the required literal strings.
@@ -107,6 +108,10 @@ const PHASE_1_FILES: BuilderPromptFile[] = [
     relPath: 'codev-skeleton/protocols/air/builder-prompt.md',
     baselineName: null,
   },
+  // PIR (#1903) postdates Spec 746: no pre-746 baseline exists, so baselineName is null and no
+  // pure-addition guard applies. Deletion protection: spec-1280-prompt-deletion-guard.test.ts.
+  { label: 'codev PIR builder-prompt', relPath: 'codev/protocols/pir/builder-prompt.md', baselineName: null },
+  { label: 'skeleton PIR builder-prompt', relPath: 'codev-skeleton/protocols/pir/builder-prompt.md', baselineName: null },
 ];
 
 describe('Spec 746 Phase 1: builder-prompt baked-decisions instruction', () => {
@@ -173,7 +178,7 @@ describe('Spec 746 Phase 1: builder-prompt baked-decisions instruction', () => {
   // itself is byte-identical across both copies, so future drift in this
   // paragraph (e.g., someone edits codev/ but forgets skeleton) is caught.
   describe('baked-decisions paragraph is byte-identical across codev/ and skeleton', () => {
-    const PROTOCOLS = ['spir', 'aspir', 'air'] as const;
+    const PROTOCOLS = ['spir', 'aspir', 'air', 'pir'] as const;
     const BAKED_HEADER = '## Baked Decisions';
 
     // Extract the Baked Decisions paragraph from a file's full content.
@@ -251,6 +256,11 @@ const PHASE_2_FILES: DraftingPromptFile[] = [
     relPath: 'codev-skeleton/protocols/air/prompts/implement.md',
     baselineName: null,
   },
+  // PIR (#1903): no pre-746 baseline (see PHASE_1_FILES).
+  { label: 'codev PIR plan.md', relPath: 'codev/protocols/pir/prompts/plan.md', baselineName: null },
+  { label: 'codev PIR implement.md', relPath: 'codev/protocols/pir/prompts/implement.md', baselineName: null },
+  { label: 'skeleton PIR plan.md', relPath: 'codev-skeleton/protocols/pir/prompts/plan.md', baselineName: null },
+  { label: 'skeleton PIR implement.md', relPath: 'codev-skeleton/protocols/pir/prompts/implement.md', baselineName: null },
 ];
 
 describe('Spec 746 Phase 2: drafting-prompt baked-decisions clause', () => {
@@ -359,6 +369,16 @@ describe('Spec 746 Phase 2: drafting-prompt baked-decisions clause', () => {
         protocol: 'air implement.md',
         codev: 'codev/protocols/air/prompts/implement.md',
         skeleton: 'codev-skeleton/protocols/air/prompts/implement.md',
+      },
+      {
+        protocol: 'pir plan.md',
+        codev: 'codev/protocols/pir/prompts/plan.md',
+        skeleton: 'codev-skeleton/protocols/pir/prompts/plan.md',
+      },
+      {
+        protocol: 'pir implement.md',
+        codev: 'codev/protocols/pir/prompts/implement.md',
+        skeleton: 'codev-skeleton/protocols/pir/prompts/implement.md',
       },
     ];
 
@@ -471,6 +491,9 @@ const PHASE_3_FILES: ReviewerPromptFile[] = [
     relPath: 'codev-skeleton/protocols/air/consult-types/pr-review.md',
     baselineName: null,
   },
+  // PIR (#1903): no pre-746 baseline (see PHASE_1_FILES).
+  { label: 'codev PIR pr-review', relPath: 'codev/protocols/pir/consult-types/pr-review.md', baselineName: null },
+  { label: 'skeleton PIR pr-review', relPath: 'codev-skeleton/protocols/pir/consult-types/pr-review.md', baselineName: null },
 ];
 
 describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
@@ -617,6 +640,11 @@ describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
         codev: 'codev/protocols/air/consult-types/pr-review.md',
         skeleton: 'codev-skeleton/protocols/air/consult-types/pr-review.md',
       },
+      {
+        protocol: 'pir pr-review',
+        codev: 'codev/protocols/pir/consult-types/pr-review.md',
+        skeleton: 'codev-skeleton/protocols/pir/consult-types/pr-review.md',
+      },
     ];
 
     for (const pair of PAIRS) {
@@ -653,6 +681,8 @@ const PHASE_4_FILES: ProtocolDocFile[] = [
   { label: 'skeleton SPIR protocol.md', relPath: 'codev-skeleton/protocols/spir/protocol.md' },
   { label: 'skeleton ASPIR protocol.md', relPath: 'codev-skeleton/protocols/aspir/protocol.md' },
   { label: 'skeleton AIR protocol.md', relPath: 'codev-skeleton/protocols/air/protocol.md' },
+  { label: 'codev PIR protocol.md', relPath: 'codev/protocols/pir/protocol.md' },
+  { label: 'skeleton PIR protocol.md', relPath: 'codev-skeleton/protocols/pir/protocol.md' },
 ];
 
 describe('Spec 746 Phase 4: protocol documentation discoverability paragraph', () => {
@@ -707,6 +737,11 @@ describe('Spec 746 Phase 4: protocol documentation discoverability paragraph', (
         protocol: 'air protocol.md',
         codev: 'codev/protocols/air/protocol.md',
         skeleton: 'codev-skeleton/protocols/air/protocol.md',
+      },
+      {
+        protocol: 'pir protocol.md',
+        codev: 'codev/protocols/pir/protocol.md',
+        skeleton: 'codev-skeleton/protocols/pir/protocol.md',
       },
     ];
 
@@ -785,10 +820,21 @@ describe('Spec 746 Phase 4 final sweep: end-to-end regression check', () => {
     'codev-skeleton/protocols/spir/protocol.md',
     'codev-skeleton/protocols/aspir/protocol.md',
     'codev-skeleton/protocols/air/protocol.md',
+    // PIR (#1903): builder-prompt, plan.md, implement.md, pr-review.md, protocol.md × 2 trees
+    'codev/protocols/pir/builder-prompt.md',
+    'codev/protocols/pir/prompts/plan.md',
+    'codev/protocols/pir/prompts/implement.md',
+    'codev/protocols/pir/consult-types/pr-review.md',
+    'codev/protocols/pir/protocol.md',
+    'codev-skeleton/protocols/pir/builder-prompt.md',
+    'codev-skeleton/protocols/pir/prompts/plan.md',
+    'codev-skeleton/protocols/pir/prompts/implement.md',
+    'codev-skeleton/protocols/pir/consult-types/pr-review.md',
+    'codev-skeleton/protocols/pir/protocol.md',
   ];
 
-  it('30 files were touched across Phases 1-4 (sanity check on the inventory)', () => {
-    expect(ALL_TOUCHED_FILES.length).toBe(30);
+  it('40 files carry Baked Decisions: Spec 746\'s 30 plus PIR\'s 10 (#1903) (sanity check on the inventory)', () => {
+    expect(ALL_TOUCHED_FILES.length).toBe(40);
   });
 
   describe('cross-phase: every touched file contains "Baked Decisions"', () => {
@@ -844,7 +890,7 @@ describe('Spec 746 end-to-end smoke: builder-prompt rendering with baked-decisio
     };
   }
 
-  for (const protocol of ['spir', 'aspir', 'air']) {
+  for (const protocol of ['spir', 'aspir', 'air', 'pir']) {
     describe(`${protocol} builder-prompt`, () => {
       const templatePath = path.resolve(repoRoot, `codev/protocols/${protocol}/builder-prompt.md`);
       const template = fs.readFileSync(templatePath, 'utf-8');
@@ -873,7 +919,7 @@ describe('Spec 746 end-to-end smoke: builder-prompt rendering with baked-decisio
   describe('absence default: rendering with an issue that has no baked-decisions section', () => {
     const PLAIN_ISSUE_BODY = '## Background\n\nA boring feature.\n\n## Done When\n\nIt ships.';
 
-    for (const protocol of ['spir', 'aspir', 'air']) {
+    for (const protocol of ['spir', 'aspir', 'air', 'pir']) {
       it(`${protocol} builder-prompt: instruction paragraph is still present (it's unconditional)`, () => {
         const template = fs.readFileSync(
           path.resolve(repoRoot, `codev/protocols/${protocol}/builder-prompt.md`),

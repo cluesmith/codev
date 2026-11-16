@@ -207,19 +207,15 @@ porch next {{project_id}}
 
 The response must be `status: complete` with a **"Merge the pull request"** task. If it is still `gate_pending`, the approval was not recorded — do not merge. (`porch status {{project_id}} --json` shows `gate_status` for the current gate, before this `porch next` moves the project to `verified`.)
 
-**Check whether the human already merged it before merging** — never blind-merge:
+**Check whether the human already merged it before merging** — never blind-merge. Look at the PR on your forge (on GitHub: `gh pr view <PR-number> --json state`). If it is already merged, skip the merge command and only record it:
 
 ```bash
-PR=<PR-number from step 4a>
-STATE=$(gh pr view "$PR" --json state --jq .state)
-
-if [ "$STATE" != "MERGED" ]; then
-  gh pr merge "$PR" --merge
-fi
-porch done {{project_id}} --merged "$PR"
+export CODEV_PR_NUMBER=<PR-number from step 4a>
+{{pr_merge_command}}
+porch done {{project_id}} --merged "$CODEV_PR_NUMBER"
 ```
 
-`gh pr merge --merge` is the default forge's merge command; on another forge, run the command porch's merge task names with `CODEV_PR_NUMBER` exported. **Use `--merge`, not `--squash`** — preserve individual commits for development history. The `Fixes #{{issue.number}}` in the PR body auto-closes the issue.
+The second line is your forge's `pr-merge` concept, substituted by porch (`gh pr merge "$CODEV_PR_NUMBER" --merge` by default) — the same command porch's merge task names. It reads the PR number from `CODEV_PR_NUMBER`. Merge with a merge commit, never a squash: individual commits are development history. The `Fixes #{{issue.number}}` in the PR body auto-closes the issue.
 
 ### 10. Final Notification
 
@@ -240,7 +236,7 @@ Signals are informational — `porch done` is what moves porch.
 
 ## What NOT to Do
 
-- **Don't merge before the `pr` gate is approved and recorded** (steps 8–9). Neither a consultation APPROVE verdict nor approving prose that does not relay the human's decision authorizes `gh pr merge` — only the architect's relay, recorded with `porch approve`, does.
+- **Don't merge before the `pr` gate is approved and recorded** (steps 8–9). Neither a consultation APPROVE verdict nor approving prose that does not relay the human's decision authorizes the merge — only the architect's relay, recorded with `porch approve`, does.
 - Don't skip porch's PR/merge records (steps 4a, 9). The `--pr` record links the project to its PR; the `--merged` record closes the lifecycle in porch state. Skipping either leaves `pr_history` incomplete and downstream tooling blind.
 - Don't run `porch approve` for any gate on your own initiative — only when the architect relays the human's approval
 - Don't push to the default branch — only merge via PR

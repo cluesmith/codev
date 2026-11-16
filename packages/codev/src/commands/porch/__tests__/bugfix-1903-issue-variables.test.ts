@@ -113,30 +113,41 @@ describe('#1903 — porch substitutes {{issue.number}} and {{issue.title}}', () 
     expect(fetchIssue).toHaveBeenCalledWith('builder-task-abc', { cwd: tmp });
   });
 
-  // The shipped prompts, rendered for real: no `{{issue.*}}` survives in either tree.
-  const shipped = [
-    ['pir', 'plan', 'plan.md', '1234'],
-    ['pir', 'implement', 'implement.md', '1234'],
-    ['pir', 'review', 'review.md', '1234'],
-    ['air', 'implement', 'implement.md', '1234'],
-    ['air', 'pr', 'pr.md', '1234'],
-    ['bugfix', 'investigate', 'investigate.md', 'bugfix-1234'],
-    ['bugfix', 'fix', 'fix.md', 'bugfix-1234'],
-    ['bugfix', 'pr', 'pr.md', 'bugfix-1234'],
-  ] as const;
+  // The shipped prompts, rendered for real: no `{{issue.*}}` survives in either tree. Every
+  // prompt file of the protocols that name the issue, so a new one is covered automatically.
+  // Each prompt's file name is its phase id; BUGFIX's porch id is `bugfix-<N>`.
   const cases = ['codev', 'codev-skeleton'].flatMap((tree) =>
-    shipped.map(([proto, phase, file, id]) => ({ tree, proto, phase, file, id })),
+    ['pir', 'air', 'bugfix'].flatMap((proto) =>
+      fs
+        .readdirSync(path.join(repoRoot, tree, 'protocols', proto, 'prompts'))
+        .filter((file) => file.endsWith('.md'))
+        .map((file) => ({
+          tree,
+          proto,
+          file,
+          phase: file.replace(/\.md$/, ''),
+          id: proto === 'bugfix' ? 'bugfix-1234' : '1234',
+        })),
+    ),
   );
+
+  it('found the shipped prompts that name the issue', () => {
+    const names = cases.map(({ tree, proto, file }) => `${tree}/${proto}/${file}`);
+    for (const tree of ['codev', 'codev-skeleton']) {
+      for (const f of ['pir/plan.md', 'pir/implement.md', 'pir/review.md', 'air/implement.md', 'air/pr.md', 'bugfix/investigate.md', 'bugfix/fix.md', 'bugfix/pr.md']) {
+        expect(names).toContain(`${tree}/${f}`);
+      }
+    }
+  });
 
   it.each(cases)('$tree/protocols/$proto/prompts/$file renders every {{issue.*}} tag', async ({ tree, proto, phase, file, id }) => {
     const source = fs.readFileSync(path.join(repoRoot, tree, 'protocols', proto, 'prompts', file), 'utf-8');
-    expect(source, 'fixture no longer uses an issue tag — drop it from this list').toMatch(ISSUE_TAG);
     writePrompt(proto, file, source);
 
     const prompt = await buildPhasePrompt(tmp, stateFor(id, proto, phase), protocolFor(proto, phase, file));
 
     expect(prompt).not.toMatch(ISSUE_TAG);
-    expect(prompt).toContain('#1234');
+    if (ISSUE_TAG.test(source)) expect(prompt).toContain('1234');
   });
 });
 
