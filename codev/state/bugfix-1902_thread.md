@@ -132,3 +132,20 @@ candidates are listed in the PR's Flaky Tests section, neither skipped).
 - **Fixed in place after the ready message**: porch's own `To approve:` hints lacked the
   human-approval flag. Architect told.
 - Gate `pr` requested; waiting for the human.
+
+## Architect review fold-ins (2026-11-16)
+
+Architect: codex REQUEST_CHANGES, claude COMMENT; five fold-ins, all done (49f4c58b0, bde5a7cb6):
+
+1. builder.md post-merge row is per protocol — "Ready for cleanup" only for protocols with no
+   verify phase; SPIR/ASPIR say "Entering verify", then cleanup after `verify-approval`.
+2. builder.md gate list now includes PIR, RESEARCH, EXPERIMENT; sweep checks all gate lists.
+3. Phase `consultation.enabled/parallel`: dropped from schema and RESEARCH's blocks (both were
+   `true`). A `false` throws at load; a legacy `true` is tolerated. Not a key whitelist: pre-#1902
+   BUGFIX local copies carry `{on, max_rounds, parallel}` and must keep loading.
+4. An unrendered `{{consult_*}}` token after substitution throws. It caught a real skew in the
+   #1455 test fixture (hand-built phase, real pr.md); fixture fixed.
+5. docs/faq.md + docs/tips.md fixed; `docs/` (minus releases) is now a sweep root.
+
+Full suite green (349 files / 7343 tests). Waiting on PR #1904 to merge, then merge main in
+(expected conflict in porch/prompts.ts).
