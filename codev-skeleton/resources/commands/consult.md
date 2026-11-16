@@ -102,8 +102,28 @@ The `gemini` lane passes the id to `agy --model`, so the id space is agy's, not 
 { "consult": { "reasoningEffort": { "codex": "high" } } }
 ```
 
-Only `codex` exposes this. Values: `minimal`, `low`, `medium`, `high`, `xhigh` (default `medium`).
+Only `codex` exposes this. Values: `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`,
+`persistent` (default `medium`).
 Unlike model ids, this **is** a closed set Codev validates locally — see the asymmetry below.
+
+### `consult.codexPath`
+
+The codex lane runs the Codex CLI **bundled with codev** (inside `@openai/codex-sdk`), never the
+`codex` on your PATH, so upgrading your own CLI changes nothing. When a model needs a newer Codex
+than the bundle ("requires a newer version of Codex"), point the lane at your own binary:
+
+```json
+{ "consult": { "codexPath": "/opt/homebrew/bin/codex" } }
+```
+
+- Unset (the default) → the bundled CLI. Every run prints which binary and version it used:
+  `[CODEX] binary: Codex CLI 0.167.0 bundled with codev …` or
+  ``[CODEX] binary: /opt/homebrew/bin/codex, codex-cli 0.167.0 (from `consult.codexPath` in …)``.
+- Must be an **absolute path** (use the output of `which codex`). Before each consultation the lane
+  runs it once with `--version`; a path that does not exist or is not executable fails the
+  consultation. There is **no fallback** to the bundled CLI.
+- Authentication is unchanged: the lane passes no API key, so your binary uses the stored
+  `codex login` (or `CODEX_API_KEY`, if you set one).
 
 ### `consult.pricing.codex`
 
@@ -200,12 +220,13 @@ the protocol file.
 Config errors are raised when config is **loaded** — before any consultation starts — and name the
 offending key and the valid alternatives. Nothing falls back to a default on error.
 
-**The asymmetry worth knowing about:** these two are validated very differently.
+**The asymmetry worth knowing about:** these are validated very differently.
 
 | | Validated by | When you find out |
 |---|---|---|
 | `reasoningEffort` | **Codev**, against a closed enum | Config load, before anything runs |
 | Model ids | **The provider** | When the lane runs |
+| `codexPath` | **Codev**: absolute-path syntax, then `<path> --version` | Syntax at config load; a binary that doesn't run, when the codex lane starts |
 
 Codev checks a model id's *syntax* only (ASCII alphanumerics plus `. _ : / @ + -`, 1–200 characters,
 no leading punctuation) — never its existence. **There is no allowlist of model ids anywhere in

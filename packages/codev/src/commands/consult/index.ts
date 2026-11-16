@@ -11,6 +11,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync, execSync, execFileSync } from 'node:child_process';
 import { tmpdir, homedir } from 'node:os';
+import { createRequire } from 'node:module';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { Codex } from '@openai/codex-sdk';
@@ -41,12 +42,11 @@ import {
   formatSnapshotLostWarning,
   appendTreeChangeWarningToOutput,
 } from './tree-tripwire.js';
-import { ISSUE_KEY_SOURCE } from '../../lib/issue-id.js';
 import { isWindows } from '../../lib/platform.js';
 import { containsBuildersSegment } from '../../agent-farm/utils/builder-worktree-identity.js';
 import { findOnHostPath, spawnableOnHost } from '../../lib/shell-launch.js';
 import { commandLaunch } from '../../lib/platform/command-launch.js';
-import { hostPaths } from '../../lib/platform/host-paths.js';
+import { detectProjectIdFromCwd } from '../../lib/worktree-project-id.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -320,49 +320,48 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): Buil
     throw new Error('No project state found. Are you in a builder worktree?');
   }
 
+  // As porch's findProjectInDir: a project dir is one holding a status.yaml.
   const entries = fs.readdirSync(projectsDir);
   const projectDirs = entries.filter(e => {
-    return fs.statSync(path.join(projectsDir, e)).isDirectory();
+    return fs.statSync(path.join(projectsDir, e)).isDirectory() && fs.existsSync(path.join(projectsDir, e, 'status.yaml'));
   });
 
   if (projectDirs.length === 0) {
     throw new Error('No project found in codev/projects/');
   }
+  // Never list the project dirs in an error: a long-lived repo has thousands (#1898).
+  const hint = `${projectDirs.length} projects in codev/projects/; pass --issue <N> or --project-id <id>`;
+  // Same rule as porch's findProjectInDir: the dir is `<id>` or `<id>-<slug>`.
+  const dirFor = (id: string): string | undefined => {
+    const lower = id.toLowerCase();
+    return projectDirs.find(d => {
+      const name = d.toLowerCase();
+      return name === lower || name.startsWith(`${lower}-`);
+    });
+  };
   let dir: string;
   if (projectId) {
-    // Direct lookup by project ID (passed via --project-id from porch)
-    const matched = projectDirs.find(d => d.startsWith(`${projectId}-`) || d.startsWith(`bugfix-${projectId}-`));
-    if (matched) {
-      dir = matched;
-    } else {
-      throw new Error(`Project ${projectId} not found in codev/projects/. Available: ${projectDirs.join(', ')}`);
+    // Direct lookup by project ID (passed via --project-id from porch). A hand-typed bare
+    // number may mean a bugfix project, so fall back to `bugfix-<id>`; a worktree-derived ID
+    // below is already exact and gets no fallback.
+    const matched = dirFor(projectId) ?? dirFor(`bugfix-${projectId}`);
+    if (!matched) {
+      throw new Error(`Project ${projectId} not found (${hint})`);
     }
+    dir = matched;
   } else if (projectDirs.length > 1) {
-    // Multiple project dirs — try to disambiguate from worktree directory name
-    // The matchers below are written against '/' separators.
-    const cwd = hostPaths().toForwardSlashes(process.cwd());
-    // Tracker-key worktrees (#1740): .builders/pir-ENG-123[-slug]
-    const keyMatch = cwd.match(new RegExp(`\\.builders/[a-z]+-(${ISSUE_KEY_SOURCE})(?:-|/|$)`, 'i'));
-    const builderMatch = cwd.match(/\.builders\/[^/]*?-?(\d+)-([^/]+)/);
-    if (keyMatch) {
-      const key = keyMatch[1].toLowerCase();
-      const matched = projectDirs.find(d => d.toLowerCase().startsWith(`${key}-`) || d.toLowerCase().startsWith(`bugfix-${key}-`));
-      if (matched) {
-        dir = matched;
-      } else {
-        throw new Error(`Multiple projects found and none match worktree ID ${keyMatch[1]}: ${projectDirs.join(', ')}`);
-      }
-    } else if (builderMatch) {
-      const worktreeId = builderMatch[1];
-      const matched = projectDirs.find(d => d.startsWith(`${worktreeId}-`) || d.startsWith(`bugfix-${worktreeId}-`));
-      if (matched) {
-        dir = matched;
-      } else {
-        throw new Error(`Multiple projects found and none match worktree ID ${worktreeId}: ${projectDirs.join(', ')}`);
-      }
-    } else {
-      throw new Error(`Multiple projects found: ${projectDirs.join(', ')}`);
+    // Multiple project dirs — resolve the worktree's project exactly as porch does,
+    // which covers slugless worktrees (.builders/bugfix-N), subdirs, and tracker keys.
+    const cwd = process.cwd();
+    const worktreeId = detectProjectIdFromCwd(cwd);
+    if (!worktreeId) {
+      throw new Error(`Multiple projects found and no project ID in worktree path ${cwd} (${hint})`);
     }
+    const matched = dirFor(worktreeId);
+    if (!matched) {
+      throw new Error(`Multiple projects found and none match worktree ID ${worktreeId} (${hint})`);
+    }
+    dir = matched;
   } else {
     dir = projectDirs[0];
   }
@@ -598,21 +597,26 @@ export function resolveOptionalLaneModelChoice(
  * loudly. The provider's own text is preserved verbatim and merely annotated, because paraphrasing
  * a provider error is how you lose the one detail that identifies the real problem.
  */
-function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice): unknown {
-  // A shipped default can't be misconfigured by the user — nothing useful to add.
-  if (choice.key === null) return err;
+function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice, ranBinary?: string): unknown {
+  const notes: string[] = [];
+  // A shipped default can't be misconfigured by the user — nothing useful to add about the id.
+  if (choice.key !== null) {
+    const where = choice.fromFlag
+      ? 'passed via --model-id'
+      : `from \`${choice.key}\`${choice.source ? ` in ${choice.source}` : ''}`;
+    notes.push(
+      `The ${lane} lane requested model "${choice.id}" (${where}).\n` +
+      `If the provider rejected that id, correct it at the source above. ` +
+      `Codev does not fall back to a default model.`
+    );
+  }
+  // A provider can reject a valid id because the client is too old ("requires a newer version of
+  // Codex", #1880) — so name the client, which is otherwise invisible to the user.
+  if (ranBinary) notes.push(`The ${lane} lane ran ${ranBinary}.`);
+  if (notes.length === 0) return err;
 
   const providerText = err instanceof Error ? err.message : String(err);
-  const where = choice.fromFlag
-    ? 'passed via --model-id'
-    : `from \`${choice.key}\`${choice.source ? ` in ${choice.source}` : ''}`;
-
-  const annotated = new Error(
-    `${providerText}\n\n` +
-    `The ${lane} lane requested model "${choice.id}" (${where}).\n` +
-    `If the provider rejected that id, correct it at the source above. ` +
-    `Codev does not fall back to a default model.`
-  );
+  const annotated = new Error(`${providerText}\n\n${notes.join('\n')}`);
   if (err instanceof Error && err.stack) annotated.stack = err.stack;
   return annotated;
 }
@@ -624,6 +628,71 @@ function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice)
  */
 export function describeCodexAuth(env: NodeJS.ProcessEnv, fromDotenv: ReadonlySet<string>): string {
   return env.CODEX_API_KEY ? credentialOrigin('CODEX_API_KEY', fromDotenv) : 'stored codex login (no CODEX_API_KEY)';
+}
+
+/** The codex binary the codex lane runs, and how to say so. */
+export interface CodexBinary {
+  /** Passed to the SDK as `codexPathOverride`; undefined runs the SDK's bundled CLI. */
+  pathOverride?: string;
+  /** Which binary, which version, and where that choice came from. */
+  description: string;
+}
+
+/**
+ * The version of the Codex CLI the SDK runs when no override is set.
+ *
+ * The SDK resolves `@openai/codex` from its OWN install location — never PATH — and pins it to its
+ * own version, so upgrading the user's `codex` changes nothing (#1880). Resolved the same way here.
+ */
+export function bundledCodexVersion(): string {
+  // Walk the lookup paths rather than `require.resolve('@openai/codex-sdk')`: the SDK exports only
+  // an `import` condition, so require-resolution throws ERR_PACKAGE_PATH_NOT_EXPORTED.
+  const localRequire = createRequire(import.meta.url);
+  for (const dir of localRequire.resolve.paths('@openai/codex-sdk') ?? []) {
+    const sdkPackageJson = path.join(dir, '@openai', 'codex-sdk', 'package.json');
+    if (!fs.existsSync(sdkPackageJson)) continue;
+    // realpath: under pnpm the SDK is a symlink, and its `@openai/codex` sits beside the real path.
+    const sdkRequire = createRequire(fs.realpathSync(sdkPackageJson));
+    const codexPackageJson = sdkRequire.resolve('@openai/codex/package.json');
+    return JSON.parse(fs.readFileSync(codexPackageJson, 'utf-8')).version;
+  }
+  throw new Error('Cannot locate @openai/codex-sdk to read the version of its bundled Codex CLI.');
+}
+
+/**
+ * Pick the codex binary: `consult.codexPath` if set, else the SDK's bundled CLI.
+ *
+ * A configured path is run once with `--version` before the consultation. That reports the version
+ * actually in use and makes a missing or non-executable path fail here, loudly — Codev never falls
+ * back to the bundled CLI, which is exactly the binary the user configured their way around.
+ */
+export function resolveCodexBinary(workspaceRoot: string): CodexBinary {
+  const codexPath = loadConfig(workspaceRoot).consult?.codexPath;
+  if (codexPath === undefined) {
+    return {
+      description: `Codex CLI ${bundledCodexVersion()} bundled with codev ` +
+        `(set \`consult.codexPath\` to run your own codex)`,
+    };
+  }
+
+  const source = findConfigSource(workspaceRoot, ['consult', 'codexPath']);
+  const from = `from \`consult.codexPath\`${source ? ` in ${source}` : ''}`;
+  let version: string;
+  try {
+    version = execFileSync(codexPath, ['--version'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+    }).trim();
+  } catch (err) {
+    throw new Error(
+      `Cannot run the codex binary ${codexPath} (${from}): ` +
+      `${err instanceof Error ? err.message : String(err)}\n` +
+      `Point consult.codexPath at an executable codex, or remove it to use the bundled CLI. ` +
+      `Codev does not fall back to the bundled CLI.`
+    );
+  }
+  return { pathOverride: codexPath, description: `${codexPath}, ${version} (${from})` };
 }
 
 /**
@@ -657,8 +726,17 @@ export async function runCodexConsultation(
   const tempFile = path.join(tmpdir(), `codev-role-${Date.now()}.md`);
   fs.writeFileSync(tempFile, role);
 
+  let binary: CodexBinary | undefined;
   try {
+    // Inside the guarded lifecycle: a binary that fails its preflight must still discard a stale
+    // review file and record the failure, like any other failed consultation.
+    binary = resolveCodexBinary(workspaceRoot);
+    console.error(`[CODEX] binary: ${binary.description}`);
+
+    // Never pass `apiKey`: the SDK would export it as CODEX_API_KEY and move the lane off the
+    // stored ChatGPT login onto metered API billing.
     const codex = new Codex({
+      codexPathOverride: binary.pathOverride,
       config: {
         model_instructions_file: tempFile,
       },
@@ -715,7 +793,8 @@ export async function runCodexConsultation(
       exitCode = 1;
     }
     discardStaleOutput(outputPath);
-    throw annotateModelError(err, 'codex', choice);
+    // A binary that never started cannot have rejected the model, so there is nothing to annotate.
+    throw binary ? annotateModelError(err, 'codex', choice, binary.description) : err;
   } finally {
     // Clean up temp file
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
@@ -2600,6 +2679,7 @@ export {
   resolveIntegrationBase as _resolveIntegrationBase,
   resolveArchitectQuery as _resolveArchitectQuery,
   computePersistentOutputPath as _computePersistentOutputPath,
+  getBuilderProjectState as _getBuilderProjectState,
   MODEL_CONFIGS as _MODEL_CONFIGS,
   MODEL_ALIASES as _MODEL_ALIASES,
   runAgyConsultation as _runAgyConsultation,

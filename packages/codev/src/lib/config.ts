@@ -22,6 +22,7 @@ import {
   validateConsultModels,
   validateReasoningEffort,
   validatePricing,
+  validateCodexPath,
   validateConsultationConfig,
   type CodexPricing,
 } from './consult-lanes.js';
@@ -87,6 +88,12 @@ export interface CodevConfig {
     reasoningEffort?: { codex?: ModelReasoningEffort };
     /** Codex-only per-1M token rates; all three required together. */
     pricing?: { codex?: CodexPricing };
+    /**
+     * Absolute path to the codex binary the codex lane runs. Unset → the Codex CLI bundled with
+     * `@openai/codex-sdk`. For when the bundled CLI is too old for a model (#1880). A path that
+     * does not run fails the consultation; Codev never falls back to the bundled CLI.
+     */
+    codexPath?: string;
   };
   forge?: Record<string, string | null> & { provider?: string };
   templates?: {
@@ -367,6 +374,7 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
   validateConsultModels(merged.consult?.models);
   validateReasoningEffort(merged.consult?.reasoningEffort);
   validatePricing(merged.consult?.pricing);
+  validateCodexPath(merged.consult?.codexPath);
   validateConsultationConfig(merged.porch?.consultation, workspaceRoot);
 
   return merged;
