@@ -1834,9 +1834,8 @@ The canonical builder loop:
 
 - **`porch next`** — Reads `status.yaml` + filesystem, returns a `PorchNextResponse` with status (`tasks`, `gate_pending`, `complete`, `error`) and an array of `PorchTask` objects (subject, description, sequential flag). No side effects except reading state.
 - **`porch done`** — Signals task completion, runs checks (npm test/build), records reviews, advances state machine.
-- **`porch run`** — Loops `next` → execute → `done` until complete or gate-blocked. Used by strict-mode builders.
 - **`porch status`** — Shows current state and prescriptive next steps.
-- **`porch approve <id> <gate>`** — Human-only gate approval.
+- **`porch approve <id> <gate> --a-human-explicitly-approved-this`** — Records a human's gate decision. The builder runs it after the architect relays the decision. (`porch run` was removed; strict-mode builders loop `porch next` → execute → `porch done` themselves.)
 
 #### State: `status.yaml`
 

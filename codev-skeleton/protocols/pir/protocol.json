@@ -70,15 +70,15 @@
     {
       "id": "review",
       "name": "Review",
-      "description": "Write retrospective (arch + lessons), push, open PR with review as body, run 3-way consultation, then wait at pr gate while the human merges on GitHub",
+      "description": "Write retrospective (arch + lessons), push, open PR with review as body, run the consultation porch emits, wait at the pr gate; once the architect relays the human's approval, record it with porch approve and merge",
       "type": "build_verify",
       "build": {
         "prompt": "review.md",
         "artifact": "codev/reviews/${PROJECT_TITLE}.md"
       },
       "verify": {
-        "type": "impl",
-        "models": ["gemini", "codex"],
+        "type": "pr",
+        "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
       "max_iterations": 1,

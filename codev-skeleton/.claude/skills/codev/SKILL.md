@@ -57,7 +57,7 @@ codev update --agent           # Agent mode: JSON stdout, no interactive merge
 
 ## codev doctor
 
-Checks all required dependencies: Node.js (>=18), git (>=2.5), gh (authenticated), and at least one AI CLI (Claude, Gemini, or Codex).
+Checks dependencies: Node.js (>=18), git (>=2.5), your forge's CLI and its auth (`gh` on GitHub), and at least one working AI model — Claude (via the bundled Agent SDK), Codex, OpenCode, or Gemini (via the Antigravity CLI, `agy`).
 
 ```bash
 codev doctor

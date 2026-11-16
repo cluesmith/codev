@@ -47,34 +47,29 @@ The command above is your forge's `pr-create` concept, substituted by porch (`gh
 
 ## Run CMAP review
 
-BUGFIX runs its own 3-way consultation on the PR (porch does not do it for you). Dispatch all three in the background:
+BUGFIX runs its own consultation on the PR (porch does not run it for you). Porch wrote these commands from the protocol's default reviewers (gemini, codex, claude) and your project's `.codev/config.json` `porch.consultation`:
 
 ```bash
-consult -m gemini --protocol bugfix --type pr &
-consult -m codex --protocol bugfix --type pr &
-consult -m claude --protocol bugfix --type pr &
+{{consult_commands}}
 ```
 
-Do not proceed until **ALL THREE consultations have returned results** — retrieve each with `TaskOutput` (`block: true`), record its verdict (APPROVE / REQUEST_CHANGES), fix real issues, push, and re-run CMAP if the changes were substantial. You must hold three concrete verdicts before you notify.
+Run each as its own background task (in Claude Code, `run_in_background: true`, not a trailing `&`), so your turn ends and you are notified as each one finishes.
+
+Do not proceed until **ALL consultations listed above have returned results**. Record each verdict (APPROVE / REQUEST_CHANGES), fix real issues, push, and re-run CMAP if the changes were substantial. You must hold a concrete verdict from every reviewer before you notify.
 
 ## Notify and hand off at the gate
 
-**DO NOT send this notification until you have all three CMAP verdicts.** Send a **single** notification with the PR link and all three verdicts, then request the gate:
+**DO NOT send this notification until you have every CMAP verdict.** Send a **single** notification with the PR link and the verdicts, then request the gate:
 
 ```bash
-afx send architect "PR #<number> ready for review (fixes issue #{{issue.number}}). CMAP: gemini=<APPROVE|REQUEST_CHANGES>, codex=<APPROVE|REQUEST_CHANGES>, claude=<APPROVE|REQUEST_CHANGES>"
-porch done <project-id>
+afx send architect "PR #<number> ready for review (fixes issue #{{issue.number}}). CMAP: {{consult_verdicts}}"
+porch done {{project_id}}
 ```
 
-`porch done` fires the `pr` gate and surfaces the PR in Needs Attention. Wait for the architect to approve it (`porch approve <project-id> pr`) — a CMAP APPROVE is not merge authorization. After gate approval, follow the merge task from `porch next` to merge and advance to `verified`.
+`porch done` fires the `pr` gate and surfaces the PR in Needs Attention. Then stop and wait — a CMAP APPROVE is not merge authorization. When the architect relays the human's approval, you run the approval yourself:
 
-## Signals
+```bash
+porch approve {{project_id}} pr --a-human-explicitly-approved-this
+```
 
-- PR created and reviews complete:
-  ```
-  <signal>PHASE_COMPLETE</signal>
-  ```
-- Blocked:
-  ```
-  <signal>BLOCKED:reason goes here</signal>
-  ```
+Then follow the merge task from `porch next`. If you are blocked before the gate, `afx send architect` the specifics and wait instead of running `porch done`.

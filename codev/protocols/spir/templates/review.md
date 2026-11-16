@@ -54,7 +54,7 @@ What you routed where — HOT `codev/resources/lessons-critical.md` (capped) vs 
 
 ## Flaky Tests
 
-Pre-existing tests skipped as flaky during this project — name, file path, observed failure mode. "No flaky tests encountered" if none.
+Pre-existing tests that failed intermittently during this project (left running, not skipped) — name, file path, observed failure mode. "No flaky tests encountered" if none.
 
 ## Follow-up Items
 

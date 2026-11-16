@@ -1,6 +1,6 @@
 # Plan: [Title]
 
-**Specification**: [Link to codev/specs/XXXX-*.md]
+**Specification**: [Link to codev/specs/<id>-*.md]
 
 ## Executive Summary
 

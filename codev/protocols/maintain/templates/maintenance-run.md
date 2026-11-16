@@ -2,7 +2,7 @@
 
 **Date**: YYYY-MM-DD
 **Base Commit**: <hash>
-**PR**: #NNN
+**PR**: #<N>
 
 ## Changes Since Last Run
 
@@ -10,7 +10,7 @@
 
 ## Audit Findings
 
-Recorded by Step 3a (Audit documentation) as the cuts are applied — one line per cut, with its reason. The diff plus these reasons is the proposal; the architect's PR review is the gate.
+Recorded during Step 4 (Sync Documentation) as the cuts are applied — one line per cut, with its reason. The diff plus these reasons is the proposal; the architect's PR review is the gate.
 
 ### arch.md (cold) / arch-critical.md (hot)
 - <section or hot entry>: <reason for cut / compression / demotion>

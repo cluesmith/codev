@@ -352,11 +352,11 @@ Default project configuration uses a 3-model set (`gemini`, `codex`, `claude`).
 For thorough reviews, run multiple models in parallel:
 
 ```bash
-# Default 3-way spec review
-consult -m gemini --protocol spir --type spec &
-consult -m codex --protocol spir --type spec &
-consult -m claude --protocol spir --type spec &
-wait
+# Default 3-way spec review — run each as its own background task
+# (in Claude Code, run_in_background: true; not a trailing &)
+consult -m gemini --protocol spir --type spec
+consult -m codex --protocol spir --type spec
+consult -m claude --protocol spir --type spec
 
 # Optional: include Hermes as a 4th reviewer
 consult -m hermes --protocol spir --type spec
@@ -500,11 +500,10 @@ consult -m codex --protocol spir --type pr --issue 42
 # Protocol: implementation review with bugfix protocol
 consult -m claude --protocol bugfix --type impl
 
-# Default 3-way parallel review
-consult -m gemini --protocol spir --type spec &
-consult -m codex --protocol spir --type spec &
-consult -m claude --protocol spir --type spec &
-wait
+# Default 3-way parallel review — each as its own background task
+consult -m gemini --protocol spir --type spec
+consult -m codex --protocol spir --type spec
+consult -m claude --protocol spir --type spec
 
 # Optional: include Hermes as an additional reviewer
 consult -m hermes --protocol spir --type spec

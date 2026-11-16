@@ -53,8 +53,9 @@ their templates arrive via porch. Naming a `codev/...` path in prose for orienta
 the rule is about *fetching*. (`codev/resources/arch.md` and `lessons-learned.md` are
 user-evolved files, not framework files — referencing those by path is correct.)
 
-Verify an unfamiliar protocol against the CLI rather than assuming: `afx spawn --protocol
-<name> --help` succeeds if it is registered, including via the skeleton fallback.
+An unfamiliar protocol name: look for it under `.codev/protocols/`, `codev/protocols/` and
+`codev-skeleton/protocols/`; if it is in none, ask. (`afx spawn --protocol <name> --help` proves
+nothing — `--help` succeeds for any name.)
 
 ## Irreversible acts — the rules that exist because something was destroyed
 
@@ -72,9 +73,12 @@ a human decision.
 
 ## Gates
 
-Two human approval gates plus the PR gate. Only a human transitions
-`conceived → specified` and `committed → integrated`. Stop and wait at each; do not infer
-approval from silence.
+Each protocol's `protocol.json` defines its human gates: SPIR `spec-approval`, `plan-approval`,
+`pr`, `verify-approval`; ASPIR `pr`, `verify-approval`; AIR and BUGFIX `pr`; PIR
+`plan-approval`, `dev-approval`, `pr`; MAINTAIN `maintain-complete`; RESEARCH `scope-approval`,
+`research-complete`; EXPERIMENT `experiment-complete`. Only a human approves one. Stop and wait at
+each; do not infer approval from silence. The architect relays the human's decision; the builder
+runs `porch approve <id> <gate> --a-human-explicitly-approved-this`.
 
 **Approved specs and plans need frontmatter and must be committed to `main` before spawning.**
 Porch runs the full protocol from `specify`, but treats an artifact carrying this as done:
@@ -153,16 +157,18 @@ Commit messages:
 [Bugfix #42] Fix: URL-encode username before API call
 ```
 
-Branches: `spir/42-feature-name/phase-name`, `builder/bugfix-42-description`.
+Branches: `builder/<protocol>-<id>` (e.g. `builder/spir-42`, `builder/bugfix-42`), created by
+`afx spawn`. Plan phases are commits on that branch, not branches of their own.
 
 **Merge PRs with `gh pr merge <n> --merge` — never squash.** Individual commits document the
 development process; squashing destroys it.
 
 ## Working with builders
 
-Architects create specs and plans and review work; builders implement in isolated worktrees
-under `.builders/<id>/`. Commit everything before `afx spawn` — builders branch from HEAD, so
-uncommitted work is invisible to them.
+Builders write specs and plans and implement them in isolated worktrees under
+`.builders/<id>/`; architects review those artifacts at the gates and review the work. Commit
+everything before `afx spawn` — builders branch from HEAD, so uncommitted work is invisible to
+them.
 
 Agents message each other with `afx send`:
 
@@ -182,7 +188,7 @@ Each builder keeps a narrative log at `codev/state/<builder-id>_thread.md` — i
 
 Each CLI has a skill carrying its commands and flags — **check the skill before running the
 command rather than guessing**: `afx` (spawn, status, send, dev, cleanup, Tower),
-`codev` (init, adopt, update, doctor, local build/test), `porch` (status, run, approve),
+`codev` (init, adopt, update, doctor, local build/test), `porch` (next, done, status, approve),
 `consult` (reviews, cmap, stats), `runnable-worktrees` (making builder
 worktrees runnable), `update-arch-docs`.
 
