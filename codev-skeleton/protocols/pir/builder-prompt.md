@@ -57,7 +57,9 @@ the code directly in the worktree (you see it via `git diff`), typing into your 
 
 Revise, recommit, ask whether more remains. **The gate stays pending until the human approves. When
 the architect relays that approval, run `porch approve <id> <gate> --a-human-explicitly-approved-this`
-to record it, then `porch next {{project_id}}` to continue — never on your own initiative.**
+to record it, then `porch next {{project_id}}` to continue — never on your own initiative.** If
+porch's own message arrives instead ("Gate <gate> approved — please run `porch next` to advance."),
+the human recorded the approval directly: just run `porch next {{project_id}}`.
 
 ## Resumption After Crash
 

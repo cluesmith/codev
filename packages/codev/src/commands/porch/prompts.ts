@@ -37,7 +37,8 @@ export async function getProjectSummary(
 ): Promise<string | null> {
   // 1. Try forge issue lookup (supports numeric and alphanumeric IDs like "ENG-123").
   // A caller that already fetched the issue passes it (null = fetched, not found).
-  const issue = prefetchedIssue !== undefined ? prefetchedIssue : await fetchIssue(projectId);
+  // `cwd` makes the lookup use the workspace's configured forge, not the GitHub default.
+  const issue = prefetchedIssue !== undefined ? prefetchedIssue : await fetchIssue(projectId, { cwd: workspaceRoot });
   if (issue?.title) {
     return issue.title;
   }
@@ -280,7 +281,7 @@ export async function buildPhasePrompt(
   // The driving issue, fetched once: it feeds the `{{issue.*}}` variables and the Goal
   // header. The porch id is not always the issue id (BUGFIX uses `bugfix-<N>`), so derive it.
   const issueNumber = issueNumberFromPorchId(state.id);
-  const forgeIssue = issueNumber ? await fetchIssue(issueNumber) : null;
+  const forgeIssue = issueNumber ? await fetchIssue(issueNumber, { cwd: workspaceRoot }) : null;
   const issue: PromptIssue | null = issueNumber ? { number: issueNumber, title: forgeIssue?.title } : null;
 
   // Get project summary from GitHub Issues (with spec-file fallback)

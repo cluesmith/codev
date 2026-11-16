@@ -167,7 +167,7 @@ For each `REQUEST_CHANGES` point:
    - **Real defect** (correctness / cancellation / security / data-loss): fix it in code, add a regression test that fails without the fix, commit + push (the PR updates automatically — no second PR).
    - **False positive / out of scope**: no code change; say why.
 3. Write the disposition of every point (what you changed, or why you disagree) to the rebuttal file porch named (`{{project_id}}-review-iter1-rebuttals.md`), and summarize it in the review file's **"Things to Look At During PR Review"** section. Commit and push.
-4. Run `porch done {{project_id}}` — this requests the `pr` gate. `porch next {{project_id}}` then returns `gate_pending`.
+4. Run `porch done {{project_id}}` — this requests the `pr` gate. `porch next {{project_id}}` then returns `gate_pending`. (Use `porch done` here, not `porch next`: both reach the gate, but `porch next` records it as a safety-ceiling force-advance.)
 
 ### 7. Notify the Architect (gate is now pending)
 
@@ -194,6 +194,8 @@ End your turn and stay in the interactive session. The human reviews the PR on G
   ```bash
   porch approve {{project_id}} pr --a-human-explicitly-approved-this
   ```
+
+If porch's own message arrives instead — "Gate pr approved — please run `porch next` to advance." — the human recorded the approval directly (e.g. in VS Code); skip `porch approve` and go to step 9, which confirms it.
 
 Neither a consultation `APPROVE` nor approving prose that does not relay the human's decision ("looks good", "lgtm") authorizes the merge.
 

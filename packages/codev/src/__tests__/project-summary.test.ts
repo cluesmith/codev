@@ -41,7 +41,7 @@ describe('getProjectSummary', () => {
 
     const result = await getProjectSummary(testDir, '0126');
     expect(result).toBe('Project Management Rework');
-    expect(mockFetchIssue).toHaveBeenCalledWith('0126');
+    expect(mockFetchIssue).toHaveBeenCalledWith('0126', { cwd: testDir });
   });
 
   it('falls back to spec file heading when GitHub fails', async () => {
@@ -91,7 +91,7 @@ describe('getProjectSummary', () => {
     mockFetchIssue.mockResolvedValue(null);
 
     const result = await getProjectSummary(testDir, 'abc');
-    expect(mockFetchIssue).toHaveBeenCalledWith('abc');
+    expect(mockFetchIssue).toHaveBeenCalledWith('abc', { cwd: testDir });
     expect(result).toBeNull();
   });
 

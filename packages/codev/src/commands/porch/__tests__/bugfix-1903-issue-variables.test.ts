@@ -82,8 +82,8 @@ describe('#1903 — porch substitutes {{issue.number}} and {{issue.title}}', () 
       protocolFor('bugfix', 'investigate', 'investigate.md'),
     );
 
-    expect(fetchIssue).toHaveBeenCalledWith('1903');
-    expect(fetchIssue).not.toHaveBeenCalledWith('bugfix-1903');
+    expect(fetchIssue).toHaveBeenCalledWith('1903', { cwd: tmp });
+    expect(fetchIssue).not.toHaveBeenCalledWith('bugfix-1903', expect.anything());
     expect(prompt).toContain('- **Issue**: #1903 — Title of 1903');
     expect(prompt).toContain('## Goal\n\nTitle of 1903');
   });
@@ -110,7 +110,7 @@ describe('#1903 — porch substitutes {{issue.number}} and {{issue.title}}', () 
     );
     expect(prompt).toContain('#{{issue.number}} builder-task-abc');
     // The summary lookup still tries the raw id, as before.
-    expect(fetchIssue).toHaveBeenCalledWith('builder-task-abc');
+    expect(fetchIssue).toHaveBeenCalledWith('builder-task-abc', { cwd: tmp });
   });
 
   // The shipped prompts, rendered for real: no `{{issue.*}}` survives in either tree.
@@ -137,5 +137,32 @@ describe('#1903 — porch substitutes {{issue.number}} and {{issue.title}}', () 
 
     expect(prompt).not.toMatch(ISSUE_TAG);
     expect(prompt).toContain('#1234');
+  });
+});
+
+// The PIR half of #1903: the PR-time consultation must load PIR's PR reviewer prompt (not the
+// pre-dev-approval impl prompt) with three reviewers by default, identically in both trees.
+describe('#1903 — PIR review consultation shape (both trees)', () => {
+  const read = (rel: string) => fs.readFileSync(path.join(repoRoot, rel), 'utf-8');
+
+  it.each(['codev', 'codev-skeleton'])('%s: review verify is type "pr" with three reviewers', (tree) => {
+    const proto = JSON.parse(read(`${tree}/protocols/pir/protocol.json`));
+    const review = proto.phases.find((p: { id: string }) => p.id === 'review');
+    expect(review.verify.type).toBe('pr');
+    expect(review.verify.models).toEqual(['gemini', 'codex', 'claude']);
+    // consult resolves `--protocol pir --type pr` to this file.
+    expect(fs.existsSync(path.join(repoRoot, tree, 'protocols/pir/consult-types/pr-review.md'))).toBe(true);
+  });
+
+  it('the PIR trees are byte-identical', () => {
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(path.join(dir, e.name)).map((f) => path.join(e.name, f)) : [e.name],
+      );
+    const files = walk(path.join(repoRoot, 'codev-skeleton/protocols/pir')).sort();
+    expect(walk(path.join(repoRoot, 'codev/protocols/pir')).sort()).toEqual(files);
+    for (const f of files) {
+      expect(read(`codev/protocols/pir/${f}`), f).toBe(read(`codev-skeleton/protocols/pir/${f}`));
+    }
   });
 });
