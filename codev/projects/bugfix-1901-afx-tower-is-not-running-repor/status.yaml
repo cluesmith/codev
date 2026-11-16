@@ -1,0 +1,14 @@
+id: bugfix-1901
+title: afx-tower-is-not-running-repor
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-16T21:51:51.349Z'
+updated_at: '2026-11-16T21:51:51.351Z'
