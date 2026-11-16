@@ -49,12 +49,12 @@ describe('bugfix-744: SPIR/ASPIR builder-prompt PR strategy', () => {
       expect(content).toMatch(/architect MAY request a PR/i);
     });
 
-    it(`${relPath} — states the default PR-timing (during/after final implement phase)`, () => {
+    it(`${relPath} — states the default PR-timing (Review phase, after every implement phase)`, () => {
       const content = fs.readFileSync(fullPath, 'utf-8');
-      // The new default replaces the old rigid "ONE PR per spec, opened at the end of
-      // the implement phase" wording. Builders need to know *when* the default PR opens
-      // so they don't fall back to per-phase PRs in the absence of architect direction.
-      expect(content).toMatch(/By default, the PR is opened during\/after the final implement phase/);
+      // Builders need to know *when* the default PR opens so they don't fall back to
+      // per-phase PRs in the absence of architect direction. #1902 aligned this with
+      // review.md and porch: the Review phase's `pr_exists` check requires the PR.
+      expect(content).toMatch(/By default, you open the PR in the Review phase, once every implement phase is committed/);
     });
   }
 });

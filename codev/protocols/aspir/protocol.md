@@ -19,13 +19,30 @@ auto-approved, they are ungated:
 
 ## Everything else is SPIR
 
-Artifacts (`codev/specs/`, `codev/plans/`, `codev/reviews/`, same base filename), the
-build-verify cycle per plan phase, mandatory 3-way consultation at each verify step, the
-machine-readable `phases` block in the plan, commit and branch conventions, and Baked Decisions
-handling are all identical to SPIR. ASPIR includes SPIR's templates rather than copying them, so
-there is one set to keep correct.
+ASPIR includes SPIR's templates rather than copying them, so there is one set to keep correct.
+The rules it shares with SPIR:
 
-See `protocols/spir/protocol.md` for that shared substance.
+- **Artifacts** — three documents, same base filename: `codev/specs/<id>-<name>.md` (what and
+  why), `codev/plans/<id>-<name>.md` (how, in what order), `codev/reviews/<id>-<name>.md` (what
+  was learned). Sequential numbering, no leading zeros. Specs and plans stay separate.
+- **The plan's `phases` JSON block** is a contract porch parses, not an illustration.
+- **Build-verify per phase** — build, commit, run `porch done`, then run the `consult` commands
+  `porch next` hands you (three reviewers by default; `.codev/config.json` `porch.consultation`
+  can narrow them). Porch never commits your work — you do. Tests belong to the phase that
+  creates the behaviour; mock external dependencies only.
+- **No time estimates** in the plan.
+- **Review** — compare the implementation against the spec, record lessons, and route new facts
+  by tier: behaviour-changing and cross-cutting to `arch-critical.md` / `lessons-critical.md`
+  (capped — displace a weaker entry), reference detail to `arch.md` / `lessons-learned.md`.
+- **Git** — `[Spec 42] Initial specification draft`,
+  `[Spec 42][Phase: user-auth] feat: Add password hashing service`. One branch,
+  `builder/aspir-42` (created by `afx spawn`); every plan phase is a commit in one PR.
+
+## Gates
+
+`pr` and `verify-approval` are **human** decisions. Stop and wait; a gate message is a
+notification to a human, not authorization. When the architect relays the human's decision, you
+run `porch approve <id> <gate> --a-human-explicitly-approved-this` yourself.
 
 ## Baked Decisions
 

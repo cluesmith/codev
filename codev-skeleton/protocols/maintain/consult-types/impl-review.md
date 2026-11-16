@@ -1,24 +1,31 @@
-# Implementation Review Prompt
+# Implementation Review Prompt (MAINTAIN)
 
 ## Context
 
-You are reviewing implementation work during the Implement phase. A builder has completed a plan phase and needs feedback before proceeding. Verify the implementation matches the spec and plan.
+You are reviewing the **maintain** phase of a MAINTAIN run: a scheduled, whole-repository hygiene pass that audits, removes dead code and unused dependencies, and syncs the governance docs, scoped to the commits since the last run. Verify the cleanup is correct and safe.
+
+**MAINTAIN is not SPIR.** There is **no spec, no plan, and no review document**. The run's record is its maintenance run file in `codev/maintain/` (audit findings, what was removed and why, deferred items). Do **not** request changes for missing `codev/specs/`, `codev/plans/`, or `codev/reviews/` artifacts.
 
 ## Verify before flagging
 
-Before requesting changes for missing configuration, wrong patterns, or framework issues, confirm the claim against the project rather than your training data:
+Before requesting changes, confirm the claim against the project rather than your training data:
 
-- Check `package.json` for the actual dependency versions — framework conventions change between major versions.
-- Read the actual config files (or confirm their deliberate absence) before flagging a missing config.
+- Check `package.json` for the actual dependency versions before calling a dependency unused or misused.
 - If "Previous Iteration Context" is provided, read it before re-raising concerns already disputed.
 
 ## Focus Areas
 
-- **Spec Adherence** — the implementation fulfills the spec requirements for this phase; acceptance criteria are met.
-- **Code Quality** — readable and maintainable; no obvious bugs; error cases handled.
-- **Test Coverage** — tests are adequate for this phase and cover main paths and edge cases.
-- **Plan Alignment** — the implementation follows the plan; no plan items silently skipped.
-- **UX Verification** (if the spec has UX requirements) — the actual behavior matches what the spec describes (e.g. "async"/"non-blocking" really is).
+- **Removals are really dead** — every removed export, file, or dependency has no remaining caller. Grep for it yourself; a detector cannot tell "vestigial" from "used by a path nobody searched".
+- **Each removal is justified** — the maintenance run file records why, and removals are one per commit.
+- **Docs match the code** — `arch.md` / `arch-critical.md` and `lessons-learned.md` / `lessons-critical.md` describe what exists now; hot-tier files stay within their caps; `CLAUDE.md` and `AGENTS.md` are byte-identical.
+- **Build and tests pass** after the cleanup.
+- **Scope** — dead-code removal, dependency cleanup, doc sync, and small bugs found on the way (named in the run file). Refactoring live code is out of scope.
+
+## Out of Scope (Do NOT request changes for)
+
+- Missing spec, plan, or review documents — MAINTAIN produces none.
+- "Plan Alignment" or "Spec Adherence" — there is no plan or spec to align with.
+- `status.yaml` fields — porch manages them; the builder must not edit that file.
 
 ## Verdict Format
 
@@ -36,10 +43,6 @@ KEY_ISSUES:
 ...
 ```
 
-- `APPROVE`: phase is complete, builder can proceed.
-- `REQUEST_CHANGES`: issues that must be fixed before proceeding.
+- `APPROVE`: the cleanup is correct and safe; the builder can move to the review phase.
+- `REQUEST_CHANGES`: a removal breaks something, a doc is wrong, or build/tests fail.
 - `COMMENT`: minor suggestions; can proceed but note the feedback.
-
-## Scoping (Multi-Phase Plans)
-
-Review **only the current plan phase** — the query names which one. Do not request changes for functionality scheduled in later phases, and do not flag missing features that are out of scope for this phase. If unsure whether something belongs to this phase, check the plan file. This is a phase-level review ("does this phase work"), not the final PR review.

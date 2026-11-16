@@ -17,7 +17,7 @@ Implement the current plan phase — code and tests — so it matches the spec a
 
 Your scope is exactly `{{plan_phase_id}}` ({{plan_phase_title}}), whose details are included below under "Current Plan Phase Details". Other phases are handled in later porch iterations — do not implement them, and do not read the full plan and build everything you see. Read `codev/specs/{{project_id}}-*.md` for requirements, but implement only what this phase requires.
 
-When you signal `PHASE_COMPLETE`, porch runs the 3-way consultation, checks that tests exist and pass, and either respawns you with feedback or commits and moves to the next phase.
+When the phase is done, **commit it yourself** — porch commits only `status.yaml`, never your code — and run `porch done {{project_id}}`. Porch runs the phase checks, then `porch next` hands you the consultation commands to run in the background. REQUEST_CHANGES brings the feedback back to you for another iteration; approval moves porch to the next plan phase.
 
 ## What must be true when you finish
 
@@ -26,21 +26,13 @@ When you signal `PHASE_COMPLETE`, porch runs the 3-way consultation, checks that
 - **Build and tests pass.** Confirm the actual project commands (check `package.json` rather than assuming `npm run build` / `npm test` exist) and run them; fix failures before signaling.
 - **The change is clean.** Self-documenting names, explicit error handling, no commented-out or debug code, only the files this phase touches — the simplest solution that satisfies the phase, not more.
 
-## Signals
+## When you finish
 
-- Implementation and tests complete and passing:
-  ```
-  <signal>PHASE_COMPLETE</signal>
-  ```
-- Blocked — the plan is wrong, the spec is wrong, a dependency is missing, or build/tests fail in a way you cannot resolve:
-  ```
-  <signal>BLOCKED:reason goes here</signal>
-  ```
-- Need spec/plan clarification:
-  ```
-  <signal type=AWAITING_INPUT>
-  Your specific questions here
-  </signal>
-  ```
+- **Implementation and tests complete and passing:** stage this phase's files by path and commit
+  (`[Spec {{project_id}}][Phase: {{plan_phase_id}}] feat: <what it delivers>`), then run
+  `porch done {{project_id}}`.
+- **Blocked** — the plan is wrong, the spec is wrong, a dependency is missing, or build/tests fail
+  in a way you cannot resolve — or **you need spec/plan clarification**: do not run `porch done`.
+  `afx send architect` the specifics and your questions, then stop and wait.
 
-A blocker is a signal, not a silent workaround: never edit `status.yaml` or bypass a porch check to force a green.
+A blocker is a message to the architect, not a silent workaround: never edit `status.yaml` or bypass a porch check to force a green.

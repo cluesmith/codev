@@ -160,16 +160,6 @@
       "next": null
     }
   ],
-  "signals": {
-    "PHASE_COMPLETE": {
-      "description": "Signal current build phase is complete",
-      "transitions_to": "verify"
-    },
-    "BLOCKED": {
-      "description": "Signal implementation is blocked",
-      "requires": "reason"
-    }
-  },
   "phase_completion": {
     "build_succeeds": "npm run build 2>&1",
     "tests_pass": "npm test 2>&1",

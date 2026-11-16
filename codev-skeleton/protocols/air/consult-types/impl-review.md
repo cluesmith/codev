@@ -22,7 +22,7 @@ If the baked decisions themselves contradict each other, do not pick one — `RE
 - **Issue Adherence** — the implementation fulfills the issue's requirements and acceptance criteria.
 - **Code Quality** — readable and maintainable; no obvious bugs; error cases handled.
 - **Test Coverage** — tests are adequate and cover main paths and edge cases.
-- **Scope** — the change stays focused on the issue and under ~300 LOC; if larger, it should escalate to ASPIR.
+- **Scope** — the change stays focused on the issue (a small adjacent fix named in the PR body is fine — AIR fixes in place); ~300 LOC is a guideline, and a change that turned architectural should escalate to SPIR or ASPIR.
 
 ## Verdict Format
 

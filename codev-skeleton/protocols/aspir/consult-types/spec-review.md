@@ -2,7 +2,7 @@
 
 ## Context
 
-You are reviewing a feature specification during the Specify phase, before it goes to human approval. Judge whether the spec is complete, correct, feasible, and clear enough for a builder to plan from.
+You are reviewing a feature specification during the Specify phase. ASPIR has no human spec gate — once this review approves, the builder plans and implements without stopping, so this is the spec's last check before the PR. Judge whether the spec is complete, correct, feasible, and clear enough for a builder to plan from.
 
 ## Baked Decisions
 

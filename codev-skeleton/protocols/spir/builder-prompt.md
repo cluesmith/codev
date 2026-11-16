@@ -64,8 +64,8 @@ Follow the implementation plan at: `{{plan.path}}`
 within a single PR, not as separate PRs. The plan's instruction that "each phase commits
 independently" refers to git commits, not PRs.
 
-By default, the PR is opened during/after the final implement phase, with all phase-commits
-already on the branch.
+By default, you open the PR in the Review phase, once every implement phase is committed — the
+Review phase's `pr_exists` check requires it before `porch done` passes.
 
 The architect MAY request a PR at any point — for spec review, mid-implementation feedback, or
 slicing a large spec into shippable pieces. Follow that direction when they do; the prohibition

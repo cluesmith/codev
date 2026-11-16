@@ -30,20 +30,11 @@ Write the spec to `codev/specs/{{artifact_name}}.md` using the template below as
 
 Keep the three artifact filenames in sync: spec `codev/specs/{{artifact_name}}.md`, plan `codev/plans/{{artifact_name}}.md`, review `codev/reviews/{{artifact_name}}.md`.
 
-## Signals
+## When you finish
 
-- Waiting on clarifying-question answers — **put the questions inside the signal**, which is displayed prominently to the user:
-  ```
-  <signal type=AWAITING_INPUT>
-  Please answer:
-  1. ...
-  2. ...
-  </signal>
-  ```
-- Initial draft done:
-  ```
-  <signal>SPEC_DRAFTED</signal>
-  ```
+- **Clarifying questions first:** if the answers would change the spec, send them and wait
+  rather than guessing — `afx send architect "Spec {{project_id}} questions: 1. … 2. …"`.
+- **Draft done:** commit the spec (below), then run `porch done {{project_id}}`.
 
 ## Commit cadence
 
@@ -53,7 +44,7 @@ git add codev/specs/{{artifact_name}}.md
 ```
 1. `[Spec {{project_id}}] Initial specification draft`
 2. `[Spec {{project_id}}] Specification with multi-agent review`
-3. `[Spec {{project_id}}] Specification with user feedback`
-4. `[Spec {{project_id}}] Final approved specification`
 
-Porch runs the 3-way consultation itself after you signal — do not run `consult`. This is the Specify phase: no implementation detail (that is the plan), no code, no time estimates.
+ASPIR has no human spec gate: once the consultation approves, porch moves straight to Plan.
+
+After `porch done`, `porch next` hands you the consultation commands for this phase — three reviewers by default, or your project's `.codev/config.json` `porch.consultation` lanes. Run exactly those, each as a background task, then `porch next` again. Do not run any other `consult`. This is the Specify phase: no implementation detail (that is the plan), no code, no time estimates.

@@ -1,20 +1,24 @@
-# PR Ready Review Prompt
+# PR Review Prompt (MAINTAIN)
 
 ## Context
 
-You are performing the final self-check during the Review phase — the builder has completed all implementation phases and is about to open the PR. This is the last check before the work goes to the architect for integration review.
+You are reviewing the pull request of a MAINTAIN run — a scheduled, whole-repository hygiene pass (audit, dead-code and dependency cleanup, governance-doc sync) scoped to the commits since the last run. The builder has opened the PR; after this review, the run stops at the human `maintain-complete` gate.
+
+**MAINTAIN is not SPIR.** There is **no spec, no plan, and no review document**. The run's record is its maintenance run file in `codev/maintain/`. Do **not** request changes for missing `codev/specs/`, `codev/plans/`, or `codev/reviews/` artifacts.
 
 ## Focus Areas
 
-- **Completeness** — all spec requirements implemented, all plan phases complete, the review document written (`codev/reviews/XXXX-name.md`), and commits in the `[Spec XXXX][Phase]` format.
-- **Test Status** — all tests pass, coverage is adequate for the changes, and any skipped/flaky tests are accounted for.
-- **Code Cleanliness** — no debug code, no stray `TODO` / `// REVIEW:` left unaddressed, code properly formatted.
-- **Documentation** — inline comments clear where needed, the review document comprehensive, new APIs documented.
-- **PR Readiness** — the branch is up to date with its base (the integration branch the PR targets), commits are atomic and well-described, and the diff size is reasonable.
+- **Removals are really dead** — spot-check removed code for remaining callers.
+- **The run file is complete** — base commit, audit findings, each removal with its reason, documentation changes, deferred items, and the PR number.
+- **Docs match the code** — governance docs describe what exists now, hot-tier caps hold, and `CLAUDE.md` / `AGENTS.md` are byte-identical.
+- **Test status** — build and tests pass.
+- **PR hygiene** — `Closes #<N>` only when a GitHub issue requested this run; commits are one removal each with `[Maintain] ...` messages.
 
-## Scope
+## Out of Scope (Do NOT request changes for)
 
-Do not flag the syntax of `git diff` examples that appear in review-file prose (e.g. `git diff ci..HEAD` inside a "Files Changed" caption or "How to Test Locally" section) — quoted diff syntax is documentation, not a command. Apply two-dot/three-dot scrutiny only to diffs you compute yourself.
+- Missing spec, plan, or review documents — MAINTAIN produces none.
+- `status.yaml` fields — porch manages them.
+- The syntax of `git diff` examples quoted in prose — quoted diff syntax is documentation, not a command.
 
 ## Verdict Format
 
@@ -30,21 +34,8 @@ KEY_ISSUES:
 - [Issue 1 or "None"]
 - [Issue 2]
 ...
-
-PR_SUMMARY: |
-  ## Summary
-  [2-3 sentences describing what this PR does]
-
-  ## Key Changes
-  - [Change 1]
-  - [Change 2]
-
-  ## Test Plan
-  - [How to test]
 ```
 
-- `APPROVE`: ready to create the PR.
-- `REQUEST_CHANGES`: issues to fix before PR creation.
-- `COMMENT`: minor items; can create the PR but note the feedback.
-
-The `PR_SUMMARY` block can be used directly as the PR description.
+- `APPROVE`: ready for the human `maintain-complete` gate.
+- `REQUEST_CHANGES`: issues to fix before the gate.
+- `COMMENT`: minor items; can proceed but note the feedback.

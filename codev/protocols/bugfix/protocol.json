@@ -27,8 +27,7 @@
         "assess_complexity"
       ],
       "transition": {
-        "on_complete": "fix",
-        "on_too_complex": "escalate"
+        "on_complete": "fix"
       }
     },
     {
@@ -74,11 +73,8 @@
         "request_review"
       ],
       "consultation": {
-        "on": "review",
-        "models": ["gemini", "codex"],
-        "type": "impl",
-        "parallel": true,
-        "max_rounds": 1
+        "models": ["gemini", "codex", "claude"],
+        "type": "pr"
       },
       "gate": "pr",
       "transition": {
@@ -86,27 +82,8 @@
       }
     }
   ],
-  "signals": {
-    "PHASE_COMPLETE": {
-      "description": "Signal current phase is complete",
-      "transitions_to": "next_phase"
-    },
-    "TOO_COMPLEX": {
-      "description": "Bug is too complex for BUGFIX, escalate to SPIR",
-      "transitions_to": "escalate"
-    },
-    "BLOCKED": {
-      "description": "Signal fix is blocked",
-      "requires": "reason"
-    }
-  },
   "defaults": {
     "mode": "strict",
-    "consultation": {
-      "enabled": true,
-      "models": ["gemini", "codex"],
-      "parallel": true
-    },
     "checks": {
       "build": "npm run build",
       "test": "npm test"
