@@ -59,6 +59,7 @@ They are not watching. Send a message at each of these:
 | PR merged — protocols with no `verify` phase (BUGFIX, AIR, PIR, MAINTAIN) | `afx send architect "Project <id> complete. PR merged. Ready for cleanup."` |
 | PR merged — SPIR, ASPIR | `afx send architect "Project <id>: PR merged. Entering verify."` |
 | Verified — SPIR, ASPIR, after `verify-approval` | `afx send architect "Project <id> verified. Ready for cleanup."` |
+| A pre-existing test is flaky | `afx send architect "Flaky test: <name> (<file>) — left running, named in the PR"` |
 | Blocked | `afx send architect "Blocked on X — need guidance"` |
 
 SPIR and ASPIR merge inside their `verify` phase: after merging, run `porch done <id>`; porch then
@@ -125,7 +126,8 @@ two contradict each other, don't pick — flag the contradiction and wait.
 
 ## Flaky tests
 
-If a pre-existing test fails intermittently and unrelated to your change: skip it with an
-annotation naming it flaky, document it under `## Flaky Tests` in your review (the PR body for
-protocols with no review file, such as BUGFIX and AIR), and continue.
+If a pre-existing test fails intermittently and unrelated to your change, do not skip it. Leave it
+running, name it under `## Flaky Tests` in your review (the PR body for protocols with no review
+file, such as BUGFIX and AIR) with its file and the failure you saw, and tell the architect. If it
+fails a porch check, run the check again; if it keeps failing, you are blocked — say so.
 Never edit `status.yaml` or bypass a porch check to route around it.

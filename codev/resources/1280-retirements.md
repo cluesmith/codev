@@ -443,3 +443,32 @@ rulings of 2026-11-15, recorded in issue #1902.
 2. **Guard kept, not retired.** Only the baselines move; future silent deletion is still caught.
 3. **Audit trail.** This entry, `bugfix-1902-prompt-sweep.test.ts` (which asserts the removed
    constructs stay gone), and the bugfix-1902 thread.
+
+## R8 — re-baseline four guarded prompts for the owner's "report, don't skip" flaky-test ruling
+
+**Status: DIRECTED by the owner (decision main-13, 2026-11-16, "report"), relayed by the architect
+(main) to the bugfix-1902 builder as an instruction to change the wording everywhere it appears,
+both trees. Applied in PR #1905.** Builders no longer skip a flaky pre-existing test: they leave it
+running, name it under Flaky Tests, and tell the architect.
+
+| | |
+|---|---|
+| **Assertion** | `spec-1280-prompt-deletion-guard.test.ts` → *"no baseline line has been deleted"* (kept, not retired) |
+| **Files (4)** | `codev/protocols/air/consult-types/pr-review.md`, `codev/protocols/pir/prompts/{implement,review}.md`, `codev/protocols/pir/consult-types/pr-review.md` |
+| **Originating issue** | #1902 (fold-in requested at the `pr` gate) |
+| **Baselines** | the four `fixtures/spec-1280-baselines/*.md.baseline` files, re-captured |
+
+### What was removed
+
+One line per file, each replaced in place by its "left running, not skipped" counterpart:
+the air and pir pr-review "skipped/flaky tests are accounted for / documented" checklist item;
+pir implement.md's "skip it with annotation"; pir review.md's "tests you skipped due to
+pre-existing flakiness".
+
+### Class-invariant compliance
+
+1. **Behaviour grep green.** Every anti-vacuity string (Baked Decisions, `do not autonomously`,
+   the pr-gate approve line, the forge concept tokens) is still present in the new baselines.
+2. **Guard kept, not retired.** Only the baselines move.
+3. **Audit trail.** This entry and `bugfix-1902-prompt-sweep.test.ts`, which asserts no
+   agent-facing file (PIR included) tells a builder to skip a flaky test.

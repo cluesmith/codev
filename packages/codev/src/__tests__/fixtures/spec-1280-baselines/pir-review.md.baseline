@@ -80,7 +80,7 @@ For reviewers pulling the branch:
 
 ## Flaky Tests (if any)
 
-List any tests you skipped due to pre-existing flakiness, with file:line refs and a one-line rationale each. Omit this section if none.
+List any pre-existing tests that failed intermittently (left running, not skipped), with file:line refs and the failure you saw. Omit this section if none.
 ```
 
 ### 2. Update Architecture / Lessons Docs (if applicable)

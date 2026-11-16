@@ -83,7 +83,7 @@ not silently expand scope.**
 |---|---|
 | Cannot reproduce | Document the attempts on the issue, ask the reporter for detail, notify the architect |
 | Fix outgrows scope | Notify the architect and recommend escalation; do not proceed |
-| A pre-existing test fails intermittently, unrelated to your change | Skip it with an annotation naming it flaky, list it under `## Flaky Tests` in the PR body, continue |
+| A pre-existing test fails intermittently, unrelated to your change | Do not skip it: leave it running, name it under `## Flaky Tests` in the PR body, tell the architect, continue |
 | A pre-existing test fails consistently, unrelated to your change | Small, clear fix: fix it here. Otherwise tell the architect |
 | Multiple bugs in one issue | Fix them all here unless one needs something unavailable now, another subsystem, or a large refactor |
 

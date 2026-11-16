@@ -155,6 +155,22 @@ describe('#1902 B — the builder runs porch approve, with the human-approval fl
     expect(hits, hits.join('\n')).toEqual([]);
   });
 
+  it('no text tells a builder to skip a flaky test (owner ruling: report it, leave it running)', () => {
+    // PIR included: the ruling covers every protocol, unlike the rest of this sweep.
+    const pir = ['codev-skeleton', 'codev'].flatMap((t) => walk(`${t}/protocols/pir`));
+    const pattern = /skip it with (an )?annotation|skipped as flaky|tests you skipped due to|skipped\/flaky/i;
+    const hits: Hit[] = [];
+    for (const file of [...new Set([...FILES, ...pir])]) {
+      read(file).split('\n').forEach((text, i) => {
+        if (pattern.test(text)) hits.push({ file, line: i + 1, text: text.trim() });
+      });
+    }
+    expect(hits, `A flaky pre-existing test is reported and left running, not skipped.\n${fmt(hits)}`).toEqual([]);
+    for (const tree of ['codev-skeleton', 'codev']) {
+      expect(read(`${tree}/roles/builder.md`)).toMatch(/do not skip it\. Leave it\s+running/);
+    }
+  });
+
   it('no text tells builders never to run porch approve', () => {
     expectNone(/Builders? (must )?NEVER (call|run) `?porch approve/i, 'The builder runs porch approve (#1902 B).');
   });
