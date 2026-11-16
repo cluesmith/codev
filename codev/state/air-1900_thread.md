@@ -95,3 +95,13 @@ Claude reported all 8 CI checks green on e02debe8. Its non-blocking polish, fixe
 Not done: a unit test of the CLI arg branch (covered by the manual CLI run), and rejecting
 newlines in --reason (the doc covers it; claude traced that folding is harmless).
 Touched tests 65/65, typecheck clean, hashes regenerated.
+
+## PR gate requested (porch gate, not porch done)
+The architect directed `porch gate 1900`: no local e2e run, at the owner's request. Two
+side effects worth knowing:
+- `porch gate` doesn't set `pr_ready_for_human`; `porch done` does. So the dashboard's
+  "PR waiting on a human" signal may not show this PR.
+- Porch never reads a check's `optional` flag, and `approve()` runs every check in the
+  current phase. So `porch approve 1900 pr` will run `npm run test:e2e || echo skipped`
+  locally: it can't fail, but it does load the machine. Flagged to the architect.
+Waiting on the human pr-gate decision.
