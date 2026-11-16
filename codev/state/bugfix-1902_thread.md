@@ -113,3 +113,22 @@ skills; regression sweep).
   described.
 - `bugfix-1902-prompt-sweep.test.ts`: 29 checks, 28 of which fail against a HEAD snapshot of
   the pre-fix tree.
+
+## PR (2026-11-16)
+
+PR #1905 opened; `porch done` checks passed on the second run (the first hit an intermittent test
+failure under machine load; porch truncates check output, so the failing test is unknown — the two
+candidates are listed in the PR's Flaky Tests section, neither skipped).
+
+- **C2 end to end**: this branch's `porch next` for this PR phase rendered `consult -m codex …` and
+  `consult -m claude …` — exactly this repo's `porch.consultation` lanes.
+- **CMAP**: codex=COMMENT (the BUGFIX rule didn't say what labels non-fix commits use; fixed),
+  claude=APPROVE (optional inverse guard — no unrendered `{{consult_*}}` token — added; the first
+  version was vacuous because it ignored porch's `<phase>.md` fallback, caught and fixed).
+- **Consult lane trouble, not this change**: the installed consult can't auto-detect the project in
+  a builder worktree (fixed on main by bugfix-1898, unreleased); this branch's bundled Agent SDK
+  claude lane gets API 400 `thinking.type.enabled` on claude-opus-5. Ran claude via the installed
+  consult with `--project-id`. Flagged to the architect as a possible release blocker.
+- **Fixed in place after the ready message**: porch's own `To approve:` hints lacked the
+  human-approval flag. Architect told.
+- Gate `pr` requested; waiting for the human.
