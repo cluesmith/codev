@@ -149,3 +149,27 @@ Architect: codex REQUEST_CHANGES, claude COMMENT; five fold-ins, all done (49f4c
 
 Full suite green (349 files / 7343 tests). Waiting on PR #1904 to merge, then merge main in
 (expected conflict in porch/prompts.ts).
+
+## Main merge + owner-ruling fold-ins (2026-11-16)
+
+Human ruled approve on PR #1905 (decision main-12); architect holds porch approve/merge until CI
+on the final head.
+
+- **Merged main (PR #1904, 618612db).** One conflict, porch/prompts.ts: both sides added a
+  `substituteVariables` param (main `issue` for `{{issue.number}}`, ours `consultation`). Kept
+  both; main's dotted-name regex feeds our unrendered-consult-token check.
+- **Flaky tests (main-13, "report").** Builders leave a flaky pre-existing test running, name it
+  under Flaky Tests, tell the architect. Changed everywhere the skip rule appeared, PIR included
+  now that #1904 has landed. Four guarded baselines re-captured under register R8.
+- **RELEASE (main-17, "exception").** architect.md names the release commit+tag as the one
+  exception to "don't commit to the default branch"; RELEASE's notes filename and codename table
+  fixed from docs/releases/ (2.1 left blank: no codename recorded).
+- **Flaky, reported not skipped:** `bugfix-1267-launch-loop.test.ts` (two "keeps resuming across
+  a CRASH" / "switch to fresh is sticky" tests) hit 5s timeouts once in a loaded full run; passed
+  standalone and on the full rerun.
+- **Post-merge full run (the one allowed; owner asked to limit full runs):** build ok; 6 failures.
+  4 were real: main's new #1903 test renders shipped BUGFIX/AIR pr.md against a hand-built phase
+  with no consultation block, which our fail-fast rejects. The fixture now takes each phase's
+  shipped block (a052bda38); file passes. 2 were `session-manager.test.ts` auto-restart timing
+  ("respects maxRestarts limit", "applies crashLoopFallback…"); 97/97 standalone. Reported, not
+  skipped. A second confirming full run was stopped per the owner's instruction; CI covers the head.
