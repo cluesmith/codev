@@ -252,12 +252,14 @@ export function skipPlanPhase(
     throw new Error(`Plan phase ${phaseId} is already skipped (reason: ${target.skip_reason ?? 'none recorded'}).`);
   }
 
-  const updated = phases.map(p =>
-    p.id === phaseId ? { ...p, status: 'skipped' as const, skip_reason: reason, skipped_at: now } : p,
+  const targetIndex = phases.indexOf(target);
+  const updated = phases.map((p, i) =>
+    i === targetIndex ? { ...p, status: 'skipped' as const, skip_reason: reason, skipped_at: now } : p,
   );
 
+  // Hand in_progress forward, as advancePlanPhase does — never back to an earlier phase.
   if (target.status === 'in_progress') {
-    const nextIndex = updated.findIndex(p => !isPlanPhaseSettled(p));
+    const nextIndex = updated.findIndex((p, i) => i > targetIndex && !isPlanPhaseSettled(p));
     if (nextIndex >= 0) {
       updated[nextIndex] = { ...updated[nextIndex], status: 'in_progress' as const };
     }

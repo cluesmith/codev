@@ -63,3 +63,21 @@ asked the architect instead of re-running or skip-annotating whole healthy files
 Architect ruled option (a): re-run porch done once. Never skip-annotate: the owner ruled
 that flaky pre-existing tests are reported and left running. If it fails again on timeouts
 only, stop and report; name the flaky files in the PR body.
+
+## PR #1908 — CMAP round 1 (codex, claude): both REQUEST_CHANGES, same cause
+Branch was 27 commits behind main, with conflicts in `porch/index.ts` and all four
+porch SKILL.md copies. Consult project auto-detect failed first ("Multiple projects found");
+re-ran with `--issue 1900`.
+- Merged origin/main (merge commit, no rebase). Main (#1902) moved the CLI help into
+  `printHelp()`, so my two help lines were re-added there; checked via
+  `porch skip-phase --help`. Main rewrote SKILL.md, so I took main's version and re-applied my
+  section and rule to its new structure (all four copies identical). Regenerated skill hashes.
+- Non-blocking, fixed in place: `skipPlanPhase` now hands in_progress forward only (symmetric
+  with `advancePlanPhase`); added an overview progress test for skipped-as-settled; the skill
+  doc asks for a one-line reason (yaml folds long lines).
+- Rebutted: firing an `enter:review` refresh on skip. Refresh is porch-chosen at `porch next`
+  transitions, and builders must not self-invoke /builder-refresh. A human runs skip-phase.
+- Not done (scope): surfacing `on_all_phases_complete` through `normalizePhase` so neither
+  site hardcodes `'review'`. It would touch the working handleVerifyApproved refresh path.
+Locally: typecheck clean; touched files 281/281. CI on GitHub runs the full suite (no local
+full run after the merge, given the owner's load concern).
