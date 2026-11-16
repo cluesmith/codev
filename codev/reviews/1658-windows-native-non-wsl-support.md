@@ -1425,6 +1425,32 @@ preflight. Opt-in only: the default runs the SDK's bundled CLI, unaffected. A fi
 probe through the command launch capability and point the SDK at the shim's `node <entry>`.
 Follow-up candidate for main.
 
+**M14. Agents search the whole disk for framework files, and on Windows the search outlives its
+caller (owner's machine, 2026-11-16). Pre-existing, not Windows code; recorded, not fixed
+(Amendment 2 rule F).** The owner saw four CPU-heavy `find.exe` processes, all Git Bash's, all
+parentless: `find / -path *protocols/experiment/protocol.md`, `find / -path
+*codev*skeleton*protocols/experiment* -name *.md`, `find / -path *spir/templates/spec.md` and
+`find / -path *protocols/spir/templates/spec.md`. Two causes:
+
+- *Prompts name framework paths that are not on disk.* In an adopter project a protocol's files
+  resolve from the installed package (tier 4), so a workspace path such as
+  `codev/protocols/experiment/protocol.md` does not exist. Prose that names one invites an agent
+  to read it, and on a miss agents fall back to `find /`. Sites: the spec-review consult types
+  ("the spec follows the delivered template (`protocols/spir/templates/spec.md`)",
+  `codev-skeleton/protocols/{spir,aspir}/consult-types/spec-review.md`), the matching
+  `protocol.json` check descriptions, and the CLAUDE.md/AGENTS.md templates' protocol list
+  (`codev/protocols/experiment/protocol.md` and siblings). Cross-platform; on macOS `find /`
+  stays on one volume and is cheaper.
+- *A timed-out agent command leaves its children running on Windows.* Git Bash's `/` spans every
+  drive (`/c`, `/d`), so the walk is long; when the agent's tool call times out the harness ends
+  `bash.exe`, but on Windows that does not end `bash`'s children, so each `find.exe` runs on
+  parentless. POSIX harnesses kill the process group. Codev's session Job Object ends them with
+  the session, not before. Harness behaviour, not Codev code.
+
+Follow-up candidate for main: word those prompt lines as "delivered to you" (or render the content
+through the resolver), never as a workspace path to open, per the repo rule "deliver framework
+content; don't instruct an agent to fetch it by path".
+
 ## Appendix: Implementation Notes by Phase
 
 Rulings, measurements and findings recorded as each phase closed.
