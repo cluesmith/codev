@@ -1,0 +1,14 @@
+id: bugfix-1902
+title: prompt-sweep-fix-broken-comman
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-16T05:15:26.513Z'
+updated_at: '2026-11-16T05:15:26.515Z'
