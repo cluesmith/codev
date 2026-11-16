@@ -1405,6 +1405,15 @@ Recorded; umbrella follow-up (architect ruling).** Only `afx tower` and `afx cro
 `spawn`, `send`, `cleanup`, `status` and `workspace` always use 4100, so an isolated Tower can be
 driven over its API only.
 
+**M13. `consult.codexPath` cannot launch an npm-installed codex on Windows (found merging `main`,
+2026-11-16). Arrived with `main`'s #1880; recorded, not fixed (Amendment 2 rule F).** The new
+option runs `execFileSync(codexPath, ['--version'])` and hands the path to the Codex SDK as
+`codexPathOverride`. On Windows an npm-installed `codex` is a `.cmd` shim, which neither
+`execFileSync` nor the SDK's spawn can run without a shell, so pointing the option at it fails the
+preflight. Opt-in only: the default runs the SDK's bundled CLI, unaffected. A fix would route the
+probe through the command launch capability and point the SDK at the shim's `node <entry>`.
+Follow-up candidate for main.
+
 ## Appendix: Implementation Notes by Phase
 
 Rulings, measurements and findings recorded as each phase closed.
