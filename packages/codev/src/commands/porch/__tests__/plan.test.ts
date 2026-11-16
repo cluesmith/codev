@@ -340,6 +340,16 @@ Content here.
       expect(next).toBeNull();
     });
 
+    it('should step over a skipped phase (#1900)', () => {
+      const withSkip: PlanPhase[] = [
+        inProgressPhase('phase_1', 'One'),
+        { id: 'phase_2', title: 'Two', status: 'skipped', skip_reason: 'dropped' },
+        pendingPhase('phase_3', 'Three'),
+      ];
+      expect(getNextPlanPhase(withSkip, 'phase_1')?.id).toBe('phase_3');
+      expect(getNextPlanPhase(withSkip.slice(0, 2), 'phase_1')).toBeNull();
+    });
+
     it('should return null for non-existent phase', () => {
       const next = getNextPlanPhase(phases, 'phase_99');
       expect(next).toBeNull();

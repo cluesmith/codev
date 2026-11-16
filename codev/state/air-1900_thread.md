@@ -105,3 +105,32 @@ side effects worth knowing:
   current phase. So `porch approve 1900 pr` will run `npm run test:e2e || echo skipped`
   locally: it can't fail, but it does load the machine. Flagged to the architect.
 Waiting on the human pr-gate decision.
+
+## Architect integration review (codex REQUEST_CHANGES, claude APPROVE): fold-ins
+1. `porch status` after skipping the last phase: the plan list is no longer hidden once the
+   project leaves implement if any phase was skipped. `⊘ phase_3: UI (skipped: <reason>)`
+   shows in review. Checked with the real CLI.
+2. Context-refresh boundaries: **chose the printed line, not recording.** A refresh TASK can
+   only come from `porch next` at the transition. Recording the boundary in skip-phase would
+   mark it consumed with no task emitted, and the next normal-path `porch next` would
+   acknowledge it, silently swallowing the refresh. Emitting it properly needs new
+   pending-refresh state plus a hook in `next()`, a change to Spec 1470's transition-keyed,
+   at-most-once design, which is not small. So skip-phase computes the boundary it crossed
+   (`enter:review`, or `plan-phase:<next>` when the current phase was skipped). When
+   `shouldRefresh` says it's due, it prints: run /builder-refresh, then porch next.
+3. `getNextPlanPhase` is now skip-aware via a shared `nextUnsettledIndex`, used by
+   getNextPlanPhase, advancePlanPhase and skipPlanPhase (one rule, three call sites). The
+   status banner uses getNextPlanPhase.
+4. Card label vs progress: both now treat a skipped phase as **dropped from the plan**,
+   counted in neither n/m nor progress numerator/denominator. That is more truthful than
+   "settled": [in_progress, pending, skipped] reads 50%, not 63%. Changed overview progress
+   and BuilderCard.
+5. Removed the unused `isPlanPhaseComplete` import; added skip-phase to arch.md's porch
+   command list; the skill says the builder runs it after the architect relays the human's
+   decision (matching `approve`).
+6. Hardcoded 'review': left as is, for the architect to file. The schema makes
+   `on_all_phases_complete` optional with no default, and next.test.ts fixtures omit it, so
+   reading it means either inventing a default (a fallback) or throwing (breaks fixtures).
+   That's a design decision, not a few lines.
+Targeted tests only: porch/overview/skill-refresh/1470-status/1902-help 310/310, web
+BuilderCard 13/13, both typechecks clean. No local e2e.

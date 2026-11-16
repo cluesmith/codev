@@ -61,9 +61,9 @@ Plan phases are copied into `status.yaml` once, on entering `implement`; editing
 porch skip-phase 42 phase_3 --reason "dropped by owner: superseded by #57" --a-human-explicitly-approved-this
 ```
 
-The phase is marked `skipped` with the reason (keep it to one short line); skipping the last unsettled phase advances to review. Completed phases cannot be skipped — use `porch rollback <id> implement` to redo implementation.
+**Who runs `porch skip-phase`:** the builder, in its own worktree, after the architect relays the human's decision — as with `porch approve`. Porch commits and pushes `status.yaml` in whichever checkout it runs from, so run from the main workspace root it can land on `main`.
 
-Run it from the builder's worktree, as with `porch approve` — e.g. `(cd .builders/<id> && porch skip-phase …)`. Porch commits and pushes `status.yaml` in whichever checkout it runs from; from the main workspace root that can land on `main`.
+The phase is marked `skipped` with the reason (keep it to one short line) and drops out of the plan; `porch status` keeps listing it, with the reason, after implement. Skipping the last unsettled phase advances to review. Completed phases cannot be skipped — use `porch rollback <id> implement` to redo implementation. If the skip crosses a context-refresh boundary, porch says so: run `/builder-refresh`, then `porch next`.
 
 ## Checking pending gates
 
@@ -75,7 +75,7 @@ porch pending --all            # Include stale records on finished/advanced proj
 ## Critical rules
 
 - **Never run `porch approve` without a human's explicit decision**, relayed to you by the architect
-- **Never run `porch skip-phase` without a human's explicit instruction** — it changes an approved plan
+- **Never run `porch skip-phase` without a human's explicit decision**, relayed to you by the architect — it changes an approved plan
 - **Never edit `status.yaml` directly** — porch manages all state
 - Builders signal phase completion with `porch done`; blockers go to the architect with `afx send architect`
 - Strict mode only: soft-mode builders follow the protocol document themselves

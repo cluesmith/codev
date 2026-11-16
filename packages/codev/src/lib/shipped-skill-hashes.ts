@@ -99,6 +99,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     'd4a0baf78238ea44627e49cf4f6c1a2d0f6e32ea1f53430eb3385fa3a748c4eb',
   ],
   '.claude/skills/porch': [
+    '37f8ec0dbd8d8361f6398449d043ebda2cf0d5cea4aafd24b9788bdc7eaa682f',
     '437bc48bbe866d1a1a1f8ad8ff1dd1d8099138666f6457309260cdf279088b65',
     '59feb29e6855f49678770266c054a3d2040a88d99c22a14fa75670f0c4b4f9da',
     '6dfe37f372f890f9f1bbfb531f3a7684a5d1bceb0c568f9e67ff190549b07ab4',
@@ -187,6 +188,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     'd4a0baf78238ea44627e49cf4f6c1a2d0f6e32ea1f53430eb3385fa3a748c4eb',
   ],
   '.codex/skills/porch': [
+    '37f8ec0dbd8d8361f6398449d043ebda2cf0d5cea4aafd24b9788bdc7eaa682f',
     '437bc48bbe866d1a1a1f8ad8ff1dd1d8099138666f6457309260cdf279088b65',
     '59feb29e6855f49678770266c054a3d2040a88d99c22a14fa75670f0c4b4f9da',
     '6dfe37f372f890f9f1bbfb531f3a7684a5d1bceb0c568f9e67ff190549b07ab4',

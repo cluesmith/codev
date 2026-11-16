@@ -590,8 +590,8 @@ describe('overview', () => {
       }))).toBe(90);
     });
 
-    it('counts a skipped plan phase as settled (#1900)', () => {
-      // 2 complete + 1 skipped of 5 → same as 3 of 5 complete.
+    it('drops a skipped plan phase from the progress count (#1900)', () => {
+      // 2 complete of the 4 phases still in the plan → 50 + 20.
       expect(calculateProgress(makeParsed({
         phase: 'implement',
         planPhases: [
@@ -601,7 +601,7 @@ describe('overview', () => {
           { id: 'p4', title: 'D', status: 'in_progress' },
           { id: 'p5', title: 'E', status: 'pending' },
         ],
-      }))).toBe(74);
+      }))).toBe(70);
     });
 
     it('returns 92 for review phase (in progress)', () => {

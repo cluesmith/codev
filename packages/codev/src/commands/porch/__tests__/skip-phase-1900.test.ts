@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
-import { skipPhase } from '../index.js';
+import { skipPhase, status } from '../index.js';
 import { advancePlanPhase, getCurrentPlanPhase, skipPlanPhase } from '../plan.js';
 import { writeState, readState, getStatusPath } from '../state.js';
 import type { PlanPhase, ProjectState } from '../types.js';
@@ -51,6 +51,8 @@ function makeState(overrides: Partial<ProjectState> = {}): ProjectState {
 describe('porch skip-phase (issue #1900)', () => {
   let testDir: string;
   let statusPath: string;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  const output = (): string => logSpy.mock.calls.map(c => c.join(' ')).join('\n');
 
   function seed(overrides: Partial<ProjectState> = {}): void {
     statusPath = getStatusPath(testDir, '0042', 'test-feature');
@@ -63,7 +65,7 @@ describe('porch skip-phase (issue #1900)', () => {
     const protocolDir = path.join(testDir, 'codev', 'protocols', 'spir');
     fs.mkdirSync(protocolDir, { recursive: true });
     fs.copyFileSync(SPIR_PROTOCOL, path.join(protocolDir, 'protocol.json'));
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -151,6 +153,34 @@ describe('porch skip-phase (issue #1900)', () => {
 
     await expect(skipPhase(testDir, '0042', 'phase_2', 'dropped', HUMAN)).rejects.toThrow("no 'review' phase");
     expect(fs.readFileSync(statusPath, 'utf-8')).toBe(before);
+  });
+
+  it('porch status still shows the skipped phase and its reason after moving to review', async () => {
+    seed({ plan_phases: phases('complete', 'complete', 'in_progress'), current_plan_phase: 'phase_3' });
+    await skipPhase(testDir, '0042', 'phase_3', 'dropped by owner', HUMAN);
+    logSpy.mockClear();
+
+    await status(testDir, '0042');
+
+    expect(output()).toContain('PHASE: review');
+    expect(output()).toContain('phase_3: Phase 3 (skipped: dropped by owner)');
+  });
+
+  it('says a context refresh is due when the skip crosses a declared boundary', async () => {
+    // The real SPIR protocol declares both enter:review and on_plan_phase_advance.
+    seed(); // phase_2 in progress
+    await skipPhase(testDir, '0042', 'phase_2', 'superseded', HUMAN);
+    expect(output()).toContain('Context refresh due at `plan-phase:phase_3`');
+
+    logSpy.mockClear();
+    await skipPhase(testDir, '0042', 'phase_3', 'dropped', HUMAN);
+    expect(output()).toContain('Context refresh due at `enter:review`');
+  });
+
+  it('says nothing about a refresh when skipping a phase that is not current', async () => {
+    seed(); // phase_2 in progress, phase_3 pending
+    await skipPhase(testDir, '0042', 'phase_3', 'out of scope', HUMAN);
+    expect(output()).not.toContain('Context refresh due');
   });
 
   it('refuses to skip a completed phase', async () => {

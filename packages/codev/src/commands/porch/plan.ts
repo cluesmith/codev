@@ -174,15 +174,20 @@ export function getCurrentPlanPhase(phases: PlanPhase[]): PlanPhase | null {
   return null; // All phases complete or skipped
 }
 
+/** Index of the first unsettled phase after `afterIndex`, or -1. */
+function nextUnsettledIndex(phases: PlanPhase[], afterIndex: number): number {
+  return phases.findIndex((p, i) => i > afterIndex && !isPlanPhaseSettled(p));
+}
+
 /**
- * Get the next plan phase after a given phase
+ * Get the next plan phase still to build after a given phase — skipped (#1900)
+ * and complete phases are stepped over.
  */
 export function getNextPlanPhase(phases: PlanPhase[], currentPhaseId: string): PlanPhase | null {
   const currentIndex = phases.findIndex(p => p.id === currentPhaseId);
-  if (currentIndex >= 0 && currentIndex < phases.length - 1) {
-    return phases[currentIndex + 1];
-  }
-  return null;
+  if (currentIndex < 0) return null;
+  const nextIndex = nextUnsettledIndex(phases, currentIndex);
+  return nextIndex >= 0 ? phases[nextIndex] : null;
 }
 
 /**
@@ -212,7 +217,7 @@ export function advancePlanPhase(
 
   // Hand in_progress to the next unsettled phase, stepping over skipped ones
   // (#1900) — marking `phaseIndex + 1` blindly would resurrect a skipped phase.
-  const nextIndex = updatedPhases.findIndex((p, i) => i > phaseIndex && !isPlanPhaseSettled(p));
+  const nextIndex = nextUnsettledIndex(updatedPhases, phaseIndex);
   if (nextIndex >= 0) {
     updatedPhases[nextIndex] = { ...updatedPhases[nextIndex], status: 'in_progress' as const };
   }
@@ -261,7 +266,7 @@ export function skipPlanPhase(
   // Skipping the current phase hands in_progress forward, as advancePlanPhase
   // does — never back to an earlier phase.
   if (wasCurrent) {
-    const nextIndex = updated.findIndex((p, i) => i > targetIndex && !isPlanPhaseSettled(p));
+    const nextIndex = nextUnsettledIndex(updated, targetIndex);
     if (nextIndex >= 0) {
       updated[nextIndex] = { ...updated[nextIndex], status: 'in_progress' as const };
     }

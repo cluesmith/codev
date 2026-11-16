@@ -10,7 +10,15 @@ import * as path from 'node:path';
 import chalk from 'chalk';
 import { globSync } from 'glob';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
-import { stalledRefreshes, unacknowledgedRefreshes } from './context-refresh.js';
+import {
+  stalledRefreshes,
+  unacknowledgedRefreshes,
+  shouldRefresh,
+  declaresEnter,
+  declaresPlanPhaseAdvance,
+  enterBoundary,
+  planPhaseBoundary,
+} from './context-refresh.js';
 import {
   listAllProjects,
   readState,
@@ -38,10 +46,9 @@ import {
   findPlanFile,
   extractPlanPhases,
   getCurrentPlanPhase,
+  getNextPlanPhase,
   getPhaseContent,
   allPlanPhasesComplete,
-  isPlanPhaseComplete,
-  isPlanPhaseSettled,
   skipPlanPhase,
 } from './plan.js';
 import { getResolver, LocalResolver, type ArtifactResolver } from './artifacts.js';
@@ -204,8 +211,11 @@ export async function status(
   console.log(`  PROTOCOL: ${state.protocol}`);
   console.log(`  PHASE: ${state.phase} (${phaseConfig?.name || 'unknown'})`);
 
-  // For phased protocols, show plan phase status
-  if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
+  // For phased protocols, show plan phase status. Keep showing it after
+  // implement when a phase was skipped, so the drop and its reason stay
+  // visible once the project has moved on to review (#1900).
+  const hasSkipped = state.plan_phases.some(p => p.status === 'skipped');
+  if (state.plan_phases.length > 0 && (isPhased(protocol, state.phase) || hasSkipped)) {
     console.log('');
     console.log(chalk.bold('PLAN PHASES:'));
     console.log('');
@@ -289,8 +299,7 @@ export async function status(
       }
 
       // Find the next phase name for the warning
-      const currentIdx = state.plan_phases.findIndex(p => p.id === currentPlanPhase.id);
-      const nextPlanPhase = state.plan_phases.find((p, i) => i > currentIdx && !isPlanPhaseSettled(p));
+      const nextPlanPhase = getNextPlanPhase(state.plan_phases, currentPlanPhase.id);
 
       console.log('');
       console.log(chalk.red.bold('╔══════════════════════════════════════════════════════════════╗'));
@@ -961,7 +970,8 @@ export async function skipPhase(
   if (!hasHumanFlag) {
     throw new Error(
       'Human approval required: skipping a plan phase changes an approved plan.\n' +
-      `  A human must run: porch skip-phase ${projectId} ${planPhaseId} --reason "..." --a-human-explicitly-approved-this`,
+      '  Run it only after the architect relays a human\'s decision:\n' +
+      `    porch skip-phase ${projectId} ${planPhaseId} --reason "..." --a-human-explicitly-approved-this`,
     );
   }
   const why = reason?.trim();
@@ -1003,6 +1013,18 @@ export async function skipPhase(
     state.current_plan_phase = getCurrentPlanPhase(state.plan_phases)?.id ?? null;
   }
 
+  // A skip that hands work on (to the next plan phase, or to review) crosses the
+  // same context-refresh boundary the normal advance would. Porch can only emit
+  // a refresh TASK from `porch next`, at the transition; recording the boundary
+  // here would mark it consumed without any builder ever receiving the task, and
+  // the next `porch next` would acknowledge it. So say so instead (#1900).
+  const crossed = moveToReview
+    ? { boundary: enterBoundary(state.phase), declared: declaresEnter(protocol, state.phase) }
+    : wasCurrent && state.current_plan_phase
+      ? { boundary: planPhaseBoundary(state.current_plan_phase), declared: declaresPlanPhaseAdvance(protocol) }
+      : null;
+  const refreshDue = crossed !== null && shouldRefresh(state, crossed.declared, crossed.boundary);
+
   await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} skip plan phase ${planPhaseId}: ${why}`);
 
   console.log('');
@@ -1012,6 +1034,11 @@ export async function skipPhase(
     console.log(chalk.green(`  All plan phases settled: ${previousPhase} → ${state.phase}`));
   } else {
     console.log(`  Current plan phase: ${state.current_plan_phase}`);
+  }
+  if (refreshDue && crossed) {
+    console.log('');
+    console.log(chalk.yellow(`  Context refresh due at \`${crossed.boundary}\`. porch next emits refresh tasks only at its own`));
+    console.log(chalk.yellow('  transitions, so this skip cannot. The builder should run /builder-refresh, then porch next.'));
   }
   console.log(`\n  Run: porch next ${state.id}`);
   console.log('');
