@@ -255,3 +255,35 @@ Owner rulings treated as fixed (Baked-Decision equivalent, though not under that
 - Plan Amendment 2 written: layout, signatures, phases A2-1 (launch) to A2-5 (shellper, last), per-phase proof (moved-code diff, suites, POSIX CI, Windows dispatch, CMAP), re-verification table, and the divergences the moves must keep.
 - 2026-11-10, Amendment 2 phases: A2-1 command launch, A2-2 host paths, A2-3 processes, A2-4 test helpers/docs, A2-5 shellper transport. Each: POSIX moved verbatim (scripted body comparison against main or the pre-phase head), Windows modules split into leaf -windows files where needed to avoid import cycles, contract test per capability, POSIX CI + Windows dispatch, 2-way CMAP (agy unauthenticated). Product isWindows() 103 -> 55; what stays is listed with reasons in the plan's A2.5/A2.10. Rulings recorded in A2.10 (censusCostMs / commandLineText). Gotchas: Object.freeze needs Object.freeze<Interface>() for contextual typing; promisify(exec) at module load breaks partial child_process mocks; a POSIX resolve() in a test expectation is host-dependent on the Windows runner.
 - 2026-11-10 endgame: macOS smoke on an isolated Tower (non-default port, own state and socket dirs; the scratchpad socket path was too long for a Unix socket, so a short home dir was used and removed after). S1 upgrade 3.3.7 -> branch with a live shell: reconnected, same PIDs, replay intact. S2 dashboard buttons in Chromium: pass x3. S3 partial by ruling (afx CLI has no port option). Found and recorded (pre-existing, identical on published 3.3.7): M10 launch during an in-flight stop is wiped; M11 stop after a Tower restart leaves reconnected shellpers alive; M12 no CLI port option. PR-level CMAP round 4 (2-way): claude REQUEST_CHANGES on docs/PR body only, codex on owner gate items; addressed.
+
+## 2026-11-11 to 2026-11-17: endgame to the pr gate
+
+- Amendment 2 completed (four platform capabilities: command launch, host paths, processes,
+  shellper transport); macOS smoke S1/S2 passed; integration review round 3 needed no code change.
+  The dashboard's Open IDE (M7) and workspace buttons (M8) were fixed from the owner's pass.
+- Owner tidy-ups B/C/D: the `/tmp` guard became `scripts/tmp-residue-check.mjs` + an allowlist,
+  checked in CI's unit job; Windows census names imported from their own module; sdk `/node`
+  wording.
+- Amendment 3 (owner's "layout B"): platform-specific code lives in a `posix/` or `windows/`
+  folder of its own layer (`lib/platform/{posix,windows}/`, `agent-farm/commands/windows/`).
+  Moves done by script from the committed files; a first pass double-resolved imports in moved
+  files, caught by tsc and regenerated before commit. Two of three lib -> agent-farm imports
+  removed; `lib/config.ts` remains (pre-existing).
+- Amendment 4 (owner decisions at the gate): codex capture criterion moved to #1858; native
+  Windows ships as a preview until #1911 (cwd-first lookup) lands; claude ConPTY fixtures recorded
+  before merge.
+- ConPTY fixtures (owner machine, claude 2.1.326): recording them found M15, the render gate
+  holding mail to an idle claude under ConPTY (its software-cursor exemption anchored only on the
+  hardware cursor, which ConPTY parks elsewhere). Fixed with a second anchor (first input cell);
+  codex's consult point recorded as a residual bounded by two control recordings (prefix,
+  prefix-left). The recorder runs from inside the installed package as plain JS (Node will not
+  strip types under node_modules) and writes a scrubbed `.diagnostic` file for a failed state.
+- Other findings: M13 (consult.codexPath with a .cmd shim), M14 (agents `find /` for framework
+  paths; #1910), M16 (main's #1912 claude CLI lane and doctor check on native Windows: exact-name
+  PATH walk, direct exec of a .cmd; fixed, with npm-shaped claude.cmd test fakes generated from
+  cmd-shim 7.0.0 and named platform skips where a suite pins the seam to linux).
+- Lessons for the next builder: read the CI run id back from `gh run list` before watching it (a
+  made-up id wastes a watcher); a Windows-only failure in code merged from main is still this
+  lane's to surface; a test stub should take the route a real install takes, not a convenient one.
+- PR gate approved by the owner 2026-11-17T07:03Z (relayed by main); `porch approve` run. The
+  merge is main's.
