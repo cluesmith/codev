@@ -94,3 +94,27 @@ sibling-worktree deny, prefix-superset 'wt-backup' deny). Deny-reason asserts li
 (guard emits normalized, not realpath). Full build green.
 
 Next: push, tell reviewer revision ready; dev-approval stays pending.
+
+## Relevance check + main merge (2026-11-18, ~2.5mo later)
+
+Owner asked if the issue/approach is still relevant. Checked: issue #1536 still OPEN, no new
+comments since Aug; on origin/main the guard STILL matches only Write|Edit|MultiEdit (Bash
+unguarded) — nobody solved it another way. Approach still valid.
+
+BUT the guard diverged materially via Spec 1658 (Git Bash / Windows): added `comparable()`
+(case-insensitive compare on win32), isInside uses it, a Windows allowlist branch (os.tmpdir +
+%USERPROFILE%\.claude), and `forwardSlashes()` baked into the hook command. Merged origin/main
+(1700 commits). git auto-merged the guard source and, verified by hand, correctly combined my
+restructure (GUARDED_WRITE_TOOLS, guardWrite/guardBash split, literal main-root search,
+matcher+Bash, escape hatch) WITH the Spec 1658 Windows code. One real conflict in
+worktree-write-guard.test.ts: main added 2 Windows tests + kept the stale "allows a non-guarded
+tool (Bash)" test my change had deleted — resolved by keeping main's Windows tests and dropping
+the stale one (my Bash describe block replaces it).
+
+Verified: install + build green, tests 115 passed / 2 skipped (the 2 Windows-only
+it.runIf(onWindows) tests skip on macOS). Merge commit 5e9ffa472.
+
+KNOWN GAP (follow-up, not blocking): my guardBash literal search (indexOf/startsWith) is NOT
+Windows case-insensitive — it doesn't use comparable(). On Windows a case-mismatched main path
+wouldn't be caught, but that fails OPEN (miss -> allow), the safe direction. Worth hardening with
+comparable()/forward-slash normalization for Windows parity; flagged to owner.
