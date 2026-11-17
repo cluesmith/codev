@@ -1,5 +1,11 @@
 # Change Log
 
+## [Unreleased]
+
+### What's new
+
+- **Native Windows (preview).** On Windows 11 without WSL, the extension starts Tower and spawns builders through the Codev command-line tools with no console window flashing up, and the Tower view recognises this window's workspace whatever the drive letter's case. Needs the matching Codev release installed natively; see the project's Windows notes for setup and the preview's limits (#1658, PR #1859).
+
 ## [3.3.6] - 2026-10-29
 
 ### What's new

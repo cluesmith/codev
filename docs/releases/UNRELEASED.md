@@ -33,6 +33,10 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Native Windows (preview)
+
+Codev now runs natively on Windows 11, no WSL required (#1658, PR #1859). Install needs Node.js 22 or 24, Git for Windows and `jq`, with no admin rights or Developer Mode. Builders, Tower, the dashboard, `consult`, `codev doctor` and the Codev IDE server all work from a native checkout; the Windows Terminal is PowerShell while Codev's own plumbing runs in Git Bash. Platform-specific behaviour now lives behind a small set of capabilities with POSIX and Windows implementations, so macOS and Linux behaviour is unchanged. Native support is a preview until the remaining release blocker lands (#1911): until then, use it only in repositories you trust. WSL 2 remains a supported path.
+
 ## Polish
 
 <!-- Small vscode items as bullets:
