@@ -21,6 +21,8 @@ porch pending [--all]          List gates awaiting approval
 porch approve <id> <gate> --a-human-explicitly-approved-this
 porch verify <id> --skip "reason"   Skip post-merge verification and mark verified
 porch rollback <id> <phase>    Rewind to an earlier phase
+porch skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this
+                               Drop one unbuilt plan phase from an approved plan
 porch init <protocol> <id> <name>   Initialize a new project
 ```
 
@@ -51,6 +53,18 @@ porch approve 42 spec-approval --a-human-explicitly-approved-this
 porch approve bugfix-42 pr --a-human-explicitly-approved-this
 ```
 
+## Dropping a plan phase
+
+Plan phases are copied into `status.yaml` once, on entering `implement`; editing the plan afterwards changes nothing. When a human drops an unbuilt phase from an approved plan, record it with:
+
+```bash
+porch skip-phase 42 phase_3 --reason "dropped by owner: superseded by #57" --a-human-explicitly-approved-this
+```
+
+**Who runs `porch skip-phase`:** the builder, in its own worktree, after the architect relays the human's decision — as with `porch approve`. Porch commits and pushes `status.yaml` in whichever checkout it runs from, so run from the main workspace root it can land on `main`.
+
+The phase is marked `skipped` with the reason (keep it to one short line) and drops out of the plan; `porch status` keeps listing it, with the reason, after implement. Skipping the last unsettled phase advances to review. Completed phases cannot be skipped — use `porch rollback <id> implement` to redo implementation. If the skip crosses a context-refresh boundary, porch says so: run `/builder-refresh`, then `porch next`.
+
 ## Checking pending gates
 
 ```bash
@@ -61,6 +75,7 @@ porch pending --all            # Include stale records on finished/advanced proj
 ## Critical rules
 
 - **Never run `porch approve` without a human's explicit decision**, relayed to you by the architect
+- **Never run `porch skip-phase` without a human's explicit decision**, relayed to you by the architect — it changes an approved plan
 - **Never edit `status.yaml` directly** — porch manages all state
 - Builders signal phase completion with `porch done`; blockers go to the architect with `afx send architect`
 - Strict mode only: soft-mode builders follow the protocol document themselves
