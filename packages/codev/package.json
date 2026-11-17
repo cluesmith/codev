@@ -40,7 +40,6 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.41",
     "@cluesmith/codev-core": "workspace:*",
     "@cluesmith/codev-sdk": "workspace:*",
     "@cluesmith/codev-types": "workspace:*",

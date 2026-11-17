@@ -372,11 +372,22 @@ export function describeClaudeAuth(d: ClaudeAuthDescription): string {
   if (d.mode === 'api-key') {
     line += `, consult.claudeAuth="api-key"${d.modeSource ? ` in ${d.modeSource}` : ''}`;
   }
-  if (d.withheld.length > 0) {
-    const ignored = d.withheld.map((key) => credentialOrigin(key, d.fromDotenv)).join(', ');
-    line += `; ignoring ${ignored} — set consult.claudeAuth to "api-key" to bill the API instead`;
-  }
+  const withheldNote = describeWithheldKeys(d.withheld, d.fromDotenv);
+  if (withheldNote) line += `; ${withheldNote}`;
   return line;
+}
+
+/**
+ * The note for API credentials withheld in `login` mode, or null when none were, e.g.
+ *
+ *   ignoring ANTHROPIC_API_KEY (from .env) — set consult.claudeAuth to "api-key" to bill the API instead
+ *
+ * Shared by the auth line and `codev doctor`, so both word it the same way.
+ */
+export function describeWithheldKeys(withheld: readonly string[], fromDotenv: ReadonlySet<string>): string | null {
+  if (withheld.length === 0) return null;
+  const ignored = withheld.map((key) => credentialOrigin(key, fromDotenv)).join(', ');
+  return `ignoring ${ignored} — set consult.claudeAuth to "api-key" to bill the API instead`;
 }
 
 // ---------------------------------------------------------------------------
