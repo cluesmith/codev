@@ -167,10 +167,14 @@ vi.mock('../utils/server-utils.js', async (importActual) => ({
 }));
 
 // Issue #1869: the /ide session mint makes sure the IDE server is live first.
-const { mockEnsureIdeServerLive } = vi.hoisted(() => ({ mockEnsureIdeServerLive: vi.fn() }));
+const { mockEnsureIdeServerLive, mockIdeAvailability } = vi.hoisted(() => ({
+  mockEnsureIdeServerLive: vi.fn(),
+  mockIdeAvailability: vi.fn(async () => false),
+}));
 vi.mock('../servers/ide-server.js', async (importActual) => ({
   ...(await importActual<typeof import('../servers/ide-server.js')>()),
   ensureIdeServerLive: (...args: unknown[]) => mockEnsureIdeServerLive(...args),
+  ideAvailability: (...args: unknown[]) => mockIdeAvailability(...args),
 }));
 
 vi.mock('../servers/analytics.js', () => ({
@@ -764,6 +768,39 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.instances).toHaveLength(1);
+    });
+
+    // Issue #1914: the IDE signal rides the status payload, which the tunnel relays.
+    it('carries ide { available, viaTunnel:false } for a local request', async () => {
+      mockGetInstances.mockResolvedValue([]);
+      mockIdeAvailability.mockResolvedValueOnce(true);
+
+      const { res, body } = makeRes();
+      await handleRequest(makeReq('GET', '/api/status'), res, makeCtx());
+
+      expect(mockIdeAvailability).toHaveBeenLastCalledWith(false);
+      expect(JSON.parse(body()).ide).toEqual({ available: true, viaTunnel: false });
+    });
+
+    it('asks for the tunnel rule and reports viaTunnel:true for a tunnel-borne request', async () => {
+      mockGetInstances.mockResolvedValue([]);
+      mockIdeAvailability.mockResolvedValueOnce(false);
+
+      const { res, body } = makeRes();
+      await handleRequest(makeReq('GET', '/api/status', { 'x-codev-tunnel-proxy': '1' }), res, makeCtx());
+
+      expect(mockIdeAvailability).toHaveBeenLastCalledWith(true);
+      expect(JSON.parse(body()).ide).toEqual({ available: false, viaTunnel: true });
+    });
+
+    it('exposes only the yes/no and the tunnel hint: no port, path, pid or token', async () => {
+      mockGetInstances.mockResolvedValue([]);
+      mockIdeAvailability.mockResolvedValueOnce(true);
+
+      const { res, body } = makeRes();
+      await handleRequest(makeReq('GET', '/api/status'), res, makeCtx());
+
+      expect(Object.keys(JSON.parse(body()).ide).sort()).toEqual(['available', 'viaTunnel']);
     });
   });
 
