@@ -1,7 +1,7 @@
 id: '1912'
 title: consult-run-the-claude-review-
 protocol: aspir
-phase: review
+phase: verify
 plan_phases:
   - id: phase_1
     title: Claude CLI primitives and config
@@ -24,22 +24,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
-history:
-  - iteration: 1
-    plan_phase: phase_1
-    build_output: ''
-    reviews:
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1912/codev/projects/1912-consult-run-the-claude-review-/1912-phase_1-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1912/codev/projects/1912-consult-run-the-claude-review-/1912-phase_1-iter1-claude.txt
+build_complete: false
+history: []
 started_at: '2026-11-17T00:17:34.881Z'
-updated_at: '2026-11-17T05:14:20.736Z'
+updated_at: '2026-11-17T05:14:26.200Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-17T00:43:47.408Z'
