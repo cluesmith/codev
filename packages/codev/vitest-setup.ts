@@ -27,7 +27,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { realAgyOptIn } from './src/lib/test-env.js';
+import { realAgyOptIn, realClaudeOptIn } from './src/lib/test-env.js';
 import { BUILDER_WORKTREE_ENV } from './src/lib/agent-env.js';
 
 /**
@@ -45,6 +45,38 @@ case "$1" in
   --version) echo "codev-fake-agy 0.0.0" ;;
   *) echo "VERDICT: COMMENT" ;;
 esac
+exit 0
+`;
+
+/**
+ * Stand-in for the `claude` CLI (#1912): no model call, no subscription spend. It
+ * answers `--version` above the lane's floor, `auth status --json` as logged in,
+ * and a print-mode review with a minimal successful stream-json transcript (an
+ * init event listing only Read/Glob/Grep, one assistant text block carrying a
+ * VERDICT, and a result event), so suites that reach the claude lane in-process
+ * run against this rather than the real CLI. Tests that need to vary or record
+ * the CLI's behaviour use `src/__tests__/helpers/stub-claude.ts` instead.
+ */
+const FAKE_CLAUDE_STREAM = [
+  { type: 'system', subtype: 'init', tools: ['Glob', 'Grep', 'Read'], mcp_servers: [], model: 'claude-opus-5' },
+  {
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: '---\nVERDICT: COMMENT\nSUMMARY: fake claude (vitest harness)\nCONFIDENCE: LOW\n---\n' }] },
+  },
+  {
+    type: 'result', subtype: 'success', is_error: false, result: 'VERDICT: COMMENT',
+    usage: { input_tokens: 1, cache_read_input_tokens: 0, output_tokens: 1 }, total_cost_usd: 0,
+  },
+].map((event) => `printf '%s\\n' '${JSON.stringify(event)}'`).join('\n');
+
+const FAKE_CLAUDE = `#!/bin/sh
+# Fake claude installed by the Codev vitest harness (#1912). See vitest-setup.ts.
+case "$1" in
+  --version) echo "2.1.326 (Claude Code)"; exit 0 ;;
+  auth) echo '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'; exit 0 ;;
+esac
+cat > /dev/null
+${FAKE_CLAUDE_STREAM}
 exit 0
 `;
 
@@ -68,6 +100,15 @@ if (!realAgyOptIn()) {
   const fakeAgy = join(sandbox, 'agy');
   writeFileSync(fakeAgy, FAKE_AGY, { mode: 0o755 });
   process.env.CODEV_AGY_BIN = fakeAgy;
+}
+
+// Pin the claude lane to a fake binary, unconditionally, for the same reason as
+// agy: a shell that exports CODEV_CLAUDE_BIN must not feed the real CLI back into
+// the suites. CODEV_ALLOW_REAL_CLAUDE is the single, named way through.
+if (!realClaudeOptIn()) {
+  const fakeClaude = join(sandbox, 'claude');
+  writeFileSync(fakeClaude, FAKE_CLAUDE, { mode: 0o755 });
+  process.env.CODEV_CLAUDE_BIN = fakeClaude;
 }
 
 // Keep the #1077 auth cache ACTIVE but sandboxed. `agyAuthCacheDisabled()` turns

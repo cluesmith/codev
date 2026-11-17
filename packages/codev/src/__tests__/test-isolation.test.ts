@@ -66,6 +66,24 @@ describe('test-suite isolation (#1323)', () => {
       expect(pinned).not.toBe(join(homedir(), '.codev', 'metrics.db'));
     });
 
+    it('pins CODEV_CLAUDE_BIN to a fake that passes the lane preflight and streams a review (#1912)', async () => {
+      const pinned = process.env.CODEV_CLAUDE_BIN;
+      expect(pinned, 'vitest-setup.ts must pin a fake claude for every suite').toBeTruthy();
+      expect(pinned!.startsWith(homedir() + '/.local')).toBe(false);
+
+      const { readClaudeVersion, assertClaudeVersion, readClaudeAuthStatus } = await import('../lib/claude-cli.js');
+      assertClaudeVersion(readClaudeVersion(pinned!));
+      expect(readClaudeAuthStatus(pinned!, {}).loggedIn).toBe(true);
+
+      const { execFileSync } = await import('node:child_process');
+      const events = execFileSync(pinned!, ['-p', '--output-format', 'stream-json'], { input: 'prompt', encoding: 'utf-8' })
+        .split('\n').filter(Boolean).map((line) => JSON.parse(line));
+      expect(events.map((e) => e.type)).toEqual(['system', 'assistant', 'result']);
+      expect(events[0].tools).toEqual(['Glob', 'Grep', 'Read']);
+      expect(events[1].message.content[0].text).toContain('\nVERDICT: COMMENT\n');
+      expect(events[2]).toMatchObject({ subtype: 'success', is_error: false });
+    });
+
     it('names an agy auth-cache dir, so #1077 burst protection is active in tests', async () => {
       // agyAuthCacheDisabled() switches itself off under VITEST unless a dir is
       // named — which is precisely what left burst protection inert for tests.

@@ -2,30 +2,22 @@
  * Regression tests for issue #1754.
  *
  * `consult` loads `<workspace>/.env` into `process.env`. A `CLAUDE_CODE_OAUTH_TOKEN` there outranks
- * the keychain login and — via `buildClaudeConsultEnv` (#985) — strips the API key, so the lane runs
- * as whichever org owns that token. When that org was out of usage, the only output was the
- * provider's limit text, with nothing saying the credential came from `.env`.
+ * the keychain login, so the claude lane runs as whichever org owns that token. When that org was
+ * out of usage, the only output was the provider's limit text, with nothing saying the credential
+ * came from `.env`.
  *
- * Pinned here: each SDK lane names its credential and its origin on stderr, and a result the SDK
- * flags `is_error` fails the run with no output file instead of passing as a review.
+ * Pinned here: each lane names its credential and its origin on stderr, and a result the CLI flags
+ * `is_error` fails the run with no output file instead of passing as a review. Since #1912 the
+ * claude lane runs the installed `claude` CLI and, by default, withholds `ANTHROPIC_API_KEY` /
+ * `ANTHROPIC_AUTH_TOKEN` from it, wherever they came from. The `claude` here is the stub from
+ * `helpers/stub-claude.ts`, which records the env it was run with.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-
-let mockClaudeOptions: Record<string, unknown> | undefined;
-let mockClaudeMessages: unknown[] = [];
-
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: (args: { options: Record<string, unknown> }) => {
-    mockClaudeOptions = args.options;
-    return (async function* () {
-      for (const m of mockClaudeMessages) yield m;
-    })();
-  },
-}));
+import { createStubClaude, readClaudeFixture, type StubClaude, type StubClaudeOptions } from '../../../__tests__/helpers/stub-claude.js';
 
 vi.mock('@openai/codex-sdk', () => {
   class MockCodex {
@@ -56,7 +48,6 @@ const {
   _loadDotenv,
   runClaudeConsultation,
   runCodexConsultation,
-  describeClaudeAuth,
   describeCodexAuth,
 } = await import('../index.js');
 
@@ -68,6 +59,21 @@ const CREDENTIAL_KEYS = [
 ];
 
 const LIMIT_TEXT = 'You have hit your org monthly usage limit';
+
+/** What `claude auth status --json` reports when `CLAUDE_CODE_OAUTH_TOKEN` is the credential. */
+const OAUTH_TOKEN_STATUS = JSON.stringify({ loggedIn: true, authMethod: 'oauth_token', apiProvider: 'firstParty' });
+
+/** The env the stub `claude` ran the review with. */
+const reviewEnv = () => claude.invocations('print')[0].env;
+
+let claude: StubClaude;
+const harnessClaudeBin = process.env.CODEV_CLAUDE_BIN;
+
+function pinClaude(options: StubClaudeOptions = {}): void {
+  claude?.cleanup();
+  claude = createStubClaude({ authStatus: { stdout: OAUTH_TOKEN_STATUS }, ...options });
+  process.env.CODEV_CLAUDE_BIN = claude.bin;
+}
 
 let tmpDir: string;
 let origHome: string | undefined;
@@ -81,18 +87,17 @@ beforeEach(() => {
   // The developer's own shell credentials would otherwise decide every origin assertion.
   savedEnv = Object.fromEntries(CREDENTIAL_KEYS.map((k) => [k, process.env[k]]));
   for (const k of CREDENTIAL_KEYS) delete process.env[k];
-  mockClaudeOptions = undefined;
   recordedMetrics = [];
-  mockClaudeMessages = [
-    { type: 'assistant', message: { content: [{ text: 'LGTM' }] } },
-    { type: 'result', subtype: 'success', is_error: false, result: 'LGTM' },
-  ];
+  pinClaude();
   stderr = [];
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { stderr.push(args.join(' ')); });
 });
 
 afterEach(() => {
+  claude.cleanup();
+  if (harnessClaudeBin === undefined) delete process.env.CODEV_CLAUDE_BIN;
+  else process.env.CODEV_CLAUDE_BIN = harnessClaudeBin;
   process.env.HOME = origHome;
   for (const k of CREDENTIAL_KEYS) {
     if (savedEnv[k] === undefined) delete process.env[k];
@@ -103,35 +108,33 @@ afterEach(() => {
 });
 
 describe('the claude lane names its credential source (#1754)', () => {
-  it('reports an OAuth token injected from .env, and passes it without the .env API key', async () => {
+  it('reports an OAuth token injected from .env, and withholds the .env API key from claude', async () => {
     writeFileSync(join(tmpDir, '.env'), 'CLAUDE_CODE_OAUTH_TOKEN=oat-from-dotenv\nANTHROPIC_API_KEY="sk-from-dotenv"\n');
     _loadDotenv(tmpDir);
 
     await runClaudeConsultation('q', 'role', tmpDir);
 
-    expect(stderr).toContain('[CLAUDE] auth: CLAUDE_CODE_OAUTH_TOKEN (from .env)');
-    const env = mockClaudeOptions?.env as Record<string, string>;
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('oat-from-dotenv');
-    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(stderr).toContain(
+      '[CLAUDE] auth: oauth_token — CLAUDE_CODE_OAUTH_TOKEN (from .env); ignoring ANTHROPIC_API_KEY (from .env)' +
+      ' — set consult.claudeAuth to "api-key" to bill the API instead',
+    );
+    expect(reviewEnv().CLAUDE_CODE_OAUTH_TOKEN).toBe('oat-from-dotenv');
+    expect(reviewEnv()).not.toHaveProperty('ANTHROPIC_API_KEY');
   });
 
-  it('reports the winning credential after the #985 strip, per Claude Code precedence', () => {
-    const none = new Set<string>();
-    expect(describeClaudeAuth({ CLAUDE_CODE_OAUTH_TOKEN: 't' }, none)).toBe('CLAUDE_CODE_OAUTH_TOKEN (from shell)');
-    expect(describeClaudeAuth({ ANTHROPIC_API_KEY: 'k' }, new Set(['ANTHROPIC_API_KEY'])))
-      .toBe('ANTHROPIC_API_KEY (from .env)');
-    expect(describeClaudeAuth({ ANTHROPIC_AUTH_TOKEN: 'a', ANTHROPIC_API_KEY: 'k' }, none))
-      .toBe('ANTHROPIC_AUTH_TOKEN (from shell)');
-    expect(describeClaudeAuth({ CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_API_KEY: 'k' }, none))
-      .toBe('CLAUDE_CODE_USE_BEDROCK (from shell)');
-    // Every provider the bundled CLI recognises, resolved in its order.
-    expect(describeClaudeAuth({ CLAUDE_CODE_USE_MANTLE: 'true', CLAUDE_CODE_OAUTH_TOKEN: 't' }, none))
-      .toBe('CLAUDE_CODE_USE_MANTLE (from shell)');
-    expect(describeClaudeAuth({ CLAUDE_CODE_USE_VERTEX: '1', CLAUDE_CODE_USE_ANTHROPIC_AWS: '1' }, none))
-      .toBe('CLAUDE_CODE_USE_ANTHROPIC_AWS (from shell)');
-    // Claude Code reads "0" as off, so it must not be reported as the provider.
-    expect(describeClaudeAuth({ CLAUDE_CODE_USE_BEDROCK: '0' }, none)).toBe('stored claude login (no credential env var)');
-    expect(describeClaudeAuth({ PATH: '/usr/bin' }, none)).toBe('stored claude login (no credential env var)');
+  it('passes a .env API key, and says so, only when consult.claudeAuth opts into api-key billing', async () => {
+    pinClaude({ authStatus: { stdout: JSON.stringify({ loggedIn: true, authMethod: 'api_key', apiKeySource: 'ANTHROPIC_API_KEY' }) } });
+    mkdirSync(join(tmpDir, '.codev'), { recursive: true });
+    writeFileSync(join(tmpDir, '.codev', 'config.json'), JSON.stringify({ consult: { claudeAuth: 'api-key' } }));
+    writeFileSync(join(tmpDir, '.env'), 'ANTHROPIC_API_KEY=sk-from-dotenv\n');
+    _loadDotenv(tmpDir);
+
+    await runClaudeConsultation('q', 'role', tmpDir);
+
+    expect(stderr).toContain(
+      `[CLAUDE] auth: api_key (ANTHROPIC_API_KEY) — ANTHROPIC_API_KEY (from .env), consult.claudeAuth="api-key" in ${join(tmpDir, '.codev', 'config.json')}`,
+    );
+    expect(reviewEnv().ANTHROPIC_API_KEY).toBe('sk-from-dotenv');
   });
 });
 
@@ -154,15 +157,13 @@ describe('the codex lane names its credential source (#1754)', () => {
 
 describe('an is_error result fails the claude lane instead of passing as a review (#1754)', () => {
   beforeEach(() => {
-    // What the SDK yields when the final assistant message is an API error. Nothing is thrown
-    // afterwards: consult must fail on the result itself, not on the SDK's exit-code rethrow.
-    mockClaudeMessages = [
-      { type: 'assistant', error: 'rate_limit', message: { content: [{ text: LIMIT_TEXT }] } },
-      {
-        type: 'result', subtype: 'success', is_error: true, result: LIMIT_TEXT,
-        total_cost_usd: 0.42, usage: { input_tokens: 1200, output_tokens: 30, cache_read_input_tokens: 800 },
-      },
-    ];
+    // What the CLI prints when the final assistant message is an API error: subtype `success` with
+    // `is_error: true`. consult must fail on the result itself, whatever the exit code.
+    const events = readClaudeFixture('claude-stream-error-result.jsonl').trim().split('\n').map((l) => JSON.parse(l));
+    const stream = events.map((e) => JSON.stringify(e.type !== 'result' ? e : {
+      ...e, total_cost_usd: 0.42, usage: { input_tokens: 1200, output_tokens: 30, cache_read_input_tokens: 800 },
+    })).join('\n') + '\n';
+    pinClaude({ print: { stdout: stream } });
   });
 
   it('rejects, names the credential, and writes no output file', async () => {
@@ -170,10 +171,10 @@ describe('an is_error result fails the claude lane instead of passing as a revie
     _loadDotenv(tmpDir);
     const outputPath = join(tmpDir, 'review.md');
 
-    const run = runClaudeConsultation('q', 'role', tmpDir, outputPath);
+    const err = await runClaudeConsultation('q', 'role', tmpDir, outputPath).catch((e: unknown) => e as Error);
 
-    await expect(run).rejects.toThrow(LIMIT_TEXT);
-    await expect(run).rejects.toThrow('Credential in use: CLAUDE_CODE_OAUTH_TOKEN (from .env)');
+    expect(err.message).toContain(LIMIT_TEXT);
+    expect(err.message).toContain('Credential in use: oauth_token — CLAUDE_CODE_OAUTH_TOKEN (from .env)');
     expect(existsSync(outputPath)).toBe(false);
   });
 
@@ -200,10 +201,15 @@ describe('an is_error result fails the claude lane instead of passing as a revie
   });
 
   it('still writes the review when the result is a real success', async () => {
-    mockClaudeMessages = [
-      { type: 'assistant', message: { content: [{ text: 'VERDICT: APPROVE' }] } },
-      { type: 'result', subtype: 'success', is_error: false, result: 'VERDICT: APPROVE' },
-    ];
+    pinClaude({
+      print: {
+        stdout: [
+          { type: 'system', subtype: 'init', tools: ['Glob', 'Grep', 'Read'] },
+          { type: 'assistant', message: { content: [{ type: 'text', text: 'VERDICT: APPROVE' }] } },
+          { type: 'result', subtype: 'success', is_error: false, result: 'VERDICT: APPROVE' },
+        ].map((e) => JSON.stringify(e)).join('\n') + '\n',
+      },
+    });
     const outputPath = join(tmpDir, 'review.md');
 
     await runClaudeConsultation('q', 'role', tmpDir, outputPath);

@@ -7,6 +7,13 @@ import { execSync, spawnSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
+import { CLAUDE_INSTALL_HINT, CLAUDE_MIN_VERSION } from '../lib/claude-cli.js';
+import {
+  createStubClaude,
+  STUB_LOGGED_OUT_STATUS,
+  type StubClaude,
+  type StubClaudeOptions,
+} from './helpers/stub-claude.js';
 
 // We need to test the internal functions, so we'll import the module
 // and test the exported function behavior
@@ -57,23 +64,18 @@ const makeFakeChild = vi.hoisted(() => (opts: { stdout?: string; stderr?: string
   return child;
 });
 
-// Mock child_process
-vi.mock('node:child_process', () => ({
-  execSync: vi.fn(),
-  spawnSync: vi.fn(),
-  // Default for the async agy auth probe: reply "OK" → operational.
-  spawn: vi.fn(() => makeFakeChild({ stdout: 'OK', code: 0 })),
-}));
-
-// Mock Claude Agent SDK - returns success by default
-let mockDoctorQueryFn: ReturnType<typeof vi.fn>;
-vi.mock('@anthropic-ai/claude-agent-sdk', () => {
-  mockDoctorQueryFn = vi.fn().mockImplementation(() =>
-    (async function* () {
-      yield { type: 'result', subtype: 'success' };
-    })()
-  );
-  return { query: mockDoctorQueryFn };
+// Mock child_process. `execFileSync` stays real: it is the only call the claude
+// checks make (`lib/claude-cli.ts`), and they run a stub `claude` executable —
+// the harness's fake by default, or a `createStubClaude()` stub — never the real CLI.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    execSync: vi.fn(),
+    spawnSync: vi.fn(),
+    // Default for the async agy auth probe: reply "OK" → operational.
+    spawn: vi.fn(() => makeFakeChild({ stdout: 'OK', code: 0 })),
+    execFileSync: actual.execFileSync,
+  };
 });
 
 // Mock chalk to avoid color output issues in tests
@@ -209,7 +211,8 @@ describe('doctor command', () => {
 
       // Re-import to get fresh module
       vi.resetModules();
-      vi.mock('node:child_process', () => ({
+      vi.mock('node:child_process', async (importOriginal) => ({
+        execFileSync: (await importOriginal<typeof import('node:child_process')>()).execFileSync,
         execSync: vi.fn((cmd: string) => {
           if (cmd.includes('which node')) {
             throw new Error('not found');
@@ -240,9 +243,11 @@ describe('doctor command', () => {
     });
 
     it('should return 1 when no AI CLI is available', async () => {
-      // Mock all core deps present but no AI CLIs (incl. agy unavailable).
+      // Mock all core deps present but no AI CLIs (incl. agy and claude unavailable).
       const priorAgyBin = process.env.CODEV_AGY_BIN;
+      const priorClaudeBin = process.env.CODEV_CLAUDE_BIN;
       process.env.CODEV_AGY_BIN = path.join(tmpdir(), `no-such-agy-${Date.now()}`);
+      process.env.CODEV_CLAUDE_BIN = path.join(tmpdir(), `no-such-claude-${Date.now()}`);
       vi.mocked(execSync).mockImplementation((cmd: string) => {
         if (cmd.includes('which claude') || cmd.includes('which gemini') || cmd.includes('which codex')) {
           throw new Error('not found');
@@ -275,18 +280,12 @@ describe('doctor command', () => {
       vi.resetModules();
       const { doctor } = await import('../commands/doctor.js');
 
-      // Claude SDK also fails (auth error)
-      mockDoctorQueryFn.mockImplementation(() =>
-        (async function* () {
-          throw new Error('Invalid API key');
-        })()
-      );
-
       let result: number;
       try {
         result = await doctor();
       } finally {
         restoreEnv('CODEV_AGY_BIN', priorAgyBin);
+        restoreEnv('CODEV_CLAUDE_BIN', priorClaudeBin);
       }
       expect(result).toBe(1);
     });
@@ -1089,60 +1088,6 @@ describe('doctor command', () => {
       expect(hasActionableHint).toBe(true);
     });
 
-    it('should show auth error with hint when Claude SDK auth fails', async () => {
-      // Mock core deps present
-      vi.mocked(execSync).mockImplementation((cmd: string) => {
-        if (cmd.includes('which')) {
-          return Buffer.from('/usr/bin/command');
-        }
-        if (cmd.includes('gh auth status')) {
-          return Buffer.from('Logged in');
-        }
-        return Buffer.from('');
-      });
-
-      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
-        const responses: Record<string, string> = {
-          'node': 'v20.0.0',
-          'tmux': 'tmux 3.4',
-          'git': 'git version 2.40.0',
-        };
-        return {
-          status: 0,
-          stdout: responses[cmd] || 'working',
-          stderr: '',
-          signal: null,
-          output: [null, responses[cmd] || 'working', ''],
-          pid: 0,
-        };
-      });
-
-      vi.resetModules();
-
-      // Capture console.log output
-      const logOutput: string[] = [];
-      vi.spyOn(console, 'log').mockImplementation((...args) => {
-        logOutput.push(args.join(' '));
-      });
-
-      const { doctor } = await import('../commands/doctor.js');
-
-      // Claude SDK fails with API key error
-      mockDoctorQueryFn.mockImplementation(() =>
-        (async function* () {
-          throw new Error('Invalid API key provided');
-        })()
-      );
-
-      await doctor();
-
-      // Should show auth error with actionable hint
-      const hasAuthError = logOutput.some(line =>
-        line.includes('Claude') && (line.includes('auth error') || line.includes('ANTHROPIC_API_KEY'))
-      );
-      expect(hasAuthError).toBe(true);
-    });
-
     it('reports "needs login" promptly when agy is unauthenticated (fast OAuth detection)', async () => {
       // The gemini lane verifies via agy. An unauthenticated agy prints an OAuth
       // URL and waits; verifyAgy streams the output and must detect it on the
@@ -1292,21 +1237,190 @@ describe('doctor command', () => {
     });
   });
 
-  describe('Claude SDK auth probe (#1649 audit)', () => {
-    it('tells the probe not to touch anything', async () => {
-      // The package's second `bypassPermissions` call site. It is one turn with
-      // no tools needed, but it had no system prompt at all and runs in whatever
-      // directory the user typed `codev doctor` in. The #1649 fix is instruction
-      // rather than restriction, so the instruction is the thing to pin.
+  describe('Claude checks on the installed CLI (#1912)', () => {
+    // Doctor checks the claude lane's CLI the way the lane does: resolve the binary, check its
+    // version against the floor, then run `claude auth status` with the child env the lane would
+    // build. Every case runs a stub `claude`; none reaches a model.
+    const SAVED_ENV = [
+      'CODEV_CLAUDE_BIN', 'CODEV_ALLOW_REAL_CLAUDE', 'PATH', 'HOME', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+    ] as const;
+    const CLAUDE = 'Claude'.padEnd(12);
+    let savedEnv: Record<string, string | undefined>;
+    let originalCwd: string;
+    let tmpDir: string;
+    let workspace: string;
+    const stubs: StubClaude[] = [];
+
+    function pinStub(options?: StubClaudeOptions): StubClaude {
+      const stub = createStubClaude(options);
+      stubs.push(stub);
+      process.env.CODEV_CLAUDE_BIN = stub.bin;
+      return stub;
+    }
+
+    async function runDoctor(): Promise<{ code: number; lines: string[]; claudeRows: string[] }> {
+      const lines: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        lines.push(args.join(' '));
+      });
       vi.resetModules();
-      vi.spyOn(console, 'log').mockImplementation(() => {});
-
       const { doctor } = await import('../commands/doctor.js');
-      await doctor();
+      const code = await doctor();
+      // The "AI CLI Dependencies" row, then the "AI Model Verification" row when the CLI is usable.
+      const claudeRows = lines.filter((line) => line.startsWith('  ') && line.slice(4).startsWith(CLAUDE));
+      return { code, lines, claudeRows: claudeRows.filter((line) => !line.includes('verifying...')) };
+    }
 
-      const call = mockDoctorQueryFn.mock.calls.at(-1)?.[0];
-      expect(call?.options?.systemPrompt).toMatch(/do not read, create, or modify any file/i);
-      expect(call?.options?.systemPrompt).toMatch(/do not[\s\S]*run any command/i);
+    beforeEach(() => {
+      savedEnv = Object.fromEntries(SAVED_ENV.map((key) => [key, process.env[key]]));
+      originalCwd = process.cwd();
+      tmpDir = fs.mkdtempSync(path.join(tmpdir(), 'codev-doctor-claude-'));
+      workspace = path.join(tmpDir, 'workspace');
+      fs.mkdirSync(path.join(workspace, 'codev'), { recursive: true });
+      // So no global ~/.codev/config.json can set consult.claudeAuth under the test.
+      process.env.HOME = path.join(tmpDir, 'home');
+      fs.mkdirSync(process.env.HOME);
+      delete process.env.CODEV_ALLOW_REAL_CLAUDE;
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
+      process.chdir(workspace);
+
+      // Core deps, gh and codex present and working; claude is the variable.
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) return Buffer.from('/usr/bin/command');
+        if (cmd.includes('gh auth status')) return Buffer.from('Logged in');
+        return Buffer.from('');
+      });
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          node: 'v20.0.0', tmux: 'tmux 3.4', git: 'git version 2.40.0', codex: '0.60.0',
+        };
+        const stdout = responses[cmd] || 'working';
+        return { status: 0, stdout, stderr: '', signal: null, output: [null, stdout, ''], pid: 0 };
+      });
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+      for (const key of SAVED_ENV) restoreEnv(key, savedEnv[key]);
+      for (const stub of stubs.splice(0)) stub.cleanup();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('a logged-in claude at 2.1.326: ok rows with the version and the auth method (scenario 27)', async () => {
+      pinStub();
+      const { claudeRows } = await runDoctor();
+      expect(claudeRows).toEqual([`  ✓ ${CLAUDE} 2.1.326`, `  ✓ ${CLAUDE} logged in (claude.ai)`]);
+    });
+
+    it('claude not on PATH: a warning with the install hint, and codex alone still satisfies doctor (scenario 28)', async () => {
+      delete process.env.CODEV_CLAUDE_BIN;
+      // Under a test runner the PATH walk needs the real-claude opt-in (#1323). PATH is an empty
+      // dir, so there is no real claude to reach.
+      process.env.CODEV_ALLOW_REAL_CLAUDE = '1';
+      process.env.PATH = path.join(tmpDir, 'empty-path');
+      fs.mkdirSync(process.env.PATH);
+
+      const { lines, claudeRows } = await runDoctor();
+      expect(claudeRows).toHaveLength(1);
+      expect(claudeRows[0]).toContain(`⚠ ${CLAUDE} not found`);
+      expect(claudeRows[0]).toContain(CLAUDE_INSTALL_HINT);
+      expect(lines.some((line) => line.includes('⚠ Claude: not found'))).toBe(true);
+      // Claude no longer counts as installed when it is absent; codex is the working model here.
+      expect(lines.some((line) => line.includes('Codex') && line.includes('operational'))).toBe(true);
+      expect(lines.some((line) => line.includes('No AI model operational'))).toBe(false);
+    });
+
+    it('claude below the floor: a warning naming the floor and `claude update`, and no login check (scenario 29)', async () => {
+      const stub = pinStub({ version: { stdout: '2.1.100 (Claude Code)\n' } });
+      const { claudeRows } = await runDoctor();
+      expect(claudeRows).toHaveLength(1);
+      expect(claudeRows[0]).toContain(`⚠ ${CLAUDE} 2.1.100`);
+      expect(claudeRows[0]).toContain(CLAUDE_MIN_VERSION);
+      expect(claudeRows[0]).toContain('claude update');
+      expect(stub.invocations('authStatus')).toHaveLength(0);
+    });
+
+    it('claude logged out: a warning with `claude auth login` (scenario 30)', async () => {
+      pinStub({ authStatus: { stdout: `${JSON.stringify(STUB_LOGGED_OUT_STATUS)}\n`, exitCode: 1 } });
+      const { lines, claudeRows } = await runDoctor();
+      expect(claudeRows[0]).toBe(`  ✓ ${CLAUDE} 2.1.326`);
+      expect(claudeRows[1]).toContain(`⚠ ${CLAUDE} not logged in`);
+      expect(claudeRows[1]).toContain('claude auth login');
+      expect(lines.some((line) => line.includes('⚠ Claude: not logged in'))).toBe(true);
+    });
+
+    it('makes no model call: the stub sees only --version and auth status (scenario 31)', async () => {
+      // This replaces the #1649 audit of the SDK probe, which opened a model session with
+      // unrestricted tools in whatever directory doctor ran. Doctor no longer opens a session.
+      const stub = pinStub();
+      await runDoctor();
+      expect(stub.invocations().map((inv) => inv.argv)).toEqual([['--version'], ['auth', 'status', '--json']]);
+      expect(stub.invocations('print')).toHaveLength(0);
+    });
+
+    it('reports an ANTHROPIC_API_KEY from .env as withheld, without passing it on or touching process.env', async () => {
+      fs.writeFileSync(path.join(workspace, '.env'), 'ANTHROPIC_API_KEY=sk-ant-doctor-dotenv-value\n');
+      const stub = pinStub();
+      const { lines, claudeRows } = await runDoctor();
+      expect(claudeRows[1]).toBe(
+        `  ✓ ${CLAUDE} logged in (claude.ai) (ignoring ANTHROPIC_API_KEY (from .env) — ` +
+        'set consult.claudeAuth to "api-key" to bill the API instead)'
+      );
+      expect(stub.invocations('authStatus')[0].env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(process.env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(lines.join('\n')).not.toContain('sk-ant-doctor-dotenv-value');
+    });
+
+    it('reports a shell ANTHROPIC_API_KEY as withheld from the shell, and leaves process.env alone', async () => {
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-doctor-shell-value';
+      const stub = pinStub();
+      const { claudeRows } = await runDoctor();
+      expect(claudeRows[1]).toContain('ignoring ANTHROPIC_API_KEY (from shell)');
+      expect(stub.invocations('authStatus')[0].env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(process.env.ANTHROPIC_API_KEY).toBe('sk-ant-doctor-shell-value');
+    });
+
+    it('in api-key mode, runs auth status with the key and reports the API login', async () => {
+      fs.mkdirSync(path.join(workspace, '.codev'));
+      fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), JSON.stringify({ consult: { claudeAuth: 'api-key' } }));
+      fs.writeFileSync(path.join(workspace, '.env'), 'ANTHROPIC_API_KEY=sk-ant-doctor-api-key-mode\n');
+      const stub = pinStub({
+        authStatus: {
+          stdout: JSON.stringify({ loggedIn: true, authMethod: 'api_key', apiProvider: 'firstParty', apiKeySource: 'ANTHROPIC_API_KEY' }),
+        },
+      });
+      const { claudeRows } = await runDoctor();
+      expect(claudeRows[1]).toBe(`  ✓ ${CLAUDE} logged in (api_key)`);
+      expect(stub.invocations('authStatus')[0].env.ANTHROPIC_API_KEY).toBe('sk-ant-doctor-api-key-mode');
+    });
+
+    it('honours a CODEV_CLAUDE_BIN set only in the workspace .env, as consult does, without touching process.env', async () => {
+      const stub = createStubClaude();
+      stubs.push(stub);
+      delete process.env.CODEV_CLAUDE_BIN;
+      fs.writeFileSync(path.join(workspace, '.env'), `CODEV_CLAUDE_BIN=${stub.bin}\n`);
+      const { claudeRows } = await runDoctor();
+      expect(claudeRows).toEqual([`  ✓ ${CLAUDE} 2.1.326`, `  ✓ ${CLAUDE} logged in (claude.ai)`]);
+      expect(stub.invocations().map((inv) => inv.argv)).toEqual([['--version'], ['auth', 'status', '--json']]);
+      expect(process.env.CODEV_CLAUDE_BIN).toBeUndefined();
+    });
+
+    it('a shell CODEV_CLAUDE_BIN outranks the one in .env', async () => {
+      const inDotenv = createStubClaude();
+      stubs.push(inDotenv);
+      fs.writeFileSync(path.join(workspace, '.env'), `CODEV_CLAUDE_BIN=${inDotenv.bin}\n`);
+      const inShell = pinStub();
+      await runDoctor();
+      expect(inShell.invocations()).toHaveLength(2);
+      expect(inDotenv.invocations()).toHaveLength(0);
+    });
+
+    it('unparseable auth status: a warning quoting the output', async () => {
+      pinStub({ authStatus: { stdout: 'definitely not json\n' } });
+      const { claudeRows } = await runDoctor();
+      expect(claudeRows[1]).toContain(`⚠ ${CLAUDE} auth unknown`);
+      expect(claudeRows[1]).toContain('"definitely not json"');
     });
   });
 });

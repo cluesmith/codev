@@ -141,7 +141,7 @@ Verifies that all required dependencies are installed and properly configured:
 - gh (GitHub CLI, authenticated)
 
 **AI CLI Dependencies (at least one required):**
-- Claude (`@anthropic-ai/claude-code`)
+- Claude (the installed `claude` CLI, 2.1.141 or newer; its login is checked with `claude auth status`, with no model call)
 - Gemini (Antigravity CLI, `agy`)
 - Codex (`@openai/codex`)
 
@@ -174,7 +174,7 @@ Core Dependencies (required for Agent Farm)
 
 AI CLI Dependencies (at least one required)
 
-  ✓ Claude       working
+  ✓ Claude       2.1.326
   ✓ Gemini       working
   ○ Codex        not installed (npm i -g @openai/codex)
 
