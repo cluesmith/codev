@@ -154,6 +154,11 @@ with a ruling in A2.10. Divergences the moves preserved verbatim are listed in A
      (product-identical to `54b134795`, the Amendment 3 code head). The later `main` merge
      (`be68f7c58`, #1902/#1903: porch prompt rendering and agent-facing docs, plus one import
      conflict in `reset/context.ts`) touches no platform code; CI covers it.
+   - **Rows 1 and 13 need a re-run on the final pack.** The second `main` merge (`8b0860734`) brought
+     #1912, which replaced the Agent SDK in doctor's claude check and the consult claude lane with
+     the installed `claude` CLI; it did not work on native Windows (finding M16, fixed). Rows 1 and
+     13 passed on the SDK, so they are re-run on the final pack: `codev doctor` reports claude
+     operational, and `consult -m claude` returns a review from a Windows builder.
    - The ConPTY fixtures (item 1) remain open.
    - Findings, under "Manual pass findings": M1 (resolved: a machine npm setting, not a defect),
      M2 (double cursor, cosmetic follow-up), M3 (uninstall while Tower runs, docs follow-up), M4
@@ -1049,6 +1054,12 @@ Flaky Tests (main's #1902 rule).
   (`__tests__/bugfix-1880-codex-binary.test.ts`): a shebang script cannot be executed on Windows. Finding
   M13 covers the product side (`consult.codexPath` with an npm `.cmd` shim).
 
+- **Main's #1912, two `claude-cli.test.ts` tests skip on win32** (Spec 1658, M16): "a relative
+  pin is returned as an absolute path" (the Windows runner's checkout and temp dir are on different
+  drives, so no relative path reaches the stub) and "a pin that is not executable throws" (Windows
+  has no execute permission bit, so every existing file passes `X_OK`). The other #1912 tests run on
+  Windows against a `claude.cmd` stub.
+
 ## Follow-up Items
 
 Filed or ruled:
@@ -1099,7 +1110,7 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 
 | # | Scenario | Steps | Expected | Result |
 |---|---|---|---|---|
-| 1 | Fresh install | Git for Windows, jq, Node 22 or 24; no Visual Studio Build Tools. `npm install -g` the packed tarballs; `codev --version`; `codev doctor`; `codev init` in an empty folder. | Install needs no toolchain. `--version` prints the version (not empty). Doctor's "Windows Prerequisites" is green (Git Bash path and version, jq). `init` creates the project. | Pass (2026-11-02, Windows 11 26H2 build 26300.9711, Node 24.13.0, npm 11.6.2, tarballs packed from 793332c6e). No toolchain needed; `--version`, doctor and `init` as expected. Doctor's Claude check first failed: finding M1 (a machine npm setting, not a Codev defect). `init` must not target `%TEMP%`: Tower's home page hides temp-folder workspaces by design. |
+| 1 | Fresh install | Git for Windows, jq, Node 22 or 24; no Visual Studio Build Tools. `npm install -g` the packed tarballs; `codev --version`; `codev doctor`; `codev init` in an empty folder. | Install needs no toolchain. `--version` prints the version (not empty). Doctor's "Windows Prerequisites" is green (Git Bash path and version, jq). `init` creates the project. | Pass (2026-11-02, Windows 11 26H2 build 26300.9711, Node 24.13.0, npm 11.6.2, tarballs packed from 793332c6e). No toolchain needed; `--version`, doctor and `init` as expected. Doctor's Claude check first failed: finding M1 (a machine npm setting, not a Codev defect). `init` must not target `%TEMP%`: Tower's home page hides temp-folder workspaces by design. **Re-run needed on the final pack:** the second `main` merge replaced the Agent SDK with the installed `claude` CLI (finding M16). |
 | 3 | Tower + terminals | `afx tower start`; open the dashboard; type in the architect terminal; open a new shell; resize the window; `afx tower stop`. | Ready in seconds. The architect runs `claude` and takes input. The new shell is PowerShell. Resize reflows. Stop exits 0, `afx tower status` says not running, a second start succeeds (owner lock released). | Pass (2026-11-02). Architect `claude` starts and responds, the new shell is PowerShell, resize reflows, stop exits 0, status reports not running, restart succeeds. Cosmetic: two cursors in the architect terminal, finding M2. Re-check after the M6 fix and the `main` merge: Pass (reported 2026-11-10, tarballs and vsix packed from 1dfb17ccf, product-identical to 7903facff); the Agents view shows one entry per workspace. |
 | 4 | Persistence, three launchers | Run from Windows Terminal, the PowerShell console, and the VS Code terminal: spawn a builder, note its agent PID (`Get-Process claude`), `afx tower stop`, `afx tower start`. | The builder terminal reconnects with replayed output, same PID, input still works. In each launcher. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case D). From Windows Terminal, the PowerShell console and the VS Code terminal: after `afx tower stop` + `afx tower start` the builder terminal replays its output, keeps the same `claude.exe` PID, and takes input. |
 | 6b | Long paths | Workspace at `C:\Users\<name>\src\<repo>`, `LongPathsEnabled` off; spawn a builder; `npm install` in its worktree. | Install completes. Doctor reports workspace depth and `core.longpaths`. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, cases A and C). `LongPathsEnabled` 0; doctor reports the workspace depth and `core.longpaths`; `npm install` completes in the builder worktree under `.builders\`. |
@@ -1107,7 +1118,7 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 | 9 | Spawn to PR | `afx spawn <issue> --protocol bugfix` on a throwaway issue; let it reach PR creation. | Builder launches through Git Bash, porch transitions phases, the PR opens via the forge. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case C). A bugfix builder launches through Git Bash, porch moves it through its phases, and it opens a PR referencing the issue. |
 | 11 | Developer Mode on | Enable Developer Mode; spawn a builder in a repo with `worktree.symlinks` configured. | Real symlinks (`Get-Item <link>` shows `SymbolicLink`). With it off, directories are junctions and files hard links or copies (a copy warns). | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case F, Developer Mode on). `.env` in the builder worktree is a `SymbolicLink` to the main checkout's `.env`. The Developer Mode off path (hard link, or a copy with a warning) is covered by Windows CI, whose runners cannot create symlinks; not re-run on the owner machine. |
 | 12 | `afx send` live | `scripts/bugfix-1664-streaming-delivery-harness.mts --scenario streaming`, then `--scenario draft` (from `packages/codev`). | Streaming with an empty composer: delivered. Typed draft: held (`user-text`). Idle: delivered. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case E, live agents rather than the harness script). Idle builder: delivered at once. Typed draft: held, then delivered once the draft was cleared. Builder mid-answer: delivered without corrupting its output. |
-| 13 | Consult | From a Windows builder, a 3-way consult (porch-run, or `consult -m codex` / `-m claude` directly). | codex and claude return; an unauthenticated agy skips without blocking. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case G). `consult -m claude` and `-m codex` answer from Windows; gemini (agy) does not block; the porch-run 3-way consult on the case C builder's PR completes. |
+| 13 | Consult | From a Windows builder, a 3-way consult (porch-run, or `consult -m codex` / `-m claude` directly). | codex and claude return; an unauthenticated agy skips without blocking. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case G). `consult -m claude` and `-m codex` answer from Windows; gemini (agy) does not block; the porch-run 3-way consult on the case C builder's PR completes. **Re-run needed on the final pack:** the second `main` merge replaced the Agent SDK with the installed `claude` CLI (finding M16). |
 | 15 | VS Code extension | In VS Code on Windows: start Tower from the extension, spawn a builder, open its terminal, reveal a file. | Each works; no console windows flash. | Pass on the branch vsix (reported 2026-11-10, tarballs and vsix packed from 1dfb17ccf, product-identical to 7903facff). The Codev output channel showed `[Preflight] status=ok cli=3.3.7 ext=3.3.7`; from the sidebar, start Tower, spawn a builder, open its terminal and reveal a file all work, with no "CLI not installed" warning and no console window. The first attempt (reported 2026-11-09) used the Marketplace extension, `main`'s code, whose shell-less spawn cannot run the npm `.cmd` shim, the defect `apps/vscode/src/cli-process.ts` fixes; it is not counted. |
 | 15a | IDE server (optional dry run) | With the real `@cluesmith/codev-ide-server` installed: `afx ide start`, open `/ide/?folder=<repo>`, `afx ide stop`. | Found via `PATH`, passes the 1.128.0 floor, serves the folder, installs the sidebar extension; stop leaves no `codev-ide-server` or extension host process. | Pass (2026-11-02, published `@cluesmith/codev-ide` 1.0.0 and `@cluesmith/codev-ide-win32-x64` 1.0.0 via `afx ide install`; the package is now `@cluesmith/codev-ide`, not the name in Steps). The workbench loads and works through Codev Cloud, with the CODEV and CODEV TOWER views. A blank console window and some console errors belong to the codev-ide package (finding M4); asset 502s after a Tower re-registration are a Tower tunnel filing candidate (finding M5). Codev's own spawn is clean. Re-check: Pass (reported 2026-11-10, tarballs and vsix packed from 1dfb17ccf, product-identical to 7903facff). The dashboard's Open IDE link (new with #1869 via the `main` merge) opened the workbench without the folder: finding M7, fixed in this PR. |
 | G | ConPTY fixtures (gate condition) | Capture recipe in `audit.md` "ConPTY → Phase 8": `node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app claude --state all -- --model haiku` (and codex once #1858 lands). | Four `conpty-claude-*.capture.jsonl.gz` files, committed to `__tests__/fixtures/gate/conpty/`; the replay suite runs them instead of skipping: idle, midturn and resize delivered, draft held. | Pass (2026-11-17, owner machine, claude 2.1.326, packs from `b18bc57c`): six captures committed (idle, draft, midturn, resize, plus the M15 controls prefix and prefix-left); all replay as expected. The script ran from inside the installed package as plain JavaScript (Node does not strip types under `node_modules`). Idle and draft first failed: finding M15, fixed. |
@@ -1503,6 +1514,26 @@ earlier owner sessions (11:05-11:32) and in none of the eight since, in either p
 the controls could not be recorded with it showing; what triggers it is unknown (neither window
 focus nor permission mode). A wide-character ghost was never seen and is untested. If a later
 capture shows an inverse typed character with a dim remainder, the first-input anchor comes out.
+
+**M16. Main's #1912 claude consult lane and doctor's claude check did not work on native Windows
+(found merging `main`, 2026-11-17). Fixed in this PR (architect ruling (a)).** #1912 moved the
+claude lane and doctor's check from the Agent SDK to the installed `claude` CLI. Its
+`resolveClaudeBin` walked `PATH` for a file named exactly `claude`, but Windows installs are
+`claude.exe` (native installer) or an npm `claude.cmd`; and `readClaudeVersion`, `auth status` and
+the review spawn ran the binary directly, which cannot start a `.cmd`. The merge head
+`8b0860734` failed 105 Windows unit tests (Windows 44024895591, all in #1912's surface:
+`claude-cli`, `claude-cli-lane`, `doctor`, `tripwire-wiring`, `bugfix-1754-dotenv-auth`, `consult`,
+`lane-models`, `test-isolation`), because its test stub and the vitest sandbox's fake claude are
+`#!/bin/sh` scripts. Owner scenarios 1 (doctor) and 13 (consult) passed on the SDK, before this
+code. Fix: on Windows only (one `isWindows()` site), `resolveClaudeBin`'s `PATH` walk goes through
+`findOnHostPath` (`PATHEXT`, `PATH` only, never the cwd; the `#1323` guard still runs first; the
+`CODEV_CLAUDE_BIN` pin is unchanged); the three launches go through `claudeLaunch`
+(`spawnableOnHost`: identity on POSIX and for `claude.exe`, an npm `claude.cmd` becomes `node
+<entry>`, another `.cmd` runs through `cmd.exe`), the pin included. Tests: on win32 the stub and the
+sandbox fake are `claude.cmd` files running the same node logic (the POSIX scripts are
+byte-identical); a new test checks a `claude` in the cwd is never taken; the PATH-walk test compares
+case-insensitively on win32 (`PATHEXT` spells the extension); two tests skip on win32 for harness
+facts (Platform Skips).
 
 ## Appendix: Implementation Notes by Phase
 

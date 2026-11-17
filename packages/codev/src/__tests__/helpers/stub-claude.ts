@@ -155,9 +155,15 @@ export function createStubClaude(options: StubClaudeOptions = {}): StubClaude {
   fs.writeFileSync(script, STUB_SCRIPT);
 
   // A shell wrapper rather than a node shebang: shebang lines have length limits, and the absolute
-  // node path keeps the stub runnable under a PATH that a test has narrowed.
-  const bin = path.join(dir, 'claude');
-  fs.writeFileSync(bin, `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(script)} "$@"\n`, { mode: 0o755 });
+  // node path keeps the stub runnable under a PATH that a test has narrowed. Native Windows cannot
+  // run either, so there the stub is a `claude.cmd` doing the same (Spec 1658, M16).
+  let bin = path.join(dir, 'claude');
+  if (process.platform === 'win32') {
+    bin = path.join(dir, 'claude.cmd');
+    fs.writeFileSync(bin, `@"${process.execPath}" "${script}" %*\r\n`);
+  } else {
+    fs.writeFileSync(bin, `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(script)} "$@"\n`, { mode: 0o755 });
+  }
 
   const log = path.join(dir, 'invocations.jsonl');
   return {

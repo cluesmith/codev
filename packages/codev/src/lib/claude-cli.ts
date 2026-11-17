@@ -18,6 +18,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { isClaudeSessionMarker } from './agent-env.js';
+import { findOnHostPath, spawnableOnHost } from './host-executable.js';
+import { isWindows } from './platform.js';
 import { assertClaudeLaneAllowedUnderTest } from './test-env.js';
 import { loadConfig, findConfigSource } from './config.js';
 import type { ClaudeAuthMode } from './consult-lanes.js';
@@ -136,10 +138,17 @@ export function resolveClaudeBin(env: NodeJS.ProcessEnv = process.env): string {
   // the test-isolation guard (#1323), as `resolveAgyBin` is for agy.
   assertClaudeLaneAllowedUnderTest();
 
-  for (const dir of (env.PATH ?? '').split(path.delimiter)) {
-    if (!dir) continue;
-    const candidate = path.join(dir, 'claude');
-    if (isExecutableFile(candidate)) return candidate;
+  // Spec 1658 (M16): Windows installs are `claude.exe` or an npm `claude.cmd`, so the walk honours
+  // PATHEXT there. Like the POSIX walk it reads PATH only, never the cwd.
+  if (isWindows()) {
+    const found = findOnHostPath('claude', env);
+    if (found !== null) return found;
+  } else {
+    for (const dir of (env.PATH ?? '').split(path.delimiter)) {
+      if (!dir) continue;
+      const candidate = path.join(dir, 'claude');
+      if (isExecutableFile(candidate)) return candidate;
+    }
   }
   throw new Error(
     `The claude CLI was not found on PATH. The claude review lane runs your installed claude. ` +
@@ -147,14 +156,33 @@ export function resolveClaudeBin(env: NodeJS.ProcessEnv = process.env): string {
   );
 }
 
+/**
+ * `bin args` in the form the host starts without a shell (Spec 1658, M16): unchanged on POSIX and
+ * for a native `claude.exe`; an npm `claude.cmd` becomes the `node <entry>` it wraps. Every claude
+ * launch goes through here, the pinned binary included.
+ */
+export function claudeLaunch(
+  bin: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): { command: string; args: string[]; options: { windowsVerbatimArguments?: true } } {
+  const spawnable = spawnableOnHost(bin, args, env);
+  if (spawnable.windowsVerbatimArguments) {
+    return { command: spawnable.command, args: spawnable.args, options: { windowsVerbatimArguments: true } };
+  }
+  return { command: spawnable.command, args: spawnable.args, options: {} };
+}
+
 /** `bin --version`, parsed to `MAJOR.MINOR.PATCH` (`2.1.326 (Claude Code)` → `2.1.326`). */
 export function readClaudeVersion(bin: string): string {
   let out: string;
   try {
-    out = execFileSync(bin, ['--version'], {
+    const launch = claudeLaunch(bin, ['--version']);
+    out = execFileSync(launch.command, launch.args, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: CLAUDE_PREFLIGHT_TIMEOUT_MS,
+      ...launch.options,
     });
   } catch (err) {
     throw new Error(`Cannot run \`${bin} --version\` (${describeExecFailure(err)}).`);
@@ -300,11 +328,13 @@ function parseClaudeAuthStatus(bin: string, stdout: string): ClaudeAuthStatus {
 export function readClaudeAuthStatus(bin: string, env: Record<string, string>): ClaudeAuthStatus {
   let stdout: string;
   try {
-    stdout = execFileSync(bin, ['auth', 'status', '--json'], {
+    const launch = claudeLaunch(bin, ['auth', 'status', '--json'], env);
+    stdout = execFileSync(launch.command, launch.args, {
       encoding: 'utf-8',
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: CLAUDE_PREFLIGHT_TIMEOUT_MS,
+      ...launch.options,
     });
   } catch (err) {
     const e = err as { status?: unknown; stdout?: unknown };

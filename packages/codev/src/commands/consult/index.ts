@@ -36,6 +36,7 @@ import {
   CLAUDE_BIN_ENV,
   CLAUDE_UPDATE_HINT,
   ClaudePreflightError,
+  claudeLaunch,
   credentialOrigin,
   excerpt,
   preflightClaude,
@@ -968,7 +969,14 @@ function startClaudeReview(opts: {
   env: Record<string, string>;
   onText: (text: string) => void;
 }): { child: ChildProcess; finished: Promise<ClaudeReviewRun> } {
-  const child = spawn(opts.bin, opts.args, { cwd: opts.cwd, env: opts.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  // Spec 1658 (M16): an npm claude.cmd on Windows starts as `node <entry>`; unchanged on POSIX.
+  const launch = claudeLaunch(opts.bin, opts.args, opts.env);
+  const child = spawn(launch.command, launch.args, {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    ...launch.options,
+  });
 
   const finished = new Promise<ClaudeReviewRun>((resolve, reject) => {
     let settled = false;
