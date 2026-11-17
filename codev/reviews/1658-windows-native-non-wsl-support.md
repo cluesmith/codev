@@ -1011,6 +1011,9 @@ change on either platform.
   `agy-lane-model.test.ts`) and run 42734572993 attempt 1 (Node 22, head `5bc668fb1`: all 389 files
   and 7667 tests passed, then the pool reported an unhandled "Worker exited unexpectedly" with no
   test attributed). Attempt 2 was green. Recorded; not skipped (nothing to skip).
+  **Third sighting:** run 44030447127 attempt 1 (Node 22, head `b306fed33`): 8045 tests passed with
+  none failing, then the same unattributed "Worker exited unexpectedly"; Node 24 passed in the same
+  run, and attempt 2 was green on every job.
 
 - **POSIX CI on the PR found two latent test bugs** (this branch had no PR, so `test.yml` had not
   run on it before 2026-10-23). Both pass on macOS, which is why local runs missed them:
