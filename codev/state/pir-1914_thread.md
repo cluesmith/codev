@@ -12,3 +12,7 @@
 - Server: ideAvailability(viaTunnel) in ide-server.ts; /api/status carries ide:{available, viaTunnel}. ide-forward: TokenCookiePolicy (strip | scope) shared by HTTP and the WS 101; tunnel-borne vscode-tkn gets Path=/t/<tower>/ide; getPublicAuthority rejects unsafe tower_name.
 - Dashboard: refreshIdeStatus + ./api/ide poll removed; refresh() reads data.ide; openIde skips the mint when viaTunnel; ideTargetUrl relative to location.href.
 - Note: the tower name from `afx tower connect` is prompted without validation (tower-cloud.ts:134); normalized names pass the check.
+
+## 2026-11-18 dev-approval
+- porch tests check failed on the pre-existing protocol-drift-audit test: the machine scoped @cluesmith registry overrides npm_config_registry, and pnpm script runner re-exports user npm config, so an env scope override is not enough. Per architect ruling, ran porch done once with npm_config_userconfig=<empty temp file> (deleted after). Build + tests green. pir-1233 launch-loop failed once in a parallel run (recorded intermittent).
+- Gate dev-approval pending. The cloud check needs a cloud-registered Tower running this build.
