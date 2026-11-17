@@ -75,3 +75,17 @@ Commit 6f10c66cd. `codev doctor` checks the installed CLI with no model call, an
 - Manual run of the built `codev doctor` in this worktree, real claude: `✓ Claude 2.1.326`, then `✓ Claude logged in (claude.ai) (ignoring ANTHROPIC_API_KEY (from .env) — set consult.claudeAuth to "api-key" to bill the API instead)`.
 - Known gap, not in the plan: a `CODEV_CLAUDE_BIN` set only in `.env` would steer consult (which loads `.env` before resolving the binary) but not doctor (which resolves from the real `process.env`).
 porch done phase_3: build ✓ (15.4s), tests ✓ (46.0s). Review iter1: codex APPROVE (HIGH, no issues), claude APPROVE (HIGH). Claude's two minor notes: (a) `checkClaude` catches the test-isolation guard where `checkAgy` lets it propagate. A comment now explains why (nothing ran, and the message lands in the row). (b) The `.env`-only `CODEV_CLAUDE_BIN` gap above. It goes into the phase_4 docs and the review doc; the lane's resolution is not changed.
+
+## Implement phase_4 (2026-11-17)
+Docs in every tree now say "installed `claude` CLI".
+- `CLAUDE.md`/`AGENTS.md`: one sentence, `cmp` passes.
+- `consult` and `codev` skills, four identical copies each. The consult skill's "Credentials and `.env`" claude bullet was rewritten, because it still said an OAuth token drops the API keys. That was the #985 rule, and it no longer holds.
+- `consult.md` (both twins, `diff` empty):
+  - lane, performance and prerequisite rows
+  - a new `consult.claudeAuth` subsection, plus its row in the validation table
+  - `CODEV_CLAUDE_BIN` / `CODEV_ALLOW_REAL_CLAUDE` in the test-isolation table. The `CODEV_CLAUDE_BIN` row names the `.env`-only gap: it steers consult but not doctor.
+  - the auth section rewritten: login by default, the withheld-key line, the `api-key` breaking change with its exact error text, the fail-fast table, and the error shape that names the binary (`The claude lane ran <bin>, <version> (from PATH).`). The Agent-SDK credit caveat is gone.
+- Added beyond the plan: `codev.md`'s doctor section (both trees) listed Claude as `@anthropic-ai/claude-code` and showed `✓ Claude working`. It now names the installed CLI, the 2.1.141 floor and the `auth status` check. The two trees' copies already differed elsewhere, and that difference is unchanged.
+- Cold-tier lesson [From 0120] got a trailing Spec 1912 note.
+- Skill hashes regenerated (4 new hashes: codev + consult in `.claude` and `.codex`). Tests run, touched files only: `skill-refresh` (23 passed), plus the 7 test files that read these docs (governance-sweep, scar-rules, 1902 prompt-sweep, hot-tier, review-prompt-routing, framework-ref-audit, measurement-instrument; 144 passed).
+- For the review phase: `arch.md`'s consult design-decision section (~line 2030) still has a pre-SDK table (`claude` with the query prepended, `ANTHROPIC_API_KEY`) and a "Claude nesting limitation" paragraph. It never described the SDK lane, so the plan's grep did not catch it. Route it at review time through update-arch-docs; it is not a phase_4 edit.

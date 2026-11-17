@@ -141,8 +141,8 @@ apps/streamdeck; Elgato channel: profiles, Maker Console, packaging) · core · 
 
 **Enabled by default.** Three reviewers: **Gemini** via the Antigravity CLI (`agy`, skips
 non-blockingly if unauthenticated), **GPT-5.6 Sol** (`gpt-5.6-sol` — the `-sol` suffix is
-load-bearing) via the Codex SDK, and **Claude Opus 5** via the Agent SDK. Disable only when
-the user says "without consultation".
+load-bearing) via the Codex SDK, and **Claude Opus 5** via the installed `claude` CLI (your
+subscription login by default). Disable only when the user says "without consultation".
 
 Consult after writing implementation code and after writing tests, before presenting results.
 **"cmap"** means run all three in parallel *in the background* and return control immediately.

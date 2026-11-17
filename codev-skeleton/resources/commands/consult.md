@@ -43,7 +43,7 @@ consult -m codex --model-id gpt-5.6-sol --prompt "Review this design"
 |-------|-------|---------|--------------------------|-------|
 | `gemini` | `pro` | Antigravity CLI (`agy`) | *(agy's own default — no pinned id)* | Agentic file access (`--sandbox --add-dir`), OAuth/subscription login. Skips non-blockingly if `agy` is missing/unauthed. |
 | `codex` | `gpt` | @openai/codex | `gpt-5.6-sol` (medium reasoning effort) | Read-only sandbox, thorough |
-| `claude` | `opus` | Claude Agent SDK | `claude-opus-5` | Balanced analysis with tool use |
+| `claude` | `opus` | Your installed `claude` CLI (`claude -p`) | `claude-opus-5` | Read-only (Read/Glob/Grep); your `claude` login by default ([auth](#claude-auth-subscription-vs-metered-api)) |
 | `hermes` | - | hermes CLI (`hermes chat -q`) | *(hermes' own default)* | Uses Hermes agent as consult backend |
 
 > **The codex lane's `-sol` suffix is load-bearing.** Plain `gpt-5.6` and `gpt-5.6-codex` are both
@@ -124,6 +124,28 @@ than the bundle ("requires a newer version of Codex"), point the lane at your ow
   consultation. There is **no fallback** to the bundled CLI.
 - Authentication is unchanged: the lane passes no API key, so your binary uses the stored
   `codex login` (or `CODEX_API_KEY`, if you set one).
+
+### `consult.claudeAuth`
+
+The claude lane runs **your installed `claude` CLI**: the one on `PATH`, or the one
+`CODEV_CLAUDE_BIN` names. Upgrading `claude` upgrades the lane; there is no bundled copy. This key
+picks what the lane bills:
+
+```json
+{ "consult": { "claudeAuth": "api-key" } }
+```
+
+| Value | The lane authenticates with | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` |
+|---|---|---|
+| `"login"` (default) | the CLI's own login: your Claude subscription, for most people | withheld from the `claude` child, whether set in the shell or in `.env` |
+| `"api-key"` | the API key or token | passed through; at least one must be set, or the lane fails before the review starts |
+
+- Any other value is an error at config load, naming the valid values.
+- Like every `consult.*` key it is honoured from any config layer: committed project config for
+  CI, global config for a key-only personal machine. In `api-key` mode the auth line names the
+  file that set the key, on every run, so an opt-in is never invisible.
+- What passes through in `login` mode, what the auth line says, and how the lane fails are in
+  [Claude auth: subscription vs. metered API](#claude-auth-subscription-vs-metered-api).
 
 ### `consult.pricing.codex`
 
@@ -227,6 +249,7 @@ offending key and the valid alternatives. Nothing falls back to a default on err
 | `reasoningEffort` | **Codev**, against a closed enum | Config load, before anything runs |
 | Model ids | **The provider** | When the lane runs |
 | `codexPath` | **Codev**: absolute-path syntax, then `<path> --version` | Syntax at config load; a binary that doesn't run, when the codex lane starts |
+| `claudeAuth` | **Codev**, against a closed enum (`login`, `api-key`) | Config load, before anything runs |
 
 Codev checks a model id's *syntax* only (ASCII alphanumerics plus `. _ : / @ + -`, 1–200 characters,
 no leading punctuation) — never its existence. **There is no allowlist of model ids anywhere in
@@ -234,7 +257,7 @@ Codev, by design**: a new model must work the day the provider ships it, without
 
 So a typo'd model id is not caught at config time. It reaches the backend, which rejects it; that
 lane exits non-zero, the provider's error text is surfaced, the config key that supplied the id is
-named, and **no review file is written** — so porch cannot advance on a lane that never ran. What
+named (the claude and codex lanes also name the binary that ran), and **no review file is written** — so porch cannot advance on a lane that never ran. What
 you do *not* get is a silent substitution of the default model.
 
 One deliberate exception: a `gemini` lane **with no model id resolved** still skips non-blockingly
@@ -368,15 +391,16 @@ consult -m hermes --protocol spir --type spec
 |-------|--------------|----------|
 | Gemini | ~120-180s | Antigravity CLI (`agy`); agentic file access via `--sandbox`, plain text output |
 | Codex | ~200-250s | Shell command exploration, read-only sandbox |
-| Claude | ~60-120s | Agent SDK with Read/Glob/Grep tools |
+| Claude | ~60-120s | Installed `claude` CLI in print mode, Read/Glob/Grep only |
 
 ## Prerequisites
 
 Install the model CLIs you plan to use:
 
 ```bash
-# Claude Agent SDK
-npm install -g @anthropic-ai/claude-code
+# Claude: the installed claude CLI, 2.1.141 or newer
+curl -fsSL https://claude.ai/install.sh | bash
+claude auth login   # sign in once (your Claude subscription)
 
 # Codex
 npm install -g @openai/codex
@@ -387,7 +411,9 @@ agy   # run once and sign in (OAuth / Google subscription)
 ```
 
 Configure auth:
-- Claude: the stored `claude` login, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`
+- Claude: the stored `claude` login (`claude auth login`), or `CLAUDE_CODE_OAUTH_TOKEN`. An API key
+  is used only with `consult.claudeAuth: "api-key"`; see
+  [Claude auth](#claude-auth-subscription-vs-metered-api).
 - Codex: the stored `codex login`, or `CODEX_API_KEY` (codex ignores `OPENAI_API_KEY`)
 - Gemini (`agy`): **OAuth / subscription** — run `agy` once and sign in (no API key). If `agy`
   is missing or unauthenticated, the gemini lane skips non-blockingly (the run proceeds without it).
@@ -425,45 +451,106 @@ cache disables itself under `VITEST` unless a cache directory is named, and any
 test that reached the gemini lane without pinning `CODEV_AGY_BIN` resolved the
 real binary — so a suite run could still open a login window per spawn (#1323).
 Consult now treats a test runner as a hard boundary. Under `VITEST` (or
-`CODEV_TEST_ISOLATION`) it refuses to resolve an unpinned `agy` and refuses to open the
-user-global metrics database, failing loudly instead of reaching either. Codev's
-own suites pin a fake `agy`, a sandbox auth cache, and a sandbox metrics DB for
-every test; spawned `codev` / `consult` children inherit the pins through the
-environment.
+`CODEV_TEST_ISOLATION`) it refuses to resolve an unpinned `agy` or `claude` and refuses
+to open the user-global metrics database, failing loudly instead of reaching any of
+them. Codev's own suites pin a fake `agy`, a fake `claude`, a sandbox auth cache, and
+a sandbox metrics DB for every test; spawned `codev` / `consult` children inherit the
+pins through the environment.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `CODEV_AGY_BIN` | auto-resolved | Pin the agy binary. The harness sets this to a fake for every test. |
 | `CODEV_ALLOW_REAL_AGY` | unset | `1` opts a test run into the REAL agy binary — the guarded integration smoke and real-AI e2e runs. Expect a browser window if agy's login has lapsed. |
+| `CODEV_CLAUDE_BIN` | `claude` on `PATH` | Pin the claude binary the claude lane and `codev doctor` run. Must be an executable file; a bad pin fails, with no fallback to `PATH`. The harness sets this to a fake for every test. Set it in the shell: consult loads `<workspace>/.env` before resolving the binary, so a value only in `.env` steers consult but not `codev doctor`. |
+| `CODEV_ALLOW_REAL_CLAUDE` | unset | `1` opts a test run into the REAL `claude` on `PATH`: the opt-in read-only review e2e. It spends tokens on your login. (Renamed from `CODEV_ALLOW_REAL_CLAUDE_SDK`.) |
 | `CODEV_METRICS_DB` | `~/.codev/metrics.db` | Redirect the consult metrics database. Required under a test runner; the harness points it at a temp dir so suite runs stop skewing `consult stats`. |
 | `CODEV_TEST_ISOLATION` | unset | `1` applies the same guards to a harness that is not vitest. |
 
 **Adopters:** `VITEST` is exported by *any* vitest run, including yours. If your
 project's own suite deliberately shells out to `consult -m gemini`, that call now
 throws until you set `CODEV_ALLOW_REAL_AGY=1` (and `CODEV_METRICS_DB` if you want
-the metrics recorded somewhere). This is intentional — a suite reaching the real
+the metrics recorded somewhere). `consult -m claude` likewise needs
+`CODEV_CLAUDE_BIN` or `CODEV_ALLOW_REAL_CLAUDE=1`. This is intentional — a suite reaching the real
 agy is what #1323 was about — but it is a behaviour change, not a silent one: the
 error names the variable to set.
 
 ### Claude auth: subscription vs. metered API
 
-`consult -m claude` runs on the Claude Agent SDK. When `CLAUDE_CODE_OAUTH_TOKEN`
-(a Claude subscription/OAuth token) is present, consult strips `ANTHROPIC_API_KEY`
-and `ANTHROPIC_AUTH_TOKEN` from the SDK subprocess env so the consultation
-authenticates against the **subscription** rather than the **metered Opus API**.
-The Agent SDK otherwise prioritizes `ANTHROPIC_API_KEY`, which silently routes
-CMAP/review traffic to the metered API (issue #985). When no OAuth token is set,
-the API key is used as before so CI / key-only environments keep working.
+`consult -m claude` runs your installed `claude` CLI in print mode, on **the CLI's own login**:
+your Claude subscription, for most people. That is `consult.claudeAuth: "login"`, the default.
 
-**Workspace `.env` (issue #1754).** `consult` loads `<workspace>/.env` and sets every key the
-shell does not already define, credentials included. So a `CLAUDE_CODE_OAUTH_TOKEN` there
-overrides your stored login and, via the strip above, displaces the API key too; `CODEX_API_KEY`
-does the same for codex. Each SDK lane logs what it authenticates with, e.g.
-`[CLAUDE] auth: CLAUDE_CODE_OAUTH_TOKEN (from .env)`. A result the SDK flags as an error (usage
-limit, billing, auth) fails the run with no output file, and the error names that credential.
+- **API keys are withheld.** `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` never reach the
+  `claude` child in `login` mode, whether they come from the shell or from `<workspace>/.env`.
+  Before #1912, an `ANTHROPIC_API_KEY` in `.env` (there for app code, say) billed review traffic
+  to the metered API unless an OAuth token was also set (#985 covered only that case).
+- **What passes through:** `CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token` subscription token,
+  which is a login rather than API billing), and explicit provider and routing configuration
+  (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, …, `ANTHROPIC_BASE_URL`, proxies).
+- **Workspace `.env` (#1754).** `consult` loads `<workspace>/.env` and sets every key the shell
+  does not already define, credentials included. A `CLAUDE_CODE_OAUTH_TOKEN` there outranks your
+  stored login, and the auth line says `(from .env)`. A key exported in the shell wins over `.env`.
+  `CODEX_API_KEY` in `.env` likewise outranks the codex lane's stored `codex login`.
 
-> **Caveat:** dedicated Agent-SDK subscription credit starts **2026-06-15**.
-> Before that date, subscription auth draws from the interactive Max quota.
+Every run prints two lines before the review starts:
+
+```
+[CLAUDE] binary: /Users/you/.local/bin/claude, 2.1.326 (from PATH)
+[CLAUDE] auth: claude.ai (max) — stored claude login; ignoring ANTHROPIC_API_KEY (from .env) — set consult.claudeAuth to "api-key" to bill the API instead
+```
+
+The auth line names the auth method `claude auth status` reports, the credential in use and
+where it came from, and any key that was withheld. It never prints an email address, an org name
+or a credential value. Other shapes:
+
+```
+[CLAUDE] auth: oauth_token — CLAUDE_CODE_OAUTH_TOKEN (from .env)
+[CLAUDE] auth: api_key (ANTHROPIC_API_KEY) — ANTHROPIC_API_KEY (from shell), consult.claudeAuth="api-key" in /repo/.codev/config.json
+```
+
+**Billing the API instead (CI, key-only machines).** Set `"consult": { "claudeAuth": "api-key" }`.
+The keys then pass through, and at least one must be set. **This is a breaking change for
+key-only environments.** A CI job with `ANTHROPIC_API_KEY` and no `claude` login now fails with:
+
+```
+claude reports no login (authMethod: none). Run `claude auth login`. ANTHROPIC_API_KEY is set but not used: to bill the API with it instead, set consult.claudeAuth to "api-key" in .codev/config.json.
+```
+
+That one config line is the fix.
+
+**Fail fast, no fallbacks.** Before the review the lane runs `claude --version` and
+`claude auth status --json`, both local, with no model call. It fails, writes no `--output`
+(and removes a stale one) and records a metrics row with exit code 1 when:
+
+| Condition | What to do |
+|---|---|
+| `claude` is not on `PATH` | Install it (`curl -fsSL https://claude.ai/install.sh \| bash`), or set `CODEV_CLAUDE_BIN` |
+| `CODEV_CLAUDE_BIN` is not an executable file | Fix the path. Codev does not fall back to `PATH` |
+| Older than 2.1.141, or a version it cannot parse | `claude update` |
+| `claude auth status` reports no login | `claude auth login` |
+| `api-key` mode with neither key set | Set one, or remove `consult.claudeAuth` |
+
+It never falls back to another credential or to another `claude`. A run that fails before the
+auth status is known prints no auth line; its message is the explanation.
+
+Once the review runs, an error result (a usage limit, an invalid or expired credential) fails the
+run with no output file, and the message names the credential in use. A reviewer that fills its
+context window ("Prompt is too long") fails with a message naming the model and #1641; consult
+does not retry. Every failure after the preflight also names the binary that ran, so an old or
+unexpected `claude` is visible:
+
+```
+Claude CLI error (error_max_budget_usd). The review reached the $25 budget cap.
+
+The claude lane ran /Users/you/.local/bin/claude, 2.1.326 (from PATH).
+```
+
+**Read-only, isolated, and safe to nest.** The reviewer session has only Read, Glob and Grep: no
+edit, shell, web or MCP tools. It has a 200-turn cap and a $25 budget cap. It loads none of your
+settings files, hooks, plugins, MCP servers or CLAUDE.md, and its sessions are not saved, so
+reviews do not fill `claude --resume`. Claude Code's session markers (`CLAUDECODE` and related
+variables) are removed from the child's environment, so consult works from inside a Claude Code
+session. If the CLI denies any of the reviewer's tool calls, consult says so:
+`[CLAUDE] warning: claude denied 1 tool call (Read /etc/hosts). The review did not see what those calls asked for.`
 
 ## The Consultant Role
 
