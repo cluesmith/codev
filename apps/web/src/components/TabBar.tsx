@@ -11,6 +11,7 @@ export const TAB_ICONS: Record<Tab['type'], string> = {
   files: '📁',
   analytics: '📊',
   team: '👥',
+  decisions: '⚖️',
 };
 
 interface TabBarProps {

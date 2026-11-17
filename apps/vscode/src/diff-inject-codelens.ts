@@ -41,6 +41,13 @@ export const COMMENT_FOR_BUILDER_COMMAND = 'codev.commentForBuilder';
  *  scopes the `editor/context` "Forward Selection to Builder" item. */
 export const BUILDER_FILE_CONTEXT_KEY = 'codev.activeEditorIsBuilderFile';
 
+/** Context key (true when the active tab is a tracked builder diff, whichever
+ *  side has focus) that scopes the hunk-step keybindings (#1546). Only the
+ *  modified (worktree) side is registered, and inside a diff editor the
+ *  built-in `resourceScheme` key follows the modified side too, so neither
+ *  holds with the original side focused. */
+export const BUILDER_DIFF_CONTEXT_KEY = 'codev.activeTabIsBuilderDiff';
+
 /** Setting + context key carrying the diff codelens mode (#1037). The setting
  *  persists per workspace; the same-named context key mirrors it so the
  *  `editor/title` toggle buttons swap via `when` clauses. */
@@ -182,6 +189,10 @@ export function activateDiffInjectCodeLens(context: vscode.ExtensionContext): vo
 
   const syncContextKey = (editor: vscode.TextEditor | undefined): void => {
     const isBuilderFile = !!editor && provider.get(editor.document.uri.fsPath) !== undefined;
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    const isBuilderDiff = isBuilderFile ||
+      (input instanceof vscode.TabInputTextDiff && provider.get(input.modified.fsPath) !== undefined);
+    void vscode.commands.executeCommand('setContext', BUILDER_DIFF_CONTEXT_KEY, isBuilderDiff);
     void vscode.commands.executeCommand('setContext', BUILDER_FILE_CONTEXT_KEY, isBuilderFile);
   };
   syncContextKey(vscode.window.activeTextEditor);

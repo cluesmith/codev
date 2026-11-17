@@ -3,19 +3,27 @@
  */
 
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, appendFileSync, statSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import { logger, fatal } from '../utils/logger.js';
-import { spawn } from 'node:child_process';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import { getConfig } from '../utils/config.js';
-import { execSync } from 'node:child_process';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { isPortAvailable } from '../utils/shell.js';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { activeStateDbPath, planMigration } from '../db/consolidate.js';
+import { sanitizeAgentEnv, findClaudeSessionMarkers } from '../../lib/agent-env.js';
+import { getProcessesOnPort } from '../utils/port.js';
+import { isWindows, windowsSystem32Path } from '../../lib/platform.js';
+import { spawnableOnHost } from '../../lib/host-executable.js';
+import { followFile } from '../../lib/file-follow.js';
+import { defaultWindowsStopDeps, forceKillTowerWindows, pidList, stopTowerWindows } from './windows/tower-lifecycle.js';
+import { cimRefusalMessage, daemonEnvironment, launchViaCim } from './windows/tower-lifecycle.js';
+import { isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
 
 // Log file location
 const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
@@ -66,9 +74,9 @@ async function previewStateDbMigration(): Promise<void> {
 
   let globalDb: Database.Database;
   if (existsSync(globalPath)) {
-    globalDb = new Database(globalPath, { readonly: true });
+    globalDb = openDatabase(globalPath, { readonly: true });
   } else {
-    globalDb = new Database(':memory:');
+    globalDb = openDatabase(':memory:');
   }
   try {
     const plan = planMigration(globalDb, source);
@@ -143,44 +151,84 @@ async function isServerResponding(port: number): Promise<boolean> {
 }
 
 /**
- * Wait for the server to start responding
+ * The three distinguishable outcomes of waiting for a freshly spawned Tower (Issue #1691).
+ * - `started`: the port answered readiness within the budget.
+ * - `exited`: the spawned daemon died before the port answered — a fast-exit refusal (the
+ *   #1629 owner-lock guard) or any early boot failure. The launcher stops waiting the instant
+ *   it observes the exit instead of burning the full timeout on a process already gone.
+ * - `timeout`: the budget elapsed with the daemon still alive but not answering (a real hang).
  */
-async function waitForServer(port: number): Promise<boolean> {
+export type TowerStartupOutcome = 'started' | 'exited' | 'timeout';
+
+/**
+ * Wait for a freshly spawned Tower to become ready, returning which of the three outcomes
+ * occurred. `isReady` is the readiness probe (port answering); `isDaemonAlive` reports whether
+ * the spawned daemon process is still running. Both are injectable so the outcome logic can be
+ * exercised deterministically without spawning a real server.
+ *
+ * The tower-server IS the daemon, so once it exits the port can never come up — hence a dead
+ * daemon short-circuits to `exited`. A final readiness re-probe closes the benign race where the
+ * daemon answered readiness in the same tick it was observed to exit.
+ */
+export async function waitForServerOutcome(
+  isReady: () => Promise<boolean>,
+  isDaemonAlive: () => boolean,
+  opts: { timeoutMs?: number; intervalMs?: number } = {}
+): Promise<TowerStartupOutcome> {
+  const timeoutMs = opts.timeoutMs ?? STARTUP_TIMEOUT_MS;
+  const intervalMs = opts.intervalMs ?? STARTUP_CHECK_INTERVAL_MS;
   const startTime = Date.now();
 
-  while (Date.now() - startTime < STARTUP_TIMEOUT_MS) {
-    if (await isServerResponding(port)) {
-      return true;
+  while (Date.now() - startTime < timeoutMs) {
+    if (await isReady()) {
+      return 'started';
     }
-    await new Promise((r) => setTimeout(r, STARTUP_CHECK_INTERVAL_MS));
+    if (!isDaemonAlive()) {
+      // The daemon is gone before the port answered. Re-probe once to close the benign race
+      // where it answered readiness in the same tick it was observed to exit.
+      if (await isReady()) {
+        return 'started';
+      }
+      return 'exited';
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
 
-  return false;
+  // Budget exhausted. The daemon may have exited during the final sleep — check once more so a
+  // fast-exit landing on the deadline is reported as `exited`, not a misleading `timeout`.
+  if (!isDaemonAlive()) {
+    if (await isReady()) {
+      return 'started';
+    }
+    return 'exited';
+  }
+  return 'timeout';
+}
+
+/** Current byte length of the tower log (0 if absent) — the boundary for {@link readLogSince}. */
+function currentLogOffset(): number {
+  try {
+    return statSync(LOG_FILE).size;
+  } catch {
+    return 0;
+  }
 }
 
 /**
- * Get the PID(s) of the process *listening* on a port (the server), not its
- * clients.
- *
- * `-sTCP:LISTEN` is load-bearing (#991): without it, `lsof -ti :PORT` also
- * returns every process holding an *established* client socket to the port —
- * notably the VSCode extension host (its SSE stream + terminal WebSockets) and
- * dashboard browsers. `afx tower stop` SIGTERMs whatever this returns, so the
- * unfiltered form would kill the editor's extension host (and every open
- * terminal with it), not just the Tower server.
+ * Read everything appended to the tower log since `offset` bytes. Surfaces a fast-exiting
+ * daemon's own output (e.g. the owner-lock guard's teaching error) verbatim, without dragging in
+ * stale lines from previous runs. Returns '' if the file is gone or nothing new was written.
  */
-export function getProcessesOnPort(port: number): number[] {
+function readLogSince(offset: number): string {
   try {
-    const result = execSync(`lsof -ti :${port} -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8' });
-    return result
-      .trim()
-      .split('\n')
-      .map((line) => parseInt(line, 10))
-      .filter((pid) => !isNaN(pid));
+    const buf = readFileSync(LOG_FILE);
+    return buf.subarray(Math.min(offset, buf.length)).toString('utf8').trim();
   } catch {
-    return [];
+    return '';
   }
 }
+
+export { getProcessesOnPort } from '../utils/port.js';
 
 /**
  * Start the tower dashboard
@@ -249,34 +297,123 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
   logToFile(`Starting tower server on port ${port}`);
   logToFile(`Command: ${command} ${args.join(' ')}`);
 
-  // Start tower server fully detached - stdio: 'ignore' ensures parent can exit
-  const serverProcess = spawn(command, args, {
-    cwd: process.cwd(),
-    env: process.env,
-    detached: true,
-    stdio: 'ignore', // Must be 'ignore' for true daemonization
-  });
-
-  if (!serverProcess.pid) {
-    logToFile('Failed to spawn tower server process');
-    fatal('Failed to start tower server');
+  // Issue #1219: scrub Claude Code session markers before daemonizing. Starting
+  // Tower from inside a Claude Code session is routine, and the markers it plants
+  // would otherwise bake into the daemon and cascade into every agent it spawns,
+  // silently disabling transcript saving (and therefore resume) for all of them.
+  const inheritedMarkers = findClaudeSessionMarkers(process.env);
+  if (inheritedMarkers.length > 0) {
+    logger.info(`Scrubbed inherited Claude Code session markers: ${inheritedMarkers.join(', ')}`);
+    logToFile(`Scrubbed inherited Claude Code session markers: ${inheritedMarkers.join(', ')}`);
   }
 
-  // Detach from parent process
-  serverProcess.unref();
+  // Issue #1691: track the daemon's liveness and mark where its own log output begins, so the
+  // readiness wait can distinguish a fast-exit (owner-lock refusal, early boot failure) from a
+  // genuine hang — and, on a fast-exit, surface the daemon's teaching error verbatim instead of
+  // a generic timeout. The offset is captured before the daemon starts (after the launcher's own
+  // pre-spawn writes) so readLogSince() returns only what THIS daemon run appended.
+  let daemonExited = false;
+  let logOffsetAtSpawn = currentLogOffset();
+  let isDaemonAlive = () => !daemonExited;
 
-  logToFile(`Spawned tower server with PID ${serverProcess.pid}`);
+  if (isWindows() && isInsideCodevSession(process.env)) {
+    // Spec 1658 Phase 4: launched from inside a codev session, a spawned daemon would sit in
+    // that session's Job Object and stop with it; create it outside through CIM instead.
+    let cimCommand = process.execPath;
+    let cimArgs = args;
+    if (command === 'npx') {
+      cimCommand = windowsSystem32Path('cmd.exe');
+      cimArgs = ['/d', '/c', 'npx', ...args];
+    }
+    logger.info('Inside a codev session: starting Tower outside the session job (CIM)');
+    logToFile('Launcher is inside a codev session; creating the daemon through CIM Win32_Process.Create');
+    logOffsetAtSpawn = currentLogOffset();
+    const launched = await launchViaCim({
+      command: cimCommand,
+      args: cimArgs,
+      cwd: process.cwd(),
+      env: daemonEnvironment(sanitizeAgentEnv(process.env)),
+    });
+    if ('error' in launched) {
+      logToFile(`CIM launch failed: ${launched.error}`);
+      fatal(cimRefusalMessage(launched.error));
+    }
+    const daemonPid = launched.pid;
+    logToFile(`Created tower server through CIM with PID ${daemonPid}`);
+    isDaemonAlive = () => {
+      try {
+        process.kill(daemonPid, 0);
+        return true;
+      } catch (err) {
+        // EPERM: alive, just not ours to signal (same rule as the Windows stop).
+        return (err as NodeJS.ErrnoException).code === 'EPERM';
+      }
+    };
+  } else {
+    // Start tower server fully detached - stdio: 'ignore' ensures parent can exit
+    const spawnOptions: SpawnOptions = {
+      cwd: process.cwd(),
+      env: sanitizeAgentEnv(process.env),
+      detached: true,
+      // Spec 1658: no console window for the daemon (ignored on POSIX).
+      windowsHide: true,
+      stdio: 'ignore', // Must be 'ignore' for true daemonization
+    };
+    let daemonCommand = command;
+    let daemonArgs = args;
+    if (isWindows()) {
+      // Spec 1658: dev mode's `npx` is a .cmd shim, which spawn cannot run without a shell.
+      const spawnable = spawnableOnHost(command, args);
+      daemonCommand = spawnable.command;
+      daemonArgs = spawnable.args;
+      spawnOptions.windowsVerbatimArguments = spawnable.windowsVerbatimArguments;
+    }
+    const serverProcess = spawn(daemonCommand, daemonArgs, spawnOptions);
+
+    if (!serverProcess.pid) {
+      logToFile('Failed to spawn tower server process');
+      fatal('Failed to start tower server');
+    }
+
+    // Detach from parent process
+    serverProcess.unref();
+
+    logToFile(`Spawned tower server with PID ${serverProcess.pid}`);
+
+    serverProcess.on('exit', () => {
+      daemonExited = true;
+    });
+    logOffsetAtSpawn = currentLogOffset();
+  }
 
   const dashboardUrl = `http://localhost:${port}`;
 
   if (wait) {
     // Wait for server to actually start responding
     logger.info('Waiting for server to start...');
-    const started = await waitForServer(port);
+    const outcome = await waitForServerOutcome(
+      () => isServerResponding(port),
+      () => isDaemonAlive()
+    );
 
-    if (!started) {
+    if (outcome === 'exited') {
+      // The daemon died before the port came up: a refusal (the #1629 owner-lock guard) or an
+      // early boot failure. Surface its own log output verbatim so the user sees the teaching
+      // error, not a generic timeout indistinguishable from a real hang (Issue #1691).
+      const reason = readLogSince(logOffsetAtSpawn);
+      logToFile('Tower server exited during startup before responding');
+      logger.error('Tower server exited during startup before it became ready:');
+      if (reason) {
+        console.error(`\n${reason}\n`);
+      } else {
+        logger.error(`No output was captured. Check logs at: ${LOG_FILE}`);
+      }
+      process.exit(1);
+    }
+
+    if (outcome === 'timeout') {
       logToFile(`Tower server failed to respond within ${STARTUP_TIMEOUT_MS}ms`);
-      logger.error(`Tower server failed to start within ${STARTUP_TIMEOUT_MS / 1000}s`);
+      logger.error(`Tower server did not respond within ${STARTUP_TIMEOUT_MS / 1000}s and is still running (status unknown).`);
       logger.error(`Check logs at: ${LOG_FILE}`);
       process.exit(1);
     }
@@ -302,6 +439,11 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
   const forceKill = options.forceKillAllChildProcesses || false;
 
   logger.header(forceKill ? 'Force-Killing Tower and All Child Processes' : 'Stopping Tower');
+
+  if (isWindows()) {
+    await towerStopWindows(port, forceKill);
+    return;
+  }
 
   const pids = getProcessesOnPort(port);
 
@@ -405,6 +547,30 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
   }
 }
 
+/** Windows: graceful stop over HTTP, single-pid fallback; see windows/tower-lifecycle.ts. */
+async function towerStopWindows(port: number, forceKill: boolean): Promise<void> {
+  const deps = defaultWindowsStopDeps({
+    info: (m) => logger.info(m),
+    warn: (m) => logger.warn(m),
+    success: (m) => logger.success(m),
+  });
+  if (forceKill) {
+    const killed = await forceKillTowerWindows(port, deps);
+    if (killed === 0) {
+      logger.info('Tower is not running');
+      return;
+    }
+    logger.success(`Force-killed ${killed} process tree(s) (tower and shellper sessions)`);
+    return;
+  }
+  const { stopped } = await stopTowerWindows(port, deps);
+  if (stopped.length === 0) {
+    logger.info('Tower is not running');
+    return;
+  }
+  logger.success(`Tower stopped (${pidList(stopped)}); sessions keep running`);
+}
+
 export interface TowerLogOptions {
   follow?: boolean; // Tail the log file
   lines?: number; // Number of lines to show
@@ -425,6 +591,12 @@ export async function towerLog(options: TowerLogOptions = {}): Promise<void> {
   if (options.follow) {
     // Tail -f the log file
     logger.info(`Following ${LOG_FILE} (Ctrl+C to stop)`);
+    if (isWindows()) {
+      // Spec 1658: no `tail` on native Windows; follow in Node.
+      followFile(LOG_FILE, (text) => process.stdout.write(text));
+      await new Promise(() => {});
+      return;
+    }
     const tail = spawn('tail', ['-f', LOG_FILE], { stdio: 'inherit' });
     tail.on('error', (err) => {
       logger.error(`Failed to tail log: ${err.message}`);

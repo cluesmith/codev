@@ -7,14 +7,30 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { PASTE_BEGIN, PASTE_END } from '../servers/message-write.js';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
 import { handleRequest } from '../servers/tower-routes.js';
+import { resetHostPlatformForTests } from '../../lib/platform.js';
+import { setGitBashForTests } from '../../lib/platform/windows/git-bash-launch.js';
+import { getWorkspaceTerminals } from '../servers/tower-terminals.js';
+import type { DbMailbox } from '../db/types.js';
+import { setArchitectByName } from '../state.js';
+import { DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
 import type { RouteContext } from '../servers/tower-routes.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
+import { MAX_MESSAGE_BYTES, MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
+// Issue #1473: a REAL PtySession for the raw-write route test. The claim under test is that the
+// route's bytes reach the gate's input signal, and a session double cannot make that claim —
+// it would only assert what the double was written to do.
+import { PtySession } from '../../terminal/pty-session.js';
+import type { IShellperClient } from '../../terminal/shellper-client.js';
 // Spec 1313 round 3: the real delayed-send timer registry + per-session submission lock
 // (NOT mocked) so the delayed-`--interrupt` reshape is exercised through the same singletons
 // handleSend uses. shutdownDelayedSends() models a Tower restart (bumps the liveness
@@ -22,6 +38,7 @@ import { SessionScreen } from '../../terminal/session-screen.js';
 // shutdown-during-lock-wait window deterministically.
 import { shutdownDelayedSends } from '../servers/delayed-send.js';
 import { submitToSession, trySubmitToSession, resetSubmissionChains } from '../servers/session-submit.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 // ============================================================================
 // Mocks
@@ -37,6 +54,7 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockReadCloudConfig,
   mockComputeAnalytics,
   mockGetKnownWorkspacePaths,
+  mockGetAllKnownWorkspacePaths,
   mockIsStartupReconcileSettled,
   sendDbHolder } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
@@ -63,6 +81,7 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockReadCloudConfig: vi.fn(),
   mockComputeAnalytics: vi.fn(),
   mockGetKnownWorkspacePaths: vi.fn(() => []),
+  mockGetAllKnownWorkspacePaths: vi.fn((): string[] => []),
   mockIsStartupReconcileSettled: vi.fn(() => true),
   // Holder for the in-memory global.db used by the Spec 1313 send path (mailbox
   // persist + gate delivery). Re-created per test in beforeEach.
@@ -76,6 +95,7 @@ vi.mock('../lib/cloud-config.js', () => ({
 vi.mock('../servers/tower-instances.js', () => ({
   getInstances: mockGetInstances,
   getKnownWorkspacePaths: (...args: unknown[]) => mockGetKnownWorkspacePaths(...args),
+  getAllKnownWorkspacePaths: (...args: unknown[]) => mockGetAllKnownWorkspacePaths(...args),
   getDirectorySuggestions: vi.fn(async () => []),
   launchInstance: vi.fn(async () => ({ success: true })),
   killTerminalWithShellper: vi.fn(async () => true),
@@ -124,6 +144,9 @@ vi.mock('../servers/tower-messages.js', () => ({
 vi.mock('../db/index.js', async (importActual) => ({
   ...(await importActual<typeof import('../db/index.js')>()),
   getGlobalDb: () => sendDbHolder.db,
+  // getDb() aliases the global connection (Issue #1118), so the registry reads in state.ts
+  // see the same in-memory rows as the mailbox.
+  getDb: () => sendDbHolder.db,
 }));
 
 vi.mock('../servers/tower-utils.js', () => ({
@@ -141,6 +164,13 @@ vi.mock('../utils/server-utils.js', async (importActual) => ({
   ...(await importActual<typeof import('../utils/server-utils.js')>()),
   isRequestAllowed: vi.fn(() => true),
   parseJsonBody: (...args: unknown[]) => mockParseJsonBody(...args),
+}));
+
+// Issue #1869: the /ide session mint makes sure the IDE server is live first.
+const { mockEnsureIdeServerLive } = vi.hoisted(() => ({ mockEnsureIdeServerLive: vi.fn() }));
+vi.mock('../servers/ide-server.js', async (importActual) => ({
+  ...(await importActual<typeof import('../servers/ide-server.js')>()),
+  ensureIdeServerLive: (...args: unknown[]) => mockEnsureIdeServerLive(...args),
 }));
 
 vi.mock('../servers/analytics.js', () => ({
@@ -191,9 +221,11 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
   const hdrs: Record<string, string> = {};
 
   const res = {
+    headersSent: false,
     writeHead: vi.fn((status: number, h?: Record<string, string>) => {
       code = status;
       if (h) Object.assign(hdrs, h);
+      res.headersSent = true;
     }),
     setHeader: vi.fn((k: string, v: string) => { hdrs[k] = v; }),
     end: vi.fn((data?: string | Buffer) => {
@@ -256,6 +288,13 @@ function gateSession(mockWrite: (data: string) => void, ring: string, writable =
     // normal state for a session sitting at an idle prompt. A test modelling a still-repainting
     // composer overrides it with a recent timestamp.
     lastDataAt: 0,
+    // Issue #1473 input signals. This fake reaches the LIVE mailbox wiring, so both are
+    // load-bearing at runtime, not just for the types: without `lastInputAt` the gate computes
+    // `now() - undefined` → NaN, every comparison against NaN is false, the input settle reads
+    // as unsettled, and every send test in this file would HOLD instead of delivering. Epoch 0
+    // is "nobody has typed here since the epoch", the state an idle prompt is in.
+    inputSeq: 0,
+    lastInputAt: 0,
     gateScreen,
   };
 }
@@ -345,8 +384,251 @@ describe('tower-routes', () => {
   });
 
   // =========================================================================
+  // IDE forward cookie (Issue #1869)
+  // =========================================================================
+
+  describe('IDE forward cookie (Issue #1869)', () => {
+    const KEY = 'd'.repeat(64);
+    let savedKey: string | undefined;
+
+    beforeEach(async () => {
+      savedKey = process.env.CODEV_TOWER_KEY;
+      process.env.CODEV_TOWER_KEY = KEY;
+      mockEnsureIdeServerLive.mockResolvedValue(8200);
+      const { resetExpectedKeyCache } = await import('../utils/server-utils.js');
+      resetExpectedKeyCache();
+    });
+
+    afterEach(async () => {
+      if (savedKey === undefined) delete process.env.CODEV_TOWER_KEY;
+      else process.env.CODEV_TOWER_KEY = savedKey;
+      const { resetExpectedKeyCache } = await import('../utils/server-utils.js');
+      resetExpectedKeyCache();
+    });
+
+    it('POST /api/ide/session mints the HttpOnly, SameSite=Strict, Path=/ide cookie with an empty 204', async () => {
+      const { ideForwardCookieValue } = await import('../utils/server-utils.js');
+      const req = makeReq('POST', '/api/ide/session');
+      const { res, statusCode, headers, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(204);
+      expect(headers()['Set-Cookie']).toBe(`codev-ide-session=${ideForwardCookieValue()}; Path=/ide; HttpOnly; SameSite=Strict`);
+      expect(headers()['Set-Cookie']).not.toContain(KEY);
+      expect(body()).toBe('');
+    });
+
+    it('POST /api/ide/session waits for a live IDE server and 503s when none can be made live', async () => {
+      mockEnsureIdeServerLive.mockResolvedValueOnce(null);
+      const req = makeReq('POST', '/api/ide/session');
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(mockEnsureIdeServerLive).toHaveBeenCalled();
+      expect(statusCode()).toBe(503);
+      expect(headers()['Set-Cookie']).toBeUndefined();
+    });
+
+    it('POST /api/ide/session without the key is refused at the choke point', async () => {
+      const { isRequestAllowed } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const req = makeReq('POST', '/api/ide/session');
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(401);
+      expect(headers()['Set-Cookie']).toBeUndefined();
+    });
+
+    it('POST /api/ide/session refuses a tunnel-borne request Tower-side', async () => {
+      const req = makeReq('POST', '/api/ide/session', { 'x-codev-tunnel-proxy': '1' });
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(403);
+      expect(headers()['Set-Cookie']).toBeUndefined();
+    });
+
+    it('GET /api/ide/session is 405', async () => {
+      const req = makeReq('GET', '/api/ide/session');
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(405);
+      expect(headers()['Set-Cookie']).toBeUndefined();
+    });
+
+    it('a refused /ide request logs path and reason, never the cookie value', async () => {
+      const { isRequestAllowed, ideForwardCookieValue } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const value = ideForwardCookieValue() as string;
+      const req = makeReq('GET', '/ide/?folder=%2Fw', {
+        cookie: `codev-ide-session=${value}`,
+        origin: 'http://localhost:3000',
+      });
+      const ctx = makeCtx();
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      expect(statusCode()).toBe(401);
+      const logged = (ctx.log as any).mock.calls.map((c: unknown[]) => String(c[1])).join('\n');
+      // Pathname only for /ide: no query string ever reaches the log.
+      expect(logged).toContain('401 GET /ide/ —');
+      expect(logged).not.toContain('folder=');
+      expect(logged).toContain('cross-origin');
+      expect(logged).not.toContain(value);
+      expect(logged).not.toContain('codev-ide-session=');
+    });
+
+    it('a refused /ide request with a token in the query logs the pathname only', async () => {
+      const { isRequestAllowed } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const req = makeReq('GET', '/ide/stable-x?reconnectionToken=SECRET-RT&tkn=SECRET-TKN');
+      const ctx = makeCtx();
+      const { res } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      const logged = (ctx.log as any).mock.calls.map((c: unknown[]) => String(c[1])).join('\n');
+      expect(logged).toContain('401 GET /ide/stable-x —');
+      expect(logged).not.toContain('SECRET');
+    });
+
+    it('a refused non-/ide request still logs its full target', async () => {
+      const { isRequestAllowed } = await import('../utils/server-utils.js');
+      (isRequestAllowed as any).mockReturnValueOnce(false);
+      const req = makeReq('GET', '/api/terminals?x=1');
+      const ctx = makeCtx();
+      const { res } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      const logged = (ctx.log as any).mock.calls.map((c: unknown[]) => String(c[1])).join('\n');
+      expect(logged).toContain('401 GET /api/terminals?x=1 —');
+    });
+
+    it('INVARIANT: no response ever carries Access-Control-Allow-Credentials', async () => {
+      const cases: Array<[string, string]> = [
+        ['OPTIONS', '/ide/'],
+        ['OPTIONS', '/api/ide/session'],
+        ['POST', '/api/ide/session'],
+        ['GET', '/health'],
+      ];
+      for (const [method, url] of cases) {
+        const req = makeReq(method, url, { origin: 'http://localhost:3000' });
+        const { res, headers } = makeRes();
+        await handleRequest(req, res, makeCtx());
+        const names = Object.keys(headers()).map((h) => h.toLowerCase());
+        expect(names).not.toContain('access-control-allow-credentials');
+      }
+    });
+  });
+
+  // =========================================================================
   // Health check
   // =========================================================================
+
+  describe('POST /api/shutdown (Spec 1658 Phase 4)', () => {
+    function shutdownRes() {
+      const made = makeRes();
+      // The handler starts the shutdown once the answer is flushed.
+      made.res.end = vi.fn((data?: string, cb?: () => void) => {
+        made.res.write(data ?? '');
+        cb?.();
+      }) as any;
+      return made;
+    }
+
+    it('answers 202 with the pid, then starts the shutdown, from loopback', async () => {
+      const requestShutdown = vi.fn();
+      for (const address of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+        const req = makeReq('POST', '/api/shutdown');
+        (req.socket as any).remoteAddress = address;
+        const { res, statusCode, body } = shutdownRes();
+        await handleRequest(req, res, makeCtx({ requestShutdown }));
+        expect(statusCode()).toBe(202);
+        expect(JSON.parse(body())).toEqual({ pid: process.pid });
+      }
+      expect(requestShutdown).toHaveBeenCalledTimes(3);
+    });
+
+    it('refuses a peer that is not this machine and does not shut down', async () => {
+      const requestShutdown = vi.fn();
+      for (const address of ['203.0.113.7', '::ffff:198.51.100.5', '2001:db8::1', undefined]) {
+        const req = makeReq('POST', '/api/shutdown');
+        (req.socket as any).remoteAddress = address;
+        const { res, statusCode } = shutdownRes();
+        await handleRequest(req, res, makeCtx({ requestShutdown }));
+        expect(statusCode()).toBe(403);
+      }
+      expect(requestShutdown).not.toHaveBeenCalled();
+    });
+
+    it('refuses a tunnel-borne request even with loopback and the key (the proxy stamps both)', async () => {
+      const requestShutdown = vi.fn();
+      const log = vi.fn();
+      const req = makeReq('POST', '/api/shutdown', { 'x-codev-tunnel-proxy': '1' });
+      (req.socket as any).remoteAddress = '127.0.0.1';
+      const { res, statusCode } = shutdownRes();
+      await handleRequest(req, res, makeCtx({ requestShutdown, log }));
+      expect(statusCode()).toBe(403);
+      expect(requestShutdown).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('arrived via tunnel proxy'));
+    });
+
+    it('logs a refused request without control characters from its user-agent', async () => {
+      const log = vi.fn();
+      const req = makeReq('POST', '/api/shutdown', { 'x-codev-tunnel-proxy': '1', 'user-agent': 'evil\r\n[ERROR] forged line' });
+      const { res } = shutdownRes();
+      await handleRequest(req, res, makeCtx({ requestShutdown: vi.fn(), log }));
+      const line = log.mock.calls.find((c) => String(c[1]).includes('REJECTED'))![1] as string;
+      expect(line).not.toMatch(/[\r\n]/);
+      expect(line).toContain('evil  [ERROR] forged line');
+    });
+
+    it('accepts a peer that is one of this machine\'s own addresses (bridge mode), and only those', async () => {
+      const { isLocalMachineAddress } = await import('../servers/tower-routes.js');
+      const interfaces = { eth0: [{ address: '192.168.1.20', family: 'IPv4' }, { address: 'fe80::1', family: 'IPv6' }] } as any;
+      expect(isLocalMachineAddress('192.168.1.20', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('::ffff:192.168.1.20', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('fe80::1', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('fe80::1%eth0', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('127.0.0.1', interfaces)).toBe(true);
+      expect(isLocalMachineAddress('192.168.1.21', interfaces)).toBe(false);
+      expect(isLocalMachineAddress(undefined, interfaces)).toBe(false);
+    });
+
+    it('is 501 where no shutdown hook is wired', async () => {
+      const { res, statusCode } = shutdownRes();
+      await handleRequest(makeReq('POST', '/api/shutdown'), res, makeCtx());
+      expect(statusCode()).toBe(501);
+    });
+  });
+
+  describe('GET /health on Windows (Spec 1658 Phase 4)', () => {
+    it('reports whether Tower runs inside a codev session; POSIX omits the field', async () => {
+      mockGetInstances.mockResolvedValue([]);
+      forceHostPlatform('linux');
+      try {
+        const posix = makeRes();
+        await handleRequest(makeReq('GET', '/health'), posix.res, makeCtx());
+        expect(JSON.parse(posix.body()).insideCodevSession).toBeUndefined();
+      } finally {
+        resetHostPlatformForTests();
+      }
+
+      forceHostPlatform('win32');
+      try {
+        const saved = process.env.CODEV_SHELLPER_SESSION;
+        process.env.CODEV_SHELLPER_SESSION = 'sess-1';
+        const win = makeRes();
+        await handleRequest(makeReq('GET', '/health'), win.res, makeCtx());
+        expect(JSON.parse(win.body()).insideCodevSession).toBe(true);
+        if (saved === undefined) delete process.env.CODEV_SHELLPER_SESSION;
+        else process.env.CODEV_SHELLPER_SESSION = saved;
+      } finally {
+        resetHostPlatformForTests();
+      }
+    });
+  });
 
   describe('GET /health', () => {
     it('returns healthy status with workspace counts', async () => {
@@ -414,6 +696,56 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.terminals).toEqual([{ id: 'term-1' }]);
+    });
+  });
+
+  // =========================================================================
+  // Terminal create: Tower's port on the final session env (Spec 1595)
+  // =========================================================================
+
+  describe('POST /api/terminals sets CODEV_TOWER_PORT on the final env', () => {
+    const inheritedEnv = { PATH: '/usr/bin', CODEV_TOWER_PORT: '1', CLAUDECODE: '1' };
+
+    it('non-persistent branch: overrides an inherited port, with or without a client env', async () => {
+      const createSession = vi.fn(async () => ({ id: 'term-new', pid: 1 }));
+      mockGetTerminalManager.mockReturnValue({ createSession });
+
+      for (const env of [inheritedEnv, undefined]) {
+        mockParseJsonBody.mockResolvedValueOnce({ command: 'bash', cwd: '/tmp', env });
+        const { res, statusCode } = makeRes();
+        await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx({ port: 4242 }));
+        expect(statusCode()).toBe(201);
+      }
+
+      const [withClientEnv, withoutClientEnv] = createSession.mock.calls.map(c => (c[0] as { env: Record<string, string> }).env);
+      expect(withClientEnv.CODEV_TOWER_PORT).toBe('4242');
+      expect(withClientEnv.CLAUDECODE).toBeUndefined();
+      expect(withClientEnv.PATH).toBe('/usr/bin');
+      expect(withoutClientEnv).toEqual({ CODEV_TOWER_PORT: '4242' });
+    });
+
+    it('shellper branch: overrides an inherited port', async () => {
+      const shellperCreate = vi.fn(async () => ({ waitForReplay: async () => Buffer.alloc(0) }));
+      const shellperManager = {
+        createSession: shellperCreate,
+        getSessionInfo: () => ({ pid: 7, socketPath: '/tmp/s.sock', startTime: 1 }),
+      };
+      mockGetTerminalManager.mockReturnValue({
+        createSessionRaw: vi.fn(() => ({ id: 'term-new', pid: 7 })),
+        getSession: vi.fn(() => undefined),
+      });
+      mockParseJsonBody.mockResolvedValueOnce({ command: 'bash', cwd: '/tmp', env: inheritedEnv, persistent: true });
+
+      const { res, statusCode } = makeRes();
+      await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx({
+        port: 4242,
+        getShellperManager: () => shellperManager as unknown as ReturnType<RouteContext['getShellperManager']>,
+      }));
+
+      expect(statusCode()).toBe(201);
+      const env = (shellperCreate.mock.calls[0][0] as { env: Record<string, string> }).env;
+      expect(env.CODEV_TOWER_PORT).toBe('4242');
+      expect(env.CLAUDECODE).toBeUndefined();
     });
   });
 
@@ -720,6 +1052,223 @@ describe('tower-routes', () => {
       const parsed = JSON.parse(body());
       expect(parsed.hostname).toBeUndefined();
     });
+
+    describe('decisions (Spec 1819)', () => {
+      const FIXTURE = fs.readFileSync(path.resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8');
+      let workspace: string;
+      let encoded: string;
+      let decisionsFile: string;
+      let origHome: string | undefined;
+
+      beforeEach(() => {
+        workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tower-routes-decisions-')));
+        encoded = Buffer.from(workspace).toString('base64url');
+        decisionsFile = path.join(workspace, 'codev', 'state', 'pending-decisions.md');
+        fs.mkdirSync(path.dirname(decisionsFile), { recursive: true });
+        // The decisions path comes from loadConfig, which also reads ~/.codev/config.json.
+        origHome = process.env.HOME;
+        process.env.HOME = path.join(workspace, 'home');
+      });
+
+      afterEach(() => {
+        process.env.HOME = origHome;
+        fs.rmSync(workspace, { recursive: true, force: true });
+      });
+
+      async function request(method: string, sub: string) {
+        const { res, statusCode, body } = makeRes();
+        await handleRequest(makeReq(method, `/workspace/${encoded}/${sub}`), res, makeCtx());
+        return { status: statusCode(), body: JSON.parse(body()) };
+      }
+
+      it('sets decisionsEnabled on /api/state from whether the file exists', async () => {
+        expect((await request('GET', 'api/state')).body.decisionsEnabled).toBe(false);
+        fs.writeFileSync(decisionsFile, FIXTURE);
+        expect((await request('GET', 'api/state')).body.decisionsEnabled).toBe(true);
+      });
+
+      it('keeps /api/state working, with decisionsEnabled false, when the config is broken', async () => {
+        fs.writeFileSync(decisionsFile, FIXTURE);
+        fs.mkdirSync(path.join(workspace, '.codev'));
+        fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), '{ not json');
+        const { status, body } = await request('GET', 'api/state');
+        expect(status).toBe(200);
+        expect(body.decisionsEnabled).toBe(false);
+        expect(body).toHaveProperty('builders');
+        expect((await request('GET', 'api/decisions')).body.code).toBe('config-error');
+      });
+
+      it('dispatches GET api/decisions and POST api/decisions/rule', async () => {
+        fs.writeFileSync(decisionsFile, FIXTURE);
+        const read = await request('GET', 'api/decisions');
+        expect(read.status).toBe(200);
+        const item = read.body.document.items.find((i: { id: string }) => i.id === 'main-11');
+
+        mockParseJsonBody.mockResolvedValueOnce({ id: 'main-11', word: 'accept', fingerprint: item.fingerprint });
+        const written = await request('POST', 'api/decisions/rule');
+        expect(written.status).toBe(200);
+        expect(written.body.document.items.find((i: { id: string }) => i.id === 'main-11').currentRuling).toBe('accept');
+        expect(fs.readFileSync(decisionsFile, 'utf8')).not.toBe(FIXTURE);
+      });
+
+      // #1828: a submit tells the hub architect through the mailbox — one row, gated.
+      describe('the hub notice (#1828)', () => {
+        const allRows = () => sendDbHolder.db.prepare('SELECT * FROM mailbox').all() as DbMailbox[];
+        /** Register architects in the (in-memory) registry, in the order given. */
+        const register = (...names: string[]) => {
+          for (const name of names) setArchitectByName(workspace, name, { name, cmd: 'claude', startedAt: '2026-10-18T00:00:00.000Z' });
+        };
+
+        /** Submit a ruling for main-11 against a fresh copy of `text`. */
+        async function submit(ruling: Record<string, unknown>, ctx = makeCtx(), text = FIXTURE) {
+          fs.writeFileSync(decisionsFile, text);
+          const item = (await request('GET', 'api/decisions')).body.document.items.find((i: { id: string }) => i.id === 'main-11');
+          mockParseJsonBody.mockResolvedValueOnce({ id: 'main-11', fingerprint: item.fingerprint, ...ruling });
+          const { res, statusCode, body } = makeRes();
+          await handleRequest(makeReq('POST', `/workspace/${encoded}/api/decisions/rule`), res, ctx);
+          return { status: statusCode(), body: JSON.parse(body()) };
+        }
+
+        afterEach(() => {
+          vi.mocked(getWorkspaceTerminals).mockImplementation(() => new Map());
+        });
+
+        /** Route the workspace's live architects to clean prompts; returns each one's write spy. */
+        function liveArchitects(...names: string[]): Record<string, ReturnType<typeof vi.fn>> {
+          const writes = Object.fromEntries(names.map(name => [name, vi.fn()]));
+          vi.mocked(getWorkspaceTerminals).mockImplementation(() => new Map([[workspace, {
+            architects: new Map(names.map(name => [name, `term-arch-${name}`])),
+            builders: new Map(),
+            shells: new Map(),
+            fileTabs: new Map(),
+          }]]) as any);
+          mockGetTerminalManager.mockReturnValue({
+            listSessions: mockListSessions.mockReturnValue([]),
+            getSession: (id: string) => {
+              const name = names.find(n => id === `term-arch-${n}`);
+              return name ? gateSession(writes[name], '❯ ', true, id) : null;
+            },
+          });
+          return writes;
+        }
+
+        it('delivers exactly one mailbox row to a live main architect through the gate', async () => {
+          const writes = liveArchitects('main');
+          register('main');
+          const ctx = makeCtx();
+
+          const { status } = await submit({ word: 'accept', comment: 'ship it\nno new limits' }, ctx);
+          expect(status).toBe(200);
+
+          const rows = allRows();
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({
+            workspace_path: workspace,
+            to_agent: 'main',
+            from_agent: 'decisions-tab',
+            body: 'RULED main-11: accept\nship it\nno new limits',
+            status: 'delivered',
+          });
+          expect(rows[0].formatted_message).toMatch(/^### \[USER via Decisions tab → main \| .+\] ###\nRULED main-11: accept\n/);
+          expect(writes.main.mock.calls.map(([data]) => data).join('')).toContain('RULED main-11: accept');
+          expect(ctx.log).toHaveBeenCalledWith('INFO', expect.stringMatching(/^Decisions notice delivered → main @ /));
+        });
+
+        it('holds the row for an offline main architect rather than telling a live sibling', async () => {
+          const writes = liveArchitects('sibling');
+          register('main', 'sibling');
+          const ctx = makeCtx();
+
+          expect((await submit({ comment: 'which branch?' }, ctx)).status).toBe(200);
+          const rows = allRows();
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({ to_agent: 'main', body: 'QUESTION main-11:\nwhich branch?', status: 'held', reason: 'no-live-pty' });
+          expect(writes.sibling).not.toHaveBeenCalled();
+          expect(ctx.log).toHaveBeenCalledWith('INFO', expect.stringMatching(/^Decisions notice held \(no-live-pty\) → main @ /));
+        });
+
+        it('tells no architect when none is named main, whatever the registration order (#1633)', async () => {
+          // Registered zeta first, then alpha: neither "first registered" nor alphabetical
+          // order may stand in for the hub.
+          const writes = liveArchitects('zeta', 'alpha');
+          register('zeta', 'alpha');
+          const ctx = makeCtx();
+
+          expect((await submit({ word: 'accept' }, ctx)).status).toBe(200);
+          expect(fs.readFileSync(decisionsFile, 'utf8')).not.toBe(FIXTURE);
+          expect(allRows()).toHaveLength(0);
+          expect(writes.zeta).not.toHaveBeenCalled();
+          expect(writes.alpha).not.toHaveBeenCalled();
+          expect(ctx.log).toHaveBeenCalledWith('WARN', expect.stringContaining(`no architect named 'main' is registered in workspace ${workspace}`));
+        });
+
+        it('still writes the ruling, and logs, when the workspace has no architect', async () => {
+          const ctx = makeCtx();
+          const { status, body } = await submit({ word: 'accept' }, ctx);
+
+          expect(status).toBe(200);
+          expect(body.document.items.find((i: { id: string }) => i.id === 'main-11').currentRuling).toBe('accept');
+          expect(allRows()).toHaveLength(0);
+          expect(ctx.log).toHaveBeenCalledWith('WARN', expect.stringContaining('hub architect was not told'));
+        });
+
+        it('frames an /api/send from the Decisions-tab sender to an architect as the owner, never a builder', async () => {
+          mockParseJsonBody.mockResolvedValueOnce({ to: 'architect', message: 'RULED main-11: accept', workspace, from: DECISIONS_TAB_SENDER });
+          mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+          mockResolveAgentInRegistry.mockReturnValue({ workspacePath: workspace, agent: 'main', kind: 'architect' });
+          const { res, body } = makeRes();
+          await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+          const row = mailbox.getById(sendDbHolder.db, JSON.parse(body()).mailboxId)!;
+          expect(row.formatted_message).toMatch(/^### \[USER via Decisions tab → main \| .+\] ###\nRULED main-11: accept\n#+$/);
+        });
+
+        it('does not answer twice when the route fails after its response', async () => {
+          // No `main`, so the notice fails; a log sink that throws on that WARN makes the route
+          // itself throw after res.end(), into handleRequest's catch.
+          const ctx = makeCtx({ log: vi.fn((level: string) => { if (level === 'WARN') throw new Error('log sink down'); }) });
+          fs.writeFileSync(decisionsFile, FIXTURE);
+          const item = (await request('GET', 'api/decisions')).body.document.items.find((i: { id: string }) => i.id === 'main-11');
+          mockParseJsonBody.mockResolvedValueOnce({ id: 'main-11', word: 'accept', fingerprint: item.fingerprint });
+          const { res, statusCode } = makeRes();
+          await handleRequest(makeReq('POST', `/workspace/${encoded}/api/decisions/rule`), res, ctx);
+
+          expect(ctx.log).toHaveBeenCalledWith('ERROR', 'Request error: log sink down');
+          expect(res.writeHead).toHaveBeenCalledOnce();
+          expect(statusCode()).toBe(200);
+        });
+
+        it('refuses, persisting nothing, a notice over the send limit', async () => {
+          register('main');
+          const word = 'x'.repeat(MAX_MESSAGE_BYTES);
+          const text = FIXTURE.replace('**Your word:** `accept`', `**Your word:** \`${word}\``);
+          expect(text).not.toBe(FIXTURE);
+          const ctx = makeCtx();
+
+          expect((await submit({ word }, ctx, text)).status).toBe(200);
+          // The word is spliced in as a line of its own. Split on either ending: the
+          // splice keeps the file's own (CRLF when git checks the fixture out on Windows).
+          expect(fs.readFileSync(decisionsFile, 'utf8').split(/\r?\n/)).toContain(word);
+          expect(allRows()).toHaveLength(0);
+          expect(ctx.log).toHaveBeenCalledWith('WARN', expect.stringContaining('over the 49152-byte'));
+        });
+      });
+
+      it('rejects both routes without the Tower key', async () => {
+        fs.writeFileSync(decisionsFile, FIXTURE);
+        const actual = await vi.importActual<typeof import('../utils/server-utils.js')>('../utils/server-utils.js');
+        const { isRequestAllowed } = await import('../utils/server-utils.js');
+        for (const [method, sub] of [['GET', 'api/decisions'], ['POST', 'api/decisions/rule']]) {
+          (isRequestAllowed as any).mockImplementationOnce(actual.isRequestAllowed);
+          const { res, statusCode, body } = makeRes();
+          await handleRequest(makeReq(method, `/workspace/${encoded}/${sub}`), res, makeCtx());
+          expect(statusCode()).toBe(401);
+          expect(body()).toBe('Unauthorized');
+        }
+        expect(mockParseJsonBody).not.toHaveBeenCalled();
+        expect(fs.readFileSync(decisionsFile, 'utf8')).toBe(FIXTURE);
+      });
+    });
   });
 
   // =========================================================================
@@ -801,6 +1350,38 @@ describe('tower-routes', () => {
       expect(json.success).toBe(false);
       expect(json.error).toMatch(/Failed to create architect terminal/);
       expect(json.error).toMatch(/spawn claude ENOENT/);
+    });
+  });
+
+  // =========================================================================
+  // #1809: deactivate still reaches a live stray builder-worktree workspace
+  // =========================================================================
+
+  describe('POST /api/workspaces/:path/deactivate', () => {
+    const worktree = '/repo/.builders/pir-1802';
+    const encoded = Buffer.from(worktree).toString('base64url');
+
+    it('stops a stray worktree workspace that the filtered list excludes', async () => {
+      const { stopInstance } = await import('../servers/tower-instances.js');
+      mockGetKnownWorkspacePaths.mockReturnValueOnce([]);
+      mockGetAllKnownWorkspacePaths.mockReturnValueOnce([worktree]);
+
+      const req = makeReq('POST', `/api/workspaces/${encoded}/deactivate`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      expect(stopInstance).toHaveBeenCalledWith(worktree);
+    });
+
+    it('still returns 404 for a path Tower has never seen', async () => {
+      mockGetAllKnownWorkspacePaths.mockReturnValueOnce([]);
+
+      const req = makeReq('POST', `/api/workspaces/${encoded}/deactivate`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(404);
     });
   });
 
@@ -1548,6 +2129,97 @@ describe('tower-routes', () => {
       expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9')).toHaveLength(1);
     });
 
+    // Issue #1478: the sender's identity must survive into the row both attribution
+    // surfaces read — `from_agent` (what `afx inbox` renders) and `formatted_message`
+    // (the builder's composer header). `formatMessageForTarget`'s any → builder branch
+    // used to discard `from` entirely, so even a corrected sender could not surface.
+    // The registry hold path is the cheapest route that formats AND persists.
+    describe('architect identity in the persisted row (issue #1478)', () => {
+      /** POST /api/send from `from` to an offline-but-known builder → held row. */
+      async function heldRowFrom(from: string | undefined) {
+        mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'ship it', workspace: '/tmp/ws', from });
+        mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+        mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+        const { res, body } = makeRes();
+        await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+        return mailbox.getById(sendDbHolder.db, JSON.parse(body()).mailboxId)!;
+      }
+
+      it('stores the specific architect as from_agent — the identity `afx inbox` renders', async () => {
+        const row = await heldRowFrom('architect:feedback');
+        // Pre-fix this was the generic 'architect' for every architect in the workspace.
+        expect(row.from_agent).toBe('architect:feedback');
+        expect(row.to_agent).toBe('spir-9');
+      });
+
+      it('names the architect in the composer header (the any → builder branch)', async () => {
+        const row = await heldRowFrom('architect:main');
+        // The recipient segment is #1574's; the name before it is this issue's. Both are
+        // asserted here so a regression in either shows up as a header-shape failure.
+        expect(row.formatted_message).toMatch(/^### \[ARCHITECT:main INSTRUCTION → spir-9 \| .+\] ###\n/);
+        expect(row.formatted_message).toContain('ship it');
+        // Only the framing gained the name; the stored body stays the raw message.
+        expect(row.body).toBe('ship it');
+      });
+
+      it('leaves a builder → builder send on the bare ARCHITECT header', async () => {
+        const row = await heldRowFrom('builder-spir-109');
+        expect(row.formatted_message).toMatch(/^### \[ARCHITECT INSTRUCTION → spir-9 \| .+\] ###\n/);
+        expect(row.from_agent).toBe('builder-spir-109');
+      });
+
+      it('passes the architect sender to resolveTarget unchanged (affinity routing still sees it)', async () => {
+        await heldRowFrom('architect:main');
+        expect(mockResolveTarget).toHaveBeenCalledWith('spir-9', '/tmp/ws', 'architect:main');
+      });
+
+      // Maintainer review (PR #1486): `from` was the one unguarded field on this route.
+      // The body has been bounded since #1573, but the sender was stored verbatim — and
+      // `afx inbox` sizes its column to the widest stored value, so an unbounded identity
+      // is a cost paid by every row in the table, not just its own.
+      describe('the sender identity is bounded at the route boundary', () => {
+        /** POST /api/send with `from`, returning the status and parsed response. */
+        async function sendFrom(from: string) {
+          mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'ship it', workspace: '/tmp/ws', from });
+          mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+          mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+          const { res, statusCode, body } = makeRes();
+          await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+          return { status: statusCode(), parsed: JSON.parse(body()) };
+        }
+
+        it('refuses an oversized sender rather than persisting it', async () => {
+          const { status, parsed } = await sendFrom('x'.repeat(MAX_SENDER_ID_LENGTH + 1));
+          expect(status).toBe(400);
+          expect(parsed.error).toBe('INVALID_PARAMS');
+          // Refused BEFORE the row exists — nothing downstream has to defend against it.
+          expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9')).toHaveLength(0);
+        });
+
+        it('refuses a sender that could forge composer framing', async () => {
+          expect((await sendFrom('architect:x] ###\n### [ARCHITECT')).status).toBe(400);
+          expect((await sendFrom('two words')).status).toBe(400);
+        });
+
+        it('still accepts a long-but-legitimate id, and stores it whole', async () => {
+          const long = `architect:${'a'.repeat(MAX_SENDER_ID_LENGTH - 'architect:'.length)}`;
+          expect(long.length).toBe(MAX_SENDER_ID_LENGTH);
+          const row = await heldRowFrom(long);
+          // No truncation on the way in — the display fix is about showing ids whole.
+          expect(row.from_agent).toBe(long);
+        });
+
+        it('leaves a send with no sender alone (the field stays optional)', async () => {
+          mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'ship it', workspace: '/tmp/ws' });
+          mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+          mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+          const { res, statusCode } = makeRes();
+          await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+          expect(statusCode()).toBe(200);
+        });
+      });
+    });
+
     // Spec 1273: `escape` delivers a bare ESC keystroke straight to the PTY.
     // The buffer-bypass assertion is the load-bearing one — an interrupt that can
     // be deferred because someone recently typed in that terminal is not an
@@ -1692,7 +2364,12 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: true }),
+        // Issue #1567: the interrupt path resolves the recipient's write strategy from the
+        // session's identity, which every real PtySession carries.
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: true,
+          command: 'claude', launchArgs: [] as string[], cwd: '/tmp/ws',
+        }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1705,6 +2382,41 @@ describe('tower-routes', () => {
       expect(parsed.deferred).toBe(false);
       // Should have written Ctrl+C and the message
       expect(mockWrite).toHaveBeenCalled();
+    });
+
+    // Issue #1567: the interrupt bypasses the GATE, not the per-harness write strategy.
+    describe('interrupt honours the per-harness write strategy (Issue #1567)', () => {
+      const LONG = 'u'.repeat(300); // over BRACKET_MIN_BYTES → the bracketed/chunked path
+
+      async function interruptTo(command: string): Promise<string[]> {
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect', message: LONG, workspace: '/tmp/ws', options: { interrupt: true },
+        });
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-001', workspacePath: '/tmp/ws', agent: 'architect' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({
+          getSession: () => ({ ...gateSession(mockWrite, '❯ '), command }),
+          listSessions: () => [],
+        });
+        const { res, statusCode } = makeRes();
+        await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+        expect(statusCode()).toBe(200);
+        await vi.waitFor(() => expect(mockWrite.mock.calls.at(-1)?.[0]).toBe('\r'));
+        return mockWrite.mock.calls.map((c) => c[0] as string);
+      }
+
+      it('a long interrupt to claude is bracketed like a gated delivery', async () => {
+        const writes = await interruptTo('claude');
+        expect(writes[0]).toBe('\x03');
+        expect(writes.some((w) => w.startsWith(PASTE_BEGIN))).toBe(true);
+      });
+
+      it('a long interrupt to agy (opted out) is chunked but NOT bracketed', async () => {
+        const writes = await interruptTo('agy');
+        expect(writes[0]).toBe('\x03');
+        expect(writes.some((w) => w.includes(PASTE_BEGIN) || w.includes(PASTE_END))).toBe(false);
+        expect(writes.slice(1, -1).join('')).toContain(LONG);
+      });
     });
 
     it('writes the message as one un-split write, Enter separate (Bugfix #481, via the gate)', async () => {
@@ -1818,6 +2530,91 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled();
     }, 10_000);
 
+    // ------------------------------------------------------------------
+    // `unverifiedCause` on the /api/send response (Issue #1473)
+    //
+    // The SENDER's boundary, and the reason the field exists at all. `verified` alone did not
+    // serve the case that motivated it — a human's Enter submitting our half-written body — 
+    // because there the header DID land, so `verified` is true and the operator read a plain
+    // "Message delivered". Without these two tests the whole route→SDK→CLI plumbing could be
+    // deleted and the suite would stay green.
+    // ------------------------------------------------------------------
+
+    it("propagates unverifiedCause 'no-echo' to the sender when the header never appeared", async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hi', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-swallow2', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      const swallowing = {
+        ...gateSession(mockWrite, '❯ ', true, 'term-swallow2'),
+        write: (data: string): boolean => { mockWrite(data); return true; },
+      };
+      mockGetTerminalManager.mockReturnValue({ getSession: () => swallowing, listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true);
+      expect(parsed.unverifiedCause).toBe('no-echo');
+    }, 10_000);
+
+    it("propagates unverifiedCause 'input-raced' even though the header DID land", async () => {
+      // The motivating case. The session echoes normally — so `verified` is true and nothing
+      // else on this response says anything is wrong — but a keystroke lands DURING the paced
+      // write. That is the delivery an operator must be told about, and it is invisible without
+      // this field.
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hi', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-raced', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      const base = gateSession(mockWrite, '❯ ', true, 'term-raced');
+      const raced = {
+        ...base,
+        // A human typing while our bytes go out: the counter moves between the write's own
+        // before/after samples. Mutating on write is the only faithful model — the race is
+        // defined by the counter changing across the write, not by its value.
+        write: (data: string): boolean => { raced.inputSeq += 1; return base.write(data); },
+      };
+      mockGetTerminalManager.mockReturnValue({ getSession: () => raced, listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true);
+      expect(parsed.unverifiedCause).toBe('input-raced');
+    }, 10_000);
+
+    it('omits unverifiedCause entirely on an ordinary clean delivery', async () => {
+      // The field is additive: absent must read exactly as it did before it existed, so a
+      // sender that never races never sees a new key.
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hi', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-clean', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(mockWrite, '❯ ', true, 'term-clean'),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true);
+      expect(parsed).not.toHaveProperty('unverifiedCause');
+    }, 10_000);
+
     it('a body-bearing interrupt that crosses the wait ceiling reports degraded (Issue #1365)', async () => {
       // codex review of PR #1492: the interrupt claims its mailbox row `delivered` BEFORE the
       // write (un-claiming would risk a double delivery), so if the ceiling expires and the
@@ -1852,6 +2649,78 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled(); // the escape hatch still landed
       await holder;
     }, 10_000);
+  });
+
+  // ==========================================================================
+  // POST /api/terminals/:id/write — the raw write route feeds the input signal
+  //
+  // The route is a FOREIGN writer: the dashboard, the VS Code terminal and any script hit it,
+  // and its bytes must count as human input at the delivery gate. That works only because
+  // `session.write()` defaults to `origin: 'external'` and the route passes no override — an
+  // invisible coupling, one word wide. Someone "tidying" the call to `write(data, 'delivery')`
+  // would silently reopen the race for every non-WebSocket client while every gate test kept
+  // passing, because the gate tests supply their own sessions.
+  //
+  // These use a REAL PtySession on a shellper double, so the assertion is about the production
+  // recording path rather than about a fake's bookkeeping.
+  // ==========================================================================
+
+  describe('POST /api/terminals/:id/write (Issue #1473 input signal)', () => {
+    function realSession(id: string): { session: PtySession; ptyWrites: string[] } {
+      const ptyWrites: string[] = [];
+      const client = new EventEmitter() as unknown as IShellperClient;
+      Object.defineProperty(client, 'lastDataAt', { get: () => Date.now() });
+      Object.defineProperty(client, 'connected', { get: () => true });
+      (client as { write: (d: string) => boolean }).write = (d: string) => { ptyWrites.push(d); return true; };
+      (client as { resize: () => boolean }).resize = () => true;
+      const session = new PtySession({
+        id, command: '', args: [], cols: 80, rows: 24, cwd: '/tmp', env: {},
+        label: 'test', logDir: '/tmp', diskLogEnabled: false,
+      });
+      session.attachShellper(client, Buffer.alloc(0), 1234);
+      return { session, ptyWrites };
+    }
+
+    async function writeVia(session: PtySession, data: string): Promise<number> {
+      mockParseJsonBody.mockResolvedValue({ data });
+      mockGetTerminalManager.mockReturnValue({ getSession: () => session, listSessions: () => [] });
+      const { res, statusCode } = makeRes();
+      await handleRequest(makeReq('POST', `/api/terminals/${session.id}/write`), res, makeCtx());
+      return statusCode();
+    }
+
+    it('advances the input signal for a keystroke sent through the route', async () => {
+      const { session } = realSession('raw-write-1');
+      const before = session.inputSeq;
+
+      expect(await writeVia(session, 'hello')).toBe(200);
+
+      expect(session.inputSeq).toBe(before + 5);
+      expect(session.lastInputAt).toBeGreaterThan(0);
+    });
+
+    it('does NOT advance it for a terminal reply sent through the route, but still writes it to the PTY', async () => {
+      // The self-trip this whole filter exists to prevent, exercised at the route rather than at
+      // `write()`: a client answering the TUI's DA query must not read as a human at the
+      // keyboard — while the PTY must still receive the answer, or the app blocks forever.
+      const { session, ptyWrites } = realSession('raw-write-2');
+      const before = session.inputSeq;
+
+      expect(await writeVia(session, '\x1b[?1;2c')).toBe(200);
+
+      expect(session.inputSeq).toBe(before);
+      expect(ptyWrites).toContain('\x1b[?1;2c');
+    });
+
+    it('keeps only the human residue of a mixed chunk', async () => {
+      const { session, ptyWrites } = realSession('raw-write-3');
+      const before = session.inputSeq;
+
+      expect(await writeVia(session, 'a\x1b[12;40Rb')).toBe(200);
+
+      expect(session.inputSeq).toBe(before + 2); // 'a' and 'b'; the CPR reply is not input
+      expect(ptyWrites).toContain('a\x1b[12;40Rb'); // …and the PTY still saw all of it
+    });
   });
 
   // ==========================================================================
@@ -2162,6 +3031,101 @@ describe('tower-routes', () => {
       await handleRequest(req, res, makeCtx());
 
       expect(statusCode()).toBe(400);
+    });
+  });
+
+  // =========================================================================
+  // Spec 1658 Phase 6: Windows shell roles (Area F) and client POSIX shells
+  // =========================================================================
+
+  describe('Windows shell roles (Spec 1658)', () => {
+    const GIT_BASH = {
+      path: 'C:\\Program Files\\Git\\bin\\bash.exe',
+      root: 'C:\\Program Files\\Git',
+      gitVersion: 'git version 2.47.1.windows.1',
+      source: 'install' as const,
+    };
+    let workspace: string;
+    let createSession: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-shell-'));
+      createSession = vi.fn(async (req: { command?: string }) => ({ id: 'term-new', pid: 77, label: 'Shell 1', command: req.command }));
+      mockGetTerminalManager.mockReturnValue({ createSession, listSessions: mockListSessions, getSession: mockGetSession });
+      mockGetNextShellId.mockReturnValue('shell-1');
+      setGitBashForTests(GIT_BASH);
+    });
+
+    afterEach(() => {
+      setGitBashForTests(null);
+      fs.rmSync(workspace, { recursive: true, force: true });
+    });
+
+    function writeShellConfig(shell: string): void {
+      fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+      fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), JSON.stringify({ shell: { shell } }));
+    }
+
+    async function createShell(): Promise<void> {
+      const encoded = Buffer.from(workspace).toString('base64url');
+      const { res, statusCode } = makeRes();
+      await handleRequest(makeReq('POST', `/workspace/${encoded}/api/tabs/shell`), res, makeCtx());
+      expect(statusCode()).toBe(200);
+    }
+
+    it('a new dashboard shell opens Windows PowerShell by default', async () => {
+      forceHostPlatform('win32');
+      // A user-global ~/.codev/config.json may set shell.shell; keep the test hermetic.
+      const previousHome = process.env.HOME;
+      process.env.HOME = workspace;
+      try {
+        await createShell();
+      } finally {
+        process.env.HOME = previousHome;
+      }
+      const req = createSession.mock.calls[0][0];
+      expect(req.command).toMatch(/\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe$/);
+      expect(req.args).toEqual(['-NoLogo']);
+    });
+
+    it('an existing shell.shell "bash" opens Git Bash, never System32 bash.exe', async () => {
+      forceHostPlatform('win32');
+      writeShellConfig('bash');
+      await createShell();
+      const req = createSession.mock.calls[0][0];
+      expect(req.command).toBe(GIT_BASH.path);
+      expect(req.args).toEqual(['-i']);
+    });
+
+    it('POSIX keeps $SHELL with no arguments', async () => {
+      forceHostPlatform('darwin');
+      const previous = process.env.SHELL;
+      process.env.SHELL = '/bin/zsh';
+      try {
+        await createShell();
+      } finally {
+        process.env.SHELL = previous;
+      }
+      const req = createSession.mock.calls[0][0];
+      expect(req.command).toBe('/bin/zsh');
+      expect(req.args).toEqual([]);
+    });
+
+    it('a client /bin/sh -lc terminal runs in Git Bash -c on Windows', async () => {
+      forceHostPlatform('win32');
+      mockParseJsonBody.mockResolvedValueOnce({ command: '/bin/sh', args: ['-lc', 'pnpm dev'], cwd: 'C:\\ws', type: 'dev' });
+      const { res, statusCode } = makeRes();
+      await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx());
+      expect(statusCode()).toBeLessThan(300);
+      expect(createSession.mock.calls[0][0]).toMatchObject({ command: GIT_BASH.path, args: ['-c', 'pnpm dev'] });
+    });
+
+    it('the same request is untouched on POSIX', async () => {
+      forceHostPlatform('linux');
+      mockParseJsonBody.mockResolvedValueOnce({ command: '/bin/sh', args: ['-lc', 'pnpm dev'], cwd: '/ws', type: 'dev' });
+      const { res } = makeRes();
+      await handleRequest(makeReq('POST', '/api/terminals'), res, makeCtx());
+      expect(createSession.mock.calls[0][0]).toMatchObject({ command: '/bin/sh', args: ['-lc', 'pnpm dev'] });
     });
   });
 });

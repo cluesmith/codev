@@ -2,12 +2,18 @@
 
 ## Context
 
-You are performing the 3-way review of a PIR PR. The builder implemented an approved plan, the human approved the `dev-approval` gate (having run and tested the code locally), and the PR is open. This is a single advisory pass (`max_iterations: 1`) — your verdict is surfaced to the human at the `pr` gate, who is the sole remaining reviewer; it is not auto-re-reviewed.
+You are one of the consultation reviewers of a PIR PR (three by default). The builder implemented an approved plan, the human approved the `dev-approval` gate (having run and tested the code locally), and the PR is open. This is a single advisory pass (`max_iterations: 1`) — your verdict is surfaced to the human at the `pr` gate, who is the sole remaining reviewer; it is not auto-re-reviewed.
+
+## Baked Decisions
+
+If the issue body includes content under a "Baked Decisions" heading, the architect has marked those choices as fixed. Do not autonomously challenge them: do not propose alternative languages, frameworks, deployment shapes, or dependencies that contradict a baked decision. You may `COMMENT` with concerns about a baked decision (the architect decides whether to rescind it); reserve `REQUEST_CHANGES` for the case where the code **fails to honor** a stated baked decision — that is a real defect.
+
+If the baked decisions themselves contradict each other, do not pick one — `REQUEST_CHANGES` and ask the architect to clarify before proceeding.
 
 ## Focus Areas
 
 - **Completeness** — the PR body is the review-file content plus `Fixes #<N>`; commits are formatted `[PIR #<N>] ...`; the diff matches what the review file describes.
-- **Test Status** — all tests pass on the branch, coverage is adequate, and skipped/flaky tests are documented.
+- **Test Status** — all tests pass on the branch, coverage is adequate, and any flaky pre-existing test is named under Flaky Tests (reported and left running, not skipped).
 - **Code Quality** — no debug code, no stray `TODO` or unaddressed `// REVIEW:` markers.
 - **Branch Hygiene** — the branch is up to date with the default branch (whatever `git symbolic-ref --short refs/remotes/origin/HEAD` reports — typically `main`, sometimes `dev`/`ci`); commits are atomic; the diff size is reasonable for the issue.
 - **Issue Linkage** — the PR body carries `Fixes #<N>` (or `Refs #<N>` for a partial fix), without which GitHub won't auto-close the issue on merge.

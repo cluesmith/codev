@@ -7,6 +7,7 @@ import { BacklogGroupTreeItem, BacklogTreeItem } from './backlog-tree-item.js';
 import { AreaGroupExpansionStore } from './area-group-expansion.js';
 import { activeBuilderCountByArea, filterMine, spawnableBacklog } from './backlog-filter.js';
 import { recencyPrefix, relativeAge } from './backlog-recency.js';
+import { issueRef } from '../issue-id.js';
 
 // Re-export so existing call sites (extension.ts, src/test/backlog.test.ts)
 // keep their import path. The definition lives in `backlog-filter.ts` so
@@ -128,7 +129,7 @@ export class BacklogProvider implements vscode.TreeDataProvider<vscode.TreeItem>
     // (following #810).
     const now = Date.now();
     const prefix = recencyPrefix(item.createdAt, now);
-    const ti = new BacklogTreeItem(item.id, item.url, item.title, `${prefix}#${item.id} ${item.title}${author}`);
+    const ti = new BacklogTreeItem(item.id, item.url, item.title, `${prefix}${issueRef(item.id)} ${item.title}${author}`);
     const age = relativeAge(item.createdAt, now);
     ti.tooltip = age ? `${item.url}\nCreated ${age}` : item.url;
     ti.contextValue = 'backlog-item';

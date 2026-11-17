@@ -1,0 +1,30 @@
+codev-spike: uncached (Tower GET /api/issue) #1782: 992ms
+uncached (Tower GET /api/issue) #1782: 1162ms
+uncached (Tower GET /api/issue) #1782: 928ms
+first getIssue (fills $.store) #1782: 952ms
+cached ($.store) #1782: 1ms
+cached ($.store) #1782: 0ms
+hook own time: 8ms of 10000ms
+real 6.17
+user 0.90
+sys 0.51
+codev-spike: uncached (Tower GET /api/issue) #1761: 1061ms
+uncached (Tower GET /api/issue) #1761: 1039ms
+uncached (Tower GET /api/issue) #1761: 1089ms
+first getIssue (fills $.store) #1761: 1038ms
+cached ($.store) #1761: 1ms
+cached ($.store) #1761: 1ms
+hook own time: 7ms of 10000ms
+real 6.57
+user 0.85
+sys 0.47
+codev-spike: uncached (Tower GET /api/issue) #1412: 1116ms
+uncached (Tower GET /api/issue) #1412: 1016ms
+uncached (Tower GET /api/issue) #1412: 1184ms
+first getIssue (fills $.store) #1412: 1077ms
+cached ($.store) #1412: 1ms
+cached ($.store) #1412: 1ms
+hook own time: 9ms of 10000ms
+real 6.42
+user 0.88
+sys 0.53

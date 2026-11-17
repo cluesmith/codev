@@ -1,5 +1,6 @@
 import type { OverviewRecentlyClosed } from '../lib/api.js';
 import { createFileTab } from '../lib/api.js';
+import { issueRef } from '../lib/issueIds.js';
 
 interface RecentlyClosedListProps {
   items: OverviewRecentlyClosed[];
@@ -49,7 +50,7 @@ export function RecentlyClosedList({ items, onRefresh }: RecentlyClosedListProps
           <div key={item.id} className="recently-closed-row">
             <a className="recently-closed-row-main" href={item.url} target="_blank" rel="noopener noreferrer">
               <span className="recently-closed-check">&#10003;</span>
-              <span className="backlog-row-number">#{item.id}</span>
+              <span className="backlog-row-number">{issueRef(item.id)}</span>
               <span className={`backlog-type-tag ${TYPE_CLASS[item.type] ?? ''}`}>{item.type}</span>
               <span className="backlog-row-title">{item.title}</span>
               <span className="backlog-row-age">{timeAgo(item.closedAt)}</span>

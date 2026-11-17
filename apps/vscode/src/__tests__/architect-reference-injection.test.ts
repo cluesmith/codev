@@ -45,3 +45,14 @@ describe('buildArchitectReferenceInjection', () => {
       .toBe('#1234 "path\\to\\thing" ');
   });
 });
+
+describe('tracker keys (#1740)', () => {
+  it('references a key without #', () => {
+    expect(buildArchitectReferenceInjection('ENG-12', 'Fix login')).toBe('ENG-12 "Fix login" ');
+    expect(buildArchitectReferenceInjection('ENG-12', undefined)).toBe('ENG-12 ');
+  });
+
+  it('keeps numeric references unchanged', () => {
+    expect(buildArchitectReferenceInjection('42', undefined)).toBe('#42 ');
+  });
+});

@@ -11,13 +11,20 @@ import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
+import { rethrowIfNativeLoadFailure } from '../../lib/native-deps.js';
 import type { SendOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadState } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
-import { normalizeWorkspacePath } from '../utils/workspace-path.js';
+import { normalizeWorkspacePath, workspaceKey } from '../utils/workspace-path.js';
+import { matchBuilderRow, parseBuilderWorktreePath, type BuilderWorktreeRow } from '../utils/builder-worktree-identity.js';
+import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
+import { hostPaths } from '../../lib/platform/host-paths.js';
 import { TowerClient } from '../lib/tower-client.js';
+import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
+import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /**
  * `--file` attachment cap. One constant with the message-body ceiling (Issue #1573): the file's
@@ -26,25 +33,53 @@ import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js
 const MAX_FILE_SIZE = MAX_MESSAGE_BYTES;
 
 /**
+ * The path a builder's identity is read from: the spawn-time `CODEV_BUILDER_WORKTREE`
+ * when it names a builder worktree, else the cwd (Issue #1783).
+ *
+ * The env var wins because identity is where the builder was spawned, not where its
+ * shell happens to be: a builder that runs `cd <workspace root> && afx send architect`
+ * (as the "run afx from the main root" rule tells it to) used to resolve as a
+ * non-builder, so plain `architect` routed to `main` instead of its owner and the
+ * `architect:<name>` spoofing guard was skipped. The value is still only a path —
+ * `detectCurrentBuilderId` verifies it against global.db exactly as it does a cwd.
+ */
+function identityPath(): string {
+  const worktree = process.env[BUILDER_WORKTREE_ENV]?.trim();
+  if (worktree && namesAbsoluteBuilderWorktree(worktree)) return worktree;
+  return process.cwd();
+}
+
+/**
+ * Whether `value` is an absolute path inside a builder worktree. On Windows the
+ * spawn env carries a native path (`C:\repo\.builders\<id>`), so the drive or
+ * UNC root and either separator are accepted there.
+ */
+function namesAbsoluteBuilderWorktree(value: string): boolean {
+  return hostPaths().isAbsoluteBuilderWorktree(value);
+}
+
+/**
  * Detect workspace root from CWD by walking up to find .git or .codev/config.json.
- * Builder worktrees are at .builders/<id>/ which is inside the workspace root.
+ * Builder worktrees are at .builders/<id>/ which is inside the workspace root;
+ * a builder's spawn-time worktree (see `identityPath`) takes precedence over the cwd.
  *
  * Note: checks for .codev/config.json (not just .codev/) to avoid false
  * positives from ~/.codev/ which exists for global config.
  */
 export function detectWorkspaceRoot(): string | null {
-  let dir = process.cwd();
+  let dir = identityPath();
   // If inside .builders/<id>/, the workspace root is the prefix before the
   // LAST `/.builders/`. Greedy `.+` (not lazy `.+?`) so a nested worktree path
   // like `<repo>/.builders/a/.builders/b` resolves the inner builder's
   // workspace, not the outer one — mirrors deriveWorkspaceFromWorktree's
   // lastIndexOf (Issue #1118 codex review). Nesting is an unsupported
   // anti-pattern, but the parse should be consistent with the rest of the code.
-  const buildersMatch = dir.match(/^(.+)\/\.builders\/[^/]+/);
-  if (buildersMatch) return buildersMatch[1];
+  // Spec 1658 (M6): returned as one spelling per directory on Windows (as found on POSIX).
+  const buildersRef = parseBuilderWorktreePath(dir);
+  if (buildersRef) return workspaceKey(buildersRef.workspacePath);
   // Walk up looking for markers
   for (let i = 0; i < 20; i++) {
-    if (existsSync(join(dir, '.codev', 'config.json')) || existsSync(join(dir, '.git'))) return dir;
+    if (existsSync(join(dir, '.codev', 'config.json')) || existsSync(join(dir, '.git'))) return workspaceKey(dir);
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -92,7 +127,7 @@ export function describeStateDbOpenFailure(dbPath: string, worktreeDirName: stri
 }
 
 /**
- * Detect the current builder ID from the worktree path.
+ * Detect the current builder ID from the worktree path (`identityPath`: spawn env, else cwd).
  *
  * Issue #1118: builders live in the single shared `global.db`, scoped by
  * `workspace_path` (per-workspace `state.db` is retired). This resolves the
@@ -114,14 +149,12 @@ export function describeStateDbOpenFailure(dbPath: string, worktreeDirName: stri
  *     unverified id silently misroutes `afx send architect` to `main` (#1094).
  */
 export function detectCurrentBuilderId(): string | null {
-  const cwd = process.cwd();
-  // Builder worktrees are at .builders/<dir-name>/. Greedy `.+` (not lazy `.+?`)
-  // so a nested worktree resolves the INNER builder (the LAST `/.builders/`).
-  const match = cwd.match(/^(.+)\/\.builders\/([^/]+)/);
-  if (!match) return null;
+  // Builder worktrees are at .builders/<dir-name>/; a nested worktree resolves
+  // the INNER builder (the LAST `/.builders/`).
+  const ref = parseBuilderWorktreePath(identityPath());
+  if (!ref) return null;
 
-  const workspacePath = match[1];
-  const worktreeDirName = match[2];
+  const { workspacePath, worktreeDirName } = ref;
 
   // Issue #1118: builders live in the single shared global.db, scoped by
   // workspace_path (state.db is retired). Open global.db readonly and scope the
@@ -140,27 +173,24 @@ export function detectCurrentBuilderId(): string | null {
 
   let gdb: Database.Database;
   try {
-    gdb = new Database(dbPath, { readonly: true });
+    gdb = openDatabase(dbPath, { readonly: true });
   } catch (err) {
+    rethrowIfNativeLoadFailure(err);
     throw new BuilderIdResolutionError(describeStateDbOpenFailure(dbPath, worktreeDirName, err));
   }
 
   try {
-    // Match by canonical worktree path first (most precise), then fall back
-    // to a tail-segment match for legacy rows that recorded a different
-    // absolute prefix. Scoped by workspace_path so only this workspace's
-    // builders are considered.
+    // The shared matcher (Spec 1595): canonical worktree path first (most
+    // precise), then a tail-segment match for legacy rows that recorded a
+    // different absolute prefix. Scoped by workspace_path so only this
+    // workspace's builders are considered.
     const ws = normalizeWorkspacePath(workspacePath);
-    const canonicalWorktree = join(workspacePath, '.builders', worktreeDirName);
     const rows = gdb
       .prepare('SELECT id, worktree FROM builders WHERE workspace_path = ? AND worktree IS NOT NULL')
-      .all(ws) as Array<{ id: string; worktree: string }>;
+      .all(ws) as BuilderWorktreeRow[];
 
-    const exact = rows.find(r => r.worktree === canonicalWorktree);
-    if (exact) return exact.id;
-
-    const tail = rows.find(r => r.worktree.split('/').pop() === worktreeDirName);
-    if (tail) return tail.id;
+    const row = matchBuilderRow(rows, ref);
+    if (row) return row.id;
 
     throw new BuilderIdResolutionError(
       `Cannot resolve canonical builder id for worktree '${worktreeDirName}': ` +
@@ -170,6 +200,41 @@ export function detectCurrentBuilderId(): string | null {
   } finally {
     gdb.close();
   }
+}
+
+/**
+ * The sender identity for a message that does NOT originate in a builder worktree:
+ * the *specific* architect, as the `architect:<name>` address form (issue #1478).
+ *
+ * Collapsing every architect sender to the bare string `architect` discarded the one
+ * fact both attribution surfaces exist to show — `afx inbox`'s FROM → TO column and
+ * the builder's composer header.
+ *
+ * **Why the env is read directly instead of via `currentArchitectName()`** (whose
+ * absent-value default is `main`): Tower injects `CODEV_ARCHITECT_NAME` into EVERY
+ * architect terminal it starts — `main` included (`tower-instances.ts` uses
+ * `DEFAULT_ARCHITECT_NAME`; the shellper-restart path re-injects `role_id || 'main'`).
+ * So a missing value does not mean "the main architect", it means "not an architect
+ * terminal" (a plain shell, a script, CI). Defaulting those to `architect:main` would
+ * turn today's honest ambiguity into a specific FALSE attribution — precisely the
+ * laundering of an unverified identity that #1094 exists to prevent. They keep the bare
+ * `architect` they send today, and every real architect terminal gains its name.
+ *
+ * The name is validated against `ARCHITECT_NAME_PATTERN` before it becomes an identity,
+ * so a malformed env value degrades to `architect` rather than travelling into a
+ * recipient's composer framing.
+ *
+ * The address form is deliberate: it is what Tower already accepts as an architect
+ * address, it stores directly as the mailbox row's `from_agent`, and it stays outside
+ * `looksLikeBuilderId`'s heuristic — so sender-affinity routing and the #1094
+ * anti-spoofing warning behave exactly as they did with the generic string.
+ */
+export function architectSenderId(): string {
+  const name = process.env.CODEV_ARCHITECT_NAME?.trim();
+  if (!name || name.length > MAX_ARCHITECT_NAME_LENGTH || !ARCHITECT_NAME_PATTERN.test(name)) {
+    return 'architect';
+  }
+  return `architect:${name}`;
 }
 
 /**
@@ -204,7 +269,7 @@ async function readStdin(): Promise<string> {
  */
 interface SendToAllResults {
   delivered: string[];
-  held: Array<{ id: string; reason?: string; mailboxId?: string }>;
+  held: Array<{ id: string; reason?: string; detail?: string; mailboxId?: string }>;
   /** Spec 1307 `--delay`: accepted for later delivery, not sent now. */
   scheduled: string[];
   failed: string[];
@@ -254,7 +319,12 @@ async function sendToAll(
       if (result.scheduled) {
         results.scheduled.push(builder.id);
       } else if (result.held) {
-        results.held.push({ id: builder.id, reason: result.reason, mailboxId: result.mailboxId });
+        results.held.push({
+          id: builder.id,
+          reason: result.reason,
+          detail: result.detail, // Issue #1482: which kind of hold, not just that it held
+          mailboxId: result.mailboxId,
+        });
       } else {
         results.delivered.push(builder.id);
       }
@@ -319,13 +389,15 @@ export async function send(options: SendOptions): Promise<void> {
   // Detect workspace for target resolution and sender provenance
   const workspace = detectWorkspaceRoot() ?? undefined;
 
-  // Detect sender identity (builder ID if in a worktree, otherwise 'architect').
+  // Detect sender identity: builder ID if in a worktree, otherwise this terminal's
+  // architect — `architect:<name>` when the terminal names one, else the bare
+  // `architect` (issue #1478; see architectSenderId for why it never guesses a name).
   // In a confirmed builder worktree, detectCurrentBuilderId throws when the
   // canonical id can't be verified — abort loudly here rather than send an
   // unverified `from` that Tower would silently route to 'main' (issue #1094).
   let from: string;
   try {
-    from = detectCurrentBuilderId() ?? 'architect';
+    from = detectCurrentBuilderId() ?? architectSenderId();
   } catch (err) {
     fatal(err instanceof Error ? err.message : String(err));
   }
@@ -345,7 +417,9 @@ export async function send(options: SendOptions): Promise<void> {
       logger.success(`Delivered to ${results.delivered.length} builder(s): ${results.delivered.join(', ')}`);
     }
     if (results.held.length > 0) {
-      const detail = results.held.map((h) => `${h.id} (${h.reason ?? 'pending'})`).join(', ');
+      const detail = results.held
+        .map((h) => `${h.id} (${formatVerdict(h.reason, h.detail, 'pending')})`)
+        .join(', ');
       logger.info(
         `Held for ${results.held.length} builder(s): ${detail}. ` +
           `Each delivers automatically when its prompt is clear.`,
@@ -390,10 +464,19 @@ export async function send(options: SendOptions): Promise<void> {
         logger.info('Persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
       } else if (result.held) {
         logger.info(
-          `Message held for ${result.resolvedTo ?? target} (${result.reason ?? 'pending'})` +
+          `Message held for ${result.resolvedTo ?? target} (${formatVerdict(result.reason, result.detail, 'pending')})` +
             `${result.mailboxId ? ` — mailbox id ${result.mailboxId}` : ''}. ` +
             `It delivers automatically when the prompt is clear.`,
         );
+        // Issue #1482: a hold the gate could not classify will NOT clear on its own, so saying
+        // "it delivers automatically" and stopping there would be misleading for exactly the
+        // case that needs a human. Say so, once, only for that case.
+        if (isUnverifiableVerdict(result.reason, result.detail)) {
+          logger.warn(
+            `The render gate could not verify that composer (${result.detail ?? result.reason}), ` +
+              `so this hold will not clear by itself — inspect with 'afx inbox'.`,
+          );
+        }
       } else {
         // Issue #1573: report WHAT was sent, not just that a send happened. The failures this
         // echo exists for (#1564: a ~1,900-char message arriving as its final ~30) all read as
@@ -404,8 +487,26 @@ export async function send(options: SendOptions): Promise<void> {
         // re-injected one message dozens of times in #1583 — so this line is the only place the
         // sender learns the delivery was unconfirmed. `verified` absent (older Tower, or a body
         // with no header worth matching) keeps today's wording.
-        const unverified = result.verified === false ? ' (unverified — header not seen on the terminal)' : '';
+        // Issue #1473: `verified === false` was the wrong condition on its own. The case that
+        // most needs saying — a human's Enter submitting our half-written body — has the header
+        // on screen, so `verified` is `true` or absent, and this printed a plain success to the
+        // one person standing there. Drive the qualifier off the CAUSE, and keep the old
+        // `verified === false` wording as the fallback for an older Tower that sends no cause.
+        const unverified =
+          result.unverifiedCause === 'input-raced'
+            ? ' (unconfirmed — the terminal received input mid-write)'
+            : result.unverifiedCause === 'no-echo' || result.verified === false
+              ? ' (unverified — header not seen on the terminal)'
+              : '';
         logger.success(`Message delivered to ${result.resolvedTo ?? target}${size}${unverified}`);
+        if (result.unverifiedCause === 'input-raced') {
+          logger.warn(
+            `That terminal received input while this message was being written, so the body may ` +
+              `have been truncated, submitted early, or had the input absorbed into it. It is ` +
+              `recorded as delivered and will NOT be re-sent — check the agent's prompt before ` +
+              `assuming it read cleanly.`,
+          );
+        }
         // Issue #1365: an interrupt/escape that gave up waiting for the terminal's submission
         // lock wrote unserialized, so its bytes may have interleaved with the delivery it
         // skipped. The row is claimed `delivered` before the write (un-claiming would risk a

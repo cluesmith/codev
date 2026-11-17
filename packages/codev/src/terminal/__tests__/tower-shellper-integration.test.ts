@@ -306,10 +306,12 @@ describe('PtySession + ShellperClient integration', () => {
       const exitSpy = vi.fn();
       session.on('exit', exitSpy);
 
+      expect(session.awaitingRestart).toBe(false);
       // Process crashes (Bugfix #1241: only these await a restart)
       mockClient.simulateExit(1);
       expect(exitSpy).not.toHaveBeenCalled();
       expect(session.status).toBe('exited'); // exitCode is set initially
+      expect(session.awaitingRestart).toBe(true);
 
       // Process restarts — new data arrives before timeout
       vi.advanceTimersByTime(2000); // 2s restart delay
@@ -317,6 +319,7 @@ describe('PtySession + ShellperClient integration', () => {
 
       // exitCode should be cleared — session is running again
       expect(session.status).toBe('running');
+      expect(session.awaitingRestart).toBe(false);
 
       // Write should work after restart
       session.write('test input');
@@ -347,6 +350,7 @@ describe('PtySession + ShellperClient integration', () => {
 
       // Exit should fire now (permanent death)
       expect(exitSpy).toHaveBeenCalledWith(1, null);
+      expect(session.awaitingRestart).toBe(false);
       vi.useRealTimers();
     });
 

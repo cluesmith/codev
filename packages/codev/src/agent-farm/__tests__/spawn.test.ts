@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import type { SpawnOptions, BuilderType } from '../types.js';
 import { stripLeadingZeros } from '../utils/agent-names.js';
+import { inferProtocolFromDirs } from '../commands/spawn.js';
 
 // Re-implement the validation logic for testing (avoids importing with side effects)
 function validateSpawnOptions(options: SpawnOptions): string | null {
@@ -704,16 +705,8 @@ describe('Spawn Command', () => {
   });
 
   describe('inferProtocolFromWorktree (unit logic)', () => {
-    // Re-implement inferProtocolFromWorktree for isolated testing
-    function inferProtocolFromWorktree(dirs: string[], issueNumber: number): string | null {
-      const strippedId = stripLeadingZeros(String(issueNumber));
-      const match = dirs.find(d => {
-        const parts = d.split('-');
-        return parts.length >= 2 && stripLeadingZeros(parts[1]) === strippedId;
-      });
-      if (match) return match.split('-')[0];
-      return null;
-    }
+    // The real matcher behind inferProtocolFromWorktree, minus the readdir.
+    const inferProtocolFromWorktree = inferProtocolFromDirs;
 
     it('matches worktree with non-padded ID (e.g., spir-315-feature)', () => {
       expect(inferProtocolFromWorktree(['spir-315-feature-name'], 315)).toBe('spir');
@@ -729,6 +722,22 @@ describe('Spawn Command', () => {
 
     it('returns null when no worktree matches', () => {
       expect(inferProtocolFromWorktree(['spir-100-other'], 42)).toBeNull();
+    });
+
+    it('matches tracker-key worktrees without splitting the key (#1740)', () => {
+      expect(inferProtocolFromWorktree(['pir-ENG-123'], 'ENG-123')).toBe('pir');
+      expect(inferProtocolFromWorktree(['bugfix-ENG-123-fix-login'], 'ENG-123')).toBe('bugfix');
+      expect(inferProtocolFromWorktree(['spir-AB2_X-7'], 'AB2_X-7')).toBe('spir');
+    });
+
+    it('matches a key spawned in another case (pre-canonicalization worktree)', () => {
+      expect(inferProtocolFromWorktree(['pir-eng-123'], 'ENG-123')).toBe('pir');
+    });
+
+    it('does not confuse a key with a numeric id or a different key', () => {
+      expect(inferProtocolFromWorktree(['pir-ENG-123'], 123)).toBeNull();
+      expect(inferProtocolFromWorktree(['pir-ENG-1234'], 'ENG-123')).toBeNull();
+      expect(inferProtocolFromWorktree(['spir-123-slug'], 'ENG-123')).toBeNull();
     });
 
     it('returns null for empty directory listing', () => {

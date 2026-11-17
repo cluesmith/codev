@@ -1,0 +1,13 @@
+# Shell scripts run under bash, which is Git Bash on native Windows (Spec 1658),
+# and bash fails on CRLF line endings. Pin LF in the working tree whatever the
+# checkout's core.autocrlf, so the forge concept scripts that ship in
+# packages/codev/scripts/forge/ (and every other .sh) stay runnable.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Windows batch files need CRLF; cmd.exe misparses some LF-only scripts.
+*.cmd text eol=crlf
+
+# Render-gate fixtures are raw PTY bytes (Spec 1658): never convert their line
+# endings, or a Windows checkout with core.autocrlf=true rewrites the captures.
+packages/codev/src/agent-farm/__tests__/fixtures/gate/** -text

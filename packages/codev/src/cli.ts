@@ -20,6 +20,7 @@ import { cli as porchCli } from './commands/porch/index.js';
 import { importCommand } from './commands/import.js';
 import { generateImage } from './commands/generate-image.js';
 import { version } from './version.js';
+import { isCodevEntrypoint } from './lib/cli-entry.js';
 import { findWorkspaceRoot } from './agent-farm/utils/index.js';
 
 /**
@@ -89,6 +90,22 @@ program
     }
   });
 
+// Bootstrap-docs command (Spec 1797). Deliberately no -y: it always confirms before
+// launching an agent.
+program
+  .command('bootstrap-docs')
+  .description('Draft the governance docs (arch/lessons, hot + cold) from this codebase')
+  .option('-n, --dry-run', 'Report which files are eligible and what would launch, without launching')
+  .action(async (options) => {
+    try {
+      const { bootstrapDocs } = await import('./commands/bootstrap-docs.js');
+      process.exitCode = await bootstrapDocs({ dryRun: options.dryRun });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
 // Update command
 program
   .command('update')
@@ -122,6 +139,7 @@ program
               ? 'For each conflict, merge the .codev-new file into the original. Preserve user customizations and incorporate new sections from .codev-new. Delete the .codev-new file after merging.'
               : null,
             commit: `Stage and commit all changed files with message: '[Maintenance] Update codev to v${version}'`,
+            bootstrapDocs: result.bootstrapDocsHint ?? null,
           },
           ...(result.error ? { error: result.error } : {}),
         };
@@ -198,8 +216,8 @@ registerConsultOptions(
       }
 
       await consult(buildConsultOptions(options));
-      // Bugfix #341: Force exit after consult completes. SDK internals
-      // (Claude Agent SDK, Codex SDK, Gemini CLI) leave dangling handles
+      // Bugfix #341: Force exit after consult completes. Lane internals
+      // (the Codex SDK, the Gemini CLI) can leave dangling handles
       // (timers, sockets, subprocesses) that keep the Node.js event loop
       // alive indefinitely. Without this, consult processes accumulate as
       // orphans when run in the background by porch/builders.
@@ -243,12 +261,13 @@ program
 // Generate-image command
 program
   .command('generate-image')
-  .description('Generate images using Gemini (Nano Banana Pro)')
+  .description('Generate images using Gemini (Nano Banana Pro), or an optional async API provider')
   .argument('<prompt>', 'Text prompt or path to .txt file')
   .option('-o, --output <path>', 'Output file path', 'output.png')
   .option('-r, --resolution <res>', 'Resolution: 1K, 2K, or 4K', '1K')
   .option('-a, --aspect <ratio>', 'Aspect ratio: 1:1, 16:9, 9:16, 3:4, 4:3, 3:2, 2:3', '1:1')
   .option('--ref <path...>', 'Reference image(s) for image-to-image generation (up to 14)')
+  .option('-p, --provider <name>', 'Provider name (default: gemini); MuAPI is available as an async backend', 'gemini')
   .action(async (prompt, options) => {
     try {
       await generateImage(prompt, {
@@ -256,6 +275,7 @@ program
         resolution: options.resolution,
         aspect: options.aspect,
         ref: options.ref,
+        provider: options.provider,
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
@@ -357,9 +377,7 @@ export async function run(args: string[]): Promise<void> {
 }
 
 // If run directly (not imported)
-const isMainModule = import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith('/codev.js') ||
-  process.argv[1]?.endsWith('/codev');
+const isMainModule = isCodevEntrypoint(process.argv[1], import.meta.url);
 
 if (isMainModule) {
   const args = process.argv.slice(2);

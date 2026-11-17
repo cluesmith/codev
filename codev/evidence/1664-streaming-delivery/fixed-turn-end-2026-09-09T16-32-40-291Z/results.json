@@ -1,0 +1,286 @@
+{
+  "scenario": "turn-end",
+  "tuiVersion": "2.1.266 (Claude Code)",
+  "results": [
+    {
+      "n": 1,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 397,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 40,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 7,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 2,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 91,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 3,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 397,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 18,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 4,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 4,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 395,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 19,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 4,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 5,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 92,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 6,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 93,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 7,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 397,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 17,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 4,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 8,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 90,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 9,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 93,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 10,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 92,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 11,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 404,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 45,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 4,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 12,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 395,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 17,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 4,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 13,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 92,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 14,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 395,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 21,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 4,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 15,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 91,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 16,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 394,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 20,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 4,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 17,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 92,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 18,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 393,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 3,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 19,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 91,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 0,
+      "verdicts": [],
+      "outputChunksDuringWait": 2,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 20,
+      "scenario": "turn-end",
+      "deliveredAfterMs": 393,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 26,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 4,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    }
+  ]
+}

@@ -5,21 +5,20 @@
  * external commands. Default commands wrap the `gh` CLI for GitHub repos.
  * Projects override commands via the `forge` section in .codev/config.json.
  *
- * Concept commands are executed via shell (`sh -c`) to support pipes,
- * redirects, and variable expansion in user-configured commands.
+ * Concept commands are executed via shell (`sh -c`; the resolved Git Bash on
+ * native Windows) to support pipes, redirects, and variable expansion in
+ * user-configured commands.
  * Environment variables (CODEV_*) are set before invocation.
  *
  * @see codev/specs/589-non-github-repository-support.md
  */
 
-import { exec, execSync } from 'node:child_process';
-import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { IssueIdKind } from '@cluesmith/codev-types';
 import { loadConfig as loadCodevConfig } from './config.js';
-
-const execAsync = promisify(exec);
+import { commandLaunch } from './platform/command-launch.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -132,6 +131,10 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
     // default. Disabling pr-create here would leave Linear the one provider
     // that can merge a PR but not open one.
     linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps']),
+    // Jira Cloud via Atlassian's `acli` (#1740) is hybrid on the Linear model:
+    // issue concepts only, every PR concept (pr-create included) on the github
+    // default.
+    jira: buildPresetFromScripts('jira', ['team-activity', 'on-it-timestamps']),
   };
   return _providerPresets;
 }
@@ -139,6 +142,38 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
 /** Get known provider names. */
 export function getKnownProviders(): string[] {
   return Object.keys(getProviderPresets());
+}
+
+/**
+ * Providers that hold only the issues (spec 719). Their PR concepts run `gh`,
+ * so a workspace on one needs a working `gh` login as well as the tracker's.
+ */
+const HYBRID_PROVIDERS: ReadonlySet<string> = new Set(['linear', 'jira']);
+
+export function isHybridProvider(provider: string | undefined): boolean {
+  return provider !== undefined && HYBRID_PROVIDERS.has(provider.toLowerCase());
+}
+
+const ISSUE_ID_KIND_BY_PROVIDER: Record<string, IssueIdKind> = {
+  github: 'number',
+  gitlab: 'number',
+  gitea: 'number',
+  linear: 'key',
+  jira: 'key',
+};
+
+const ISSUE_CONCEPTS = ['issue-view', 'issue-list', 'issue-search', 'issue-comment', 'recently-closed'];
+
+/**
+ * The shape of the workspace's issue ids, from its provider (#1740). Undefined
+ * when a hand-written override replaces an issue concept: the provider then no
+ * longer says what the ids look like, so this reports nothing rather than guess.
+ */
+export function resolveIssueIdKind(forgeConfig: ForgeConfig | null | undefined): IssueIdKind | undefined {
+  if (forgeConfig && ISSUE_CONCEPTS.some((concept) => typeof forgeConfig[concept] === 'string')) {
+    return undefined;
+  }
+  return ISSUE_ID_KIND_BY_PROVIDER[(forgeConfig?.provider ?? 'github').toLowerCase()];
 }
 
 /** Resolution source for a concept command. */
@@ -329,28 +364,97 @@ export async function executeForgeCommand(
   env?: Record<string, string>,
   options?: ForgeCommandOptions,
 ): Promise<unknown | null> {
-  const forgeConfig = resolveForgeConfig(options);
-  const command = getForgeCommand(concept, forgeConfig);
+  return (await executeForgeCommandDetailed(concept, env, options)).data;
+}
 
-  if (command === null) {
-    return null;
-  }
+/** Why a forge command produced no data (#1645). `null` on the result means it exited 0. */
+export interface ForgeCommandError {
+  message: string;
+  stderr: string;
+  /** Process exit code; null when the command was disabled, timed out, or config failed to load. */
+  exitCode: number | null;
+}
 
-  const forgeEnv = buildForgeEnv(forgeConfig);
+export interface ForgeCommandResult {
+  data: unknown | null;
+  error: ForgeCommandError | null;
+}
 
+/**
+ * Like `executeForgeCommand`, but keeps the failure (#1645). Callers that must
+ * tell "rate limited" from "CLI missing" need stderr and the exit code; the
+ * plain variant collapses every failure to `null`. Never throws — a malformed
+ * `.codev/config.json` is reported as an error, not raised into Tower's
+ * `unhandledRejection` handler.
+ */
+export async function executeForgeCommandDetailed(
+  concept: string,
+  env?: Record<string, string>,
+  options?: ForgeCommandOptions,
+): Promise<ForgeCommandResult> {
   try {
-    const { stdout } = await execAsync(command, {
-      cwd: options?.cwd,
-      env: { ...process.env, ...forgeEnv, ...env },
-      timeout: 30_000,
-      maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
-    });
+    const forgeConfig = resolveForgeConfig(options);
+    const command = getForgeCommand(concept, forgeConfig);
+    if (command === null) {
+      return { data: null, error: { message: `concept '${concept}' is disabled or unknown`, stderr: '', exitCode: null } };
+    }
 
-    return parseOutput(stdout, options?.raw);
+    const execEnv = { ...process.env, ...buildForgeEnv(forgeConfig), ...env };
+    const maxBuffer = options?.maxBuffer ?? DEFAULT_MAX_BUFFER;
+    const stdout = await commandLaunch().execShellString(command, {
+      cwd: options?.cwd,
+      env: execEnv,
+      timeout: 30_000,
+      maxBuffer,
+      workspaceRoot: options?.workspaceRoot ?? options?.cwd,
+      msysPathEnvKeys: PATH_INPUTS,
+    });
+    return { data: parseOutput(stdout, options?.raw), error: null };
   } catch (err: unknown) {
     logDebug(concept, err);
-    return null;
+    const e = err as { message?: string; stderr?: string; code?: unknown };
+    return {
+      data: null,
+      error: {
+        message: e?.message ?? String(err),
+        stderr: typeof e?.stderr === 'string' ? e.stderr : '',
+        exitCode: typeof e?.code === 'number' ? e.code : null,
+      },
+    };
   }
+}
+
+/**
+ * Executables that name a transport, not a forge account. A concept run through
+ * one of these is keyed by its provider (`linear`), because `curl` has no budget.
+ */
+const GENERIC_TRANSPORTS = new Set(['curl', 'wget', 'sh', 'bash', 'zsh', 'node', 'python', 'python3', 'npx', 'env']);
+const FORGE_CLIS = new Set(['gh', 'glab', 'tea']);
+
+/**
+ * The backend a concept actually spends budget on (#1645): the resolved
+ * executable's lowercased basename (`gh`, whether configured as `gh` or
+ * `/usr/local/bin/gh`), never the configured provider — a Linear workspace's
+ * `pr-list` falls through to the GitHub script and spends GitHub's budget.
+ * Generic transports and custom script paths key by provider instead.
+ * Returns null when the concept is disabled or unknown.
+ */
+export function resolveForgeBackend(concept: string, options?: ForgeCommandOptions): string | null {
+  let forgeConfig: ForgeConfig | null;
+  try {
+    forgeConfig = resolveForgeConfig(options);
+  } catch {
+    forgeConfig = null;
+  }
+  const command = getForgeCommand(concept, forgeConfig);
+  if (command === null) return null;
+  const provider = (forgeConfig?.provider ?? 'github').toLowerCase();
+  const executable = extractExecutable(command);
+  if (!executable) return provider;
+  const base = basename(executable).toLowerCase();
+  if (GENERIC_TRANSPORTS.has(base)) return provider;
+  if (executable.includes('/') && !FORGE_CLIS.has(base)) return provider;
+  return base;
 }
 
 /**
@@ -374,13 +478,15 @@ export function executeForgeCommandSync(
   const forgeEnv = buildForgeEnv(forgeConfig);
 
   try {
-    const stdout = execSync(command, {
+    const execEnv = { ...process.env, ...forgeEnv, ...env };
+    const maxBuffer = options?.maxBuffer ?? DEFAULT_MAX_BUFFER;
+    const stdout = commandLaunch().execShellStringSync(command, {
       cwd: options?.cwd,
-      env: { ...process.env, ...forgeEnv, ...env },
-      encoding: 'utf-8',
+      env: execEnv,
       timeout: 30_000,
-      maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer,
+      workspaceRoot: options?.workspaceRoot ?? options?.cwd,
+      msysPathEnvKeys: PATH_INPUTS,
     });
 
     return parseOutput(stdout, options?.raw);
@@ -395,6 +501,14 @@ export function executeForgeCommandSync(
 // =============================================================================
 
 const _knownConceptSet = new Set<string>(KNOWN_CONCEPTS);
+
+/**
+ * Concept inputs that carry a local path. Scripts hand them to MSYS tools
+ * (`tar -C`), which need POSIX form. Add any new CODEV_* input whose value is a
+ * host file-system path; identifiers, URLs and API paths stay out (they must
+ * pass through unchanged).
+ */
+const PATH_INPUTS: readonly string[] = ['CODEV_OUTPUT_DIR'];
 
 /**
  * Build environment variables from non-concept forge config keys.
@@ -460,6 +574,23 @@ export function getDefaultCommand(concept: string): string | null {
  * Returns an array of diagnostic messages.
  * Used by `codev doctor`.
  */
+/**
+ * Non-concept settings each provider's scripts read, passed through as
+ * `CODEV_<KEY>` (see buildForgeEnv). Listed so validation can tell a real
+ * setting from a typo'd concept name.
+ */
+const PROVIDER_SETTINGS: Record<string, readonly string[]> = {
+  linear: ['linear-team'],
+  jira: ['jira-site', 'jira-project'],
+};
+
+function providerOwningSetting(key: string): string | null {
+  for (const [provider, settings] of Object.entries(PROVIDER_SETTINGS)) {
+    if (settings.includes(key)) return provider;
+  }
+  return null;
+}
+
 export function validateForgeConfig(
   forgeConfig: ForgeConfig,
 ): { concept: string; status: 'ok' | 'disabled' | 'unknown_concept' | 'empty_command' | 'provider'; message: string }[] {
@@ -482,7 +613,14 @@ export function validateForgeConfig(
     } else if (command === '') {
       results.push({ concept, status: 'empty_command', message: `Concept '${concept}' has an empty command string` });
     } else if (!(concept in getDefaultCommands())) {
-      results.push({ concept, status: 'unknown_concept', message: `Concept '${concept}' is not a known forge concept` });
+      const owner = providerOwningSetting(concept);
+      if (owner !== null && owner === forgeConfig.provider?.toLowerCase()) {
+        results.push({ concept, status: 'ok', message: `Setting '${concept}': ${command}` });
+      } else if (owner !== null) {
+        results.push({ concept, status: 'unknown_concept', message: `Setting '${concept}' only applies to provider '${owner}'` });
+      } else {
+        results.push({ concept, status: 'unknown_concept', message: `Concept '${concept}' is not a known forge concept` });
+      }
     } else {
       results.push({ concept, status: 'ok', message: `Concept '${concept}' overridden: ${command}` });
     }

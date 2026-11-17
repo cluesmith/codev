@@ -17,6 +17,7 @@
 
 import * as vscode from 'vscode';
 import type { ConnectionManager } from '../connection-manager.js';
+import { issueRef } from '../issue-id.js';
 
 export async function runWorktreeSetup(
   connectionManager: ConnectionManager,
@@ -39,7 +40,7 @@ export async function runWorktreeSetup(
     }
     const picked = await vscode.window.showQuickPick(
       builders.map(b => ({
-        label: `#${b.issueId ?? b.id} ${b.issueTitle ?? ''}`,
+        label: `${issueRef(b.issueId ?? b.id)} ${b.issueTitle ?? ''}`,
         builder: b,
       })),
       { placeHolder: 'Select builder whose worktree to re-setup' },

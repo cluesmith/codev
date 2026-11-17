@@ -20,6 +20,10 @@ import {
   validateForgeConfig,
   loadForgeConfig,
   resolveAllConcepts,
+  executeForgeCommandDetailed,
+  resolveForgeBackend,
+  isHybridProvider,
+  resolveIssueIdKind,
 } from '../lib/forge.js';
 
 // =============================================================================
@@ -109,13 +113,13 @@ afterAll(() => {
 describe('getForgeCommand', () => {
   it('returns default script path when no config provided', () => {
     const cmd = getForgeCommand('issue-view');
-    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'issue-view.sh'));
   });
 
   it('returns default script path when config has no override for concept', () => {
     const config = { 'pr-list': 'custom-pr-list' };
     const cmd = getForgeCommand('issue-view', config);
-    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'issue-view.sh'));
   });
 
   it('returns user override when configured', () => {
@@ -347,17 +351,17 @@ describe('getKnownConcepts', () => {
 describe('getDefaultCommand', () => {
   it('returns the on-disk script path for a known concept', () => {
     const cmd = getDefaultCommand('issue-view');
-    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'issue-view.sh'));
   });
 
   it('returns the on-disk script path for recently-closed', () => {
     const cmd = getDefaultCommand('recently-closed');
-    expect(cmd).toContain('scripts/forge/github/recently-closed.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'recently-closed.sh'));
   });
 
   it('returns the on-disk script path for recently-merged', () => {
     const cmd = getDefaultCommand('recently-merged');
-    expect(cmd).toContain('scripts/forge/github/recently-merged.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'recently-merged.sh'));
   });
 
   it('returns null for unknown concepts', () => {
@@ -453,7 +457,7 @@ describe('provider presets', () => {
   it('uses provider preset when no manual override', () => {
     const config = { provider: 'gitlab' };
     const cmd = getForgeCommand('pr-merge', config);
-    expect(cmd).toContain('scripts/forge/gitlab/pr-merge.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'gitlab', 'pr-merge.sh'));
   });
 
   it('manual override takes precedence over provider preset', () => {
@@ -466,7 +470,7 @@ describe('provider presets', () => {
     // github preset uses on-disk scripts, same as defaults
     const config = { provider: 'github' };
     const cmd = getForgeCommand('issue-view', config);
-    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'issue-view.sh'));
   });
 
   it('returns null for concepts disabled in provider preset', () => {
@@ -491,13 +495,13 @@ describe('provider presets', () => {
   it('linear provider uses linear scripts for concepts with scripts', () => {
     const config = { provider: 'linear' };
     const cmd = getForgeCommand('issue-view', config);
-    expect(cmd).toContain('scripts/forge/linear/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'linear', 'issue-view.sh'));
   });
 
   it('linear provider falls through to github default for concepts without scripts', () => {
     const config = { provider: 'linear' };
     const cmd = getForgeCommand('pr-list', config);
-    expect(cmd).toContain('scripts/forge/github/pr-list.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'pr-list.sh'));
   });
 
   it('linear provider omits (not nulls) concepts without scripts so they fall through', () => {
@@ -506,7 +510,7 @@ describe('provider presets', () => {
     const prList = resolutions.find(r => r.concept === 'pr-list');
     // pr-list has no linear script — should fall through to default, NOT be disabled
     expect(prList?.source).toBe('default');
-    expect(prList?.command).toContain('github/pr-list.sh');
+    expect(prList?.command).toContain(join('github', 'pr-list.sh'));
   });
 
   it('linear provider disables explicitly disabled concepts', () => {
@@ -528,7 +532,7 @@ describe('provider presets', () => {
     expect(getForgeCommand('pr-create', config)).toBe(getForgeCommand('pr-create', null));
     const prCreate = resolveAllConcepts(config).find(r => r.concept === 'pr-create');
     expect(prCreate?.source).toBe('default');
-    expect(prCreate?.command).toContain('github/pr-create.sh');
+    expect(prCreate?.command).toContain(join('github', 'pr-create.sh'));
     expect(prCreate?.executable).toBe('gh');
     // The sibling PR concepts fall through the same way.
     const prMerge = resolveAllConcepts(config).find(r => r.concept === 'pr-merge');
@@ -552,7 +556,84 @@ describe('provider presets', () => {
     const resolutions = resolveAllConcepts(config);
     const issueView = resolutions.find(r => r.concept === 'issue-view');
     expect(issueView?.source).toBe('preset');
-    expect(issueView?.command).toContain('linear/issue-view.sh');
+    expect(issueView?.command).toContain(join('linear', 'issue-view.sh'));
+  });
+
+  // Jira (#1740) is hybrid on the Linear model: issue concepts from acli
+  // scripts, every PR concept (pr-create included) on the github default.
+  const JIRA_ISSUE_CONCEPTS = [
+    'auth-status', 'issue-comment', 'issue-list', 'issue-search', 'issue-view', 'recently-closed', 'user-identity',
+  ];
+
+  it('jira is a known provider', () => {
+    expect(getKnownProviders()).toContain('jira');
+  });
+
+  it('jira provider resolves every issue concept to its acli preset script', () => {
+    const resolutions = resolveAllConcepts({ provider: 'jira' });
+    for (const concept of JIRA_ISSUE_CONCEPTS) {
+      const r = resolutions.find(x => x.concept === concept);
+      expect(r?.source, concept).toBe('preset');
+      expect(r?.command, concept).toContain(join('scripts', 'forge', 'jira', `${concept}.sh`));
+      expect(r?.executable, concept).toBe('acli');
+    }
+  });
+
+  it('jira provider falls through to the gh default for every PR concept, pr-create included', () => {
+    const config = { provider: 'jira' };
+    for (const concept of ['pr-create', 'pr-merge', 'pr-list', 'pr-view', 'pr-diff', 'pr-search', 'pr-exists', 'recently-merged']) {
+      expect(getForgeCommand(concept, config), concept).toBe(getForgeCommand(concept, null));
+    }
+  });
+
+  it('jira provider leaves no concept unresolvable (hybrid model guard)', () => {
+    const resolutions = resolveAllConcepts({ provider: 'jira' });
+    const disabled = resolutions.filter(r => r.source === 'disabled').map(r => r.concept);
+    expect(disabled.sort()).toEqual(['on-it-timestamps', 'team-activity']);
+    const preset = resolutions.filter(r => r.source === 'preset').map(r => r.concept);
+    expect(preset.sort()).toEqual([...JIRA_ISSUE_CONCEPTS].sort());
+  });
+});
+
+describe('isHybridProvider (#1740)', () => {
+  it('is true for the issue-only providers, whose PR concepts run gh', () => {
+    expect(isHybridProvider('linear')).toBe(true);
+    expect(isHybridProvider('jira')).toBe(true);
+    expect(isHybridProvider('Jira')).toBe(true);
+  });
+
+  it('is false for full forges and for no provider', () => {
+    for (const p of ['github', 'gitlab', 'gitea']) expect(isHybridProvider(p), p).toBe(false);
+    expect(isHybridProvider(undefined)).toBe(false);
+  });
+});
+
+describe('resolveIssueIdKind (#1740)', () => {
+  it('reports numbers for the full forges, including the github default', () => {
+    expect(resolveIssueIdKind(null)).toBe('number');
+    expect(resolveIssueIdKind({})).toBe('number');
+    expect(resolveIssueIdKind({ provider: 'gitlab' })).toBe('number');
+    expect(resolveIssueIdKind({ provider: 'gitea' })).toBe('number');
+  });
+
+  it('reports keys for the trackers', () => {
+    expect(resolveIssueIdKind({ provider: 'jira' })).toBe('key');
+    expect(resolveIssueIdKind({ provider: 'linear' })).toBe('key');
+  });
+
+  it('reports nothing when an issue concept is overridden by hand', () => {
+    // The interim Jira wiring: provider unset, issue concepts overridden.
+    expect(resolveIssueIdKind({ 'issue-view': 'my-jira-view' })).toBeUndefined();
+    expect(resolveIssueIdKind({ provider: 'jira', 'issue-list': 'my-list' })).toBeUndefined();
+  });
+
+  it('ignores PR-concept overrides and disabled issue concepts', () => {
+    expect(resolveIssueIdKind({ 'pr-list': 'my-pr-list' })).toBe('number');
+    expect(resolveIssueIdKind({ provider: 'jira', 'issue-search': null })).toBe('key');
+  });
+
+  it('reports nothing for an unknown provider', () => {
+    expect(resolveIssueIdKind({ provider: 'bitbucket' })).toBeUndefined();
   });
 });
 
@@ -691,5 +772,99 @@ describe('resolveAllConcepts', () => {
     const config = { 'issue-view': './bin/my-forge issue view "$1"' };
     const issueView = resolveAllConcepts(config).find(r => r.concept === 'issue-view');
     expect(issueView?.executable).toBe('./bin/my-forge');
+  });
+});
+
+// =============================================================================
+// #1645: failures keep their stderr/exit code; budgets key by resolved backend
+// =============================================================================
+
+describe('executeForgeCommandDetailed (#1645)', () => {
+  const SCRIPT = join(MOCK_SCRIPTS_DIR, 'rate-limited.sh');
+  beforeAll(() => {
+    writeFileSync(SCRIPT, '#!/bin/sh\necho "gh: API rate limit already exceeded for user ID 1" >&2\nexit 1\n');
+    chmodSync(SCRIPT, 0o755);
+  });
+
+  it('surfaces stderr and the exit code of a failing concept', async () => {
+    const result = await executeForgeCommandDetailed('issue-view', {}, { forgeConfig: { 'issue-view': SCRIPT } });
+    expect(result.data).toBeNull();
+    expect(result.error?.exitCode).toBe(1);
+    expect(result.error?.stderr).toContain('rate limit already exceeded');
+  });
+
+  it('reports a disabled concept as an error without executing', async () => {
+    const result = await executeForgeCommandDetailed('issue-view', {}, { forgeConfig: { 'issue-view': null } });
+    expect(result).toEqual({ data: null, error: { message: expect.stringContaining('disabled'), stderr: '', exitCode: null } });
+  });
+
+  it('reports a malformed .codev/config.json as an error instead of rejecting', async () => {
+    const broken = join(TEST_DIR, 'broken-config');
+    mkdirSync(join(broken, '.codev'), { recursive: true });
+    writeFileSync(join(broken, '.codev', 'config.json'), '{ not json');
+    await expect(executeForgeCommandDetailed('pr-list', {}, { workspaceRoot: broken })).resolves.toMatchObject({ data: null });
+  });
+});
+
+describe('resolveForgeBackend (#1645)', () => {
+  it('keys the github default scripts by their CLI, gh', () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: null })).toBe('gh');
+    expect(resolveForgeBackend('user-identity', { forgeConfig: null })).toBe('gh');
+  });
+
+  it("keys a Linear workspace's pr-list (falls through to github) by gh, and its issue-list by provider", () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { provider: 'linear' } })).toBe('gh');
+    expect(resolveForgeBackend('issue-list', { forgeConfig: { provider: 'linear' } })).toBe('linear');
+  });
+
+  it("keys a Jira workspace's issue concepts by acli and its PR concepts by gh (#1740)", () => {
+    expect(resolveForgeBackend('issue-list', { forgeConfig: { provider: 'jira' } })).toBe('acli');
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { provider: 'jira' } })).toBe('gh');
+  });
+
+  it('keys an absolute CLI path like the bare command, lowercased', () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { 'pr-list': '/usr/local/bin/GH pr list --json number' } })).toBe('gh');
+  });
+
+  it('keys generic transports and custom script paths by provider', () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { provider: 'gitlab', 'pr-list': 'curl -s https://forge.example/prs' } })).toBe('gitlab');
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { 'pr-list': '/home/me/my-forge-script' } })).toBe('github');
+  });
+
+  it('returns null for a disabled concept', () => {
+    expect(resolveForgeBackend('pr-list', { forgeConfig: { 'pr-list': null } })).toBeNull();
+  });
+});
+
+describe('shipped provider scripts declare their executable (#1645)', () => {
+  const BUILTINS = new Set(['set', 'if', 'case', 'echo', 'printf', 'test', '[', 'exit', 'export', 'local', '.', 'source']);
+
+  it('no built-in provider resolves a concept to a shell builtin', () => {
+    for (const provider of getKnownProviders()) {
+      for (const r of resolveAllConcepts({ provider })) {
+        if (r.command === null) continue;
+        expect(r.executable, `${provider}/${r.concept} resolved to '${r.executable}'`).not.toBeNull();
+        expect(BUILTINS.has(r.executable as string), `${provider}/${r.concept} resolved to builtin '${r.executable}'`).toBe(false);
+      }
+    }
+  });
+});
+
+describe('validateForgeConfig provider settings (#1740)', () => {
+  it('accepts a provider setting when that provider is configured', () => {
+    const results = validateForgeConfig({ provider: 'jira', 'jira-site': 'https://x.atlassian.net', 'jira-project': 'ENG' });
+    expect(results.filter(r => r.status === 'unknown_concept')).toEqual([]);
+    expect(validateForgeConfig({ provider: 'linear', 'linear-team': 'ENG' }).filter(r => r.status === 'unknown_concept')).toEqual([]);
+  });
+
+  it('flags a provider setting under a different provider', () => {
+    const r = validateForgeConfig({ provider: 'github', 'jira-site': 'x' }).find(x => x.concept === 'jira-site');
+    expect(r?.status).toBe('unknown_concept');
+    expect(r?.message).toContain("only applies to provider 'jira'");
+  });
+
+  it('still flags a typo as an unknown concept', () => {
+    const r = validateForgeConfig({ provider: 'jira', 'jira-sitee': 'x' }).find(x => x.concept === 'jira-sitee');
+    expect(r?.message).toContain('is not a known forge concept');
   });
 });

@@ -7,6 +7,7 @@
  */
 
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -215,7 +216,7 @@ export class MetricsDB {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
 
-    this.db = new Database(path);
+    this.db = openDatabase(path);
 
     // busy_timeout must come FIRST: everything below (the journal-mode switch, CREATE TABLE, the
     // migration, INSERTs) can contend, and without it each one fails instantly instead of waiting.

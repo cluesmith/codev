@@ -104,11 +104,10 @@ describe('reply hint on architect → builder frames (#1574)', () => {
   });
 
   /**
-   * Load-bearing, not incidental: `message-write.ts` paces any message of
-   * PACED_WRITE_LINE_THRESHOLD (4) lines or more line-by-line. A hint on its own
-   * trailing line would push every short architect→builder message off the
-   * single-write path onto the paced one, widening the delivery-write exposure
-   * window (#1521/#1573) as a side effect of a formatter change.
+   * Load-bearing, not incidental: `message-write.ts` sends any message of
+   * BRACKET_MIN_LINES (4) lines or more as a bracketed, chunked paste (#1567). A hint
+   * on its own trailing line would push every short architect→builder message off the
+   * single-write path onto the paste one as a side effect of a formatter change.
    */
   it('does not grow the frame beyond 3 lines, so the write path is unchanged', () => {
     expect(formatArchitectToBuilderMessage('bugfix-1574', 'do the thing').split('\n')).toHaveLength(3);

@@ -17,14 +17,17 @@ Never hand-edit `status.yaml` — only porch commands modify project state.
 
 ## Gates
 
-Porch stops at human approval gates (`spec-approval`, `plan-approval`, `pr`). When it does:
-say so, **stop**, and wait.
+Porch stops at the human approval gates your protocol defines — SPIR: `spec-approval`,
+`plan-approval`, `pr`, `verify-approval`; ASPIR: `pr`, `verify-approval`; AIR and BUGFIX: `pr`;
+PIR: `plan-approval`, `dev-approval`, `pr`; MAINTAIN: `maintain-complete`; RESEARCH:
+`scope-approval`, `research-complete`; EXPERIMENT: `experiment-complete`. When it does: say so,
+**stop**, and wait.
 
 Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
 
-Approval reaches you as a message from the architect. Then *you* run
-`porch approve <id> <gate>`; the architect does not run it for you. Defer to your protocol's phase
-prompts on who types `porch approve`.
+Approval reaches you as a message from the architect, relaying the human's decision. Then *you*
+run `porch approve <id> <gate> --a-human-explicitly-approved-this`; the architect does not run it
+for you.
 
 ## Deliverables
 
@@ -53,8 +56,15 @@ They are not watching. Send a message at each of these:
 |---|---|
 | Gate reached | `afx send architect "Project <id>: <gate> ready for approval"` |
 | PR ready | `afx send architect "PR #N ready for review"` |
-| PR merged | `afx send architect "Project <id> complete. Entering verify phase."` |
+| PR merged — protocols with no `verify` phase (BUGFIX, AIR, PIR, MAINTAIN) | `afx send architect "Project <id> complete. PR merged. Ready for cleanup."` |
+| PR merged — SPIR, ASPIR | `afx send architect "Project <id>: PR merged. Entering verify."` |
+| Verified — SPIR, ASPIR, after `verify-approval` | `afx send architect "Project <id> verified. Ready for cleanup."` |
+| A pre-existing test is flaky | `afx send architect "Flaky test: <name> (<file>) — left running, named in the PR"` |
 | Blocked | `afx send architect "Blocked on X — need guidance"` |
+
+SPIR and ASPIR merge inside their `verify` phase: after merging, run `porch done <id>`; porch then
+stops at `verify-approval`, which is a gate like any other. Do not announce "ready for cleanup"
+before that gate is approved — the worktree is still needed for verification.
 
 When blocked, state the problem and the options you see, then wait. Don't guess past a decision
 that isn't yours.
@@ -107,6 +117,10 @@ reads succeed, writes succeed, and nothing corrects you until a later `git add` 
 Build what the spec says. If part of it is blocked, finish everything else and say plainly what
 you left out and why — scaling the work down is the architect's call.
 
+**Fix in place.** A small adjacent bug found during the work is fixed in the same PR and named in
+its body. A follow-up issue is for work that needs something unavailable now (a device, an owner
+decision), touches a different subsystem, or is a large refactor.
+
 Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 
 If the issue carries a **Baked Decisions** section, those are fixed. Don't relitigate them in
@@ -115,6 +129,8 @@ two contradict each other, don't pick — flag the contradiction and wait.
 
 ## Flaky tests
 
-If a pre-existing test fails intermittently and unrelated to your change: skip it with an
-annotation naming it flaky, document it under `## Flaky Tests` in your review, and continue.
+If a pre-existing test fails intermittently and unrelated to your change, do not skip it. Leave it
+running, name it under `## Flaky Tests` in your review (the PR body for protocols with no review
+file, such as BUGFIX and AIR) with its file and the failure you saw, and tell the architect. If it
+fails a porch check, run the check again; if it keeps failing, you are blocked — say so.
 Never edit `status.yaml` or bypass a porch check to route around it.

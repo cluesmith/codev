@@ -260,6 +260,9 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider,
       // Bootstrap the persisted mode in the initial HTML (spec 1380 D4): the canvas mounts
       // before the first host message, so a message cannot initialize it.
       initialReadingMode: sanitizeReadingMode(this.globalState.get(READING_MODE_STATE_KEY)),
+      // Reading aids (#1802). A change re-renders the webview via onDidChangeConfiguration.
+      hoverHighlight: cfg.get<string>('hoverHighlight'),
+      readingCursor: cfg.get<string>('readingCursor'),
     });
   }
 }

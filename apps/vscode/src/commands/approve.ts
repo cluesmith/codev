@@ -6,6 +6,7 @@ import { VSCODE_USER_SENDER } from '@cluesmith/codev-types';
 import type { TowerClient } from '@cluesmith/codev-sdk/tower-client';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
+import { issueRef as formatIssueRef } from '../issue-id.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -82,7 +83,7 @@ export function buildRelayMessage(args: {
   issueId?: string | null;
 }): string {
   const { id, gateLabel, issueId } = args;
-  const issuePart = issueId && !id.includes(issueId) ? ` (#${issueId})` : '';
+  const issuePart = issueId && !id.includes(issueId) ? ` (${formatIssueRef(issueId)})` : '';
   return `Approve the ${gateLabel} gate for ${id}${issuePart}, please pass it to the builder.`;
 }
 
@@ -212,7 +213,7 @@ export async function approveGate(
     const candidates = blocked.filter(b => b.blockedGate);
     const picked = await vscode.window.showQuickPick(
       candidates.map(b => ({
-        label: `#${b.issueId ?? b.id} ${b.issueTitle ?? ''}`,
+        label: `${formatIssueRef(b.issueId ?? b.id)} ${b.issueTitle ?? ''}`,
         description: `blocked on ${b.blocked}`,
         builder: b,
         gate: b.blockedGate!,
@@ -225,7 +226,7 @@ export async function approveGate(
   }
 
   const id = builder.id;
-  const issueRef = builder.issueId ? `#${builder.issueId}` : id;
+  const issueRef = builder.issueId ? formatIssueRef(builder.issueId) : id;
   const titlePart = builder.issueTitle ? ` — ${truncate(builder.issueTitle, 60)}` : '';
   // Display label e.g. "plan review" from overview; falls back to the
   // canonical gate name if the display label isn't set.

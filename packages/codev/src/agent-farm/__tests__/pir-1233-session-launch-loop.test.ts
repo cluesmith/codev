@@ -21,7 +21,9 @@ import {
   buildSessionLaunchLoop,
   buildLaunchLoop,
   buildWorktreeLaunchScript,
+  builderScriptLaunch,
   scriptSessionForms,
+  sessionIdMintFallback,
   CRASH_RESUME_NUDGE,
   SESSION_ID_EXPR,
 } from '../commands/spawn-worktree.js';
@@ -66,6 +68,9 @@ function buildLoop(agent: string, opts?: { initial?: string; sessionId?: string 
     pinnedFresh: `'${agent}' ${forms.newSessionScriptFragment(SESSION_ID_EXPR)} ${promptArg}`,
     unpinnedFresh: `'${agent}' ${promptArg}`,
     resume: `'${agent}' ${forms.resumeScriptFragment(SESSION_ID_EXPR)} '${CRASH_RESUME_NUDGE}'`,
+    // Git Bash has neither uuidgen nor /proc's uuid, so production hands Windows
+    // scripts a Node minting fallback; undefined on POSIX, as in production.
+    mintFallback: sessionIdMintFallback(),
   });
 }
 
@@ -73,7 +78,13 @@ function runLoop(loop: string, enterPresses: number, env?: Record<string, string
   const script = join(dir, 'start.sh');
   writeFileSync(script, `#!/bin/bash\ncd '${dir}'\n${loop}`);
   chmodSync(script, '755');
-  execFileSync('bash', [script], {
+  // Run it the way Tower does on Windows (the resolved Git Bash, never a bare `bash`
+  // that may be the System32 WSL launcher); POSIX keeps the PATH `bash`.
+  let launch = { command: 'bash', args: [script] };
+  if (process.platform === 'win32') {
+    launch = builderScriptLaunch(script);
+  }
+  execFileSync(launch.command, launch.args, {
     input: '\n'.repeat(enterPresses),
     stdio: ['pipe', 'ignore', 'ignore'],
     timeout: 60_000,

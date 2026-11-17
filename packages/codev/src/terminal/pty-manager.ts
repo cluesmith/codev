@@ -12,6 +12,7 @@ import type { PtySessionConfig, PtySessionInfo } from './pty-session.js';
 import { decodeFrame, encodeControl, encodeData } from './ws-protocol.js';
 import { attachWithReplay } from './attach-replay.js';
 import { defaultSessionOptions, DEFAULT_DISK_LOG_MAX_BYTES } from './index.js';
+import { commandLaunch } from '../lib/platform/command-launch.js';
 
 export interface TerminalManagerConfig {
   workspaceRoot: string;
@@ -63,18 +64,10 @@ export class TerminalManager {
     }
 
     const id = randomUUID();
-    const shell = req.command ?? process.env.SHELL ?? '/bin/bash';
-    const baseEnv: Record<string, string> = {
-      PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
-      HOME: process.env.HOME ?? '/tmp',
-      SHELL: shell,
-      TERM: 'xterm-256color',
-      // UTF-8 locale for proper Unicode character rendering
-      LANG: process.env.LANG ?? 'en_US.UTF-8',
-      LC_ALL: process.env.LC_ALL ?? '',
-      // Propagate artifact data repo for CliResolver in builder worktrees
-      ...(process.env.CODEV_ARTIFACTS_DATA_REPO ? { CODEV_ARTIFACTS_DATA_REPO: process.env.CODEV_ARTIFACTS_DATA_REPO } : {}),
-    };
+    // The terminal's program and base environment: `$SHELL` and a POSIX base env
+    // (`/tmp` HOME fallback included), or Windows PowerShell and the Windows base
+    // variables (Spec 1658).
+    const { shell, baseEnv } = commandLaunch().terminalProfile(req.command);
 
     const defaults = defaultSessionOptions();
     const sessionConfig: PtySessionConfig = {
@@ -236,11 +229,20 @@ export class TerminalManager {
     return true;
   }
 
-  /** Resize a session. */
+  /**
+   * Resize a session. Returns its info, or `null` when the resize did not happen.
+   *
+   * `null` now covers two cases (Issue #1482): no such session, and a session whose resize was
+   * DROPPED — a dead shellper socket, or no live process. Both are "the geometry you asked for
+   * is not the geometry in effect", and returning `session.info` for the second would hand the
+   * caller back dimensions the process never adopted, which is exactly the false belief this
+   * issue exists to remove. Callers distinguish the two by whether the session exists, if they
+   * need to; the REST route's message does.
+   */
   resizeSession(id: string, cols: number, rows: number): PtySessionInfo | null {
     const session = this.sessions.get(id);
     if (!session) return null;
-    session.resize(cols, rows);
+    if (!session.resize(cols, rows)) return null;
     return session.info;
   }
 
@@ -370,7 +372,15 @@ export class TerminalManager {
         const cols = msg.payload.cols as number;
         const rows = msg.payload.rows as number;
         if (typeof cols === 'number' && typeof rows === 'number') {
-          session.resize(cols, rows);
+          // Issue #1482: a dropped resize leaves Tower and the process disagreeing about the
+          // geometry, and the render gate classifies at the geometry Tower believes — so this
+          // is a diagnosable event, not a silent no-op.
+          if (!session.resize(cols, rows)) {
+            console.warn(
+              `[pty-manager] resize dropped for session ${session.id}: ${cols}x${rows} not applied ` +
+                `(no live process or dropped shellper write) — dimensions unchanged`,
+            );
+          }
         }
         break;
       }
@@ -479,7 +489,20 @@ export class TerminalManager {
       }
       const info = this.resizeSession(id, body.cols, body.rows);
       if (!info) {
-        this.sendError(res, 404, 'NOT_FOUND', `Session ${id} not found`);
+        // Issue #1482: separate "no such session" from "the session exists but the resize did
+        // not reach its process". Answering 404 for the second would tell the caller the
+        // terminal is gone when it is very much alive — and, worse, the old code answered 200
+        // with the requested dimensions echoed back, which is how a divergence became invisible.
+        if (!this.getSession(id)) {
+          this.sendError(res, 404, 'NOT_FOUND', `Session ${id} not found`);
+        } else {
+          this.sendError(
+            res,
+            409,
+            'RESIZE_DROPPED',
+            `Session ${id} did not accept the resize (no live process or dropped shellper write); dimensions unchanged`,
+          );
+        }
         return;
       }
       this.sendJson(res, 200, info);

@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: recently-closed (Linear via GraphQL API)
+# forge-executable: curl
 # Input: CODEV_LINEAR_TEAM, CODEV_SINCE_DATE (optional, ISO date)
 # Output: JSON [{number, title, url, labels, createdAt, closedAt}]
 set -e

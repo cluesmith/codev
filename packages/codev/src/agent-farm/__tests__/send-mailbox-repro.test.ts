@@ -25,7 +25,7 @@ import {
   type DeliverySession,
   type DeliveredBroadcast,
 } from '../servers/mailbox-delivery.js';
-import { classifyBuffer } from '../servers/render-gate.js';
+import { classifyBuffer, composerRegionFingerprint } from '../servers/render-gate.js';
 import { resolveProfile } from '../servers/gate-profiles.js';
 
 const COLS = 110;
@@ -68,6 +68,9 @@ function flipSession(command = 'claude'): FlipSession {
     // Issue #1573 settle-before-write: this fake's clock is the harness's fixed `now: 1000`, so
     // 0 is "quiet long before now" — an idle prompt, which is what every case here models.
     lastDataAt: 0,
+    // Issue #1473: likewise for the input signals — nothing has been typed at this fake.
+    inputSeq: 0,
+    lastInputAt: 0,
     info: { cols: COLS, rows: ROWS },
     command,
     launchArgs: [],
@@ -102,6 +105,12 @@ function realGatePorts(
       if (!session) return { clean: false, reason: 'busy', detail: 'no-composer-marker' };
       const { term, cols, rows } = await session.screen.read();
       return classifyBuffer(term, cols, rows, prof);
+    },
+    // The REAL composer-stability seam (Issue #1664): the same mirror the classify reads,
+    // fingerprinted synchronously — identical to mailbox-wiring's live binding.
+    composerFingerprint: (_s, prof) => {
+      const view = session?.screen.peek();
+      return view ? composerRegionFingerprint(view.term, view.cols, view.rows, prof) : null;
     },
     writeMessage: (_s, msg, noEnter, precheck) => {
       const abort = precheck();

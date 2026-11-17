@@ -43,6 +43,11 @@ Releases group projects into deployable units with semantic versioning:
 
 ```yaml
 releases:
+  - version: "v3.3.7"
+    name: "Luxor"
+    status: released
+    target_date: "2026-11-03"
+    notes: "Single-patch release: the Codev IDE opens from Tower's local dashboard (#1869/PR #1872). Each workspace card leads with an IDE row whose Open IDE action opens the workbench through Tower on port 4100; Tower accepts an origin-guarded /ide session cookie, routes the workbench and its WebSockets through itself, keeps the IDE server's connection token out of the browser and rotates it on every start. Plan and implementation had a dedicated security-architect review. Extension unchanged; Marketplace stays at 3.3.6. Contributors: Amr Elsayed."
   - version: "v1.0.0"           # Semantic version (required)
     name: "Optional codename"   # Optional friendly name
     status: planning|active|released|archived
@@ -233,6 +238,26 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.3.6"
+    name: "Luxor"
+    status: released
+    target_date: "2026-10-29"
+    notes: "Patch that grew while it waited. The owner decisions process document and afx decisions init (#1826/PR #1832, #1840/PR #1841), UTC stamps shown in the viewer's time (#1836/PR #1837); agents report their own attention state to Tower (Spec 1595/PR #1854); codev bootstrap-docs drafts governance docs for a mature codebase and codev update refreshes shipped skills (Spec 1797, #1811/PR #1808); Jira Cloud as issue tracker with tracker-key ids end to end (#1740/PR #1848); a builder worktree opened in VS Code never becomes a second workspace (#1809/PR #1846); on-demand Windows CI workflow skeleton (Spec 1658/PR #1849); Decisions tab second after Work (#1861/PR #1862). First Marketplace and Open VSX publish of the extension since 3.3.4, carrying the unpublished 3.3.5 items. Contributors: Amr Elsayed, Waleed Kadous."
+  - version: "v3.3.5"
+    name: "Luxor"
+    status: released
+    target_date: "2026-10-18"
+    notes: "Decisions tab with hub notice, porch per-check timeouts with process-group kill, Tower fleet view and review queue in VS Code, Tower startup safety"
+  - version: "v3.3.4"
+    name: "Luxor"
+    status: released
+    target_date: "2026-09-17"
+    notes: "Hardening patch driven by the first production 3.3.3 installs. Messaging: long frames travel as one bracketed paste so heads stop being lost (#1567/PR #1644); the gate waits on the composer region, not the recipient's output, killing mid-turn delivery latency (#1664/PR #1666); keystrokes count as input in the gate with terminal replies filtered (#1473/PR #1634). Forge: overview cache stops burning the GitHub GraphQL quota via negative cache + backend suspension + single-flight (#1645/PR #1652). Tower startup safety cluster from the #1515/#1629 incident: global.db owner lock (#1629/PR #1689), proof-of-death-only reconcile (#1686/PR #1693), bounded orphan sweep (#1685/PR #1687), legible refusal in the CLI (#1691/PR #1692). Spawn env sanitization makes Tower-descendant agents resumable (#1219/PR #1626); tunnel H2 windows raised, tower half (#1677/PR #1678, issue open for field re-measure); browser IDE over the tunnel via /ide/ + afx ide (#1668/PR #1683); consult tree tripwire + consultant no-edit rule (#1649/PR #1659); spawn guard counts only open PRs (#1637/PR #1673). Community: MuAPI generate-image provider (PR #1624) by @Anil-matcha. VS Code items (agent cycling #1563/PR #1676, reconnect-on-wake #1681/PR #1682) ship with the next extension publish. Contributors: Amr Elsayed, Waleed Kadous, @mohidmakhdoomi, @Anil-matcha."
+  - version: "v3.3.3"
+    name: "Luxor"
+    status: released
+    target_date: "2026-09-05"
+    notes: "Delivery-integrity release that grew from a two-fix patch. Mailbox never replays an already-written message (completed write = point of no return, #1584/PR #1585); session identity is authoritative from the terminal handshake, fixing builder→architect misrouting (#1475/PR #1511); holds carry reasons and sender attribution everywhere (#1482/PR #1604 with migration v18, #1478-#1479/PR #1486); agy composer marker anchored to cursor row + palette (#1474/PR #1491); cloud tunnel requests authenticate again (#1586/PR #1588). Dashboard held-mail counter opens a popover (#1450/PR #1510); consult reviews merged PRs (#759/PR #1619). Community: pr-create forge concept (#1455/PR #1458) and working Gitea preset (#1137/PR #1146) by @pseudoseed; Atlas Cloud generate-image provider (PR #1618) by @binyangzhu000-sudo. VS Code 3.3.3 shipped same day (issue-preview metadata #1592/PR #1616, bounded escalation toast #1472/PR #1484); Stream Deck review-dial truth fix (#1606/PR #1607) rides the next Elgato batch. Contributors: @mohidmakhdoomi (delivery-integrity core), Waleed Kadous, Amr Elsayed, @pseudoseed, @binyangzhu000-sudo."
   - version: "v3.3.2"
     name: "Luxor"
     status: released

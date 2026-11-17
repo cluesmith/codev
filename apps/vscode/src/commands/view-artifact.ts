@@ -26,6 +26,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import type { ConnectionManager } from '../connection-manager.js';
 import { MarkdownPreviewProvider } from '../markdown-preview/preview-provider.js';
 import { builderById } from '../builder-lookup.js';
+import { issueRef } from '../issue-id.js';
 
 type ArtifactKind = 'plan' | 'spec' | 'review';
 
@@ -154,7 +155,7 @@ interface BuilderLike {
 async function pickBuilder<T extends BuilderLike>(builders: T[], kind: ArtifactKind): Promise<T | undefined> {
   const picked = await vscode.window.showQuickPick(
     builders.map(b => ({
-      label: `#${b.issueId ?? b.id} ${b.issueTitle ?? ''}`,
+      label: `${issueRef(b.issueId ?? b.id)} ${b.issueTitle ?? ''}`,
       builder: b,
     })),
     { placeHolder: `Select builder whose ${kind} file to open` },

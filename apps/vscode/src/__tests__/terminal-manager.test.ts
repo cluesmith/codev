@@ -111,8 +111,12 @@ describe('#804 — builder/shell terminals do not force-create a second editor g
   // group on demand, reshaping a single-column user's layout. Source-level per
   // this file's harness rationale (constructing TerminalManager needs heavy
   // vscode mocking).
+  // Scope the extraction to openTerminal's body first: other methods
+  // (e.g. getActiveArchitectName, #1563) also compare `type === 'architect'`,
+  // so splitting the whole file on that literal would grab the wrong region.
+  const openTerminalSrc = TM_SRC.split('private async openTerminal')[1] ?? '';
   const elseBranch =
-    TM_SRC.split("type === 'architect'")[1]?.split('createTerminal')[0] ?? '';
+    openTerminalSrc.split("type === 'architect'")[1]?.split('createTerminal')[0] ?? '';
 
   it('gates the second-group target on existing tab groups', () => {
     expect(elseBranch).toMatch(/vscode\.window\.tabGroups\.all\.length >= 2/);
@@ -195,6 +199,39 @@ describe('#1180 — terminal cap is a configurable setting, not a static constan
     // Regression guard: the fix must replace the constant, not shadow it.
     expect(TM_SRC).not.toMatch(/const MAX_TERMINALS = 10/);
     expect(TM_SRC).toMatch(/const DEFAULT_MAX_TERMINALS = 25/);
+  });
+});
+
+describe('#1681 — re-arm terminal reconnects on wake', () => {
+  // Source-level guards (heavy TerminalManager / extension harness avoided, per
+  // this file's rationale): the wake path is thin glue. Its behavior is unit-
+  // tested at the adapter (terminal-adapter.test.ts: onWake, the give-up split,
+  // the honest banner) and confirmed by a physical sleep→wake round-trip. These
+  // guards pin the wiring so deleting the manager fan-out, the /health-probe
+  // injection, or the extension focus-handler call is caught (CMAP #1682).
+  const rearmBody = TM_SRC.split('rearmAllOnWake(): void')[1]?.split('buildWsUrl')[0] ?? '';
+  const EXT_SRC = readFileSync(resolve(__dirname, '../extension.ts'), 'utf8');
+
+  it('fans onWake out to every managed terminal', () => {
+    expect(TM_SRC).toMatch(/rearmAllOnWake\(\): void/);
+    expect(rearmBody).toMatch(/for \(const entry of this\.terminals\.values\(\)\)/);
+    expect(rearmBody).toMatch(/entry\.pty\.onWake\(\)/);
+  });
+
+  it('injects the /health probe into every adapter it constructs', () => {
+    expect(TM_SRC).toMatch(/new CodevPseudoterminal\(/);
+    expect(TM_SRC).toMatch(/\(\) => this\.probeTowerHealth\(\)/);
+    expect(TM_SRC).toMatch(/private async probeTowerHealth\(\): Promise<boolean \| null>/);
+    expect(TM_SRC).toMatch(/getClient\(\)[\s\S]*getHealth\(\)\)\s*!==\s*null/);
+  });
+
+  it('extension calls rearmAllOnWake on the window-focus rising edge', () => {
+    // The rising-edge block runs when `state.focused && !windowFocused`; the
+    // re-arm must fire there, unconditionally (not behind repaintOnRefocus).
+    const focusBlock =
+      EXT_SRC.split('state.focused && !windowFocused')[1]
+        ?.split('windowFocused = state.focused')[0] ?? '';
+    expect(focusBlock).toMatch(/terminalManager\?\.rearmAllOnWake\(\)/);
   });
 });
 

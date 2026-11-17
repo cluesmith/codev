@@ -33,6 +33,9 @@ import {
   OPERATOR_SUBMIT_WAIT_CEILING_MS,
 } from '../servers/session-submit.js';
 import {
+  PASTE_BEGIN,
+  PASTE_END,
+  PASTE_ENTER_DELAY_MS,
   submitMessagePaced,
   writeMessageToSession,
   writeEscapeToSession,
@@ -46,15 +49,26 @@ import {
 } from '../servers/mailbox-delivery.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 
-const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
+// Issue #1664: a claude-shaped profile, so it carries claude's measured `queuesInputMidTurn`.
+// Without it the delivery path keeps the whole-screen output settle, which is the branch
+// these files' non-#1664 cases already exercise through `lastDataAt`.
+const PROFILE: GateProfile = {
+  app: 'claude',
+  markerPattern: /^❯/,
+  regionEndPatterns: [],
+  queuesInputMidTurn: true,
+};
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
 const WS = '/ws/a';
 const AGENT = 'spir-1';
 
 /** A body long enough to take the paced multi-line path (≥4 lines) and so hold the line ~110 ms. */
 const MULTILINE = 'L1\nL2\nL3\nL4';
-/** Time for a MULTILINE paced write to finish: last line at 30 ms + the 80 ms Enter delay. */
-const MULTILINE_DONE_MS = 3 * 10 + 80;
+/**
+ * Time for a MULTILINE write to finish. Since Issue #1567 a 4-line frame is ONE bracketed
+ * paste piece (it is far under the chunk size) followed by the 80 ms Enter delay.
+ */
+const MULTILINE_DONE_MS = PASTE_ENTER_DELAY_MS;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -64,12 +78,23 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  */
 function makeComposer(id = 'term-1') {
   let pending = '';
+  let inPaste = false;
   const submitted: string[] = [];
   const bypasses: string[] = [];
   const session = {
     id,
     write(data: string): boolean {
-      if (data === '\r') {
+      // Issue #1567: a long frame arrives as a bracketed paste. Model what a real TUI does
+      // with it — everything between the markers is literal text (a `\r` inside is a newline,
+      // not Enter), and only a `\r` OUTSIDE a paste submits.
+      if (inPaste || data.startsWith(PASTE_BEGIN)) {
+        let text = data;
+        if (text.startsWith(PASTE_BEGIN)) { inPaste = true; text = text.slice(PASTE_BEGIN.length); }
+        let closes = false;
+        if (text.endsWith(PASTE_END)) { closes = true; text = text.slice(0, -PASTE_END.length); }
+        pending += text.replace(/\r/g, '\n');
+        if (closes) inPaste = false;
+      } else if (data === '\r') {
         submitted.push(pending);
         pending = '';
       } else if (data === '\x03') {
@@ -465,6 +490,8 @@ function sessionFor(session: { id: string; write(d: string): boolean }): Deliver
     id: session.id,
     bytesWritten: 0,
     lastDataAt: 0,
+    inputSeq: 0,
+    lastInputAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -480,6 +507,9 @@ function livePorts(sessions: Map<string, DeliverySession>, log: string[] = []): 
     getSessionForAgent: (_ws, agent) => sessions.get(agent) ?? null,
     resolveProfile: () => PROFILE,
     classify: () => Promise.resolve(CLEAN),
+    // Issue #1664: a composer that never moves, so these tests keep asserting what they were
+    // written for (the classify verdict, the settle, the lock) rather than region stability.
+    composerFingerprint: () => 'composer',
     writeMessage: (session, msg, noEnter, precheck) => submitMessagePaced(session, msg, noEnter, precheck),
     broadcast: () => {},
     onHeldStateChange: () => {},
@@ -592,22 +622,26 @@ describe('Issue #1365 — a raced delivery is held, never marked delivered', () 
     expect(c.submitted).toHaveLength(0);
   });
 
-  it('a screen that moved inside the lock holds busy', async () => {
+  it('a COMPOSER that moved inside the lock holds busy', async () => {
+    // Issue #1664 scoped the in-lock re-check from "any output landed" to "the composer region
+    // moved" — an agent repainting a spinner above an untouched composer is safe to write to,
+    // and holding for it is the defect that issue removed.
     const c = makeComposer();
-    let bytes = 10;
-    const session: DeliverySession = { ...sessionFor(c.session), get bytesWritten() { return bytes; } };
-    const ports = livePorts(new Map([[AGENT, session]]));
+    let region = 'empty-composer';
+    const ports = livePorts(new Map([[AGENT, sessionFor(c.session)]]));
+    ports.composerFingerprint = () => region;
     const row = enqueue();
 
     ports.writeMessage = (s, msg, noEnter, precheck) =>
       submitMessagePaced(s, msg, noEnter, () => {
-        bytes += 1; // new output landed between the gate and the first byte
+        region = 'the composer repainted'; // the composer moved between the gate and the first byte
         return precheck();
       });
 
     const out = await deliverAgentMail(ports, db, WS, AGENT);
 
     expect(out.reason).toBe('busy');
+    expect(out.detail).toBe('composer-redraw');
     expect(mailbox.getById(db, row.id)?.status).toBe('held');
     expect(c.submitted).toHaveLength(0);
   });

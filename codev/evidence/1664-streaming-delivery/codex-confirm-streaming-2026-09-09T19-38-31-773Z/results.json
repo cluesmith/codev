@@ -1,0 +1,86 @@
+{
+  "scenario": "streaming",
+  "tuiVersion": "codex-cli 0.153.4",
+  "results": [
+    {
+      "n": 1,
+      "scenario": "streaming",
+      "deliveredAfterMs": 400,
+      "deliveredWhileWorking": true,
+      "longestQuietMs": 169,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 16,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 2,
+      "scenario": "streaming",
+      "deliveredAfterMs": 394,
+      "deliveredWhileWorking": true,
+      "longestQuietMs": 140,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 16,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 3,
+      "scenario": "streaming",
+      "deliveredAfterMs": 397,
+      "deliveredWhileWorking": true,
+      "longestQuietMs": 140,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 16,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 4,
+      "scenario": "streaming",
+      "deliveredAfterMs": 397,
+      "deliveredWhileWorking": true,
+      "longestQuietMs": 174,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 16,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 5,
+      "scenario": "streaming",
+      "deliveredAfterMs": 396,
+      "deliveredWhileWorking": true,
+      "longestQuietMs": 169,
+      "verdicts": [
+        "busy:composer-redraw"
+      ],
+      "outputChunksDuringWait": 16,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "delivered-intact"
+    }
+  ]
+}

@@ -10,11 +10,7 @@ You are executing the **review** phase of the MAINTAIN protocol.
 
 ### 1. Final Validation
 
-```bash
-cd packages/codev && pnpm build && pnpm test
-```
-
-Both must pass. If either fails, fix before proceeding.
+Run the project's build and tests (porch's `build` and `tests` checks: `pnpm build` / `pnpm test` unless `.codev/config.json` `porch.checks` overrides them). Both must pass. If either fails, fix before proceeding.
 
 ### 2. Verify Documentation Links
 
@@ -33,13 +29,13 @@ Update `codev/maintain/NNNN.md` with:
 
 ### 4. Create PR
 
-**PR body requirements**: If this maintenance run was triggered by a GitHub issue
-(e.g. "track down dead X", "clean up Y module"), the PR body MUST include
-`Closes #<N>` for that issue so GitHub auto-closes it on merge. If multiple
-issues are addressed in one run, include one `Closes #<N>` per issue.
+**PR body requirements**: If a GitHub issue requested this run (e.g. "run MAINTAIN
+before the 3.4 release"), the PR body MUST include `Closes #<N>` for that issue so
+GitHub auto-closes it on merge. A single targeted cleanup is not a MAINTAIN run — that
+issue belongs to BUGFIX or AIR.
 
-**Exception**: if this PR only partially addresses a tracking issue (e.g. more
-cleanup passes are planned), use `Refs #<N>` or `Part of #<N>` instead.
+**Exception**: if this PR only partially addresses a tracking issue, use `Refs #<N>`
+or `Part of #<N>` instead.
 
 If the run was not tied to any issue, the `Closes` line can be omitted.
 
@@ -74,16 +70,10 @@ PREOF
 
 The command above is your forge's `pr-create` concept, substituted by porch (`gh pr create` by default). It takes `CODEV_PR_TITLE` / `CODEV_PR_BODY` — optionally `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO` — from the environment, which is why they are exported rather than prefixed onto the command line: an inline override that spells `--title "$CODEV_PR_TITLE"` needs them set in the calling shell too. It prints `{"number": <int>, "url": "<url>"}`.
 
-## Signals
+## When you finish
 
-When PR is created:
-
-```
-<signal>PHASE_COMPLETE</signal>
-```
-
-If blocked:
-
-```
-<signal>BLOCKED:reason</signal>
-```
+- **PR created:** run `porch done`, then run the consultation commands `porch next` hands you.
+  After they approve, porch stops at the `maintain-complete` gate: stop and wait. When the
+  architect relays the human's approval, run
+  `porch approve <id> maintain-complete --a-human-explicitly-approved-this` and follow `porch next`.
+- **Blocked:** do not run `porch done`. `afx send architect` the specifics, then stop and wait.

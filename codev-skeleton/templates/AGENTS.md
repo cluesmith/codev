@@ -32,6 +32,7 @@ This project uses **Codev** for AI-assisted development.
 - **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)
 - **MAINTAIN**: Codebase maintenance (`codev/protocols/maintain/protocol.md`)
 - **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique (`codev/protocols/research/protocol.md`)
+- **SPIKE**: Time-boxed feasibility investigation — findings, not shipped code (`codev/protocols/spike/protocol.md`)
 
 ## File Resolution (How Codev Finds Protocols and Templates)
 
@@ -46,15 +47,9 @@ Codev resolves protocol files, prompts, agent definitions, and roles through a f
 
 **Implication for `codev update` and CLAUDE.md / AGENTS.md merges:** when an updated template references a protocol, do NOT drop the reference because `codev/protocols/<name>/` is absent locally. The protocol resolves via the package skeleton, and dropping the reference removes it from your available-protocol list while it's still callable from the CLI.
 
-## Protocol Verification (When You Don't Recognize a Protocol Name)
+## Protocol Names You Don't Recognize
 
-If the user mentions a protocol name you don't immediately recognize, verify against the CLI before responding:
-
-```bash
-afx spawn --protocol <name> --help
-```
-
-This succeeds if the protocol is registered (including via the skeleton fallback in tier 4 of the resolution chain) and errors helpfully otherwise. The CLI is the source of truth — defer to it when in doubt.
+The list above is what ships with Codev; a project can add its own under `.codev/protocols/` or `codev/protocols/`. If the user names a protocol that is in neither the list nor those directories, ask rather than guess. (`afx spawn --protocol <name> --help` is no check — `--help` succeeds for any name.)
 
 ## Key Locations
 
@@ -111,11 +106,12 @@ Commit messages format:
 
 ## CLI Commands
 
-Codev provides three CLI tools:
+Codev's core CLI tools:
 
 - **codev**: Project management (init, adopt, update, doctor)
-- **afx**: Agent Farm orchestration (start, spawn, status, cleanup)
-- **consult**: AI consultation for reviews (general, protocol, stats)
+- **afx**: Agent Farm orchestration (workspace start, spawn, status, send, cleanup)
+- **porch**: Protocol orchestration (next, done, status, approve)
+- **consult**: AI consultation — general queries (`--prompt`), protocol reviews (`--type`), and `consult stats`
 
 For complete reference, see `codev/resources/commands/`:
 - `codev/resources/commands/overview.md` - Quick start
@@ -129,12 +125,12 @@ Agents within a workspace communicate through `afx send`. Four addressing forms 
 
 | Form | Meaning | Allowed from |
 |---|---|---|
-| `afx send <builder-id> "msg"` | Send to a specific builder (e.g. `afx send 0042 "..."`). | Any sender. |
+| `afx send <builder-id> "msg"` | Send to a specific builder (e.g. `afx send spir-42 "..."`; a bare `42` also resolves when only one builder ends in it). | Any sender. |
 | `afx send architect "msg"` | From a builder: routes to the spawning architect via affinity. From an architect (or any non-builder sender): routes to the architect named `main` if present, else the first registered architect. | Any sender. |
 | `afx send architect:<name> "msg"` | Explicit per-architect addressing. **Architects (including `main`)**: open address grammar — any architect can address any other architect (sibling-architect messaging). **Builders**: allowed ONLY when `<name>` matches the builder's own spawning architect; mismatches are rejected by Tower's spoofing check. From a builder, this is an explicit form of the affinity routing, NOT an override. | Any sender (with the spoofing constraint above for builders). |
 | `afx send <workspace>:architect "msg"` | Cross-workspace addressing (e.g. `afx send marketmaker:architect "..."`). | Any sender. |
 
-**Send outcomes (delivered vs held)**: `afx send` reports the real first outcome. **delivered** means the message was written to the recipient's prompt after a clean render-gate pass; **held** means the prompt wasn't clear, so the message was persisted in Tower's durable mailbox and delivers automatically once the prompt is clean — with a why-held reason (`busy`, `no-profile`, or `no-live-pty`) and a mailbox id. A held message is never force-injected onto a busy line, so it can't corrupt a half-typed draft, and held rows survive a Tower restart. List held messages with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`; `afx send --interrupt` is the explicit bypass.
+**Send outcomes (delivered vs held)**: `afx send` reports the real first outcome. **delivered** means the message was written to the recipient's prompt after a clean render-gate pass; **held** means the prompt wasn't clear, so the message was persisted in Tower's durable mailbox and delivers automatically once the prompt is clean — with a why-held reason (`busy`, `no-profile`, or `no-live-pty`) and a mailbox id. A held message is never force-injected onto a busy line, so it can't corrupt a draft the gate can see, and held rows survive a Tower restart. (The gate reads the composer off the rendered screen and counts input through `PtySession.write()`; `afx attach` writes the shellper socket directly, so a draft typed there is seen only once the app echoes it.) List held messages with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`; `afx send --interrupt` is the explicit bypass.
 
 **Sibling-architect messaging**: when a workspace hosts more than one architect (added via `afx workspace add-architect --name <name>`), sibling architects message each other via the `architect:<name>` form. Example: `main` running `afx send architect:ob-refine "PR-iter-2 feedback ready"` lands on the `ob-refine` architect's terminal. This works because sender = architect bypasses the spoofing check.
 

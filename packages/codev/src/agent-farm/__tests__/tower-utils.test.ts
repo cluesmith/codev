@@ -38,6 +38,13 @@ vi.mock('../state.js', async (importOriginal) => {
 });
 import { getArchitectByName, setArchitectSessionId } from '../state.js';
 import { encodeClaudeProjectDir } from '../utils/claude-session-discovery.js';
+import { LIFECYCLE_REPORTER_SETTINGS_NAME, lifecycleReporterDir } from '../utils/lifecycle-reporter.js';
+import { toShellPath } from '../utils/harness.js';
+
+/** Spec 1595: the reporter argv every Claude architect launch carries. */
+// The harness hands --settings a forward-slash path (toShellPath, #1658), so a
+// Windows reporter path is expected in that form; on POSIX it is unchanged.
+const REPORTER_ARGS = ['--settings', toShellPath(path.join(lifecycleReporterDir(), LIFECYCLE_REPORTER_SETTINGS_NAME))];
 
 /**
  * Issue #1145: stored-id resume now requires the session jsonl to exist under
@@ -169,8 +176,10 @@ describe('tower-utils', () => {
     });
 
     it('resolves non-existent paths with path.resolve', () => {
+      // path.resolve, not a literal: on Windows a rooted path gains the
+      // current drive and backslashes ('D:\\nonexistent\\...').
       const normalized = normalizeWorkspacePath('/nonexistent/path/to/workspace');
-      expect(normalized).toBe('/nonexistent/path/to/workspace');
+      expect(normalized).toBe(path.resolve('/nonexistent/path/to/workspace'));
     });
 
     it('resolves relative paths', () => {
@@ -180,11 +189,12 @@ describe('tower-utils', () => {
   });
 
   describe('isTempDirectory', () => {
-    it('detects /tmp/ paths', () => {
+    // POSIX temp roots; Windows counts only the host temp dir (spec-1658-posix-residue.test.ts).
+    it.skipIf(process.platform === 'win32')('detects /tmp/ paths', () => {
       expect(isTempDirectory('/tmp/test-project')).toBe(true);
     });
 
-    it('detects /private/tmp/ paths (macOS)', () => {
+    it.skipIf(process.platform === 'win32')('detects /private/tmp/ paths (macOS)', () => {
       expect(isTempDirectory('/private/tmp/test-project')).toBe(true);
     });
 
@@ -275,7 +285,7 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
     const { args, env, sessionId, resumed } = resolveArchitectLaunch({
       workspacePath: workspace, name: 'reviewer', baseArgs: [], storedSessionId: 'stored-abc', homeDir: fakeHome,
     });
-    expect(args).toEqual(['--resume', 'stored-abc']);
+    expect(args).toEqual(['--resume', 'stored-abc', ...REPORTER_ARGS]);
     expect(env).toEqual({});
     expect(sessionId).toBe('stored-abc');
     expect(resumed).toBe(true);   // drives the "Resuming…" log line at the callers
@@ -304,7 +314,7 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
     const { args } = resolveArchitectLaunch({
       workspacePath: workspace, name: 'main', baseArgs: ['--foo'], storedSessionId: 'x', homeDir: fakeHome,
     });
-    expect(args).toEqual(['--foo', '--resume', 'x']);
+    expect(args).toEqual(['--foo', '--resume', 'x', ...REPORTER_ARGS]);
   });
 
   it('two siblings with distinct stored ids resume independently (no cross-attachment)', () => {
@@ -312,8 +322,8 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
     writeSessionFixture(fakeHome, workspace, 'casa-1');
     const reviewer = resolveArchitectLaunch({ workspacePath: workspace, name: 'reviewer', baseArgs: [], storedSessionId: 'rev-1', homeDir: fakeHome });
     const casa = resolveArchitectLaunch({ workspacePath: workspace, name: 'casa', baseArgs: [], storedSessionId: 'casa-1', homeDir: fakeHome });
-    expect(reviewer.args).toEqual(['--resume', 'rev-1']);
-    expect(casa.args).toEqual(['--resume', 'casa-1']);
+    expect(reviewer.args).toEqual(['--resume', 'rev-1', ...REPORTER_ARGS]);
+    expect(casa.args).toEqual(['--resume', 'casa-1', ...REPORTER_ARGS]);
   });
 
   // Issue #1145: ownership verification ahead of the resume branch.
@@ -426,7 +436,7 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
       workspacePath: workspace, name: 'main', baseArgs: [], storedSessionId: 'stored-abc',
       homeDir: fakeHome, hasLiveHolder: () => false,
     });
-    expect(args).toEqual(['--resume', 'stored-abc']);
+    expect(args).toEqual(['--resume', 'stored-abc', ...REPORTER_ARGS]);
     expect(sessionId).toBe('stored-abc');
     expect(resumed).toBe(true);
   });
@@ -787,7 +797,7 @@ describe('resolveArchitectRestart (Issue #832 — shellper auto-restart bake)', 
     mockGet.mockReturnValue({ name: 'reviewer', cmd: 'claude', startedAt: 'x', sessionId: 'stored-xyz' } as never);
     const { args, env, resumed, storedSessionId } = resolveArchitectRestart(workspace, 'reviewer', [], { homeDir: fakeHome });
     expect(mockGet).toHaveBeenCalledWith(workspace, 'reviewer');
-    expect(args).toEqual(['--resume', 'stored-xyz']);
+    expect(args).toEqual(['--resume', 'stored-xyz', ...REPORTER_ARGS]);
     expect(env).toEqual({});
     expect(resumed).toBe(true);              // drives the "Resuming…" log line at the bake sites
     expect(storedSessionId).toBe('stored-xyz');
@@ -825,8 +835,8 @@ describe('resolveArchitectRestart (Issue #832 — shellper auto-restart bake)', 
     writeSessionFixture(fakeHome, workspace, 'casa-1');
     mockGet.mockImplementation((_ws: string, name: string) =>
       (name === 'reviewer' ? { sessionId: 'rev-1' } : { sessionId: 'casa-1' }) as never);
-    expect(resolveArchitectRestart(workspace, 'reviewer', [], { homeDir: fakeHome }).args).toEqual(['--resume', 'rev-1']);
-    expect(resolveArchitectRestart(workspace, 'casa', [], { homeDir: fakeHome }).args).toEqual(['--resume', 'casa-1']);
+    expect(resolveArchitectRestart(workspace, 'reviewer', [], { homeDir: fakeHome }).args).toEqual(['--resume', 'rev-1', ...REPORTER_ARGS]);
+    expect(resolveArchitectRestart(workspace, 'casa', [], { homeDir: fakeHome }).args).toEqual(['--resume', 'casa-1', ...REPORTER_ARGS]);
   });
 
   it('passes the crash-loop fallback through on resume (Issue #1149)', () => {
@@ -878,5 +888,104 @@ describe('buildArchitectCrashLoopFallback (Issue #1149)', () => {
     });
     expect(() => built.onApply!()).not.toThrow();
     expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('db locked'));
+  });
+});
+
+// Spec 1595 (Test 7): every architect launch form carries the lifecycle
+// reporter exactly once on Claude; a harness without the capability carries none.
+describe('architect lifecycle reporter injection (Spec 1595)', () => {
+  let workspace: string;
+  let fakeHome: string;
+  let envGuard: { restore: () => void };
+
+  beforeEach(() => {
+    envGuard = isolateHarnessEnv();
+    workspace = fs.mkdtempSync(path.join(tmpdir(), 'lri-ws-'));
+    fakeHome = fs.mkdtempSync(path.join(tmpdir(), 'lri-home-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+    envGuard.restore();
+  });
+
+  function writeRole(): void {
+    fs.mkdirSync(path.join(workspace, 'codev', 'roles'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, 'codev', 'roles', 'architect.md'), 'ARCHITECT ROLE');
+  }
+
+  function writeArchitect(architect: string): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), JSON.stringify({ shell: { architect } }));
+  }
+
+  function reporterCount(args: string[]): number {
+    return args.filter(arg => arg === '--settings').length;
+  }
+
+  function expectReporterOnce(args: string[]): void {
+    expect(reporterCount(args)).toBe(1);
+    const at = args.indexOf('--settings');
+    expect(args.slice(at, at + 2)).toEqual(REPORTER_ARGS);
+  }
+
+  it('fresh launch without a role', () => {
+    const launch = resolveArchitectLaunch({ workspacePath: workspace, name: 'main', baseArgs: [], homeDir: fakeHome });
+    expectReporterOnce(launch.args);
+  });
+
+  it('fresh launch with a role', () => {
+    writeRole();
+    const launch = resolveArchitectLaunch({ workspacePath: workspace, name: 'main', baseArgs: [], homeDir: fakeHome });
+    expect(launch.args).toContain('--append-system-prompt');
+    expectReporterOnce(launch.args);
+  });
+
+  it('resume and its fallback', () => {
+    writeRole();
+    writeSessionFixture(fakeHome, workspace, 'stored-1');
+    const launch = resolveArchitectLaunch({
+      workspacePath: workspace, name: 'main', baseArgs: [], storedSessionId: 'stored-1', homeDir: fakeHome, hasLiveHolder: () => false,
+    });
+    expect(launch.resumed).toBe(true);
+    expectReporterOnce(launch.args);
+    expectReporterOnce(launch.fallback!.args);
+  });
+
+  it('crash-loop fallback', () => {
+    writeSessionFixture(fakeHome, workspace, 'stored-2');
+    const launch = resolveArchitectLaunch({
+      workspacePath: workspace, name: 'main', baseArgs: [], storedSessionId: 'stored-2', homeDir: fakeHome, hasLiveHolder: () => false,
+    });
+    const fallback = buildArchitectCrashLoopFallback({
+      workspacePath: workspace, architectName: 'main', storedSessionId: 'stored-2',
+      fallback: launch.fallback!, baseEnv: {}, log: vi.fn(),
+    });
+    expectReporterOnce(fallback.args);
+  });
+
+  it('clean-exit fresh rerun', () => {
+    const fresh = buildArchitectFreshLaunch({
+      workspacePath: workspace, architectName: 'main', baseArgs: [], baseEnv: {}, log: vi.fn(),
+    });
+    const next = fresh.next();
+    expect('args' in next).toBe(true);
+    if ('args' in next) expectReporterOnce(next.args);
+  });
+
+  it('reconnect restart', () => {
+    vi.mocked(getArchitectByName).mockReturnValueOnce(undefined);
+    const opts = buildArchitectReconnectRestartOptions({
+      workspacePath: workspace, architectName: 'main', cmdParts: ['claude'], cleanEnv: {}, includeFreshLaunch: false, log: vi.fn(),
+    });
+    expectReporterOnce(opts!.args);
+  });
+
+  it('a codex architect carries no reporter, fresh or with a role', () => {
+    writeArchitect('codex');
+    expect(reporterCount(resolveArchitectLaunch({ workspacePath: workspace, name: 'main', baseArgs: [], homeDir: fakeHome }).args)).toBe(0);
+    writeRole();
+    expect(reporterCount(buildArchitectArgs([], workspace).args)).toBe(0);
   });
 });

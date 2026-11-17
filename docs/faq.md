@@ -78,17 +78,16 @@ Codev ships with several protocols for different types of work:
 |----------|---------|-----------|
 | **SPIR** | New features | Full ceremony: Specify → Plan → Implement → Review with human gates |
 | **ASPIR** | Trusted features | Same as SPIR but without human gates on spec/plan — builder runs autonomously |
-| **AIR** | Small features (< 300 LOC) | Lightweight: Implement → Review, no spec/plan artifacts |
+| **AIR** | Small features (around 300 lines, a guideline) | Lightweight: Implement → Review, no spec/plan artifacts |
 | **BUGFIX** | Bug fixes from GitHub issues | Minimal: fix, test, PR — no spec needed |
-| **TICK** | Amendments to existing specs | Extends an existing SPIR spec with incremental changes |
 | **MAINTAIN** | Code hygiene | Dead code removal, documentation sync, dependency cleanup |
 | **EXPERIMENT** | Research spikes | Hypothesis → Experiment → Conclude |
 
-**How to choose**: SPIR for anything significant or novel. ASPIR for trusted, well-scoped features. AIR or BUGFIX for small work. TICK to amend an existing spec.
+**How to choose**: SPIR for anything significant or novel. ASPIR for trusted, well-scoped features. AIR or BUGFIX for small work.
 
 ## What is porch?
 
-**Porch** is the protocol orchestrator. It drives SPIR, ASPIR, TICK, and BUGFIX protocols via a state machine — managing phase transitions, human approval gates, and multi-agent consultations automatically.
+**Porch** is the protocol orchestrator. It drives every protocol — SPIR, ASPIR, AIR, BUGFIX and the rest — via a state machine — managing phase transitions, human approval gates, and multi-agent consultations automatically.
 
 When you `afx spawn` a builder, porch orchestrates its work:
 - Enforces phase order (can't skip from Specify to Implement)
@@ -96,11 +95,11 @@ When you `afx spawn` a builder, porch orchestrates its work:
 - Blocks at human gates until approved
 - Tracks state in `codev/projects/<id>/status.yaml`
 
-You can also use porch manually: `porch status 42`, `porch run 42`, `porch approve 42 spec-approval`.
+You can also run porch by hand: `porch status 42` shows where a project is, `porch next 42` prints its next tasks, and `porch approve 42 spec-approval --a-human-explicitly-approved-this` records a human's approval of a gate.
 
 ## Can I use Codev without Agent Farm?
 
-Yes. All protocols (SPIR, TICK, etc.) work in any AI coding assistant — Claude Code, Cursor, Copilot, or any tool that reads CLAUDE.md/AGENTS.md. Just tell your AI: *"I want to build X using the SPIR protocol"*.
+Yes. All protocols (SPIR, ASPIR, BUGFIX, etc.) work in any AI coding assistant — Claude Code, Cursor, Copilot, or any tool that reads CLAUDE.md/AGENTS.md. Just tell your AI: *"I want to build X using the SPIR protocol"*.
 
 Agent Farm adds parallel builder orchestration, a web dashboard, and automated protocol enforcement. It's optional but powerful for larger projects.
 

@@ -29,7 +29,15 @@ import {
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 import { formatArchitectToBuilderMessage } from '../utils/message-format.js';
 
-const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
+// Issue #1664: a claude-shaped profile, so it carries claude's measured `queuesInputMidTurn`.
+// Without it the delivery path keeps the whole-screen output settle, which is the branch
+// these files' non-#1664 cases already exercise through `lastDataAt`.
+const PROFILE: GateProfile = {
+  app: 'claude',
+  markerPattern: /^❯/,
+  regionEndPatterns: [],
+  queuesInputMidTurn: true,
+};
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
 const BUSY: GateVerdict = { clean: false, reason: 'busy', detail: 'user-text' };
 
@@ -49,6 +57,12 @@ function fakeSession(overrides: Partial<DeliverySession> = {}): DeliverySession 
     // Old enough that the Issue #1573 settle window has long passed for the harness clock
     // (`now` starts at 1000): a test that wants a still-painting screen overrides it.
     lastDataAt: 0,
+    // Issue #1473 input signals, the input-side twins of `bytesWritten`/`lastDataAt`. 0/0 is an
+    // idle prompt nobody has typed at: the counter never moves, and `now - 0` is far past the
+    // input-settle interval for the harness clock. Tests that want a MOVING input counter build
+    // the session inline with a `get inputSeq()`, exactly as they do for `bytesWritten`.
+    inputSeq: 0,
+    lastInputAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -82,6 +96,8 @@ interface Harness {
   setProfile(p: GateProfile | null): void;
   setVerdict(v: GateVerdict): void;
   setClassify(fn: ((session: DeliverySession, p: GateProfile) => Promise<GateVerdict>) | null): void;
+  /** Issue #1664: drive the composer-region fingerprint the delivery path samples. */
+  setComposerFingerprint(fn: (() => string | null) | null): void;
   now: number;
   /**
    * Result the fake `writeMessage` port returns (Spec 1313 silent-loss test). Default true
@@ -102,6 +118,7 @@ function harness(): Harness {
   let profile: GateProfile | null = PROFILE;
   let verdict: GateVerdict = CLEAN;
   let classifyOverride: ((session: DeliverySession, p: GateProfile) => Promise<GateVerdict>) | null = null;
+  let fingerprintOverride: (() => string | null) | null = null;
   const broadcasts: DeliveredBroadcast[] = [];
   const writes: Array<{ formattedMessage: string; noEnter: boolean }> = [];
   const logs: string[] = [];
@@ -127,11 +144,18 @@ function harness(): Harness {
     setClassify: (fn) => {
       classifyOverride = fn;
     },
+    setComposerFingerprint: (fn) => {
+      fingerprintOverride = fn;
+    },
     ports: {
       getSessionForAgent: (_ws, agent) => sessions.get(agent) ?? null,
       resolveProfile: () => profile,
       classify: (session: DeliverySession, p: GateProfile): Promise<GateVerdict> =>
         classifyOverride ? classifyOverride(session, p) : Promise.resolve(verdict),
+      // Issue #1664: the composer-stability seam. Default is a composer that never moves, so
+      // every test written before this issue keeps asserting what it was written for; tests
+      // about stability drive it with `setComposerFingerprint`.
+      composerFingerprint: () => (fingerprintOverride ? fingerprintOverride() : 'composer'),
       writeMessage: (_s, formattedMessage, noEnter, precheck) => {
         // Mirror the live binding's ordering: the precheck runs INSIDE the lock, before the
         // first byte (Issue #1365), so an abort must record no write at all.
@@ -349,41 +373,31 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     expect(h.writes).toHaveLength(1); // not re-delivered
   });
 
-  it('re-validates the SCREEN after the classify: a keystroke landing during the classify → holds, never writes (Spec 1313 render-gate hardening)', async () => {
-    // The classify awaits (the mirror flushes its parser); if the user starts typing during
-    // it, the clean verdict is for a screen that no longer exists. The delivery path samples
-    // the monotone bytesWritten token before the classify and re-checks it after — a change
-    // means "screen moved under us" → hold, never write the message onto the now-present draft
-    // (the false-clean the gate exists to prevent).
-    let bytes = 0;
-    const session: DeliverySession = {
-      id: 'term-moving',
-      get bytesWritten() {
-        return bytes;
-      },
-      // Settled (Issue #1573), so the hold this test asserts is attributable to the token
-      // moving under the classify — not to an unknown screen age.
-      lastDataAt: 0,
-      info: { cols: 110, rows: 32 },
-      command: 'claude',
-      launchArgs: [],
-      cwd: '/ws/a',
-      writable: true,
-      write: () => true,
-    };
+  it('re-validates the COMPOSER after the classify: a draft appearing during the classify → holds, never writes (Spec 1313 render-gate hardening; Issue #1664)', async () => {
+    // The classify awaits (the mirror flushes its parser); if a draft appears during it, the
+    // clean verdict is for a screen that no longer exists. The delivery path fingerprints the
+    // composer region AFTER that await, so a region that moved cannot be stable → hold, never
+    // write the message onto the now-present draft (the false-clean the gate exists to
+    // prevent). Issue #1664 scoped the re-validation from the whole screen to this region: an
+    // agent repainting a spinner has not touched the composer and must not hold.
     const h = harness();
-    h.setSession('spir-1', session);
-    // Model the keystroke: new output advances the token *during* the classify, which still
-    // returns CLEAN for the (now stale) screen it was handed.
+    // NOT settled: the screen is being painted, so the verdict rests on region stability alone
+    // rather than falling through to the whole-screen quiet fast path.
+    h.setSession('spir-1', fakeSession({ lastDataAt: 1000 }));
+    let region = 'empty-composer';
+    h.setComposerFingerprint(() => region);
+    // Model the draft: the composer region changes *during* the classify, which still returns
+    // CLEAN for the (now stale) screen it was handed.
     h.setClassify(async () => {
-      bytes++;
+      region = 'a draft the human started';
       return CLEAN;
     });
     const row = enqueue();
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
     expect(out.delivered).toEqual([]);
-    expect(out.reason).toBe('busy'); // held: the screen moved under the gate
+    expect(out.reason).toBe('busy'); // held: the composer moved under the gate
+    expect(out.detail).toBe('composer-redraw');
     expect(h.writes).toHaveLength(0); // never wrote onto the draft that appeared
     expect(mailbox.getById(db, row.id)?.status).toBe('held');
   });
@@ -594,6 +608,10 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
       // Issue #1573 settle-before-write: epoch 0 against the harness clock is a screen that
       // stopped painting long ago, so this test still exercises the memo and nothing else.
       lastDataAt: 0,
+      // Issue #1473: static input signals, so these tests still isolate the OUTPUT half of the
+      // token and the settle they were written for.
+      inputSeq: 0,
+      lastInputAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -896,7 +914,17 @@ describe('MailboxDrainer escalation + liveness telemetry (Spec 1313, Phase 7)', 
     expect(mailbox.getById(db, row.id)?.status).toBe('held'); // visibility only, no delivery
     expect(h.writes).toHaveLength(0);
     expect(h.escalations).toEqual([
-      { workspacePath: '/ws/a', toAgent: 'spir-1', mailboxId: row.id, ageMs: 6000, reason: 'busy' },
+      {
+        workspacePath: '/ws/a',
+        toAgent: 'spir-1',
+        mailboxId: row.id,
+        ageMs: 6000,
+        reason: 'busy',
+        // Issue #1482: the gate detail rides along, so a client seeing this escalation can tell
+        // an occupied composer (this case — a human is at the line) from one the classifier
+        // could not read at all. Read off the row the delivery pass persisted it to.
+        detail: 'user-text',
+      },
     ]);
     // Redaction: the escalation payload carries no message body.
     expect(Object.keys(h.escalations[0])).not.toContain('body');
@@ -1103,6 +1131,10 @@ describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)',
       // Issue #1573: the repaint that cleared the composer has already settled by the time a
       // drainer tick sees it — ticks are 1.5 s apart, the settle window is 250 ms.
       lastDataAt: 0,
+      // Issue #1473: static input signals, so these tests still isolate the OUTPUT half of the
+      // token and the settle they were written for.
+      inputSeq: 0,
+      lastInputAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -1193,5 +1225,213 @@ describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)',
     await drainer.tick();
     expect(fired).toBe(1);
     drainer.stop();
+  });
+});
+
+/**
+ * Issue #1482 — the gate verdict's DETAIL survives the trip to the database.
+ *
+ * The render gate has always distinguished a composer that is legitimately occupied
+ * (`user-text` — a human at the line, and the hold clears when they finish) from one it cannot
+ * verify at all (`no-region-end` / `no-composer-marker` — a drifted profile, a torn frame, or
+ * dimensions that do not match the real terminal, and the hold NEVER clears on its own). That
+ * distinction lived only in memory on `DeliveryOutcome`, so every operator surface printed a
+ * bare `busy` for both — which is why a dimension divergence could starve an agent invisibly.
+ *
+ * These pin the persistence contract the surfaces read from.
+ */
+describe('Issue #1482 — gate detail persisted on the held row', () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(GLOBAL_SCHEMA);
+  });
+  afterEach(() => db.close());
+
+  const enqueue = (overrides: Partial<mailbox.EnqueueInput> = {}, now = 1000) =>
+    mailbox.enqueue(
+      db,
+      { workspacePath: '/ws/a', toAgent: 'spir-1', body: 'hi', formattedMessage: 'M', ...overrides },
+      now
+    );
+
+  it.each([
+    ['user-text', 'a human is at the composer'],
+    ['no-region-end', 'the composer has no proven lower bound'],
+    ['no-composer-marker', 'no marker on screen at all'],
+  ] as const)('persists detail %s (%s)', async (detail) => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict({ clean: false, reason: 'busy', detail });
+    const row = enqueue();
+
+    const outcome = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(outcome.reason).toBe('busy');
+    expect(outcome.detail).toBe(detail);
+    const stored = mailbox.getById(db, row.id);
+    expect(stored?.reason).toBe('busy');
+    expect(stored?.detail).toBe(detail);
+  });
+
+  it('a clean delivery clears both reason and detail', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY);
+    const row = enqueue();
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+    expect(mailbox.getById(db, row.id)?.detail).toBe('user-text');
+
+    // The human finishes; the next pass finds a clean prompt and delivers.
+    h.setVerdict(CLEAN);
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    const stored = mailbox.getById(db, row.id);
+    expect(stored?.status).toBe('delivered');
+    expect(stored?.reason).toBeNull();
+    expect(stored?.detail).toBeNull();
+  });
+
+  it('a NON-gate hold nulls a previously-recorded detail', async () => {
+    // The regression this guards: a row that held `busy:user-text` while a human typed, whose
+    // terminal then died. Leaving the old detail in place would have `afx inbox` asserting
+    // "a human is at the composer" about a session that no longer exists.
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY);
+    const row = enqueue();
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+    expect(mailbox.getById(db, row.id)?.detail).toBe('user-text');
+
+    h.setSession('spir-1', null); // the PTY is gone
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    const stored = mailbox.getById(db, row.id);
+    expect(stored?.reason).toBe('no-live-pty');
+    expect(stored?.detail).toBeNull();
+  });
+
+  it('a repeated identical verdict does not bump updated_at', async () => {
+    // `updated_at` means "when this row's verdict last MOVED" — that is what lets the
+    // starvation notice talk about how long a composer has been occupied without a second
+    // timestamp column. The backstop re-checks every 1.5s, so a per-tick bump would destroy it.
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY);
+    const row = enqueue();
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+    const firstUpdate = mailbox.getById(db, row.id)?.updated_at;
+
+    h.now += 60_000;
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+    expect(mailbox.getById(db, row.id)?.updated_at).toBe(firstUpdate);
+
+    // A verdict that genuinely changes DOES move it.
+    h.setVerdict({ clean: false, reason: 'busy', detail: 'no-region-end' });
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+    expect(mailbox.getById(db, row.id)?.updated_at).toBe(h.now);
+  });
+
+  it('carries the detail and the confirmation streak into the owner starvation notice', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict({ clean: false, reason: 'busy', detail: 'no-region-end' });
+    enqueue({}, 1000);
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 5000, ownerNoticeMs: 10000 });
+    drainer.start(h.ports, db);
+
+    // Three passes before the notice is due: the streak grows to 3, all confirming the same
+    // unverifiable verdict.
+    h.now = 2000;
+    await drainer.tick();
+    h.now = 3000;
+    await drainer.tick();
+    h.now = 12000; // past ownerNoticeMs
+    await drainer.tick();
+
+    expect(h.ownerNotices).toHaveLength(1);
+    expect(h.ownerNotices[0].reason).toBe('busy');
+    expect(h.ownerNotices[0].detail).toBe('no-region-end');
+    expect(h.ownerNotices[0].streak).toBe(3);
+    drainer.stop();
+  });
+});
+
+describe('Issue #1482 — setHeldVerdict enforces changed-only AT THE REPOSITORY', () => {
+  // Codex flagged at the PR consultation that the changed-only guard lived only at the two
+  // call sites in mailbox-delivery.ts, while the plan, the review and arch.md all credited
+  // the repository function with it. These tests drive setHeldVerdict DIRECTLY — no delivery
+  // pass, no call-site guard in the way — so the invariant is pinned where it is claimed.
+  //
+  // It matters because the owner starvation notice reads elapsed time off `updated_at` to say
+  // how long a composer has been occupied. A caller that re-writes an unchanged verdict every
+  // tick would reset that clock and the notice would never fire.
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(GLOBAL_SCHEMA);
+  });
+  afterEach(() => db.close());
+
+  const held = (now = 1000) =>
+    mailbox.enqueue(db, { workspacePath: '/ws/a', toAgent: 'spir-1', body: 'hi', formattedMessage: 'M' }, now);
+
+  it('a repeated (reason, detail) pair does NOT bump updated_at', () => {
+    const row = held();
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 2000)).toBe(true);
+    const first = mailbox.getById(db, row.id)!.updated_at;
+
+    // Same verdict re-asserted 5s later — the composer has not moved, so neither should the clock.
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 7000)).toBe(false);
+    expect(mailbox.getById(db, row.id)!.updated_at).toBe(first);
+  });
+
+  it('a repeated NULL detail does not bump either — the null-safe half of the predicate', () => {
+    // `<>` would not catch this: NULL <> NULL is NULL, not false, so a `<>`-based predicate
+    // lets the no-op through and silently bumps the timestamp. This is the case that pins `IS NOT`.
+    const row = held();
+    expect(mailbox.setHeldVerdict(db, row.id, 'no-live-pty', null, 2000)).toBe(true);
+    const first = mailbox.getById(db, row.id)!.updated_at;
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'no-live-pty', null, 7000)).toBe(false);
+    expect(mailbox.getById(db, row.id)!.updated_at).toBe(first);
+  });
+
+  it('a changed detail alone (same reason) DOES bump — the verdict really moved', () => {
+    const row = held();
+    mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 2000);
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', 'no-region-end', 7000)).toBe(true);
+    const stored = mailbox.getById(db, row.id)!;
+    expect(stored.updated_at).toBe(7000);
+    expect(stored.detail).toBe('no-region-end');
+  });
+
+  it('a changed reason alone (same null detail) DOES bump', () => {
+    const row = held();
+    mailbox.setHeldVerdict(db, row.id, 'busy', null, 2000);
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'no-live-pty', null, 7000)).toBe(true);
+    expect(mailbox.getById(db, row.id)!.updated_at).toBe(7000);
+  });
+
+  it('dropping a detail to null (same reason) DOES bump — a stale detail must not outlive its verdict', () => {
+    const row = held();
+    mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 2000);
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', null, 7000)).toBe(true);
+    const stored = mailbox.getById(db, row.id)!;
+    expect(stored.updated_at).toBe(7000);
+    expect(stored.detail).toBeNull();
+  });
+
+  it('never touches a terminal row, and returns false for an unknown id', () => {
+    const row = held();
+    mailbox.markDelivered(db, row.id, 3000);
+    const delivered = mailbox.getById(db, row.id)!;
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 9000)).toBe(false);
+    expect(mailbox.getById(db, row.id)!.updated_at).toBe(delivered.updated_at);
+    expect(mailbox.setHeldVerdict(db, 'no-such-id', 'busy', 'user-text', 9000)).toBe(false);
   });
 });

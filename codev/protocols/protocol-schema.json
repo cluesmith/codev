@@ -1,14 +1,29 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://codev.dev/protocol-schema.json",
-  "title": "Protocol Definition",
-  "description": "Schema for porch protocol definitions",
+  "title": "Codev Protocol Definition",
+  "description": "Schema for porch protocol definitions (protocols/<name>/protocol.json). Editor tooling: porch parses these files with its own normalizer, and a test validates every shipped protocol.json against this schema.",
   "type": "object",
-  "required": ["name", "version", "description", "phases"],
+  "required": [
+    "name",
+    "version",
+    "description",
+    "phases"
+  ],
+  "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path to this schema, for editors"
+    },
     "name": {
       "type": "string",
-      "description": "Protocol identifier (e.g., 'spir', 'bugfix', 'air')"
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Protocol identifier (e.g. 'spir', 'bugfix', 'air')"
+    },
+    "alias": {
+      "type": "string",
+      "description": "Alternative name accepted wherever the protocol name is (e.g. 'spider' for spir)"
     },
     "version": {
       "type": "string",
@@ -16,16 +31,7 @@
       "description": "Semantic version of the protocol"
     },
     "description": {
-      "type": "string",
-      "description": "Human-readable description of the protocol"
-    },
-    "phases": {
-      "type": "array",
-      "description": "Ordered list of protocol phases",
-      "items": {
-        "$ref": "#/definitions/phase"
-      },
-      "minItems": 1
+      "type": "string"
     },
     "input": {
       "$ref": "#/definitions/protocolInput"
@@ -42,7 +48,9 @@
           "type": "array",
           "description": "Protocol phase ids to refresh on entry to. Each must name a phase this protocol declares.",
           "uniqueItems": true,
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "on_plan_phase_advance": {
           "type": "boolean",
@@ -50,29 +58,132 @@
         }
       }
     },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/phase"
+      },
+      "description": "Ordered list of protocol phases"
+    },
+    "phase_completion": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Named predicates (shell commands). Their names are valid porch.checks override keys; porch does not run them."
+    },
     "signals": {
       "type": "object",
-      "description": "Signal definitions for state transitions",
+      "description": "Legacy: porch does not read this. Builders finish a phase with `porch done` and report blockers with `afx send architect`.",
       "additionalProperties": {
-        "$ref": "#/definitions/signal"
+        "type": "object"
       }
     },
     "defaults": {
       "type": "object",
-      "description": "Default configuration for the protocol",
+      "additionalProperties": false,
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["strict", "soft"],
-          "description": "Default orchestration mode for the protocol"
+          "enum": [
+            "strict",
+            "soft"
+          ],
+          "description": "Default orchestration mode"
         },
-        "consultation": {
-          "$ref": "#/definitions/consultationDefaults"
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1
         },
         "checks": {
           "type": "object",
+          "description": "Default check commands, overridden by a phase's own checks",
           "additionalProperties": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "description": "Shell command to run. A check without one is a named requirement the builder satisfies (e.g. BUGFIX regression_test); porch runs only checks that have a command."
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "description": "Working directory relative to the project root"
+                  },
+                  "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647,
+                    "description": "Kill the check after this many milliseconds (default: 300000, i.e. 5 minutes)"
+                  },
+                  "on_fail": {
+                    "type": "string",
+                    "description": "'retry', or a phase id to return to"
+                  },
+                  "max_retries": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "optional": {
+                    "type": "boolean",
+                    "description": "A failure does not block the phase"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "skip_requires_justification": {
+                    "type": "boolean",
+                    "description": "Skipping this check must be justified in the commit and PR"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "consultation": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Descriptive only: porch takes lanes from a phase's verify or consultation block and from .codev/config.json porch.consultation.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "May be empty for protocols that run no consultation"
+            },
+            "parallel": {
+              "type": "boolean"
+            }
+          }
+        },
+        "verify": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Descriptive only: each build_verify phase carries its own verify block.",
+          "properties": {
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "parallel": {
+              "type": "boolean"
+            }
           }
         }
       }
@@ -81,7 +192,10 @@
   "definitions": {
     "phase": {
       "type": "object",
-      "required": ["id", "name", "type"],
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
       "properties": {
         "id": {
           "type": "string",
@@ -89,207 +203,266 @@
         },
         "name": {
           "type": "string",
-          "description": "Human-readable phase name"
+          "description": "Human-readable phase name (defaults to id)"
         },
         "description": {
-          "type": "string",
-          "description": "Phase description"
+          "type": "string"
         },
         "type": {
           "type": "string",
-          "enum": ["once", "per_plan_phase"],
-          "description": "Whether phase runs once or per plan phase"
+          "enum": [
+            "once",
+            "per_plan_phase",
+            "build_verify"
+          ],
+          "description": "once: one task, the builder runs `porch done`. build_verify: build, then consultation, iterated until reviewers approve. per_plan_phase: build_verify once per phase of the plan."
         },
         "steps": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Ordered list of steps within the phase"
+          "description": "Descriptive step names; porch does not read them"
+        },
+        "build": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prompt"
+          ],
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Prompt file in prompts/"
+            },
+            "artifact": {
+              "type": "string",
+              "description": "Artifact glob; ${PROJECT_ID} and ${PROJECT_TITLE} are substituted"
+            }
+          }
+        },
+        "verify": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "models"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "consult review type (spec, plan, impl, pr, phase)"
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "parallel": {
+              "type": "boolean"
+            }
+          },
+          "description": "Consultation porch emits after `porch done` (build_verify phases); null means the phase has none (its gate is the review). .codev/config.json porch.consultation overrides the lanes."
+        },
+        "consultation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "models"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "consult review type"
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          },
+          "description": "Consultation the builder runs from a once phase's prompt (BUGFIX/AIR PR phase). Porch renders the commands into {{consult_commands}}, applying .codev/config.json porch.consultation. There is no enabled or parallel switch: turn reviewers off or change them in porch.consultation."
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Safety ceiling on build-verify iterations (default 8)"
+        },
+        "on_complete": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commit": {
+              "type": "boolean"
+            },
+            "push": {
+              "type": "boolean"
+            }
+          },
+          "description": "Descriptive: porch commits only status.yaml; the builder commits the phase's work."
         },
         "checks": {
           "type": "object",
-          "description": "Build/test checks for this phase",
+          "description": "Checks run by `porch check` / `porch done` for this phase",
           "additionalProperties": {
-            "$ref": "#/definitions/check"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "description": "Shell command to run. A check without one is a named requirement the builder satisfies (e.g. BUGFIX regression_test); porch runs only checks that have a command."
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "description": "Working directory relative to the project root"
+                  },
+                  "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647,
+                    "description": "Kill the check after this many milliseconds (default: 300000, i.e. 5 minutes)"
+                  },
+                  "on_fail": {
+                    "type": "string",
+                    "description": "'retry', or a phase id to return to"
+                  },
+                  "max_retries": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "optional": {
+                    "type": "boolean",
+                    "description": "A failure does not block the phase"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "skip_requires_justification": {
+                    "type": "boolean",
+                    "description": "Skipping this check must be justified in the commit and PR"
+                  }
+                }
+              }
+            ]
           }
-        },
-        "consultation": {
-          "$ref": "#/definitions/consultation"
         },
         "gate": {
-          "$ref": "#/definitions/gate"
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/definitions/gate"
+            }
+          ],
+          "description": "Human approval gate after this phase: a gate name, or an object with name and next"
         },
         "transition": {
-          "$ref": "#/definitions/transition"
-        }
-      }
-    },
-    "check": {
-      "type": "object",
-      "required": ["command"],
-      "properties": {
-        "command": {
-          "type": "string",
-          "description": "Command to run"
-        },
-        "on_fail": {
-          "type": "string",
-          "description": "Action on failure: 'retry' or phase name to return to"
-        },
-        "max_retries": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Maximum retry attempts"
-        },
-        "retry_delay": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Delay between retries in seconds"
-        }
-      }
-    },
-    "consultation": {
-      "type": "object",
-      "properties": {
-        "on": {
-          "type": "string",
-          "enum": ["review", "complete"],
-          "description": "When to trigger consultation"
-        },
-        "models": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "AI models to consult"
-        },
-        "type": {
-          "type": "string",
-          "description": "Review type (spec, plan, impl, pr, phase, integration)"
-        },
-        "parallel": {
-          "type": "boolean",
-          "description": "Run consultations in parallel"
-        },
-        "max_rounds": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Maximum revision rounds"
-        },
-        "next": {
-          "type": "string",
-          "description": "Phase to proceed to after consultation"
-        }
-      }
-    },
-    "consultationDefaults": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Whether consultation is enabled by default"
-        },
-        "models": {
-          "type": "array",
-          "items": {
-            "type": "string"
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "on_complete": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Next phase id (null: terminal)"
+            },
+            "on_all_phases_complete": {
+              "type": "string",
+              "description": "Next phase once every plan phase is done (per_plan_phase)"
+            }
           }
         },
-        "parallel": {
-          "type": "boolean"
+        "next": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Next phase id (null: terminal); defaults to the following phase"
         }
       }
     },
     "gate": {
       "type": "object",
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
       "properties": {
         "name": {
-          "type": "string",
-          "description": "Gate identifier"
+          "type": "string"
         },
         "description": {
-          "type": "string",
-          "description": "What this gate checks"
+          "type": "string"
         },
         "requires": {
           "type": "array",
           "items": {
             "type": "string"
-          },
-          "description": "Items that must be complete to pass"
+          }
         },
         "next": {
-          "type": ["string", "null"],
-          "description": "Next phase after gate (null for terminal)"
-        }
-      }
-    },
-    "transition": {
-      "type": "object",
-      "properties": {
-        "on_complete": {
-          "type": "string",
-          "description": "Phase to transition to on completion"
-        },
-        "on_fail": {
-          "type": "string",
-          "description": "Phase to return to on failure"
-        },
-        "on_too_complex": {
-          "type": "string",
-          "description": "Action when task is too complex"
-        },
-        "on_all_phases_complete": {
-          "type": "string",
-          "description": "Phase to transition to when all plan phases are done"
-        }
-      }
-    },
-    "signal": {
-      "type": "object",
-      "properties": {
-        "description": {
-          "type": "string"
-        },
-        "transitions_to": {
-          "type": "string"
-        },
-        "requires": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Next phase after the gate (null: terminal)"
         }
       }
     },
     "protocolInput": {
       "type": "object",
-      "description": "Protocol input configuration - defines what input types a protocol accepts",
+      "additionalProperties": false,
+      "description": "What input a protocol accepts at spawn",
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["spec", "github-issue", "task", "protocol", "shell", "worktree"],
-          "description": "Primary input type for this protocol"
+          "enum": [
+            "spec",
+            "github-issue",
+            "task",
+            "protocol",
+            "shell",
+            "worktree",
+            "none"
+          ]
         },
         "required": {
-          "type": "boolean",
-          "description": "Whether an input of this type is required"
+          "type": "boolean"
         },
         "default_for": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "CLI flags this protocol is the default for (e.g., ['--issue', '-i'])"
+          "description": "CLI flags this protocol is the default for (e.g. ['--issue', '-i'])"
         }
       }
     },
     "protocolHooks": {
       "type": "object",
-      "description": "Hooks triggered at various points in the spawn lifecycle",
+      "additionalProperties": false,
       "properties": {
         "pre-spawn": {
           "type": "object",
-          "description": "Hooks executed before spawning the builder",
+          "additionalProperties": false,
           "properties": {
             "collision-check": {
               "type": "boolean",
@@ -297,7 +470,7 @@
             },
             "comment-on-issue": {
               "type": "string",
-              "description": "Comment to post on GitHub issue when spawning"
+              "description": "Comment posted on the issue at spawn"
             }
           }
         }

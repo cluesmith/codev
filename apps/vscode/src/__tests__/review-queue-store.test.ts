@@ -264,4 +264,47 @@ describe('ReviewQueueStore', () => {
     expect(events).toEqual(['pir-1', 'pir-1']);
     store.dispose();
   });
+
+  it('markSent moves submitted comments to `sent` on disk, keeping `comments` pending-only (#1562)', async () => {
+    const wt = await makeWorktree('pir-1');
+    const store = new ReviewQueueStore(undefined);
+    store.registerWorktree('pir-1', wt);
+    await store.add('pir-1', makeComment('c1'));
+    await store.add('pir-1', makeComment('c2'));
+
+    await store.markSent('pir-1', ['c1']);
+
+    const onDisk = JSON.parse(await fs.readFile(path.join(wt, QUEUE_FILE_RELPATH), 'utf8'));
+    expect(onDisk.comments.map((c: { id: string }) => c.id)).toEqual(['c2']);
+    expect(onDisk.sent.map((c: { id: string }) => c.id)).toEqual(['c1']);
+    expect(typeof onDisk.sent[0].sentAt).toBe('string');
+
+    const fresh = new ReviewQueueStore(undefined);
+    fresh.registerWorktree('pir-1', wt);
+    const state = await fresh.loadState('pir-1');
+    expect(state.comments.map(c => c.id)).toEqual(['c2']);
+    expect(state.sent.map(c => c.id)).toEqual(['c1']);
+    store.dispose();
+    fresh.dispose();
+  });
+
+  it('a builder with only sent entries stays targetable; clearSent drops them; clear keeps them', async () => {
+    const wt = await makeWorktree('pir-1');
+    const store = new ReviewQueueStore(undefined);
+    store.registerWorktree('pir-1', wt);
+    await store.add('pir-1', makeComment('c1'));
+    await store.markSent('pir-1', ['c1']);
+    expect(store.buildersWithPending()).toEqual(['pir-1']);
+
+    await store.add('pir-1', makeComment('c2'));
+    await store.clear('pir-1');
+    expect(store.getSent('pir-1').map(c => c.id)).toEqual(['c1']);
+
+    await store.clearSent('pir-1');
+    expect(store.getSent('pir-1')).toEqual([]);
+    expect(store.buildersWithPending()).toEqual([]);
+    const onDisk = JSON.parse(await fs.readFile(path.join(wt, QUEUE_FILE_RELPATH), 'utf8'));
+    expect(onDisk.sent).toBeUndefined();
+    store.dispose();
+  });
 });

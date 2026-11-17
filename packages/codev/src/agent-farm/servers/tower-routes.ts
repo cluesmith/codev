@@ -18,22 +18,28 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { homedir, tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { fileURLToPath } from 'node:url';
 import { version } from '../../version.js';
+import { sanitizeAgentEnv, withTowerPort } from '../../lib/agent-env.js';
 
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
 import type { BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage } from '@cluesmith/codev-types';
-import { getBuilders, setArchitectByName } from '../state.js';
+import { getArchitectByName, getBuilders, setArchitectByName } from '../state.js';
+import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
-import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
-import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER } from '@cluesmith/codev-types';
+import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml, decideForwardAuthorization, ideForwardSetCookie } from '../utils/server-utils.js';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
+import { isWindows } from '../../lib/platform.js';
+import { workspaceKey } from '../utils/workspace-path.js';
+import { expandHomePath } from '../../lib/host-paths.js';
+import { isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
 import {
   isRateLimited,
   normalizeWorkspacePath,
@@ -44,8 +50,16 @@ import {
   logSessionIdentity,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
-import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
+import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
+import { logSafe } from '../utils/log-safe.js';
+import { handleIdeApi, ensureIdeServerLive } from './ide-server.js';
+import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
+import { getWorktreeConfig, getActivityHooks, getResolvedCommands } from '../utils/config.js';
+import { windowsShellRequest } from '../../lib/platform/windows/git-bash-launch.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { ensureCodevConfigWatcher } from './codev-config-watcher.js';
+import { handleDecisionsGet, handleDecisionsRule } from './decisions/routes.js';
+import { decisionsFilePresent } from './decisions/file.js';
 import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
 import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
 import { resolveTarget, resolveAgentInRegistry, broadcastMessage, isResolveError, type ResolveResult } from './tower-messages.js';
@@ -56,12 +70,15 @@ import {
   formatArchitectToBuilderMessage,
   formatBuilderMessage,
   formatUserViaVsCodeMessage,
+  formatUserViaDecisionsTabMessage,
+  isSafeSenderId,
+  messageLimitError,
   messageTooLargeError,
   MAX_MESSAGE_BYTES,
 } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
-import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
-import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
+import { writeMessageToSession, writeEscapeToSession, writeStrategyForApp } from './message-write.js';
+import { makeDeliveryPorts, getMailboxDrainer, resolveProfileForSession } from './mailbox-wiring.js';
 import { deliverAgentMailSerialized, type DeliveryOutcome, type DeliveryPorts } from './mailbox-delivery.js';
 import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import {
@@ -73,6 +90,7 @@ import {
   type EnqueueInput,
 } from '../db/mailbox.js';
 import type { MailboxReason } from '../db/types.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 // Spec 1273 per-terminal submission lock. Originally the anti-fusion lock for the two
 // explicit human-bypass paths (escape + interrupt); since Issue #1365 the gated mailbox
 // delivery path takes it too, so it now serializes the whole write edge of a terminal.
@@ -86,6 +104,7 @@ import { submitToSession, OPERATOR_SUBMIT_WAIT_CEILING_MS } from './session-subm
 import { scheduleDelayedSend, validateDelaySeconds } from './delayed-send.js';
 import {
   getKnownWorkspacePaths,
+  getAllKnownWorkspacePaths,
   getInstances,
   getDirectorySuggestions,
   launchInstance,
@@ -96,12 +115,17 @@ import {
   removeArchitect,
 } from './tower-instances.js';
 import { OverviewCache } from './overview.js';
+import { handleAgentLifecycle } from './agent-state/route.js';
+import { agentStateStore } from './agent-state/store.js';
+import { resolveAgentIdentity } from './agent-state/identity.js';
+import { serveAgentState } from './agent-state/serve.js';
 import {
   fetchIssue,
   fetchPR,
   searchIssues,
   fetchPRList,
   fetchCurrentUser,
+  probeGhGraphqlRateLimit,
   parseLinkedIssue,
   parseArea,
 } from '../../lib/github.js';
@@ -110,14 +134,16 @@ import { computeAnalytics } from './analytics.js';
 import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
 import { getGlobalDb } from '../db/index.js';
 import { listProcessCensus } from './process-census.js';
+import { containsBuildersSegment } from '../utils/builder-worktree-identity.js';
 import {
   SHELLPER_MARKER,
   computeRegisteredShellperPids,
   findHuskShellpers,
   sweepShellperHusks,
   resolveHuskGraceMs,
+  startTimeLookupFor,
 } from './shellper-husk-sweep.js';
-import { getProcessStartTime } from '../../terminal/session-manager.js';
+import { isShellperInScope } from '../../terminal/shellper-cmdline.js';
 import type { CronTask } from './tower-cron.js';
 import {
   getWorkspaceTerminals,
@@ -143,7 +169,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Singleton cache for overview endpoint (Spec 0126 Phase 4)
-const overviewCache = new OverviewCache();
+// #1645: the gh reset probe is enabled here, in Tower, and nowhere else.
+const overviewCache = new OverviewCache({ probe: probeGhGraphqlRateLimit });
 
 // Spec 1313: the in-memory SendBuffer (Spec 403) is retired. Every send is now
 // persisted to the durable `mailbox` table before the response and delivered only
@@ -169,6 +196,11 @@ export interface RouteContext {
   broadcastNotification: (notification: { type: string; title: string; body: string; workspace?: string }) => void;
   addSseClient: (client: SSEClient) => boolean;
   removeSseClient: (id: string) => void;
+  /**
+   * Begin a graceful shutdown (Spec 1658): `afx tower stop` on Windows, where a
+   * signal is a hard kill that skips the shutdown path. Absent in route tests.
+   */
+  requestShutdown?: (reason: string) => void;
 }
 
 // ============================================================================
@@ -190,6 +222,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
+  'POST /api/shutdown':   (req, res, _url, ctx) => handleShutdown(req, res, ctx),
   'GET /api/version':     (_req, res, _url, ctx) => handleVersion(res, ctx),
   'GET /api/overview':    (_req, res, url, ctx) => handleOverview(res, url, undefined, ctx),
   'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
@@ -201,6 +234,11 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/overview/refresh': (_req, res, _url, ctx) => handleOverviewRefresh(res, ctx),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
   'POST /api/notify':     (req, res, _url, ctx) => handleNotify(req, res, ctx),
+  // Spec 1595: write-only lifecycle ingestion; key-authenticated like every non-public route.
+  'POST /api/agent-lifecycle': (req, res) => handleAgentLifecycle(req, res, {
+    store: agentStateStore,
+    resolve: identity => resolveAgentIdentity(identity),
+  }),
   'GET /api/browse':      (_req, res, url) => handleBrowse(res, url),
   'POST /api/create':     (req, res, _url, ctx) => handleCreateWorkspace(req, res, ctx),
   'POST /api/launch':     (req, res) => handleLaunchInstance(req, res),
@@ -232,6 +270,94 @@ function respondStartingUp(res: http.ServerResponse): void {
 }
 
 // ============================================================================
+// IDE forward cookie (Issue #1869)
+// ============================================================================
+
+/** Mints the header-free `/ide` forward credential for a local browser. */
+const IDE_SESSION_ROUTE = '/api/ide/session';
+
+/**
+ * The log-safe reason for a 401 at the HTTP choke point. `/ide*` paths report
+ * the forward seam's own reason (Host, credential, or cross-origin cookie);
+ * every other route distinguishes Host from key. Never includes credentials.
+ */
+function unauthorizedReason(req: http.IncomingMessage): string {
+  let pathname = '/';
+  try {
+    pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  } catch {
+    return 'malformed URL';
+  }
+  if (matchIdePrefix(pathname)) {
+    const decision = decideForwardAuthorization(req);
+    if (!decision.allowed) return decision.reason;
+  }
+  if (!isAllowedHost(req.headers.host)) return `disallowed Host "${req.headers.host ?? ''}"`;
+  return 'missing or invalid key';
+}
+
+/**
+ * The request target as it may appear in a log line. For the IDE forward this
+ * is the PATHNAME only (Issue #1869): the workbench's own requests can carry
+ * credentials in the query (`?tkn=`, a reconnection token), and none of that
+ * may land in Tower's log. Other routes keep the full target.
+ */
+function loggableTarget(req: http.IncomingMessage): string {
+  const target = req.url ?? '/';
+  try {
+    const { pathname } = new URL(target, 'http://localhost');
+    if (matchIdePrefix(pathname)) return pathname;
+  } catch {
+    return '(malformed URL)';
+  }
+  return target;
+}
+
+/**
+ * `POST /api/ide/session`: set the `/ide` forward cookie (HttpOnly,
+ * SameSite=Strict, Path=/ide). Reached only after isRequestAllowed, so the
+ * caller already holds the key. Refuses tunnel-borne requests Tower-side as
+ * well (belt-and-braces over the tunnel's api/ide/ block): the cloud has no use
+ * for a loopback cookie. 204 with no body; the value is never logged.
+ *
+ * Before answering it makes sure the IDE server is live, respawning a recorded
+ * but dead server the same way the forward does. Otherwise the first navigation
+ * would land on a 502 while the forward's own respawn ran in the background.
+ * 503 when no server can be made live, so the dashboard shows an error instead
+ * of opening a dead tab.
+ */
+async function handleIdeSessionMint(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  log: RouteContext['log'],
+): Promise<void> {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'POST' });
+    res.end(JSON.stringify({ error: 'Method not allowed' }));
+    return;
+  }
+  if (req.headers[TUNNEL_PROXY_HEADER] === '1') {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not available over the tunnel' }));
+    return;
+  }
+  const setCookie = ideForwardSetCookie();
+  if (!setCookie) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Local key unavailable' }));
+    return;
+  }
+  const port = await ensureIdeServerLive(log);
+  if (port === null) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'IDE server unavailable: run afx ide start' }));
+    return;
+  }
+  res.writeHead(204, { 'Set-Cookie': setCookie });
+  res.end();
+}
+
+// ============================================================================
 // Main request handler
 // ============================================================================
 
@@ -241,6 +367,10 @@ export async function handleRequest(
   ctx: RouteContext,
 ): Promise<void> {
   // CORS headers — reflect only allowlisted origins (advisory Layer 3).
+  // INVARIANT (Issue #1869): Tower NEVER sets Access-Control-Allow-Credentials.
+  // isAllowedOrigin reflects any http://localhost:<port>, so adding it would let
+  // any localhost page READ responses authorized by the ambient /ide forward
+  // cookie. Pinned by a route test.
   const origin = req.headers.origin;
   if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -266,10 +396,9 @@ export async function handleRequest(
   if (!isRequestAllowed(req)) {
     // Log the reason so a broken legitimate client (disallowed Host vs missing
     // key) is diagnosable — a bare 401 is indistinguishable from either side.
-    const reason = isAllowedHost(req.headers.host)
-      ? 'missing or invalid key'
-      : `disallowed Host "${req.headers.host ?? ''}"`;
-    ctx.log('WARN', `401 ${req.method ?? 'GET'} ${req.url ?? '/'} — ${reason}`);
+    // Path + reason only: never the Cookie header or any credential value.
+    const reason = unauthorizedReason(req);
+    ctx.log('WARN', `401 ${req.method ?? 'GET'} ${loggableTarget(req)} — ${reason}`);
     res.writeHead(401, { 'Content-Type': 'text/plain' });
     res.end('Unauthorized');
     return;
@@ -286,6 +415,26 @@ export async function handleRequest(
     }
 
     // Pattern-based routes (require regex or prefix matching)
+
+    // IDE management endpoint: /api/ide (Issue #1668). Local-only — blocked from
+    // the tunnel in tunnel-client (like /api/tunnel/*) — and reached only after
+    // the isRequestAllowed key check above. Drives the IDE server lifecycle.
+    if (url.pathname === '/api/ide') {
+      return await handleIdeApi(req, res, ctx.log);
+    }
+
+    // IDE forward cookie mint: /api/ide/session (Issue #1869). Key-gated by
+    // isRequestAllowed above and tunnel-blocked by the api/ide/ segment.
+    if (url.pathname === IDE_SESSION_ROUTE) {
+      return handleIdeSessionMint(req, res, ctx.log);
+    }
+
+    // IDE prefix forward: /ide/* → local IDE server (Issue #1668). A post-auth
+    // handler: isRequestAllowed above is the whole trust boundary (the forward
+    // adds no per-folder authorization). Path + query forwarded unchanged.
+    if (matchIdePrefix(url.pathname)) {
+      return await forwardIdeHttp(req, res, ctx.log);
+    }
 
     // Tunnel endpoints: /api/tunnel/* (Spec 0097 Phase 4)
     if (url.pathname.startsWith('/api/tunnel/')) {
@@ -362,6 +511,9 @@ export async function handleRequest(
     res.end('Not found');
   } catch (err) {
     ctx.log('ERROR', `Request error: ${(err as Error).message}`);
+    // A handler may fail after it has answered (the Decisions route keeps working past its
+    // `res.end()`); a second writeHead would throw ERR_HTTP_HEADERS_SENT out of here.
+    if (res.headersSent) return;
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: (err as Error).message }));
   }
@@ -390,14 +542,11 @@ async function computeFleetHealthFields(
   if (!shellperManager) return {};
   try {
     const census = await listProcessCensus();
-    const scopeMarker = shellperManager.socketDir.endsWith('/')
-      ? shellperManager.socketDir
-      : `${shellperManager.socketDir}/`;
 
     const inScopePids = new Set<number>();
     let fleetRssKb = 0;
     for (const entry of census) {
-      if (entry.cmdline.includes(SHELLPER_MARKER) && entry.cmdline.includes(scopeMarker)) {
+      if (entry.cmdline.includes(SHELLPER_MARKER) && isShellperInScope(entry.cmdline, shellperManager.socketDir)) {
         inScopePids.add(entry.pid);
         fleetRssKb += entry.rssKb;
       }
@@ -408,7 +557,7 @@ async function computeFleetHealthFields(
       }
     }
 
-    const registered = await computeRegisteredShellperPids(getGlobalDb());
+    const registered = await computeRegisteredShellperPids(getGlobalDb(), startTimeLookupFor(census));
     let unregisteredShellperCount = 0;
     for (const pid of inScopePids) {
       if (!registered.has(pid)) unregisteredShellperCount++;
@@ -424,6 +573,10 @@ async function handleHealthCheck(res: http.ServerResponse, ctx: RouteContext): P
   const instances = await getInstances();
   const activeCount = instances.filter((i) => i.running).length;
   const fleetFields = await computeFleetHealthFields(ctx);
+  // Spec 1658 Phase 4: doctor cannot read another process's environment on
+  // Windows, so Tower reports whether it runs inside a codev session itself.
+  const platformFields: Record<string, boolean> = {};
+  if (isWindows()) platformFields.insideCodevSession = isInsideCodevSession(process.env);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(
     JSON.stringify({
@@ -437,6 +590,7 @@ async function handleHealthCheck(res: http.ServerResponse, ctx: RouteContext): P
       totalWorkspaces: instances.length,
       memoryUsage: process.memoryUsage().heapUsed,
       ...fleetFields,
+      ...platformFields,
       timestamp: new Date().toISOString(),
     })
   );
@@ -462,19 +616,21 @@ async function handleHuskPreview(res: http.ServerResponse, ctx: RouteContext): P
     // candidacy, not a later, possibly-different one (codex #1227 PR review).
     const census = await listProcessCensus();
     const rssByPid = new Map(census.map((entry) => [entry.pid, entry.rssKb]));
+    const getStartTime = startTimeLookupFor(census);
 
-    const registered = await computeRegisteredShellperPids(getGlobalDb());
+    const registered = await computeRegisteredShellperPids(getGlobalDb(), getStartTime);
     const pids = await findHuskShellpers({
       socketDir: shellperManager.socketDir,
       registeredShellperPids: registered,
       graceMs,
       census: () => census,
+      getStartTime,
     });
 
     const now = Date.now();
     const candidates = await Promise.all(
       pids.map(async (pid) => {
-        const startTime = await getProcessStartTime(pid);
+        const startTime = await getStartTime(pid);
         return {
           pid,
           rssKb: rssByPid.get(pid) ?? 0,
@@ -528,6 +684,90 @@ async function handleHuskSweep(res: http.ServerResponse, ctx: RouteContext): Pro
  * restart, the two diverge; the VS Code preflight probes this to detect that.
  * Read-only, no auth beyond the existing Host/Origin gate (same as /health).
  */
+/** Loopback peers only: the IPv4, IPv6 and IPv4-mapped forms. */
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  if (address === '::1') return true;
+  let v4 = address;
+  if (address.startsWith('::ffff:')) v4 = address.slice('::ffff:'.length);
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v4);
+}
+
+/**
+ * True when `address` is this machine: loopback, or one of its own interface
+ * addresses. A bridge-mode Tower binds a specific LAN address, so a local
+ * `afx tower stop` reaches it from that address, not from loopback. A remote
+ * host cannot complete a TCP handshake from one of our addresses, so this still
+ * admits local callers only.
+ */
+export function isLocalMachineAddress(
+  address: string | undefined,
+  interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces(),
+): boolean {
+  if (!address) return false;
+  if (isLoopbackAddress(address)) return true;
+  let bare = address;
+  if (address.startsWith('::ffff:')) bare = address.slice('::ffff:'.length);
+  // A link-local IPv6 peer may carry a zone suffix (`fe80::1%eth0`); the
+  // interface list reports the bare address.
+  const zone = bare.indexOf('%');
+  if (zone !== -1) bare = bare.slice(0, zone);
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries ?? []) {
+      if (entry.address === bare || entry.address === address) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * POST /api/shutdown (Spec 1658 Phase 4): the graceful stop `afx tower stop`
+ * uses on Windows. Accepted only when all three hold:
+ *
+ * 1. keyed, like every route (the shared choke point above);
+ * 2. not tunnel-borne: the tunnel client runs inside Tower and forwards cloud
+ *    requests over loopback with the real key, so loopback and the key alone
+ *    would let a cloud-side actor stop Tower; its proxy marker
+ *    (TUNNEL_PROXY_HEADER, which it strips from inbound requests so it cannot
+ *    be forged or suppressed) is refused here, and the proxy also blocks the
+ *    path (`isBlockedPath`);
+ * 3. from this machine (loopback, or one of its own interface addresses for a
+ *    bridge-mode Tower bound to a LAN address), so a remote bridge client
+ *    holding the key cannot.
+ *
+ * Registered on every platform, not only Windows: the conditions are the same
+ * everywhere, and POSIX keeps it testable; POSIX `tower stop` still uses SIGTERM.
+ * Answers with the pid before shutting down, so the caller waits on the right
+ * process.
+ */
+function handleShutdown(req: http.IncomingMessage, res: http.ServerResponse, ctx: RouteContext): void {
+  const remote = logSafe(req.socket.remoteAddress ?? 'unknown', 64);
+  const ua = logSafe(req.headers['user-agent']) || 'none';
+  const sourceText = `remote=${remote} ua="${ua}"`;
+  if (req.headers[TUNNEL_PROXY_HEADER] !== undefined) {
+    ctx.log('WARN', `Shutdown request REJECTED — arrived via tunnel proxy (${sourceText} via=tunnel)`);
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'shutdown is local-only' }));
+    return;
+  }
+  if (!isLocalMachineAddress(req.socket.remoteAddress)) {
+    ctx.log('WARN', `Shutdown request REJECTED — peer is not this machine (${sourceText})`);
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'shutdown is accepted from this machine only' }));
+    return;
+  }
+  if (!ctx.requestShutdown) {
+    res.writeHead(501, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'shutdown is not available' }));
+    return;
+  }
+  const requestShutdown = ctx.requestShutdown;
+  res.writeHead(202, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ pid: process.pid }), () => {
+    requestShutdown('shutdown request');
+  });
+}
+
 function handleVersion(res: http.ServerResponse, ctx: RouteContext): void {
   const body: TowerVersionInfo = { version: ctx.version, startedAt: ctx.startedAt };
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -734,8 +974,10 @@ async function handleWorkspaceAction(
 
   // POST /api/workspaces/:path/deactivate
   if (req.method === 'POST' && action === 'deactivate') {
-    const knownPaths = getKnownWorkspacePaths();
-    const resolvedPath = fs.existsSync(workspacePath) ? fs.realpathSync(workspacePath) : workspacePath;
+    // Unfiltered on purpose (#1809): a stray architect left running in a builder
+    // worktree is excluded from the listing but must still be stoppable.
+    const knownPaths = getAllKnownWorkspacePaths();
+    const resolvedPath = fs.existsSync(workspacePath) ? workspaceKey(fs.realpathSync(workspacePath)) : workspacePath;
     const isKnown = knownPaths.some(
       (p) => p === workspacePath || p === resolvedPath
     );
@@ -772,8 +1014,8 @@ async function handleTerminalCreate(
     const manager = getTerminalManager();
 
     // Parse request fields
-    const command = typeof body.command === 'string' ? body.command : undefined;
-    const args = Array.isArray(body.args) ? body.args as string[] : undefined;
+    let command = typeof body.command === 'string' ? body.command : undefined;
+    let args = Array.isArray(body.args) ? body.args as string[] : undefined;
     const cols = typeof body.cols === 'number' ? body.cols : undefined;
     const rows = typeof body.rows === 'number' ? body.rows : undefined;
     const cwd = typeof body.cwd === 'string' ? body.cwd : undefined;
@@ -790,6 +1032,14 @@ async function handleTerminalCreate(
     const roleId = typeof body.roleId === 'string' ? body.roleId : null;
     const requestPersistence = body.persistent === true;
 
+    // Spec 1658: on Windows a client's POSIX shell (`/bin/sh -lc ...`) runs in
+    // the resolved Git Bash, never System32's WSL launcher.
+    if (isWindows() && command) {
+      const launch = windowsShellRequest(command, args ?? [], workspacePath ?? undefined);
+      command = launch.command;
+      args = launch.args;
+    }
+
     let info: PtySessionInfo | undefined;
     let persistent = false;
 
@@ -798,9 +1048,12 @@ async function handleTerminalCreate(
     if (requestPersistence && shellperManager && command && cwd) {
       try {
         const sessionId = crypto.randomUUID();
-        // Strip CLAUDECODE so spawned Claude processes don't detect nesting
-        const sessionEnv = { ...(env || process.env) } as Record<string, string>;
-        delete sessionEnv['CLAUDECODE'];
+        // Strip Claude Code session markers so spawned Claude processes don't
+        // detect nesting and disable transcript saving (#1219). `env` is normally
+        // absent — `createPtySession` sends no env — so this is the path by which
+        // Tower's own environment becomes every builder's environment. Spec 1595:
+        // Tower's port is set last, so an inherited value never survives.
+        const sessionEnv = withTowerPort(sanitizeAgentEnv(env || process.env), ctx.port);
         const client = await shellperManager.createSession({
           sessionId,
           command,
@@ -849,7 +1102,8 @@ async function handleTerminalCreate(
           logSessionIdentity(ctx.log, 'terminal-create', session.id, ptySession, command ?? null);
           saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
             shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null,
-            persistableCommand(ptySession) ?? command ?? null);
+            persistableCommand(ptySession) ?? command ?? null,
+            { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret });
           ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
@@ -860,7 +1114,10 @@ async function handleTerminalCreate(
     // Fallback: non-persistent session (graceful degradation per plan)
     // Shellper is the only persistence backend for new sessions.
     if (!info) {
-      info = await manager.createSession({ command, args, cols, rows, cwd, env, label });
+      // Spec 1595: the manager merges this over its own base env, so Tower's port
+      // reaches the session whether or not the client supplied an env.
+      const sessionEnv = withTowerPort(sanitizeAgentEnv(env ?? {}), ctx.port);
+      info = await manager.createSession({ command, args, cols, rows, cwd, env: sessionEnv, label });
       persistent = false;
 
       if (workspacePath && termType && roleId) {
@@ -956,6 +1213,9 @@ async function handleTerminalRoutes(
         res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
         return;
       }
+      // Deliberately the default `'external'` origin (Issue #1473): this is a foreign writer, so
+      // its bytes count as input at the delivery gate and are reply-filtered on the way — both
+      // for free, because the recording lives inside `write()` rather than at each call site.
       session.write(body.data);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -977,8 +1237,19 @@ async function handleTerminalRoutes(
       }
       const info = manager.resizeSession(terminalId, body.cols, body.rows);
       if (!info) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+        // Issue #1482: a resize that did not reach the process is NOT a missing session, and it
+        // is not a success either — echoing back the requested dimensions (what a 200 here used
+        // to do) is how Tower came to believe a geometry the TUI never adopted.
+        if (!manager.getSession(terminalId)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+        } else {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: 'RESIZE_DROPPED',
+            message: `Session ${terminalId} did not accept the resize (no live process or dropped shellper write); dimensions unchanged`,
+          }));
+        }
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1099,18 +1370,27 @@ async function handleStatus(res: http.ServerResponse): Promise<void> {
  * dashboard-state handler (`/api/state`) and the overview handler
  * (`/api/overview`), so the two payloads list an identical set and can't drift.
  * Extracted verbatim from the dashboard-state builder's former inline loop.
+ *
+ * Spec 1595: each architect also carries its served `agentState` (read by
+ * `(workspace, name)` from the agent-state store and liveness, projected per
+ * request) and its session's `lastDataAt`, for the sdk's staleness rule.
  */
-function liveArchitects(entry: WorkspaceTerminals, manager: TerminalManager): ArchitectState[] {
+function liveArchitects(entry: WorkspaceTerminals, manager: TerminalManager, workspacePath: string): ArchitectState[] {
+  const agentWorkspace = normalizeWorkspacePath(workspacePath);
   const architects: ArchitectState[] = [];
   for (const [architectName, terminalId] of entry.architects) {
     const session = manager.getSession(terminalId);
     if (!session) continue;
+    let lastDataAt: string | null = null;
+    if (Number.isFinite(session.lastDataAt)) lastDataAt = new Date(session.lastDataAt).toISOString();
     architects.push({
       name: architectName,
       port: 0,
       pid: session.pid || 0,
       terminalId,
       persistent: isSessionPersistent(terminalId, session),
+      agentState: serveAgentState(agentWorkspace, architectName, { blocked: false, blockedSince: null, phase: '' }),
+      lastDataAt,
     });
   }
   const mainIdx = architects.findIndex(a => a.name === 'main');
@@ -1127,7 +1407,11 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
 
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
 
   if (!workspaceRoot) {
@@ -1172,11 +1456,27 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     builder.lastDataAt = new Date(ptySession.lastDataAt).toISOString();
   }
 
+  // Spec 1595: project the served agent state over EVERY listed builder, not
+  // inside the loop above, which skips a builder whose session is gone (the
+  // case liveness reports as dead). Every listed builder is registered: the
+  // list is filtered to `entry.builders`, and its `roleId` is the lowercased
+  // registry key, the same key the store and liveness use. `blocked` reuses the
+  // gate the overview already detected (no second parse of status.yaml).
+  const agentWorkspace = normalizeWorkspacePath(workspaceRoot);
+  for (const builder of data.builders) {
+    if (builder.roleId === null) continue;
+    builder.agentState = serveAgentState(agentWorkspace, builder.roleId, {
+      blocked: builder.blocked !== null,
+      blockedSince: builder.blockedSince,
+      phase: builder.phase,
+    });
+  }
+
   // Issue 1104: enrich with the live architects (main-first) so the VSCode
   // Agents tree can render its architect tier and attribution badge straight
   // off the overview cache. Same `liveArchitects` helper (and so the same set)
   // the dashboard-state handler uses.
-  data.architects = liveArchitects(entry, terminalManager);
+  data.architects = liveArchitects(entry, terminalManager, workspaceRoot);
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
@@ -1188,7 +1488,11 @@ async function handleIssueView(res: http.ServerResponse, url: URL): Promise<void
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
 
   const number = url.searchParams.get('number');
@@ -1217,7 +1521,11 @@ async function handlePRView(res: http.ServerResponse, url: URL): Promise<void> {
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
 
   const number = url.searchParams.get('number');
@@ -1257,7 +1565,11 @@ async function handleIssueSearch(res: http.ServerResponse, url: URL): Promise<vo
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1336,7 +1648,11 @@ function handleWorktreeConfigView(res: http.ServerResponse, url: URL): void {
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1365,7 +1681,11 @@ function handleActivityHooksView(res: http.ServerResponse, url: URL): void {
   let workspaceRoot = url.searchParams.get('workspace');
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
   if (!workspaceRoot) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1400,7 +1720,11 @@ async function handleAnalytics(res: http.ServerResponse, url: URL, workspaceOver
 
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
-    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+    workspaceRoot = knownPaths.find(p => !containsBuildersSegment(p)) || null;
+  }
+  // Spec 1658 (M6): one spelling per directory on Windows; identity on POSIX.
+  if (workspaceRoot) {
+    workspaceRoot = workspaceKey(workspaceRoot);
   }
 
   // Validate range parameter (before workspace check so fallback uses correct range)
@@ -1546,6 +1870,11 @@ function liveTargetIdentity(result: ResolveResult): { toAgent: string; isArchite
  * architect reverse-map for architect targets, the resolved agent id otherwise),
  * so the header a recipient reads names the same identity the row was addressed
  * to. Passing anything else here would make the frame attest to a fiction.
+ *
+ * #1478: `from` is the SENDER, and it is threaded on the any → builder path too —
+ * that branch used to discard it, so an `architect:<name>` origin reached the
+ * builder's composer as a bare `ARCHITECT INSTRUCTION`. The two are complementary:
+ * #1574 answers "was this addressed to me?", #1478 answers "who sent it?".
  */
 function formatMessageForTarget(
   isArchitectTarget: boolean,
@@ -1557,8 +1886,14 @@ function formatMessageForTarget(
   // #1494: a human's approval relayed by the VS Code extension gets its own
   // header, so the architect can tell it from a peer-architect instruction.
   if (isArchitectTarget && from === VSCODE_USER_SENDER) return formatUserViaVsCodeMessage(toAgent, message, undefined, raw);
+  // #1828: likewise the owner's ruling relayed by the Decisions tab — never a builder frame.
+  if (isArchitectTarget && from === DECISIONS_TAB_SENDER) return formatUserViaDecisionsTabMessage(toAgent, message, raw);
   if (isArchitectTarget && from) return formatBuilderMessage(from, toAgent, message, undefined, raw); // builder → architect
-  if (!isArchitectTarget) return formatArchitectToBuilderMessage(toAgent, message, undefined, raw); // any → builder
+  // any → builder: thread the sender so an `architect:<name>` origin is named in the
+  // header (issue #1478) instead of collapsing to a bare `ARCHITECT INSTRUCTION`.
+  if (!isArchitectTarget) return formatArchitectToBuilderMessage(toAgent, message, undefined, raw, from); // any → builder
+  // unknown → architect: `from` is absent by construction on this branch, so there is
+  // no sender to name.
   return raw ? message : formatArchitectMessage(toAgent, message, undefined, false); // unknown → architect
 }
 
@@ -1622,7 +1957,46 @@ export async function deliverCronMessage(
   }
 
   log('WARN', `Cron '${task.name}': target '${task.target}' not found — message not delivered`);
-  return { outcome: 'unresolved', reason: null, mailboxId: null };
+  return { outcome: 'unresolved', reason: null, detail: null, mailboxId: null };
+}
+
+/**
+ * Tell a workspace's hub architect about a ruling the owner just wrote from the
+ * Decisions tab (#1828). The hub is the architect registered as `main` and no other:
+ * the registry's "first registered" order is by name (#1633), so a workspace without
+ * `main` gets no notice rather than a guess, and a `main` that is offline holds it
+ * (`no-live-pty`). One mailbox row is persisted, then offered to the same gated delivery
+ * `handleSend` uses; a busy line holds it for the backstop. Throws, persisting nothing,
+ * when `main` is not registered or the notice is over the send limit.
+ */
+async function notifyHubOfRuling(workspacePath: string, message: string, log: RouteContext['log']): Promise<void> {
+  const tooLarge = messageLimitError(message);
+  if (tooLarge) throw new Error(tooLarge);
+  const toAgent = DEFAULT_ARCHITECT_NAME;
+  if (!getArchitectByName(workspacePath, toAgent)) {
+    throw new Error(`no architect named '${toAgent}' is registered in workspace ${workspacePath}`);
+  }
+
+  const db = getGlobalDb();
+  const row = enqueueMailbox(db, {
+    workspacePath,
+    toAgent,
+    body: message,
+    formattedMessage: formatMessageForTarget(true, DECISIONS_TAB_SENDER, toAgent, message, false),
+    fromAgent: DECISIONS_TAB_SENDER,
+    fromWorkspace: workspacePath,
+  });
+  const ports = makeDeliveryPorts(log);
+  ports.onHeldStateChange();
+  try {
+    const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent);
+    getMailboxDrainer().noteOutcome(workspacePath, toAgent, outcome);
+  } catch (err) {
+    log('ERROR', `Decisions notice delivery errored for ${toAgent} (row ${row.id.slice(0, 8)}... stays held): ${(err as Error).message}`);
+  }
+  const stored = getMailboxById(db, row.id);
+  const fate = stored?.status === 'delivered' ? 'delivered' : `held (${stored?.reason ?? 'unknown'})`;
+  log('INFO', `Decisions notice ${fate} → ${toAgent} @ ${path.basename(workspacePath)} (mailbox ${row.id.slice(0, 8)}...)`);
 }
 
 /**
@@ -1652,6 +2026,10 @@ function holdAndRespond(
     delivered: false,
     held: true,
     reason,
+    // A hold from THIS path is always a non-gate one (no live PTY), so it carries no gate
+    // detail (Issue #1482). Reported explicitly rather than omitted so the held response has
+    // one shape whichever path produced it.
+    detail: null,
     mailboxId: row.id,
     bodyLength: Buffer.byteLength(input.body, 'utf8'),
   });
@@ -1891,8 +2269,37 @@ async function handleSend(
 
   // Optional fields
   const from = typeof body.from === 'string' ? body.from : undefined;
-  const workspace = typeof body.workspace === 'string' ? body.workspace : undefined;
-  const fromWorkspace = typeof body.fromWorkspace === 'string' ? body.fromWorkspace : undefined;
+
+  // Maintainer review (PR #1486): `from` was the one unguarded field on this route — the
+  // body above is bounded by MAX_MESSAGE_BYTES, but the sender was taken verbatim, and
+  // `/api/send` is a public local route whose only well-behaved caller is the CLI. It is
+  // stored on the mailbox row and rendered by every attribution surface, and `afx inbox`
+  // now sizes its `FROM → TO` column to the widest value it holds — so an unbounded
+  // identity is a rendering cost paid by every row, not just its own. Enforced with the
+  // SAME predicate the header formatter uses, so the boundary and the renderer cannot
+  // disagree about what an identity is. Refused rather than silently dropped or
+  // truncated: a message delivered under a quietly-discarded sender is exactly the
+  // unattributed frame this PR exists to fix.
+  if (from !== undefined && !isSafeSenderId(from)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'INVALID_PARAMS',
+      message:
+        'Invalid "from" field: a sender identity must be 1-128 characters of ' +
+        '[A-Za-z0-9._:-] (no whitespace, brackets or newlines).',
+    }));
+    return;
+  }
+  // Spec 1658 (M6): both workspace fields as one spelling per directory on Windows
+  // (they key the registry and are stored in the mailbox); as given on POSIX.
+  let workspace: string | undefined;
+  if (typeof body.workspace === 'string') {
+    workspace = workspaceKey(body.workspace);
+  }
+  let fromWorkspace: string | undefined;
+  if (typeof body.fromWorkspace === 'string') {
+    fromWorkspace = workspaceKey(body.fromWorkspace);
+  }
   const options = typeof body.options === 'object' && body.options !== null
     ? (body.options as Record<string, unknown>)
     : {};
@@ -2147,7 +2554,16 @@ async function handleSend(
       result.terminalId,
       () => {
         session.write('\x03'); // Ctrl+C
-        return writeMessageToSession(session, formattedMessage, noEnter, 100);
+        // Issue #1567: the same per-harness write strategy the gated path uses — an
+        // interrupt to an opted-out harness must not be bracketed just because it bypassed
+        // the gate.
+        return writeMessageToSession(
+          session,
+          formattedMessage,
+          noEnter,
+          100,
+          writeStrategyForApp(resolveProfileForSession(session)?.app),
+        );
       },
       undefined,
       {
@@ -2176,6 +2592,7 @@ async function handleSend(
       held: false,
       mailboxId: row.id,
       reason: null,
+      detail: null,
       bodyLength,
       // Additive and present only when it happened, so older clients are unaffected.
       ...(degraded ? { degraded: true, degradedReason: DEGRADED_SUBMIT_REASON } : {}),
@@ -2218,6 +2635,12 @@ async function handleSend(
     // completed write); the backstop drainer will retry. Report held, not a 500.
     ctx.log('ERROR', `Delivery attempt errored for ${toAgent} (row ${row.id.slice(0, 8)}... stays held): ${(err as Error).message}`);
   }
+  // Issue #1473: this pass ran OUTSIDE the drainer, so hand it the outcome — otherwise a hold
+  // on recent terminal input arms no re-drain here, and the send an operator is watching falls
+  // through to the quiescence trigger or the backstop instead of clearing after one settle.
+  // That is exactly the latency the re-drain exists to remove, in the case where somebody is
+  // waiting for it. A no-op for every other outcome.
+  if (outcome) getMailboxDrainer().noteOutcome(result.workspacePath, toAgent, outcome);
   const stored = getMailboxById(db, row.id);
   if (stored?.status === 'delivered') {
     ctx.log('INFO', `Message delivered: ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
@@ -2240,11 +2663,27 @@ async function handleSend(
       ...(outcome?.delivered.includes(row.id) && outcome.verified !== undefined
         ? { verified: outcome.verified }
         : {}),
+      // Issue #1473. `verified` alone was not enough for the SENDER — the case that motivated
+      // it is a human's Enter submitting our half-written body, where the header landed, so
+      // `verified` is `true` (or absent) and this human read a plain "Message delivered". The
+      // cause says which flag it is: `input-raced` (may be truncated or submitted early) or
+      // `no-echo` (header never appeared). Same id guard as `verified` — reported only when
+      // THIS pass is the one that delivered THIS row.
+      ...(outcome?.delivered.includes(row.id) && outcome.unverifiedCause !== undefined
+        ? { unverifiedCause: outcome.unverifiedCause }
+        : {}),
     });
     return;
   }
   const reason: MailboxReason = stored?.reason ?? 'busy';
-  ctx.log('INFO', `Message held (${reason}): ${from ?? 'unknown'} → ${toAgent} (mailbox ${row.id.slice(0, 8)}...)`);
+  // Issue #1482: read the detail back off the row the delivery pass just refreshed, rather
+  // than re-deriving it — the row is the record every other surface reads, so the sender's
+  // response and `afx inbox` can never disagree about the same hold.
+  const detail = stored?.detail ?? null;
+  ctx.log(
+    'INFO',
+    `Message held (${formatVerdict(reason, detail)}): ${from ?? 'unknown'} → ${toAgent} (mailbox ${row.id.slice(0, 8)}...)`,
+  );
   // The message stayed held → a new held row is in the set; refresh the indicator
   // count (Spec 1313, Phase 7). The delivered branch above needs no fire — the
   // delivery path's onHeldStateChange already broadcast when the row left the set.
@@ -2257,6 +2696,7 @@ async function handleSend(
     delivered: false,
     held: true,
     reason,
+    detail,
     mailboxId: row.id,
     bodyLength,
   });
@@ -2318,6 +2758,9 @@ export function handleInboxList(res: http.ServerResponse, url: URL, workspaceOve
     toAgent: r.to_agent,
     fromAgent: r.from_agent,
     reason: r.reason,
+    // Issue #1482: the gate verdict behind a `busy` hold, so `afx inbox` and the dashboard
+    // popover can distinguish an occupied composer from one the classifier could not read.
+    detail: r.detail,
     escalated: r.escalated === 1,
     createdAt: r.created_at,
     // Spec 1313 round 3: due time of a pre-due delayed (`--delay`) row; null = deliver-ASAP.
@@ -2394,6 +2837,7 @@ function handleInboxShow(
     fromWorkspace: row.from_workspace,
     status: row.status,
     reason: row.reason,
+    detail: row.detail,  // Issue #1482: the gate verdict behind a `busy` hold
     escalated: row.escalated === 1,
     body: row.body,
     createdAt: row.created_at,
@@ -2437,11 +2881,7 @@ async function handleCreateWorkspace(
     return;
   }
 
-  // Expand ~ to home directory
-  let expandedParent = parentPath;
-  if (expandedParent.startsWith('~')) {
-    expandedParent = expandedParent.replace('~', homedir());
-  }
+  const expandedParent = expandHomePath(parentPath);
 
   // Validate parent exists
   if (!fs.existsSync(expandedParent)) {
@@ -2503,10 +2943,7 @@ async function handleLaunchInstance(
     return;
   }
 
-  // Expand ~ to home directory
-  if (workspacePath.startsWith('~')) {
-    workspacePath = workspacePath.replace('~', homedir());
-  }
+  workspacePath = expandHomePath(workspacePath);
 
   // Reject relative paths — tower daemon CWD is unpredictable
   if (!path.isAbsolute(workspacePath)) {
@@ -2717,7 +3154,7 @@ async function handleWorkspaceRoutes(
 
     // GET /api/state - Return workspace state (architect, builders, shells)
     if (req.method === 'GET' && (apiPath === 'state' || apiPath === '')) {
-      return handleWorkspaceState(res, workspacePath);
+      return handleWorkspaceState(res, ctx, workspacePath);
     }
 
     // POST /api/tabs/shell - Create a new shell terminal
@@ -2807,6 +3244,15 @@ async function handleWorkspaceRoutes(
     // GET /api/team - Return team members with GitHub data + messages (Spec 587)
     if (req.method === 'GET' && apiPath === 'team') {
       return handleWorkspaceTeam(res, workspacePath);
+    }
+
+    // GET /api/decisions, POST /api/decisions/rule — the Decisions tab (Spec 1819).
+    // The file is the configured one; neither route takes a path from the request.
+    if (req.method === 'GET' && apiPath === 'decisions') {
+      return handleDecisionsGet(res, workspacePath);
+    }
+    if (req.method === 'POST' && apiPath === 'decisions/rule') {
+      return handleDecisionsRule(req, res, workspacePath, ctx.log, message => notifyHubOfRuling(workspacePath, message, ctx.log));
     }
 
     // GET /api/annotate/:tabId/* — Serve rich annotator template and sub-APIs
@@ -2935,6 +3381,7 @@ async function handleWorkspaceRoutes(
 
 async function handleWorkspaceState(
   res: http.ServerResponse,
+  ctx: RouteContext,
   workspacePath: string,
 ): Promise<void> {
   // Rehydrate wsTerminals (SQLite sync + shellper reconnect) before reading.
@@ -2954,6 +3401,7 @@ async function handleWorkspaceState(
     version,
     hostname: (() => { try { return readCloudConfig()?.tower_name; } catch { return undefined; } })(),
     teamEnabled: await hasTeam(path.join(workspacePath, 'codev', 'team')),
+    decisionsEnabled: await decisionsFilePresent(workspacePath, ctx.log),
   };
 
   // Spec 761: build the architects collection from entry.architects (skip dead
@@ -2961,7 +3409,7 @@ async function handleWorkspaceState(
   // (Issue 1104) so both payloads list an identical set.
   // Spec 755: the scalar `state.architect` is preserved as a backward-compat
   // pointer to the same default architect (architects[0] when present).
-  const architects = liveArchitects(entry, manager);
+  const architects = liveArchitects(entry, manager, workspacePath);
   state.architects = architects;
   state.architect = architects[0] ?? null;
 
@@ -3094,8 +3542,10 @@ async function handleWorkspaceShellCreate(
   try {
     const manager = getTerminalManager();
     const shellId = getNextShellId(workspacePath);
-    const shellCmd = process.env.SHELL || '/bin/bash';
-    const shellArgs: string[] = [];
+    // `$SHELL` on POSIX; on Windows the configured `shell.shell` (Spec 1658, Area F).
+    const workspaceShell = commandLaunch().workspaceShell(workspacePath, () => getResolvedCommands(workspacePath).shell);
+    const shellCmd = workspaceShell.command;
+    const shellArgs = workspaceShell.args;
 
     let shellCreated = false;
 
@@ -3104,9 +3554,9 @@ async function handleWorkspaceShellCreate(
     if (shellperManager) {
       try {
         const sessionId = crypto.randomUUID();
-        // Strip CLAUDECODE so spawned Claude processes don't detect nesting
-        const shellEnv = { ...process.env } as Record<string, string>;
-        delete shellEnv['CLAUDECODE'];
+        // Strip Claude Code session markers so spawned Claude processes don't
+        // detect nesting and disable transcript saving (#1219).
+        const shellEnv = sanitizeAgentEnv(process.env);
         // Inject session identity for afx rename (Spec 468)
         shellEnv['SHELLPER_SESSION_ID'] = sessionId;
         shellEnv['TOWER_PORT'] = String(ctx.port);
@@ -3147,7 +3597,8 @@ async function handleWorkspaceShellCreate(
         logSessionIdentity(ctx.log, 'shell-create', session.id, ptySession, shellCmd);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
           shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath,
-          persistableCommand(ptySession) ?? shellCmd);
+          persistableCommand(ptySession) ?? shellCmd,
+          { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret });
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -3173,7 +3624,7 @@ async function handleWorkspaceShellCreate(
         args: shellArgs,
         cwd: workspacePath,
         label: `Shell ${shellId.replace('shell-', '')}`,
-        env: process.env as Record<string, string>,
+        env: sanitizeAgentEnv(process.env),
       });
 
       const entry = getWorkspaceTerminalsEntry(workspacePath);
@@ -3855,7 +4306,7 @@ function handleCronList(res: http.ServerResponse, url: URL): void {
 
   const tasks = getAllTasks();
   const filtered = workspaceFilter
-    ? tasks.filter(t => t.workspacePath === workspaceFilter)
+    ? tasks.filter(t => workspaceKey(t.workspacePath) === workspaceKey(workspaceFilter))
     : tasks;
 
   // Merge with SQLite state
@@ -3894,7 +4345,7 @@ async function handleCronTaskAction(
   const allTasks = getAllTasks();
   const matchingTasks = allTasks.filter(t => {
     if (t.name !== taskName) return false;
-    if (workspace && t.workspacePath !== workspace) return false;
+    if (workspace && workspaceKey(t.workspacePath) !== workspaceKey(workspace)) return false;
     return true;
   });
 

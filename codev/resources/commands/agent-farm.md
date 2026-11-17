@@ -33,10 +33,9 @@ afx workspace start [options]
 ```
 
 **Options:**
-- `-c, --cmd <command>` - Command to run in architect terminal
-- `-p, --port <port>` - Port for architect terminal
-- `--no-role` - Skip loading architect role prompt
 - `--no-browser` - Skip opening browser after start
+
+To change the architect command, use the global `--architect-cmd <command>` option (`afx --architect-cmd "claude --model opus" workspace start`) or `shell.architect` in `.codev/config.json`.
 - `-r, --remote <target>` - Start Agent Farm on remote machine (see below)
 - `--allow-insecure-remote` - Bind to 0.0.0.0 for remote access (deprecated)
 
@@ -47,7 +46,7 @@ Starts the workspace with:
 - Web-based UI for monitoring builders
 - Shellper session management
 
-The workspace overview is accessible via browser at `http://localhost:<port>`.
+The workspace overview is served by Tower at `http://localhost:4100`.
 
 **Examples:**
 
@@ -55,49 +54,11 @@ The workspace overview is accessible via browser at `http://localhost:<port>`.
 # Start with defaults
 afx workspace start
 
-# Start with custom port
-afx workspace start -p 4300
-
-# Start with specific command
-afx workspace start -c "claude --model opus"
-
-# Start on remote machine
-afx workspace start --remote user@host
+# Start without opening a browser
+afx workspace start --no-browser
 ```
 
-#### Remote Access
-
-Start Agent Farm on a remote machine and access it from your local workstation with a single command:
-
-```bash
-# On your local machine - one command does everything:
-afx workspace start --remote user@remote-host
-
-# Or with explicit project path:
-afx workspace start --remote user@remote-host:/path/to/project
-
-# With custom port:
-afx workspace start --remote user@remote-host --port 4300
-```
-
-This single command:
-1. Checks passwordless SSH is configured
-2. Verifies CLI versions match between local and remote
-3. SSHs into the remote machine
-4. Starts Agent Farm there with matching port
-5. Sets up SSH tunnel back to your local machine
-6. Opens the workspace overview in your browser
-
-The workspace and all terminals work identically to local development. Press Ctrl+C to disconnect.
-
-**Port Selection:**
-
-The port is determined by the global port registry (`afx ports list`). Each project gets a consistent 100-port block (e.g., 4200-4299, 4600-4699). The same port is used on both local and remote ends for the SSH tunnel.
-
-```bash
-# Check your project's port allocation
-afx ports list
-```
+All workspaces share one Tower on port 4100; there are no per-project port blocks.
 
 **Prerequisites:**
 - SSH server must be running on the remote machine
@@ -273,18 +234,20 @@ afx spawn [number] --protocol <name> [options]
 - `[number]` - Issue number (positional)
 
 **Required:**
-- `--protocol <name>` - Protocol to use: spir, bugfix, tick, maintain, experiment. **REQUIRED** for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip this flag.
+- `--protocol <name>` - Protocol to use: spir, aspir, air, bugfix, pir, maintain, experiment. **REQUIRED** for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip this flag.
 
 **Options:**
 - `--task <text>` - Spawn builder with a task description (no `--protocol` needed)
-- `--amends <number>` - Original spec number for TICK amendments
 - `--shell` - Spawn a bare Claude session (no `--protocol` needed)
 - `--worktree` - Spawn worktree session (no `--protocol` needed)
-- `--files <files>` - Context files (comma-separated)
+- `--files <files>` - Context files (comma-separated; requires `--task`)
+- `--no-comment` - Skip commenting on the issue
 - `--soft` - Use soft mode (AI follows protocol, you verify compliance)
 - `--strict` - Use strict mode (porch orchestrates, default)
 - `--resume` - Resume an existing builder worktree
 - `--force` - Skip safety checks (dirty worktree, collision detection)
+- `--branch <name>` - Build on an existing remote branch instead of creating one (requires `--protocol`)
+- `--remote <name>` - Remote to fetch the `--branch` from (fork PRs)
 - `--no-role` - Skip loading role prompt
 
 **Preconditions:**
@@ -311,9 +274,6 @@ afx spawn 42 --protocol spir
 # Spawn builder for a bugfix
 afx spawn 42 --protocol bugfix
 
-# Spawn TICK amendment to spec 30
-afx spawn 42 --protocol tick --amends 30
-
 # Spawn with task description (no --protocol needed)
 afx spawn --task "Fix login bug in auth module"
 
@@ -331,7 +291,7 @@ afx spawn 42 --resume
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Missing required flag: --protocol" | Forgot `--protocol` | Add `--protocol spir` (or bugfix, tick, etc.) |
+| "Missing required flag: --protocol" | Forgot `--protocol` | Add `--protocol spir` (or bugfix, air, etc.) |
 | "Dirty worktree" | Uncommitted changes | Run `git status`, commit changes, retry |
 | "Builder already exists" | Worktree collision | Use `--resume` to resume, or `afx cleanup` first |
 
@@ -561,17 +521,42 @@ Sends text to a builder's terminal. Useful for:
 
 - **delivered** — the message was written to the recipient's prompt after a clean render-gate pass (an empty, render-verified prompt).
 - **held** — the prompt was not clear, so the message is persisted in Tower's durable mailbox and **delivers automatically** the moment the recipient's prompt is clean (after a submit, on output quiescence, or a poll backstop). The response carries a **why-held reason** and a mailbox id:
-  - `busy` — a draft, menu, dialog, or wrapper screen occupies the prompt;
+  - `busy` — the prompt is occupied. `afx inbox` qualifies it with the gate's own detail:
+    `busy:user-text` (a draft, menu, dialog, or wrapper screen), `busy:recent-input` (the
+    terminal received input within the last fraction of a second — a keystroke, a click, or an
+    ungated `--interrupt`/`--escape` write — so the composer may be changing under the gate; it
+    clears by itself a moment after the input stops), `busy:composer-redraw` (the composer is
+    empty but its rendered region moved a moment ago — a turn-end redraw, a rotating
+    placeholder, a resize; also self-clearing, about a quarter second after it stops moving), or
+    `busy:no-region-end` / `busy:no-composer-marker` (the classifier could not verify the
+    composer at all — the one hold class that does NOT clear on its own);
   - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
   - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
 
-A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
+**A recipient that is simply TALKING does not hold mail** (Issue #1664). claude and codex accept
+input during a turn and queue it for the next one, so a message written onto their empty composer
+mid-turn is safe and lands as one message when the turn ends — the gate waits only on the
+*composer*, never on the spinner or the streaming transcript above it. Before that, mail queued
+behind whole turns: measured over 24 h, 227 deliveries waited more than 2 s, averaging 54 s and
+peaking at 561 s.
+
+A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a draft the gate can see, and held rows survive Tower restart/shutdown (no shutdown force-flush). Two signals make a draft visible (Issue #1473) — the composer classifier reads it off the rendered screen, and every write that reaches the PTY **through Tower** (browser and VS Code keystrokes, the terminal input API, an ungated `--interrupt`/`--escape`) is observed there — whatever survives the terminal-reply filter bumps an input counter the gate folds into its change token, so even a keystroke the app has not echoed yet holds the message, while a chunk that is nothing but a DA/DSR/CPR answer moves nothing. **`afx attach` is the one exception:** it pipes your keystrokes straight to the shellper socket, never through Tower's `PtySession.write()`, so they move no counter — a draft typed under `afx attach` is seen only once the app has echoed it and the classifier can read it off the screen. See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
+
+**How a body is typed (Issue #1567):** a frame under 4 lines and at most 256 bytes is one write plus
+Enter, as always. Anything longer is written as **one explicit bracketed paste** (`ESC[200~ … ESC[201~`,
+in ≤512-byte pieces 5 ms apart) with the Enter as a separate write after a short settle. This is the fix
+for the delivery-side head loss where a >1 KB single write was split by the PTY input queue and the
+recipient's paste heuristic discarded the first chunk (only the tail arrived, with `delivered` at the
+sender). While it sits in the composer, claude shows the paste as `[Pasted text #N +M lines]` and codex
+as `[Pasted Content N chars]`; the echo verification behind the `(unverified — …)` suffix accepts a new
+placard as well as the header, so a correct long delivery is reported verified. agy keeps the older
+line-by-line shape (also chunked) because its paste handling has not been measured.
 
 **Examples:**
 
 ```bash
 # Send message to builder in current workspace
-afx send 0042 "Focus on the auth module first"
+afx send spir-42 "Focus on the auth module first"
 
 # Send to architect in current workspace
 afx send architect "PR #42 has been merged"
@@ -587,13 +572,13 @@ afx send architect:ob-refine "PR-iter-2 feedback ready"
 afx send marketmaker:architect "R4 report updated with cost analysis"
 
 # Interrupt and send new instructions
-afx send 0042 --interrupt "Stop that. Try a different approach."
+afx send spir-42 --interrupt "Stop that. Try a different approach."
 
 # Send to all builders
 afx send --all "Time to wrap up, create PRs"
 
 # Include file content
-afx send 0042 --file src/api.ts "Review this implementation"
+afx send spir-42 --file src/api.ts "Review this implementation"
 ```
 
 **Discovering active agents** (Spec 823):
@@ -620,7 +605,7 @@ afx inbox dismiss <id> [options]
 | `ID` | Mailbox row id (pass to `show` / `dismiss`) |
 | `AGE` | How long the message has been held (`5s`, `3m`, `2h`, `1d`) |
 | `REASON` | Why-held: `busy`, `no-profile`, or `no-live-pty`; a trailing `!` marks a row past the escalation age |
-| `FROM → TO` | Sender → recipient agent |
+| `FROM → TO` | Sender → recipient agent. An architect sender carries its name (`architect:main`); the column is sized to its content, so long ids are never truncated |
 | `WORKSPACE` | Owning workspace |
 
 **Options:**
@@ -657,6 +642,21 @@ Dismissal is CLI-only; the dashboard and VSCode held-count indicators surface th
 
 ---
 
+### afx decisions init
+
+Turn on the dashboard's Decisions tab (Issue #1840).
+
+```bash
+afx decisions init [--path <file>]
+```
+
+**Options:**
+- `--path <file>` - File to create, relative to the workspace root (default: `dashboard.decisionsFile`, else `codev/state/pending-decisions.md`)
+
+Creates the decisions file from its template and prints the sentence to tell the main architect. It never replaces an existing file, and refuses a path outside the workspace. See [Decisions tab](#decisions-tab).
+
+---
+
 ### afx interrupt
 
 Interrupt a builder mid-turn by sending an ESC keystroke to its PTY.
@@ -687,7 +687,7 @@ Distinct from `afx send --interrupt`, which sends Ctrl+C.
 afx interrupt 0042
 
 # Then the queued instruction lands
-afx send 0042 "That producer died — stop waiting and report."
+afx send spir-42 "That producer died — stop waiting and report."
 ```
 
 ---
@@ -851,37 +851,6 @@ afx rename "testing"   # → "testing-1" if "testing" already exists
 
 ---
 
-### afx ports
-
-Manage global port registry.
-
-#### afx ports list
-
-List all port allocations.
-
-```bash
-afx ports list
-```
-
-Shows port blocks allocated to different projects:
-```
-Port Allocations
-4200-4299: /Users/me/project-a
-4300-4399: /Users/me/project-b
-```
-
-#### afx ports cleanup
-
-Remove stale port allocations.
-
-```bash
-afx ports cleanup
-```
-
-Removes entries for projects that no longer exist.
-
----
-
 ### afx tower
 
 Manage the cross-project tower dashboard. Tower shows all agent-farm instances across projects and provides cloud connectivity via codevos.ai.
@@ -979,6 +948,126 @@ Displays local tower status plus cloud registration details: tower name, ID, con
 
 **Environment Variables:**
 - `CODEVOS_URL` - Override the codevos.ai server URL (default: `https://codevos.ai`). Useful for local development or staging environments.
+
+---
+
+### afx ide
+
+Manage the Codev IDE server: a Codev-branded VS Code server-web build that Tower spawns, owns,
+and forwards at the `/ide/` prefix. One server serves any folder. These commands drive Tower's
+local-only `/api/ide` endpoint, so Tower must be running.
+
+**Opening the IDE locally:** on the Tower dashboard (`http://localhost:4100/`), each running
+workspace card shows an **IDE** row first, with an **Open IDE** link, once an IDE server is
+recorded (`afx ide start`). It opens the workbench for that workspace, with the Codev sidebar, in a new tab
+at `http://localhost:4100/ide/?folder=<absolute path>`. No Codev Cloud session or hand-built URL
+is needed. The link sets a browser-session cookie scoped to `/ide`, so after the first click that
+browser can also open or reload `http://localhost:4100/ide/?folder=<absolute path>` directly. A
+browser that has not used the link gets `401` there. Use the same host the dashboard is on: a
+cookie set on `localhost` is not sent to `127.0.0.1`.
+
+**Trust notes for the `/ide` session cookie:**
+- It is a **full-trust credential for this machine**, scoped by route, not by capability: the
+  workbench it opens has terminals and file access. Treat it like the Tower key.
+- Only a page that already holds the Tower key can get one (`POST /api/ide/session` requires the
+  key header and is blocked over the cloud tunnel). Tower accepts it only under `/ide`, refuses it
+  on requests initiated by another origin (including other `localhost` ports), and never forwards
+  it to the IDE server, which still requires its own connection token.
+- Revocation is rotating the local key (delete `~/.agent-farm/local-key` and restart Tower, or
+  change `CODEV_TOWER_KEY`); every keyed client re-keys. There is no finer revocation.
+- Never build a `?tkn=` URL by hand (for example `http://127.0.0.1:8200/ide/?tkn=…`): it puts the
+  IDE server's own token in the browser's cookie jar for 7 days, for every `localhost` port,
+  and the IDE server does no Origin check on it. Use the Open IDE link; Tower hands the
+  workbench its token without a cookie, replaces any stale browser copy, and issues a fresh
+  token every time it starts the IDE server.
+- Tower's loopback trust boundary is the single-user machine; on a multi-user host another local
+  user can reach Tower's listener and, via the `/ide` session cookie, can collect and replay this
+  machine's IDE credential if you browse to their localhost port under `/ide`. Do not use the Open
+  IDE path on shared hosts.
+
+**Install:** `npm i -g @cluesmith/codev @cluesmith/codev-ide` (or `afx ide install` for the
+second package). `@cluesmith/codev` carries the Codev sidebar extension; `@cluesmith/codev-ide`
+carries the server binary `codev-ide-server` for your platform.
+
+#### afx ide install
+
+Install the IDE server package.
+
+```bash
+afx ide install
+```
+
+Runs `npm i -g @cluesmith/codev-ide` in your shell with npm's output shown, and exits with npm's
+status. On success it reports the server it now finds and its version. Running it again upgrades
+the server in place; a server that is already running keeps the old version until it is
+restarted (`afx ide stop && afx ide start`).
+
+#### afx ide start
+
+Find the server and ask Tower to spawn it.
+
+```bash
+afx ide start [options]
+```
+
+**Options:**
+- `--server-path <path>` - Path to the `codev-ide-server` binary (overrides discovery)
+- `-p, --port <port>` - Port the server listens on (default: 8200, loopback only)
+
+**Discovery** (without `--server-path`), first match wins:
+1. `codev-ide-server` on `PATH`
+2. `@cluesmith/codev-ide` installed next to the running `@cluesmith/codev`
+3. `@cluesmith/codev-ide` under `npm root -g`
+
+Discovery runs in the CLI, in your shell's environment, because Tower is a long-running daemon
+whose `PATH` may predate the install. When nothing is found the command exits 1 without
+contacting Tower and names `afx ide install` and `--server-path`. A `--server-path` that does
+not exist fails the same way.
+
+**What Tower does on every start, before spawning:**
+1. **Version check.** Runs `codev-ide-server --version` and refuses a server older than the
+   minimum Tower supports, naming the installed version, the minimum, and the upgrade command.
+2. **Sidebar install.** Installs the sidebar vsix embedded in `@cluesmith/codev` into
+   `~/.agent-farm/ide-extensions` with the server's own `--install-extension`. Skipped when that
+   version is already installed. Other extensions in the directory are left alone. If the
+   installed codev package has no embedded sidebar, Tower warns and starts the server without it.
+3. **Spawn** with `--extensions-dir ~/.agent-farm/ide-extensions`.
+
+A failed check or install refuses the start and leaves any running server untouched. The first
+start can take a minute or more.
+
+The server loads extensions only from `~/.agent-farm/ide-extensions`, so anything installed into
+its default extensions directory is no longer loaded. Install additional extensions there:
+`codev-ide-server --install-extension <id-or-vsix> --extensions-dir ~/.agent-farm/ide-extensions`.
+
+If a server is already live on the port, `start` adopts it rather than killing it. When that
+server predates the current start (a different binary, an older sidebar, or a server started
+before this feature), the command prints a restart hint: `afx ide stop && afx ide start`.
+
+On success it prints the prefix, port, PID, server version, and sidebar version.
+
+#### afx ide stop
+
+```bash
+afx ide stop
+```
+
+Stops the server and clears Tower's record. Reports when no server was running.
+
+#### afx ide status
+
+```bash
+afx ide status
+```
+
+Shows the prefix, port, server path, server version, extensions directory, sidebar version,
+and whether the process is live. Records written before this feature
+show `unknown` for the version and extensions fields.
+
+**Files:**
+- `~/.agent-farm/ide-server.json` - Tower's record of the running server
+- `~/.agent-farm/ide-extensions/` - Tower-owned extensions directory (mode 0700)
+- `~/.agent-farm/ide-connection-token` - Token guarding direct access to the server port (regenerated on every IDE server start)
 
 ---
 
@@ -1137,6 +1226,32 @@ refreshes the snapshot from the main workspace.
 
 Both are Tower-global (they apply to the whole Tower, not per-project) and optional — omit them to use the defaults above.
 
+### Decisions tab
+
+Turn the tab on with `afx decisions init`. It creates the decisions file from its template, prints where it went, and gives the one sentence to tell the main architect: "Route every ask for my word through the decisions file." It refuses a file that already exists, because that file holds the owner's rulings, and a path outside the workspace. `--path <file>` creates another file, relative to the workspace root; the tab shows it once `dashboard.decisionsFile` names it.
+
+When a workspace has a pending-decisions file, the dashboard shows a **Decisions** tab (Spec 1819). The tab is a view of that file. Each item under `## Open` becomes a card with a click box per option (the first option, the recommended one, is marked) and a comment box. Submitting writes the chosen word, then the comment, on the lines right after the item's `**Your word:**` line, exactly as the owner would type them, and changes nothing else. `## Ruled` is shown below as a collapsed, read-only list. The file is the only state. While the tab is open it re-reads the file every 2 seconds, so edits made elsewhere appear without a reload, and an unsent draft survives them.
+
+The file's format and the process around it are in [`decision-protocol.md`](../decision-protocol.md): one hub architect, `main`, is the only agent that edits the file, other architects send it their items, and the hub relays each ruling. The tab reads exactly the item format that document describes.
+
+The file is `codev/state/pending-decisions.md` unless `dashboard.decisionsFile` names another:
+
+```json
+{
+  "dashboard": {
+    "decisionsFile": "codev/state/pending-decisions.md"
+  }
+}
+```
+
+- **Relative to the workspace root.** An absolute path, or anything but a non-empty string, is a configuration error: the tab does not appear, and Tower logs the error once.
+- **Inside the workspace.** The path is resolved with symlinks followed on every read and write, and a path that leads outside the workspace (directly, through `..`, or through a symlink) is refused. A symlinked decisions file keeps its link: the ruling is written to its in-workspace target.
+- **Layers.** Like the other settings, it can be set globally in `~/.codev/config.json`, for the team in the project's `.codev/config.json`, or per engineer in `.codev/config.local.json`. Project settings override global ones, and project-local settings override both.
+
+The tab appears once the file exists (within about 5 seconds of a change to the setting), and then stays for the page session: if the file is deleted while the tab is open, the tab says so and keeps any unsent draft. A reload of a workspace without the file shows no tab. A submit is refused, with a message on the card and the draft kept, when the item has changed or been ruled since the tab showed it. Tower applies one write to a file at a time and replaces the file atomically (a temporary file renamed over it).
+
+After each ruling is written, Tower tells the workspace's hub architect, the one named `main`, in one mailbox message delivered like an `afx send architect`: `RULED <id>: <word>`, or `QUESTION <id>:` for a comment-only submit, with the comment on the lines after it, under a `[USER via Decisions tab]` header. Like any message it waits for a clear prompt, and it waits for `main` to come back if `main` is not running. A workspace with no architect named `main` gets no notice: Tower logs a warning naming the workspace and does not pick another architect. A failed send is logged and leaves the ruling as written: the file is still the source of truth, and a ruling typed into the file by hand reaches the hub only when it scans the file.
+
 ### Language-Agnostic Porch Checks
 
 By default, porch protocol checks use `npm run build` and `npm test`. Non-Node.js projects can override these via the `porch.checks` section in `.codev/config.json`:
@@ -1156,6 +1271,7 @@ By default, porch protocol checks use `npm run build` and `npm test`. Non-Node.j
 **Override fields:**
 - `command` — Replace the protocol's check command with a custom shell command
 - `cwd` — Override the working directory for this check (relative to project root)
+- `timeout_ms` — Kill the check after this many milliseconds (default 5 minutes; a protocol.json check can set it too). On timeout porch kills the check's whole process tree
 - `skip: true` — Omit this check entirely (for checks that don't apply to your project)
 
 Porch logs a visible warning for each overridden or skipped check so the change is always visible.

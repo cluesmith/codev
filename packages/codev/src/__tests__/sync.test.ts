@@ -13,7 +13,7 @@ describe('sync module', () => {
   describe('getCacheDir', () => {
     it('returns path under ~/.codev/cache/framework/', () => {
       const dir = getCacheDir('myorg/repo', 'v1.0.0');
-      expect(dir).toContain('.codev/cache/framework/');
+      expect(dir).toContain(path.join('.codev', 'cache', 'framework') + path.sep);
       expect(dir).toContain('v1.0.0');
     });
 

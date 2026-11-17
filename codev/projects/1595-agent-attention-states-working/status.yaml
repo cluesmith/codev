@@ -1,0 +1,84 @@
+id: '1595'
+title: agent-attention-states-working
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Agent-state wire contract and projection
+    status: complete
+  - id: phase_2
+    title: Shared attention predicate and summary
+    status: complete
+  - id: phase_3
+    title: Tower lifecycle ingestion and in-memory state
+    status: complete
+  - id: phase_4
+    title: Tower agent liveness
+    status: complete
+  - id: phase_5
+    title: Agent state served on the overview
+    status: complete
+  - id: phase_6
+    title: Claude lifecycle reporter and launch injection
+    status: complete
+  - id: phase_7
+    title: Attention surfaces render agent state
+    status: complete
+  - id: phase_8
+    title: Real-session verification and documentation
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-10-05T07:15:55.361Z'
+    approved_at: '2026-10-21T04:52:54.284Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-10-21T05:15:43.593Z'
+    approved_at: '2026-10-21T05:22:39.176Z'
+  pr:
+    status: pending
+    requested_at: '2026-10-21T09:41:49.630Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-05T05:42:35.416Z'
+updated_at: '2026-10-21T09:41:49.630Z'
+force_advanced:
+  phase: plan
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1595-plan-iter3-rebuttals.md
+  at: '2026-10-21T05:15:41.755Z'
+context_refreshes:
+  - boundary: enter:implement
+    at: '2026-10-21T05:22:51.709Z'
+    acknowledged_at: '2026-10-21T05:22:57.112Z'
+  - boundary: plan-phase:phase_2
+    at: '2026-10-21T05:36:37.279Z'
+    acknowledged_at: '2026-10-21T05:37:42.861Z'
+  - boundary: plan-phase:phase_3
+    at: '2026-10-21T05:46:23.854Z'
+    acknowledged_at: '2026-10-21T05:47:23.177Z'
+  - boundary: plan-phase:phase_4
+    at: '2026-10-21T06:18:13.885Z'
+    acknowledged_at: '2026-10-21T06:18:56.939Z'
+  - boundary: plan-phase:phase_5
+    at: '2026-10-21T06:36:45.754Z'
+    acknowledged_at: '2026-10-21T06:37:32.934Z'
+  - boundary: plan-phase:phase_6
+    at: '2026-10-21T06:51:23.924Z'
+    acknowledged_at: '2026-10-21T06:52:24.241Z'
+  - boundary: plan-phase:phase_7
+    at: '2026-10-21T07:22:10.336Z'
+    acknowledged_at: '2026-10-21T07:22:57.541Z'
+  - boundary: plan-phase:phase_8
+    at: '2026-10-21T07:49:39.469Z'
+    acknowledged_at: '2026-10-21T07:50:20.181Z'
+  - boundary: enter:review
+    at: '2026-10-21T09:22:25.259Z'
+    acknowledged_at: '2026-10-21T09:23:38.587Z'
+pr_ready_for_human: true

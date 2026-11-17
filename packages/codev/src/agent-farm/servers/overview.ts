@@ -11,16 +11,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import {
-  fetchPRList,
-  fetchIssueList,
-  fetchRecentlyClosed,
-  fetchRecentMergedPRs,
-  fetchCurrentUser,
+  fetchForOverview,
+  overviewBackend,
   parseLinkedIssue,
   parseLabelDefaults,
   parseArea,
 } from '../../lib/github.js';
-import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
+import type { ForgePR, ForgeIssueListItem, OverviewConcept } from '../../lib/github.js';
+import { ForgeRateLimiter, budgetKeyFor, type RateLimitProbe } from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
 import type {
@@ -30,11 +28,15 @@ import type {
   OverviewBacklogItem,
   OverviewRecentlyClosed,
   OverviewData,
+  IssueIdKind,
 } from '@cluesmith/codev-types';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { heldSummaryForWorkspace } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
+import { CANONICAL_KEY_SOURCE, ISSUE_KEY_SOURCE, canonicalIssueId, isIssueKey } from '../../lib/issue-id.js';
+import { resolveIssueIdKind, loadForgeConfig } from '../../lib/forge.js';
 
 // =============================================================================
 // Status YAML parser (lightweight, no library dependency)
@@ -278,9 +280,12 @@ function calculateSpirProgress(parsed: ParsedStatus): number {
     case 'plan':
       return gateRequested('plan-approval') ? 45 : 35;
     case 'implement': {
-      const total = parsed.planPhases.length;
+      // A phase a human skipped (#1900) is dropped from the plan: it counts in
+      // neither the total nor the completed — matching the builder card's (n/m).
+      const phases = parsed.planPhases.filter(p => p.status !== 'skipped');
+      const total = phases.length;
       if (total === 0) return 70;
-      const completed = parsed.planPhases.filter(p => p.status === 'complete').length;
+      const completed = phases.filter(p => p.status === 'complete').length;
       return 50 + Math.round((completed / total) * 40);
     }
     case 'review':
@@ -329,13 +334,17 @@ function loadProtocolPhases(workspaceRoot: string, protocolName: string): string
 
 /**
  * Detect if a builder is blocked on a gate (requested but not approved).
- * Returns a human-readable label or null.
  *
- * The allowlist mirrors the gates emitted by the bundled protocols (SPIR,
- * ASPIR, BUGFIX, AIR, PIR). New protocols that introduce new gate names must
- * register them here, otherwise their gate-pending state is invisible to
- * `OverviewBuilder.blocked` and downstream UIs (VSCode Needs Attention tree,
- * VSCode toast, dashboard NeedsAttentionList, status bar counter).
+ * Generic over gate names (#1777): ANY gate in `status.yaml` with
+ * `status: pending` and a `requested_at` timestamp is a human gate porch is
+ * holding the lane at, so it surfaces on `OverviewBuilder.blocked` and the
+ * downstream UIs (VSCode Agents tree/toast/status bar, dashboard
+ * NeedsAttentionList, Tower hub attention rows) whatever protocol emitted it.
+ * The earlier allowlist made EXPERIMENT's `experiment-complete` (and
+ * MAINTAIN/RESEARCH's gates) invisible.
+ *
+ * `GATE_LABELS` supplies display labels and the scan priority for the bundled
+ * gates; an unlisted gate is still detected, labelled from its own name.
  */
 const GATE_LABELS: Record<string, string> = {
   'spec-approval': 'spec review',
@@ -348,15 +357,37 @@ const GATE_LABELS: Record<string, string> = {
   // bar). The `pr` gate stays mapped here too (VSCode depends on it); the
   // dashboard alone excludes `pr` from its gate rows since it renders PR rows.
   'verify-approval': 'verify review',
+  'experiment-complete': 'experiment review',
+  'maintain-complete': 'maintenance review',
+  'scope-approval': 'scope review',
+  'research-complete': 'research review',
 };
 
-export function detectBlocked(parsed: ParsedStatus): string | null {
-  for (const [gate, label] of Object.entries(GATE_LABELS)) {
+/** Display label for a gate: the mapped label, else derived from its name. */
+function gateLabel(gate: string): string {
+  return GATE_LABELS[gate] ?? `${gate.replace(/-(approval|complete|review)$/, '').replace(/-/g, ' ')} review`;
+}
+
+/**
+ * Canonical name of the gate the builder is blocked on, or null. Known gates
+ * are scanned first (preserving their priority order), then any other gate in
+ * `status.yaml` order.
+ */
+function findBlockedGate(parsed: ParsedStatus): string | null {
+  const gates = new Set([...Object.keys(GATE_LABELS), ...Object.keys(parsed.gates)]);
+  for (const gate of gates) {
     if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
-      return label;
+      return gate;
     }
   }
   return null;
+}
+
+/** Human-readable label for the gate the builder is blocked on, or null. */
+export function detectBlocked(parsed: ParsedStatus): string | null {
+  const gate = findBlockedGate(parsed);
+  if (!gate) return null;
+  return gateLabel(gate);
 }
 
 /**
@@ -365,29 +396,21 @@ export function detectBlocked(parsed: ParsedStatus): string | null {
  * Returns null if the builder isn't blocked.
  */
 export function detectBlockedGate(parsed: ParsedStatus): string | null {
-  for (const gate of Object.keys(GATE_LABELS)) {
-    if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
-      return gate;
-    }
-  }
-  return null;
+  return findBlockedGate(parsed);
 }
 
 /**
  * Detect when the current blocked gate was first requested.
  * Returns the ISO timestamp string or null if not blocked.
  *
- * Iterates `GATE_LABELS` so the gate set lives in exactly one place — sibling
- * to `detectBlocked` / `detectBlockedGate` (#927 removed this function's
- * previously-separate hardcoded array, which was a silent drift hazard).
+ * Shares `findBlockedGate` with `detectBlocked` / `detectBlockedGate` so the
+ * gate set lives in exactly one place (#927 removed a previously-separate
+ * hardcoded array, which was a silent drift hazard).
  */
 export function detectBlockedSince(parsed: ParsedStatus): string | null {
-  for (const gate of Object.keys(GATE_LABELS)) {
-    if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
-      return parsed.gateRequestedAt[gate];
-    }
-  }
-  return null;
+  const gate = findBlockedGate(parsed);
+  if (!gate) return null;
+  return parsed.gateRequestedAt[gate];
 }
 
 /**
@@ -456,6 +479,38 @@ export function computeIdleMs(parsed: ParsedStatus): number {
 // Builder discovery
 // =============================================================================
 
+/** `task-<short id>` / `worktree-<short id>`: base64url, so '-' and '_' can appear. */
+const SHORT_ID_NAME_TASK = /^task-([a-z0-9_-]+)$/;
+const SHORT_ID_NAME_WORKTREE = /^worktree-([a-z0-9_-]+)$/;
+
+/** `<protocol>-<KEY>` at the start of a worktree name, optionally followed by `-slug`. */
+const WORKTREE_KEY_NAME = new RegExp(`^([a-z]+)-(${ISSUE_KEY_SOURCE})(?:-|$)`, 'i');
+
+/**
+ * The issue id a porch project id names: `ENG-123` / `bugfix-ENG-123` → the
+ * key; numeric forms → the trailing number without zero padding
+ * (`bugfix-315` → "315", `0042` → "42"). Null when it names no issue.
+ */
+function issueIdFromProjectId(projectId: string): string | null {
+  // `bugfix-315` is itself key-shaped, so the numeric forms go first.
+  if (/^(?:bugfix-)?\d+$/i.test(projectId)) return String(Number(projectId.replace(/^bugfix-/i, '')));
+  const key = projectId.match(new RegExp(`^(?:bugfix-)?(${ISSUE_KEY_SOURCE})$`, 'i'));
+  if (key) return canonicalIssueId(key[1]);
+  const trailingNum = projectId.match(/(\d+)$/);
+  if (trailingNum) return String(Number(trailingNum[1]));
+  return null;
+}
+
+/** What global.db records for a builder, by worktree path (#1740). */
+export interface StoredBuilderIdentity {
+  /** The builder id, which is its terminal role id. */
+  roleId: string;
+  /** The issue it was spawned for, or null for task/protocol/worktree builders. */
+  issueNumber: string | null;
+  /** The architect that spawned it (Spec 823), or null. */
+  spawnedByArchitect: string | null;
+}
+
 /**
  * Map a worktree directory name to its expected terminal role_id.
  * Must match what buildAgentName() produces during spawn so we can
@@ -470,7 +525,11 @@ export function computeIdleMs(parsed: ParsedStatus): number {
  *   task-NAvW             → "builder-task-navw"
  *   worktree-foIg         → "worktree-foig"
  *   0110-legacy           → "builder-spir-110"
+ *   pir-ENG-123-slug      → "builder-pir-eng-123"   (tracker key, #1740)
  *   experiment-AbCd       → "builder-experiment-abcd"
+ *
+ * This is the fallback: discoverBuilders prefers the builder id stored in
+ * global.db, which is the role id itself.
  */
 export function worktreeNameToRoleId(dirName: string): string | null {
   const lower = dirName.toLowerCase();
@@ -491,21 +550,35 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   const pirMatch = lower.match(/^pir-(\d+)/);
   if (pirMatch) return `builder-pir-${Number(pirMatch[1])}`;
 
-  // Task: task-NAvW → builder-task-navw
-  const taskMatch = lower.match(/^task-([a-z0-9]+)/);
+  // Task: task-NAvW → builder-task-navw. The whole remainder is the short id:
+  // base64url short ids can contain '-' and '_' (task-Ab-3 → builder-task-ab-3,
+  // as buildAgentName produces; #1740).
+  const taskMatch = lower.match(SHORT_ID_NAME_TASK);
   if (taskMatch) return `builder-task-${taskMatch[1]}`;
 
   // Worktree: worktree-foIg → worktree-foig (no builder- prefix)
-  const worktreeMatch = lower.match(/^worktree-([a-z0-9]+)/);
+  const worktreeMatch = lower.match(SHORT_ID_NAME_WORKTREE);
   if (worktreeMatch) return `worktree-${worktreeMatch[1]}`;
 
   // Legacy numeric: 0110-slug → builder-spir-110 (assume spir)
   const numericMatch = lower.match(/^(\d+)(?:-|$)/);
   if (numericMatch) return `builder-spir-${Number(numericMatch[1])}`;
 
-  // Generic protocol: experiment-AbCd → builder-experiment-abcd
-  const genericMatch = lower.match(/^([a-z]+)-([a-z0-9]+)/);
-  if (genericMatch) return `builder-${genericMatch[1]}-${genericMatch[2]}`;
+  // Tracker key (#1740): pir-ENG-123[-slug] → builder-pir-eng-123. After every
+  // numeric form, so a name that resolves today resolves identically.
+  const keyMatch = lower.match(WORKTREE_KEY_NAME);
+  if (keyMatch) return `builder-${keyMatch[1]}-${keyMatch[2]}`;
+
+  // Generic protocol: experiment-1560[-slug] → builder-experiment-1560 (a
+  // numbered spawn), else experiment-AbCd → builder-experiment-abcd, where the
+  // whole remainder is the issue-less spawn's short id, '-'/'_' included
+  // (maintain-x_9Q → builder-maintain-x_9q, as buildAgentName produces; #1740).
+  const genericMatch = lower.match(/^([a-z]+)-(.+)$/);
+  if (genericMatch) {
+    const numbered = genericMatch[2].match(/^(\d+)(?:-|$)/);
+    if (numbered) return `builder-${genericMatch[1]}-${numbered[1]}`;
+    return `builder-${genericMatch[1]}-${genericMatch[2]}`;
+  }
 
   return null;
 }
@@ -544,18 +617,120 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
   const pirMatch = dirName.match(/^pir-(\d+)/);
   if (pirMatch) return pirMatch[1];
 
+  // task-NAvW, worktree-foIg → null (soft mode). Checked before the generic
+  // case below because a short id can be all digits (task-1234).
+  if (/^(task|worktree)-/.test(dirName)) return null;
+
+  // Any other numbered protocol spawn (experiment/maintain/research, #1777):
+  // experiment-1560 → "1560" (porch project dir is 1560-slug, like SPIR).
+  const genericMatch = dirName.match(/^[a-z]+-(\d+)(?:-|$)/);
+  if (genericMatch) return genericMatch[1];
+
   // Legacy numeric: 0110 or 0110-slug → "0110"
   const numericMatch = dirName.match(/^(\d+)(?:-|$)/);
   if (numericMatch) return numericMatch[1];
+
+  // Tracker key (#1740), after every numeric form: bugfix-ENG-123[-slug] →
+  // "bugfix-ENG-123" (porch's bugfix convention), pir-ENG-123[-slug] →
+  // "ENG-123". Canonical upper case, the spelling spawn now records.
+  const keyMatch = dirName.match(WORKTREE_KEY_NAME);
+  if (keyMatch) {
+    const key = canonicalIssueId(keyMatch[2]);
+    if (keyMatch[1].toLowerCase() === 'bugfix') return `bugfix-${key}`;
+    return key;
+  }
 
   // task-NAvW, worktree-foIg → null (soft mode)
   return null;
 }
 
 /**
+ * The porch project id for a worktree. A key-shaped directory name is
+ * ambiguous: an issue-less protocol spawn is named `<protocol>-<short id>`, and
+ * a base64url short id can look like a key (`maintain-Ab-3`). So when the
+ * stored row says the builder has no issue, a key-shaped name is not read as
+ * one. Numeric names are trusted as before.
+ */
+function projectIdForWorktree(dirName: string, storedIdentity: StoredBuilderIdentity | undefined): string | null {
+  const projectId = extractProjectIdFromWorktreeName(dirName);
+  if (projectId === null || storedIdentity === undefined) return projectId;
+  const keyed = isIssueKey(projectId.replace(/^bugfix-/i, ''));
+  if (keyed && storedIdentity.issueNumber === null) return null;
+  return projectId;
+}
+
+/**
+ * The stored builder id as a terminal role id, when it has the shape
+ * buildAgentName() produces (`builder-…`, `worktree-…`). Rows written by older
+ * versions can carry a legacy id (`bugfix-42`) that is not the role id; those
+ * fall back to parsing the directory name, as before.
+ */
+function storedRoleId(storedId: string | undefined): string | null {
+  if (!storedId) return null;
+  const id = storedId.toLowerCase();
+  if (id.startsWith('builder-') || id.startsWith('worktree-')) return id;
+  return null;
+}
+
+/**
+ * A builder's lowercased role id: the stored builder id when it has the role-id
+ * shape, else the id derived from its worktree directory name; `null` when
+ * neither yields one. The one derivation shared by overview discovery and
+ * Tower's agent-state key (Spec 1595), so the two cannot diverge.
+ */
+export function builderRoleId(storedId: string | undefined, worktreeDirName: string): string | null {
+  return storedRoleId(storedId) ?? worktreeNameToRoleId(worktreeDirName);
+}
+
+/**
+ * Read each builder's stored identity (builder id, issue) from global.db for
+ * this workspace, keyed by worktree path. Empty when the DB is missing or
+ * unreadable, so discovery falls back to parsing directory names.
+ */
+export function loadStoredBuilderIdentities(workspaceRoot: string): Map<string, StoredBuilderIdentity> {
+  const result = new Map<string, StoredBuilderIdentity>();
+  try {
+    const dbPath = getGlobalDbPath();
+    if (!fs.existsSync(dbPath)) return result;
+    const db = openDatabase(dbPath, { readonly: true });
+    try {
+      const rows = db.prepare(
+        'SELECT worktree, id, issue_number, spawned_by_architect FROM builders WHERE workspace_path = ?',
+      ).all(normalizeWorkspacePath(workspaceRoot)) as Array<{
+        worktree: string; id: string; issue_number: string | null; spawned_by_architect: string | null;
+      }>;
+      for (const row of rows) {
+        result.set(row.worktree, {
+          roleId: row.id,
+          issueNumber: row.issue_number,
+          spawnedByArchitect: row.spawned_by_architect,
+        });
+      }
+    } finally {
+      db.close();
+    }
+  } catch {
+    // DB not available: discovery parses directory names instead.
+  }
+  return result;
+}
+
+/** The workspace's issue-id kind from its forge config, or undefined when unknown. */
+function issueIdKindFor(workspaceRoot: string): IssueIdKind | undefined {
+  try {
+    return resolveIssueIdKind(loadForgeConfig(workspaceRoot));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Discover builders by scanning .builders/ directory and reading status.yaml.
  */
-export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
+export function discoverBuilders(
+  workspaceRoot: string,
+  stored: ReadonlyMap<string, StoredBuilderIdentity> = new Map(),
+): OverviewBuilder[] {
   const buildersDir = path.join(workspaceRoot, '.builders');
   if (!fs.existsSync(buildersDir)) return [];
 
@@ -572,11 +747,14 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
     if (!entry.isDirectory()) continue;
 
     const worktreePath = path.join(buildersDir, entry.name);
-    const projectId = extractProjectIdFromWorktreeName(entry.name);
+    // #1740: the stored builder row is the source of truth where it exists;
+    // parsing the directory name is the fallback for rows that don't.
+    const storedIdentity = stored.get(worktreePath);
+    const projectId = projectIdForWorktree(entry.name, storedIdentity);
     // Compute the canonical roleId once per worktree — used both as a
     // filter key (against entry.builders.keys()) and as the bridge to
     // PtySession at request time, so callers don't re-run the regex.
-    const roleId = worktreeNameToRoleId(entry.name);
+    const roleId = builderRoleId(storedIdentity?.roleId, entry.name);
 
     if (!projectId) {
       // No ID extracted (task-*, worktree-*) → soft mode
@@ -612,6 +790,9 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
     // Porch may create dirs with or without zero-padding (e.g. "386-slug" or "0386-slug"),
     // and bugfix dirs may be "bugfix-382-slug" or "builder-bugfix-382-slug".
     const paddedId = /^\d+$/.test(projectId) ? projectId.padStart(4, '0') : null;
+    // Keys compare case-insensitively: a project spawned as `eng-123` before
+    // spawn canonicalized keys still matches `ENG-123`.
+    const keyed = isIssueKey(projectId.replace(/^bugfix-/i, ''));
     let found = false;
     if (fs.existsSync(projectsDir)) {
       try {
@@ -619,7 +800,8 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
         for (const projEntry of projectEntries) {
           if (!projEntry.isDirectory()) continue;
           const name = projEntry.name;
-          const matches = name.startsWith(`${projectId}-`)
+          const matches = (keyed && name.toLowerCase().startsWith(`${projectId.toLowerCase()}-`))
+            || name.startsWith(`${projectId}-`)
             || (paddedId && name.startsWith(`${paddedId}-`));
           if (!matches) continue;
 
@@ -629,12 +811,9 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
           const content = fs.readFileSync(statusFile, 'utf-8');
           const parsed = parseStatusYaml(content);
 
+          // "bugfix-315" → "315", "0042" → "42", "ENG-123" → "ENG-123"
           let issueId: string | null = parsed.id || null;
-          if (issueId) {
-            // Extract trailing number as the issue ID (e.g. "bugfix-315" → "315", "0042" → "42")
-            const trailingNum = issueId.match(/(\d+)$/);
-            if (trailingNum) issueId = String(Number(trailingNum[1]));
-          }
+          if (issueId) issueId = issueIdFromProjectId(issueId) ?? issueId;
 
           builders.push({
             id: parsed.id || entry.name,
@@ -673,8 +852,7 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
 
     if (!found) {
       // No matching project dir → soft mode, but extract issue ID from dir name
-      const numMatch = projectId.match(/(\d+)$/);
-      const issueId = numMatch ? numMatch[1] : null;
+      const issueId = issueIdFromProjectId(projectId);
       builders.push({
         id: entry.name,
         issueId,
@@ -708,8 +886,12 @@ export function discoverBuilders(workspaceRoot: string): OverviewBuilder[] {
 // Backlog derivation
 // =============================================================================
 
+// Upper case only: artifacts are named from the canonical (upper-case) id, and
+// a case-insensitive match would read `bugfix-1436-slug.md` as key BUGFIX-1436.
+const ARTIFACT_KEY_PREFIX = new RegExp(`^(${CANONICAL_KEY_SOURCE})(?:-|\\.md$)`);
+
 /**
- * Scan a codev artifact directory and return a map of issue number → filename.
+ * Scan a codev artifact directory and return a map of issue id → filename.
  */
 function scanArtifactDir(dirPath: string): Map<string, string> {
   const result = new Map<string, string>();
@@ -718,6 +900,12 @@ function scanArtifactDir(dirPath: string): Map<string, string> {
     const files = fs.readdirSync(dirPath);
     for (const file of files) {
       if (!file.endsWith('.md')) continue;
+      // Tracker keys first (#1740): `ENG-123-slug.md` → "ENG-123".
+      const key = file.match(ARTIFACT_KEY_PREFIX);
+      if (key) {
+        result.set(canonicalIssueId(key[1]), file);
+        continue;
+      }
       const idStr = file.split('-')[0];
       if (/^\d+$/.test(idStr)) result.set(String(Number(idStr)), file);
     }
@@ -836,20 +1024,60 @@ export function deriveBacklog(
 // OverviewCache
 // =============================================================================
 
+/** One cached concept result per workspace. `data: null` is a cached failure (#1645). */
+interface CacheEntry<T> { data: T | null; fetchedAt: number; expiresAt: number }
+
+interface FetchOutcome<T> {
+  data: T | null;
+  /** Set when the concept's budget was suspended at read time (data, if any, is stale). */
+  rateLimitedUntil: number | null;
+  backend: string | null;
+}
+
+export interface OverviewCacheOptions {
+  /** Clock, injectable for tests. */
+  now?: () => number;
+  /** Reset probe run once per fresh suspension (Tower passes the gh probe). */
+  probe?: RateLimitProbe;
+}
+
+/** Open lists: what porch/VS Code invalidation refreshes. */
+const LIST_TTL_MS = 180_000;
+/** The two 24 h searches: invalidation never touches these. */
+const SEARCH_TTL_MS = 600_000;
+/** GitHub identity is session-stable. */
+const USER_TTL_MS = 3_600_000;
+/** A list refetches at most once per minute per workspace because of invalidation. */
+const INVALIDATE_DEBOUNCE_MS = 60_000;
+/** Failure window: 60 s, doubling per window (not per failed command) to 15 min. */
+const FAILURE_WINDOW_MIN_MS = 60_000;
+const FAILURE_WINDOW_MAX_MS = 15 * 60_000;
+
 export class OverviewCache {
-  private prCache = new Map<string, { data: ForgePR[]; fetchedAt: number }>();
-  private issueCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
-  private closedCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
-  private mergedPRCache = new Map<string, { data: ForgePR[]; fetchedAt: number }>();
-  private currentUserCache = new Map<string, { data: string; fetchedAt: number }>();
+  private prCache = new Map<string, CacheEntry<ForgePR[]>>();
+  private issueCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
+  private closedCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
+  private mergedPRCache = new Map<string, CacheEntry<ForgePR[]>>();
+  private currentUserCache = new Map<string, CacheEntry<string>>();
+  /** Single-flight per `<workspace>:<concept>` (#1645). */
+  private inflight = new Map<string, Promise<FetchOutcome<unknown>>>();
+  /** Escalating failure window per `<workspace>:<budget>`. */
+  private failureWindows = new Map<string, { level: number; startedAt: number; ttl: number }>();
+  /** Epoch of the last invalidate(); open-list entries fetched before it are stale once debounced. */
+  private invalidatedAt = 0;
+  private readonly limiter: ForgeRateLimiter;
+  private readonly now: () => number;
+
+  constructor(options: OverviewCacheOptions = {}) {
+    this.now = options.now ?? (() => Date.now());
+    this.limiter = new ForgeRateLimiter(options.probe);
+  }
   // Cache of issue-derived builder fields (today: `area`) keyed by worktreePath,
   // so they survive refreshes where the source issue is unreachable rather than
   // snapping back to their default while the builder is still listed (PIR #907).
   // Intentionally NOT cleared by invalidate(): surviving cache invalidation is
   // the whole point. See ResolvedEnrichmentCache.
   private resolvedEnrichment = new ResolvedEnrichmentCache();
-  private readonly TTL = 30_000;
-  private readonly USER_TTL = 3_600_000; // 1h — GitHub identity is session-stable
 
   /**
    * Build the overview response. Aggregates builder state, PRs, and backlog.
@@ -863,13 +1091,16 @@ export class OverviewCache {
     const errors: { prs?: string; issues?: string } = {};
 
     // 1. Discover builders from .builders/ directory, then filter to live sessions
-    let builders = discoverBuilders(workspaceRoot);
+    // One read of the builders table (#1740) feeds both discovery (role id,
+    // project id) and the issueId / spawnedByArchitect enrichment below.
+    const stored = loadStoredBuilderIdentities(workspaceRoot);
+    let builders = discoverBuilders(workspaceRoot, stored);
     if (activeBuilderRoleIds) {
       // roleId is precomputed by discoverBuilders — no regex per call.
       builders = builders.filter(b => b.roleId !== null && activeBuilderRoleIds.has(b.roleId));
     }
 
-    // Enrich issueId and spawnedByArchitect from the builders table — protocol-
+    // Enrich issueId and spawnedByArchitect from the builders table (read once above), protocol-
     // agnostic (fixes #664 for issueId; adds spawnedByArchitect per Spec 823).
     // Issue #1118: builders now live in the single shared global.db, scoped by
     // workspace_path; read that file (read-only) and scope to this workspace.
@@ -877,6 +1108,15 @@ export class OverviewCache {
     // Spec 823: dropped the `WHERE issue_number IS NOT NULL` filter so soft-mode
     // builders (issue_number=null) also enrich their spawnedByArchitect. Each
     // field is applied conditionally on per-row non-nullness.
+    for (const [worktree, row] of stored) {
+      const builder = builders.find(b => b.worktreePath === worktree);
+      if (!builder) continue;
+      // Canonical spelling (#1740): a row written before spawn canonicalized keys
+      // holds `eng-123`, which would fail to match the forge's `ENG-123`.
+      if (row.issueNumber != null) builder.issueId = canonicalIssueId(String(row.issueNumber));
+      if (row.spawnedByArchitect != null) builder.spawnedByArchitect = row.spawnedByArchitect;
+    }
+
     // Spec 1313 Phase 7: workspace held-mail summary, folded into the overview so the
     // dashboard/VSCode indicator renders count + attention state straight off
     // /api/overview. Defaults (0 / false) survive a missing or unreadable DB.
@@ -886,17 +1126,8 @@ export class OverviewCache {
       const dbPath = getGlobalDbPath();
       if (fs.existsSync(dbPath)) {
         const normWs = normalizeWorkspacePath(workspaceRoot);
-        const db = new Database(dbPath, { readonly: true });
+        const db = openDatabase(dbPath, { readonly: true });
         try {
-          const rows = db.prepare(
-            'SELECT worktree, issue_number, spawned_by_architect FROM builders WHERE workspace_path = ?',
-          ).all(normWs) as Array<{ worktree: string; issue_number: string | null; spawned_by_architect: string | null }>;
-          for (const row of rows) {
-            const builder = builders.find(b => b.worktreePath === row.worktree);
-            if (!builder) continue;
-            if (row.issue_number != null) builder.issueId = String(row.issue_number);
-            if (row.spawned_by_architect != null) builder.spawnedByArchitect = row.spawned_by_architect;
-          }
           // Counts + escalation flag only — never bodies (redaction rule). Per-agent
           // held counts attach to the matching builder by roleId (the same
           // case-normalized key handleOverview uses to map the terminal registry).
@@ -924,18 +1155,30 @@ export class OverviewCache {
 
     // 2. Fetch PRs, issues, recently closed, merged PRs, and current user in
     //    parallel (each is independently cached)
-    const [prs, issues, closed, mergedPRs, currentUser] = await Promise.all([
-      this.fetchPRsCached(workspaceRoot),
-      this.fetchIssuesCached(workspaceRoot),
-      this.fetchRecentlyClosedCached(workspaceRoot),
-      this.fetchMergedPRsCached(workspaceRoot),
-      this.fetchCurrentUserCached(workspaceRoot),
+    const [prsOutcome, issuesOutcome, closedOutcome, mergedOutcome, userOutcome] = await Promise.all([
+      this.cachedFetch<ForgePR[]>(this.prCache, workspaceRoot, 'pr-list', LIST_TTL_MS, true),
+      this.cachedFetch<ForgeIssueListItem[]>(this.issueCache, workspaceRoot, 'issue-list', LIST_TTL_MS, true),
+      this.cachedFetch<ForgeIssueListItem[]>(this.closedCache, workspaceRoot, 'recently-closed', SEARCH_TTL_MS, false),
+      this.cachedFetch<ForgePR[]>(this.mergedPRCache, workspaceRoot, 'recently-merged', SEARCH_TTL_MS, false),
+      this.cachedFetch<string>(this.currentUserCache, workspaceRoot, 'user-identity', USER_TTL_MS, false),
     ]);
+    const prs = prsOutcome.data;
+    const issues = issuesOutcome.data;
+    const closed = closedOutcome.data;
+    const mergedPRs = mergedOutcome.data;
+    const currentUser = userOutcome.data;
+    // Every forge-backed section counts, the two searches included (#1645).
+    const sections = [prsOutcome, issuesOutcome, closedOutcome, mergedOutcome];
+    const rateLimited = sections.find(o => o.rateLimitedUntil !== null);
+    const forgeStatus: OverviewData['forgeStatus'] = rateLimited
+      ? 'rate-limited'
+      : sections.some(o => o.data === null) ? 'unavailable' : 'ok';
+    const forgeResetAt = rateLimited ? new Date(rateLimited.rateLimitedUntil as number).toISOString() : undefined;
 
     // 3. Process PRs
     let pendingPRs: OverviewPR[] = [];
     if (prs === null) {
-      errors.prs = 'GitHub CLI unavailable — could not fetch PRs';
+      errors.prs = describeMissing(prsOutcome, 'PRs');
     } else {
       pendingPRs = prs.map(pr => ({
         id: String(pr.number),
@@ -964,7 +1207,7 @@ export class OverviewCache {
       ? new Map(issues.map(i => [String(i.number), parseArea(i.labels)]))
       : null;
     if (issues === null) {
-      errors.issues = 'GitHub CLI unavailable — could not fetch issues';
+      errors.issues = describeMissing(issuesOutcome, 'issues');
     } else {
       backlog = deriveBacklog(issues, workspaceRoot, activeBuilderIssues, prLinkedIssues);
 
@@ -1062,7 +1305,16 @@ export class OverviewCache {
     // has no view of the live terminal sessions. `handleOverview` (tower-routes.ts)
     // injects the real architect list via `liveArchitects` before serialization,
     // mirroring how it enriches `lastDataAt`.
-    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, queuedFeedback, feedbackMode };
+    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, queuedFeedback, feedbackMode, forgeStatus };
+    if (forgeResetAt) {
+      result.forgeResetAt = forgeResetAt;
+    }
+    // #1740: tell clients whether issue ids are numbers or tracker keys, so
+    // they can accept `ENG-123` input on Jira/Linear workspaces only.
+    const issueIdKind = issueIdKindFor(workspaceRoot);
+    if (issueIdKind) {
+      result.issueIdKind = issueIdKind;
+    }
     if (currentUser) {
       result.currentUser = currentUser;
     }
@@ -1073,14 +1325,14 @@ export class OverviewCache {
   }
 
   /**
-   * Invalidate all cached data.
+   * Mark the open lists (PRs, issues) stale. Porch, cleanup and the VS Code
+   * review queue call this after every mutation, so it is not a human signal
+   * (#1645): it never clears a suspension or a cached failure, never touches
+   * the search or identity caches, and a list is refetched for it at most once
+   * per `INVALIDATE_DEBOUNCE_MS` per workspace.
    */
   invalidate(): void {
-    this.prCache.clear();
-    this.issueCache.clear();
-    this.closedCache.clear();
-    this.mergedPRCache.clear();
-    this.currentUserCache.clear();
+    this.invalidatedAt = this.now();
     // Note: resolvedEnrichment is deliberately NOT cleared here. It must survive
     // invalidation so a cleanup-triggered refresh (which calls invalidate()) can
     // still fall back to a builder's resolved area instead of UNCATEGORIZED
@@ -1088,82 +1340,101 @@ export class OverviewCache {
   }
 
   // ===========================================================================
-  // Private cache helpers
+  // Private cache helpers (#1645)
   // ===========================================================================
 
-  private async fetchPRsCached(cwd: string): Promise<ForgePR[] | null> {
-    const now = Date.now();
-    const cached = this.prCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
-    }
-
-    const data = await fetchPRList(cwd);
-    if (data !== null) {
-      this.prCache.set(cwd, { data, fetchedAt: now });
-    }
-    return data;
-  }
-
-  private async fetchIssuesCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
-    const now = Date.now();
-    const cached = this.issueCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
-    }
-
-    const data = await fetchIssueList(cwd);
-    if (data !== null) {
-      this.issueCache.set(cwd, { data, fetchedAt: now });
-    }
-    return data;
-  }
-
   /**
-   * Resolve the current user's forge login via the `user-identity` concept.
-   * Long TTL — identity is stable for the lifetime of a Tower session.
-   * Only successful resolutions are cached, so a transient failure (gh
-   * logged out, offline) self-heals on the next overview poll.
+   * Serve `concept` for `cwd` from cache, or dispatch exactly one fetch.
+   * `listCache` entries additionally honour invalidate() (debounced).
    */
-  private async fetchCurrentUserCached(cwd: string): Promise<string | null> {
-    const now = Date.now();
-    const cached = this.currentUserCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.USER_TTL) {
-      return cached.data;
+  private cachedFetch<T>(
+    cache: Map<string, CacheEntry<T>>,
+    cwd: string,
+    concept: OverviewConcept,
+    ttl: number,
+    listCache: boolean,
+  ): Promise<FetchOutcome<T>> {
+    const now = this.now();
+    const backend = overviewBackend(concept, cwd);
+    const budget = backend === null ? null : budgetKeyFor(backend, concept);
+    const entry = cache.get(cwd);
+    const withinTtl = entry !== undefined && now < entry.expiresAt;
+    // Only a *positive* entry goes stale on invalidation: a refresh means "my
+    // data may be stale", never "the forge has recovered".
+    const invalidated = listCache && entry !== undefined && entry.data !== null
+      && entry.fetchedAt < this.invalidatedAt && now - entry.fetchedAt >= INVALIDATE_DEBOUNCE_MS;
+    const rateLimitedUntil = budget === null ? null : this.limiter.resetAt(budget, now);
+
+    if (withinTtl && !invalidated) {
+      return Promise.resolve({ data: entry.data, rateLimitedUntil, backend });
+    }
+    if (rateLimitedUntil !== null) {
+      // Suspended: a list still inside its TTL is served stale; an expired one is empty.
+      return Promise.resolve({ data: withinTtl ? entry.data : null, rateLimitedUntil, backend });
+    }
+    if (backend === null || budget === null) {
+      return Promise.resolve({ data: null, rateLimitedUntil: null, backend: null });
     }
 
-    const login = await fetchCurrentUser(cwd);
-    if (login !== null) {
-      this.currentUserCache.set(cwd, { data: login, fetchedAt: now });
-    }
-    return login;
+    const key = `${cwd}:${concept}`;
+    const existing = this.inflight.get(key);
+    if (existing) return existing as Promise<FetchOutcome<T>>;
+    const flight = this.dispatch(cache, cwd, concept, ttl, backend, budget).finally(() => {
+      // Identity check: a settling flight must never unregister a newer one.
+      if (this.inflight.get(key) === flight) this.inflight.delete(key);
+    });
+    this.inflight.set(key, flight as Promise<FetchOutcome<unknown>>);
+    return flight;
   }
 
-  private async fetchRecentlyClosedCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
-    const now = Date.now();
-    const cached = this.closedCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
+  /** Run the concept once and record the outcome. Never rejects. */
+  private async dispatch<T>(
+    cache: Map<string, CacheEntry<T>>,
+    cwd: string,
+    concept: OverviewConcept,
+    ttl: number,
+    backend: string,
+    budget: string,
+  ): Promise<FetchOutcome<T>> {
+    const dispatchedAt = this.now();
+    let data: T | null = null;
+    let errorText: string | null = null;
+    try {
+      const result = await fetchForOverview(concept, cwd);
+      data = result.data as T | null;
+      if (result.error) errorText = `${result.error.stderr}\n${result.error.message}`;
+      else if (data === null) errorText = '';
+    } catch (err) {
+      errorText = err instanceof Error ? err.message : String(err);
     }
-
-    const data = await fetchRecentlyClosed(cwd);
-    if (data !== null) {
-      this.closedCache.set(cwd, { data, fetchedAt: now });
+    const now = this.now();
+    if (errorText !== null) {
+      const suspended = this.limiter.noteFailure(budget, backend, cwd, errorText, now);
+      cache.set(cwd, { data: null, fetchedAt: dispatchedAt, expiresAt: now + this.failureWindow(`${cwd}:${budget}`, now) });
+      return { data: null, rateLimitedUntil: suspended ? this.limiter.resetAt(budget, now) : null, backend };
     }
-    return data;
+    this.limiter.noteSuccess(budget, dispatchedAt);
+    this.failureWindows.delete(`${cwd}:${budget}`);
+    cache.set(cwd, { data, fetchedAt: dispatchedAt, expiresAt: now + ttl });
+    return { data, rateLimitedUntil: null, backend };
   }
 
-  private async fetchMergedPRsCached(cwd: string): Promise<ForgePR[] | null> {
-    const now = Date.now();
-    const cached = this.mergedPRCache.get(cwd);
-    if (cached && (now - cached.fetchedAt) < this.TTL) {
-      return cached.data;
-    }
-
-    const data = await fetchRecentMergedPRs(cwd);
-    if (data !== null) {
-      this.mergedPRCache.set(cwd, { data, fetchedAt: now });
-    }
-    return data;
+  /** Current failure window for a key; escalates once per elapsed window, not per failure. */
+  private failureWindow(key: string, now: number): number {
+    const w = this.failureWindows.get(key);
+    if (w && now < w.startedAt + w.ttl) return w.ttl;
+    const level = w ? w.level + 1 : 0;
+    const ttl = Math.min(FAILURE_WINDOW_MIN_MS * 2 ** level, FAILURE_WINDOW_MAX_MS);
+    this.failureWindows.set(key, { level, startedAt: now, ttl });
+    return ttl;
   }
+}
+
+/** Degraded-mode text naming the real reason and the real backend (never "GitHub" on GitLab). */
+function describeMissing(outcome: FetchOutcome<unknown>, what: string): string {
+  if (outcome.rateLimitedUntil !== null) {
+    return `${outcome.backend} rate limited until ${new Date(outcome.rateLimitedUntil).toISOString()} — ${what} unavailable`;
+  }
+  if (outcome.backend === null) return `forge concept disabled — ${what} unavailable`;
+  return `${outcome.backend} CLI unavailable — could not fetch ${what}`;
 }

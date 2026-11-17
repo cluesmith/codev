@@ -76,6 +76,10 @@ function harness(): Harness {
       id: 'term-1584',
       bytesWritten: 7,
       lastDataAt: NOW - 10_000,
+      // Issue #1473 input signals: no input has ever reached this fake, so the counter is 0
+      // and the timestamp reads as settled from birth (`now - 0` is far past the interval).
+      inputSeq: 0,
+      lastInputAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -95,6 +99,9 @@ function harness(): Harness {
       getSessionForAgent: () => h.session,
       resolveProfile: () => PROFILE,
       classify: () => Promise.resolve(CLEAN),
+      // Issue #1664: a composer that never moves, so these tests keep asserting what they were
+      // written for (the classify verdict, the settle, the lock) rather than region stability.
+      composerFingerprint: () => 'composer',
       writeMessage: (_s, formattedMessage, _noEnter, precheck): WriteResult => {
         const abort: WriteAbort | null = precheck();
         if (abort) return { status: 'aborted', abort };
@@ -146,7 +153,9 @@ describe('#1584 a completed write is never re-written', () => {
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out).toEqual({ delivered: [row.id], reason: null, verified: false });
+    // Issue #1473 added `unverifiedCause`, which names WHICH flag this is — here `no-echo`,
+    // distinct from the `input-raced` case where the header did land and the tail did not.
+    expect(out).toEqual({ delivered: [row.id], reason: null, verified: false, unverifiedCause: 'no-echo' });
     expect(h.writes).toEqual([FORMATTED]);
     const stored = mailbox.getById(db, row.id);
     expect(stored?.status).toBe('delivered');
@@ -261,7 +270,9 @@ describe('#1584 a completed write is never re-written', () => {
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out).toEqual({ delivered: [row.id], reason: null, verified: false });
+    // Issue #1473 added `unverifiedCause`, which names WHICH flag this is — here `no-echo`,
+    // distinct from the `input-raced` case where the header did land and the tail did not.
+    expect(out).toEqual({ delivered: [row.id], reason: null, verified: false, unverifiedCause: 'no-echo' });
     const stored = mailbox.getById(db, row.id);
     expect(stored?.status).toBe('delivered');
     expect(stored?.escalated).toBe(1);
@@ -285,7 +296,9 @@ describe('#1584 a completed write is never re-written', () => {
     await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
     expect(h.notices).toEqual([
-      { workspacePath: '/ws/a', toAgent: 'spir-1', mailboxId: row.id, terminalId: 'term-1584' },
+      // `cause` (Issue #1473) is what lets the notification say the right thing: 'its header
+      // never appeared' is a false statement about an input-raced delivery.
+      { workspacePath: '/ws/a', toAgent: 'spir-1', mailboxId: row.id, terminalId: 'term-1584', cause: 'no-echo' },
     ]);
     expect(mailbox.heldSummaryForWorkspace(db, '/ws/a', NOW).total).toBe(0);
   });

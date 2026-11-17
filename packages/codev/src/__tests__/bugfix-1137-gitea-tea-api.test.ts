@@ -297,6 +297,19 @@ function hasJq(): boolean {
 
 const jqAvailable = hasJq();
 
+/**
+ * Budget for the 100-page walks (several hundred sequential `sh`, fake-`tea` and
+ * jq processes). Git Bash on native Windows emulates fork, so each process
+ * costs several times what it does on Linux or macOS: the walks measured 33s
+ * and 36s on a Windows runner against the POSIX-sized 30s.
+ */
+function pageCeilingBudgetMs(): number {
+  if (process.platform === 'win32') {
+    return 120_000;
+  }
+  return 30_000;
+}
+
 /** Run a gitea forge script under the fake `tea`, return trimmed stdout. */
 function runScript(name: string, env: Record<string, string> = {}): string {
   return execFileSync('sh', [join(giteaDir, name)], {
@@ -607,7 +620,7 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
     expect(stdout.trim()).toBe('');
     expect(stderr).toContain('page ceiling');
     // 100 sequential fake-`tea` + jq invocations; the default 5s is too tight.
-  }, 30_000);
+  }, pageCeilingBudgetMs());
 
   it('pr-view fails with the server message on an error body (not an all-null PR)', () => {
     // `tea api` exits 0 and prints the error body. Unvalidated, that produced a
@@ -764,7 +777,7 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
     // complete result.
     const list = JSON.parse(runScript('pr-list.sh', { CODEV_REPO: 'acme/exact' }));
     expect(list).toHaveLength(500); // 100 pages x 5
-  }, 30_000);
+  }, pageCeilingBudgetMs());
 
   it('the stop filter handles pages larger than the Linux per-argument cap', () => {
     // Each page here is ~150KB, past Linux MAX_ARG_STRLEN (128KiB) — the cap on

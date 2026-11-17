@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev",
-  "version": "3.3.2",
+  "version": "3.3.7",
   "description": "Codev CLI - AI-assisted software development framework",
   "type": "module",
   "bin": {
@@ -18,15 +18,19 @@
     "templates",
     "dashboard-dist",
     "scripts/forge",
-    "scripts/postinstall.mjs"
+    "scripts/postinstall.mjs",
+    "scripts/preinstall.mjs",
+    "scripts/native-deps-guard.mjs",
+    "ide-extension"
   ],
   "scripts": {
     "clean": "rm -rf dist",
     "build": "pnpm --filter \"@cluesmith/codev^...\" build && pnpm clean && tsc && pnpm bundle-assets",
-    "bundle-assets": "pnpm copy-dashboard && pnpm copy-skeleton && node ./scripts/copy-three.mjs",
+    "bundle-assets": "pnpm copy-dashboard && pnpm copy-skeleton && node ./scripts/copy-three.mjs && node ./scripts/build-ide-extension.mjs",
     "copy-dashboard": "rm -rf dashboard-dist && cp -r ../../apps/web/dist dashboard-dist",
     "dev:dashboard": "cd ../../apps/web && pnpm dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
+    "generate-skill-hashes": "tsx scripts/generate-shipped-skill-hashes.mts",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest",
@@ -34,16 +38,16 @@
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
     "test:e2e:playwright": "pnpm exec playwright test",
     "test:e2e:cli": "pnpm build && vitest run --config vitest.cli.config.ts",
+    "preinstall": "node ./scripts/preinstall.mjs",
     "postinstall": "node ./scripts/postinstall.mjs",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.41",
     "@cluesmith/codev-core": "workspace:*",
     "@cluesmith/codev-sdk": "workspace:*",
     "@cluesmith/codev-types": "workspace:*",
     "@google/genai": "^1.0.0",
-    "@openai/codex-sdk": "^0.146.0",
+    "@openai/codex-sdk": "^0.167.0",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
     "better-sqlite3": "^12.10.0",
@@ -53,7 +57,6 @@
     "js-yaml": "^4.1.0",
     "node-pty": "^1.1.0",
     "open": "^10.1.0",
-    "tree-kill": "^1.2.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {

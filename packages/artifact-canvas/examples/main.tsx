@@ -11,6 +11,8 @@
  *   ?fixture=columns          load the columns fixture document instead of the sample
  *   ?mode=horizontal          seed `initialReadingMode` (any other value exercises coercion)
  *   ?height=unbounded         omit the bounded-height container (self-bounding assertion)
+ *   ?highlight=<style>        seed the hover reading aid (#1802): none | word | wordLine | wordLineParagraph | line | lineParagraph
+ *   ?cursor=<cursor>          seed the prose cursor (#1802): arrow | iBeam | hand
  * Default (no params) is the classic hands-on page, unchanged.
  *
  * Remote commands (spec 1401): the page wires a `CommandAdapter` to `window.__canvasCommand`,
@@ -22,6 +24,8 @@ import { createRoot } from 'react-dom/client';
 import { ArtifactCanvas } from '../src/components/ArtifactCanvas.js';
 import type { CommandAdapter } from '../src/adapters/CommandAdapter.js';
 import type { CanvasCommand } from '@cluesmith/codev-types';
+import type { HoverHighlightStyle, ReadingCursor } from '../src/types.js';
+import { parseHighlightStyle, parseReadingCursor } from '../src/components/hover-word.js';
 import { createStubHost, stubEditMarker, stubDeleteMarker } from '../src/__tests__/fixtures/stub-adapters.js';
 import { SAMPLE_ARTIFACT } from '../src/__tests__/fixtures/sample-artifact.js';
 import { COLUMNS_FIXTURE } from '../src/__tests__/fixtures/columns-fixture.js';
@@ -83,6 +87,12 @@ function Example(): React.ReactElement {
   // opaque to this page beyond one equality check for its own chrome. The production host
   // (VS Code webview) is mode-invariant full-viewport and carries no such state.
   const [mode, setMode] = React.useState<string>(initialReadingMode() ?? 'vertical');
+  // Reading aids (#1802): seeded from the URL (the Playwright suite drives them there), switchable
+  // from the header selects for hands-on comparison.
+  const [highlight, setHighlight] = React.useState<HoverHighlightStyle>(
+    parseHighlightStyle(params.get('highlight') ?? undefined),
+  );
+  const [cursor, setCursor] = React.useState<ReadingCursor>(parseReadingCursor(params.get('cursor') ?? undefined));
   const onAddComment = (line: number, text: string) => {
     // Host glue (spec D6): the canvas's inline composer (#1107) collects the body and passes it
     // here; the host just writes it back. (Pre-#1107 this used window.prompt for the input.)
@@ -102,6 +112,8 @@ function Example(): React.ReactElement {
     onDeleteComment: (markerLine: number, expectedAuthor: string, expectedBodyPrefix: string) =>
       stubDeleteMarker(host.store, markerLine, expectedAuthor, expectedBodyPrefix),
     commandAdapter,
+    hoverHighlight: highlight,
+    readingCursor: cursor,
     initialReadingMode: mode,
     onReadingModeChange: (next: string) => {
       setMode(next);
@@ -144,6 +156,44 @@ function Example(): React.ReactElement {
         'p',
         { style: { color: '#6e7781' } },
         'Hover a block for the + affordance (or focus it and press Enter). Comments round-trip through text.',
+      ),
+      React.createElement(
+        'p',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Highlight ',
+          React.createElement(
+            'select',
+            {
+              value: highlight,
+              onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setHighlight(parseHighlightStyle(e.target.value)),
+            },
+            React.createElement('option', { value: 'none' }, 'None'),
+            React.createElement('option', { value: 'word' }, 'Word'),
+            React.createElement('option', { value: 'wordLine' }, 'Word and line'),
+            React.createElement('option', { value: 'wordLineParagraph' }, 'Word, line and paragraph'),
+            React.createElement('option', { value: 'line' }, 'Line'),
+            React.createElement('option', { value: 'lineParagraph' }, 'Line and paragraph'),
+          ),
+        ),
+        ' ',
+        React.createElement(
+          'label',
+          null,
+          'Cursor ',
+          React.createElement(
+            'select',
+            {
+              value: cursor,
+              onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setCursor(parseReadingCursor(e.target.value)),
+            },
+            React.createElement('option', { value: 'arrow' }, 'Arrow'),
+            React.createElement('option', { value: 'iBeam' }, 'I-beam'),
+            React.createElement('option', { value: 'hand' }, 'Hand'),
+          ),
+        ),
       ),
     ),
     canvas,

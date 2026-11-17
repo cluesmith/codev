@@ -6,10 +6,10 @@
  * xterm.js has multiple code paths (keydown, compositionend, input event)
  * that can each fire onData for the same keystroke, causing duplicates.
  *
- * The fix uses two complementary dedup triggers:
- * 1. Composition event tracking — dedup during/after IME composition
- * 2. Touch device detection via pointer:coarse — always-on dedup for
- *    soft keyboard devices (catches iPads which report desktop UA)
+ * The guard drops an exact repeat during or just after an IME composition.
+ * It was also always on for touch devices (pointer: coarse). Since the IME
+ * bridge (#1883) owns soft-keyboard text on touch devices, that arm only
+ * dropped real repeats from hardware keys (Issue #1886), and is gone.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
@@ -228,6 +228,20 @@ describe('Terminal IME deduplication (Issue #253, #517)', () => {
     expect(frames).toHaveLength(2);
   });
 
+  it('deduplicates a doubled period from an IME composition (Issue #517)', () => {
+    const onData = renderAndGetOnData();
+
+    // Simulate typing "todo." where the period gets duplicated
+    fireComposition('compositionstart');
+    fireComposition('compositionend', '.');
+    onData('.');
+    onData('.'); // duplicate from xterm double-fire
+
+    const frames = getDataFrames();
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toBe('.');
+  });
+
   it('deduplicates Enter key during IME composition', () => {
     const onData = renderAndGetOnData();
 
@@ -242,7 +256,7 @@ describe('Terminal IME deduplication (Issue #253, #517)', () => {
   });
 });
 
-describe('Terminal touch device dedup — iPad fix (Issue #517)', () => {
+describe('Terminal on a touch device: hardware keys are never deduplicated (Issue #1886)', () => {
   beforeEach(() => {
     capturedOnData = null;
     mockTextarea = document.createElement('textarea');
@@ -263,58 +277,32 @@ describe('Terminal touch device dedup — iPad fix (Issue #517)', () => {
     return capturedOnData!;
   }
 
-  it('deduplicates on touch device even without composition events', () => {
+  // Issue #1886: with the IME bridge (#1883) owning soft-keyboard text, what
+  // reaches onData outside a composition on a touch device is hardware keys,
+  // paste and terminal replies. A repeat among those is the user's.
+  it('sends fast double letters from a hardware keyboard', () => {
     const onData = renderAndGetOnData();
 
-    // No composition events fired, but touch device dedup is always active.
-    // This catches delayed duplicates that arrive after the composition window.
-    onData('t');
-    onData('t'); // duplicate
+    for (const key of ['h', 'e', 'l', 'l', 'o']) onData(key);
 
-    const frames = getDataFrames();
-    expect(frames).toHaveLength(1);
-    expect(frames[0]).toBe('t');
+    expect(getDataFrames()).toEqual(['h', 'e', 'l', 'l', 'o']);
   });
 
-  it('allows different characters on touch device', () => {
+  it('sends every repeat of a held key (Backspace, arrows)', () => {
     const onData = renderAndGetOnData();
 
-    onData('h');
-    onData('e');
-    onData('l');
-    onData('l');
+    for (let i = 0; i < 4; i++) onData('\x7f');
+    for (let i = 0; i < 3; i++) onData('\x1b[B');
 
-    // 'h', 'e', 'l' are different → all sent. Second 'l' is same → deduped.
-    // But wait — the second 'l' IS intentional (spelling "hell").
-    // However since they arrive in the same tick (< 150ms), the dedup
-    // suppresses it. On a real device, the second 'l' would come from
-    // a new composition cycle with enough time between.
-    const frames = getDataFrames();
-    expect(frames).toHaveLength(3); // h, e, l (second l deduped)
+    expect(getDataFrames()).toEqual(['\x7f', '\x7f', '\x7f', '\x7f', '\x1b[B', '\x1b[B', '\x1b[B']);
   });
 
-  it('allows same character after 150ms on touch device', () => {
+  it('sends Enter pressed twice quickly', () => {
     const onData = renderAndGetOnData();
 
-    onData('l');
-    vi.advanceTimersByTime(200);
-    onData('l'); // intentional repeat — enough time has passed
+    onData('\r');
+    onData('\r');
 
-    const frames = getDataFrames();
-    expect(frames).toHaveLength(2);
-  });
-
-  it('deduplicates period on touch device (Issue #517 extra period)', () => {
-    const onData = renderAndGetOnData();
-
-    // Simulate typing "todo." where the period gets duplicated
-    fireComposition('compositionstart');
-    fireComposition('compositionend', '.');
-    onData('.');
-    onData('.'); // duplicate from xterm double-fire
-
-    const frames = getDataFrames();
-    expect(frames).toHaveLength(1);
-    expect(frames[0]).toBe('.');
+    expect(getDataFrames()).toEqual(['\r', '\r']);
   });
 });

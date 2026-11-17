@@ -16,6 +16,7 @@ import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
 import { AnalyticsView } from './AnalyticsView.js';
 import { TeamView } from './TeamView.js';
+import { DecisionsView } from './DecisionsView.js';
 
 
 /** Spec 443: Build the overview title string with optional hostname. */
@@ -196,6 +197,12 @@ export function App() {
         {state?.teamEnabled && (
           <div style={{ display: activeTab?.type === 'team' ? undefined : 'none', height: '100%' }}>
             <TeamView isActive={activeTab?.type === 'team'} />
+          </div>
+        )}
+        {/* Spec 1819: mounted for as long as the tab exists, so drafts survive tab switches. */}
+        {tabs.some(t => t.type === 'decisions') && (
+          <div style={{ display: activeTab?.type === 'decisions' ? undefined : 'none', height: '100%' }}>
+            <DecisionsView isActive={activeTab?.type === 'decisions'} />
           </div>
         )}
         {activeTab?.type === 'file' && renderAnnotation(activeTab)}

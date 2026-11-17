@@ -1,0 +1,17 @@
+id: bugfix-1877
+title: tower-keeps-a-dead-shellper-ro
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-11-04T16:41:24.116Z'
+    approved_at: '2026-11-06T04:52:37.005Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-04T16:26:23.764Z'
+updated_at: '2026-11-06T04:52:45.092Z'
+pr_ready_for_human: false

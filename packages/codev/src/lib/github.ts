@@ -9,10 +9,13 @@
  * @see codev/specs/589-non-github-repository-support.md
  */
 
+import { execFile } from 'node:child_process';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
-import { executeForgeCommand, type ForgeConfig } from './forge.js';
+import { executeForgeCommand, executeForgeCommandDetailed, resolveForgeBackend, type ForgeConfig, type ForgeCommandResult } from './forge.js';
+import type { RateLimitProbeResult } from './forge-rate-limit.js';
 import { getRepoInfo } from './team-github.js';
 import type { IssueViewResult, PrListItem, PrViewResult, IssueListItem } from './forge-contracts.js';
+import { ISSUE_KEY_SOURCE, canonicalIssueId } from './issue-id.js';
 
 // =============================================================================
 // Types — re-export forge-contracts types under generic names
@@ -200,20 +203,28 @@ export async function fetchRecentlyClosed(
   // entire sinceDate day, collapsing the 24h window to "since UTC midnight"
   // (≈0h just after 00:00Z) and silently hiding genuinely-recent closures.
   // Seconds precision (no millis) matches GitHub's documented format.
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    .toISOString().replace(/\.\d{3}Z$/, 'Z');
   const result = await executeForgeCommand('recently-closed', {
-    CODEV_SINCE_DATE: since,
+    CODEV_SINCE_DATE: sinceTimestamp24h(),
   }, {
     cwd,
     forgeConfig,
   });
-  if (!result || !Array.isArray(result)) return result as ForgeIssueListItem[] | null;
+  return withinLast24h(result, 'closedAt') as ForgeIssueListItem[] | null;
+}
 
-  // Filter to last 24 hours (concept command may return more)
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return (result as ForgeIssueListItem[]).filter(
-    i => i.closedAt && new Date(i.closedAt).getTime() >= cutoff,
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** ISO-8601 at seconds precision, 24 h ago (GitHub's documented datetime format). */
+function sinceTimestamp24h(): string {
+  return new Date(Date.now() - DAY_MS).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+/** Filter concept output to the last 24 hours (a concept command may return more). */
+function withinLast24h(result: unknown, field: 'closedAt' | 'mergedAt'): unknown {
+  if (!result || !Array.isArray(result)) return result;
+  const cutoff = Date.now() - DAY_MS;
+  return (result as Array<Record<string, string | undefined>>).filter(
+    item => item[field] && new Date(item[field] as string).getTime() >= cutoff,
   );
 }
 
@@ -229,21 +240,62 @@ export async function fetchRecentMergedPRs(
   // Full ISO-8601 timestamp (seconds precision), not a bare date — same
   // GitHub bare-date `>` day-exclusion bug as fetchRecentlyClosed.
   // `merged:>$CODEV_SINCE_DATE` against a precise timestamp is exact.
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    .toISOString().replace(/\.\d{3}Z$/, 'Z');
   const result = await executeForgeCommand('recently-merged', {
-    CODEV_SINCE_DATE: since,
+    CODEV_SINCE_DATE: sinceTimestamp24h(),
   }, {
     cwd,
     forgeConfig,
   });
-  if (!result || !Array.isArray(result)) return result as ForgePR[] | null;
+  return withinLast24h(result, 'mergedAt') as ForgePR[] | null;
+}
 
-  // Filter to last 24 hours (concept command may return more)
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return (result as ForgePR[]).filter(
-    pr => pr.mergedAt && new Date(pr.mergedAt).getTime() >= cutoff,
-  );
+// =============================================================================
+// Overview fetches (#1645) — keep the failure so the cache can tell a rate
+// limit from a missing CLI, and know which backend each concept spends on.
+// =============================================================================
+
+export type OverviewConcept = 'pr-list' | 'issue-list' | 'recently-closed' | 'recently-merged' | 'user-identity';
+
+/** Resolved backend key for an overview concept in `cwd` (see `resolveForgeBackend`). */
+export function overviewBackend(concept: OverviewConcept, cwd: string): string | null {
+  return resolveForgeBackend(concept, { cwd });
+}
+
+/** Run one overview concept, post-processed exactly like its `fetch*` counterpart. */
+export async function fetchForOverview(concept: OverviewConcept, cwd: string): Promise<ForgeCommandResult> {
+  switch (concept) {
+    case 'user-identity': {
+      const r = await executeForgeCommandDetailed(concept, {}, { cwd, raw: true });
+      return { ...r, data: typeof r.data === 'string' && r.data.trim() ? r.data.trim() : null };
+    }
+    case 'recently-closed':
+    case 'recently-merged': {
+      const r = await executeForgeCommandDetailed(concept, { CODEV_SINCE_DATE: sinceTimestamp24h() }, { cwd });
+      return { ...r, data: withinLast24h(r.data, concept === 'recently-closed' ? 'closedAt' : 'mergedAt') };
+    }
+    default:
+      return executeForgeCommandDetailed(concept, {}, { cwd });
+  }
+}
+
+/**
+ * Ask gh for the GraphQL bucket's reset instant. `gh api rate_limit` is free
+ * (it spends no quota) but is known to misreport a healthy bucket, so callers
+ * only trust it when it agrees the budget is gone (`remaining === 0`).
+ */
+export function probeGhGraphqlRateLimit(_backend: string, cwd: string): Promise<RateLimitProbeResult | null> {
+  return new Promise(resolvePromise => {
+    execFile('gh', ['api', 'rate_limit', '--jq', '.resources.graphql'], { cwd, timeout: 15_000 }, (err, stdout) => {
+      if (err) return resolvePromise(null);
+      try {
+        const parsed = JSON.parse(stdout) as { remaining?: unknown; reset?: unknown };
+        if (typeof parsed.remaining !== 'number' || typeof parsed.reset !== 'number') return resolvePromise(null);
+        resolvePromise({ remaining: parsed.remaining, resetAt: parsed.reset * 1000 });
+      } catch {
+        resolvePromise(null);
+      }
+    });
+  });
 }
 
 // =============================================================================
@@ -438,6 +490,9 @@ export function parseLinkedIssue(prBody: string, prTitle: string): string | null
   // Check PR title for [Spec N] or [Bugfix #N] patterns
   const specPattern = /\[Spec\s+#?(\d+)\]/i;
   const bugfixPattern = /\[Bugfix\s+#?(\d+)\]/i;
+  // [PIR #N] (#1740): the PIR commit tag, matched like the other two, so PIR
+  // links the same way whether its id is a number or a tracker key.
+  const pirPattern = /\[PIR\s+#?(\d+)\]/i;
 
   const titleSpecMatch = prTitle.match(specPattern);
   if (titleSpecMatch) {
@@ -460,8 +515,36 @@ export function parseLinkedIssue(prBody: string, prTitle: string): string | null
     return String(Number(bodyBugfixMatch[1]));
   }
 
+  const pirMatch = prTitle.match(pirPattern) ?? prBody.match(pirPattern);
+  if (pirMatch) {
+    return String(Number(pirMatch[1]));
+  }
+
+  // Tracker keys (#1740), only inside codev's bracketed tags, checked after
+  // every numeric form so a numeric PR links exactly as before.
+  const keyMatch = prTitle.match(TAGGED_KEY) ?? prBody.match(TAGGED_KEY)
+    ?? prBody.match(CLOSING_KEY) ?? prTitle.match(CLOSING_KEY);
+  if (keyMatch) {
+    return canonicalIssueId(keyMatch[1]);
+  }
+
   return null;
 }
+
+/**
+ * A tracker key in a codev commit/PR tag: `[Spec ENG-1]`, `[Bugfix #ENG-1]`,
+ * `[PIR #ENG-1]`. Bare `ABC-123` tokens in free text are never matched: they
+ * are as often `UTF-8` or `ISO-8601` as an issue.
+ */
+const TAGGED_KEY = new RegExp(`\\[(?:Spec|Bugfix|PIR)\\s+#?(${ISSUE_KEY_SOURCE})\\]`, 'i');
+
+/**
+ * A closing keyword on a `#`-prefixed key: `Fixes #ENG-1` (the BUGFIX/PIR PR
+ * body) and `Fix #ENG-1: …` (the BUGFIX PR title). The `#` is required, so
+ * `Closes ENG-1` stays inert. On GitHub these never close a tracker issue;
+ * they only link the PR to it in codev's views.
+ */
+const CLOSING_KEY = new RegExp(`(?:fix(?:es)?|close[sd]?|resolve[sd]?)\\s+#(${ISSUE_KEY_SOURCE})\\b`, 'i');
 
 /**
  * Parse ALL linked issue numbers from a PR body and title.
@@ -492,6 +575,18 @@ export function parseAllLinkedIssues(prBody: string, prTitle: string): string[] 
   const bugfixPattern = /\[Bugfix\s+#?(\d+)\]/gi;
   for (const m of combined.matchAll(bugfixPattern)) {
     issues.add(String(Number(m[1])));
+  }
+
+  const pirPattern = /\[PIR\s+#?(\d+)\]/gi;
+  for (const m of combined.matchAll(pirPattern)) {
+    issues.add(String(Number(m[1])));
+  }
+
+  // Tracker keys in codev tags and after closing keywords (#1740)
+  for (const pattern of [TAGGED_KEY, CLOSING_KEY]) {
+    for (const m of combined.matchAll(new RegExp(pattern.source, 'gi'))) {
+      issues.add(canonicalIssueId(m[1]));
+    }
   }
 
   return [...issues];

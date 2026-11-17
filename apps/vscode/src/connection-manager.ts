@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { TowerClient } from '@cluesmith/codev-sdk/tower-client';
 import { backoffDelayMs } from '@cluesmith/codev-sdk/reconnect-policy';
 import { AuthWrapper } from './auth-wrapper.js';
-import { detectWorkspacePath, getTowerAddress } from './workspace-detector.js';
+import { detectWorkspace, towerWorkspacePath, getTowerAddress, type DetectedWorkspace } from './workspace-detector.js';
 import { SSEClient } from './sse-client.js';
 import { autoStartTower } from './tower-starter.js';
 
@@ -20,6 +20,7 @@ export class ConnectionManager {
   private auth: AuthWrapper;
   private outputChannel: vscode.OutputChannel;
   private workspacePath: string | null = null;
+  private detected: DetectedWorkspace | null = null;
   private sse: SSEClient | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
@@ -45,8 +46,23 @@ export class ConnectionManager {
     return this.state;
   }
 
+  /**
+   * The workspace path used for every Tower call. In a builder-worktree window
+   * this is the PARENT root (#1809): the window attaches read-only to it.
+   */
   getWorkspacePath(): string | null {
     return this.workspacePath;
+  }
+
+  /** The builder worktree this window is rooted at, or null (#1809). */
+  getBuilderWorktree(): { builderId: string; worktreePath: string } | null {
+    if (this.detected?.kind !== 'builder-worktree') { return null; }
+    return { builderId: this.detected.builderId, worktreePath: this.detected.path };
+  }
+
+  /** The folder this window is rooted at: the worktree in a worktree window. */
+  getWindowRoot(): string | null {
+    return this.detected?.path ?? null;
   }
 
   getClient(): TowerClient | null {
@@ -61,8 +77,12 @@ export class ConnectionManager {
     await this.auth.initialize();
 
     // Detect workspace
-    this.workspacePath = detectWorkspacePath();
-    if (this.workspacePath) {
+    this.detected = detectWorkspace();
+    this.workspacePath = towerWorkspacePath(this.detected);
+    const worktree = this.getBuilderWorktree();
+    if (worktree) {
+      this.log('INFO', `Builder worktree window (${worktree.worktreePath}): attached read-only to ${this.workspacePath}; not activating`);
+    } else if (this.workspacePath) {
       this.log('INFO', `Workspace detected: ${this.workspacePath}`);
     } else {
       this.log('WARN', 'No Codev workspace detected');
@@ -82,7 +102,7 @@ export class ConnectionManager {
     if (autoConnect) {
       // Try connecting; if Tower isn't running, try auto-start
       await this.connect();
-      if (this.state !== 'connected' && config.get<boolean>('autoStartTower', true)) {
+      if (this.state !== 'connected' && this.mayAutoStartTower(config)) {
         // A failed connect() will have scheduled a backoff retry; cancel it so the
         // explicit auto-start path isn't racing the timer.
         if (this.reconnectTimer) {
@@ -155,7 +175,7 @@ export class ConnectionManager {
     this.log('INFO', 'Manual reconnect requested');
 
     const config = vscode.workspace.getConfiguration('codev');
-    if (config.get<boolean>('autoStartTower', true) && this.client && !this.autoStartInFlight) {
+    if (this.mayAutoStartTower(config) && this.client && !this.autoStartInFlight) {
       this.autoStartInFlight = true;
       try {
         await autoStartTower(this.client, this.workspacePath, this.outputChannel);
@@ -201,10 +221,23 @@ export class ConnectionManager {
     }
   }
 
+  /**
+   * A builder-worktree window never starts Tower (#1809): it only attaches to
+   * one that is already running.
+   */
+  private mayAutoStartTower(config: vscode.WorkspaceConfiguration): boolean {
+    if (this.getBuilderWorktree()) { return false; }
+    return config.get<boolean>('autoStartTower', true);
+  }
+
   // ── Workspace Activation ──────────────────────────────────────
 
   private async activateWorkspace(): Promise<void> {
     if (!this.client || !this.workspacePath) { return; }
+    // #1809: Codev never activates inside a builder worktree, and a worktree
+    // window does not activate its parent either (that would spawn the
+    // parent's architect as a side effect of opening a worktree).
+    if (this.getBuilderWorktree()) { return; }
     try {
       const result = await this.client.activateWorkspace(this.workspacePath);
       if (result.ok) {

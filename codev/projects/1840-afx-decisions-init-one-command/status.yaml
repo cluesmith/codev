@@ -1,0 +1,17 @@
+id: '1840'
+title: afx-decisions-init-one-command
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-10-19T17:35:05.884Z'
+    approved_at: '2026-10-19T18:32:28.632Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-19T17:21:36.050Z'
+updated_at: '2026-10-19T18:32:28.633Z'
+pr_ready_for_human: false

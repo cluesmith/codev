@@ -1,0 +1,326 @@
+{
+  "scenario": "draft",
+  "tuiVersion": "2.1.266 (Claude Code)",
+  "results": [
+    {
+      "n": 1,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 3509,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 2,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2408,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 3,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2462,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 4,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2313,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 5,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2467,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 6,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2512,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 7,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2498,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 8,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2461,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 9,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2438,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 10,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2301,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 11,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2542,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 12,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2489,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 13,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2346,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 14,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2363,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 15,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2382,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 16,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2485,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 17,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2461,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 18,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2356,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 19,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2219,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    },
+    {
+      "n": 20,
+      "scenario": "draft",
+      "deliveredAfterMs": null,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 2348,
+      "verdicts": [
+        "busy:user-text"
+      ],
+      "outputChunksDuringWait": 1,
+      "headRendered": false,
+      "tailRendered": false,
+      "composerClearedAfter": true,
+      "turnRunning": true,
+      "verdict": "held"
+    }
+  ]
+}

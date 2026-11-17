@@ -58,3 +58,17 @@ describe('BacklogList assignee rendering', () => {
     expect(screen.getByText('a: none')).toBeInTheDocument();
   });
 });
+
+describe('BacklogList tracker-key items (#1740)', () => {
+  it('renders an item without createdAt with no NaN age, and its key without #', () => {
+    const { container } = render(<BacklogList items={[makeItem({ id: 'ENG-12', title: 'Jira item', createdAt: undefined })]} />);
+    expect(container.textContent).not.toContain('NaN');
+    expect(container.querySelector('.backlog-row-age')?.textContent).toBe('');
+    expect(screen.getByText('ENG-12')).toBeInTheDocument();
+  });
+
+  it('keeps # on numeric ids', () => {
+    render(<BacklogList items={[makeItem({ id: '42', title: 'GitHub item' })]} />);
+    expect(screen.getByText('#42')).toBeInTheDocument();
+  });
+});

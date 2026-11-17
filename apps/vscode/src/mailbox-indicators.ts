@@ -13,6 +13,7 @@
 
 import * as path from 'node:path';
 import type { MailboxEscalationPayload } from '@cluesmith/codev-types';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /**
  * Status-bar segment for held mail, e.g. ` · $(mail) 2 held`. Returns the empty
@@ -81,21 +82,50 @@ export function composeStatusBarText(
 }
 
 /**
+ * Spec 1595: tooltip clause naming the architects waiting on the user (at a
+ * prompt, or with their agent dead), e.g. `architect main waiting on input` or
+ * `architects main, ob waiting on input`. Empty string when none are.
+ */
+export function architectTooltipClause(architectNames: readonly string[]): string {
+  if (architectNames.length === 0) {
+    return '';
+  }
+  if (architectNames.length === 1) {
+    return `architect ${architectNames[0]} waiting on input`;
+  }
+  return `architects ${architectNames.join(', ')} waiting on input`;
+}
+
+/**
+ * Spec 1595: the status-bar tooltip. Names the waiting architects (their count
+ * is already in the `waiting` segment), then the click action.
+ */
+export function composeStatusBarTooltip(waitingArchitects: readonly string[]): string {
+  const clause = architectTooltipClause(waitingArchitects);
+  if (clause === '') {
+    return 'Click to reconnect to Tower';
+  }
+  return `${clause.charAt(0).toUpperCase()}${clause.slice(1)}\nClick to reconnect to Tower`;
+}
+
+/**
  * Compose the activity-bar badge (value + tooltip) from the live "needs me"
- * counts, folding the workspace held-mail count into the total so the icon
- * reflects held mail even when the sidebar is collapsed. Returns `undefined`
- * when nothing needs the user (blocked + idle + held all zero) so the caller
- * clears the badge. The blocked/idle tooltip phrasing is preserved verbatim from
- * the original inline logic; the held clause is appended after a ` · `. Pure so
- * the fold + tooltip composition is unit-tested (previously inline + untested).
+ * counts, folding the workspace held-mail count and the waiting architects into
+ * the total so the icon reflects them even when the sidebar is collapsed.
+ * Returns `undefined` when nothing needs the user (blocked + idle + held +
+ * architects all zero) so the caller clears the badge. The blocked/idle tooltip
+ * phrasing is preserved verbatim from the original inline logic; the held and
+ * architect clauses are appended after a ` · `. Pure so the fold + tooltip
+ * composition is unit-tested (previously inline + untested).
  */
 export function composeActivityBadge(
   blockedCount: number,
   idleCount: number,
   heldCount: number,
+  waitingArchitects: readonly string[] = [],
 ): BadgeValue | undefined {
   const held = heldBadgeCount(heldCount);
-  const total = blockedCount + idleCount + held;
+  const total = blockedCount + idleCount + held + waitingArchitects.length;
   if (total === 0) {
     return undefined;
   }
@@ -106,7 +136,7 @@ export function composeActivityBadge(
       : idleCount > 0
         ? (idleCount === 1 ? '1 builder waiting on input' : `${idleCount} builders waiting on input`)
         : '';
-  const tooltip = [builderTip, heldTooltipClause(held)].filter(Boolean).join(' · ');
+  const tooltip = [builderTip, heldTooltipClause(held), architectTooltipClause(waitingArchitects)].filter(Boolean).join(' · ');
   return { value: total, tooltip };
 }
 
@@ -114,11 +144,20 @@ export function composeActivityBadge(
  * Human-facing text for the `mailbox-escalation` toast. Metadata only — the
  * payload never carries a message body (spec redaction rule), so neither does
  * this. Points the reader at `afx inbox`, the read/dismiss surface.
+ *
+ * Renders the gate detail as a `reason:detail` sub-code (Issue #1482) through the SAME
+ * formatter the CLI and the dashboard use (`@cluesmith/codev-sdk/hold-verdict`). This toast is
+ * the surface a VS Code operator actually sees — often the only one — and a bare `busy` there
+ * cannot distinguish `busy:user-text` (a human is typing; it clears itself) from
+ * `busy:no-region-end` (the classifier cannot verify the composer; it never clears). The
+ * detail was already on the wire in `MailboxEscalationPayload` and simply went unrendered.
  */
 export function escalationToastText(payload: MailboxEscalationPayload): string {
   const seconds = Math.max(0, Math.round(payload.ageMs / 1000));
-  const reason = payload.reason ? ` (${payload.reason})` : '';
-  return `Codev: a message to ${payload.toAgent} has been held ${seconds}s${reason} — past the escalation age. Review with: afx inbox`;
+  // No fallback text: an escalation with no reason recorded should read as a bare age, not as
+  // the word "held" twice over, so the parenthetical is dropped entirely rather than filled in.
+  const verdict = payload.reason || payload.detail ? ` (${formatVerdict(payload.reason, payload.detail)})` : '';
+  return `Codev: a message to ${payload.toAgent} has been held ${seconds}s${verdict} — past the escalation age. Review with: afx inbox`;
 }
 
 /**

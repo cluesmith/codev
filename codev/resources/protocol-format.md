@@ -1,6 +1,6 @@
 # Protocol Definition Format
 
-This document describes the format for defining protocols in Codev. Protocols define the workflow for development tasks (SPIR, TICK, BUGFIX, etc.).
+This document describes the format for defining protocols in Codev. Protocols define the workflow for development tasks (SPIR, AIR, BUGFIX, etc.). `protocol-schema.json` (shipped with every protocol tree) is the machine-checked description of `protocol.json`; a test validates every shipped protocol against it.
 
 **JSON Schema**: `codev-skeleton/protocols/protocol-schema.json` — use `"$schema": "../../protocol-schema.json"` in your protocol.json for IDE validation.
 
@@ -31,12 +31,12 @@ The main protocol definition file. Porch reads this to orchestrate phases.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Protocol identifier (e.g., "spir", "tick") |
+| `name` | string | Yes | Protocol identifier (e.g., "spir", "bugfix") |
 | `version` | string | No | Semantic version |
 | `description` | string | No | Human-readable description |
 | `phases` | array | Yes | List of phase definitions |
-| `signals` | object | No | Signal definitions |
-| `phase_completion` | object | No | Checks run at end of each plan phase |
+| `signals` | object | No | Legacy — porch does not read it (see Signals below) |
+| `phase_completion` | object | No | Named predicates; their names are valid `porch.checks` override keys, but porch does not run them |
 | `defaults` | object | No | Default settings |
 
 ### Phase Definition
@@ -48,13 +48,13 @@ Each phase in the `phases` array:
 | `id` | string | Yes | Phase identifier (e.g., "specify", "implement") |
 | `name` | string | No | Display name |
 | `description` | string | No | What this phase does |
-| `type` | string | No | "once" or "per_plan_phase" |
+| `type` | string | No | "once", "build_verify" or "per_plan_phase" |
 | `prompt` | string | No | Filename in prompts/ directory |
 | `steps` | array | No | Named steps within the phase |
 | `checks` | object | No | Validation checks |
 | `gate` | object | No | Human approval gate |
 | `transition` | object | No | State transitions |
-| `consultation` | object | No | Multi-agent consultation config |
+| `consultation` | object | No | `{type, models}` for a review the builder runs from a `once` phase's prompt (BUGFIX/AIR PR phase); porch renders it into `{{consult_commands}}`, applying `.codev/config.json` `porch.consultation`. No `enabled`/`parallel` switch (a `false` is rejected at load); a prompt using the token in a phase without the block fails at `porch next` |
 
 ### Phase Types
 
@@ -106,8 +106,8 @@ Build-verify phases are the core pattern in SPIR v2. Porch orchestrates:
 | `verify.models` | array | Yes | Models to consult ["gemini", "codex", "claude"] |
 | `verify.parallel` | boolean | No | Run consultations in parallel (default: true) |
 | `max_iterations` | number | No | Max build-verify iterations (default: 3) |
-| `on_complete.commit` | boolean | No | Commit artifact after successful verify |
-| `on_complete.push` | boolean | No | Push after commit |
+| `on_complete.commit` | boolean | No | Descriptive only — porch commits just `status.yaml`; the builder commits its work |
+| `on_complete.push` | boolean | No | Descriptive only |
 
 ### Checks
 
@@ -171,28 +171,16 @@ Define how phases connect:
 ```
 
 
-### Signals
+### Signals (legacy)
 
-Define signals that AI agents can emit:
+Older protocol files carried a `signals` block of named completion and blocked signals. Porch never
+reads it: a builder finishes a phase with `porch done <id>` and reports a blocker with
+`afx send architect "…"`. New protocols should omit it.
 
-```json
-{
-  "signals": {
-    "PHASE_COMPLETE": {
-      "description": "Signal current phase is complete",
-      "transitions_to": "next_phase"
-    },
-    "BLOCKED": {
-      "description": "Signal implementation is blocked",
-      "requires": "reason"
-    }
-  }
-}
-```
+### Phase Completion Predicates
 
-### Phase Completion Checks
-
-Checks run at the end of each plan phase (after evaluate):
+Named shell predicates. Porch parses them but does not run them; their names are accepted as
+`porch.checks` override keys. Put checks porch should run in the phase's `checks`:
 
 ```json
 {
@@ -220,6 +208,8 @@ Use `{{variable}}` syntax:
 | `{{protocol}}` | Protocol name |
 | `{{plan_phase_id}}` | Current plan phase ID (for phased protocols) |
 | `{{plan_phase_title}}` | Current plan phase title |
+| `{{consult_commands}}` | The `consult` commands for a `once` phase with a `consultation` block, one per configured lane (or a comment when `porch.consultation` is `none`/`parent`) |
+| `{{consult_verdicts}}` | The matching `model=<APPROVE\|REQUEST_CHANGES>` list for the architect notification |
 
 ### Example Prompt
 
@@ -239,13 +229,12 @@ You are executing the **SPECIFY** phase of the SPIR protocol.
 1. Ask clarifying questions
 2. Analyze the problem
 3. Draft the specification
-4. Run consultations
-5. Get human approval
+4. Commit the spec
 
-## Signals
+## When you finish
 
-- When spec is ready: `PHASE_COMPLETE`
-- If you need help: `BLOCKED: <reason>`
+- Spec committed: run `porch done {{project_id}}`; porch hands you the consultation commands.
+- Need help: `afx send architect "Blocked on <reason>"`
 ```
 
 ### Prompt File Naming

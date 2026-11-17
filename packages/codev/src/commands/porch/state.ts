@@ -12,6 +12,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
 import type { ArtifactResolver } from './artifacts.js';
+import { CANONICAL_KEY_SOURCE } from '../../lib/issue-id.js';
+import { detectProjectIdFromCwd } from '../../lib/worktree-project-id.js';
+
+export { detectProjectIdFromCwd };
 
 const execFileAsync = promisify(execFile);
 
@@ -352,30 +356,6 @@ export function listAllProjects(
   return [...collected.values()];
 }
 
-/**
- * Detect project ID from the current working directory if inside a builder worktree.
- * Works from any subdirectory within the worktree.
- * Returns the porch project ID (e.g. "bugfix-237", "1298", or "0073"), or null if not in a recognized worktree.
- */
-export function detectProjectIdFromCwd(cwd: string): string | null {
-  const normalized = path.resolve(cwd).split(path.sep).join('/');
-  // bugfix worktrees: .builders/bugfix-{N}-{slug} (slug optional)
-  //   porch project ID is "bugfix-{N}" — historical convention, kept untouched.
-  // PIR / SPIR / ASPIR / AIR worktrees: .builders/{prefix}-{N}-{slug} (slug optional)
-  //   porch project ID is the bare numeric ID.
-  // Spec worktrees (legacy): .builders/{NNNN} (bare 4-digit ID, no slug)
-  const match = normalized.match(
-    /\/\.builders\/(bugfix-(\d+)(?:-[^/]*)?|(?:aspir|spir|air|pir)-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/,
-  );
-  if (!match) return null;
-  // bugfix uses "bugfix-N" as the porch project ID
-  if (match[2]) return `bugfix-${match[2]}`;
-  // Protocol worktrees (aspir, spir, air, pir) use the bare numeric ID
-  if (match[3]) return match[3];
-  // Spec worktrees use zero-padded numeric IDs
-  return match[4];
-}
-
 export type ResolvedProjectId = { id: string; source: 'explicit' | 'cwd' | 'filesystem' };
 
 /**
@@ -409,6 +389,9 @@ export function resolveProjectId(
  * Auto-detect project ID when only one project exists.
  * Returns null if zero or multiple projects found.
  */
+/** Project dir id prefix: `bugfix-237`, `0076`, or a tracker key `ENG-123` / `bugfix-ENG-123` (#1740). */
+const PROJECT_DIR_ID = new RegExp(`^(bugfix-\\d+|\\d{4}|(?:bugfix-)?${CANONICAL_KEY_SOURCE})-`);
+
 export function detectProjectId(workspaceRoot: string): string | null {
   const projectsDir = path.join(workspaceRoot, PROJECTS_DIR);
 
@@ -423,7 +406,7 @@ export function detectProjectId(workspaceRoot: string): string | null {
     if (entry.isDirectory()) {
       // Extract project ID from directory name
       // Matches: "0076-skip-close" -> "0076", "bugfix-237-fix-name" -> "bugfix-237"
-      const match = entry.name.match(/^(bugfix-\d+|\d{4})-/);
+      const match = entry.name.match(PROJECT_DIR_ID);
       if (match) {
         const statusPath = path.join(projectsDir, entry.name, 'status.yaml');
         if (fs.existsSync(statusPath)) {

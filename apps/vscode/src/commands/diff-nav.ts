@@ -24,6 +24,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 import type { OverviewCache } from '../views/overview-data.js';
 import type { BuilderDiffCache, BuilderFileChange } from '../views/builder-diff-cache.js';
 import { getDiffInjectEntry } from '../diff-inject-codelens.js';
@@ -228,18 +229,155 @@ export async function navigateBuilderDiffToFirst(
 }
 
 /**
+ * Open a review-comment / file reference at its location (#1559, the contextual
+ * panel's clickable refs): the builder's per-file diff when the file is among
+ * its changed files (anchoring navigation there), otherwise the worktree file
+ * itself. `line` is 1-based; omitted means the top of the file. Flashes when
+ * the builder has no worktree on record.
+ */
+export async function openBuilderDiffLocation(
+  target: { builderId: string; relPath: string; line?: number },
+  deps: NavDeps,
+): Promise<void> {
+  const builder = builderWithWorktree(deps.overviewCache.getData(), target.builderId);
+  if (!builder) {
+    flash(`no worktree on record for ${target.builderId}`);
+    return;
+  }
+  // The ref comes from the webview (lower trust): only ever open a path inside the worktree.
+  const fsPath = path.resolve(builder.worktreePath, target.relPath);
+  const inside = path.relative(builder.worktreePath, fsPath);
+  if (inside === '' || inside.startsWith('..') || path.isAbsolute(inside)) {
+    flash(`cannot open ${target.relPath}`);
+    return;
+  }
+  const result = await deps.diffCache.getDiff(target.builderId, builder.worktreePath);
+  const change = result.files.find(f => f.plan.resourcePath === target.relPath);
+  let editor: vscode.TextEditor | undefined;
+  if (change) {
+    await openBuilderFileDiff(
+      deps.context,
+      { worktreePath: builder.worktreePath, baseRef: result.baseRef, builderId: target.builderId, plan: change.plan },
+      { preview: true },
+    );
+    recordDiffNavPosition(target.builderId, target.relPath);
+    // The per-file diff's modified side is normally the active editor once the open resolves; else
+    // any visible editor showing the worktree file. A file deleted since the comment has no worktree
+    // side, so fall back to whichever side the just-opened diff focused (its original text).
+    const active = vscode.window.activeTextEditor;
+    editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === fsPath);
+    if (active?.document.uri.fsPath === fsPath || editor === undefined) {
+      editor = active;
+    }
+  } else {
+    try {
+      editor = await vscode.window.showTextDocument(vscode.Uri.file(fsPath), { preview: true });
+    } catch {
+      flash(`cannot open ${target.relPath}`);
+      return;
+    }
+  }
+  if (editor && target.line !== undefined) {
+    const line = Math.max(0, Math.min(target.line - 1, editor.document.lineCount - 1));
+    placeCaret(editor, line);
+    editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  }
+}
+
+// ── Hunk navigation (VS Code's built-in compare-editor change stepping) ─────
+
+const NEXT_CHANGE = 'workbench.action.compareEditor.nextChange';
+const PREVIOUS_CHANGE = 'workbench.action.compareEditor.previousChange';
+
+/**
+ * The tracked builder-diff editor whose caret the built-in change stepping
+ * reads, or undefined outside a tracked diff (so a plain editor's caret is never
+ * moved). In a per-file diff tab that is the MODIFIED side whichever side has
+ * focus: the built-in steps from the modified caret, and only the modified
+ * (worktree) path is in the diff-inject registry. Elsewhere (the multi-file View
+ * Diff) it is the active editor when it is a tracked diff file.
+ */
+function trackedDiffEditor(): { editor: vscode.TextEditor; perFile: boolean } | undefined {
+  const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+  if (input instanceof vscode.TabInputTextDiff) {
+    const modified = input.modified.toString();
+    const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === modified);
+    if (!editor || !getDiffInjectEntry(editor.document.uri.fsPath)) { return undefined; }
+    return { editor, perFile: true };
+  }
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || !getDiffInjectEntry(editor.document.uri.fsPath)) { return undefined; }
+  return { editor, perFile: false };
+}
+
+function placeCaret(editor: vscode.TextEditor, line: number): void {
+  const anchor = new vscode.Position(line, 0);
+  editor.selection = new vscode.Selection(anchor, anchor);
+}
+
+/**
  * Jump to the FIRST hunk of the active diff editor: move to the top, then step
  * to the first change. Uses VS Code's built-in compare-editor change navigation
- * (no stable "first change" command exists). A no-op outside a diff editor.
+ * (no stable "first change" command exists). A no-op outside a tracked diff.
  */
 export async function diffFirstHunk(): Promise<void> {
-  // Guard on the diff-inject registry so this is a true no-op outside a tracked
-  // diff: otherwise `cursorTop` would jump the caret in whatever plain editor
-  // happens to be focused.
-  const editor = vscode.window.activeTextEditor;
-  if (!editor || !getDiffInjectEntry(editor.document.uri.fsPath)) { return; }
-  await vscode.commands.executeCommand('cursorTop');
-  await vscode.commands.executeCommand('workbench.action.compareEditor.nextChange');
+  const tracked = trackedDiffEditor();
+  if (!tracked) { return; }
+  placeCaret(tracked.editor, 0);
+  await vscode.commands.executeCommand(NEXT_CHANGE);
+}
+
+export type HunkDirection = 1 | -1;
+
+/** A visible line span, inclusive, 0-based. */
+export interface LineSpan {
+  start: number;
+  end: number;
+}
+
+/**
+ * Where to put the caret before stepping (#1546), or undefined to leave it.
+ * Pure, so it unit-tests without a live editor.
+ *
+ * The built-in steps to the first hunk starting strictly AFTER the caret (next)
+ * or strictly BEFORE it (previous). An off-screen caret is a stale anchor left
+ * behind by mouse-wheel scrolling, so it moves to just above the viewport for
+ * next / just below it for previous: a hunk starting on the edge visible line is
+ * then the one stepped to, not skipped. An on-screen caret is left alone, so the
+ * unscrolled case behaves exactly as the built-in.
+ */
+export function viewportAnchorLine(
+  caretLine: number,
+  visible: readonly LineSpan[],
+  direction: HunkDirection,
+): number | undefined {
+  if (visible.length === 0) { return undefined; }
+  if (visible.some(span => caretLine >= span.start && caretLine <= span.end)) {
+    return undefined;
+  }
+  if (direction === 1) { return Math.max(visible[0].start - 1, 0); }
+  return visible[visible.length - 1].end + 1;
+}
+
+/**
+ * Step to the next (1) / previous (-1) change, continuing from where the
+ * reviewer scrolled (#1546). Re-anchors only in a tracked per-file builder diff;
+ * the multi-file View Diff and every other surface delegate to the built-in
+ * unchanged.
+ */
+export async function diffStepHunk(direction: HunkDirection): Promise<void> {
+  const tracked = trackedDiffEditor();
+  if (tracked?.perFile) {
+    const { editor } = tracked;
+    const visible = editor.visibleRanges.map(r => ({ start: r.start.line, end: r.end.line }));
+    const line = viewportAnchorLine(editor.selection.active.line, visible, direction);
+    if (line !== undefined) { placeCaret(editor, Math.min(line, editor.document.lineCount - 1)); }
+  }
+  if (direction === 1) {
+    await vscode.commands.executeCommand(NEXT_CHANGE);
+  } else {
+    await vscode.commands.executeCommand(PREVIOUS_CHANGE);
+  }
 }
 
 /**

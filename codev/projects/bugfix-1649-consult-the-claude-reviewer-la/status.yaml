@@ -1,0 +1,21 @@
+id: bugfix-1649
+title: consult-the-claude-reviewer-la
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+    requested_at: '2026-09-09T03:13:59.614Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-09T02:16:39.070Z'
+updated_at: '2026-09-09T03:13:59.615Z'
+pr_history:
+  - phase: pr
+    pr_number: 1659
+    branch: builder/bugfix-1649
+    created_at: '2026-09-09T03:13:53.550Z'
+pr_ready_for_human: true

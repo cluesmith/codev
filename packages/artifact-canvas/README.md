@@ -52,6 +52,8 @@ the host performs the input and calls its own `MarkerAdapter.add` (spec D6).
 | `refreshKey?` | `number \| string` | For hosts **without** a watcher: pass a new value whenever the underlying data changes to force a re-read + re-list. Hosts with a watcher omit it. |
 | `initialReadingMode?` | `string` | Seed for the reading mode (spec 1380). Typed `string` because it round-trips through host persistence and arrives untrusted; anything other than `'horizontal'` is coerced to `'vertical'`. |
 | `onReadingModeChange?` | `(mode: ReadingMode) => void` | Toggle intent: the host persists it per-user (VS Code `globalState`, browser `localStorage`, …) or ignores it — the canvas works without persistence, defaulting to vertical each mount. |
+| `hoverHighlight?` | `HoverHighlightStyle` | Hover reading aid (#1802): `'none'`, `'word'`, `'wordLine'`, `'wordLineParagraph'`, `'line'` or `'lineParagraph'` (default). The name lists the shapes drawn: word pill, line band, paragraph tint. Soft shapes drawn behind the text under the pointer. Fenced code, comment cards, the composer and the "+" are never lit; inline code keeps the line band and paragraph tint (only the word pill is skipped, the chip's background would hide it). |
+| `readingCursor?` | `ReadingCursor` | Prose cursor (#1802): `'arrow'` (default, `cursor: default`), `'iBeam'` or `'hand'`. Inline code takes the chosen cursor; fenced code, cards, the composer and the "+" keep the arrow. |
 
 ### Reading modes (spec 1380)
 
@@ -148,6 +150,19 @@ Import the default stylesheet and override any subset of the `--codev-canvas-*` 
 | `--codev-canvas-code-foreground` | `#1f2328` |
 | `--codev-canvas-link` | `#0969da` |
 | `--codev-canvas-comment-marker` | `#bf8700` |
+| `--codev-canvas-hover-word-background` | `color-mix(in srgb, var(--codev-canvas-foreground) 14%, transparent)` |
+| `--codev-canvas-hover-line-background` | `color-mix(in srgb, var(--codev-canvas-foreground) 6%, transparent)` |
+| `--codev-canvas-hover-paragraph-background` | `color-mix(in srgb, var(--codev-canvas-foreground) 3.5%, transparent)` |
+
+The three hover tokens (#1802) derive from the foreground, so a host that maps only the
+foreground gets a matching reading aid in dark themes too. Keep the word darkest and the
+paragraph faintest. `parseHighlightStyle` and `parseReadingCursor` are exported for hosts that
+read either value from untyped storage (case-insensitive, unknown values fall back to the
+defaults).
+
+Host contract: the hover shapes are drawn in a `position: fixed` layer covering the viewport (so
+the body's DOM is never written). A host that embeds the canvas in a sub-region of a larger page
+should expect shapes in client coordinates, clipped to the viewport rather than the canvas box.
 
 **Column tokens** (spec 1380, horizontal mode): `--codev-canvas-column-width` (`25em`, a
 preferred minimum — rendered columns stretch to share leftover width) and

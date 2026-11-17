@@ -6,7 +6,7 @@ Codev provides five CLI tools for AI-assisted software development:
 |------|-------------|
 | `codev` | Project setup, maintenance, and framework commands |
 | `afx` | Agent Farm - multi-agent orchestration for development |
-| `porch` | Protocol orchestrator - drives SPIR/ASPIR/TICK/BUGFIX state machines |
+| `porch` | Protocol orchestrator - drives each protocol's state machine |
 | `consult` | AI consultation with external models (Gemini, Codex, Claude) |
 | `team` | Team coordination - manage members and messages |
 
@@ -45,6 +45,7 @@ This installs all five commands globally: `codev`, `afx`, `porch`, `consult`, an
 |---------|-------------|
 | `codev init [name]` | Create a new codev project |
 | `codev adopt` | Add codev to an existing project |
+| `codev bootstrap-docs` | Draft the governance docs from an existing codebase |
 | `codev doctor` | Check system dependencies |
 | `codev update` | Update codev templates and protocols |
 | `codev import <source>` | AI-assisted protocol import from other projects |
@@ -72,12 +73,14 @@ See [agent-farm.md](agent-farm.md) for full documentation.
 
 | Command | Description |
 |---------|-------------|
-| `porch status <id>` | Show project protocol status |
-| `porch run <id>` | Run the next protocol phase |
-| `porch approve <id> <gate>` | Approve a human gate |
-| `porch pending` | List all pending gates across projects |
+| `porch next [id]` | Emit the next tasks as JSON (the strict-mode loop) |
+| `porch done [id]` | Signal the current phase complete: run its checks and advance |
+| `porch status [id]` | Show project protocol status |
+| `porch approve <id> <gate> --a-human-explicitly-approved-this` | Record a human's gate decision (run by the builder, after the architect relays it) |
+| `porch pending` | List live pending gates across projects (stale records on finished/advanced projects hidden; `--all` shows them) |
+| `porch verify <id> --skip "reason"` | Skip post-merge verification and mark the project verified |
 
-Porch drives SPIR, ASPIR, TICK, and BUGFIX protocols via a state machine. It's used automatically by `afx spawn` (strict mode) or manually by builders (soft mode).
+Porch drives every protocol's state machine (SPIR, ASPIR, AIR, BUGFIX, PIR, MAINTAIN, RESEARCH, EXPERIMENT). `afx spawn` starts builders in strict mode, where the builder runs the `porch next` / `porch done` loop; soft-mode builders follow the protocol document themselves.
 
 ### consult - AI Consultation
 
@@ -128,6 +131,5 @@ Customize agent-farm commands via `.codev/config.json` (project root):
 ## Related Documentation
 
 - [SPIR Protocol](../protocols/spir/protocol.md) - Multi-phase development workflow
-- [TICK Protocol](../protocols/tick/protocol.md) - Fast amendment workflow
 - [Architect Role](../roles/architect.md) - Architect responsibilities
 - [Builder Role](../roles/builder.md) - Builder responsibilities

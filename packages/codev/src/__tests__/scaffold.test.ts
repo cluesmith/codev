@@ -337,6 +337,23 @@ describe('Scaffold Utilities', () => {
       expect(result.copied.sort()).toEqual(expected.sort());
     });
 
+    // Discarding an earlier install's untracked files leaves the skill folders empty; adopt
+    // used to skip them as existing, so the project ended up with no skills at all.
+    it('skipExisting fills an empty skill folder, including one holding only .DS_Store', () => {
+      const empty = path.join(tempDir, '.claude', 'skills', 'afx');
+      const finderOnly = path.join(tempDir, '.codex', 'skills', 'afx');
+      fs.mkdirSync(empty, { recursive: true });
+      fs.mkdirSync(finderOnly, { recursive: true });
+      fs.writeFileSync(path.join(finderOnly, '.DS_Store'), 'finder');
+
+      const result = copySkills(tempDir, realSkeletonDir, { skipExisting: true });
+      expect(result.copied).toContain('.claude/skills/afx/');
+      expect(result.copied).toContain('.codex/skills/afx/');
+      expect(result.skipped).toEqual([]);
+      expect(fs.existsSync(path.join(empty, 'SKILL.md'))).toBe(true);
+      expect(fs.existsSync(path.join(finderOnly, 'SKILL.md'))).toBe(true);
+    });
+
     it('skipExisting preserves a customized Codex skill while backfilling missing skills', () => {
       const customized = path.join(tempDir, '.codex', 'skills', 'arch-init');
       fs.mkdirSync(customized, { recursive: true });

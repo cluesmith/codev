@@ -5,17 +5,27 @@
  * with timeout support.
  */
 
-import { spawn, execFile } from 'node:child_process';
+import { execFile, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
 import type { CheckResult, CheckDef } from './types.js';
 import type { ArtifactResolver } from './artifacts.js';
 import { executeForgeCommand, getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
+import { isWindows } from '../../lib/platform.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
+import { killSessionTree, waitForTreeExit, type KillSessionTreeResult } from '../../lib/process-tree.js';
 
 const execFileAsync = promisify(execFile);
 
-/** Default timeout for checks: 5 minutes */
+/** Default timeout for checks: 5 minutes. A check may set its own `timeout_ms`. */
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** After a timeout's SIGTERM, how long the check's process group gets before SIGKILL */
+const KILL_GRACE_MS = 5000;
+
+/** Signals porch forwards to a running check's process group */
+const RELAYED_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 // ============================================================================
 // Check Execution
@@ -28,7 +38,12 @@ export interface CheckEnv {
 }
 
 /**
- * Run a single check command
+ * Run a single check command.
+ *
+ * While the check runs, this installs process-level SIGINT/SIGTERM/SIGHUP
+ * listeners that re-raise the signal on porch itself, so call it only from
+ * the short-lived porch CLI (porch check/done/approve in index.ts), never
+ * from a long-running server.
  */
 export async function runCheck(
   name: string,
@@ -44,31 +59,62 @@ export async function runCheck(
     let stderr = '';
     let killed = false;
 
-    // Parse command into executable and args
-    const parts = command.split(/\s+/);
-    const executable = parts[0];
-    const args = parts.slice(1);
+    // detached: the check leads its own process group, so a timeout can kill
+    // the whole tree (#1814). Killing only the shell left its grandchildren
+    // (test workers) holding stdout open, and 'close' never fired. detached
+    // calls setsid, so the check also has no controlling terminal: one that
+    // opens /dev/tty fails instead of prompting, which is intended.
+    // On Windows there are no process groups (detached would only open a new
+    // console), so the check runs hidden in the resolved Git Bash, never
+    // cmd.exe, and its tree is tracked from the teardown snapshot instead (Spec 1658).
+    const checkEnv = {
+      ...process.env,
+      PROJECT_ID: env.PROJECT_ID,
+      PROJECT_TITLE: env.PROJECT_TITLE,
+    };
+    const proc = commandLaunch().spawnShellString(
+      command,
+      { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: checkEnv },
+      { workspaceRoot: cwd, posixDetached: true, posixCollapseWhitespace: true },
+    ) as ChildProcessByStdio<null, Readable, Readable>;
 
-    const proc = spawn(executable, args, {
-      cwd,
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        PROJECT_ID: env.PROJECT_ID,
-        PROJECT_TITLE: env.PROJECT_TITLE,
-      },
-    });
+    // The first teardown's snapshot is what the close handler waits on.
+    let firstKill: Promise<KillSessionTreeResult | null> | null = null;
+    const killGroup = (signal: NodeJS.Signals): Promise<KillSessionTreeResult | null> => {
+      if (proc.pid === undefined) return Promise.resolve(null);
+      const result = killSessionTree(proc.pid, { signal }).catch((err: Error) => {
+        process.stderr.write(`porch: ${err.message}\n`);
+        return null;
+      });
+      if (firstKill === null) firstKill = result;
+      return result;
+    };
+
+    // Leaving porch's process group also means a Ctrl+C at porch's terminal
+    // no longer reaches the check. Relay porch's own interruption to the
+    // group, then re-raise it so porch dies of the signal as before. A Windows
+    // teardown is asynchronous (it snapshots the tree first), so porch waits
+    // for it before dying.
+    const relay = (signal: NodeJS.Signals) => {
+      stopRelaying();
+      const teardown = killGroup(signal);
+      if (isWindows()) {
+        teardown.finally(() => process.kill(process.pid, signal));
+        return;
+      }
+      process.kill(process.pid, signal);
+    };
+    const stopRelaying = () => {
+      for (const signal of RELAYED_SIGNALS) process.removeListener(signal, relay);
+    };
+    for (const signal of RELAYED_SIGNALS) process.on(signal, relay);
 
     // Set up timeout
+    let escalation: NodeJS.Timeout | undefined;
     const timeout = setTimeout(() => {
       killed = true;
-      proc.kill('SIGTERM');
-      setTimeout(() => {
-        if (!proc.killed) {
-          proc.kill('SIGKILL');
-        }
-      }, 5000);
+      killGroup('SIGTERM');
+      escalation = setTimeout(() => killGroup('SIGKILL'), KILL_GRACE_MS);
     }, timeoutMs);
 
     proc.stdout.on('data', (data) => {
@@ -79,19 +125,33 @@ export async function runCheck(
       stderr += data.toString();
     });
 
-    proc.on('close', (code) => {
+    proc.on('close', async (code) => {
       clearTimeout(timeout);
-      const duration = Date.now() - startTime;
 
       if (killed) {
+        // 'close' means the pipes closed, not that the group is gone: a member
+        // that ignores SIGTERM and holds no pipe outlives the shell. Resolving
+        // now would let porch exit before the SIGKILL escalation fires.
+        if (proc.pid !== undefined) {
+          const first = await firstKill;
+          const snapshot = first?.snapshot ?? { rootPid: proc.pid, members: [] };
+          await waitForTreeExit(proc.pid, snapshot, KILL_GRACE_MS + 1000);
+        }
+        clearTimeout(escalation);
+        stopRelaying();
         resolve({
           name,
           command,
           passed: false,
-          error: `Timed out after ${timeoutMs / 1000}s`,
-          duration_ms: duration,
+          error: `Timed out after ${timeoutMs / 1000}s (raise this check's timeout_ms if it needs longer)`,
+          duration_ms: Date.now() - startTime,
         });
-      } else if (code === 0) {
+        return;
+      }
+
+      stopRelaying();
+      const duration = Date.now() - startTime;
+      if (code === 0) {
         resolve({
           name,
           command,
@@ -113,6 +173,7 @@ export async function runCheck(
 
     proc.on('error', (err) => {
       clearTimeout(timeout);
+      stopRelaying();
       resolve({
         name,
         command,
@@ -287,6 +348,7 @@ export function runArtifactCheck(
 /**
  * Run multiple checks for a phase.
  * Accepts either Record<string, string> (legacy) or Record<string, CheckDef>.
+ * `timeoutMs` applies to each check that carries no `timeout_ms` of its own.
  *
  * Special handling: `pr_exists` checks are routed through the forge concept
  * command dispatcher instead of running the protocol.json command directly.
@@ -320,6 +382,9 @@ export async function runPhaseChecks(
     const checkCwd = typeof checkVal === 'object' && checkVal.cwd
       ? path.resolve(cwd, checkVal.cwd)
       : cwd;
+    const checkTimeoutMs = typeof checkVal === 'object' && checkVal.timeout_ms !== undefined
+      ? checkVal.timeout_ms
+      : timeoutMs;
 
     // Intercept pr_exists: route through forge concept command
     if (name === 'pr_exists') {
@@ -329,7 +394,7 @@ export async function runPhaseChecks(
       continue;
     }
 
-    const result = await runCheck(name, command, checkCwd, env, timeoutMs);
+    const result = await runCheck(name, command, checkCwd, env, checkTimeoutMs);
     results.push(result);
 
     // Stop on first failure

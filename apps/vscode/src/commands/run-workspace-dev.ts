@@ -19,12 +19,14 @@ export async function runWorkspaceDev(
   connectionManager: ConnectionManager,
   terminalManager: TerminalManager,
 ): Promise<void> {
-  const workspacePath = connectionManager.getWorkspacePath();
-  if (!workspacePath) {
+  // The window root, not the Tower workspace path: in a builder-worktree
+  // window the latter is the parent root (#1809), which would target `main`.
+  const windowRoot = connectionManager.getWindowRoot();
+  if (!windowRoot) {
     vscode.window.showErrorMessage('Codev: Not connected to Tower');
     return;
   }
-  const target = resolveWorkspaceDevTarget(workspacePath);
+  const target = resolveWorkspaceDevTarget(windowRoot);
   await startDevForTarget(connectionManager, terminalManager, target);
 }
 
@@ -32,11 +34,13 @@ export async function stopWorkspaceDev(
   connectionManager: ConnectionManager,
   terminalManager: TerminalManager,
 ): Promise<void> {
-  const workspacePath = connectionManager.getWorkspacePath();
-  if (!workspacePath) {
+  // The window root, not the Tower workspace path: in a builder-worktree
+  // window the latter is the parent root (#1809), which would target `main`.
+  const windowRoot = connectionManager.getWindowRoot();
+  if (!windowRoot) {
     vscode.window.showErrorMessage('Codev: Not connected to Tower');
     return;
   }
-  const target = resolveWorkspaceDevTarget(workspacePath);
+  const target = resolveWorkspaceDevTarget(windowRoot);
   await stopDevForTarget(connectionManager, terminalManager, target.id, target.name);
 }

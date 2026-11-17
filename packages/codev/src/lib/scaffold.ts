@@ -7,6 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { isEmptySkillDir } from './skill-refresh.js';
 
 interface CreateUserDirsOptions {
   skipExisting?: boolean;
@@ -247,11 +248,24 @@ export function copyColdTierDefaults(
 
 interface CopyRootFilesOptions {
   handleConflicts?: boolean;
+  /** Report what would be copied or conflict, writing nothing. */
+  dryRun?: boolean;
 }
 
 interface CopyRootFilesResult {
   copied: string[];
   conflicts: string[];
+  /** Root files left alone because the path to write is a symlink or otherwise irregular. */
+  notRegular: string[];
+}
+
+/** Something other than a regular file sits at `p` (a symlink, dangling or not; a directory). */
+function isIrregularPath(p: string): boolean {
+  try {
+    return !fs.lstatSync(p).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -263,9 +277,10 @@ export function copyRootFiles(
   projectName: string,
   options: CopyRootFilesOptions = {}
 ): CopyRootFilesResult {
-  const { handleConflicts = false } = options;
+  const { handleConflicts = false, dryRun = false } = options;
   const copied: string[] = [];
   const conflicts: string[] = [];
+  const notRegular: string[] = [];
 
   const rootFiles = ['CLAUDE.md', 'AGENTS.md'];
   for (const file of rootFiles) {
@@ -279,20 +294,31 @@ export function copyRootFiles(
     const content = fs.readFileSync(srcPath, 'utf-8')
       .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
 
+    // Never write through a symlink, which may point outside the project: not the
+    // `.codev-new` copy, and not a dangling link where a missing file would be created. A
+    // root file that is itself a symlink (CLAUDE.md -> AGENTS.md) is fine: only its
+    // `.codev-new` sibling is written.
+    const pendingIrregular = handleConflicts && isIrregularPath(destPath + '.codev-new');
+    const danglingDest = !fs.existsSync(destPath) && isIrregularPath(destPath);
+    if (pendingIrregular || danglingDest) {
+      notRegular.push(file);
+      continue;
+    }
+
     if (fs.existsSync(destPath)) {
       if (handleConflicts) {
         // Create .codev-new for merge
-        fs.writeFileSync(destPath + '.codev-new', content);
+        if (!dryRun) fs.writeFileSync(destPath + '.codev-new', content);
         conflicts.push(file);
       }
       // Skip if exists and not handling conflicts
     } else {
-      fs.writeFileSync(destPath, content);
+      if (!dryRun) fs.writeFileSync(destPath, content);
       copied.push(file);
     }
   }
 
-  return { copied, conflicts };
+  return { copied, conflicts, notRegular };
 }
 
 interface CreateProjectsDirOptions {
@@ -395,7 +421,8 @@ export function copySkills(
       const destSkillDir = path.join(skillsDir, entry.name);
       const relativeSkillDir = `${relativeSkillsDir}/${entry.name}/`;
 
-      if (skipExisting && fs.existsSync(destSkillDir)) {
+      // An empty folder (left when an earlier install's files were discarded) is filled.
+      if (skipExisting && fs.existsSync(destSkillDir) && !isEmptySkillDir(destSkillDir)) {
         skipped.push(relativeSkillDir);
         continue;
       }

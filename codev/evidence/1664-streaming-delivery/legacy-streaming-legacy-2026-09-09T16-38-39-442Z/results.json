@@ -1,0 +1,306 @@
+{
+  "scenario": "streaming",
+  "tuiVersion": "2.1.266 (Claude Code)",
+  "results": [
+    {
+      "n": 1,
+      "scenario": "streaming",
+      "deliveredAfterMs": 1754,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 315,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 18,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 2,
+      "scenario": "streaming",
+      "deliveredAfterMs": 2355,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 341,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 23,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 3,
+      "scenario": "streaming",
+      "deliveredAfterMs": 2657,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 265,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 31,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 4,
+      "scenario": "streaming",
+      "deliveredAfterMs": 1905,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 235,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 23,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 5,
+      "scenario": "streaming",
+      "deliveredAfterMs": 6432,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 316,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 71,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 6,
+      "scenario": "streaming",
+      "deliveredAfterMs": 1750,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 220,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 21,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 7,
+      "scenario": "streaming",
+      "deliveredAfterMs": 1450,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 299,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 17,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 8,
+      "scenario": "streaming",
+      "deliveredAfterMs": 3410,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 340,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 30,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 9,
+      "scenario": "streaming",
+      "deliveredAfterMs": 2807,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 313,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 31,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 10,
+      "scenario": "streaming",
+      "deliveredAfterMs": 1448,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 223,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 18,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 11,
+      "scenario": "streaming",
+      "deliveredAfterMs": 5518,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 324,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 58,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 12,
+      "scenario": "streaming",
+      "deliveredAfterMs": 1449,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 247,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 14,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 13,
+      "scenario": "streaming",
+      "deliveredAfterMs": 2807,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 327,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 30,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 14,
+      "scenario": "streaming",
+      "deliveredAfterMs": 2804,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 316,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 31,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 15,
+      "scenario": "streaming",
+      "deliveredAfterMs": 1903,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 316,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 20,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 16,
+      "scenario": "streaming",
+      "deliveredAfterMs": 4764,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 319,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 53,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 17,
+      "scenario": "streaming",
+      "deliveredAfterMs": 1449,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 289,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 17,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 18,
+      "scenario": "streaming",
+      "deliveredAfterMs": 1600,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 219,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 20,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 19,
+      "scenario": "streaming",
+      "deliveredAfterMs": 3410,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 254,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 39,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    },
+    {
+      "n": 20,
+      "scenario": "streaming",
+      "deliveredAfterMs": 2505,
+      "deliveredWhileWorking": false,
+      "longestQuietMs": 237,
+      "verdicts": [
+        "busy (legacy whole-screen settle)"
+      ],
+      "outputChunksDuringWait": 27,
+      "headRendered": true,
+      "tailRendered": true,
+      "composerClearedAfter": true,
+      "verdict": "delivered-intact"
+    }
+  ]
+}

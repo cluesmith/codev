@@ -17,7 +17,7 @@ export {
   type MailboxEscalationPayload,
 } from './sse.js';
 
-export { VSCODE_USER_SENDER } from './messaging.js';
+export { VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from './messaging.js';
 
 export {
   type CommandRequest,
@@ -59,6 +59,7 @@ export {
   type OverviewBacklogItem,
   type OverviewRecentlyClosed,
   type OverviewData,
+  type IssueIdKind,
   type HeldMessage,
   type IssueView,
   type PRView,
@@ -74,8 +75,29 @@ export {
   type TeamApiMember,
   type TeamApiMessage,
   type TeamApiResponse,
+  type DecisionStamp,
+  type DecisionOption,
+  type DecisionQaEntry,
+  type DecisionItemProblem,
+  type DecisionsFileProblem,
+  type DecisionItem,
+  type DecisionsDocument,
+  type DecisionsRuleRequest,
+  type DecisionsRefusalCode,
+  type DecisionsReadResponse,
+  type DecisionsRuleResponse,
   type TunnelStatus,
   type TowerVersionInfo,
   type ProtocolStats,
   type AnalyticsResponse,
 } from './api.js';
+
+export {
+  type AgentState,
+  type AgentActivity,
+  type NeedsInputDetail,
+  type ServedAgentState,
+  type AgentLifecycleEventName,
+  type AgentLaunchIdentity,
+  type AgentLifecycleEvent,
+} from './agent-state.js';

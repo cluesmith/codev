@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: issue-search (GitLab via glab CLI)
+# forge-executable: glab
 #
 # ⚠️ UNVERIFIED — mirrors gitlab/issue-list.sh (raw `glab ... --output json`,
 #    no field normalization) plus a state flag and a `body` field surfaced from

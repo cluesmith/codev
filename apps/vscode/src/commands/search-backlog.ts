@@ -10,6 +10,7 @@ import {
 } from '../views/backlog-search.js';
 import { openIssueInBrowser } from './open-issue-by-id.js';
 import { openPRInBrowser } from './open-pr-by-id.js';
+import { acceptsIssueKeys } from '../issue-id.js';
 
 /**
  * `codev.searchBacklog` — open a Quick Pick over the current backlog and, on
@@ -48,6 +49,9 @@ export async function searchBacklog(
     return;
   }
 
+  // Offer `View Issue ENG-123` rows only where issue ids are keys (#1740).
+  const acceptKeys = acceptsIssueKeys(data, 'passive');
+
   const picker = vscode.window.createQuickPick<BacklogQuickPickItem | DynamicQuickPickItem>();
   picker.items = staticItems;
   picker.placeholder = 'Search backlog by id, title, area, assignee...';
@@ -55,7 +59,7 @@ export async function searchBacklog(
   picker.matchOnDetail = true;
 
   picker.onDidChangeValue((value) => {
-    const dynamicItems = toDynamicQuickPickItems(value);
+    const dynamicItems = toDynamicQuickPickItems(value, acceptKeys);
     if (dynamicItems.length === 0) {
       picker.items = staticItems;
     } else {

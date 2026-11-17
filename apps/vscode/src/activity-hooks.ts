@@ -25,6 +25,18 @@ export function setActivityHooks(hooks: ActivityHook[]): void {
  */
 let deliveryDisabled = false;
 
+/**
+ * Set in a builder-worktree window (#1809). That window attaches read-only to the
+ * parent workspace, so every event would carry the PARENT root and tell a companion
+ * the main workspace is focused when it is not. Such a window fires no hooks.
+ */
+let suppressedForWorktree = false;
+
+/** Suppress (or re-enable) every activity hook in this window. */
+export function setActivityHooksSuppressed(suppressed: boolean): void {
+  suppressedForWorktree = suppressed;
+}
+
 /** Last `(event, workspace, builder)` fired — to dedup rapid repeats (see fireActivity). */
 let lastFiredKey = '';
 
@@ -39,7 +51,7 @@ export function fireActivity(
   event: ActivityEvent,
   data: Record<string, string> = {},
 ): void {
-  if (deliveryDisabled || !workspaceRoot) { return; }
+  if (deliveryDisabled || suppressedForWorktree || !workspaceRoot) { return; }
   // SECURITY: hooks execute (we open their url), so never fire in a workspace the
   // user hasn't trusted (VSCode Restricted Mode). Defence-in-depth with resolving
   // hooks from personal config layers only (never the committed .codev/config.json).

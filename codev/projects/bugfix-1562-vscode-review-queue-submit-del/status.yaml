@@ -1,0 +1,22 @@
+id: bugfix-1562
+title: vscode-review-queue-submit-del
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-10-05T00:17:47.906Z'
+    approved_at: '2026-10-05T01:05:00.456Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-05T00:05:11.132Z'
+updated_at: '2026-10-05T01:05:00.456Z'
+pr_history:
+  - phase: pr
+    pr_number: 1768
+    branch: builder/bugfix-1562
+    created_at: '2026-10-05T00:17:43.721Z'
+pr_ready_for_human: false

@@ -14,11 +14,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
+// Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 
 // Redirect global.db to a per-test temp file (Issue #1118 pattern).
 const dbState = vi.hoisted(() => ({ globalDbPath: '' }));
@@ -54,14 +56,14 @@ describe('Spec 1134 — afx whoami', () => {
     db.prepare(
       `INSERT INTO builders (workspace_path, id, name, worktree, branch, type, status, spawned_by_architect)
        VALUES (?, ?, ?, ?, ?, 'spec', 'implementing', ?)`,
-    ).run(realpathSync(workspacePath), id, id, worktreePath, `builder/${id}`, spawnedByArchitect);
+    ).run(normalizeWorkspacePath(workspacePath), id, id, worktreePath, `builder/${id}`, spawnedByArchitect);
     db.close();
   }
 
   function seedKnownWorkspace(name: string): void {
     const db = openDb();
     db.prepare('INSERT INTO known_workspaces (workspace_path, name) VALUES (?, ?)').run(
-      realpathSync(workspacePath),
+      normalizeWorkspacePath(workspacePath),
       name,
     );
     db.close();
@@ -71,7 +73,7 @@ describe('Spec 1134 — afx whoami', () => {
     const db = openDb();
     db.prepare(
       'INSERT INTO architect (workspace_path, id, pid, port, cmd) VALUES (?, ?, 1234, 0, ?)',
-    ).run(realpathSync(workspacePath), name, 'claude');
+    ).run(normalizeWorkspacePath(workspacePath), name, 'claude');
     db.close();
   }
 
@@ -102,7 +104,7 @@ describe('Spec 1134 — afx whoami', () => {
     process.chdir(workspacePath);
     const identity = resolveIdentity(archEnv('ob-refine'));
     expect(identity).toMatchObject({ type: 'architect', name: 'ob-refine' });
-    expect(identity.workspace).toBe(basename(realpathSync(workspacePath)));
+    expect(identity.workspace).toBe(basename(normalizeWorkspacePath(workspacePath)));
   });
 
   // Scenario 2: builder with recorded spawning architect.
@@ -168,7 +170,7 @@ describe('Spec 1134 — afx whoami', () => {
   it('falls back to the directory basename when the workspace is unregistered', () => {
     seedBuilder('builder-spir-984', 'main');
     process.chdir(worktreePath);
-    expect(resolveIdentity(noEnv).workspace).toBe(basename(realpathSync(workspacePath)));
+    expect(resolveIdentity(noEnv).workspace).toBe(basename(normalizeWorkspacePath(workspacePath)));
   });
 
   // Scenario 10: architect running whoami from a subdirectory.
@@ -254,7 +256,7 @@ describe('Spec 1134 — afx whoami', () => {
       await whoami({ json: true });
       const payload = JSON.parse(stdout.join(''));
       expect(payload).toEqual({
-        workspace: basename(realpathSync(workspacePath)),
+        workspace: basename(normalizeWorkspacePath(workspacePath)),
         type: 'builder',
         name: 'builder-spir-984',
         architect: 'main',

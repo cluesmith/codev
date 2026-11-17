@@ -32,9 +32,18 @@ function makeHost(initial: string) {
   };
 }
 
-// h1 at line 0, paragraphs at lines 2 and 4 (labels "line 3" / "line 5"), a list whose ul + first
-// item share line 6 and whose second item is line 7 (labels "line 7" / "line 8").
+// h1 at line 0, paragraphs at lines 2 and 4 (labels "line 3" / "line 5"), a list whose first item
+// is line 6 and second item line 7 (labels "line 7" / "line 8"). Since #1738 the `<ul>` wrapper
+// carries no `data-line` (its items are individually navigable), but it is still the top-level row
+// that HOSTS the "+" for its items, so it must remain a positioned gutter row.
 const DOC = '# Alpha\n\nFirst paragraph.\n\nSecond paragraph.\n\n- item one\n- item two';
+
+/** The top-level `<ul>` row (no longer a `[data-line]` element since #1738). */
+const topLevelList = (): HTMLElement =>
+  document.querySelector<HTMLElement>('.codev-artifact-canvas-body > ul') as HTMLElement;
+/** The affordance wrapper node the "+" is portalled into, wherever it is currently hosted. */
+const affordanceHost = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('.codev-canvas-row-affordance')?.parentElement ?? null;
 
 async function mount() {
   const host = makeHost(DOC);
@@ -79,14 +88,25 @@ describe('full-row "+" affordance (#1343)', () => {
     expect(plusButton(5)!.closest('[data-line]')).toBe(paras[1]);
   });
 
-  it('a nested list item labels its own line but is hosted by its top-level row', async () => {
+  it('a list item labels its own line but is hosted by its top-level row (the <ul>)', async () => {
     await mount();
-    const ul = document.querySelector<HTMLElement>('ul[data-line="6"]') as HTMLElement;
-    const li = document.querySelector<HTMLElement>('li[data-line="7"]') as HTMLElement;
-    fireEvent.mouseOver(li);
-    const btn = plusButton(8); // the li's own line — activation targeting stays precise
+    const ul = topLevelList();
+    // The FIRST item (line 6) — individually reachable since #1738 — is hosted by the top-level ul.
+    const firstItem = document.querySelector<HTMLElement>('li[data-line="6"]') as HTMLElement;
+    fireEvent.mouseOver(firstItem);
+    const btn = plusButton(7); // the item's own line — activation targeting stays precise
     expect(btn).not.toBeNull();
-    expect(btn!.closest('[data-line]')).toBe(ul); // hosted in the row's gutter
+    // The ul no longer carries `data-line`, so the host is asserted structurally: the "+" wrapper
+    // lives inside the top-level ul, which CSS keeps position:relative for correct placement.
+    expect(affordanceHost()).toBe(ul);
+    // The wrapper carries `data-row` (the CSS row hook), not `data-line` — it is a row, not a block.
+    expect(ul.getAttribute('data-line')).toBeNull();
+    expect(ul.getAttribute('data-row')).toBe('');
+    // Item 2 (line 7) is hosted by the SAME top-level ul row — first and non-first items are alike.
+    const secondItem = document.querySelector<HTMLElement>('li[data-line="7"]') as HTMLElement;
+    fireEvent.mouseOver(secondItem);
+    expect(plusButton(8)).not.toBeNull();
+    expect(affordanceHost()).toBe(ul);
   });
 
   it('dead strips are sticky: hovering body whitespace keeps the current row lit', async () => {

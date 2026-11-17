@@ -1,0 +1,16 @@
+id: '1560'
+title: spike-thread-owning-open-path-
+protocol: experiment
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  experiment-complete:
+    status: approved
+    requested_at: '2026-10-05T00:20:48.976Z'
+    approved_at: '2026-10-05T01:29:51.015Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-05T00:05:23.509Z'
+updated_at: '2026-10-05T01:30:00.344Z'

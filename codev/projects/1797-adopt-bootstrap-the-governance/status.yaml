@@ -1,0 +1,193 @@
+id: '1797'
+title: adopt-bootstrap-the-governance
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Governance-doc classifier and validator library
+    status: complete
+  - id: phase_2
+    title: Skill bootstrap mode and bootstrap prompt template
+    status: complete
+  - id: phase_3
+    title: Harness capability for interactive task launch
+    status: complete
+  - id: phase_4
+    title: codev bootstrap-docs command core
+    status: complete
+  - id: phase_5
+    title: Three-way review of the drafts
+    status: complete
+  - id: phase_6
+    title: adopt and update integration plus docs
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-10-12T20:25:30.430Z'
+    approved_at: '2026-10-12T20:29:14.640Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-10-12T20:52:03.635Z'
+    approved_at: '2026-10-12T22:27:20.567Z'
+  pr:
+    status: approved
+    requested_at: '2026-10-13T01:04:40.115Z'
+    approved_at: '2026-10-21T02:12:10.381Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_1-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: COMMENT
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_1-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_1-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_1-iter2-claude.txt
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_2-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_3-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_3-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_3-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter1-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter2-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter3-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1797/codev/projects/1797-adopt-bootstrap-the-governance/1797-phase_4-iter3-claude.txt
+started_at: '2026-10-12T20:18:01.796Z'
+updated_at: '2026-10-21T02:12:10.381Z'
+context_refreshes:
+  - boundary: enter:plan
+    at: '2026-10-12T20:29:16.809Z'
+    acknowledged_at: '2026-10-12T20:29:59.479Z'
+  - boundary: enter:implement
+    at: '2026-10-12T22:27:27.949Z'
+    acknowledged_at: '2026-10-12T22:27:33.258Z'
+  - boundary: plan-phase:phase_2
+    at: '2026-10-12T22:54:07.509Z'
+    acknowledged_at: '2026-10-12T22:54:13.174Z'
+  - boundary: plan-phase:phase_3
+    at: '2026-10-12T23:05:12.674Z'
+    acknowledged_at: '2026-10-12T23:05:56.119Z'
+  - boundary: plan-phase:phase_4
+    at: '2026-10-12T23:21:51.134Z'
+    acknowledged_at: '2026-10-12T23:22:35.351Z'
+  - boundary: plan-phase:phase_5
+    at: '2026-10-12T23:59:50.857Z'
+    acknowledged_at: '2026-10-13T00:00:00.468Z'
+  - boundary: plan-phase:phase_6
+    at: '2026-10-13T00:09:01.950Z'
+    acknowledged_at: '2026-10-13T00:09:47.454Z'
+  - boundary: enter:review
+    at: '2026-10-13T00:21:15.486Z'
+    acknowledged_at: '2026-10-13T00:22:04.333Z'
+force_advanced:
+  phase: phase_4
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1797-phase_4-iter3-rebuttals.md
+  at: '2026-10-12T23:59:48.999Z'
+pr_history:
+  - phase: review
+    pr_number: 1808
+    branch: builder/spir-1797
+    created_at: '2026-10-13T00:38:17.132Z'
+pr_ready_for_human: false

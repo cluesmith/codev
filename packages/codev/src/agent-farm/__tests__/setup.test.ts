@@ -59,6 +59,7 @@ describe('afx setup worktree configuration', () => {
     expect(mocks.runPostSpawnHooks).toHaveBeenCalledWith(
       '/workspace/.builders/spir-1216',
       ['install-deps'],
+      '/workspace',
     );
     expect(mocks.symlinkConfigFiles.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.syncLocalConfigSnapshot.mock.invocationCallOrder[0]);

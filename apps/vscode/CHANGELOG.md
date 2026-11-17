@@ -1,5 +1,53 @@
 # Change Log
 
+## [3.3.6] - 2026-10-29
+
+### What's new
+
+- **Agents show what they are doing: working, needs input, idle, blocked or dead.** The Agents view, the Tower view, the status bar and the badge now take a Claude agent's state from the agent itself, so a permission prompt counts the moment it is drawn, a long build no longer reads as idle, and an exited agent reads as dead within about ten seconds. Codex and OpenCode builders, and Claude sessions started before this update, keep the silence-based behaviour; an approved long-running tool stays at "needs input" until it finishes (#1851).
+- **Reading aids in the Markdown Preview.** A soft shape can follow your eye through the prose (word, line, paragraph or their combinations) and the cursor can be an arrow, I-beam or hand. Choose both from "Reading Aids..." in the preview's `...` menu or the `codev.markdownPreview.hoverHighlight` and `codev.markdownPreview.readingCursor` settings.
+- **Review your queued comments from the contextual panel.** In Code Review mode, and in the Builder Inspector when a builder's terminal has focus, the panel lists that builder's pending and sent review comments with Submit Review, Discard, Mark Delivered and Re-send buttons, and every file reference opens the builder's diff at that line. The status-bar "Submit Review (N)" item is retired; the palette commands remain, joined by `Codev: Re-send Review` and `Codev: Mark Review Delivered`.
+- **Codev Tower: every workspace on this machine, in one view.** The new Tower view lists each workspace the local Tower knows, with "needs a human" at the top, an attention badge, and what is waiting inside each one. Switch to a workspace from its row or `Codev: Switch Workspace`, and activate a dormant one on demand.
+- **Tower opens on the right by default.** The Tower container lives in the secondary side bar, reveals itself once on first run, and then respects your layout.
+- **Minimum VS Code is now 1.128.** The engine floor follows Cursor's bundled VS Code; editors below 1.128 keep the last release published for 1.105.
+- **Codev now activates in Restricted Mode.** An untrusted folder gets the sidebar and status-bar item immediately. The `codev.towerHost`, `codev.towerPort`, `codev.workspacePath` and `codev.autoStartTower` settings ignore workspace-scope values until the folder is trusted.
+- **Choose whether a builder-row click expands the row.** With `codev.buildersClickExpands` off, a click on a builder only opens its terminal; the chevron opens the file list. Default on, so nothing changes until you flip it.
+- **The agent-cycle keys open the first agent when nothing is open.** `ctrl+alt+n` / `ctrl+alt+p` now open the first or last agent when no agent terminal has focus, instead of saying there is nothing to cycle to.
+- **Tracker-key issue ids on Jira and Linear workspaces.** Keys like `ENG-123` work in Open Issue by ID and the backlog search, sort by project then number, and read as `ENG-123` rather than `#ENG-123` in rows, labels and terminal titles. GitHub, GitLab and Gitea workspaces are unchanged.
+
+### Fixes
+
+- **Opening a builder worktree folder no longer starts a second Codev.** A worktree window now attaches to its parent checkout read-only: no second workspace, no architect of its own, and none of the parent's gate notifications, counts or badge. Reviewing files there, comments included, works as before, and Codev tidies the rows left by earlier worktree windows on start.
+- **A builder waiting on PR review is listed once, not twice.** The Tower and Agents views no longer show that lane as two identical rows or count it twice.
+- **Tower view rows show the right gate icon.** Attention rows use the same per-gate icon as the Agents view instead of a warning triangle for every gate but PR review.
+- **Every protocol's human gate now shows as blocked.** A builder waiting at an EXPERIMENT, MAINTAIN or RESEARCH gate now gets the blocked icon, the toast and the status-bar count, with icons for the four new gates and a bell for any gate the extension has not seen.
+- **Adding a review comment no longer pops open the Comments panel.** The extension sets the default for `comments.openView` to `never`; a value you set yourself still wins.
+- **Queued review comments are no longer lost on submit.** Submitted comments move to a sent list instead of being deleted, and the next submit for that builder asks whether to mark them delivered, re-send them, or cancel. Tracking which sent feedback the builder acted on is next (#1771).
+- **Next and previous hunk continue from where you scrolled.** In a builder diff the step starts from the visible viewport when the cursor is off screen, for alt+F5 / shift+alt+F5, the new `Codev: Next Hunk` and `Codev: Previous Hunk` commands, and the Stream Deck changes dial.
+- **Status-bar text is readable in light themes.** The dev chip, "Reconnecting..." and "Offline" now use the theme's normal status-bar foreground instead of a near-white colour.
+
+## [3.3.4] - 2026-09-17
+
+### What's new
+
+- **Cycle through agent terminals from the keyboard.** `ctrl+alt+n` / `ctrl+alt+p` move focus through the sidebar's Agents order: architects and builders exactly as the sidebar lists them. An agent whose terminal cannot open is skipped, so a dead session never wedges the cycle.
+
+### Fixes
+
+- **Terminals come back after a laptop sleep.** Sleeping the machine used to burn every terminal tab's reconnect budget against the suspended network stack, leaving a permanent "unable to reconnect" banner while Tower was healthy. Refocusing the window now re-arms reconnects for every tab, and a tab that gave up for a transient reason reconnects on its own. When the budget really is exhausted, the banner checks Tower first and says which case you are in: Tower unreachable, or Tower up and a click will retry. A session that no longer exists on Tower still gives up immediately, as before.
+
+## [3.3.3] - 2026-09-05
+
+### What's new
+
+- **The in-editor issue preview now shows who, when, and what.** Opening an issue from the backlog renders a metadata block under the title: state and labels on one line, then who opened it and on which date, assignees, and milestone. Lines whose data is absent are simply omitted, so issues on forges that do not supply a field still render cleanly. The preview keeps refreshing the way it did before, with no extra requests.
+
+### Fixes
+
+- **Held-mail toasts say why a message is held.** The mailbox escalation toast now carries the hold reason, distinguishing "a human is typing in that composer" (clears itself) from "the composer could not be verified" (needs attention), instead of a bare busy.
+- **The escalation toast no longer grows memory for the life of the window.** Its already-shown tracking now clears when a workspace's escalations clear, with a hard cap as backstop.
+- **A restored issue preview no longer sticks on "Content unavailable".** When VS Code restored a preview tab on launch before Tower had connected, the tab showed the fallback text and never recovered. It now refreshes as soon as the connection comes up, on tab open, and at activation, so the content self-heals instead of staying blank.
+
 ## [3.3.2] - 2026-09-02
 
 ### What's new

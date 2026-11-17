@@ -1,0 +1,30 @@
+id: '1668'
+title: tower-forward-a-sub-path-to-a-
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-09-11T10:07:39.117Z'
+    approved_at: '2026-09-11T11:06:38.554Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-09-11T11:23:56.493Z'
+    approved_at: '2026-09-15T01:00:46.503Z'
+  pr:
+    status: approved
+    requested_at: '2026-09-15T01:17:39.619Z'
+    approved_at: '2026-09-15T01:20:02.425Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-09-11T09:59:52.172Z'
+updated_at: '2026-09-15T01:20:02.427Z'
+pr_history:
+  - phase: review
+    pr_number: 1683
+    branch: builder/pir-1668
+    created_at: '2026-09-15T01:04:34.249Z'
+pr_ready_for_human: false

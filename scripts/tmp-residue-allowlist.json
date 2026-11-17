@@ -1,0 +1,317 @@
+{
+  "//": "Test files that may contain /tmp, and why it is safe on native Windows (where /tmp does not exist). Checked by scripts/tmp-residue-check.mjs in CI. opaque: every /tmp is a string that never reaches the disk. posix-only: the tests using /tmp are skipped on win32. sun_path: /tmp is used on POSIX for short Unix-socket paths; Windows uses os.tmpdir().",
+  "files": {
+    "apps/vscode/src/__tests__/builder-grouping.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/wt is a worktreePath field in fake builder rows for pure grouping helpers"
+    },
+    "apps/vscode/src/__tests__/builder-row.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/wt is a worktreePath field in fake builder rows for pure label/icon helpers"
+    },
+    "apps/vscode/src/__tests__/builders-architect-header-command.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/wt is a worktreePath field in fake builder rows; only group headers render, so no builder row probes the disk"
+    },
+    "apps/vscode/src/__tests__/builders-autoreveal.test.ts": {
+      "reason": "opaque",
+      "note": "the remaining /tmp/wt strings are labels on BuilderFileTreeItem, never read from disk"
+    },
+    "apps/vscode/src/__tests__/builders-childless-architect-header.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/wt is a worktreePath field in fake builder rows; only group headers render, so no builder row probes the disk"
+    },
+    "apps/vscode/src/__tests__/builders-idle-architects-group.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/wt is a worktreePath field in fake builder rows; only group and architect headers render, so no builder row probes the disk"
+    },
+    "packages/codev/src/__tests__/github.test.ts": {
+      "reason": "opaque",
+      "note": "the /tmp cwd is handed to a mocked executeForgeCommand and asserted on; nothing touches the disk"
+    },
+    "packages/codev/src/__tests__/host-paths.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is an input to pure string path comparisons under a forced platform; nothing touches the disk"
+    },
+    "packages/codev/src/__tests__/msys-path.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/x is a string fed to a pure MSYS path translator to assert it throws; nothing touches the disk"
+    },
+    "packages/codev/src/__tests__/worktree-write-guard.test.ts": {
+      "reason": "posix-only",
+      "note": "the /tmp and /private/tmp guard-allowlist tests are it.skipIf(onWindows); the Windows temp allowlist is covered by runIf(onWindows) tests using os.tmpdir()"
+    },
+    "packages/codev/src/agent-farm/__tests__/agent-names.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/.builders/<id> is a fake worktree field on in-memory Builder objects for name resolution; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/analytics.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a cwd or workspace string passed to mocked child_process, forge and MetricsDB and asserted on; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/architect-session-holder.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/sock/s.sock is a socketPath inside a fake ps cmdline string; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/attach.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp socket is a fake DB row value checked against a mocked existsSync and handed to a mocked ShellperClient; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/bench.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is an output path or cwd given to fully mocked node:fs, child_process and process.cwd; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/bugfix-1219-claude-env-leak.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a fake env var value fed to sanitizeAgentEnv and marker detection; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/bugfix-1519-e2e-auth.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/ws is a workspace string posted through an injected mock fetch; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/bugfix-773-launch-retry.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/workspace is a workspace string posted through an injected mock fetch; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/cleanup-shellper-kill.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp socket is inside fake ps output from a mocked execFile; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/concurrency.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a worktree column value in SQLite rows; the DB itself lives under process.cwd()"
+    },
+    "packages/codev/src/agent-farm/__tests__/db.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a worktree or workspace_path column value in SQLite rows; the DB itself lives under process.cwd()"
+    },
+    "packages/codev/src/agent-farm/__tests__/e2e/spec-1595-agent-state.test.ts": {
+      "reason": "opaque",
+      "note": "the /tmp worktreePath is a field in the mocked /api/overview response"
+    },
+    "packages/codev/src/agent-farm/__tests__/e2e/spec-823-builder-attribution.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/.builders/<id> is a worktreePath in a mocked /api/overview response; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/harness-integration.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a worktree, workspace or role-file string; the launch-script writes go to the mocked node:fs and the architect-args case loads no role so writes nothing"
+    },
+    "packages/codev/src/agent-farm/__tests__/harness.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/workspace/.builder-role.md is a role-file string interpolated into harness args and fragments; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/helpers/socket-temp-root.ts": {
+      "reason": "sun_path",
+      "note": "see the doc comment"
+    },
+    "packages/codev/src/agent-farm/__tests__/helpers/spec-1470-fakes.ts": {
+      "reason": "opaque",
+      "note": "WORKTREE is a key in the in-memory FakeFs and fake git/terminal ports; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/inbox-routes.test.ts": {
+      "reason": "opaque",
+      "note": "reactDashboardPath /tmp/dash is a RouteContext field the inbox routes never read; hasReactDashboard is false"
+    },
+    "packages/codev/src/agent-farm/__tests__/pir-1475-welcome-identity.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/pir1475-ws is a workspace_path value in a seeded DB row; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/pir-1809-builder-worktree.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/sock is a shellper_socket value in seeded in-memory DB rows; prune keys on the pid, never the socket path"
+    },
+    "packages/codev/src/agent-farm/__tests__/pty-last-data-at.test.ts": {
+      "reason": "opaque",
+      "note": "cwd and logDir /tmp go to a PtySession whose spawn is never called and node-pty is mocked, so no log file is opened"
+    },
+    "packages/codev/src/agent-farm/__tests__/send.test.ts": {
+      "reason": "opaque",
+      "note": "the /tmp --file paths are answered by the mocked node:fs existsSync/readFileSync"
+    },
+    "packages/codev/src/agent-farm/__tests__/shellper-cleanup.e2e.test.ts": {
+      "reason": "posix-only",
+      "note": "every suite is skipped on win32 via skipOnWindows; /tmp is the session cwd"
+    },
+    "packages/codev/src/agent-farm/__tests__/shellper-husk-sweep.e2e.test.ts": {
+      "reason": "posix-only",
+      "note": "every suite is skipped on win32 via skipOnWindows; /tmp is the session cwd"
+    },
+    "packages/codev/src/agent-farm/__tests__/spawn-worktree.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp worktree path goes to mocked node:fs, mocked run/runStreaming or a launch-script string assertion"
+    },
+    "packages/codev/src/agent-farm/__tests__/spec-1273-interrupt.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/ws is the return value of a mocked detectWorkspaceRoot"
+    },
+    "packages/codev/src/agent-farm/__tests__/spec-1273-reset-command.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/ws paths are fake builder rows and mocked runReset/getConfig results; the context fs port is mocked"
+    },
+    "packages/codev/src/agent-farm/__tests__/spec-1273-reset-receipt.test.ts": {
+      "reason": "opaque",
+      "note": "the /tmp/ws state path is a key in an in-memory fs port and a string compared through join"
+    },
+    "packages/codev/src/agent-farm/__tests__/spec-1470-self-refresh-command.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/ws paths are fake builder rows, a mocked cwd and mocked orchestrator results; writes and git are mocked, so at most a realpath/stat probe of the nonexistent path fails the same way on every OS"
+    },
+    "packages/codev/src/agent-farm/__tests__/spec-1658-posix-residue.test.ts": {
+      "reason": "opaque",
+      "note": "/tmp/ws and /private/tmp/ws are strings fed to isTempDirectory, which compares them with string ops"
+    },
+    "packages/codev/src/agent-farm/__tests__/spec-761-api-state.test.ts": {
+      "reason": "opaque",
+      "note": "templatePath and reactDashboardPath under /tmp are RouteContext fields /api/state never reads"
+    },
+    "packages/codev/src/agent-farm/__tests__/state.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is inside a comment about realpath canonicalization; the test dir is under cwd"
+    },
+    "packages/codev/src/agent-farm/__tests__/terminal-label.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a shellper_socket value in DB rows or a string fed to extractShellperSessionId; the DB itself lives under os.tmpdir()"
+    },
+    "packages/codev/src/agent-farm/__tests__/terminal-sessions.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a shellper_socket column value in test DB rows; the DB itself lives under os.tmpdir()"
+    },
+    "packages/codev/src/agent-farm/__tests__/tower-command.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a mocked config/tower-client path; the test only calls shouldWaitForTowerStart, nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/tower-cron-routes.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is reactDashboardPath in a RouteContext with hasReactDashboard false; never read"
+    },
+    "packages/codev/src/agent-farm/__tests__/tower-cron.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is a cwd field in task YAML, asserted after parsing; exec is mocked"
+    },
+    "packages/codev/src/agent-farm/__tests__/tower-routes-husks.e2e.test.ts": {
+      "reason": "posix-only",
+      "note": "every suite is skipped on win32 via skipOnWindows; /tmp is the session cwd"
+    },
+    "packages/codev/src/agent-farm/__tests__/tower-routes.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a fake ctx path, a cwd handed to a mocked terminal manager, or a workspace string in mocked send routing and in-memory mailbox rows; nothing touches the disk"
+    },
+    "packages/codev/src/agent-farm/__tests__/tower-terminals.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a shellper_socket in mocked DB rows, checked only through spied existsSync and a mocked shellperManager"
+    },
+    "packages/codev/src/agent-farm/__tests__/tower-tunnel.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is the return value of a mocked getCloudConfigPath; fs.watch is mocked"
+    },
+    "packages/codev/src/agent-farm/__tests__/tower-utils.test.ts": {
+      "reason": "posix-only",
+      "note": "the /tmp and /private/tmp isTempDirectory cases are it.skipIf(win32), since Windows counts only the host temp dir"
+    },
+    "packages/codev/src/agent-farm/__tests__/typing-awareness.test.ts": {
+      "reason": "opaque",
+      "note": "cwd and logDir /tmp are config strings for a PtySession whose node-pty and fs log calls are mocked"
+    },
+    "packages/codev/src/agent-farm/__tests__/workspace-recover.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is a shellper_socket in a fake DbTerminalSession; socketExists is an injected stub"
+    },
+    "packages/codev/src/agent-farm/servers/__tests__/overview-agent-state.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is reactDashboardPath in a RouteContext with hasReactDashboard false; never read"
+    },
+    "packages/codev/src/agent-farm/servers/agent-state/__tests__/route.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is reactDashboardPath in a RouteContext with hasReactDashboard false; never read"
+    },
+    "packages/codev/src/commands/consult/__tests__/claude-cli-lane.test.ts": {
+      "reason": "opaque",
+      "note": "from main (#1912): /tmp paths appear only inside fake permission-denial records and the expected warning text; nothing touches the disk"
+    },
+    "packages/codev/src/commands/consult/__tests__/metrics-model-id.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a workspace_path column value written into the metrics DB, which itself lives under os.tmpdir()"
+    },
+    "packages/codev/src/commands/consult/__tests__/metrics.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is a workspacePath field in sample metrics records; the DB lives under os.tmpdir()"
+    },
+    "packages/codev/src/commands/consult/__tests__/pr-query.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is a diffPath string asserted inside the composed prompt text"
+    },
+    "packages/codev/src/commands/consult/__tests__/tree-tripwire.test.ts": {
+      "reason": "opaque",
+      "note": "the only /tmp is an output path given to relativeOutputPath, which is pure path math"
+    },
+    "packages/codev/src/commands/porch/__tests__/agy-skip-progression.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a review file field in ReviewResult objects passed to allApprove; never read"
+    },
+    "packages/codev/src/commands/porch/__tests__/rollback.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a build_output or review file string in history that rollback clears; never read"
+    },
+    "packages/codev/src/terminal/__tests__/attach-replay.test.ts": {
+      "reason": "opaque",
+      "note": "cwd and logDir /tmp are config strings for a PtySession that is never spawned and has diskLogEnabled false"
+    },
+    "packages/codev/src/terminal/__tests__/pty-manager.test.ts": {
+      "reason": "opaque",
+      "note": "the /tmp workspaceRoot only reaches the mocked node-pty spawn, and disk logging is off"
+    },
+    "packages/codev/src/terminal/__tests__/pty-session-attach.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off, and the one disk-log test uses os.tmpdir()"
+    },
+    "packages/codev/src/terminal/__tests__/pty-session-delivery-signals.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off"
+    },
+    "packages/codev/src/terminal/__tests__/pty-session-input-signal.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off"
+    },
+    "packages/codev/src/terminal/__tests__/pty-session-replay-snapshot.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off"
+    },
+    "packages/codev/src/terminal/__tests__/pty-session-resize.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a cwd/logDir string in a PtySession config backed by a fake shellper client; disk logging is off"
+    },
+    "packages/codev/src/terminal/__tests__/session-manager-spawn-config.test.ts": {
+      "reason": "opaque",
+      "note": "the /tmp cwd only reaches the mocked child_process.spawn and the captured argv JSON; the socket dir uses os.tmpdir()"
+    },
+    "packages/codev/src/terminal/__tests__/session-manager.test.ts": {
+      "reason": "posix-only",
+      "note": "real disk and process uses of /tmp sit in the real-shellper tests, skipped on win32 by skipRealShellper; the rest are mock cwd strings"
+    },
+    "packages/codev/src/terminal/__tests__/shellper-cmdline.test.ts": {
+      "reason": "opaque",
+      "note": "the /tmp socket path is a JSON string parsed with string ops"
+    },
+    "packages/codev/src/terminal/__tests__/shellper-process.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a cwd handed to a MockPty or carried in a SPAWN frame; the real socket lives under os.tmpdir()"
+    },
+    "packages/codev/src/terminal/__tests__/shellper-survive-parent-exit.test.ts": {
+      "reason": "posix-only",
+      "note": "the suite is skipped on win32; the reason is at the skip"
+    },
+    "packages/codev/src/terminal/__tests__/shellper-windows-transport.test.ts": {
+      "reason": "opaque",
+      "note": "the /tmp cwd is handed to a MockPty; the real socket dir uses os.tmpdir()"
+    },
+    "packages/codev/src/terminal/__tests__/tower-shellper-integration.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a cwd/HOME string for a mocked node-pty or a socketDir on a SessionManager that never creates it; real dirs use os.tmpdir()"
+    },
+    "packages/sdk/src/__tests__/workspace.test.ts": {
+      "reason": "opaque",
+      "note": "every /tmp is a path string fed to the base64url codec"
+    }
+  }
+}

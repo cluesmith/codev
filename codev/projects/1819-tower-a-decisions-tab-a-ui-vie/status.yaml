@@ -1,0 +1,79 @@
+id: '1819'
+title: tower-a-decisions-tab-a-ui-vie
+protocol: spir
+phase: verified
+plan_phases:
+  - id: phase_1
+    title: 'Decisions read model: parser, timestamp resolver, wire types'
+    status: complete
+  - id: phase_2
+    title: Ruling splice with fail-loud validation
+    status: complete
+  - id: phase_3
+    title: 'Tower decisions routes: config, containment, serialized atomic writes'
+    status: complete
+  - id: phase_4
+    title: 'Decisions tab shell: dependency, race-safe polling, tab wiring'
+    status: complete
+  - id: phase_5
+    title: Read-only decision cards
+    status: complete
+  - id: phase_6
+    title: 'Ruling from the tab: options, comment, drafts, submit'
+    status: complete
+  - id: phase_7
+    title: Browser verification and documentation
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-10-17T07:25:37.280Z'
+    approved_at: '2026-10-17T13:20:57.641Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-10-17T13:33:54.785Z'
+    approved_at: '2026-10-17T16:37:40.481Z'
+  pr:
+    status: approved
+    requested_at: '2026-10-17T19:11:32.554Z'
+    approved_at: '2026-10-18T07:05:10.123Z'
+  verify-approval:
+    status: approved
+    requested_at: '2026-10-18T07:10:10.980Z'
+    approved_at: '2026-10-18T07:11:15.190Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-10-17T07:13:03.052Z'
+updated_at: '2026-10-18T07:11:17.537Z'
+context_refreshes:
+  - boundary: plan-phase:phase_2
+    at: '2026-10-17T16:56:28.468Z'
+    acknowledged_at: '2026-10-17T16:56:33.276Z'
+  - boundary: plan-phase:phase_3
+    at: '2026-10-17T17:09:13.272Z'
+    acknowledged_at: '2026-10-17T17:10:01.900Z'
+  - boundary: plan-phase:phase_4
+    at: '2026-10-17T17:23:39.730Z'
+    acknowledged_at: '2026-10-17T17:26:04.078Z'
+  - boundary: plan-phase:phase_5
+    at: '2026-10-17T17:43:08.327Z'
+    acknowledged_at: '2026-10-17T17:43:22.284Z'
+  - boundary: plan-phase:phase_6
+    at: '2026-10-17T17:58:12.488Z'
+    acknowledged_at: '2026-10-17T17:58:17.130Z'
+  - boundary: plan-phase:phase_7
+    at: '2026-10-17T18:20:43.681Z'
+    acknowledged_at: '2026-10-17T18:21:38.560Z'
+  - boundary: enter:review
+    at: '2026-10-17T18:49:44.539Z'
+    acknowledged_at: '2026-10-17T18:50:48.797Z'
+pr_history:
+  - phase: review
+    pr_number: 1820
+    branch: builder/spir-1819
+    created_at: '2026-10-17T18:58:02.238Z'
+    merged: true
+    merged_at: '2026-10-18T07:08:22.184Z'
+pr_ready_for_human: false

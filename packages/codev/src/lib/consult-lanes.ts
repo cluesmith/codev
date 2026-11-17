@@ -18,6 +18,7 @@
  *    file stops compiling rather than silently diverging.
  */
 
+import { isAbsolute } from 'node:path';
 import type { ModelReasoningEffort } from '@openai/codex-sdk';
 import { canonicalProtocolName, listProtocolNames, listReviewTypes } from './skeleton.js';
 
@@ -49,7 +50,7 @@ export const REASONING_EFFORT_LANES = ['codex'] as const;
  * test this replaced.
  */
 export const REASONING_EFFORTS = [
-  'minimal', 'low', 'medium', 'high', 'xhigh',
+  'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'persistent',
 ] as const satisfies readonly ModelReasoningEffort[];
 
 type UncoveredEffort = Exclude<ModelReasoningEffort, (typeof REASONING_EFFORTS)[number]>;
@@ -61,6 +62,18 @@ export const VALID_LANE_NAMES = ['gemini', 'codex', 'claude', 'hermes'];
 
 /** Whole-value special modes, accepted wherever a lane list is accepted. */
 export const SPECIAL_MODES = ['none', 'parent'] as const;
+
+/**
+ * How the claude lane authenticates (`consult.claudeAuth`, #1912). An enum rather than a boolean
+ * so a third mode can be added later.
+ *
+ * - `login` (default): the claude CLI's own login, which is the subscription for most people.
+ *   `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` are withheld from the child, so a stray key in the
+ *   shell or `.env` cannot silently switch billing to metered API tokens.
+ * - `api-key`: those keys pass through, and at least one must be set. For CI and key-only machines.
+ */
+export const CLAUDE_AUTH_MODES = ['login', 'api-key'] as const;
+export type ClaudeAuthMode = (typeof CLAUDE_AUTH_MODES)[number];
 
 /**
  * Model-id syntax. Deliberately permissive: ASCII alphanumerics plus `. _ : / @ + -`, 1–200 chars,
@@ -204,6 +217,34 @@ export function validateReasoningEffort(effort: unknown): void {
         `Valid values: ${quoted(REASONING_EFFORTS)}.`
       );
     }
+  }
+}
+
+/**
+ * `consult.codexPath` — run this codex binary instead of the CLI bundled with the SDK (#1880).
+ *
+ * Syntax only, at load time. Whether the binary actually runs is checked when the codex lane
+ * starts, and a failure there is fatal: there is no fallback to the bundled CLI.
+ */
+export function validateCodexPath(codexPath: unknown): void {
+  if (codexPath === undefined) return;
+  if (typeof codexPath !== 'string' || !isAbsolute(codexPath)) {
+    fail(
+      `Invalid consult.codexPath in Codev config: expected an absolute path to a codex binary ` +
+      `(e.g. the output of \`which codex\`), got ${JSON.stringify(codexPath)}.`
+    );
+  }
+}
+
+/** `consult.claudeAuth` — which credential the claude lane bills (#1912). See CLAUDE_AUTH_MODES. */
+export function validateClaudeAuth(claudeAuth: unknown): void {
+  if (claudeAuth === undefined) return;
+  if (typeof claudeAuth !== 'string' || !(CLAUDE_AUTH_MODES as readonly string[]).includes(claudeAuth)) {
+    fail(
+      `Invalid consult.claudeAuth in Codev config: got ${JSON.stringify(claudeAuth)}. ` +
+      `Valid values: ${quoted(CLAUDE_AUTH_MODES)}. "login" (the default) uses your claude CLI ` +
+      `login; "api-key" bills ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN instead.`
+    );
   }
 }
 

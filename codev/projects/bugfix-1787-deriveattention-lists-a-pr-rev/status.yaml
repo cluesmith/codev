@@ -1,0 +1,17 @@
+id: bugfix-1787
+title: deriveattention-lists-a-pr-rev
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-10-05T07:12:36.600Z'
+    approved_at: '2026-10-05T07:24:38.696Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-05T07:06:32.345Z'
+updated_at: '2026-10-05T07:24:38.697Z'
+pr_ready_for_human: false

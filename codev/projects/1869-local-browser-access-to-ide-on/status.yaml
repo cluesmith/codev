@@ -1,0 +1,30 @@
+id: '1869'
+title: local-browser-access-to-ide-on
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-11-03T00:50:24.987Z'
+    approved_at: '2026-11-03T01:38:32.151Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-11-03T02:09:00.503Z'
+    approved_at: '2026-11-03T02:23:46.762Z'
+  pr:
+    status: approved
+    requested_at: '2026-11-03T02:35:05.333Z'
+    approved_at: '2026-11-03T03:18:46.086Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-11-03T00:48:40.471Z'
+updated_at: '2026-11-03T03:18:46.086Z'
+pr_history:
+  - phase: review
+    pr_number: 1872
+    branch: builder/pir-1869
+    created_at: '2026-11-03T02:25:57.477Z'
+pr_ready_for_human: false

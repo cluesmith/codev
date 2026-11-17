@@ -1,0 +1,30 @@
+id: '1802'
+title: artifact-viewer-highlight-the-
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-10-12T22:29:28.846Z'
+    approved_at: '2026-10-15T23:11:55.289Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-10-15T23:26:56.327Z'
+    approved_at: '2026-10-15T23:50:15.218Z'
+  pr:
+    status: approved
+    requested_at: '2026-10-15T23:57:27.474Z'
+    approved_at: '2026-10-16T00:04:59.904Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-12T22:27:12.269Z'
+updated_at: '2026-10-16T00:05:02.505Z'
+pr_history:
+  - phase: review
+    pr_number: 1812
+    branch: builder/pir-1802
+    created_at: '2026-10-15T23:51:37.541Z'
+pr_ready_for_human: false

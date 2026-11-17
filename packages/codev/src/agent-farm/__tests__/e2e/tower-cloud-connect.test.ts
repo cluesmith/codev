@@ -14,7 +14,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 
-const TOWER_URL = process.env.TOWER_URL || 'http://localhost:4100';
+const TOWER_URL = process.env.TOWER_URL || `http://localhost:${process.env.TOWER_TEST_PORT || '4100'}`;
 
 /** Intercept the tunnel status API to return a mocked response. */
 async function mockTunnelStatus(page: Page, body: Record<string, unknown> | null, status = 200) {

@@ -26,7 +26,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                               IMPLEMENTATION                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  → 4. IMPLEMENTING                                                                  │
-│         Architect spawns builder: afx spawn XXXX                                  │
+│         Architect spawns builder: afx spawn <id> --protocol spir                  │
 │         Builder reads spec and plan                                                 │
 │         For each phase: Implement → Defend → Evaluate                               │
 │         Builder commits after each phase                                            │
@@ -127,38 +127,26 @@ codev import github:owner/repo --dry-run
 
 ### Consultation Commands
 
+In strict mode porch hands the builder the exact `consult` commands after each `porch done` —
+three reviewers by default, or the lanes in `.codev/config.json` `porch.consultation`. Run each
+as its own background task (in Claude Code, `run_in_background: true`, not a trailing `&`).
+For reference, the shapes are:
+
 ```bash
-# Spec review (during Stage 1)
-consult -m gemini --protocol spir --type spec
-consult -m codex --protocol spir --type spec
+# Builder reviews (porch emits these, with --output and --project-id added)
+consult -m gemini --protocol spir --type spec      # Stage 1
+consult -m codex  --protocol spir --type plan      # Stage 2
+consult -m claude --protocol spir --type impl      # Stage 4, after each plan phase
+consult -m gemini --protocol spir --type pr        # Stage 5, on the open PR
 
-# Plan review (during Stage 2)
-consult -m gemini --protocol spir --type plan
-consult -m codex --protocol spir --type plan
-
-# Implementation review (during Stage 4, after each phase)
-consult -m gemini --protocol spir --type impl
-consult -m codex --protocol spir --type impl
-
-# PR review (during Stage 5)
-consult -m gemini --protocol spir --type pr
-consult -m codex --protocol spir --type pr
-
-# Integration review (during Stage 6 — depth depends on risk)
-# Low risk: no consult needed, architect reads and merges
-# Medium risk: single-model review
-consult -m claude --type integration pr N
-# High risk: full 3-way CMAP
-consult -m gemini --type integration pr N &
-consult -m codex --type integration pr N &
-consult -m claude --type integration pr N &
-wait
-
-# Parallel 3-way reviews (run all three concurrently)
-consult -m gemini --protocol spir --type spec &
-consult -m codex --protocol spir --type spec &
-consult -m claude --protocol spir --type spec &
-wait
+# Integration review (Stage 6 — depth depends on risk; see risk-triage.md)
+# Low risk: no consult needed, the architect reads it
+# Medium risk: one model
+consult -m claude --type integration --issue <N>
+# High risk: all three, each as a background task
+consult -m gemini --type integration --issue <N>
+consult -m codex  --type integration --issue <N>
+consult -m claude --type integration --issue <N>
 ```
 
 ## Review Types
@@ -168,7 +156,7 @@ wait
 | `spec` | Stage 1 | Requirements clarity, completeness, feasibility |
 | `plan` | Stage 2 | Implementation approach, phase breakdown, risk assessment |
 | `impl` | Stage 4 | Code quality, test coverage, spec adherence |
-| `pr` | Stage 5 | Final self-check before PR creation |
+| `pr` | Stage 5 | Final check of the open PR |
 | `integration` | Stage 6 | System fit, architectural consistency, side effects (depth varies by risk — see `codev/resources/risk-triage.md`) |
 
 ## Builder Lifecycle
@@ -190,14 +178,14 @@ spawning → implementing → blocked → implementing → pr → complete
 
 ### Branch Naming
 ```
-builder/XXXX-spec-name
+builder/<protocol>-<id>        # e.g. builder/spir-42, created by afx spawn
 ```
 
 ### Commit Messages
 ```
-[Spec XXXX][Implement] Phase description
-[Spec XXXX][Defend] Add tests for phase
-[Spec XXXX][Review] Add lessons learned
+[Spec <id>] Initial specification draft
+[Spec <id>][Phase: <plan-phase>] feat: Phase description
+[Spec <id>] Review: lessons learned
 ```
 
 ### PR Merge (Builder)
@@ -212,7 +200,7 @@ gh pr merge N --merge --delete-branch
 ### Post-Merge Cleanup (Architect)
 ```bash
 git pull                    # Get merged changes
-afx cleanup -p XXXX          # Clean up builder worktree
+afx cleanup -p <id>          # Clean up builder worktree (plain number, no leading zeros)
 ```
 
 ## Troubleshooting
@@ -221,7 +209,7 @@ afx cleanup -p XXXX          # Clean up builder worktree
 
 1. Check builder terminal for blocker message
 2. Review any `// REVIEW(@architect):` comments in code
-3. Provide guidance via `afx send XXXX "guidance here"`
+3. Provide guidance via `afx send <builder-id> "guidance here"`
 4. Builder will resume work after receiving help
 
 ### PR Has Conflicts
@@ -231,6 +219,18 @@ afx cleanup -p XXXX          # Clean up builder worktree
 3. Builder: Rebase or merge main into branch
 4. Builder: Force push if needed
 
+### Claude Agent Exits With "Settings file not found"
+
+A Claude builder or architect that exits at once with `Settings file not found` (exit 1),
+with its builder loop relaunching every 2 seconds, means the attention-state reporter
+files under `~/.agent-farm/hooks/` were deleted. Any Tower launch reinstalls them:
+
+```bash
+afx spawn <id> --resume
+# or, for a whole workspace
+afx workspace recover
+```
+
 ### Builder Worktree Broken
 
 ```bash
@@ -238,7 +238,7 @@ afx cleanup -p XXXX          # Clean up builder worktree
 git worktree list
 
 # Force cleanup (only if work is committed/pushed)
-afx cleanup -p XXXX --force
+afx cleanup -p <id> --force
 ```
 
 ## Related Documentation

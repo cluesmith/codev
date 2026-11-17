@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import {
   resolveBuilderContext,
   readPorchContext,
@@ -30,7 +30,9 @@ import {
 // Fixtures
 // ============================================================================
 
-const WORKTREE = '/ws/.builders/aspir-1273';
+// Host-joined like every path the resolver derives from it, so the in-memory
+// fs keys and the worktree agree on the separator (backslash on Windows).
+const WORKTREE = join('/ws', '.builders', 'aspir-1273');
 const BRANCH = 'builder/aspir-1273';
 const BUILDER_ID = 'builder-aspir-1273';
 
@@ -64,7 +66,7 @@ done
 /** In-memory worktree. `dirs` maps a directory to its immediate subdirectories. */
 function makeFs(files: Record<string, string>, dirs: Record<string, string[]> = {}): ContextFsPort {
   return {
-    exists: (p) => p in files || p in dirs || Object.keys(files).some(f => f.startsWith(`${p}/`)),
+    exists: (p) => p in files || p in dirs || Object.keys(files).some(f => f.startsWith(`${p}${sep}`)),
     read: (p) => (p in files ? files[p] : null),
     listDirs: (p) => (p in dirs ? dirs[p] : null),
   };
@@ -880,6 +882,24 @@ describe('post-merge codex findings (Spec 1273)', () => {
     // But an ad-hoc task id still cannot masquerade as an issue.
     expect(issueNumberFromPorchId('builder-task-abc')).toBeUndefined();
     expect(issueNumberFromPorchId(undefined)).toBeUndefined();
+  });
+
+  it('recovers a tracker key whole, not its trailing digits (#1740)', () => {
+    expect(issueNumberFromPorchId('ENG-123')).toBe('ENG-123');
+    expect(issueNumberFromPorchId('bugfix-ENG-123')).toBe('ENG-123');
+    expect(issueNumberFromPorchId('eng-123')).toBe('ENG-123');
+    expect(issueNumberFromPorchId('AB2_X-7')).toBe('AB2_X-7');
+  });
+
+  it('reads only bugfix- as a protocol prefix; any other <word>-<N> is a tracker key (#1740)', () => {
+    // Porch prefixes only BUGFIX project ids (bugfix-<N>); SPIR, PIR, ASPIR, AIR
+    // and the experiment-style protocols use the bare number. So a different
+    // word before -<N> is not a protocol prefix but a tracker key, and its
+    // trailing digits must not be taken as the issue (that is the ENG-123 -> 123
+    // bug this function used to have).
+    expect(issueNumberFromPorchId('bugfix-887')).toBe('887');
+    expect(issueNumberFromPorchId('spir-42')).toBe('SPIR-42');
+    expect(issueNumberFromPorchId('experiment-7')).toBe('EXPERIMENT-7');
   });
 
   it('does not treat a --task --protocol builder as bare when porch init failed', () => {

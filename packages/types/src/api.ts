@@ -1,3 +1,5 @@
+import type { ServedAgentState } from './agent-state.js';
+
 /**
  * Tower API response shapes.
  *
@@ -20,6 +22,17 @@ export interface ArchitectState {
   pid: number;
   terminalId?: string;
   persistent?: boolean;
+  /**
+   * Spec 1595: the architect's served attention state. Optional and nullable:
+   * absent and `null` both mean unknown.
+   */
+  agentState?: ServedAgentState | null;
+  /**
+   * Spec 1595: wall-clock ISO time of the architect session's last PTY output,
+   * for the sdk's `working` staleness rule. Optional and nullable like
+   * `OverviewBuilder.lastDataAt`'s `null`.
+   */
+  lastDataAt?: string | null;
 }
 
 export interface Builder {
@@ -91,6 +104,12 @@ export interface DashboardState {
   version?: string;
   hostname?: string;
   teamEnabled?: boolean;
+  /**
+   * Spec 1819: true when the workspace's decisions file (config
+   * `dashboard.decisionsFile`, default `codev/state/pending-decisions.md`)
+   * exists inside the workspace. Controls the Decisions tab's visibility.
+   */
+  decisionsEnabled?: boolean;
 }
 
 // --- Terminal Entry (returned by tower routes) ---
@@ -192,6 +211,12 @@ export interface OverviewBuilder {
    */
   lastDataAt: string | null;
   /**
+   * Spec 1595: the builder's served attention state (working / needs-input /
+   * idle / blocked / dead). Optional and nullable: absent and `null` both mean
+   * unknown, and consumers fall back to the `lastDataAt` silence rule.
+   */
+  agentState?: ServedAgentState | null;
+  /**
    * Name of the architect that spawned this builder (Spec 755 / 823). `null` for
    * legacy rows from before #755, for builders whose worktree doesn't have a
    * matching row in `state.db.builders`, or when state.db is unavailable. Used
@@ -266,7 +291,8 @@ export interface OverviewBacklogItem {
   hasPlan: boolean;
   hasReview: boolean;
   hasBuilder: boolean;
-  createdAt: string;
+  /** ISO 8601 creation time; absent when the forge cannot supply it (Jira, #1740). */
+  createdAt?: string;
   author?: string;
   assignees?: string[];
   specPath?: string;
@@ -285,6 +311,9 @@ export interface OverviewRecentlyClosed {
   planPath?: string;
   reviewPath?: string;
 }
+
+/** The shape of a workspace's issue ids: bare numbers, or tracker keys like `ENG-123`. */
+export type IssueIdKind = 'number' | 'key';
 
 export interface OverviewData {
   builders: OverviewBuilder[];
@@ -343,6 +372,23 @@ export interface OverviewData {
   feedbackMode: 'forward' | 'queue';
   /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */
   currentUser?: string;
+  /**
+   * Issue #1740: the shape of this workspace's issue ids, from its configured
+   * forge provider: `'number'` (GitHub, GitLab, Gitea: `42`) or `'key'` (Linear,
+   * Jira: `ENG-123`). Clients gate key-shaped input on it. Absent when Tower
+   * cannot tell (the issue concepts are overridden by hand, or an older Tower);
+   * clients then fall back to their own inference.
+   */
+  issueIdKind?: IssueIdKind;
+  /**
+   * Issue #1645: why forge-backed sections (PRs, backlog, recently closed/merged)
+   * may be stale or empty. `rate-limited` = the backend's budget is exhausted and
+   * Tower has suspended fetches until `forgeResetAt`; `unavailable` = at least one
+   * section could not be fetched for another reason (CLI missing, offline).
+   */
+  forgeStatus?: 'ok' | 'rate-limited' | 'unavailable';
+  /** ISO instant the rate-limit suspension lifts; present only when `forgeStatus` is `rate-limited`. */
+  forgeResetAt?: string;
   errors?: { prs?: string; issues?: string };
 }
 
@@ -422,7 +468,8 @@ export interface IssueView {
    * The issue's **browser/web** URL (NOT an API endpoint), when the forge
    * concept supplies it. Each forge maps its own web-URL field into this:
    * GitHub `url`, GitLab `web_url`, Gitea `html_url` (Gitea's `url` is the API
-   * endpoint — do not use it), Linear `url`. Optional so the contract stays
+   * endpoint — do not use it), Linear `url`, Jira `<site>/browse/<key>` (never
+   * the REST `self` link, which names an infrastructure host). Optional so the contract stays
    * forge-neutral; consumers that open the issue in a browser degrade
    * gracefully when it's absent (e.g. a forge script that doesn't emit it).
    */
@@ -430,7 +477,8 @@ export interface IssueView {
   /**
    * Login/handle of the user who opened the issue, when the forge concept
    * supplies it: GitHub `author.login`, GitLab `author.username`, Gitea
-   * `user.login`, Linear `creator.displayName`. Optional so the contract
+   * `user.login`, Linear `creator.displayName`, Jira the creator's email
+   * (falling back to display name). Optional so the contract
    * stays forge-neutral — a forge/script that omits it degrades gracefully
    * (the consumer drops the "opened by" attribution).
    */
@@ -511,7 +559,8 @@ export interface IssueSearchItem {
   area: string;
   author?: string;
   assignees?: string[];
-  createdAt: string;
+  /** ISO 8601 creation time; absent when the forge cannot supply it (Jira, #1740). */
+  createdAt?: string;
   /** Issue body for substring matching. `''` when the forge can't supply it. */
   body: string;
 }
@@ -582,6 +631,120 @@ export interface TeamApiResponse {
   githubError?: string;
 }
 
+// --- Decisions (GET/POST /workspace/:path/api/decisions…, Spec 1819) ---
+
+/**
+ * A heading timestamp, resolved to an instant only from the zone written in it or, failing
+ * that, the file's `_Zone: …_` line.
+ */
+export interface DecisionStamp {
+  /** The stamp exactly as written in the heading. */
+  raw: string;
+  /** ISO-8601 UTC instant, or null when the stamp could not be converted. */
+  instant: string | null;
+  /** The stamp gives a time but no date (it was read as today): show the time alone. */
+  timeOnly?: true;
+  /**
+   * Why `instant` is null, when the stamp names a zone the tab cannot use or a time the
+   * clocks skipped or repeated. Absent with a null instant: no zone is known, so the stamp
+   * is shown as written.
+   */
+  unconvertedReason?: 'unknown-zone' | 'nonexistent-time' | 'ambiguous-time';
+}
+
+export interface DecisionOption {
+  /** The backticked word the owner chooses (and the tab writes). */
+  word: string;
+  /**
+   * The text after `=` on the `**Your word:**` line; failing that, the word's entry in the
+   * item body's `**Options:**` (`(a) `word` = …`, `(a) `word`: …` or `- `word` = …`); else ''.
+   */
+  description: string;
+  /** The first option on the `**Your word:**` line. */
+  recommended: boolean;
+}
+
+/** One `- **You asked (t):**` / `- **<Name>'s answer (t):**` entry from an item body. */
+export type DecisionQaEntry =
+  | { kind: 'asked'; time: string; markdown: string; answered: boolean }
+  | { kind: 'answer'; name: string; time: string; markdown: string };
+
+export type DecisionItemProblem =
+  | 'id-missing'
+  | 'duplicate-id'
+  | 'your-word-missing'
+  | 'your-word-multiple';
+
+export type DecisionsFileProblem = 'open-missing' | 'open-multiple' | 'ruled-multiple';
+
+export interface DecisionItem {
+  id: string;
+  stamp: DecisionStamp | null;
+  question: string;
+  /** Item body markdown (heading → `**Your word:**` line), Q&A entries removed. */
+  bodyMarkdown: string;
+  options: DecisionOption[];
+  /** Text after the `**Your word:**` line, trimmed, verbatim; '' when unruled. */
+  currentRuling: string;
+  qa: DecisionQaEntry[];
+  /** SHA-256 of the item's exact text (trailing blank lines excluded); echoed back on a ruling request. */
+  fingerprint: string;
+  problems: DecisionItemProblem[];
+  /** Whether the tab may write a ruling for this item. */
+  writable: boolean;
+}
+
+export interface DecisionsDocument {
+  /** Workspace-relative path of the decisions file. */
+  path: string;
+  /** SHA-256 of the whole file; changes whenever the file does. */
+  version: string;
+  /** `## Open` items, in file order. */
+  items: DecisionItem[];
+  /** `## Ruled` section content (markdown), '' when absent. */
+  ruledMarkdown: string;
+  problems: DecisionsFileProblem[];
+}
+
+export interface DecisionsRuleRequest {
+  id: string;
+  word?: string;
+  comment?: string;
+  fingerprint: string;
+}
+
+export type DecisionsRefusalCode =
+  | 'invalid-request'
+  | 'empty-ruling'
+  | 'comment-too-long'
+  | 'comment-heading'
+  | 'comment-fence'
+  | 'comment-your-word'
+  | 'open-multiple'
+  | 'heading-missing'
+  | 'heading-duplicate'
+  | 'your-word-missing'
+  | 'your-word-multiple'
+  | 'already-ruled'
+  | 'unknown-word'
+  | 'item-changed'
+  | 'structure-changed'
+  | 'not-utf8'
+  | 'write-failed'
+  | 'not-found'
+  | 'outside-workspace'
+  | 'config-error';
+
+/** GET …/api/decisions. */
+export type DecisionsReadResponse =
+  | { ok: true; document: DecisionsDocument }
+  | { ok: false; code: DecisionsRefusalCode; message: string };
+
+/** POST …/api/decisions/rule; on success, the document re-parsed from the bytes just written. */
+export type DecisionsRuleResponse =
+  | { ok: true; document: DecisionsDocument }
+  | { ok: false; code: DecisionsRefusalCode; message: string };
+
 // --- Tunnel (GET /api/tunnel/status) ---
 
 export interface TunnelStatus {
@@ -648,6 +811,22 @@ export interface HeldMessage {
   fromAgent: string | null;
   /** Why the render gate held it: `'busy' | 'no-profile' | 'no-live-pty'`; `null` if unset. */
   reason: string | null;
+  /**
+   * The gate's detail behind a `busy` reason (Issue #1482):
+   * `'user-text'` — a draft or menu occupies the composer; a human is at the line and the hold
+   * clears by itself. `'recent-input'` (Issue #1473) — the composer is EMPTY but input landed
+   * within the input-settle window (a keystroke, a click, or an ungated `--interrupt`/
+   * `--escape` write); also self-clearing, and distinct from `user-text` in that no draft
+   * exists to be corrupted. `'composer-redraw'` (Issue #1664) — the composer is EMPTY but its
+   * rendered region moved within the settle window (a turn-end redraw, a rotating placeholder,
+   * a resize); also self-clearing, and NOT raised for the recipient merely producing output
+   * elsewhere on the screen, which is safe to write onto. `'no-region-end'` /
+   * `'no-composer-marker'` — the classifier could not verify the composer at all (a drifted
+   * profile, a torn frame, or Tower's dimensions diverging from the real PTY); this hold does
+   * NOT clear on its own.
+   * `null` for a non-gate hold (`no-live-pty`, `no-profile`) and once delivered.
+   */
+  detail: string | null;
   /** True once the row has crossed the escalation age. A pre-due row never escalates. */
   escalated: boolean;
   /** Enqueue time, epoch ms — the basis for the displayed age. */

@@ -9,6 +9,7 @@
  * This pins the LISTEN filter so a future edit can't silently drop it.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const execSyncMock = vi.fn(() => '');
 // Spread the real module and override only execSync — other transitive imports
@@ -19,6 +20,13 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 const { getProcessesOnPort } = await import('../commands/tower.js');
+
+// These tests drive the POSIX branch (lsof through a mocked execSync), so
+// force the platform seam to linux; on a win32 host the code would otherwise take its
+// Windows branch.
+beforeEach(() => {
+  forceHostPlatform('linux');
+});
 
 describe('getProcessesOnPort — LISTENer only (#991)', () => {
   beforeEach(() => execSyncMock.mockClear());

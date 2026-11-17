@@ -42,9 +42,7 @@
         "collect_all_reports"
       ],
       "consultation": {
-        "enabled": true,
-        "models": ["codex"],
-        "parallel": true,
+        "models": ["gemini", "codex", "claude"],
         "type": "investigation"
       },
       "transition": {
@@ -79,9 +77,7 @@
         "finalize_report"
       ],
       "consultation": {
-        "enabled": true,
-        "models": ["codex"],
-        "parallel": true,
+        "models": ["gemini", "codex", "claude"],
         "type": "critique"
       },
       "gate": {
@@ -92,25 +88,11 @@
       }
     }
   ],
-  "signals": {
-    "PHASE_COMPLETE": {
-      "description": "Signal current phase is complete",
-      "transitions_to": "next_phase"
-    },
-    "BLOCKED": {
-      "description": "Signal research is blocked",
-      "requires": "reason"
-    },
-    "SCOPE_REJECTED": {
-      "description": "Architect rejects the scope — rework needed",
-      "transitions_to": "scope"
-    }
-  },
   "defaults": {
     "mode": "strict",
     "consultation": {
       "enabled": true,
-      "models": ["codex"],
+      "models": ["gemini", "codex", "claude"],
       "parallel": true
     },
     "checks": {}

@@ -5,12 +5,14 @@
  * collects timing data, computes statistics, and saves results.
  */
 
-import { spawn as spawnProcess, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, createWriteStream } from 'node:fs';
 import { join } from 'node:path';
-import { hostname as osHostname } from 'node:os';
+import { hostname as osHostname, cpus, totalmem } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { logger } from '../utils/logger.js';
+import { isWindows } from '../../lib/platform.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 
 const ENGINES = ['gemini', 'codex', 'claude'] as const;
 type Engine = (typeof ENGINES)[number];
@@ -40,6 +42,9 @@ export interface IterationResult {
 
 /** Detect host CPU model. */
 export function detectCpu(): string {
+  if (isWindows()) {
+    return cpus()[0]?.model.trim() || 'unknown';
+  }
   try {
     // macOS
     return execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8' }).trim();
@@ -59,6 +64,9 @@ export function detectCpu(): string {
 
 /** Detect host RAM. */
 export function detectRam(): string {
+  if (isWindows()) {
+    return `${Math.round(totalmem() / 1073741824)} GB`;
+  }
   try {
     // macOS
     const bytes = execSync('sysctl -n hw.memsize', { encoding: 'utf8' }).trim();
@@ -89,7 +97,7 @@ export function runEngine(
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const proc = spawnProcess('consult', ['-m', engine, '--prompt', prompt], {
+    const proc = commandLaunch().spawn('consult', ['-m', engine, '--prompt', prompt], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -211,9 +219,15 @@ export async function bench(options: BenchOptions): Promise<void> {
   }
 
   // Validate consult is available by checking PATH
-  try {
-    execSync('which consult', { stdio: 'ignore' });
-  } catch {
+  const consultOnPath = commandLaunch().commandExists('consult', () => {
+    try {
+      execSync('which consult', { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!consultOnPath) {
     logger.error("'consult' command not found on PATH");
     process.exit(1);
   }

@@ -70,20 +70,14 @@ describe('PR close-keyword directive (#685)', () => {
   });
 
   /**
-   * Porch's phase prompt renderer (packages/codev/src/commands/porch/prompts.ts
-   * `substituteVariables`) only replaces `{{word}}` tokens — NOT dotted paths
-   * like `{{issue.number}}`. So any `{{issue...}}` left inside the PR body
-   * template would render literally and break GitHub auto-close.
-   *
-   * New directive text added for #685 must use `<N>` placeholders, not
-   * `{{issue.number}}`, inside the PR body template (the lines between
-   * `CODEV_PR_BODY="$(cat <<'EOF'` and the matching `EOF`). #1455 moved the
-   * body from `gh pr create --body` into that environment variable, so the
-   * match accepts either spelling.
-   *
-   * The bugfix prompt's `{{issue.number}}` in the PR title and in the
-   * notification `afx send architect` command predates this fix and is
-   * out of scope — this test only guards the PR body template itself.
+   * When #685 landed, porch's phase prompt renderer (packages/codev/src/commands/
+   * porch/prompts.ts `substituteVariables`) only replaced `{{word}}` tokens, so a
+   * `{{issue...}}` inside the PR body template rendered literally and broke
+   * GitHub auto-close. #1903 taught porch `{{issue.number}}` / `{{issue.title}}`,
+   * but the body templates kept `<N>` placeholders, and this guard keeps them
+   * consistent (the lines between `CODEV_PR_BODY="$(cat <<'EOF'` and the
+   * matching `EOF`). #1455 moved the body from `gh pr create --body` into that
+   * environment variable, so the match accepts either spelling.
    */
   const prBodyTargets: PromptTarget[] = [
     { protocol: 'bugfix', relPath: 'codev/protocols/bugfix/prompts/pr.md' },

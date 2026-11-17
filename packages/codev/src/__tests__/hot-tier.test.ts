@@ -10,6 +10,15 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import {
+  HOT_CAP_LINES,
+  HOT_CAP_ENTRIES,
+  HOT_CAP_MAP_TOPICS,
+  bulletsUnder,
+  topLevelHeadings,
+  mapTopics,
+  sectionsNamedBy,
+} from '../lib/governance-bootstrap.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 
@@ -31,9 +40,12 @@ const PLACEMENTS = [
 // generic starters with placeholders, so structural asserts apply only here.
 const REAL_DIR = 'codev/resources';
 
-const CAP_LINES = 35;
-const CAP_FACTS = 10;
-const CAP_MAP_TOPICS = 12;
+// The cap and map rules are shared with the bootstrap validator (Spec 1797), so this test
+// and `codev bootstrap-docs` enforce one definition. The raw line count below (comments
+// included) is this test's stricter policy for the shipped placements.
+const CAP_LINES = HOT_CAP_LINES;
+const CAP_FACTS = HOT_CAP_ENTRIES;
+const CAP_MAP_TOPICS = HOT_CAP_MAP_TOPICS;
 
 function read(relPath: string): string {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf-8');
@@ -42,49 +54,6 @@ function read(relPath: string): string {
 // Match `wc -l` semantics: count newline characters.
 function lineCount(content: string): number {
   return (content.match(/\n/g) ?? []).length;
-}
-
-// Count `- ` bullets under the `## <prefix>...` section (until the next `## `).
-function bulletsUnder(content: string, headingPrefix: string): number {
-  let inSection = false;
-  let count = 0;
-  for (const line of content.split('\n')) {
-    if (line.startsWith('## ')) {
-      inSection = line.startsWith(`## ${headingPrefix}`);
-    } else if (inSection && line.startsWith('- ')) {
-      count++;
-    }
-  }
-  return count;
-}
-
-// Top-level `## ` heading texts of a markdown doc.
-function topLevelHeadings(content: string): string[] {
-  return content
-    .split('\n')
-    .filter((l) => l.startsWith('## '))
-    .map((l) => l.slice(3).trim());
-}
-
-// The topic each map bullet points at: the text before the " — consult when…" guidance.
-function mapTopics(content: string): string[] {
-  const topics: string[] = [];
-  let inMap = false;
-  for (const line of content.split('\n')) {
-    if (line.startsWith('## ')) {
-      inMap = line.startsWith('## Map');
-    } else if (inMap && line.startsWith('- ')) {
-      topics.push(line.slice(2).split(' — ')[0].trim());
-    }
-  }
-  return topics;
-}
-
-// A map topic is accurate if it names a real cold-doc section — exact match, or a
-// prefix of one (so "Critical" maps "Critical (Prevent Major Failures)"). This
-// enforces accuracy without requiring completeness (the map is bounded by design).
-function isRealSection(topic: string, headings: string[]): boolean {
-  return headings.some((h) => h === topic || h.startsWith(`${topic} `));
 }
 
 // Which cold doc each real hot file maps.
@@ -120,13 +89,13 @@ describe('Spec 987 — hot tier placement and cap', () => {
       const rel = `${REAL_DIR}/${file}`;
       const content = read(rel);
 
-      const facts = bulletsUnder(content, 'Critical');
+      const facts = bulletsUnder(content, 'Critical').length;
       expect(facts, `${rel}: facts present`).toBeGreaterThan(0);
       expect(facts, `${rel}: facts exceed cap`).toBeLessThanOrEqual(CAP_FACTS);
 
-      const mapTopics = bulletsUnder(content, 'Map');
-      expect(mapTopics, `${rel}: cold-doc map present`).toBeGreaterThan(0);
-      expect(mapTopics, `${rel}: map exceeds cap`).toBeLessThanOrEqual(CAP_MAP_TOPICS);
+      const mapEntries = bulletsUnder(content, 'Map').length;
+      expect(mapEntries, `${rel}: cold-doc map present`).toBeGreaterThan(0);
+      expect(mapEntries, `${rel}: map exceeds cap`).toBeLessThanOrEqual(CAP_MAP_TOPICS);
 
       // The map must point at its sibling cold doc with "consult when" guidance.
       expect(content).toMatch(/## Map of (arch|lessons-learned)\.md \(consult when/);
@@ -143,8 +112,8 @@ describe('Spec 987 — hot tier placement and cap', () => {
       expect(topics.length, `${file}: map should have topics`).toBeGreaterThan(0);
       for (const topic of topics) {
         expect(
-          isRealSection(topic, headings),
-          `${file}: map topic "${topic}" is not a real top-level section of ${COLD_DOC[file]}`
+          sectionsNamedBy(topic, headings).length === 1,
+          `${file}: map topic "${topic}" must name exactly one top-level section of ${COLD_DOC[file]}`
         ).toBe(true);
       }
     }

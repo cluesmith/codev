@@ -7,6 +7,8 @@
  * and the CSP source; this builds the document with a fresh per-render nonce.
  */
 
+import { knownCursor, knownHighlight } from './reading-aids.js';
+
 export interface MarkdownPreviewHtmlOptions {
   /** `webview.cspSource` — the origin the webview may load styles/images/fonts from. */
   cspSource: string;
@@ -28,6 +30,13 @@ export interface MarkdownPreviewHtmlOptions {
    * omitted and the canvas defaults to vertical.
    */
   initialReadingMode?: string;
+  /**
+   * Reading aids (#1802) from `codev.markdownPreview.hoverHighlight` / `readingCursor`. Emitted
+   * as `#root` data attributes only when they name a known value; anything else is omitted and
+   * the canvas uses its defaults (line and paragraph, arrow).
+   */
+  hoverHighlight?: string;
+  readingCursor?: string;
 }
 
 /** Build the full webview document with a fresh nonce bound into the CSP and the script tag. */
@@ -70,6 +79,9 @@ export function renderMarkdownPreviewHtml(opts: MarkdownPreviewHtmlOptions): str
       --codev-canvas-code-foreground: var(--vscode-textPreformat-foreground);
       --codev-canvas-link: var(--vscode-textLink-foreground);
       --codev-canvas-comment-marker: var(--vscode-editorWarning-foreground);
+      /* Hover reading aid (#1802): the word pill uses the theme's own hover grey. The line band
+       * and paragraph tint keep the package defaults, derived from the foreground above. */
+      --codev-canvas-hover-word-background: var(--vscode-toolbar-hoverBackground);
 
       /*
        * Typography (#1053). The split is deliberate, mirroring github-markdown-css's own
@@ -88,11 +100,19 @@ ${userTokens}
       color: var(--codev-canvas-foreground);
       background: var(--codev-canvas-background);
     }
+    /* Dark themes (#1802 dev-gate feedback): light text at the package's light-tuned strengths
+     * reads too faint on a dark background, so the line band and paragraph tint are stronger
+     * there. VS Code stamps the theme kind as a class on the webview body. */
+    body.vscode-dark .codev-artifact-canvas,
+    body.vscode-high-contrast:not(.vscode-high-contrast-light) .codev-artifact-canvas {
+      --codev-canvas-hover-line-background: color-mix(in srgb, var(--codev-canvas-foreground) 12%, transparent);
+      --codev-canvas-hover-paragraph-background: color-mix(in srgb, var(--codev-canvas-foreground) 6%, transparent);
+    }
   </style>
   <title>Codev Markdown Preview</title>
 </head>
 <body>
-  <div id="root"${readingModeAttr(opts.initialReadingMode)}></div>
+  <div id="root"${readingModeAttr(opts.initialReadingMode)}${readingAidAttrs(opts)}></div>
   <script nonce="${nonce}" src="${opts.scriptUri}"></script>
 </body>
 </html>`;
@@ -105,6 +125,22 @@ function readingModeAttr(mode: string | undefined): string {
     return ` data-reading-mode="${mode}"`;
   }
   return '';
+}
+
+/** The bootstrap `data-hover-highlight` / `data-reading-cursor` attributes (#1802). Only known
+ * vocabulary values are interpolated (the canonical spelling, not the stored text), so the markup
+ * is closed-vocabulary by construction. */
+function readingAidAttrs(opts: MarkdownPreviewHtmlOptions): string {
+  let out = '';
+  const highlight = knownHighlight(opts.hoverHighlight);
+  if (highlight) {
+    out += ` data-hover-highlight="${highlight}"`;
+  }
+  const cursor = knownCursor(opts.readingCursor);
+  if (cursor) {
+    out += ` data-reading-cursor="${cursor}"`;
+  }
+  return out;
 }
 
 /**

@@ -15,10 +15,11 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { WebSocketServer } from 'ws';
-import { SessionManager } from '../../terminal/session-manager.js';
+import { SessionManager, ORPHAN_SWEEP_TIMEOUT_MS } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup, persistableCommand, logSessionIdentity } from './tower-utils.js';
-import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
+import { sweepShellperHusks, resolveHuskGraceMs, livenessFromStartTimes } from './shellper-husk-sweep.js';
+import { listProcessCensus } from './process-census.js';
 import {
   sweepSessionLogs,
   measureSessionLogs,
@@ -31,7 +32,8 @@ import {
   initTunnel,
   shutdownTunnel,
 } from './tower-tunnel.js';
-import { initCron, shutdownCron } from './tower-cron.js';
+import { initCron, shutdownCron, getTaskId } from './tower-cron.js';
+import { reconcileIdeServer } from './ide-server.js';
 import {
   initInstances,
   shutdownInstances,
@@ -53,6 +55,8 @@ import {
   deleteFileTabsForWorkspace,
   getTerminalsForWorkspace,
   reconcileTerminalSessions,
+  pruneBuilderWorktreeWorkspaces,
+  processExists,
 } from './tower-terminals.js';
 import {
   setupUpgradeHandler,
@@ -62,11 +66,25 @@ import { startMailboxDrainer, stopMailboxDrainer, setMailboxBroadcaster } from '
 import { shutdownDelayedSends } from './delayed-send.js';
 import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
+import { agentStateStore, AGENT_STATE_CHANGED } from './agent-state/store.js';
+import { coalesceAgentStateChanges } from './agent-state/broadcast.js';
+import { registeredAgents, startAgentLiveness, stopAgentLiveness } from './agent-state/liveness.js';
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { getGlobalDb } from '../db/index.js';
+import {
+  claimGlobalDbOwnership,
+  defaultLockFile,
+  ownershipConflictMessage,
+  releaseTowerOwnerIfMine,
+} from '../db/tower-owner.js';
 import { runBootConsolidation } from '../db/consolidate.js';
+import { canonicalizeWorkspacePathRows } from '../db/canonicalize-workspace-paths.js';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/server-utils.js';
 import { version } from '../../version.js';
+import { isWindows } from '../../lib/platform.js';
+import { WindowsJobHelper, getTowerJobHelper, setTowerJobHelper } from '../../lib/platform/windows/job-objects.js';
+import { towerBootSessionWarning } from '../commands/windows/tower-lifecycle.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -117,6 +135,11 @@ const bindHost = bridgeMode
   ? validateHost(process.env.BRIDGE_TOWER_HOST || '127.0.0.1')
   : '127.0.0.1';
 
+// Issue #1629: the owner lock file for this global.db (its `.tower-owner` sibling;
+// the suffix avoids SQLite's own auxiliary/dotfile-VFS names). Resolved once so the
+// boot guard and the graceful-shutdown release use the same path.
+const towerLockFile = defaultLockFile();
+
 // Request authentication (advisory GHSA-xvjp-7748-v88v): ensure the shared local
 // key exists at boot so HTTP/WS enforcement has an expected value to compare
 // against. getExpectedKey() issues the key if missing (Tower owns generation)
@@ -161,7 +184,12 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Graceful shutdown handler (Phase 2 - Spec 0090)
+let shutdownStarted = false;
+
 async function gracefulShutdown(signal: string): Promise<void> {
+  // A signal and a shutdown request (Spec 1658) can both arrive; run once.
+  if (shutdownStarted) return;
+  shutdownStarted = true;
   log('INFO', `Received ${signal}, starting graceful shutdown...`);
 
   // 1. Stop accepting new connections
@@ -191,6 +219,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   if (shellperHuskSweepInterval) clearInterval(shellperHuskSweepInterval);
   if (terminalPartialMonitorInterval) clearInterval(terminalPartialMonitorInterval);
   if (sessionLogSweepInterval) clearInterval(sessionLogSweepInterval);
+  stopAgentLiveness();
   clearInterval(sseHeartbeatInterval);
 
   // 4b. Drop pending delayed sends FIRST (Spec 1307 `--delay`). Cancels every timer
@@ -223,6 +252,20 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   // 8. Tear down terminal module (Spec 0105 Phase 4) — shuts down terminal manager
   shutdownTerminals();
+
+  // 8b. Spec 1658 Phase 3b: stop the job helper. Session jobs carry no
+  // kill-on-close, so this never touches a session.
+  getTowerJobHelper()?.stop();
+
+  // 9. Issue #1629: release our global.db owner lock so the next start sees an
+  // unowned DB. Best-effort and pid-scoped (never removes a lock we don't own);
+  // a hard kill skips this, but the boot liveness check self-clears a dead
+  // owner's lock anyway.
+  try {
+    releaseTowerOwnerIfMine(towerLockFile, process.pid);
+  } catch (err) {
+    log('WARN', `Failed to release global.db owner lock: ${(err as Error).message}`);
+  }
 
   log('INFO', 'Graceful shutdown complete');
   process.exit(0);
@@ -379,6 +422,9 @@ const routeCtx: RouteContext = {
       sseClients.splice(index, 1);
     }
   },
+  requestShutdown: (reason: string) => {
+    gracefulShutdown(reason);
+  },
 };
 
 // Wire the broadcast function into the codev config-file watcher so edits
@@ -393,6 +439,21 @@ setCodevConfigNotifier(broadcastNotification);
 // escalation age (moves the indicator into its attention state). The pure delivery
 // module and the boot-time drainer have no RouteContext, so they fan out through here.
 setMailboxBroadcaster(broadcastNotification);
+
+// Spec 1595: an accepted lifecycle report that changes an agent's served state
+// fans out as the existing `overview-changed` event, so surfaces refetch the
+// overview (which projects agent state per request; no cache to invalidate).
+// Changes are coalesced per workspace: reports arrive once per tool call.
+// Liveness flips (started after the boot reconcile) share the same coalescer.
+const announceAgentStateChange = coalesceAgentStateChanges((workspacePath) => {
+  broadcastNotification({
+    type: 'overview-changed',
+    title: 'Agent state changed',
+    body: 'agent state',
+    workspace: workspacePath,
+  });
+});
+agentStateStore.on(AGENT_STATE_CHANGED, announceAgentStateChange);
 
 // ============================================================================
 // Readiness gate (Issue #1261)
@@ -493,6 +554,45 @@ server.listen(port, bindHost, () => {
  * the readiness gate above until it calls markBootComplete().
  */
 async function bootSequence(): Promise<void> {
+  // Issue #1629: global.db owner lock. The port bind above is a SAME-PORT mutex
+  // only — a second Tower on a DIFFERENT port can still open this global.db (the
+  // #1515 incident: an AGENT_FARM_DIR typo pointed a test Tower at production).
+  // Its reconcile would then hijack every live shellper and delete the rows. So
+  // BEFORE anything touches the shared DB rows, sockets, or shellper processes
+  // (consolidation, reconcile, killOrphanedShellpers), claim ownership via an
+  // exclusive lock file next to global.db — and refuse loudly if a live Tower
+  // already owns this DB.
+  const ownership = await claimGlobalDbOwnership({
+    lockFile: towerLockFile,
+    pid: process.pid,
+    port,
+    dbDir: AGENT_FARM_DIR,
+    bindHost,
+  });
+  if (!ownership.ok) {
+    log('ERROR', ownershipConflictMessage(ownership.conflict, AGENT_FARM_DIR));
+    process.exit(1);
+  }
+  log('INFO', `Claimed global.db ownership (pid ${process.pid}, port ${port}) at ${AGENT_FARM_DIR}`);
+
+  // Spec 1658 Phase 3b: one job helper per Tower, started now so the first
+  // session create finds it warm. It never wraps Tower: it only puts shellper
+  // pids in per-session jobs. A failure to bind is logged by the helper once;
+  // sessions then start without a job.
+  // Spec 1658 Phase 4: a Tower inside a codev session's job stops when that
+  // session is torn down. Warn, never refuse: the marker is inherited and can
+  // be stale. The launcher is what refuses (commands/windows/tower-lifecycle.ts).
+  const sessionWarning = towerBootSessionWarning(process.env, isWindows());
+  if (sessionWarning !== null) log('WARN', sessionWarning);
+
+  if (isWindows()) {
+    const jobHelper = new WindowsJobHelper({ log: (msg: string) => log('WARN', msg) });
+    setTowerJobHelper(jobHelper);
+    jobHelper.start().then((failure) => {
+      if (failure === null) log('INFO', 'Per-session job objects available');
+    });
+  }
+
   // Initialize shellper session manager for persistent terminals
   const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.codev', 'run');
   const shellperScript = path.join(__dirname, '..', '..', 'terminal', 'shellper-main.js');
@@ -607,6 +707,7 @@ async function bootSequence(): Promise<void> {
   // Spec 0105 Phase 4: Initialize terminal management module
   initTerminals({
     log,
+    towerPort: port,
     shellperManager,
     registerKnownWorkspace,
     getKnownWorkspacePaths,
@@ -653,6 +754,42 @@ async function bootSequence(): Promise<void> {
     log('ERROR', `state.db consolidation failed: ${(err as Error).message}`);
   }
 
+  // Spec 1658 (M6): on Windows, collapse every stored spelling of a workspace path
+  // (VS Code's `c:\`, Git Bash's `C:\`, any other case) onto its canonical key,
+  // BEFORE reconcile and initInstances() read the rows. Every boot, idempotent.
+  // POSIX keeps its keys exactly as written (#1870).
+  if (isWindows()) {
+    try {
+      // Liveness must survive PID reuse (a recorded pid now owned by an unrelated
+      // process reads as dead), so take one census for start times up front: the
+      // canonicalization itself runs synchronously in a transaction.
+      const census = await listProcessCensus({ fresh: true });
+      const startTimes = new Map<number, number>();
+      for (const entry of census) {
+        if (entry.creationTime !== undefined) startTimes.set(entry.pid, entry.creationTime);
+      }
+      const report = canonicalizeWorkspacePathRows(getGlobalDb(), {
+        canonicalize: normalizeWorkspacePath,
+        cronTaskId: getTaskId,
+        isAlive: livenessFromStartTimes(startTimes, processExists),
+      });
+      for (const move of report.moved) {
+        log('INFO', `workspace path canonicalized: ${move.from} -> ${move.to}`);
+      }
+      for (const drop of report.dropped) {
+        log('WARN', `workspace path canonicalization dropped a duplicate ${drop.table} row (${drop.key}); the canonical row was kept`);
+      }
+      for (const terminalId of report.droppedTerminalIds) {
+        log('INFO', `terminal ${terminalId}: duplicate row dropped, its process had already exited`);
+      }
+      for (const dup of report.liveDuplicates) {
+        log('ERROR', `workspace ${dup.workspace}: ${dup.terminalIds.length} live ${dup.type} sessions claim role ${dup.roleId ?? '(none)'} (terminals ${dup.terminalIds.join(', ')}); both kept, only one is addressable; stop the one you do not want`);
+      }
+    } catch (err) {
+      log('ERROR', `workspace path canonicalization failed: ${(err as Error).message}`);
+    }
+  }
+
   // TICK-001: Reconcile terminal sessions from previous run.
   // Must run BEFORE initInstances() so that API request handlers
   // (getInstances → getTerminalsForWorkspace) cannot race with reconciliation.
@@ -663,13 +800,47 @@ async function bootSequence(): Promise<void> {
   // and deleting the architect terminal's socket file (Bugfix #274).
   await reconcileTerminalSessions();
 
-  // Bugfix #341: Kill orphaned shellper processes not in active sessions.
-  // Must run AFTER reconciliation so that reconnected sessions are in the
-  // active map and won't be killed. Catches shellpers from crashed tests
-  // or previous Tower instances that lost their socket files.
+  // Issue #1809: drop global.db rows that recorded a builder worktree as a
+  // workspace. Runs AFTER reconcile (liveness is known) and BEFORE the #341
+  // orphan sweep, so liveness is decided before anything is killed; the prune
+  // itself never signals a process and only reports live stray architects.
+  pruneBuilderWorktreeWorkspaces();
+
+  // Spec 1595: agent liveness, the one place Tower decides whether an agent's
+  // process is running. Started after the reconcile so the registry it sweeps
+  // is complete; it also drops the reported state of agents no longer registered.
+  const agentLiveness = startAgentLiveness({
+    agents: () => registeredAgents(
+      getWorkspaceTerminals(),
+      (terminalId) => getTerminalManager().getSession(terminalId),
+      normalizeWorkspacePath,
+    ),
+    log: (msg: string) => log('ERROR', msg),
+  });
+  agentLiveness.on(AGENT_STATE_CHANGED, announceAgentStateChange);
+
+  // Bugfix #341: Kill orphaned shellper processes not in active sessions. Must
+  // run AFTER reconciliation so reconnected sessions are in the active map and
+  // won't be killed. Catches shellpers from crashed tests or previous Tower
+  // instances that lost their socket files.
+  //
+  // Issue #1685: this sweep used to be unbounded and silent on the zero-orphan
+  // path, so on a flooded/wedged process table its `ps` scan + per-orphan socket
+  // probes stalled here for minutes, tripping the launcher's 30s startup timeout
+  // with no trace in the log. It is now time-bounded (killOrphanedShellpers
+  // abandons past ORPHAN_SWEEP_TIMEOUT_MS, well under the 30s launcher timeout
+  // and the 20s BOOT_READY_TIMEOUT_MS) and logs its entry + duration. It is kept
+  // BEFORE markBootComplete() deliberately: an un-aged sweep must not run once
+  // requests are served, or it could reap a just-spawned session whose shellper
+  // is already in `ps` but not yet registered/socket-listening.
+  const orphanSweepStartMs = Date.now();
+  log('INFO', 'Sweeping for orphaned shellpers…');
   const orphansKilled = await shellperManager.killOrphanedShellpers();
-  if (orphansKilled > 0) {
-    log('INFO', `Killed ${orphansKilled} orphaned shellper process(es)`);
+  const orphanSweepMs = Date.now() - orphanSweepStartMs;
+  if (orphansKilled < 0) {
+    log('WARN', `Orphan sweep abandoned after ${orphanSweepMs}ms (exceeded ${ORPHAN_SWEEP_TIMEOUT_MS}ms budget); remaining orphans left for the next startup`);
+  } else {
+    log('INFO', `Orphan sweep done in ${orphanSweepMs}ms (${orphansKilled} killed)`);
   }
 
   // Issue #1261 test hook: widen the pre-wiring window to a known duration so
@@ -691,6 +862,7 @@ async function bootSequence(): Promise<void> {
   // now runs here and the two maintenance sweeps run after readiness instead.
   initInstances({
     log,
+    towerPort: port,
     workspaceTerminals: getWorkspaceTerminals(),
     getTerminalManager,
     shellperManager,
@@ -723,6 +895,12 @@ async function bootSequence(): Promise<void> {
   // shellper (1h grace by default), so a session created by an incoming
   // request while the sweep runs can never match it.
   await runHuskSweep();
+
+  // Issue #1668: reconcile the IDE server across a Tower restart — adopt a live
+  // one (no orphan) or respawn a recorded-but-dead one. Post-readiness and
+  // NOT awaited: a respawn's readiness wait must never delay the rest of boot,
+  // and a failure here never affects Tower itself.
+  reconcileIdeServer(log).catch((err) => log('ERROR', `IDE server reconcile failed: ${(err as Error).message}`));
 
   // Issue #1238: PTY session log retention. Session logs are per-session files
   // in ~/.agent-farm/logs that nothing ever deleted, so they accreted forever

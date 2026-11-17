@@ -94,6 +94,15 @@ describe('#1455 — pr-create is a forge concept', () => {
       expect(command, `${provider} has no pr-create route`).not.toBeNull();
       expect(command).toBe(path.join(forgeScripts, provider, 'pr-create.sh'));
       expect(fs.existsSync(command!)).toBe(true);
+    },
+  );
+
+  // POSIX-only assertion: checks the exec mode bits, which NTFS does not carry
+  // (native Windows runs the script through Git Bash by path, so it needs none).
+  it.skipIf(process.platform === 'win32').each(['github', 'gitea', 'gitlab'])(
+    'the %s preset pr-create script is executable',
+    (provider) => {
+      const command = getForgeCommand('pr-create', { provider });
       expect(fs.statSync(command!).mode & 0o111, 'script is not executable').not.toBe(0);
     },
   );

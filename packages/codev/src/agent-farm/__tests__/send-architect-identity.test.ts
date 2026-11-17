@@ -31,7 +31,11 @@ import {
   type DeliverySession,
   type DeliveredBroadcast,
 } from '../servers/mailbox-delivery.js';
-import { resolveProfileForSession, classifyAgentScreen } from '../servers/mailbox-wiring.js';
+import {
+  resolveProfileForSession,
+  classifyAgentScreen,
+  composerFingerprintForSession,
+} from '../servers/mailbox-wiring.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 import type { IShellperClient } from '../../terminal/shellper-client.js';
 
@@ -101,6 +105,8 @@ function realSeamPorts(
     // The REAL production classify seam (Spec 1313 round 2): read the session's persistent
     // mirror (seeded here via attachShellper's replay) and classify its viewport.
     classify: (s, prof) => classifyAgentScreen(s, prof),
+    // The REAL production composer-stability seam (Issue #1664) — same mirror as the classify.
+    composerFingerprint: (s, prof) => composerFingerprintForSession(s, prof),
     writeMessage: (s, msg, noEnter, precheck) => {
       const abort = precheck();
       if (abort) return { status: 'aborted' as const, abort };
@@ -241,11 +247,13 @@ describe('Spec 1313 — migration + self-heal source guards', () => {
     const dbSrc = read('../db/migrations.ts');
     // The version constant MUST advance — else a fresh install records only 1..15
     // and the v16 block only converges on a later open (the omission #23 flagged).
-    // It now sits at 17 (Spec 1313 round 3 added the not_before mailbox migration);
-    // both v16 and v17 must be registered under it.
-    expect(dbSrc).toContain('GLOBAL_CURRENT_VERSION = 17');
+    // It now sits at 19 (Spec 1313 round 3 added the not_before mailbox migration at v17;
+    // Issue #1482 added the mailbox detail column at v18; Spec 1658 added the shellper
+    // identity columns at v19); v16, v17 and v18 must all be registered under it.
+    expect(dbSrc).toContain('GLOBAL_CURRENT_VERSION = 19');
     expect(dbSrc).toContain('Migration v16');
     expect(dbSrc).toContain('Migration v17');
+    expect(dbSrc).toContain('Migration v18');
     expect(dbSrc).toContain('ALTER TABLE terminal_sessions ADD COLUMN command TEXT');
     // Fresh installs get the column from GLOBAL_SCHEMA, not the migration.
     expect(read('../db/schema.ts')).toMatch(/terminal_sessions[\s\S]*command TEXT/);

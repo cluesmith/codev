@@ -48,6 +48,17 @@ export interface ProtocolPhase {
   gate?: string;                 // Gate name that blocks after this phase
   checks?: string[];             // Check names to run (keys into protocol.checks)
   next?: string | null;          // Next phase id, or null if terminal
+  consultation?: PhaseConsultationConfig; // Builder-run review in a once phase (BUGFIX/AIR PR phase)
+}
+
+/**
+ * A review the builder runs from the phase prompt, rather than one porch runs in a verify step.
+ * `models` is the protocol default; `.codev/config.json` `porch.consultation` overrides it, the
+ * same way it overrides a verify step's lanes. Rendered into the prompt as `{{consult_commands}}`.
+ */
+export interface PhaseConsultationConfig {
+  type: string;     // consult review type, e.g. 'pr'
+  models: string[]; // default lanes
 }
 
 /**
@@ -56,6 +67,7 @@ export interface ProtocolPhase {
 export interface CheckDef {
   command: string;             // Command to run (e.g., "npm run build")
   cwd?: string;               // Working directory relative to project root (e.g., "packages/codev")
+  timeout_ms?: number;        // Kill the check after this long (default: 5 minutes)
 }
 
 /**
@@ -65,6 +77,7 @@ export interface CheckDef {
 export interface CheckOverride {
   command?: string;    // Replace the protocol's check command
   cwd?: string;        // Replace the protocol's working directory
+  timeout_ms?: number; // Replace the protocol's timeout
   skip?: boolean;      // Omit this check entirely when true
 }
 
@@ -138,7 +151,7 @@ export interface GateStatus {
 /**
  * Plan phase status
  */
-export type PlanPhaseStatus = 'pending' | 'in_progress' | 'complete';
+export type PlanPhaseStatus = 'pending' | 'in_progress' | 'complete' | 'skipped';
 
 /**
  * Plan phase extracted from plan.md
@@ -148,6 +161,9 @@ export interface PlanPhase {
   id: string;
   title: string;
   status: PlanPhaseStatus;
+  /** Why a human dropped this phase from the approved plan (`porch skip-phase`, #1900). */
+  skip_reason?: string;
+  skipped_at?: string;                     // ISO timestamp of the skip
 }
 
 /**

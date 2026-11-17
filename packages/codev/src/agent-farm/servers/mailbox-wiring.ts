@@ -19,7 +19,13 @@ import type { SessionScreen } from '../../terminal/session-screen.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './tower-messages.js';
 import { submitMessagePaced } from './message-write.js';
-import { bufferLines, classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
+import {
+  bufferLines,
+  classifyBuffer,
+  composerRegionFingerprint,
+  type GateProfile,
+  type GateVerdict,
+} from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import {
   buildContextFsPort,
@@ -29,11 +35,13 @@ import {
 import { getGlobalDb } from '../db/index.js';
 import { getArchitectByName } from '../state.js';
 import { formatBuilderMessage } from '../utils/message-format.js';
+import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { supersede as supersedeMailbox, dismissHeldWithKey, NOTICE_SUPERSEDE_PREFIX } from '../db/mailbox.js';
 import path from 'node:path';
 import {
   MailboxDrainer,
   normalizeForEcho,
+  PASTE_PLACARD_NEEDLES,
   type EchoWatch,
   type UnverifiedDeliveryInfo,
   type DeliveryPorts,
@@ -179,14 +187,38 @@ export function resolveProfileForSession(session: DeliverySession): GateProfile 
  * cast is sound. A session that has produced NO output yet has no mirror (`gateScreen` is null);
  * that is not a verified-empty prompt, so it classifies not-clean (`no-composer-marker`), exactly
  * as an empty replay always did. `SessionScreen.read()` flushes the parser, so the buffer the
- * shared {@link classifyBuffer} reads reflects every byte counted by the change token the
- * delivery path sampled — the property its gate→write TOCTOU relies on.
+ * shared {@link classifyBuffer} reads reflects every byte the session had emitted when this was
+ * called — which is what makes the composer fingerprint the delivery path takes immediately
+ * afterwards (with no intervening await) the freshest reading of the composer available to it.
+ * Issue #1664 retired the whole-screen `bytesWritten` TOCTOU this note used to name.
  */
 export async function classifyAgentScreen(session: DeliverySession, profile: GateProfile): Promise<GateVerdict> {
   const screen = (session as PtySession).gateScreen;
   if (!screen) return { clean: false, reason: 'busy', detail: 'no-composer-marker' };
   const { term, cols, rows } = await screen.read();
   return classifyBuffer(term, cols, rows, profile);
+}
+
+/**
+ * The live binding for {@link DeliveryPorts.composerFingerprint} (Issue #1664) — the delivery
+ * path's composer-stability signal.
+ *
+ * Reads the SAME `SessionScreen` mirror {@link classifyAgentScreen} classifies, so stability
+ * and emptiness can never be answered about different screens. SYNCHRONOUS, via
+ * `SessionScreen.peek()`: the in-lock precheck that consumes it cannot await (see the port's
+ * contract). A session with no mirror has produced no output and shows no composer, so it
+ * fingerprints `null` — indeterminate, which the delivery path treats as moved.
+ */
+export function composerFingerprintForSession(session: DeliverySession, profile: GateProfile): string | null {
+  const screen = (session as PtySession).gateScreen;
+  if (!screen) return null;
+  // `peek()` answers `null` while any fed byte is still unparsed (CMAP round 2 — codex): a grid
+  // that is missing the very redraw we are checking for would compare EQUAL and permit the
+  // write. Pass the refusal straight through — the delivery path reads `null` as "the composer
+  // moved" and holds, which self-clears a parse turn later.
+  const view = screen.peek();
+  if (!view) return null;
+  return composerRegionFingerprint(view.term, view.cols, view.rows, profile);
 }
 
 /**
@@ -209,7 +241,7 @@ const ECHO_VERIFY_TIMEOUT_MS = 600;
 const ECHO_VERIFY_POLL_MS = 50;
 
 /**
- * How many times `needle` appears in the session's rendered mirror right now.
+ * How many times each of `needles` appears in the session's rendered mirror right now.
  *
  * A COUNT rather than a boolean because presence alone is not evidence (CMAP round 1 — codex):
  * a previous delivery attempt's echo sits in the same scrollback, so "the header is on screen"
@@ -220,20 +252,23 @@ const ECHO_VERIFY_POLL_MS = 50;
  * never disagree about what the terminal shows, and scans its full retained buffer rather than
  * the viewport — a long message scrolls its own header into scrollback while it types.
  */
-async function countEchoOnScreen(screen: SessionScreen, needle: string): Promise<number> {
+async function countEchoOnScreen(screen: SessionScreen, needles: readonly string[]): Promise<number[]> {
   const { term } = await screen.read();
   const text = normalizeForEcho(bufferLines(term).join('\n'));
-  let count = 0;
-  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) count++;
-  return count;
+  return needles.map((needle) => {
+    let count = 0;
+    for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) count++;
+    return count;
+  });
 }
 
 /**
  * Open an echo watch on a session (Issue #1573) — the live binding for
  * {@link DeliveryPorts.watchEcho}.
  *
- * Samples the terminal BEFORE the write, then `verify()` polls until the needle appears MORE
- * often than it did in that sample. New evidence, not mere presence.
+ * Samples the terminal BEFORE the write, then `verify()` polls until the needle — or a paste
+ * placard (Issue #1567, {@link PASTE_PLACARD_NEEDLES}) — appears MORE often than it did in that
+ * sample. New evidence, not mere presence.
  *
  * A session with no mirror has produced no output and therefore cannot echo anything, so its
  * watch verifies `false` rather than passing.
@@ -257,12 +292,16 @@ async function countEchoOnScreen(screen: SessionScreen, needle: string): Promise
 export async function watchEchoOnScreen(session: DeliverySession, needle: string): Promise<EchoWatch> {
   const screen = (session as PtySession).gateScreen;
   if (!screen) return { verify: () => Promise.resolve(false) };
-  const before = await countEchoOnScreen(screen, needle);
+  // Issue #1567: a long frame is a bracketed paste, which the composer shows as a placard
+  // until it is submitted — so a new placard is as much evidence as a new header.
+  const needles = [needle, ...PASTE_PLACARD_NEEDLES];
+  const before = await countEchoOnScreen(screen, needles);
   return {
     verify: async (): Promise<boolean> => {
       const deadline = Date.now() + ECHO_VERIFY_TIMEOUT_MS;
       for (;;) {
-        if (await countEchoOnScreen(screen, needle) > before) return true;
+        const after = await countEchoOnScreen(screen, needles);
+        if (after.some((n, i) => n > before[i])) return true;
         if (Date.now() >= deadline) return false;
         await new Promise((resolve) => setTimeout(resolve, ECHO_VERIFY_POLL_MS));
       }
@@ -293,11 +332,15 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     getSessionForAgent: (ws, agent) => resolveLiveSessionForAgent(ws, agent),
     resolveProfile: (session) => resolveProfileForSession(session),
     classify: (session, profile) => classifyAgentScreen(session, profile),
+    // Issue #1664: the composer-stability signal that replaced whole-screen output quiescence.
+    // Same mirror as `classify`, read synchronously so the in-lock precheck can use it too.
+    composerFingerprint: (session, profile) => composerFingerprintForSession(session, profile),
     // Issue #1365: the write edge takes the session's per-terminal submission lock as a
     // LEAF inside the per-agent serializer, so a gated delivery and a concurrent
     // `--interrupt`/`--escape` can no longer interleave. The precheck is the delivery
     // module's, re-run inside that lock.
-    writeMessage: (session, msg, noEnter, precheck) => submitMessagePaced(session, msg, noEnter, precheck),
+    writeMessage: (session, msg, noEnter, precheck, strategy) =>
+      submitMessagePaced(session, msg, noEnter, precheck, undefined, strategy),
     // Issue #1573: the only end-to-end evidence that the bytes reached the terminal — opened
     // before the write. Issue #1584: consulted AFTER the row is marked delivered, because the
     // commit is what makes a completed write un-repeatable; this only decides what we report.
@@ -324,14 +367,96 @@ function noticeSupersedeKey(toAgent: string): string {
   return `${NOTICE_SUPERSEDE_PREFIX}${toAgent}`;
 }
 
-/** Human-readable notice body (metadata only — never the starved messages' contents). */
-function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
+/**
+ * Human-readable notice body (metadata only — never the starved messages' contents).
+ *
+ * TWO notices, not one (Issue #1482). The old single body said "its composer never classifies
+ * as a ready prompt" and offered `afx interrupt` for every hold, which is wrong advice in the
+ * commonest case: when the detail is `user-text` a human is sitting at that composer with a
+ * draft, and interrupting them is the last thing the owner should do. The gate has always
+ * known which case it is; now the row carries it, so the notice can say it.
+ *
+ * The `streak` — how many consecutive gate checks re-confirmed the same verdict — is what
+ * separates "held ~7m" (which could be one unlucky sample) from "held ~7m, re-confirmed across
+ * 41 checks" (which cannot be).
+ *
+ * Exported for unit testing. This text is operator-facing INSTRUCTIONS during an incident, and
+ * it went un-asserted long enough to ship a remedy line naming `afx interrupt` at a composer a
+ * human was actively typing in. Prose that tells someone what to do to a live terminal is
+ * behaviour, and gets tested like behaviour.
+ */
+export function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
   const mins = Math.max(1, Math.round(info.ageMs / 60_000));
   const plural = info.heldCount === 1 ? 'message' : 'messages';
-  return (
+  const confirmed = info.streak > 1 ? `, re-confirmed across ${info.streak} consecutive gate checks` : '';
+  const head =
     `Mailbox delivery is STUCK for builder '${info.toAgent}' @ ${path.basename(info.workspacePath)}. ` +
-    `${info.heldCount} ${plural} held ~${mins}m (reason: ${info.reason ?? 'held'}) — its composer never classifies as a ready prompt, ` +
-    `so nothing is being delivered (cron nudges included). ` +
+    `${info.heldCount} ${plural} held ~${mins}m (${formatVerdict(info.reason, info.detail)}${confirmed}).`;
+
+  if (info.detail === 'user-text') {
+    // The SAFE hold: the classifier positively identified a draft or menu in the composer.
+    //
+    // This branch names NO command that touches the terminal, deliberately — not even hedged
+    // with "only if you are sure". An operator reading a notice headed "delivery is STUCK"
+    // treats the remedy line as the instruction, and the person at that composer is mid-thought
+    // by definition of this verdict. The #1583 loop was aggravated by exactly that: an operator
+    // followed an `afx interrupt` suggestion out of this notice. A hedge is not a safeguard
+    // when the surrounding text reads as an incident.
+    return (
+      `${head} Its composer has been OCCUPIED that whole time — a draft or an open menu is on ` +
+      `the line, which usually means a human is working there, and delivery resumes by itself ` +
+      `the moment the line clears. ` +
+      `Remedy: usually none — let it clear. 'afx inbox' inspects the queue (metadata only, ` +
+      `never bodies) if you want to see what is waiting, and talking to whoever is at that ` +
+      `terminal is the only other thing worth doing.`
+    );
+  }
+  if (!isUnverifiableVerdict(info.reason, info.detail) && info.detail) {
+    // The OTHER self-clearing holds — `recent-input` (Issue #1473) and `composer-redraw`
+    // (Issue #1664). Neither is a draft, so the `user-text` wording above would be wrong; but
+    // both clear by themselves, so the defect wording below is worse than wrong — it tells the
+    // owner the mail will NEVER deliver and hands them `afx interrupt`, which kills the turn of
+    // an agent that is merely working, or wipes the line of someone who is merely typing.
+    //
+    // This branch used to not exist: the test was `if (info.detail || …)`, so every detail but
+    // `user-text` fell into the defect arm. That was already wrong for `recent-input` before
+    // this issue added a second self-clearing value to the same arm (CMAP round 3 — codex). The
+    // routing question is exactly the one `isUnverifiableVerdict` answers, so it is asked here
+    // rather than restated as a list of names that the next detail will silently fall out of.
+    //
+    // Like the `user-text` branch, this one deliberately names NO command that touches the
+    // terminal. A notice headed "delivery is STUCK" reads as an incident, and an operator takes
+    // its remedy line as the instruction (the #1583 loop was aggravated by exactly that).
+    const because =
+      info.detail === 'recent-input'
+        ? `the terminal keeps RECEIVING INPUT — keystrokes, clicks, or an interrupt/escape write ` +
+          `— and delivery pauses for a fraction of a second after each one`
+        : `the composer keeps being REPAINTED — a turn ending, a rotating placeholder, a resize ` +
+          `— and delivery pauses for a fraction of a second after each redraw`;
+    return (
+      `${head} Its composer is EMPTY and the gate can read it fine: ${because}. This clears by ` +
+      `itself, so a hold this old means the activity has been essentially continuous — someone ` +
+      `typing steadily, or something emitting on every repaint. ` +
+      `Remedy: usually none — delivery resumes on its own. 'afx inbox' inspects the queue ` +
+      `(metadata only, never bodies); if it truly never clears, what to look at is whatever ` +
+      `keeps touching that terminal, not the composer.`
+    );
+  }
+  if (isUnverifiableVerdict(info.reason, info.detail)) {
+    // The DEFECT class: the gate could not verify the composer at all, so nothing will clear
+    // this without intervention.
+    return (
+      `${head} The render gate CANNOT VERIFY that composer — this is not a busy human, it is a ` +
+      `classifier that cannot find a bounded composer region, so the mail will never deliver on ` +
+      `its own. Usual causes: a drifted TUI profile, a torn/mid-repaint frame, or Tower's ` +
+      `terminal dimensions diverging from the real PTY (Issue #1482). ` +
+      `Remedy: 'afx inbox' to inspect; resizing the viewer forces a repaint; ` +
+      `'afx interrupt ${info.toAgent}' clears a stuck composer.`
+    );
+  }
+  return (
+    `${head} Its composer never classifies as a ready prompt, so nothing is being delivered ` +
+    `(cron nudges included). ` +
     `Remedy: run 'afx inbox' to inspect; 'afx interrupt ${info.toAgent}' clears a stuck composer.`
   );
 }
@@ -376,7 +501,8 @@ function escalateHeldToOwner(info: HeldOwnerNoticeInfo, log: LogFn): boolean {
   log(
     'WARN',
     `[mailbox] STARVATION notice → ${owner.agent} about ${info.toAgent} @ ${path.basename(info.workspacePath)} ` +
-      `(${info.heldCount} held ~${Math.round(info.ageMs / 1000)}s, reason ${info.reason ?? 'held'})`,
+      `(${info.heldCount} held ~${Math.round(info.ageMs / 1000)}s, ${formatVerdict(info.reason, info.detail)}` +
+      `${info.streak > 1 ? `, streak ${info.streak}` : ''})`,
   );
   return true;
 }
@@ -418,6 +544,10 @@ function broadcastEscalation(info: EscalationInfo): void {
     mailboxId: info.mailboxId,
     ageMs: info.ageMs,
     reason: info.reason,
+    // Issue #1482: a client showing only `busy` cannot tell an occupied composer from one the
+    // gate could not read. The wire is additive — an older client that ignores the field is
+    // unaffected — but the TYPE is required, so this producer cannot forget it.
+    detail: info.detail,
   };
   mailboxBroadcaster?.({
     type: 'mailbox-escalation',
@@ -466,13 +596,23 @@ function surfaceLiveness(info: LivenessInfo, log: LogFn): void {
  */
 function surfaceUnverifiedDelivery(info: UnverifiedDeliveryInfo): void {
   const where = `${info.toAgent} @ ${path.basename(info.workspacePath)}`;
+  // Issue #1473: the body branches on the cause. The no-echo wording asserts the header never
+  // appeared, and saying that about a delivery whose header DID appear — and whose tail a human
+  // keystroke truncated or submitted early — points the reader at the wrong thing entirely.
+  const raced = info.cause === 'input-raced';
+  const what = raced
+    ? `every byte was accepted, but the terminal received input while the message was going out, so ` +
+      `the body may have been truncated or submitted early`
+    : `every byte was accepted, but its header never appeared on that screen`;
   mailboxBroadcaster?.({
     type: 'notification',
-    title: 'Mailbox: delivered but not confirmed on screen',
+    title: raced
+      ? 'Mailbox: delivered, but raced by terminal input'
+      : 'Mailbox: delivered but not confirmed on screen',
     body:
-      `${where} — the message was written to terminal ${info.terminalId.slice(0, 8)}… and every byte was ` +
-      `accepted, but its header never appeared on that screen. It is recorded as delivered and will NOT ` +
-      `be sent again (mailbox id ${info.mailboxId.slice(0, 8)}…). Check the agent's transcript.`,
+      `${where} — the message was written to terminal ${info.terminalId.slice(0, 8)}… and ${what}. It is ` +
+      `recorded as delivered and will NOT be sent again (mailbox id ${info.mailboxId.slice(0, 8)}…). ` +
+      `Check the agent's transcript.`,
     workspace: info.workspacePath,
   });
 }

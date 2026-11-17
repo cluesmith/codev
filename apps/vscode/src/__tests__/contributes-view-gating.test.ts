@@ -68,8 +68,12 @@ describe('workspace-bound views are gated on codev.hasWorkspace', () => {
     expect(viewById('codev.status').when).toBe('codev.hasWorkspace || codev.ideMode');
   });
 
-  it('codev.agents stays ungated: it anchors the container and carries the welcome content', () => {
-    expect(viewById('codev.agents').when).toBeUndefined();
+  // #1809 (owner ruling): the Agents view must not render in a builder-worktree
+  // window at all. It stays visible in every OTHER window, including empty and
+  // non-codev ones where it anchors the container and carries the welcome
+  // content; in a worktree window `codev.workspace` (hasWorkspace) still anchors it.
+  it('codev.agents is hidden only in a builder-worktree window', () => {
+    expect(viewById('codev.agents').when).toBe('!codev.isBuilderWorktree');
   });
 });
 

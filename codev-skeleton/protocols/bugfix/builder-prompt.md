@@ -32,7 +32,7 @@ need to fetch it.
 
 1. Reproduce the bug
 2. Identify the root cause — **no code in the investigate phase**
-3. Implement the minimal fix (<300 LOC)
+3. Implement the minimal fix (~300 LOC is a guideline, not a hard limit)
 4. Add a regression test that **fails without the fix and passes with it**
 5. Open a PR with `Fixes #{{issue.number}}` in the body
 6. Notify: `afx send architect "PR #N ready for review (fixes #{{issue.number}})"`
@@ -40,8 +40,8 @@ need to fetch it.
 When merging, use `gh pr merge --merge` **without** `--delete-branch` — you are checked out on
 that branch in a worktree.
 
-If the fix outgrows BUGFIX (>300 LOC, architectural impact, or an unclear root cause after
-investigation), stop and say so:
+If the fix outgrows BUGFIX (well past ~300 LOC, architectural impact, or an unclear root cause
+after investigation), stop and say so:
 
 ```bash
 afx send architect "Issue #{{issue.number}} is more complex than expected. [Reason]. Recommend escalating to SPIR."

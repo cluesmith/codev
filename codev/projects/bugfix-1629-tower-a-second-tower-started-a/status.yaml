@@ -1,0 +1,17 @@
+id: bugfix-1629
+title: tower-a-second-tower-started-a
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-09-16T01:37:14.673Z'
+    approved_at: '2026-09-16T23:01:13.423Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-16T00:56:30.256Z'
+updated_at: '2026-09-16T23:01:13.423Z'
+pr_ready_for_human: false

@@ -15,23 +15,33 @@ design decision use SPIR.
 ## Phases
 
 **Investigate** — reproduce the bug and identify the root cause. **No code in this phase.**
-Confirm the fix fits BUGFIX scope; if it does not, signal `BLOCKED` and recommend escalation
-rather than growing the project quietly.
+Confirm the fix fits BUGFIX scope; if it does not, tell the architect (`afx send architect`)
+and recommend escalation rather than growing the project quietly.
 
 **Fix** — the minimal change that resolves the root cause, plus a regression test that **fails
 without the fix and passes with it**. A test that passes either way documents nothing. Do not
-refactor surrounding code, fix unrelated bugs (file separate issues), or add features.
+refactor surrounding code or add features.
+
+**Fix in place.** A small adjacent bug you find during the work is fixed in the same PR and
+named in its body. A follow-up issue is only for work that needs something unavailable now (a
+device, an owner decision), touches a different subsystem, or is a large refactor.
+
+Commit format:
 
 ```
 [Bugfix #42] Fix: URL-encode username before API call
 [Bugfix #42] Test: regression for unencoded username
 ```
 
+Every commit on the branch starts with `[Bugfix #<N>]`. `Fix:` and `Test:` label the fix and the
+regression test; other commits use a short label of their own (`[Bugfix #42] CMAP: …` for review
+follow-ups, `[Bugfix #42] Thread: …` for the thread log).
+
 **PR** — open with the `pr-create` forge concept command the PR-phase prompt hands you (`gh
 pr create` on GitHub), body carrying Summary, Root Cause, Fix and Test Plan plus
-`Fixes #<N>` so the issue closes on merge. Run one CMAP pass (Gemini, Codex, Claude), record
-each verdict, and address or rebut every `REQUEST_CHANGES`. Notify the architect with the
-verdicts, then `porch done <id>` and wait.
+`Fixes #<N>` so the issue closes on merge. Run one CMAP pass with the reviewers the PR-phase prompt
+lists, record each verdict, and address or rebut every `REQUEST_CHANGES`. Notify the architect
+with the verdicts, then `porch done <id>` and wait.
 
 Merge with `gh pr merge --merge`. **Do not pass `--delete-branch`** — the builder is checked out
 on that branch in a worktree, and deleting it out from under them breaks the worktree.
@@ -42,10 +52,18 @@ BUGFIX has one human gate, `pr`. Its purpose is that the merge trigger is **porc
 approved or not — rather than free text typed into the builder's pane. That closes the
 self-merge bug class: a builder cannot infer authorization from ambiguous prose.
 
+When the architect relays the human's approval, the builder runs
+`porch approve <id> pr --a-human-explicitly-approved-this`, then follows `porch next` to merge.
+`Fixes #<N>` closes the issue on merge; the builder never closes it by hand.
+
 ## Consultation
 
 One CMAP pass at the PR. No per-phase consultation: the issue is the spec and the fix is small,
 so review effort concentrates where it can still change the outcome.
+
+Three reviewers by default — gemini, codex and claude. A project narrows the set in
+`.codev/config.json` under `porch.consultation`; porch writes the resulting `consult` commands
+into the PR-phase prompt, so the configured lanes are what runs.
 
 ## Scope
 
@@ -65,9 +83,10 @@ not silently expand scope.**
 |---|---|
 | Cannot reproduce | Document the attempts on the issue, ask the reporter for detail, notify the architect |
 | Fix outgrows scope | Notify the architect and recommend escalation; do not proceed |
-| Unrelated test failures | Out of scope — note them for the architect, do not fix here |
-| Multiple bugs in one issue | Fix the primary one; file separate issues for the rest |
+| A pre-existing test fails intermittently, unrelated to your change | Do not skip it: leave it running, name it under `## Flaky Tests` in the PR body, tell the architect, continue |
+| A pre-existing test fails consistently, unrelated to your change | Small, clear fix: fix it here. Otherwise tell the architect |
+| Multiple bugs in one issue | Fix them all here unless one needs something unavailable now, another subsystem, or a large refactor |
 
 ## Branch naming
 
-`builder/bugfix-<issue>-<slug>`
+`builder/bugfix-<issue>` — created by `afx spawn`.

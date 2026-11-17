@@ -9,8 +9,37 @@ import { EventEmitter } from 'node:events';
 import type { IPty } from 'node-pty';
 import { RingBuffer } from './ring-buffer.js';
 import { SessionScreen } from './session-screen.js';
+import { stripTerminalReplies, terminalReplyMatches, escapeBytes } from './terminal-replies.js';
+
+/**
+ * Set `AF_LOG_INPUT_SIGNAL=1` to trace every external write's effect on the delivery gate's
+ * input signal (Issue #1473): the raw chunk, what the reply filter removed, and what survived
+ * as human input.
+ *
+ * It exists because the filter's correctness is otherwise INVISIBLE. An under-strip shows up as
+ * a hold with nobody at the keyboard and an over-strip shows up as nothing at all, and neither
+ * can be told apart from normal operation by watching the outside of the system. The one
+ * measurement that settles it — sit with hands off the keyboard and see whether anything is
+ * recorded as input — needs this trace to be readable.
+ *
+ * Read once at module load: this is on the write path for every keystroke, and a per-write
+ * `process.env` lookup is a string-map hit on the hottest line in the terminal layer.
+ *
+ * ## SENSITIVE DATA — this logs what a human types, verbatim
+ *
+ * `survived="..."` is literal keystrokes. Everything typed into any composer on this Tower goes
+ * to the log while the flag is on: prompts, pasted content, and anything a person types into a
+ * password or token field an app happens to be showing. It is off by default and must stay a
+ * short, deliberate, supervised diagnostic session — never a setting left on in a shared or
+ * long-lived Tower, never enabled in an environment whose logs are shipped or retained. Delete
+ * or truncate the captured output when the session ends.
+ */
+const LOG_INPUT_SIGNAL = process.env.AF_LOG_INPUT_SIGNAL === '1';
 import type { IShellperClient } from './shellper-client.js';
 import { isDeliberateExit } from './shellper-protocol.js';
+import { killSessionTree } from '../lib/process-tree.js';
+import { ptyCommand } from '../lib/pty-command.js';
+import { explainNativeLoadFailure, withNativeLoadExplanation } from '../lib/native-deps.js';
 
 /**
  * Terminal delivery-signal bus (Spec 1313, Phase 5).
@@ -39,6 +68,27 @@ export const terminalDeliverySignals = new EventEmitter();
  */
 export const QUIESCENCE_DEBOUNCE_MS = 500;
 
+/**
+ * Who is putting bytes on this session's line (Issue #1473) — the only thing that decides
+ * whether a write moves the delivery gate's INPUT signal.
+ *
+ * The default is `'external'` on purpose: the failure this closes is a new input path that
+ * forgets to announce itself, and an opt-OUT makes that impossible — a forgotten origin
+ * over-counts (a spurious hold, self-correcting) instead of under-counting (a delivery
+ * written onto a draft, the corruption). Exactly one caller opts out, and it hard-codes the
+ * value rather than forwarding a parameter: a 1-arg function is assignable to a 2-arg
+ * function type, so a wrapper that dropped the argument would compile cleanly and present as
+ * "mail never delivers".
+ */
+export type WriteOrigin =
+  /** An unknown or foreign writer — a live client's keystrokes, the raw write route, an
+   *  operator `^C`/ESC. Counts as input. */
+  | 'external'
+  /** The gated mailbox delivery's own paced write. Must never trip the input signal: its
+   *  bytes are the thing the gate just authorised, and counting them would make every
+   *  delivery block the next one. */
+  | 'delivery';
+
 export interface PtySessionConfig {
   id: string;
   command: string;
@@ -53,6 +103,18 @@ export interface PtySessionConfig {
   diskLogEnabled?: boolean; // Default: true
   diskLogMaxBytes?: number; // Default: 50MB
   reconnectTimeoutMs?: number; // Default: 300_000 (5 min)
+  /**
+   * Injectable clock for the input-signal timestamps (Issue #1473). Defaults to `Date.now`.
+   *
+   * It exists because the delivery gate reads `lastInputAt` through its own `ports.now()`,
+   * which tests replace with a fake clock, while `recordUserInput` was hard-wired to
+   * `Date.now()`. Any test pairing a fake gate clock with a REAL `PtySession` therefore
+   * compares two unrelated time bases, and no amount of adding fields fixes it — the two
+   * clocks have to be the same one. `lastDataAt` never needed this seam because
+   * {@link attachShellper} hydrates it from the shellper's tracker; the input timestamps have
+   * no such hydration path, so this is theirs.
+   */
+  clock?: () => number;
 }
 
 export interface PtySessionInfo {
@@ -138,8 +200,26 @@ export class PtySession extends EventEmitter {
   // SessionManager's in-place reconnect delivers a replacement client.
   private _closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private shellperPid = -1;
+  // APPLIED geometry (Issue #1482): the dimensions a resize actually reached the process with.
+  // Everything that must agree with the real TUI reads these — `info`, and above all the gate
+  // mirror, whose classification is only valid if it wraps the way the app's own layout does.
+  // They move in `resize()` ONLY after the underlying resize is confirmed; see that method.
   private cols: number;
   private rows: number;
+  // REQUESTED geometry (Issue #1482): the last dimensions anyone ASKED for, applied or not.
+  // Kept separately so a resize that arrives before the process exists — or one dropped by a
+  // disconnected shellper — is not simply lost: `spawn()` starts the process at the requested
+  // size, and the attach path re-sends it once a connection is back. Without this pair, the
+  // fix for a dropped resize (don't commit dims) would regress the pre-spawn resize, which
+  // used to work precisely because the assignment was unconditional.
+  private requestedCols: number;
+  private requestedRows: number;
+  // Is `requested` an OUTSTANDING request — one somebody made that could not be applied?
+  // (Issue #1482.) Set when a resize is dropped, cleared when one lands. The attach path needs
+  // exactly this distinction: re-sending on "requested !== applied" alone would also re-send
+  // the constructor's own defaults, which would immediately overwrite the geometry just
+  // adopted from the shellper — trading a measurement back for the memory it corrected.
+  private resizePending = false;
   private exitCode: number | undefined;
   private logFd: number | null = null;
   private logBytes: number = 0;
@@ -152,8 +232,12 @@ export class PtySession extends EventEmitter {
   private _quiescenceTimer: ReturnType<typeof setTimeout> | null = null;
   private clients: Set<{ send: (data: Buffer | string) => void }> = new Set();
   private _lastInputAt = 0;
+  // Issue #1473: the gate's MONOTONE input-change counter. Never reset — not on respawn, not
+  // on re-attach — see the `inputSeq` getter.
+  private _inputSeq = 0;
   private _lastDataAt = Date.now();
   private _composing = false;
+  private readonly clock: () => number;
 
   constructor(private readonly config: PtySessionConfig) {
     super();
@@ -161,18 +245,27 @@ export class PtySession extends EventEmitter {
     this.label = config.label;
     this.cols = config.cols;
     this.rows = config.rows;
+    this.requestedCols = config.cols;
+    this.requestedRows = config.rows;
     this.createdAt = new Date().toISOString();
     this.ringBuffer = new RingBuffer(config.ringBufferLines ?? 1000);
     this.diskLogEnabled = config.diskLogEnabled ?? true;
     this.diskLogMaxBytes = config.diskLogMaxBytes ?? 50 * 1024 * 1024; // DEFAULT_DISK_LOG_MAX_BYTES
     this.reconnectTimeoutMs = config.reconnectTimeoutMs ?? 300_000;
+    this.clock = config.clock ?? Date.now;
     this.logPath = path.join(config.logDir, `${config.id}.log`);
   }
 
   /** Spawn the PTY process. Must be called after construction. */
   async spawn(): Promise<void> {
-    // Dynamic import to avoid hard dependency at module level
-    const nodePty = await import('node-pty');
+    // Dynamic import to avoid hard dependency at module level. A binding that cannot
+    // load on Windows surfaces with the supported-versions message (Spec 1658).
+    let nodePty: typeof import('node-pty');
+    try {
+      nodePty = await import('node-pty');
+    } catch (err) {
+      throw explainNativeLoadFailure(err);
+    }
 
     // Ensure log directory exists
     if (this.diskLogEnabled) {
@@ -180,13 +273,22 @@ export class PtySession extends EventEmitter {
       this.logFd = fs.openSync(this.logPath, 'a');
     }
 
-    this.pty = nodePty.spawn(this.config.command, this.config.args, {
+    // Spawn at the REQUESTED geometry (Issue #1482): a viewer that resized before the process
+    // existed had its resize dropped by the `status === 'running'` guard in `resize()`, and the
+    // request is honoured here instead. Applied and requested are equal for a session nobody
+    // resized, so this is a no-op in the common case.
+    this.cols = this.requestedCols;
+    this.rows = this.requestedRows;
+    this.resizePending = false;
+    // Spec 1658: on Windows a bare or `.cmd` command becomes one ConPTY can start.
+    const launch = ptyCommand(this.config.command, this.config.args, this.config.env);
+    this.pty = withNativeLoadExplanation(() => nodePty.spawn(launch.file, launch.args, {
       name: 'xterm-256color',
       cols: this.cols,
       rows: this.rows,
       cwd: this.config.cwd,
       env: this.config.env,
-    });
+    }));
 
     this.pty.onData((data: string) => {
       this.onPtyData(data);
@@ -237,6 +339,12 @@ export class PtySession extends EventEmitter {
     // it has a value (WELCOME-side hydration carries genuine activity
     // history across Tower restart). The data-frame subscription below
     // keeps it bumped going forward via onPtyData.
+    //
+    // The INPUT signals (`_inputSeq`, `_lastInputAt`) get no such hydration and must be left
+    // strictly alone here (Issue #1473). The shellper has no view of them, and this object
+    // survives the re-attach — so resetting the counter could reproduce an earlier gate token
+    // on the same session identity and alias a stale CLEAN verdict, while resetting the
+    // timestamp would erase a keystroke that is still un-echoed on the line.
     this._lastDataAt = client.lastDataAt;
 
     // Ensure log directory exists. Guarded on logFd: with #1198 re-attach is
@@ -246,6 +354,42 @@ export class PtySession extends EventEmitter {
     if (this.diskLogEnabled && this.logFd === null) {
       fs.mkdirSync(path.dirname(this.logPath), { recursive: true });
       this.logFd = fs.openSync(this.logPath, 'a');
+    }
+
+    // Reconcile our geometry against the PROCESS before seeding anything (Issue #1482).
+    //
+    // The render gate classifies the mirror seeded just below, and its verdict is only valid
+    // if that mirror wraps the way the real TUI does. Until now the seed was rendered at
+    // whatever Tower believed — which after a restart is a value read back out of the
+    // database, and after a dropped resize was never true at all. The shellper, meanwhile,
+    // has always reported the geometry it actually applied to the kernel winsize in its
+    // WELCOME frame, and Tower has always thrown it away. Adopt it: a measurement beats a
+    // memory, and this is the only measurement available.
+    //
+    // Adoption is not the last word — a live viewer's geometry still wins. It is re-sent
+    // immediately below, and only takes effect (per `resize`) if it reaches the process.
+    const reportedCols = client.welcomeCols ?? null;
+    const reportedRows = client.welcomeRows ?? null;
+    if (reportedCols && reportedRows && (reportedCols !== this.cols || reportedRows !== this.rows)) {
+      // This log line is the one that would have made #1482 self-evident in the field: it
+      // names both geometries at the moment they are known to disagree.
+      console.warn(
+        `[pty-session ${this.id}] dimension divergence on attach: Tower believed ` +
+          `${this.cols}x${this.rows}, shellper reports ${reportedCols}x${reportedRows} — ` +
+          `adopting the shellper's (the render gate classifies at these dimensions)`,
+      );
+      this.cols = reportedCols;
+      this.rows = reportedRows;
+      // Adoption re-bases the REQUEST too, unless one is genuinely outstanding. Without this
+      // the constructor's defaults would count as a request to undo the correction we just
+      // made — see `resizePending`.
+      if (!this.resizePending) {
+        this.requestedCols = reportedCols;
+        this.requestedRows = reportedRows;
+      }
+      // A mirror that outlived a disconnect was built at the stale geometry; re-wrap it now,
+      // BEFORE the seed below is fed into it. A null mirror is created at the corrected dims.
+      this._gateScreen?.resize(reportedCols, reportedRows);
     }
 
     // Populate the ring buffer and seed the screen mirror so both reflect the session's
@@ -261,6 +405,22 @@ export class PtySession extends EventEmitter {
     const screenSeed = mirrorSeed ?? replayData;
     if (screenSeed.length > 0) {
       this.feedGateScreen(screenSeed.toString('utf-8'));
+    }
+
+    // Re-assert an OUTSTANDING resize now that a connection exists (Issue #1482). A viewer's
+    // size is the one Tower should be driving toward; adopting the shellper's above only fixed
+    // our BELIEF, and a resize dropped while the socket was down was never delivered at all.
+    // Gated on `resizePending` rather than on "requested !== applied": the latter is also true
+    // for a session whose constructor defaults simply differ from the running geometry, and
+    // re-sending THOSE would undo the adoption above. Routed through `resize`, so it commits
+    // only if it lands and cannot re-introduce the divergence it exists to close.
+    if (this.resizePending && (this.requestedCols !== this.cols || this.requestedRows !== this.rows)) {
+      if (!this.resize(this.requestedCols, this.requestedRows)) {
+        console.warn(
+          `[pty-session ${this.id}] could not re-apply requested ${this.requestedCols}x${this.requestedRows} ` +
+            `on attach; running at ${this.cols}x${this.rows}`,
+        );
+      }
     }
 
     // Forward shellper data to ring buffer + WebSocket clients
@@ -369,6 +529,14 @@ export class PtySession extends EventEmitter {
    */
   notice(text: string): void {
     this.onPtyData(`\r\n\x1b[33m${text}\x1b[0m\r\n`);
+  }
+
+  /**
+   * Whether the session is in restart wait: its process exited and the bounded
+   * wait for the relaunched process is armed (Spec 1595 reads this as not alive).
+   */
+  get awaitingRestart(): boolean {
+    return this._restartCleanupTimeout !== null;
   }
 
   /** Whether this session is backed by a shellper process. */
@@ -545,8 +713,34 @@ export class PtySession extends EventEmitter {
   /**
    * Write user input to the PTY or shellper.
    * Returns false when the input was dropped (#1198).
+   *
+   * THE GATE'S INPUT OBSERVATION POINT (Issue #1473). This is the single funnel every write
+   * to a session passes through, so it is where the delivery gate learns that somebody put
+   * something on the line. Until now it recorded nothing: `bytesWritten` counts OUTPUT and
+   * `lastDataAt` tracks OUTPUT, so a keystroke was invisible to the gate until the TUI
+   * happened to echo it — which is the whole of the echo-lag hole.
+   *
+   * Two things are deliberate here:
+   *
+   *   - **The filter, not just the counter.** xterm forwards terminal REPLIES (DA, CPR,
+   *     DECRPM, focus, …) through the same upstream path as keystrokes, so counting the raw
+   *     chunk would hold mail with nobody at the keyboard — and would SELF-TRIP, since our own
+   *     delivery repaints the TUI, which queries the client, which answers. Only the human
+   *     residue is recorded; see {@link stripTerminalReplies}. The PTY still receives the
+   *     chunk VERBATIM, because the application asked for the reply and blocks on it.
+   *   - **The bump ignores the return value.** The question the gate asks is "did a foreign
+   *     writer put input at this session?", not "did it land". A dropped write cannot
+   *     misreport itself as `busy` instead of `no-live-pty` either, because the delivery
+   *     precheck tests `writable` BEFORE the token.
+   *
+   * Record-then-write is atomic with respect to the event loop: this method has no await.
    */
-  write(data: string): boolean {
+  write(data: string, origin: WriteOrigin = 'external'): boolean {
+    if (origin === 'external') {
+      const human = stripTerminalReplies(data);
+      if (LOG_INPUT_SIGNAL) this.logInputSignal(data, human);
+      if (human) this.recordUserInput(human);
+    }
     if (this._shellperBacked) {
       if (this.shellperClient && this.status === 'running') {
         return this.shellperClient.write(data);
@@ -563,24 +757,52 @@ export class PtySession extends EventEmitter {
   /**
    * Resize the PTY or shellper.
    * Returns false when the resize was dropped (#1198).
+   *
+   * COMMIT-ON-SUCCESS (Issue #1482). This used to assign `this.cols`/`this.rows` and resize the
+   * gate mirror on entry, BEFORE finding out whether the resize could reach the process. When
+   * it could not — a dropped shellper write, or no live process at all — Tower's dimensions and
+   * the classification mirror moved while the kernel winsize, and therefore the TUI's own
+   * layout, did not. The render gate then classified a screen re-wrapped at a geometry the app
+   * never adopted: the composer's bounding rule lands on a different row, `findRegionEnd`
+   * returns -1, and every message to that agent holds `busy`/`no-region-end` FOREVER. That is
+   * the indefinite false-busy this issue is named for, and it starts with a boolean nobody read.
+   *
+   * So: record the request, attempt the resize, and move the applied geometry only if it
+   * landed. The request survives in `requestedCols`/`requestedRows` for `spawn()` and for the
+   * re-send on re-attach, so nothing is lost by declining to commit — only the false belief is.
+   *
+   * Callers must not ignore the return value; a dropped resize means Tower and the process now
+   * disagree about the geometry until something re-sends it.
    */
   resize(cols: number, rows: number): boolean {
+    // The request stands whether or not it lands — see the field comments.
+    this.requestedCols = cols;
+    this.requestedRows = rows;
+
+    let applied = false;
+    if (this._shellperBacked) {
+      applied = this.shellperClient !== null && this.status === 'running'
+        ? this.shellperClient.resize(cols, rows)
+        : false;
+    } else if (this.pty && this.status === 'running') {
+      this.pty.resize(cols, rows);
+      applied = true;
+    }
+    if (!applied) {
+      this.resizePending = true;
+      return false;
+    }
+
+    this.resizePending = false;
     this.cols = cols;
     this.rows = rows;
     // Keep the gate mirror at the live geometry (Spec 1313) so the classified screen wraps
-    // identically to what the user sees; no-op before the mirror's first output / after teardown.
+    // identically to what the user sees; no-op before the mirror's first output / after
+    // teardown. Safe to do after the process resize rather than before it: the app's repaint
+    // arrives as output on a later tick, so the mirror is always re-sized before the first byte
+    // drawn at the new geometry reaches it.
     this._gateScreen?.resize(cols, rows);
-    if (this._shellperBacked) {
-      if (this.shellperClient && this.status === 'running') {
-        return this.shellperClient.resize(cols, rows);
-      }
-      return false;
-    }
-    if (this.pty && this.status === 'running') {
-      this.pty.resize(cols, rows);
-      return true;
-    }
-    return false;
+    return true;
   }
 
   /** Kill the PTY process or send signal to shellper. */
@@ -593,15 +815,11 @@ export class PtySession extends EventEmitter {
       return;
     }
     if (this.pty && this.status === 'running') {
-      try {
-        // Kill process group to prevent orphans
-        process.kill(-this.pty.pid, 'SIGTERM');
-        setTimeout(() => {
-          try { process.kill(-this.pty!.pid, 'SIGKILL'); } catch { /* already dead */ }
-        }, 5000);
-      } catch {
-        // Process already exited
-      }
+      // Kill the whole session tree to prevent orphans (SIGTERM, then SIGKILL
+      // after 5s on POSIX; a snapshot-backed tree kill on Windows).
+      killSessionTree(this.pty.pid, { escalateAfterMs: 5000 }).catch(() => {
+        // Teardown incomplete; the orphan sweep is the backstop
+      });
     }
     this.cleanup();
   }
@@ -824,9 +1042,66 @@ export class PtySession extends EventEmitter {
     return this.ringBuffer.bytesWritten;
   }
 
-  /** Record that a user sent input to this session. */
-  recordUserInput(): void {
-    this._lastInputAt = Date.now();
+  /**
+   * One `AF_LOG_INPUT_SIGNAL` trace line. See {@link LOG_INPUT_SIGNAL}.
+   *
+   * `survived=<NOTHING>` is the line to look for with hands off the keyboard: it means the
+   * chunk was entirely terminal replies and moved no input signal. A line with a non-empty
+   * `survived` while nobody is typing names the exact bytes the filter failed to recognise —
+   * which is the whole finding, so they are printed escaped rather than summarised.
+   *
+   * SENSITIVE: that same fidelity means a `survived` run is the operator's literal keystrokes.
+   * The diagnostic is only useful if it prints the bytes exactly, so there is no redaction to
+   * add here without destroying it — the control is the flag, which is off by default. See
+   * {@link LOG_INPUT_SIGNAL}.
+   */
+  private logInputSignal(raw: string, survived: string): void {
+    const stripped = terminalReplyMatches(raw);
+    console.log(
+      `[input-signal ${this.id.slice(0, 8)}] raw="${escapeBytes(raw)}" ` +
+        `stripped=${stripped.length === 0 ? '<none>' : stripped.map((r) => `"${escapeBytes(r)}"`).join(' ')} ` +
+        `survived=${survived === '' ? '<NOTHING>' : `"${escapeBytes(survived)}"`} ` +
+        `inputSeq=${this._inputSeq}→${this._inputSeq + survived.length}`,
+    );
+  }
+
+  /**
+   * The gate's MONOTONE input-change counter (Issue #1473) — the input-side twin of
+   * {@link bytesWritten}.
+   *
+   * *A change counter, not a total.* It exists to DIFFER between two samples, never to be
+   * read as a byte count: it advances by the recorded chunk's `.length`, which is UTF-16 code
+   * units, so an emoji moves it by two and a stripped reply by nothing. Naming it `inputBytes`
+   * would have been a lie.
+   *
+   * The delivery path folds it into the gate's change token, which is what makes a keystroke
+   * landing during the async classify invalidate the clean verdict instead of being written
+   * over — and, just as importantly, what keeps a memoized CLEAN verdict from being reused
+   * across one.
+   *
+   * NEVER RESET. Not on `spawn()`, not on {@link attachShellper}: those replace the PTY while
+   * KEEPING this `PtySession` object, and the gate's verdict memo is keyed on object identity
+   * plus the token — so a counter that fell back to 0 could reproduce an earlier token value
+   * on the same object and alias a stale verdict. (`attachShellper` does hydrate
+   * `_lastDataAt` from the shellper's tracker; the input signals get no such hydration, and
+   * must not.)
+   */
+  get inputSeq(): number {
+    return this._inputSeq;
+  }
+
+  /**
+   * Record that a user sent input to this session.
+   *
+   * `chunk` is the HUMAN residue of the write — replies already stripped by
+   * {@link stripTerminalReplies} — and is what advances {@link inputSeq}. Called with no
+   * argument (Spec 403's original typing-awareness contract) it still moves
+   * {@link lastInputAt}, so an existing caller keeps working; it just contributes no change
+   * to the counter, since there is no chunk to measure.
+   */
+  recordUserInput(chunk = ''): void {
+    this._lastInputAt = this.clock();
+    this._inputSeq += chunk.length;
   }
 
   /**
@@ -838,9 +1113,17 @@ export class PtySession extends EventEmitter {
    * fast-delivery trigger emitted by {@link stopComposing}) can never diverge between
    * clients. Automated mailbox delivery calls {@link write} directly and so, correctly,
    * never trips a submit signal.
+   *
+   * The input RECORDING moved down into {@link write} (Issue #1473), so it covers every
+   * writer rather than only this one — the raw `POST /api/terminals/:id/write` route and the
+   * operator `^C`/ESC bypasses are counted for free, and a future input path is counted by
+   * default. What stays here is what only a live client can tell us: whether the chunk ends a
+   * draft. Composing state is tracked on the RAW chunk deliberately — a reply already called
+   * `startComposing()` before this change, `stopComposing` drives the `'submit'` delivery
+   * trigger, and perturbing a delivery trigger inside a delivery-safety fix is not a trade
+   * worth making for a getter with no production consumer.
    */
   handleUserInput(data: string): void {
-    this.recordUserInput();
     if (data.includes('\r') || data.includes('\n')) {
       this.stopComposing();
     } else {
@@ -851,10 +1134,20 @@ export class PtySession extends EventEmitter {
 
   /** Whether the user has been idle (no input) for at least thresholdMs. */
   isUserIdle(thresholdMs: number): boolean {
-    return Date.now() - this._lastInputAt >= thresholdMs;
+    return this.clock() - this._lastInputAt >= thresholdMs;
   }
 
-  /** Timestamp (epoch ms) of the last user input, or 0 if none. */
+  /**
+   * Timestamp (epoch ms) of the last user input, or 0 if none.
+   *
+   * Beyond Spec 403's typing-awareness, this is now the delivery gate's INPUT-SETTLE signal
+   * (Issue #1473). A change counter can only catch input that arrives AFTER the gate sampled
+   * it; input that landed just BEFORE the sample and has not been echoed yet moves no counter
+   * — both samples agree, correctly — and the classifier reads a genuinely empty composer.
+   * Only a clock can see that, so the delivery path requires a quiet interval here before it
+   * writes. `0` for a session that has never received input, which reads as settled from
+   * birth.
+   */
   get lastInputAt(): number {
     return this._lastInputAt;
   }

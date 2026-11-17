@@ -37,6 +37,8 @@ import {
   type ReadingMode,
   type ThemeAdapter,
   type ReviewMarker,
+  parseHighlightStyle,
+  parseReadingCursor,
 } from '@cluesmith/codev-artifact-canvas';
 import '@cluesmith/codev-artifact-canvas/default-theme.css';
 import type { HostToWebviewMessage, WebviewToHostMessage } from '../messages.js';
@@ -53,6 +55,9 @@ const rootElement = document.getElementById('root') as HTMLElement;
 // script mounts the canvas before the first host message. The canvas coerces anything
 // unrecognized to vertical, so a missing/garbage attribute is safe.
 const initialReadingMode = rootElement.dataset.readingMode;
+// Reading aids (#1802): bootstrapped the same way; a settings change re-renders the HTML.
+const hoverHighlight = parseHighlightStyle(rootElement.dataset.hoverHighlight);
+const readingCursor = parseReadingCursor(rootElement.dataset.readingCursor);
 
 let content = '';
 let markers: ReviewMarker[] = [];
@@ -136,6 +141,8 @@ function render(): void {
       initialReadingMode,
       onReadingModeChange: (mode: ReadingMode) =>
         vscodeApi.postMessage({ type: 'readingModeChange', mode }),
+      hoverHighlight,
+      readingCursor,
       refreshKey,
     }),
   );

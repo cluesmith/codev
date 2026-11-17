@@ -599,6 +599,13 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
       // 4. The backstop redelivers on the first clean render-gate → delivery
       //    broadcast. Held sends never broadcast, so the mailbox-sourced message
       //    frame is unambiguously the redelivery of exactly this held message.
+      //
+      //    Issue #1473 makes one thing about this wait DELIBERATE rather than lucky.
+      //    `writeToTerminal` drives the raw write route, which is an EXTERNAL writer — so the
+      //    CLEAN_COMPOSER bytes above now count as terminal input, and the very next gate pass
+      //    holds `busy:recent-input` until the input-settle interval elapses. That interval is
+      //    300 ms against a 12 s deadline, so this test rides over it comfortably; if the
+      //    constant were ever raised into seconds, this is the wait that would need revisiting.
       let delivered: { content?: string } | null = null;
       const deadline = Date.now() + 12_000;
       while (!delivered && Date.now() < deadline) {

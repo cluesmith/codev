@@ -1,7 +1,8 @@
 /**
  * ShellperClient: Tower's connection to a single shellper process.
  *
- * Connects to a shellper via Unix socket, performs HELLO/WELCOME handshake,
+ * Connects to a shellper via Unix socket (POSIX) or named pipe (Windows),
+ * performs HELLO/WELCOME handshake,
  * and provides a typed API for sending/receiving frames. Emits events for
  * data, exit, replay, and errors.
  *
@@ -47,6 +48,44 @@ export const DEFAULT_REPLAY_TIMEOUT_MS = 500;
 // sub-millisecond) — see waitForReplay() for the full rationale.
 export const LEGACY_REPLAY_TIMEOUT_MS = 50;
 
+/**
+ * Credentials and expected identity for a secret-gated (Windows) shellper
+ * (Spec 1658). The secret goes in HELLO; the expectations are checked against
+ * WELCOME's `sessionId` and `shellperPid`, so a client never adopts a shellper
+ * other than the one its DB row names.
+ */
+export interface ShellperClientAuth {
+  secret: string;
+  expectedSessionId?: string;
+  expectedShellperPid?: number;
+}
+
+/**
+ * The shellper answered, but it is not the one the caller expected: WELCOME
+ * named a different session or shellper PID. Unlike a transient connect
+ * failure, this is proof that the endpoint does not belong to the recorded
+ * session (Spec 1658).
+ */
+export class ShellperIdentityError extends Error {
+  readonly code = 'SHELLPER_IDENTITY_REFUSED';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'ShellperIdentityError';
+  }
+}
+
+/** Why a WELCOME fails the caller's identity expectations, or null when it passes. */
+export function welcomeIdentityMismatch(welcome: WelcomeMessage, auth: ShellperClientAuth): string | null {
+  if (auth.expectedSessionId !== undefined && welcome.sessionId !== auth.expectedSessionId) {
+    return `WELCOME sessionId ${String(welcome.sessionId)} does not match expected ${auth.expectedSessionId}`;
+  }
+  if (auth.expectedShellperPid !== undefined && welcome.shellperPid !== auth.expectedShellperPid) {
+    return `WELCOME shellperPid ${String(welcome.shellperPid)} does not match expected ${auth.expectedShellperPid}`;
+  }
+  return null;
+}
+
 export interface IShellperClient extends EventEmitter {
   connect(): Promise<WelcomeMessage>;
   disconnect(): void;
@@ -86,6 +125,19 @@ export interface IShellperClient extends EventEmitter {
    * command can trust these args belong to it.
    */
   readonly welcomeArgs?: string[] | null;
+  /**
+   * The PTY geometry the shellper reported on WELCOME (Issue #1482) — its own
+   * `cols`/`rows`, which is what it last applied to the kernel winsize and what it will
+   * re-apply across a SPAWN relaunch. This is the only measurement of the real terminal
+   * size available to Tower; everything else is Tower's memory of what it asked for.
+   *
+   * `null` when the frame carried no usable pair. Like {@link welcomeCommand}/{@link
+   * welcomeArgs} the two move together, and OPTIONAL on the interface for the same reason
+   * (test doubles) — treat absent and null identically.
+   */
+  readonly welcomeCols?: number | null;
+  /** Rows paired with {@link IShellperClient.welcomeCols}; both are set or both are null. */
+  readonly welcomeRows?: number | null;
 }
 
 // PIR #1475: bounds on the WELCOME identity payload — a sanity check against a
@@ -150,10 +202,16 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
   // and consumers fall back to the persisted launch command.
   private _welcomeCommand: string | null = null;
   private _welcomeArgs: string[] | null = null;
+  // Issue #1482: the geometry the shellper reported on WELCOME — the real PTY's dimensions,
+  // as opposed to the dimensions Tower remembers asking for. Null when the frame carried no
+  // usable pair (an older shellper, or garbled values).
+  private _welcomeCols: number | null = null;
+  private _welcomeRows: number | null = null;
 
   constructor(
     private readonly socketPath: string,
     private readonly clientType: 'tower' | 'terminal' = 'tower',
+    private readonly auth: ShellperClientAuth | null = null,
   ) {
     super();
   }
@@ -191,6 +249,37 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
   /** argv[1..] paired with {@link ShellperClient.welcomeCommand}, or null. */
   get welcomeArgs(): string[] | null {
     return this._welcomeArgs;
+  }
+
+  /** PTY columns the shellper reported on WELCOME, or null (Issue #1482). */
+  get welcomeCols(): number | null {
+    return this._welcomeCols;
+  }
+
+  /** PTY rows paired with {@link ShellperClient.welcomeCols}, or null (Issue #1482). */
+  get welcomeRows(): number | null {
+    return this._welcomeRows;
+  }
+
+  /**
+   * Adopt the geometry a WELCOME reported, as a PAIR (Issue #1482).
+   *
+   * Both or neither, and only when both are finite positive integers: a half-adopted
+   * geometry is worse than none, because the consumer of this pair resizes a screen mirror
+   * with it, and a mirror at 139 columns by a nonsense row count classifies no better than
+   * one at the wrong size. Anything unusable leaves both null and the caller keeps its own
+   * belief — the pre-#1482 behaviour.
+   */
+  private setWelcomeGeometry(cols: unknown, rows: unknown): void {
+    const usable = (n: unknown): n is number =>
+      typeof n === 'number' && Number.isInteger(n) && n > 0 && n <= 10_000;
+    if (!usable(cols) || !usable(rows)) {
+      this._welcomeCols = null;
+      this._welcomeRows = null;
+      return;
+    }
+    this._welcomeCols = cols;
+    this._welcomeRows = rows;
   }
 
   /**
@@ -311,8 +400,13 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
 
       socket.on('connect', () => {
         socket.pipe(parser);
-        // Send HELLO to initiate handshake
-        socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: this.clientType }));
+        // Send HELLO to initiate handshake. The secret is added only for a
+        // secret-gated (Windows) shellper, so POSIX HELLO bytes are unchanged.
+        if (this.auth) {
+          socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: this.clientType, secret: this.auth.secret }));
+        } else {
+          socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: this.clientType }));
+        }
       });
 
       socket.on('close', () => {
@@ -356,6 +450,18 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
                 this.emit('version-warning', shellperVersion, PROTOCOL_VERSION);
               }
 
+              // Spec 1658: on a secret-gated shellper, WELCOME must name the
+              // session and shellper the caller expects.
+              if (this.auth) {
+                const mismatch = welcomeIdentityMismatch(welcome, this.auth);
+                if (mismatch) {
+                  handshakeResolved = true;
+                  reject(new ShellperIdentityError(mismatch));
+                  this.cleanup();
+                  return;
+                }
+              }
+
               handshakeResolved = true;
               this._connected = true;
               // Hydrate lastDataAt from the shellper's own tracker if it
@@ -374,6 +480,12 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
               // omit both fields, leaving them null so consumers fall back to the
               // persisted command.
               this.setIdentity(welcome.command, welcome.args);
+              // Issue #1482: hydrate the shellper's reported PTY geometry. This is the one
+              // measurement of the real winsize Tower can get, and the attach path uses it to
+              // correct a belief that a dropped resize (or a Tower restart reading dimensions
+              // back out of the database) may have left wrong. Older/garbled frames leave the
+              // pair null and nothing is adopted.
+              this.setWelcomeGeometry(welcome.cols, welcome.rows);
               // Replay any buffered frames received before WELCOME
               for (const buffered of preWelcomeBuffer) {
                 this.handleFrame(buffered);

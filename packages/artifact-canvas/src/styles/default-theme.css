@@ -39,6 +39,12 @@
   --codev-canvas-code-foreground: #1f2328;
   --codev-canvas-link: #0969da;
   --codev-canvas-comment-marker: #bf8700;
+  /* Hover reading aid (#1802): word pill, line band and paragraph tint, drawn behind the text.
+     Derived from the foreground so they invert with any host's dark mapping; word darkest,
+     paragraph faintest is the contract, the exact strengths are tunable. */
+  --codev-canvas-hover-word-background: color-mix(in srgb, var(--codev-canvas-foreground) 14%, transparent);
+  --codev-canvas-hover-line-background: color-mix(in srgb, var(--codev-canvas-foreground) 6%, transparent);
+  --codev-canvas-hover-paragraph-background: color-mix(in srgb, var(--codev-canvas-foreground) 3.5%, transparent);
 
   /*
    * Typography token tier (#1053 — amends the spec-945 D4 "locked public contract").
@@ -94,9 +100,37 @@
 }
 
 /* Positioning context for canvas-level chrome (composed surface only — MarkdownView has none).
-   The "+" affordance does NOT anchor here (#1343: it is row-scoped, see below). */
+   The "+" affordance does NOT anchor here (#1343: it is row-scoped, see below).
+   `isolation: isolate` (#1802) makes the root a stacking context, so the hover layer's
+   `z-index: -1` paints above the root's background but below the prose. */
 .codev-artifact-canvas {
   position: relative;
+  isolation: isolate;
+}
+
+/* Hover reading aid (#1802): a fixed, click-transparent layer of shapes in client coordinates,
+   behind the text and below cards, composer and every fixed overlay. Geometry and corner radii
+   are set inline from the hovered text's font metrics. */
+.codev-canvas-hover-word-layer {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.codev-canvas-hover-paragraph,
+.codev-canvas-hover-line,
+.codev-canvas-hover-word {
+  position: absolute;
+}
+.codev-canvas-hover-paragraph {
+  background: var(--codev-canvas-hover-paragraph-background);
+}
+.codev-canvas-hover-line {
+  background: var(--codev-canvas-hover-line-background);
+}
+.codev-canvas-hover-word {
+  background: var(--codev-canvas-hover-word-background);
 }
 
 /* `cursor: default` (#1232): the content is read-only and comments are button-driven (hover →
@@ -105,6 +139,20 @@
    (The old canvas-level left gutter is gone — leading space is block-local now, see the row
    rules below.) */
 .codev-artifact-canvas-body {
+  cursor: default;
+}
+/* Opt-in prose cursors (#1802). Arrow carries no attribute and is the rule above. Fenced code,
+   comment cards, the composer and the "+" keep today's arrow (their buttons and links set their
+   own). Inline code is part of the sentence, so it takes the prose cursor: resetting it made the
+   cursor flicker along lines dense with code chips (dev-gate feedback). */
+.codev-artifact-canvas[data-reading-cursor='iBeam'] .codev-artifact-canvas-body {
+  cursor: text;
+}
+.codev-artifact-canvas[data-reading-cursor='hand'] .codev-artifact-canvas-body {
+  cursor: pointer;
+}
+.codev-artifact-canvas[data-reading-cursor] .codev-artifact-canvas-body
+  :is(pre, .codev-canvas-marker-cards, .codev-canvas-comment-composer-host, .codev-canvas-row-affordance) {
   cursor: default;
 }
 
@@ -248,29 +296,36 @@
  * marker bar anchor against the row, never the canvas. Nested blocks (an `li`, a `p` inside a
  * blockquote) sit inside their row and must not double-indent, hence the child combinator.
  */
-.codev-artifact-canvas-body > [data-line] {
+/* A top-level list or blockquote is a hover row even though #1738 stopped stamping `data-line`
+   on the container (so its first child is individually navigable). It still hosts the "+" for its
+   items (rowHostOf walks to the direct body child), so it MUST stay a positioning context with a
+   gutter. The renderer marks it `data-row` for exactly this — a CSS row hook with no navigation
+   identity — so the row model keys on `[data-line], [data-row]`. */
+.codev-artifact-canvas-body > :is([data-line], [data-row]) {
   position: relative;
   padding-left: var(--codev-canvas-gutter);
 }
 /* Rows with their own left chrome absorb the gutter into their existing padding so the text
    keeps its x-position; their backgrounds and rules now start at the canvas edge (full-bleed
-   rows, deliberately GitHub-like — the "+" renders on top of the row's own chrome). */
+   rows, deliberately GitHub-like — the "+" renders on top of the row's own chrome). blockquote
+   and list rows carry `data-row`, not `data-line`, since #1738. */
 .codev-artifact-canvas-body > pre[data-line] {
   padding-left: calc(var(--codev-canvas-gutter) + 16px);
 }
-.codev-artifact-canvas-body > blockquote[data-line] {
+.codev-artifact-canvas-body > blockquote[data-row] {
   padding-left: calc(var(--codev-canvas-gutter) + 1em);
 }
-.codev-artifact-canvas-body > :is(ul, ol)[data-line] {
+.codev-artifact-canvas-body > :is(ul, ol)[data-row] {
   padding-left: calc(var(--codev-canvas-gutter) + 2em);
 }
 /* Everything ELSE at the top level aligns via margin instead (#1343, iter-1 consultation):
    unmapped renderer output (`hr`, raw HTML blocks — markdown-it stamps `data-line` only on
    `_open`/fence tokens) and the injected marker-card stacks / composer hosts. Margin, not
-   padding: these aren't hover rows and host no "+". Child combinator is load-bearing — a
-   NESTED stack/host (an li's marker cards) sits inside a row that already carries the gutter,
-   and an unscoped margin would double-indent it. */
-.codev-artifact-canvas-body > :not([data-line]) {
+   padding: these aren't hover rows and host no "+". Rows (`[data-line]` blocks and `[data-row]`
+   list/blockquote containers) are excluded so they take padding, not a double gutter. Child
+   combinator is load-bearing — a NESTED stack/host (an li's marker cards) sits inside a row that
+   already carries the gutter, and an unscoped margin would double-indent it. */
+.codev-artifact-canvas-body > :not([data-line]):not([data-row]) {
   margin-left: var(--codev-canvas-gutter);
 }
 
@@ -572,14 +627,18 @@
    while its composer is open; the chained `break-after: avoid` covers the card stack sitting
    between them. Horizontal-only — vertical has no columns to strand across. */
 .codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing,
-.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards {
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing > .codev-canvas-marker-cards {
   break-after: avoid;
 }
 /* While composing, the block's card stack must be ATOMIC, not merely break-averse: its normal
    between-cards break points are legal escapes the engine will take, keeping the block but
    pushing trailing cards + dialog to the next column — the exact stranding being fixed. Scoped
-   to the composing block's stack only; ordinary stacks keep fragmenting between cards (D1). */
-.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards {
+   to the composing block's stack only; ordinary stacks keep fragmenting between cards (D1). The
+   `>` variant covers a list-item stack, which lives INSIDE the composing `<li>` (#1738) rather
+   than as its next sibling. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing > .codev-canvas-marker-cards {
   break-inside: avoid;
 }
 .codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-host {

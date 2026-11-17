@@ -18,17 +18,22 @@ import { discoverResumeSession } from '../commands/spawn.js';
 import { encodeClaudeProjectDir } from '../utils/claude-session-discovery.js';
 import { CLAUDE_HARNESS, CODEX_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
 
-// discoverResumeSession reads from $HOME via os.homedir() through
-// findLatestSessionId. Override the env var for the duration of the test so
-// the helper looks at our fake home instead of the user's real one.
+// discoverResumeSession reads from os.homedir() through findLatestSessionId.
+// Override the home env vars for the duration of the test so the helper looks
+// at our fake home instead of the user's real one. os.homedir() reads HOME on
+// POSIX and USERPROFILE on Windows, so both are pinned.
 function pinHome<T>(fakeHome: string, fn: () => T): T {
-  const original = process.env.HOME;
+  const originalHome = process.env.HOME;
+  const originalProfile = process.env.USERPROFILE;
   process.env.HOME = fakeHome;
+  process.env.USERPROFILE = fakeHome;
   try {
     return fn();
   } finally {
-    if (original === undefined) delete process.env.HOME;
-    else process.env.HOME = original;
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalProfile;
   }
 }
 

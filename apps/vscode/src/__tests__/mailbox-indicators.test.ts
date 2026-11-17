@@ -10,6 +10,8 @@ import {
   heldBadgeCount,
   composeStatusBarText,
   composeActivityBadge,
+  composeStatusBarTooltip,
+  architectTooltipClause,
   escalationToastText,
   escalationMatchesWorkspace,
 } from '../mailbox-indicators.js';
@@ -20,6 +22,7 @@ function makePayload(overrides: Partial<{
   mailboxId: string;
   ageMs: number;
   reason: string | null;
+  detail: string | null;
 }> = {}) {
   return {
     workspacePath: '/ws',
@@ -27,6 +30,7 @@ function makePayload(overrides: Partial<{
     mailboxId: 'mb1',
     ageMs: 65_000,
     reason: 'busy' as string | null,
+    detail: null as string | null,
     ...overrides,
   };
 }
@@ -151,6 +155,47 @@ describe('escalationToastText', () => {
     expect(escalationToastText(makePayload({ ageMs: -10 }))).toContain('0s');
   });
 
+  // ------------------------------------------------------------------ Issue #1482
+  // The detail was already on the wire in MailboxEscalationPayload and simply went
+  // unrendered, so this toast — often the only surface a VS Code operator sees — could not
+  // distinguish a hold that clears itself from one that never will.
+
+  it.each([
+    ['user-text', 'busy:user-text'],
+    ['no-region-end', 'busy:no-region-end'],
+    ['no-composer-marker', 'busy:no-composer-marker'],
+    // Issue #1664: the composer is empty but still being repainted — self-clearing, like
+    // user-text, and the detail the whole-screen settle used to swallow into a bare `busy`.
+    ['composer-redraw', 'busy:composer-redraw'],
+  ])('renders the gate detail %s as a reason:detail sub-code', (detail, expected) => {
+    const text = escalationToastText(makePayload({ reason: 'busy', detail }));
+    expect(text).toContain(`(${expected})`);
+  });
+
+  it('renders the bare reason when there is no detail', () => {
+    const text = escalationToastText(makePayload({ reason: 'no-live-pty', detail: null }));
+    expect(text).toContain('(no-live-pty)');
+    expect(text).not.toContain('no-live-pty:');
+  });
+
+  it('still shows a detail that arrives without a reason', () => {
+    // Defensive: the producer should not emit this, but dropping the one diagnostic the
+    // operator needs would be the wrong failure.
+    expect(escalationToastText(makePayload({ reason: null, detail: 'user-text' }))).toContain('(held:user-text)');
+  });
+
+  it('omits the parens entirely when both reason and detail are absent', () => {
+    expect(escalationToastText(makePayload({ reason: null, detail: null }))).not.toContain('(');
+  });
+
+  it('matches what the CLI renders for the same row — one formatter, not two', () => {
+    // Guards the reason this imports from the sdk rather than re-implementing: if the toast
+    // ever forks its own formatting, `afx inbox` and this toast start describing the same
+    // held row differently.
+    const text = escalationToastText(makePayload({ toAgent: 'b', ageMs: 60_000, reason: 'busy', detail: 'no-region-end' }));
+    expect(text).toBe('Codev: a message to b has been held 60s (busy:no-region-end) — past the escalation age. Review with: afx inbox');
+  });
+
   it('carries no message body (redaction — payload has none to leak)', () => {
     // The payload type has no body field; assert the text is metadata only by
     // confirming it is fully determined by the metadata we passed.
@@ -175,5 +220,26 @@ describe('escalationMatchesWorkspace', () => {
 
   it('matches everything when no active workspace is known yet (startup)', () => {
     expect(escalationMatchesWorkspace('/ws/a', null)).toBe(true);
+  });
+});
+
+describe('waiting architects (Spec 1595, SC13)', () => {
+  it('names one or several architects', () => {
+    expect(architectTooltipClause([])).toBe('');
+    expect(architectTooltipClause(['main'])).toBe('architect main waiting on input');
+    expect(architectTooltipClause(['main', 'ob'])).toBe('architects main, ob waiting on input');
+  });
+
+  it('folds waiting architects into the badge count and names them in its tooltip', () => {
+    expect(composeActivityBadge(0, 0, 0, ['main'])).toEqual({ value: 1, tooltip: 'architect main waiting on input' });
+    expect(composeActivityBadge(1, 1, 0, ['ob'])).toEqual({
+      value: 3,
+      tooltip: '1 blocked, 1 waiting on input · architect ob waiting on input',
+    });
+  });
+
+  it('names waiting architects in the status-bar tooltip ahead of the click action', () => {
+    expect(composeStatusBarTooltip([])).toBe('Click to reconnect to Tower');
+    expect(composeStatusBarTooltip(['main'])).toBe('Architect main waiting on input\nClick to reconnect to Tower');
   });
 });

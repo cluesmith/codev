@@ -7,7 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, CheckDef, CheckOverrides, ContextRefreshConfig } from './types.js';
+import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, PhaseConsultationConfig, CheckDef, CheckOverrides, ContextRefreshConfig } from './types.js';
 import { resolveCodevFile, getSkeletonDir } from '../../lib/skeleton.js';
 
 // ============================================================================
@@ -200,6 +200,25 @@ function normalizeContextRefresh(
   return { on_enter, on_plan_phase_advance };
 }
 
+/** setTimeout's ceiling; a larger delay overflows and fires after 1ms. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
+/**
+ * Validate a check's optional `timeout_ms` (#1814). Absent stays absent, so the
+ * runner's 5-minute default applies. Anything but a positive integer fails
+ * loudly: silently reverting to the default is the failure this key exists to fix.
+ */
+function parseTimeoutMs(value: unknown, where: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0 || value > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `${where}: timeout_ms must be a positive integer of milliseconds (at most ${MAX_TIMEOUT_MS}), ` +
+        `got ${JSON.stringify(value)}`,
+    );
+  }
+  return value;
+}
+
 /**
  * Normalize protocol JSON to our simplified Protocol type
  */
@@ -232,7 +251,11 @@ function normalizeProtocol(json: unknown): Protocol {
         checks[name] = { command: val };
       } else if (typeof val === 'object' && val !== null && 'command' in val) {
         const checkObj = val as Record<string, unknown>;
-        checks[name] = { command: checkObj.command as string, cwd: checkObj.cwd as string | undefined };
+        checks[name] = {
+          command: checkObj.command as string,
+          cwd: checkObj.cwd as string | undefined,
+          timeout_ms: parseTimeoutMs(checkObj.timeout_ms, `Invalid protocol: check "${name}"`),
+        };
       }
     }
   }
@@ -243,7 +266,11 @@ function normalizeProtocol(json: unknown): Protocol {
       for (const [name, check] of Object.entries(phase.checks as Record<string, unknown>)) {
         if (typeof check === 'object' && check !== null && 'command' in check) {
           const checkObj = check as Record<string, unknown>;
-          checks[name] = { command: checkObj.command as string, cwd: checkObj.cwd as string | undefined };
+          checks[name] = {
+            command: checkObj.command as string,
+            cwd: checkObj.cwd as string | undefined,
+            timeout_ms: parseTimeoutMs(checkObj.timeout_ms, `Invalid protocol: check "${name}"`),
+          };
         } else if (typeof check === 'string') {
           checks[name] = { command: check };
         }
@@ -330,6 +357,29 @@ function normalizePhase(p: unknown): ProtocolPhase {
     };
   }
 
+  // Parse a builder-run consultation (once phases). Malformed is an error, not a silent skip:
+  // a dropped block would quietly render no review commands into the prompt.
+  let consultation: PhaseConsultationConfig | undefined;
+  const consultationRaw = phase.consultation as Record<string, unknown> | undefined;
+  if (consultationRaw !== undefined) {
+    const { type, models } = consultationRaw;
+    if (typeof type !== 'string' || !Array.isArray(models) || !models.every(m => typeof m === 'string')) {
+      throw new Error(`Invalid protocol phase "${phase.id}": consultation needs a string "type" and a "models" string array`);
+    }
+    // `enabled` / `parallel` are not read for a phase block. A `false` is an intent porch would
+    // silently drop, so it fails here; a legacy `true` is a no-op and tolerated (older local copies
+    // of RESEARCH carried one).
+    for (const key of ['enabled', 'parallel'] as const) {
+      if (consultationRaw[key] === false) {
+        throw new Error(
+          `Invalid protocol phase "${phase.id}": consultation "${key}": false is not supported — porch does not read it. ` +
+            'To change or turn off a phase\'s reviewers, set porch.consultation in .codev/config.json (e.g. "none").',
+        );
+      }
+    }
+    consultation = { type, models: models as string[] };
+  }
+
   // Parse on_complete config
   let on_complete: OnCompleteConfig | undefined;
   const onCompleteRaw = phase.on_complete as Record<string, unknown> | undefined;
@@ -349,6 +399,7 @@ function normalizePhase(p: unknown): ProtocolPhase {
     max_iterations: (phase.max_iterations as number) ?? 8,
     on_complete,
     gate: gateName,
+    consultation,
     checks: checks.length > 0 ? checks : undefined,
     next,
   };
@@ -380,9 +431,10 @@ export function getNextPhase(protocol: Protocol, currentPhaseId: string): Protoc
  * Get check definitions for a phase, optionally merging in .codev/config.json overrides.
  *
  * Override semantics (applied per check name):
- *   - skip: true   → check is omitted from the result
- *   - command set  → replaces the protocol's command
- *   - cwd set      → replaces the protocol's cwd
+ *   - skip: true      → check is omitted from the result
+ *   - command set     → replaces the protocol's command
+ *   - cwd set         → replaces the protocol's cwd
+ *   - timeout_ms set  → replaces the protocol's timeout
  *
  * Unknown override names (not found in this phase's check list) are warned
  * via a chalk.yellow log line. All existing call sites that pass no overrides
@@ -426,6 +478,9 @@ export function getPhaseChecks(
       result[checkName] = {
         command: override.command ?? base.command,
         cwd: override.cwd ?? base.cwd,
+        timeout_ms:
+          parseTimeoutMs(override.timeout_ms, `.codev/config.json porch.checks.${checkName}`) ??
+          base.timeout_ms,
       };
     } else {
       result[checkName] = base;

@@ -16,13 +16,17 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { getFrameworkCacheDir as _getFrameworkCacheDir } from './skeleton.js';
+import { defaultInteractiveShell } from './platform.js';
 import { validateCustomHarnessConfig } from '../agent-farm/utils/harness.js';
 import {
   validateConsultModels,
   validateReasoningEffort,
   validatePricing,
+  validateCodexPath,
+  validateClaudeAuth,
   validateConsultationConfig,
   type CodexPricing,
+  type ClaudeAuthMode,
 } from './consult-lanes.js';
 import type { ModelReasoningEffort } from '@openai/codex-sdk';
 
@@ -86,6 +90,20 @@ export interface CodevConfig {
     reasoningEffort?: { codex?: ModelReasoningEffort };
     /** Codex-only per-1M token rates; all three required together. */
     pricing?: { codex?: CodexPricing };
+    /**
+     * Absolute path to the codex binary the codex lane runs. Unset → the Codex CLI bundled with
+     * `@openai/codex-sdk`. For when the bundled CLI is too old for a model (#1880). A path that
+     * does not run fails the consultation; Codev never falls back to the bundled CLI.
+     */
+    codexPath?: string;
+    /**
+     * How the claude lane authenticates (#1912). `"login"` (the default) runs on the claude CLI's
+     * own login — the subscription, for most people — and withholds `ANTHROPIC_API_KEY` /
+     * `ANTHROPIC_AUTH_TOKEN` from the child, so a stray key cannot switch billing to the metered
+     * API. `"api-key"` passes those keys through and requires one; for CI and key-only machines.
+     * Honoured from every config layer; the lane's auth line names the file that set it.
+     */
+    claudeAuth?: ClaudeAuthMode;
   };
   forge?: Record<string, string | null> & { provider?: string };
   templates?: {
@@ -101,6 +119,15 @@ export interface CodevConfig {
   };
   terminal?: {
     backend?: 'node-pty';
+  };
+  /** Native Windows settings (Spec 1658). Ignored on macOS and Linux. */
+  windows?: {
+    /**
+     * Full path of Git for Windows' `bin\bash.exe`. Overrides the standard
+     * install locations and `PATH`; a path that is not a Git Bash (the System32
+     * WSL launcher included) is an error, never silently skipped.
+     */
+    gitBashPath?: string;
   };
   /**
    * Mailbox delivery settings (Spec 1313). Tower-global — the drainer prunes
@@ -126,6 +153,13 @@ export interface CodevConfig {
   };
   dashboard?: {
     frontend?: 'react' | 'legacy';
+    /**
+     * The pending-decisions file the Decisions tab views and writes rulings into
+     * (Spec 1819), relative to the workspace root. Default
+     * `codev/state/pending-decisions.md`. It must resolve — symlinks followed — to a
+     * file inside the workspace; anything else is refused.
+     */
+    decisionsFile?: string;
   };
   framework?: {
     source?: string;
@@ -138,6 +172,7 @@ export interface CodevConfig {
 export interface CheckOverride {
   command?: string;
   cwd?: string;
+  timeout_ms?: number;
   skip?: boolean;
 }
 
@@ -296,7 +331,7 @@ export function resolveLocalConfigPath(workspaceRoot: string): string | null {
  * `.gitignore` so it's never accidentally committed.
  */
 export function loadConfig(workspaceRoot: string): CodevConfig {
-  let merged: CodevConfig = structuredClone(DEFAULT_CONFIG);
+  let merged: CodevConfig = defaultConfigForHost();
 
   // Layer 2: remote framework base config (if cached)
   const cacheDir = _getFrameworkCacheDir();
@@ -349,6 +384,8 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
   validateConsultModels(merged.consult?.models);
   validateReasoningEffort(merged.consult?.reasoningEffort);
   validatePricing(merged.consult?.pricing);
+  validateCodexPath(merged.consult?.codexPath);
+  validateClaudeAuth(merged.consult?.claudeAuth);
   validateConsultationConfig(merged.porch?.consultation, workspaceRoot);
 
   return merged;
@@ -402,5 +439,12 @@ export function findConfigSource(workspaceRoot: string, keyPath: string[]): stri
  * Get the default config (useful for init/adopt to write a starter config).
  */
 export function getDefaultConfig(): CodevConfig {
-  return structuredClone(DEFAULT_CONFIG);
+  return defaultConfigForHost();
+}
+
+/** A fresh copy of the defaults, with the host's interactive shell. */
+function defaultConfigForHost(): CodevConfig {
+  const config = structuredClone(DEFAULT_CONFIG);
+  config.shell = { ...config.shell, shell: defaultInteractiveShell() };
+  return config;
 }

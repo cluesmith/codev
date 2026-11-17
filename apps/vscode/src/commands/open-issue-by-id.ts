@@ -12,8 +12,9 @@
  *
  * "ID" rather than "number": the term is forge-neutral (GitLab `iid`, Linear /
  * Jira identifiers aren't bare numbers), matching the extension's existing
- * `issueId` vocabulary. The numeric validation in `parseIssueId` is the
- * GitHub-specific part; only it loosens if a non-numeric forge is supported.
+ * `issueId` vocabulary. `parseIssueId` stays numeric (Open PR by ID shares it);
+ * `parseIssueInput` adds tracker keys (`ENG-123`) on workspaces whose issues
+ * use them (#1740), gated by `acceptsIssueKeys`.
  *
  * Graceful degradation: the issue is fetched via the same forge-agnostic
  * `getIssue` path the in-editor preview uses. When the forge supplies a `url`
@@ -22,7 +23,9 @@
  */
 
 import * as vscode from 'vscode';
+import type { OverviewData } from '@cluesmith/codev-types';
 import type { ConnectionManager } from '../connection-manager.js';
+import { acceptsIssueKeys, isIssueKey } from '../issue-id.js';
 
 /**
  * Normalize a typed issue id to its bare numeric string, or `undefined` if it
@@ -39,6 +42,22 @@ export function parseIssueId(input: string): string | undefined {
   if (withoutHash.length === 0) { return undefined; }
   if (!/^\d+$/.test(withoutHash)) { return undefined; }
   return withoutHash;
+}
+
+/**
+ * Normalize a typed issue id: a number (as `parseIssueId`), or, when
+ * `acceptKeys`, a tracker key canonicalized to upper case (`" eng-12 "` →
+ * `"ENG-12"`, a leading `#` tolerated). `undefined` for anything else.
+ */
+export function parseIssueInput(input: string, acceptKeys: boolean): string | undefined {
+  const numeric = parseIssueId(input);
+  if (numeric !== undefined) { return numeric; }
+  if (!acceptKeys) { return undefined; }
+  const trimmed = input.trim();
+  let withoutHash = trimmed;
+  if (trimmed.startsWith('#')) { withoutHash = trimmed.slice(1); }
+  if (!isIssueKey(withoutHash)) { return undefined; }
+  return withoutHash.toUpperCase();
 }
 
 /**
@@ -61,7 +80,7 @@ export async function openIssueInBrowser(
   const issue = await client.getIssue(issueId, workspacePath);
   if (!issue) {
     vscode.window.showWarningMessage(
-      `Codev: Could not open issue #${issueId} (not found, or forge unavailable).`,
+      `Codev: Could not open issue ${issueLabel(issueId)} (not found, or forge unavailable).`,
     );
     return;
   }
@@ -75,19 +94,35 @@ export async function openIssueInBrowser(
   await vscode.commands.executeCommand('codev.viewBacklogIssue', issueId);
 }
 
-export async function openIssueById(connectionManager: ConnectionManager): Promise<void> {
+/** `#42` for numbers, `ENG-12` for keys (no `#` on a tracker key). */
+function issueLabel(issueId: string): string {
+  if (isIssueKey(issueId)) { return issueId; }
+  return `#${issueId}`;
+}
+
+export async function openIssueById(
+  connectionManager: ConnectionManager,
+  getOverview?: () => Pick<OverviewData, 'issueIdKind' | 'backlog'> | null | undefined,
+): Promise<void> {
+  const acceptKeys = acceptsIssueKeys(getOverview?.(), 'explicit');
+  let placeHolder = 'Issue ID, e.g. 1096 or #1096';
+  let invalidMessage = 'Enter a numeric issue id (e.g. 1096 or #1096).';
+  if (acceptKeys) {
+    placeHolder = 'Issue ID, e.g. 1096 or PROJ-123';
+    invalidMessage = 'Enter an issue id (e.g. 1096 or PROJ-123).';
+  }
   const input = await vscode.window.showInputBox({
     title: 'Codev: Open Issue by ID',
-    placeHolder: 'Issue ID, e.g. 1096 or #1096',
+    placeHolder,
     prompt: 'Opens the issue in your browser — works for open, closed, or archived issues.',
-    validateInput: (value) =>
-      parseIssueId(value) === undefined
-        ? 'Enter a numeric issue id (e.g. 1096 or #1096).'
-        : undefined,
+    validateInput: (value) => {
+      if (parseIssueInput(value, acceptKeys) === undefined) { return invalidMessage; }
+      return undefined;
+    },
   });
   if (input === undefined) { return; }
 
-  const issueId = parseIssueId(input);
+  const issueId = parseIssueInput(input, acceptKeys);
   if (issueId === undefined) { return; }
 
   await openIssueInBrowser(connectionManager, issueId);

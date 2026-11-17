@@ -10,7 +10,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { AGENT_FARM_DIR, encodeWorkspacePath } from '../lib/tower-client.js';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
+import { isBuilderWorktreePath } from '@cluesmith/codev-sdk/builder-worktree';
 import { loadConfig } from '../../lib/config.js';
+import { sanitizeAgentEnv, withTowerPort, ARCHITECT_WORKSPACE_ENV } from '../../lib/agent-env.js';
 import { getGlobalDb } from '../db/index.js';
 import {
   saveFileTab as saveFileTabToDb,
@@ -50,9 +52,30 @@ function extractShellperSessionId(socketPath: string | null): string | null {
   const match = path.basename(socketPath).match(/^shellper-(.+)\.sock$/);
   return match ? match[1] : null;
 }
-import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
+
+/**
+ * The shellper session id for a row (Spec 1658): the persisted column, else the
+ * legacy `shellper-<id>.sock` basename (pre-v19 POSIX rows), else the row id.
+ */
+function rowShellperSessionId(dbSession: DbTerminalSession): string {
+  return dbSession.shellper_session_id ?? extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
+}
+
+/** What a Windows reconnect needs from the row to authenticate (Spec 1658). */
+function rowReconnectAuth(dbSession: DbTerminalSession): ReconnectAuth {
+  return {
+    shellperSessionId: dbSession.shellper_session_id ?? extractShellperSessionId(dbSession.shellper_socket),
+    secret: dbSession.shellper_secret,
+  };
+}
+
+/** The row's shellper identity columns, carried forward when a row is re-saved. */
+function rowShellperAuth(dbSession: DbTerminalSession): ShellperRowAuth {
+  return { sessionId: dbSession.shellper_session_id, secret: dbSession.shellper_secret };
+}
+import { isIdentityRefused, isShellperPidReused, type SessionManager, type ReconnectRestartOptions, type ReconnectAuth } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
-import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
+import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession, ShellperRowAuth } from './tower-types.js';
 import {
   normalizeWorkspacePath,
   buildArchitectReconnectRestartOptions,
@@ -61,6 +84,10 @@ import {
 } from './tower-utils.js';
 import { setArchitectByName } from '../state.js';
 import { isIntentionallyStopping } from './tower-instances.js';
+import { isWindows } from '../../lib/platform.js';
+import { workspaceKey } from '../utils/workspace-path.js';
+import { isHostPathAtOrUnder } from '../../lib/host-paths.js';
+import { homedir, tmpdir } from 'node:os';
 
 // ============================================================================
 // Module-private state (lifecycle driven by orchestrator)
@@ -68,8 +95,36 @@ import { isIntentionallyStopping } from './tower-instances.js';
 
 let _deps: TerminalDeps | null = null;
 
+/**
+ * A workspace-keyed map whose keys are canonical on Windows (Spec 1658, M6).
+ *
+ * Tower is handed workspace paths in more than one spelling on Windows (VS Code's
+ * `c:\repo`, Git Bash's `C:\repo`, a raw `?workspace=` query parameter), and many
+ * callsites look the registry up with the path exactly as they received it.
+ * Canonicalizing inside the map's own accessors makes every one of them agree,
+ * rather than relying on each callsite to normalize first. On POSIX `workspaceKey`
+ * is the identity, so the map behaves exactly like a plain `Map` there.
+ */
+export class WorkspaceKeyedMap<V> extends Map<string, V> {
+  override get(key: string): V | undefined {
+    return super.get(workspaceKey(key));
+  }
+
+  override set(key: string, value: V): this {
+    return super.set(workspaceKey(key), value);
+  }
+
+  override has(key: string): boolean {
+    return super.has(workspaceKey(key));
+  }
+
+  override delete(key: string): boolean {
+    return super.delete(workspaceKey(key));
+  }
+}
+
 /** Workspace terminal registry — tracks which terminals belong to which workspace */
-const workspaceTerminals = new Map<string, WorkspaceTerminals>();
+const workspaceTerminals = new WorkspaceKeyedMap<WorkspaceTerminals>();
 
 /** Global TerminalManager instance (lazy singleton) */
 let terminalManager: TerminalManager | null = null;
@@ -85,6 +140,8 @@ let _reconciling = false;
 export interface TerminalDeps {
   /** Logging function */
   log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void;
+  /** Tower's listening port, set as `CODEV_TOWER_PORT` on every architect restart env (Spec 1595). */
+  towerPort?: number;
   /** Shellper session manager for persistent terminals */
   shellperManager: SessionManager | null;
   /** Register a known workspace path (from tower-instances) */
@@ -201,7 +258,7 @@ export function shutdownTerminals(): void {
 // ============================================================================
 
 /** Get the workspace terminals registry (returns the Map reference) */
-export function getWorkspaceTerminals(): Map<string, WorkspaceTerminals> {
+export function getWorkspaceTerminals(): WorkspaceKeyedMap<WorkspaceTerminals> {
   return workspaceTerminals;
 }
 
@@ -211,7 +268,11 @@ export function getWorkspaceTerminals(): Map<string, WorkspaceTerminals> {
  */
 export function getTerminalManager(): TerminalManager {
   if (!terminalManager) {
-    const workspaceRoot = process.env.HOME || '/tmp';
+    // POSIX keeps its `/tmp` fallback; Windows has no HOME by default (Spec 1658).
+    let workspaceRoot = process.env.HOME || '/tmp';
+    if (isWindows()) {
+      workspaceRoot = homedir();
+    }
     terminalManager = new TerminalManager({
       workspaceRoot: workspaceRoot,
       logDir: path.join(AGENT_FARM_DIR, 'logs'),
@@ -235,6 +296,9 @@ export function getTerminalManager(): TerminalManager {
  * persisted tabs are available immediately (not just after /api/state).
  */
 export function getWorkspaceTerminalsEntry(workspacePath: string): WorkspaceTerminals {
+  // Spec 1658 (M6): one spelling per directory on Windows (identity on POSIX), so
+  // the file tabs below load under the same key the registry stores.
+  workspacePath = workspaceKey(workspacePath);
   let entry = workspaceTerminals.get(workspacePath);
   if (!entry) {
     entry = { architects: new Map(), builders: new Map(), shells: new Map(), fileTabs: loadFileTabsForWorkspace(workspacePath) };
@@ -304,6 +368,7 @@ export function saveTerminalSession(
   label: string | null = null,
   cwd: string | null = null,
   command: string | null = null,
+  shellperAuth: ShellperRowAuth | null = null,
 ): void {
   try {
     const normalizedPath = normalizeWorkspacePath(workspacePath);
@@ -317,9 +382,10 @@ export function saveTerminalSession(
 
     const db = getGlobalDb();
     db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label, cwd, command)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label, cwd, command);
+      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label, cwd, command, shellper_session_id, shellper_secret)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label, cwd, command,
+      shellperAuth?.sessionId ?? null, shellperAuth?.secret ?? null);
     _deps?.log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
   } catch (err) {
     _deps?.log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
@@ -549,7 +615,7 @@ export function deleteFileTabsByPathPrefix(pathPrefix: string): number {
   try {
     const deleted = deleteFileTabsByPathPrefixFromDb(getGlobalDb(), pathPrefix);
     // Ensure trailing slash for boundary-safe in-memory matching
-    const safePrefix = pathPrefix.endsWith('/') ? pathPrefix : pathPrefix + '/';
+    const safePrefix = pathPrefix.endsWith(path.sep) ? pathPrefix : pathPrefix + path.sep;
     // Evict matching entries from in-memory registries
     for (const [, entry] of workspaceTerminals) {
       if (entry.fileTabs) {
@@ -601,6 +667,21 @@ export function processExists(pid: number): boolean {
 // Terminal reconciliation
 // ============================================================================
 
+/** POSIX temp roots a reconnect skips; Windows uses the host temp dir (Spec 1658). */
+const POSIX_TEMP_ROOTS = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
+
+/** True when a workspace lives in a temp directory, so its sessions are not reconnected. */
+function isTemporaryWorkspace(workspacePath: string): boolean {
+  if (isWindows()) {
+    const roots = [tmpdir()];
+    try {
+      roots.push(fs.realpathSync(tmpdir()));
+    } catch { /* the unresolved form is enough */ }
+    return roots.some(d => isHostPathAtOrUnder(workspacePath, d));
+  }
+  return POSIX_TEMP_ROOTS.some(d => isHostPathAtOrUnder(workspacePath, d));
+}
+
 /**
  * Reconcile terminal sessions on startup.
  *
@@ -646,9 +727,17 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   let orphanReconnected = 0;
   let killed = 0;
   let cleaned = 0;
+  // Bugfix #1686: rows kept because reconnect failed but death was not proven
+  // (the shellper pid is still alive). Counted so a reconcile that only
+  // preserved rows does not misreport "No terminal sessions to reconcile".
+  let unconfirmed = 0;
 
   // Track matched session IDs across all phases
   const matchedSessionIds = new Set<string>();
+  // Spec 1658: rows whose reconnect was refused on identity (the endpoint is
+  // provably not this session's shellper). Phase 2 deletes them even when the
+  // recorded pid is alive, and never signals that pid: it is not ours.
+  const identityRefusedIds = new Set<string>();
 
   // ---- Phase 1: Shellper reconnection ----
   let allDbSessions: DbTerminalSession[];
@@ -684,8 +773,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       cleaned++;
       continue;
     }
-    const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
-    if (tmpDirs.some(d => workspacePath === d || workspacePath.startsWith(d + '/'))) {
+    if (isTemporaryWorkspace(workspacePath)) {
       _deps.log('INFO', `Skipping shellper session ${dbSession.id} — workspace is in temp directory: ${workspacePath}`);
       if (dbSession.shellper_pid && processExists(dbSession.shellper_pid)) {
         try { process.kill(dbSession.shellper_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
@@ -720,16 +808,18 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
         } catch { /* use default */ }
       }
       const cmdParts = architectCmd.split(/\s+/);
-      const cleanEnv = { ...process.env } as Record<string, string>;
-      delete cleanEnv['CLAUDECODE'];
+      // Spec 1595: Tower's port, for the restarted agent's lifecycle reporter.
+      const cleanEnv = withTowerPort(sanitizeAgentEnv(process.env), _deps.towerPort);
       // Spec 786 Phase 2: preserve architect identity across shellper auto-
       // restart. Without this, the new claude process would inherit Tower's
       // CODEV_ARCHITECT_NAME (or none), and builders spawned by a restarted
       // sibling would lose affinity to the sibling. The `|| 'main'` fallback
       // covers legacy rows where role_id is null (v13 backfill should have
-      // populated them; this is belt-and-suspenders).
+      // populated them; this is belt-and-suspenders). Spec 1595: the
+      // workspace travels beside the name.
       const architectName = dbSession.role_id || 'main';
       cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
+      cleanEnv[ARCHITECT_WORKSPACE_ENV] = workspacePath;
       // Issue #832/#1149/#1264: bake `--resume <storedId>` + a #1264 clean-exit
       // fresh-launch factory + a #1149 crash-loop fallback into the auto-restart
       // args, so a claude crash inside a live shellper revives the SAME
@@ -765,7 +855,12 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
           task.dbSession.shellper_pid!,
           task.dbSession.shellper_start_time!,
           task.restartOptions,
+          rowReconnectAuth(task.dbSession),
         );
+        if (isIdentityRefused(client)) {
+          identityRefusedIds.add(task.dbSession.id);
+          return { dbSession: task.dbSession, client: null, replayData: null, restartOptions: task.restartOptions };
+        }
         if (!client) {
           return { dbSession: task.dbSession, client: null, replayData: null, restartOptions: task.restartOptions };
         }
@@ -800,8 +895,13 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   // Process probe results sequentially (shared state mutations)
   for (const { dbSession, client, replayData, restartOptions } of probeResults) {
     if (!client) {
-      _deps.log('INFO', `Shellper session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
-      continue; // Will be cleaned up in Phase 2
+      // Bugfix #1686: reconnect returning null does NOT prove death (it also
+      // covers a connect refused by another Tower client, or a transient
+      // socket/fd hiccup). Death is confirmed in the Phase 2 sweep, which keeps
+      // a row whose pid is still alive — so this log defers the verdict rather
+      // than asserting "dead" up front.
+      _deps.log('INFO', `Shellper session ${dbSession.id} reconnect failed — deferring to Phase 2 sweep for death confirmation`);
+      continue; // Phase 2 confirms death before any cleanup
     }
 
     const workspacePath = dbSession.workspace_path;
@@ -830,7 +930,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     });
     const ptySession = manager.getSession(session.id);
     if (ptySession) {
-      const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
+      const shellperSessId = rowShellperSessionId(dbSession);
       // replayData is only null when client is null (probe batch above),
       // which the `if (!client)` guard already excluded — fall back to
       // empty defensively rather than asserting.
@@ -881,7 +981,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
     saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
       dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, sessionCwd,
-      ptySession ? persistableCommand(ptySession) : identitySeed);
+      ptySession ? persistableCommand(ptySession) : identitySeed, rowShellperAuth(dbSession));
     _deps.registerKnownWorkspace(workspacePath);
 
     // Clean up on exit (only fires for permanent death when restartOnExit is set)
@@ -923,6 +1023,49 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     const existing = manager.getSession(session.id);
     if (existing && existing.status !== 'exited') continue;
 
+    // Bugfix #1686: a shellper-backed row reaches here when Phase 1 failed to
+    // reconnect to it. But reconnectSession() returns null for transient reasons
+    // too — a socket connect refused because another Tower client already owns
+    // the shellper (one-client-per-shellper), or a boot-time socket/fd hiccup —
+    // not just for a genuinely dead process. Treating that failure as death and
+    // SIGTERMing the still-live pid is what destroyed 53 live sessions in the
+    // #1629 incident. Destroy only what is proven dead, and the sole proof of
+    // death is the pid being down: a live shellper pid is never signaled and its
+    // row is never deleted here, regardless of socket-file state (a transiently
+    // absent socket is the same transient-failure class and must not kill a live
+    // agent). The row is left in place (WARN) and retried on a later
+    // reconcile/adoption pass; a pid-dead row still deletes below as before.
+    //
+    // Spec 1658: an identity refusal IS proof. The shellper answered (or its
+    // pipe is gone) and is not this row's, so the live pid belongs to some other
+    // process: delete the row, and never signal that pid.
+    if (identityRefusedIds.has(session.id)) {
+      _deps.log('WARN', `Shellper session ${session.id} refused reconnect on identity — removing row without signaling pid ${session.shellper_pid} (${session.type} for ${path.basename(session.workspace_path)})`);
+      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
+      cleaned++;
+      continue;
+    }
+    if (session.shellper_socket) {
+      const shellperAlive = session.shellper_pid != null && processExists(session.shellper_pid);
+      if (shellperAlive) {
+        // Bugfix #1877: a live pid whose start time does not match the recorded
+        // shellper's was reused by an unrelated process (typically after a
+        // reboot), so it is proven not ours: the row is stale and is deleted.
+        // The pid belongs to someone else, so it is never signaled — and this
+        // must `continue` before the stale-row branch below, which would
+        // SIGTERM `session.pid` (persisted equal to `shellper_pid`).
+        if (await isShellperPidReused(session.shellper_pid!, session.shellper_start_time)) {
+          _deps.log('INFO', `Shellper session ${session.id}: pid ${session.shellper_pid} was reused by another process (start time mismatch) — deleting stale row, pid not signaled (${session.type} for ${path.basename(session.workspace_path)})`);
+          db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
+          cleaned++;
+          continue;
+        }
+        _deps.log('WARN', `Shellper session ${session.id} failed to reconnect but pid ${session.shellper_pid} is alive — leaving row untouched (a live pid is never signaled), retried next reconcile/adoption pass (${session.type} for ${path.basename(session.workspace_path)})`);
+        unconfirmed++;
+        continue;
+      }
+    }
+
     // Stale row — kill orphaned process if any, then delete
     if (session.pid && processExists(session.pid)) {
       _deps.log('INFO', `Killing orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.workspace_path)})`);
@@ -937,11 +1080,153 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   }
 
   const total = shellperReconnected + orphanReconnected;
-  if (total > 0 || killed > 0 || cleaned > 0) {
-    _deps.log('INFO', `Reconciliation complete: ${shellperReconnected} shellper, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned`);
+  if (total > 0 || killed > 0 || cleaned > 0 || unconfirmed > 0) {
+    _deps.log('INFO', `Reconciliation complete: ${shellperReconnected} shellper, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned, ${unconfirmed} unconfirmed (kept)`);
   } else {
     _deps.log('INFO', 'No terminal sessions to reconcile');
   }
+}
+
+// ============================================================================
+// Builder-worktree row prune (#1809)
+// ============================================================================
+
+/** Counts from one prune pass, returned for tests and logged as one INFO line. */
+export interface BuilderWorktreePruneResult {
+  /** Worktree paths whose rows were deleted. */
+  pruned: number;
+  /** known_workspaces + architect + terminal_sessions rows deleted. */
+  rowsDeleted: number;
+  /** Worktree paths kept because a live session is attached; reported, never killed. */
+  live: string[];
+}
+
+/**
+ * Delete global.db rows that recorded a builder worktree as a workspace (#1809).
+ *
+ * Before #1809 Tower activated a worktree like any folder, leaving known_workspaces
+ * and architect rows (and their stray `main` architects) under `.builders/`.
+ * Activation now refuses worktrees; this pass removes what was left behind.
+ *
+ * Runs once per boot, AFTER reconcile (so the in-memory map holds every reattached
+ * session) and BEFORE the #341 orphan sweep, so liveness is decided before anything
+ * is killed. It never signals a process: a path with a live session keeps its rows
+ * and is reported at WARN every boot until it is stopped; the next boot after that
+ * prunes it. Idempotent.
+ */
+export function pruneBuilderWorktreeWorkspaces(): BuilderWorktreePruneResult {
+  const result: BuilderWorktreePruneResult = { pruned: 0, rowsDeleted: 0, live: [] };
+  const log = _deps?.log ?? (() => {});
+  let db: ReturnType<typeof getGlobalDb>;
+  try {
+    db = getGlobalDb();
+  } catch {
+    return result;
+  }
+
+  const candidates = new Set<string>();
+  for (const table of ['known_workspaces', 'architect', 'terminal_sessions']) {
+    try {
+      const rows = db.prepare(`SELECT DISTINCT workspace_path FROM ${table} WHERE workspace_path LIKE '%.builders%'`)
+        .all() as { workspace_path: string }[];
+      for (const row of rows) {
+        if (isBuilderWorktreePath(row.workspace_path)) {
+          candidates.add(row.workspace_path);
+        }
+      }
+    } catch {
+      // Table may not exist yet (pre-migration)
+    }
+  }
+
+  const deleteRows = db.transaction((workspacePath: string): number => {
+    let deleted = 0;
+    for (const table of ['known_workspaces', 'architect', 'terminal_sessions']) {
+      try {
+        deleted += db.prepare(`DELETE FROM ${table} WHERE workspace_path = ?`).run(workspacePath).changes;
+      } catch {
+        // Table may not exist yet (pre-migration)
+      }
+    }
+    return deleted;
+  });
+
+  for (const workspacePath of candidates) {
+    const live = liveSessionsForWorkspace(db, workspacePath);
+    if (live.attached.length > 0 || live.unattached.length > 0) {
+      result.live.push(workspacePath);
+      log('WARN', strayWarning(workspacePath, live));
+      continue;
+    }
+    result.rowsDeleted += deleteRows(workspacePath);
+    result.pruned++;
+  }
+
+  log('INFO', `Builder-worktree prune: ${result.pruned} paths pruned, ${result.rowsDeleted} rows deleted, ${result.live.length} live kept`);
+  return result;
+}
+
+/** Live sessions for one worktree path, split by whether Tower holds them. */
+interface WorktreeLiveSessions {
+  /** Terminal ids reconcile reattached into the in-memory map: `afx workspace stop` reaches these. */
+  attached: string[];
+  /** Persisted sessions whose pid is up but which Tower did NOT reattach. stopInstance only kills
+   *  what the in-memory map holds, so `afx workspace stop` cannot reach these. */
+  unattached: Array<{ id: string; pid: number }>;
+}
+
+/**
+ * Sessions still alive for a workspace path: anything reconcile reattached into the in-memory
+ * map, plus any terminal_sessions row whose shellper pid or process pid is up (the bugfix #1686
+ * rule: a live pid is proof of life). The map is keyed by the normalized path, so it is looked up
+ * under both spellings; a differently-spelled DB row must not hide a live session.
+ */
+function liveSessionsForWorkspace(db: ReturnType<typeof getGlobalDb>, workspacePath: string): WorktreeLiveSessions {
+  const attached = new Set<string>();
+  for (const key of new Set([workspacePath, normalizeWorkspacePath(workspacePath)])) {
+    const entry = workspaceTerminals.get(key);
+    if (!entry) continue;
+    for (const map of [entry.architects, entry.builders, entry.shells]) {
+      for (const terminalId of map.values()) {
+        attached.add(terminalId);
+      }
+    }
+  }
+  const unattached: WorktreeLiveSessions['unattached'] = [];
+  try {
+    const rows = db.prepare('SELECT id, pid, shellper_pid FROM terminal_sessions WHERE workspace_path = ?')
+      .all(workspacePath) as { id: string; pid: number | null; shellper_pid: number | null }[];
+    for (const row of rows) {
+      if (attached.has(row.id)) continue;
+      if (row.shellper_pid != null && processExists(row.shellper_pid)) {
+        unattached.push({ id: row.id, pid: row.shellper_pid });
+      } else if (row.pid != null && processExists(row.pid)) {
+        unattached.push({ id: row.id, pid: row.pid });
+      }
+    }
+  } catch {
+    // Table may not exist yet (pre-migration)
+  }
+  return { attached: Array.from(attached), unattached };
+}
+
+/**
+ * The WARN for a kept stray, naming a remedy that actually works for what was found: an attached
+ * session stops with `afx workspace stop` (the deactivate route keeps the unfiltered path list); an
+ * unattached one is out of Tower's reach, so the operator is pointed at its pid instead. Tower never
+ * signals either itself.
+ */
+function strayWarning(workspacePath: string, live: WorktreeLiveSessions): string {
+  const parts = [`Stray architect in a builder worktree: ${workspacePath}. Left running and its rows kept.`];
+  if (live.attached.length > 0) {
+    parts.push(`Attached terminals (${live.attached.join(', ')}): stop them with \`afx workspace stop\` from that worktree.`);
+  }
+  if (live.unattached.length > 0) {
+    const list = live.unattached.map((s) => `${s.id} pid ${s.pid}`).join(', ');
+    parts.push(`Not attached to Tower (${list}): \`afx workspace stop\` cannot reach these; `
+      + 'confirm each pid is the stray (its cwd is the worktree) and stop it by pid.');
+  }
+  return parts.join(' ');
 }
 
 // ============================================================================
@@ -985,6 +1270,9 @@ export async function getTerminalsForWorkspace(
     // Verify session still exists in TerminalManager (runtime state)
     let session = manager.getSession(dbSession.id);
 
+    // Spec 1658: set when the on-the-fly reconnect proves the endpoint is not
+    // this row's shellper.
+    let identityRefused = false;
     if (!session && dbSession.shellper_socket && _deps?.shellperManager && !_reconciling) {
       // PTY session gone but shellper may still be alive — reconnect on-the-fly
       // Skip during reconciliation to avoid racing with reconcileTerminalSessions()
@@ -1007,12 +1295,12 @@ export async function getTerminalsForWorkspace(
             } catch { /* use default */ }
           }
           const cmdParts = architectCmd.split(/\s+/);
-          const cleanEnv = { ...process.env } as Record<string, string>;
-          delete cleanEnv['CLAUDECODE'];
+          const cleanEnv = withTowerPort(sanitizeAgentEnv(process.env), _deps?.towerPort);
           // Spec 786 Phase 2: preserve architect identity across shellper auto-
           // restart (see matching block in reconcileTerminalSessionsInner above).
           const architectName = dbSession.role_id || 'main';
           cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
+          cleanEnv[ARCHITECT_WORKSPACE_ENV] = dbSession.workspace_path;
           // Issue #832/#1149: revive the same conversation on auto-restart via the
           // stored session id, with the #1149 crash-loop fallback (see matching
           // block in reconcileTerminalSessionsInner above). Issue #1338: a retired
@@ -1036,8 +1324,11 @@ export async function getTerminalsForWorkspace(
           dbSession.shellper_pid!,
           dbSession.shellper_start_time!,
           restartOptions,
+          rowReconnectAuth(dbSession),
         );
-        if (client) {
+        if (isIdentityRefused(client)) {
+          identityRefused = true;
+        } else if (client) {
           // #1198: wait for the REPLAY frame instead of racing it (see the
           // matching change in the startup adoption pass above). Uncapped —
           // the ring seed is capped at the attach below, while the mirror
@@ -1057,7 +1348,7 @@ export async function getTerminalsForWorkspace(
           });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
-            const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
+            const shellperSessId = rowShellperSessionId(dbSession);
             // Capped ring seed, full mirror seed (PIR #1354) — single-session path,
             // so no cross-session parse sequencing is needed here.
             ptySession.attachShellper(client, capRingSeed(replayData, dbSession.id), dbSession.shellper_pid!, shellperSessId, replayData);
@@ -1101,7 +1392,7 @@ export async function getTerminalsForWorkspace(
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
             dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, dbSession.cwd,
-            ptySession ? persistableCommand(ptySession) : identitySeed);
+            ptySession ? persistableCommand(ptySession) : identitySeed, rowShellperAuth(dbSession));
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
           _deps.log('INFO', `On-the-fly reconnect succeeded for ${newSession.id} (id preserved)`);
@@ -1112,6 +1403,32 @@ export async function getTerminalsForWorkspace(
     }
 
     if (!session) {
+      // Bugfix #1686: the same guard as reconcile Phase 2, applied to this
+      // sibling delete site. The on-the-fly reconnect above returns null for
+      // transient reasons too (socket connect refused because another Tower
+      // client owns the shellper, or a boot-time socket/fd hiccup), not just
+      // for a dead process. Dropping the row on that failure alone is how a row
+      // the Phase 2 guard just preserved would be deleted by the first
+      // /api/state or /api/overview read whose reconnect fails again — making
+      // Phase 2's "retried next reconcile/adoption pass" promise false. Destroy
+      // only what is proven dead: a live shellper pid is never deleted here,
+      // regardless of socket-file state; the row is kept for a later pass.
+      // Spec 1658: an identity refusal is proof the pid is not this row's
+      // shellper, so the row goes (the pid is never signaled here either way).
+      if (dbSession.shellper_socket && !identityRefused) {
+        const shellperAlive = dbSession.shellper_pid != null && processExists(dbSession.shellper_pid);
+        if (shellperAlive) {
+          // Bugfix #1877: same proof as reconcile Phase 2 — a reused pid is not
+          // our shellper, so the row is deleted and the pid is never signaled.
+          if (await isShellperPidReused(dbSession.shellper_pid!, dbSession.shellper_start_time)) {
+            _deps?.log('INFO', `On-the-fly reconnect for ${dbSession.id}: pid ${dbSession.shellper_pid} was reused by another process (start time mismatch) — deleting stale row, pid not signaled (${dbSession.type})`);
+            deleteTerminalSession(dbSession.id);
+            continue;
+          }
+          _deps?.log('WARN', `On-the-fly reconnect for ${dbSession.id} failed but pid ${dbSession.shellper_pid} is alive — leaving row untouched (a live pid is never signaled), retried next reconcile/adoption pass (${dbSession.type})`);
+          continue;
+        }
+      }
       // Stale row, nothing to reconnect — clean up
       deleteTerminalSession(dbSession.id);
       continue;

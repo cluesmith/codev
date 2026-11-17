@@ -120,6 +120,11 @@ describe('update command', () => {
       ).toBe(true);
       expect(result.newFiles).toContain('.codex/skills/afx/');
       expect(result.newFiles).not.toContain('.codex/skills/arch-init/');
+      // #1811: the edited skill is offered the package's version for the merge, not replaced.
+      expect(result.conflicts.map(c => c.file)).toContain('.codex/skills/arch-init/SKILL.md');
+      expect(
+        fs.existsSync(path.join(customized, 'SKILL.md.codev-new'))
+      ).toBe(true);
       // Spec 1307: existing projects get /arch-save via `codev update`, which is
       // the path every current adopter takes — init only covers new ones.
       expect(result.newFiles).toContain('.codex/skills/arch-save/');
@@ -247,6 +252,77 @@ describe('update command', () => {
       expect(console.log).not.toHaveBeenCalled();
     });
 
+    it('a dry run reports root-file conflicts but writes no .codev-new and leaves the files alone', async () => {
+      const projectDir = path.join(testBaseDir, 'root-dryrun');
+      fs.mkdirSync(path.join(projectDir, 'codev'), { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'CLAUDE.md'), 'my claude\n');
+      fs.writeFileSync(path.join(projectDir, 'AGENTS.md'), 'my agents\n');
+      process.chdir(projectDir);
+
+      const { update } = await import('../commands/update.js');
+      const result = await update({ agent: true, dryRun: true });
+
+      expect(result.rootConflicts.map(c => c.file)).toEqual(['CLAUDE.md', 'AGENTS.md']);
+      expect(fs.readFileSync(path.join(projectDir, 'CLAUDE.md'), 'utf-8')).toBe('my claude\n');
+      expect(fs.readFileSync(path.join(projectDir, 'AGENTS.md'), 'utf-8')).toBe('my agents\n');
+      expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md.codev-new'))).toBe(false);
+      expect(fs.existsSync(path.join(projectDir, 'AGENTS.md.codev-new'))).toBe(false);
+    });
+
+    it('never writes a root file through a symlink, but still offers .codev-new beside a symlinked CLAUDE.md', async () => {
+      const projectDir = path.join(testBaseDir, 'root-symlinks');
+      const outside = path.join(testBaseDir, 'outside');
+      fs.mkdirSync(path.join(projectDir, 'codev'), { recursive: true });
+      fs.mkdirSync(outside, { recursive: true });
+      // CLAUDE.md -> AGENTS.md is a common setup; its .codev-new is a regular file beside it.
+      fs.writeFileSync(path.join(projectDir, 'AGENTS.md'), 'my agents\n');
+      fs.symlinkSync('AGENTS.md', path.join(projectDir, 'CLAUDE.md'));
+      // A symlinked pending copy must not be written through.
+      fs.writeFileSync(path.join(outside, 'target.md'), 'outside\n');
+      fs.symlinkSync(path.join(outside, 'target.md'), path.join(projectDir, 'AGENTS.md.codev-new'));
+      process.chdir(projectDir);
+
+      const { update } = await import('../commands/update.js');
+      const result = await update({ agent: true });
+
+      expect(result.rootConflicts.map(c => c.file)).toEqual(['CLAUDE.md']);
+      expect(fs.lstatSync(path.join(projectDir, 'CLAUDE.md.codev-new')).isFile()).toBe(true);
+      expect(result.skipped).toContain('AGENTS.md');
+      expect(fs.readFileSync(path.join(outside, 'target.md'), 'utf-8')).toBe('outside\n');
+      expect(fs.readFileSync(path.join(projectDir, 'AGENTS.md'), 'utf-8')).toContain('my agents');
+    });
+
+    it('a dangling root-file symlink is not followed to create a file', async () => {
+      const projectDir = path.join(testBaseDir, 'root-dangling');
+      const outside = path.join(testBaseDir, 'outside-dangling');
+      fs.mkdirSync(path.join(projectDir, 'codev'), { recursive: true });
+      fs.mkdirSync(outside, { recursive: true });
+      fs.symlinkSync(path.join(outside, 'CLAUDE.md'), path.join(projectDir, 'CLAUDE.md'));
+      process.chdir(projectDir);
+
+      const { update } = await import('../commands/update.js');
+      const result = await update({ agent: true });
+
+      expect(result.skipped).toContain('CLAUDE.md');
+      expect(fs.existsSync(path.join(outside, 'CLAUDE.md'))).toBe(false);
+    });
+
+    it('a --dry-run --force reports root files but creates and overwrites nothing', async () => {
+      const projectDir = path.join(testBaseDir, 'root-dryrun-force');
+      fs.mkdirSync(path.join(projectDir, 'codev'), { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'CLAUDE.md'), 'my claude\n');
+      process.chdir(projectDir);
+
+      const { update } = await import('../commands/update.js');
+      const result = await update({ agent: true, dryRun: true, force: true });
+
+      expect(result.updated).toContain('AGENTS.md');
+      expect(fs.readFileSync(path.join(projectDir, 'CLAUDE.md'), 'utf-8')).toBe('my claude\n');
+      expect(fs.existsSync(path.join(projectDir, 'AGENTS.md'))).toBe(false);
+      expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md.codev-new'))).toBe(false);
+      expect(fs.existsSync(path.join(projectDir, 'AGENTS.md.codev-new'))).toBe(false);
+    });
+
     it('should return result with dryRun - no files modified', async () => {
       const projectDir = path.join(testBaseDir, 'agent-dryrun');
       fs.mkdirSync(path.join(projectDir, 'codev'), { recursive: true });
@@ -258,15 +334,14 @@ describe('update command', () => {
 
       expect(result).toBeDefined();
       expect(result.error).toBeUndefined();
-      // In dry-run mode, scaffold-only files are NOT reported (per spec limitation)
-      // Scaffold utilities (copyConsultTypes, copySkills) don't run in dry-run,
-      // so their files won't appear. Note: roles and protocol files appear through
-      // the hash-based template loop, which does preview in dry-run.
+      // Consult types are not previewed. Skills are (#1811): the preview names them, and
+      // nothing is written.
       for (const file of result.newFiles) {
         expect(file).not.toMatch(/^codev\/consult-types\//);
-        expect(file).not.toMatch(/^\.claude\/skills\//);
-        expect(file).not.toMatch(/^\.codex\/skills\//);
       }
+      expect(result.newFiles).toContain('.claude/skills/afx/');
+      expect(result.newFiles).toContain('.codex/skills/afx/');
+      expect(fs.existsSync(path.join(projectDir, '.claude', 'skills'))).toBe(false);
     });
 
     it('should return no conflicts with force mode', async () => {
@@ -649,6 +724,68 @@ describe('update command', () => {
       // Verify persistence
       const reloaded = loadHashStore(projectDir);
       expect(reloaded['new-file.md']).toBe('hash3');
+    });
+  });
+
+  // Spec 1797: a non-empty project left with governance starters is pointed at bootstrap-docs.
+  describe('bootstrap-docs hint', () => {
+    function hintLines(spy: ReturnType<typeof vi.fn> | unknown): number {
+      const calls = (spy as { mock: { calls: unknown[][] } }).mock.calls;
+      return calls.filter(call => call.join(' ').includes('codev bootstrap-docs')).length;
+    }
+
+    function makeProject(name: string, withSource: boolean): string {
+      const projectDir = path.join(testBaseDir, name);
+      fs.mkdirSync(path.join(projectDir, 'codev'), { recursive: true });
+      if (withSource) fs.writeFileSync(path.join(projectDir, 'main.py'), 'print(1)\n');
+      process.chdir(projectDir);
+      return projectDir;
+    }
+
+    it('prints the hint exactly once when starters remain on a non-empty project', async () => {
+      makeProject('hint-nonempty', true);
+      const { update, BOOTSTRAP_DOCS_HINT } = await import('../commands/update.js');
+      const result = await update();
+      expect(result.bootstrapDocsHint).toBe(BOOTSTRAP_DOCS_HINT);
+      expect(hintLines(console.log)).toBe(1);
+    });
+
+    it('prints nothing once the governance docs carry real content', async () => {
+      const projectDir = makeProject('hint-populated', true);
+      const { update } = await import('../commands/update.js');
+      await update();
+      for (const name of ['arch-critical.md', 'lessons-critical.md', 'arch.md', 'lessons-learned.md']) {
+        fs.writeFileSync(path.join(projectDir, 'codev', 'resources', name), `# ${name}\n\n## Real\n\nProject content.\n`);
+      }
+      vi.mocked(console.log).mockClear();
+      const result = await update();
+      expect(result.bootstrapDocsHint).toBeUndefined();
+      expect(hintLines(console.log)).toBe(0);
+    });
+
+    it('prints nothing on an empty project', async () => {
+      makeProject('hint-empty', false);
+      const { update } = await import('../commands/update.js');
+      const result = await update();
+      expect(result.bootstrapDocsHint).toBeUndefined();
+      expect(hintLines(console.log)).toBe(0);
+    });
+
+    it('prints nothing on a dry run', async () => {
+      makeProject('hint-dryrun', true);
+      const { update } = await import('../commands/update.js');
+      const result = await update({ dryRun: true });
+      expect(result.bootstrapDocsHint).toBeUndefined();
+      expect(hintLines(console.log)).toBe(0);
+    });
+
+    it('agent mode carries the hint in the result instead of logging it', async () => {
+      makeProject('hint-agent', true);
+      const { update, BOOTSTRAP_DOCS_HINT } = await import('../commands/update.js');
+      const result = await update({ agent: true });
+      expect(result.bootstrapDocsHint).toBe(BOOTSTRAP_DOCS_HINT);
+      expect(hintLines(console.log)).toBe(0);
+      expect(hintLines(console.error)).toBe(0);
     });
   });
 });

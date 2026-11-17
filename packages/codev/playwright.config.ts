@@ -21,8 +21,16 @@ import { defineConfig } from '@playwright/test';
 
 const port = Number(process.env.TOWER_TEST_PORT || '4100');
 
+/**
+ * The Decisions tab suite (Spec 1819) writes files and drives only throwaway workspaces, so it
+ * runs through `playwright.decisions.config.ts` instead — without the global setup below, which
+ * activates the repository workspace and starts an architect shell in it.
+ */
+export const DECISIONS_SUITE = '**/decisions-tab.test.ts';
+
 export default defineConfig({
   testDir: './src/agent-farm/__tests__/e2e',
+  testIgnore: DECISIONS_SUITE,
   timeout: 60_000,
   retries: 0,
   globalSetup: './src/agent-farm/__tests__/e2e/global-setup.ts',

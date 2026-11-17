@@ -5,6 +5,7 @@
 
 import path from 'node:path';
 import { getTowerClient } from '../lib/tower-client.js';
+import { hostPaths } from '../../lib/platform/host-paths.js';
 
 export type NotificationType = 'gate' | 'blocked' | 'error' | 'info';
 
@@ -34,9 +35,9 @@ function isDuplicate(key: string): boolean {
  * Porch runs in these worktrees but notifications need the canonical path.
  */
 function getCanonicalWorkspacePath(cwd: string): string {
-  const builderMatch = cwd.match(/^(.+)\/.builders\/[^/]+$/);
-  if (builderMatch) {
-    return builderMatch[1]; // Return canonical workspace root
+  const workspaceRoot = hostPaths().workspaceOfBuilderCwd(cwd);
+  if (workspaceRoot !== null) {
+    return workspaceRoot; // Return canonical workspace root
   }
   return cwd;
 }

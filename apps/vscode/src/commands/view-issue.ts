@@ -27,6 +27,7 @@ import * as vscode from 'vscode';
 import type { IssueView } from '@cluesmith/codev-types';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
+import { issueRef } from '../issue-id.js';
 
 const SCHEME = 'codev-issue';
 const REFRESH_THROTTLE_MS = 30_000;
@@ -61,7 +62,7 @@ class IssueContentProvider implements vscode.TextDocumentContentProvider {
   provideTextDocumentContent(uri: vscode.Uri): string {
     // URI form: codev-issue:<id>.md  → authority/path is `<id>.md`
     const issueId = uri.path.replace(/\.md$/, '');
-    return this.contents.get(issueId) ?? `# Issue #${issueId}\n\n_Content unavailable._`;
+    return this.contents.get(issueId) ?? `# Issue ${issueRef(issueId)}\n\n_Content unavailable._`;
   }
 
   /** Issue ids whose previews are currently open. */
@@ -174,7 +175,7 @@ export function renderIssue(issueId: string, issue: IssueView): string {
   }
 
   const lines: string[] = [
-    `# #${issueId} ${issue.title}`,
+    `# ${issueRef(issueId)} ${issue.title}`,
     '',
     metaLines.join('\n\n'),
     '',
@@ -291,7 +292,7 @@ export async function viewBacklogIssue(
   const issue = await client.getIssue(issueId, workspacePath);
   if (!issue) {
     vscode.window.showWarningMessage(
-      `Codev: Could not load issue #${issueId} (forge unavailable?)`,
+      `Codev: Could not load issue ${issueRef(issueId)} (forge unavailable?)`,
     );
     return;
   }

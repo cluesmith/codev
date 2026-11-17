@@ -10,7 +10,8 @@ import http from 'node:http';
 import type net from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import { WS_CLOSE_SESSION_UNKNOWN, WS_CLOSE_UNAUTHORIZED } from '../lib/reconnect-backoff.js';
-import { isWebSocketAllowed } from '../utils/server-utils.js';
+import { isWebSocketAllowed, decideForwardAuthorization } from '../utils/server-utils.js';
+import { matchIdePrefix, forwardIdeWebSocket } from './ide-forward.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { attachWithReplay } from '../../terminal/attach-replay.js';
@@ -77,7 +78,16 @@ export async function handleTerminalWebSocket(ws: WebSocket, session: PtySession
           const cols = msg.payload.cols as number;
           const rows = msg.payload.rows as number;
           if (typeof cols === 'number' && typeof rows === 'number') {
-            session.resize(cols, rows);
+            // Issue #1482: this is the viewer's geometry, and the render gate classifies the
+            // session's mirror at the geometry Tower believes. A resize that never reached the
+            // process leaves those two disagreeing, which is how mail comes to be held `busy`
+            // indefinitely — so a drop is logged rather than discarded.
+            if (!session.resize(cols, rows)) {
+              console.warn(
+                `[tower-ws] resize dropped for session ${session.id}: ${cols}x${rows} not applied ` +
+                  `(no live process or dropped shellper write) — dimensions unchanged`,
+              );
+            }
           }
         } else if (msg.type === 'ping') {
           if (ws.readyState === WebSocket.OPEN) {
@@ -225,6 +235,27 @@ export function setupUpgradeHandler(
 ): void {
   server.on('upgrade', async (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     const reqUrl = new URL(req.url || '/', `http://localhost:${port}`);
+
+    // IDE prefix WebSocket forward (Issue #1668). Checked BEFORE the generic
+    // isWebSocketAllowed gate below, which requires the `codev-key` SUBPROTOCOL
+    // that the IDE workbench's vanilla `?reconnectionToken=` sockets never offer.
+    // Authorized instead by the forward seam (Host guard, then the tunnel-stamped
+    // `codev-tower-key` header, then the local browser's `/ide` forward cookie
+    // behind its cross-port Origin guard, Issue #1869) — the same whole-boundary
+    // decision the HTTP forward uses, with no per-folder logic (§D2). Then
+    // raw-piped to the local IDE server; Tower never parses the workbench's own
+    // protocol.
+    if (matchIdePrefix(reqUrl.pathname)) {
+      const decision = decideForwardAuthorization(req);
+      if (!decision.allowed) {
+        // Path + reason only: never the Cookie header or any credential value.
+        logTerminal('WARN', `IDE WS upgrade 401 ${reqUrl.pathname} — ${decision.reason}`);
+        rejectUnauthorized(req, socket, head, wss);
+        return;
+      }
+      await forwardIdeWebSocket(req, socket, head, logTerminal);
+      return;
+    }
 
     // Request authentication (advisory GHSA-xvjp-7748-v88v): validate the key at
     // the handshake, before any session lookup or PTY attach, for every WS route.

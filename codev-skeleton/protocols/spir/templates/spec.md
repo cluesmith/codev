@@ -4,7 +4,7 @@
 SPEC vs PLAN BOUNDARY:
 This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 Keep implementation phases, file paths, code, and "first we will… then we will…"
-out of the spec — those belong in codev/plans/XXXX-*.md.
+out of the spec — those belong in codev/plans/<id>-*.md.
 -->
 
 ## Problem Statement

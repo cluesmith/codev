@@ -17,6 +17,9 @@ import {
   removeIsolatedAgentFarmDir,
 } from './helpers/tower-test-utils.js';
 
+// POSIX-only assertions: Tower spawns /bin/echo and /bin/sleep sessions, with cwd /tmp.
+const skipOnWindows = process.platform === 'win32';
+
 // Use a short cleanup interval for testing (2 seconds)
 const CLEANUP_INTERVAL_MS = '2000';
 const TEST_TOWER_PORT = 14700;
@@ -76,7 +79,7 @@ async function createPersistentTerminal(port: number, label: string): Promise<{ 
   return data;
 }
 
-describe('Spec 0116: Shellper cleanup E2E', () => {
+describe.skipIf(skipOnWindows)('Spec 0116: Shellper cleanup E2E', () => {
   beforeAll(async () => {
     tower = await startTower(TEST_TOWER_PORT, {
       SHELLPER_CLEANUP_INTERVAL_MS: CLEANUP_INTERVAL_MS,
@@ -144,7 +147,7 @@ describe('Spec 0116: Shellper cleanup E2E', () => {
   }, 15_000);
 });
 
-describe('Spec 0116: Tower graceful shutdown', () => {
+describe.skipIf(skipOnWindows)('Spec 0116: Tower graceful shutdown', () => {
   it('completes without hanging (validates clearInterval)', async () => {
     const port = 14701;
     const handle = await startTower(port, {

@@ -77,19 +77,18 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
     }
 
     const items: vscode.TreeItem[] = [];
+    // #1809: a builder-worktree window attaches read-only to the parent
+    // workspace, so it shows only the worktree-scoped rows (dashboard, dev,
+    // dev URLs). Architects, Spawn Builder and New Shell act on the parent and
+    // are omitted there.
+    const inWorktreeWindow = this.connectionManager.getBuilderWorktree() !== null;
 
     // Spec 786 Phase 6: expandable "Architects" tree section, replacing the
     // pre-786 singleton "Open Architect" row. Collapsed = "Architects" only;
     // expanded = "Architects > main" (and any siblings).
-    const architectsRoot = new vscode.TreeItem(
-      'Architects',
-      vscode.TreeItemCollapsibleState.Expanded,
-    );
-    architectsRoot.id = 'workspace-architects-root';
-    architectsRoot.iconPath = new vscode.ThemeIcon('person');
-    architectsRoot.tooltip = 'Workspace architect terminals (main + any siblings)';
-    architectsRoot.contextValue = 'workspace-architects-root';
-    items.push(architectsRoot);
+    if (!inWorktreeWindow) {
+      items.push(this.buildArchitectsRoot());
+    }
 
     const webUrl = this.buildDashboardUrl();
     if (webUrl) {
@@ -105,31 +104,17 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
       items.push(web);
     }
 
-    const spawn = new vscode.TreeItem('Spawn Builder');
-    spawn.iconPath = new vscode.ThemeIcon('rocket');
-    spawn.tooltip = 'Spawn a new builder for a GitHub issue';
-    spawn.contextValue = 'workspace-spawn';
-    spawn.command = {
-      command: 'codev.spawnBuilder',
-      title: 'Spawn Builder',
-    };
-    items.push(spawn);
-
-    const shell = new vscode.TreeItem('New Shell');
-    shell.iconPath = new vscode.ThemeIcon('terminal-new');
-    shell.tooltip = 'Open a new shell tab in Tower';
-    shell.contextValue = 'workspace-shell';
-    shell.command = {
-      command: 'codev.newShell',
-      title: 'New Shell',
-    };
-    items.push(shell);
+    if (!inWorktreeWindow) {
+      items.push(this.buildSpawnRow(), this.buildShellRow());
+    }
 
     // Target is whatever folder this VSCode window is rooted at: the main
     // checkout → `main`, a `.builders/<id>/` worktree → that builder. The
-    // label stays generic; the tooltip names the resolved target.
-    const workspacePath = this.connectionManager.getWorkspacePath();
-    const devTarget = workspacePath ? resolveWorkspaceDevTarget(workspacePath) : null;
+    // label stays generic; the tooltip names the resolved target. Read from
+    // the window root, not the Tower workspace path, which is the parent
+    // root in a worktree window (#1809).
+    const windowRoot = this.connectionManager.getWindowRoot();
+    const devTarget = windowRoot ? resolveWorkspaceDevTarget(windowRoot) : null;
 
     // Resolved worktree config (Tower-merged across all 5 layers). One
     // fetch drives both the dev row's visibility (gated on
@@ -226,6 +211,42 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
     }
 
     return items;
+  }
+
+  private buildArchitectsRoot(): vscode.TreeItem {
+    const architectsRoot = new vscode.TreeItem(
+      'Architects',
+      vscode.TreeItemCollapsibleState.Expanded,
+    );
+    architectsRoot.id = 'workspace-architects-root';
+    architectsRoot.iconPath = new vscode.ThemeIcon('person');
+    architectsRoot.tooltip = 'Workspace architect terminals (main + any siblings)';
+    architectsRoot.contextValue = 'workspace-architects-root';
+    return architectsRoot;
+  }
+
+  private buildSpawnRow(): vscode.TreeItem {
+    const spawn = new vscode.TreeItem('Spawn Builder');
+    spawn.iconPath = new vscode.ThemeIcon('rocket');
+    spawn.tooltip = 'Spawn a new builder for a GitHub issue';
+    spawn.contextValue = 'workspace-spawn';
+    spawn.command = {
+      command: 'codev.spawnBuilder',
+      title: 'Spawn Builder',
+    };
+    return spawn;
+  }
+
+  private buildShellRow(): vscode.TreeItem {
+    const shell = new vscode.TreeItem('New Shell');
+    shell.iconPath = new vscode.ThemeIcon('terminal-new');
+    shell.tooltip = 'Open a new shell tab in Tower';
+    shell.contextValue = 'workspace-shell';
+    shell.command = {
+      command: 'codev.newShell',
+      title: 'New Shell',
+    };
+    return shell;
   }
 
   private buildDashboardUrl(): string | null {

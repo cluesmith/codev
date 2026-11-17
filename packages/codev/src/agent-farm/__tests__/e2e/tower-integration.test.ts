@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 import path from 'node:path';
 import { towerAuthHeaders } from './tower-key.js';
 
-const TOWER_URL = 'http://localhost:4100';
+const TOWER_URL = `http://localhost:${process.env.TOWER_TEST_PORT || '4100'}`;
 const VIDEO_DIR = path.resolve(import.meta.dirname, '../../../../test-results/videos');
 
 // Helper to get base64url encoded workspace path

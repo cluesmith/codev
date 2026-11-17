@@ -10,10 +10,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTower } from './helpers/tower-test-utils.js';
 import type { TowerHandle } from './helpers/tower-test-utils.js';
+import { tmpdir } from 'node:os';
+
+/** Fixture root: the host temp dir (paths are canonicalized through realpath, never written). */
+const TMP = tmpdir();
 
 const PORT = 14479;
 const BASE = `http://localhost:${PORT}`;
-const WORKSPACE = '/tmp/canvas-relay-e2e';
+const WORKSPACE = `${TMP}/canvas-relay-e2e`;
 
 /** Collects parsed SSE envelopes from a live /api/events stream. */
 class SseCollector {
@@ -137,7 +141,7 @@ describe('canvas command channel (integration)', () => {
     const sse = new SseCollector();
     await sse.waitReady();
 
-    const view = await registerView('/tmp/canvas-relay-e2e/spec.md');
+    const view = await registerView(`${TMP}/canvas-relay-e2e/spec.md`);
 
     const res = await postJson('/api/canvas/command', {
       workspace: WORKSPACE,
@@ -170,13 +174,13 @@ describe('canvas command channel (integration)', () => {
     const sse = new SseCollector();
     await sse.waitReady();
 
-    const first = await registerView('/tmp/canvas-relay-e2e/dup.md');
-    const second = await registerView('/tmp/canvas-relay-e2e/dup.md');
+    const first = await registerView(`${TMP}/canvas-relay-e2e/dup.md`);
+    const second = await registerView(`${TMP}/canvas-relay-e2e/dup.md`);
     expect(first.viewId).not.toBe(second.viewId);
 
     const res = await postJson('/api/canvas/command', {
       workspace: WORKSPACE,
-      file: '/tmp/canvas-relay-e2e/dup.md',
+      file: `${TMP}/canvas-relay-e2e/dup.md`,
       command: 'composer-submit',
     });
     expect(res.status).toBe(200);
@@ -196,7 +200,7 @@ describe('canvas command channel (integration)', () => {
   });
 
   it('rejects an unknown command with invalid-request', async () => {
-    const view = await registerView('/tmp/canvas-relay-e2e/bad.md');
+    const view = await registerView(`${TMP}/canvas-relay-e2e/bad.md`);
 
     const res = await postJson('/api/canvas/command', {
       workspace: WORKSPACE,

@@ -114,9 +114,13 @@ If Tower is running during an upgrade, restart it afterwards so it picks up the 
 
 | Dependency | Install | Purpose |
 |------------|---------|---------|
-| Node.js 18+ | `brew install node` | Runtime |
+| Node.js 20+ (22 recommended) | `brew install node` | Runtime |
 | git 2.5+ | (pre-installed) | Version control |
 | AI CLIs | See below | All three recommended |
+
+On Linux and WSL, also install `build-essential` and `python3` (node-pty compiles from source).
+
+**Windows:** two paths. **Native** (preview): Node.js 22 or 24 (x64 or ARM64), [Git for Windows](https://git-scm.com/download/win) and `jq`, no admin rights or Developer Mode needed. **WSL 2**: follow the Linux instructions inside your distribution. See [DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md#windows) for setup and limitations, including why native support is a preview (#1911).
 
 **AI CLIs** (install all three for multi-model consultation):
 - Claude Code: `npm install -g @anthropic-ai/claude-code`
@@ -382,7 +386,7 @@ Templates in `codev/protocols/spir/templates/` can be modified to fit your team'
 
 ## Agent Farm (Optional)
 
-Agent Farm is an optional companion tool for Codev that provides a web-based dashboard for managing multiple AI agents working in parallel. **You can use Codev without Agent Farm** - all protocols (SPIR, TICK, etc.) work perfectly in any AI coding assistant.
+Agent Farm is an optional companion tool for Codev that provides a web-based dashboard for managing multiple AI agents working in parallel. **You can use Codev without Agent Farm** - all protocols (SPIR, BUGFIX, etc.) work perfectly in any AI coding assistant.
 
 **Why use Agent Farm?**
 - **Web dashboard** for monitoring multiple builders at once

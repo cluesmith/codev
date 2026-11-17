@@ -9,10 +9,10 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn, execSync, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execSync, execFileSync, type ChildProcess } from 'node:child_process';
 import { tmpdir, homedir } from 'node:os';
+import { createRequire } from 'node:module';
 import chalk from 'chalk';
-import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { Codex } from '@openai/codex-sdk';
 import { readCodevFile, findWorkspaceRoot } from '../../lib/skeleton.js';
 import { resolveDefaultBranch } from '../../lib/default-branch.js';
@@ -27,10 +27,36 @@ import {
 import type { ModelReasoningEffort } from '@openai/codex-sdk';
 import { getResolver, GitRefResolver, type ArtifactResolver } from '../porch/artifacts.js';
 import { MetricsDB } from './metrics.js';
-import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
+import { extractUsage, extractReviewText, type ClaudeResultLike, type UsageData } from './usage-extractor.js';
 import { executeForgeCommandSync } from '../../lib/forge.js';
 import { preflightAgyAuth, recordAgyAuthState, type AgyAuthState } from './agy-auth-cache.js';
 import { assertAgyLaneAllowedUnderTest } from '../../lib/test-env.js';
+import { readDotenvFile } from '../../lib/dotenv.js';
+import {
+  CLAUDE_BIN_ENV,
+  CLAUDE_UPDATE_HINT,
+  ClaudePreflightError,
+  claudeLaunch,
+  credentialOrigin,
+  excerpt,
+  preflightClaude,
+  type ClaudePreflight,
+} from '../../lib/claude-cli.js';
+import {
+  snapshotTree,
+  diffTreeSnapshots,
+  diffRepositoryIdentity,
+  relativeOutputPath,
+  formatTreeChangeWarning,
+  formatRepositoryMovedWarning,
+  formatSnapshotLostWarning,
+  appendTreeChangeWarningToOutput,
+} from './tree-tripwire.js';
+import { isWindows } from '../../lib/platform.js';
+import { containsBuildersSegment } from '../../agent-farm/utils/builder-worktree-identity.js';
+import { findOnHostPath, spawnableOnHost } from '../../lib/host-executable.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
+import { detectProjectIdFromCwd } from '../../lib/worktree-project-id.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -53,16 +79,13 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
   hermes: { cli: 'hermes', args: ['chat', '-q'], envVar: null },
 };
 
-// Models that use an Agent SDK instead of CLI subprocess
-const SDK_MODELS = ['claude', 'codex'];
+// Lanes with a dedicated runner (runClaudeConsultation, runCodexConsultation) rather than a
+// MODEL_CONFIGS entry. Listed so model validation accepts them.
+const RUNNER_LANES = ['claude', 'codex'];
 
 // Prevent E2BIG when passing very large prompts to CLI backends.
 // Large payloads are written to a temp file and referenced in the query.
 const CLI_PROMPT_INLINE_MAX_CHARS = 100_000;
-
-// Claude Agent SDK turn limit. Claude explores the codebase with Read/Glob/Grep
-// tools before producing its verdict, so it needs a generous turn budget.
-const CLAUDE_MAX_TURNS = 200;
 
 // Model aliases
 const MODEL_ALIASES: Record<string, string> = {
@@ -205,32 +228,22 @@ function resolveProtocolPrompt(workspaceRoot: string, protocol: string | undefin
 }
 
 /**
- * Load .env file if it exists
+ * Keys this process took from `<workspace>/.env` rather than the shell. `process.env` cannot say
+ * where a value came from, and a credential injected from `.env` silently outranks the stored
+ * login — so the lanes' auth lines read this to name the file (#1754).
+ */
+const dotenvKeys = new Set<string>();
+
+/**
+ * Load `<workspace>/.env` into `process.env`, for any key the shell has not set. The parsing rules
+ * live in `readDotenvFile`, which `codev doctor` shares without touching its own `process.env`.
  */
 function loadDotenv(workspaceRoot: string): void {
-  const envFile = path.join(workspaceRoot, '.env');
-  if (!fs.existsSync(envFile)) return;
-
-  const content = fs.readFileSync(envFile, 'utf-8');
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const eqIndex = trimmed.indexOf('=');
-    if (eqIndex === -1) continue;
-
-    const key = trimmed.substring(0, eqIndex).trim();
-    let value = trimmed.substring(eqIndex + 1).trim();
-
-    // Remove surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-
+  for (const [key, value] of Object.entries(readDotenvFile(workspaceRoot))) {
     // Only set if not already in environment
     if (!(key in process.env)) {
       process.env[key] = value;
+      dotenvKeys.add(key);
     }
   }
 }
@@ -270,7 +283,7 @@ function findPlanContent(workspaceRoot: string, id: string, resolver?: ArtifactR
  * Check if running in a builder worktree
  */
 function isBuilderContext(): boolean {
-  return process.cwd().includes('/.builders/');
+  return containsBuildersSegment(process.cwd());
 }
 
 interface BuilderProjectState {
@@ -291,38 +304,48 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): Buil
     throw new Error('No project state found. Are you in a builder worktree?');
   }
 
+  // As porch's findProjectInDir: a project dir is one holding a status.yaml.
   const entries = fs.readdirSync(projectsDir);
   const projectDirs = entries.filter(e => {
-    return fs.statSync(path.join(projectsDir, e)).isDirectory();
+    return fs.statSync(path.join(projectsDir, e)).isDirectory() && fs.existsSync(path.join(projectsDir, e, 'status.yaml'));
   });
 
   if (projectDirs.length === 0) {
     throw new Error('No project found in codev/projects/');
   }
+  // Never list the project dirs in an error: a long-lived repo has thousands (#1898).
+  const hint = `${projectDirs.length} projects in codev/projects/; pass --issue <N> or --project-id <id>`;
+  // Same rule as porch's findProjectInDir: the dir is `<id>` or `<id>-<slug>`.
+  const dirFor = (id: string): string | undefined => {
+    const lower = id.toLowerCase();
+    return projectDirs.find(d => {
+      const name = d.toLowerCase();
+      return name === lower || name.startsWith(`${lower}-`);
+    });
+  };
   let dir: string;
   if (projectId) {
-    // Direct lookup by project ID (passed via --project-id from porch)
-    const matched = projectDirs.find(d => d.startsWith(`${projectId}-`) || d.startsWith(`bugfix-${projectId}-`));
-    if (matched) {
-      dir = matched;
-    } else {
-      throw new Error(`Project ${projectId} not found in codev/projects/. Available: ${projectDirs.join(', ')}`);
+    // Direct lookup by project ID (passed via --project-id from porch). A hand-typed bare
+    // number may mean a bugfix project, so fall back to `bugfix-<id>`; a worktree-derived ID
+    // below is already exact and gets no fallback.
+    const matched = dirFor(projectId) ?? dirFor(`bugfix-${projectId}`);
+    if (!matched) {
+      throw new Error(`Project ${projectId} not found (${hint})`);
     }
+    dir = matched;
   } else if (projectDirs.length > 1) {
-    // Multiple project dirs — try to disambiguate from worktree directory name
+    // Multiple project dirs — resolve the worktree's project exactly as porch does,
+    // which covers slugless worktrees (.builders/bugfix-N), subdirs, and tracker keys.
     const cwd = process.cwd();
-    const builderMatch = cwd.match(/\.builders\/[^/]*?-?(\d+)-([^/]+)/);
-    if (builderMatch) {
-      const worktreeId = builderMatch[1];
-      const matched = projectDirs.find(d => d.startsWith(`${worktreeId}-`) || d.startsWith(`bugfix-${worktreeId}-`));
-      if (matched) {
-        dir = matched;
-      } else {
-        throw new Error(`Multiple projects found and none match worktree ID ${worktreeId}: ${projectDirs.join(', ')}`);
-      }
-    } else {
-      throw new Error(`Multiple projects found: ${projectDirs.join(', ')}`);
+    const worktreeId = detectProjectIdFromCwd(cwd);
+    if (!worktreeId) {
+      throw new Error(`Multiple projects found and no project ID in worktree path ${cwd} (${hint})`);
     }
+    const matched = dirFor(worktreeId);
+    if (!matched) {
+      throw new Error(`Multiple projects found and none match worktree ID ${worktreeId} (${hint})`);
+    }
+    dir = matched;
   } else {
     dir = projectDirs[0];
   }
@@ -394,12 +417,14 @@ function logQuery(workspaceRoot: string, model: string, query: string, duration?
  * Check if a command exists
  */
 function commandExists(cmd: string): boolean {
-  try {
-    execSync(`which ${cmd}`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandLaunch().commandExists(cmd, () => {
+    try {
+      execSync(`which ${cmd}`, { stdio: 'pipe' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -476,7 +501,7 @@ export interface LaneModelChoice {
 }
 
 /**
- * Resolve which model id an SDK lane runs, and record where it came from.
+ * Resolve which model id a lane with a built-in default runs, and record where it came from.
  *
  * Precedence: `--model-id` > `consult.models.<lane>` > the shipped default constant.
  *
@@ -556,28 +581,107 @@ export function resolveOptionalLaneModelChoice(
  * loudly. The provider's own text is preserved verbatim and merely annotated, because paraphrasing
  * a provider error is how you lose the one detail that identifies the real problem.
  */
-function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice): unknown {
-  // A shipped default can't be misconfigured by the user — nothing useful to add.
-  if (choice.key === null) return err;
+function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice, ranBinary?: string): unknown {
+  const notes: string[] = [];
+  // A shipped default can't be misconfigured by the user — nothing useful to add about the id.
+  if (choice.key !== null) {
+    const where = choice.fromFlag
+      ? 'passed via --model-id'
+      : `from \`${choice.key}\`${choice.source ? ` in ${choice.source}` : ''}`;
+    notes.push(
+      `The ${lane} lane requested model "${choice.id}" (${where}).\n` +
+      `If the provider rejected that id, correct it at the source above. ` +
+      `Codev does not fall back to a default model.`
+    );
+  }
+  // A provider can reject a valid id because the client is too old ("requires a newer version of
+  // Codex", #1880) — so name the client, which is otherwise invisible to the user.
+  if (ranBinary) notes.push(`The ${lane} lane ran ${ranBinary}.`);
+  if (notes.length === 0) return err;
 
   const providerText = err instanceof Error ? err.message : String(err);
-  const where = choice.fromFlag
-    ? 'passed via --model-id'
-    : `from \`${choice.key}\`${choice.source ? ` in ${choice.source}` : ''}`;
-
-  const annotated = new Error(
-    `${providerText}\n\n` +
-    `The ${lane} lane requested model "${choice.id}" (${where}).\n` +
-    `If the provider rejected that id, correct it at the source above. ` +
-    `Codev does not fall back to a default model.`
-  );
+  const annotated = new Error(`${providerText}\n\n${notes.join('\n')}`);
   if (err instanceof Error && err.stack) annotated.stack = err.stack;
   return annotated;
 }
 
 /**
+ * Name the credential the codex lane authenticates with. The Codex SDK hands `process.env` to its
+ * subprocess, and `CODEX_API_KEY` there overrides the stored ChatGPT login. `OPENAI_API_KEY` does
+ * not — codex ignores it for auth — so it is deliberately not reported (#1754).
+ */
+export function describeCodexAuth(env: NodeJS.ProcessEnv, fromDotenv: ReadonlySet<string>): string {
+  return env.CODEX_API_KEY ? credentialOrigin('CODEX_API_KEY', fromDotenv) : 'stored codex login (no CODEX_API_KEY)';
+}
+
+/** The codex binary the codex lane runs, and how to say so. */
+export interface CodexBinary {
+  /** Passed to the SDK as `codexPathOverride`; undefined runs the SDK's bundled CLI. */
+  pathOverride?: string;
+  /** Which binary, which version, and where that choice came from. */
+  description: string;
+}
+
+/**
+ * The version of the Codex CLI the SDK runs when no override is set.
+ *
+ * The SDK resolves `@openai/codex` from its OWN install location — never PATH — and pins it to its
+ * own version, so upgrading the user's `codex` changes nothing (#1880). Resolved the same way here.
+ */
+export function bundledCodexVersion(): string {
+  // Walk the lookup paths rather than `require.resolve('@openai/codex-sdk')`: the SDK exports only
+  // an `import` condition, so require-resolution throws ERR_PACKAGE_PATH_NOT_EXPORTED.
+  const localRequire = createRequire(import.meta.url);
+  for (const dir of localRequire.resolve.paths('@openai/codex-sdk') ?? []) {
+    const sdkPackageJson = path.join(dir, '@openai', 'codex-sdk', 'package.json');
+    if (!fs.existsSync(sdkPackageJson)) continue;
+    // realpath: under pnpm the SDK is a symlink, and its `@openai/codex` sits beside the real path.
+    const sdkRequire = createRequire(fs.realpathSync(sdkPackageJson));
+    const codexPackageJson = sdkRequire.resolve('@openai/codex/package.json');
+    return JSON.parse(fs.readFileSync(codexPackageJson, 'utf-8')).version;
+  }
+  throw new Error('Cannot locate @openai/codex-sdk to read the version of its bundled Codex CLI.');
+}
+
+/**
+ * Pick the codex binary: `consult.codexPath` if set, else the SDK's bundled CLI.
+ *
+ * A configured path is run once with `--version` before the consultation. That reports the version
+ * actually in use and makes a missing or non-executable path fail here, loudly — Codev never falls
+ * back to the bundled CLI, which is exactly the binary the user configured their way around.
+ */
+export function resolveCodexBinary(workspaceRoot: string): CodexBinary {
+  const codexPath = loadConfig(workspaceRoot).consult?.codexPath;
+  if (codexPath === undefined) {
+    return {
+      description: `Codex CLI ${bundledCodexVersion()} bundled with codev ` +
+        `(set \`consult.codexPath\` to run your own codex)`,
+    };
+  }
+
+  const source = findConfigSource(workspaceRoot, ['consult', 'codexPath']);
+  const from = `from \`consult.codexPath\`${source ? ` in ${source}` : ''}`;
+  let version: string;
+  try {
+    version = execFileSync(codexPath, ['--version'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+    }).trim();
+  } catch (err) {
+    throw new Error(
+      `Cannot run the codex binary ${codexPath} (${from}): ` +
+      `${err instanceof Error ? err.message : String(err)}\n` +
+      `Point consult.codexPath at an executable codex, or remove it to use the bundled CLI. ` +
+      `Codev does not fall back to the bundled CLI.`
+    );
+  }
+  return { pathOverride: codexPath, description: `${codexPath}, ${version} (${from})` };
+}
+
+/**
  * Run Codex consultation via @openai/codex-sdk.
- * Mirrors runClaudeConsultation() — streams events, captures usage, records metrics.
+ * Streams events, captures usage and records metrics, like runClaudeConsultation().
  */
 export async function runCodexConsultation(
   queryText: string,
@@ -600,12 +704,23 @@ export async function runCodexConsultation(
   let errorMessage: string | null = null;
   let exitCode = 0;
 
+  console.error(`[CODEX] auth: ${describeCodexAuth(process.env, dotenvKeys)}`);
+
   // Write role to temp file — SDK requires file path for instructions
   const tempFile = path.join(tmpdir(), `codev-role-${Date.now()}.md`);
   fs.writeFileSync(tempFile, role);
 
+  let binary: CodexBinary | undefined;
   try {
+    // Inside the guarded lifecycle: a binary that fails its preflight must still discard a stale
+    // review file and record the failure, like any other failed consultation.
+    binary = resolveCodexBinary(workspaceRoot);
+    console.error(`[CODEX] binary: ${binary.description}`);
+
+    // Never pass `apiKey`: the SDK would export it as CODEX_API_KEY and move the lane off the
+    // stored ChatGPT login onto metered API billing.
     const codex = new Codex({
+      codexPathOverride: binary.pathOverride,
       config: {
         model_instructions_file: tempFile,
       },
@@ -662,7 +777,8 @@ export async function runCodexConsultation(
       exitCode = 1;
     }
     discardStaleOutput(outputPath);
-    throw annotateModelError(err, 'codex', choice);
+    // A binary that never started cannot have rejected the model, so there is nothing to annotate.
+    throw binary ? annotateModelError(err, 'codex', choice, binary.description) : err;
   } finally {
     // Clean up temp file
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
@@ -684,44 +800,396 @@ export async function runCodexConsultation(
   }
 }
 
+// ── The claude lane: the installed `claude` CLI in print mode (#1912) ──────────────────────────
+//
+// The lane runs the user's own `claude`, so upgrading `claude` upgrades the lane and there is no
+// bundled copy to drift (#1906). Everything decided before the review (binary, version floor, auth
+// mode, the child's env, the login) is `preflightClaude` in lib/claude-cli.ts; this half spawns the
+// review, reads its stream-json and classifies how it ended.
+
 /**
- * Build the env passed to the Claude Agent SDK subprocess for a consultation.
- *
- * Copies the given environment, but when a Claude subscription/OAuth token
- * (`CLAUDE_CODE_OAUTH_TOKEN`) is present, strips `ANTHROPIC_API_KEY` and
- * `ANTHROPIC_AUTH_TOKEN` from the *copy* (never the global `process.env`).
- * The Agent SDK prioritizes the API key over the OAuth token, so leaving the
- * key in would silently route CMAP/review traffic to the metered Opus API
- * instead of the Claude subscription (issue #985).
- *
- * When no OAuth token is set, the API key is preserved so CI / key-only
- * environments continue to authenticate.
- *
- * The deletion is scoped to this subprocess env only — other callers that need
- * the API key (persona, dev:local) are unaffected.
+ * The only tools the claude reviewer session has. They go to `--tools`, which decides which tools
+ * *exist* in the session, unlike `--allowedTools`, which only pre-approves. Write, edit, shell, web
+ * and MCP tools are absent, not merely unapproved.
  */
-export function buildClaudeConsultEnv(
-  processEnv: NodeJS.ProcessEnv,
-): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(processEnv)) {
-    if (value !== undefined) {
-      env[key] = value;
-    }
-  }
+export const CLAUDE_REVIEW_TOOLS = ['Read', 'Glob', 'Grep'] as const;
 
-  if (env.CLAUDE_CODE_OAUTH_TOKEN) {
-    delete env.ANTHROPIC_API_KEY;
-    delete env.ANTHROPIC_AUTH_TOKEN;
-  }
+/**
+ * Turn cap for a review. Claude explores the codebase with Read/Glob/Grep before producing its
+ * verdict, so it needs a generous turn budget.
+ */
+const CLAUDE_MAX_TURNS = 200;
 
-  return env;
+/** Spend cap for a review, in USD. `--max-budget-usd` works in print mode only, which is how the lane runs. */
+const CLAUDE_MAX_BUDGET_USD = 25;
+
+/** The stderr tail a failure message quotes, bounded like `AGY_FAILURE_TAIL_MAX_CHARS`. */
+const CLAUDE_STDERR_TAIL_MAX_CHARS = 2000;
+
+/** How long a `claude` child gets to exit after SIGTERM before it is sent SIGKILL. */
+const CLAUDE_KILL_GRACE_MS = 5000;
+
+/**
+ * Appended to the claude lane's system prompt, after the role. `consultant.md` and the review
+ * prompts mention shell commands, and the codex and gemini lanes do have a shell, so the shared
+ * text is left alone and only this lane is told what it actually has.
+ */
+export const CLAUDE_CAPABILITY_NOTE = [
+  '---',
+  '',
+  '## Tools in this review session',
+  '',
+  'This session has exactly three tools: Read, Glob and Grep. There is no shell, and no tool that ' +
+    'edits or writes files.',
+  '',
+  'Wherever the instructions above or the review request mention a shell command (`cat`, `git diff`, ' +
+    '`git log`, `git show`, `git status`, `ls`, `grep`), that command is not available here. Use ' +
+    'Read, Glob and Grep instead: read the changed files themselves, and any diff or prompt file the ' +
+    'request names.',
+].join('\n');
+
+/**
+ * The argv for one review: `claude <these args>`, with the prompt on stdin.
+ *
+ * - `--tools` is the hard read-only guarantee (see `CLAUDE_REVIEW_TOOLS`).
+ * - `--permission-mode dontAsk` + `--allowedTools`: print mode has no human, so nothing may wait on
+ *   a permission prompt. `dontAsk` denies what is not pre-approved instead of asking.
+ * - `--setting-sources ""`, `--strict-mcp-config` with no `--mcp-config`, `--disable-slash-commands`
+ *   and `--no-session-persistence` isolate the reviewer the way the Agent SDK's isolation mode did:
+ *   none of the user's settings, hooks, plugins, MCP servers, skills or CLAUDE.md, and no session
+ *   left behind for `claude --resume`.
+ * - `--add-dir <sandboxDir>` grants consult's private temp dir, where the PR diff and the system
+ *   prompt file live. The workspace is the cwd and needs no grant.
+ *
+ * `--tools`, `--allowedTools` and `--add-dir` are variadic. Each takes one comma-joined value and is
+ * followed by another flag or the end of argv; nothing positional follows, because the prompt
+ * arrives on stdin.
+ *
+ * Floor discipline: every flag here is present in CLI 2.1.105, below `CLAUDE_MIN_VERSION`. Presence
+ * is all that was checked there: this exact argv, including the empty `--setting-sources` value,
+ * was run live only on 2.1.326. A flag added later must be verified at the floor, or the floor
+ * raised in the same commit.
+ */
+export function buildClaudeReviewArgs(opts: { model: string; systemPromptFile: string; sandboxDir: string }): string[] {
+  const tools = CLAUDE_REVIEW_TOOLS.join(',');
+  return [
+    '-p',
+    '--output-format', 'stream-json',
+    // Print mode requires --verbose for stream-json.
+    '--verbose',
+    '--tools', tools,
+    '--permission-mode', 'dontAsk',
+    '--allowedTools', tools,
+    '--setting-sources', '',
+    '--strict-mcp-config',
+    '--disable-slash-commands',
+    '--no-session-persistence',
+    '--max-turns', String(CLAUDE_MAX_TURNS),
+    '--max-budget-usd', String(CLAUDE_MAX_BUDGET_USD),
+    '--model', opts.model,
+    '--system-prompt-file', opts.systemPromptFile,
+    '--add-dir', opts.sandboxDir,
+  ];
+}
+
+/** The stream-json `result` event, as far as the lane reads it. Validated before it is stored. */
+interface ClaudeResultEvent extends ClaudeResultLike {
+  is_error: boolean;
+  result?: unknown;
+  errors?: unknown;
+  /** Tool calls the CLI refused: `{ tool_name, tool_use_id, tool_input }` each. */
+  permission_denials?: unknown;
+}
+
+const PERMISSION_DENIALS_LISTED = 5;
+
+/**
+ * The `[CLAUDE] warning:` line for tool calls the CLI denied, or null when it denied none.
+ *
+ * Under `--permission-mode dontAsk` a denial is silent: the reviewer is told no and carries on, so a
+ * denied read of the PR diff would leave the review blind with nothing to show for it. Naming the
+ * denials on every run makes that visible. A denial is not a failure: a reviewer that reaches for a
+ * file outside the workspace and the sandbox dir is meant to be refused.
+ */
+export function describeClaudePermissionDenials(denials: unknown): string | null {
+  if (!Array.isArray(denials) || denials.length === 0) return null;
+  const described = denials.map((denial) => {
+    if (!isRecord(denial) || typeof denial.tool_name !== 'string') return 'an unrecognised tool call';
+    const input = isRecord(denial.tool_input) ? denial.tool_input : {};
+    const target = [input.file_path, input.path, input.pattern].find((v): v is string => typeof v === 'string');
+    return target ? `${denial.tool_name} ${excerpt(target)}` : denial.tool_name;
+  });
+  const listed = described.slice(0, PERMISSION_DENIALS_LISTED).join(', ');
+  const more = described.length > PERMISSION_DENIALS_LISTED ? `, and ${described.length - PERMISSION_DENIALS_LISTED} more` : '';
+  return `[CLAUDE] warning: claude denied ${denials.length} tool call${denials.length === 1 ? '' : 's'} ` +
+    `(${listed}${more}). The review did not see what those calls asked for.`;
+}
+
+/** How a review child ended. The caller classifies it (`classifyClaudeRun`). */
+interface ClaudeReviewRun {
+  /** The stream's `result` event, if one arrived. */
+  result?: ClaudeResultEvent;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  stderrTail: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** SIGTERM now, SIGKILL if the child is still alive after `CLAUDE_KILL_GRACE_MS`. */
+function terminateChild(child: ChildProcess): void {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill('SIGTERM');
+  const escalate = setTimeout(() => child.kill('SIGKILL'), CLAUDE_KILL_GRACE_MS);
+  escalate.unref();
+  child.once('exit', () => clearTimeout(escalate));
 }
 
 /**
- * Run Claude consultation via Agent SDK.
- * Uses the SDK's query() function instead of CLI subprocess.
- * This avoids the CLAUDECODE nesting guard and enables tool use during reviews.
+ * Spawn one review and read its stream-json until the child exits.
+ *
+ * Each stdout line must be a JSON event. Assistant text blocks go to `onText`; the `result` event is
+ * kept; any other event type is ignored. The first `system`/`init` event must list only
+ * `CLAUDE_REVIEW_TOOLS`, and no assistant event may come before it: that is the one check that would
+ * catch a future CLI silently ignoring `--tools`.
+ *
+ * `finished` rejects on a spawn error, and on any protocol failure mid-stream (a non-JSON line, an
+ * unexpected event shape, the init guard, an `onText` throw). A mid-stream failure terminates the
+ * child and waits for it to exit before rejecting, so a protocol error never leaves a review running
+ * unattended. Otherwise `finished` resolves with however the child ended; deciding whether that was
+ * a review is `classifyClaudeRun`'s job.
+ */
+function startClaudeReview(opts: {
+  bin: string;
+  args: string[];
+  prompt: string;
+  cwd: string;
+  env: Record<string, string>;
+  onText: (text: string) => void;
+}): { child: ChildProcess; finished: Promise<ClaudeReviewRun> } {
+  // Spec 1658 (M16): an npm claude.cmd on Windows starts as `node <entry>`; unchanged on POSIX.
+  const launch = claudeLaunch(opts.bin, opts.args, opts.env);
+  const child = spawn(launch.command, launch.args, {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    ...launch.options,
+  });
+
+  const finished = new Promise<ClaudeReviewRun>((resolve, reject) => {
+    let settled = false;
+    let failure: Error | null = null;
+    let pending = '';
+    let stderrTail = '';
+    let sawInit = false;
+    let result: ClaudeResultEvent | undefined;
+
+    const abort = (err: Error) => {
+      if (failure) return;
+      failure = err;
+      pending = '';
+      terminateChild(child);
+    };
+
+    const unexpected = (what: string, line: string) =>
+      new Error(`claude printed ${what} on stdout: ${excerpt(line)}. ${CLAUDE_UPDATE_HINT}; if this persists, the CLI's stream-json format has changed.`);
+
+    // A claude release that changes the session's tools stops every review at once, so each guard
+    // failure names the way out.
+    const toolsFailure = (why: string, detail: string) => new Error(
+      `claude did not honour --tools; refusing a review ${why}. ${detail} If a claude release ` +
+      `changed the session's tools, pin a known-good claude with ${CLAUDE_BIN_ENV}=/path/to/claude.`
+    );
+
+    const handleLine = (line: string) => {
+      let event: unknown;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        abort(unexpected('a line that is not stream-json', line));
+        return;
+      }
+      if (!isRecord(event) || typeof event.type !== 'string') {
+        abort(unexpected('a JSON line that is not a stream-json event', line));
+        return;
+      }
+
+      if (event.type === 'system' && event.subtype === 'init') {
+        // The session must have exactly the review tools: an extra one could write or run a shell,
+        // and a missing one means the reviewer reads less than the review assumes.
+        const tools = event.tools;
+        const allowed: readonly unknown[] = CLAUDE_REVIEW_TOOLS;
+        const reported = `The session reported tools: ${excerpt(JSON.stringify(tools ?? null))}; expected exactly ${CLAUDE_REVIEW_TOOLS.join(', ')}.`;
+        if (!Array.isArray(tools)) {
+          abort(toolsFailure('whose tools it cannot see', reported));
+          return;
+        }
+        const extra = tools.filter((tool) => !allowed.includes(tool));
+        if (extra.length > 0) {
+          abort(toolsFailure(`with tools consult did not grant: ${excerpt(extra.map(String).join(', '))}`, reported));
+          return;
+        }
+        const missing = CLAUDE_REVIEW_TOOLS.filter((tool) => !tools.includes(tool));
+        if (missing.length > 0 || tools.length !== CLAUDE_REVIEW_TOOLS.length) {
+          abort(toolsFailure(`without ${missing.length > 0 ? missing.join(', ') : 'each tool exactly once'}`, reported));
+          return;
+        }
+        sawInit = true;
+      } else if (event.type === 'assistant') {
+        if (!sawInit) {
+          abort(toolsFailure(
+            'whose tools it cannot see',
+            'An assistant event arrived before the init event that lists the session\'s tools.',
+          ));
+          return;
+        }
+        const content = isRecord(event.message) ? event.message.content : undefined;
+        if (!Array.isArray(content)) {
+          abort(unexpected('an assistant event with no message.content array', line));
+          return;
+        }
+        for (const block of content) {
+          if (isRecord(block) && block.type === 'text' && typeof block.text === 'string') {
+            try {
+              opts.onText(block.text);
+            } catch (err) {
+              abort(new Error(`Cannot write the review to stdout: ${err instanceof Error ? err.message : String(err)}`));
+              return;
+            }
+          }
+        }
+      } else if (event.type === 'result') {
+        if (typeof event.subtype !== 'string' || typeof event.is_error !== 'boolean') {
+          abort(unexpected('a result event without a string subtype and a boolean is_error', line));
+          return;
+        }
+        result = event as unknown as ClaudeResultEvent;
+      }
+      // Any other event (rate_limit_event, user tool results, other system events) is not the lane's.
+    };
+
+    const settle = (outcome: () => void) => {
+      if (settled) return;
+      settled = true;
+      outcome();
+    };
+
+    child.stdout!.setEncoding('utf8');
+    child.stdout!.on('data', (chunk: string) => {
+      if (failure) return;
+      pending += chunk;
+      let newline: number;
+      while (!failure && (newline = pending.indexOf('\n')) !== -1) {
+        const line = pending.slice(0, newline);
+        pending = pending.slice(newline + 1);
+        if (line.trim()) handleLine(line);
+      }
+    });
+
+    child.stderr!.setEncoding('utf8');
+    child.stderr!.on('data', (chunk: string) => {
+      stderrTail = (stderrTail + chunk).slice(-CLAUDE_STDERR_TAIL_MAX_CHARS);
+    });
+
+    // EPIPE here means the child exited without reading its whole prompt. The exit classification
+    // reports why it exited, with its stderr.
+    child.stdin!.on('error', () => {});
+    child.stdin!.end(opts.prompt);
+
+    child.on('error', (err) => {
+      // No pid: the process never started (ENOENT, EACCES), and no 'close' is guaranteed.
+      if (child.pid === undefined) {
+        settle(() => reject(new Error(
+          `Cannot start ${opts.bin}: ${err.message}. Check that it is an executable claude, or set ` +
+          `${CLAUDE_BIN_ENV} to one.`
+        )));
+        return;
+      }
+      abort(err);
+    });
+
+    child.on('close', (exitCode, signal) => {
+      // A final line with no trailing newline is still an event.
+      if (!failure && pending.trim()) handleLine(pending);
+      pending = '';
+      settle(() => (failure ? reject(failure) : resolve({ result, exitCode, signal, stderrTail })));
+    });
+  });
+
+  return { child, finished };
+}
+
+const PROMPT_TOO_LONG = /prompt is too long/i;
+
+/**
+ * Whether a finished review child produced a review, or why not. Null means success.
+ *
+ * Checked in this order, so each failure gets its own message:
+ *   no result event (exit non-zero, or exit 0) → "Prompt is too long" → an error subtype
+ *   (`error_max_turns`, …) → an error result (`is_error` with subtype `success`) → a non-zero exit
+ *   after a successful result.
+ * `is_error` is checked before a `success` subtype is trusted: the CLI reports an API error (a usage
+ * limit, a bad credential) as subtype `success` with `is_error: true`.
+ */
+function classifyClaudeRun(run: ClaudeReviewRun, modelId: string, authLine: string): Error | null {
+  const exited = run.signal ? `was killed by ${run.signal}` : `exited with code ${run.exitCode}`;
+  const stderr = run.stderrTail.trim()
+    ? `\n\nclaude stderr (last ${CLAUDE_STDERR_TAIL_MAX_CHARS} chars):\n${run.stderrTail.trim()}`
+    : '';
+  const { result } = run;
+
+  if (!result) {
+    if (run.exitCode === 0) {
+      return new Error(`claude exited 0 but ended without a result event, so there is no review.${stderr}`);
+    }
+    return new Error(`claude ${exited} before reporting a result.${stderr}`);
+  }
+
+  const resultText = typeof result.result === 'string' ? result.result : '';
+  const errors = Array.isArray(result.errors)
+    ? result.errors.filter((e): e is string => typeof e === 'string')
+    : [];
+
+  if ((result.is_error || result.subtype !== 'success') && [resultText, ...errors].some((t) => PROMPT_TOO_LONG.test(t))) {
+    return new Error(
+      `Claude ran out of context: the reviewer's context window filled while it read files ` +
+      `("Prompt is too long") on model ${modelId}. Consult does not retry. A larger-context default ` +
+      `for this lane is tracked in #1641.`
+    );
+  }
+
+  if (result.subtype !== 'success') {
+    const cap = result.subtype === 'error_max_turns'
+      ? ` The review used all ${CLAUDE_MAX_TURNS} turns.`
+      : result.subtype === 'error_max_budget_usd'
+        ? ` The review reached the $${CLAUDE_MAX_BUDGET_USD} budget cap.`
+        : '';
+    return new Error(`Claude CLI error (${result.subtype})${errors.length ? `: ${errors.join(', ')}` : ''}.${cap}`);
+  }
+
+  if (result.is_error) {
+    return new Error(`Claude returned an error instead of a review: ${resultText}\nCredential in use: ${authLine}`);
+  }
+
+  if (run.exitCode !== 0) {
+    return new Error(`claude reported a successful review but ${exited}.${stderr}`);
+  }
+  return null;
+}
+
+/**
+ * Run a review on the claude lane: `claude -p` from the user's installed CLI (#1912).
+ *
+ * The prompt goes on stdin and the role, plus `CLAUDE_CAPABILITY_NOTE`, in a `0600` system-prompt
+ * file in consult's sandbox dir, so neither appears on argv. Assistant text streams to stdout and,
+ * on success, is written verbatim to `outputPath`.
+ *
+ * Any failure (preflight or review) throws, writes no output, removes a stale one and records a
+ * metrics row with exit code 1. SIGINT/SIGTERM mid-review terminates the child, removes the temp
+ * file and any stale output, and exits 130/143 without a metrics row, as the other lanes do.
+ * `process.env` is never modified: the child gets its own env from the preflight.
  */
 export async function runClaudeConsultation(
   queryText: string,
@@ -736,53 +1204,86 @@ export async function runClaudeConsultation(
   const choice = modelChoice ?? resolveLaneModelChoice(workspaceRoot, 'claude', DEFAULT_CLAUDE_MODEL);
   const chunks: string[] = [];
   const startTime = Date.now();
-  let sdkResult: SDKResultLike | undefined;
+  let result: ClaudeResultEvent | undefined;
   let errorMessage: string | null = null;
   let exitCode = 0;
+  let preflight: ClaudePreflight | undefined;
+  let systemPromptFile: string | undefined;
+  let child: ChildProcess | undefined;
 
-  // The SDK spawns a Claude Code subprocess that checks process.env.CLAUDECODE.
-  // We must remove it from process.env (not just the options env) to avoid
-  // the nesting guard. Restore it after the SDK call.
-  const savedClaudeCode = process.env.CLAUDECODE;
-  delete process.env.CLAUDECODE;
+  const removeSystemPromptFile = () => {
+    if (!systemPromptFile) return;
+    try {
+      fs.unlinkSync(systemPromptFile);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error(`[warning] could not remove ${systemPromptFile}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    systemPromptFile = undefined;
+  };
 
-  const env = buildClaudeConsultEnv(process.env);
+  let interrupted = false;
+  const onSignal = (signal: NodeJS.Signals) => {
+    const exit = () => {
+      removeSystemPromptFile();
+      discardStaleOutput(outputPath);
+      process.exit(signal === 'SIGINT' ? 130 : 143);
+    };
+    if (interrupted || !child || child.exitCode !== null || child.signalCode !== null) {
+      exit();
+      return;
+    }
+    interrupted = true;
+    console.error(`\n[CLAUDE] ${signal} received: stopping the review`);
+    child.once('exit', exit);
+    terminateChild(child);
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
 
   try {
-    const session = claudeQuery({
+    try {
+      preflight = preflightClaude({ workspaceRoot, processEnv: process.env, fromDotenv: dotenvKeys });
+    } catch (err) {
+      // Whatever was known before the failure is still worth showing. A failure before auth status
+      // parsed has no auth line: its message is the explanation.
+      if (err instanceof ClaudePreflightError) {
+        if (err.binaryLine) console.error(`[CLAUDE] binary: ${err.binaryLine}`);
+        if (err.authLine) console.error(`[CLAUDE] auth: ${err.authLine}`);
+      }
+      throw err;
+    }
+    console.error(`[CLAUDE] binary: ${preflight.binaryLine}`);
+    console.error(`[CLAUDE] auth: ${preflight.authLine}`);
+
+    const sandboxDir = consultSandboxDir();
+    systemPromptFile = path.join(sandboxDir, `claude-system-prompt-${process.pid}-${Date.now()}.md`);
+    fs.writeFileSync(systemPromptFile, `${role}\n\n${CLAUDE_CAPABILITY_NOTE}\n`, { mode: 0o600, flag: 'wx' });
+
+    const review = startClaudeReview({
+      bin: preflight.bin,
+      args: buildClaudeReviewArgs({ model: choice.id, systemPromptFile, sandboxDir }),
       prompt: queryText,
-      options: {
-        systemPrompt: role,
-        allowedTools: ['Read', 'Glob', 'Grep'],
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        model: choice.id,
-        maxTurns: CLAUDE_MAX_TURNS,
-        maxBudgetUsd: 25,
-        cwd: workspaceRoot,
-        env,
+      cwd: workspaceRoot,
+      env: preflight.env,
+      onText: (text) => {
+        process.stdout.write(text);
+        chunks.push(text);
       },
     });
+    child = review.child;
+    const run = await review.finished;
+    result = run.result;
 
-    for await (const message of session) {
-      if (message.type === 'assistant' && message.message?.content) {
-        for (const block of message.message.content) {
-          if ('text' in block) {
-            process.stdout.write(block.text);
-            chunks.push(block.text);
-          }
-        }
-      }
-      if (message.type === 'result') {
-        if (message.subtype === 'success') {
-          sdkResult = message as unknown as SDKResultLike;
-        } else {
-          const errors = 'errors' in message ? (message as { errors: string[] }).errors : [];
-          errorMessage = `Claude SDK error (${message.subtype}): ${errors.join(', ')}`.substring(0, 500);
-          exitCode = 1;
-          throw new Error(errorMessage);
-        }
-      }
+    const denials = describeClaudePermissionDenials(result?.permission_denials);
+    if (denials) console.error(denials);
+
+    const failure = classifyClaudeRun(run, choice.id, preflight.authLine);
+    if (failure) throw failure;
+    // A successful result with no assistant text has no VERDICT block to save.
+    if (chunks.join('').trim() === '') {
+      throw new Error('claude reported a successful review but wrote no review text, so there is no VERDICT.');
     }
 
     if (outputPath) {
@@ -792,21 +1293,20 @@ export async function runClaudeConsultation(
       console.error(`\nOutput written to: ${outputPath}`);
     }
   } catch (err) {
-    if (!errorMessage) {
-      errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
-      exitCode = 1;
-    }
+    errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
+    exitCode = 1;
     discardStaleOutput(outputPath);
-    throw annotateModelError(err, 'claude', choice);
+    // Only a binary that passed its preflight can have rejected the model.
+    throw preflight ? annotateModelError(err, 'claude', choice, preflight.binaryLine) : err;
   } finally {
-    if (savedClaudeCode !== undefined) {
-      process.env.CLAUDECODE = savedClaudeCode;
-    }
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+    removeSystemPromptFile();
 
     // Record metrics (always, even on error)
     if (metricsCtx) {
       const duration = (Date.now() - startTime) / 1000;
-      const usage = sdkResult ? extractUsage('claude', '', sdkResult) : null;
+      const usage = result ? extractUsage('claude', '', result) : null;
       recordMetrics(metricsCtx, {
         modelId: choice.id,
         durationSeconds: duration,
@@ -888,6 +1388,17 @@ export function isRealAgyCli(p: string): boolean {
  * candidate so we only run a binary proven to be the CLI.
  */
 export function agyRespondsToVersion(bin: string): boolean {
+  if (isWindows()) {
+    const probe = spawnableOnHost(bin, ['--version']);
+    const result = spawnSync(probe.command, probe.args, {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+      windowsVerbatimArguments: probe.windowsVerbatimArguments,
+    });
+    return result.status === 0 && typeof result.stdout === 'string' && result.stdout.trim().length > 0;
+  }
   try {
     const out = execSync(`"${bin}" --version 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
     return out.length > 0;
@@ -915,6 +1426,11 @@ export function resolveAgyBin(): string | null {
 
   // A bare PATH `agy` is untrusted: require it to NOT be the IDE (realpath) AND
   // to behave like the headless CLI (`--version`) before we'll run it.
+  if (isWindows()) {
+    const found = findOnHostPath('agy');
+    if (found && isRealAgyCli(found) && agyRespondsToVersion(found)) return found;
+    return null;
+  }
   try {
     const found = execSync('command -v agy 2>/dev/null', { encoding: 'utf-8' }).trim();
     if (found && isRealAgyCli(found) && agyRespondsToVersion(found)) return found;
@@ -1091,7 +1607,7 @@ async function runAgyConsultation(
   };
 
   return new Promise<void>((resolve, reject) => {
-    const proc = spawn(bin, args, {
+    const proc = commandLaunch().spawn(bin, args, {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -1263,9 +1779,81 @@ function logResolvedModel(lane: string, id: string, key: string | null, effort?:
 }
 
 /**
- * Run the consultation — dispatches to the correct model runner.
+ * Run one consultation lane, with the working-tree tripwire wrapped around it (#1649).
+ *
+ * A consultant reviews the tree and never writes to it — `consultant.md` says so
+ * outright now. This wrapper is the check on that instruction rather than a
+ * substitute for it: it snapshots the tree either side of the lane and says
+ * loudly, on stderr and in the review file, if anything moved. Nothing is
+ * blocked; a review that ran is still a review, and the reader now knows to
+ * check `git status` before trusting it.
+ *
+ * Wrapping the dispatcher rather than one lane covers every lane at once. The
+ * claude lane has had no write tools since #1912 (`--tools Read,Glob,Grep`), but
+ * "which lane is sandboxed" is a property of three separate tools that no one
+ * here controls, so the check stays on all of them.
  */
 async function runConsultation(
+  model: string,
+  query: string,
+  workspaceRoot: string,
+  role: string,
+  outputPath?: string,
+  metricsCtx?: MetricsContext,
+  generalMode?: boolean,
+  modelIdOverride?: string,
+): Promise<void> {
+  const before = snapshotTree(workspaceRoot);
+  if (!before.available) {
+    console.error(chalk.dim(`[tripwire unavailable: ${before.reason ?? 'not a git repository'}]`));
+  }
+
+  try {
+    await dispatchConsultation(
+      model, query, workspaceRoot, role, outputPath, metricsCtx, generalMode, modelIdOverride,
+    );
+  } finally {
+    // In the `finally` because a lane that threw mid-turn is exactly when an
+    // unrestored edit is most likely to still be sitting in the tree.
+    if (before.available) {
+      const after = snapshotTree(workspaceRoot);
+      if (!after.available) {
+        // Not "no changes". A second `git status` that fails after the first one
+        // worked means something happened to the repository during the review,
+        // which is more alarming than the mutation this is watching for — and
+        // `diffTreeSnapshots` would otherwise report `[]` and say nothing.
+        const warning = formatSnapshotLostWarning(model, after.reason);
+        console.error(`\n${chalk.red.bold(warning)}\n`);
+        appendTreeChangeWarningToOutput(outputPath, warning);
+      } else {
+        const own = relativeOutputPath(workspaceRoot, outputPath);
+        const changed = diffTreeSnapshots(before, after, own ? [own] : []);
+        if (changed.length > 0) {
+          const warning = formatTreeChangeWarning(model, changed);
+          console.error(`\n${chalk.red.bold(warning)}\n`);
+          appendTreeChangeWarningToOutput(outputPath, warning);
+        }
+
+        // Reported separately from the file list, and after it, because it is a
+        // different fact: a lane that commits or switches refs can leave every
+        // file byte-identical while the review is of a different commit than the
+        // builder thinks it is.
+        const moved = diffRepositoryIdentity(before, after);
+        if (moved.length > 0) {
+          const warning = formatRepositoryMovedWarning(model, moved);
+          console.error(`\n${chalk.red.bold(warning)}\n`);
+          appendTreeChangeWarningToOutput(outputPath, warning);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Dispatch to the correct model runner. The tripwire lives in `runConsultation`
+ * above; this is the lane switch and nothing else.
+ */
+async function dispatchConsultation(
   model: string,
   query: string,
   workspaceRoot: string,
@@ -1282,7 +1870,7 @@ async function runConsultation(
     assertLaneAcceptsModelOverride(model);
   }
 
-  // SDK-based models
+  // claude: the installed claude CLI (#1912)
   if (model === 'claude') {
     const startTime = Date.now();
     const choice = resolveLaneModelChoice(workspaceRoot, 'claude', DEFAULT_CLAUDE_MODEL, modelIdOverride);
@@ -1360,7 +1948,7 @@ async function runConsultation(
   const startTime = Date.now();
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd[0], cmd.slice(1), {
+    const proc = commandLaunch().spawn(cmd[0], cmd.slice(1), {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'inherit'],
     });
@@ -2305,8 +2893,8 @@ export async function consult(options: ConsultOptions): Promise<void> {
 
   // --- Resolve model ---
   const model = MODEL_ALIASES[options.model.toLowerCase()] || options.model.toLowerCase();
-  if (!MODEL_CONFIGS[model] && !SDK_MODELS.includes(model)) {
-    const validModels = [...Object.keys(MODEL_CONFIGS), ...SDK_MODELS, ...Object.keys(MODEL_ALIASES)];
+  if (!MODEL_CONFIGS[model] && !RUNNER_LANES.includes(model)) {
+    const validModels = [...Object.keys(MODEL_CONFIGS), ...RUNNER_LANES, ...Object.keys(MODEL_ALIASES)];
     throw new Error(`Unknown model: ${options.model}\nValid models: ${validModels.join(', ')}`);
   }
 
@@ -2423,8 +3011,10 @@ export {
   resolveIntegrationBase as _resolveIntegrationBase,
   resolveArchitectQuery as _resolveArchitectQuery,
   computePersistentOutputPath as _computePersistentOutputPath,
+  getBuilderProjectState as _getBuilderProjectState,
   MODEL_CONFIGS as _MODEL_CONFIGS,
   MODEL_ALIASES as _MODEL_ALIASES,
   runAgyConsultation as _runAgyConsultation,
+  loadDotenv as _loadDotenv,
   agySkipContent as _agySkipContent,
 };

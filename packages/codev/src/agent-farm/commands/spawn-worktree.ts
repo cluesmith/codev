@@ -17,7 +17,6 @@ import {
   readFileSync,
   writeFileSync,
   chmodSync,
-  symlinkSync,
   readdirSync,
   mkdirSync,
   copyFileSync,
@@ -28,12 +27,19 @@ import { globSync } from 'glob';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness, getWorktreeConfig } from '../utils/config.js';
-import { shellEscapeSingleQuote, type HarnessProvider } from '../utils/harness.js';
+import { type HarnessProvider } from '../utils/harness.js';
+import { shellEscapeSingleQuote } from '../../lib/shell-quote.js';
+import { resolveLifecycleReporterInjection } from '../utils/lifecycle-reporter.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, runStreaming, commandExists } from '../utils/shell.js';
 import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
 import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
+import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
+import { isIssueKey } from '../../lib/issue-id.js';
+import type { Launch } from '../../lib/host-executable.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
+import { createWorktreeLink, type WorktreeLinkMethod } from '../lib/worktree-links.js';
 
 // =============================================================================
 // Dependency Checks
@@ -70,6 +76,19 @@ function pathOccupied(p: string): boolean {
 }
 
 /**
+ * Log a link made into the worktree. A copy (native Windows, when neither a
+ * symlink nor a hard link could be made) is reported as a warning: edits in the
+ * worktree do not reach the workspace root.
+ */
+function reportLink(label: string, method: WorktreeLinkMethod): void {
+  if (method === 'copy') {
+    logger.warn(`Copied ${label} from workspace root (no link possible here); edits will not write through`);
+    return;
+  }
+  logger.info(`Linked ${label} from workspace root`);
+}
+
+/**
  * Symlink config files from workspace root into a worktree (if they exist).
  * Shared by createWorktree() and createWorktreeFromBranch().
  *
@@ -90,8 +109,7 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
   const envWorktree = resolve(worktreePath, '.env');
   if (existsSync(envRoot) && !existsSync(envWorktree)) {
     try {
-      symlinkSync(envRoot, envWorktree);
-      logger.info(`Linked .env from workspace root`);
+      reportLink('.env', createWorktreeLink(envRoot, envWorktree, 'file'));
     } catch (error) {
       logger.debug(`Failed to symlink .env: ${error}`);
     }
@@ -107,8 +125,7 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
     const configWorktree = resolve(codevDir, 'config.json');
     if (!existsSync(configWorktree)) {
       try {
-        symlinkSync(configRoot, configWorktree);
-        logger.info(`Linked .codev/config.json from workspace root`);
+        reportLink('.codev/config.json', createWorktreeLink(configRoot, configWorktree, 'file'));
       } catch (error) {
         logger.debug(`Failed to symlink .codev/config.json: ${error}`);
       }
@@ -131,15 +148,13 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
       const srcAbs = resolve(config.workspaceRoot, rel);
       mkdirSync(dirname(target), { recursive: true });
       const isDir = existsSync(srcAbs) && statSync(srcAbs).isDirectory();
-      symlinkSync(srcAbs, target, isDir ? 'dir' : undefined);
-      logger.info(`Linked directory ${rel}/ from workspace root`);
+      reportLink(`directory ${rel}/`, createWorktreeLink(srcAbs, target, 'directory', isDir ? 'dir' : undefined));
     } else {
       for (const rel of globSync(pattern, { cwd: config.workspaceRoot, dot: true, nodir: true })) {
         const target = resolve(worktreePath, rel);
         if (existsSync(target)) continue;
         mkdirSync(dirname(target), { recursive: true });
-        symlinkSync(resolve(config.workspaceRoot, rel), target);
-        logger.info(`Linked ${rel} from workspace root`);
+        reportLink(rel, createWorktreeLink(resolve(config.workspaceRoot, rel), target, 'file'));
       }
     }
   }
@@ -178,7 +193,8 @@ export function syncLocalConfigSnapshot(config: Config, worktreePath: string): b
 /**
  * Run user-configured post-spawn commands inside a freshly-created worktree.
  *
- * Each command runs sequentially in its own `bash -c` subshell with cwd =
+ * Each command runs sequentially in its own `bash -c` subshell (the resolved
+ * Git Bash on native Windows) with cwd =
  * worktreePath — so `cd` inside one command (e.g. `cd apps/foo && uv sync`)
  * doesn't carry over into the next. Output streams live via runStreaming
  * so users see install progress in real time. A non-zero exit aborts the
@@ -187,10 +203,11 @@ export function syncLocalConfigSnapshot(config: Config, worktreePath: string): b
 export async function runPostSpawnHooks(
   worktreePath: string,
   commands: string[],
+  workspaceRoot?: string,
 ): Promise<void> {
   for (const cmd of commands) {
     logger.info(`Running post-spawn hook: ${cmd}`);
-    await runStreaming(cmd, { cwd: worktreePath });
+    await runStreaming(cmd, { cwd: worktreePath, workspaceRoot });
   }
 }
 
@@ -217,7 +234,7 @@ export async function createWorktree(config: Config, branchName: string, worktre
 
   symlinkConfigFiles(config, worktreePath);
   syncLocalConfigSnapshot(config, worktreePath);
-  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn);
+  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn, config.workspaceRoot);
 }
 
 /**
@@ -450,7 +467,7 @@ export async function createWorktreeFromBranch(
 
   symlinkConfigFiles(config, worktreePath);
   syncLocalConfigSnapshot(config, worktreePath);
-  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn);
+  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn, config.workspaceRoot);
 }
 
 /**
@@ -493,6 +510,17 @@ export function slugify(title: string): string {
 }
 
 /**
+ * A worktree directory name in comparable form. Tracker keys compare
+ * case-insensitively (#1740): a builder spawned as `pir-eng-123` before ids
+ * were canonicalized to `ENG-123` is still found on a case-sensitive
+ * filesystem. Numeric ids compare exactly, as before.
+ */
+export function issueDirName(name: string, issueNumber: number | string): string {
+  if (isIssueKey(String(issueNumber))) return name.toLowerCase();
+  return name;
+}
+
+/**
  * Find an existing issue-driven worktree directory for a given protocol prefix
  * and issue number. Scans the builders directory for directories matching
  * `<protocolPrefix>-<issueNumber>-*`. Returns the directory name if found, or
@@ -509,7 +537,7 @@ export function findExistingIssueWorktree(
   const dirPrefix = `${protocolPrefix}-${issueNumber}-`;
   try {
     const entries = readdirSync(buildersDir, { withFileTypes: true });
-    const match = entries.find(e => e.isDirectory() && e.name.startsWith(dirPrefix));
+    const match = entries.find(e => e.isDirectory() && issueDirName(e.name, issueNumber).startsWith(issueDirName(dirPrefix, issueNumber)));
     return match ? match.name : null;
   } catch {
     return null;
@@ -587,20 +615,29 @@ export async function checkBugfixCollisions(
     }
   }
 
-  // 3. Check for open PRs referencing this issue via pr-search concept
+  // 3. Check for open PRs referencing this issue via pr-search concept.
+  // pr-search runs `--state all` (#759) so consult can find merged PRs; this guard
+  // must ignore merged/closed ones, else it blocks spawns on already-resolved work
+  // (#1637). Filter to state === "OPEN"; treat an absent/empty state (a stale
+  // pr-search.sh override predating the field, or a forge script that leaves it
+  // blank) as unknown → keep counting it, the conservative pre-#1637 behavior,
+  // with --force still available.
   try {
     const result = await executeForgeCommand('pr-search', {
       CODEV_SEARCH_QUERY: `in:body #${issueNumber}`,
     }, { forgeConfig });
-    if (result && Array.isArray(result) && result.length > 0) {
-      const openPRs = result as Array<{ number: number; title?: string; headRefName?: string }>;
-      if (!force) {
-        const prList = openPRs.slice(0, 5).map((pr) =>
-          `  - PR #${pr.number}${pr.title ? `: ${pr.title}` : ''}`,
-        ).join('\n');
-        fatal(`Found ${openPRs.length} open PR(s) referencing issue #${issueNumber}:\n${prList}\nUse --force to proceed anyway.`);
+    if (result && Array.isArray(result)) {
+      const prs = result as Array<{ number: number; title?: string; headRefName?: string; state?: string }>;
+      const openPRs = prs.filter((pr) => !pr.state || pr.state === 'OPEN');
+      if (openPRs.length > 0) {
+        if (!force) {
+          const prList = openPRs.slice(0, 5).map((pr) =>
+            `  - PR #${pr.number}${pr.title ? `: ${pr.title}` : ''}`,
+          ).join('\n');
+          fatal(`Found ${openPRs.length} open PR(s) referencing issue #${issueNumber}:\n${prList}\nUse --force to proceed anyway.`);
+        }
+        logger.warn(`Warning: Found ${openPRs.length} open PR(s) referencing issue - proceeding with --force`);
       }
-      logger.warn(`Warning: Found ${openPRs.length} open PR(s) referencing issue - proceeding with --force`);
     }
   } catch {
     // Non-fatal: continue if PR search concept unavailable
@@ -943,8 +980,18 @@ export function buildSessionLaunchLoop(opts: {
   unpinnedFresh: string;
   /** Resume $codev_session_id with the crash-resume nudge. */
   resume: string;
+  /**
+   * Last-resort minting command, printing one uuid (Spec 1658). Git Bash has
+   * neither `uuidgen` nor `/proc/sys/kernel/random/uuid`, so Windows scripts
+   * mint through Node. Omitted on POSIX, where the script is unchanged.
+   */
+  mintFallback?: string;
 }): string {
   const entry = opts.initial ?? opts.pinnedFresh;
+  let mintFallback = '';
+  if (opts.mintFallback) {
+    mintFallback = `  else\n    ${opts.mintFallback}\n`;
+  }
   return `codev_session_id='${shellEscapeSingleQuote(opts.sessionId)}'
 codev_fast_fail_secs="\${CODEV_LAUNCH_FAST_FAIL_SECS:-15}"
 codev_mint_session_id() {
@@ -952,7 +999,7 @@ codev_mint_session_id() {
     uuidgen | tr '[:upper:]' '[:lower:]'
   elif [ -r /proc/sys/kernel/random/uuid ]; then
     cat /proc/sys/kernel/random/uuid
-  fi
+${mintFallback}  fi
 }
 codev_persist_session_id() {
   printf '%s\\n' "$codev_session_id" > '.builder-session-id'
@@ -1018,6 +1065,71 @@ done
 `;
 }
 
+/** `export K='v'` lines for `env`, newline-terminated, or '' when empty. */
+function envExportBlock(env: Record<string, string>): string {
+  const envExports = Object.entries(env)
+    .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
+    .join('\n');
+  return envExports ? `${envExports}\n` : '';
+}
+
+/**
+ * Spec 1595: the base command carrying the harness's lifecycle reporter, and
+ * the env it needs. Applied to the BASE command, before the role, prompt and
+ * session forms are built on it, so every loop form (initial, resume, pinned
+ * and unpinned fresh, crash resume) reports. A harness without the capability
+ * gets the command unchanged, which keeps its script byte-identical.
+ */
+function withLifecycleReporter(
+  harness: HarnessProvider,
+  baseCmd: string,
+): { command: string; env: Record<string, string> } {
+  const injection = resolveLifecycleReporterInjection(harness);
+  if (!injection) return { command: baseCmd, env: {} };
+  return { command: `${baseCmd} ${injection.scriptFragment}`, env: injection.env };
+}
+
+/**
+ * Export the builder's worktree as its identity (Issue #1783), so `afx send` /
+ * `afx whoami` resolve this builder from any cwd — including the workspace root a
+ * builder `cd`s to before running `afx`. Both launch scripts carry it, and a
+ * `--resume` regenerates the script, so a resumed builder gains it too.
+ */
+function builderIdentityExport(worktreePath: string): string {
+  return `export ${BUILDER_WORKTREE_ENV}='${shellEscapeSingleQuote(worktreePath)}'\n`;
+}
+
+/**
+ * The first lines of a builder launch script: enter the worktree and export the
+ * builder's identity. On native Windows (Spec 1658) the script runs under Git
+ * Bash, so `cd` takes the worktree in POSIX form, while the identity stays
+ * native because Node reads it; the resolved Git Bash is exported for the
+ * harness (Claude Code reads `CLAUDE_CODE_GIT_BASH_PATH` to find its shell).
+ */
+function launchScriptPrelude(worktreePath: string, workspaceRoot?: string): string {
+  const launch = commandLaunch();
+  return `cd "${launch.launchScriptPath(worktreePath)}"\n${builderIdentityExport(worktreePath)}`
+    + launch.launchScriptExports(workspaceRoot);
+}
+
+/** A path as the launch script's own commands (`cat`) read it: POSIX form under Git Bash. */
+function scriptLocalPath(path: string): string {
+  return commandLaunch().launchScriptPath(path);
+}
+
+/**
+ * The minting fallback for the session-aware loop: Node's `randomUUID`, run by
+ * the Node executing this CLI, on Windows only (see `buildSessionLaunchLoop`).
+ */
+export function sessionIdMintFallback(): string | undefined {
+  return commandLaunch().sessionIdMintFallback();
+}
+
+/** How Tower runs a builder launch script: `/bin/bash <script>`, or the resolved Git Bash on Windows. */
+export function builderScriptLaunch(scriptPath: string, workspaceRoot?: string): Launch {
+  return commandLaunch().scriptFileArgv(scriptPath, [], workspaceRoot);
+}
+
 /**
  * Start a terminal session for a builder.
  *
@@ -1067,7 +1179,9 @@ export async function startBuilderSession(
   if (!resume) writeFileSync(promptFile, prompt);
 
   const harness = getBuilderHarness(config.workspaceRoot);
-  let envBlock = '';
+  const reporter = withLifecycleReporter(harness, baseCmd);
+  const launchCmd = reporter.command;
+  let roleEnv: Record<string, string> = {};
   let roleFragment = '';
 
   if (roleContent) {
@@ -1080,10 +1194,7 @@ export async function startBuilderSession(
 
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
     roleFragment = fragment;
-    const envExports = Object.entries(env)
-      .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
-      .join('\n');
-    envBlock = envExports ? `${envExports}\n` : '';
+    roleEnv = env;
 
     // Write any harness-specific worktree files (e.g., opencode.json for OpenCode,
     // the write-guard hook for Claude — Issue #1018)
@@ -1097,8 +1208,9 @@ export async function startBuilderSession(
   // With a role, the fragment is appended even when empty (gemini injects via
   // env only, fragment '') — preserving the historical command text exactly,
   // double space included, so session-less scripts stay byte-identical.
-  const withRole = roleContent ? `${baseCmd} ${roleFragment}` : baseCmd;
-  const promptArg = `"$(cat '${promptFile}')"`;
+  const withRole = roleContent ? `${launchCmd} ${roleFragment}` : launchCmd;
+  const envBlock = envExportBlock({ ...roleEnv, ...reporter.env });
+  const promptArg = `"$(cat '${scriptLocalPath(promptFile)}')"`;
   const freshCommand = `${withRole} ${promptArg}`;
 
   if (resume) {
@@ -1115,31 +1227,32 @@ export async function startBuilderSession(
     const sessionId = resume ? resume.sessionId : randomUUID();
     loop = buildSessionLaunchLoop({
       sessionId,
-      initial: resume ? `${baseCmd} ${resume.scriptFragment}` : undefined,
+      initial: resume ? `${launchCmd} ${resume.scriptFragment}` : undefined,
       pinnedFresh: `${withRole} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)} ${promptArg}`,
       unpinnedFresh: freshCommand,
-      resume: `${baseCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+      resume: `${launchCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+      mintFallback: sessionIdMintFallback(),
     });
   } else {
     // Session-less harness (codex/gemini/opencode/custom): historical loop,
     // byte for byte. Resume entry via the pre-escaped harness fragment.
-    const initialCommand = resume ? `${baseCmd} ${resume.scriptFragment}` : freshCommand;
+    const initialCommand = resume ? `${launchCmd} ${resume.scriptFragment}` : freshCommand;
     loop = buildLaunchLoop(initialCommand, freshCommand);
   }
 
   const scriptContent = `#!/bin/bash
-cd "${worktreePath}"
-${envBlock}${loop}`;
+${launchScriptPrelude(worktreePath, config.workspaceRoot)}${envBlock}${loop}`;
 
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
 
   // Create PTY session via Tower REST API (shellper for persistence)
   logger.info('Creating PTY terminal session...');
+  const launch = builderScriptLaunch(scriptPath, config.workspaceRoot);
   const { terminalId } = await createPtySession(
     config,
-    '/bin/bash',
-    [scriptPath],
+    launch.command,
+    launch.args,
     worktreePath,
     { workspacePath: config.workspaceRoot, type: 'builder', roleId: builderId },
   );
@@ -1157,10 +1270,11 @@ export async function startShellSession(
 ): Promise<{ terminalId: string }> {
   // Create PTY session via REST API
   logger.info('Creating PTY terminal session for shell...');
+  const launch = commandLaunch().shellStringArgv(baseCmd, { command: '/bin/bash', flag: '-c' }, config.workspaceRoot);
   const { terminalId } = await createPtySession(
     config,
-    '/bin/bash',
-    ['-c', baseCmd],
+    launch.command,
+    launch.args,
     config.workspaceRoot,
     { workspacePath: config.workspaceRoot, type: 'shell', roleId: shellId },
   );
@@ -1178,8 +1292,10 @@ export function buildWorktreeLaunchScript(
   workspaceRoot?: string,
 ): string {
   const harness = getBuilderHarness(workspaceRoot);
-  let envBlock = '';
-  let command = baseCmd;
+  const reporter = withLifecycleReporter(harness, baseCmd);
+  const launchCmd = reporter.command;
+  let roleEnv: Record<string, string> = {};
+  let command = launchCmd;
 
   if (role) {
     const roleFile = resolve(worktreePath, '.builder-role.md');
@@ -1188,16 +1304,13 @@ export function buildWorktreeLaunchScript(
     logger.info(`Loaded role (${role.source})`);
 
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
-    const envExports = Object.entries(env)
-      .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
-      .join('\n');
-    envBlock = envExports ? `${envExports}\n` : '';
+    roleEnv = env;
 
     // Write any harness-specific worktree files (e.g., opencode.json for OpenCode,
     // the write-guard hook for Claude — Issue #1018)
     installHarnessWorktreeFiles(harness, roleWithPort, roleFile, worktreePath);
 
-    command = `${baseCmd} ${fragment}`;
+    command = `${launchCmd} ${fragment}`;
   } else {
     // Install harness worktree files even without a role, so the write-guard
     // (Issue #1018) is deterministic across all Claude spawn modes.
@@ -1208,17 +1321,18 @@ export function buildWorktreeLaunchScript(
   // session-aware when the harness supports it (Issue #1233): crash restarts
   // resume the pinned conversation here too. There is no prompt file in this
   // mode, so the fresh and degraded invocations are the bare command.
+  const envBlock = envExportBlock({ ...roleEnv, ...reporter.env });
   const sessionForms = scriptSessionForms(harness);
   const loop = sessionForms
     ? buildSessionLaunchLoop({
       sessionId: randomUUID(),
       pinnedFresh: `${command} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)}`,
       unpinnedFresh: command,
-      resume: `${baseCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+      resume: `${launchCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+      mintFallback: sessionIdMintFallback(),
     })
     : buildLaunchLoop(command, command);
 
   return `#!/bin/bash
-cd "${worktreePath}"
-${envBlock}${loop}`;
+${launchScriptPrelude(worktreePath, workspaceRoot)}${envBlock}${loop}`;
 }

@@ -19,6 +19,7 @@
  * mock. The toast/recovery UX it feeds lives in `terminal-manager.ts`.
  */
 
+import { parseBuilderWorktreePath } from '@cluesmith/codev-sdk/builder-worktree';
 import { backoffDelayMs } from '@cluesmith/codev-sdk/reconnect-policy';
 import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 
@@ -94,15 +95,18 @@ export async function resolveBuilderTerminal<T extends ResolvableBuilder>(
  * The main-checkout root for an `afx` command, given the VSCode window's
  * detected workspace path.
  *
- * A builder worktree lives at `<root>/.builders/<id>` and is itself a full
- * checkout (it has its own `codev/`), so `detectWorkspacePath`'s walk-up stops
- * at the worktree when VSCode is *rooted at* that worktree — `getWorkspacePath()`
- * then returns the worktree, not the main checkout. `afx workspace recover` must
- * run from the main root (repo guidance: never run `afx` from inside a
- * worktree), so strip a trailing `/.builders/<id>` segment when present.
- * A normal main-checkout window has no such suffix and is returned unchanged.
+ * A builder worktree lives at `<root>/.builders/<id>`. Since #1809 a window
+ * rooted at a worktree already reports the parent root from
+ * `getWorkspacePath()`, so this is normally the identity; it stays as a guard
+ * because `afx workspace recover` must run from the main root (repo guidance:
+ * never run `afx` from inside a worktree). Only a path that IS a worktree
+ * (leaf `.builders/<id>`) maps to its parent root, via the shared sdk
+ * predicate; a deeper path or any other path is returned unchanged.
  */
 export function mainCheckoutRoot(workspacePath: string): string {
-  const match = /[\\/]\.builders[\\/][^\\/]+\/?$/.exec(workspacePath);
-  return match ? workspacePath.slice(0, match.index) : workspacePath;
+  const worktree = parseBuilderWorktreePath(workspacePath);
+  if (worktree && workspacePath.replace(/[\\/]$/, '') === worktree.worktreePath) {
+    return worktree.workspaceRoot;
+  }
+  return workspacePath;
 }

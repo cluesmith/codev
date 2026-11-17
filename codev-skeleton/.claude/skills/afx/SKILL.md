@@ -17,7 +17,7 @@ afx spawn [number] [options]
 
 | Flag | Description |
 |------|-------------|
-| `--protocol <name>` | Protocol: spir, aspir, air, bugfix, maintain, experiment. **Required for numbered spawns.** |
+| `--protocol <name>` | Protocol: spir, aspir, air, bugfix, pir, maintain, experiment. **Required for numbered spawns.** |
 | `--task <text>` | Ad-hoc task (no issue number needed) |
 | `--shell` | Bare Claude session |
 | `--worktree` | Bare worktree session |
@@ -27,16 +27,20 @@ afx spawn [number] [options]
 | `--soft` | Soft mode (AI follows protocol, you verify) |
 | `--strict` | Strict mode (porch orchestrates) — this is the default |
 | `--resume` | Resume builder in existing worktree |
+| `--branch <name>` | Build on an existing remote branch instead of creating one. **Requires `--protocol`.** |
+| `--remote <name>` | Remote to fetch the `--branch` from (fork PRs) |
 | `--no-role` | Skip loading role prompt |
 
-**There is NO `-t`, `--title`, `--name`, or `--branch` flag.** The branch name is auto-generated from the issue title.
+**There is NO `-t`, `--title`, or `--name` flag.** The worktree is `.builders/<protocol>-<id>` and the branch `builder/<protocol>-<id>`, unless `--branch` reuses an existing one.
 
 **Examples:**
 ```bash
 afx spawn 42 --protocol spir           # SPIR builder for issue #42
-afx spawn 42 --protocol aspir          # ASPIR (autonomous, no human gates)
+afx spawn 42 --protocol aspir          # ASPIR (no spec/plan gates)
 afx spawn 42 --protocol air            # AIR (small features)
 afx spawn 42 --protocol bugfix         # Bugfix
+afx spawn 42 --protocol pir            # PIR (plan, dev and pr gates)
+afx spawn 42 --protocol spir --branch fix/foo --remote fork   # Reuse a contributor's branch
 afx spawn 42 --protocol spir --soft    # Soft mode
 afx spawn 42 --resume                  # Resume existing builder
 afx spawn --task "fix the flaky test"  # Ad-hoc task (no issue)
@@ -50,7 +54,7 @@ afx spawn 42 --protocol spir --force   # Skip dirty-worktree check
 
 ## afx send
 
-Sends a message to a running builder.
+Sends a message to a builder or an architect (see the addressing forms below).
 
 ```
 afx send [builder] [message]
@@ -63,10 +67,34 @@ afx send [builder] [message]
 | `--interrupt` | Send Ctrl+C first |
 | `--raw` | Skip structured formatting |
 | `--no-enter` | Don't press Enter after message |
+| `--delay <seconds>` | Deliver after N seconds (persisted; survives a Tower restart, except a delayed `--interrupt` ^C) |
 
 ```bash
-afx send 0042 "PR approved, please merge"
-afx send 0585 "check the test output" --file /tmp/test-results.txt
+afx send spir-42 "PR approved, please merge"
+afx send 585 "check the test output" --file /tmp/test-results.txt
+```
+
+The reply is `delivered`, or `held` with a reason: a held message waits in Tower's mailbox and
+delivers once the recipient's prompt is clear. See `afx inbox`.
+
+**Addressing forms** — the recipient isn't only a builder ID:
+
+| Form | Routes to |
+|------|-----------|
+| `afx send spir-585 "…"` | Builder `spir-585`. A bare `585` also works when exactly one builder id ends in it; leading zeros are ignored. |
+| `afx send architect "…"` | From a builder: its spawning architect. From an architect: the `main` architect (else first registered). |
+| `afx send architect:<name> "…"` | A specific named architect (sibling-architect messaging). Architects can address any architect; a builder may only use its own `spawnedByArchitect`. |
+| `afx send <workspace>:architect "…"` | The architect in **another workspace** (cross-workspace). |
+
+```bash
+afx send architect:ob-refine "PR-iter-2 feedback ready"   # sibling architect, same workspace
+afx send taqwabench:architect "use porch.checks, don't fork protocol.json"  # cross-workspace
+```
+
+**Find the exact workspace name first** — guessing fails with `NOT_FOUND`. The name is the basename of the workspace path, which can differ from how someone refers to it. List active workspaces via the Tower API:
+
+```bash
+curl -s http://localhost:4100/api/workspaces | python3 -m json.tool   # → each .name is a valid <workspace> address
 ```
 
 ## afx interrupt
@@ -85,8 +113,8 @@ A builder chaining foreground waits inside one turn queues every `afx send` unre
 to stop. ESC ends the turn so the queue processes. Distinct from `afx send --interrupt` (Ctrl+C).
 
 ```bash
-afx interrupt 0042
-afx send 0042 "That producer died — stop waiting and report."
+afx interrupt spir-42
+afx send spir-42 "That producer died — stop waiting and report."
 ```
 
 ## afx refresh
@@ -117,10 +145,35 @@ naming the gate. Requires a harness with in-session context clearing (Claude Cod
 in a future release.
 
 ```bash
-afx refresh 0042 --dry-run                # inspect first — touches nothing
-afx refresh 0042
-afx refresh 0042 --note "PR #90 merged while you were mid-phase. Rebase first."
-afx refresh 0042 --interrupt-first        # builder is wedged mid-turn
+afx refresh spir-42 --dry-run                # inspect first — touches nothing
+afx refresh spir-42
+afx refresh spir-42 --note "PR #90 merged while you were mid-phase. Rebase first."
+afx refresh spir-42 --interrupt-first        # builder is wedged mid-turn
+```
+
+## afx self-refresh
+
+A builder refreshes **its own** context at a protocol boundary: save state, verify it, clear,
+re-orient. Two steps — `--begin` issues the challenge and prints what to save, then a second
+call verifies the saved state and clears. Porch chooses the moment (a context-refresh task);
+the `builder-refresh` skill carries the procedure.
+
+| Flag | Description |
+|------|-------------|
+| `--begin` | Issue the challenge and print what to save (step 1 of 2) |
+| `--boundary <id>` | Protocol boundary this refresh is for (e.g. `enter:review`) |
+| `--note <text>` | Addendum appended to the re-orientation |
+| `--dry-run` | Verify and assemble; send and clear nothing |
+| `--delay <seconds>` | Seconds Tower holds the re-entry before delivering it |
+
+## afx inbox
+
+Held (undelivered) messages for this workspace.
+
+```bash
+afx inbox                       # List held messages
+afx inbox show <id>             # One message, including its body
+afx inbox dismiss <id>          # Mark it dismissed; it is never delivered
 ```
 
 ## afx cleanup
@@ -143,7 +196,7 @@ afx cleanup -p 585              # Clean up project 585
 afx cleanup -p 585 -f           # Force (unmerged branch)
 ```
 
-**Note:** `afx cleanup` uses plain numbers (`585`), not zero-padded (`0585`). But `afx send` uses zero-padded IDs (`0585`).
+**Note:** `afx cleanup -p` takes the plain number (`585`), not a zero-padded one (`0585`). `afx send` takes the full builder id (`spir-585`) or the bare number.
 
 ## afx status
 
@@ -179,12 +232,62 @@ afx tower disconnect            # Disconnect from Codev Cloud
 
 There is NO `afx tower restart` — use `afx tower stop && afx tower start`.
 
+## afx ide
+
+Manages the Codev IDE server (VS Code server-web) that Tower forwards at `/ide/`. Tower spawns
+and owns the process; these commands drive it. Open a workspace at
+`http://localhost:4100/ide/?folder=<abs path>`.
+
+```bash
+afx ide install                 # npm i -g @cluesmith/codev-ide, then report the installed version
+afx ide start                   # Find codev-ide-server, ask Tower to spawn it (port 8200)
+afx ide start --server-path <bin>   # Use this binary instead of discovery
+afx ide start -p <port>         # Run the server on another port
+afx ide stop                    # Stop the server
+afx ide status                  # Port, PID, server path/version, extensions dir, sidebar version
+```
+
+**Discovery** (when `--server-path` is absent): `codev-ide-server` on `PATH`, then
+`@cluesmith/codev-ide` next to the running codev install, then under `npm root -g`. Nothing
+found exits 1 before Tower is contacted, naming `afx ide install` and `--server-path`.
+
+**On every start** Tower checks `codev-ide-server --version` against a minimum (an older server
+is refused with the installed version, the floor, and the upgrade command), installs the
+sidebar vsix that ships inside `@cluesmith/codev` into `~/.agent-farm/ide-extensions` (skipped
+when that version is already installed; other extensions in the directory are left alone), and
+spawns the server with `--extensions-dir` pointing there. The first start can take a minute or more.
+
+The server loads extensions only from `~/.agent-farm/ide-extensions`, so anything installed into
+its default extensions directory is no longer loaded. Install additional extensions there:
+`codev-ide-server --install-extension <id-or-vsix> --extensions-dir ~/.agent-farm/ide-extensions`.
+
+A server that is already running is never killed by `start`. If it predates the current server
+or sidebar, `start` warns: restart it with `afx ide stop && afx ide start`.
+
+There is NO `afx ide restart` and NO `afx ide upgrade`. To upgrade, run `afx ide install`, then
+`afx ide stop && afx ide start`.
+
 ## afx workspace
 
 ```bash
 afx workspace start             # Start workspace for current project
 afx workspace stop              # Stop workspace processes
+afx workspace add-architect --name <name>   # Add a named sibling architect terminal
+afx workspace remove-architect <name>       # Remove a sibling architect (cannot remove main)
+afx workspace recover           # Revive builders whose shellper died (e.g. after reboot)
 ```
+
+**Recreating a dead architect** (its process died while Tower kept the registration):
+re-add it under the SAME name, then re-init its identity:
+
+```bash
+afx workspace add-architect --name <name>
+afx send architect:<name> "/arch-init <name>"
+```
+
+Builder-to-architect affinity survives the death (builders keep their Owner), so a
+same-name re-add restores routing with no worktree impact and no builder disruption.
+`afx workspace recover` revives builders only, not architects.
 
 `afx dash` is a deprecated alias — use `afx workspace` instead.
 
@@ -220,5 +323,8 @@ afx open <file>                 # Open file in annotation viewer (NOT system ope
 afx shell                       # Spawn utility shell
 afx attach                      # Attach to running builder terminal
 afx rename <name>               # Rename current shell session
+afx decisions init              # Create the decisions file; turns on the Decisions tab
 afx architect                   # Start architect session in current terminal
+afx dev [builder-id]            # Run a builder's dev server (see the runnable-worktrees skill)
+afx setup [builder-id]          # Re-run worktree.postSpawn for an existing builder
 ```

@@ -37,6 +37,27 @@ export interface Disposable {
 export type ReadingMode = 'vertical' | 'horizontal';
 
 /**
+ * Hover reading aid (#1802): what lights up under the pointer. `word` is a soft pill behind the
+ * word; `line` is a fainter band along the word's line; `paragraph` styles add a faintest tint
+ * behind the whole paragraph. The names list the shapes drawn (`wordLine` = word pill + line
+ * band, `lineParagraph` = line band + paragraph tint, and so on); `none` turns the aid off.
+ */
+export type HoverHighlightStyle =
+  | 'none'
+  | 'word'
+  | 'wordLine'
+  | 'wordLineParagraph'
+  | 'line'
+  | 'lineParagraph';
+
+/**
+ * Pointer shape over prose (#1802). `arrow` keeps #1232's `cursor: default`; `iBeam` is the
+ * text cursor; `hand` is the pointing hand. Code, comment cards, the composer and the "+" keep
+ * their own cursors in every mode.
+ */
+export type ReadingCursor = 'arrow' | 'iBeam' | 'hand';
+
+/**
  * In-memory model of a review marker. The package is serialization-agnostic (spec D3): the
  * host's `MarkerAdapter` owns the on-disk byte form; `raw` preserves the original marker text
  * for lossless round-tripping.
@@ -123,4 +144,14 @@ export interface ArtifactCanvasProps {
    * paths cannot drift. Omitting it leaves behavior exactly as it is without one.
    */
   commandAdapter?: CommandAdapter;
+  /**
+   * Hover reading aid style (contract amendment #1802). Optional and additive: omitted means
+   * `lineParagraph`. Unrecognized values from an untyped host are coerced to the default.
+   */
+  hoverHighlight?: HoverHighlightStyle;
+  /**
+   * Pointer shape over prose (contract amendment #1802). Optional and additive: omitted means
+   * `arrow`, today's behavior.
+   */
+  readingCursor?: ReadingCursor;
 }

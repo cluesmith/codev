@@ -6,7 +6,7 @@
  * getTerminalsForWorkspace, and initTerminals/shutdownTerminals lifecycle.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, onTestFinished, vi } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -34,6 +34,7 @@ import {
   __resetStartupReconcileSettledForTest,
   type TerminalDeps,
 } from '../servers/tower-terminals.js';
+import { getProcessStartTime } from '../../terminal/session-manager.js';
 
 // ============================================================================
 // Mocks
@@ -78,6 +79,20 @@ function makeDeps(overrides: Partial<TerminalDeps> = {}): TerminalDeps {
     getKnownWorkspacePaths: vi.fn(() => []),
     ...overrides,
   };
+}
+
+/**
+ * The live process's real start time, as the PID-reuse guard reads it. A test row
+ * that models a genuine live shellper must record this, or the guard rightly
+ * classifies its pid as reused (#1877). Fails loudly if it cannot be read.
+ */
+async function realStartTime(pid: number): Promise<number> {
+  const startTime = await getProcessStartTime(pid);
+  if (startTime !== null) return startTime;
+  // Spec 1658: Windows reads no start time here, so the guard never calls a pid
+  // reused and any recorded value models a live shellper.
+  if (process.platform === 'win32') return Date.now();
+  throw new Error(`cannot read start time of pid ${pid}`);
 }
 
 // ============================================================================
@@ -822,6 +837,448 @@ describe('tower-terminals', () => {
       vi.restoreAllMocks();
     });
 
+    // Bugfix #1686: a shellper row whose reconnect FAILS but whose process is
+    // still alive and whose socket file is still present must survive Phase 2
+    // untouched — never deleted, never signaled. reconnectSession() returns null
+    // for transient reasons (socket connect refused because another Tower client
+    // owns the shellper, or a boot-time socket/fd hiccup), not just for a dead
+    // process; treating that as death SIGTERMed 53 live sessions in the #1629
+    // incident. Fails without the guard (Phase 2 killed session.pid + DELETEd
+    // the row on reconnect failure alone).
+    it('leaves a live-pid + present-socket row untouched when reconnect fails (#1686)', async () => {
+      // onTestFinished so the mocked process.kill (dangerous if leaked into
+      // other tests) is always restored, even if an assertion throws.
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const liveId = 'bugfix-1686-live-session';
+      const socketPath = '/tmp/shellper-bugfix-1686.sock';
+      // A genuine live shellper: its recorded start time matches the live pid's (#1877).
+      const liveStartTime = await realStartTime(process.pid);
+
+      // Reconnect fails (e.g. socket owned by the real Tower — one-client-per-
+      // shellper), the same null this path returns for a genuinely dead process.
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      // process.pid is genuinely alive, so processExists() returns true.
+      mockDbAll.mockReturnValue([{
+        id: liveId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-live',
+        pid: process.pid,
+        shellper_socket: socketPath,
+        shellper_pid: process.pid,
+        shellper_start_time: liveStartTime,
+        created_at: new Date().toISOString(),
+      }]);
+
+      // Workspace exists; the shellper socket FILE is present (connect refused,
+      // not file-gone). Config lookups resolve false.
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        if (String(p) === socketPath) return true;
+        return false;
+      });
+
+      // Swallow real SIGTERMs (would kill the test runner if the bug regressed),
+      // but let the liveness probe (signal 0) pass through to the real kill.
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      // Never signaled.
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      // Row left in place — no DELETE run for this session id.
+      expect(mockDbRun).not.toHaveBeenCalledWith(liveId);
+      // Logged WARN for the next-pass retry.
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+    });
+
+    // Bugfix #1686 (sibling site): a row the reconcile guard above preserved
+    // must also survive the on-the-fly reconnect in getTerminalsForWorkspace()
+    // when that reconnect still fails. Before the fold, this path deleted the
+    // row on any null reconnect (no liveness check), so the first /api/state or
+    // /api/overview read after a Tower restart would delete the very row Phase 2
+    // had just preserved — falsifying the "retried next pass" promise. Fails
+    // without the on-the-fly guard (deleteTerminalSession runs DELETE for the id).
+    it('leaves a live-pid + present-socket row untouched when on-the-fly reconnect fails (#1686)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const liveId = 'bugfix-1686-onthefly-session';
+      const socketPath = '/tmp/shellper-bugfix-1686-otf.sock';
+      // A genuine live shellper: its recorded start time matches the live pid's (#1877).
+      const liveStartTime = await realStartTime(process.pid);
+
+      // On-the-fly reconnect still fails (persistent ownership/transient hiccup).
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      // getTerminalSessionsForWorkspace() reads this row; its PtySession is gone
+      // (never created), so getTerminalsForWorkspace takes the on-the-fly path.
+      mockDbAll.mockReturnValue([{
+        id: liveId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-live-otf',
+        pid: process.pid,
+        shellper_socket: socketPath,
+        shellper_pid: process.pid,
+        shellper_start_time: liveStartTime,
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        if (String(p) === socketPath) return true;
+        return false;
+      });
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { getTerminalsForWorkspace: getTerms } = await import('../servers/tower-terminals.js');
+      await getTerms('/real/project', 'http://proxy');
+
+      // On-the-fly never signals, but before the fold it DELETEd the row.
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(mockDbRun).not.toHaveBeenCalledWith(liveId);
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+    });
+
+    // Spec 1658 (scenario 5): on Windows a reconnect can REFUSE on identity — the
+    // pipe's WELCOME names another session/shellper, or the pipe is gone while the
+    // pid lives on (PID reuse). That is proof, not a transient failure: the row
+    // must be deleted even though the pid is alive, and the pid (someone else's
+    // process) is never signaled. The #1686 keep-row guard still covers `null`.
+    it('deletes an identity-refused row without signaling its live pid — reconcile (Spec 1658)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const refusedId = 'spec-1658-refused-session';
+      const pipeName = '\\\\.\\pipe\\codev-shellper-user-0000';
+
+      const mockReconnectSession = vi.fn(async () => ({ identityRefused: true as const, reason: 'WELCOME sessionId mismatch' }));
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: refusedId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-refused',
+        pid: process.pid,
+        shellper_socket: pipeName,
+        shellper_pid: process.pid,
+        shellper_start_time: Date.now(),
+        shellper_session_id: 'shellper-sess-1',
+        shellper_secret: 'a'.repeat(64),
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => String(p) === '/real/project');
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      // The row's persisted shellper identity reached the reconnect.
+      expect(mockReconnectSession).toHaveBeenCalledWith(
+        refusedId, pipeName, process.pid, expect.any(Number), undefined,
+        { shellperSessionId: 'shellper-sess-1', secret: 'a'.repeat(64) },
+      );
+      // Never signaled: the live pid is not this row's shellper.
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      // Row deleted despite the live pid.
+      expect(mockDbRun).toHaveBeenCalledWith(refusedId);
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('refused reconnect on identity'));
+    });
+
+    it('deletes an identity-refused row without signaling its live pid — on-the-fly (Spec 1658)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const refusedId = 'spec-1658-refused-otf-session';
+      const pipeName = '\\\\.\\pipe\\codev-shellper-user-0001';
+
+      const mockReconnectSession = vi.fn(async () => ({ identityRefused: true as const, reason: 'pipe does not exist' }));
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: refusedId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-refused-otf',
+        pid: process.pid,
+        shellper_socket: pipeName,
+        shellper_pid: process.pid,
+        shellper_start_time: Date.now(),
+        shellper_session_id: 'shellper-sess-2',
+        shellper_secret: 'b'.repeat(64),
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => String(p) === '/real/project');
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { getTerminalsForWorkspace: getTerms } = await import('../servers/tower-terminals.js');
+      await getTerms('/real/project', 'http://proxy');
+
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(mockDbRun).toHaveBeenCalledWith(refusedId);
+      expect(deps.log).not.toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+    });
+
+    // Bugfix #1686 (socket-absent edge, #1693 ruling): the sole proof of death
+    // is the pid being down. A live pid whose socket FILE is absent — the same
+    // transient-failure class (fd pressure / hiccup) that fails the reconnect —
+    // must still be preserved, never signaled. This closes the issue's internal
+    // "AND/OR socket absent" ambiguity in favor of its "a live pid is never
+    // signaled" invariant. Would SIGTERM + delete under the earlier
+    // shellperAlive && socketPresent guard.
+    it('leaves a live-pid row untouched even when its socket file is absent — reconcile (#1686)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const liveId = 'bugfix-1686-socketgone-session';
+      const socketPath = '/tmp/shellper-bugfix-1686-gone.sock';
+      // A genuine live shellper: its recorded start time matches the live pid's (#1877).
+      const liveStartTime = await realStartTime(process.pid);
+
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: liveId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-socketgone',
+        pid: process.pid,
+        shellper_socket: socketPath,
+        shellper_pid: process.pid,
+        shellper_start_time: liveStartTime,
+        created_at: new Date().toISOString(),
+      }]);
+
+      // Socket FILE is ABSENT (returns false), but the pid is alive.
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        return false; // socket file gone, config lookups false
+      });
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(mockDbRun).not.toHaveBeenCalledWith(liveId);
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+    });
+
+    // Same socket-absent edge at the on-the-fly sibling site.
+    it('leaves a live-pid row untouched even when its socket file is absent — on-the-fly (#1686)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const liveId = 'bugfix-1686-socketgone-otf';
+      const socketPath = '/tmp/shellper-bugfix-1686-gone-otf.sock';
+      // A genuine live shellper: its recorded start time matches the live pid's (#1877).
+      const liveStartTime = await realStartTime(process.pid);
+
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: liveId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-socketgone-otf',
+        pid: process.pid,
+        shellper_socket: socketPath,
+        shellper_pid: process.pid,
+        shellper_start_time: liveStartTime,
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        return false; // socket file gone
+      });
+
+      const realKill = process.kill.bind(process);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (signal === 0 || signal === undefined) return realKill(pid, signal);
+        return true;
+      }) as typeof process.kill);
+
+      const { getTerminalsForWorkspace: getTerms } = await import('../servers/tower-terminals.js');
+      await getTerms('/real/project', 'http://proxy');
+
+      expect(killSpy).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(mockDbRun).not.toHaveBeenCalledWith(liveId);
+      expect(deps.log).toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+    });
+
+    // Bugfix #1686 (other direction): the guard must NOT over-preserve. A
+    // shellper row whose pid is genuinely DEAD is still swept — deleted as
+    // before. Without this, an over-broad guard (`if (shellper_socket) continue`)
+    // would pass the rest of the suite unnoticed. Here the guard's shellperAlive
+    // is false (dead pid), so Phase 2 falls through to the DELETE.
+    it('still deletes a shellper row whose pid is dead (#1686)', async () => {
+      onTestFinished(() => vi.restoreAllMocks());
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      const deadId = 'bugfix-1686-dead-session';
+      const deadPid = 2147483646; // no such process → processExists() === false
+
+      const mockReconnectSession = vi.fn(async () => null);
+      const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+      initTerminals(deps);
+
+      mockDbAll.mockReturnValue([{
+        id: deadId,
+        workspace_path: '/real/project',
+        type: 'builder',
+        role_id: 'builder-dead',
+        pid: deadPid,
+        shellper_socket: '/tmp/shellper-bugfix-1686-dead.sock',
+        shellper_pid: deadPid,
+        shellper_start_time: Date.now(),
+        created_at: new Date().toISOString(),
+      }]);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        return false;
+      });
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      // Dead pid → not preserved → row is deleted (DELETE run with the id).
+      expect(mockDbRun).toHaveBeenCalledWith(deadId);
+    });
+
+    // Bugfix #1877: after a reboot a row's shellper pid can be reused by an
+    // unrelated process. The pid is alive, so the #1686 guard alone kept the row
+    // forever and retried it on every pass. A recorded start time that does not
+    // match the live process's is proof the pid is not our shellper: the row is
+    // deleted, and the pid (someone else's) is never signaled. Shellper rows
+    // persist `pid == shellper_pid`, so the stale-row SIGTERM branch must not be
+    // reached either. Fails without the fix (row kept with the WARN).
+    // Spec 1658: reuse is proven by a start-time mismatch, which Windows cannot read
+    // here (its reconnect identity is the WELCOME check instead).
+    describe.skipIf(process.platform === 'win32')('reused shellper pid (#1877)', () => {
+      const reusedId = 'bugfix-1877-reused-session';
+      const socketPath = '/tmp/shellper-bugfix-1877.sock';
+
+      async function setUpReusedPidRow(): Promise<{ deps: TerminalDeps; killSpy: ReturnType<typeof vi.spyOn> }> {
+        mockDbRun.mockReset();
+        mockDbAll.mockReset();
+        mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+        const mockReconnectSession = vi.fn(async () => null);
+        const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+        initTerminals(deps);
+
+        // process.pid is alive (processExists() === true), but the row recorded a
+        // shellper that started a day before this process did: the pid was reused.
+        const recordedStartTime = (await realStartTime(process.pid)) - 24 * 60 * 60 * 1000;
+        mockDbAll.mockReturnValue([{
+          id: reusedId,
+          workspace_path: '/real/project',
+          type: 'architect',
+          role_id: 'guidebook',
+          pid: process.pid,
+          shellper_socket: socketPath,
+          shellper_pid: process.pid,
+          shellper_start_time: recordedStartTime,
+          created_at: new Date().toISOString(),
+        }]);
+
+        vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => String(p) === '/real/project');
+
+        const realKill = process.kill.bind(process);
+        const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+          if (signal === 0 || signal === undefined) return realKill(pid, signal);
+          return true;
+        }) as typeof process.kill);
+        return { deps, killSpy };
+      }
+
+      function expectDeletedUnsignaled(deps: TerminalDeps, killSpy: ReturnType<typeof vi.spyOn>): void {
+        expect(mockDbRun).toHaveBeenCalledWith(reusedId);
+        const signals = killSpy.mock.calls.filter(([, signal]) => signal !== 0 && signal !== undefined);
+        expect(signals).toEqual([]);
+        expect(deps.log).toHaveBeenCalledWith('INFO', expect.stringContaining(`pid ${process.pid} was reused`));
+        expect(deps.log).not.toHaveBeenCalledWith('WARN', expect.stringContaining('leaving row untouched'));
+      }
+
+      it('reconcile deletes the row without signaling the pid', async () => {
+        onTestFinished(() => vi.restoreAllMocks());
+        const { deps, killSpy } = await setUpReusedPidRow();
+
+        const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+        await reconcileTerminalSessions();
+
+        expectDeletedUnsignaled(deps, killSpy);
+      });
+
+      it('on-the-fly reconnect deletes the row without signaling the pid', async () => {
+        onTestFinished(() => vi.restoreAllMocks());
+        const { deps, killSpy } = await setUpReusedPidRow();
+
+        const { getTerminalsForWorkspace: getTerms } = await import('../servers/tower-terminals.js');
+        await getTerms('/real/project', 'http://proxy');
+
+        expectDeletedUnsignaled(deps, killSpy);
+      });
+    });
+
     // =========================================================================
     // Spec 786 Phase 2 — Identity preservation on shellper auto-restart
     // =========================================================================
@@ -852,7 +1309,7 @@ describe('tower-terminals', () => {
           return null; // stale — phase 2 cares only about restartOptions construction
         });
 
-        const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+        const deps = makeDeps({ towerPort: 4242, shellperManager: { reconnectSession: mockReconnectSession } as any });
         initTerminals(deps);
 
         mockDbAll.mockReturnValue([{
@@ -879,6 +1336,9 @@ describe('tower-terminals', () => {
 
         expect(capturedRestartOptions).not.toBeNull();
         expect(capturedRestartOptions.env.CODEV_ARCHITECT_NAME).toBe('ob-refine');
+        // Spec 1595: the workspace travels beside the name, with Tower's port.
+        expect(capturedRestartOptions.env.CODEV_ARCHITECT_WORKSPACE).toBe('/real/project');
+        expect(capturedRestartOptions.env.CODEV_TOWER_PORT).toBe('4242');
       });
 
       it('falls back to CODEV_ARCHITECT_NAME=main when role_id is null (legacy rows)', async () => {
@@ -961,7 +1421,7 @@ describe('tower-terminals', () => {
           return null; // stale — phase 2 cares only about restartOptions construction
         });
 
-        const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+        const deps = makeDeps({ towerPort: 4242, shellperManager: { reconnectSession: mockReconnectSession } as any });
         initTerminals(deps);
 
         // getTerminalSessionsForWorkspace queries via mockDbAll. Return a
@@ -990,6 +1450,8 @@ describe('tower-terminals', () => {
         expect(mockReconnectSession).toHaveBeenCalledTimes(1);
         expect(capturedRestartOptions).not.toBeNull();
         expect(capturedRestartOptions.env.CODEV_ARCHITECT_NAME).toBe('team-a');
+        expect(capturedRestartOptions.env.CODEV_ARCHITECT_WORKSPACE).toBe('/real/project');
+        expect(capturedRestartOptions.env.CODEV_TOWER_PORT).toBe('4242');
       });
 
       it('does not set CODEV_ARCHITECT_NAME for non-architect sessions (builders/shells)', async () => {
@@ -1056,7 +1518,9 @@ describe('tower-terminals', () => {
     function setupWorkspaceWithArchitects(names: string[]) {
       const deps = makeDeps();
       initTerminals(deps);
-      const wsPath = '/real/project';
+      // Host-resolved: the entry is keyed by this path and the read normalizes
+      // it, which on Windows (not on disk, so `resolve`) prefixes the drive.
+      const wsPath = path.resolve('/real/project');
       vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
         if (String(p) === wsPath) return true;
         return false;

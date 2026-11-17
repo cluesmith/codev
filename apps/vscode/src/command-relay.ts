@@ -51,8 +51,10 @@ const VERB_COMMANDS: Record<string, string> = {
   'diff-next-file': 'codev.diffNextFile',
   'diff-prev-file': 'codev.diffPreviousFile',
   'diff-first-file': 'codev.diffFirstFile',
-  'diff-next-hunk': 'workbench.action.compareEditor.nextChange',
-  'diff-prev-hunk': 'workbench.action.compareEditor.previousChange',
+  // Viewport-anchored wrappers of the built-in compareEditor next/previousChange
+  // (#1546): stepping continues from where the reviewer scrolled.
+  'diff-next-hunk': 'codev.diffNextHunk',
+  'diff-prev-hunk': 'codev.diffPrevHunk',
   'diff-first-hunk': 'codev.diffFirstHunk',
   // Viewport scroll of the focused editor (the Scroll dial). Args carry the
   // built-in editorScroll options { to, by, value, revealCursor }.
@@ -61,6 +63,10 @@ const VERB_COMMANDS: Record<string, string> = {
   'focus-workspace': 'codev.focusWorkspaceWindow',
   'open-architect-terminal': 'codev.openArchitectTerminal',
   'open-builder-terminal': 'codev.openBuilderTerminal',
+  // Cycle agent terminals in the sidebar Agents order (#1563). No args — the
+  // command reads VSCode's own active-terminal cursor; the deck is a pure trigger.
+  'focus-next-agent': 'codev.focusNextAgentTerminal',
+  'focus-prev-agent': 'codev.focusPreviousAgentTerminal',
   'send-message': 'codev.sendMessage',
   'refresh-overview': 'codev.refreshOverview',
   'new-shell': 'codev.newShell',

@@ -1,0 +1,229 @@
+{
+  "host": {
+    "appName": "Codev",
+    "version": "1.138.0"
+  },
+  "routes": {
+    "DA-diff-reveal-focusReply": {
+      "error": null,
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-abdc9742-c31c-4184-896d-d47e63e4d3c9-1.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "submit",
+          "text": "DA",
+          "onOwnedThread": true
+        }
+      ]
+    },
+    "DB-diff-draft-expanded": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159328864.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "saveDraft",
+          "text": "DB",
+          "onOwnedThread": true,
+          "onOwnedComment": true
+        }
+      ],
+      "tabsBefore": 1,
+      "tabsAfter": 1
+    },
+    "DH0-diff-create-then-addComment": {
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample3.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "RB-draft-expanded-x5-short-wait": [
+      {
+        "focused": true,
+        "ok": true
+      },
+      {
+        "focused": true,
+        "ok": true
+      },
+      {
+        "focused": true,
+        "ok": true
+      },
+      {
+        "focused": true,
+        "ok": true
+      },
+      {
+        "focused": true,
+        "ok": true
+      }
+    ],
+    "RA-reveal-x5-no-wait": [
+      {
+        "error": null,
+        "focused": true,
+        "ok": true
+      },
+      {
+        "error": null,
+        "focused": true,
+        "ok": true
+      },
+      {
+        "error": null,
+        "focused": true,
+        "ok": true
+      },
+      {
+        "error": null,
+        "focused": true,
+        "ok": true
+      },
+      {
+        "error": null,
+        "focused": true,
+        "ok": true
+      }
+    ],
+    "EB-draft-escape-then-dispose": {
+      "afterEscape": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159355437.md"
+      },
+      "submitAfterEscapeArrivals": 1,
+      "discard": {
+        "tabsBefore": 1,
+        "tabsAfter": 1,
+        "hostStillOpen": true,
+        "activeAfter": "file"
+      }
+    },
+    "H0a-create-expanded-then-addComment-immediately": {
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample7.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "H0b-create-expanded-wait-mount-then-addComment": {
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "H0c-create-collapsed-wait-mount-then-addComment": {
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample2.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "CTRL-shipped-addComment-only": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-543d304c-f52c-47e6-aadf-c9f325eefcd7-12.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "submit",
+          "text": "CTRL",
+          "onOwnedThread": false
+        }
+      ]
+    },
+    "C-create-then-focusCommentOnCurrentLine": {
+      "error": null,
+      "focus": {
+        "activeScheme": "file",
+        "activeUri": "file://codev/experiments/1560-thread-owning-open-path/probe/ws/sample4.txt"
+      },
+      "typed": false,
+      "arrivals": []
+    },
+    "A1-create-then-reveal-focusReply": {
+      "error": null,
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-6a13e2e0-0322-47b2-87fc-d3234b9737b0-14.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "submit",
+          "text": "A1",
+          "onOwnedThread": true
+        }
+      ]
+    },
+    "A1-discard": {
+      "error": null,
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment://probe-1560/codev-probe.probe-1560/commentinput-fa3018ac-8638-486d-8ceb-038c5cbf9b97-15.md"
+      },
+      "discard": {
+        "tabsBefore": 1,
+        "tabsAfter": 1,
+        "hostStillOpen": true,
+        "activeAfter": "file"
+      },
+      "postDisposeSubmitArrivals": 0
+    },
+    "B1-draft-collapsed-wait-then-expand": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159377545.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "saveDraft",
+          "text": "B1",
+          "onOwnedThread": true,
+          "onOwnedComment": true
+        }
+      ]
+    },
+    "B2-draft-created-expanded": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159380684.md"
+      },
+      "typed": true,
+      "arrivals": [
+        {
+          "kind": "saveDraft",
+          "text": "B2",
+          "onOwnedThread": true,
+          "onOwnedComment": true
+        }
+      ]
+    },
+    "B1-discard": {
+      "focus": {
+        "activeScheme": "comment",
+        "activeUri": "comment:/commentinput-1-1791159383217.md"
+      },
+      "discard": {
+        "tabsBefore": 1,
+        "tabsAfter": 1,
+        "hostStillOpen": true,
+        "activeAfter": "file"
+      },
+      "postDisposeSubmitArrivals": 0
+    }
+  }
+}

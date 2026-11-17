@@ -18,6 +18,8 @@ import {
   validateResumeWorktree, initPorchInWorktree, type GitHubIssue,
 } from '../commands/spawn-worktree.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
+import { join, resolve } from 'node:path';
+import { LIFECYCLE_REPORTER_SETTINGS_NAME, lifecycleReporterDir } from '../utils/lifecycle-reporter.js';
 // node:fs is mocked below; import writeFileSync so resume-script assertions can
 // read its captured calls without a per-test dynamic import.
 import { writeFileSync } from 'node:fs';
@@ -71,7 +73,8 @@ vi.mock('../../lib/forge.js', () => ({
 }));
 
 // Mock the harness resolution to return claude harness by default
-import { CLAUDE_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
+import { CLAUDE_HARNESS, CODEX_HARNESS, OPENCODE_HARNESS, toShellPath } from '../utils/harness.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 const getBuilderHarnessMock = vi.fn(() => CLAUDE_HARNESS);
 const getWorktreeConfigMock = vi.fn(() => ({ symlinks: [], postSpawn: [], devCommand: null, devUrls: [] }));
 vi.mock('../utils/config.js', () => ({
@@ -96,6 +99,34 @@ vi.mock('../lib/tower-client.js', async (importOriginal) => {
     getTowerClient: () => ({ createTerminal: createTerminalMock }),
   };
 });
+
+/**
+ * The launch-script and link tests below assert the POSIX branch (the script a
+ * POSIX host writes, the `symlinkSync` call POSIX makes), so they pin the
+ * platform seam to linux; on a Windows host that branch would otherwise resolve
+ * Git Bash and take the junction/hard-link path. The Windows branches are
+ * covered by windows-launch-sites.test.ts and worktree-links.test.ts.
+ */
+function pinPosixHost(): void {
+  beforeEach(() => {
+    forceHostPlatform('linux');
+  });
+}
+
+/** The product resolves paths with node:path, so expected paths are host-shaped. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** The sibling temporary file syncLocalConfigSnapshot writes before its rename. */
+function snapshotTemporary(worktree: string): unknown {
+  const target = resolve(worktree, '.codev', 'config.local.json');
+  return expect.stringMatching(new RegExp(`^${escapeRegExp(target)}\\.tmp-`));
+}
+
+/** Spec 1595: the reporter fragment every Claude builder launch carries. */
+// The harness hands the settings path to bash in forward-slash form (toShellPath), as on Windows.
+const REPORTER_FRAGMENT = `--settings '${toShellPath(join(lifecycleReporterDir(), LIFECYCLE_REPORTER_SETTINGS_NAME))}'`;
 
 describe('spawn-worktree', () => {
   beforeEach(() => {
@@ -199,6 +230,8 @@ describe('spawn-worktree', () => {
   // =========================================================================
 
   describe('buildWorktreeLaunchScript', () => {
+    pinPosixHost();
+
     it('generates script without role', () => {
       const script = buildWorktreeLaunchScript('/tmp/worktree', 'claude', null);
       expect(script).toContain('#!/bin/bash');
@@ -228,6 +261,8 @@ describe('spawn-worktree', () => {
   // =========================================================================
 
   describe('buildWorktreeLaunchScript (opencode harness)', () => {
+    pinPosixHost();
+
     it('generates script with empty fragment for opencode', () => {
       getBuilderHarnessMock.mockReturnValueOnce(OPENCODE_HARNESS);
       const role = { content: 'You are a builder', source: 'codev' };
@@ -318,8 +353,8 @@ describe('spawn-worktree', () => {
       const role = { content: 'You are a builder', source: 'codev' };
       buildWorktreeLaunchScript('/tmp/worktree', 'claude', role);
       const written = vi.mocked(writeFileSync).mock.calls.map(c => String(c[0]));
-      expect(written.some(p => p.endsWith('.claude/settings.local.json'))).toBe(true);
-      expect(written.some(p => p.endsWith('.claude/hooks/worktree-write-guard.cjs'))).toBe(true);
+      expect(written.some(p => p.endsWith(join('.claude', 'settings.local.json')))).toBe(true);
+      expect(written.some(p => p.endsWith(join('.claude', 'hooks', 'worktree-write-guard.cjs')))).toBe(true);
     });
 
     it('installs the write-guard for claude even WITHOUT a role (#1018 — no-role spawn path)', async () => {
@@ -329,8 +364,8 @@ describe('spawn-worktree', () => {
       const { writeFileSync } = await import('node:fs');
       buildWorktreeLaunchScript('/tmp/worktree', 'claude', null);
       const written = vi.mocked(writeFileSync).mock.calls.map(c => String(c[0]));
-      expect(written.some(p => p.endsWith('.claude/settings.local.json'))).toBe(true);
-      expect(written.some(p => p.endsWith('.claude/hooks/worktree-write-guard.cjs'))).toBe(true);
+      expect(written.some(p => p.endsWith(join('.claude', 'settings.local.json')))).toBe(true);
+      expect(written.some(p => p.endsWith(join('.claude', 'hooks', 'worktree-write-guard.cjs')))).toBe(true);
     });
   });
 
@@ -346,6 +381,8 @@ describe('spawn-worktree', () => {
   // =========================================================================
 
   describe('startBuilderSession resume script (Issue #929)', () => {
+    pinPosixHost();
+
     function findScript(): string | undefined {
       const writeCalls = vi.mocked(writeFileSync).mock.calls;
       const scriptCall = writeCalls.find(
@@ -358,6 +395,85 @@ describe('spawn-worktree', () => {
     function launcherBody(script: string, name: 'entry' | 'pinned' | 'unpinned' | 'resume'): string | undefined {
       return script.match(new RegExp(`codev_launch_${name}\\(\\) \\{\\n(.*)\\n\\}`))?.[1].trim();
     }
+
+    // Issue #1783: the builder's identity travels in its environment, so `afx send`
+    // resolves it from any cwd — fresh spawns and resumes alike.
+    it.each([
+      ['fresh', undefined],
+      ['resume', { sessionId: 'abc-1234-uuid', scriptFragment: "--resume 'abc-1234-uuid'" }],
+    ])('%s → exports CODEV_BUILDER_WORKTREE before launching the agent', async (_label, resume) => {
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'bugfix-1783', "/tmp/ws/.builders/it's", 'claude',
+        'PROMPT', 'ROLE', 'codev', resume,
+      );
+      const script = findScript()!;
+      const exportLine = `export CODEV_BUILDER_WORKTREE='/tmp/ws/.builders/it'\\''s'`;
+      expect(script).toContain(exportLine);
+      expect(script.indexOf(exportLine)).toBeLessThan(script.indexOf('codev_launch_entry()'));
+    });
+
+    // Spec 1595 (Test 7): the lifecycle reporter rides on the base command, so
+    // every launcher a Claude builder script can run carries it exactly once.
+    it.each([
+      ['fresh', undefined, ['entry', 'pinned', 'unpinned', 'resume']],
+      ['resume', { sessionId: 'abc-1234-uuid', scriptFragment: "--resume 'abc-1234-uuid'" }, ['entry', 'pinned', 'unpinned', 'resume']],
+    ] as const)('%s → every Claude launcher carries the lifecycle reporter once', async (_label, resume, launchers) => {
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'spir-1595', '/tmp/ws/.builders/spir-1595', 'claude',
+        'PROMPT', 'ROLE', 'codev', resume,
+      );
+      const script = findScript()!;
+      for (const name of launchers) {
+        const body = launcherBody(script, name);
+        expect(body, name).toBeDefined();
+        expect(body!.startsWith(`claude ${REPORTER_FRAGMENT}`), name).toBe(true);
+        expect(body!.split('--settings').length - 1, name).toBe(1);
+      }
+    });
+
+    it('no role → the Claude launchers still carry the lifecycle reporter', async () => {
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'spir-1595b', '/tmp/ws/.builders/spir-1595b', 'claude',
+        'PROMPT', null, 'none',
+      );
+      const script = findScript()!;
+      for (const name of ['entry', 'pinned', 'unpinned', 'resume'] as const) {
+        expect(launcherBody(script, name)!.startsWith(`claude ${REPORTER_FRAGMENT}`), name).toBe(true);
+      }
+    });
+
+    it('worktree-mode Claude script carries the lifecycle reporter on every launcher', () => {
+      const script = buildWorktreeLaunchScript('/tmp/ws/.builders/task-x', 'claude', { content: 'ROLE', source: 'codev' });
+      for (const name of ['entry', 'pinned', 'unpinned', 'resume'] as const) {
+        expect(launcherBody(script, name)!.startsWith(`claude ${REPORTER_FRAGMENT}`), name).toBe(true);
+      }
+    });
+
+    it.each([
+      ['codex', CODEX_HARNESS],
+      ['opencode', OPENCODE_HARNESS],
+    ] as const)('%s builder script carries no lifecycle reporter', async (name, harness) => {
+      getBuilderHarnessMock.mockReturnValue(harness);
+      try {
+        await startBuilderSession(
+          { workspaceRoot: '/tmp/ws' } as any,
+          `spir-${name}`, `/tmp/ws/.builders/spir-${name}`, name,
+          'PROMPT', 'ROLE', 'codev',
+        );
+        expect(findScript()).not.toContain('--settings');
+        expect(buildWorktreeLaunchScript('/tmp/ws/.builders/task-y', name, null)).not.toContain('--settings');
+      } finally {
+        getBuilderHarnessMock.mockReturnValue(CLAUDE_HARNESS);
+      }
+    });
+
+    it('worktree-mode script exports CODEV_BUILDER_WORKTREE too', () => {
+      const script = buildWorktreeLaunchScript('/tmp/ws/.builders/task-x', 'claude', null);
+      expect(script).toContain(`export CODEV_BUILDER_WORKTREE='/tmp/ws/.builders/task-x'`);
+    });
 
     it('resume → entry command is the escaped scriptFragment, with no role injection', async () => {
       const resume = { sessionId: 'abc-1234-uuid', scriptFragment: "--resume 'abc-1234-uuid'" };
@@ -374,7 +490,7 @@ describe('spawn-worktree', () => {
       // fresh command, so this asserts on the *entry* launcher specifically:
       // the resumed conversation carries its own system prompt, so role
       // injection and the initial prompt stay off this path.
-      expect(launcherBody(script!, 'entry')).toBe("claude --resume 'abc-1234-uuid'");
+      expect(launcherBody(script!, 'entry')).toBe(`claude ${REPORTER_FRAGMENT} --resume 'abc-1234-uuid'`);
       expect(script).not.toContain('--resume,');
       expect(script).toContain('while true');
       // Resume never rewrites the prompt file: `afx refresh` reads the spawn-time
@@ -571,12 +687,12 @@ describe('spawn-worktree', () => {
       await createWorktree(config, 'my-branch', '/tmp/wt');
 
       expect(copyFileSync).toHaveBeenCalledWith(
-        '/projects/test/.codev/config.local.json',
-        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
+        resolve('/projects/test', '.codev', 'config.local.json'),
+        snapshotTemporary('/tmp/wt'),
       );
       expect(renameSync).toHaveBeenCalledWith(
-        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
-        '/tmp/wt/.codev/config.local.json',
+        snapshotTemporary('/tmp/wt'),
+        resolve('/tmp/wt', '.codev', 'config.local.json'),
       );
       expect(vi.mocked(renameSync).mock.invocationCallOrder[0])
         .toBeLessThan(vi.mocked(runStreaming).mock.invocationCallOrder[0]);
@@ -648,6 +764,66 @@ describe('spawn-worktree', () => {
         expect.objectContaining({ CODEV_SEARCH_QUERY: expect.stringContaining('#42') }),
         expect.any(Object),
       );
+    });
+
+    it('ignores merged PRs referencing the issue (#1637)', async () => {
+      // pr-search runs --state all (#759), so merged PRs come back too. The guard
+      // must not count them as open, else it blocks spawns on already-resolved work.
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([
+        { number: 4747, headRefName: 'fix-a', state: 'MERGED' },
+        { number: 4766, headRefName: 'fix-b', state: 'CLOSED' },
+      ]);
+      const { fatal } = await import('../utils/logger.js');
+      await expect(
+        checkBugfixCollisions(4750, '/tmp/wt', baseIssue, false),
+      ).resolves.toBeUndefined();
+      expect(fatal).not.toHaveBeenCalled();
+    });
+
+    it('still fatals for an open PR referencing the issue (#1637)', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([{ number: 99, headRefName: 'fix-42', state: 'OPEN' }]);
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
+    });
+
+    it('counts only the open PRs when results mix open and merged (#1637)', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([
+        { number: 10, headRefName: 'merged', state: 'MERGED' },
+        { number: 11, headRefName: 'open', state: 'OPEN' },
+      ]);
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('Found 1 open PR(s)'));
+    });
+
+    it('treats a missing state as open for stale pr-search overrides (#1637)', async () => {
+      // A project-local pr-search.sh predating the state field returns no state;
+      // the guard keeps the conservative pre-fix behavior rather than silently
+      // dropping the collision check.
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([{ number: 99, headRefName: 'fix-42' }]);
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
+    });
+
+    it('treats a blank state as open (gitlab pr-search leaves it empty) (#1637)', async () => {
+      // gitlab/pr-search.sh maps a missing glab state to "" via jq; the guard must
+      // treat that the same as absent — conservatively counting it as open.
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([{ number: 99, headRefName: 'fix-42', state: '' }]);
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
     });
 
     it('warns when issue is already closed', async () => {
@@ -862,12 +1038,12 @@ describe('spawn-worktree', () => {
       await createWorktreeFromBranch(config, 'my-branch', '/tmp/wt');
 
       expect(copyFileSync).toHaveBeenCalledWith(
-        '/projects/test/.codev/config.local.json',
-        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
+        resolve('/projects/test', '.codev', 'config.local.json'),
+        snapshotTemporary('/tmp/wt'),
       );
       expect(renameSync).toHaveBeenCalledWith(
-        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
-        '/tmp/wt/.codev/config.local.json',
+        snapshotTemporary('/tmp/wt'),
+        resolve('/tmp/wt', '.codev', 'config.local.json'),
       );
       expect(vi.mocked(renameSync).mock.invocationCallOrder[0])
         .toBeLessThan(vi.mocked(runStreaming).mock.invocationCallOrder[0]);
@@ -1099,6 +1275,7 @@ describe('spawn-worktree', () => {
 
   describe('symlinkConfigFiles', () => {
     const config = { workspaceRoot: '/projects/test' } as any;
+    pinPosixHost();
 
     it('symlinks .env and .codev/config.json when they exist at root', async () => {
       const { existsSync, symlinkSync, mkdirSync } = await import('node:fs');
@@ -1161,9 +1338,13 @@ describe('spawn-worktree', () => {
 
       expect(globSyncMock).toHaveBeenCalledTimes(2);
       expect(symlinkSync).toHaveBeenCalledTimes(3);
-      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/.env.local', '/tmp/wt/.env.local');
-      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/packages/web/.env', '/tmp/wt/packages/web/.env');
-      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/packages/api/.env', '/tmp/wt/packages/api/.env');
+      expect(symlinkSync).toHaveBeenCalledWith(resolve('/projects/test', '.env.local'), resolve('/tmp/wt', '.env.local'));
+      expect(symlinkSync).toHaveBeenCalledWith(
+        resolve('/projects/test', 'packages/web/.env'), resolve('/tmp/wt', 'packages/web/.env'),
+      );
+      expect(symlinkSync).toHaveBeenCalledWith(
+        resolve('/projects/test', 'packages/api/.env'), resolve('/tmp/wt', 'packages/api/.env'),
+      );
       // mkdirSync called for the nested dirs (packages/web, packages/api)
       expect(mkdirSync).toHaveBeenCalled();
     });
@@ -1212,8 +1393,8 @@ describe('spawn-worktree', () => {
       expect(globSyncMock).not.toHaveBeenCalled();
       expect(symlinkSync).toHaveBeenCalledTimes(1);
       expect(symlinkSync).toHaveBeenCalledWith(
-        '/projects/test/.local-user-data',
-        '/tmp/wt/.local-user-data',
+        resolve('/projects/test', '.local-user-data'),
+        resolve('/tmp/wt', '.local-user-data'),
         'dir',
       );
     });
@@ -1232,8 +1413,8 @@ describe('spawn-worktree', () => {
       // Link still created (no throw); no 'dir' type since the source isn't a dir.
       expect(symlinkSync).toHaveBeenCalledTimes(1);
       expect(symlinkSync).toHaveBeenCalledWith(
-        '/projects/test/.local-user-data',
-        '/tmp/wt/.local-user-data',
+        resolve('/projects/test', '.local-user-data'),
+        resolve('/tmp/wt', '.local-user-data'),
         undefined,
       );
     });

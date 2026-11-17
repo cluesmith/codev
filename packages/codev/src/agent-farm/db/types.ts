@@ -93,6 +93,58 @@ export type MailboxStatus = 'held' | 'delivered' | 'superseded' | 'dismissed';
 export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
 
 /**
+ * The render gate's classification detail behind a `busy` hold (Issue #1482). Persisted
+ * beside {@link MailboxReason} so every operator surface can tell the two apart:
+ *   - `user-text`           — a draft or menu occupies the composer. A human is at the line;
+ *                             this is the SAFE, intended hold and it clears when they finish.
+ *   - `no-region-end`       — a composer marker with no rule/status line beneath it to bound
+ *                             the region (a partial/mid-repaint frame, or a mirror rendered at
+ *                             dims the real TUI never adopted).
+ *   - `no-composer-marker`  — no recognized marker at all (a wrapper/boot screen, a drifted
+ *                             profile, or an unrenderable frame).
+ *   - `recent-input`        — the terminal saw INPUT too recently to write onto (Issue #1473):
+ *                             either it landed while the gate was classifying, or the
+ *                             input-settle interval has not elapsed. "Input" is whatever
+ *                             survives `stripTerminalReplies` on a write reaching the PTY
+ *                             under `PtySession.write()`'s default `'external'` origin — a
+ *                             human's keystrokes, and equally an ungated `--interrupt`/
+ *                             `--escape`, which is why the operator wording says "input"
+ *                             rather than "typing"; a chunk that is nothing but a terminal
+ *                             REPLY moves neither signal. Like `user-text` this
+ *                             is a SAFE hold that clears on its own — the same someone-else-is-
+ *                             writing class, caught one beat earlier, before the TUI has echoed
+ *                             anything for the classifier to see.
+ *   - `composer-redraw`     — the composer is EMPTY but its rendered region changed within the
+ *                             settle window (Issue #1664): a turn-end box redraw, a rotating
+ *                             placeholder, a resize, or an interrupt clearing the line. The
+ *                             recipient's own output ELSEWHERE on the screen — a spinner, a
+ *                             streaming transcript — is deliberately NOT this: writing onto an
+ *                             empty composer while the agent talks is safe and intended, since
+ *                             claude/codex queue input received mid-turn. Self-clearing, like
+ *                             `user-text` and `recent-input`; it resolves about a settle after
+ *                             the composer stops moving.
+ * The two can't-verify values are the DEFECT class: the classifier could not verify anything,
+ * so the mail will not deliver on its own. `GateVerdict.detail`'s fourth value, `empty`, is
+ * never persisted — a clean verdict delivers the row (and delivery nulls both columns).
+ *
+ * `recent-input` and `composer-redraw` are deliberately NOT part of {@link isUnverifiableVerdict}'s
+ * set: escalating either would false-alarm on every ordinary typist and every ordinary repaint. That predicate is an allow-list, so the value is
+ * correctly inert there by construction rather than by an edit.
+ *
+ * Null for every non-gate hold (`no-live-pty`, `no-profile`) and for the post-classify
+ * token re-hold, so a stale detail can never outlive the verdict that produced it.
+ *
+ * The DB column carries NO CHECK constraint (see `GLOBAL_SCHEMA` / migration v18); this type
+ * is the enforcement.
+ */
+export type MailboxGateDetail =
+  | 'user-text'
+  | 'no-region-end'
+  | 'no-composer-marker'
+  | 'recent-input'
+  | 'composer-redraw';
+
+/**
  * Database row type for the mailbox table (Spec 1313).
  *
  * Rows address AGENTS (`to_agent` within `workspace_path`), not PTYs, so a
@@ -113,6 +165,7 @@ export interface DbMailbox {
   no_enter: number;        // 0 | 1 (SQLite has no boolean)
   status: MailboxStatus;
   reason: MailboxReason | null;
+  detail: MailboxGateDetail | null;  // Issue #1482: the gate verdict behind a `busy` hold; null for non-gate holds and once delivered
   supersede_key: string | null;
   escalated: number;       // 0 | 1 — set once escalation age crossed (visibility only)
   not_before: number | null; // epoch ms; delayed-send due time (Spec 1313 round 3). null = deliver-ASAP; row is deliverable only when not_before IS NULL OR not_before <= now

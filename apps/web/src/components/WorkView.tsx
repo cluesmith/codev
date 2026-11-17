@@ -9,6 +9,7 @@ import { RecentlyClosedList } from './RecentlyClosedList.js';
 import { FileTree } from './FileTree.js';
 import { OpenFilesShellsSection } from './OpenFilesShellsSection.js';
 import { TipBanner } from './TipBanner.js';
+import { findBuilderTab } from '../lib/issueIds.js';
 
 interface WorkViewProps {
   state: DashboardState | null;
@@ -30,14 +31,8 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
   }, [onRefresh]);
 
   const handleOpenBuilder = useCallback((builder: OverviewBuilder) => {
-    // Find matching builder terminal tab by issue number or ID
-    const builderTab = state?.builders?.find(b => {
-      // Match by project ID in the terminal state
-      if (builder.issueId) {
-        return b.name?.includes(builder.issueId) || b.id?.includes(builder.issueId);
-      }
-      return b.id?.includes(builder.id) || b.name?.includes(builder.id);
-    });
+    // Find the builder's terminal tab: by roleId, else by issue number or ID.
+    const builderTab = findBuilderTab(builder, state?.builders);
     if (builderTab) {
       onSelectTab?.(builderTab.id);
     }
@@ -112,6 +107,13 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
           onSelectTab={id => onSelectTab?.(id)}
         />
 
+        {overview?.forgeStatus === 'rate-limited' && (
+          <p className="work-unavailable">
+            Forge rate limited — PRs, backlog and recently closed may be stale until{' '}
+            {overview.forgeResetAt ? new Date(overview.forgeResetAt).toLocaleTimeString() : 'the budget resets'}
+          </p>
+        )}
+
         {/* Needs Attention */}
         <section className="work-section">
           <h3 className="work-section-title">Needs Attention</h3>
@@ -121,6 +123,7 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
             <NeedsAttentionList
               prs={overview?.pendingPRs ?? []}
               builders={overview?.builders ?? []}
+              architects={overview?.architects ?? []}
             />
           )}
         </section>

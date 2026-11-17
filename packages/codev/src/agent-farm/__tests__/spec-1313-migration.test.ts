@@ -153,12 +153,13 @@ describe('Spec 1313 — mailbox table migration (v15) via runGlobalMigrations', 
     h.migrate();
 
     expect(h.tableExists('mailbox')).toBe(true);
-    // v15 creates the table; the same call then walks v16/v17, so `not_before`
-    // (v17) is present too — precisely the shape a real upgrade lands on.
+    // v15 creates the table; the same call then walks v16/v17/v18, so `not_before`
+    // (v17) and `detail` (v18) are present too — precisely the shape a real upgrade lands on.
     expect(h.columns('mailbox')).toEqual(
       [
         'body',
         'created_at',
+        'detail',
         'escalated',
         'formatted_message',
         'from_agent',
@@ -429,6 +430,201 @@ describe('Spec 1313 round 3 — mailbox not_before column migration (v17) via ru
         .map((c) => c.name)
         .sort();
       expect(freshCols).toContain('not_before');
+      expect(freshCols).toEqual(migratedCols);
+    } finally {
+      fresh.close();
+    }
+  });
+});
+
+/** The post-v17 mailbox shape: has `not_before`, no `detail` (that is v18). */
+const PRE_V18_MAILBOX_DDL = PRE_V17_MAILBOX_DDL.replace(
+  'escalated INTEGER NOT NULL DEFAULT 0,',
+  'escalated INTEGER NOT NULL DEFAULT 0,\n    not_before INTEGER,'
+);
+
+describe('Issue #1482 — mailbox detail column migration (v18) via runGlobalMigrations', () => {
+  const h = harness('.test-1482-v18-migration');
+
+  function buildPreV18Db(): void {
+    h.seedMarkers(17);
+    h.state.db.exec(PRE_V18_MAILBOX_DDL);
+  }
+
+  it('adds the detail column to a pre-v18 mailbox and records v18', () => {
+    buildPreV18Db();
+    expect(h.columns('mailbox')).not.toContain('detail');
+
+    h.migrate();
+
+    expect(h.columns('mailbox')).toContain('detail');
+    expect(h.state.db.prepare('SELECT version FROM _migrations WHERE version = 18').get()).toBeTruthy();
+  });
+
+  it('round-trips every gate detail, and defaults to null', () => {
+    buildPreV18Db();
+    h.migrate();
+
+    // The three not-clean details the gate can record. `empty` is the CLEAN verdict and never
+    // reaches a held row (a clean gate delivers it), so it is deliberately absent here.
+    for (const detail of ['user-text', 'no-region-end', 'no-composer-marker']) {
+      h.state.db
+        .prepare(
+          `INSERT INTO mailbox (id, workspace_path, to_agent, body, formatted_message, reason, detail, created_at, updated_at)
+           VALUES (?, '/ws', 'pir-1482', 'b', 'f', 'busy', ?, 1000, 1000)`
+        )
+        .run(detail, detail);
+      expect(
+        (h.state.db.prepare('SELECT detail FROM mailbox WHERE id = ?').get(detail) as { detail: string })
+          .detail
+      ).toBe(detail);
+    }
+
+    // A row written without the column — every pre-#1482 row, and every non-gate hold.
+    h.state.db
+      .prepare(
+        `INSERT INTO mailbox (id, workspace_path, to_agent, body, formatted_message, created_at, updated_at)
+         VALUES ('n', '/ws', 'pir-1482', 'b', 'f', 1000, 1000)`
+      )
+      .run();
+    expect(
+      (h.state.db.prepare("SELECT detail FROM mailbox WHERE id='n'").get() as { detail: string | null })
+        .detail
+    ).toBeNull();
+  });
+
+  it('accepts any string: the column carries NO CHECK, by design', () => {
+    // This is the deliberate asymmetry with the sibling `reason` column, and it is worth
+    // pinning rather than leaving as a silent property. SQLite cannot add a CHECK via ALTER
+    // TABLE, so a CHECK in GLOBAL_SCHEMA could not be reproduced by this migration — and a
+    // fresh install would then differ structurally from an upgraded one, which is exactly the
+    // convergence the suite below asserts. `MailboxGateDetail` is the enforcement instead.
+    buildPreV18Db();
+    h.migrate();
+    expect(() =>
+      h.state.db
+        .prepare(
+          `INSERT INTO mailbox (id, workspace_path, to_agent, body, formatted_message, detail, created_at, updated_at)
+           VALUES ('x', '/ws', 'pir-1482', 'b', 'f', 'not-a-real-detail', 1000, 1000)`
+        )
+        .run()
+    ).not.toThrow();
+  });
+
+  it('is idempotent: re-running does not throw, double-add, or duplicate the marker', () => {
+    buildPreV18Db();
+    h.migrate();
+    expect(() => h.migrate()).not.toThrow();
+    const count = h.state.db.prepare('SELECT COUNT(*) AS n FROM _migrations WHERE version = 18').get() as {
+      n: number;
+    };
+    expect(count.n).toBe(1);
+    expect(h.columns('mailbox').filter((c) => c === 'detail')).toHaveLength(1);
+  });
+
+  it('the PRAGMA gate skips the ALTER when detail already exists (fresh-install shape)', () => {
+    // Fresh install: GLOBAL_SCHEMA already created `detail`, but the v18 marker was not yet
+    // stamped. The gate must NOT attempt a duplicate ALTER (which SQLite would reject).
+    h.seedMarkers(17);
+    h.state.db.exec(
+      PRE_V18_MAILBOX_DDL.replace(
+        "reason TEXT CHECK(reason IN ('busy', 'no-profile', 'no-live-pty')),",
+        "reason TEXT CHECK(reason IN ('busy', 'no-profile', 'no-live-pty')),\n    detail TEXT,"
+      )
+    );
+    expect(h.columns('mailbox')).toContain('detail');
+
+    expect(() => h.migrate()).not.toThrow();
+    expect(h.state.db.prepare('SELECT version FROM _migrations WHERE version = 18').get()).toBeTruthy();
+  });
+
+  it('a fresh install (GLOBAL_SCHEMA) has detail, matching the migrated shape', () => {
+    buildPreV18Db();
+    h.migrate();
+    const migratedCols = h.columns('mailbox');
+
+    const fresh = new Database(resolve(h.state.testDir, 'fresh.db'));
+    try {
+      fresh.exec(GLOBAL_SCHEMA);
+      const freshCols = (
+        fresh.prepare("SELECT name FROM pragma_table_info('mailbox')").all() as Array<{ name: string }>
+      )
+        .map((c) => c.name)
+        .sort();
+      expect(freshCols).toContain('detail');
+      expect(freshCols).toEqual(migratedCols);
+    } finally {
+      fresh.close();
+    }
+  });
+});
+
+/** The post-v16 terminal_sessions shape: has `command`, no shellper identity columns (v19). */
+const PRE_V19_TERMINAL_SESSIONS_DDL = PRE_V16_TERMINAL_SESSIONS_DDL.replace(
+  '    cwd TEXT,',
+  '    cwd TEXT,\n    command TEXT,'
+);
+
+describe('Spec 1658 — shellper identity columns migration (v19) via runGlobalMigrations', () => {
+  const h = harness('.test-1658-v19-migration');
+
+  function buildPreV19Db(): void {
+    h.seedMarkers(18);
+    h.state.db.exec(PRE_V19_TERMINAL_SESSIONS_DDL);
+  }
+
+  it('adds shellper_session_id and shellper_secret to an existing table, keeping its rows', () => {
+    buildPreV19Db();
+    h.state.db
+      .prepare(
+        `INSERT INTO terminal_sessions (id, workspace_path, type, shellper_socket, shellper_pid, shellper_start_time, command)
+         VALUES ('t1', '/ws', 'builder', '/run/shellper-abc.sock', 42, 1000, 'claude')`
+      )
+      .run();
+    expect(h.columns('terminal_sessions')).not.toContain('shellper_secret');
+
+    h.migrate();
+
+    expect(h.columns('terminal_sessions')).toEqual(expect.arrayContaining(['shellper_session_id', 'shellper_secret']));
+    expect(h.state.db.prepare('SELECT version FROM _migrations WHERE version = 19').get()).toBeTruthy();
+    // Pre-v19 rows survive with both identity columns null (POSIX rows keep the basename fallback).
+    const row = h.state.db.prepare("SELECT * FROM terminal_sessions WHERE id = 't1'").get() as Record<string, unknown>;
+    expect(row.shellper_socket).toBe('/run/shellper-abc.sock');
+    expect(row.shellper_session_id).toBeNull();
+    expect(row.shellper_secret).toBeNull();
+  });
+
+  it('is idempotent and skips the ALTER when the columns already exist (fresh-install shape)', () => {
+    h.seedMarkers(18);
+    h.state.db.exec(
+      PRE_V19_TERMINAL_SESSIONS_DDL.replace(
+        '    command TEXT,',
+        '    command TEXT,\n    shellper_session_id TEXT,\n    shellper_secret TEXT,'
+      )
+    );
+    expect(() => h.migrate()).not.toThrow();
+    expect(() => h.migrate()).not.toThrow();
+    const count = h.state.db.prepare('SELECT COUNT(*) AS n FROM _migrations WHERE version = 19').get() as {
+      n: number;
+    };
+    expect(count.n).toBe(1);
+    expect(h.columns('terminal_sessions').filter((c) => c === 'shellper_secret')).toHaveLength(1);
+  });
+
+  it('a fresh install (GLOBAL_SCHEMA) has the identity columns, matching the migrated shape', () => {
+    buildPreV19Db();
+    h.migrate();
+    const migratedCols = h.columns('terminal_sessions');
+
+    const fresh = new Database(resolve(h.state.testDir, 'fresh.db'));
+    try {
+      fresh.exec(GLOBAL_SCHEMA);
+      const freshCols = (
+        fresh.prepare("SELECT name FROM pragma_table_info('terminal_sessions')").all() as Array<{ name: string }>
+      )
+        .map((c) => c.name)
+        .sort();
+      expect(freshCols).toEqual(expect.arrayContaining(['shellper_session_id', 'shellper_secret']));
       expect(freshCols).toEqual(migratedCols);
     } finally {
       fresh.close();

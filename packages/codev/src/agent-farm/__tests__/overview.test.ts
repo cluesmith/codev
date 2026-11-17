@@ -20,6 +20,7 @@ import {
   calculateProgress,
   calculateEvenProgress,
   detectBlocked,
+  detectBlockedGate,
   detectBlockedSince,
   computeIdleMs,
   derivePrReady,
@@ -45,6 +46,16 @@ const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchM
 
 vi.mock('../../lib/github.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/github.js')>();
+  // #1645: OverviewCache reads through fetchForOverview/overviewBackend; route
+  // each concept to the per-fetcher mocks so tests keep their mockResolvedValue
+  // idiom. A `null` from a mock is reported as a failed command.
+  const byConcept: Record<string, (cwd: string) => Promise<unknown>> = {
+    'pr-list': mockFetchPRList,
+    'issue-list': mockFetchIssueList,
+    'recently-closed': mockFetchRecentlyClosed,
+    'recently-merged': mockFetchMergedPRs,
+    'user-identity': mockFetchCurrentUser,
+  };
   return {
     ...actual,
     fetchPRList: mockFetchPRList,
@@ -52,6 +63,13 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
     fetchRecentlyClosed: mockFetchRecentlyClosed,
     fetchRecentMergedPRs: mockFetchMergedPRs,
     fetchCurrentUser: mockFetchCurrentUser,
+    overviewBackend: () => 'gh',
+    fetchForOverview: async (concept: string, cwd: string) => {
+      const data = await byConcept[concept](cwd);
+      return data === null
+        ? { data: null, error: { message: 'mock failure', stderr: '', exitCode: 1 } }
+        : { data, error: null };
+    },
   };
 });
 
@@ -67,6 +85,7 @@ vi.mock('../db/index.js', async (importOriginal) => {
 });
 
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
+import { buildAgentName } from '../utils/agent-names.js';
 
 // ============================================================================
 // Temp directory helper
@@ -571,6 +590,20 @@ describe('overview', () => {
       }))).toBe(90);
     });
 
+    it('drops a skipped plan phase from the progress count (#1900)', () => {
+      // 2 complete of the 4 phases still in the plan → 50 + 20.
+      expect(calculateProgress(makeParsed({
+        phase: 'implement',
+        planPhases: [
+          { id: 'p1', title: 'A', status: 'complete' },
+          { id: 'p2', title: 'B', status: 'skipped' },
+          { id: 'p3', title: 'C', status: 'complete' },
+          { id: 'p4', title: 'D', status: 'in_progress' },
+          { id: 'p5', title: 'E', status: 'pending' },
+        ],
+      }))).toBe(70);
+    });
+
     it('returns 92 for review phase (in progress)', () => {
       expect(calculateProgress(makeParsed({ phase: 'review' }))).toBe(92);
     });
@@ -757,6 +790,72 @@ describe('overview', () => {
           'plan-approval': '2026-01-02T00:00:00Z',
         },
       }))).toBe('spec review');
+    });
+
+    // #1777: EXPERIMENT's experiment-complete gate was outside the allowlist,
+    // so a lane held at it surfaced nowhere.
+    it('reports a pending experiment-complete gate parsed from status.yaml (#1777)', () => {
+      const parsed = parseStatusYaml([
+        "id: experiment-1560",
+        "title: spike",
+        "protocol: experiment",
+        "phase: analyze",
+        "gates:",
+        "  experiment-complete:",
+        "    status: pending",
+        "    requested_at: '2026-10-05T00:20:48Z'",
+        "",
+      ].join('\n'));
+      expect(detectBlocked(parsed)).toBe('experiment review');
+      expect(detectBlockedGate(parsed)).toBe('experiment-complete');
+      expect(detectBlockedSince(parsed)).toBe('2026-10-05T00:20:48Z');
+    });
+
+    it.each([
+      ['maintain-complete', 'maintenance review'],
+      ['scope-approval', 'scope review'],
+      ['research-complete', 'research review'],
+    ])('reports bundled protocol gate %s as "%s" (#1777)', (gate, label) => {
+      const parsed = makeParsed({
+        gates: { [gate]: 'pending' },
+        gateRequestedAt: { [gate]: '2026-10-05T00:00:00Z' },
+      });
+      expect(detectBlocked(parsed)).toBe(label);
+      expect(detectBlockedGate(parsed)).toBe(gate);
+    });
+
+    it('reports an unknown future gate with a label derived from its name (#1777)', () => {
+      const parsed = makeParsed({
+        gates: { 'security-approval': 'pending' },
+        gateRequestedAt: { 'security-approval': '2026-10-05T00:00:00Z' },
+      });
+      expect(detectBlocked(parsed)).toBe('security review');
+      expect(detectBlockedGate(parsed)).toBe('security-approval');
+      expect(detectBlockedSince(parsed)).toBe('2026-10-05T00:00:00Z');
+    });
+
+    it('prefers a known gate over an unknown one when both are pending (#1777)', () => {
+      const parsed = makeParsed({
+        gates: { 'security-approval': 'pending', 'pr': 'pending' },
+        gateRequestedAt: {
+          'security-approval': '2026-10-05T00:00:00Z',
+          'pr': '2026-10-05T01:00:00Z',
+        },
+      });
+      expect(detectBlockedGate(parsed)).toBe('pr');
+    });
+
+    it('does not double "review" in a derived label (#1777)', () => {
+      expect(detectBlocked(makeParsed({
+        gates: { 'code-review': 'pending' },
+        gateRequestedAt: { 'code-review': '2026-10-05T00:00:00Z' },
+      }))).toBe('code review');
+    });
+
+    it('does not report an unknown gate that is pending but not requested (#1777)', () => {
+      expect(detectBlockedGate(makeParsed({
+        gates: { 'experiment-complete': 'pending' },
+      }))).toBeNull();
     });
   });
 
@@ -1097,8 +1196,48 @@ describe('overview', () => {
       expect(extractProjectIdFromWorktreeName('worktree-foIg')).toBeNull();
     });
 
-    it('returns null for unknown prefixes', () => {
-      expect(extractProjectIdFromWorktreeName('unknown-123-slug')).toBeNull();
+    it('returns null for an unnumbered protocol-mode worktree', () => {
+      expect(extractProjectIdFromWorktreeName('experiment-AbCd')).toBeNull();
+    });
+
+    it.each([
+      ['experiment-1560', '1560'],
+      ['maintain-42-slug', '42'],
+      ['research-7', '7'],
+    ])('extracts bare numeric ID from other numbered protocol worktree %s (#1777)', (dir, id) => {
+      expect(extractProjectIdFromWorktreeName(dir)).toBe(id);
+    });
+
+    it('keeps all-digit task/worktree short ids in soft mode (#1777)', () => {
+      expect(extractProjectIdFromWorktreeName('task-1234')).toBeNull();
+      expect(extractProjectIdFromWorktreeName('worktree-1234')).toBeNull();
+    });
+
+    // #1740: tracker keys (Jira/Linear) as porch project ids.
+    it.each([
+      ['pir-ENG-123', 'ENG-123'],
+      ['pir-ENG-123-fix-login', 'ENG-123'],
+      ['spir-AB2_X-7-slug', 'AB2_X-7'],
+      ['aspir-eng-5', 'ENG-5'],
+      ['bugfix-ENG-123-fix-login', 'bugfix-ENG-123'],
+      ['bugfix-ENG-123', 'bugfix-ENG-123'],
+    ])('extracts the canonical key from tracker worktree %s (#1740)', (dir, id) => {
+      expect(extractProjectIdFromWorktreeName(dir)).toBe(id);
+    });
+
+    it('keeps task/worktree short ids that look like keys in soft mode (#1740)', () => {
+      // base64url short ids can contain '-' and digits.
+      expect(extractProjectIdFromWorktreeName('task-Ab-3')).toBeNull();
+      expect(extractProjectIdFromWorktreeName('worktree-x_9-1')).toBeNull();
+    });
+
+    it('resolves every pre-#1740 numeric form exactly as before', () => {
+      const cases: Array<[string, string | null]> = [
+        ['spir-126-slug', '126'], ['bugfix-296-slug', 'bugfix-296'], ['pir-1298', '1298'],
+        ['air-633-x', '633'], ['aspir-633-x', '633'], ['tick-130-x', '130'], ['0110', '0110'],
+        ['experiment-1560', '1560'], ['task-NAvW', null], ['worktree-foIg', null], ['experiment-AbCd', null],
+      ];
+      for (const [dir, id] of cases) expect(extractProjectIdFromWorktreeName(dir), dir).toBe(id);
     });
   });
 
@@ -1145,6 +1284,32 @@ describe('overview', () => {
 
     it('returns null for empty string', () => {
       expect(worktreeNameToRoleId('')).toBeNull();
+    });
+
+    it('maps tracker-key worktrees to the role id buildAgentName produces (#1740)', () => {
+      expect(worktreeNameToRoleId('pir-ENG-123')).toBe('builder-pir-eng-123');
+      expect(worktreeNameToRoleId('pir-ENG-123-fix-login')).toBe('builder-pir-eng-123');
+      expect(worktreeNameToRoleId('bugfix-ENG-123-x')).toBe('builder-bugfix-eng-123');
+      expect(worktreeNameToRoleId('spir-AB2_X-7')).toBe('builder-spir-ab2_x-7');
+    });
+
+    it('maps base64url short ids with - and _ to what buildAgentName produces (#1740)', () => {
+      // generateShortId() is base64url (A-Z a-z 0-9 - _); buildAgentName lowercases it whole.
+      expect(worktreeNameToRoleId('experiment-Ab-3')).toBe(buildAgentName('protocol', 'Ab-3', 'experiment'));
+      expect(worktreeNameToRoleId('maintain-x_9Q')).toBe(buildAgentName('protocol', 'x_9Q', 'maintain'));
+      expect(worktreeNameToRoleId('maintain--ab3')).toBe(buildAgentName('protocol', '-ab3', 'maintain'));
+      expect(worktreeNameToRoleId('task-Ab-3')).toBe(buildAgentName('task', 'Ab-3'));
+      expect(worktreeNameToRoleId('task-x_9Q')).toBe(buildAgentName('task', 'x_9Q'));
+      expect(worktreeNameToRoleId('worktree-a_-1')).toBe('worktree-a_-1');
+    });
+
+    it('resolves every pre-#1740 numeric and short-id form exactly as before', () => {
+      const cases: Array<[string, string]> = [
+        ['spir-126-x', 'builder-spir-126'], ['bugfix-296-x', 'builder-bugfix-296'], ['pir-1298-x', 'builder-pir-1298'],
+        ['0110', 'builder-spir-110'], ['task-NAvW', 'builder-task-navw'], ['worktree-foIg', 'worktree-foig'],
+        ['experiment-AbCd', 'builder-experiment-abcd'], ['experiment-1560', 'builder-experiment-1560'],
+      ];
+      for (const [dir, role] of cases) expect(worktreeNameToRoleId(dir), dir).toBe(role);
     });
   });
 
@@ -1196,6 +1361,118 @@ describe('overview', () => {
       expect(builders[0].planPhases).toEqual([]);
       expect(builders[0].progress).toBe(0);
       expect(builders[0].blocked).toBeNull();
+    });
+
+    // #1777: experiment-/maintain-/research- worktrees had no project-id case,
+    // so they fell to soft mode and status.yaml (and its gates) was never read.
+    it('discovers a strict experiment builder blocked on experiment-complete (#1777)', () => {
+      createBuilderWorktree(tmpDir, 'experiment-1560', [
+        "id: '1560'",
+        'title: spike-thread-owning-open-path-',
+        'protocol: experiment',
+        'phase: analyze',
+        'gates:',
+        '  experiment-complete:',
+        '    status: pending',
+        "    requested_at: '2026-10-05T00:20:48.976Z'",
+      ].join('\n'), '1560-spike-thread-owning-open-path-');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].mode).toBe('strict');
+      expect(builders[0].issueId).toBe('1560');
+      expect(builders[0].protocolPhase).toBe('analyze');
+      expect(builders[0].blocked).toBe('experiment review');
+      expect(builders[0].blockedGate).toBe('experiment-complete');
+      expect(builders[0].blockedSince).toBe('2026-10-05T00:20:48.976Z');
+    });
+
+    it('keeps an all-digit task worktree in soft mode (#1777)', () => {
+      createBuilderWorktree(tmpDir, 'task-123');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].mode).toBe('soft');
+      expect(builders[0].issueId).toBeNull();
+    });
+
+    it('discovers a strict tracker-key PIR builder (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'pir-ENG-123', [
+        "id: 'ENG-123'",
+        'title: fix-login',
+        'protocol: pir',
+        'phase: implement',
+      ].join('\n'), 'ENG-123-fix-login');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].mode).toBe('strict');
+      expect(builders[0].issueId).toBe('ENG-123');
+      expect(builders[0].roleId).toBe('builder-pir-eng-123');
+    });
+
+    it('discovers a strict tracker-key bugfix builder (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'bugfix-ENG-9-x', [
+        "id: 'bugfix-ENG-9'",
+        'title: crash',
+        'protocol: bugfix',
+        'phase: fix',
+      ].join('\n'), 'bugfix-ENG-9-crash');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders[0].mode).toBe('strict');
+      expect(builders[0].issueId).toBe('ENG-9');
+    });
+
+    it('matches a project dir spawned in lower case before keys were canonicalized (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'pir-eng-5', [
+        "id: 'eng-5'", 'title: old', 'protocol: pir', 'phase: implement',
+      ].join('\n'), 'eng-5-old');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders[0].mode).toBe('strict');
+      expect(builders[0].issueId).toBe('ENG-5');
+    });
+
+    it('prefers the stored builder id over the parsed directory name (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'task-Ab-3');
+      const worktree = path.join(tmpDir, '.builders', 'task-Ab-3');
+      const stored = new Map([[worktree, { roleId: 'builder-task-zz-9', issueNumber: null, spawnedByArchitect: null }]]);
+      expect(discoverBuilders(tmpDir, stored)[0].roleId).toBe('builder-task-zz-9');
+    });
+
+    it('does not read an issue-less protocol short id as a tracker key when the stored row has no issue (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'maintain-Ab-3');
+      const worktree = path.join(tmpDir, '.builders', 'maintain-Ab-3');
+      const stored = new Map([[worktree, { roleId: 'builder-maintain-Ab-3', issueNumber: null, spawnedByArchitect: null }]]);
+
+      const builders = discoverBuilders(tmpDir, stored);
+      expect(builders[0].mode).toBe('soft');
+      expect(builders[0].issueId).toBeNull();
+      expect(builders[0].roleId).toBe('builder-maintain-ab-3');
+    });
+
+    it('trusts a key-shaped name when the stored row confirms the issue (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'pir-AB-3');
+      const worktree = path.join(tmpDir, '.builders', 'pir-AB-3');
+      const stored = new Map([[worktree, { roleId: 'builder-pir-ab-3', issueNumber: 'AB-3', spawnedByArchitect: null }]]);
+
+      expect(discoverBuilders(tmpDir, stored)[0].issueId).toBe('AB-3');
+    });
+
+    it('ignores a legacy stored id that is not a role id (#1740)', () => {
+      createBuilderWorktree(tmpDir, 'bugfix-42-x');
+      const worktree = path.join(tmpDir, '.builders', 'bugfix-42-x');
+      const stored = new Map([[worktree, { roleId: 'bugfix-42', issueNumber: '42', spawnedByArchitect: null }]]);
+      expect(discoverBuilders(tmpDir, stored)[0].roleId).toBe('builder-bugfix-42');
+    });
+
+    it('stored identities leave numeric discovery unchanged', () => {
+      createBuilderWorktree(tmpDir, 'spir-126-x', ["id: '0126'", 'title: t', 'protocol: spir', 'phase: implement'].join('\n'), '0126-t');
+      const worktree = path.join(tmpDir, '.builders', 'spir-126-x');
+      const without = discoverBuilders(tmpDir)[0];
+      const withStored = discoverBuilders(tmpDir, new Map([[worktree, { roleId: 'builder-spir-126', issueNumber: '126', spawnedByArchitect: null }]]))[0];
+      expect(withStored).toEqual(without);
     });
 
     it('populates progress and blocked from status.yaml', () => {
@@ -1501,6 +1778,22 @@ describe('overview', () => {
       expect(backlog[0].reviewPath).toBe('codev/reviews/42-my-feature.md');
     });
 
+    it('links spec/plan files named by a tracker key (#1740)', () => {
+      for (const dir of ['specs', 'plans']) {
+        fs.mkdirSync(path.join(tmpDir, 'codev', dir), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, 'codev', dir, 'ENG-12-login.md'), '# x');
+      }
+      // A bugfix review named bugfix-<N>-slug must not be read as key BUGFIX-<N>.
+      fs.mkdirSync(path.join(tmpDir, 'codev', 'reviews'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'codev', 'reviews', 'bugfix-12-x.md'), '# x');
+
+      const issues = [{ number: 'ENG-12', title: 'Login', url: 'https://x.atlassian.net/browse/ENG-12', labels: [], createdAt: '' }];
+      const backlog = deriveBacklog(issues as never, tmpDir, new Set(), new Set());
+      expect(backlog[0].specPath).toBe('codev/specs/ENG-12-login.md');
+      expect(backlog[0].planPath).toBe('codev/plans/ENG-12-login.md');
+      expect(backlog[0].hasReview).toBe(false);
+    });
+
     it('marks issues with active builders', () => {
       const issues = [issueItem(100, 'Active'), issueItem(200, 'Idle')];
 
@@ -1661,6 +1954,24 @@ describe('overview', () => {
       expect(data.backlog[0].author).toBe('external-dev');
     });
 
+    it('reports issueIdKind from the configured forge provider (#1740)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+      const writeForge = (forge: Record<string, unknown>) => {
+        fs.mkdirSync(path.join(tmpDir, '.codev'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.codev', 'config.json'), JSON.stringify({ forge }));
+      };
+
+      expect((await new OverviewCache().getOverview(tmpDir)).issueIdKind).toBe('number');
+
+      writeForge({ provider: 'jira' });
+      expect((await new OverviewCache().getOverview(tmpDir)).issueIdKind).toBe('key');
+
+      // Hand-overridden issue concepts: the provider no longer says what ids look like.
+      writeForge({ 'issue-view': 'my-jira-view' });
+      expect((await new OverviewCache().getOverview(tmpDir)).issueIdKind).toBeUndefined();
+    });
+
     it('handles PR without author field', async () => {
       mockFetchPRList.mockResolvedValue([
         { number: 10, title: 'Add feature', url: 'https://github.com/org/repo/pull/10', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-10T00:00:00Z' },
@@ -1715,20 +2026,32 @@ describe('overview', () => {
       expect(mockFetchCurrentUser).toHaveBeenCalledTimes(1);
     });
 
-    it('invalidates cache on refresh', async () => {
+    it('invalidates the open lists on refresh, debounced to once a minute (#1645)', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
       await cache.getOverview(tmpDir);
 
+      // Invalidated 10 s after the fetch: still inside the debounce, served from cache.
+      clock += 10_000;
       cache.invalidate();
       await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
 
+      // Once the entry is a minute old the invalidation takes effect.
+      clock += 51_000;
+      await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+      expect(mockFetchIssueList).toHaveBeenCalledTimes(2);
+      // The searches and identity are not owned by invalidation.
+      expect(mockFetchRecentlyClosed).toHaveBeenCalledTimes(1);
+      expect(mockFetchMergedPRs).toHaveBeenCalledTimes(1);
+      expect(mockFetchCurrentUser).toHaveBeenCalledTimes(1);
     });
 
-    it('re-fetches after 30s TTL expires (Bugfix #388)', async () => {
+    it('re-fetches after the 180 s list TTL expires (Bugfix #388, #1645)', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
       mockFetchRecentlyClosed.mockResolvedValue([]);
@@ -1737,9 +2060,9 @@ describe('overview', () => {
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(1);
 
-      // Advance time past the 30s TTL
+      // Advance time past the 180 s list TTL
       vi.useFakeTimers();
-      vi.advanceTimersByTime(31_000);
+      vi.advanceTimersByTime(181_000);
 
       await cache.getOverview(tmpDir);
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
@@ -1792,23 +2115,33 @@ describe('overview', () => {
       expect(data.errors?.issues).toBeDefined();
     });
 
-    it('does not cache failed fetch results', async () => {
+    it('caches a failed fetch for the 60 s failure window, then retries (#1645)', async () => {
       // First call: gh fails
       mockFetchPRList.mockResolvedValueOnce(null);
       mockFetchIssueList.mockResolvedValue([]);
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
       const data1 = await cache.getOverview(tmpDir);
       expect(data1.errors?.prs).toBeDefined();
+      expect(data1.forgeStatus).toBe('unavailable');
 
-      // Second call: gh succeeds
-      mockFetchPRList.mockResolvedValueOnce([
+      // gh would succeed now, but inside the window the failure is served from cache.
+      mockFetchPRList.mockResolvedValue([
         { number: 1, title: 'Test', url: 'https://github.com/org/repo/pull/1', reviewDecision: '', body: '', createdAt: '2026-01-01T00:00:00Z' },
       ]);
-
+      clock += 30_000;
       const data2 = await cache.getOverview(tmpDir);
-      expect(data2.errors?.prs).toBeUndefined();
-      expect(data2.pendingPRs).toHaveLength(1);
+      expect(data2.errors?.prs).toBeDefined();
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+
+      // Past the window: one retry, which self-heals.
+      clock += 31_000;
+      const data3 = await cache.getOverview(tmpDir);
+      expect(data3.errors?.prs).toBeUndefined();
+      expect(data3.pendingPRs).toHaveLength(1);
+      expect(data3.forgeStatus).toBe('ok');
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
     it('filters backlog issues that are linked to PRs', async () => {
@@ -1916,11 +2249,13 @@ describe('overview', () => {
       createBuilderWorktree(tmpDir, 'task-AbCd');
 
       // Without filter: all 3 worktrees discovered
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
       const unfiltered = await cache.getOverview(tmpDir);
       expect(unfiltered.builders).toHaveLength(3);
 
       // With filter: only spir-42 has an active session
+      clock += 61_000;
       cache.invalidate();
       const activeSet = new Set(['builder-spir-42']);
       const filtered = await cache.getOverview(tmpDir, activeSet);
@@ -2003,7 +2338,8 @@ describe('overview', () => {
         'gates:',
       ].join('\n'), '0907-area-fix');
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
 
       // First refresh: issue is open and labeled area/vscode.
       mockFetchIssueList.mockResolvedValue([
@@ -2014,6 +2350,7 @@ describe('overview', () => {
       expect(first.builders[0].area).toBe('vscode');
 
       // Issue closes (e.g. PR merged) → drops out of the open-issues list.
+      clock += 61_000;
       cache.invalidate();
       mockFetchIssueList.mockResolvedValue([]);
       const second = await cache.getOverview(tmpDir);
@@ -2031,7 +2368,8 @@ describe('overview', () => {
         'gates:',
       ].join('\n'), '0907-area-fetchfail');
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
 
       mockFetchIssueList.mockResolvedValue([
         issueItem(907, 'Builder flash bug', [{ name: 'area/vscode' }]),
@@ -2039,6 +2377,7 @@ describe('overview', () => {
       const first = await cache.getOverview(tmpDir);
       expect(first.builders[0].area).toBe('vscode');
 
+      clock += 61_000;
       cache.invalidate();
       mockFetchIssueList.mockResolvedValue(null);
       const second = await cache.getOverview(tmpDir);
@@ -2053,7 +2392,8 @@ describe('overview', () => {
         'gates:',
       ].join('\n'), '0908-no-area');
 
-      const cache = new OverviewCache();
+      let clock = 1_000_000;
+      const cache = new OverviewCache({ now: () => clock });
 
       // Issue is present across two refreshes but carries no area/* label.
       mockFetchIssueList.mockResolvedValue([
@@ -2062,6 +2402,7 @@ describe('overview', () => {
       const first = await cache.getOverview(tmpDir);
       expect(first.builders[0].area).toBe('Uncategorized');
 
+      clock += 61_000;
       cache.invalidate();
       const second = await cache.getOverview(tmpDir);
       expect(second.builders[0].area).toBe('Uncategorized');
@@ -2257,6 +2598,21 @@ describe('overview', () => {
 
       expect(data.builders).toHaveLength(1);
       expect(data.builders[0].issueId).toBe('42');
+    });
+
+    it('canonicalizes a lower-case stored tracker key (#1740)', async () => {
+      // A row written before spawn canonicalized keys holds `eng-123`.
+      const worktreePath = createBuilderWorktree(tmpDir, 'pir-eng-123', [
+        "id: 'eng-123'", 'title: old', 'protocol: pir', 'phase: implement',
+      ].join('\n'), 'eng-123-old');
+      createStateDb(tmpDir, [{ worktree: worktreePath, issue_number: 'eng-123' }]);
+      mockFetchIssueList.mockResolvedValue([{ number: 'ENG-123', title: 'Old', url: 'https://x/browse/ENG-123', labels: [] }]);
+
+      const data = await new OverviewCache().getOverview(tmpDir);
+
+      expect(data.builders[0].issueId).toBe('ENG-123');
+      // The forge's ENG-123 matches the builder, so it is not offered again as spawnable.
+      expect(data.backlog.find(b => b.id === 'ENG-123')?.hasBuilder).toBe(true);
     });
 
     it('falls back to regex-parsed issueId when DB has no issue_number (#664)', async () => {

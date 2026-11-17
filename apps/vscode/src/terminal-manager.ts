@@ -6,6 +6,7 @@ import { encodeWorkspacePath } from '@cluesmith/codev-sdk/workspace';
 import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { resolveBuilderTerminal, mainCheckoutRoot } from './terminal-resolve.js';
+import { issueRef, roleShortId } from './issue-id.js';
 
 /**
  * Default per-window terminal cap, overridable via the `codev.maxTerminals`
@@ -79,7 +80,7 @@ export class TerminalManager {
     // matches a *short* target against canonical candidates, so feed it the
     // trailing id token, not the full roleId (otherwise it never matches and
     // every builder falls back to the agent name).
-    const shortId = builderId.split('-').pop() ?? builderId;
+    const shortId = roleShortId(builderId);
     const { builder } = resolveAgentName(shortId, data.builders);
     // Mirror the sidebar exactly: `#${issueId ?? id} ${issueTitle ?? ''}`.
     const num = builder?.issueId ?? builder?.id;
@@ -98,7 +99,7 @@ export class TerminalManager {
       const cut = lastSpace > 0 ? slice.slice(0, lastSpace) : slice.slice(0, MAX_TITLE - 1);
       title = `${cut.trimEnd()}…`;
     }
-    return `Codev: #${num}${title ? ` ${title}` : ''}`;
+    return `Codev: ${issueRef(num)}${title ? ` ${title}` : ''}`;
   }
 
   /**
@@ -222,12 +223,17 @@ export class TerminalManager {
    * be opened. The "Forward to Builder" inject path (#789) uses this to target
    * the same terminal that was opened, even when called with a bare numeric id;
    * other callers ignore the return value.
+   *
+   * `quiet` (#1563): suppress the ambiguity warning and the sticky
+   * "no terminal" recovery prompt, returning `undefined` silently instead. The
+   * agent-cycle walk sets it so a single stale roster row is skipped to the next
+   * agent rather than blocking the walk behind a button-bearing notification.
    */
-  async openBuilderByRoleOrId(roleOrId: string, focus = false): Promise<string | undefined> {
+  async openBuilderByRoleOrId(roleOrId: string, focus = false, quiet = false): Promise<string | undefined> {
     const client = this.connectionManager.getClient();
     const workspacePath = this.connectionManager.getWorkspacePath();
     if (!client || !workspacePath) {
-      vscode.window.showErrorMessage('Codev: Not connected to Tower');
+      if (!quiet) { vscode.window.showErrorMessage('Codev: Not connected to Tower'); }
       return undefined;
     }
     try {
@@ -243,13 +249,15 @@ export class TerminalManager {
         { sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)) },
       );
       if (outcome.kind === 'ambiguous') {
-        vscode.window.showWarningMessage(
-          `Codev: Multiple builders match "${roleOrId}": ${outcome.matches.map(b => b.name).join(', ')}`,
-        );
+        if (!quiet) {
+          vscode.window.showWarningMessage(
+            `Codev: Multiple builders match "${roleOrId}": ${outcome.matches.map(b => b.name).join(', ')}`,
+          );
+        }
         return undefined;
       }
       if (outcome.kind === 'missing') {
-        await this.promptNoTerminalRecovery(roleOrId, workspacePath, focus);
+        if (!quiet) { await this.promptNoTerminalRecovery(roleOrId, workspacePath, focus); }
         return undefined;
       }
       const { builder, terminalId } = outcome;
@@ -257,7 +265,7 @@ export class TerminalManager {
       return builder.id;
     } catch (err) {
       this.log('ERROR', `Failed to open builder ${roleOrId}: ${(err as Error).message}`);
-      vscode.window.showErrorMessage(`Codev: Failed to open ${roleOrId}`);
+      if (!quiet) { vscode.window.showErrorMessage(`Codev: Failed to open ${roleOrId}`); }
       return undefined;
     }
   }
@@ -308,10 +316,10 @@ export class TerminalManager {
   private friendlyBuilderId(roleOrId: string): string {
     const data = this.overviewCache.getData();
     if (!data?.builders?.length) { return roleOrId; }
-    const shortId = roleOrId.split('-').pop() ?? roleOrId;
+    const shortId = roleShortId(roleOrId);
     const { builder } = resolveAgentName(shortId, data.builders);
     const num = builder?.issueId ?? builder?.id;
-    return num ? `#${num}` : roleOrId;
+    return num ? issueRef(num) : roleOrId;
   }
 
   /**
@@ -475,6 +483,27 @@ export class TerminalManager {
     return null;
   }
 
+  /**
+   * The architect name of the currently-focused VSCode terminal, or null when the
+   * active terminal isn't a Codev *architect* terminal. Recovered from the map key
+   * (`architect:<name>`), the same name `openArchitect` cached it under. The
+   * architect counterpart to `getActiveBuilderId`; together they let the agent-cycle
+   * commands (#1563) resolve which agent terminal currently has focus. VSCode keeps
+   * `activeTerminal` set even when an editor is focused, so this reports the
+   * last-focused architect terminal — the natural resume point for the cycle.
+   */
+  getActiveArchitectName(): string | null {
+    const active = vscode.window.activeTerminal;
+    if (!active) { return null; }
+    const prefix = 'architect:';
+    for (const [mapKey, entry] of this.terminals) {
+      if (entry.terminal === active && entry.type === 'architect' && mapKey.startsWith(prefix)) {
+        return mapKey.slice(prefix.length);
+      }
+    }
+    return null;
+  }
+
   // ── Internal ─────────────────────────────────────────────────
 
   private async openTerminal(
@@ -501,7 +530,7 @@ export class TerminalManager {
     }
 
     const authKey = await this.getAuthKey();
-    const pty = new CodevPseudoterminal(wsUrl, authKey, this.outputChannel);
+    const pty = new CodevPseudoterminal(wsUrl, authKey, this.outputChannel, () => this.probeTowerHealth());
     const position = vscode.workspace.getConfiguration('codev').get<string>('terminalPosition', 'editor');
 
     // Dev processes are long-running background logs — always the bottom panel,
@@ -592,6 +621,36 @@ export class TerminalManager {
     for (const entry of this.terminals.values()) {
       entry.pty.forceRepaint();
     }
+  }
+
+  /**
+   * Re-arm every managed terminal's reconnect budget on a wake signal (#1681).
+   * A laptop sleep suspends the network stack, so the adapters' six-attempt
+   * budgets burn instantly and every tab lands on a permanent-looking
+   * "unable to reconnect" banner while Tower and the detached sessions are
+   * healthy. `onWake` reconnects a transiently gave-up (or still-parked)
+   * adapter and no-ops an already-connected one or a #936 permanent give-up, so
+   * this is safe to fire across all terminals unconditionally on every refocus
+   * — unlike repaintAllOnRefocus, which stays behind an opt-in setting.
+   */
+  rearmAllOnWake(): void {
+    for (const entry of this.terminals.values()) {
+      entry.pty.onWake();
+    }
+  }
+
+  /**
+   * One-shot Tower `/health` probe used to word a terminal's exhausted-budget
+   * give-up banner honestly (#1681). Returns true when Tower answers, false when
+   * it is unreachable, and `null` when reachability is unknown (no client yet) —
+   * so the adapter falls back to the neutral attempt-count wording rather than
+   * asserting "Tower unreachable" for what is really an unconfigured client.
+   * `getHealth` already collapses network errors to `null`, so this never throws.
+   */
+  private async probeTowerHealth(): Promise<boolean | null> {
+    const client = this.connectionManager.getClient();
+    if (!client) { return null; }
+    return (await client.getHealth()) !== null;
   }
 
   private buildWsUrl(terminalId: string): string | null {

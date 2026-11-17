@@ -130,3 +130,20 @@ describe('Spec 823 — WorkspaceProvider subscribes to architects-updated SSE', 
     expect(WS_SRC).not.toMatch(/workspace\.path\s*===\s*envelope/);
   });
 });
+
+// #1809: a builder-worktree window attaches read-only to the parent, so the
+// Workspace view omits the rows that act on the parent workspace and keeps the
+// worktree-scoped ones (dashboard, dev, dev URLs). The dev target comes from
+// the window root, never the Tower workspace path (the parent in that window).
+describe('#1809 — Workspace view in a builder-worktree window', () => {
+  it('gates Architects, Spawn Builder and New Shell on not being a worktree window', () => {
+    expect(WS_SRC).toMatch(/const inWorktreeWindow = this\.connectionManager\.getBuilderWorktree\(\) !== null;/);
+    expect(WS_SRC).toMatch(/if \(!inWorktreeWindow\) \{\s*items\.push\(this\.buildArchitectsRoot\(\)\);/);
+    expect(WS_SRC).toMatch(/if \(!inWorktreeWindow\) \{\s*items\.push\(this\.buildSpawnRow\(\), this\.buildShellRow\(\)\);/);
+  });
+
+  it('resolves the dev target from the window root', () => {
+    expect(WS_SRC).toMatch(/resolveWorkspaceDevTarget\(windowRoot\)/);
+    expect(WS_SRC).not.toMatch(/resolveWorkspaceDevTarget\(workspacePath\)/);
+  });
+});

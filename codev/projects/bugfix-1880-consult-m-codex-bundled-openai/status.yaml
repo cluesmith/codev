@@ -1,0 +1,17 @@
+id: bugfix-1880
+title: consult-m-codex-bundled-openai
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-11-10T04:51:04.123Z'
+    approved_at: '2026-11-10T18:06:48.133Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-10T04:32:52.263Z'
+updated_at: '2026-11-10T18:06:48.133Z'
+pr_ready_for_human: false
