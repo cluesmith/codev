@@ -14,7 +14,9 @@ import { handleDecisionsGet, handleDecisionsRule, MAX_RULE_BODY_BYTES } from '..
 import { CONFIGURED_PATH_MEMO_MS, decisionsFilePresent, DEFAULT_DECISIONS_FILE } from '../servers/decisions/file.js';
 import { parseDecisions } from '../servers/decisions/parse.js';
 
-const FIXTURE = fs.readFileSync(path.resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8');
+// The fixture is LF; a CRLF checkout (core.autocrlf on Windows) is normalized back, and
+// the CRLF behaviour is tested in decisions-parse and decisions-splice.
+const FIXTURE = fs.readFileSync(path.resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8').replace(/\r\n/g, '\n');
 const ACCEPT_LINE = '**Your word:** `accept` = merge as is / `rework` = send back / `hold`';
 const COMMENT = "accept but don't add the limit on additional tests. That could easily backfire.";
 
@@ -351,17 +353,21 @@ describe('POST decisions/rule', () => {
     fs.writeFileSync(target, FIXTURE);
     fs.rmSync(decisionsFile);
     fs.symlinkSync('../../docs/decisions.md', decisionsFile);
+    // Read back rather than compared with the literal: Windows stores the link target with
+    // backslash separators, and the assertion is that the write leaves the link as made.
+    const linkTarget = fs.readlinkSync(decisionsFile);
 
     const result = await rule({ id: 'main-11', word: 'accept', fingerprint: fingerprintOf(FIXTURE, 'main-11') });
     expect(result.status).toBe(200);
     expect(result.body.document.path).toBe(DEFAULT_DECISIONS_FILE);
     expect(fs.lstatSync(decisionsFile).isSymbolicLink()).toBe(true);
-    expect(fs.readlinkSync(decisionsFile)).toBe('../../docs/decisions.md');
+    expect(fs.readlinkSync(decisionsFile)).toBe(linkTarget);
     expect(fs.readFileSync(target, 'utf8')).toBe(fixtureRuledWith('accept\n'));
     expect(fs.readdirSync(path.dirname(target))).toEqual(['decisions.md']);
   });
 
-  it('keeps the file permissions', async () => {
+  // POSIX-only assertion: checks the 0640 mode bits, which NTFS does not carry (Node reports 0666).
+  it.skipIf(process.platform === 'win32')('keeps the file permissions', async () => {
     fs.chmodSync(decisionsFile, 0o640);
     await rule({ id: 'main-11', word: 'accept', fingerprint: fingerprintOf(FIXTURE, 'main-11') });
     expect(fs.statSync(decisionsFile).mode & 0o7777).toBe(0o640);

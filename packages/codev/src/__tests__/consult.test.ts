@@ -44,6 +44,16 @@ vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(() => Buffer.from('')),
 }));
 
+// The suite drives consult's POSIX branches (`which` / execSync probes through the
+// child_process mock above), so the platform seam is forced to linux; on a win32 host
+// the CLI checks would otherwise take the PATHEXT lookup. Forced inside the factory so
+// every fresh module instance after vi.resetModules() is forced too.
+vi.mock('../lib/platform.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/platform.js')>();
+  actual.setHostPlatformForTests('linux');
+  return actual;
+});
+
 // Mock chalk
 vi.mock('chalk', () => ({
   default: {
@@ -514,7 +524,11 @@ describe('consult command', () => {
     });
   });
 
-  describe('Claude CLI integration', () => {
+  // Spec 1658 platform skip: this file pins the platform seam to linux (it drives the POSIX
+  // branches through mocked child_process), so on a Windows host these real-stub runs cannot take
+  // the Windows launch path. The same lane functions run unpinned on Windows in claude-cli.test.ts
+  // and claude-cli-lane.test.ts.
+  describe.skipIf(process.platform === 'win32')('Claude CLI integration', () => {
     // The claude lane spawns the installed `claude` CLI (#1912). This file mocks node:child_process
     // for the other lanes, so these tests route the mocks to the real implementation and pin a
     // stub `claude` that records what it was run with.

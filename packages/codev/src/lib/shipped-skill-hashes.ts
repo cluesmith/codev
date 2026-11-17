@@ -113,6 +113,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     'cbea3254263c98713076ebf666e0805e029cfc809229e7fbf1f71c87dd5a0767',
   ],
   '.claude/skills/runnable-worktrees': [
+    '371d5dc88ddbcce63649aa325fbf55945283f61cb91c44e157b280c293c4f264',
     '8d52f4b10829b1d2d81774dcc39c10948c33c42202f2f0a8efb6e02d8d913db8',
   ],
   '.claude/skills/update-arch-docs': [
@@ -202,6 +203,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
     'b811a74a097a7b9ddf00b7f30a907186026220d09625a675dfa805e6bdf2128f',
   ],
   '.codex/skills/runnable-worktrees': [
+    '371d5dc88ddbcce63649aa325fbf55945283f61cb91c44e157b280c293c4f264',
     '8d52f4b10829b1d2d81774dcc39c10948c33c42202f2f0a8efb6e02d8d913db8',
   ],
   '.codex/skills/update-arch-docs': [

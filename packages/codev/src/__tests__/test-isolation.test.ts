@@ -71,12 +71,14 @@ describe('test-suite isolation (#1323)', () => {
       expect(pinned, 'vitest-setup.ts must pin a fake claude for every suite').toBeTruthy();
       expect(pinned!.startsWith(homedir() + '/.local')).toBe(false);
 
-      const { readClaudeVersion, assertClaudeVersion, readClaudeAuthStatus } = await import('../lib/claude-cli.js');
+      const { readClaudeVersion, assertClaudeVersion, readClaudeAuthStatus, claudeLaunch } = await import('../lib/claude-cli.js');
       assertClaudeVersion(readClaudeVersion(pinned!));
       expect(readClaudeAuthStatus(pinned!, {}).loggedIn).toBe(true);
 
       const { execFileSync } = await import('node:child_process');
-      const events = execFileSync(pinned!, ['-p', '--output-format', 'stream-json'], { input: 'prompt', encoding: 'utf-8' })
+      // Started the way the lane starts it, so the Windows fake (an npm-shaped claude.cmd) runs too.
+      const launch = claudeLaunch(pinned!, ['-p', '--output-format', 'stream-json']);
+      const events = execFileSync(launch.command, launch.args, { input: 'prompt', encoding: 'utf-8', ...launch.options })
         .split('\n').filter(Boolean).map((line) => JSON.parse(line));
       expect(events.map((e) => e.type)).toEqual(['system', 'assistant', 'result']);
       expect(events[0].tools).toEqual(['Glob', 'Grep', 'Read']);

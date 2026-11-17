@@ -59,6 +59,26 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
 - **wrapper-boot.busy.txt** — **synthetic** builder launch-loop screen (a born-dirty
   state with no composer marker). App-agnostic: no marker → busy under any profile.
 
+- **conpty/\*.capture.jsonl.gz** (Spec 1658) — **timed** captures of a real agent TUI under
+  Windows ConPTY: output chunks, keystrokes and resizes stamped in milliseconds, plus probe
+  points. Recorded by `packages/codev/scripts/spec-1658-conpty-capture.mts` on an authenticated
+  Windows machine (recipe: `codev/projects/1658-windows-native-non-wsl-support/audit.md`,
+  "ConPTY → Phase 8"); replayed through the production delivery path by
+  `spec-1658-conpty-gate-replay.test.ts`. Scrubbed of user name, profile path, scratch path and
+  host name with same-length placeholders at record time. The claude set (2.1.326, 120×40, owner
+  machine, 2026-11-17): idle, draft, midturn, resize, and two M15 controls, `prefix` (the
+  suggestion's first character typed) and `prefix-left` (then Left onto it), both held. The
+  controls are the evidence for the ghost exemption's shared residual (an inverse one-character
+  draft with a dim remainder would read as a ghost): claude drew no such screen in any of them.
+
+- **claude-conpty-ghost-idle.replay.bin.gz** (Spec 1658, M15) — **real capture**: the output of
+  an idle claude 2.1.326 under Windows ConPTY at 120×40, taken from the recorder's
+  `.diagnostic` file for a failed idle state (owner machine, 2026-11-17; scrubbed and
+  leak-checked by the recorder; the only path left is claude's own `~\AppData\Local\Temp\…`).
+  Claude draws its software cursor inverse over the first character of a dim suggestion while
+  ConPTY parks the hidden hardware cursor at the end of the last row: the case the ghost
+  exemption's first-input-cell anchor exists for. Expected verdict: clean.
+
 ## Classifier assumption
 
 CLEAN requires a composer marker **and** zero normal-intensity, non-whitespace,

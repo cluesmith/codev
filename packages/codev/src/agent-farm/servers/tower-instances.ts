@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir } from 'node:os';
+import { endsWithHostSeparator, expandHomePath } from '../../lib/host-paths.js';
 import { encodeWorkspacePath } from '../lib/tower-client.js';
 import { loadConfig } from '../../lib/config.js';
 import { sanitizeAgentEnv, withTowerPort, ARCHITECT_WORKSPACE_ENV } from '../../lib/agent-env.js';
@@ -23,7 +24,7 @@ import type { SessionManager } from '../../terminal/session-manager.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { isBuilderWorktreePath, parseBuilderWorktreePath } from '@cluesmith/codev-sdk/builder-worktree';
-import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
+import type { WorkspaceTerminals, TerminalEntry, InstanceStatus, ShellperRowAuth } from './tower-types.js';
 import {
   normalizeWorkspacePath,
   getWorkspaceName,
@@ -39,7 +40,10 @@ import {
   reconcileArchitectSessionHolder,
   findOwnArchitectShellpers,
   reapShellpers,
+  listProcessEntries,
+  type ProcessEntry,
 } from './architect-session-holder.js';
+import { shellperTeardownIdentities } from '../../terminal/shellper-cmdline.js';
 import {
   autoNumberArchitectName,
   validateArchitectName,
@@ -47,6 +51,8 @@ import {
 } from '../utils/architect-name.js';
 import { RetiredHarnessError } from '../utils/harness.js';
 import { setArchitect, setArchitectByName, getArchitects, getArchitectByName } from '../state.js';
+import { workspaceKey } from '../utils/workspace-path.js';
+import type { WorkspaceKeyedMap } from './tower-terminals.js';
 
 // ============================================================================
 // Dependency interface
@@ -57,7 +63,7 @@ export interface InstanceDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void;
   /** Tower's listening port, set as `CODEV_TOWER_PORT` on every architect launch (Spec 1595). */
   towerPort?: number;
-  workspaceTerminals: Map<string, WorkspaceTerminals>;
+  workspaceTerminals: WorkspaceKeyedMap<WorkspaceTerminals>;
   getTerminalManager: () => TerminalManager;
   shellperManager: SessionManager | null;
   /** Get or create a workspace's terminal registry entry */
@@ -68,6 +74,7 @@ export interface InstanceDeps {
     roleId: string | null, pid: number | null,
     shellperSocket?: string | null, shellperPid?: number | null, shellperStartTime?: number | null,
     label?: string | null, cwd?: string | null, command?: string | null,
+    shellperAuth?: ShellperRowAuth | null,
   ) => void;
   /** Delete a terminal session row from SQLite */
   deleteTerminalSession: (id: string) => void;
@@ -114,7 +121,7 @@ const intentionallyStopping = new Set<string>();
  * Exported so `tower-terminals.ts`'s reconciliation exit handler can call it.
  */
 export function isIntentionallyStopping(workspacePath: string): boolean {
-  return intentionallyStopping.has(workspacePath);
+  return intentionallyStopping.has(workspaceKey(workspacePath));
 }
 
 /**
@@ -204,6 +211,8 @@ export function instancesReady(): boolean {
  * reattaches: the session stays live, it just isn't recorded as a workspace.
  */
 export function registerKnownWorkspace(workspacePath: string): void {
+  // Spec 1658 (M6): one row per directory on Windows; identity on POSIX.
+  workspacePath = workspaceKey(workspacePath);
   if (isBuilderWorktreePath(workspacePath)) {
     return;
   }
@@ -361,10 +370,7 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
     inputPath = homedir();
   }
 
-  // Expand ~ to home directory
-  if (inputPath.startsWith('~')) {
-    inputPath = inputPath.replace('~', homedir());
-  }
+  inputPath = expandHomePath(inputPath);
 
   // Relative paths are meaningless for the tower daemon — only absolute paths
   if (!path.isAbsolute(inputPath)) {
@@ -375,7 +381,7 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
   let dirToList: string;
   let prefix: string;
 
-  if (inputPath.endsWith('/')) {
+  if (endsWithHostSeparator(inputPath)) {
     // User typed a complete directory path, list its contents
     dirToList = inputPath;
     prefix = '';
@@ -529,7 +535,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
   // No dashboard-server spawning - tower handles everything
   try {
     // Ensure workspace has port allocation
-    const resolvedPath = fs.realpathSync(workspacePath);
+    const resolvedPath = workspaceKey(fs.realpathSync(workspacePath));
 
     // Persist in known_workspaces so the workspace survives terminal cleanup
     registerKnownWorkspace(resolvedPath);
@@ -704,7 +710,8 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
             logSessionIdentity(_deps.log, 'architect-launch', session.id, ptySession, cmd);
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', shellperInfo.pid,
               shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
-              persistableCommand(ptySession) ?? cmd);
+              persistableCommand(ptySession) ?? cmd,
+              { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret });
 
             // Spec 755: persist to local state.db (architect table) so afx
             // status / stop see the architect via loadState's scalar shim.
@@ -913,7 +920,7 @@ export async function stopInstance(workspacePath: string): Promise<{ success: bo
   let resolvedPath = workspacePath;
   try {
     if (fs.existsSync(workspacePath)) {
-      resolvedPath = fs.realpathSync(workspacePath);
+      resolvedPath = workspaceKey(fs.realpathSync(workspacePath));
     }
   } catch {
     // Ignore - use original path
@@ -929,8 +936,8 @@ export async function stopInstance(workspacePath: string): Promise<{ success: bo
   // handlers in tower-instances.ts (4 handlers) and tower-terminals.ts (1
   // handler) would delete sibling rows on every stop — making it impossible
   // for siblings to survive `afx workspace stop` + `start`.
-  intentionallyStopping.add(resolvedPath);
-  if (resolvedPath !== workspacePath) intentionallyStopping.add(workspacePath);
+  intentionallyStopping.add(workspaceKey(resolvedPath));
+  if (resolvedPath !== workspacePath) intentionallyStopping.add(workspaceKey(workspacePath));
   try {
     if (entry) {
       // Spec 786 Phase 3 / PR iter-2 race-fix: register exit-promises for
@@ -1003,8 +1010,8 @@ export async function stopInstance(workspacePath: string): Promise<{ success: bo
       }
     }
   } finally {
-    intentionallyStopping.delete(resolvedPath);
-    if (resolvedPath !== workspacePath) intentionallyStopping.delete(workspacePath);
+    intentionallyStopping.delete(workspaceKey(resolvedPath));
+    if (resolvedPath !== workspacePath) intentionallyStopping.delete(workspaceKey(workspacePath));
   }
 
   if (stopped.length === 0) {
@@ -1046,7 +1053,7 @@ export async function addArchitect(
   let resolvedPath = workspacePath;
   try {
     if (fs.existsSync(workspacePath)) {
-      resolvedPath = fs.realpathSync(workspacePath);
+      resolvedPath = workspaceKey(fs.realpathSync(workspacePath));
     }
   } catch {
     // Use original path on resolution failure
@@ -1229,6 +1236,7 @@ export async function addArchitect(
         session.id, resolvedPath, 'architect', name, shellperInfo.pid,
         shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
         persistableCommand(ptySession) ?? cmd,
+        { sessionId: shellperInfo.shellperSessionId, secret: shellperInfo.secret },
       );
 
       // Spec 755: persist to local state.db so the architect appears in
@@ -1360,7 +1368,7 @@ export async function removeArchitect(
   let resolvedPath = workspacePath;
   try {
     if (fs.existsSync(workspacePath)) {
-      resolvedPath = fs.realpathSync(workspacePath);
+      resolvedPath = workspaceKey(fs.realpathSync(workspacePath));
     }
   } catch {
     // Use original path on resolution failure.
@@ -1399,10 +1407,19 @@ export async function removeArchitect(
     // while the process kept running, and remove-architect could not clear it.
     // Reap any of our own shellpers matching this identity so this command is
     // the recovery tool for a live-process-without-a-row zombie too.
-    const zombiePids = findOwnArchitectShellpers({
+    // One snapshot serves the identity match and the reap's pid-reuse check.
+    let processSnapshot: ProcessEntry[] = [];
+    try {
+      processSnapshot = await listProcessEntries();
+    } catch (err) {
+      _deps.log('WARN', `Zombie shellper check for architect '${name}' skipped: ${(err as Error).message}`);
+    }
+    const zombiePids = await findOwnArchitectShellpers({
       identity: { workspacePath: resolvedPath, architectName: name },
       selfPid: process.pid,
+      list: () => processSnapshot,
     });
+    const zombieIdentities = shellperTeardownIdentities(processSnapshot, zombiePids);
     if (hasStaleRow || staleTerminalIds.length > 0 || zombiePids.length > 0) {
       try {
         if (hasStaleRow) {
@@ -1418,7 +1435,11 @@ export async function removeArchitect(
         };
       }
       if (zombiePids.length > 0) {
-        await reapShellpers(zombiePids);
+        try {
+          await reapShellpers(zombiePids, { startTimes: zombieIdentities.startTimes, jobNames: zombieIdentities.jobNames });
+        } catch (err) {
+          _deps.log('WARN', `Zombie shellper reap for architect '${name}' incomplete: ${(err as Error).message}`);
+        }
       }
       _deps.log('INFO', `Purged stale architect state for '${name}' from workspace ${workspacePath} (no live terminal; registration=${hasStaleRow}, terminal rows=${staleTerminalIds.length}, zombie shellpers=${zombiePids.length})`);
       return { success: true };
@@ -1433,8 +1454,8 @@ export async function removeArchitect(
   // exit handler would call setArchitectByName(name, null) — harmless but the
   // double-delete is wasteful and the intent (this is an intentional removal)
   // is clearer with the flag set.
-  intentionallyStopping.add(resolvedPath);
-  if (resolvedPath !== workspacePath) intentionallyStopping.add(workspacePath);
+  intentionallyStopping.add(workspaceKey(resolvedPath));
+  if (resolvedPath !== workspacePath) intentionallyStopping.add(workspaceKey(workspacePath));
   try {
     // Spec 786 Phase 4 / PR iter-2 race-fix: register the exit-promise
     // BEFORE the kill so the listener is attached before node-pty can emit
@@ -1484,8 +1505,8 @@ export async function removeArchitect(
       return { success: false, error: errMsg };
     }
   } finally {
-    intentionallyStopping.delete(resolvedPath);
-    if (resolvedPath !== workspacePath) intentionallyStopping.delete(workspacePath);
+    intentionallyStopping.delete(workspaceKey(resolvedPath));
+    if (resolvedPath !== workspacePath) intentionallyStopping.delete(workspaceKey(workspacePath));
   }
 
   _deps.log('INFO', `Removed architect '${name}' from workspace ${workspacePath}`);

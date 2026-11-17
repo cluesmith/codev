@@ -20,6 +20,7 @@ import { cli as porchCli } from './commands/porch/index.js';
 import { importCommand } from './commands/import.js';
 import { generateImage } from './commands/generate-image.js';
 import { version } from './version.js';
+import { isCodevEntrypoint } from './lib/cli-entry.js';
 import { findWorkspaceRoot } from './agent-farm/utils/index.js';
 
 /**
@@ -376,9 +377,7 @@ export async function run(args: string[]): Promise<void> {
 }
 
 // If run directly (not imported)
-const isMainModule = import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith('/codev.js') ||
-  process.argv[1]?.endsWith('/codev');
+const isMainModule = isCodevEntrypoint(process.argv[1], import.meta.url);
 
 if (isMainModule) {
   const args = process.argv.slice(2);

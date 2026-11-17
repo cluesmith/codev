@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   startTower,
@@ -16,6 +17,7 @@ import {
   createIsolatedAgentFarmDir,
   removeIsolatedAgentFarmDir,
 } from "./helpers/tower-test-utils.js";
+import { socketTempRoot } from "./helpers/socket-temp-root.js";
 
 const PORT_DEFAULT = 14900;
 const PORT_BRIDGE_ALL = 14901;
@@ -65,7 +67,7 @@ describe("Bridge Mode", () => {
       "../../../../dist/agent-farm/servers/tower-server.js",
     );
 
-    const socketDir = mkdtempSync("/tmp/codev-sock-invalid-");
+    const socketDir = mkdtempSync(join(socketTempRoot(), "codev-sock-invalid-"));
     const invalidAgentFarmDir = createIsolatedAgentFarmDir();
     invalidProcess = spawn("node", [towerServerPath, String(PORT_INVALID)], {
       stdio: ["ignore", "pipe", "pipe"],

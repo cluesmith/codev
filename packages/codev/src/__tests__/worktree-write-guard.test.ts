@@ -11,6 +11,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync, execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import {
   WORKTREE_WRITE_GUARD_SCRIPT,
   buildWorktreeGuardFiles,
@@ -27,6 +28,7 @@ import {
 // both platforms) makes the deny-tests platform-independent and exercises the
 // same literal-path comparison Linux production hits.
 const FIXTURE_HOME = path.join(path.resolve(__dirname, '..', '..'), 'node_modules', '.cguard-fixtures');
+const onWindows = process.platform === 'win32';
 
 let base: string;
 let mainCheckout: string;
@@ -65,12 +67,13 @@ interface GuardResult {
 function runGuard(
   toolName: string,
   filePath: string | undefined,
-  opts: { root?: string; home?: string; cwd?: string; bakeRoot?: boolean } = {},
+  opts: { root?: string; home?: string; cwd?: string; bakeRoot?: boolean; env?: Record<string, string> } = {},
 ): GuardResult {
   const cwd = opts.cwd ?? opts.root ?? worktree;
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     HOME: opts.home ?? homeDir,
+    ...opts.env,
   };
   const bakeRoot = opts.bakeRoot ?? true;
   if (bakeRoot && opts.root !== null) {
@@ -124,12 +127,13 @@ describe('worktree-write-guard script', () => {
     expect(r.denied).toBe(true);
   });
 
-  it('allows a Write to /tmp (temp allowlist, with macOS symlink normalization)', () => {
+  // POSIX temp roots; on Windows the guard allowlists the host temp dir instead.
+  it.skipIf(onWindows)('allows a Write to /tmp (temp allowlist, with macOS symlink normalization)', () => {
     const r = runGuard('Write', '/tmp/codev-guard-scratch/out.txt');
     expect(r.denied).toBe(false);
   });
 
-  it('allows a Write to /private/tmp (temp allowlist)', () => {
+  it.skipIf(onWindows)('allows a Write to /private/tmp (temp allowlist)', () => {
     const r = runGuard('Write', '/private/tmp/codev-guard-scratch/out.txt');
     expect(r.denied).toBe(false);
   });
@@ -140,6 +144,26 @@ describe('worktree-write-guard script', () => {
       path.join(homeDir, '.claude', 'projects', 'p', 'memory', 'm.md'),
     );
     expect(r.denied).toBe(false);
+  });
+
+  it.runIf(onWindows)('allows a Write under the Windows temp dir (Spec 1658)', () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cguard-temp-'));
+    try {
+      const r = runGuard('Write', path.join(temp, 'out.txt'), { env: { TEMP: temp, TMP: temp } });
+      expect(r.denied).toBe(false);
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(onWindows)('allows a Write to %USERPROFILE%\\.claude and compares paths case-insensitively (Spec 1658)', () => {
+    const memory = path.join(homeDir, '.claude', 'projects', 'p', 'memory', 'm.md');
+    const r = runGuard('Write', memory, { home: path.join(base, 'no-home'), env: { USERPROFILE: homeDir } });
+    expect(r.denied).toBe(false);
+    const upper = runGuard('Write', path.join(worktree, 'codev', 'x.md').toUpperCase());
+    expect(upper.denied).toBe(false);
+    const outside = runGuard('Write', path.join(mainCheckout, 'codev', 'x.md').toUpperCase());
+    expect(outside.denied).toBe(true);
   });
 
   it('allows a non-guarded tool (Bash) regardless of path', () => {
@@ -220,6 +244,7 @@ describe('buildWorktreeGuardFiles', () => {
     const files = buildWorktreeGuardFiles('relative/wt');
     const settings = files.find((f) => f.relativePath === GUARD_SETTINGS_RELPATH);
     const command = JSON.parse(settings!.content).hooks.PreToolUse[0].hooks[0].command;
-    expect(command).toContain(`CODEV_WORKTREE_ROOT='${path.resolve('relative/wt')}'`);
+    // Forward slashes: the hook runs under Git Bash on Windows (Spec 1658).
+    expect(command).toContain(`CODEV_WORKTREE_ROOT='${path.resolve('relative/wt').replace(/\\/g, '/')}'`);
   });
 });

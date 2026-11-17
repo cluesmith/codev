@@ -11,8 +11,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { _findWorkspaceRoot as findWorkspaceRoot } from '../utils/config.js';
+// Spec 1658 (M6): the root is the directory's canonical spelling on Windows (8.3 names
+// expanded, as in a runner's RUNNER~1 temp dir); identity on POSIX.
+import { workspaceKey } from '../utils/workspace-path.js';
 
 describe('findWorkspaceRoot (issue #407)', () => {
   const testBase = path.join(tmpdir(), `codev-wsr-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -30,7 +34,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(path.join(projectRoot, 'codev'), { recursive: true });
 
     const result = findWorkspaceRoot(projectRoot);
-    expect(result).toBe(projectRoot);
+    expect(result).toBe(workspaceKey(projectRoot));
   });
 
   it('finds codev/ when starting from a subdirectory', () => {
@@ -41,7 +45,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(subDir, { recursive: true });
 
     const result = findWorkspaceRoot(subDir);
-    expect(result).toBe(projectRoot);
+    expect(result).toBe(workspaceKey(projectRoot));
   });
 
   it('finds .git as fallback when no codev/ exists', () => {
@@ -49,7 +53,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
 
     const result = findWorkspaceRoot(projectRoot);
-    expect(result).toBe(projectRoot);
+    expect(result).toBe(workspaceKey(projectRoot));
   });
 
   it('prefers codev/ over .git higher in the tree', () => {
@@ -61,7 +65,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(path.join(subProject, 'codev'), { recursive: true });
 
     const result = findWorkspaceRoot(subProject);
-    expect(result).toBe(subProject);
+    expect(result).toBe(workspaceKey(subProject));
   });
 
   it('returns worktree root (not main repo) when worktree has codev/', () => {
@@ -77,7 +81,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     // Key test: starting from worktree root, should find worktree's codev/
     // (NOT resolve up to main repo)
     const result = findWorkspaceRoot(worktree);
-    expect(result).toBe(worktree);
+    expect(result).toBe(workspaceKey(worktree));
     expect(result).not.toBe(mainRepo);
   });
 
@@ -94,7 +98,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(deepDir, { recursive: true });
 
     const result = findWorkspaceRoot(deepDir);
-    expect(result).toBe(worktree);
+    expect(result).toBe(workspaceKey(worktree));
     expect(result).not.toBe(mainRepo);
   });
 
@@ -103,7 +107,7 @@ describe('findWorkspaceRoot (issue #407)', () => {
     fs.mkdirSync(noMarkersDir, { recursive: true });
 
     const result = findWorkspaceRoot(noMarkersDir);
-    expect(result).toBe(noMarkersDir);
+    expect(result).toBe(workspaceKey(noMarkersDir));
   });
 });
 
@@ -114,8 +118,10 @@ describe('findWorkspaceRoot (issue #407)', () => {
  * (git rev-parse fails in non-git temp dirs, so mainRepo is always null).
  */
 describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
-  // Resolve tmpdir symlinks (macOS /var → /private/var) so paths match git output
-  const testBase = path.join(fs.realpathSync(tmpdir()), `codev-wsr-git-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  // Resolve tmpdir symlinks (macOS /var → /private/var) so paths match git output.
+  // The native realpath also expands a Windows 8.3 short name (the runner's
+  // `RUNNER~1` temp dir) to the long form git reports; the JS one does not.
+  const testBase = path.join(fs.realpathSync.native(tmpdir()), `codev-wsr-git-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   let mainRepo: string;
   let worktreePath: string;
 
@@ -154,7 +160,7 @@ describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
     // findWorkspaceRoot should detect the worktree via git rev-parse
     // and return the worktree root, NOT the main repo.
     const result = findWorkspaceRoot(worktreePath);
-    expect(result).toBe(worktreePath);
+    expect(result).toBe(workspaceKey(worktreePath));
     expect(result).not.toBe(mainRepo);
   });
 
@@ -163,7 +169,7 @@ describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
     fs.mkdirSync(deepDir, { recursive: true });
 
     const result = findWorkspaceRoot(deepDir);
-    expect(result).toBe(worktreePath);
+    expect(result).toBe(workspaceKey(worktreePath));
     expect(result).not.toBe(mainRepo);
   });
 
@@ -172,6 +178,40 @@ describe('findWorkspaceRoot with real git worktrees (issue #407)', () => {
     fs.rmSync(path.join(worktreePath, 'codev'), { recursive: true, force: true });
 
     const result = findWorkspaceRoot(worktreePath);
-    expect(result).toBe(mainRepo);
+    expect(result).toBe(workspaceKey(mainRepo));
   });
 });
+
+/**
+ * Spec 1658 regression: the walk up must stop at the filesystem root on every
+ * host. It once stopped only at '/', so on Windows a start path with no marker
+ * looped forever at the drive root (dirname('C:\\') is 'C:\\'). A synchronous
+ * loop cannot be timed out in-process, so the walk runs in a child with a
+ * deadline: a regression fails instead of hanging the suite.
+ */
+describe('findWorkspaceRoot terminates at the filesystem root (Spec 1658)', () => {
+  it('returns the start dir for a markerless path directly under the root (a drive root on Windows)', () => {
+    // The source runs under tsx, so the test needs no build (the POSIX unit job
+    // does not build dist). The package dir is the child's cwd only so that
+    // `--import tsx` resolves; the walk starts from `startDir`, never the cwd.
+    const packageDir = path.resolve(import.meta.dirname, '../../..');
+    const sourceConfig = path.join(packageDir, 'src/agent-farm/utils/config.ts');
+    const root = path.parse(tmpdir()).root;
+    const startDir = path.join(root, `codev-no-marker-${process.pid}-${Date.now()}`);
+    const script = [
+      `const { _findWorkspaceRoot } = await import(${JSON.stringify(pathToFileURL(sourceConfig).href)});`,
+      `process.stdout.write(_findWorkspaceRoot(${JSON.stringify(startDir)}));`,
+    ].join('\n');
+
+    const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+      cwd: packageDir,
+      encoding: 'utf8',
+      timeout: 20_000,
+    });
+
+    expect(result.error?.message, 'the walk did not terminate').toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(startDir);
+  });
+});
+

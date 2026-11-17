@@ -7,6 +7,16 @@ import { execSync, spawnSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
+import { forceHostPlatform } from './helpers/host-platform.js';
+
+// These tests call vi.resetModules() and re-import doctor, which loads a fresh
+// platform module with no override; pin every instance to POSIX so a win32 host
+// does not take the Windows sections (covered by doctor-windows-*.test.ts).
+vi.mock('../lib/platform.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/platform.js')>();
+  actual.setHostPlatformForTests('linux');
+  return actual;
+});
 import { CLAUDE_INSTALL_HINT, CLAUDE_MIN_VERSION } from '../lib/claude-cli.js';
 import {
   createStubClaude,
@@ -123,6 +133,10 @@ function restoreEnv(key: string, prior: string | undefined): void {
 describe('doctor command', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // These are the POSIX doctor's checks (which/--version probes through the mocked
+    // child_process); force the seam so a win32 host does not take the Windows sections
+    // (process census, job helper, Windows prerequisites), which have their own tests.
+    forceHostPlatform('linux');
     // Suppress console output during tests
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -176,6 +190,19 @@ describe('doctor command', () => {
       const { doctor } = await import('../commands/doctor.js');
       const result = await doctor();
       expect(result).toBe(0);
+    });
+
+    it('prints no Windows prerequisites section on POSIX (Spec 1658: POSIX output unchanged)', async () => {
+      vi.mocked(execSync).mockImplementation(() => Buffer.from('/usr/bin/command'));
+      vi.mocked(spawnSync).mockImplementation(() => ({
+        status: 0, stdout: 'git version 2.40.0', stderr: '', signal: null, output: [null, 'git version 2.40.0', ''], pid: 0,
+      }));
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+      const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join('\n');
+      expect(printed).toContain('Core Dependencies');
+      expect(printed).not.toContain('Windows Prerequisites');
+      expect(printed).not.toContain('Git Bash');
     });
 
     it('should return 1 when required dependencies are missing', async () => {
@@ -1237,7 +1264,11 @@ describe('doctor command', () => {
     });
   });
 
-  describe('Claude checks on the installed CLI (#1912)', () => {
+  // Spec 1658 platform skip: this file pins the platform seam to linux (doctor's POSIX checks run
+  // through mocked child_process), so on a Windows host these real-stub runs cannot take the
+  // Windows launch path. Doctor's claude check composes resolveClaudeBin, readClaudeVersion and
+  // readClaudeAuthStatus, which run unpinned on Windows in claude-cli.test.ts.
+  describe.skipIf(process.platform === 'win32')('Claude checks on the installed CLI (#1912)', () => {
     // Doctor checks the claude lane's CLI the way the lane does: resolve the binary, check its
     // version against the floor, then run `claude auth status` with the child env the lane would
     // build. Every case runs a stub `claude`; none reaches a model.

@@ -559,6 +559,79 @@ describe('Issue #1482 — mailbox detail column migration (v18) via runGlobalMig
   });
 });
 
+/** The post-v16 terminal_sessions shape: has `command`, no shellper identity columns (v19). */
+const PRE_V19_TERMINAL_SESSIONS_DDL = PRE_V16_TERMINAL_SESSIONS_DDL.replace(
+  '    cwd TEXT,',
+  '    cwd TEXT,\n    command TEXT,'
+);
+
+describe('Spec 1658 — shellper identity columns migration (v19) via runGlobalMigrations', () => {
+  const h = harness('.test-1658-v19-migration');
+
+  function buildPreV19Db(): void {
+    h.seedMarkers(18);
+    h.state.db.exec(PRE_V19_TERMINAL_SESSIONS_DDL);
+  }
+
+  it('adds shellper_session_id and shellper_secret to an existing table, keeping its rows', () => {
+    buildPreV19Db();
+    h.state.db
+      .prepare(
+        `INSERT INTO terminal_sessions (id, workspace_path, type, shellper_socket, shellper_pid, shellper_start_time, command)
+         VALUES ('t1', '/ws', 'builder', '/run/shellper-abc.sock', 42, 1000, 'claude')`
+      )
+      .run();
+    expect(h.columns('terminal_sessions')).not.toContain('shellper_secret');
+
+    h.migrate();
+
+    expect(h.columns('terminal_sessions')).toEqual(expect.arrayContaining(['shellper_session_id', 'shellper_secret']));
+    expect(h.state.db.prepare('SELECT version FROM _migrations WHERE version = 19').get()).toBeTruthy();
+    // Pre-v19 rows survive with both identity columns null (POSIX rows keep the basename fallback).
+    const row = h.state.db.prepare("SELECT * FROM terminal_sessions WHERE id = 't1'").get() as Record<string, unknown>;
+    expect(row.shellper_socket).toBe('/run/shellper-abc.sock');
+    expect(row.shellper_session_id).toBeNull();
+    expect(row.shellper_secret).toBeNull();
+  });
+
+  it('is idempotent and skips the ALTER when the columns already exist (fresh-install shape)', () => {
+    h.seedMarkers(18);
+    h.state.db.exec(
+      PRE_V19_TERMINAL_SESSIONS_DDL.replace(
+        '    command TEXT,',
+        '    command TEXT,\n    shellper_session_id TEXT,\n    shellper_secret TEXT,'
+      )
+    );
+    expect(() => h.migrate()).not.toThrow();
+    expect(() => h.migrate()).not.toThrow();
+    const count = h.state.db.prepare('SELECT COUNT(*) AS n FROM _migrations WHERE version = 19').get() as {
+      n: number;
+    };
+    expect(count.n).toBe(1);
+    expect(h.columns('terminal_sessions').filter((c) => c === 'shellper_secret')).toHaveLength(1);
+  });
+
+  it('a fresh install (GLOBAL_SCHEMA) has the identity columns, matching the migrated shape', () => {
+    buildPreV19Db();
+    h.migrate();
+    const migratedCols = h.columns('terminal_sessions');
+
+    const fresh = new Database(resolve(h.state.testDir, 'fresh.db'));
+    try {
+      fresh.exec(GLOBAL_SCHEMA);
+      const freshCols = (
+        fresh.prepare("SELECT name FROM pragma_table_info('terminal_sessions')").all() as Array<{ name: string }>
+      )
+        .map((c) => c.name)
+        .sort();
+      expect(freshCols).toEqual(expect.arrayContaining(['shellper_session_id', 'shellper_secret']));
+      expect(freshCols).toEqual(migratedCols);
+    } finally {
+      fresh.close();
+    }
+  });
+});
+
 /**
  * Whole-chain coverage — only possible now that the runner is callable (Issue #1476).
  * A replica test could assert one block at a time; driving the real function walks a

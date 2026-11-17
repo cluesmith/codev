@@ -8,6 +8,7 @@ import { chmodSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { unsupportedWindowsNodeMessage, verifyNativeBindings } from './native-deps-guard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const forgeRoot = join(here, 'forge');
@@ -47,5 +48,18 @@ function chmodNodePtySpawnHelper() {
   }
 }
 
+// Spec 1658: on native Windows, prove both native bindings load now, so an
+// install that cannot work fails here with the supported versions instead of
+// at first use.
+function verifyWindowsNativeBindings() {
+  if (process.platform !== 'win32') return;
+  const failure = verifyNativeBindings(createRequire(import.meta.url));
+  if (failure === null) return;
+  console.error(unsupportedWindowsNodeMessage(process.version, process.arch));
+  console.error(`Native binding load failure:\n${failure}`);
+  process.exit(1);
+}
+
 chmodForgeScripts(forgeRoot);
 chmodNodePtySpawnHelper();
+verifyWindowsNativeBindings();

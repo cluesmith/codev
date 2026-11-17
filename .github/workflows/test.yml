@@ -28,6 +28,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # Spec 1658: /tmp does not exist on native Windows; every /tmp in code that
+      # runs there is explained (runtime POSIX notes, test allowlist).
+      - name: Check /tmp residue
+        run: node scripts/tmp-residue-check.mjs
+
       - name: Build sdk package
         working-directory: packages/sdk
         run: pnpm build

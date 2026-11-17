@@ -53,6 +53,15 @@ function sidebarEngineSources(): Array<{ source: string; range: string }> {
   return sources;
 }
 
+
+/**
+ * Spec 1658: tests marked with this drive `#!/bin/sh` stub servers, or assert
+ * POSIX modes, paths or the `:` separator, so they cannot run on native
+ * Windows. The Windows behavior they stand for is covered natively by
+ * `ide-server-stub.windows.test.ts` (.cmd stubs) and `ide-server-windows.test.ts`.
+ */
+const posixStubsOnly = process.platform === 'win32';
+
 describe('IDE_SERVER_MIN_VERSION floor', () => {
   it('is at least the sidebar engines.vscode minimum in every source (Scenario 11)', () => {
     const sources = sidebarEngineSources();
@@ -141,7 +150,7 @@ describe('buildIdeServerEnv', () => {
     expect(env.PATH.split(delimiter)).toEqual([nodeDir, '/usr/bin', '/bin']);
   });
 
-  it('sets PATH when the base env has none', () => {
+  it.skipIf(posixStubsOnly)('sets PATH when the base env has none', () => {
     expect(buildIdeServerEnv({}).PATH).toBe(nodeDir);
   });
 
@@ -152,7 +161,7 @@ describe('buildIdeServerEnv', () => {
   });
 });
 
-describe('checkIdeServerVersion', () => {
+describe.skipIf(posixStubsOnly)('checkIdeServerVersion', () => {
   let dir: string;
 
   function fakeServer(name: string, body: string): string {

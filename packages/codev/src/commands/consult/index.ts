@@ -9,7 +9,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn, execSync, execFileSync, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, execSync, execFileSync, type ChildProcess } from 'node:child_process';
 import { tmpdir, homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import chalk from 'chalk';
@@ -36,6 +36,7 @@ import {
   CLAUDE_BIN_ENV,
   CLAUDE_UPDATE_HINT,
   ClaudePreflightError,
+  claudeLaunch,
   credentialOrigin,
   excerpt,
   preflightClaude,
@@ -51,6 +52,10 @@ import {
   formatSnapshotLostWarning,
   appendTreeChangeWarningToOutput,
 } from './tree-tripwire.js';
+import { isWindows } from '../../lib/platform.js';
+import { containsBuildersSegment } from '../../agent-farm/utils/builder-worktree-identity.js';
+import { findOnHostPath, spawnableOnHost } from '../../lib/host-executable.js';
+import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { detectProjectIdFromCwd } from '../../lib/worktree-project-id.js';
 
 // Content reference — resolved artifact content with a display label
@@ -278,7 +283,7 @@ function findPlanContent(workspaceRoot: string, id: string, resolver?: ArtifactR
  * Check if running in a builder worktree
  */
 function isBuilderContext(): boolean {
-  return process.cwd().includes('/.builders/');
+  return containsBuildersSegment(process.cwd());
 }
 
 interface BuilderProjectState {
@@ -412,12 +417,14 @@ function logQuery(workspaceRoot: string, model: string, query: string, duration?
  * Check if a command exists
  */
 function commandExists(cmd: string): boolean {
-  try {
-    execSync(`which ${cmd}`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandLaunch().commandExists(cmd, () => {
+    try {
+      execSync(`which ${cmd}`, { stdio: 'pipe' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -962,7 +969,14 @@ function startClaudeReview(opts: {
   env: Record<string, string>;
   onText: (text: string) => void;
 }): { child: ChildProcess; finished: Promise<ClaudeReviewRun> } {
-  const child = spawn(opts.bin, opts.args, { cwd: opts.cwd, env: opts.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  // Spec 1658 (M16): an npm claude.cmd on Windows starts as `node <entry>`; unchanged on POSIX.
+  const launch = claudeLaunch(opts.bin, opts.args, opts.env);
+  const child = spawn(launch.command, launch.args, {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    ...launch.options,
+  });
 
   const finished = new Promise<ClaudeReviewRun>((resolve, reject) => {
     let settled = false;
@@ -1374,6 +1388,17 @@ export function isRealAgyCli(p: string): boolean {
  * candidate so we only run a binary proven to be the CLI.
  */
 export function agyRespondsToVersion(bin: string): boolean {
+  if (isWindows()) {
+    const probe = spawnableOnHost(bin, ['--version']);
+    const result = spawnSync(probe.command, probe.args, {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+      windowsVerbatimArguments: probe.windowsVerbatimArguments,
+    });
+    return result.status === 0 && typeof result.stdout === 'string' && result.stdout.trim().length > 0;
+  }
   try {
     const out = execSync(`"${bin}" --version 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
     return out.length > 0;
@@ -1401,6 +1426,11 @@ export function resolveAgyBin(): string | null {
 
   // A bare PATH `agy` is untrusted: require it to NOT be the IDE (realpath) AND
   // to behave like the headless CLI (`--version`) before we'll run it.
+  if (isWindows()) {
+    const found = findOnHostPath('agy');
+    if (found && isRealAgyCli(found) && agyRespondsToVersion(found)) return found;
+    return null;
+  }
   try {
     const found = execSync('command -v agy 2>/dev/null', { encoding: 'utf-8' }).trim();
     if (found && isRealAgyCli(found) && agyRespondsToVersion(found)) return found;
@@ -1577,7 +1607,7 @@ async function runAgyConsultation(
   };
 
   return new Promise<void>((resolve, reject) => {
-    const proc = spawn(bin, args, {
+    const proc = commandLaunch().spawn(bin, args, {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -1918,7 +1948,7 @@ async function dispatchConsultation(
   const startTime = Date.now();
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd[0], cmd.slice(1), {
+    const proc = commandLaunch().spawn(cmd[0], cmd.slice(1), {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'inherit'],
     });

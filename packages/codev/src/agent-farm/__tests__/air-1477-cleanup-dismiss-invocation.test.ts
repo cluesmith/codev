@@ -111,8 +111,8 @@ const { normalizeWorkspacePath } = await import('../utils/workspace-path.js');
  * `normalizeWorkspacePath` deleted from `cleanup.ts`. A symlink cannot be resolved lexically —
  * only a real `realpathSync` gets from one to the other.
  */
-const WS = realpathSync(mkdtempSync(join(tmpdir(), 'air-1477-cleanup-')));
-const workspaceRoot = join(realpathSync(tmpdir()), `air-1477-cleanup-link-${process.pid}`);
+const WS = normalizeWorkspacePath(mkdtempSync(join(tmpdir(), 'air-1477-cleanup-')));
+const workspaceRoot = join(normalizeWorkspacePath(tmpdir()), `air-1477-cleanup-link-${process.pid}`);
 // A hard-killed run (SIGKILL/OOM) skips afterAll and strands this link; a later run that draws the
 // same pid would then die on EEXIST at module load — taking the whole FILE, not one test, and with
 // an opaque error. Clearing first makes the fixture idempotent.

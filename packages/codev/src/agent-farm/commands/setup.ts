@@ -67,6 +67,6 @@ export async function setup(options: SetupOptions): Promise<void> {
   }
 
   logger.info(`Running ${postSpawn.length} post-spawn hook(s) in ${builder.worktree}...`);
-  await runPostSpawnHooks(builder.worktree, postSpawn);
+  await runPostSpawnHooks(builder.worktree, postSpawn, config.workspaceRoot);
   logger.success(`Setup complete for ${builder.id}`);
 }

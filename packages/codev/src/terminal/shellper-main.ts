@@ -8,20 +8,31 @@
  *
  * Where json-config is a JSON string with:
  *   { command, args, cwd, env, cols, rows, socketPath }
+ * plus, on Windows only, { socketDir, sessionId } (Spec 1658).
  *
  * On startup:
- * 1. Creates socket directory with 0700 permissions
- * 2. Spawns PTY with requested command
+ * 1. Creates socket directory with 0700 permissions (POSIX)
+ * 2. Spawns PTY with requested command (on Windows with `deferPty`, on
+ *    Tower's first HELLO instead, once Tower has assigned the session job)
  * 3. Writes { pid, startTime } to stdout as JSON, then closes stdout
- * 4. Listens on Unix socket at socketPath
+ * 4. Listens on the Unix socket or named pipe at socketPath
  * 5. Handles SIGTERM gracefully
+ *
+ * A named-pipe shellper requires the per-session secret in its environment
+ * (SHELLPER_SECRET_ENV) and refuses to start without it. The secret is removed
+ * from this process's environment before anything else runs.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { ShellperProcess, type IShellperPty, type PtyOptions } from './shellper-process.js';
+import { DEFER_PTY_DEADLINE_MS, ShellperProcess, type IShellperPty, type PtyOptions, type ShellperAuth } from './shellper-process.js';
+import { SHELLPER_SECRET_ENV, isPipeEndpoint, removeStaleEndpoint } from './shellper-endpoint.js';
 import { REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
+import { isWindows } from '../lib/platform.js';
+import { ptyCommand } from '../lib/pty-command.js';
+import { withNativeLoadExplanation } from '../lib/native-deps.js';
+import { killSessionTree } from '../lib/process-tree.js';
 
 // createRequire enables importing native/CJS modules (like node-pty) from ESM.
 // The package uses "type": "module", so bare `require()` is not available.
@@ -52,6 +63,19 @@ interface ShellperConfig {
   replayBufferLines?: number;
   /** Byte ceiling on the replay buffer (#1205). Defaults to REPLAY_BUFFER_MAX_BYTES. */
   replayBufferBytes?: number;
+  /**
+   * Windows only (Spec 1658). A pipe name does not contain the socket directory,
+   * so it is carried separately: it is the Tower-instance scope marker the orphan
+   * sweep matches in this process's command line.
+   */
+  socketDir?: string;
+  /** Windows only (Spec 1658): the session id reported in WELCOME. */
+  sessionId?: string;
+  /**
+   * Windows only (Spec 1658 Phase 3b): hold the first PTY spawn until Tower's
+   * HELLO, after Tower has put this process in its per-session job.
+   */
+  deferPty?: boolean;
 }
 
 function createRealPty(): IShellperPty {
@@ -72,19 +96,23 @@ function createRealPty(): IShellperPty {
     spawn(command: string, args: string[], options: PtyOptions): void {
       // Load node-pty at spawn time via createRequire (defined at module level).
       // node-pty is a native CJS module; createRequire handles ESM→CJS interop.
-      ptyModule = require('node-pty') as typeof import('node-pty');
+      // A binding that cannot load on Windows surfaces with the supported-versions message (Spec 1658).
+      const nodePty = withNativeLoadExplanation(() => require('node-pty') as typeof import('node-pty'));
+      ptyModule = nodePty;
       // A resize that landed before this spawn wins over the spawn options — it is the more
       // recent statement of the caller's intent (Issue #1482).
       const cols = pendingResize?.cols ?? options.cols;
       const rows = pendingResize?.rows ?? options.rows;
       pendingResize = null;
-      ptyInstance = ptyModule.spawn(command, args, {
+      // Spec 1658: on Windows a bare or `.cmd` command becomes one ConPTY can start.
+      const launch = ptyCommand(command, args, options.env);
+      ptyInstance = withNativeLoadExplanation(() => nodePty.spawn(launch.file, launch.args, {
         name: options.name ?? 'xterm-256color',
         cols,
         rows,
         cwd: options.cwd,
         env: options.env,
-      });
+      }));
 
       if (dataCallback) {
         ptyInstance.onData(dataCallback);
@@ -107,12 +135,20 @@ function createRealPty(): IShellperPty {
     },
 
     kill(signal?: number): void {
-      if (ptyInstance) {
-        try {
-          process.kill(ptyInstance.pid, signal ?? 15);
-        } catch {
-          // Process already dead
-        }
+      if (!ptyInstance) return;
+      // Windows has no signals to forward: every kill is a hard kill, and
+      // killing the PTY's root alone would leave its descendants running, so
+      // the whole tree goes (Spec 1658).
+      if (isWindows()) {
+        killSessionTree(ptyInstance.pid).catch((err: Error) => {
+          logStderr(`PTY tree teardown incomplete: ${err.message}`);
+        });
+        return;
+      }
+      try {
+        process.kill(ptyInstance.pid, signal ?? 15);
+      } catch {
+        // Process already dead
       }
     },
 
@@ -162,18 +198,24 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Ensure socket directory exists with 0700 permissions
-  const socketDir = path.dirname(config.socketPath);
-  fs.mkdirSync(socketDir, { recursive: true, mode: 0o700 });
-
-  // Remove stale socket file if it exists
-  try {
-    const stat = fs.lstatSync(config.socketPath);
-    if (stat.isSocket()) {
-      fs.unlinkSync(config.socketPath);
+  // Spec 1658: take the secret out of the environment before anything can
+  // inherit it. A pipe shellper without one would be open to every local user.
+  const secret = process.env[SHELLPER_SECRET_ENV];
+  delete process.env[SHELLPER_SECRET_ENV];
+  let auth: ShellperAuth | null = null;
+  if (isPipeEndpoint(config.socketPath)) {
+    if (!secret) {
+      logStderr(`Shellper refusing to start: named pipe endpoint without ${SHELLPER_SECRET_ENV}`);
+      process.exit(1);
     }
-  } catch {
-    // File doesn't exist — fine
+    auth = { secret, sessionId: config.sessionId ?? '', shellperPid: process.pid };
+  } else {
+    // Ensure socket directory exists with 0700 permissions
+    const socketDir = path.dirname(config.socketPath);
+    fs.mkdirSync(socketDir, { recursive: true, mode: 0o700 });
+
+    // Remove stale socket file if it exists
+    removeStaleEndpoint(config.socketPath);
   }
 
   const shellper = new ShellperProcess(
@@ -182,11 +224,23 @@ async function main(): Promise<void> {
     config.replayBufferLines ?? 10_000,
     logStderr,
     config.replayBufferBytes ?? REPLAY_BUFFER_MAX_BYTES,
+    auth,
   );
 
   logStderr(`Shellper started: pid=${process.pid}, command=${config.command}, socket=${config.socketPath}`);
 
-  // Start the shellper (spawns PTY and listens on socket)
+  // A deferred spawn needs the secret gate: only an authenticated Tower may start the PTY.
+  let deferSpawnMs: number | undefined;
+  if (config.deferPty === true && auth) {
+    deferSpawnMs = DEFER_PTY_DEADLINE_MS;
+    shellper.on('spawn-deadline', () => {
+      logStderr('Shellper exiting: Tower never connected to start the PTY');
+      shellper.shutdown();
+      process.exit(1);
+    });
+  }
+
+  // Start the shellper (spawns PTY, unless deferred, and listens on socket)
   await shellper.start(
     config.command,
     config.args,
@@ -194,9 +248,14 @@ async function main(): Promise<void> {
     config.env,
     config.cols,
     config.rows,
+    deferSpawnMs,
   );
 
-  logStderr(`PTY spawned: pid=${shellper.getPid()}, cols=${config.cols}, rows=${config.rows}`);
+  if (shellper.spawnDeferred) {
+    logStderr(`PTY spawn deferred until Tower connects, cols=${config.cols}, rows=${config.rows}`);
+  } else {
+    logStderr(`PTY spawned: pid=${shellper.getPid()}, cols=${config.cols}, rows=${config.rows}`);
+  }
   logStderr(`Socket listening: ${config.socketPath}`);
 
   // Write PID and start time to stdout, then close stdout
@@ -217,12 +276,8 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => {
     logStderr('Shellper received SIGTERM, shutting down');
     shellper.shutdown();
-    // Clean up socket file
-    try {
-      fs.unlinkSync(config.socketPath);
-    } catch {
-      // Already gone
-    }
+    // Clean up socket file (a pipe vanishes with its server)
+    removeStaleEndpoint(config.socketPath);
     process.exit(0);
   });
 

@@ -113,13 +113,13 @@ afterAll(() => {
 describe('getForgeCommand', () => {
   it('returns default script path when no config provided', () => {
     const cmd = getForgeCommand('issue-view');
-    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'issue-view.sh'));
   });
 
   it('returns default script path when config has no override for concept', () => {
     const config = { 'pr-list': 'custom-pr-list' };
     const cmd = getForgeCommand('issue-view', config);
-    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'issue-view.sh'));
   });
 
   it('returns user override when configured', () => {
@@ -351,17 +351,17 @@ describe('getKnownConcepts', () => {
 describe('getDefaultCommand', () => {
   it('returns the on-disk script path for a known concept', () => {
     const cmd = getDefaultCommand('issue-view');
-    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'issue-view.sh'));
   });
 
   it('returns the on-disk script path for recently-closed', () => {
     const cmd = getDefaultCommand('recently-closed');
-    expect(cmd).toContain('scripts/forge/github/recently-closed.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'recently-closed.sh'));
   });
 
   it('returns the on-disk script path for recently-merged', () => {
     const cmd = getDefaultCommand('recently-merged');
-    expect(cmd).toContain('scripts/forge/github/recently-merged.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'recently-merged.sh'));
   });
 
   it('returns null for unknown concepts', () => {
@@ -457,7 +457,7 @@ describe('provider presets', () => {
   it('uses provider preset when no manual override', () => {
     const config = { provider: 'gitlab' };
     const cmd = getForgeCommand('pr-merge', config);
-    expect(cmd).toContain('scripts/forge/gitlab/pr-merge.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'gitlab', 'pr-merge.sh'));
   });
 
   it('manual override takes precedence over provider preset', () => {
@@ -470,7 +470,7 @@ describe('provider presets', () => {
     // github preset uses on-disk scripts, same as defaults
     const config = { provider: 'github' };
     const cmd = getForgeCommand('issue-view', config);
-    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'issue-view.sh'));
   });
 
   it('returns null for concepts disabled in provider preset', () => {
@@ -495,13 +495,13 @@ describe('provider presets', () => {
   it('linear provider uses linear scripts for concepts with scripts', () => {
     const config = { provider: 'linear' };
     const cmd = getForgeCommand('issue-view', config);
-    expect(cmd).toContain('scripts/forge/linear/issue-view.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'linear', 'issue-view.sh'));
   });
 
   it('linear provider falls through to github default for concepts without scripts', () => {
     const config = { provider: 'linear' };
     const cmd = getForgeCommand('pr-list', config);
-    expect(cmd).toContain('scripts/forge/github/pr-list.sh');
+    expect(cmd).toContain(join('scripts', 'forge', 'github', 'pr-list.sh'));
   });
 
   it('linear provider omits (not nulls) concepts without scripts so they fall through', () => {
@@ -510,7 +510,7 @@ describe('provider presets', () => {
     const prList = resolutions.find(r => r.concept === 'pr-list');
     // pr-list has no linear script — should fall through to default, NOT be disabled
     expect(prList?.source).toBe('default');
-    expect(prList?.command).toContain('github/pr-list.sh');
+    expect(prList?.command).toContain(join('github', 'pr-list.sh'));
   });
 
   it('linear provider disables explicitly disabled concepts', () => {
@@ -532,7 +532,7 @@ describe('provider presets', () => {
     expect(getForgeCommand('pr-create', config)).toBe(getForgeCommand('pr-create', null));
     const prCreate = resolveAllConcepts(config).find(r => r.concept === 'pr-create');
     expect(prCreate?.source).toBe('default');
-    expect(prCreate?.command).toContain('github/pr-create.sh');
+    expect(prCreate?.command).toContain(join('github', 'pr-create.sh'));
     expect(prCreate?.executable).toBe('gh');
     // The sibling PR concepts fall through the same way.
     const prMerge = resolveAllConcepts(config).find(r => r.concept === 'pr-merge');
@@ -556,7 +556,7 @@ describe('provider presets', () => {
     const resolutions = resolveAllConcepts(config);
     const issueView = resolutions.find(r => r.concept === 'issue-view');
     expect(issueView?.source).toBe('preset');
-    expect(issueView?.command).toContain('linear/issue-view.sh');
+    expect(issueView?.command).toContain(join('linear', 'issue-view.sh'));
   });
 
   // Jira (#1740) is hybrid on the Linear model: issue concepts from acli
@@ -574,7 +574,7 @@ describe('provider presets', () => {
     for (const concept of JIRA_ISSUE_CONCEPTS) {
       const r = resolutions.find(x => x.concept === concept);
       expect(r?.source, concept).toBe('preset');
-      expect(r?.command, concept).toContain(`scripts/forge/jira/${concept}.sh`);
+      expect(r?.command, concept).toContain(join('scripts', 'forge', 'jira', `${concept}.sh`));
       expect(r?.executable, concept).toBe('acli');
     }
   });

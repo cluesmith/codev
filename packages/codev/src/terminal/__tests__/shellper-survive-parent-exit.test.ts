@@ -19,7 +19,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 
-describe('Bugfix #324: shellper survives parent exit', () => {
+// POSIX-only assertions: the shellper hosts a /bin/sh child on a Unix-domain
+// socket under /tmp, and cleanup kills its process group by negative pid.
+// On Windows, a shellper outliving its parent is covered by scenario 4 of
+// tower-lifecycle.windows.test.ts (the session survives tower stop/start).
+describe.skipIf(process.platform === 'win32')('Bugfix #324: shellper survives parent exit', () => {
   let tmpDir: string;
   let shellperPid: number | null = null;
 

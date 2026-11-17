@@ -12,6 +12,7 @@
  * Before the fix, every Tower spawn site built `{ ...process.env }` and deleted
  * only `CLAUDECODE`, so each of the assertions below on a real spawn path failed.
  */
+
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -177,7 +178,7 @@ describe('bugfix-1219 — findClaudeSessionMarkers', () => {
  * copy-pasted site would take.
  */
 const SPAWN_SITES: Array<{ file: string; calls: number; what: string }> = [
-  { file: 'agent-farm/commands/tower.ts', calls: 1, what: 'the daemon itself' },
+  { file: 'agent-farm/commands/tower.ts', calls: 2, what: 'the daemon itself, spawned or (Windows, inside a session) created through CIM' },
   { file: 'agent-farm/servers/tower-routes.ts', calls: 4, what: 'builder terminals + workspace shells, and both non-persistent fallbacks' },
   { file: 'agent-farm/servers/tower-instances.ts', calls: 2, what: 'architect launch: main + siblings' },
   { file: 'agent-farm/servers/tower-terminals.ts', calls: 2, what: 'architect reconnect: startup reconcile + on-the-fly' },

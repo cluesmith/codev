@@ -307,6 +307,15 @@ function findRegionEnd(lines: string[], markerRow: number, endPatterns: RegExp[]
  * false-clean an empty-tail exemption would have opened, honoring the no-new-corruption-vector
  * / fail-toward-hold invariant (Codex CMAP, 2026-08-06). Real ghosts always carry a multi-char
  * dim command body (the captured fixture's tail is 23 dim cells), so nothing real is lost.
+ *
+ * Two anchors place the software cursor, and either suffices (M15, Spec 1658): the headless
+ * cursor position, as measured on POSIX, or the composer's FIRST INPUT CELL (the cell after the
+ * marker and its one space). Under Windows ConPTY the position anchor never matches: claude
+ * hides the hardware cursor while it draws its own, and ConPTY's repaints park that hidden
+ * cursor at the end of the last row, so an idle claude showing its software cursor over a
+ * suggestion classified `user-text` and mail to it held (owner's ConPTY capture, claude
+ * 2.1.326, 2026-11-17: `claude-conpty-ghost-idle.replay.bin.gz`). Everything else is unchanged:
+ * inverse at normal intensity and the positive dim-tail test, so a draft still holds.
  */
 function isGhostCursorCell(
   line: BufferLine,
@@ -315,10 +324,12 @@ function isGhostCursorCell(
   cols: number,
   cursorRow: number,
   cursorCol: number,
+  markerRow: number,
   cell: BufferCell,
   probe: BufferCell,
 ): boolean {
-  if (row !== cursorRow || col !== cursorCol) return false;
+  const atCursor = row === cursorRow && col === cursorCol;
+  if (!atCursor && !isFirstInputCell(line, row, col, markerRow, probe)) return false;
   if (!cell.isInverse()) return false; // typed text is never inverse-rendered; only the software cursor is
   // Require POSITIVE ghost evidence: at least one dim, non-whitespace, non-chrome cell must
   // follow on this row (the SGR-2 suggestion body), and EVERY following such cell must be dim.
@@ -334,6 +345,16 @@ function isGhostCursorCell(
     sawDimTail = true;
   }
   return sawDimTail;
+}
+
+/**
+ * Whether (row, col) is the composer's first input cell: on the marker row, immediately after
+ * the marker glyph (column 0) and its one space (column 1).
+ */
+function isFirstInputCell(line: BufferLine, row: number, col: number, markerRow: number, probe: BufferCell): boolean {
+  if (row !== markerRow || col !== 2) return false;
+  line.getCell(1, probe);
+  return WHITESPACE.test(probe.getChars() || ' ');
 }
 
 /**
@@ -536,7 +557,7 @@ export function classifyBuffer(
       ) {
         continue; // per-app placeholder color: agy renders its idle hint in palette-8 (gray)
       }
-      if (isGhostCursorCell(line, row, col, cols, cursorRow, cursorCol, cell, probe)) {
+      if (isGhostCursorCell(line, row, col, cols, cursorRow, cursorCol, markerRow, cell, probe)) {
         continue; // claude's suggested-command ghost cursor cell (see isGhostCursorCell)
       }
       userCells++;

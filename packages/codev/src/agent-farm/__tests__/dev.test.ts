@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Builder } from '../types.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────
 
@@ -118,6 +119,8 @@ describe('afx dev — validation', () => {
 
 describe('afx dev — spawn (no existing dev)', () => {
   it('creates a PTY with type=dev, label=Dev: <id>, cwd=worktree', async () => {
+    // The POSIX launch (/bin/sh -lc); the Windows launch is pinned in windows-launch-sites.test.ts.
+    forceHostPlatform('linux');
     await dev({ builderId: 'spir-42' });
 
     expect(createPtySessionMock).toHaveBeenCalledTimes(1);

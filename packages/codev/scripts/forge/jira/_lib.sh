@@ -18,6 +18,18 @@
 #   - Jira rejects unbounded JQL, so every query carries a status-category
 #     clause; project scoping is optional on top of it.
 
+# Print a temp-file path in the form a native program can open. On native
+# Windows these scripts run under Git Bash with MSYS argument conversion off, so
+# an MSYS path (`/tmp/tmp.X/f`) would reach a native acli.exe or jq.exe
+# unconverted; `cygpath` exists only there. Elsewhere the path is printed as is.
+native_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 # Print the site's browser base URL (`https://<site>.atlassian.net`), no
 # trailing slash. Honors CODEV_JIRA_SITE (`forge.jira-site`), with or without a
 # scheme; otherwise asks acli which site it is logged into. Callers must use:

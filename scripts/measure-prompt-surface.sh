@@ -59,8 +59,14 @@ cd "$ROOT"
 # (The irony is recorded rather than smoothed over: the characters that broke
 # portability are the `⚠️ BLOCKING` worst-case-padding banners that principle P7
 # exists to delete.)
+#
+# The text is decoded as UTF-8 explicitly and the count written with a bare LF,
+# rather than through Python's locale-dependent stdio: on native Windows that is
+# the console code page (cp1252), which decodes the same bytes into different
+# characters (UTF-8 continuation byte 0xA0 becomes a whitespace NBSP, so the
+# split changes) and writes CRLF, which bash arithmetic rejects.
 _count() { # count words on stdin, deterministically
-  python3 -c 'import sys; print(len(sys.stdin.read().split()))'
+  python3 -c 'import sys; sys.stdout.reconfigure(encoding="utf-8", newline="\n"); print(len(sys.stdin.buffer.read().decode("utf-8").split()))'
 }
 w() { # word count of a file, 0 if absent
   [ -f "$1" ] || { echo 0; return; }
@@ -125,6 +131,9 @@ def expand(text, depth=0):
             return expand(fh.read(), depth + 1)
     return DIRECTIVE.sub(sub, text)
 
+# UTF-8 out whatever the console code page (cp1252 on native Windows cannot
+# encode the corpus's arrows and banners), with no CRLF translation.
+sys.stdout.reconfigure(encoding='utf-8', newline='\n')
 path = sys.argv[1]
 if os.path.isfile(path):
     with open(path, encoding='utf-8', errors='replace') as fh:

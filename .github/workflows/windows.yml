@@ -1,29 +1,63 @@
 name: Windows (on demand)
+# Each dispatch names its purpose, so the run list says what every run was for.
+run-name: "Windows: ${{ inputs.purpose || 'unlabelled' }}"
 
 # Native Windows checks for Spec 1658. Manual dispatch ONLY: this workflow never runs on
 # push or pull_request and is never a required check (owner ruling, 2026-10-21). Dispatch it
 # before a release and on any PR that touches platform code:
 #
-#   gh workflow run windows.yml --ref <branch> [-f filter=<vitest filter>] [-f tower=true]
+#   gh workflow run windows.yml --ref <branch> -f purpose='<what this run is for>' [-f suites=true] [-f filter=<vitest filter>] [-f tower=true]
 #
 # Jobs:
-#   probe     scripts/windows-probe.mjs on Node 20/22/24: Git Bash, PATHEXT, named pipes,
+#   probe     scripts/windows-probe.mjs on Node 20/22/24 (x64) and 22/24 (ARM64): Git Bash, PATHEXT, named pipes,
 #             CIM census latency, job objects, detached survival, native-dependency installs.
-#             With tower=true the Node 22 leg also starts Tower from the built checkout.
+#             With tower=true the x64 Node 22 leg also starts Tower from the built checkout (building
+#             the repo on ARM64 fails in the artifact-canvas bundler; users install prebuilt packages).
 #   targeted  runs the packages/codev vitest files matching `filter` (skipped when empty).
+#   install-guard (install_guard=true) packs the branch packages, then on Node 20 installs them
+#             globally with node-gyp replaced by a failing stub: the install must fail with the
+#             supported-versions message and never reach the stub; on Node 22 it must succeed.
+#   unit, cli-e2e, post-release-e2e (suites=true) the full suites on windows-latest, Node 22 and 24
+#             (Node 20 has no better-sqlite3 prebuild on Windows, so it cannot install there):
+#             unit runs the sdk, core and codev unit tests; cli-e2e runs the built CLI tests;
+#             post-release-e2e packs the dispatched ref's packages and installs those tarballs
+#             with verify-install.mjs, or a published release when `version` is set (setting
+#             `version` without `suites` runs this job and the probes, not unit or cli-e2e).
 
 on:
   workflow_dispatch:
     inputs:
+      purpose:
+        description: 'What this run is for (shown as the run name)'
+        required: false
+        default: ''
       filter:
         description: 'Vitest filter for the targeted job (packages/codev); empty skips it'
         required: false
         default: ''
       tower:
-        description: 'Probe: also try `afx tower start` from the built checkout'
+        description: 'Probe: also try `afx tower start` (built checkout on Node 22; published package on every leg)'
         type: boolean
         required: false
         default: false
+      install_guard:
+        description: 'Run the native-dependency install guard check (Node 20 refused, Node 22 installs)'
+        type: boolean
+        required: false
+        default: false
+      suites:
+        description: 'Run the full unit, cli-e2e and post-release-e2e suites (about an hour)'
+        type: boolean
+        required: false
+        default: false
+      version:
+        description: 'post-release-e2e: verify this published @cluesmith/codev version instead of the packed branch (a release after 3.3.5)'
+        required: false
+        default: ''
+      published:
+        description: 'Published @cluesmith/codev versions to probe with tower=true (space-separated; 3.3.3 was current on 2026-09-09)'
+        required: false
+        default: 'latest'
 
 defaults:
   run:
@@ -36,13 +70,21 @@ env:
 
 jobs:
   probe:
-    name: Probe (Node ${{ matrix.node }})
-    runs-on: windows-latest
+    name: Probe (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        os: [windows-latest]
         node: ['20', '22', '24']
+        # ARM64: the spec supports it only if the native dependencies install from prebuilds;
+        # measured here rather than inferred from release asset names.
+        include:
+          - os: windows-11-arm
+            node: '22'
+          - os: windows-11-arm
+            node: '24'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,34 +98,99 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Probe platform facts and native-dependency installs
-        run: node scripts/windows-probe.mjs --deps --out "$RUNNER_TEMP/probe-node${{ matrix.node }}.json"
+        run: node scripts/windows-probe.mjs --deps --out "$RUNNER_TEMP/probe-${{ matrix.os }}-node${{ matrix.node }}.json"
 
       - name: Install dependencies
-        if: ${{ inputs.tower && matrix.node == '22' }}
+        if: ${{ !cancelled() && inputs.tower && matrix.node == '22' && matrix.os == 'windows-latest' }}
         run: pnpm install
 
       - name: Build packages/codev
-        if: ${{ inputs.tower && matrix.node == '22' }}
+        if: ${{ !cancelled() && inputs.tower && matrix.node == '22' && matrix.os == 'windows-latest' }}
         working-directory: packages/codev
         run: pnpm build
 
       - name: Probe Tower start
-        if: ${{ inputs.tower && matrix.node == '22' }}
-        run: node scripts/windows-probe.mjs --tower --out "$RUNNER_TEMP/probe-tower.json"
+        if: ${{ !cancelled() && inputs.tower && matrix.node == '22' && matrix.os == 'windows-latest' }}
+        run: node scripts/windows-probe.mjs --tower --out "$RUNNER_TEMP/probe-tower-${{ matrix.os }}.json"
+
+      - name: Probe Tower start from the published package (global install)
+        if: ${{ !cancelled() && inputs.tower }}
+        # Node 20 cannot install the package on Windows (no better-sqlite3 prebuild; audit 1.1), so
+        # that leg records the failure without turning the run red.
+        continue-on-error: ${{ matrix.node == '20' }}
+        env:
+          PUBLISHED: ${{ inputs.published }}
+        run: |
+          specs=()
+          for v in $PUBLISHED; do specs+=(--tower-published "$v"); done
+          node scripts/windows-probe.mjs "${specs[@]}" --out "$RUNNER_TEMP/probe-published-${{ matrix.os }}-node${{ matrix.node }}.json"
 
       - name: Upload probe reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-probe-node${{ matrix.node }}
+          name: windows-probe-${{ matrix.os }}-node${{ matrix.node }}
           path: ${{ runner.temp }}/probe-*.json
           if-no-files-found: warn
+
+  install-guard:
+    name: Install guard (native dependencies)
+    if: ${{ inputs.install_guard }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22 (build and pack)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages/codev
+        working-directory: packages/codev
+        run: pnpm build
+
+      - name: Pack the branch packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs"
+          for p in codev-types codev-core codev-sdk codev; do
+            pnpm --filter "@cluesmith/$p" pack --pack-destination "$RUNNER_TEMP/packs"
+          done
+          ls -l "$RUNNER_TEMP/packs"
+
+      - name: Setup Node.js 20 (unsupported on native Windows)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Control - without the guard, better-sqlite3 falls back to node-gyp on Node 20
+        run: node scripts/windows-install-guard-check.mjs --control "$RUNNER_TEMP/packs"
+
+      - name: Guard - Node 20 install fails with the supported versions, node-gyp never runs
+        run: node scripts/windows-install-guard-check.mjs --unsupported "$RUNNER_TEMP/packs"
+
+      - name: Setup Node.js 22 (supported)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Supported - Node 22 installs from prebuilds
+        run: node scripts/windows-install-guard-check.mjs --supported "$RUNNER_TEMP/packs"
 
   targeted:
     name: Targeted tests
     if: ${{ inputs.filter != '' }}
     runs-on: windows-latest
-    timeout-minutes: 45
+    # The full unit suite (filter `src`) runs about 50 minutes on windows-latest.
+    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -108,4 +215,161 @@ jobs:
         working-directory: packages/codev
         env:
           FILTER: ${{ inputs.filter }}
-        run: pnpm exec vitest run $FILTER
+          # Read-only GitHub concepts run live (Spec 1658 scenario 8).
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm exec vitest run "$FILTER" --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-report.json"
+
+      - name: Upload the test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-vitest-report
+          path: ${{ runner.temp }}/vitest-report.json
+          if-no-files-found: warn
+
+  unit:
+    name: Unit tests (Node ${{ matrix.node }})
+    if: ${{ inputs.suites }}
+    runs-on: windows-latest
+    # The codev unit suite alone runs about 50 minutes on windows-latest.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # Builds codev's workspace dependencies (types, sdk, core) first.
+      - name: Build packages/codev
+        working-directory: packages/codev
+        run: pnpm build
+
+      - name: Run sdk unit tests
+        working-directory: packages/sdk
+        run: pnpm test
+
+      - name: Run core unit tests
+        working-directory: packages/core
+        run: pnpm test
+
+      - name: Copy skeleton for unit tests
+        working-directory: packages/codev
+        run: pnpm copy-skeleton
+
+      - name: Run codev unit tests
+        working-directory: packages/codev
+        env:
+          # Read-only GitHub concepts run live (Spec 1658 scenario 8).
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-unit-report.json"
+
+      - name: Upload the test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unit-report-node${{ matrix.node }}
+          path: ${{ runner.temp }}/vitest-unit-report.json
+          if-no-files-found: warn
+
+  cli-e2e:
+    name: CLI tests (Node ${{ matrix.node }})
+    if: ${{ inputs.suites }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages/codev
+        working-directory: packages/codev
+        run: pnpm build
+
+      - name: Run CLI integration tests
+        working-directory: packages/codev
+        run: pnpm exec vitest run --config vitest.cli.config.ts
+
+  post-release-e2e:
+    name: Install verification (Node ${{ matrix.node }})
+    if: ${{ inputs.suites || inputs.version != '' }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        if: ${{ inputs.version == '' }}
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies
+        if: ${{ inputs.version == '' }}
+        run: pnpm install
+
+      - name: Build packages/codev
+        if: ${{ inputs.version == '' }}
+        working-directory: packages/codev
+        run: pnpm build
+
+      # codev-types, codev-core and codev-sdk are runtime dependencies of codev, so the branch
+      # install takes their tarballs too (as test.yml's install verification does).
+      - name: Pack the branch packages
+        if: ${{ inputs.version == '' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs"
+          for p in codev-types codev-core codev-sdk codev; do
+            pnpm --filter "@cluesmith/$p" pack --pack-destination "$RUNNER_TEMP/packs"
+          done
+          ls -l "$RUNNER_TEMP/packs"
+
+      - name: Download the published package
+        if: ${{ inputs.version != '' }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs"
+          npm view "@cluesmith/codev@$VERSION" version
+          npm pack "@cluesmith/codev@$VERSION" --pack-destination "$RUNNER_TEMP/packs"
+
+      # A user's npm runs install scripts under cmd.exe, so the workflow's Git Bash script shell
+      # (needed only to build this repo) is removed for the install, as windows-probe.mjs does.
+      - name: Verify installation
+        run: env -u npm_config_script_shell node packages/codev/scripts/verify-install.mjs "$RUNNER_TEMP"/packs/*.tgz

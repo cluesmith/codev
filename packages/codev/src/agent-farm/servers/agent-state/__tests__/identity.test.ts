@@ -5,11 +5,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../../../db/schema.js';
+// Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
+import { normalizeWorkspacePath } from '../../../utils/workspace-path.js';
 import {
   resolveAgentIdentity,
   invalidateAgentIdentityMemo,
@@ -41,7 +43,7 @@ function resolve(identity: Parameters<typeof resolveAgentIdentity>[0]) {
 beforeEach(() => {
   invalidateAgentIdentityMemo();
   clock = 1_000_000;
-  tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'spec-1595-identity-')));
+  tmpRoot = normalizeWorkspacePath(mkdtempSync(join(tmpdir(), 'spec-1595-identity-')));
   workspace = join(tmpRoot, 'workspace');
   mkdirSync(join(workspace, '.builders', 'spir-1595-agent-attention'), { recursive: true });
   db = new Database(join(tmpRoot, 'global.db'));

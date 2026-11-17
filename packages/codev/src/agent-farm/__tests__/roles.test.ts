@@ -39,7 +39,7 @@ describe('Role Utilities', () => {
       const result = findRolePromptPath(config, 'architect');
       expect(result).not.toBeNull();
       expect(result!.source).toBe('local');
-      expect(result!.path).toContain('codev/roles/architect.md');
+      expect(result!.path).toContain(path.join('codev', 'roles', 'architect.md'));
     });
 
     it('should fall back to bundled when local not found', () => {
@@ -49,7 +49,7 @@ describe('Role Utilities', () => {
       const result = findRolePromptPath(config, 'builder');
       expect(result).not.toBeNull();
       expect(result!.source).toBe('bundled');
-      expect(result!.path).toContain('bundled/builder.md');
+      expect(result!.path).toContain(path.join('bundled', 'builder.md'));
     });
   });
 

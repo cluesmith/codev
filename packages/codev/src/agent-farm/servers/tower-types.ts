@@ -11,6 +11,7 @@ import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { TunnelClient } from '../lib/tunnel-client.js';
 import type { FileTab } from '../utils/file-tabs.js';
+import type { WorkspaceKeyedMap } from './tower-terminals.js';
 /**
  * Shared context passed to all tower modules.
  * The orchestrator (tower-server.ts) owns lifecycle — it creates
@@ -21,7 +22,7 @@ export interface TowerContext {
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   terminalManager: TerminalManager;
   shellperManager: SessionManager | null;
-  workspaceTerminals: Map<string, WorkspaceTerminals>;
+  workspaceTerminals: WorkspaceKeyedMap<WorkspaceTerminals>;
   db: () => Database.Database;
   broadcastNotification: (n: { type: string; title: string; body: string; workspace?: string }) => void;
   tunnelClient: TunnelClient | null;
@@ -105,6 +106,15 @@ export interface InstanceStatus {
 }
 
 /**
+ * The shellper identity columns of a terminal_sessions row (Spec 1658): the id the
+ * shellper was created with, and its per-session pipe secret (Windows only).
+ */
+export interface ShellperRowAuth {
+  sessionId: string | null;
+  secret: string | null;
+}
+
+/**
  * SQLite terminal session row shape.
  * Note: dev PTYs (`type: 'dev'`) are intentionally never written here — see
  * the runtime filter in tower-routes.ts that gates shellper persistence.
@@ -121,5 +131,9 @@ export interface DbTerminalSession {
   label: string | null;
   cwd: string | null;
   command: string | null;
+  /** The id the shellper was created with; null on pre-v19 rows (Spec 1658). */
+  shellper_session_id: string | null;
+  /** Per-session pipe secret; Windows only, null on POSIX (Spec 1658). */
+  shellper_secret: string | null;
   created_at: string;
 }

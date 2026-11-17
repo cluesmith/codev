@@ -28,6 +28,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { realAgyOptIn, realClaudeOptIn } from './src/lib/test-env.js';
+import { npmCmdShim } from './src/__tests__/helpers/npm-cmd-shim.js';
 import { BUILDER_WORKTREE_ENV } from './src/lib/agent-env.js';
 
 /**
@@ -57,7 +58,7 @@ exit 0
  * run against this rather than the real CLI. Tests that need to vary or record
  * the CLI's behaviour use `src/__tests__/helpers/stub-claude.ts` instead.
  */
-const FAKE_CLAUDE_STREAM = [
+const FAKE_CLAUDE_EVENTS = [
   { type: 'system', subtype: 'init', tools: ['Glob', 'Grep', 'Read'], mcp_servers: [], model: 'claude-opus-5' },
   {
     type: 'assistant',
@@ -67,7 +68,8 @@ const FAKE_CLAUDE_STREAM = [
     type: 'result', subtype: 'success', is_error: false, result: 'VERDICT: COMMENT',
     usage: { input_tokens: 1, cache_read_input_tokens: 0, output_tokens: 1 }, total_cost_usd: 0,
   },
-].map((event) => `printf '%s\\n' '${JSON.stringify(event)}'`).join('\n');
+];
+const FAKE_CLAUDE_STREAM = FAKE_CLAUDE_EVENTS.map((event) => `printf '%s\\n' '${JSON.stringify(event)}'`).join('\n');
 
 const FAKE_CLAUDE = `#!/bin/sh
 # Fake claude installed by the Codev vitest harness (#1912). See vitest-setup.ts.
@@ -78,6 +80,22 @@ esac
 cat > /dev/null
 ${FAKE_CLAUDE_STREAM}
 exit 0
+`;
+
+/**
+ * The same fake for native Windows (Spec 1658, M16), which cannot run a `#!/bin/sh` script: the
+ * npm-shaped `claude.cmd` for this script, answering exactly as FAKE_CLAUDE does.
+ */
+const FAKE_CLAUDE_NODE = `// Fake claude installed by the Codev vitest harness (#1912, Spec 1658). See vitest-setup.ts.
+const arg = process.argv[2];
+if (arg === '--version') { console.log('2.1.326 (Claude Code)'); process.exit(0); }
+if (arg === 'auth') { console.log('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'); process.exit(0); }
+process.stdin.resume();
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => {
+  for (const event of ${JSON.stringify(FAKE_CLAUDE_EVENTS)}) console.log(JSON.stringify(event));
+  process.exit(0);
+});
 `;
 
 /**
@@ -106,9 +124,16 @@ if (!realAgyOptIn()) {
 // agy: a shell that exports CODEV_CLAUDE_BIN must not feed the real CLI back into
 // the suites. CODEV_ALLOW_REAL_CLAUDE is the single, named way through.
 if (!realClaudeOptIn()) {
-  const fakeClaude = join(sandbox, 'claude');
-  writeFileSync(fakeClaude, FAKE_CLAUDE, { mode: 0o755 });
-  process.env.CODEV_CLAUDE_BIN = fakeClaude;
+  if (process.platform === 'win32') {
+    writeFileSync(join(sandbox, 'fake-claude.cjs'), FAKE_CLAUDE_NODE);
+    const fakeClaude = join(sandbox, 'claude.cmd');
+    writeFileSync(fakeClaude, npmCmdShim('fake-claude.cjs'));
+    process.env.CODEV_CLAUDE_BIN = fakeClaude;
+  } else {
+    const fakeClaude = join(sandbox, 'claude');
+    writeFileSync(fakeClaude, FAKE_CLAUDE, { mode: 0o755 });
+    process.env.CODEV_CLAUDE_BIN = fakeClaude;
+  }
 }
 
 // Keep the #1077 auth cache ACTIVE but sandboxed. `agyAuthCacheDisabled()` turns

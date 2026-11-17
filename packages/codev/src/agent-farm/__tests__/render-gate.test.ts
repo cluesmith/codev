@@ -813,6 +813,49 @@ describe('render-gate — claude suggested-command ghost (Spec 1313 render-gate 
   });
 });
 
+describe('render-gate — the ghost cursor under Windows ConPTY (Spec 1658, M15)', () => {
+  // Under ConPTY claude hides the hardware cursor while it draws its own (an inverse cell over a
+  // dim suggestion), and ConPTY's repaints park that hidden cursor at the end of the last row.
+  // The position anchor never matches there, so the exemption also accepts the composer's first
+  // input cell (after the marker and its one space). The narrowness is unchanged: inverse at
+  // normal intensity and a positive dim tail, so every case below with real text still holds.
+  const loadGz = (name: string) => gunzipSync(readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
+  // Cursor parked far from the composer, where ConPTY leaves it (row 3 is the last row here).
+  const parked = (...lines: string[]) => snapshotFromRaw(screen(...lines) + '\x1b[3;40H');
+
+  it('the real ConPTY capture (claude 2.1.326, 120×40, owner machine) → clean', async () => {
+    // `❯ ␛[7mT␛[2m␛[27mry "how does <filepath> work?"␛[22m`, hardware cursor at (39, 119).
+    const replay = loadGz('claude-conpty-ghost-idle.replay.bin.gz');
+    const v = await classifyScreen({ replay, cols: 120, rows: 40 }, CLAUDE_PROFILE);
+    expect(v).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('the ghost signature at the first input cell, cursor elsewhere → clean', async () => {
+    const snap = parked(`❯ ${INV}T${INV_OFF}${DIM}ry "how does <filepath> work?"${RESET}`, '──────────');
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('an inverse first input cell followed by NON-dim text, cursor elsewhere → busy', async () => {
+    const snap = parked(`❯ ${INV}d${INV_OFF}eploy the hotfix`, '──────────');
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: false, detail: 'user-text' });
+  });
+
+  it('a 1-char draft rendered inverse at the first input cell with NO dim tail, cursor elsewhere → busy', async () => {
+    const snap = parked(`❯ ${INV}x${INV_OFF}`, '──────────');
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: false, detail: 'user-text' });
+  });
+
+  it('a real draft with the software cursor past the typed text, cursor elsewhere → busy', async () => {
+    const snap = parked(`❯ review the mailbox change${INV} ${INV_OFF}`, '──────────');
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: false, detail: 'user-text' });
+  });
+
+  it('the ghost signature NOT at the first input cell, cursor elsewhere → busy (only that one cell is anchored)', async () => {
+    const snap = parked(`❯  ${INV}a${INV_OFF}${DIM}fx cleanup${RESET}`, '──────────');
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: false, detail: 'user-text' });
+  });
+});
+
 describe('queuesInputMidTurn — the mid-turn delivery licence (Issue #1664)', () => {
   // Pins each shipped profile's value and, just as importantly, WHERE it came from. Two of the
   // three were established by driving the real TUI through the acceptance harness; agy's was set

@@ -245,7 +245,10 @@ describe('fetchTeamGitHubData', () => {
     // Should always return a result object (never throw)
     expect(result).toHaveProperty('data');
     expect(result.data).toBeInstanceOf(Map);
-  });
+    // A live `team-activity` call, which forge bounds at 30s. The default 5s
+    // budget is tighter than that bound, and native Windows adds the Git Bash
+    // resolution and launch on top of the network round trip.
+  }, 45_000);
 });
 
 // =============================================================================

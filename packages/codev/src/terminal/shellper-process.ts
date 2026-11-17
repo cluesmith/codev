@@ -2,7 +2,8 @@
  * ShellperProcess: the testable core logic of the shellper daemon.
  *
  * Owns a single PTY via the IShellperPty interface (injected for testability).
- * Listens on a Unix socket for multiple client connections. Handles the binary
+ * Listens on a Unix socket (POSIX) or named pipe (Windows) for multiple client
+ * connections. Handles the binary
  * wire protocol: HELLO/WELCOME handshake, DATA forwarding, RESIZE, SIGNAL,
  * SPAWN, PING/PONG, and EXIT lifecycle.
  *
@@ -12,6 +13,11 @@
  * - New tower connection replaces any existing tower connection
  * - Terminal connections always coexist
  * - PTY output is broadcast to all connected clients
+ *
+ * With a {@link ShellperAuth} (Windows only, Spec 1658) every connection must
+ * present the per-session secret in its HELLO. Until it does, the shellper writes
+ * nothing to it and acts on none of its frames; a wrong or missing secret drops
+ * the connection, and so does staying unauthenticated past PRE_AUTH_TIMEOUT_MS.
  */
 
 import fs from 'node:fs';
@@ -38,6 +44,7 @@ import {
   type SpawnMessage,
 } from './shellper-protocol.js';
 import { ShellperReplayBuffer, REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
+import { SHELLPER_SECRET_ENV, SHELLPER_SESSION_ENV, isPipeEndpoint, secretsMatch } from './shellper-endpoint.js';
 import { DEFAULT_COLS, DEFAULT_ROWS } from './index.js';
 
 // --- IShellperPty: abstraction over node-pty for testing ---
@@ -60,6 +67,20 @@ export interface IShellperPty {
   pid: number;
 }
 
+/**
+ * Per-session connection gate (Windows only). `shellperPid` and `sessionId` are
+ * reported in WELCOME so the client can verify it reached the shellper its DB
+ * row names.
+ */
+export interface ShellperAuth {
+  secret: string;
+  sessionId: string;
+  shellperPid: number;
+}
+
+/** How long a secret-gated connection may stay unauthenticated before it is dropped. */
+export const PRE_AUTH_TIMEOUT_MS = 10_000;
+
 // --- Connection metadata ---
 
 interface ConnectionEntry {
@@ -69,6 +90,14 @@ interface ConnectionEntry {
 }
 
 // --- ShellperProcess ---
+
+/**
+ * How long a deferred shellper (Spec 1658 Phase 3b) waits for Tower's HELLO
+ * before exiting. Tower bounds its job assign well inside this
+ * (JOB_ASSIGN_BUDGET_MS), so a slow helper degrades the session to "no job"
+ * rather than costing the create.
+ */
+export const DEFER_PTY_DEADLINE_MS = 30_000;
 
 export class ShellperProcess extends EventEmitter {
   private pty: IShellperPty | null = null;
@@ -99,6 +128,10 @@ export class ShellperProcess extends EventEmitter {
   // EXIT broadcast reaches nobody, and the client hangs forever waiting for an
   // EXIT frame that already went out (Bugfix #905).
   private exitInfo: { code: number; signal: string | null } | null = null;
+  // Spec 1658 Phase 3b: the first PTY spawn, held until Tower's HELLO, and the
+  // deadline after which a shellper with no PTY gives up.
+  private deferredSpawn: { command: string; args: string[]; cwd: string; env: Record<string, string> } | null = null;
+  private deferredSpawnTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly ptyFactory: () => IShellperPty,
@@ -106,6 +139,7 @@ export class ShellperProcess extends EventEmitter {
     replayBufferLines: number = 10_000,
     private readonly log: (msg: string) => void = () => {},
     replayBufferBytes: number = REPLAY_BUFFER_MAX_BYTES,
+    private readonly auth: ShellperAuth | null = null,
   ) {
     super();
     this.replayBuffer = new ShellperReplayBuffer(replayBufferLines, replayBufferBytes);
@@ -113,6 +147,15 @@ export class ShellperProcess extends EventEmitter {
 
   /**
    * Start the shellper: spawn the PTY and begin listening on the Unix socket.
+   *
+   * With `deferSpawnMs` (Windows, secret-gated shellpers only; Spec 1658 Phase
+   * 3b) the PTY is not spawned yet: Tower first puts this process in a
+   * per-session Job Object, so the PTY and everything it starts inherit the
+   * job. The first authenticated HELLO from a `tower` client spawns it, before
+   * the WELCOME. A HELLO from any other role neither spawns nor fails; that
+   * client sees an empty replay. If no `tower` HELLO arrives within
+   * `deferSpawnMs`, 'spawn-deadline' is emitted and the caller exits, so a
+   * PTY-less shellper never lingers.
    */
   async start(
     command: string,
@@ -121,13 +164,37 @@ export class ShellperProcess extends EventEmitter {
     env: Record<string, string>,
     cols: number,
     rows: number,
+    deferSpawnMs?: number,
   ): Promise<void> {
     this.cols = cols;
     this.rows = rows;
     this.startTime = Date.now();
 
-    this.spawnPty(command, args, cwd, env, cols, rows);
+    if (deferSpawnMs !== undefined && this.auth) {
+      this.deferredSpawn = { command, args, cwd, env };
+      this.deferredSpawnTimer = setTimeout(() => {
+        this.deferredSpawnTimer = null;
+        if (!this.deferredSpawn) return;
+        this.log(`No tower HELLO within ${deferSpawnMs}ms; the PTY was never spawned`);
+        this.emit('spawn-deadline');
+      }, deferSpawnMs);
+    } else {
+      this.spawnPty(command, args, cwd, env, cols, rows);
+    }
     await this.listen();
+  }
+
+  /** Whether the first PTY spawn is still waiting for Tower's HELLO. */
+  get spawnDeferred(): boolean {
+    return this.deferredSpawn !== null;
+  }
+
+  private clearDeferredSpawn(): void {
+    this.deferredSpawn = null;
+    if (this.deferredSpawnTimer) {
+      clearTimeout(this.deferredSpawnTimer);
+      this.deferredSpawnTimer = null;
+    }
   }
 
   private spawnPty(
@@ -138,6 +205,7 @@ export class ShellperProcess extends EventEmitter {
     cols: number,
     rows: number,
   ): void {
+    this.clearDeferredSpawn();
     this.exited = false;
     this.exitInfo = null;
     // PIR #1475: record what we are ACTUALLY spawning, for the WELCOME frame.
@@ -148,12 +216,17 @@ export class ShellperProcess extends EventEmitter {
     this.ptyArgs = [...args];
     const pty = this.ptyFactory();
     this.pty = pty;
+    // Spec 1658: the connection secret must never reach the PTY child, whatever
+    // env the launch or a SPAWN frame supplies.
+    const childEnv = { ...env };
+    delete childEnv[SHELLPER_SECRET_ENV];
+    if (this.auth) childEnv[SHELLPER_SESSION_ENV] = this.auth.sessionId;
     pty.spawn(command, args, {
       name: 'xterm-256color',
       cols,
       rows,
       cwd,
-      env,
+      env: childEnv,
     });
 
     pty.onData((data: string) => {
@@ -231,6 +304,11 @@ export class ShellperProcess extends EventEmitter {
       });
 
       this.server.listen(this.socketPath, () => {
+        // A named pipe has no file mode; its access control is the secret gate.
+        if (isPipeEndpoint(this.socketPath)) {
+          resolve();
+          return;
+        }
         // Enforce 0600 permissions on socket file (owner-only access).
         // Unix sockets inherit permissions from umask; we override after creation.
         try {
@@ -257,6 +335,24 @@ export class ShellperProcess extends EventEmitter {
     let connectionId: string | null = null;
     let handshakeComplete = false;
 
+    // Spec 1658: a secret-gated connection that never authenticates is dropped.
+    let preAuthTimer: ReturnType<typeof setTimeout> | null = null;
+    if (this.auth) {
+      preAuthTimer = setTimeout(() => {
+        if (!handshakeComplete && !socket.destroyed) {
+          this.log('Connection dropped: no authenticated HELLO in time');
+          socket.destroy();
+        }
+      }, PRE_AUTH_TIMEOUT_MS);
+      preAuthTimer.unref?.();
+    }
+    const clearPreAuthTimer = (): void => {
+      if (preAuthTimer) {
+        clearTimeout(preAuthTimer);
+        preAuthTimer = null;
+      }
+    };
+
     const parser = createFrameParser();
     socket.pipe(parser);
 
@@ -268,6 +364,7 @@ export class ShellperProcess extends EventEmitter {
           if (result) {
             connectionId = result;
             handshakeComplete = true;
+            clearPreAuthTimer();
             this.pendingSockets.delete(socket);
           }
         }
@@ -286,6 +383,7 @@ export class ShellperProcess extends EventEmitter {
     });
 
     socket.on('close', () => {
+      clearPreAuthTimer();
       this.pendingSockets.delete(socket);
       if (connectionId && this.connections.has(connectionId)) {
         this.connections.delete(connectionId);
@@ -294,6 +392,7 @@ export class ShellperProcess extends EventEmitter {
     });
 
     socket.on('error', () => {
+      clearPreAuthTimer();
       this.pendingSockets.delete(socket);
       if (connectionId && this.connections.has(connectionId)) {
         this.connections.delete(connectionId);
@@ -361,7 +460,24 @@ export class ShellperProcess extends EventEmitter {
       return null;
     }
 
+    // Spec 1658: on a secret-gated shellper, a HELLO without the right secret is
+    // dropped before anything is written or any connection state changes.
+    if (this.auth && !secretsMatch(hello.secret, this.auth.secret)) {
+      this.log('HELLO rejected: missing or wrong secret');
+      this.emit('auth-rejected');
+      socket.destroy();
+      return null;
+    }
+
     const clientType = hello.clientType || 'tower';
+
+    // Spec 1658 Phase 3b: Tower's HELLO means the job is in place; spawn now,
+    // so the WELCOME below carries the real PTY pid.
+    const deferred = this.deferredSpawn;
+    if (deferred && clientType === 'tower') {
+      this.log('Tower HELLO: spawning the deferred PTY');
+      this.spawnPty(deferred.command, deferred.args, deferred.cwd, deferred.env, this.cols, this.rows);
+    }
 
     // Tower replacement: destroy any existing tower connection
     if (clientType === 'tower') {
@@ -394,6 +510,9 @@ export class ShellperProcess extends EventEmitter {
       // first spawn, so the peer sees the same shape an older shellper sends and
       // falls back to its persisted command rather than adopting a half-identity.
       ...(this.ptyCommand ? { command: this.ptyCommand, args: this.ptyArgs } : {}),
+      // Spec 1658: the reconnect identity on Windows. Only a secret-gated
+      // shellper sends these, so POSIX WELCOME frames are unchanged.
+      ...(this.auth ? { shellperPid: this.auth.shellperPid, sessionId: this.auth.sessionId } : {}),
     });
     socket.write(welcome);
     this.log(
@@ -525,6 +644,7 @@ export class ShellperProcess extends EventEmitter {
    * Graceful shutdown: kill child process, close socket server, clean up.
    */
   shutdown(): void {
+    this.clearDeferredSpawn();
     if (this.pty && !this.exited) {
       this.pty.kill(15); // SIGTERM
     }

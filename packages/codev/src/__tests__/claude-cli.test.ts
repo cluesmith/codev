@@ -20,6 +20,7 @@ import {
   describeClaudeAuth,
   preflightClaude,
   readClaudeAuthStatus,
+  claudeLaunch,
   readClaudeVersion,
   resolveClaudeAuthMode,
   resolveClaudeBin,
@@ -35,7 +36,7 @@ import {
   type StubClaude,
 } from './helpers/stub-claude.js';
 
-const SAVED_ENV_KEYS = ['CODEV_CLAUDE_BIN', 'CODEV_ALLOW_REAL_CLAUDE', 'PATH', 'HOME'] as const;
+const SAVED_ENV_KEYS = ['CODEV_CLAUDE_BIN', 'CODEV_ALLOW_REAL_CLAUDE', 'PATH', 'HOME', 'USERPROFILE'] as const;
 
 const SESSION_MARKERS = {
   CLAUDECODE: '1',
@@ -112,6 +113,8 @@ beforeEach(() => {
   workspace = path.join(tmpDir, 'workspace');
   fs.mkdirSync(workspace);
   process.env.HOME = path.join(tmpDir, 'home');
+  // Spec 1658 (M16): os.homedir() reads USERPROFILE on Windows, HOME elsewhere.
+  process.env.USERPROFILE = process.env.HOME;
   fs.mkdirSync(process.env.HOME);
   delete process.env.CODEV_ALLOW_REAL_CLAUDE;
 });
@@ -123,6 +126,24 @@ afterEach(() => {
   }
   for (const created of stubs.splice(0)) created.cleanup();
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+describe('claudeLaunch (Spec 1658, M16)', () => {
+  it.skipIf(process.platform === 'win32')('is the identity on POSIX: same command, same args, no extra option', () => {
+    expect(claudeLaunch('/opt/claude/bin/claude', ['--version'])).toEqual({
+      command: '/opt/claude/bin/claude',
+      args: ['--version'],
+      options: {},
+    });
+  });
+
+  it.runIf(process.platform === 'win32')('a pinned npm-shaped claude.cmd starts as node <entry> <args>, with no verbatim arguments', () => {
+    const pinned = stub();
+    const launch = claudeLaunch(pinned.bin, ['auth', 'status', '--json']);
+    expect(path.basename(launch.command).toLowerCase()).toBe('node.exe');
+    expect(launch.args).toEqual([path.join(pinned.dir, 'stub.cjs'), 'auth', 'status', '--json']);
+    expect(launch.options).toEqual({});
+  });
 });
 
 describe('resolveClaudeBin', () => {
@@ -149,14 +170,18 @@ describe('resolveClaudeBin', () => {
     expect(() => resolveClaudeBin()).toThrow(/does not fall back to PATH/);
   });
 
-  it('a relative pin is returned as an absolute path, so a spawn from another cwd runs the same file', () => {
+  // Spec 1658 platform skip: the Windows runner's checkout (D:) and temp dir (C:) are on different
+  // drives, so no relative path from the cwd reaches the stub.
+  it.skipIf(process.platform === 'win32')('a relative pin is returned as an absolute path, so a spawn from another cwd runs the same file', () => {
     const pinned = stub();
     process.env.CODEV_CLAUDE_BIN = path.relative(process.cwd(), pinned.bin);
     expect(path.isAbsolute(process.env.CODEV_CLAUDE_BIN)).toBe(false);
     expect(resolveClaudeBin()).toBe(pinned.bin);
   });
 
-  it('a pin that is not executable throws (scenario 13)', () => {
+  // Spec 1658 platform skip: Windows has no execute permission bit, so every existing file passes the
+  // X_OK check this test exercises.
+  it.skipIf(process.platform === 'win32')('a pin that is not executable throws (scenario 13)', () => {
     const notExecutable = path.join(tmpDir, 'claude');
     fs.writeFileSync(notExecutable, '#!/bin/sh\n', { mode: 0o644 });
     process.env.CODEV_CLAUDE_BIN = notExecutable;
@@ -181,7 +206,27 @@ describe('resolveClaudeBin', () => {
     fs.writeFileSync(path.join(notExecutable, 'claude'), 'not a program', { mode: 0o644 });
     const real = stub();
     process.env.PATH = [empty, '', dirNamedClaude, notExecutable, real.dir].join(path.delimiter);
-    expect(resolveClaudeBin()).toBe(path.join(real.dir, 'claude'));
+    const found = resolveClaudeBin();
+    if (process.platform === 'win32') {
+      // Spec 1658 (M16): the PATHEXT walk finds the stub's claude.cmd; PATHEXT spells the extension.
+      expect(found.toLowerCase()).toBe(real.bin.toLowerCase());
+    } else {
+      expect(found).toBe(path.join(real.dir, 'claude'));
+    }
+  });
+
+  it('never takes a claude from the cwd when it is not on PATH (Spec 1658: no cwd lookup on either platform)', () => {
+    delete process.env.CODEV_CLAUDE_BIN;
+    process.env.CODEV_ALLOW_REAL_CLAUDE = '1';
+    const planted = stub();
+    process.env.PATH = path.join(tmpDir, 'nothing-here');
+    const cwd = process.cwd();
+    process.chdir(planted.dir);
+    try {
+      expect(() => resolveClaudeBin()).toThrow(/not found on PATH/);
+    } finally {
+      process.chdir(cwd);
+    }
   });
 
   it('with no claude anywhere, throws the install hint and names the pin', () => {

@@ -331,7 +331,8 @@ describe('a default successful review', () => {
     expect(review.systemPrompt?.content).toBe(`${ROLE}\n\n${CLAUDE_CAPABILITY_NOTE}\n`);
   });
 
-  it('writes the system prompt 0600 in the granted sandbox dir and removes it after (scenario 3b)', () => {
+  // Spec 1658 platform skip: Windows has no POSIX permission bits, so the 0600 mode cannot be read back.
+  it.skipIf(process.platform === 'win32')('writes the system prompt 0600 in the granted sandbox dir and removes it after (scenario 3b)', () => {
     const file = review.systemPrompt!;
     expect(file.mode).toBe(0o600);
     const sandboxDir = flagValue(review.argv, '--add-dir');
@@ -652,7 +653,9 @@ describe('a review run that fails is reported by how it failed', () => {
     expect(run.error!.message).not.toMatch(/x{2001}/);
   });
 
-  it('names the binary it could not start', async () => {
+  // Spec 1658 platform skip: on Windows the stub is claude.cmd, and Node refuses to spawn a .cmd
+  // without a shell (EINVAL) before it looks for the file, so the ENOENT message cannot occur.
+  it.skipIf(process.platform === 'win32')('names the binary it could not start', async () => {
     // The auth-status run deletes the stub, so the review spawn finds nothing to execute.
     const stub = pinnedStub(ctx(), {
       authStatus: { stdout: JSON.stringify(STUB_LOGGED_IN_STATUS), beforeOutput: 'rm -f "$STUB_CLAUDE_DIR/claude"' },
@@ -766,7 +769,9 @@ describe('SIGTERM while the review runs (scenario 23a)', () => {
     }
   }
 
-  it('terminates the child, removes the temp file and the stale review, and exits non-zero', async () => {
+  // Spec 1658 platform skip: Windows has no SIGTERM delivery; kill() terminates the process
+  // outright, so the handler under test never runs.
+  it.skipIf(process.platform === 'win32')('terminates the child, removes the temp file and the stale review, and exits non-zero', async () => {
     // Consult runs in its own process, from source via tsx, so the signal never reaches the vitest
     // worker and the test cannot pass against a stale build.
     const stub = pinnedStub(ctx(), { print: { stdout: jsonl(INIT), sleepSeconds: 120 } });

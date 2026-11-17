@@ -15,10 +15,10 @@ import {
   CODEX_HARNESS,
   resolveHarness,
   buildCustomHarnessProvider,
-  shellEscapeSingleQuote,
   throwRetired,
   type CustomHarnessConfig,
 } from '../utils/harness.js';
+import { shellEscapeSingleQuote } from '../../lib/shell-quote.js';
 
 // Mock fs for buildWorktreeLaunchScript (it calls writeFileSync)
 vi.mock('node:fs', async (importOriginal) => {

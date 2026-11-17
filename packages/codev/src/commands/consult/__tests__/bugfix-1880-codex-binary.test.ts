@@ -129,7 +129,9 @@ describe('bundled Codex CLI (#1880)', () => {
 });
 
 describe('consult.codexPath (#1880)', () => {
-  it('runs the configured binary and reports its path, version, and config source', async () => {
+  // Spec 1658 (M13): the stand-in codex is a #!/bin/sh script, which Windows cannot run; the
+  // Windows behaviour of consult.codexPath is finding M13 in the Spec 1658 review.
+  it.skipIf(process.platform === 'win32')('runs the configured binary and reports its path, version, and config source', async () => {
     const codex = writeFakeCodex(0o755);
     const configFile = writeConfig({ consult: { codexPath: codex } });
 
@@ -149,7 +151,9 @@ describe('consult.codexPath (#1880)', () => {
     expect(mockConstructorArgs).toBeUndefined();
   });
 
-  it('a path that is not executable fails loudly and never falls back to the bundled CLI', async () => {
+  // Spec 1658 (M13): the stand-in codex is a #!/bin/sh script, which Windows cannot run; the
+  // Windows behaviour of consult.codexPath is finding M13 in the Spec 1658 review.
+  it.skipIf(process.platform === 'win32')('a path that is not executable fails loudly and never falls back to the bundled CLI', async () => {
     writeConfig({ consult: { codexPath: writeFakeCodex(0o644) } });
 
     await expect(runCodexConsultation('q', 'role', tmpDir))
@@ -176,7 +180,9 @@ describe('consult.codexPath (#1880)', () => {
 });
 
 describe('subscription billing (#1880 owner constraint)', () => {
-  it('never passes apiKey to the SDK, bundled or overridden', async () => {
+  // Spec 1658 (M13): the stand-in codex is a #!/bin/sh script, which Windows cannot run; the
+  // Windows behaviour of consult.codexPath is finding M13 in the Spec 1658 review.
+  it.skipIf(process.platform === 'win32')('never passes apiKey to the SDK, bundled or overridden', async () => {
     await runCodexConsultation('q', 'role', tmpDir);
     expect(mockConstructorArgs).not.toHaveProperty('apiKey');
     expect(mockStartThreadArgs).not.toHaveProperty('apiKey');

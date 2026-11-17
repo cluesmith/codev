@@ -22,6 +22,7 @@ import {
   copyColdTierDefaults,
 } from '../lib/scaffold.js';
 import { updateGitignore } from '../lib/gitignore.js';
+import { isWindows } from '../lib/platform.js';
 
 interface AdoptOptions {
   yes?: boolean;
@@ -218,6 +219,11 @@ export async function adopt(options: AdoptOptions = {}, overrides: Partial<Adopt
         postSpawn: [],
       },
     };
+    // Spec 1658: no interactive shell is committed from a Windows machine; the
+    // loader's per-host default (Windows PowerShell there, bash elsewhere) applies.
+    if (isWindows()) {
+      delete (codevConfig.shell as Record<string, unknown>).shell;
+    }
     fs.writeFileSync(codevConfigPath, JSON.stringify(codevConfig, null, 2) + '\n');
     console.log(chalk.green('  +'), '.codev/config.json');
     fileCount++;
