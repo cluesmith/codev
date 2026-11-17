@@ -1,7 +1,7 @@
 id: '1914'
 title: dashboard-open-codev-ide-link-
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-17T20:27:21.694Z'
-updated_at: '2026-11-17T20:36:31.659Z'
+updated_at: '2026-11-17T20:36:34.168Z'
