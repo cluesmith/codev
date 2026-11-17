@@ -237,6 +237,15 @@ class Recording {
   }
 }
 
+/** A state that failed; carries what was recorded so far, for a diagnostic write. */
+class FailedRecording extends Error {
+  readonly recording: Recording;
+  constructor(cause: unknown, recording: Recording) {
+    super((cause as Error).message);
+    this.recording = recording;
+  }
+}
+
 async function record(state: string): Promise<Recording> {
   const rec = new Recording();
   try {
@@ -280,6 +289,8 @@ async function record(state: string): Promise<Recording> {
     }
     await sleep(TAIL_MS);
     return rec;
+  } catch (error) {
+    throw new FailedRecording(error, rec);
   } finally {
     rec.kill();
   }
@@ -314,7 +325,7 @@ function scrub(text: string, values: string[]): string {
   return out;
 }
 
-async function write(state: string, rec: Recording): Promise<string> {
+async function write(state: string, rec: Recording, kind = 'capture'): Promise<string> {
   const values = scrubValues(rec.cwd);
   const events = rec.events.map((event) => {
     if ('o' in event) return { t: event.t, o: scrub(event.o, values) };
@@ -354,7 +365,7 @@ async function write(state: string, rec: Recording): Promise<string> {
   };
   const body = [header, ...events].map((entry) => JSON.stringify(entry)).join('\n') + '\n';
   mkdirSync(OUT, { recursive: true });
-  const file = join(OUT, `conpty-${APP}-${state}.capture.jsonl.gz`);
+  const file = join(OUT, `conpty-${APP}-${state}.${kind}.jsonl.gz`);
   writeFileSync(file, gzipSync(body));
   return file;
 }
@@ -373,6 +384,17 @@ for (const state of states) {
   } catch (error) {
     failed++;
     console.error(`[1658] ${state}: FAILED: ${(error as Error).message}`);
+    // A failed state still writes what it recorded, scrubbed and leak-checked like a capture, as
+    // a `.diagnostic` file: not a fixture (the replay suite reads `*.capture.jsonl.gz` only), but
+    // the raw bytes a fix needs, attributes included.
+    if (error instanceof FailedRecording) {
+      try {
+        const file = await write(state, error.recording, 'diagnostic');
+        console.error(`[1658] ${state}: diagnostic recording -> ${file}`);
+      } catch (writeError) {
+        console.error(`[1658] ${state}: no diagnostic recording: ${(writeError as Error).message}`);
+      }
+    }
   }
 }
 process.exit(failed);

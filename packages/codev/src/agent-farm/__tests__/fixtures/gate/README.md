@@ -67,6 +67,14 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
   `spec-1658-conpty-gate-replay.test.ts`. Scrubbed of user name, profile path, scratch path and
   host name with same-length placeholders at record time.
 
+- **claude-conpty-ghost-idle.replay.bin.gz** (Spec 1658, M15) — **real capture**: the output of
+  an idle claude 2.1.326 under Windows ConPTY at 120×40, taken from the recorder's
+  `.diagnostic` file for a failed idle state (owner machine, 2026-11-17; scrubbed and
+  leak-checked by the recorder; the only path left is claude's own `~\AppData\Local\Temp\…`).
+  Claude draws its software cursor inverse over the first character of a dim suggestion while
+  ConPTY parks the hidden hardware cursor at the end of the last row: the case the ghost
+  exemption's first-input-cell anchor exists for. Expected verdict: clean.
+
 ## Classifier assumption
 
 CLEAN requires a composer marker **and** zero normal-intensity, non-whitespace,

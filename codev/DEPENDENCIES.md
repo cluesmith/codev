@@ -263,7 +263,7 @@ How it works and what to know:
   many of those commands with a builder worktree or a cloned repository as the current folder.
   A repository that contains, say, a `git.exe` would have that file run instead of Git. Codev's
   own Windows tools (`powershell.exe`, `taskkill`, `cmd.exe`) already run by full system path;
-  the user tools follow, and native Windows support leaves preview with that fix.
+  the user tools follow (#1911), and native Windows support leaves preview with that fix.
 - **Known limitations.** Doctor cannot show Tower's environment on Windows (the process table does
   not expose it). Building this repository from source on ARM64 fails in one bundler; installing
   the published package on ARM64 works.

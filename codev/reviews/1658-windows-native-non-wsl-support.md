@@ -202,9 +202,9 @@ Windows support must not be announced until this is fixed. On Windows, a spawn b
 `npm.cmd` or `node.exe` committed to that repo would run under codev. This PR fixes the system
 programs: `powershell.exe`, `taskkill` and `cmd.exe` now go by full System32 path through
 `windowsSystem32Path` / `windowsPowerShellPath`. The user tools are not fixed. The fix routes
-each site through `spawnOnHost` / `spawnSyncOnHost` / `findOnHostPath` (`lib/shell-launch.ts`):
-the `codev-sdk/node/executable` resolver searches `PATH` and never the cwd. The architect files
-it as the first follow-up after #1859 merges, since it depends on that resolver.
+each site through the command launch capability (`commandLaunch().spawn` / `spawnSync`) and `findOnHostPath` (`lib/host-executable.ts`; `lib/shell-launch.ts` before Amendment 3):
+the `codev-sdk/node/executable` resolver searches `PATH` and never the cwd. Filed as #1911, the
+first follow-up after #1859 merges, since it depends on that resolver.
 
 Inventory at head 47523751f: direct `child_process` calls whose command is a string literal,
 in non-test source, by file and line. Call sites that take the command from a variable
@@ -1462,6 +1462,27 @@ parentless: `find / -path *protocols/experiment/protocol.md`, `find / -path
 Follow-up: #1910 (filed by main). Word those prompt lines as "delivered to you" (or render the
 content through the resolver), never as a workspace path to open, per the repo rule "deliver
 framework content; don't instruct an agent to fetch it by path".
+
+**M15. The render gate held mail to an idle claude under Windows ConPTY (owner's ConPTY
+captures, 2026-11-17). Fixed in this PR under Phase 8 (architect ruling (a)).** Recording the
+claude fixtures, idle and draft failed: the recorder never saw an empty composer (gate verdict
+`user-text`); midturn and resize recorded. The recorder now writes a scrubbed `.diagnostic` file
+for a failed state, and the owner's idle diagnostic shows the composer as `❯ ␛[7mT␛[2m␛[27mry
+"how does <filepath> work?"␛[22m`: claude's software cursor, inverse, over a dim suggestion, with
+the hardware cursor hidden. The gate's ghost exemption (#1330's, measured on macOS) accepted that
+cell only at the hardware cursor position, and ConPTY's repaints park the hidden cursor at the end
+of the last row (39, 119 in the capture), so an idle claude showing its software cursor held mail
+indefinitely on Windows. It seems to track terminal focus: the recordings made with the window
+in front failed, the others showed a plain dim hint. POSIX is unaffected (a macOS idle recording
+with the same claude version is clean). Fix, per the ruling: a second accepted anchor in
+`isGhostCursorCell`, the composer's first input cell (after the marker and its one space); the
+position anchor, the inverse-at-normal-intensity test and the positive dim-tail test are
+unchanged, with no cursor-visibility heuristic. Tests from the scrubbed capture
+(`claude-conpty-ghost-idle.replay.bin.gz` → clean) and synthetic negatives with the cursor parked
+away (non-dim text after the inverse cell, a 1-char draft with no dim tail, a draft with the cursor
+past it, the signature off the first input cell: all `user-text`); with the new anchor disabled,
+only the two positive cases fail. The main architect runs a one-model codex consult on the
+render-gate delta.
 
 ## Appendix: Implementation Notes by Phase
 
