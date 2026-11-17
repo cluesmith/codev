@@ -523,6 +523,11 @@ function errorMessage(err: unknown): string {
  * Any problem is a warning whose note is the lane's own message, which already says what to do:
  * the install hint when `claude` is not on PATH, `claude update` when it is below the floor.
  * `bin` is set only on an ok row, and only then is the login checked.
+ *
+ * Unlike `checkAgy`, this also catches the test-isolation guard (#1323) that `resolveClaudeBin`
+ * throws for an unpinned lookup under a test runner. The guard has already done its job by then
+ * (nothing was resolved or run), and its message lands in the row, where a test asserting on the
+ * rows sees it.
  */
 function checkClaude(): { result: CheckResult; bin: string | null } {
   let bin: string;
