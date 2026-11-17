@@ -28,6 +28,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { realAgyOptIn, realClaudeOptIn } from './src/lib/test-env.js';
+import { npmCmdShim } from './src/__tests__/helpers/npm-cmd-shim.js';
 import { BUILDER_WORKTREE_ENV } from './src/lib/agent-env.js';
 
 /**
@@ -82,8 +83,8 @@ exit 0
 `;
 
 /**
- * The same fake for native Windows (Spec 1658, M16), which cannot run a `#!/bin/sh` script: a
- * `claude.cmd` that runs this through the current node, answering exactly as FAKE_CLAUDE does.
+ * The same fake for native Windows (Spec 1658, M16), which cannot run a `#!/bin/sh` script: the
+ * npm-shaped `claude.cmd` for this script, answering exactly as FAKE_CLAUDE does.
  */
 const FAKE_CLAUDE_NODE = `// Fake claude installed by the Codev vitest harness (#1912, Spec 1658). See vitest-setup.ts.
 const arg = process.argv[2];
@@ -124,10 +125,9 @@ if (!realAgyOptIn()) {
 // the suites. CODEV_ALLOW_REAL_CLAUDE is the single, named way through.
 if (!realClaudeOptIn()) {
   if (process.platform === 'win32') {
-    const script = join(sandbox, 'fake-claude.cjs');
-    writeFileSync(script, FAKE_CLAUDE_NODE);
+    writeFileSync(join(sandbox, 'fake-claude.cjs'), FAKE_CLAUDE_NODE);
     const fakeClaude = join(sandbox, 'claude.cmd');
-    writeFileSync(fakeClaude, `@"${process.execPath}" "${script}" %*\r\n`);
+    writeFileSync(fakeClaude, npmCmdShim('fake-claude.cjs'));
     process.env.CODEV_CLAUDE_BIN = fakeClaude;
   } else {
     const fakeClaude = join(sandbox, 'claude');

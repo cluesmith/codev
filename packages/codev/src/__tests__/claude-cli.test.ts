@@ -20,6 +20,7 @@ import {
   describeClaudeAuth,
   preflightClaude,
   readClaudeAuthStatus,
+  claudeLaunch,
   readClaudeVersion,
   resolveClaudeAuthMode,
   resolveClaudeBin,
@@ -123,6 +124,24 @@ afterEach(() => {
   }
   for (const created of stubs.splice(0)) created.cleanup();
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+describe('claudeLaunch (Spec 1658, M16)', () => {
+  it.skipIf(process.platform === 'win32')('is the identity on POSIX: same command, same args, no extra option', () => {
+    expect(claudeLaunch('/opt/claude/bin/claude', ['--version'])).toEqual({
+      command: '/opt/claude/bin/claude',
+      args: ['--version'],
+      options: {},
+    });
+  });
+
+  it.runIf(process.platform === 'win32')('a pinned npm-shaped claude.cmd starts as node <entry> <args>, with no verbatim arguments', () => {
+    const pinned = stub();
+    const launch = claudeLaunch(pinned.bin, ['auth', 'status', '--json']);
+    expect(path.basename(launch.command).toLowerCase()).toBe('node.exe');
+    expect(launch.args).toEqual([path.join(pinned.dir, 'stub.cjs'), 'auth', 'status', '--json']);
+    expect(launch.options).toEqual({});
+  });
 });
 
 describe('resolveClaudeBin', () => {

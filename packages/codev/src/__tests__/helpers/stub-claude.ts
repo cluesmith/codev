@@ -26,6 +26,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { npmCmdShim } from './npm-cmd-shim.js';
 
 export type StubClaudeMode = 'version' | 'authStatus' | 'print';
 
@@ -156,11 +157,12 @@ export function createStubClaude(options: StubClaudeOptions = {}): StubClaude {
 
   // A shell wrapper rather than a node shebang: shebang lines have length limits, and the absolute
   // node path keeps the stub runnable under a PATH that a test has narrowed. Native Windows cannot
-  // run either, so there the stub is a `claude.cmd` doing the same (Spec 1658, M16).
+  // run either, so there the stub is the `claude.cmd` npm would write for stub.cjs, reached the way
+  // a real npm-installed claude is (Spec 1658, M16).
   let bin = path.join(dir, 'claude');
   if (process.platform === 'win32') {
     bin = path.join(dir, 'claude.cmd');
-    fs.writeFileSync(bin, `@"${process.execPath}" "${script}" %*\r\n`);
+    fs.writeFileSync(bin, npmCmdShim('stub.cjs'));
   } else {
     fs.writeFileSync(bin, `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(script)} "$@"\n`, { mode: 0o755 });
   }

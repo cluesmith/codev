@@ -1535,6 +1535,29 @@ byte-identical); a new test checks a `claude` in the cwd is never taken; the PAT
 case-insensitively on win32 (`PATHEXT` spells the extension); two tests skip on win32 for harness
 facts (Platform Skips).
 
+*Codex consult on the delta: REQUEST_CHANGES on the test stub's route; architect ruling, done.*
+The first Windows stub was `@"<node>" "<script>" %*`, which is not npm's shape, so the shim resolver
+took the generic `cmd.exe` route, one no real claude install takes. Both fakes (the stub and the
+vitest sandbox's) are now the `claude.cmd` npm writes, byte for byte as npm's cmd-shim 7.0.0
+generates it (`helpers/npm-cmd-shim.ts`, checked against cmd-shim's own output), with the logic in
+the sibling `.cjs` entry: a real npm install's route (`node <entry>`, or the double-escaped `cmd.exe`
+route under a `PATH` without node). A win32 test pins one through `claudeLaunch` and checks it
+starts as `node.exe <entry> <args>` with no verbatim arguments; a POSIX test checks `claudeLaunch`
+is the identity. `readClaudeVersion(bin, env?)` resolves its launch from the same env the auth-status
+read uses (preflight's and doctor's merged env); the version call itself still inherits
+`process.env`, so POSIX is unchanged.
+
+*Divergence on Windows:* a pinned `CODEV_CLAUDE_BIN` that exists but cannot run fails at launch
+(`Cannot run \`<pin> --version\``) rather than at resolve time (`is not an executable file`):
+`X_OK` is a no-op on Windows, so every existing file passes the pin check.
+
+*Residual, not fixed here:* the SDK's generic (non-npm) `.cmd` route escapes arguments once, although
+a `%*`-forwarding batch file re-parses them; `%`, `^` and `!` in an argument are not proven safe
+there. No claude install produces such a file (`claude.exe` is run directly; npm's shim gets `node
+<entry>` or the double-escaped route), so the lane is unaffected. Main holds a follow-up filing for
+the owner's word (treat a `%*`-forwarding shim as double-parse; an execution test with spaces,
+parentheses, `%`, `^` and `!` on a Windows runner).
+
 ## Appendix: Implementation Notes by Phase
 
 Rulings, measurements and findings recorded as each phase closed.

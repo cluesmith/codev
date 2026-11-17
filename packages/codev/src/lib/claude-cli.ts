@@ -173,11 +173,15 @@ export function claudeLaunch(
   return { command: spawnable.command, args: spawnable.args, options: {} };
 }
 
-/** `bin --version`, parsed to `MAJOR.MINOR.PATCH` (`2.1.326 (Claude Code)` → `2.1.326`). */
-export function readClaudeVersion(bin: string): string {
+/**
+ * `bin --version`, parsed to `MAJOR.MINOR.PATCH` (`2.1.326 (Claude Code)` → `2.1.326`). `env` only
+ * decides how the launch resolves on Windows (PATHEXT, COMSPEC, the shim's node), the same env the
+ * auth-status read uses; the version call itself inherits process.env as before.
+ */
+export function readClaudeVersion(bin: string, env: NodeJS.ProcessEnv = process.env): string {
   let out: string;
   try {
-    const launch = claudeLaunch(bin, ['--version']);
+    const launch = claudeLaunch(bin, ['--version'], env);
     out = execFileSync(launch.command, launch.args, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -483,7 +487,7 @@ export function preflightClaude(opts: {
   let authLine: string | undefined;
   try {
     const bin = resolveClaudeBin();
-    const version = readClaudeVersion(bin);
+    const version = readClaudeVersion(bin, opts.processEnv);
     // `process.env`, not `opts.processEnv`: the pin is consult's own setting, read where
     // `resolveClaudeBin` reads it. `opts.processEnv` is only the source of the child's env.
     binaryLine = `${bin}, ${version} (from ${process.env[CLAUDE_BIN_ENV] ? CLAUDE_BIN_ENV : 'PATH'})`;

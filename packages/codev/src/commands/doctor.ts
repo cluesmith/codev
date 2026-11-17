@@ -908,7 +908,7 @@ function checkClaude(env: NodeJS.ProcessEnv): { result: CheckResult; bin: string
 
   let version: string;
   try {
-    version = readClaudeVersion(bin);
+    version = readClaudeVersion(bin, env);
   } catch (err) {
     return { result: { status: 'warn', version: '(version unknown)', note: errorMessage(err) }, bin: null };
   }
