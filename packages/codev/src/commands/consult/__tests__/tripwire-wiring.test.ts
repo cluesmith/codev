@@ -8,22 +8,21 @@
  * acceptance clause is "the tripwire fires when a write is simulated", and that
  * was carried only by unit tests and a manual CLI run.
  *
- * So this drives the real `consult()` entry point with a stubbed Agent SDK that
- * writes a file the way a misbehaving lane would, against a real git repo, and
- * asserts the banner reaches stderr and the review file. Remove the wrapper and
- * these fail.
+ * So this drives the real `consult()` entry point with a stub `claude` CLI that
+ * acts on the tree the way a misbehaving lane would (a shell command it runs in
+ * its cwd, the workspace, before it streams its review), against a real git
+ * repo, and asserts the banner reaches stderr and the review file. Remove the
+ * wrapper and these fail.
+ *
+ * Since #1912 the real claude lane has no write tools at all, so this stub is
+ * playing a lane that does: the tripwire wraps every lane, whichever one that is.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-
-let mockQueryFn: ReturnType<typeof vi.fn>;
-vi.mock('@anthropic-ai/claude-agent-sdk', () => {
-  mockQueryFn = vi.fn();
-  return { query: mockQueryFn };
-});
+import { createStubClaude, type StubClaude } from '../../../__tests__/helpers/stub-claude.js';
 
 vi.mock('chalk', () => ({
   default: {
@@ -39,25 +38,26 @@ vi.mock('chalk', () => ({
 let repo: string;
 let cwdBefore: string;
 let stderr: string[];
+let claude: StubClaude | undefined;
+const harnessClaudeBin = process.env.CODEV_CLAUDE_BIN;
+
+const REVIEW_STREAM = [
+  { type: 'system', subtype: 'init', tools: ['Glob', 'Grep', 'Read'] },
+  { type: 'assistant', message: { content: [{ type: 'text', text: 'Looks fine to me.\n\nVERDICT: APPROVE' }] } },
+  { type: 'result', subtype: 'success', is_error: false, result: 'VERDICT: APPROVE' },
+].map((e) => JSON.stringify(e)).join('\n') + '\n';
+
+/** Pin a claude lane that streams `stdout`, after running `write` (a shell command) in the workspace. */
+function pinLane(write?: string, stdout = REVIEW_STREAM, exitCode = 0): void {
+  claude = createStubClaude({ print: { stdout, exitCode, beforeOutput: write } });
+  process.env.CODEV_CLAUDE_BIN = claude.bin;
+}
 
 /** A lane that writes to the tree mid-review, as the #1649 lane did. */
-function laneThatWrites(write: () => void) {
-  return () =>
-    (async function* () {
-      write();
-      yield { type: 'assistant', message: { content: [{ text: 'Looks fine to me.\n\nVERDICT: APPROVE' }] } };
-      yield { type: 'result', subtype: 'success' };
-    })();
-}
+const laneThatWrites = (write: string) => pinLane(write);
 
 /** A well-behaved lane. */
-function laneThatReads() {
-  return () =>
-    (async function* () {
-      yield { type: 'assistant', message: { content: [{ text: 'Looks fine to me.\n\nVERDICT: APPROVE' }] } };
-      yield { type: 'result', subtype: 'success' };
-    })();
-}
+const laneThatReads = () => pinLane();
 
 beforeEach(() => {
   cwdBefore = process.cwd();
@@ -81,11 +81,13 @@ beforeEach(() => {
     stderr.push(args.map(String).join(' '));
   });
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-  // `mockQueryFn` is assigned by the vi.mock factory, which does not run until
-  // the mocked module is first imported — inside each test, after resetModules.
 });
 
 afterEach(() => {
+  claude?.cleanup();
+  claude = undefined;
+  if (harnessClaudeBin === undefined) delete process.env.CODEV_CLAUDE_BIN;
+  else process.env.CODEV_CLAUDE_BIN = harnessClaudeBin;
   process.chdir(cwdBefore);
   vi.restoreAllMocks();
   fs.rmSync(repo, { recursive: true, force: true });
@@ -97,11 +99,7 @@ describe('the tripwire is wired into consult() (#1649)', () => {
   it('fires when the lane modifies a tracked file under review', async () => {
     vi.resetModules();
     const { consult } = await import('../index.js');
-    mockQueryFn.mockImplementation(
-      laneThatWrites(() =>
-        fs.writeFileSync(path.join(repo, 'app.ts'), '// REVERTED FOR VACUITY CHECK\n'),
-      ),
-    );
+    laneThatWrites(`printf '// REVERTED FOR VACUITY CHECK\\n' > app.ts`);
 
     await consult({ model: 'claude', prompt: 'review app.ts' });
 
@@ -112,9 +110,7 @@ describe('the tripwire is wired into consult() (#1649)', () => {
   it('fires when the lane creates a file', async () => {
     vi.resetModules();
     const { consult } = await import('../index.js');
-    mockQueryFn.mockImplementation(
-      laneThatWrites(() => fs.writeFileSync(path.join(repo, 'suggested.patch'), 'diff…')),
-    );
+    laneThatWrites(`printf 'diff' > suggested.patch`);
 
     await consult({ model: 'claude', prompt: 'review app.ts' });
 
@@ -125,7 +121,7 @@ describe('the tripwire is wired into consult() (#1649)', () => {
   it('stays quiet when the lane only reads', async () => {
     vi.resetModules();
     const { consult } = await import('../index.js');
-    mockQueryFn.mockImplementation(laneThatReads());
+    laneThatReads();
 
     await consult({ model: 'claude', prompt: 'review app.ts' });
 
@@ -135,11 +131,13 @@ describe('the tripwire is wired into consult() (#1649)', () => {
   it('fires even when the lane throws — an unrestored edit is likeliest then', async () => {
     vi.resetModules();
     const { consult } = await import('../index.js');
-    mockQueryFn.mockImplementation(() =>
-      (async function* () {
-        fs.writeFileSync(path.join(repo, 'app.ts'), 'half-applied edit\n');
-        yield { type: 'result', subtype: 'error_during_execution', errors: ['boom'] };
-      })(),
+    pinLane(
+      `printf 'half-applied edit\\n' > app.ts`,
+      [
+        { type: 'system', subtype: 'init', tools: ['Glob', 'Grep', 'Read'] },
+        { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['boom'] },
+      ].map((e) => JSON.stringify(e)).join('\n') + '\n',
+      1,
     );
 
     await expect(consult({ model: 'claude', prompt: 'review app.ts' })).rejects.toThrow();
@@ -151,7 +149,7 @@ describe('the tripwire is wired into consult() (#1649)', () => {
   it('does not name the lane\'s own --output file', async () => {
     vi.resetModules();
     const { consult } = await import('../index.js');
-    mockQueryFn.mockImplementation(laneThatReads());
+    laneThatReads();
 
     // Relative, as a human would type it — the case a raw workspaceRoot prefix
     // test used to miss, leaving the lane reporting its own review file.
@@ -167,7 +165,7 @@ describe('the tripwire is wired into consult() (#1649)', () => {
     // consult never chdirs, but the exclusion named `review.txt`.
     vi.resetModules();
     const { consult } = await import('../index.js');
-    mockQueryFn.mockImplementation(laneThatReads());
+    laneThatReads();
 
     fs.mkdirSync(path.join(repo, 'subdir'), { recursive: true });
     process.chdir(path.join(repo, 'subdir'));
@@ -181,9 +179,7 @@ describe('the tripwire is wired into consult() (#1649)', () => {
   it('appends the warning below the verdict in the review file', async () => {
     vi.resetModules();
     const { consult } = await import('../index.js');
-    mockQueryFn.mockImplementation(
-      laneThatWrites(() => fs.writeFileSync(path.join(repo, 'app.ts'), 'mutated\n')),
-    );
+    laneThatWrites(`printf 'mutated\\n' > app.ts`);
 
     await consult({ model: 'claude', prompt: 'review app.ts', output: 'review.txt' });
 
@@ -198,13 +194,9 @@ describe('the tripwire is wired into consult() (#1649)', () => {
     // tree clean, so the lane's own edit disappears from `git status`.
     vi.resetModules();
     const { consult } = await import('../index.js');
-    mockQueryFn.mockImplementation(
-      laneThatWrites(() => {
-        fs.writeFileSync(path.join(repo, 'app.ts'), 'export const answer = 43;\n');
-        const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf-8' });
-        git('add', 'app.ts');
-        git('commit', '-qm', 'a commit the reviewer had no business making');
-      }),
+    laneThatWrites(
+      `printf 'export const answer = 43;\\n' > app.ts && git add app.ts && ` +
+      `git commit -qm 'a commit the reviewer had no business making'`,
     );
 
     await consult({ model: 'claude', prompt: 'review app.ts' });
@@ -221,7 +213,7 @@ describe('the tripwire is wired into consult() (#1649)', () => {
     const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf-8' });
     git('branch', 'feature');
 
-    mockQueryFn.mockImplementation(laneThatWrites(() => git('checkout', '-q', 'feature')));
+    laneThatWrites('git checkout -q feature');
 
     await consult({ model: 'claude', prompt: 'review app.ts' });
 
@@ -234,9 +226,7 @@ describe('the tripwire is wired into consult() (#1649)', () => {
     vi.resetModules();
     const { consult } = await import('../index.js');
     // The repository disappearing mid-review is not "nothing changed".
-    mockQueryFn.mockImplementation(
-      laneThatWrites(() => fs.rmSync(path.join(repo, '.git'), { recursive: true, force: true })),
-    );
+    laneThatWrites('rm -rf .git');
 
     await consult({ model: 'claude', prompt: 'review app.ts' });
 

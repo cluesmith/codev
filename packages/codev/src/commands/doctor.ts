@@ -9,7 +9,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
-import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, isHybridProvider, type ConceptResolution } from '../lib/forge.js';
 import { detectHarnessFromCommand, getRetirement } from '../agent-farm/utils/harness.js';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
@@ -32,6 +31,19 @@ import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
+import {
+  assertApiKeyPresent,
+  assertClaudeVersion,
+  assertLoggedIn,
+  buildClaudeChildEnv,
+  describeWithheldKeys,
+  readClaudeAuthStatus,
+  readClaudeVersion,
+  resolveClaudeAuthMode,
+  resolveClaudeBin,
+  type ClaudeAuthStatus,
+} from '../lib/claude-cli.js';
+import { readDotenvFile } from '../lib/dotenv.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
 import { hostPlatform, isWindows } from '../lib/platform.js';
 import { isHostPathAtOrUnder } from '../lib/host-paths.js';
@@ -755,7 +767,8 @@ const CORE_DEPENDENCIES: Dependency[] = [
 ];
 
 // AI CLI dependencies - at least one required
-// Note: Claude is verified via Agent SDK (not CLI), handled separately below
+// Note: the claude lane's CLI is checked separately via checkClaude, which resolves
+// and version-checks the binary exactly as the lane does (#1912).
 // Note: the gemini lane now uses the Antigravity CLI (agy) — checked separately
 // via resolveAgyBin (the bare `which agy` resolves to the IDE symlink, not the CLI).
 const AI_DEPENDENCIES: Dependency[] = [
@@ -860,70 +873,108 @@ const VERIFY_CONFIGS: Record<string, VerifyConfig> = {
     successCheck: (r) => r.status === 0,
     authHint: 'Run "opencode --version" to verify installation',
   },
-  // Claude is verified via Agent SDK — see verifyClaudeViaSDK() below.
-  // The gemini lane (Antigravity `agy`) is verified via verifyAgy() — not here.
+  // Claude is verified via verifyClaudeViaCli() and the gemini lane (Antigravity
+  // `agy`) via verifyAgy() — not here.
 };
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
- * Verify Claude is operational via Agent SDK.
- * Sends a minimal query to verify auth and connectivity.
+ * Presence and version check for the installed `claude` CLI, the claude consult lane's backend
+ * (#1912). It resolves and version-checks the binary exactly as the lane does, so a row that is ok
+ * here is a binary the lane will accept. Local and model-free.
+ *
+ * Any problem is a warning whose note is the lane's own message, which already says what to do:
+ * the install hint when `claude` is not on PATH, the update hint when it is below the floor.
+ * `bin` is set only on an ok row, and only then is the login checked.
+ *
+ * `env` is `process.env` with the workspace `.env` merged under it (`envWithWorkspaceDotenv`), so a
+ * `CODEV_CLAUDE_BIN` set only in `.env` is honoured here as it is by consult.
+ *
+ * Unlike `checkAgy`, this also catches the test-isolation guard (#1323) that `resolveClaudeBin`
+ * throws for an unpinned lookup under a test runner. The guard has already done its job by then
+ * (nothing was resolved or run), and its message lands in the row, where a test asserting on the
+ * rows sees it.
  */
-async function verifyClaudeViaSDK(): Promise<CheckResult> {
-  // Temporarily remove CLAUDECODE nesting guard from process.env.
-  // The SDK spawns a subprocess that checks this directly.
-  const savedClaudeCode = process.env.CLAUDECODE;
-  delete process.env.CLAUDECODE;
+function checkClaude(env: NodeJS.ProcessEnv): { result: CheckResult; bin: string | null } {
+  let bin: string;
+  try {
+    bin = resolveClaudeBin(env);
+  } catch (err) {
+    return { result: { status: 'warn', version: 'not found', note: errorMessage(err) }, bin: null };
+  }
+
+  let version: string;
+  try {
+    version = readClaudeVersion(bin);
+  } catch (err) {
+    return { result: { status: 'warn', version: '(version unknown)', note: errorMessage(err) }, bin: null };
+  }
 
   try {
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) {
-        env[key] = value;
-      }
-    }
-
-    const session = claudeQuery({
-      prompt: 'Reply OK',
-      options: {
-        // The #1649 audit: this is the second `bypassPermissions` call site in the
-        // package, so it runs with the same unrestricted tool access the consult
-        // lane does. It is an auth probe, not a review — one turn, no tools needed
-        // — but it had nothing telling it so, and it runs in whatever directory the
-        // user typed `codev doctor` in. Say it outright, as consultant.md now does.
-        systemPrompt:
-          'You are a connectivity probe for `codev doctor`. Reply with the requested ' +
-          'text and nothing else. Do not read, create, or modify any file, and do not ' +
-          'run any command — there is no task here beyond answering.',
-        allowedTools: [],
-        maxTurns: 1,
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        env,
-      },
-    });
-
-    for await (const message of session) {
-      if (message.type === 'result') {
-        if (message.subtype === 'success') {
-          return { status: 'ok', version: 'operational (SDK)' };
-        }
-        return { status: 'fail', version: 'SDK error', note: 'Set ANTHROPIC_API_KEY or run: claude /login' };
-      }
-    }
-
-    return { status: 'ok', version: 'operational (SDK)' };
+    assertClaudeVersion(version);
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : 'unknown error';
-    const combined = errMsg.toLowerCase();
-    if (combined.includes('api key') || combined.includes('unauthorized') || combined.includes('authentication')) {
-      return { status: 'fail', version: 'auth error', note: 'Set ANTHROPIC_API_KEY or run: claude /login' };
-    }
-    return { status: 'fail', version: 'error', note: `Set ANTHROPIC_API_KEY or run: claude /login (${errMsg.substring(0, 60)})` };
-  } finally {
-    if (savedClaudeCode !== undefined) {
-      process.env.CLAUDECODE = savedClaudeCode;
+    return { result: { status: 'warn', version, note: errorMessage(err) }, bin: null };
+  }
+  return { result: { status: 'ok', version }, bin };
+}
+
+/**
+ * `process.env` with `<workspace>/.env` merged under it, as consult loads it, in a copy: doctor
+ * never mutates its own `process.env`. `fromDotenv` names the keys the file supplied. With no
+ * workspace root, no `.env` is read.
+ */
+function envWithWorkspaceDotenv(workspaceRoot: string | null): { env: NodeJS.ProcessEnv; fromDotenv: Set<string> } {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const fromDotenv = new Set<string>();
+  if (workspaceRoot) {
+    for (const [key, value] of Object.entries(readDotenvFile(workspaceRoot))) {
+      // The shell wins, as in consult's loader.
+      if (key in env) continue;
+      env[key] = value;
+      fromDotenv.add(key);
     }
   }
+  return { env, fromDotenv };
+}
+
+/**
+ * Verify the claude lane's login without a model call (#1912): `claude auth status`, run with the
+ * child env the lane would build from this workspace (its `.env`, its `consult.claudeAuth`). So a
+ * key the lane would withhold is reported as withheld, naming where it came from, and a login the
+ * review would not see is not reported as working.
+ *
+ * Any problem is a warning carrying the lane's own message: `claude auth login` when logged out,
+ * the output excerpt when `auth status` is unparseable, the missing key in `api-key` mode, and a
+ * config error for an unknown `consult.claudeAuth`.
+ */
+function verifyClaudeViaCli(
+  bin: string,
+  workspaceRoot: string | null,
+  { env: processEnv, fromDotenv }: { env: NodeJS.ProcessEnv; fromDotenv: Set<string> },
+): CheckResult {
+  let status: ClaudeAuthStatus;
+  let withheld: string[];
+  try {
+    const { mode, source } = resolveClaudeAuthMode(workspaceRoot ?? process.cwd());
+    const child = buildClaudeChildEnv(processEnv, mode);
+    withheld = child.withheld;
+    assertApiKeyPresent(child.env, mode, source);
+    status = readClaudeAuthStatus(bin, child.env);
+  } catch (err) {
+    return { status: 'warn', version: 'auth unknown', note: errorMessage(err) };
+  }
+
+  try {
+    assertLoggedIn(status, withheld);
+  } catch (err) {
+    return { status: 'warn', version: 'not logged in', note: errorMessage(err) };
+  }
+
+  const withheldNote = describeWithheldKeys(withheld, fromDotenv);
+  return { status: 'ok', version: `logged in (${status.authMethod})`, ...(withheldNote ? { note: withheldNote } : {}) };
 }
 
 /**
@@ -1265,9 +1316,19 @@ export async function doctor(): Promise<number> {
   let aiCliCount = 0;
   const installedAiClis: string[] = [];
 
-  // Claude uses Agent SDK (always available as a dependency)
-  printStatus('Claude', { status: 'ok', version: 'Agent SDK' });
-  installedAiClis.push('Claude');
+  // Claude: the installed CLI the claude lane runs (#1912). Not a bundled
+  // dependency, so it can be absent, and then it does not count as installed.
+  // Both Claude rows read the workspace `.env` as consult does, so they see the same pin and keys.
+  const claudeWorkspaceRoot = findWorkspaceRoot();
+  const claudeEnv = envWithWorkspaceDotenv(claudeWorkspaceRoot);
+  const claude = checkClaude(claudeEnv.env);
+  printStatus('Claude', claude.result);
+  if (claude.bin) {
+    installedAiClis.push('Claude');
+  } else {
+    warnings++;
+    warningDetails.push({ name: 'Claude', issue: claude.result.version, recommendation: claude.result.note });
+  }
 
   // Check CLI-based AI dependencies (Codex, OpenCode)
   for (const dep of AI_DEPENDENCIES) {
@@ -1289,20 +1350,22 @@ export async function doctor(): Promise<number> {
   console.log(chalk.bold('AI Model Verification') + ' (checking auth & connectivity)');
   console.log('');
 
-  // Verify Claude via SDK
-  console.log(chalk.blue(`  ⋯ ${'Claude'.padEnd(12)} verifying...`));
-  process.stdout.write('\x1b[1A\x1b[2K');
-  const claudeResult = await verifyClaudeViaSDK();
-  printStatus('Claude', claudeResult);
-  if (claudeResult.status === 'ok') {
-    aiCliCount++;
-  } else if (claudeResult.status === 'fail') {
-    warnings++;
-    warningDetails.push({
-      name: 'Claude',
-      issue: claudeResult.version,
-      recommendation: claudeResult.note,
-    });
+  // Verify Claude's login via the CLI, with no model call
+  if (claude.bin) {
+    console.log(chalk.blue(`  ⋯ ${'Claude'.padEnd(12)} verifying...`));
+    process.stdout.write('\x1b[1A\x1b[2K');
+    const claudeResult = verifyClaudeViaCli(claude.bin, claudeWorkspaceRoot, claudeEnv);
+    printStatus('Claude', claudeResult);
+    if (claudeResult.status === 'ok') {
+      aiCliCount++;
+    } else {
+      warnings++;
+      warningDetails.push({
+        name: 'Claude',
+        issue: claudeResult.version,
+        recommendation: claudeResult.note,
+      });
+    }
   }
 
   // Verify CLI-based models (agy handled separately below — custom OAuth probe)

@@ -225,6 +225,10 @@
       "reason": "opaque",
       "note": "the only /tmp is reactDashboardPath in a RouteContext with hasReactDashboard false; never read"
     },
+    "packages/codev/src/commands/consult/__tests__/claude-cli-lane.test.ts": {
+      "reason": "opaque",
+      "note": "from main (#1912): /tmp paths appear only inside fake permission-denial records and the expected warning text; nothing touches the disk"
+    },
     "packages/codev/src/commands/consult/__tests__/metrics-model-id.test.ts": {
       "reason": "opaque",
       "note": "every /tmp is a workspace_path column value written into the metrics DB, which itself lives under os.tmpdir()"

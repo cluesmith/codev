@@ -7,6 +7,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { EventEmitter } from 'node:events';
+import { createStubClaude, type StubClaude } from './helpers/stub-claude.js';
 
 // Fake child process for agy tests: stdout/stderr emitters + kill, emits on next tick.
 function makeFakeAgyProc(opts: { stdout?: string; stderr?: string; code?: number; closeAfter?: boolean }): any {
@@ -51,14 +52,6 @@ vi.mock('../lib/platform.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/platform.js')>();
   actual.setHostPlatformForTests('linux');
   return actual;
-});
-
-// Mock Claude Agent SDK
-let mockQueryFn: ReturnType<typeof vi.fn>;
-
-vi.mock('@anthropic-ai/claude-agent-sdk', () => {
-  mockQueryFn = vi.fn();
-  return { query: mockQueryFn };
 });
 
 // Mock chalk
@@ -118,7 +111,7 @@ describe('consult command', () => {
 
     it('should have correct CLI configuration for each model', async () => {
       // Assert the REAL exported config (not a hardcoded fake), so a backend
-      // change is caught. Claude/Codex use SDKs (not MODEL_CONFIGS).
+      // change is caught. Claude and Codex have dedicated runners (not MODEL_CONFIGS).
       const { _MODEL_CONFIGS } = await import('../commands/consult/index.js');
       // gemini lane dispatches to the Antigravity CLI (agy) via runAgyConsultation
       // (#778): cli marker 'agy', no pinned --model, no system-prompt env var.
@@ -531,9 +524,14 @@ describe('consult command', () => {
     });
   });
 
-  describe('Claude Agent SDK integration', () => {
+  describe('Claude CLI integration', () => {
+    // The claude lane spawns the installed `claude` CLI (#1912). This file mocks node:child_process
+    // for the other lanes, so these tests route the mocks to the real implementation and pin a
+    // stub `claude` that records what it was run with.
+    let stub: StubClaude;
+    const harnessClaudeBin = process.env.CODEV_CLAUDE_BIN;
+
     beforeEach(() => {
-      mockQueryFn.mockClear();
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
       fs.writeFileSync(
         path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
@@ -542,94 +540,99 @@ describe('consult command', () => {
       process.chdir(testBaseDir);
     });
 
-    it('should invoke Agent SDK with correct parameters', async () => {
-      vi.resetModules();
-      const { consult } = await import('../commands/consult/index.js');
-
-      mockQueryFn.mockImplementation(() =>
-        (async function* () {
-          yield { type: 'assistant', message: { content: [{ text: 'OK' }] } };
-          yield { type: 'result', subtype: 'success' };
-        })()
-      );
-      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-
-      await consult({ model: 'claude', prompt: 'test query' });
-
-      expect(mockQueryFn).toHaveBeenCalledTimes(1);
-      const callArgs = mockQueryFn.mock.calls[0][0];
-      expect(callArgs.options.allowedTools).toEqual(['Read', 'Glob', 'Grep']);
-      expect(callArgs.options.model).toBe('claude-opus-5');
-      expect(callArgs.options.maxTurns).toBe(200);
-      expect(callArgs.options.maxBudgetUsd).toBe(25);
-      expect(callArgs.options.permissionMode).toBe('bypassPermissions');
+    afterEach(async () => {
+      restoreEnv('CODEV_CLAUDE_BIN', harnessClaudeBin);
+      stub?.cleanup();
+      // Back to the file-wide fakes, or the lanes tested later in this file spawn for real.
+      const cp = await import('node:child_process');
+      vi.mocked(cp.spawn).mockReset();
+      vi.mocked(cp.execFileSync).mockReset();
     });
 
-    it('passes consultant.md through as the system prompt (#1649)', async () => {
-      // The #1649 fix is an instruction in consultant.md, so the instruction is
-      // only worth anything if the role file actually reaches the model. This
-      // pins the wire: file on disk → `systemPrompt`. The prohibition's wording
-      // is asserted in consult/__tests__/consultant-role.test.ts.
+    async function loadClaude(print?: { stdout: string; exitCode?: number }) {
+      stub = createStubClaude(print ? { print } : {});
+      process.env.CODEV_CLAUDE_BIN = stub.bin;
       vi.resetModules();
+      const cp = await import('node:child_process');
+      const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+      vi.mocked(cp.spawn).mockImplementation(actual.spawn as typeof cp.spawn);
+      vi.mocked(cp.execFileSync).mockImplementation(actual.execFileSync as typeof cp.execFileSync);
       const { consult } = await import('../commands/consult/index.js');
+      return consult;
+    }
 
+    const review = () => stub.invocations('print')[0];
+    const event = (e: unknown) => `${JSON.stringify(e)}\n`;
+    const INIT = event({ type: 'system', subtype: 'init', tools: ['Glob', 'Grep', 'Read'] });
+    const RESULT = event({ type: 'result', subtype: 'success', is_error: false, result: 'done' });
+    const assistant = (...content: unknown[]) => event({ type: 'assistant', message: { content } });
+
+    it('runs the installed claude CLI in print mode, read-only, with consultant.md as the system prompt (#1649)', async () => {
+      // The #1649 instruction in consultant.md is only worth anything if the role file reaches the
+      // model. This pins the wire: file on disk → the system-prompt file the CLI is given. The
+      // prohibition's wording is asserted in consult/__tests__/consultant-role.test.ts.
       fs.writeFileSync(
         path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
         '# Consultant Role\n\nNever modify the tree under review.'
       );
-
-      mockQueryFn.mockImplementation(() =>
-        (async function* () {
-          yield { type: 'result', subtype: 'success' };
-        })()
-      );
+      const consult = await loadClaude();
       vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
       await consult({ model: 'claude', prompt: 'test query' });
 
-      const callArgs = mockQueryFn.mock.calls[0][0];
-      expect(callArgs.options.systemPrompt).toContain('Never modify the tree under review.');
+      const { argv, stdin, systemPrompt } = review();
+      expect(argv[0]).toBe('-p');
+      expect(argv[argv.indexOf('--tools') + 1]).toBe('Read,Glob,Grep');
+      expect(argv[argv.indexOf('--model') + 1]).toBe('claude-opus-5');
+      expect(argv[argv.indexOf('--max-turns') + 1]).toBe('200');
+      expect(argv[argv.indexOf('--max-budget-usd') + 1]).toBe('25');
+      expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('dontAsk');
+      expect(stdin).toBe('test query');
+      expect(systemPrompt?.content).toContain('Never modify the tree under review.');
     });
 
-    it('should extract text from assistant messages', async () => {
-      vi.resetModules();
-      const { consult } = await import('../commands/consult/index.js');
+    it('removes CLAUDECODE from the child env without touching process.env', async () => {
+      const originalClaudeCode = process.env.CLAUDECODE;
+      process.env.CLAUDECODE = '1';
+      try {
+        const consult = await loadClaude();
+        vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
-      mockQueryFn.mockImplementation(() =>
-        (async function* () {
-          yield {
-            type: 'assistant',
-            message: { content: [{ text: 'Review: ' }, { text: 'All good.' }] },
-          };
-          yield { type: 'result', subtype: 'success' };
-        })()
-      );
+        await consult({ model: 'claude', prompt: 'test' });
 
+        expect(review().env).not.toHaveProperty('CLAUDECODE');
+        expect(process.env.CLAUDECODE).toBe('1');
+      } finally {
+        restoreEnv('CLAUDECODE', originalClaudeCode);
+      }
+    });
+
+    it('streams assistant text to stdout, and not tool-use blocks', async () => {
+      const consult = await loadClaude({
+        stdout: INIT +
+          assistant({ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/foo/bar.ts' } }, { type: 'text', text: 'Review: ' }) +
+          assistant({ type: 'text', text: 'All good.' }) +
+          RESULT,
+      });
       const writes: string[] = [];
       vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
         writes.push(chunk.toString());
         return true;
       });
+      const stderrWrites: string[] = [];
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk: any) => {
+        stderrWrites.push(chunk.toString());
+        return true;
+      });
 
       await consult({ model: 'claude', prompt: 'test query' });
 
-      expect(writes).toContain('Review: ');
-      expect(writes).toContain('All good.');
+      expect(writes).toEqual(['Review: ', 'All good.']);
+      expect(stderrWrites.some(w => w.includes('Tool: Read'))).toBe(false);
     });
 
     it('should write output to file when output option is set', async () => {
-      vi.resetModules();
-      const { consult } = await import('../commands/consult/index.js');
-
-      mockQueryFn.mockImplementation(() =>
-        (async function* () {
-          yield {
-            type: 'assistant',
-            message: { content: [{ text: 'File output content' }] },
-          };
-          yield { type: 'result', subtype: 'success' };
-        })()
-      );
+      const consult = await loadClaude({ stdout: INIT + assistant({ type: 'text', text: 'File output content' }) + RESULT });
       vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
       const outputFile = path.join(testBaseDir, 'output', 'review.md');
@@ -643,86 +646,16 @@ describe('consult command', () => {
       expect(fs.readFileSync(outputFile, 'utf-8')).toBe('File output content');
     });
 
-    it('should remove CLAUDECODE from env passed to SDK', async () => {
-      vi.resetModules();
-      const { consult } = await import('../commands/consult/index.js');
-
-      const originalClaudeCode = process.env.CLAUDECODE;
-      process.env.CLAUDECODE = '1';
-
-      mockQueryFn.mockImplementation(() =>
-        (async function* () {
-          yield { type: 'result', subtype: 'success' };
-        })()
-      );
-      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-
-      await consult({ model: 'claude', prompt: 'test' });
-
-      // Verify CLAUDECODE not in the env options
-      const callArgs = mockQueryFn.mock.calls[0][0];
-      expect(callArgs.options.env).not.toHaveProperty('CLAUDECODE');
-
-      // Verify CLAUDECODE is restored in process.env after the call
-      expect(process.env.CLAUDECODE).toBe('1');
-
-      if (originalClaudeCode !== undefined) {
-        process.env.CLAUDECODE = originalClaudeCode;
-      } else {
-        delete process.env.CLAUDECODE;
-      }
-    });
-
-    it('should throw on SDK error results', async () => {
-      vi.resetModules();
-      const { consult } = await import('../commands/consult/index.js');
-
-      mockQueryFn.mockImplementation(() =>
-        (async function* () {
-          yield {
-            type: 'result',
-            subtype: 'error_max_turns',
-            errors: ['Max turns exceeded'],
-          };
-        })()
-      );
+    it('should throw on CLI error results', async () => {
+      const consult = await loadClaude({
+        stdout: INIT + event({ type: 'result', subtype: 'error_max_turns', is_error: true, errors: ['Max turns exceeded'] }),
+        exitCode: 1,
+      });
       vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
       await expect(
         consult({ model: 'claude', prompt: 'test' })
-      ).rejects.toThrow(/Claude SDK error/);
-    });
-
-    it('should suppress tool use blocks from stderr', async () => {
-      vi.resetModules();
-      const { consult } = await import('../commands/consult/index.js');
-
-      mockQueryFn.mockImplementation(() =>
-        (async function* () {
-          yield {
-            type: 'assistant',
-            message: {
-              content: [
-                { name: 'Read', input: { file_path: '/foo/bar.ts' } },
-                { text: 'File contents here' },
-              ],
-            },
-          };
-          yield { type: 'result', subtype: 'success' };
-        })()
-      );
-
-      const stderrWrites: string[] = [];
-      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-      vi.spyOn(process.stderr, 'write').mockImplementation((chunk: any) => {
-        stderrWrites.push(chunk.toString());
-        return true;
-      });
-
-      await consult({ model: 'claude', prompt: 'test' });
-
-      // Tool use blocks are intentionally suppressed to reduce noise
-      expect(stderrWrites.some(w => w.includes('Tool: Read'))).toBe(false);
+      ).rejects.toThrow(/Claude CLI error \(error_max_turns\): Max turns exceeded/);
     });
   });
 

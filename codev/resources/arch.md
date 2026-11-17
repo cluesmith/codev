@@ -1835,6 +1835,7 @@ The canonical builder loop:
 - **`porch next`** — Reads `status.yaml` + filesystem, returns a `PorchNextResponse` with status (`tasks`, `gate_pending`, `complete`, `error`) and an array of `PorchTask` objects (subject, description, sequential flag). No side effects except reading state.
 - **`porch done`** — Signals task completion, runs checks (npm test/build), records reviews, advances state machine.
 - **`porch status`** — Shows current state and prescriptive next steps.
+- **`porch skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this`** — Drops one unbuilt plan phase from an approved plan (#1900). `plan_phases` is snapshotted into `status.yaml` on entering `implement` and never re-read, so editing the plan changes nothing. The phase becomes `skipped` with its reason; navigation (`isPlanPhaseSettled`) steps over it; skipping the last unsettled phase moves to `review`. The builder runs it after the architect relays a human's decision, same as `porch approve`.
 - **`porch approve <id> <gate> --a-human-explicitly-approved-this`** — Records a human's gate decision. The builder runs it after the architect relays the decision. (`porch run` was removed; strict-mode builders loop `porch next` → execute → `porch done` themselves.)
 
 #### State: `status.yaml`
@@ -2095,7 +2096,9 @@ consult -m codex spec 42
   → spawns: codex exec -c experimental_instructions_file=<tmpfile> --full-auto "<query>"
 
 consult -m claude spec 42
-  → spawns: claude --print -p "<role + query>" --dangerously-skip-permissions
+  → spawns: claude -p --output-format stream-json --verbose --tools Read,Glob,Grep
+            --permission-mode dontAsk --setting-sources "" --strict-mcp-config
+            --no-session-persistence --system-prompt-file <0600 role file> --add-dir <sandbox>  (prompt on stdin)
 ```
 
 **Model configuration** (top of `index.ts`):
@@ -2104,7 +2107,7 @@ consult -m claude spec 42
 |-------|-----------|----------------|-------------|
 | gemini | `agy` (Antigravity CLI; resolved real bin, not the IDE symlink) | Folded into the prompt (role + query) | OAuth / subscription (no API key) |
 | codex | `codex` | Temp file via `-c experimental_instructions_file=` flag | `OPENAI_API_KEY` |
-| claude | `claude` | Prepended to query string | `ANTHROPIC_API_KEY` |
+| claude | the installed `claude` CLI (`CODEV_CLAUDE_BIN` pin, else `PATH`; floor 2.1.141, Spec 1912) | Role + claude-lane capability note via `--system-prompt-file` | The CLI's own login (subscription for most). `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are withheld unless `consult.claudeAuth: "api-key"` |
 
 **Query building**: Five subcommands (`pr`, `spec`, `plan`, `impl`, `general`) each build a prompt that includes the spec/plan/diff content plus a verdict template (`VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]`). PR diffs truncated to 50k chars, impl diffs to 80k chars.
 
@@ -2116,9 +2119,7 @@ consult -m claude spec 42
 
 **Consultation feedback flow** (Spec 0395): Consultation concerns and builder responses are captured in the **review document** (`codev/reviews/<project>.md`), not in porch project directories. The builder writes a `## Consultation Feedback` section during the review phase, summarizing each reviewer's concerns with one of three responses: **Addressed** (fixed), **Rebutted** (disagreed), or **N/A** (out of scope). This is prompt-driven — the porch review prompt and review templates instruct the builder to read raw consultation output files and summarize them. Raw consultation files remain ephemeral session artifacts; the review file is the durable record. Specs and plans stay clean as forward-looking documents.
 
-**Claude nesting limitation**: The `claude` CLI detects nested sessions via the `CLAUDECODE` environment variable and refuses to run inside another Claude session. This affects builders (which run inside Claude) trying to run `consult -m claude`. Two mitigation options exist:
-1. **Unset `CLAUDECODE`**: Builder's shellper session already uses `env -u CLAUDECODE` for terminal sessions, but not for `consult` invocations
-2. **Anthropic SDK**: Replace CLI delegation with direct API calls via `@anthropic-ai/sdk`, bypassing the nesting check entirely
+**Claude lane (Spec 1912)**: `consult -m claude` runs the user's installed `claude` CLI, not the Agent SDK (Spec 0103's SDK lane is gone, and so is the dependency). Before the review it runs three local preflights, none of them a model call: binary resolution, `--version` against `CLAUDE_MIN_VERSION`, then `claude auth status --json` with the child's own env. The shared primitives live in `packages/codev/src/lib/claude-cli.ts`, which `codev doctor` reuses. The child env drops every Claude Code session marker (`isClaudeSessionMarker` from `lib/agent-env.ts`), which is how the nested-session guard is handled; consult's own `process.env` is never mutated. Read-only is a session property: `--tools` leaves only Read/Glob/Grep, and the lane fails and kills the child if the stream's `system/init` event lists any other tool. Every failure is loud, with no fallback to the SDK or to an API key. The `[CLAUDE] binary:` and `[CLAUDE] auth:` lines go to stderr, and stdout carries only the review text.
 
 ### 6. Single Canonical Implementation (TypeScript agent-farm)
 **Decision**: Delete all bash architect scripts; TypeScript agent-farm is the single source of truth

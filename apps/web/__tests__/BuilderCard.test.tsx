@@ -164,6 +164,19 @@ describe('BuilderCard — Spec 1595 agent state', () => {
     expect(stateCell().textContent).toBe('implement');
   });
 
+  it('leaves a skipped plan phase out of the (n/m) label (#1900)', () => {
+    renderBuilder({ builder: makeBuilder({
+      ...served('working'),
+      phase: 'phase_3',
+      planPhases: [
+        { id: 'phase_1', title: 'A', status: 'complete' },
+        { id: 'phase_2', title: 'B', status: 'skipped' },
+        { id: 'phase_3', title: 'C', status: 'in_progress' },
+      ],
+    }) });
+    expect(stateCell().textContent).toBe('phase_3 (2/2)');
+  });
+
   it('renders a dead agent distinctly from idle and needs-input (SC7)', () => {
     renderBuilder({ builder: makeBuilder(served('dead')) });
     expect(stateCell().textContent).toBe('Agent exited');

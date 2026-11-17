@@ -216,8 +216,8 @@ registerConsultOptions(
       }
 
       await consult(buildConsultOptions(options));
-      // Bugfix #341: Force exit after consult completes. SDK internals
-      // (Claude Agent SDK, Codex SDK, Gemini CLI) leave dangling handles
+      // Bugfix #341: Force exit after consult completes. Lane internals
+      // (the Codex SDK, the Gemini CLI) can leave dangling handles
       // (timers, sockets, subprocesses) that keep the Node.js event loop
       // alive indefinitely. Without this, consult processes accumulate as
       // orphans when run in the background by porch/builders.

@@ -151,7 +151,7 @@ export interface GateStatus {
 /**
  * Plan phase status
  */
-export type PlanPhaseStatus = 'pending' | 'in_progress' | 'complete';
+export type PlanPhaseStatus = 'pending' | 'in_progress' | 'complete' | 'skipped';
 
 /**
  * Plan phase extracted from plan.md
@@ -161,6 +161,9 @@ export interface PlanPhase {
   id: string;
   title: string;
   status: PlanPhaseStatus;
+  /** Why a human dropped this phase from the approved plan (`porch skip-phase`, #1900). */
+  skip_reason?: string;
+  skipped_at?: string;                     // ISO timestamp of the skip
 }
 
 /**

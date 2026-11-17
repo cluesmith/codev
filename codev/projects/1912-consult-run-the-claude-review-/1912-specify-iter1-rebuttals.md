@@ -1,0 +1,19 @@
+# Spec 1912 — iteration 1 rebuttals
+
+Both reviewers returned REQUEST_CHANGES. Every point was accepted and folded into the spec (commit `481ea1219`). None is disputed.
+
+## codex
+
+1. **`consult.claudeAuth` scope versus config layers.** *Accepted, resolved by choosing all layers.* The opt-in is honoured from every Codev config layer, like every other `consult.*` key: global, project, local and remote base. Reasons: CI opts in through committed project config, a key-only personal machine opts in once globally, and source-aware semantics for one key would be a special case. The safeguard is visibility: in `api-key` mode the auth line names the file that set the key, on every run. Desired State now says "Codev config explicitly opts in" instead of "workspace". Added a design-decision bullet and scenario 9a.
+2. **"Exactly one auth line" is impossible on early failures.** *Accepted.* The criterion now covers runs whose `auth status` preflight parses. Runs that fail earlier print no auth line, and their failure message is the explanation: binary missing, version too old or unparseable, api-key mode with no key, or auth status unparseable. Scenarios 9, 16 and 16a assert both halves.
+3. **SIGINT/SIGTERM versus "every failure records metrics".** *Accepted.* New criterion: on a signal the child is terminated, no output is written, stale output is removed, temp files are deleted, and consult exits non-zero. A metrics row is explicitly *not* required for a signal-killed run; the other lanes record none either. Scenario 23a.
+4. **The temp system-prompt file.** *Accepted.* It is mode `0600`, sits in consult's private per-process sandbox dir (already granted to the reviewer), and is removed on success, failure and signal. Scenario 3b.
+
+## claude
+
+1. **The hard tool restriction silently invalidates shell instructions in the prompts and `consultant.md`.** *Accepted. This was the real gap.* Since Baked Decision 4 says "no shell", a git-only shell allowance is ruled out. `consultant.md` is shared with the codex and gemini lanes, which keep a shell, so it is not edited. The claude lane's system prompt becomes the role plus a short **capability note**. The note says only Read/Glob/Grep exist, there is no shell, and any shell command in the instructions is to be replaced by reading files directly. There is a new success criterion, a design-decision bullet, a Current State bullet, scenario 3a and a risk row. `consultant.md` is now named in the spec as deliberately unchanged, so the decision has an owner.
+2. **"Only documented flags" is untrue: `--max-turns` and `--system-prompt-file` are hidden.** *Accepted.* The Constraints now say "in `--help`, or verified present in both the floor version and the current version", and name both hidden flags (present in 2.1.105 and 2.1.326).
+3. **The 2.1.141 floor overstates #1907.** *Accepted.* The rationale now says 2.1.105 returned 400 on the API-key path only, while stored login worked. The floor stays at 2.1.141 because `api-key` mode needs it and a single floor is simpler than one per mode.
+4. **Hard-failing on non-JSON stdout is a sharp edge.** *Accepted, keeping the hard fail.* The Assumptions now require the plan to confirm empirically on the live run, with the lane's exact argv, that stdout is JSON-only under `--verbose`. A non-JSON line found there is a blocker to raise, not a reason to start skipping lines quietly. Scenario 32 and a risk row cover it.
+5. **`apiKeySource`.** *Accepted.* It is added to the `auth status` field contract and to the auth line.
+6. **Concurrent children.** *Accepted.* A new assumption: each child has no session persistence and no settings sources, so it writes no shared state. Concurrent `claude` processes on one login are routine, and today's SDK lane already runs the same CLI concurrently.

@@ -280,9 +280,12 @@ function calculateSpirProgress(parsed: ParsedStatus): number {
     case 'plan':
       return gateRequested('plan-approval') ? 45 : 35;
     case 'implement': {
-      const total = parsed.planPhases.length;
+      // A phase a human skipped (#1900) is dropped from the plan: it counts in
+      // neither the total nor the completed — matching the builder card's (n/m).
+      const phases = parsed.planPhases.filter(p => p.status !== 'skipped');
+      const total = phases.length;
       if (total === 0) return 70;
-      const completed = parsed.planPhases.filter(p => p.status === 'complete').length;
+      const completed = phases.filter(p => p.status === 'complete').length;
       return 50 + Math.round((completed / total) * 40);
     }
     case 'review':

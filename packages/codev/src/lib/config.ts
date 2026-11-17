@@ -23,8 +23,10 @@ import {
   validateReasoningEffort,
   validatePricing,
   validateCodexPath,
+  validateClaudeAuth,
   validateConsultationConfig,
   type CodexPricing,
+  type ClaudeAuthMode,
 } from './consult-lanes.js';
 import type { ModelReasoningEffort } from '@openai/codex-sdk';
 
@@ -94,6 +96,14 @@ export interface CodevConfig {
      * does not run fails the consultation; Codev never falls back to the bundled CLI.
      */
     codexPath?: string;
+    /**
+     * How the claude lane authenticates (#1912). `"login"` (the default) runs on the claude CLI's
+     * own login — the subscription, for most people — and withholds `ANTHROPIC_API_KEY` /
+     * `ANTHROPIC_AUTH_TOKEN` from the child, so a stray key cannot switch billing to the metered
+     * API. `"api-key"` passes those keys through and requires one; for CI and key-only machines.
+     * Honoured from every config layer; the lane's auth line names the file that set it.
+     */
+    claudeAuth?: ClaudeAuthMode;
   };
   forge?: Record<string, string | null> & { provider?: string };
   templates?: {
@@ -375,6 +385,7 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
   validateReasoningEffort(merged.consult?.reasoningEffort);
   validatePricing(merged.consult?.pricing);
   validateCodexPath(merged.consult?.codexPath);
+  validateClaudeAuth(merged.consult?.claudeAuth);
   validateConsultationConfig(merged.porch?.consultation, workspaceRoot);
 
   return merged;

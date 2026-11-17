@@ -1,0 +1,59 @@
+id: '1912'
+title: consult-run-the-claude-review-
+protocol: aspir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Claude CLI primitives and config
+    status: complete
+  - id: phase_2
+    title: Consult claude lane on the installed CLI
+    status: complete
+  - id: phase_3
+    title: Doctor on the CLI and Agent SDK removal
+    status: complete
+  - id: phase_4
+    title: Docs in every tree
+    status: complete
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-11-17T03:20:56.323Z'
+    approved_at: '2026-11-17T05:13:50.267Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1912/codev/projects/1912-consult-run-the-claude-review-/1912-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1912/codev/projects/1912-consult-run-the-claude-review-/1912-phase_1-iter1-claude.txt
+started_at: '2026-11-17T00:17:34.881Z'
+updated_at: '2026-11-17T05:13:50.268Z'
+context_refreshes:
+  - boundary: enter:implement
+    at: '2026-11-17T00:43:47.408Z'
+    acknowledged_at: '2026-11-17T00:44:05.955Z'
+  - boundary: plan-phase:phase_2
+    at: '2026-11-17T01:44:58.791Z'
+    acknowledged_at: '2026-11-17T01:46:02.873Z'
+  - boundary: plan-phase:phase_3
+    at: '2026-11-17T02:28:32.523Z'
+    acknowledged_at: '2026-11-17T02:29:31.280Z'
+  - boundary: plan-phase:phase_4
+    at: '2026-11-17T02:43:11.660Z'
+    acknowledged_at: '2026-11-17T02:43:17.151Z'
+  - boundary: enter:review
+    at: '2026-11-17T03:09:20.994Z'
+    acknowledged_at: '2026-11-17T03:10:24.234Z'
+pr_ready_for_human: false
