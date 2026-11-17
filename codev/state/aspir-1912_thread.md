@@ -19,3 +19,8 @@ Decisions flagged as Important open questions: `CLAUDE_CODE_OAUTH_TOKEN` and pro
 - claude found the real gap: `--tools Read,Glob,Grep` removes Bash, but the PR, impl and integration prompts and the shared `consultant.md` tell the reviewer to `cat` and `git diff`. Resolution: a claude-lane-only capability note appended to the role; the shared role stays untouched (the codex and gemini lanes keep a shell).
 - codex: the `consult.claudeAuth` opt-in is honoured from any config layer and the auth line names the file; runs that fail before auth is known print no auth line; SIGINT/SIGTERM terminates the child and removes stale output, with no metrics row required; temp role file is 0600, kept in the sandbox dir, and always removed.
 - Wording fixes: `--max-turns` and `--system-prompt-file` are hidden flags; the 2.1.141 floor needs nuance (2.1.105 got a 400 on the API-key path only); JSON-only stdout must be confirmed on the live run; `apiKeySource` added; concurrency noted.
+
+## Plan (2026-11-16)
+4 phases: (1) `lib/claude-cli.ts` primitives, `consult.claudeAuth` (validator in `consult-lanes.ts`), `lib/dotenv.ts` parser, test guard + harness fake claude, stub helper, real fixture capture; (2) consult lane on `claude -p` with init-event tools guard, kill+await on abort, signals, migrated tests; (3) doctor on the CLI + SDK removal; (4) docs in every tree + skill hashes.
+Plan review iter 1: codex COMMENT and claude COMMENT, all folded in. Key catch: `SDK_MODELS` is the model-validation list, so it is renamed to `RUNNER_LANES` and keeps `claude`. Declined `--permission-prompts none`: absent at 2.1.105 and unverified at the 2.1.141 floor.
+Worktree setup done: `pnpm install` ok, baseline `pnpm build` ok.
