@@ -67,25 +67,50 @@ tunnel-blocked. `BLOCKED_PATH_SEGMENT` is not touched.
 
 `openIde()` keeps opening the tab synchronously (popup blockers), then:
 
-- **Local (`!ideViaTunnel`):** unchanged — `POST ./api/ide/session`, then navigate (#1869).
+- **Local (`!ideViaTunnel`):** unchanged: `POST ./api/ide/session`, then navigate (#1869).
 - **Tunnel (`ideViaTunnel`):** skip the mint and navigate the tab directly to
   `new URL('./ide/?folder=' + encodeURIComponent(ideFolderUriPath(path)), location.href)`, which
-  resolves under the tenant prefix (`<server_url>/t/<tower>/ide/?folder=…`). Authorization is the
-  cloud login plus the tunnel's key stamp, the same trust every other cloud dashboard request uses.
+  resolves under the prefix the browser is already on (`<server_url>/t/<slug>/ide/?folder=…`).
+  If the tab cannot be opened or navigated, a plain error toast, as the local branch has today.
 
-Target-URL construction is factored into one small helper (`ideTargetUrl(workspacePath)`) so both
-branches build the same URL.
+Two properties are explicit, and pinned by template assertions:
 
-### 4. Cloud-side verification (coordination, not code here)
+- **(a) The link is always relative to `location.href`.** The slug is never stored, persisted or
+  computed in the page; `openIde()` contains no literal `/t/` construction. A cloud-side Tower
+  rename (old slugs 410/404) therefore cannot strand the link: it follows whatever slug the
+  browser used to reach the dashboard. Both branches build the URL through one helper
+  (`ideTargetUrl(workspacePath)`).
+- **(b) The tunnel branch carries no Tower key and no forward cookie.** It is a plain top-level
+  navigation; the cloud browser session cookie is the authorization (the relay requires it on
+  `/t/<tower>/ide/*`), and the tunnel client stamps the local key on the Tower side as it does for
+  every proxied request. No `authFetch`, no `codev-tower-key` header, no mint on that branch.
 
-Before this is relied on, the Codev Cloud architect confirms the relay passes `/t/<tower>/ide/*`
-end to end: HTTP, WebSocket upgrades, the IDE server's `Set-Cookie: vscode-tkn=…` scoped under
-the tenant prefix, and absolute asset paths under `x-forwarded-prefix`. I will ask the architect
-to route that question at plan approval. **If the cloud side reports a failure**, the fallback is
-a one-line server switch: tunnel-borne `ide.available` reported `false` (link hidden over the
-tunnel), and `openIde()`'s tunnel branch refuses with a clear toast ("The Codev IDE is not
-available over Codev Cloud yet") instead of opening a broken tab. I would ship whichever the
-architect rules; default is the enabled path.
+### 4. Scope the relayed `vscode-tkn` cookie to the tenant prefix (tunnel-borne only)
+
+The Codev Cloud relay passes `Set-Cookie: vscode-tkn=…` through untouched (confirmed on #1914), so
+its scope is whatever the IDE server sets; today that is the RFC 6265 default path, which happens
+to be `/t/<tower>/ide`. A future `Path=/` from the IDE server would collide across towers on the
+shared cloud origin. Tower guarantees the scope itself:
+
+- **Tunnel-borne responses:** every `vscode-tkn` Set-Cookie the IDE server emits is rewritten to
+  carry `Path=<publicAuthority.prefix>` (that is, `/t/<tower-name>/ide`, the same prefix Tower
+  already stamps in `x-forwarded-prefix`, `ide-forward.ts:139`). Any existing `Path` attribute is
+  replaced; every other attribute (`Max-Age`, `Expires`, `SameSite`, `HttpOnly`, `Secure`, …) and
+  every other cookie are relayed as-is. With no public authority (a tunnel-borne request on a
+  tower with no cloud config, which should not occur) the cookie is stripped, failing closed: the
+  browser never needs it, because Tower injects the token on every forwarded request
+  (`buildForwardHeaders`, `ide-forward.ts:190-197`).
+- **Local responses:** unchanged, the cookie is still stripped (#1869).
+- Applies on both relay paths: HTTP (`copyResponseHeaders`, including the workbench-HTML path) and
+  the WebSocket 101 (`rebuildUpgradeResponse`). The current `stripTokenCookie: boolean` parameter
+  becomes a small policy value (`{ kind: 'strip' } | { kind: 'scope', path }`) chosen once per
+  request by one function, so the two relay paths cannot disagree.
+
+Note: the relay itself also stamps `x-forwarded-*` on the IDE prefix and overwrites Tower's
+values if they differ, so Tower's stamp is consistency, not authority. The cookie Path uses
+Tower's own `tower_name`; if that ever drifted from the slug the browser used, the effect is only
+that the browser does not send the cookie back, which is harmless because Tower injects the token
+itself.
 
 ## Files to Change
 
@@ -96,6 +121,13 @@ architect rules; default is the enabled path.
   for tunnel-borne). Lives beside `ideServerStatus` so the IDE-record logic stays in one module.
 - `packages/codev/templates/tower.html:991-994,1065-1073,1168-1186,1229-1288` — `ideViaTunnel`
   state, read both flags in `refresh()`, drop `refreshIdeStatus()` + its hooks, branch `openIde()`.
+- `packages/codev/src/agent-farm/servers/ide-forward.ts:205-245,340-360,395-407,477,517-535` —
+  new exported `scopeConnectionTokenSetCookie(value, path)`; `copyResponseHeaders` and
+  `rebuildUpgradeResponse` take the cookie policy instead of a boolean; `forwardIdeHttp` and the
+  upgrade path pick the policy from `isTunnelBorne` + `getPublicAuthority()`.
+- `packages/codev/src/agent-farm/__tests__/ide-forward.test.ts:237-330` — existing callers of
+  `copyResponseHeaders(…, true/false)` / `rebuildUpgradeResponse(…, bool)` move to the policy form;
+  the "tunnel path relays the cookie unchanged" assertions become "tunnel path scopes it".
 - `packages/codev/src/agent-farm/__tests__/pir-1914-ide-cloud-availability.test.ts` — new unit tests
   (below).
 - Existing pinning tests left as-is and re-run: `tunnel-client` `isBlockedPath` tests for
@@ -136,16 +168,31 @@ No `codev-skeleton/` change (runtime code and the shipped template only).
     `viaTunnel:true` with the tunnel marker.
   - Forward auth: a request to `/ide/` with `x-codev-tunnel-proxy: 1` and no key/cookie is refused;
     with the key header (what the tunnel client stamps) it is allowed.
-  - Template source assertions (bugfix-1599 pattern): `openIde()` branches on `ideViaTunnel` and the
-    tunnel branch contains no `api/ide/session` call; the local branch still mints before
-    navigating; `refresh()` reads `data.ide`; the template no longer fetches `./api/ide`.
+  - Template source assertions (bugfix-1599 pattern): `openIde()` branches on `ideViaTunnel`; the
+    tunnel branch contains no `api/ide/session`, no `authFetch` and no key header; the local branch
+    still mints before navigating; `openIde()`/`ideTargetUrl()` contain no literal `/t/` and build
+    from `location.href`; `refresh()` reads `data.ide`; the template no longer fetches `./api/ide`.
+  - Cookie scoping (`ide-forward.test.ts`): tunnel policy rewrites `vscode-tkn=T; Max-Age=604800;
+    SameSite=Lax` to carry `Path=/t/<name>/ide` with `Max-Age`/`SameSite` preserved; an existing
+    `Path=/` is replaced, not duplicated; other cookies untouched; `vscode-tkn2=` untouched; same on
+    the WebSocket 101 rebuild; tunnel-borne with no public authority strips; local still strips.
+  - Integration (`ide-forward-integration.test.ts` style, stub IDE server emitting `Set-Cookie:
+    vscode-tkn=T`): a tunnel-marked request through `forwardIdeHttp` with a cloud config gets the
+    scoped cookie; a local request gets none.
   - Existing: `isBlockedPath('/api/ide')`, `('/api/ide/session')` stay true; tunnel-borne mint stays
     403.
 - **Playwright (per testing guide):** load the dashboard against a test Tower with a stubbed IDE
   record: (a) local → Open IDE visible, click → mint request then `/ide/?folder=` tab;
   (b) the same page with the `/api/status` response intercepted to `viaTunnel:true` → link visible,
   click opens `/ide/?folder=…` with **no** `api/ide/session` request; (c) `available:false` → no row.
-- **Manual (dev-approval):** run the worktree Tower; locally confirm Open IDE behaves as before.
-  If a cloud-registered Tower is available, open `<server_url>/t/<tower>/` with an IDE server
-  running → link visible, click opens a working workbench; stop the IDE server → link disappears
-  within one poll.
+- **Manual (dev-approval), local:** run the worktree Tower; confirm Open IDE behaves as before
+  (link shown with a recorded server, mint request, workbench opens).
+- **Manual (dev-approval), cloud — stated dependency:** the cloud path can only be exercised by a
+  Tower that is **registered to Codev Cloud and running this branch's build**. A worktree Tower on
+  another port is not cloud-registered, and the owner's live Tower is not restarted without the
+  owner's word. So this check **needs the owner's live Tower on this build, or a second
+  cloud-registered Tower**; that is the explicit question for the dev-approval gate. When available:
+  open `<server_url>/t/<tower>/` with an IDE server running → link visible; click opens a working
+  workbench (no `api/ide/session` request in devtools, both remote WebSockets connect, the
+  `vscode-tkn` cookie shows `Path=/t/<tower>/ide`); stop the IDE server → link gone within one
+  poll; a Tower with no IDE server → no link.
