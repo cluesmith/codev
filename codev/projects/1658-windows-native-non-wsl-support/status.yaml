@@ -47,15 +47,16 @@ gates:
     requested_at: '2026-10-21T05:38:10.273Z'
     approved_at: '2026-10-21T06:16:13.465Z'
   pr:
-    status: pending
+    status: approved
     requested_at: '2026-10-23T09:06:22.466Z'
+    approved_at: '2026-11-17T07:04:02.005Z'
   verify-approval:
     status: pending
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-10-23T09:06:22.466Z'
+updated_at: '2026-11-17T07:04:02.006Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
@@ -104,4 +105,4 @@ pr_history:
     pr_number: 1859
     branch: builder/spir-1658
     created_at: '2026-10-23T08:27:08.233Z'
-pr_ready_for_human: true
+pr_ready_for_human: false
