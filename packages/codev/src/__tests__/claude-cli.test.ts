@@ -83,6 +83,17 @@ function consultEnv(shell: Record<string, string>): { processEnv: NodeJS.Process
   return { processEnv, fromDotenv };
 }
 
+/** The error `fn` throws. One call, so a stub-backed assertion starts the stub once. */
+function thrown(fn: () => unknown): Error {
+  try {
+    fn();
+  } catch (err) {
+    expect(err).toBeInstanceOf(Error);
+    return err as Error;
+  }
+  throw new Error('expected a throw');
+}
+
 function preflightError(fn: () => unknown): ClaudePreflightError {
   try {
     fn();
@@ -185,18 +196,16 @@ describe('claude version', () => {
 
   it('fails as unparseable on garbage, quoting it (scenario 15)', () => {
     const garbage = stub({ version: { stdout: 'claude, some version\n' } });
-    expect(() => readClaudeVersion(garbage.bin)).toThrow(/Unparseable output from .*--version.*"claude, some version"/);
-    expect(() => readClaudeVersion(garbage.bin)).toThrow(/claude update/);
+    const { message } = thrown(() => readClaudeVersion(garbage.bin));
+    expect(message).toMatch(/Unparseable output from .*--version.*"claude, some version"/);
+    expect(message).toMatch(/claude update/);
   });
 
   it('bounds the quoted excerpt', () => {
     const noisy = stub({ version: { stdout: 'x'.repeat(5000) } });
-    expect(() => readClaudeVersion(noisy.bin)).toThrow(/x{200}…"/);
-    try {
-      readClaudeVersion(noisy.bin);
-    } catch (err) {
-      expect((err as Error).message.length).toBeLessThan(600);
-    }
+    const { message } = thrown(() => readClaudeVersion(noisy.bin));
+    expect(message).toMatch(/x{200}…"/);
+    expect(message.length).toBeLessThan(600);
   });
 
   it('fails naming the binary and exit code when --version itself fails', () => {
@@ -341,8 +350,9 @@ describe('readClaudeAuthStatus (scenario 16)', () => {
     ['a numeric optional field', JSON.stringify({ loggedIn: true, authMethod: 'x', subscriptionType: 5 }), /subscriptionType is not a string/],
   ])('fails as unparseable on %s', (_label, stdout, why) => {
     const odd = stub({ authStatus: { stdout } });
-    expect(() => readClaudeAuthStatus(odd.bin, {})).toThrow(/Unparseable output from .*auth status --json/);
-    expect(() => readClaudeAuthStatus(odd.bin, {})).toThrow(why);
+    const { message } = thrown(() => readClaudeAuthStatus(odd.bin, {}));
+    expect(message).toMatch(/Unparseable output from .*auth status --json/);
+    expect(message).toMatch(why);
   });
 
   it('treats a null display field as not reported', () => {
