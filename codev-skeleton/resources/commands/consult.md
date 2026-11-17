@@ -143,7 +143,7 @@ picks what the lane bills:
 - Any other value is an error at config load, naming the valid values.
 - Like every `consult.*` key it is honoured from any config layer: committed project config for
   CI, global config for a key-only personal machine. In `api-key` mode the auth line names the
-  file that set the key, on every run, so an opt-in is never invisible.
+  file that set `consult.claudeAuth`, on every run, so an opt-in is never invisible.
 - What passes through in `login` mode, what the auth line says, and how the lane fails are in
   [Claude auth: subscription vs. metered API](#claude-auth-subscription-vs-metered-api).
 
@@ -550,7 +550,7 @@ settings files, hooks, plugins, MCP servers or CLAUDE.md, and its sessions are n
 reviews do not fill `claude --resume`. Claude Code's session markers (`CLAUDECODE` and related
 variables) are removed from the child's environment, so consult works from inside a Claude Code
 session. If the CLI denies any of the reviewer's tool calls, consult says so:
-`[CLAUDE] warning: claude denied 1 tool call (Read /etc/hosts). The review did not see what those calls asked for.`
+`[CLAUDE] warning: claude denied 1 tool call (Read "/etc/hosts"). The review did not see what those calls asked for.`
 
 ## The Consultant Role
 
