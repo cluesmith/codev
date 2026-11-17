@@ -13,6 +13,9 @@
  *
  * States: idle (delivered) · draft (held: a human typed text) · midturn (delivered: a turn is
  * streaming and the composer is empty, #1664) · resize (delivered after the repaint) · all.
+ * Two more, the M15 controls, run only when named: prefix (held: the suggestion's first
+ * character typed, cursor after it) and prefix-left (held: the same, then Left so the software
+ * cursor sits ON the typed character). Each needs a suggestion showing in the composer.
  *
  * Output: `<out>/conpty-<app>-<state>.capture.jsonl.gz`. Every chunk is scrubbed of the user
  * name, home directory, scratch directory, host name and each `--redact` value with SAME-LENGTH
@@ -60,11 +63,14 @@ let AGENT_ARGS: string[] = [];
 if (separator !== -1) AGENT_ARGS = process.argv.slice(separator + 1);
 
 const STATES = ['idle', 'draft', 'midturn', 'resize'];
+const CONTROL_STATES = ['prefix', 'prefix-left'];
 const EXPECT: Record<string, 'delivered' | 'held'> = {
   idle: 'delivered',
   draft: 'held',
   midturn: 'delivered',
   resize: 'delivered',
+  prefix: 'held',
+  'prefix-left': 'held',
 };
 
 const profile = resolveProfile({ command: APP });
@@ -75,8 +81,8 @@ if (!profile) {
 let states = [STATE];
 if (STATE === 'all') states = STATES;
 for (const state of states) {
-  if (!STATES.includes(state)) {
-    console.error(`unknown --state ${state}; expected one of ${STATES.join(', ')}, all`);
+  if (!STATES.includes(state) && !CONTROL_STATES.includes(state)) {
+    console.error(`unknown --state ${state}; expected one of ${[...STATES, ...CONTROL_STATES].join(', ')}, all`);
     process.exit(2);
   }
 }
@@ -173,6 +179,18 @@ class Recording {
     this.events.push({ t: this.now(), probe: name });
   }
 
+  /** The composer's first input character (after the marker and its space), or '' when blank. */
+  async firstInputChar(): Promise<string> {
+    const lines = (await this.text()).split('\n');
+    let composer = '';
+    for (const line of lines) {
+      if (/^[❯›]/.test(line)) composer = line;
+    }
+    const ch = [...composer][2] ?? '';
+    if (/^\s*$/.test(ch)) return '';
+    return ch;
+  }
+
   async text(): Promise<string> {
     const { term } = await this.screen.read();
     return bufferLines(term).slice(-this.rows).join('\n');
@@ -257,6 +275,19 @@ async function record(state: string): Promise<Recording> {
       rec.probe('idle-late');
     } else if (state === 'draft') {
       await rec.type(DRAFT_TEXT);
+      rec.probe('typed');
+      await sleep(1500);
+      rec.probe('paused');
+    } else if (state === 'prefix' || state === 'prefix-left') {
+      // M15 control: a real one-character draft that is the suggestion's own first character.
+      const ch = await rec.firstInputChar();
+      if (ch === '') throw new Error(`no suggestion in the composer to type a prefix of; screen:\n${await rec.text()}`);
+      await rec.type(ch);
+      await sleep(800);
+      if (state === 'prefix-left') {
+        rec.key('\x1b[D');
+        await sleep(800);
+      }
       rec.probe('typed');
       await sleep(1500);
       rec.probe('paused');

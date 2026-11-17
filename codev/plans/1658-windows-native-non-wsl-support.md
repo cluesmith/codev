@@ -701,7 +701,7 @@ assumptions (#1567).
 
 #### Deliverables
 
-- [ ] ConPTY fixtures for claude (codex moved to #1858 by Amendment 4; agy if available on the owner's machine).
+- [x] ConPTY fixtures for claude (codex moved to #1858 by Amendment 4; agy if available on the owner's machine). Six captures, 2026-11-17; recording them found M15.
 - [ ] Replay tests asserting held/delivered for each state.
 - [ ] Gate profile adjustments, if any, with POSIX behavior unchanged.
 

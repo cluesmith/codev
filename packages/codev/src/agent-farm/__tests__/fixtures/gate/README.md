@@ -65,7 +65,11 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
   Windows machine (recipe: `codev/projects/1658-windows-native-non-wsl-support/audit.md`,
   "ConPTY → Phase 8"); replayed through the production delivery path by
   `spec-1658-conpty-gate-replay.test.ts`. Scrubbed of user name, profile path, scratch path and
-  host name with same-length placeholders at record time.
+  host name with same-length placeholders at record time. The claude set (2.1.326, 120×40, owner
+  machine, 2026-11-17): idle, draft, midturn, resize, and two M15 controls, `prefix` (the
+  suggestion's first character typed) and `prefix-left` (then Left onto it), both held. The
+  controls are the evidence for the ghost exemption's shared residual (an inverse one-character
+  draft with a dim remainder would read as a ghost): claude drew no such screen in any of them.
 
 - **claude-conpty-ghost-idle.replay.bin.gz** (Spec 1658, M15) — **real capture**: the output of
   an idle claude 2.1.326 under Windows ConPTY at 120×40, taken from the recorder's

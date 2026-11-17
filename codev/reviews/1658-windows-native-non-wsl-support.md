@@ -130,9 +130,11 @@ with a ruling in A2.10. Divergences the moves preserved verbatim are listed in A
 ### Open at the PR gate
 
 1. Claude ConPTY fixtures committed to `packages/codev/src/agent-farm/__tests__/fixtures/gate/conpty/`
-   (recorded on a Windows machine with `scripts/spec-1658-conpty-capture.mts`). The directory does
-   not exist yet; the replay suite skips with a reason until it does. Codex fixtures may wait on
-   #1858.
+   (recorded on a Windows machine with `scripts/spec-1658-conpty-capture.mts`). **Done
+   2026-11-17:** six captures on the owner's machine (claude 2.1.326, 120x40): idle, draft,
+   prefix and prefix-left (manual mode), midturn and resize; each replays through the production
+   delivery path as expected (idle, midturn, resize delivered; draft, prefix, prefix-left held).
+   Recording them found M15. Codex captures moved to #1858 (Amendment 4).
 2. The PR-gate manual pass on the owner's Windows machine (plan section "PR-gate manual pass");
    results are recorded in its table. In progress since 2026-11-02.
    - Passed on tarballs packed from `793332c6e` (before the M6 fix rewrote Tower boot, the
@@ -1108,7 +1110,7 @@ or build from a checkout with `pnpm install` + `pnpm build`). Results go in the 
 | 13 | Consult | From a Windows builder, a 3-way consult (porch-run, or `consult -m codex` / `-m claude` directly). | codex and claude return; an unauthenticated agy skips without blocking. | Pass (reported 2026-11-09, tarballs packed from efd1db9f1, real project `C:\Users\<name>\src\<repo>` with a private GitHub remote, case G). `consult -m claude` and `-m codex` answer from Windows; gemini (agy) does not block; the porch-run 3-way consult on the case C builder's PR completes. |
 | 15 | VS Code extension | In VS Code on Windows: start Tower from the extension, spawn a builder, open its terminal, reveal a file. | Each works; no console windows flash. | Pass on the branch vsix (reported 2026-11-10, tarballs and vsix packed from 1dfb17ccf, product-identical to 7903facff). The Codev output channel showed `[Preflight] status=ok cli=3.3.7 ext=3.3.7`; from the sidebar, start Tower, spawn a builder, open its terminal and reveal a file all work, with no "CLI not installed" warning and no console window. The first attempt (reported 2026-11-09) used the Marketplace extension, `main`'s code, whose shell-less spawn cannot run the npm `.cmd` shim, the defect `apps/vscode/src/cli-process.ts` fixes; it is not counted. |
 | 15a | IDE server (optional dry run) | With the real `@cluesmith/codev-ide-server` installed: `afx ide start`, open `/ide/?folder=<repo>`, `afx ide stop`. | Found via `PATH`, passes the 1.128.0 floor, serves the folder, installs the sidebar extension; stop leaves no `codev-ide-server` or extension host process. | Pass (2026-11-02, published `@cluesmith/codev-ide` 1.0.0 and `@cluesmith/codev-ide-win32-x64` 1.0.0 via `afx ide install`; the package is now `@cluesmith/codev-ide`, not the name in Steps). The workbench loads and works through Codev Cloud, with the CODEV and CODEV TOWER views. A blank console window and some console errors belong to the codev-ide package (finding M4); asset 502s after a Tower re-registration are a Tower tunnel filing candidate (finding M5). Codev's own spawn is clean. Re-check: Pass (reported 2026-11-10, tarballs and vsix packed from 1dfb17ccf, product-identical to 7903facff). The dashboard's Open IDE link (new with #1869 via the `main` merge) opened the workbench without the folder: finding M7, fixed in this PR. |
-| G | ConPTY fixtures (gate condition) | Capture recipe in `audit.md` "ConPTY → Phase 8": `node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app claude --state all -- --model haiku` (and codex once #1858 lands). | Four `conpty-claude-*.capture.jsonl.gz` files, committed to `__tests__/fixtures/gate/conpty/`; the replay suite runs them instead of skipping: idle, midturn and resize delivered, draft held. | |
+| G | ConPTY fixtures (gate condition) | Capture recipe in `audit.md` "ConPTY → Phase 8": `node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app claude --state all -- --model haiku` (and codex once #1858 lands). | Four `conpty-claude-*.capture.jsonl.gz` files, committed to `__tests__/fixtures/gate/conpty/`; the replay suite runs them instead of skipping: idle, midturn and resize delivered, draft held. | Pass (2026-11-17, owner machine, claude 2.1.326, packs from `b18bc57c`): six captures committed (idle, draft, midturn, resize, plus the M15 controls prefix and prefix-left); all replay as expected. The script ran from inside the installed package as plain JavaScript (Node does not strip types under `node_modules`). Idle and draft first failed: finding M15, fixed. |
 
 ### Manual pass findings
 
@@ -1483,6 +1485,24 @@ away (non-dim text after the inverse cell, a 1-char draft with no dim tail, a dr
 past it, the signature off the first input cell: all `user-text`); with the new anchor disabled,
 only the two positive cases fail. The main architect runs a one-model codex consult on the
 render-gate delta.
+
+*Codex consult on the delta: REQUEST_CHANGES on one point; architect ruling: no code change, the
+owner's recordings are the empirical control.* Codex: a real one-character draft rendered inverse
+at the first input cell with a dim autocomplete remainder is byte-identical to the idle ghost, so
+the new anchor would classify it clean (a wide character in that cell likewise). The ambiguity is
+shared with the position anchor, which accepted the same bytes at the same cell since #1330 on
+the 2026-08 measurement that claude never inverse-renders typed text. **Residual, bounded by
+recordings:** the recorder gained two control states, `prefix` (type exactly the suggestion's
+first character) and `prefix-left` (the same, then Left so the cursor sits on it). In every
+recording where something was typed (Windows, claude 2.1.326: `draft`, `prefix`, `prefix-left` in
+auto mode, owner 2026-11-17 16:18-16:19, and again in manual mode, 16:24-16:25; macOS: `prefix`,
+`prefix-left`), claude drew the typed character plainly, erased the suggestion and showed the
+hardware cursor (`T ESC[K`; Left is a backspace): never an inverse typed character with a dim
+remainder, and every one holds `user-text`. Not bounded: claude's software cursor appeared in three
+earlier owner sessions (11:05-11:32) and in none of the eight since, in either permission mode, so
+the controls could not be recorded with it showing; what triggers it is unknown (neither window
+focus nor permission mode). A wide-character ghost was never seen and is untested. If a later
+capture shows an inverse typed character with a dim remainder, the first-input anchor comes out.
 
 ## Appendix: Implementation Notes by Phase
 
