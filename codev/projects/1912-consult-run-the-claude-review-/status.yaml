@@ -1,7 +1,7 @@
 id: '1912'
 title: consult-run-the-claude-review-
 protocol: aspir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -10,7 +10,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-17T00:17:34.881Z'
-updated_at: '2026-11-17T00:26:39.838Z'
+updated_at: '2026-11-17T00:32:57.391Z'
