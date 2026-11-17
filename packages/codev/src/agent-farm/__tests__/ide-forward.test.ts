@@ -20,11 +20,16 @@ import {
   copyResponseHeaders,
   rebuildUpgradeResponse,
   injectWorkbenchConnectionToken,
+  scopeConnectionTokenSetCookie,
+  tokenCookiePolicy,
   type PublicAuthority,
+  type TokenCookiePolicy,
 } from '../servers/ide-forward.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 
 const AUTHORITY: PublicAuthority = { host: 'cloud.codevos.ai', proto: 'https', prefix: '/t/mytower/ide' };
+const STRIP: TokenCookiePolicy = { kind: 'strip' };
+const SCOPE: TokenCookiePolicy = { kind: 'scope', path: '/t/mytower/ide' };
 
 describe('matchIdePrefix', () => {
   it('matches the bare prefix and any subpath', () => {
@@ -172,6 +177,39 @@ describe('getPublicAuthority', () => {
     (readCloudConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue(null);
     expect(getPublicAuthority()).toBeNull();
   });
+
+  it('returns null for a tower name that could inject a header or cookie attribute (Issue #1914)', () => {
+    for (const tower_name of ['a;Path=/', 'a\r\nSet-Cookie: x=1', 'a/b', 'my tower', '']) {
+      (readCloudConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+        tower_id: 't1', tower_name, api_key: 'ctk_x', server_url: 'https://cloud.codevos.ai',
+      });
+      expect(getPublicAuthority()).toBeNull();
+    }
+  });
+});
+
+describe('the tunnel relays vscode-tkn scoped to the tenant prefix (Issue #1914)', () => {
+  it('adds Path=<prefix> and keeps every other attribute', () => {
+    expect(scopeConnectionTokenSetCookie('vscode-tkn=T; Max-Age=604800; SameSite=Lax; HttpOnly', '/t/mytower/ide'))
+      .toEqual(['vscode-tkn=T; Max-Age=604800; SameSite=Lax; HttpOnly; Path=/t/mytower/ide']);
+  });
+
+  it('replaces an existing Path (any case) instead of adding a second one', () => {
+    expect(scopeConnectionTokenSetCookie('vscode-tkn=T; path=/; Secure', '/t/mytower/ide'))
+      .toEqual(['vscode-tkn=T; Secure; Path=/t/mytower/ide']);
+  });
+
+  it('leaves other cookies, including lookalike names, untouched', () => {
+    expect(scopeConnectionTokenSetCookie(['a=1; Path=/', 'vscode-tkn2=keep; Path=/', 'vscode-tkn=T'], '/t/x/ide'))
+      .toEqual(['a=1; Path=/', 'vscode-tkn2=keep; Path=/', 'vscode-tkn=T; Path=/t/x/ide']);
+    expect(scopeConnectionTokenSetCookie(undefined, '/t/x/ide')).toBeUndefined();
+  });
+
+  it('tokenCookiePolicy: tunnel-borne with an authority scopes; tunnel-borne without one, or local, strips', () => {
+    expect(tokenCookiePolicy({ 'x-codev-tunnel-proxy': '1' }, AUTHORITY)).toEqual({ kind: 'scope', path: '/t/mytower/ide' });
+    expect(tokenCookiePolicy({ 'x-codev-tunnel-proxy': '1' }, null)).toEqual({ kind: 'strip' });
+    expect(tokenCookiePolicy({}, AUTHORITY)).toEqual({ kind: 'strip' });
+  });
 });
 
 describe('stripCookie / forward cookie never reaches the IDE server (Issue #1869)', () => {
@@ -241,11 +279,14 @@ describe('the IDE connection token never reaches the browser (Issue #1869)', () 
       etag: '"x"',
       connection: 'keep-alive',
     };
-    const out = copyResponseHeaders(upstream, true);
+    const out = copyResponseHeaders(upstream, STRIP);
     expect(out['set-cookie']).toEqual(['other=1']);
-    expect(copyResponseHeaders({ 'set-cookie': ['vscode-tkn=T; Max-Age=604800'] }, true)['set-cookie']).toBeUndefined();
-    // Tunnel path (local-only scope): relayed unchanged.
-    expect(copyResponseHeaders(upstream, false)['set-cookie']).toEqual(upstream['set-cookie']);
+    expect(copyResponseHeaders({ 'set-cookie': ['vscode-tkn=T; Max-Age=604800'] }, STRIP)['set-cookie']).toBeUndefined();
+    // Tunnel path: relayed, scoped to the tenant prefix (Issue #1914).
+    expect(copyResponseHeaders(upstream, SCOPE)['set-cookie']).toEqual([
+      'vscode-tkn=T; Max-Age=604800; SameSite=Lax; Path=/t/mytower/ide',
+      'other=1',
+    ]);
     expect(out['cache-control']).toBe('no-store');
     expect(out['etag']).toBe('"x"');
     expect(out['connection']).toBeUndefined();
@@ -256,12 +297,13 @@ describe('the IDE connection token never reaches the browser (Issue #1869)', () 
       statusCode: 101,
       statusMessage: 'Switching Protocols',
       headers: { upgrade: 'websocket', 'set-cookie': ['vscode-tkn=T; SameSite=Lax', 'other=1'] },
-    }, true);
+    }, STRIP);
     expect(raw).not.toContain('vscode-tkn');
     expect(raw).toContain('set-cookie: other=1');
     expect(raw).toContain('upgrade: websocket');
-    const tunnel = rebuildUpgradeResponse({ statusCode: 101, statusMessage: 'Switching Protocols', headers: { 'set-cookie': ['vscode-tkn=T'] } }, false);
-    expect(tunnel).toContain('set-cookie: vscode-tkn=T');
+    const tunnel = rebuildUpgradeResponse({ statusCode: 101, statusMessage: 'Switching Protocols', headers: { 'set-cookie': ['vscode-tkn=T; Path=/'] } }, SCOPE);
+    expect(tunnel).toContain('set-cookie: vscode-tkn=T; Path=/t/mytower/ide');
+    expect(tunnel).not.toContain('Path=/\r');
   });
 });
 
@@ -309,18 +351,18 @@ describe('injectWorkbenchConnectionToken (Issue #1869)', () => {
 describe('the forward never relays Access-Control-Allow-Credentials (Issue #1869, M2)', () => {
   it('is dropped from HTTP responses on the local and tunnel paths', () => {
     const upstream = { 'access-control-allow-credentials': 'true', 'content-type': 'text/plain' };
-    for (const local of [true, false]) {
-      const out = copyResponseHeaders(upstream, local);
+    for (const policy of [STRIP, SCOPE]) {
+      const out = copyResponseHeaders(upstream, policy);
       expect(out['access-control-allow-credentials']).toBeUndefined();
       expect(out['content-type']).toBe('text/plain');
     }
   });
 
   it('is dropped from the rebuilt 101 on both paths', () => {
-    for (const local of [true, false]) {
+    for (const policy of [STRIP, SCOPE]) {
       const raw = rebuildUpgradeResponse(
         { statusCode: 101, statusMessage: 'Switching Protocols', headers: { 'access-control-allow-credentials': 'true', upgrade: 'websocket' } },
-        local,
+        policy,
       );
       expect(raw.toLowerCase()).not.toContain('access-control-allow-credentials');
       expect(raw).toContain('upgrade: websocket');
