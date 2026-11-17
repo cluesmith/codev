@@ -32,6 +32,7 @@ Who is affected: everyone who runs CMAP or porch consultations. That includes ev
 - **Read-only today relies on instructions, not restrictions.** With `bypassPermissions`, `allowedTools` only pre-approves tools and does not restrict them. The lane *can* call `Edit`/`Write`/`Bash`. #1649 answered that with an instruction in `consultant.md` and a working-tree tripwire around every lane. The opt-in e2e test measured six write-tool calls from the old role on a tempting prompt.
 - **Isolation today:** with `settingSources` omitted, the SDK runs in its documented "isolation mode". No user, project or local settings load, so the reviewer gets none of the user's hooks, plugins, MCP servers, settings `env` blocks or CLAUDE.md.
 - **Other SDK importers:** `codev doctor` (`verifyClaudeViaSDK`) makes a live "Reply OK" model call through the SDK. It also hard-codes the "Claude" dependency row as `ok: Agent SDK`, because the SDK is "always available as a dependency". No other production code imports the SDK; `persona` and `dev:local` do not, contrary to an old comment in `buildClaudeConsultEnv`. Five test files mock the SDK. One opt-in e2e test (`consult-readonly-review.e2e.test.ts`, gated by `CODEV_ALLOW_REAL_CLAUDE_SDK`) drives the real SDK.
+- **Shell instructions in the reviewer's text.** The PR prompt ("use the Read tool or `cat`"), the impl and integration prompts ("use `git diff <base>...HEAD`") and the shared `consultant.md` ("read-only commands are fine — `git log`, `git diff`, …") assume a shell. Today's claude lane has one in practice (see above), and so do the codex and gemini lanes.
 - **"Prompt is too long" (#1641):** large implementation reviews have failed mid-run. The reviewer reads every changed file, and a request crosses the window the bundled CLI budgets for `claude-opus-5` (200k). The fix that defaults the lane to `claude-opus-5[1m]` is open as PR #1657, which also teaches the model-id validator the `[1m]` suffix.
 - **Docs that describe the SDK:**
   - `CLAUDE.md` / `AGENTS.md` ("Claude Opus 5 via the Agent SDK")
@@ -42,7 +43,7 @@ Who is affected: everyone who runs CMAP or porch consultations. That includes ev
 ## Desired State
 
 - `consult -m claude` runs **the user's installed `claude` CLI** in non-interactive print mode. Upgrading `claude` upgrades the lane, and there is no bundled CLI to drift.
-- **Subscription by default.** The child process never sees `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, whether the key came from the shell or from `.env`, unless the workspace explicitly opts into API-key billing in `.codev/config.json`. With the opt-in, those keys pass through and are required.
+- **Subscription by default.** The child process never sees `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, whether the key came from the shell or from `.env`, unless Codev config explicitly opts into API-key billing. The opt-in is honoured from any config layer, like every other `consult.*` key, and the auth line names the file that set it. With the opt-in, those keys pass through and are required.
 - Every run logs one line naming the auth in use, so nobody has to guess what they are paying with. If a key was present and withheld, the line says so and names the opt-in.
 - **Fail fast, no fallbacks.** The lane fails loudly and says what to do when:
   - `claude` is missing
@@ -75,16 +76,27 @@ Who is affected: everyone who runs CMAP or porch consultations. That includes ev
 - [ ] `consult -m claude` spawns the resolved `claude` binary in print mode with streaming JSON output. No file in `packages/codev/src` imports `@anthropic-ai/claude-agent-sdk`. The dependency is removed from `packages/codev/package.json` and `pnpm-lock.yaml`.
 - [ ] By default, the child env contains neither `ANTHROPIC_API_KEY` nor `ANTHROPIC_AUTH_TOKEN`. This holds when they are set in the shell, in `.env`, or both, and whether or not `CLAUDE_CODE_OAUTH_TOKEN` is set. Verified with a stub `claude` that records its env.
 - [ ] With the opt-in set to API-key billing, both keys reach the child unchanged. If neither is set, the lane fails before spawning the review and names both variables and the config key.
-- [ ] Every run prints exactly one `[CLAUDE] auth: …` line. It names:
-  - the auth method the CLI reports
+- [ ] Every run whose `claude auth status` preflight parses prints exactly one `[CLAUDE] auth: …` line. It names:
+  - the auth method the CLI reports (`authMethod`, plus `apiKeySource` when present)
   - the credential variable and its origin (shell or `.env`), when one is in use
   - any key that was withheld, with the opt-in that would use it
+  - in `api-key` mode, the config file that set `consult.claudeAuth`
 
-  It never prints email addresses, org names or credential values.
+  It never prints email addresses, org names or credential values. A run that fails *before* auth can be determined (binary missing, version too old or unparseable, `api-key` mode with no key, auth status unparseable) prints no auth line; its failure message is the explanation. Tests assert both halves.
 - [ ] Each failure exits non-zero with an actionable message: `claude` not found, version below the floor, unparseable `--version`, `claude auth status` reporting `loggedIn: false`, and unparseable auth status. Each also writes no `--output`, removes a stale `--output`, and records a metrics row with exit code 1. No path falls back to the SDK or to an API key.
 - [ ] The child session's tools are exactly Read, Glob and Grep. No MCP servers, no settings sources, no slash commands or skills, no session persistence. The turn cap is 200 and the budget cap is $25. Verified from the stub's recorded argv.
+- [ ] The claude lane's system prompt is the consultant role plus a claude-lane-only **capability note**. The note says the session's only tools are Read, Glob and Grep, that there is no shell, and that wherever the role or prompt mentions a shell command (`cat`, `git diff`, `git log`, `git show`, `git status`, `ls`, `grep`) the reviewer uses Read/Glob/Grep or the files consult provides instead. The shared `consultant.md` is unchanged, because the codex and gemini lanes do have a shell. Verified from the stub's recorded system prompt.
 - [ ] Nothing in the run blocks on a permission prompt. The reviewer can read the workspace and consult's own temp artifacts, for example the PR diff file for `--type pr`/`integration`.
-- [ ] The prompt and role never travel on argv. Prompts above today's 100 KB inline threshold work, verified with a large prompt against the stub.
+- [ ] The prompt and role never travel on argv. Prompts above today's 100 KB inline threshold work, verified with a large prompt against the stub. Any temp file the lane writes (for example the role, when it goes to the CLI as a file):
+  - is mode `0600`
+  - lives in consult's private per-process sandbox directory, the one the reviewer is already granted
+  - is removed on success, on failure and on SIGINT/SIGTERM
+- [ ] If `consult` receives SIGINT or SIGTERM while the review child runs:
+  - the child is terminated, not orphaned
+  - no `--output` is written and a stale one is removed
+  - consult exits non-zero
+
+  A metrics row is *not* required for a signal-killed run (parity with the other lanes, which record none). Every other failure still records one.
 - [ ] No Claude Code session marker (the `lib/agent-env.ts` list, `CLAUDECODE` included) reaches the child. `process.env` is identical before and after the lane runs.
 - [ ] The resolved model id reaches the child as its model argument and is recorded as the metrics `model_id`. The precedence is: shipped default, then `consult.models.claude`, then `--model-id`. A rejected id still gets the existing provenance annotation.
 - [ ] A successful run writes the concatenated assistant text to `--output`, byte-for-byte what was streamed to stdout. The text contains the reviewer's VERDICT block unchanged.
@@ -122,14 +134,20 @@ On Baked Decision 1, the caller check is done. `persona` and `dev:local` do not 
 - **Server/client isolation (#1189)** is unaffected. All of this lives in `packages/codev`.
 - **The working-tree tripwire (#1649)** stays wrapped around every lane, unchanged.
 - **Two trees.** Every framework doc change is mirrored in `codev/` and `codev-skeleton/`, and `CLAUDE.md` stays byte-identical to `AGENTS.md`.
-- **The CLI is an external contract we don't control.** We depend only on documented flags, the `auth status --json` fields `loggedIn` / `authMethod` / `apiProvider` / `subscriptionType`, and the stream-json `assistant` / `result` event shapes. An unexpected shape fails loudly instead of being guessed at.
+- **The CLI is an external contract we don't control.** We depend only on:
+  - flags that are in `claude --help`, or verified present in both the floor version and the current version. Two used flags are hidden from 2.1.326's `--help`, `--max-turns` and `--system-prompt-file`; both are present in 2.1.105 and 2.1.326.
+  - the `auth status --json` fields `loggedIn` / `authMethod` / `apiProvider` / `subscriptionType` / `apiKeySource`
+  - the stream-json `assistant` / `result` event shapes
+
+  An unexpected shape fails loudly instead of being guessed at.
 
 ## Assumptions
 
 - The CLI's `--output-format stream-json` events are the same protocol the SDK parses today: `assistant` messages with text content blocks, and a final `result` with `subtype`, `is_error`, `result`, `usage`, `total_cost_usd`. The SDK is a thin wrapper over exactly this stream.
-- In print mode, stream-json output requires `--verbose`. stdout carries only JSON lines and diagnostics go to stderr.
+- In print mode, stream-json output requires `--verbose`. stdout carries only JSON lines and diagnostics go to stderr. The lane hard-fails on a non-JSON stdout line, so the plan must confirm this empirically on the live run, with `--verbose` and the lane's exact argv, before the hard fail is locked in. If the live run shows non-JSON lines on stdout, that is a blocker to raise, not a reason to start skipping lines quietly.
 - `claude auth status --json` makes no network or model call (measured at about 0.18 s). It exits 1 when logged out. It does **not** validate a token server-side: a fake `CLAUDE_CODE_OAUTH_TOKEN` reports `loggedIn: true`. An expired or invalid credential therefore surfaces only as an error result during the run, which the lane already treats as a loud failure.
 - With no settings sources loaded, the stored login (keychain or credentials file) still works. Auth is not a settings-file concern. Only `apiKeyHelper` / settings-`env` setups lose their effect, and they already lack it under today's SDK isolation.
+- Concurrent review children are independent. A CMAP round runs three lanes at once, and several builders consult in parallel. Each claude child has no session persistence and loads no settings files, so it writes no shared state. What children share is a read of the credential store, and running many concurrent `claude` processes on one login is routine for Claude Code users. Today's SDK lane already runs the same CLI concurrently.
 - `claude` is on `PATH` wherever consult runs, since builders and architects run `claude` themselves. The rare exception sets an explicit binary pin.
 - No other open work changes `runClaudeConsultation`, apart from PR #1657 (#1641, the `[1m]` default). Whichever lands second rebases. This spec neither depends on PR #1657 nor absorbs it.
 
@@ -204,7 +222,7 @@ These are settled here so the plan doesn't re-decide them.
   - Under a test runner, an unpinned lookup throws unless the real-claude opt-in is set, mirroring `assertAgyLaneAllowedUnderTest` (#1323). The existing `CODEV_ALLOW_REAL_CLAUDE_SDK` opt-in is renamed to `CODEV_ALLOW_REAL_CLAUDE`, since nothing drives the SDK any more.
   - No `consult.claudePath` config key. The codex lane needed `codexPath` because its SDK bundles codex. Here the default already *is* the user's binary, and one override mechanism is enough.
 - **Minimum version: 2.1.141**, checked by parsing `claude --version` (`2.1.326 (Claude Code)` → `2.1.326`) on every run, which takes about 40 ms.
-  - Why 2.1.141: it is the oldest CLI verified to run the shipped default `claude-opus-5` on both the API-key and stored-login paths (PR #1907's matrix; 2.1.105 got a 400).
+  - Why 2.1.141: it is the oldest CLI verified to run the shipped default `claude-opus-5` on both auth paths (PR #1907's matrix). 2.1.105 returned 400 on the API-key path only; stored login worked. 2.1.105 would therefore serve most `login`-mode users, but `api-key` mode needs 2.1.141, and one floor for both modes is simpler than a per-mode floor.
   - Every flag and subcommand the lane uses is present in 2.1.105 already, so model compatibility is what sets the floor.
   - Below the floor or unparseable: fail with "run `claude update`".
   - The floor is a single named constant, so raising it later is a one-line change.
@@ -216,6 +234,12 @@ These are settled here so the plan doesn't re-decide them.
     - The value is named `login` rather than `subscription` because a stored Console login, or a provider switch, is still "the CLI's own login" but not a claude.ai subscription. The docs say "your subscription, for most people".
   - **`api-key`:** `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` pass through. At least one must be set, from the shell or `.env`, or the lane fails before spawning.
   - The key is validated at config load: an unknown value is an error naming the valid values.
+  - **Which config layers count.** Every layer counts, like every other `consult.*` key: global `~/.codev/config.json`, project `.codev/config.json`, local `.codev/config.local.json`, and the remote base config. That is deliberate.
+    - CI usually opts in through committed project config.
+    - A key-only personal machine opts in once, globally.
+    - Restricting the source would make this the only key with source-aware semantics.
+
+    The guard against a surprise opt-in is visibility: in `api-key` mode the auth line names the file that set `consult.claudeAuth`, on every run.
 - **Login preflight.**
   - `claude auth status --json` runs with the *child's* env, so it reports exactly what the review will use.
   - `loggedIn: false` fails with "run `claude auth login`".
@@ -224,7 +248,7 @@ These are settled here so the plan doesn't re-decide them.
 - **The auth line,** for example:
   - `[CLAUDE] auth: claude.ai login (max) — stored claude login`
   - `[CLAUDE] auth: oauth_token — CLAUDE_CODE_OAUTH_TOKEN (from .env)`
-  - `[CLAUDE] auth: api_key — ANTHROPIC_API_KEY (from shell), consult.claudeAuth="api-key"`
+  - `[CLAUDE] auth: api_key (ANTHROPIC_API_KEY) — ANTHROPIC_API_KEY (from shell), consult.claudeAuth="api-key" in /repo/.codev/config.json`
 
   When a key was withheld, it adds: `; ignoring ANTHROPIC_API_KEY (from .env) — set consult.claudeAuth to "api-key" to bill the API instead`. The exact format is the plan's call, but the content above is required.
 - **Binary line,** mirroring codex: `[CLAUDE] binary: /path/to/claude, 2.1.326`.
@@ -234,13 +258,19 @@ These are settled here so the plan doesn't re-decide them.
   - No permission prompt may block: print mode has no human.
   - Reads must reach the workspace and consult's temp sandbox directory, where the PR diff and large-prompt files live.
   - The plan picks the permission mode and directory grants that meet this. It prefers to avoid `bypassPermissions` when a narrower mode meets the read requirement, and it must verify the PR-diff read on the live run.
+- **Capability note for the claude lane.** The hard tool restriction removes Bash, which today's lane has in practice. Five places tell the reviewer to use a shell:
+  - the PR prompt: "use the Read tool or `cat`"
+  - the impl and integration prompts: "if you compute a diff yourself, use `git diff <base>...HEAD`"
+  - `consultant.md`: "optionally use `git diff`", and "read-only commands are fine — `git log`, `git diff`, …"
+
+  `consultant.md` is shared with the codex and gemini lanes, which keep a shell, so it is not edited. Only the claude lane's system prompt gets a short appended note. The note says the session has only Read, Glob and Grep, has no shell, and should treat any shell command in the instructions as unavailable, reading files directly instead (the role already calls diffs a secondary source, and PR diffs arrive as files). This loses `git diff`/`git log` for the claude reviewer. That loss is what Baked Decision 4's "no shell" means, and it is small: impl reviews give the changed-file list and PR reviews give the diff file. Baked Decision 4 rules out restoring a git-only shell allowance.
 - **Isolation.** No settings sources (user/project/local), no MCP servers beyond an empty explicit set, slash commands and skills disabled, no session persistence. This matches the SDK's isolation mode today, so hooks, plugins, CLAUDE.md and the settings `env`/`apiKeyHelper` do not load.
 - **Prompt transport.** The prompt goes over stdin and the role through the CLI's system-prompt mechanism, without the role on argv (a file in consult's private sandbox dir is fine). This avoids `E2BIG` and keeps review content out of `ps`.
 - **"Prompt is too long" (#1641).** The installed CLI knows current models' context windows and auto-compacts in print mode, so this should be rarer than under the stale bundled CLI. When it still happens, the lane fails loudly and does not retry, because retrying would be a hidden fallback. The message says the reviewer's context filled while reading files, names the model id, and points to #1641 for the larger-context default. Absorbing #1641's `[1m]` default and validator change is out of scope; it stays with PR #1657.
 - **Process lifecycle.**
   - A spawn error such as `ENOENT` or `EACCES` is a loud failure naming the binary.
   - stderr is captured with a bounded tail, about 2 KB as for agy, and that tail appears in the failure message for a non-zero exit.
-  - If `consult` receives SIGINT or SIGTERM, the child is terminated, not orphaned.
+  - If `consult` receives SIGINT or SIGTERM, the child is terminated, not orphaned. Stale output is removed and lane temp files are deleted; see Success Criteria.
   - There is no new wall-clock timeout, which is parity with today: the turn and budget caps bound the run.
 - **Doctor.**
   - The "Claude" dependency row becomes a real presence and version check against the floor, with the install hint `curl -fsSL https://claude.ai/install.sh | bash`.
@@ -283,6 +313,8 @@ All unit scenarios run against a **stub `claude` executable**: a small script pi
    - the prompt arriving on stdin
 2. `consult.models.claude` set, then `--model-id` set: argv carries the right id, and metrics record it.
 3. A prompt over 100 KB arrives intact on stdin, and argv stays small.
+3a. The recorded system prompt is the consultant role followed by the capability note. The role text itself is unmodified.
+3b. Any role temp file is `0600`, inside consult's sandbox dir, and gone after success and after failure.
 
 **Env scrubbing**
 
@@ -291,7 +323,8 @@ All unit scenarios run against a **stub `claude` executable**: a small script pi
 6. `ANTHROPIC_AUTH_TOKEN` in both → absent.
 7. A key plus `CLAUDE_CODE_OAUTH_TOKEN` → the key is absent and the OAuth token present.
 8. `consult.claudeAuth: "api-key"` with a key → the key is present and the line says api-key mode.
-9. `consult.claudeAuth: "api-key"` with no key → fails before the review spawn, the message names both variables and the config key, and a metrics row records exit 1.
+9. `consult.claudeAuth: "api-key"` with no key → fails before the review spawn, the message names both variables and the config key, a metrics row records exit 1, and **no** auth line is printed.
+9a. `consult.claudeAuth: "api-key"` set only in `.codev/config.local.json` or the global config → honoured, and the auth line names that file.
 10. `consult.claudeAuth: "bogus"` → a config-load error listing the valid values.
 11. `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_PID` and `CLAUDE_CODE_ENTRYPOINT` set → none reach the child, and `process.env` is unchanged after the run.
 12. `CLAUDE_CODE_USE_VERTEX=1` and `ANTHROPIC_BASE_URL` → both pass through.
@@ -301,7 +334,8 @@ All unit scenarios run against a **stub `claude` executable**: a small script pi
 13. `CODEV_CLAUDE_BIN` pointing at a non-existent or non-executable path → a loud failure naming it, with no `PATH` retry.
 14. Unpinned under VITEST → throws the test-isolation error.
 15. `--version` prints `2.1.100 (Claude Code)` → fails naming 2.1.141 and `claude update`. Garbage output → fails as unparseable.
-16. `auth status` returns `loggedIn: false` → fails with "run `claude auth login`". Non-JSON → fails as unparseable.
+16. `auth status` returns `loggedIn: false` → fails with "run `claude auth login`". Non-JSON → fails as unparseable, with no auth line.
+16a. Binary missing, or version too old → no auth line is printed.
 17. The review exits 1 with stderr and no result → the failure message carries the exit code and stderr tail.
 18. The review exits 0 with no result event → fails.
 19. A non-JSON stdout line → fails, quoting a bounded excerpt.
@@ -309,6 +343,7 @@ All unit scenarios run against a **stub `claude` executable**: a small script pi
 21. `subtype: error_max_turns` / `error_max_budget_usd` → fails naming the subtype.
 22. A result of "Prompt is too long" → the classified context-exhaustion message, naming the model and #1641.
 23. Any failure with a stale `--output` file present → the file is removed.
+23a. SIGTERM delivered to consult mid-review against a stub that sleeps → the stub child is terminated, there is no `--output`, a stale `--output` is removed, temp files are deleted, and consult exits non-zero.
 
 **Metrics and output**
 
@@ -328,7 +363,9 @@ All unit scenarios run against a **stub `claude` executable**: a small script pi
 
 **Live (manual, once, not in the suite)**
 
-32. From this worktree's build, run `consult -m claude --protocol aspir --type impl` (or a PR review that exercises the diff-file read) on the subscription. It completes, writes a VERDICT, records a metrics row, and its `[CLAUDE] auth:` line is pasted into the PR.
+32. From this worktree's build, run `consult -m claude --protocol aspir --type impl` (or a PR review that exercises the diff-file read) on the subscription. It completes, writes a VERDICT, records a metrics row, and its `[CLAUDE] auth:` line is pasted into the PR. The same run confirms two things:
+    - stdout carried only JSON lines under the lane's exact argv
+    - no user hook or plugin fired in the reviewer
 33. The opt-in e2e, renamed to the `CODEV_ALLOW_REAL_CLAUDE` gate, drives the real CLI with the lane's real argv against the tempting fixture. It asserts zero write-tool calls and an unchanged tree. With the tools removed this is now deterministic, but it stays opt-in because it spends tokens.
 
 ## Risks and Mitigation
@@ -338,6 +375,8 @@ All unit scenarios run against a **stub `claude` executable**: a small script pi
 | A CLI release changes flags or the stream-json shape | Low | High (lane breaks) | Version floor; only documented flags; fail loudly on unexpected output and never guess; stub fixtures captured from a real run; the live run in the PR |
 | Key-only CI or adopters break on upgrade | Medium | Medium | The error names the one-line opt-in; release notes call it out; doctor shows it |
 | Isolation flags miss something (a user hook or plugin still loads in the reviewer) | Low | Low–Medium | The tool restriction is the hard read-only guarantee whatever loads; the live run checks; the #1649 tripwire still wraps the lane |
+| The reviewer follows a shell instruction it can no longer execute and quietly reviews less | Medium | Medium | The claude-lane capability note (Success Criteria); the shared role is left alone for the lanes that have a shell |
+| A future CLI prints a non-JSON line to stdout under `--verbose`, failing every review | Low | High | Confirmed JSON-only on the live run; the failure quotes the line, so the cause is obvious and the fix (a version floor bump or a parser change) is a deliberate decision |
 | Reads outside the workspace (the PR diff) are denied in non-interactive mode, so PR reviews run blind | Medium | High | An explicit success criterion; the plan must grant consult's sandbox dir; the live run exercises a PR or diff read |
 | `auth status` says logged in but the token is expired or invalid | Medium | Low | The run fails loudly through the error-result path, naming the credential (existing behaviour, kept) |
 | `claude` is not on `PATH` in some launch context (cron, a minimal Tower env) | Low | Medium | The error names `CODEV_CLAUDE_BIN`; doctor shows what was resolved |

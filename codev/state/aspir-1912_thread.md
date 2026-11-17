@@ -14,3 +14,8 @@ Research findings worth keeping:
 - PR diffs are written to consult's temp sandbox dir, so the reviewer must be able to read outside the workspace without a permission prompt.
 
 Decisions flagged as Important open questions: `CLAUDE_CODE_OAUTH_TOKEN` and provider switches pass through in default `login` mode; key-only CI breaks until it opts in with `consult.claudeAuth: "api-key"`.
+
+### Spec review iter 1 (codex + claude: both REQUEST_CHANGES, all points folded in)
+- claude found the real gap: `--tools Read,Glob,Grep` removes Bash, but the PR, impl and integration prompts and the shared `consultant.md` tell the reviewer to `cat` and `git diff`. Resolution: a claude-lane-only capability note appended to the role; the shared role stays untouched (the codex and gemini lanes keep a shell).
+- codex: the `consult.claudeAuth` opt-in is honoured from any config layer and the auth line names the file; runs that fail before auth is known print no auth line; SIGINT/SIGTERM terminates the child and removes stale output, with no metrics row required; temp role file is 0600, kept in the sandbox dir, and always removed.
+- Wording fixes: `--max-turns` and `--system-prompt-file` are hidden flags; the 2.1.141 floor needs nuance (2.1.105 got a 400 on the API-key path only); JSON-only stdout must be confirmed on the live run; `apiKeySource` added; concurrency noted.
