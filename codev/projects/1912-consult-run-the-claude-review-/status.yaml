@@ -8,21 +8,21 @@ plan_phases:
     status: complete
   - id: phase_2
     title: Consult claude lane on the installed CLI
-    status: in_progress
+    status: complete
   - id: phase_3
     title: Doctor on the CLI and Agent SDK removal
-    status: pending
+    status: in_progress
   - id: phase_4
     title: Docs in every tree
     status: pending
-current_plan_phase: phase_2
+current_plan_phase: phase_3
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -37,7 +37,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1912/codev/projects/1912-consult-run-the-claude-review-/1912-phase_1-iter1-claude.txt
 started_at: '2026-11-17T00:17:34.881Z'
-updated_at: '2026-11-17T02:18:05.193Z'
+updated_at: '2026-11-17T02:28:32.523Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-17T00:43:47.408Z'
@@ -45,3 +45,5 @@ context_refreshes:
   - boundary: plan-phase:phase_2
     at: '2026-11-17T01:44:58.791Z'
     acknowledged_at: '2026-11-17T01:46:02.873Z'
+  - boundary: plan-phase:phase_3
+    at: '2026-11-17T02:28:32.523Z'
