@@ -1,0 +1,16 @@
+id: '1912'
+title: consult-run-the-claude-review-
+protocol: aspir
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-17T00:17:34.881Z'
+updated_at: '2026-11-17T00:17:34.883Z'
