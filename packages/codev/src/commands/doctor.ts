@@ -521,18 +521,21 @@ function errorMessage(err: unknown): string {
  * here is a binary the lane will accept. Local and model-free.
  *
  * Any problem is a warning whose note is the lane's own message, which already says what to do:
- * the install hint when `claude` is not on PATH, `claude update` when it is below the floor.
+ * the install hint when `claude` is not on PATH, the update hint when it is below the floor.
  * `bin` is set only on an ok row, and only then is the login checked.
+ *
+ * `env` is `process.env` with the workspace `.env` merged under it (`envWithWorkspaceDotenv`), so a
+ * `CODEV_CLAUDE_BIN` set only in `.env` is honoured here as it is by consult.
  *
  * Unlike `checkAgy`, this also catches the test-isolation guard (#1323) that `resolveClaudeBin`
  * throws for an unpinned lookup under a test runner. The guard has already done its job by then
  * (nothing was resolved or run), and its message lands in the row, where a test asserting on the
  * rows sees it.
  */
-function checkClaude(): { result: CheckResult; bin: string | null } {
+function checkClaude(env: NodeJS.ProcessEnv): { result: CheckResult; bin: string | null } {
   let bin: string;
   try {
-    bin = resolveClaudeBin();
+    bin = resolveClaudeBin(env);
   } catch (err) {
     return { result: { status: 'warn', version: 'not found', note: errorMessage(err) }, bin: null };
   }
@@ -581,10 +584,11 @@ function envWithWorkspaceDotenv(workspaceRoot: string | null): { env: NodeJS.Pro
  * the output excerpt when `auth status` is unparseable, the missing key in `api-key` mode, and a
  * config error for an unknown `consult.claudeAuth`.
  */
-function verifyClaudeViaCli(bin: string): CheckResult {
-  const workspaceRoot = findWorkspaceRoot();
-  const { env: processEnv, fromDotenv } = envWithWorkspaceDotenv(workspaceRoot);
-
+function verifyClaudeViaCli(
+  bin: string,
+  workspaceRoot: string | null,
+  { env: processEnv, fromDotenv }: { env: NodeJS.ProcessEnv; fromDotenv: Set<string> },
+): CheckResult {
   let status: ClaudeAuthStatus;
   let withheld: string[];
   try {
@@ -918,7 +922,10 @@ export async function doctor(): Promise<number> {
 
   // Claude: the installed CLI the claude lane runs (#1912). Not a bundled
   // dependency, so it can be absent, and then it does not count as installed.
-  const claude = checkClaude();
+  // Both Claude rows read the workspace `.env` as consult does, so they see the same pin and keys.
+  const claudeWorkspaceRoot = findWorkspaceRoot();
+  const claudeEnv = envWithWorkspaceDotenv(claudeWorkspaceRoot);
+  const claude = checkClaude(claudeEnv.env);
   printStatus('Claude', claude.result);
   if (claude.bin) {
     installedAiClis.push('Claude');
@@ -951,7 +958,7 @@ export async function doctor(): Promise<number> {
   if (claude.bin) {
     console.log(chalk.blue(`  ⋯ ${'Claude'.padEnd(12)} verifying...`));
     process.stdout.write('\x1b[1A\x1b[2K');
-    const claudeResult = verifyClaudeViaCli(claude.bin);
+    const claudeResult = verifyClaudeViaCli(claude.bin, claudeWorkspaceRoot, claudeEnv);
     printStatus('Claude', claudeResult);
     if (claudeResult.status === 'ok') {
       aiCliCount++;

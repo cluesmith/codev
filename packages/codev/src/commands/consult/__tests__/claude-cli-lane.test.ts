@@ -687,12 +687,17 @@ describe('a protocol failure mid-stream stops the review child before the lane f
     {
       name: 'an init event listing write and shell tools',
       stdout: jsonl({ ...INIT, tools: ['Read', 'Edit', 'Bash'] }, assistant(text('I can edit now'))),
-      message: /claude did not honour --tools; refusing a review with write or shell tools.*Edit/,
+      message: /claude did not honour --tools; refusing a review with tools consult did not grant: "Edit, Bash"\. .*expected exactly Read, Glob, Grep/,
+    },
+    {
+      name: 'an init event with an extra tool that is neither a write nor a shell tool',
+      stdout: jsonl({ ...INIT, tools: ['Glob', 'Grep', 'Read', 'TodoWrite'] }),
+      message: /claude did not honour --tools; refusing a review with tools consult did not grant: "TodoWrite"\./,
     },
     {
       name: 'an init event with no tools list',
       stdout: jsonl({ ...INIT, tools: undefined }),
-      message: /claude did not honour --tools/,
+      message: /claude did not honour --tools; refusing a review whose tools it cannot see\./,
     },
     {
       name: 'an init event missing one review tool',
@@ -717,7 +722,7 @@ describe('a protocol failure mid-stream stops the review child before the lane f
     {
       name: 'an assistant event before any init event',
       stdout: jsonl(assistant(text('no init first'))),
-      message: /assistant event arrived before the init event/,
+      message: /refusing a review whose tools it cannot see\. An assistant event arrived before the init event/,
     },
     {
       name: 'a malformed line',
@@ -733,6 +738,10 @@ describe('a protocol failure mid-stream stops the review child before the lane f
     const run = await runLane(ctx(), { stub: { print: { stdout, sleepSeconds: 60 } } });
 
     expect(run.error!.message).toMatch(message);
+    // A CLI release that changes the session's tools stops every review, so the way out is named.
+    if (/did not honour --tools/.test(run.error!.message)) {
+      expect(run.error!.message).toContain('pin a known-good claude with CODEV_CLAUDE_BIN=/path/to/claude.');
+    }
     expect(isAlive(run.review!.pid)).toBe(false);
     expect(run.stdout).toBe('');
     expect(fs.existsSync(run.outputPath)).toBe(false);

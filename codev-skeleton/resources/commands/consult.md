@@ -461,7 +461,7 @@ pins through the environment.
 |---|---|---|
 | `CODEV_AGY_BIN` | auto-resolved | Pin the agy binary. The harness sets this to a fake for every test. |
 | `CODEV_ALLOW_REAL_AGY` | unset | `1` opts a test run into the REAL agy binary — the guarded integration smoke and real-AI e2e runs. Expect a browser window if agy's login has lapsed. |
-| `CODEV_CLAUDE_BIN` | `claude` on `PATH` | Pin the claude binary the claude lane and `codev doctor` run. Must be an executable file; a bad pin fails, with no fallback to `PATH`. The harness sets this to a fake for every test. Set it in the shell: consult loads `<workspace>/.env` before resolving the binary, so a value only in `.env` steers consult but not `codev doctor`. |
+| `CODEV_CLAUDE_BIN` | `claude` on `PATH` | Pin the claude binary the claude lane and `codev doctor` run. Must be an executable file; a bad pin fails, with no fallback to `PATH`. The harness sets this to a fake for every test. A value in `<workspace>/.env` counts for consult and `codev doctor` alike; the shell wins. |
 | `CODEV_ALLOW_REAL_CLAUDE` | unset | `1` opts a test run into the REAL `claude` on `PATH`: the opt-in read-only review e2e. It spends tokens on your login. (Renamed from `CODEV_ALLOW_REAL_CLAUDE_SDK`.) |
 | `CODEV_METRICS_DB` | `~/.codev/metrics.db` | Redirect the consult metrics database. Required under a test runner; the harness points it at a temp dir so suite runs stop skewing `consult stats`. |
 | `CODEV_TEST_ISOLATION` | unset | `1` applies the same guards to a harness that is not vitest. |
@@ -525,7 +525,7 @@ That one config line is the fix.
 |---|---|
 | `claude` is not on `PATH` | Install it (`curl -fsSL https://claude.ai/install.sh \| bash`), or set `CODEV_CLAUDE_BIN` |
 | `CODEV_CLAUDE_BIN` is not an executable file | Fix the path. Codev does not fall back to `PATH` |
-| Older than 2.1.141, or a version it cannot parse | `claude update` |
+| Older than 2.1.141, or a version it cannot parse | `claude update`, or `npm install -g @anthropic-ai/claude-code@latest` for an npm install |
 | `claude auth status` reports no login | `claude auth login` |
 | `api-key` mode with neither key set | Set one, or remove `consult.claudeAuth` |
 
@@ -547,7 +547,9 @@ The claude lane ran /Users/you/.local/bin/claude, 2.1.326 (from PATH).
 
 **Read-only, isolated, and safe to nest.** The reviewer session has only Read, Glob and Grep: no
 edit, shell, web or MCP tools. Consult checks the tool list the session reports when it starts,
-and stops the review unless it is exactly those three. It has a 200-turn cap and a $25 budget cap. It loads none of your
+and stops the review unless it is exactly those three. If a `claude` release changes the session's
+tools, every review stops; pin a known-good `claude` with `CODEV_CLAUDE_BIN` until Codev catches up.
+It has a 200-turn cap and a $25 budget cap. It loads none of your
 settings files, hooks, plugins, MCP servers or CLAUDE.md, and its sessions are not saved, so
 reviews do not fill `claude --resume`. Claude Code's session markers (`CLAUDECODE` and related
 variables) are removed from the child's environment, so consult works from inside a Claude Code

@@ -34,6 +34,7 @@ import { assertAgyLaneAllowedUnderTest } from '../../lib/test-env.js';
 import { readDotenvFile } from '../../lib/dotenv.js';
 import {
   CLAUDE_BIN_ENV,
+  CLAUDE_UPDATE_HINT,
   ClaudePreflightError,
   credentialOrigin,
   excerpt,
@@ -979,7 +980,14 @@ function startClaudeReview(opts: {
     };
 
     const unexpected = (what: string, line: string) =>
-      new Error(`claude printed ${what} on stdout: ${excerpt(line)}. Run \`claude update\`; if this persists, the CLI's stream-json format has changed.`);
+      new Error(`claude printed ${what} on stdout: ${excerpt(line)}. ${CLAUDE_UPDATE_HINT}; if this persists, the CLI's stream-json format has changed.`);
+
+    // A claude release that changes the session's tools stops every review at once, so each guard
+    // failure names the way out.
+    const toolsFailure = (why: string, detail: string) => new Error(
+      `claude did not honour --tools; refusing a review ${why}. ${detail} If a claude release ` +
+      `changed the session's tools, pin a known-good claude with ${CLAUDE_BIN_ENV}=/path/to/claude.`
+    );
 
     const handleLine = (line: string) => {
       let event: unknown;
@@ -1000,23 +1008,26 @@ function startClaudeReview(opts: {
         const tools = event.tools;
         const allowed: readonly unknown[] = CLAUDE_REVIEW_TOOLS;
         const reported = `The session reported tools: ${excerpt(JSON.stringify(tools ?? null))}; expected exactly ${CLAUDE_REVIEW_TOOLS.join(', ')}.`;
-        if (!Array.isArray(tools) || !tools.every((tool) => allowed.includes(tool))) {
-          abort(new Error(`claude did not honour --tools; refusing a review with write or shell tools. ${reported}`));
+        if (!Array.isArray(tools)) {
+          abort(toolsFailure('whose tools it cannot see', reported));
+          return;
+        }
+        const extra = tools.filter((tool) => !allowed.includes(tool));
+        if (extra.length > 0) {
+          abort(toolsFailure(`with tools consult did not grant: ${excerpt(extra.map(String).join(', '))}`, reported));
           return;
         }
         const missing = CLAUDE_REVIEW_TOOLS.filter((tool) => !tools.includes(tool));
         if (missing.length > 0 || tools.length !== CLAUDE_REVIEW_TOOLS.length) {
-          abort(new Error(
-            `claude did not honour --tools; refusing a review without ${missing.length > 0 ? missing.join(', ') : 'each tool exactly once'}. ${reported}`
-          ));
+          abort(toolsFailure(`without ${missing.length > 0 ? missing.join(', ') : 'each tool exactly once'}`, reported));
           return;
         }
         sawInit = true;
       } else if (event.type === 'assistant') {
         if (!sawInit) {
-          abort(new Error(
-            'claude did not honour --tools; refusing a review with write or shell tools. An assistant ' +
-            'event arrived before the init event that lists the session\'s tools.'
+          abort(toolsFailure(
+            'whose tools it cannot see',
+            'An assistant event arrived before the init event that lists the session\'s tools.',
           ));
           return;
         }

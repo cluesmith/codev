@@ -40,6 +40,14 @@ export const CLAUDE_BIN_ENV = 'CODEV_CLAUDE_BIN';
 
 export const CLAUDE_INSTALL_HINT = 'curl -fsSL https://claude.ai/install.sh | bash';
 
+/**
+ * How to update `claude`, for both install routes: `claude update` serves the native installer, and an
+ * npm-installed `claude` is updated through npm. A sentence fragment, so callers end it.
+ */
+export const CLAUDE_UPDATE_HINT =
+  'Update claude: `claude update` for the native install, or ' +
+  '`npm install -g @anthropic-ai/claude-code@latest` for an npm install';
+
 /** The credentials that bill the metered Anthropic API, withheld from the child in `login` mode. */
 export const CLAUDE_API_CREDENTIAL_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as const;
 
@@ -107,9 +115,12 @@ function isExecutableFile(candidate: string): boolean {
  * a reason to try `PATH`. A relative pin is resolved against consult's cwd here, so the review,
  * which runs with `cwd` = the workspace, spawns the same file that was checked. Otherwise `claude`
  * is found by walking `PATH`, without executing anything.
+ *
+ * `env` is where the pin and `PATH` are read. Consult has already merged `<workspace>/.env` into
+ * `process.env` by now; `codev doctor` passes its merged copy, so both resolve the same binary.
  */
-export function resolveClaudeBin(): string {
-  const pinned = process.env[CLAUDE_BIN_ENV];
+export function resolveClaudeBin(env: NodeJS.ProcessEnv = process.env): string {
+  const pinned = env[CLAUDE_BIN_ENV];
   if (pinned) {
     if (!isExecutableFile(pinned)) {
       throw new Error(
@@ -125,7 +136,7 @@ export function resolveClaudeBin(): string {
   // the test-isolation guard (#1323), as `resolveAgyBin` is for agy.
   assertClaudeLaneAllowedUnderTest();
 
-  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+  for (const dir of (env.PATH ?? '').split(path.delimiter)) {
     if (!dir) continue;
     const candidate = path.join(dir, 'claude');
     if (isExecutableFile(candidate)) return candidate;
@@ -152,7 +163,7 @@ export function readClaudeVersion(bin: string): string {
   if (!match) {
     throw new Error(
       `Unparseable output from \`${bin} --version\`: ${excerpt(out)}. Expected a version such as ` +
-      `"2.1.326 (Claude Code)". Run \`claude update\`.`
+      `"2.1.326 (Claude Code)". ${CLAUDE_UPDATE_HINT}.`
     );
   }
   return match[1];
@@ -171,12 +182,12 @@ export function assertClaudeVersion(version: string): void {
   // `readClaudeVersion` only returns this shape, but a malformed string would otherwise compare as
   // NaN and pass the floor check.
   if (!/^\d+\.\d+\.\d+$/.test(version)) {
-    throw new Error(`Malformed claude version ${excerpt(version)}: expected MAJOR.MINOR.PATCH. Run \`claude update\`.`);
+    throw new Error(`Malformed claude version ${excerpt(version)}: expected MAJOR.MINOR.PATCH. ${CLAUDE_UPDATE_HINT}.`);
   }
   if (compareVersions(version, CLAUDE_MIN_VERSION) < 0) {
     throw new Error(
       `claude ${version} is older than ${CLAUDE_MIN_VERSION}, the oldest version the claude review ` +
-      `lane supports. Run \`claude update\`.`
+      `lane supports. ${CLAUDE_UPDATE_HINT}.`
     );
   }
 }
@@ -257,7 +268,7 @@ const OPTIONAL_STATUS_FIELDS = ['apiProvider', 'subscriptionType', 'apiKeySource
 function parseClaudeAuthStatus(bin: string, stdout: string): ClaudeAuthStatus {
   const unparseable = (why: string) => new Error(
     `Unparseable output from \`${bin} auth status --json\` (${why}): ${excerpt(stdout)}. ` +
-    `Run \`claude update\`, then \`claude auth status\`.`
+    `${CLAUDE_UPDATE_HINT}, then run \`claude auth status\`.`
   );
   let parsed: unknown;
   try {

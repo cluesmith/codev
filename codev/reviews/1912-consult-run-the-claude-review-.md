@@ -45,7 +45,7 @@
 - **Phase 3.**
   - `describeWithheldKeys` was factored out of `describeClaudeAuth`, so doctor and the auth line share the wording.
   - The lockfile marks 54 packages `optional: true` with no version changes. They are the `@modelcontextprotocol/sdk` subtree (express, hono, …), now reachable only through `@google/genai`'s optional peer. Nothing in codev imports them.
-  - Known gap, documented rather than changed: a `CODEV_CLAUDE_BIN` set only in `<workspace>/.env` steers consult, which loads `.env` before resolving the binary, but not doctor, which resolves from the real `process.env`. It is noted in `consult.md`'s test-isolation table.
+  - A `CODEV_CLAUDE_BIN` set only in `<workspace>/.env` steered consult, which loads `.env` before resolving the binary, but not doctor, which resolved from the real `process.env`. Phase 3 documented the gap. It was closed after the architect's PR review: `resolveClaudeBin(env)` now takes the env to read, and doctor passes its `.env` merge.
 - **Phase 4.** `codev.md`'s doctor section, in both trees, was also corrected. It was not in the plan's file list, but it listed Claude as `@anthropic-ai/claude-code` and showed `✓ Claude working`.
 - **Review phase.**
   - `arch.md`'s Consult Architecture section had a pre-SDK claude spawn line, a table row naming `ANTHROPIC_API_KEY` and a stale "Claude nesting limitation" paragraph. The plan's grep missed them because they never mentioned the SDK. They now describe the CLI lane.
@@ -54,6 +54,10 @@
     - The init guard now requires *exactly* Read, Glob and Grep, not a subset. The plan had specified a subset; the spec says "exactly".
     - A successful result with no assistant text now fails instead of writing an empty `--output`.
     - Both `consult.md` twins say so.
+  - After the architect's PR review (three fold-ins):
+    - Every init-guard failure now says what it found rather than "write or shell tools", and names the recovery lever: pin a known-good `claude` with `CODEV_CLAUDE_BIN`.
+    - Every update hint covers both install routes, through a single `CLAUDE_UPDATE_HINT`: `claude update` for the native install, `npm install -g @anthropic-ai/claude-code@latest` for an npm install.
+    - Doctor resolves the binary from its `.env` merge.
 
 ## Consultation Feedback
 
@@ -149,6 +153,14 @@ Both lanes printed the #1649 "working tree changed" warning. The two changed pat
 - **Concern**: Parsing of the empty `--setting-sources ""` value was verified only at 2.1.326, while the floor comment claims flag presence at 2.1.105 → **Addressed**: the comment in `buildClaudeReviewArgs` now says that presence is all that was checked at 2.1.105, and that the exact argv ran live only on 2.1.326.
 - **Concern**: Spec scenario 33 (the opt-in real-CLI e2e) was migrated but not run → **N/A**: already disclosed under Spec Compliance. The owner's standing order bars the local e2e suite.
 
+### Review Phase, architect's PR review
+
+The architect's independent integration reviews (codex APPROVE, claude APPROVE) and CI (8/8) were green. Three fold-ins were asked for, and all are **Addressed**:
+
+- **The extra-tool message** said "write or shell tools" when the tool may be neither, and gave no way out. It now names what it found (e.g. `"TodoWrite"`) and ends with "If a claude release changed the session's tools, pin a known-good claude with CODEV_CLAUDE_BIN=/path/to/claude." The same lever is on the missing-tool, no-tool-list and assistant-before-init failures, since any of them stops every review. A new test covers a non-write extra tool, and every guard case asserts the lever.
+- **`claude update` does not apply to an npm install.** A single `CLAUDE_UPDATE_HINT` now covers both routes and is used by every update hint: version floor, malformed or unparseable version, unparseable auth status, and a non-JSON stream line. `consult.md`'s fail-fast table, in both trees, says the same.
+- **Doctor and a `.env`-only `CODEV_CLAUDE_BIN`.** Doctor builds the merged env once and uses it for the binary and the login check. Two new doctor tests cover it: a `.env`-only pin is honoured without touching `process.env`, and a shell pin outranks the one in `.env`. The `consult.md` row that documented the gap is corrected.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -203,5 +215,4 @@ The failing files were identified from vitest's results cache, because porch sho
 - **Key-only environments must opt in.** A CI job with only `ANTHROPIC_API_KEY` and no `claude` login now fails loudly until it sets `"consult": { "claudeAuth": "api-key" }`. The release note in the PR body says so; the release author should carry it.
 - **PR #1657 (#1641, the `[1m]` default)** is still open and touches `runClaudeConsultation`. Whichever lands second rebases; the scopes are disjoint.
 - **Update the global `consult` install** after release, so porch's claude reviews stop billing `.env` API keys.
-- **The `.env`-only `CODEV_CLAUDE_BIN` gap in doctor** is documented. It is worth a one-line fix (resolve the pin from the merged env) if anyone hits it.
 - **Leftover temp dirs** from the Phase 2 probe and mutation run, for the human to remove: `$TMPDIR/probe-workspace-jaAgLf`, `$TMPDIR/codev-consult-CIHiYX`, `$TMPDIR/codev-consult-dOwkBx`.

@@ -23,6 +23,7 @@ import {
   readClaudeVersion,
   resolveClaudeAuthMode,
   resolveClaudeBin,
+  CLAUDE_UPDATE_HINT,
   type ClaudeAuthStatus,
 } from '../lib/claude-cli.js';
 import { readDotenvFile } from '../lib/dotenv.js';
@@ -132,6 +133,13 @@ describe('resolveClaudeBin', () => {
     expect(resolveClaudeBin()).toBe(pinned.bin);
   });
 
+  it('reads the pin from the env it is given, not process.env (doctor passes its .env merge)', () => {
+    const fromDotenv = stub();
+    delete process.env.CODEV_CLAUDE_BIN;
+    expect(resolveClaudeBin({ ...process.env, CODEV_CLAUDE_BIN: fromDotenv.bin })).toBe(fromDotenv.bin);
+    expect(process.env.CODEV_CLAUDE_BIN).toBeUndefined();
+  });
+
   it('a pin that does not exist throws naming it, with no PATH retry (scenario 13)', () => {
     const onPath = stub();
     process.env.PATH = onPath.dir;
@@ -235,7 +243,7 @@ describe('claude version', () => {
       expect(() => assertClaudeVersion(version)).not.toThrow();
     } else {
       expect(() => assertClaudeVersion(version)).toThrow(`claude ${version} is older than 2.1.141`);
-      expect(() => assertClaudeVersion(version)).toThrow(/Run `claude update`/);
+      expect(() => assertClaudeVersion(version)).toThrow(CLAUDE_UPDATE_HINT);
     }
   });
 
@@ -641,7 +649,11 @@ describe('preflightClaude', () => {
     const old = pinnedStub({ version: { stdout: '2.1.100 (Claude Code)\n' } });
     const { processEnv, fromDotenv } = consultEnv({});
     const err = preflightError(() => preflightClaude({ workspaceRoot: workspace, processEnv, fromDotenv }));
-    expect(err.message).toBe('claude 2.1.100 is older than 2.1.141, the oldest version the claude review lane supports. Run `claude update`.');
+    expect(err.message).toBe(
+      'claude 2.1.100 is older than 2.1.141, the oldest version the claude review lane supports. ' +
+      'Update claude: `claude update` for the native install, or ' +
+      '`npm install -g @anthropic-ai/claude-code@latest` for an npm install.'
+    );
     expect(err.binaryLine).toBe(`${old.bin}, 2.1.100 (from CODEV_CLAUDE_BIN)`);
     expect(err.authLine).toBeUndefined();
     expect(old.invocations('authStatus')).toEqual([]);

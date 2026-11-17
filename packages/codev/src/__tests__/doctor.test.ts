@@ -1395,6 +1395,27 @@ describe('doctor command', () => {
       expect(stub.invocations('authStatus')[0].env.ANTHROPIC_API_KEY).toBe('sk-ant-doctor-api-key-mode');
     });
 
+    it('honours a CODEV_CLAUDE_BIN set only in the workspace .env, as consult does, without touching process.env', async () => {
+      const stub = createStubClaude();
+      stubs.push(stub);
+      delete process.env.CODEV_CLAUDE_BIN;
+      fs.writeFileSync(path.join(workspace, '.env'), `CODEV_CLAUDE_BIN=${stub.bin}\n`);
+      const { claudeRows } = await runDoctor();
+      expect(claudeRows).toEqual([`  ✓ ${CLAUDE} 2.1.326`, `  ✓ ${CLAUDE} logged in (claude.ai)`]);
+      expect(stub.invocations().map((inv) => inv.argv)).toEqual([['--version'], ['auth', 'status', '--json']]);
+      expect(process.env.CODEV_CLAUDE_BIN).toBeUndefined();
+    });
+
+    it('a shell CODEV_CLAUDE_BIN outranks the one in .env', async () => {
+      const inDotenv = createStubClaude();
+      stubs.push(inDotenv);
+      fs.writeFileSync(path.join(workspace, '.env'), `CODEV_CLAUDE_BIN=${inDotenv.bin}\n`);
+      const inShell = pinStub();
+      await runDoctor();
+      expect(inShell.invocations()).toHaveLength(2);
+      expect(inDotenv.invocations()).toHaveLength(0);
+    });
+
     it('unparseable auth status: a warning quoting the output', async () => {
       pinStub({ authStatus: { stdout: 'definitely not json\n' } });
       const { claudeRows } = await runDoctor();
