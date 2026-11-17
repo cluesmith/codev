@@ -23,11 +23,12 @@ gates:
     approved_at: '2026-11-17T05:13:50.267Z'
   verify-approval:
     status: pending
+    requested_at: '2026-11-17T05:15:30.353Z'
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-17T00:17:34.881Z'
-updated_at: '2026-11-17T05:14:26.200Z'
+updated_at: '2026-11-17T05:15:30.355Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-17T00:43:47.408Z'
