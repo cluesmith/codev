@@ -60,3 +60,10 @@ Architect asked (owner's fix-in-place rule) to take CMAP note (1): the claude la
 via an exported `bundledClaudeAgentSdkVersion()` (same lookup-path walk as `bundledCodexVersion`). The
 floor test now uses that helper and pins the line. Verified live: worktree build prints
 `… 0.2.141 bundled with codev` and returns a review. 0.3.x migration stays a follow-up.
+
+## Closed — stopped here (2026-11-17)
+
+Owner ruled 'close' on PR #1907 (decision main-19): the claude lane moves off the Agent SDK to the
+claude CLI (#1912), superseding the floor raise. Architect closed PR #1907 and issue #1906; branch
+kept. Not merged, no `porch approve` — porch stays at the `pr` gate. Nothing left to do; idle.
+Pre-reboot checkpoint: all work committed and pushed.
