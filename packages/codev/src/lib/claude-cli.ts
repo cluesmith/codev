@@ -72,6 +72,7 @@ function errorText(err: unknown): string {
 /** What went wrong with an `execFileSync` call, in one clause: errno, signal, or exit code + stderr. */
 function describeExecFailure(err: unknown): string {
   const e = err as { code?: unknown; signal?: unknown; status?: unknown; stderr?: unknown };
+  if (e.code === 'ETIMEDOUT') return `no answer within ${CLAUDE_PREFLIGHT_TIMEOUT_MS / 1000}s`;
   if (typeof e.code === 'string') return e.code;
   if (typeof e.signal === 'string') return `killed by ${e.signal}`;
   const stderr = typeof e.stderr === 'string' && e.stderr.trim() ? `: ${excerpt(e.stderr)}` : '';
@@ -102,7 +103,9 @@ function isExecutableFile(candidate: string): boolean {
  * The `claude` binary the lane runs.
  *
  * `CODEV_CLAUDE_BIN` wins when set; a pinned path that is not an executable file is an error, never
- * a reason to try `PATH`. Otherwise `claude` is found by walking `PATH`, without executing anything.
+ * a reason to try `PATH`. A relative pin is resolved against consult's cwd here, so the review,
+ * which runs with `cwd` = the workspace, spawns the same file that was checked. Otherwise `claude`
+ * is found by walking `PATH`, without executing anything.
  */
 export function resolveClaudeBin(): string {
   const pinned = process.env[CLAUDE_BIN_ENV];
@@ -114,7 +117,7 @@ export function resolveClaudeBin(): string {
         `when a pinned binary is unusable.`
       );
     }
-    return pinned;
+    return path.resolve(pinned);
   }
 
   // Past this point we go looking for the developer's real install, so this is the chokepoint for
@@ -322,14 +325,24 @@ export interface ClaudeAuthDescription {
   fromDotenv: ReadonlySet<string>;
 }
 
-/** The credential variable the child authenticates with, and its origin; or the stored login. */
+/**
+ * The credential the child authenticates with, and its origin; or the stored login. Any other
+ * credential variable in the child env is named too, so the line never hides one.
+ *
+ * The winner follows the CLI's precedence, which agrees with the `authMethod` it reports. Probed on
+ * 2.1.326: both API variables → `oauth_token` (the `ANTHROPIC_AUTH_TOKEN` bearer); API key plus
+ * `CLAUDE_CODE_OAUTH_TOKEN` → `api_key`. `apiKeySource` is not used to pick the winner: with both
+ * API variables set it still reports `ANTHROPIC_API_KEY` while `authMethod` says the token won.
+ */
 function claudeCredentialInUse(env: Record<string, string>, fromDotenv: ReadonlySet<string>): string {
   // Claude Code reads a provider switch as on only for these values.
   const provider = CLAUDE_PROVIDER_SWITCHES.find(
     (key) => ['1', 'true', 'yes', 'on'].includes((env[key] ?? '').trim().toLowerCase()),
   );
-  const credential = provider ?? CLAUDE_CREDENTIAL_VARS.find((key) => env[key]);
-  return credential ? credentialOrigin(credential, fromDotenv) : 'stored claude login';
+  const present = [...(provider ? [provider] : []), ...CLAUDE_CREDENTIAL_VARS.filter((key) => env[key])];
+  if (present.length === 0) return 'stored claude login';
+  const [winner, ...others] = present.map((key) => credentialOrigin(key, fromDotenv));
+  return others.length > 0 ? `${winner}, with ${others.join(', ')} also set` : winner;
 }
 
 /**
@@ -413,6 +426,8 @@ export function preflightClaude(opts: {
   try {
     const bin = resolveClaudeBin();
     const version = readClaudeVersion(bin);
+    // `process.env`, not `opts.processEnv`: the pin is consult's own setting, read where
+    // `resolveClaudeBin` reads it. `opts.processEnv` is only the source of the child's env.
     binaryLine = `${bin}, ${version} (from ${process.env[CLAUDE_BIN_ENV] ? CLAUDE_BIN_ENV : 'PATH'})`;
     assertClaudeVersion(version);
 

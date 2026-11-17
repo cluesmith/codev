@@ -141,6 +141,13 @@ describe('resolveClaudeBin', () => {
     expect(() => resolveClaudeBin()).toThrow(/does not fall back to PATH/);
   });
 
+  it('a relative pin is returned as an absolute path, so a spawn from another cwd runs the same file', () => {
+    const pinned = stub();
+    process.env.CODEV_CLAUDE_BIN = path.relative(process.cwd(), pinned.bin);
+    expect(path.isAbsolute(process.env.CODEV_CLAUDE_BIN)).toBe(false);
+    expect(resolveClaudeBin()).toBe(pinned.bin);
+  });
+
   it('a pin that is not executable throws (scenario 13)', () => {
     const notExecutable = path.join(tmpDir, 'claude');
     fs.writeFileSync(notExecutable, '#!/bin/sh\n', { mode: 0o644 });
@@ -411,6 +418,18 @@ describe('describeClaudeAuth', () => {
     expect(line).toBe(
       'claude.ai (max) — stored claude login; ignoring ANTHROPIC_API_KEY (from .env), ANTHROPIC_AUTH_TOKEN (from shell)' +
       ' — set consult.claudeAuth to "api-key" to bill the API instead',
+    );
+  });
+
+  it('with both API credentials set, names the one the CLI uses and the other beside it', () => {
+    // The status shape CLI 2.1.326 reports with both set: token auth, while apiKeySource names the key.
+    expect(describeClaudeAuth({
+      ...base, mode: 'api-key', modeSource: '/repo/.codev/config.json',
+      env: { ANTHROPIC_API_KEY: 'sk-key', ANTHROPIC_AUTH_TOKEN: 'bearer' }, fromDotenv: new Set(['ANTHROPIC_API_KEY']),
+      status: { loggedIn: true, authMethod: 'oauth_token', apiProvider: 'firstParty', apiKeySource: 'ANTHROPIC_API_KEY' },
+    })).toBe(
+      'oauth_token (ANTHROPIC_API_KEY) — ANTHROPIC_AUTH_TOKEN (from shell), with ANTHROPIC_API_KEY (from .env) also set, ' +
+      'consult.claudeAuth="api-key" in /repo/.codev/config.json',
     );
   });
 
