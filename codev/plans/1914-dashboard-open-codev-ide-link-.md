@@ -106,6 +106,19 @@ shared cloud origin. Tower guarantees the scope itself:
   becomes a small policy value (`{ kind: 'strip' } | { kind: 'scope', path }`) chosen once per
   request by one function, so the two relay paths cannot disagree.
 
+- **The tower name is validated before it is written into a header.** `getPublicAuthority()`
+  builds the prefix from the cloud config's `tower_name`, which then lands in a `Set-Cookie` Path
+  and in `x-forwarded-prefix`. A name containing `;`, CR/LF or other non-path characters could
+  inject cookie attributes or split the header. `getPublicAuthority()` accepts only
+  `^[A-Za-z0-9._-]+$` and returns null otherwise, so the cookie is stripped (fail closed) and no
+  prefix is stamped. This also hardens the existing `x-forwarded-prefix` stamp (small adjacent
+  fix, named in the PR).
+- **Path is not an isolation boundary.** On the shared cloud origin, another tower's page can
+  still read this cookie through same-origin script, so the Path rewrite prevents one tower's
+  cookie from overwriting another's; it does not hide the token. The token is only usable through
+  this tower's relay, which the cloud checks for ownership. Per-tower origin isolation would be a
+  Codev Cloud decision and is out of scope here.
+
 Note: the relay itself also stamps `x-forwarded-*` on the IDE prefix and overwrites Tower's
 values if they differ, so Tower's stamp is consistency, not authority. The cookie Path uses
 Tower's own `tower_name`; if that ever drifted from the slug the browser used, the effect is only
@@ -176,6 +189,8 @@ No `codev-skeleton/` change (runtime code and the shipped template only).
     SameSite=Lax` to carry `Path=/t/<name>/ide` with `Max-Age`/`SameSite` preserved; an existing
     `Path=/` is replaced, not duplicated; other cookies untouched; `vscode-tkn2=` untouched; same on
     the WebSocket 101 rebuild; tunnel-borne with no public authority strips; local still strips.
+  - `getPublicAuthority()` returns null for a `tower_name` containing `;`, CR/LF, `/` or a space,
+    and the expected prefix for a plain name.
   - Integration (`ide-forward-integration.test.ts` style, stub IDE server emitting `Set-Cookie:
     vscode-tkn=T`): a tunnel-marked request through `forwardIdeHttp` with a cloud config gets the
     scoped cookie; a local request gets none.
