@@ -535,8 +535,9 @@ auth status is known prints no auth line; its message is the explanation.
 Once the review runs, an error result (a usage limit, an invalid or expired credential) fails the
 run with no output file, and the message names the credential in use. A reviewer that fills its
 context window ("Prompt is too long") fails with a message naming the model and #1641; consult
-does not retry. Every failure after the preflight also names the binary that ran, so an old or
-unexpected `claude` is visible:
+does not retry. A successful result with no review text fails too, since it has no VERDICT. Every
+failure after the preflight also names the binary that ran, so an old or unexpected `claude` is
+visible:
 
 ```
 Claude CLI error (error_max_budget_usd). The review reached the $25 budget cap.
@@ -545,7 +546,8 @@ The claude lane ran /Users/you/.local/bin/claude, 2.1.326 (from PATH).
 ```
 
 **Read-only, isolated, and safe to nest.** The reviewer session has only Read, Glob and Grep: no
-edit, shell, web or MCP tools. It has a 200-turn cap and a $25 budget cap. It loads none of your
+edit, shell, web or MCP tools. Consult checks the tool list the session reports when it starts,
+and stops the review unless it is exactly those three. It has a 200-turn cap and a $25 budget cap. It loads none of your
 settings files, hooks, plugins, MCP servers or CLAUDE.md, and its sessions are not saved, so
 reviews do not fill `claude --resume`. Claude Code's session markers (`CLAUDECODE` and related
 variables) are removed from the child's environment, so consult works from inside a Claude Code

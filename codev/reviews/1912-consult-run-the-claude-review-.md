@@ -50,6 +50,10 @@
 - **Review phase.**
   - `arch.md`'s Consult Architecture section had a pre-SDK claude spawn line, a table row naming `ANTHROPIC_API_KEY` and a stale "Claude nesting limitation" paragraph. The plan's grep missed them because they never mentioned the SDK. They now describe the CLI lane.
   - Both `DEPENDENCIES.md` twins gained a "Consult lane" row with the 2.1.141 floor and `claude auth login`, a small in-place fix prompted by claude's Phase 4 note.
+  - After the PR review:
+    - The init guard now requires *exactly* Read, Glob and Grep, not a subset. The plan had specified a subset; the spec says "exactly".
+    - A successful result with no assistant text now fails instead of writing an empty `--output`.
+    - Both `consult.md` twins say so.
 
 ## Consultation Feedback
 
@@ -132,6 +136,19 @@ Reviewers were codex and claude: the project's `porch.consultation.models` lists
 - **Concern**: The release note was not drafted anywhere → **Addressed**: drafted in the thread and pasted into the PR body.
 - **Concern (optional)**: `DEPENDENCIES.md`, `INSTALL.md` and `README.md` install Claude Code without the 2.1.141 floor → **Addressed** for `DEPENDENCIES.md`, both twins, in the review phase. **N/A** for `INSTALL.md` and `README.md`: those lines install the latest Claude Code for the harness and `codev import`, which is already above the floor.
 
+### Review Phase, PR review (Round 1)
+
+Both lanes printed the #1649 "working tree changed" warning. The two changed paths were `.review-{codex,claude}.stderr`, which I had redirected consult's stderr into, inside the project dir. Neither reviewer wrote them. They were moved out of the worktree, and the lesson is routed below. This round's claude review again ran the global pre-1912 `consult` and reported `[CLAUDE] auth: ANTHROPIC_API_KEY (from .env)` (see Methodology Improvements).
+
+#### Codex — REQUEST_CHANGES
+- **Concern**: The runtime init guard accepts any subset of Read/Glob/Grep, including `[]` or `["Read"]`, though the spec requires exactly those three → **Addressed**: the guard now also fails on a missing tool or a repeated one, naming what is missing. Four new cases cover a missing tool, an empty list, a repeat in place of a tool, and a repeat on top of all three. The plan's "subset" wording was the gap.
+
+#### Claude — APPROVE (non-blocking notes)
+- **Concern**: A `success` result with no assistant text writes an empty `--output` and exits 0 → **Addressed** for the claude lane: it fails with "wrote no review text, so there is no VERDICT", with a new test. The codex lane has the same shape and is left unchanged; it is a different lane and was not in this spec.
+- **Concern**: Untracked artifacts in the worktree (`1912-phase_1-iter2-context.md` and the two `.stderr` files) → **Addressed** for the `.stderr` files, which were moved out. **N/A** for `1912-phase_1-iter2-context.md`: it is porch's iteration-context scratch, and the architect's standing order says not to stage it.
+- **Concern**: Parsing of the empty `--setting-sources ""` value was verified only at 2.1.326, while the floor comment claims flag presence at 2.1.105 → **Addressed**: the comment in `buildClaudeReviewArgs` now says that presence is all that was checked at 2.1.105, and that the exact argv ran live only on 2.1.326.
+- **Concern**: Spec scenario 33 (the opt-in real-CLI e2e) was migrated but not run → **N/A**: already disclosed under Spec Compliance. The owner's standing order bars the local e2e suite.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -168,6 +185,7 @@ Reviewers were codex and claude: the project's `porch.consultation.models` lists
 - Routed: cold — Testing — when porch hides a failed check's output (#1801), vitest's results cache names the failing files with no re-run.
 - Routed: cold — Testing — a file-wide `vi.mock('node:child_process')` with `mockImplementation(actual.spawn)` leaks into later tests in the file; use `mockReset()` in `afterEach`.
 - Routed: cold — Architecture — the [From 0120] "mirror the SDK runner" line gained a note that the claude lane left the SDK (Phase 4).
+- Routed: cold — 3-Way Reviews — redirect a consultation's stdout/stderr outside the worktree. A file you write there during the run sets off the #1649 working-tree tripwire on every concurrent lane, which then reports your own file as a possible reviewer write.
 - No hot-tier change. The probe-the-mechanism lesson is already covered by the hot "Verify reviewer/plan claims against the actual file" line, and `lessons-critical.md` is at its cap.
 
 ## Flaky Tests

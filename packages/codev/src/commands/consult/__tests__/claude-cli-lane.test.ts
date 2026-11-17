@@ -623,6 +623,11 @@ describe('a review run that fails is reported by how it failed', () => {
       print: { stdout: readClaudeFixture('claude-stream-success.jsonl'), exitCode: 2 },
       message: [/claude reported a successful review but exited with code 2/],
     },
+    {
+      name: 'a successful result with no review text',
+      print: { stdout: jsonl(INIT, assistant(text('  \n')), RESULT_OK) },
+      message: [/claude reported a successful review but wrote no review text, so there is no VERDICT/],
+    },
   ];
 
   it.each(cases)('$name', async ({ print, message, usage }) => {
@@ -688,6 +693,26 @@ describe('a protocol failure mid-stream stops the review child before the lane f
       name: 'an init event with no tools list',
       stdout: jsonl({ ...INIT, tools: undefined }),
       message: /claude did not honour --tools/,
+    },
+    {
+      name: 'an init event missing one review tool',
+      stdout: jsonl({ ...INIT, tools: ['Glob', 'Read'] }, assistant(text('I cannot grep'))),
+      message: /claude did not honour --tools; refusing a review without Grep\. .*expected exactly Read, Glob, Grep/,
+    },
+    {
+      name: 'an init event with an empty tools list',
+      stdout: jsonl({ ...INIT, tools: [] }),
+      message: /claude did not honour --tools; refusing a review without Read, Glob, Grep\./,
+    },
+    {
+      name: 'an init event repeating a tool in place of another',
+      stdout: jsonl({ ...INIT, tools: ['Read', 'Read', 'Glob'] }),
+      message: /claude did not honour --tools; refusing a review without Grep\./,
+    },
+    {
+      name: 'an init event repeating a tool on top of all three',
+      stdout: jsonl({ ...INIT, tools: ['Glob', 'Grep', 'Read', 'Read'] }),
+      message: /claude did not honour --tools; refusing a review without each tool exactly once\./,
     },
     {
       name: 'an assistant event before any init event',

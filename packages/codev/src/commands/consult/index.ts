@@ -857,8 +857,10 @@ export const CLAUDE_CAPABILITY_NOTE = [
  * followed by another flag or the end of argv; nothing positional follows, because the prompt
  * arrives on stdin.
  *
- * Floor discipline: every flag here is present in CLI 2.1.105, below `CLAUDE_MIN_VERSION`. A flag
- * added later must be verified at the floor, or the floor raised in the same commit.
+ * Floor discipline: every flag here is present in CLI 2.1.105, below `CLAUDE_MIN_VERSION`. Presence
+ * is all that was checked there: this exact argv, including the empty `--setting-sources` value,
+ * was run live only on 2.1.326. A flag added later must be verified at the floor, or the floor
+ * raised in the same commit.
  */
 export function buildClaudeReviewArgs(opts: { model: string; systemPromptFile: string; sandboxDir: string }): string[] {
   const tools = CLAUDE_REVIEW_TOOLS.join(',');
@@ -993,12 +995,19 @@ function startClaudeReview(opts: {
       }
 
       if (event.type === 'system' && event.subtype === 'init') {
+        // The session must have exactly the review tools: an extra one could write or run a shell,
+        // and a missing one means the reviewer reads less than the review assumes.
         const tools = event.tools;
         const allowed: readonly unknown[] = CLAUDE_REVIEW_TOOLS;
+        const reported = `The session reported tools: ${excerpt(JSON.stringify(tools ?? null))}; expected exactly ${CLAUDE_REVIEW_TOOLS.join(', ')}.`;
         if (!Array.isArray(tools) || !tools.every((tool) => allowed.includes(tool))) {
+          abort(new Error(`claude did not honour --tools; refusing a review with write or shell tools. ${reported}`));
+          return;
+        }
+        const missing = CLAUDE_REVIEW_TOOLS.filter((tool) => !tools.includes(tool));
+        if (missing.length > 0 || tools.length !== CLAUDE_REVIEW_TOOLS.length) {
           abort(new Error(
-            `claude did not honour --tools; refusing a review with write or shell tools. The session ` +
-            `reported tools: ${excerpt(JSON.stringify(tools ?? null))}; expected only ${CLAUDE_REVIEW_TOOLS.join(', ')}.`
+            `claude did not honour --tools; refusing a review without ${missing.length > 0 ? missing.join(', ') : 'each tool exactly once'}. ${reported}`
           ));
           return;
         }
@@ -1247,6 +1256,10 @@ export async function runClaudeConsultation(
 
     const failure = classifyClaudeRun(run, choice.id, preflight.authLine);
     if (failure) throw failure;
+    // A successful result with no assistant text has no VERDICT block to save.
+    if (chunks.join('').trim() === '') {
+      throw new Error('claude reported a successful review but wrote no review text, so there is no VERDICT.');
+    }
 
     if (outputPath) {
       const outputDir = path.dirname(outputPath);

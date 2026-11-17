@@ -102,3 +102,6 @@ Observation: porch's claude review ran the globally installed, pre-1912 `consult
 - Fixed in place: both `DEPENDENCIES.md` twins gained a "Consult lane" row with the 2.1.141 floor (claude's phase_4 note). `INSTALL.md`/`README.md` were left alone; they install the latest Claude Code, which is already above the floor.
 - Re-probed `auth status --json` keys on 2.1.326 with a fake key (no model call): `apiKeySource` is present and `subscriptionType` absent, so the double-parenthetical note is moot.
 - Doc-reading tests that touch these files: 7 files, 98 passed.
+- PR #1913 opened. porch done (review checks) passed.
+- PR review iter1: codex REQUEST_CHANGES (the init guard accepted any subset of Read/Glob/Grep; the spec says exactly), claude APPROVE with minor notes. Fixed: the guard now fails on a missing or repeated tool (4 new cases), a success with no review text fails (1 new case), and the floor comment is honest about what was verified at 2.1.105. `consult.md` twins updated. Touched suites: 5 files, 149 passed; tsc clean.
+- Both lanes' tripwire warnings were my own `.review-*.stderr` redirects inside `codev/projects/`. Moved to scratch; lesson routed (cold, 3-Way Reviews).
