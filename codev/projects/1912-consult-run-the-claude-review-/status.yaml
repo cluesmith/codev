@@ -1,16 +1,31 @@
 id: '1912'
 title: consult-run-the-claude-review-
 protocol: aspir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Claude CLI primitives and config
+    status: in_progress
+  - id: phase_2
+    title: Consult claude lane on the installed CLI
+    status: pending
+  - id: phase_3
+    title: Doctor on the CLI and Agent SDK removal
+    status: pending
+  - id: phase_4
+    title: Docs in every tree
+    status: pending
+current_plan_phase: phase_1
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-17T00:17:34.881Z'
-updated_at: '2026-11-17T00:36:06.407Z'
+updated_at: '2026-11-17T00:43:47.408Z'
+context_refreshes:
+  - boundary: enter:implement
+    at: '2026-11-17T00:43:47.408Z'
