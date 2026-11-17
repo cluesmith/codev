@@ -6,15 +6,17 @@ plan_phases: []
 current_plan_phase: null
 gates:
   pr:
-    status: pending
+    status: approved
     requested_at: '2026-11-16T22:26:44.781Z'
+    approved_at: '2026-11-17T00:10:17.280Z'
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-16T21:52:32.406Z'
-updated_at: '2026-11-16T22:26:44.782Z'
+updated_at: '2026-11-17T00:10:17.306Z'
 pr_history:
   - phase: pr
     pr_number: 1908
     branch: builder/air-1900
     created_at: '2026-11-16T22:10:44.803Z'
+pr_ready_for_human: false
