@@ -6,7 +6,10 @@
  *
  * - picks a mode from its argv: `--version`, `auth …` (auth status), or anything else (a print-mode
  *   review)
- * - appends one record of its argv, env, stdin, cwd and pid to a log that `invocations()` reads
+ * - appends one record of its argv, env, stdin, cwd and pid to a log that `invocations()` reads,
+ *   plus the content and mode of the `--system-prompt-file` it was given, which the lane deletes
+ *   once the run ends
+ * - optionally runs a shell command in its cwd, standing in for a reviewer that acts on the tree
  * - replays that mode's canned stdout, stderr and exit code, optionally sleeping after writing
  *   output so a test can signal it mid-run
  *
@@ -32,6 +35,11 @@ export interface StubClaudeReply {
   exitCode?: number;
   /** Seconds to stay alive after writing output, before exiting (for signal tests). */
   sleepSeconds?: number;
+  /**
+   * A `/bin/sh -c` command run in the stub's cwd before it writes output; its output is discarded.
+   * `$STUB_CLAUDE_DIR` is the stub's own dir.
+   */
+  beforeOutput?: string;
 }
 
 export type StubClaudeOptions = Partial<Record<StubClaudeMode, StubClaudeReply>>;
@@ -43,6 +51,8 @@ export interface StubClaudeInvocation {
   stdin: string;
   cwd: string;
   pid: number;
+  /** The `--system-prompt-file` as the stub found it, when argv named one. */
+  systemPrompt?: { path: string; content: string; mode: number };
 }
 
 export interface StubClaude {
@@ -103,10 +113,25 @@ function readStdin() {
   });
 }
 
+function readSystemPrompt() {
+  const index = argv.indexOf('--system-prompt-file');
+  if (index === -1) return undefined;
+  const file = argv[index + 1];
+  return { path: file, content: fs.readFileSync(file, 'utf8'), mode: fs.statSync(file).mode & 0o777 };
+}
+
 readStdin().then((stdin) => {
-  const record = { mode, argv, env: process.env, stdin, cwd: process.cwd(), pid: process.pid };
+  const record = {
+    mode, argv, env: process.env, stdin, cwd: process.cwd(), pid: process.pid, systemPrompt: readSystemPrompt(),
+  };
   fs.appendFileSync(path.join(__dirname, 'invocations.jsonl'), JSON.stringify(record) + '\\n');
   const reply = config[mode];
+  if (reply.beforeOutput) {
+    require('child_process').execFileSync('/bin/sh', ['-c', reply.beforeOutput], {
+      stdio: 'ignore',
+      env: { ...process.env, STUB_CLAUDE_DIR: __dirname },
+    });
+  }
   if (reply.stdout) process.stdout.write(reply.stdout);
   if (reply.stderr) process.stderr.write(reply.stderr);
   process.exitCode = reply.exitCode === undefined ? 0 : reply.exitCode;

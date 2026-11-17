@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MetricsDB, type MetricsRecord } from '../metrics.js';
-import { extractUsage, extractReviewText, type SDKResultLike } from '../usage-extractor.js';
+import { extractUsage, extractReviewText, type ClaudeResultLike } from '../usage-extractor.js';
 import { _MODEL_CONFIGS } from '../index.js';
 
 function makeTmpDir(): string {
@@ -168,10 +168,10 @@ describe('extractUsage for Codex (SDK-based)', () => {
   });
 });
 
-// Test 5: extractUsage() for Claude SDK result
+// Test 5: extractUsage() for the claude CLI result event
 describe('extractUsage for Claude', () => {
-  it('correctly reads SDK result message fields', () => {
-    const sdkResult: SDKResultLike = {
+  it('correctly reads the CLI result event fields', () => {
+    const claudeResult: ClaudeResultLike = {
       type: 'result',
       subtype: 'success',
       total_cost_usd: 6.50,
@@ -183,7 +183,7 @@ describe('extractUsage for Claude', () => {
       },
     };
 
-    const usage = extractUsage('claude', '', sdkResult);
+    const usage = extractUsage('claude', '', claudeResult);
     expect(usage).not.toBeNull();
     expect(usage!.inputTokens).toBe(50000);
     expect(usage!.cachedInputTokens).toBe(40000);
@@ -191,13 +191,13 @@ describe('extractUsage for Claude', () => {
     expect(usage!.costUsd).toBe(6.50);
   });
 
-  it('handles SDK result with missing usage', () => {
-    const sdkResult: SDKResultLike = {
+  it('handles a result event with no usage', () => {
+    const claudeResult: ClaudeResultLike = {
       type: 'result',
       subtype: 'success',
     };
 
-    const usage = extractUsage('claude', '', sdkResult);
+    const usage = extractUsage('claude', '', claudeResult);
     expect(usage).not.toBeNull();
     expect(usage!.inputTokens).toBeNull();
     expect(usage!.cachedInputTokens).toBeNull();

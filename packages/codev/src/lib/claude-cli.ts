@@ -60,7 +60,8 @@ const CLAUDE_PREFLIGHT_TIMEOUT_MS = 30_000;
 
 const EXCERPT_MAX_CHARS = 200;
 
-function excerpt(text: string): string {
+/** `text`, trimmed, capped at 200 characters and JSON-quoted, for quoting CLI output in an error. */
+export function excerpt(text: string): string {
   const trimmed = text.trim();
   return JSON.stringify(trimmed.length > EXCERPT_MAX_CHARS ? `${trimmed.slice(0, EXCERPT_MAX_CHARS)}…` : trimmed);
 }
@@ -167,6 +168,11 @@ function compareVersions(a: string, b: string): number {
 }
 
 export function assertClaudeVersion(version: string): void {
+  // `readClaudeVersion` only returns this shape, but a malformed string would otherwise compare as
+  // NaN and pass the floor check.
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`Malformed claude version ${excerpt(version)}: expected MAJOR.MINOR.PATCH. Run \`claude update\`.`);
+  }
   if (compareVersions(version, CLAUDE_MIN_VERSION) < 0) {
     throw new Error(
       `claude ${version} is older than ${CLAUDE_MIN_VERSION}, the oldest version the claude review ` +

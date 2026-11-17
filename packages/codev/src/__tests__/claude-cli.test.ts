@@ -238,6 +238,13 @@ describe('claude version', () => {
       expect(() => assertClaudeVersion(version)).toThrow(/Run `claude update`/);
     }
   });
+
+  it.each(['2.1', '2.1.x', '', 'v2.1.326', '2.1.326 (Claude Code)'])(
+    'rejects the malformed version %j rather than comparing NaN past the floor',
+    (version) => {
+      expect(() => assertClaudeVersion(version)).toThrow(/Malformed claude version .*MAJOR\.MINOR\.PATCH/);
+    },
+  );
 });
 
 describe('buildClaudeChildEnv', () => {
@@ -437,6 +444,19 @@ describe('describeClaudeAuth', () => {
     expect(describeClaudeAuth({
       ...base, env: { CLAUDE_CODE_USE_VERTEX: '1' }, status: { loggedIn: true, authMethod: 'third_party', apiProvider: 'vertex' },
     })).toBe('third_party via vertex — CLAUDE_CODE_USE_VERTEX (from shell)');
+  });
+
+  it.each([
+    // Every provider switch the CLI recognises, resolved in its order, ahead of any credential.
+    [{ CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_API_KEY: 'k' }, 'CLAUDE_CODE_USE_BEDROCK (from shell), with ANTHROPIC_API_KEY (from shell) also set'],
+    [{ CLAUDE_CODE_USE_MANTLE: 'true', CLAUDE_CODE_OAUTH_TOKEN: 't' }, 'CLAUDE_CODE_USE_MANTLE (from shell), with CLAUDE_CODE_OAUTH_TOKEN (from shell) also set'],
+    [{ CLAUDE_CODE_USE_VERTEX: '1', CLAUDE_CODE_USE_ANTHROPIC_AWS: '1' }, 'CLAUDE_CODE_USE_ANTHROPIC_AWS (from shell)'],
+    // Claude Code reads "0" as off, so it is not reported as the provider.
+    [{ CLAUDE_CODE_USE_BEDROCK: '0' }, 'stored claude login'],
+    [{ ANTHROPIC_AUTH_TOKEN: 'a', CLAUDE_CODE_OAUTH_TOKEN: 't' }, 'ANTHROPIC_AUTH_TOKEN (from shell), with CLAUDE_CODE_OAUTH_TOKEN (from shell) also set'],
+    [{ PATH: '/usr/bin' }, 'stored claude login'],
+  ])('names the credential Claude Code uses first: %j (#1754)', (env, credential) => {
+    expect(describeClaudeAuth({ ...base, env, status: { loggedIn: true, authMethod: 'x' } })).toBe(`x — ${credential}`);
   });
 
   it('says plainly when there is no login', () => {

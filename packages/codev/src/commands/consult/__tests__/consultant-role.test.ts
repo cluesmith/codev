@@ -3,16 +3,20 @@
  *
  * A `consult -m claude` review lane reverted three guards in a builder's
  * worktree to check whether the tests covering them were vacuous. It had the
- * capability — `allowedTools` is the Agent SDK's *auto-approve* list, not a
+ * capability — `allowedTools` was the Agent SDK's *auto-approve* list, not a
  * restriction, so under `permissionMode: 'bypassPermissions'` every tool
- * including `Edit` is reachable — and, more to the point, nothing had ever told
+ * including `Edit` was reachable — and, more to the point, nothing had ever told
  * it not to. `consultant.md` said "You have filesystem access — use it to verify
  * your claims" and stopped there.
  *
- * The owner's decision was to fix that by instruction rather than by stripping
- * tools. That makes `consultant.md` load-bearing: it is the control. These tests
- * pin that the instruction is present, that it addresses the specific temptation
- * that caused the incident, and that it actually reaches the model.
+ * The owner's decision then was to fix that by instruction rather than by
+ * stripping tools. Since #1912 the claude lane runs the installed `claude` CLI
+ * with `--tools Read,Glob,Grep`, so it no longer has a write or shell tool at
+ * all. The instruction stays, and these tests with it: `consultant.md` is shared
+ * with the codex and gemini lanes, which do have write-capable tools, and for
+ * them it is still the control. These tests pin that the instruction is present,
+ * that it addresses the specific temptation that caused the incident, and that it
+ * actually reaches the model.
  *
  * They assert on meaning, not on wording — each check looks for a phrase the
  * instruction cannot lose without losing its point. Rewriting the section for
@@ -46,7 +50,7 @@ describe('consultant.md forbids mutating the tree under review (#1649)', () => {
       });
 
       it('forbids state-changing commands, not just file edits', () => {
-        // The lane can reach `Bash` too, and `git checkout` undoes a builder's
+        // A lane with a shell (codex, gemini) can run `git checkout`, which undoes a builder's
         // work just as thoroughly as an `Edit` does.
         const text = read(file).toLowerCase();
         expect(text).toMatch(/never run a command that changes state|state-changing command/);
