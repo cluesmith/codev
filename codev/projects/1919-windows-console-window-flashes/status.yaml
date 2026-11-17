@@ -1,0 +1,18 @@
+id: '1919'
+title: windows-console-window-flashes
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-17T23:56:01.906Z'
+updated_at: '2026-11-17T23:56:01.907Z'
