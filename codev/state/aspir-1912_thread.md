@@ -95,3 +95,10 @@ Observation: porch's claude review ran the globally installed, pre-1912 `consult
 
 ### Release note (draft for the PR body, ready to paste)
 **consult: the claude lane now runs your installed `claude` CLI, on your subscription (#1912).** `consult -m claude` no longer uses the bundled Claude Agent SDK. It runs the `claude` on your `PATH` (2.1.141 or newer, or `CODEV_CLAUDE_BIN`) in read-only print mode, so upgrading `claude` upgrades the lane. It uses the CLI's own login by default, which for most people is the Claude subscription. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are withheld from it, whether set in the shell or in the workspace `.env`, and the `[CLAUDE] auth:` line says when a key was ignored. **Breaking for key-only environments:** a CI job with `ANTHROPIC_API_KEY` and no `claude` login now fails loudly. To keep billing the API, add `"consult": { "claudeAuth": "api-key" }` to `.codev/config.json`. `codev doctor` now checks the installed `claude` version and login, with no model call. The `@anthropic-ai/claude-agent-sdk` dependency is removed. The test-only opt-in `CODEV_ALLOW_REAL_CLAUDE_SDK` is renamed `CODEV_ALLOW_REAL_CLAUDE`.
+
+## Review phase (2026-11-17)
+- Wrote `codev/reviews/1912-consult-run-the-claude-review-.md` (template headings; consultation feedback per phase and round, codex + claude, no CONSULT_ERRORs).
+- Routed, cold only (both hot files are at cap): `arch.md`'s Consult Architecture section now describes the CLI lane (spawn line, table row, and the stale "Claude nesting limitation" paragraph replaced). `lessons-learned.md` gained one Security and two Testing lessons.
+- Fixed in place: both `DEPENDENCIES.md` twins gained a "Consult lane" row with the 2.1.141 floor (claude's phase_4 note). `INSTALL.md`/`README.md` were left alone; they install the latest Claude Code, which is already above the floor.
+- Re-probed `auth status --json` keys on 2.1.326 with a fake key (no model call): `apiKeySource` is present and `subscriptionType` absent, so the double-parenthetical note is moot.
+- Doc-reading tests that touch these files: 7 files, 98 passed.
