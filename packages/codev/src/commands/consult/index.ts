@@ -32,6 +32,8 @@ import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } f
 import { executeForgeCommandSync } from '../../lib/forge.js';
 import { preflightAgyAuth, recordAgyAuthState, type AgyAuthState } from './agy-auth-cache.js';
 import { assertAgyLaneAllowedUnderTest } from '../../lib/test-env.js';
+import { readDotenvFile } from '../../lib/dotenv.js';
+import { credentialOrigin, CLAUDE_PROVIDER_SWITCHES, CLAUDE_CREDENTIAL_VARS } from '../../lib/claude-cli.js';
 import {
   snapshotTree,
   diffTreeSnapshots,
@@ -224,40 +226,17 @@ function resolveProtocolPrompt(workspaceRoot: string, protocol: string | undefin
 const dotenvKeys = new Set<string>();
 
 /**
- * Load .env file if it exists
+ * Load `<workspace>/.env` into `process.env`, for any key the shell has not set. The parsing rules
+ * live in `readDotenvFile`, which `codev doctor` shares without touching its own `process.env`.
  */
 function loadDotenv(workspaceRoot: string): void {
-  const envFile = path.join(workspaceRoot, '.env');
-  if (!fs.existsSync(envFile)) return;
-
-  const content = fs.readFileSync(envFile, 'utf-8');
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const eqIndex = trimmed.indexOf('=');
-    if (eqIndex === -1) continue;
-
-    const key = trimmed.substring(0, eqIndex).trim();
-    let value = trimmed.substring(eqIndex + 1).trim();
-
-    // Remove surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-
+  for (const [key, value] of Object.entries(readDotenvFile(workspaceRoot))) {
     // Only set if not already in environment
     if (!(key in process.env)) {
       process.env[key] = value;
       dotenvKeys.add(key);
     }
   }
-}
-
-/** `KEY (from .env)` or `KEY (from shell)`. */
-function credentialOrigin(key: string, fromDotenv: ReadonlySet<string>): string {
-  return `${key} (from ${fromDotenv.has(key) ? '.env' : 'shell'})`;
 }
 
 /**
@@ -843,15 +822,6 @@ export function buildClaudeConsultEnv(
 
   return env;
 }
-
-// Claude Code's authentication precedence, highest first: a cloud-provider switch (in the order
-// the bundled CLI resolves them), then these credential variables, then the stored login
-// (keychain / apiKeyHelper).
-const CLAUDE_PROVIDER_SWITCHES = [
-  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_ANTHROPIC_AWS',
-  'CLAUDE_CODE_USE_MANTLE', 'CLAUDE_CODE_USE_VERTEX',
-];
-const CLAUDE_CREDENTIAL_VARS = ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
 /**
  * Name the credential the claude lane's subprocess authenticates with, and where it came from.

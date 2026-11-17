@@ -93,24 +93,50 @@ export function assertAgyLaneAllowedUnderTest(): void {
 }
 
 /**
- * Explicit opt-in for a test that drives the REAL Claude Agent SDK (#1649).
+ * Explicit opt-in for a test that drives the REAL `claude` CLI (#1649, #1912).
  *
  * The #1649 acceptance check is behavioural: put a review prompt in front of the
  * claude lane that tempts it to edit the code under review, and assert the tree
  * comes back unchanged. Only a real model can answer that — a mock would be
  * asserting my own stub's manners.
  *
- * It is opt-in for two reasons. It costs real tokens on the developer's
- * subscription, and its outcome is probabilistic in a way the rest of the suite
- * is not: the lane *may* write, which is the whole point of measuring it. A
- * probabilistic check cannot gate CI without eventually being ignored, so it
- * runs on request and its evidence goes in the review:
+ * It is opt-in because it costs real tokens on the developer's subscription, so
+ * it runs on request and its evidence goes in the review:
  *
- *   CODEV_ALLOW_REAL_CLAUDE_SDK=1 pnpm --filter @cluesmith/codev test:e2e:cli
+ *   CODEV_ALLOW_REAL_CLAUDE=1 pnpm --filter @cluesmith/codev test:e2e:cli
+ *
+ * When set, the vitest harness leaves `CODEV_CLAUDE_BIN` alone and the lane guard
+ * stands down — you get the `claude` on your PATH. (Renamed from
+ * `CODEV_ALLOW_REAL_CLAUDE_SDK`: nothing drives the Agent SDK any more.)
  */
-export function realClaudeSdkOptIn(): boolean {
-  const raw = process.env.CODEV_ALLOW_REAL_CLAUDE_SDK;
+export function realClaudeOptIn(): boolean {
+  const raw = process.env.CODEV_ALLOW_REAL_CLAUDE;
   return raw === '1' || raw === 'true';
+}
+
+/**
+ * Guard the claude lane against reaching the real `claude` from a test (#1912),
+ * mirroring `assertAgyLaneAllowedUnderTest`.
+ *
+ * Throws when running under a test runner with neither an explicit
+ * `CODEV_CLAUDE_BIN` pin nor the real-claude opt-in. The one call site is
+ * `resolveClaudeBin()`, in the branch taken when `CODEV_CLAUDE_BIN` is unset —
+ * the chokepoint every route to the real binary passes through (the consult lane
+ * and `codev doctor` alike). A real `claude` run from a suite would spend the
+ * developer's subscription; failing the suite is the right outcome.
+ */
+export function assertClaudeLaneAllowedUnderTest(): void {
+  if (!isUnderTestRunner()) return;
+  if (realClaudeOptIn()) return;
+  if (process.env.CODEV_CLAUDE_BIN) return;
+  throw new Error(
+    'Refusing to resolve the claude binary under a test runner without a pinned ' +
+    'CODEV_CLAUDE_BIN (#1323, #1912). This test reached the claude consult lane by ' +
+    'omission and would have run the real claude CLI on the developer\'s ' +
+    'subscription. Pin a fake binary (the vitest harness in vitest-setup.ts does ' +
+    'this for every suite), or set CODEV_ALLOW_REAL_CLAUDE=1 if this test ' +
+    'genuinely means to run the real CLI.',
+  );
 }
 
 /**

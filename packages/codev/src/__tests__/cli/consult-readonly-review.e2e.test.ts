@@ -15,7 +15,7 @@
  * cannot be a green/red CI gate without eventually being muted, and a muted
  * gate is worse than an honest manual one. So:
  *
- *   CODEV_ALLOW_REAL_CLAUDE_SDK=1 pnpm --filter @cluesmith/codev test:e2e:cli
+ *   CODEV_ALLOW_REAL_CLAUDE=1 pnpm --filter @cluesmith/codev test:e2e:cli
  *
  * Without the opt-in the whole describe reports as **skipped** — not as passing
  * tests that ran nothing.
@@ -48,7 +48,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
-import { realClaudeSdkOptIn } from '../../lib/test-env.js';
+import { realClaudeOptIn } from '../../lib/test-env.js';
 import { snapshotTree, diffTreeSnapshots } from '../../commands/consult/tree-tripwire.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -174,7 +174,7 @@ function makeRepo(): string {
   return repo;
 }
 
-const optedIn = realClaudeSdkOptIn();
+const optedIn = realClaudeOptIn();
 
 describe.skipIf(!optedIn)('claude review lane leaves the tree under review alone (#1649)', () => {
   it('declines to edit even when the review prompt tells it to use the Edit tool', async () => {
