@@ -1,0 +1,18 @@
+id: '1920'
+title: tower-mail-to-the-architect-he
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-17T23:56:34.552Z'
+updated_at: '2026-11-17T23:56:34.554Z'
