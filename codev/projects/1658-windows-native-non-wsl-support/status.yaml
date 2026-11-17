@@ -1,7 +1,7 @@
 id: '1658'
 title: windows-native-non-wsl-support
 protocol: spir
-phase: review
+phase: verify
 plan_phases:
   - id: phase_1
     title: Windows audit, probe harness, and platform seam
@@ -56,7 +56,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-11T21:15:51.801Z'
-updated_at: '2026-11-17T07:04:02.006Z'
+updated_at: '2026-11-17T07:04:09.359Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-21T05:23:43.084Z'
