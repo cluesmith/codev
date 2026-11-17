@@ -524,7 +524,11 @@ describe('consult command', () => {
     });
   });
 
-  describe('Claude CLI integration', () => {
+  // Spec 1658 platform skip: this file pins the platform seam to linux (it drives the POSIX
+  // branches through mocked child_process), so on a Windows host these real-stub runs cannot take
+  // the Windows launch path. The same lane functions run unpinned on Windows in claude-cli.test.ts
+  // and claude-cli-lane.test.ts.
+  describe.skipIf(process.platform === 'win32')('Claude CLI integration', () => {
     // The claude lane spawns the installed `claude` CLI (#1912). This file mocks node:child_process
     // for the other lanes, so these tests route the mocks to the real implementation and pin a
     // stub `claude` that records what it was run with.

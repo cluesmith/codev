@@ -27,6 +27,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { npmCmdShim } from './npm-cmd-shim.js';
+import { resolveGitBash } from '../../lib/platform/windows/git-bash.js';
 
 export type StubClaudeMode = 'version' | 'authStatus' | 'print';
 
@@ -153,7 +154,12 @@ export function createStubClaude(options: StubClaudeOptions = {}): StubClaude {
   };
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config));
   const script = path.join(dir, 'stub.cjs');
-  fs.writeFileSync(script, STUB_SCRIPT);
+  if (process.platform === 'win32') {
+    // Native Windows has no /bin/sh; the `beforeOutput` shell step runs under Git Bash (Spec 1658, M16).
+    fs.writeFileSync(script, STUB_SCRIPT.replace("'/bin/sh'", JSON.stringify(resolveGitBash().path)));
+  } else {
+    fs.writeFileSync(script, STUB_SCRIPT);
+  }
 
   // A shell wrapper rather than a node shebang: shebang lines have length limits, and the absolute
   // node path keeps the stub runnable under a PATH that a test has narrowed. Native Windows cannot

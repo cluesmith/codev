@@ -1054,11 +1054,23 @@ Flaky Tests (main's #1902 rule).
   (`__tests__/bugfix-1880-codex-binary.test.ts`): a shebang script cannot be executed on Windows. Finding
   M13 covers the product side (`consult.codexPath` with an npm `.cmd` shim).
 
-- **Main's #1912, two `claude-cli.test.ts` tests skip on win32** (Spec 1658, M16): "a relative
-  pin is returned as an absolute path" (the Windows runner's checkout and temp dir are on different
-  drives, so no relative path reaches the stub) and "a pin that is not executable throws" (Windows
-  has no execute permission bit, so every existing file passes `X_OK`). The other #1912 tests run on
-  Windows against a `claude.cmd` stub.
+- **Main's #1912 tests that skip on win32** (Spec 1658, M16; each names its reason in place). The
+  rest of #1912's tests run on Windows against the npm-shaped `claude.cmd` fakes.
+  - `claude-cli.test.ts`: "a relative pin is returned as an absolute path" (the runner's checkout
+    and temp dir are on different drives, so no relative path reaches the stub); "a pin that is not
+    executable throws" (no execute permission bit on Windows).
+  - `claude-cli-lane.test.ts`: "writes the system prompt 0600" (no POSIX permission bits); "names
+    the binary it could not start" (Node refuses to spawn a `.cmd` without a shell, `EINVAL`,
+    before it looks for the file, so the `ENOENT` message cannot occur); the SIGTERM test (scenario
+    23a: no SIGTERM delivery on Windows, `kill()` terminates outright).
+  - `consult.test.ts` "Claude CLI integration" (5) and `doctor.test.ts` "Claude checks on the
+    installed CLI" (10): both files pin the platform seam to linux for every test (they drive the
+    POSIX branches through a mocked `child_process`), so a real-stub run there cannot take the
+    Windows launch path. The functions they compose run unpinned on Windows in `claude-cli.test.ts`
+    and `claude-cli-lane.test.ts`.
+  Test-side fixes instead of skips: the stub's `beforeOutput` shell step runs under Git Bash on
+  win32; `test-isolation.test.ts` starts the sandbox fake through `claudeLaunch`; `claude-cli.test.ts`
+  sets `USERPROFILE` with `HOME` (Windows' home directory).
 
 ## Follow-up Items
 

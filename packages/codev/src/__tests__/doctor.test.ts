@@ -1264,7 +1264,11 @@ describe('doctor command', () => {
     });
   });
 
-  describe('Claude checks on the installed CLI (#1912)', () => {
+  // Spec 1658 platform skip: this file pins the platform seam to linux (doctor's POSIX checks run
+  // through mocked child_process), so on a Windows host these real-stub runs cannot take the
+  // Windows launch path. Doctor's claude check composes resolveClaudeBin, readClaudeVersion and
+  // readClaudeAuthStatus, which run unpinned on Windows in claude-cli.test.ts.
+  describe.skipIf(process.platform === 'win32')('Claude checks on the installed CLI (#1912)', () => {
     // Doctor checks the claude lane's CLI the way the lane does: resolve the binary, check its
     // version against the floor, then run `claude auth status` with the child env the lane would
     // build. Every case runs a stub `claude`; none reaches a model.

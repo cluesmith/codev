@@ -36,7 +36,7 @@ import {
   type StubClaude,
 } from './helpers/stub-claude.js';
 
-const SAVED_ENV_KEYS = ['CODEV_CLAUDE_BIN', 'CODEV_ALLOW_REAL_CLAUDE', 'PATH', 'HOME'] as const;
+const SAVED_ENV_KEYS = ['CODEV_CLAUDE_BIN', 'CODEV_ALLOW_REAL_CLAUDE', 'PATH', 'HOME', 'USERPROFILE'] as const;
 
 const SESSION_MARKERS = {
   CLAUDECODE: '1',
@@ -113,6 +113,8 @@ beforeEach(() => {
   workspace = path.join(tmpDir, 'workspace');
   fs.mkdirSync(workspace);
   process.env.HOME = path.join(tmpDir, 'home');
+  // Spec 1658 (M16): os.homedir() reads USERPROFILE on Windows, HOME elsewhere.
+  process.env.USERPROFILE = process.env.HOME;
   fs.mkdirSync(process.env.HOME);
   delete process.env.CODEV_ALLOW_REAL_CLAUDE;
 });
