@@ -856,6 +856,82 @@ describe('render-gate — the ghost cursor under Windows ConPTY (Spec 1658, M15)
   });
 });
 
+describe("render-gate — claude's ASCII-fallback composer marker (Issue #1920)", () => {
+  // claude draws `>` instead of `❯` when its env names no Unicode-capable terminal (no TERM,
+  // WT_SESSION, TERM_PROGRAM…), which is how every architect launched straight into ConPTY ran.
+  // The old pattern found no marker on those idle screens and held their mail permanently. In
+  // fallback mode the pointer is followed by U+00A0, not U+0020 (measured, claude 2.1.327).
+  const NBSP = ' ';
+  const OLD_CLAUDE_MARKER = /^[❯›]/;
+  const loadGz = (name: string) => gunzipSync(readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
+  const parked = (...lines: string[]) => snapshotFromRaw(screen(...lines) + '\x1b[3;40H');
+
+  it('the M15 ghost screen with ASCII markers (real ConPTY bytes, marker glyph swapped) → clean; the old pattern held it', async () => {
+    // Derived from claude-conpty-ghost-idle.replay.bin.gz by replacing each `❯` with `>` and
+    // touching nothing else: claude's software cursor (inverse `T` over a dim suggestion) at the
+    // first input cell, the hidden hardware cursor parked at the end of the last row. The
+    // first-input-cell anchor was only measured on a `❯` screen; this pins it on a `>` one.
+    const replay = loadGz('claude-conpty-ghost-idle-ascii.replay.bin.gz');
+    expect(await classifyScreen({ replay, cols: 120, rows: 40 }, CLAUDE_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+    const oldProfile = { ...CLAUDE_PROFILE, markerPattern: OLD_CLAUDE_MARKER };
+    expect(await classifyScreen({ replay, cols: 120, rows: 40 }, oldProfile)).toMatchObject({
+      clean: false,
+      detail: 'no-composer-marker',
+    });
+  });
+
+  it('an idle ASCII composer (NBSP after the marker, dim suggestion) → clean', async () => {
+    const snap = snapshotFromRaw(screen('──────────', `>${NBSP}${DIM}Try "how do I log an error?"${RESET}`, '──────────'));
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('an empty ASCII composer with a plain space, or the marker alone → clean', async () => {
+    for (const row of ['> ', '>']) {
+      const snap = snapshotFromRaw(screen('──────────', row, '──────────'));
+      expect(await classifyScreen(snap, CLAUDE_PROFILE), JSON.stringify(row)).toMatchObject({ clean: true, detail: 'empty' });
+    }
+  });
+
+  it('typed text in an ASCII composer → busy (user-text)', async () => {
+    const snap = snapshotFromRaw(screen('──────────', `>${NBSP}review the mailbox change`, '──────────'));
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: false, detail: 'user-text' });
+  });
+
+  it('the echo of a submitted turn above an empty composer → clean, judged on the composer, not the echo', async () => {
+    const snap = snapshotFromRaw(
+      screen(`>${NBSP}yes file the two issues`, '', '● Both issues are filed.', '──────────', `>${NBSP}`, '──────────'),
+    );
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('an ASCII picker (`> 1. Yes` cursor over normal-intensity items) → busy, never a false clean', async () => {
+    const snap = snapshotFromRaw(screen(`>${NBSP}1. Yes`, '  2. No', '──────────'));
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: false, detail: 'user-text' });
+  });
+
+  it('the ghost signature at the first input cell of an ASCII composer, cursor parked elsewhere → clean', async () => {
+    const snap = parked(`>${NBSP}${INV}T${INV_OFF}${DIM}ry "how does <filepath> work?"${RESET}`, '──────────');
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('an inverse first input cell followed by NON-dim text in an ASCII composer → busy', async () => {
+    const snap = parked(`>${NBSP}${INV}d${INV_OFF}eploy the hotfix`, '──────────');
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: false, detail: 'user-text' });
+  });
+
+  it('`>` not followed by a space (`>>`, `>foo`) is not a marker → no-composer-marker', async () => {
+    for (const row of ['>> quoted', '>foo']) {
+      const snap = snapshotFromRaw(screen('──────────', row, '──────────'));
+      expect(await classifyScreen(snap, CLAUDE_PROFILE), row).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+    }
+  });
+
+  it('codex keeps its own pattern: an ASCII `>` composer is not a codex marker', async () => {
+    const snap = snapshotFromRaw(screen(`>${NBSP}`, '  gpt-5.6-sol   high: on   ~/repo'));
+    expect(await classifyScreen(snap, CODEX_PROFILE)).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+  });
+});
+
 describe('queuesInputMidTurn — the mid-turn delivery licence (Issue #1664)', () => {
   // Pins each shipped profile's value and, just as importantly, WHERE it came from. Two of the
   // three were established by driving the real TUI through the acceptance harness; agy's was set
