@@ -354,7 +354,11 @@ describe.skipIf(!onWindows || portBusy)('Launcher routing on native Windows', ()
     }
     ownTowerPids = started ?? [];
     expect(start.code, start.output).toBe(0);
-    expect(ownTowerPids.length, 'the started Tower listening on 4100').toBeGreaterThan(0);
+    expect(
+      ownTowerPids.length,
+      'the started Tower listening on 4100: unrecorded, so teardown will not stop it. If 4100 is still ' +
+      `held after this run, stop that Tower with \`afx tower stop\` (CODEV_AGENT_FARM_DIR=${stateDir}).`,
+    ).toBeGreaterThan(0);
 
     const ws = run(afx, ['workspace', 'start', '--no-browser'], workspace);
     expect(ws.code, ws.output).toBe(0);

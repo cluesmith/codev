@@ -1,6 +1,6 @@
 /**
  * Running an agent CLI on this terminal and waiting for it to exit (Spec 1797). Shared by
- * `codev bootstrap-docs` and `codev adopt`'s conflict-merge session.
+ * `codev bootstrap-docs` and the conflict-merge sessions of `codev adopt` and `codev update`.
  */
 
 import { commandLaunch } from './platform/command-launch.js';
