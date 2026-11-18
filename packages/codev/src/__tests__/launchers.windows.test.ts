@@ -16,13 +16,17 @@
  * - `afx dev` teardown leaves no dev-server process (scenario 6).
  *
  * The CLI commands under test talk to the default Tower port, so this file's
- * Tower uses 4100 with an isolated state directory.
+ * Tower uses 4100 with an isolated state directory. That port is the
+ * developer's live Tower on a workstation (#1922: a full-suite run stopped
+ * one), so the file skips when anything already listens there, and teardown
+ * stops a Tower only when 4100 is still held by the PID this file started.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +37,7 @@ import { resolveGitBash } from '../lib/platform/windows/git-bash.js';
 import { runPostSpawnHooks } from '../agent-farm/commands/spawn-worktree.js';
 import { findCrlfHookScripts } from '../commands/doctor.js';
 import { killSessionTree } from '../lib/process-tree.js';
+import { getProcessesOnPortAsync } from '../agent-farm/utils/port.js';
 
 const onWindows = process.platform === 'win32';
 const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -47,6 +52,43 @@ const binDir = path.join(workDir, 'bin');
 const workspace = path.join(workDir, 'ws');
 const stateDir = path.join(workDir, 'state');
 const leftovers: number[] = [];
+const TOWER_PORT = 4100;
+
+/**
+ * The PIDs listening on 4100, or null when they cannot be determined. A TCP
+ * connect is checked too: a Tower reachable on the port counts even if the
+ * listener query misses it.
+ */
+async function towerPortListeners(): Promise<number[] | null> {
+  const pids = await getProcessesOnPortAsync(TOWER_PORT);
+  if (pids === null || pids.length > 0) return pids;
+  const connects = await new Promise<boolean>((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port: TOWER_PORT });
+    socket.setTimeout(2_000);
+    socket.once('connect', () => { socket.destroy(); resolve(true); });
+    socket.once('timeout', () => { socket.destroy(); resolve(false); });
+    socket.once('error', () => resolve(false));
+  });
+  return connects ? null : [];
+}
+
+function describeListeners(pids: number[] | null): string {
+  return pids === null || pids.length === 0 ? 'an unidentified listener' : `PID ${pids.join(', ')}`;
+}
+
+// Never touch a Tower this file did not start: with anything on 4100, skip the file.
+const preexisting = onWindows ? await towerPortListeners() : [];
+const portBusy = preexisting === null || preexisting.length > 0;
+if (portBusy) {
+  // Straight to stderr: vitest drops console output collected from a file whose tests all skip.
+  process.stderr.write(
+    `\n*** launchers.windows.test.ts SKIPPED (#1922): port ${TOWER_PORT} is already in use by ` +
+    `${describeListeners(preexisting)}, most likely your live Tower. This file starts and stops its ` +
+    `own Tower on ${TOWER_PORT}, so it does not run beside one. Stop that Tower to run it. ***\n`,
+  );
+}
+/** The listener PIDs of the Tower this file started; teardown stops only that Tower. */
+let ownTowerPids: number[] = [];
 
 const env: NodeJS.ProcessEnv = {
   ...process.env,
@@ -235,14 +277,22 @@ async function diagnosePostSpawnMiss(worktree: string, spawnOutput: string): Pro
 }
 
 beforeAll(() => {
-  if (!onWindows) return;
+  if (!onWindows || portBusy) return;
   installAgentStub();
   createWorkspace();
 });
 
-afterAll(() => {
-  if (onWindows && fs.existsSync(path.join(stateDir, 'local-key'))) {
-    run(afx, ['tower', 'stop'], workspace);
+afterAll(async () => {
+  if (onWindows && ownTowerPids.length > 0) {
+    const owners = await towerPortListeners();
+    if (owners !== null && owners.length > 0 && owners.every((pid) => ownTowerPids.includes(pid))) {
+      run(afx, ['tower', 'stop'], workspace);
+    } else if (owners === null || owners.length > 0) {
+      console.warn(
+        `launchers.windows.test.ts: not stopping Tower: port ${TOWER_PORT} is now held by ` +
+        `${describeListeners(owners)}, not this file's Tower (PID ${ownTowerPids.join(', ')}).`,
+      );
+    }
   }
   for (const pid of leftovers) {
     try {
@@ -258,7 +308,7 @@ afterAll(() => {
   }
 });
 
-describe.skipIf(!onWindows)('Launcher routing on native Windows', () => {
+describe.skipIf(!onWindows || portBusy)('Launcher routing on native Windows', () => {
   it('scenario 8: read-only GitHub concepts run live through Git Bash', async () => {
     if (!env.GH_TOKEN && !env.GITHUB_TOKEN) {
       console.log('FORGE-SKIP no GH_TOKEN or GITHUB_TOKEN on this runner');
@@ -283,8 +333,18 @@ describe.skipIf(!onWindows)('Launcher routing on native Windows', () => {
   }, 120_000);
 
   it('scenario 3: Tower reaches ready, the architect runs its .cmd harness, afx shell opens PowerShell', async () => {
+    // Re-checked here: a Tower started since the file loaded would otherwise be
+    // reported "already running" and adopted as this file's.
+    const before = await towerPortListeners();
+    if (before === null || before.length > 0) {
+      throw new Error(`port ${TOWER_PORT} was taken by ${describeListeners(before)} after the file loaded; not starting a Tower beside it`);
+    }
     const start = run(afx, ['tower', 'start'], workspace);
+    // Recorded before any assertion, so a start that half-failed is still torn down.
+    const started = await towerPortListeners();
+    ownTowerPids = started ?? [];
     expect(start.code, start.output).toBe(0);
+    expect(ownTowerPids.length, 'the started Tower listening on 4100').toBeGreaterThan(0);
 
     const ws = run(afx, ['workspace', 'start', '--no-browser'], workspace);
     expect(ws.code, ws.output).toBe(0);
