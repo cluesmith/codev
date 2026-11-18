@@ -17,7 +17,7 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, execFile: childProcess.execFile, execFileSync: childProcess.execFileSync };
 });
 
-import { getRepoInfo, clearRepoInfoCache, REPO_INFO_TTL_MS } from '../lib/team-github.js';
+import { getRepoInfo, REPO_INFO_TTL_MS, REPO_INFO_NEGATIVE_TTL_MS } from '../lib/team-github.js';
 import { sessionHasLiveHolder } from '../agent-farm/servers/tower-utils.js';
 import { GitRefResolver, GIT_FETCH_TIMEOUT_MS } from '../commands/porch/artifacts.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
@@ -33,7 +33,8 @@ function remoteIs(url: string): void {
 beforeEach(() => {
   childProcess.execFile.mockReset();
   childProcess.execFileSync.mockReset();
-  clearRepoInfoCache();
+  // No clearRepoInfoCache() here: the shared setup (vitest-setup.ts) resets the
+  // origin cache before every test, and these tests rely on it.
 });
 
 afterEach(() => {
@@ -68,13 +69,19 @@ describe('getRepoInfo', () => {
     expect(childProcess.execFile).toHaveBeenCalledTimes(3);
   });
 
-  it('caches a workspace with no usable origin too', async () => {
+  it('caches a missing origin only briefly, so an added origin shows up soon', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     childProcess.execFile.mockImplementation((_f: string, _a: string[], _o: unknown, cb: ExecFileCallback) => {
       cb(new Error('No such remote'));
     });
     expect(await getRepoInfo('/ws')).toBeNull();
     expect(await getRepoInfo('/ws')).toBeNull();
     expect(childProcess.execFile).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(Date.now() + REPO_INFO_NEGATIVE_TTL_MS + 1);
+    remoteIs('https://github.com/cluesmith/codev.git');
+    expect(await getRepoInfo('/ws')).toEqual({ owner: 'cluesmith', name: 'codev' });
+    expect(childProcess.execFile).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -33,6 +33,8 @@ const CONSOLE_LESS_ENTRY_POINTS = [
   'packages/codev/src/agent-farm/commands/spawn.ts', // `afx spawn`, launched detached by the extension
   'packages/codev/src/agent-farm/commands/tower.ts', // `afx tower start`, launched detached by the extension
   'apps/vscode/src/extension.ts', // the VS Code extension host
+  'packages/codev/src/commands/porch/index.ts', // `porch approve` etc., run hidden by the extension (execCodevCli)
+  'packages/codev/src/agent-farm/commands/cleanup.ts', // `afx cleanup`, run hidden by the extension (execCodevCli)
 ];
 
 const SPAWN_FUNCTIONS = new Set(['exec', 'execSync', 'execFile', 'execFileSync', 'spawn', 'spawnSync', 'fork']);
@@ -89,9 +91,12 @@ function hasWindowsHide(node: ts.Expression, constObjects: Map<string, ts.Object
     target = declared;
   }
   if (!ts.isObjectLiteralExpression(target)) return false;
+  // Only the literal `windowsHide: true` counts: `false`, a variable or a
+  // shorthand can turn the flag off, so those need an annotation instead.
   return target.properties.some((property) =>
-    (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
-    && property.name !== undefined && ts.isIdentifier(property.name) && property.name.text === 'windowsHide');
+    ts.isPropertyAssignment(property)
+    && ts.isIdentifier(property.name) && property.name.text === 'windowsHide'
+    && property.initializer.kind === ts.SyntaxKind.TrueKeyword);
 }
 
 /**
@@ -265,6 +270,16 @@ describe('Issue #1919: spawns reachable from a console-less process are hidden',
         "const deps = { spawn: spawn }; // windows-console: injected; the caller's options carry windowsHide",
         'deps.spawn();',
       ].join('\n'))).toEqual([]);
+    });
+
+    it('rejects windowsHide that is not the literal true', () => {
+      expect(scan([
+        "import { spawn } from 'node:child_process';",
+        "spawn('git', [], { windowsHide: false });",
+        'const hide = true;',
+        "spawn('git', [], { windowsHide: hide });",
+        "spawn('git', [], { windowsHide });",
+      ].join('\n'))).toHaveLength(3);
     });
   });
 });

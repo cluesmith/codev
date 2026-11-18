@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { isValidGitHubHandle } from './team.js';
 import type { TeamMember } from './team.js';
 import { executeForgeCommand, type ForgeConfig } from './forge.js';
+import { registerTestReset } from './test-env.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -60,6 +61,11 @@ type RepoInfo = { owner: string; name: string };
  * miss is a `git` spawn.
  */
 export const REPO_INFO_TTL_MS = 5 * 60_000;
+/**
+ * A missing origin is cached briefly only: a workspace can gain `origin` after
+ * creation, and a transient git failure must not blank Team data for long.
+ */
+export const REPO_INFO_NEGATIVE_TTL_MS = 45_000;
 
 const repoInfoCache = new Map<string, { value: RepoInfo | null; expiresAt: number }>();
 
@@ -67,15 +73,18 @@ const repoInfoCache = new Map<string, { value: RepoInfo | null; expiresAt: numbe
 export function clearRepoInfoCache(): void {
   repoInfoCache.clear();
 }
+registerTestReset(clearRepoInfoCache);
 
 export async function getRepoInfo(cwd?: string): Promise<RepoInfo | null> {
   const key = cwd ?? '';
   const cached = repoInfoCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
+  if (cached) {
+    if (cached.expiresAt > Date.now()) return cached.value;
+    repoInfoCache.delete(key);
   }
   const value = await readRepoInfo(cwd);
-  repoInfoCache.set(key, { value, expiresAt: Date.now() + REPO_INFO_TTL_MS });
+  const ttl = value ? REPO_INFO_TTL_MS : REPO_INFO_NEGATIVE_TTL_MS;
+  repoInfoCache.set(key, { value, expiresAt: Date.now() + ttl });
   return value;
 }
 

@@ -361,6 +361,9 @@ export class CliResolver implements ArtifactResolver {
 // Git Ref Resolver (reads codev/ artifacts at a specific git ref)
 // =============================================================================
 
+/** Upper bound on GitRefResolver's `git fetch` (#1919: hidden, so it must not wait on a prompt). */
+export const GIT_FETCH_TIMEOUT_MS = 60_000;
+
 /**
  * Reads codev/specs/, codev/plans/, codev/reviews/, and
  * codev/projects/<id>/plan.md as they exist on a specific git ref (e.g.
@@ -381,9 +384,6 @@ export class CliResolver implements ArtifactResolver {
  * the review. Refs without an `origin/` prefix (e.g. local branches like
  * `builder/777-foo`) skip the fetch entirely.
  */
-/** Upper bound on GitRefResolver's `git fetch` (#1919: hidden, so it must not wait on a prompt). */
-export const GIT_FETCH_TIMEOUT_MS = 60_000;
-
 export class GitRefResolver implements ArtifactResolver {
   constructor(
     private workspaceRoot: string,

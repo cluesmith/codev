@@ -1072,6 +1072,10 @@ branches are testable on macOS/Linux.
   The extension spawns `afx` / `codev` / `porch` through `cli-process.ts` (`spawnCodevCli`,
   `execCodevCli`), which resolve `.cmd` shims and hide the window. A Tower started from inside a
   codev session (the CIM launch path) has a hidden console, so it does not show the flash.
+  A hidden child has no console anyone can see, so it can never prompt: anything that might
+  prompt (a `git fetch` / `git push` needing credentials) must be made non-interactive and fail
+  instead, as `GitRefResolver`'s fetch (`GIT_TERMINAL_PROMPT=0`, a timeout) and porch's status
+  push now are.
 - **Resolvers**: `lib/platform/windows/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the
   System32 WSL launcher), `codev-sdk/node/executable` (`findExecutable` with `PATHEXT`,
   `resolveSpawnable` turns `.cmd` shims into `node <entry>` or `%COMSPEC% /d /s /c`),

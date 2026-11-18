@@ -31,6 +31,22 @@ export function isUnderTestRunner(): boolean {
   return Boolean(process.env.VITEST || process.env.CODEV_TEST_ISOLATION);
 }
 
+const testResets = new Set<() => void>();
+
+/**
+ * A module-level cache registers its reset here so one test's cached value
+ * cannot leak into the next: the shared test setup (`vitest-setup.ts`) runs
+ * every registered reset before each test. A no-op outside a test runner.
+ */
+export function registerTestReset(reset: () => void): void {
+  if (isUnderTestRunner()) testResets.add(reset);
+}
+
+/** Run every registered cache reset (the shared test setup calls this). */
+export function runTestResets(): void {
+  for (const reset of testResets) reset();
+}
+
 /**
  * Explicit opt-in for deliberately exercising the REAL `agy` binary from a test.
  *
