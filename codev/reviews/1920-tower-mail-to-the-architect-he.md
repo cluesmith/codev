@@ -110,3 +110,7 @@ Not routed, but worth knowing: `launchers.windows.test.ts` (before #1926) stoppe
   - On Windows, install the build and restart Tower. `afx send architect "…"` to an idle architect reports `delivered`, not `held … no-composer-marker`.
   - A newly started architect draws `❯` (its env has `TERM=xterm-256color`).
   - `npx vitest run src/agent-farm/__tests__/render-gate.test.ts src/agent-farm/__tests__/spec-1658-conpty-gate-replay.test.ts src/terminal/__tests__/session-manager.test.ts src/terminal/__tests__/session-manager-spawn-config.test.ts src/terminal/__tests__/pty-terminal-type.test.ts` (from `packages/codev`).
+
+## Flaky Tests
+
+- `packages/codev/src/__tests__/tower-lifecycle.windows.test.ts`, "Phase 4 (b): started from inside a session job, Tower is created through CIM and survives the session teardown, with its shellper". Windows workflow run 44242152525, first attempt: `Tower 3432 died with the session job (before teardown: inJob=False jobOpened=True procOpened=True ppid= created= …)`, and the CIM lookup returned null. The failed job passed on rerun. The same test failed on bugfix-1922's run 44237325105, before this branch's changes, with `connect ECONNREFUSED`. Left running, not skipped.
