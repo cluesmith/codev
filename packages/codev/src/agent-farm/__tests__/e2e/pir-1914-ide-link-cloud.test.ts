@@ -14,7 +14,18 @@
 
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 
-const TOWER_URL = process.env.TOWER_URL || `http://localhost:${process.env.TOWER_TEST_PORT || '4100'}`;
+// NO DEFAULT PORT, deliberately (same rule as issue-1482-held-popover-detail.test.ts):
+// the repo's playwright.config defaults to 4100, the live Tower. Every route here is
+// mocked, but a test meant for a throwaway server must fail loudly rather than drive
+// the live one.
+const TOWER_PORT = process.env.TOWER_TEST_PORT;
+if (!TOWER_PORT) {
+  throw new Error(
+    'TOWER_TEST_PORT must be set for this test — refusing to default to 4100 (the live Tower). ' +
+      'Run it against a throwaway server, e.g. TOWER_TEST_PORT=14114.',
+  );
+}
+const TOWER_URL = `http://localhost:${TOWER_PORT}`;
 const WORKSPACE = '/home/dev/proj';
 const IDE_PATH = `/ide/?folder=${encodeURIComponent(WORKSPACE)}`;
 

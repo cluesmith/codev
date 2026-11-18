@@ -269,6 +269,26 @@ export function tokenCookiePolicy(
   return { kind: 'strip' };
 }
 
+/**
+ * A tunnel-borne request with no usable public authority (no cloud config, or a
+ * `tower_name` that fails the character check) gets no `x-forwarded-prefix` and
+ * its `vscode-tkn` cookie stripped. Over the tunnel that cookie is the browser
+ * workbench's token source, so the cloud workbench may not work: say so in the
+ * log instead of failing silently (Issue #1914). Once per process: every
+ * workbench asset is a request.
+ */
+let warnedTunnelWithoutAuthority = false;
+
+function warnIfTunnelWithoutAuthority(
+  headers: http.IncomingHttpHeaders,
+  publicAuthority: PublicAuthority | null,
+  log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void,
+): void {
+  if (!isTunnelBorne(headers) || publicAuthority || warnedTunnelWithoutAuthority) return;
+  warnedTunnelWithoutAuthority = true;
+  log('WARN', 'IDE forward: tunnel-borne request with no usable public authority (cloud config missing or tower_name not [A-Za-z0-9._-]+); vscode-tkn stripped, no x-forwarded-prefix');
+}
+
 /** Apply a `TokenCookiePolicy` to a Set-Cookie value; undefined when nothing remains. */
 function applyTokenCookiePolicy(value: string | string[], policy: TokenCookiePolicy): string[] | undefined {
   if (policy.kind === 'scope') return scopeConnectionTokenSetCookie(value, policy.path);
@@ -453,6 +473,7 @@ export async function forwardIdeHttp(
   const connectionToken = readIdeConnectionToken();
   const local = !isTunnelBorne(req.headers);
   const publicAuthority = getPublicAuthority();
+  warnIfTunnelWithoutAuthority(req.headers, publicAuthority, log);
   const cookiePolicy = tokenCookiePolicy(req.headers, publicAuthority);
   const headers = buildForwardHeaders(req.headers, port, publicAuthority, connectionToken);
   const proxyReq = http.request(
@@ -524,6 +545,7 @@ export async function forwardIdeWebSocket(
   // so the upstream's `Sec-WebSocket-Accept` — relayed back verbatim — validates
   // against the client's own key.
   const publicAuthority = getPublicAuthority();
+  warnIfTunnelWithoutAuthority(req.headers, publicAuthority, log);
   const cookiePolicy = tokenCookiePolicy(req.headers, publicAuthority);
   const headers = buildForwardHeaders(req.headers, port, publicAuthority, readIdeConnectionToken());
   headers['Connection'] = 'Upgrade';

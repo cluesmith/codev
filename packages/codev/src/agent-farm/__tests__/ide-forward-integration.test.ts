@@ -27,7 +27,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 
 const CLOUD: CloudConfig = { tower_id: 't1', tower_name: 'mytower', api_key: 'ctk_x', server_url: 'https://cloud.codevos.ai' };
 
-const noopLog = (): void => {};
+const forwardLog = vi.fn((_level: 'INFO' | 'ERROR' | 'WARN', _message: string): void => {});
 
 let token: string;
 let lastWsReqHeaders: IncomingHttpHeaders | null = null;
@@ -108,10 +108,10 @@ beforeAll(async () => {
 
   // Tower stand-in: its request/upgrade handlers delegate to the forward.
   tower = http.createServer((req, res) => {
-    void forwardIdeHttp(req, res, noopLog);
+    void forwardIdeHttp(req, res, forwardLog);
   });
   tower.on('upgrade', (req, socket, head) => {
-    void forwardIdeWebSocket(req, socket, head as Buffer, noopLog);
+    void forwardIdeWebSocket(req, socket, head as Buffer, forwardLog);
   });
   towerPort = await listen(tower);
 });
@@ -276,6 +276,9 @@ describe('IDE HTTP forward never hands the browser the connection token (Issue #
     const setCookie = res.headers['set-cookie'] ?? [];
     expect(setCookie.join('\n')).not.toContain('vscode-tkn');
     expect(setCookie).toContain('other=keep');
+    // Not silent: the fail-closed state is logged, once per process.
+    const warnings = forwardLog.mock.calls.filter(([level, message]) => level === 'WARN' && message.includes('no usable public authority'));
+    expect(warnings).toHaveLength(1);
   });
 });
 
