@@ -121,13 +121,13 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const k of ENV_KEYS) {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
   }
   vi.restoreAllMocks();
-  removeFakeCliTempDir(dir);
+  await removeFakeCliTempDir(dir);
 });
 
 // --- argv passthrough ---------------------------------------------------------------

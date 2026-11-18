@@ -40,7 +40,7 @@ const ENV_KEYS = [
   'CODEV_AGY_AUTH_CACHE_TTL_UNAUTH_MS',
   'CODEV_AGY_AUTH_CACHE_TTL_AUTH_MS',
   'CODEV_AGY_AUTH_CACHE_WAIT_MS',
-  'FAKE_AGY_LOG',
+  'FAKE_AGY_SPAWN_DIR',
   'FAKE_AGY_MODE',
   'FAKE_AGY_BANNER_DELAY_MS',
 ] as const;
@@ -50,8 +50,12 @@ let savedEnv: Record<string, string | undefined>;
 
 /** Absolute path of the fake agy binary for the current test. */
 let fakeAgy: string;
-/** File the fake agy appends to on every invocation. */
-let spawnLog: string;
+/**
+ * One empty file per fake agy invocation, named by its PID. Never a shared append log:
+ * concurrent appends from a burst of fakes clobbered one PID to `8` on Windows (#1922),
+ * which left the survivor check blind to that process.
+ */
+let spawnDir: string;
 
 /**
  * A stand-in for the `agy` CLI. `FAKE_AGY_MODE=unauth` reproduces the upstream
@@ -60,7 +64,7 @@ let spawnLog: string;
  */
 const FAKE_AGY_SOURCE = `#!/usr/bin/env node
 const fs = require('node:fs');
-fs.appendFileSync(process.env.FAKE_AGY_LOG, process.pid + '\\n');
+fs.writeFileSync(require('node:path').join(process.env.FAKE_AGY_SPAWN_DIR, String(process.pid)), '');
 if (process.argv[2] === '--version') { console.log('1.0.10-fake'); process.exit(0); }
 if (process.env.FAKE_AGY_MODE === 'unauth' || process.env.FAKE_AGY_MODE === 'unauth-slow') {
   // 'unauth-slow' emits the banner *after* the lane's marker-free grace period,
@@ -96,8 +100,13 @@ function installFakeAgy(installDir: string): string {
 
 /** Invocations of the fake agy so far — i.e. how many browser tabs would exist. */
 function spawnCount(): number {
-  if (!fs.existsSync(spawnLog)) return 0;
-  return fs.readFileSync(spawnLog, 'utf-8').split('\n').filter(Boolean).length;
+  return spawnedPids().length;
+}
+
+/** Every PID a fake agy recorded for itself in this test. */
+function spawnedPids(): number[] {
+  if (!fs.existsSync(spawnDir)) return [];
+  return fs.readdirSync(spawnDir).map(Number);
 }
 
 function setMode(mode: 'auth' | 'unauth'): void {
@@ -110,12 +119,12 @@ beforeEach(() => {
 
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-auth-cache-test-'));
   fakeAgy = installFakeAgy(dir);
-  spawnLog = path.join(dir, 'spawns.log');
-  fs.writeFileSync(spawnLog, '');
+  spawnDir = path.join(dir, 'spawns');
+  fs.mkdirSync(spawnDir);
 
   process.env.CODEV_AGY_BIN = fakeAgy;
   process.env.CODEV_AGY_AUTH_CACHE_DIR = path.join(dir, 'cache');
-  process.env.FAKE_AGY_LOG = spawnLog;
+  process.env.FAKE_AGY_SPAWN_DIR = spawnDir;
   delete process.env.CODEV_AGY_AUTH_CACHE_DISABLE;
 });
 
@@ -135,8 +144,7 @@ function isAlive(pid: number): boolean {
  * (its cwd) on Windows. A survivor is killed and reported, never waited out.
  */
 async function fakeAgySurvivors(): Promise<number[]> {
-  if (!fs.existsSync(spawnLog)) return [];
-  const pids = fs.readFileSync(spawnLog, 'utf-8').split('\n').filter(Boolean).map(Number);
+  const pids = spawnedPids();
   const deadline = Date.now() + 3000;
   while (pids.some(isAlive) && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 50));
@@ -148,22 +156,35 @@ async function fakeAgySurvivors(): Promise<number[]> {
   return survivors;
 }
 
+/**
+ * The lane resolves right after it kills agy, before the child's `close` (#1922), so
+ * its process and pipe handles can still be open here. Yield the event loop until
+ * libuv has reaped them (bounded), rather than removing the dir underneath them.
+ */
+async function laneChildrenClosed(): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (process.getActiveResourcesInfo().includes('ProcessWrap') && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 afterEach(async () => {
   for (const k of ENV_KEYS) {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
   }
   const survivors = await fakeAgySurvivors();
+  await laneChildrenClosed();
   vi.restoreAllMocks();
   // A failed cleanup must not hide a survivor (#1922): a fake agy still running in
   // `dir` is a candidate holder, so the survivor check is reported first.
   let cleanupError: unknown;
   try {
-    removeFakeCliTempDir(dir);
+    await removeFakeCliTempDir(dir);
   } catch (err) {
     cleanupError = err;
   }
-  expect(survivors, 'fake agy outlived its lane').toEqual([]);
+  expect(survivors, `fake agy outlived its lane (recorded: ${spawnedPids().join(', ')})`).toEqual([]);
   if (cleanupError) throw cleanupError;
 });
 
