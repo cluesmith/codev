@@ -29,7 +29,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { realAgyOptIn, realClaudeOptIn } from './src/lib/test-env.js';
 import { npmCmdShim } from './src/__tests__/helpers/npm-cmd-shim.js';
-import { BUILDER_WORKTREE_ENV } from './src/lib/agent-env.js';
+import { BUILDER_WORKTREE_ENV, TOWER_PORT_ENV } from './src/lib/agent-env.js';
+import { SHELLPER_SESSION_ENV } from './src/terminal/shellper-endpoint.js';
 
 /**
  * Stand-in for the Antigravity CLI: no network, no browser tab, no OAuth. It
@@ -191,6 +192,12 @@ if (!process.env.CODEV_AGENT_FARM_DIR) {
 // (`CODEV_BUILDER_WORKTREE`, Issue #1783), which would override every cwd the
 // identity tests set up. Tests that exercise it set it themselves.
 delete process.env[BUILDER_WORKTREE_ENV];
+// The same session also exports its shellper marker and Tower port (#1922). With the
+// marker set, `afx tower start` on Windows takes the CIM branch, which no `spawn` mock
+// intercepts: the #1691 tests created a real tower-server process. The port aims
+// in-process Tower clients at the developer's live Tower.
+delete process.env[SHELLPER_SESSION_ENV];
+delete process.env[TOWER_PORT_ENV];
 
 if (firstRun) {
   process.on('exit', () => {
