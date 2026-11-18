@@ -11,7 +11,7 @@
  * from the shared filesystem cache and never spawns.
  *
  * These tests use a fake `agy` (via `CODEV_AGY_BIN`) that records every
- * invocation to a log file — so "did we spawn?" is asserted against observed
+ * invocation as a per-PID file — so "did we spawn?" is asserted against observed
  * process starts, not mocks. Because the cache and lock live entirely on disk,
  * concurrent in-process calls exercise exactly the same coordination path that
  * separate `consult` processes do.
@@ -31,6 +31,13 @@ import {
 } from '../agy-auth-cache.js';
 import { _runAgyConsultation } from '../index.js';
 import { removeFakeCliTempDir } from './fake-cli-temp-dir.js';
+
+/**
+ * Skipped on native Windows by owner ruling until #1925 finds and fixes the cause:
+ * under full-suite load its temp dir hit EPERM on cleanup in about half the runs,
+ * held for minutes. Runs everywhere else.
+ */
+const describeOffWindows = describe.skipIf(process.platform === 'win32');
 
 /** Env keys this suite manipulates; restored wholesale after each test. */
 const ENV_KEYS = [
@@ -188,7 +195,7 @@ afterEach(async () => {
   if (cleanupError) throw cleanupError;
 });
 
-describe('agy auth-state cache', () => {
+describeOffWindows('agy auth-state cache', () => {
   it('reports nothing on a cold cache', () => {
     expect(checkCachedAgyAuth(fakeAgy)).toBeNull();
   });
@@ -283,7 +290,7 @@ describe('agy auth-state cache', () => {
   });
 });
 
-describe('agy auth pre-flight', () => {
+describeOffWindows('agy auth pre-flight', () => {
   it('elects exactly one prober among concurrent callers', async () => {
     // Nothing publishes a verdict here, so the losers ride out the fail-open
     // wait — shorten it so the test does not sit through the real one.
@@ -345,7 +352,7 @@ describe('agy auth pre-flight', () => {
   });
 });
 
-describe('gemini lane burst behaviour (#1077 regression)', () => {
+describeOffWindows('gemini lane burst behaviour (#1077 regression)', () => {
   /** Silence the lane's review/skip output so test logs stay readable. */
   function muteStdout() {
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);

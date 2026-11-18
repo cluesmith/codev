@@ -45,3 +45,15 @@ Side effect: `codev update` on Windows now resolves npm `.cmd` shims via command
     `Worker exited unexpectedly`: load-dependent and Windows-host only; all pass in isolation.
     Filed as #1923.
 - Full runs with the live Tower: PID 29272 before and after on all three runs.
+
+## agy-auth-cache and the porch tests check (2026-11-18)
+
+- An in-run probe caught the EPERM: the worker's cwd was not the dir, but it still held an un-reaped
+  ChildProcess for a fake agy, and the shared `spawns.log` had one PID clobbered to `8`, so the
+  survivor check was blind to it. Test-side changes: per-PID spawn files, wait until child handles are
+  reaped, async `fs.promises.rm`. After that, 3 green full runs and porch's tests check passed.
+  The cause is inferred, not proven. The lane still resolves right after `proc.kill` without awaiting
+  `close` (untouched).
+- Owner ruling: `agy-auth-cache.test.ts` is skipped on native Windows until #1925 finds the cause;
+  it keeps running on POSIX. The other load flakes stay in #1923.
+- Tower PID 29272 before and after every full run (20+ runs, including porch's).
