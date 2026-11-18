@@ -155,8 +155,16 @@ afterEach(async () => {
   }
   const survivors = await fakeAgySurvivors();
   vi.restoreAllMocks();
-  removeFakeCliTempDir(dir);
+  // A failed cleanup must not hide a survivor (#1922): a fake agy still running in
+  // `dir` is a candidate holder, so the survivor check is reported first.
+  let cleanupError: unknown;
+  try {
+    removeFakeCliTempDir(dir);
+  } catch (err) {
+    cleanupError = err;
+  }
   expect(survivors, 'fake agy outlived its lane').toEqual([]);
+  if (cleanupError) throw cleanupError;
 });
 
 describe('agy auth-state cache', () => {
