@@ -13,3 +13,9 @@
 - Adjacent fix: the extension's `porch approve` (approve.ts) and `afx cleanup` (cleanup.ts) used bare `execFile('porch'|'afx')`, which cannot run an npm `.cmd` shim on Windows. Both now go through `execCodevCli` (cli-process.ts), the same shim resolver `spawnCodevCli` uses, hidden.
 - Guard test (windows-console-spawn-guard.test.ts) walks the import graph from tower-server, afx spawn, afx tower start and the extension entry, and parses each module with the TS compiler API. The first version missed inline `promisify(exec)(...)` and destructured `await import('node:child_process')`; fixture tests now cover both. That found the two `pgrep` calls in `tower.ts` stop (POSIX-only, annotated).
 - Team view: createTreeView + attachView; SSE-driven fetch only while visible, ≤1 per 30 s trailing; immediate on reveal/connect/manual; no overlapping fetches. getRepoInfo cached per cwd for 5 min.
+
+## Review phase (2026-11-18)
+- Rebased onto main after #1926 lifted the full-suite ban; then merged main (5bce03080) at the owner's request, no conflicts.
+- First porch tests check failed while overlapping another builder's suite (output truncated, failures unknown). Solo run: 8035 passed, 0 failed. Tower PID unchanged across every run I made.
+- Dev approved by the owner. Windows workflow: https://github.com/cluesmith/codev/actions/runs/44258108002
+- Routed: arch.md Platform Layer "Console windows"; lessons-learned Debugging "reproduce through the user's launch path".
