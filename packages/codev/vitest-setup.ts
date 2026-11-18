@@ -29,7 +29,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { realAgyOptIn, realClaudeOptIn } from './src/lib/test-env.js';
 import { npmCmdShim } from './src/__tests__/helpers/npm-cmd-shim.js';
-import { BUILDER_WORKTREE_ENV } from './src/lib/agent-env.js';
+import { BUILDER_WORKTREE_ENV, TOWER_PORT_ENV } from './src/lib/agent-env.js';
+import { SHELLPER_SESSION_ENV } from './src/terminal/shellper-endpoint.js';
 
 /**
  * Stand-in for the Antigravity CLI: no network, no browser tab, no OAuth. It
@@ -57,6 +58,10 @@ exit 0
  * VERDICT, and a result event), so suites that reach the claude lane in-process
  * run against this rather than the real CLI. Tests that need to vary or record
  * the CLI's behaviour use `src/__tests__/helpers/stub-claude.ts` instead.
+ *
+ * A launch without `-p` is an interactive session (`codev update`'s conflict merge,
+ * #1922): it appends its argv to `$CODEV_TEST_CLAUDE_LOG` when set and exits at once,
+ * since an interactive session's stdin never ends under the runner.
  */
 const FAKE_CLAUDE_EVENTS = [
   { type: 'system', subtype: 'init', tools: ['Glob', 'Grep', 'Read'], mcp_servers: [], model: 'claude-opus-5' },
@@ -77,6 +82,16 @@ case "$1" in
   --version) echo "2.1.326 (Claude Code)"; exit 0 ;;
   auth) echo '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'; exit 0 ;;
 esac
+print_mode=
+for arg in "$@"; do
+  case "$arg" in -p|--print) print_mode=1 ;; esac
+done
+if [ -z "$print_mode" ]; then
+  if [ -n "$CODEV_TEST_CLAUDE_LOG" ]; then
+    printf '%s\\n' "fake-claude-interactive $*" >> "$CODEV_TEST_CLAUDE_LOG"
+  fi
+  exit 0
+fi
 cat > /dev/null
 ${FAKE_CLAUDE_STREAM}
 exit 0
@@ -90,6 +105,12 @@ const FAKE_CLAUDE_NODE = `// Fake claude installed by the Codev vitest harness (
 const arg = process.argv[2];
 if (arg === '--version') { console.log('2.1.326 (Claude Code)'); process.exit(0); }
 if (arg === 'auth') { console.log('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'); process.exit(0); }
+if (!process.argv.slice(2).some((a) => a === '-p' || a === '--print')) {
+  if (process.env.CODEV_TEST_CLAUDE_LOG) {
+    require('fs').appendFileSync(process.env.CODEV_TEST_CLAUDE_LOG, 'fake-claude-interactive ' + process.argv.slice(2).join(' ') + '\\n');
+  }
+  process.exit(0);
+}
 process.stdin.resume();
 process.stdin.on('data', () => {});
 process.stdin.on('end', () => {
@@ -173,6 +194,12 @@ if (!process.env.CODEV_AGENT_FARM_DIR) {
 // (`CODEV_BUILDER_WORKTREE`, Issue #1783), which would override every cwd the
 // identity tests set up. Tests that exercise it set it themselves.
 delete process.env[BUILDER_WORKTREE_ENV];
+// The same session also exports its shellper marker and Tower port (#1922). With the
+// marker set, `afx tower start` on Windows takes the CIM branch, which no `spawn` mock
+// intercepts: the #1691 tests created a real tower-server process. The port aims
+// in-process Tower clients at the developer's live Tower.
+delete process.env[SHELLPER_SESSION_ENV];
+delete process.env[TOWER_PORT_ENV];
 
 if (firstRun) {
   process.on('exit', () => {

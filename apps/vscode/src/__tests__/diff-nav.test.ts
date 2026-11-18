@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import path from 'node:path';
 import type { BuilderFileChange } from '../views/builder-diff-cache.js';
 
 // `diff-nav.ts` imports `vscode` and pulls in `diff-inject-codelens`, which
@@ -283,6 +284,7 @@ describe('navigateBuilderDiffToFirst (#1414: builder-id-scoped first-file open)'
   });
 });
 
+  // The code resolves refs with `path.resolve(worktreePath, rel)`: on Windows '/wt' gains a drive letter (#1922).
 describe('openBuilderDiffLocation (#1559: clickable file refs)', () => {
   const openMock = vi.mocked(openBuilderFileDiff);
   const worktreeMock = vi.mocked(builderWithWorktree);
@@ -317,7 +319,7 @@ describe('openBuilderDiffLocation (#1559: clickable file refs)', () => {
   it("opens a changed file's per-file diff and puts the caret on the (1-based) line", async () => {
     worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
     getDiff.mockResolvedValue({ baseRef: 'base-sha', files: [mk('a.ts'), mk('b.ts')] });
-    const editor = fakeEditor('/wt/b.ts', 100);
+    const editor = fakeEditor(path.resolve('/wt', 'b.ts'), 100);
     editorState.visible = [editor];
 
     await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'b.ts', line: 42 }, deps);
@@ -347,20 +349,20 @@ describe('openBuilderDiffLocation (#1559: clickable file refs)', () => {
   it('opens the worktree file itself when it is not among the changed files, clamping the line', async () => {
     worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
     getDiff.mockResolvedValue({ baseRef: 'base-sha', files: [mk('a.ts')] });
-    const editor = fakeEditor('/wt/notes.md', 5);
+    const editor = fakeEditor(path.resolve('/wt', 'notes.md'), 5);
     editorState.shown = editor;
 
     await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'notes.md', line: 99 }, deps);
 
     expect(openMock).not.toHaveBeenCalled();
-    expect(showTextDocument).toHaveBeenCalledWith({ fsPath: '/wt/notes.md' }, { preview: true });
+    expect(showTextDocument).toHaveBeenCalledWith({ fsPath: path.resolve('/wt', 'notes.md') }, { preview: true });
     expect((editor.selection as { anchor: { line: number } }).anchor.line).toBe(4);
   });
 
   it('leaves the caret alone for a whole-file reference (no line)', async () => {
     worktreeMock.mockReturnValue({ worktreePath: '/wt' } as never);
     getDiff.mockResolvedValue({ baseRef: 'base-sha', files: [mk('a.ts')] });
-    const editor = fakeEditor('/wt/a.ts', 10);
+    const editor = fakeEditor(path.resolve('/wt', 'a.ts'), 10);
     editorState.visible = [editor];
 
     await openBuilderDiffLocation({ builderId: 'pir-x', relPath: 'a.ts' }, deps);
