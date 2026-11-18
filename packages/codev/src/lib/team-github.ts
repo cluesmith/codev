@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { isValidGitHubHandle } from './team.js';
 import type { TeamMember } from './team.js';
 import { executeForgeCommand, type ForgeConfig } from './forge.js';
+import { registerTestReset } from './test-env.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -52,12 +53,48 @@ export interface TeamMemberGitHubData {
 // Repo Detection
 // =============================================================================
 
-export async function getRepoInfo(cwd?: string): Promise<{ owner: string; name: string } | null> {
+type RepoInfo = { owner: string; name: string };
+
+/**
+ * How long a resolved origin is reused (Issue #1919). The Team view and the
+ * overview both ask on refresh, the origin URL almost never changes, and each
+ * miss is a `git` spawn.
+ */
+export const REPO_INFO_TTL_MS = 5 * 60_000;
+/**
+ * A missing origin is cached briefly only: a workspace can gain `origin` after
+ * creation, and a transient git failure must not blank Team data for long.
+ */
+export const REPO_INFO_NEGATIVE_TTL_MS = 45_000;
+
+const repoInfoCache = new Map<string, { value: RepoInfo | null; expiresAt: number }>();
+
+/** Test seam: forget every cached origin. */
+export function clearRepoInfoCache(): void {
+  repoInfoCache.clear();
+}
+registerTestReset(clearRepoInfoCache);
+
+export async function getRepoInfo(cwd?: string): Promise<RepoInfo | null> {
+  const key = cwd ?? '';
+  const cached = repoInfoCache.get(key);
+  if (cached) {
+    if (cached.expiresAt > Date.now()) return cached.value;
+    repoInfoCache.delete(key);
+  }
+  const value = await readRepoInfo(cwd);
+  const ttl = value ? REPO_INFO_TTL_MS : REPO_INFO_NEGATIVE_TTL_MS;
+  repoInfoCache.set(key, { value, expiresAt: Date.now() + ttl });
+  return value;
+}
+
+async function readRepoInfo(cwd?: string): Promise<RepoInfo | null> {
   try {
-    // Derive owner/name from git remote URL instead of calling gh directly
+    // Derive owner/name from git remote URL instead of calling gh directly.
+    // Hidden: Tower may have no console, and an unhidden git.exe opens a window (Issue #1919).
     const { stdout } = await execFileAsync('git', [
       'remote', 'get-url', 'origin',
-    ], { cwd });
+    ], { cwd, windowsHide: true });
     const url = stdout.trim();
     // Match SSH (git@github.com:owner/repo.git) or HTTPS (https://github.com/owner/repo.git)
     const match = url.match(/[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);

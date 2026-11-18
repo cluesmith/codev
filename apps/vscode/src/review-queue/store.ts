@@ -235,7 +235,7 @@ export class ReviewQueueStore implements vscode.Disposable {
     try {
       const { stdout } = await execFileAsync('git', [
         '-C', worktreePath, 'rev-parse', '--path-format=absolute', '--git-common-dir',
-      ]);
+      ], { windowsHide: true });
       const commonDir = stdout.trim();
       if (!commonDir) { return; }
       const excludePath = path.join(commonDir, 'info', 'exclude');

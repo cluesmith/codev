@@ -19,13 +19,16 @@ export const posixCommandLaunch: CommandLaunch = Object.freeze<CommandLaunch>({
     }
     const spawnOptions = { ...options, shell: true };
     if (context.posixDetached === true) {
+      // windows-console: posix-only (commandLaunch() selects this implementation off Windows)
       return spawn(command, { ...spawnOptions, detached: true });
     }
+    // windows-console: posix-only (commandLaunch() selects this implementation off Windows)
     return spawn(command, spawnOptions);
   },
 
   async execShellString(script, options) {
     // promisified per call: modules that only spawn never touch `exec`.
+    // windows-console: posix-only (commandLaunch() selects this implementation off Windows)
     const { stdout } = await promisify(exec)(script, {
       cwd: options.cwd,
       env: options.env,
@@ -36,6 +39,7 @@ export const posixCommandLaunch: CommandLaunch = Object.freeze<CommandLaunch>({
   },
 
   execShellStringSync(script, options) {
+    // windows-console: posix-only (commandLaunch() selects this implementation off Windows)
     return execSync(script, {
       cwd: options.cwd,
       env: options.env,
@@ -55,10 +59,12 @@ export const posixCommandLaunch: CommandLaunch = Object.freeze<CommandLaunch>({
   },
 
   spawn(command, args, options) {
+    // windows-console: posix-only (commandLaunch() selects this implementation off Windows)
     return spawn(command, args, options);
   },
 
   spawnSync(command, args, options) {
+    // windows-console: posix-only (commandLaunch() selects this implementation off Windows)
     return spawnSync(command, args, options);
   },
 

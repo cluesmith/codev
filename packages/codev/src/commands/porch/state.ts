@@ -202,9 +202,15 @@ export async function writeStateAndCommit(
   }
 
   try {
-    await execFileAsync('git', ['add', statusPath], { cwd: worktreeRoot });
-    await execFileAsync('git', ['commit', '-m', message], { cwd: worktreeRoot });
-    await execFileAsync('git', ['push', '-u', 'origin', 'HEAD'], { cwd: worktreeRoot });
+    await execFileAsync('git', ['add', statusPath], { cwd: worktreeRoot, windowsHide: true });
+    await execFileAsync('git', ['commit', '-m', message], { cwd: worktreeRoot, windowsHide: true });
+    // Hidden (#1919): a terminal credential prompt could never be answered, so
+    // refuse it and fail the push instead of hanging.
+    await execFileAsync('git', ['push', '-u', 'origin', 'HEAD'], {
+      cwd: worktreeRoot,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      windowsHide: true,
+    });
   } catch (err: unknown) {
     // If git commit fails because nothing changed, that's a logic bug — don't mask it.
     // If git push fails (network, auth), surface the error clearly.

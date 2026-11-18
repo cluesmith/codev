@@ -791,6 +791,7 @@ function writeWorktreeFiles(
       execSync(`git update-index --skip-worktree "${file.relativePath}"`, {
         cwd: worktreePath,
         stdio: 'pipe',
+        windowsHide: true,
       });
     } catch {
       // Non-fatal: file may not be tracked by git yet (new file in worktree)

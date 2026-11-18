@@ -86,6 +86,7 @@ export async function killShellperProcesses(worktreePath: string): Promise<numbe
   try {
     const stdout = await new Promise<string>((resolve, reject) => {
       // -ww prevents arg truncation on macOS/Linux
+      // windows-console: posix-only (Windows returned above via killWindowsShellperProcesses)
       execFile('ps', ['-ww', '-eo', 'pid,args'], (err, out) => {
         if (err) { reject(err); return; }
         resolve(out);

@@ -2912,6 +2912,7 @@ async function handleCreateWorkspace(
     await execAsync(`codev init --yes "${workspaceName}"`, {
       cwd: expandedParent,
       timeout: 60000,
+      windowsHide: true,
     });
 
     // Launch the instance
@@ -4056,6 +4057,7 @@ async function handleWorkspaceGitStatus(
       cwd: workspacePath,
       encoding: 'utf-8',
       timeout: 5000,
+      windowsHide: true,
     });
 
     // Parse porcelain output: XY filename

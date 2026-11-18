@@ -24,10 +24,11 @@
  * in `src/lib/test-env.ts` catch anything that still slips past.
  */
 
+import { beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { realAgyOptIn, realClaudeOptIn } from './src/lib/test-env.js';
+import { realAgyOptIn, realClaudeOptIn, runTestResets } from './src/lib/test-env.js';
 import { npmCmdShim } from './src/__tests__/helpers/npm-cmd-shim.js';
 import { BUILDER_WORKTREE_ENV, TOWER_PORT_ENV } from './src/lib/agent-env.js';
 import { SHELLPER_SESSION_ENV } from './src/terminal/shellper-endpoint.js';
@@ -210,3 +211,8 @@ if (firstRun) {
     }
   });
 }
+
+// Module-level caches (e.g. team-github's origin cache) reset before every test.
+beforeEach(() => {
+  runTestResets();
+});
