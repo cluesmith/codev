@@ -1,7 +1,7 @@
 id: '1919'
 title: windows-console-window-flashes
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-17T23:56:01.906Z'
-updated_at: '2026-11-18T00:17:05.186Z'
+updated_at: '2026-11-18T00:17:13.840Z'
