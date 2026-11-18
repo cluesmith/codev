@@ -1,12 +1,15 @@
 # CI Health Check — detects broken builds on main
-#
-# Checks every minute (for testing). Change to "*/30 * * * *" for production.
 
 name: CI Health Check
 schedule: "*/30 * * * *"
 enabled: true
-command: gh run list --branch main --limit 10 --json workflowName,conclusion --jq 'group_by(.workflowName) | map(.[0]) | map(select(.conclusion == "failure")) | map(.workflowName) | join(", ")'
-condition: "output != ''"
+# The jq expression is double-quoted with \" for its inner strings: Tower runs the command
+# through cmd.exe on Windows, which does not treat single quotes as quotes (a `|` inside
+# '...' becomes a pipe there). This form parses the same under cmd.exe and a POSIX shell.
+command: gh run list --branch main --limit 10 --json workflowName,conclusion --jq "group_by(.workflowName) | map(.[0]) | map(select(.conclusion == \"failure\")) | map(.workflowName) | join(\", \")"
+# exitCode == 0: a check that could not run (gh missing, unauthenticated, offline, quoting)
+# must not report its own error text as the list of failing workflows.
+condition: "exitCode == 0 && output != ''"
 message: "CI Alert: currently failing on main: ${output}. Run `gh run list --limit 5` to investigate."
 target: architect
 timeout: 30

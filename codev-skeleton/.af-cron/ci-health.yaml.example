@@ -8,8 +8,12 @@
 name: CI Health Check
 schedule: "*/30 * * * *"
 enabled: true
-command: gh run list --limit 5 --json status,conclusion --jq '[.[] | select(.conclusion == "failure")] | length'
-condition: "output != '0'"
+# Double-quote the jq expression (\" for its inner strings): on Windows the command runs
+# through cmd.exe, where single quotes are not quotes and a `|` inside '...' is a pipe.
+command: gh run list --limit 5 --json status,conclusion --jq "[.[] | select(.conclusion == \"failure\")] | length"
+# Require a clean exit: otherwise a check that cannot run (gh missing, unauthenticated,
+# offline) reports its own error text as a CI failure.
+condition: "exitCode == 0 && output != '0'"
 message: "CI Alert: ${output} recent failures. Run `gh run list --limit 5` to investigate."
 target: architect
 timeout: 30

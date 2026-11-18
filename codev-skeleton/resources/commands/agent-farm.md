@@ -876,6 +876,8 @@ enabled: true                   # optional, default true
 
 With a `condition`, the message is delivered exactly when the expression evaluates truthy — including on failed runs, so `condition: "exitCode != 0"` alerts when the command fails. Without a `condition`, the message is delivered only when the command exits 0.
 
+The command runs through the platform shell — `/bin/sh` on macOS/Linux, `cmd.exe` on Windows. cmd.exe does not treat single quotes as quotes, so quote arguments with double quotes (`\"` for a quote inside one, e.g. `--jq "select(.conclusion == \"failure\")"`), or put anything more involved in a script. A condition is evaluated on failed runs too, so a condition that inspects `output` should also require `exitCode == 0` — otherwise the command's own error text (tool missing, not authenticated, offline) reads as the alert.
+
 ---
 
 ### afx db
