@@ -79,6 +79,25 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
   ConPTY parks the hidden hardware cursor at the end of the last row: the case the ghost
   exemption's first-input-cell anchor exists for. Expected verdict: clean.
 
+- **conpty/conpty-claude-ascii-\*.capture.jsonl.gz** (Issue #1920) — **real** timed ConPTY
+  captures of claude 2.1.327 at 120×40 (owner machine, 2026-11-18), recorded with the recorder's
+  `--bare-env`: no `TERM` and none of the variables claude's Unicode check reads (`WT_SESSION`,
+  `TERM_PROGRAM`, …). That is the env an architect launched straight into ConPTY had before Tower
+  set `TERM` for every PTY child, and claude answers it with its ASCII fallbacks: the composer
+  marker is `>` followed by U+00A0, the echo of a submitted turn is `> …`, the tick is `√`. States:
+  idle (delivered), draft (held), prefix-left (held), midturn (delivered; its final screen has the
+  `> …` turn echo above the empty composer, so it also pins that the echo never takes the marker).
+  The header carries `"env": "bare"`. The recorder's **default** env sets `TERM=xterm-256color`
+  itself, so every other ConPTY capture is a `❯` screen: before #1920 nothing recorded the screen
+  production architects actually drew.
+
+- **claude-conpty-ghost-idle-ascii.replay.bin.gz** (Issue #1920) — **derived**: the M15 capture
+  above with every `❯` replaced by `>` and no other byte changed. It pins the ghost exemption's
+  first-input-cell anchor on an ASCII-marker screen. It is derived rather than recorded because
+  six bare-env and normal-env idle recordings of claude 2.1.327 on the owner's machine never drew
+  the inverse software cursor (the M15 screen was itself a one-off from a failed 2.1.326 idle run).
+  Expected: clean, and `no-composer-marker` under the pre-#1920 claude marker pattern.
+
 ## Classifier assumption
 
 CLEAN requires a composer marker **and** zero normal-intensity, non-whitespace,

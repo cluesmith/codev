@@ -9,13 +9,18 @@
  *
  * Usage (from packages/codev, after `pnpm build`):
  *   node --experimental-strip-types scripts/spec-1658-conpty-capture.mts --app claude [--state all]
- *     [--out conpty-captures] [--redact you@example.com] [-- <extra agent args>]
+ *     [--out conpty-captures] [--redact you@example.com] [--bare-env] [-- <extra agent args>]
  *
  * States: idle (delivered) · draft (held: a human typed text) · midturn (delivered: a turn is
  * streaming and the composer is empty, #1664) · resize (delivered after the repaint) · all.
  * Two more, the M15 controls, run only when named: prefix (held: the suggestion's first
  * character typed, cursor after it) and prefix-left (held: the same, then Left so the software
  * cursor sits ON the typed character). Each needs a suggestion showing in the composer.
+ *
+ * `--bare-env` (Issue #1920) records the agent WITHOUT the recorder's own `TERM` and with every
+ * variable claude's Unicode check reads removed (`WT_SESSION`, `TERM_PROGRAM`, …): the env an
+ * architect launched straight into ConPTY had before Tower set `TERM` itself. claude then draws its
+ * ASCII fallbacks, including a `>` composer marker. Output files are named `<app>-ascii`.
  *
  * Output: `<out>/conpty-<app>-<state>.capture.jsonl.gz`. Every chunk is scrubbed of the user
  * name, home directory, scratch directory, host name and each `--redact` value with SAME-LENGTH
@@ -58,6 +63,13 @@ const STATE = arg('state', 'all');
 const OUT = resolve(arg('out', 'conpty-captures'));
 const COLS = Number(arg('cols', '120'));
 const ROWS = Number(arg('rows', '40'));
+const BARE_ENV = process.argv.includes('--bare-env');
+/**
+ * The variables claude's (figures') win32 Unicode check reads. `--bare-env` removes all of them,
+ * so the agent sees no evidence of a Unicode-capable terminal.
+ */
+const UNICODE_HINT_VARS = ['TERM', 'WT_SESSION', 'TERM_PROGRAM', 'TERMINUS_SUBLIME', 'ConEmuTask', 'TERMINAL_EMULATOR'];
+const FILE_APP = BARE_ENV ? `${APP}-ascii` : APP;
 const separator = process.argv.indexOf('--');
 let AGENT_ARGS: string[] = [];
 if (separator !== -1) AGENT_ARGS = process.argv.slice(separator + 1);
@@ -138,7 +150,13 @@ class Recording {
     // dashboard-shell whitelist. Run the recorder from the kind of console Tower is started from,
     // since colour variables there (COLORTERM, WT_SESSION) reach the agent the same way.
     const env = sanitizeAgentEnv(process.env);
-    env.TERM = 'xterm-256color';
+    if (BARE_ENV) {
+      for (const name of Object.keys(env)) {
+        if (UNICODE_HINT_VARS.some((hint) => hint.toLowerCase() === name.toLowerCase())) delete env[name];
+      }
+    } else {
+      env.TERM = 'xterm-256color';
+    }
     this.screen = new SessionScreen(COLS, ROWS);
     const launch = ptyCommand(APP, AGENT_ARGS, env);
     this.pty = spawnPty(launch.file, launch.args, { name: 'xterm-256color', cols: COLS, rows: ROWS, cwd: this.cwd, env });
@@ -184,7 +202,7 @@ class Recording {
     const lines = (await this.text()).split('\n');
     let composer = '';
     for (const line of lines) {
-      if (/^[❯›]/.test(line)) composer = line;
+      if (profile!.markerPattern.test(line)) composer = line;
     }
     const ch = [...composer][2] ?? '';
     if (/^\s*$/.test(ch)) return '';
@@ -387,6 +405,7 @@ async function write(state: string, rec: Recording, kind = 'capture'): Promise<s
     format: 'codev-terminal-capture',
     version: 1,
     app: APP,
+    ...(BARE_ENV ? { env: 'bare' } : {}),
     appVersion: scrub(appVersion, values),
     state,
     platform: process.platform,
@@ -396,12 +415,12 @@ async function write(state: string, rec: Recording, kind = 'capture'): Promise<s
   };
   const body = [header, ...events].map((entry) => JSON.stringify(entry)).join('\n') + '\n';
   mkdirSync(OUT, { recursive: true });
-  const file = join(OUT, `conpty-${APP}-${state}.${kind}.jsonl.gz`);
+  const file = join(OUT, `conpty-${FILE_APP}-${state}.${kind}.jsonl.gz`);
   writeFileSync(file, gzipSync(body));
   return file;
 }
 
-console.log(`[1658] ${APP} ${appVersion} on ${process.platform}, ${COLS}x${ROWS}; states: ${states.join(', ')}`);
+console.log(`[1658] ${APP} ${appVersion} on ${process.platform}, ${COLS}x${ROWS}${BARE_ENV ? ', bare env' : ''}; states: ${states.join(', ')}`);
 if (process.platform !== 'win32') {
   console.log('[1658] not Windows: this records the host PTY, not ConPTY; the replay suite rejects it');
 }

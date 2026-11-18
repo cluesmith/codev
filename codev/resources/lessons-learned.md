@@ -478,6 +478,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 1912] **When porch hides a failed check's output (#1801), vitest's own results cache names the failing files.** `packages/codev/node_modules/.vite/vitest/*/results.json` records each file's last pass/fail and duration, with no re-run, which matters under the machine-load rule. It identified three load-sensitive timeouts (agy-auth-cache, the pir-1233 and bugfix-1267 launch loops) that porch showed only as npm warnings.
 - [From 1912] A file-wide `vi.mock('node:child_process')` whose `spawn` is given `mockImplementation(actual.spawn)` in one test keeps that implementation for every later test in the file. Later lanes then spawn real binaries (EACCES here). Call `mockReset()` in `afterEach`, not just `mockClear()`.
 
+- [From #1920] **A fixture recorder that adds environment production does not add records a screen production never shows.** Spec 1658's ConPTY recorder set `TERM=xterm-256color` itself, so every capture drew claude's Unicode `❯` marker, while real architects (launched as bare `claude` with Tower's env and no `TERM`) drew the ASCII fallback `>`, and the gate held all their mail. The suite stayed green for exactly that reason. Record with the env the production launch path builds, and when a recorder must deviate, make it a named switch (`--bare-env`) so the production-shaped capture can still be taken. The quickest diagnosis was a read-only viewer attach to the held session: the replay frame IS the gate's mirror.
+
 ## UI/UX
 
 - [From #1049] VS Code's tab/focus model needs specific, tested signals, not the obvious API:

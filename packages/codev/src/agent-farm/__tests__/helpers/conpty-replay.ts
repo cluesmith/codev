@@ -52,6 +52,12 @@ export interface CaptureHeader {
   version: 1;
   app: string;
   appVersion?: string;
+  /**
+   * `'bare'` when recorded with the recorder's `--bare-env` (Issue #1920): no `TERM` and none of
+   * the variables claude's Unicode check reads, so the agent draws its ASCII fallbacks (a `>`
+   * composer marker). Such a capture's file is named `conpty-<app>-ascii-<state>`.
+   */
+  env?: 'bare';
   state: string;
   platform?: string;
   cols: number;

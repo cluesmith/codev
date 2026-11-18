@@ -144,6 +144,29 @@ export function withTowerPort(env: Record<string, string>, port: number | undefi
 }
 
 /**
+ * The terminal type every Tower-launched PTY is created as (node-pty's `name`).
+ */
+export const PTY_TERMINAL_TYPE = 'xterm-256color';
+
+/**
+ * Copy `env` with `TERM` set to the terminal type the PTY really is (Issue #1920).
+ *
+ * node-pty derives `TERM` from its `name` option on POSIX, but not on Windows: there a child
+ * gets only the `TERM` its env carries. Agents launched straight into ConPTY (the architect's
+ * bare `claude`) therefore inherited whatever Tower's own console happened to set, often
+ * nothing. With no `TERM` (and no `WT_SESSION` / `TERM_PROGRAM`), claude decides the terminal
+ * cannot render Unicode and draws ASCII fallbacks, including a `>` composer marker. Builders
+ * never showed it because Git Bash sets `TERM=xterm-256color` itself before `claude` starts.
+ *
+ * Set unconditionally, not only when absent: an inherited value such as mintty's `xterm`
+ * describes a different terminal from the one Tower created, and claude's win32 Unicode check
+ * does not accept it.
+ */
+export function withPtyTerminalType(env: Record<string, string>): Record<string, string> {
+  return { ...env, TERM: PTY_TERMINAL_TYPE };
+}
+
+/**
  * Copy `env` with Claude Code session markers (and codev's agent identity) removed.
  *
  * Returns a plain `Record<string, string>` — `undefined`-valued entries (which

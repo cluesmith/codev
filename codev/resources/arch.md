@@ -440,6 +440,8 @@ const baseEnv = {
 };
 ```
 
+`TERM` is enforced at the spawn chokepoint, not left to callers (#1920): `withPtyTerminalType()` (`lib/agent-env.ts`) overwrites `TERM` with `PTY_TERMINAL_TYPE` (`xterm-256color`) in the shellper config, both shellper relaunch `SPAWN` frames, and the non-shellper `PtySession.spawn`. node-pty derives `TERM` from its `name` only on POSIX; on Windows a ConPTY child sees only the env's `TERM`, and claude with no Unicode signal (`TERM=xterm-256color`, `WT_SESSION`, `TERM_PROGRAM`, …) draws ASCII fallbacks — a `>` composer marker followed by U+00A0. The claude gate profile accepts that marker too (`CLAUDE_COMPOSER_MARKER` in `gate-profiles.ts`: `❯`/`›`, or `>` followed by a space, NBSP or end of line), so sessions already drawn in fallback mode still deliver. codex keeps the strict `COMPOSER_MARKER`.
+
 **Ring Buffer**: Each session maintains a 1000-line ring buffer with monotonic sequence numbers for reconnection replay. On WebSocket connect, the server replays the full buffer. Non-browser clients can send an `X-Session-Resume` header with their last sequence number to receive only missed data (browsers cannot set custom WebSocket headers).
 
 **Disk Logging**: Terminal output is logged to `.agent-farm/logs/<session-id>.log` with 50MB rotation.
