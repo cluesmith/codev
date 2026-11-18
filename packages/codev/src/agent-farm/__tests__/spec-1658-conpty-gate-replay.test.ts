@@ -229,7 +229,8 @@ describe('Spec 1658 ConPTY captures: held/delivered per state, through the produ
       it(`${name}`, async () => {
         const recorded = loadCapture(readFileSync(`${CONPTY_FIXTURE_DIR}/${name}`));
         expect(recorded.header.platform).toBe('win32');
-        expect(name).toBe(`conpty-${recorded.header.app}-${recorded.header.state}.capture.jsonl.gz`);
+        const fileApp = recorded.header.env === 'bare' ? `${recorded.header.app}-ascii` : recorded.header.app;
+        expect(name).toBe(`conpty-${fileApp}-${recorded.header.state}.capture.jsonl.gz`);
 
         const profile = resolveProfile({ command: recorded.header.app });
         expect(profile, `no gate profile for ${recorded.header.app}`).not.toBeNull();

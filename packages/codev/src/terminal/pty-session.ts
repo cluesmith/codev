@@ -38,6 +38,7 @@ const LOG_INPUT_SIGNAL = process.env.AF_LOG_INPUT_SIGNAL === '1';
 import type { IShellperClient } from './shellper-client.js';
 import { isDeliberateExit } from './shellper-protocol.js';
 import { killSessionTree } from '../lib/process-tree.js';
+import { PTY_TERMINAL_TYPE, withPtyTerminalType } from '../lib/agent-env.js';
 import { ptyCommand } from '../lib/pty-command.js';
 import { explainNativeLoadFailure, withNativeLoadExplanation } from '../lib/native-deps.js';
 
@@ -281,13 +282,15 @@ export class PtySession extends EventEmitter {
     this.rows = this.requestedRows;
     this.resizePending = false;
     // Spec 1658: on Windows a bare or `.cmd` command becomes one ConPTY can start.
-    const launch = ptyCommand(this.config.command, this.config.args, this.config.env);
+    // Issue #1920: the child's TERM names the terminal it runs in (see withPtyTerminalType).
+    const env = withPtyTerminalType(this.config.env);
+    const launch = ptyCommand(this.config.command, this.config.args, env);
     this.pty = withNativeLoadExplanation(() => nodePty.spawn(launch.file, launch.args, {
-      name: 'xterm-256color',
+      name: PTY_TERMINAL_TYPE,
       cols: this.cols,
       rows: this.rows,
       cwd: this.config.cwd,
-      env: this.config.env,
+      env,
     }));
 
     this.pty.onData((data: string) => {
