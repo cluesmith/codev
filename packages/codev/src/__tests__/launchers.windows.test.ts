@@ -38,6 +38,7 @@ import { runPostSpawnHooks } from '../agent-farm/commands/spawn-worktree.js';
 import { findCrlfHookScripts } from '../commands/doctor.js';
 import { killSessionTree } from '../lib/process-tree.js';
 import { getProcessesOnPortAsync } from '../agent-farm/utils/port.js';
+import { holdsOnlyOwnTower } from './helpers/tower-ownership.js';
 
 const onWindows = process.platform === 'win32';
 const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -285,7 +286,7 @@ beforeAll(() => {
 afterAll(async () => {
   if (onWindows && ownTowerPids.length > 0) {
     const owners = await towerPortListeners();
-    if (owners !== null && owners.length > 0 && owners.every((pid) => ownTowerPids.includes(pid))) {
+    if (holdsOnlyOwnTower(owners, ownTowerPids)) {
       run(afx, ['tower', 'stop'], workspace);
     } else if (owners === null || owners.length > 0) {
       console.warn(
@@ -340,8 +341,17 @@ describe.skipIf(!onWindows || portBusy)('Launcher routing on native Windows', ()
       throw new Error(`port ${TOWER_PORT} was taken by ${describeListeners(before)} after the file loaded; not starting a Tower beside it`);
     }
     const start = run(afx, ['tower', 'start'], workspace);
-    // Recorded before any assertion, so a start that half-failed is still torn down.
-    const started = await towerPortListeners();
+    // Recorded before any assertion, so a start that half-failed is still torn down. The
+    // port was free a moment ago, so its listener now is this file's Tower; the query is
+    // retried (bounded) because a slow or failed answer would leave that Tower unrecorded
+    // and never stopped.
+    let started: number[] | null = null;
+    const recordDeadline = Date.now() + 15_000;
+    while (Date.now() < recordDeadline) {
+      started = await towerPortListeners();
+      if (started !== null && started.length > 0) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
     ownTowerPids = started ?? [];
     expect(start.code, start.output).toBe(0);
     expect(ownTowerPids.length, 'the started Tower listening on 4100').toBeGreaterThan(0);

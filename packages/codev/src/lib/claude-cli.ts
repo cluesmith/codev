@@ -151,7 +151,7 @@ export function resolveClaudeBin(env: NodeJS.ProcessEnv = process.env): string {
     }
   }
   throw new Error(
-    `The claude CLI was not found on PATH. The claude review lane runs your installed claude. ` +
+    `The claude CLI was not found on PATH. Codev runs your installed claude (the claude review lane, and the merge session of \`codev update\` and \`codev adopt\`). ` +
     `Install it with \`${CLAUDE_INSTALL_HINT}\`, or set ${CLAUDE_BIN_ENV} to its absolute path.`
   );
 }

@@ -82,14 +82,16 @@ case "$1" in
   --version) echo "2.1.326 (Claude Code)"; exit 0 ;;
   auth) echo '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'; exit 0 ;;
 esac
-case " $* " in
-  *" -p "*|*" --print "*) ;;
-  *)
-    if [ -n "$CODEV_TEST_CLAUDE_LOG" ]; then
-      printf '%s\\n' "fake-claude-interactive $*" >> "$CODEV_TEST_CLAUDE_LOG"
-    fi
-    exit 0 ;;
-esac
+print_mode=
+for arg in "$@"; do
+  case "$arg" in -p|--print) print_mode=1 ;; esac
+done
+if [ -z "$print_mode" ]; then
+  if [ -n "$CODEV_TEST_CLAUDE_LOG" ]; then
+    printf '%s\\n' "fake-claude-interactive $*" >> "$CODEV_TEST_CLAUDE_LOG"
+  fi
+  exit 0
+fi
 cat > /dev/null
 ${FAKE_CLAUDE_STREAM}
 exit 0
