@@ -1,7 +1,7 @@
 id: '1920'
 title: tower-mail-to-the-architect-he
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-17T23:56:34.552Z'
-updated_at: '2026-11-18T06:30:38.493Z'
+updated_at: '2026-11-18T06:30:46.501Z'
 pr_history:
   - phase: review
     pr_number: 1928
