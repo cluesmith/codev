@@ -45,6 +45,7 @@ export function getMainRepoFromWorktree(dir: string): string | null {
       cwd: dir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim();
 
     // If it's just '.git', we're in the main repo

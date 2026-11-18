@@ -523,6 +523,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
       await execAsync('npx codev adopt --yes', {
         cwd: workspacePath,
         timeout: 30000,
+        windowsHide: true,
       });
       adopted = true;
       _deps.log('INFO', `Auto-adopted codev in: ${workspacePath}`);

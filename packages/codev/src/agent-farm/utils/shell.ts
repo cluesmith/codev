@@ -24,6 +24,7 @@ export async function run(
     const result = await execAsync(command, {
       cwd: options.cwd,
       maxBuffer: 10 * 1024 * 1024, // 10MB
+      windowsHide: true,
     });
     return {
       stdout: result.stdout.trim(),
@@ -87,6 +88,7 @@ export function spawnDetached(
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'], // Always capture stdout/stderr
     env: options.env || process.env,
+    windowsHide: true,
   });
 
   // Buffer stderr for error reporting (keeps last 4KB)
@@ -140,6 +142,7 @@ export async function commandExists(command: string): Promise<boolean> {
   }
 
   return commandLaunch().commandExistsAsync(command, () => new Promise((resolve) => {
+    // windows-console: posix-only (the POSIX probe; Windows uses the PATHEXT lookup)
     const child = spawn('which', [command], { stdio: 'ignore' });
     child.on('close', (code) => resolve(code === 0));
     child.on('error', () => resolve(false));

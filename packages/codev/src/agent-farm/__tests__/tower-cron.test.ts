@@ -314,12 +314,14 @@ describe('executeTask', () => {
     expect(result).toBe('success');
     expect(output).toBe('output-text');
 
-    // Should have called exec
+    // Should have called exec, hidden (Issue #1919: Tower may have no console,
+    // so an unhidden cmd.exe opens a visible window for the whole run)
     expect(mockExec).toHaveBeenCalledWith(
       'echo test',
       expect.objectContaining({
         cwd: ws,
         timeout: 30000,
+        windowsHide: true,
       }),
       expect.any(Function),
     );

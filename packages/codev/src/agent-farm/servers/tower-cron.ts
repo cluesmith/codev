@@ -290,6 +290,9 @@ function runCommand(
       // Issue #1219: a cron task runs an arbitrary command, which may itself be
       // (or launch) an agent. Same rule as every other Tower-descendant spawn.
       env: sanitizeAgentEnv(process.env),
+      // Issue #1919: Tower has no console when launched detached, so an unhidden
+      // cmd.exe would open a visible window for the length of every run.
+      windowsHide: true,
     }, (error, stdout, stderr) => {
       if (!error) {
         resolve({ output: stdout, exitCode: 0 });
