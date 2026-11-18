@@ -57,3 +57,10 @@ Side effect: `codev update` on Windows now resolves npm `.cmd` shims via command
 - Owner ruling: `agy-auth-cache.test.ts` is skipped on native Windows until #1925 finds the cause;
   it keeps running on POSIX. The other load flakes stay in #1923.
 - Tower PID 29272 before and after every full run (20+ runs, including porch's).
+
+## PR (2026-11-18)
+
+- PR #1926. CMAP: gemini skipped (no agy), codex APPROVE, claude APPROVE after three rounds (adopt shares
+  runClaudeSession; Tower ownership predicate unit-tested; bounded PID record). #1927 filed for
+  `codev import`'s bare claude spawn.
+- Windows workflow green at bfb539d3c. A tower-lifecycle CIM flake failed the run at e034d9b94.
