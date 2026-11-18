@@ -24,3 +24,24 @@ Proof: with `~/.local/bin` dropped from PATH all 47 tests in those three files p
 Fix at the cause: give `update()` adopt's seam (merge session via `spawnAgentProcess`, awaited,
 injectable), and never launch the real agent under the test runner without the real-claude opt-in.
 Side effect: `codev update` on Windows now resolves npm `.cmd` shims via commandLaunch.
+
+## Fix (2026-11-18)
+
+- Launchers guard verified by reading and one targeted run: skips naming PID 29272; Tower kept its PID.
+- update(): merge session goes through resolveClaudeBin() and spawnAgentProcess, and is awaited (an
+  injectable seam, as in adopt). The old launch was never awaited. Nothing suggests that was deliberate:
+  the CLI process stayed alive anyway while the inherited-stdio child ran, so awaiting changes no
+  user-visible behaviour except that update() now returns after the session ends. The harness fake
+  claude exits at once for an interactive (non `-p`) launch.
+- Item 3 triage:
+  - bugfix-1691 failure: the suite inherited CODEV_SHELLPER_SESSION from this builder session, so
+    towerStart took the Windows CIM branch, which the spawn mock does not cover, and created a REAL
+    tower-server process. Fixed: vitest-setup scrubs the shellper marker and CODEV_TOWER_PORT.
+  - vscode diff-nav: POSIX path literals vs path.resolve on Windows. Fixed in the test.
+  - vscode preflight-version-timeout: `#!/bin/sh` fixtures can't start on Windows. Now `.cmd`
+    fixtures. Product gap found along the way: a timed-out `.cmd` probe's child survives the kill.
+    Filed as #1924.
+  - agy-auth-cache EPERM, metrics-model-id barrier, windows-job census race, and an intermittent
+    `Worker exited unexpectedly`: load-dependent and Windows-host only; all pass in isolation.
+    Filed as #1923.
+- Full runs with the live Tower: PID 29272 before and after on all three runs.
