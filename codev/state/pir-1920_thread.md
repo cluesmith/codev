@@ -15,3 +15,9 @@
 - The live architect's own screen (captured read-only) goes from no-composer-marker to clean under the new pattern.
 - porch `tests` check blocked by failures already on main on this machine (EPERM temp cleanup in update/cold-tier/hot-tier tests, bugfix-1691; verified by restoring the base source files). Flaky: launchers.windows.test.ts, agy-auth-cache.
 - INCIDENT ~00:19Z: the live Tower (pid 13960) stopped. launchers.windows.test.ts runs a Tower on port 4100 with only its state dir isolated, and its afterAll runs `afx tower stop`, which on Windows stops whatever owns the port. The live tower.log ends at 00:19:22Z, during my full-suite run, so my run most likely stopped it. Port 4100 was then held by a test Tower started from pir-1919's worktree. I did not restart or kill anything; waiting for the human. Follow-up: that test must refuse to run (or use another port) when a live Tower holds 4100.
+
+## 2026-11-18 — dev-approval and review
+
+- Owner tested the build live on the main Tower: mail to `main` delivers, including the backlog held as no-composer-marker. dev-approval approved (relayed 04:59Z).
+- Rebased onto origin/main after #1926 (Windows suite repairs). First `porch done` timed out at 300s because several builders ran the full suite at once; the architect serialized the runs. Alone, the suite passes in ~130s. `porch approve` re-runs build+tests, so it too needs a turn in that order. Tower PID 29272 unchanged throughout.
+- Review phase: arch.md PTY Environment entry now records the TERM chokepoint and the claude ASCII-fallback marker.
