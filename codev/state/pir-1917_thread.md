@@ -24,3 +24,10 @@
 - M2 entry in the 1658 review records the cause.
 - Plan commit e9045587c carries a Co-Authored-By trailer from before the owner's no-attribution
   ruling; I asked the architect whether to rewrite it. All later commits have none.
+- Local porch `tests` check fails on 7 unrelated tests (temp-dir EPERM in cold-tier/update tests, a #1691 tower-start assertion);
+  Windows CI on this branch is green on Node 22 and 24 (run 44208299681; the first Node 22 attempt hit a vitest
+  worker crash with all tests passing, and the re-run passed). Blocked on porch's check; Tower is down so
+  the architect hasn't been told.
+- 00:19Z: my local full-suite run stopped the live Tower (architect attributes it to launchers.windows.test.ts).
+  Architect's orders: no full-suite runs locally, never run launchers.windows.test.ts, don't touch Tower, run
+  only targeted files. Holding at porch's tests check for a ruling on the pre-existing Windows failures.
