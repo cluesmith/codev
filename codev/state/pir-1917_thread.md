@@ -44,3 +44,13 @@
     `~/.agent-farm/test-workspaces/codev-1658-p6-EOuHsQ/ws` (the 00:19Z launchers.windows run).
   - PID 41076, created 15:50 local: same shellper-main.js, command `cmd.exe /d /q /k "echo MARK-1658-A"`,
     cwd `C:\Users\amr` (this run).
+
+## 2026-11-18 — PR #1934 and consultation
+
+- The trailer question from the implement notes is closed: the plan commit was rewritten without it (architect
+  ruling, 00:53Z), and no attribution trailer is left on the branch.
+- PR #1934 opened. Consultation: codex APPROVE, claude COMMENT, gemini skipped (agy not installed).
+- Claude's main point was real: the `empty-snapshot` canary had become unreachable, because an empty screen
+  serialized to `?25h`. Fixed by passing an empty payload through, with a test that fails without the guard.
+  Also added a test for the `undefined` fallback, and documented the delta-resume and seeded-mirror limits
+  in arch.md.

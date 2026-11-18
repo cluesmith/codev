@@ -46,9 +46,10 @@ only emits DECTCEM when visibility changes.
 - Build: ✓ pass (porch `build` check)
 - Full `packages/codev` suite: ✓ pass (porch `tests` check, 131.6s, on the merged head; the live
   Tower, PID 39120, was the same before and after)
-- 5 new tests in `session-screen-serialize.test.ts`. The ConPTY ghost-idle, macOS ghost and
+- 7 new tests in `session-screen-serialize.test.ts`. The ConPTY ghost-idle, macOS ghost and
   reused-client tests fail when the append is disabled and pass with it. The other two pin the
-  private field and check that a visible cursor stays visible.
+  private field and check that a visible cursor stays visible. Two more, added after the
+  consultation, cover the empty-snapshot canary and the `undefined` fallback.
 - Targeted suites after each merge of `main`: session-screen*, pty-session-replay-snapshot,
   attach-replay, pty-terminal-type, render-gate, spec-1658-conpty-gate-replay: 161/161.
 - Windows CI on the branch: run 44208299681 green (Node 22 and 24). The PR head has its own
@@ -72,6 +73,13 @@ drops, not only what it round-trips (the #1354 round-trip suite compared cells a
 position, so a lost mode was invisible to it).
 
 ## Things to Look At During PR Review
+
+- **Consultation (single pass): codex APPROVE, claude COMMENT, gemini skipped (agy CLI not installed).** How each of claude's points was handled:
+  1. *The `empty-snapshot` desync canary had become unreachable* (an empty screen serialized to `[?25h`). **Fixed:** `serialize()` passes an empty addon payload through untouched. The new test fails without the guard.
+  2. *A `Co-Authored-By` trailer might survive on the plan commit.* **Already resolved:** the commit was rewritten without it on the architect's order, and `git log <merge-base>..HEAD` shows no attribution trailer. The thread line the reviewer read predated that.
+  3. *The `undefined` fallback was untested.* **Fixed:** a getter-spy test asserts that the snapshot is the plain addon output.
+  4. *The normal-buffer delta-resume path carries no DECTCEM.* **Documented** in `arch.md`; pre-existing and narrow (cursor-hiding apps are almost always alt-screen, which takes the snapshot route).
+  5. *A mirror seeded after a Tower restart can report the cursor visible.* **Documented** with item 4: the same behaviour as before the fix, self-healing on the next toggle.
 
 - **Private field.** `cursorHidden` reads `term._core.coreService.isCursorHidden`, because
   `@xterm/headless` 6.0 has no public visibility field. If the field is missing it returns
