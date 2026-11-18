@@ -2307,8 +2307,11 @@ workspaces, so no single default makes sense (owner ruling, 2026-10-21, retired 
   present AND the port accepts a connect (no mint over the tunnel). `viaTunnel` comes from Tower's
   own marker and selects the open path: locally mint then navigate; over the tunnel navigate
   straight to `./ide/?folder=…`, always relative to `location.href` (never a stored slug), carrying
-  no key or cookie. `tower_name` reaches headers and the cookie Path only if it matches
-  `^[A-Za-z0-9._-]+$` (`getPublicAuthority`).
+  no key or cookie. The public prefix (for the `x-forwarded-prefix` stamp and the cookie
+  Path alike) comes from the relay-stamped inbound `x-forwarded-prefix` on a tunnel-borne request
+  when it matches `^/t/[A-Za-z0-9._-]+/ide$` (it tracks cloud-side renames; the stored `tower_name`
+  does not), else from `tower_name`, which is used only if it matches `^[A-Za-z0-9._-]+$`
+  (`getPublicAuthority`).
 - **State**: a Tower-managed `~/.agent-farm/ide-server.json` record (`{prefix, port, serverPath,
   pid}`, plus optional `serverVersion`, `extensionsDir`, `sidebarVersion` from Spec 1789; legacy
   records without them still parse, and a retired `defaultFolder` is ignored), the `cloud-config.json` pattern — **no
