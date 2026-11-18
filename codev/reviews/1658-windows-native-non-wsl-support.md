@@ -1227,6 +1227,19 @@ ConPTY), `claude` run in a dashboard `afx shell`, and `claude` in the VS Code te
 `useConptyDll` switch would change every Windows terminal (resize, reconnect replay) and needs
 its own Windows pass.
 
+*Cause and fix (#1917, 2026-11-18): neither candidate. Codev's attach snapshot.* The ConPTY stream
+hides the cursor correctly: the M15 capture `claude-conpty-ghost-idle` ends with `?25l`, the
+hidden cursor parked at the end of the last row (39,119). xterm.js honours that. But a viewer
+attach (opening the dashboard, a reload, a tab switch, a reconnect) replays
+`SessionScreen.serialize()`, and `@xterm/addon-serialize` 0.14 does not serialize cursor
+visibility (DECTCEM), so the client showed the hidden cursor where ConPTY had parked it. ConPTY
+frames that don't change visibility carry no DECTCEM, so the stray cursor stayed until claude
+next hid it. POSIX loses the state the same way, but there the hidden cursor sits on claude's
+drawn cell, so the two overlap. The six `conpty-claude-*` captures all end visible, with no
+software cursor on screen, so they are one-cursor screens. Fix: `serialize()` appends `?25l` or
+`?25h` from the emulator's own state, tested on the ghost-idle and macOS ghost fixtures. Cursor
+style (DECSCUSR) is also not serialized; nothing has been seen to depend on it.
+
 **M3. Uninstall or upgrade fails while Tower or a session runs (2026-11-02).** `npm uninstall
 -g @cluesmith/codev` with Tower and shellpers alive failed with `EBUSY`/`EPERM` on
 `node_modules\node-pty\prebuilds\win32-x64\conpty.node`: Windows does not let npm delete a
