@@ -466,6 +466,7 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
       if (allPids.has(pid)) return;
       allPids.add(pid);
       try {
+        // windows-console: posix-only (Windows stops through towerStopWindows, above)
         const output = execSync(`pgrep -P ${pid}`, { encoding: 'utf-8' }).trim();
         for (const line of output.split('\n')) {
           const childPid = parseInt(line, 10);
@@ -481,6 +482,7 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
 
     // Collect ALL shellper processes and their descendants (claude, bash, etc.)
     try {
+      // windows-console: posix-only (Windows stops through towerStopWindows, above)
       const shellperOutput = execSync('pgrep -f shellper-main', { encoding: 'utf-8' }).trim();
       for (const line of shellperOutput.split('\n')) {
         const pid = parseInt(line, 10);
@@ -597,6 +599,7 @@ export async function towerLog(options: TowerLogOptions = {}): Promise<void> {
       await new Promise(() => {});
       return;
     }
+    // windows-console: posix-only (Windows follows the log in Node, above)
     const tail = spawn('tail', ['-f', LOG_FILE], { stdio: 'inherit' });
     tail.on('error', (err) => {
       logger.error(`Failed to tail log: ${err.message}`);

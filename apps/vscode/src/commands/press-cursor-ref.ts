@@ -49,7 +49,7 @@ async function freshHunks(entry: DiffInjectSessionEntry): Promise<ChangedRange[]
     const { stdout } = await execFileAsync(
       'git',
       ['-C', entry.worktreePath, 'diff', '-M', '--unified=3', entry.baseRef, '--', entry.relPath],
-      { maxBuffer: 64 * 1024 * 1024 },
+      { maxBuffer: 64 * 1024 * 1024, windowsHide: true },
     );
     return parseHunkRanges(stdout);
   } catch {

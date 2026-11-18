@@ -110,6 +110,7 @@ function openUrl(url: string, background: boolean): void {
     );
   };
   if (background && process.platform === 'darwin') {
+    // windows-console: darwin-only
     execFile('open', ['-g', url], (err) => { if (err) { onFail(); } }); // -g = don't foreground
     return;
   }

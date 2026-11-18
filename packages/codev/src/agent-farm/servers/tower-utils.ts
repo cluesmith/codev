@@ -248,6 +248,7 @@ function sessionIsOwned(
  * which the caller treats as "could not determine" (see `sessionHasLiveHolder`).
  */
 function listProcessCommandLines(): string[] {
+  // windows-console: posix-only (sessionHasLiveHolder never reaches this on Windows)
   const out = execFileSync('ps', ['-ww', '-A', '-o', 'args='], {
     encoding: 'utf-8',
     timeout: 5000,
@@ -279,11 +280,19 @@ function listProcessCommandLines(): string[] {
  * is purely additive — it diverts to fresh ONLY on positive evidence of a live
  * holder, and never makes an un-held resume worse than today's behavior. The
  * `list` seam exists for tests.
+ *
+ * Windows has no `ps` that prints native command lines (Git's MSYS `ps` does
+ * not), and running one from console-less Tower flashes a window (Issue #1919),
+ * so with no `list` given it answers "could not determine" (`false`). Every
+ * production caller passes its own detector: the main-launch and add-architect
+ * paths use the census-backed reconcile in `architect-session-holder.ts`, and
+ * the restart-bake path opts out of the check entirely.
  */
 export function sessionHasLiveHolder(
   sessionId: string,
   opts?: { list?: () => string[] },
 ): boolean {
+  if (!opts?.list && isWindows()) return false;
   const list = opts?.list ?? listProcessCommandLines;
   try {
     return list().some((cmdline) => cmdlineHoldsSession(cmdline, sessionId));

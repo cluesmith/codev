@@ -1,14 +1,11 @@
 import * as vscode from 'vscode';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
 import { VSCODE_USER_SENDER } from '@cluesmith/codev-types';
 import type { TowerClient } from '@cluesmith/codev-sdk/tower-client';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
 import { issueRef as formatIssueRef } from '../issue-id.js';
-
-const execFileAsync = promisify(execFile);
+import { execCodevCli } from '../cli-process.js';
 
 /**
  * #1494: the Approve button relays the human's decision to the builder's
@@ -357,7 +354,7 @@ async function approveDirectlyNoLiveArchitect(
   issueRef: string,
 ): Promise<void> {
   try {
-    await execFileAsync('porch', [
+    await execCodevCli('porch', [
       'approve',
       id,
       gate,

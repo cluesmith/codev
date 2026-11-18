@@ -1063,6 +1063,19 @@ branches are testable on macOS/Linux.
   recorded survivors. `servers/architect-session-holder.ts` keeps its own `ps` listing on POSIX
   rather than the census, so its entries carry a creation time, and its pre-reap PID-reuse check
   runs, on Windows only.
+- **Console windows** (#1919): Tower started by `afx tower start` is `detached` (DETACHED_PROCESS),
+  so it has no console, and an unhidden console child (`git`, `gh`, `ps`, a cron command) gets a
+  visible window of its own. Every spawn reachable from Tower, `afx spawn` / `afx tower`, and the
+  VS Code extension host passes `windowsHide: true` (Node ignores it off Windows), or carries a
+  `// windows-console: <reason>` comment on the line above when it can never run on Windows.
+  `src/__tests__/windows-console-spawn-guard.test.ts` walks those import graphs and enforces it.
+  The extension spawns `afx` / `codev` / `porch` through `cli-process.ts` (`spawnCodevCli`,
+  `execCodevCli`), which resolve `.cmd` shims and hide the window. A Tower started from inside a
+  codev session (the CIM launch path) has a hidden console, so it does not show the flash.
+  A hidden child has no console anyone can see, so it can never prompt: anything that might
+  prompt (a `git fetch` / `git push` needing credentials) must be made non-interactive and fail
+  instead, as `GitRefResolver`'s fetch (`GIT_TERMINAL_PROMPT=0`, a timeout) and porch's status
+  push now are.
 - **Resolvers**: `lib/platform/windows/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the
   System32 WSL launcher), `codev-sdk/node/executable` (`findExecutable` with `PATHEXT`,
   `resolveSpawnable` turns `.cmd` shims into `node <entry>` or `%COMSPEC% /d /s /c`),

@@ -653,6 +653,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	// cached, instead of waiting for the next onDidChange tick.
 	updateActivityBadge();
 	const teamProvider = new TeamProvider(connectionManager);
+	// A tree view (not a bare provider registration) so the provider can skip
+	// fetches while the Team view is hidden (#1919).
+	const teamView = vscode.window.createTreeView('codev.team', { treeDataProvider: teamProvider });
+	teamProvider.attachView(teamView);
 	// Spec 786 Phase 6: hold the WorkspaceProvider so commands like
 	// `codev.removeArchitect` can call `.refresh()` after mutating Tower
 	// state (architects added/removed don't otherwise fire an event the
@@ -678,7 +682,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		backlogView,
 		recentlyClosedView,
 		vscode.window.registerTreeDataProvider('codev.workspace', workspaceProvider),
-		vscode.window.registerTreeDataProvider('codev.team', teamProvider),
+		teamView,
+		teamProvider,
 		vscode.window.registerTreeDataProvider('codev.status', statusProvider),
 		vscode.window.registerWebviewViewProvider(
 			ContextualPanelProvider.viewType,

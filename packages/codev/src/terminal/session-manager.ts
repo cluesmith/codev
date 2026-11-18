@@ -1146,6 +1146,7 @@ export class SessionManager extends EventEmitter {
     return new Promise((resolve) => {
       // -ww prevents arg truncation on macOS/Linux. `timeout: 0` disables the
       // execFile timeout, so floor it at 1ms to keep the bound meaningful.
+      // windows-console: posix-only (Windows returned above)
       execFile('ps', ['-ww', '-eo', 'pid,args'], { timeout: Math.max(1, timeoutMs) }, (err, stdout) => {
         if (err || !stdout.trim()) {
           resolve([]);

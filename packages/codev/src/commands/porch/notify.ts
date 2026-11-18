@@ -49,7 +49,7 @@ export function notifyTerminal(opts: NotifyTerminalOptions): void {
   execFile(
     process.execPath,
     [afBinary, 'send', opts.target, opts.message, '--raw'],
-    { cwd: opts.worktreeDir, timeout: 10_000 },
+    { cwd: opts.worktreeDir, timeout: 10_000, windowsHide: true },
     (error) => {
       if (error) {
         console.error(`[porch] notifyTerminal(${opts.target}) failed: ${error.message}`);

@@ -420,7 +420,7 @@ async function runPrExistsViaConcept(
 
   try {
     // Get current branch name
-    const { stdout: branchName } = await execFileAsync('git', ['branch', '--show-current'], { cwd });
+    const { stdout: branchName } = await execFileAsync('git', ['branch', '--show-current'], { cwd, windowsHide: true });
 
     const result = await executeForgeCommand('pr-exists', {
       CODEV_BRANCH_NAME: branchName.trim(),

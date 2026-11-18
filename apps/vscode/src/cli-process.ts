@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { execFile, spawn, type ChildProcess, type ExecFileOptions, type SpawnOptions } from 'node:child_process';
 import { resolveSpawnable } from '@cluesmith/codev-sdk/node/executable';
 
 /**
@@ -13,5 +13,33 @@ export function spawnCodevCli(command: string, args: string[], options: SpawnOpt
     ...options,
     windowsHide: true,
     windowsVerbatimArguments: spawnable.windowsVerbatimArguments,
+  });
+}
+
+/**
+ * Run a Codev CLI (`afx`, `porch`) to completion and resolve its output;
+ * rejects on a non-zero exit like `promisify(execFile)`. Same shim resolution
+ * as {@link spawnCodevCli}, and no console window: the extension host has no
+ * console, so an unhidden console child opens a visible one (Issue #1919).
+ */
+export function execCodevCli(
+  command: string,
+  args: string[],
+  options: ExecFileOptions,
+): Promise<{ stdout: string; stderr: string }> {
+  const spawnable = resolveSpawnable(command, args);
+  return new Promise((resolve, reject) => {
+    execFile(spawnable.command, spawnable.args, {
+      ...options,
+      encoding: 'utf8',
+      windowsHide: true,
+      windowsVerbatimArguments: spawnable.windowsVerbatimArguments,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        reject(Object.assign(err, { stdout, stderr }));
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
   });
 }

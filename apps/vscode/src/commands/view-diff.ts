@@ -176,7 +176,7 @@ class DiffContentProvider implements vscode.TextDocumentContentProvider {
       const { stdout } = await execFileAsync(
         'git',
         ['-C', q.wt, 'show', `${q.ref}:${q.path}`],
-        { maxBuffer: 64 * 1024 * 1024 },
+        { maxBuffer: 64 * 1024 * 1024, windowsHide: true },
       );
       return stdout;
     } catch {
@@ -269,7 +269,7 @@ export async function getBuilderChanges(wt: string): Promise<BuilderChanges> {
   try {
     const { stdout } = await execFileAsync('git', [
       '-C', wt, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD',
-    ]);
+    ], { windowsHide: true });
     const ref = stdout.trim().replace(/^origin\//, '');
     if (ref) { defaultBranch = ref; }
   } catch {
@@ -282,7 +282,7 @@ export async function getBuilderChanges(wt: string): Promise<BuilderChanges> {
   try {
     const { stdout } = await execFileAsync('git', [
       '-C', wt, 'merge-base', defaultBranch, 'HEAD',
-    ]);
+    ], { windowsHide: true });
     const sha = stdout.trim();
     if (sha) { baseRef = sha; }
   } catch {
@@ -290,8 +290,8 @@ export async function getBuilderChanges(wt: string): Promise<BuilderChanges> {
   }
 
   const [nameStatus, numstat] = await Promise.all([
-    execFileAsync('git', ['-C', wt, 'diff', '--name-status', '-M', baseRef], { maxBuffer: 64 * 1024 * 1024 }),
-    execFileAsync('git', ['-C', wt, 'diff', '--numstat', '-M', baseRef], { maxBuffer: 64 * 1024 * 1024 }),
+    execFileAsync('git', ['-C', wt, 'diff', '--name-status', '-M', baseRef], { maxBuffer: 64 * 1024 * 1024, windowsHide: true }),
+    execFileAsync('git', ['-C', wt, 'diff', '--numstat', '-M', baseRef], { maxBuffer: 64 * 1024 * 1024, windowsHide: true }),
   ]);
   return {
     defaultBranch,
@@ -392,7 +392,7 @@ export async function viewDiff(
     const { stdout: patch } = await execFileAsync(
       'git',
       ['-C', wt, 'diff', '-M', '--unified=3', baseRef],
-      { maxBuffer: 64 * 1024 * 1024 },
+      { maxBuffer: 64 * 1024 * 1024, windowsHide: true },
     );
     const hunksByPath = parseUnifiedDiff(patch);
     setDiffInjectSession(
@@ -476,7 +476,7 @@ export async function registerFileInjectSession(args: {
     const { stdout } = await execFileAsync(
       'git',
       ['-C', args.worktreePath, 'diff', '-M', '--unified=3', args.baseRef, '--', relPath],
-      { maxBuffer: 64 * 1024 * 1024 },
+      { maxBuffer: 64 * 1024 * 1024, windowsHide: true },
     );
     // Re-upsert with hunks; the provider's change event refreshes the lenses,
     // adding the per-hunk ones.
