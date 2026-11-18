@@ -2721,7 +2721,8 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
       expect(argv).not.toContain('--resume');
       expect(argv).not.toContain('old-conversation-id');
       expect(argv).toEqual(['--session-id', 'fresh-1']);
-      expect(session.client.spawn.mock.calls[0][0].env).toEqual({ FRESH: '1' });
+      // The factory's env, plus the PTY's terminal type (Issue #1920).
+      expect(session.client.spawn.mock.calls[0][0].env).toEqual({ FRESH: '1', TERM: 'xterm-256color' });
     } finally {
       rmrf(socketDir);
     }
@@ -2981,6 +2982,28 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
       expect(fresh.calls()).toBe(0);
       expect(session.client.spawn.mock.calls[0][0].args).toEqual(['--resume', 'old-conversation-id']);
       expect(session.failingExitTimes.length).toBe(1);
+    } finally {
+      rmrf(socketDir);
+    }
+  });
+  // Issue #1920: a relaunch is how an architect born without TERM (and so drawing claude's ASCII
+  // `>` composer marker) gets one, so both relaunch SPAWN frames must carry it, whatever env the
+  // session's stored options hold.
+  it('a crash relaunch carries TERM=xterm-256color alongside the stored env (#1920)', async () => {
+    const { session, socketDir } = driveExit({ code: 1, signal: null });
+    try {
+      await new Promise((r) => setTimeout(r, 50));
+      expect(session.client.spawn.mock.calls[0][0].env).toEqual({ KEEP: '1', TERM: 'xterm-256color' });
+    } finally {
+      rmrf(socketDir);
+    }
+  });
+
+  it('a clean-exit rerun with no factory carries TERM=xterm-256color too (#1920)', async () => {
+    const { session, socketDir } = driveExit({ code: 0, signal: null });
+    try {
+      await new Promise((r) => setTimeout(r, 50));
+      expect(session.client.spawn.mock.calls[0][0].env).toEqual({ KEEP: '1', TERM: 'xterm-256color' });
     } finally {
       rmrf(socketDir);
     }

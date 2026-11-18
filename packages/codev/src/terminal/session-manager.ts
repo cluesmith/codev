@@ -20,7 +20,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
 import { defaultSessionOptions } from './index.js';
-import { sanitizeAgentEnv } from '../lib/agent-env.js';
+import { sanitizeAgentEnv, withPtyTerminalType } from '../lib/agent-env.js';
 import type { Readable } from 'node:stream';
 import {
   ShellperClient,
@@ -420,7 +420,10 @@ export class SessionManager extends EventEmitter {
       command: opts.command,
       args: opts.args,
       cwd: opts.cwd,
-      env: opts.env,
+      // Issue #1920: the PTY child's TERM must name the terminal it runs in (see
+      // withPtyTerminalType). Applied here and at both relaunch SPAWN frames below,
+      // the only three places a shellper is told what env to give its child.
+      env: withPtyTerminalType(opts.env),
       cols: opts.cols,
       rows: opts.rows,
       socketPath,
@@ -1527,7 +1530,7 @@ export class SessionManager extends EventEmitter {
             command: session.options.command,
             args: session.options.args,
             cwd: session.options.cwd,
-            env: session.options.env,
+            env: withPtyTerminalType(session.options.env),
           });
           this.startRestartResetTimer(session);
         }, session.options.restartDelay ?? 2000);
@@ -1602,7 +1605,7 @@ export class SessionManager extends EventEmitter {
           command: session.options.command,
           args: session.options.args,
           cwd: session.options.cwd,
-          env: session.options.env,
+          env: withPtyTerminalType(session.options.env),
         });
 
         // Only restart the reset timer after a successful spawn
