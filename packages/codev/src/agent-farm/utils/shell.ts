@@ -88,6 +88,8 @@ export function spawnDetached(
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'], // Always capture stdout/stderr
     env: options.env || process.env,
+    // Win32 ignores CREATE_NO_WINDOW alongside `detached` (DETACHED_PROCESS): this
+    // child gets no console at all. The flag only sets SW_HIDE for a GUI window.
     windowsHide: true,
   });
 

@@ -11,6 +11,12 @@
  * options object carrying `windowsHide`, or be explained by a
  * `// windows-console: <reason>` comment on its line or the line above (a
  * POSIX-only branch, say). Static, so it runs on every OS.
+ *
+ * Limits: it follows relative imports only (spawns inside other workspace
+ * packages such as codev-sdk are not scanned), recognises named and
+ * dynamic-import-destructured `child_process` bindings only (not
+ * `import * as cp` or `require`), and cannot see a spawn passed in as a
+ * function (those sites carry the comment by hand).
  */
 
 import { describe, it, expect } from 'vitest';

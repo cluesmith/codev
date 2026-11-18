@@ -381,6 +381,9 @@ export class CliResolver implements ArtifactResolver {
  * the review. Refs without an `origin/` prefix (e.g. local branches like
  * `builder/777-foo`) skip the fetch entirely.
  */
+/** Upper bound on GitRefResolver's `git fetch` (#1919: hidden, so it must not wait on a prompt). */
+export const GIT_FETCH_TIMEOUT_MS = 60_000;
+
 export class GitRefResolver implements ArtifactResolver {
   constructor(
     private workspaceRoot: string,
@@ -389,9 +392,13 @@ export class GitRefResolver implements ArtifactResolver {
     if (ref.startsWith('origin/')) {
       const branch = ref.slice('origin/'.length);
       try {
+        // Hidden (#1919), so a credential prompt could never be answered:
+        // refuse prompts and bound the fetch rather than hang on one.
         execFileSync('git', ['fetch', 'origin', branch], {
           cwd: workspaceRoot,
           stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+          timeout: GIT_FETCH_TIMEOUT_MS,
           windowsHide: true,
         });
       } catch (err) {

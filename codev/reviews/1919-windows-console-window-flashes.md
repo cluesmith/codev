@@ -55,7 +55,9 @@ On native Windows a console window flashed about twice a second while an agent w
 - `cfe9dc873` [PIR #1919] Guard: spawns reachable from a console-less process must be hidden
 - `f46988d00` [PIR #1919] Thread: implement phase
 - `0bb21438f` Merge origin/main (5bce03080) into builder/pir-1919, no conflicts
-- plus porch state commits and the review commit
+- `543bc21e4` [PIR #1919] Review + retrospective
+- a follow-up commit: bound and de-prompt the hidden `git fetch` (consultation finding)
+- plus porch state commits
 
 ## Test Results
 
@@ -82,7 +84,8 @@ COLD `codev/resources/lessons-learned.md`, Debugging: reproduce through the user
 - **The guard test** (`windows-console-spawn-guard.test.ts`) uses the TypeScript compiler API. It walks relative imports from `tower-server.ts`, `commands/spawn.ts`, `commands/tower.ts` and `apps/vscode/src/extension.ts`, and checks every `child_process` call (named imports, dynamic-import destructuring, `promisify` aliases, same-file object literals) for `windowsHide` or a `// windows-console:` comment. It cannot see spawns through an injected function (for example `clipboard-image.ts`'s `deps.spawn`), so those carry the comment by hand.
 - **Adjacent fix:** VS Code's approve and cleanup commands called bare `execFile('porch'|'afx')`, which cannot run npm `.cmd` shims on Windows. They now use the new `execCodevCli`, which resolves the shim and hides the window.
 - **Comment-only edits in POSIX-only files** (`lib/platform/posix/*`, the `ps`/`pgrep`/`tail` sites, `activity-hooks.ts`): those calls never run on Windows and carry a `// windows-console:` comment for the guard. No behaviour change.
-- **Residual risk:** `GitRefResolver` in the extension may run `git fetch`. It is now hidden, so a credential prompt on a fetch that needs one cannot appear in a console; it fails instead, as it already did on headless hosts.
+- **Hidden `git fetch` in `GitRefResolver`** (`artifacts.ts`). Hiding it meant a Git Credential Manager prompt could no longer be seen or answered, and the fetch had no timeout, so it could hang porch. It now runs with `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never` and a 60 s timeout; a failed or timed-out fetch falls into the existing warning and the locally cached ref is read. Raised by the Claude consultation; regression test in `issue-1919-hidden-spawns.test.ts`.
+- **Consultation (single pass):** Claude APPROVE; Codex COMMENT (its sandbox could not read the files, no issues raised); Gemini COMMENT (lane skipped, `agy` not installed). Claude's other non-blocking notes: the guard's limits are now stated in its header; `spawnDetached`'s `windowsHide` is a no-op next to `detached` and now says so; `getRepoInfo` has no in-flight dedupe and caches a missing origin for 5 minutes (accepted); `TeamProvider.dispose()` is untested (accepted); a Windows cron command that deliberately opens a window now runs hidden (intended: cron runs unattended).
 
 ## How to Test Locally
 

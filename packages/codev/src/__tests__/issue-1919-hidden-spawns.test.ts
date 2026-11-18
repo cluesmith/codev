@@ -19,6 +19,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 import { getRepoInfo, clearRepoInfoCache, REPO_INFO_TTL_MS } from '../lib/team-github.js';
 import { sessionHasLiveHolder } from '../agent-farm/servers/tower-utils.js';
+import { GitRefResolver, GIT_FETCH_TIMEOUT_MS } from '../commands/porch/artifacts.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
 
 type ExecFileCallback = (err: Error | null, result?: { stdout: string; stderr: string }) => void;
@@ -94,5 +95,28 @@ describe('sessionHasLiveHolder', () => {
     childProcess.execFileSync.mockReturnValue('claude --session-id abc-123-def\n');
     expect(sessionHasLiveHolder('abc-123-def')).toBe(true);
     expect(childProcess.execFileSync).toHaveBeenCalledWith('ps', ['-ww', '-A', '-o', 'args='], expect.any(Object));
+  });
+});
+
+describe('GitRefResolver fetch', () => {
+  it('runs hidden, refuses credential prompts, and is bounded', () => {
+    new GitRefResolver('/ws', 'origin/builder/pir-1919');
+    expect(childProcess.execFileSync).toHaveBeenCalledWith(
+      'git',
+      ['fetch', 'origin', 'builder/pir-1919'],
+      expect.objectContaining({
+        windowsHide: true,
+        timeout: GIT_FETCH_TIMEOUT_MS,
+        env: expect.objectContaining({ GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' }),
+      }),
+    );
+  });
+
+  it('a timed-out fetch only warns', () => {
+    childProcess.execFileSync.mockImplementation(() => { throw Object.assign(new Error('spawnSync git ETIMEDOUT'), { stderr: '' }); });
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => new GitRefResolver('/ws', 'origin/main')).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('git fetch origin main'));
+    warn.mockRestore();
   });
 });
