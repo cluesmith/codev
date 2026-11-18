@@ -133,7 +133,16 @@ beforeEach(() => {
   process.env.CODEV_AGY_AUTH_CACHE_DIR = path.join(dir, 'cache');
   process.env.FAKE_AGY_SPAWN_DIR = spawnDir;
   delete process.env.CODEV_AGY_AUTH_CACHE_DISABLE;
+  processWrapBaseline = processWrapCount();
 });
+
+/** Child-process handles open in this worker. */
+function processWrapCount(): number {
+  return process.getActiveResourcesInfo().filter((r) => r === 'ProcessWrap').length;
+}
+
+/** Child-process handles already open before this test (another suite's, in a shared worker). */
+let processWrapBaseline = 0;
 
 /** True while `pid` is a live process. */
 function isAlive(pid: number): boolean {
@@ -166,11 +175,13 @@ async function fakeAgySurvivors(): Promise<number[]> {
 /**
  * The lane resolves right after it kills agy, before the child's `close` (#1922), so
  * its process and pipe handles can still be open here. Yield the event loop until
- * libuv has reaped them (bounded), rather than removing the dir underneath them.
+ * libuv has reaped them (bounded), rather than removing the dir underneath them. Only
+ * handles opened during this test count: one leaked earlier in the worker must not
+ * cost every afterEach the full bound.
  */
 async function laneChildrenClosed(): Promise<void> {
   const deadline = Date.now() + 3000;
-  while (process.getActiveResourcesInfo().includes('ProcessWrap') && Date.now() < deadline) {
+  while (processWrapCount() > processWrapBaseline && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 25));
   }
 }

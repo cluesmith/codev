@@ -35,8 +35,7 @@ import {
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
 import { shouldOfferBootstrap } from '../lib/governance-bootstrap.js';
 import { refreshSkills, CODEV_NEW_SUFFIX } from '../lib/skill-refresh.js';
-import { spawnAgentProcess, type AgentExit } from '../lib/agent-process.js';
-import { resolveClaudeBin } from '../lib/claude-cli.js';
+import { runClaudeSession, type AgentExit } from '../lib/agent-process.js';
 
 export const BOOTSTRAP_DOCS_HINT =
   'Governance docs are still placeholders: run `codev bootstrap-docs` to draft them from this codebase.';
@@ -53,24 +52,8 @@ export interface UpdateDeps {
   runMergeSession(prompt: string, cwd: string): Promise<AgentExit>;
 }
 
-/**
- * The merge session runs the `claude` that `resolveClaudeBin()` resolves, so `CODEV_CLAUDE_BIN`
- * applies here as it does everywhere else, and under a test runner the #1912 guard refuses the
- * developer's real install (#1922: a bare `spawn('claude')` started it from the suites, holding
- * the temp project dir open).
- */
 function defaultUpdateDeps(): UpdateDeps {
-  return {
-    runMergeSession: async (prompt, cwd) => {
-      let bin: string;
-      try {
-        bin = resolveClaudeBin();
-      } catch (err) {
-        return { code: null, signal: null, error: err instanceof Error ? err.message : String(err) };
-      }
-      return spawnAgentProcess({ executable: bin, args: [prompt] }, cwd);
-    },
-  };
+  return { runMergeSession: runClaudeSession };
 }
 
 export interface ConflictEntry {
