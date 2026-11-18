@@ -861,7 +861,7 @@ describe("render-gate — claude's ASCII-fallback composer marker (Issue #1920)"
   // WT_SESSION, TERM_PROGRAM…), which is how every architect launched straight into ConPTY ran.
   // The old pattern found no marker on those idle screens and held their mail permanently. In
   // fallback mode the pointer is followed by U+00A0, not U+0020 (measured, claude 2.1.327).
-  const NBSP = ' ';
+  const NBSP = '\u00a0';
   const OLD_CLAUDE_MARKER = /^[❯›]/;
   const loadGz = (name: string) => gunzipSync(readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
   const parked = (...lines: string[]) => snapshotFromRaw(screen(...lines) + '\x1b[3;40H');

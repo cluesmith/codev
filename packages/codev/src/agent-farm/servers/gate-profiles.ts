@@ -71,6 +71,11 @@ const REGION_END_PATTERNS = [/^[─━╌┄]{5,}/, /^\s{2,}(gpt|high:|~\/)/];
  * `>foo` at column 0 is not a marker. The space claude draws after its pointer is U+00A0 (NO-BREAK
  * SPACE), not U+0020 (measured, claude 2.1.327 under ConPTY); both are accepted. claude indents its own output, so assistant prose does not
  * begin a row with `> `. Codex keeps {@link COMPOSER_MARKER}: it was not measured to fall back.
+ *
+ * Known boundary: unlike agy (#1474), this profile has no `markerRequiresCursorRow` /
+ * `markerFgPalette` anchor. A future claude screen with a single `> `-prefixed item BELOW the
+ * composer and a rule beneath it would win last-match-wins and read as an empty region. No such
+ * screen has been observed; if one is, `markerRequiresCursorRow` is the ready answer.
  */
 const CLAUDE_COMPOSER_MARKER = /^(?:[❯›]|>(?=[ \u00a0]|$))/;
 

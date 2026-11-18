@@ -14,8 +14,9 @@ Builders never showed this, because Git Bash sets `TERM=xterm-256color` before `
 ## Files Changed
 
 - `codev/plans/1920-tower-mail-to-the-architect-he.md` (+214 / -0)
-- `codev/projects/1920-tower-mail-to-the-architect-he/status.yaml` (+22 / -0)
+- `codev/projects/1920-tower-mail-to-the-architect-he/status.yaml` (porch state)
 - `codev/resources/arch.md` (+2 / -0)
+- `codev/reviews/1920-tower-mail-to-the-architect-he.md` (this file)
 - `codev/resources/lessons-learned.md` (+2 / -0)
 - `codev/state/pir-1920_thread.md` (+23 / -0)
 - `packages/codev/scripts/spec-1658-conpty-capture.mts` (+24 / -5)
@@ -98,6 +99,8 @@ Not routed, but worth knowing: `launchers.windows.test.ts` (before #1926) stoppe
 - **The marker regex** (`gate-profiles.ts`, `CLAUDE_COMPOSER_MARKER`): `>` must be followed by a space, U+00A0, or end of line. Without that lookahead, `>>`, `>foo` or a quoted `>` line would read as a marker. The last-match-wins search plus the region-end rule requirement still bound the composer. A transcript `> …` echo above the composer is fine: the composer's own marker is the last match.
 - **TERM is overwritten, not defaulted.** An inherited `xterm` (mintty) fails claude's win32 Unicode check, and the PTY really is `xterm-256color`. The change is in shared code; on POSIX node-pty already set the same value from `name`, so behaviour there is unchanged.
 - **No hold became a force-inject.** The gate still requires a clean, bounded composer region; only the set of accepted marker glyphs grew.
+
+- **Consultation (single pass):** codex APPROVE, claude APPROVE, gemini COMMENT (lane skipped: agy CLI not installed). Claude noted three minors, all applied after the consultation: the NBSP test constant is now the escape `\u00a0` (a literal could silently normalise to a space); the `CLAUDE_COMPOSER_MARKER` doc names its known boundary (no agy-style cursor-row/palette anchor, so a single `> ` item below the composer with a rule beneath it would read as an empty region; never observed); this file list was corrected. Claude also confirmed the chokepoint holds because `session.options.env` is wrapped at every `client.spawn` read, not at its writes.
 
 ## How to Test Locally
 
