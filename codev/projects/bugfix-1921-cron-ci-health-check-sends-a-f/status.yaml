@@ -1,7 +1,7 @@
 id: bugfix-1921
 title: cron-ci-health-check-sends-a-f
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-18T03:08:46.020Z'
-updated_at: '2026-11-18T03:09:53.091Z'
+updated_at: '2026-11-18T05:19:00.092Z'
