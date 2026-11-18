@@ -206,7 +206,33 @@ export class SessionScreen {
    */
   serialize(): string {
     if (this.disposed) return '';
-    return this.serializer.serialize({ scrollback: SCREEN_SCROLLBACK });
+    const snapshot = this.serializer.serialize({ scrollback: SCREEN_SCROLLBACK });
+    // `@xterm/addon-serialize` writes the terminal modes but not cursor visibility
+    // (DECTCEM), so without this a viewer attach re-showed a cursor the app had hidden,
+    // wherever it was parked (Issue #1917, Spec 1658 M2: under ConPTY that is the end of
+    // the last row, a second cursor beside claude's drawn one). Stated explicitly in both
+    // directions so a client terminal reused across a reconnect cannot keep a stale state.
+    // DECTCEM does not move the cursor, so it is safe after the addon's position restore.
+    const hidden = this.cursorHidden;
+    if (hidden === undefined) return snapshot;
+    return snapshot + (hidden ? '\x1b[?25l' : '\x1b[?25h');
+  }
+
+  /**
+   * Whether the emulated app has hidden the cursor (DECTCEM `CSI ?25 l`), or `undefined`
+   * when it cannot be read. `@xterm/headless` 6.0's public `IModes` has no visibility
+   * field, so this reads the emulator's own state, the private
+   * `_core.coreService.isCursorHidden` (present in 6.0.0). Reading the emulator's state
+   * rather than tracking the sequence with a parser hook keeps one source of truth: every
+   * reset path (RIS, DECSTR, multi-parameter DECSET) is already handled there. If an
+   * upgrade moves the field this returns `undefined` and {@link serialize} falls back to
+   * the addon's output alone; a test pins the field so that shows up in CI.
+   */
+  get cursorHidden(): boolean | undefined {
+    if (this.disposed) return undefined;
+    const core = (this.term as unknown as { _core?: { coreService?: { isCursorHidden?: unknown } } })._core;
+    const hidden = core?.coreService?.isCursorHidden;
+    return typeof hidden === 'boolean' ? hidden : undefined;
   }
 
   /**

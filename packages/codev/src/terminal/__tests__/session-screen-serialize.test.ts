@@ -184,3 +184,84 @@ describe('SessionScreen.serialize round trip (PIR #1354)', () => {
     expect(scr.serialize()).toBe('');
   });
 });
+
+/**
+ * Cursor visibility across the attach snapshot (Issue #1917, Spec 1658 M2). The addon
+ * does not serialize DECTCEM, so a hidden cursor came back visible on every viewer
+ * attach. Under ConPTY the hidden cursor is parked at the end of the last row, which
+ * the dashboard drew as a second cursor beside claude's own.
+ */
+describe('SessionScreen.serialize cursor visibility (Issue #1917)', () => {
+  async function roundTrip(stream: string, cols: number, rows: number, replica = new SessionScreen(cols, rows)) {
+    const source = new SessionScreen(cols, rows);
+    source.feed(stream);
+    await source.read();
+    replica.feed(source.serialize());
+    await replica.read();
+    return { source, replica };
+  }
+
+  function loadCaptureOutput(name: string): string {
+    const lines = loadFixture(path.join('conpty', name)).split('\n').filter(Boolean);
+    return lines
+      .slice(1)
+      .map((l) => JSON.parse(l) as { o?: string })
+      .map((r) => r.o ?? '')
+      .join('');
+  }
+
+  it('pins the emulator field it reads: cursorHidden is a boolean on the installed @xterm/headless', async () => {
+    const scr = new SessionScreen(COLS, ROWS);
+    scr.feed('x');
+    await scr.read();
+    expect(scr.cursorHidden).toBe(false);
+    scr.feed('\x1b[?25l');
+    await scr.read();
+    expect(scr.cursorHidden).toBe(true);
+    scr.dispose();
+    expect(scr.cursorHidden).toBeUndefined();
+  });
+
+  it('keeps the ConPTY ghost-idle cursor hidden where ConPTY parked it (the M2 screen)', async () => {
+    // The M15 capture: claude's inverse software cursor over the dim suggestion, the
+    // hardware cursor hidden and parked at the end of the last row (39,119).
+    const { source, replica } = await roundTrip(loadFixture('claude-conpty-ghost-idle.replay.bin.gz'), 120, 40);
+    expect(source.cursorHidden).toBe(true);
+    expect(await cursor(source)).toBe('119,39');
+    expect(replica.cursorHidden).toBe(true);
+    expect(await cursor(replica)).toBe('119,39');
+    source.dispose();
+    replica.dispose();
+  });
+
+  it('keeps the macOS ghost-suggestion cursor hidden (POSIX parity)', async () => {
+    const { source, replica } = await roundTrip(loadFixture('claude-ghost-suggestion-empty.replay.bin.gz'), 120, 40);
+    expect(source.cursorHidden).toBe(true);
+    expect(replica.cursorHidden).toBe(true);
+    expect(await cursor(replica)).toBe(await cursor(source));
+    source.dispose();
+    replica.dispose();
+  });
+
+  it('keeps a visible cursor visible: the committed ConPTY idle capture and a plain shell', async () => {
+    for (const stream of [loadCaptureOutput('conpty-claude-idle.capture.jsonl.gz'), '$ ls\r\nfile\r\n$ ']) {
+      const { source, replica } = await roundTrip(stream, 120, 40);
+      expect(source.cursorHidden).toBe(false);
+      expect(replica.cursorHidden).toBe(false);
+      expect(await cursor(replica)).toBe(await cursor(source));
+      source.dispose();
+      replica.dispose();
+    }
+  });
+
+  it('re-shows the cursor on a client terminal reused across a reconnect', async () => {
+    const reused = new SessionScreen(120, 40);
+    reused.feed('\x1b[?25l');
+    await reused.read();
+    expect(reused.cursorHidden).toBe(true);
+    const { source, replica } = await roundTrip('$ ', 120, 40, reused);
+    expect(replica.cursorHidden).toBe(false);
+    source.dispose();
+    replica.dispose();
+  });
+});
