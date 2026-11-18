@@ -52,6 +52,7 @@ function parseCensus(out: string): ProcessCensusEntry[] {
  */
 function listPosixCensus(): Promise<ProcessCensusEntry[]> {
   return new Promise((resolve) => {
+    // windows-console: posix-only (the POSIX processes capability)
     execFile('ps', ['-A', '-ww', '-eo', 'pid=,ppid=,rss=,args='], { timeout: 5000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
       if (err || !stdout) {
         resolve([]);
@@ -75,6 +76,7 @@ function getProcessStartTime(pid: number): Promise<number | null> {
     try {
     if (process.platform === 'darwin') {
       // macOS: use ps to get launch time
+      // windows-console: posix-only (the POSIX processes capability)
       execFile('ps', ['-p', String(pid), '-o', 'lstart='], (err, stdout) => {
         if (err || !stdout.trim()) {
           resolve(null);
@@ -133,6 +135,7 @@ function getProcessStartTime(pid: number): Promise<number | null> {
 
 function getProcessesOnPort(port: number): number[] {
   try {
+    // windows-console: posix-only (the POSIX processes capability)
     const result = execSync(`lsof -ti :${port} -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8' });
     return result
       .trim()

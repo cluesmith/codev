@@ -90,6 +90,7 @@ export function isOwnArchitectShellper(cmdline: string, identity: ArchitectIdent
  * Throws on `ps` failure; callers decide how to degrade.
  */
 function listPosixProcessEntries(): ProcessEntry[] {
+  // windows-console: posix-only (Windows reads the census)
   const out = execFileSync('ps', ['-ww', '-eo', 'pid=,args='], {
     encoding: 'utf-8',
     timeout: 5000,

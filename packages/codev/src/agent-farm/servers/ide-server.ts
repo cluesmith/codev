@@ -137,6 +137,7 @@ async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
  * through the shim resolver), with no console window.
  */
 export function spawnIdeServerProcess(serverPath: string, args: string[], options: SpawnOptions & { env: Record<string, string> }): ChildProcess {
+  // windows-console: posix-only
   if (!isWindows()) return spawn(serverPath, args, options);
   const spawnable = ideServerSpawnable(serverPath, args, options.env);
   return spawn(spawnable.command, spawnable.args, {
