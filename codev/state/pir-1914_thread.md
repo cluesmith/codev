@@ -16,3 +16,6 @@
 ## 2026-11-18 dev-approval
 - porch tests check failed on the pre-existing protocol-drift-audit test: the machine scoped @cluesmith registry overrides npm_config_registry, and pnpm script runner re-exports user npm config, so an env scope override is not enough. Per architect ruling, ran porch done once with npm_config_userconfig=<empty temp file> (deleted after). Build + tests green. pir-1233 launch-loop failed once in a parallel run (recorded intermittent).
 - Gate dev-approval pending. The cloud check needs a cloud-registered Tower running this build.
+
+## 2026-11-18 review
+- dev-approval recorded on attempt 2 under the standing rule (load 7.56, empty userconfig). Merged origin/main (3bea1820b) at owner direction; bugfix #1922 harness fix cut full-run failures 7 to 1. Review written; arch.md + lessons-learned.md (cold) updated.
