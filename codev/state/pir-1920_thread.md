@@ -8,3 +8,10 @@
 - 09:34-09:37 user-text/composer-redraw holds to tiny-timesheets main all self-delivered in under 40 s; a marker was found, so they are not this bug.
 - Plan: TERM at the session-manager spawn chokepoint + claude profile accepts the `>` fallback marker (heals running sessions without a claude restart).
 - Owner ruling received: no AI attribution in commits/PRs/issue comments.
+
+## 2026-11-18 — implement phase
+
+- Implemented and pushed: TERM=xterm-256color at the shellper spawn chokepoint (first spawn, both relaunch SPAWN frames) and the non-shellper PtySession.spawn; claude marker pattern accepts `>` + space/NBSP (claude puts U+00A0 after the pointer in fallback mode); recorder `--bare-env`; four bare-env ConPTY captures; ASCII M15 ghost fixture DERIVED from the real M15 bytes (six idle recordings of 2.1.327 never drew the inverse software cursor, bare or normal env).
+- The live architect's own screen (captured read-only) goes from no-composer-marker to clean under the new pattern.
+- porch `tests` check blocked by failures already on main on this machine (EPERM temp cleanup in update/cold-tier/hot-tier tests, bugfix-1691; verified by restoring the base source files). Flaky: launchers.windows.test.ts, agy-auth-cache.
+- INCIDENT ~00:19Z: the live Tower (pid 13960) stopped. launchers.windows.test.ts runs a Tower on port 4100 with only its state dir isolated, and its afterAll runs `afx tower stop`, which on Windows stops whatever owns the port. The live tower.log ends at 00:19:22Z, during my full-suite run, so my run most likely stopped it. Port 4100 was then held by a test Tower started from pir-1919's worktree. I did not restart or kill anything; waiting for the human. Follow-up: that test must refuse to run (or use another port) when a live Tower holds 4100.
