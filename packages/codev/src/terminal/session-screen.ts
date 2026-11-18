@@ -207,6 +207,10 @@ export class SessionScreen {
   serialize(): string {
     if (this.disposed) return '';
     const snapshot = this.serializer.serialize({ scrollback: SCREEN_SCROLLBACK });
+    // An empty addon payload is `PtySession.replaySnapshot`'s `empty-snapshot` desync
+    // canary: pass it through untouched so the raw-ring fallback (which carries the real
+    // DECTCEM bytes) still fires and logs.
+    if (!snapshot) return snapshot;
     // `@xterm/addon-serialize` writes the terminal modes but not cursor visibility
     // (DECTCEM), so without this a viewer attach re-showed a cursor the app had hidden,
     // wherever it was parked (Issue #1917, Spec 1658 M2: under ConPTY that is the end of

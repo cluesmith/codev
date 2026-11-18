@@ -9,7 +9,7 @@
  * pattern from #1353: captured streams as fixtures, exhaustive structural assertions.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -252,6 +252,24 @@ describe('SessionScreen.serialize cursor visibility (Issue #1917)', () => {
       source.dispose();
       replica.dispose();
     }
+  });
+
+  it('leaves an empty addon payload empty, so the empty-snapshot desync canary can still fire', async () => {
+    const scr = new SessionScreen(120, 40);
+    await scr.read();
+    expect(scr.serialize()).toBe('');
+    scr.dispose();
+  });
+
+  it('appends nothing when the visibility field cannot be read (the documented upgrade fallback)', async () => {
+    const scr = new SessionScreen(120, 40);
+    scr.feed('$ \x1b[?25l');
+    await scr.read();
+    const withState = scr.serialize();
+    expect(withState.endsWith('\x1b[?25l')).toBe(true);
+    vi.spyOn(scr, 'cursorHidden', 'get').mockReturnValue(undefined);
+    expect(scr.serialize()).toBe(withState.slice(0, -'\x1b[?25l'.length));
+    scr.dispose();
   });
 
   it('re-shows the cursor on a client terminal reused across a reconnect', async () => {
