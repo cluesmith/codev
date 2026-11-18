@@ -12,7 +12,7 @@ import chalk from 'chalk';
 import { getTemplatesDir } from '../lib/templates.js';
 import { confirm } from '../lib/cli-prompts.js';
 import { shouldOfferBootstrap } from '../lib/governance-bootstrap.js';
-import { spawnAgentProcess, type AgentExit } from '../lib/agent-process.js';
+import { runClaudeSession, type AgentExit } from '../lib/agent-process.js';
 import {
   createUserDirs,
   createProjectsDir,
@@ -42,7 +42,7 @@ export interface AdoptDeps {
 function defaultDeps(): AdoptDeps {
   return {
     confirm,
-    runMergeSession: (prompt, cwd) => spawnAgentProcess({ executable: 'claude', args: [prompt] }, cwd),
+    runMergeSession: runClaudeSession,
     shouldOfferBootstrap: root => shouldOfferBootstrap(root, path.join(getTemplatesDir(), 'templates')),
     runBootstrap: async root => {
       // Loaded only when the user accepts the offer, so `codev` startup does not pay for it.

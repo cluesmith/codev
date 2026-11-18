@@ -27,6 +27,17 @@ describe('runCodevVersion', () => {
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'codev-preflight-'));
+    if (process.platform === 'win32') {
+      // Windows cannot start a `#!/bin/sh` script (#1922); a `.cmd` runs through cmd.exe,
+      // as the spawn resolver does for a non-npm shim.
+      fastBin = join(dir, 'fast.cmd');
+      writeFileSync(fastBin, '@echo 3.1.9\r\n');
+      // ~5s: outlasts the 150ms budget, and is short because killing the probe ends
+      // cmd.exe but not this grandchild, which then runs to completion on its own.
+      slowBin = join(dir, 'slow.cmd');
+      writeFileSync(slowBin, '@ping -n 6 127.0.0.1 > nul\r\n');
+      return;
+    }
     // Ignores its args (so the hardcoded `--version` is irrelevant) and prints
     // a version immediately.
     fastBin = join(dir, 'fast.sh');

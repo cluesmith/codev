@@ -15,7 +15,6 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
 import { deepMerge } from '../lib/config.js';
 import chalk from 'chalk';
 import {
@@ -36,6 +35,7 @@ import {
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
 import { shouldOfferBootstrap } from '../lib/governance-bootstrap.js';
 import { refreshSkills, CODEV_NEW_SUFFIX } from '../lib/skill-refresh.js';
+import { runClaudeSession, type AgentExit } from '../lib/agent-process.js';
 
 export const BOOTSTRAP_DOCS_HINT =
   'Governance docs are still placeholders: run `codev bootstrap-docs` to draft them from this codebase.';
@@ -44,6 +44,16 @@ export interface UpdateOptions {
   dryRun?: boolean;
   force?: boolean;
   agent?: boolean;
+}
+
+/** Seam for tests: the conflict-merge session is replaceable, as in `codev adopt`. */
+export interface UpdateDeps {
+  /** Run the interactive conflict-merge session and wait for it to exit. */
+  runMergeSession(prompt: string, cwd: string): Promise<AgentExit>;
+}
+
+function defaultUpdateDeps(): UpdateDeps {
+  return { runMergeSession: runClaudeSession };
 }
 
 export interface ConflictEntry {
@@ -176,8 +186,9 @@ function runMigration(
 /**
  * Update codev — migrate config and refresh AI-assistant integration files.
  */
-export async function update(options: UpdateOptions = {}): Promise<UpdateResult> {
+export async function update(options: UpdateOptions = {}, overrides: Partial<UpdateDeps> = {}): Promise<UpdateResult> {
   const { dryRun = false, force = false, agent = false } = options;
+  const deps: UpdateDeps = { ...defaultUpdateDeps(), ...overrides };
   const targetDir = process.cwd();
   const codevDir = path.join(targetDir, 'codev');
 
@@ -426,19 +437,15 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
       const fileList = allConflicts.join(', ');
       const mergePrompt = `Merge the following files from their .codev-new versions: ${fileList}. For each file, add new sections from the .codev-new version, preserve my customizations, then delete the .codev-new file when done.`;
 
-      const claude = spawn('claude', [mergePrompt], {
-        stdio: 'inherit',
-        cwd: targetDir,
-      });
-
-      claude.on('error', (err) => {
-        console.error(chalk.red('Failed to launch Claude:'), err.message);
+      const merge = await deps.runMergeSession(mergePrompt, targetDir);
+      if (merge.error) {
+        console.error(chalk.red('Failed to launch Claude:'), merge.error);
         log('');
         log('Please merge the conflicts manually:');
         for (const file of allConflicts) {
           log(chalk.dim(`  ${file} ← ${file}.codev-new`));
         }
-      });
+      }
     }
 
     return result;
