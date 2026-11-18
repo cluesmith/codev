@@ -51,6 +51,35 @@ const COMPOSER_MARKER = /^[❯›]/;
 const REGION_END_PATTERNS = [/^[─━╌┄]{5,}/, /^\s{2,}(gpt|high:|~\/)/];
 
 /**
+ * claude's composer marker: the `❯`/`›` family, OR the bare ASCII `>` claude draws in its place
+ * when it decides the terminal cannot render Unicode (Issue #1920).
+ *
+ * claude takes its pointer glyph from the `figures` set, whose win32 fallback for `❯` is `>`
+ * (and for `✔` is `√`). It falls back whenever its env names no Unicode-capable terminal
+ * (`TERM=xterm-256color`, `WT_SESSION`, `TERM_PROGRAM=vscode`, …). Every architect launched
+ * straight into ConPTY by a Tower whose console set none of those did, so the gate found no
+ * marker on a perfectly idle screen and held all of that architect's mail permanently
+ * (`no-composer-marker`). Tower now sets `TERM` for every PTY child (`withPtyTerminalType`),
+ * but a claude already running keeps the env it was born with, and nothing else stops a future
+ * env from tipping claude back into the fallback.
+ *
+ * This admits nothing the `❯` pattern did not already face. claude draws the SAME pointer glyph
+ * for its composer, its picker cursor and its echo of a submitted turn, so in fallback mode all
+ * three become `>` together: the same ambiguity, resolved the same way (last match wins; the
+ * region must be bounded by the rule below it; picker items and echoed text are normal-intensity
+ * and so count as occupancy). `>` must be followed by a space or end the row, so a `>>` or a
+ * `>foo` at column 0 is not a marker. The space claude draws after its pointer is U+00A0 (NO-BREAK
+ * SPACE), not U+0020 (measured, claude 2.1.327 under ConPTY); both are accepted. claude indents its own output, so assistant prose does not
+ * begin a row with `> `. Codex keeps {@link COMPOSER_MARKER}: it was not measured to fall back.
+ *
+ * Known boundary: unlike agy (#1474), this profile has no `markerRequiresCursorRow` /
+ * `markerFgPalette` anchor. A future claude screen with a single `> `-prefixed item BELOW the
+ * composer and a rule beneath it would win last-match-wins and read as an empty region. No such
+ * screen has been observed; if one is, `markerRequiresCursorRow` is the ready answer.
+ */
+const CLAUDE_COMPOSER_MARKER = /^(?:[❯›]|>(?=[ \u00a0]|$))/;
+
+/**
  * claude composer profile (marker ❯, dim placeholder — measured, spike g2).
  *
  * `queuesInputMidTurn` measured for Issue #1664 against claude 2.1.266: a message delivered while
@@ -60,7 +89,7 @@ const REGION_END_PATTERNS = [/^[─━╌┄]{5,}/, /^\s{2,}(gpt|high:|~\/)/];
  */
 export const CLAUDE_PROFILE: GateProfile = {
   app: 'claude',
-  markerPattern: COMPOSER_MARKER,
+  markerPattern: CLAUDE_COMPOSER_MARKER,
   regionEndPatterns: REGION_END_PATTERNS,
   queuesInputMidTurn: true,
 };

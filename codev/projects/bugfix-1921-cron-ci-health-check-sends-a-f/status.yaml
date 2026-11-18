@@ -1,0 +1,17 @@
+id: bugfix-1921
+title: cron-ci-health-check-sends-a-f
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-11-18T05:26:43.900Z'
+    approved_at: '2026-11-18T06:31:19.739Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-18T03:08:46.020Z'
+updated_at: '2026-11-18T06:31:19.740Z'
+pr_ready_for_human: false

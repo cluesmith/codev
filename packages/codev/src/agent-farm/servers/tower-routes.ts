@@ -52,7 +52,7 @@ import {
 import { handleTunnelEndpoint } from './tower-tunnel.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 import { logSafe } from '../utils/log-safe.js';
-import { handleIdeApi, ensureIdeServerLive } from './ide-server.js';
+import { handleIdeApi, ensureIdeServerLive, ideAvailability } from './ide-server.js';
 import { matchIdePrefix, forwardIdeHttp } from './ide-forward.js';
 import { getWorktreeConfig, getActivityHooks, getResolvedCommands } from '../utils/config.js';
 import { windowsShellRequest } from '../../lib/platform/windows/git-bash-launch.js';
@@ -221,7 +221,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /api/workspaces':  (_req, res) => handleListWorkspaces(res),
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
-  'GET /api/status':      (_req, res) => handleStatus(res),
+  'GET /api/status':      (req, res) => handleStatus(req, res),
   'POST /api/shutdown':   (req, res, _url, ctx) => handleShutdown(req, res, ctx),
   'GET /api/version':     (_req, res, _url, ctx) => handleVersion(res, ctx),
   'GET /api/overview':    (_req, res, url, ctx) => handleOverview(res, url, undefined, ctx),
@@ -1352,10 +1352,18 @@ async function handleTerminalRoutes(
   }
 }
 
-async function handleStatus(res: http.ServerResponse): Promise<void> {
-  const instances = await getInstances();
+/**
+ * GET /api/status. Also carries the dashboard's IDE signal (Issue #1914): the
+ * `api/ide` family is tunnel-blocked, so availability rides this payload, which
+ * the tunnel relays. Only a yes/no plus whether this request came over the
+ * tunnel (so the page knows to skip the local-only cookie mint) travel; no port,
+ * path or token. The marker is Tower's own (`TunnelClient` strips inbound copies).
+ */
+async function handleStatus(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const viaTunnel = req.headers[TUNNEL_PROXY_HEADER] === '1';
+  const [instances, available] = await Promise.all([getInstances(), ideAvailability(viaTunnel)]);
   res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ instances }));
+  res.end(JSON.stringify({ instances, ide: { available, viaTunnel } }));
 }
 
 /**

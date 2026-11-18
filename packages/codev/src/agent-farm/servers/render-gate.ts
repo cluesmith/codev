@@ -35,7 +35,8 @@
  * the same capped seed), not a round-2 regression; tracked as #1361.
  *
  * Classifier (fail-toward-not-clean): CLEAN requires
- *   (a) a recognized composer marker on the screen — a text match, plus whatever further
+ *   (a) a recognized composer marker on the screen (claude's includes its ASCII-fallback `>`,
+ *       #1920) — a text match, plus whatever further
  *       positive evidence the profile demands that the row is the LIVE composer and not
  *       just a row the app prefixes alike (agy anchors on the cursor row and the marker's
  *       own palette color; see `markerRequiresCursorRow` / `markerFgPalette`), AND

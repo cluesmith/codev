@@ -54,21 +54,23 @@ const { SHELLPER_SECRET_ENV, isPipeEndpoint } = await import('../shellper-endpoi
 
 let socketDir: string;
 
-function createOpts() {
+function createOpts(env: Record<string, string> = { TERM: 'xterm-256color' }) {
   return {
     sessionId: 'sess-1658',
     command: '/bin/bash',
     args: ['-l'],
     cwd: '/tmp',
-    env: { TERM: 'xterm-256color' },
+    env,
     cols: 80,
     rows: 24,
   };
 }
 
-async function captureLaunch(): Promise<{ config: Record<string, unknown>; argvJson: string; env: Record<string, string> }> {
+async function captureLaunch(
+  childEnv?: Record<string, string>,
+): Promise<{ config: Record<string, unknown>; argvJson: string; env: Record<string, string> }> {
   const manager = new SessionManager({ socketDir, shellperScript: '/nonexistent.js', nodeExecutable: process.execPath });
-  await expect(manager.createSession(createOpts())).rejects.toThrow('Invalid shellper info JSON');
+  await expect(manager.createSession(createOpts(childEnv))).rejects.toThrow('Invalid shellper info JSON');
   expect(spawnCalls).toHaveLength(1);
   const argvJson = spawnCalls[0].args[1];
   return { config: JSON.parse(argvJson) as Record<string, unknown>, argvJson, env: spawnCalls[0].env };
@@ -116,6 +118,25 @@ describe('SessionManager.createSession launch config', () => {
     spawnCalls.length = 0;
     const second = (await captureLaunch()).env[SHELLPER_SECRET_ENV];
     expect(second).not.toBe(first);
+  });
+});
+
+describe("SessionManager.createSession: the PTY child's TERM (Issue #1920)", () => {
+  // node-pty sets TERM from its `name` on POSIX only. On Windows a child launched straight into
+  // ConPTY (the architect's bare `claude`) gets only the env's TERM, and claude without one draws
+  // ASCII fallbacks, including a `>` composer marker the render gate did not recognise.
+  for (const platform of ['win32', 'linux'] as const) {
+    it(`${platform}: an env with no TERM gets xterm-256color for the child`, async () => {
+      forceHostPlatform(platform);
+      const { config } = await captureLaunch({ KEEP: '1' });
+      expect(config.env).toEqual({ KEEP: '1', TERM: 'xterm-256color' });
+    });
+  }
+
+  it("an inherited TERM that names another terminal (mintty's xterm) is replaced", async () => {
+    forceHostPlatform('win32');
+    const { config } = await captureLaunch({ TERM: 'xterm' });
+    expect((config.env as Record<string, string>).TERM).toBe('xterm-256color');
   });
 });
 

@@ -641,6 +641,23 @@ export async function ideServerStatus(): Promise<IdeStatus> {
   return { record, alive: pids.length > 0, pid: pids[0] ?? null };
 }
 
+/**
+ * Whether the dashboard may offer the IDE (Issue #1914), cheap enough for the
+ * dashboard's 5s status poll: no `lsof`.
+ *
+ * - Local: a recorded server is enough, even a dead one; the local open path
+ *   mints the forward cookie, and that mint respawns it first (#1869).
+ * - Over the tunnel: there is no mint, so a dead server would 502 the first
+ *   navigation. Only a recorded server whose port accepts a loopback connect
+ *   counts.
+ */
+export async function ideAvailability(viaTunnel: boolean): Promise<boolean> {
+  const record = readIdeRecord();
+  if (!record) return false;
+  if (!viaTunnel) return true;
+  return isPortAccepting(record.port);
+}
+
 // Guards against two concurrent `/ide/` requests both triggering a respawn.
 let respawnInFlight: Promise<number | null> | null = null;
 
