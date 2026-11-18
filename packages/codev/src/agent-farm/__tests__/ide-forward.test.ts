@@ -188,6 +188,52 @@ describe('getPublicAuthority', () => {
   });
 });
 
+describe('getPublicAuthority follows the relayed prefix after a rename (Issue #1914)', () => {
+  const CFG = { tower_id: 't1', tower_name: 'old-name', api_key: 'ctk_x', server_url: 'https://cloud.codevos.ai' };
+  const TUNNEL = { 'x-codev-tunnel-proxy': '1' };
+
+  afterEach(() => vi.clearAllMocks());
+
+  it('a valid relayed /t/<slug>/ide wins over a stale stored tower_name; stamp and cookie Path agree', () => {
+    (readCloudConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue(CFG);
+    const incoming = { ...TUNNEL, 'x-forwarded-prefix': '/t/renamed-tower/ide' };
+
+    const authority = getPublicAuthority(incoming);
+    expect(authority).toEqual({ host: 'cloud.codevos.ai', proto: 'https', prefix: '/t/renamed-tower/ide' });
+
+    const forwarded = buildForwardHeaders(incoming, 8200, authority, null);
+    expect(forwarded['x-forwarded-prefix']).toBe('/t/renamed-tower/ide');
+
+    const policy = tokenCookiePolicy(incoming, authority);
+    expect(copyResponseHeaders({ 'set-cookie': 'vscode-tkn=T; Path=/' }, policy)['set-cookie'])
+      .toEqual(['vscode-tkn=T; Path=/t/renamed-tower/ide']);
+  });
+
+  it('a valid relayed prefix still works when the stored tower_name fails the character check', () => {
+    (readCloudConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ ...CFG, tower_name: 'My Tower' });
+    expect(getPublicAuthority({ ...TUNNEL, 'x-forwarded-prefix': '/t/my-tower/ide' })?.prefix).toBe('/t/my-tower/ide');
+  });
+
+  it('a malformed or missing relayed prefix falls back to the stored tower_name', () => {
+    (readCloudConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue(CFG);
+    for (const prefix of ['/t/a;Path=/x/ide', '/t/x/ide/extra', '/t//ide', '/evil', '/t/x/ide\r\nSet-Cookie: a=1', '']) {
+      expect(getPublicAuthority({ ...TUNNEL, 'x-forwarded-prefix': prefix })?.prefix).toBe('/t/old-name/ide');
+    }
+    expect(getPublicAuthority({ ...TUNNEL, 'x-forwarded-prefix': ['/t/a/ide', '/t/b/ide'] } as never)?.prefix).toBe('/t/old-name/ide');
+    expect(getPublicAuthority(TUNNEL)?.prefix).toBe('/t/old-name/ide');
+  });
+
+  it('a local request never consults the inbound header', () => {
+    (readCloudConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue(CFG);
+    expect(getPublicAuthority({ 'x-forwarded-prefix': '/t/attacker/ide' })?.prefix).toBe('/t/old-name/ide');
+  });
+
+  it('no cloud config: no authority, whatever the request says', () => {
+    (readCloudConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    expect(getPublicAuthority({ ...TUNNEL, 'x-forwarded-prefix': '/t/x/ide' })).toBeNull();
+  });
+});
+
 describe('the tunnel relays vscode-tkn scoped to the tenant prefix (Issue #1914)', () => {
   it('adds Path=<prefix> and keeps every other attribute', () => {
     expect(scopeConnectionTokenSetCookie('vscode-tkn=T; Max-Age=604800; SameSite=Lax; HttpOnly', '/t/mytower/ide'))

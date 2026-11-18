@@ -125,18 +125,37 @@ export function stripCookie(existing: string | string[] | undefined, name: strin
     .join('; ');
 }
 
+/** The public IDE prefix the cloud relay stamps on a tunnel-borne request: `/t/<slug>/ide`. */
+const RELAYED_IDE_PREFIX = /^\/t\/[A-Za-z0-9._-]+\/ide$/;
+
 /**
- * Derive the tunnel's public authority from the cloud config, matching the
- * `accessUrl` Tower advertises (`tower-tunnel.ts`: `${server_url}/t/${tower_name}/`).
- * Returns null when the tower is not cloud-registered.
+ * The prefix the cloud relay stamped on this request, if Tower may trust it:
+ * only on a tunnel-borne request (the marker is Tower's own, stamped by
+ * `TunnelClient`, which strips inbound copies), and only when it is a plain
+ * `/t/<slug>/ide`. It carries the slug the browser actually used, which stays
+ * current across a cloud-side rename while the stored `tower_name` does not
+ * (Issue #1914). A local request never consults it.
  */
-export function getPublicAuthority(): PublicAuthority | null {
+function relayedIdePrefix(incoming: http.IncomingHttpHeaders | undefined): string | null {
+  if (!incoming || !isTunnelBorne(incoming)) return null;
+  const raw = incoming['x-forwarded-prefix'];
+  if (typeof raw !== 'string' || !RELAYED_IDE_PREFIX.test(raw)) return null;
+  return raw;
+}
+
+/**
+ * Derive the tunnel's public authority: host and proto from the cloud config;
+ * the prefix from the relay-stamped inbound `x-forwarded-prefix` when the
+ * request is tunnel-borne and it is a valid `/t/<slug>/ide`, else from the
+ * stored `tower_name`, matching the `accessUrl` Tower advertises
+ * (`tower-tunnel.ts`: `${server_url}/t/${tower_name}/`). One prefix feeds both
+ * the `x-forwarded-prefix` stamp and the `vscode-tkn` cookie Path, so the two
+ * cannot disagree. Returns null when the tower is not cloud-registered, or no
+ * safe prefix exists.
+ */
+export function getPublicAuthority(incoming?: http.IncomingHttpHeaders): PublicAuthority | null {
   const cfg = readCloudConfig();
   if (!cfg) return null;
-  // The name lands in `x-forwarded-prefix` and in a Set-Cookie Path (Issue
-  // #1914): anything outside a plain path segment (`;`, CR/LF, `/`, spaces)
-  // could inject cookie attributes or split a header, so it yields no authority.
-  if (typeof cfg.tower_name !== 'string' || !SAFE_TOWER_NAME.test(cfg.tower_name)) return null;
   let host: string;
   let proto: string;
   try {
@@ -146,6 +165,13 @@ export function getPublicAuthority(): PublicAuthority | null {
   } catch {
     return null;
   }
+  const relayed = relayedIdePrefix(incoming);
+  if (relayed) return { host, proto, prefix: relayed };
+  // The stored name lands in `x-forwarded-prefix` and in a Set-Cookie Path
+  // (Issue #1914): anything outside a plain path segment (`;`, CR/LF, `/`,
+  // spaces) could inject cookie attributes or split a header, so it yields no
+  // authority.
+  if (typeof cfg.tower_name !== 'string' || !SAFE_TOWER_NAME.test(cfg.tower_name)) return null;
   return { host, proto, prefix: `/t/${cfg.tower_name}${IDE_DEFAULT_PREFIX.replace(/\/$/, '')}` };
 }
 
@@ -286,7 +312,7 @@ function warnIfTunnelWithoutAuthority(
 ): void {
   if (!isTunnelBorne(headers) || publicAuthority || warnedTunnelWithoutAuthority) return;
   warnedTunnelWithoutAuthority = true;
-  log('WARN', 'IDE forward: tunnel-borne request with no usable public authority (cloud config missing or tower_name not [A-Za-z0-9._-]+); vscode-tkn stripped, no x-forwarded-prefix');
+  log('WARN', 'IDE forward: tunnel-borne request with no usable public authority (cloud config missing, or neither a valid relayed /t/<slug>/ide prefix nor a tower_name matching [A-Za-z0-9._-]+); vscode-tkn stripped, no x-forwarded-prefix');
 }
 
 /** Apply a `TokenCookiePolicy` to a Set-Cookie value; undefined when nothing remains. */
@@ -472,7 +498,7 @@ export async function forwardIdeHttp(
 
   const connectionToken = readIdeConnectionToken();
   const local = !isTunnelBorne(req.headers);
-  const publicAuthority = getPublicAuthority();
+  const publicAuthority = getPublicAuthority(req.headers);
   warnIfTunnelWithoutAuthority(req.headers, publicAuthority, log);
   const cookiePolicy = tokenCookiePolicy(req.headers, publicAuthority);
   const headers = buildForwardHeaders(req.headers, port, publicAuthority, connectionToken);
@@ -544,7 +570,7 @@ export async function forwardIdeWebSocket(
   // `Sec-WebSocket-Key` is preserved by `buildForwardHeaders` and forwarded as-is
   // so the upstream's `Sec-WebSocket-Accept` — relayed back verbatim — validates
   // against the client's own key.
-  const publicAuthority = getPublicAuthority();
+  const publicAuthority = getPublicAuthority(req.headers);
   warnIfTunnelWithoutAuthority(req.headers, publicAuthority, log);
   const cookiePolicy = tokenCookiePolicy(req.headers, publicAuthority);
   const headers = buildForwardHeaders(req.headers, port, publicAuthority, readIdeConnectionToken());

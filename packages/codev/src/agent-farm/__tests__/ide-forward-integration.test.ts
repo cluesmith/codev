@@ -270,6 +270,18 @@ describe('IDE HTTP forward never hands the browser the connection token (Issue #
     }
   });
 
+  it('over the tunnel after a rename: stamp and cookie Path follow the relayed slug, not the stored name (#1914)', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    writeCloudConfig(CLOUD);
+    try {
+      const res = await get('/ide/', { 'x-codev-tunnel-proxy': '1', 'x-forwarded-prefix': '/t/renamed-tower/ide' });
+      expect(JSON.parse(res.body).headers['x-forwarded-prefix']).toBe('/t/renamed-tower/ide');
+      expect(res.headers['set-cookie']).toContain('vscode-tkn=UPSTREAM-TOKEN; Max-Age=604800; SameSite=Lax; Path=/t/renamed-tower/ide');
+    } finally {
+      deleteCloudConfig();
+    }
+  });
+
   it('over the tunnel with no usable public authority: strips vscode-tkn (fail closed, Issue #1914)', async () => {
     writeIdeRecord(recordFor(stubPort));
     const res = await get('/ide/', { 'x-codev-tunnel-proxy': '1' });
