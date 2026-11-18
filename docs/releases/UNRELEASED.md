@@ -45,6 +45,10 @@ Codev now runs natively on Windows 11, no WSL required (#1658, PR #1859). Instal
 
 `porch skip-phase <id> <plan-phase> --reason "..."` removes one unbuilt phase from a project's state so review becomes reachable again when the owner drops a phase from an approved plan (#1900, PR #1908). The skip and its reason stay visible in `porch status`, and builder progress counts leave the skipped phase out. It is a human decision, so the command takes the same explicit-approval flag as a gate.
 
+## Open the IDE from the dashboard over Codev Cloud
+
+The dashboard's **Open IDE** link now appears when the dashboard is reached through Codev Cloud, not only on a local Tower (#1914, PR #1931). The IDE signal travels with the dashboard's regular status poll, the link opens the workbench relative to the page's own address so a cloud-side Tower rename cannot strand it, and over the cloud the page skips the local-only cookie step and lets the cloud session authorize the request. The forward also scopes the IDE's token cookie to this Tower's cloud prefix so Towers sharing the cloud origin cannot overwrite each other's, and the public prefix follows the cloud relay's stamp rather than a stored name. Locally nothing changes except that the dashboard no longer runs a blocking port probe on load.
+
 ## Polish
 
 <!-- Small vscode items as bullets:
