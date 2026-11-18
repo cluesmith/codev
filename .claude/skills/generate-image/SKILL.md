@@ -81,3 +81,18 @@ codev generate-image "Keep the subject, change the lighting" -p muapi --ref subj
 The provider submits a job, polls the [MuAPI image API](https://muapi.ai/ai-image-api),
 and writes the returned image locally. Polling and individual requests are
 bounded, and the API key is never sent to the returned media host.
+
+## UberLLM provider
+
+`-p uberllm` uses Nano Banana Pro through UberLLM's OpenAI-compatible image API,
+with the same aspect-ratio and resolution controls. Set `UBERLLM_API_KEY` from
+[uberllm.dev](https://uberllm.dev/signup). Up to 8 reference images are sent
+inline to the edit model.
+
+```bash
+codev generate-image "A sunset over mountains" -p uberllm -a 16:9 -r 2K
+codev generate-image "Keep the subject, change the lighting" -p uberllm --ref subject.png
+```
+
+The image comes back in the same response, so there is no job to poll and the
+API key is only sent to `api.uberllm.dev`.

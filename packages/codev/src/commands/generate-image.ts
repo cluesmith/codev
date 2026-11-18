@@ -23,7 +23,7 @@ const ASPECT_RATIOS = ['1:1', '16:9', '9:16', '3:4', '4:3', '3:2', '2:3'] as con
 type AspectRatio = (typeof ASPECT_RATIOS)[number];
 
 // Providers serving the same model
-const PROVIDERS = ['gemini', 'atlas', 'muapi'] as const;
+const PROVIDERS = ['gemini', 'atlas', 'muapi', 'uberllm'] as const;
 type Provider = (typeof PROVIDERS)[number];
 
 // Atlas Cloud serves the same Nano Banana Pro model over its own async REST API
@@ -53,6 +53,14 @@ const MUAPI_REQUEST_TIMEOUT_MS = 30_000;
 const MUAPI_DOWNLOAD_TIMEOUT_MS = 120_000;
 const MUAPI_MAX_REFERENCE_IMAGES = 8;
 const MUAPI_IN_PROGRESS_STATUSES = new Set(['pending', 'queued', 'processing', 'starting', 'in_queue']);
+
+// UberLLM serves Nano Banana Pro on its OpenAI-style image routes and answers
+// with the image itself, so there is no job to poll.
+const UBERLLM_BASE_URL = 'https://api.uberllm.dev/v1';
+const UBERLLM_MODEL = 'venice/nano-banana-pro';
+const UBERLLM_EDIT_MODEL = 'google/nano-banana-pro-edit';
+const UBERLLM_REQUEST_TIMEOUT_MS = 300_000;
+const UBERLLM_MAX_REFERENCE_IMAGES = 8;
 
 export interface GenerateImageOptions {
   output?: string;
@@ -384,6 +392,89 @@ export async function generateViaMuapi(
 }
 
 /**
+ * Generate through UberLLM: one request to /images/generations, or to
+ * /images/edits with the references inline as data: URIs. The image comes back
+ * as base64 in the same response, so the key is only ever sent to UberLLM.
+ */
+export async function generateViaUberllm(
+  promptText: string,
+  output: string,
+  aspect: AspectRatio,
+  resolution: Resolution,
+  refs: string[]
+): Promise<void> {
+  if (refs.length > UBERLLM_MAX_REFERENCE_IMAGES) {
+    console.error(
+      chalk.red('Error:') +
+        ` UberLLM supports at most ${UBERLLM_MAX_REFERENCE_IMAGES} reference images with --provider uberllm.`
+    );
+    process.exit(1);
+  }
+  const apiKey = process.env.UBERLLM_API_KEY;
+  if (!apiKey) {
+    console.error(
+      chalk.red('Error:') +
+        ' UBERLLM_API_KEY environment variable not set.\n' +
+        'Get an API key at https://uberllm.dev/signup'
+    );
+    process.exit(1);
+  }
+
+  const payload: Record<string, unknown> = {
+    model: refs.length > 0 ? UBERLLM_EDIT_MODEL : UBERLLM_MODEL,
+    prompt: promptText,
+    aspect_ratio: aspect,
+    resolution,
+    response_format: 'b64_json',
+  };
+  if (refs.length > 0) {
+    payload.input_images = refs.map((ref) => {
+      const refPath = resolve(ref);
+      return `data:${imageMimeType(refPath)};base64,${readFileSync(refPath).toString('base64')}`;
+    });
+  }
+
+  let outcome: { ok: true; b64: unknown } | { ok: false; detail: string };
+  try {
+    const response = await fetch(
+      `${UBERLLM_BASE_URL}/images/${refs.length > 0 ? 'edits' : 'generations'}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(UBERLLM_REQUEST_TIMEOUT_MS),
+      }
+    );
+    if (response.ok) {
+      const body = (await response.json()) as { data?: Array<{ b64_json?: unknown }> } | null;
+      outcome = { ok: true, b64: body?.data?.[0]?.b64_json };
+    } else {
+      outcome = { ok: false, detail: ` (${response.status}): ${await response.text()}` };
+    }
+  } catch (error) {
+    outcome = {
+      ok: false,
+      detail:
+        error instanceof Error && error.name === 'TimeoutError'
+          ? `: no response within ${UBERLLM_REQUEST_TIMEOUT_MS}ms`
+          : `: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  if (!outcome.ok) {
+    console.error(chalk.red('Error:') + ` UberLLM request failed${outcome.detail}`.trimEnd());
+    process.exit(1);
+  }
+  if (typeof outcome.b64 !== 'string' || outcome.b64 === '') {
+    console.error(chalk.red('Error:') + ' UberLLM response did not include an image');
+    process.exit(1);
+  }
+  const bytes = Buffer.from(outcome.b64, 'base64');
+  const target = targetPathForImageBytes(output, bytes, 'UberLLM');
+  writeFileSync(target, bytes);
+  console.log(chalk.green('Image saved to') + ` ${target}`);
+}
+
+/**
  * One Atlas exchange - connect, stream and parse - under a single deadline.
  *
  * ATLAS_TIMEOUT_MS bounds the poll loop as a whole, but it is only checked
@@ -627,6 +718,13 @@ export async function generateImage(
   if (provider === 'muapi') {
     console.log(chalk.blue('Generating image with') + ` ${MUAPI_MODEL} (MuAPI)...`);
     await generateViaMuapi(promptText, output, aspect, resolution, refs);
+    return;
+  }
+
+  if (provider === 'uberllm') {
+    const model = refs.length > 0 ? UBERLLM_EDIT_MODEL : UBERLLM_MODEL;
+    console.log(chalk.blue('Generating image with') + ` ${model} (UberLLM)...`);
+    await generateViaUberllm(promptText, output, aspect, resolution, refs);
     return;
   }
 

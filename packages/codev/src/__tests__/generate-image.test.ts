@@ -33,6 +33,7 @@ import {
   generateImage,
   generateViaAtlas,
   generateViaMuapi,
+  generateViaUberllm,
   GenerateImageOptions,
 } from '../commands/generate-image.js';
 
@@ -841,6 +842,124 @@ describe('generate-image', () => {
         expect.stringContaining('unrecognized status: cancelled_by_user')
       );
       expect(calls.filter((call) => call.url.includes('/predictions/'))).toHaveLength(1);
+    });
+  });
+
+  describe('uberllm provider', () => {
+    const originalFetch = global.fetch;
+    const JPEG_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString('base64');
+
+    type FetchCall = { url: string; init?: RequestInit };
+
+    function stubUberllm(response?: Partial<Response>): FetchCall[] {
+      const calls: FetchCall[] = [];
+      global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({ url: String(url), init });
+        return (response ?? {
+          ok: true,
+          status: 200,
+          json: async () => ({ created: 1, data: [{ b64_json: JPEG_B64 }] }),
+        }) as Response;
+      }) as unknown as typeof fetch;
+      return calls;
+    }
+
+    beforeEach(() => {
+      process.env.UBERLLM_API_KEY = 'test-uberllm-key';
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('requires an UberLLM API key', async () => {
+      delete process.env.UBERLLM_API_KEY;
+      const calls = stubUberllm();
+
+      await expect(
+        generateViaUberllm('test prompt', 'output.png', '1:1', '1K', [])
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('UBERLLM_API_KEY environment variable not set')
+      );
+      expect(calls).toHaveLength(0);
+    });
+
+    it('makes one generation request and saves the returned image under its real type', async () => {
+      const calls = stubUberllm();
+
+      await generateViaUberllm('test prompt', 'output.png', '16:9', '2K', []);
+
+      expect(calls.map((call) => call.url)).toEqual([
+        'https://api.uberllm.dev/v1/images/generations',
+      ]);
+      expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+        model: 'venice/nano-banana-pro',
+        prompt: 'test prompt',
+        aspect_ratio: '16:9',
+        resolution: '2K',
+        response_format: 'b64_json',
+      });
+      expect(new Headers(calls[0]?.init?.headers ?? {}).get('authorization')).toBe(
+        'Bearer test-uberllm-key'
+      );
+      expect(calls[0]?.init?.signal).toBeInstanceOf(AbortSignal);
+      expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith('output.jpg', expect.any(Buffer));
+    });
+
+    it('sends references inline to the edit model', async () => {
+      vi.mocked(readFileSync).mockReturnValue(Buffer.from('fake image'));
+      const calls = stubUberllm();
+
+      await generateViaUberllm('edit this', 'edited.png', '1:1', '1K', ['reference.png']);
+
+      expect(calls[0]?.url).toBe('https://api.uberllm.dev/v1/images/edits');
+      const submitted = JSON.parse(String(calls[0]?.init?.body));
+      expect(submitted.model).toBe('google/nano-banana-pro-edit');
+      expect(submitted.input_images).toEqual([
+        `data:image/png;base64,${Buffer.from('fake image').toString('base64')}`,
+      ]);
+      expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith('edited.jpg', expect.any(Buffer));
+    });
+
+    it('rejects more than 8 references before any request', async () => {
+      const calls = stubUberllm();
+      const refs = Array.from({ length: 9 }, (_, i) => `ref${i}.png`);
+
+      await expect(
+        generateViaUberllm('test prompt', 'output.png', '1:1', '1K', refs)
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('at most 8 reference images')
+      );
+      expect(calls).toHaveLength(0);
+    });
+
+    it('reports a refused request with the API message and writes nothing', async () => {
+      stubUberllm({
+        ok: false,
+        status: 400,
+        text: async () => '{"error":{"code":"invalid_request"}}',
+      });
+
+      await expect(
+        generateViaUberllm('test prompt', 'output.png', '4:3', '1K', [])
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('UberLLM request failed (400): {"error":{"code":"invalid_request"}}')
+      );
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+    });
+
+    it('fails when the response carries no image', async () => {
+      stubUberllm({ ok: true, status: 200, json: async () => ({ data: [] }) });
+
+      await expect(
+        generateViaUberllm('test prompt', 'output.png', '1:1', '1K', [])
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('UberLLM response did not include an image')
+      );
     });
   });
 });
