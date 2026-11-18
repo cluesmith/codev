@@ -31,3 +31,16 @@
 - 00:19Z: my local full-suite run stopped the live Tower (architect attributes it to launchers.windows.test.ts).
   Architect's orders: no full-suite runs locally, never run launchers.windows.test.ts, don't touch Tower, run
   only targeted files. Holding at porch's tests check for a ruling on the pre-existing Windows failures.
+
+## 2026-11-18 — rebase onto #1926, tests check
+
+- Rebased onto origin/main 075a24b99 (#1926) and force-pushed with lease. The no-full-suite rule is lifted.
+- `porch done` ~04:50Z: build passed (76.6s); tests check timed out at 300s (391.6s), with other builders'
+  full-suite runs overlapping. Live Tower PID 29272 before and after (it survived). Now waiting for the
+  architect's 'go pir-1917' (runs are serialized: 1920, 1921, 1917, 1919).
+- Two test-orphan shellpers from this worktree's dist, parent gone. Left alone on the architect's order:
+  - PID 20476, created 11:31 local: `node .builders/pir-1917/packages/codev/dist/terminal/shellper-main.js`
+    command `C:\Program Files\Git\bin\bash.exe -c "node dev-server.cjs"`, cwd
+    `~/.agent-farm/test-workspaces/codev-1658-p6-EOuHsQ/ws` (the 00:19Z launchers.windows run).
+  - PID 41076, created 15:50 local: same shellper-main.js, command `cmd.exe /d /q /k "echo MARK-1658-A"`,
+    cwd `C:\Users\amr` (this run).
