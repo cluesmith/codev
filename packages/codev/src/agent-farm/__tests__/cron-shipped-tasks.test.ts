@@ -29,6 +29,14 @@ function loadTask(workspacePath: string, name: string): CronTask {
   return task;
 }
 
+/**
+ * Platform-independent guard: on POSIX a single-quoted command reaches gh intact, so the
+ * shell-run check below only catches a reversion on Windows. This catches it everywhere.
+ */
+function expectNoSingleQuotes(task: CronTask): void {
+  expect(task.command).not.toContain("'");
+}
+
 /** Run the task's command through the real platform shell, with `gh` replaced by the stub. */
 function jqArgumentReceived(task: CronTask): Promise<string> {
   expect(task.command.startsWith('gh ')).toBe(true);
@@ -60,6 +68,10 @@ afterAll(() => {
 describe('shipped .af-cron/ci-health.yaml (#1921)', () => {
   const task = () => loadTask(repoRoot, 'CI Health Check');
 
+  it('quotes nothing with single quotes, which cmd.exe does not honour', () => {
+    expectNoSingleQuotes(task());
+  });
+
   it('passes the jq expression to gh intact under the platform shell', async () => {
     expect(await jqArgumentReceived(task())).toBe(
       'group_by(.workflowName) | map(.[0]) | map(select(.conclusion == "failure")) | map(.workflowName) | join(", ")',
@@ -86,6 +98,10 @@ describe('skeleton .af-cron/ci-health.yaml.example (#1921)', () => {
     );
     return loadTask(ws, 'CI Health Check');
   };
+
+  it('quotes nothing with single quotes, which cmd.exe does not honour', () => {
+    expectNoSingleQuotes(task());
+  });
 
   it('passes the jq expression to gh intact under the platform shell', async () => {
     expect(await jqArgumentReceived(task())).toBe('[.[] | select(.conclusion == "failure")] | length');
