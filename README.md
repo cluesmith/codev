@@ -120,7 +120,7 @@ If Tower is running during an upgrade, restart it afterwards so it picks up the 
 
 On Linux and WSL, also install `build-essential` and `python3` (node-pty compiles from source).
 
-**Windows:** two paths. **Native** (preview): Node.js 22 or 24 (x64 or ARM64), [Git for Windows](https://git-scm.com/download/win) and `jq`, no admin rights or Developer Mode needed. **WSL 2**: follow the Linux instructions inside your distribution. See [DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md#windows) for setup and limitations, including why native support is a preview (#1911).
+**Windows:** two paths. **Native**: Node.js 22 or 24 (x64 or ARM64), [Git for Windows](https://git-scm.com/download/win) and `jq`, no admin rights or Developer Mode needed. **WSL 2**: follow the Linux instructions inside your distribution. See [DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md#windows) for setup and limitations.
 
 **AI CLIs** (install all three for multi-model consultation):
 - Claude Code: `npm install -g @anthropic-ai/claude-code`
