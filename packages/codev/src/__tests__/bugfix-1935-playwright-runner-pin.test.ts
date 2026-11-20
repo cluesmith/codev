@@ -12,6 +12,11 @@
  *      overrides the default success() gate (`!cancelled()`, `always()`, `failure()`) must
  *      also require the install step's success; otherwise it runs with no browser and
  *      buries the real cause under launch errors (the Decisions tab step did exactly that).
+ *
+ * If a later step legitimately must run after a failed install (an artifact or report upload
+ * that launches no browser), exempt it here by name AND state the reason, never by dropping
+ * the install gate silently. Unpinning the image belongs with a Playwright bump verified on
+ * the new image (Chromium on ubuntu26.04 needs Playwright 1.61+).
  */
 
 import { describe, it, expect } from 'vitest';
