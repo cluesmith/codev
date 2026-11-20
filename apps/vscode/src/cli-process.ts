@@ -1,5 +1,28 @@
-import { execFile, spawn, type ChildProcess, type ExecFileOptions, type SpawnOptions } from 'node:child_process';
-import { resolveSpawnable } from '@cluesmith/codev-sdk/node/executable';
+import { ChildProcess, execFile, spawn, type ExecFileOptions, type SpawnOptions } from 'node:child_process';
+import { resolveSpawnable, type SpawnableCommand } from '@cluesmith/codev-sdk/node/executable';
+
+/**
+ * Windows looks a bare name up in the current folder before `PATH` (#1911), so
+ * a `codev.exe` in the open workspace would run in place of Codev. The
+ * resolver searches `PATH` only and hands the name back unchanged when it is
+ * not there; that case must fail here rather than reach `spawn`. The extension
+ * host is shared with other extensions, so it does not set
+ * `NoDefaultCurrentDirectoryInExePath` process-wide as the Codev CLIs do.
+ */
+function unresolvedOnWindows(command: string, spawnable: SpawnableCommand): boolean {
+  return process.platform === 'win32' && spawnable.command === command && !/[\\/]/.test(command);
+}
+
+/** The ENOENT error `spawn` raises for a missing program. */
+function notFoundError(command: string, args: string[]): NodeJS.ErrnoException {
+  return Object.assign(new Error(`spawn ${command} ENOENT (not found on PATH)`), {
+    code: 'ENOENT',
+    errno: -4058,
+    syscall: `spawn ${command}`,
+    path: command,
+    spawnargs: args,
+  });
+}
 
 /**
  * Spawn a Codev CLI (`afx`, `codev`). On Windows each is an npm `.cmd` shim,
@@ -9,6 +32,12 @@ import { resolveSpawnable } from '@cluesmith/codev-sdk/node/executable';
  */
 export function spawnCodevCli(command: string, args: string[], options: SpawnOptions): ChildProcess {
   const spawnable = resolveSpawnable(command, args);
+  if (unresolvedOnWindows(command, spawnable)) {
+    // The async contract callers already handle: an 'error' event, never a throw.
+    const child = new ChildProcess();
+    process.nextTick(() => child.emit('error', notFoundError(command, args)));
+    return child;
+  }
   return spawn(spawnable.command, spawnable.args, {
     ...options,
     windowsHide: true,
@@ -28,6 +57,9 @@ export function execCodevCli(
   options: ExecFileOptions,
 ): Promise<{ stdout: string; stderr: string }> {
   const spawnable = resolveSpawnable(command, args);
+  if (unresolvedOnWindows(command, spawnable)) {
+    return Promise.reject(notFoundError(command, args));
+  }
   return new Promise((resolve, reject) => {
     execFile(spawnable.command, spawnable.args, {
       ...options,
