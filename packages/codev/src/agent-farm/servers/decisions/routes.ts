@@ -176,22 +176,30 @@ export async function handleDecisionsImage(res: http.ServerResponse, workspacePa
   }
   const located = await locateImage(workspacePath, requested);
   if (!located.ok) return sendRefusal(res, located);
-  const stat = await fsp.stat(located.canonicalPath);
-  if (!stat.isFile()) return sendRefusal(res, refusal('not-found', `There is no image file at ${requested}.`));
-  if (stat.size > MAX_DECISIONS_IMAGE_BYTES) {
-    return sendRefusal(res, refusal(
-      'image-too-large',
-      `The image ${requested} is ${stat.size} bytes, over the ${MAX_DECISIONS_IMAGE_BYTES}-byte limit, so it was not read.`,
-    ));
+  const notFound = refusal('not-found', `There is no image file at ${requested}.`);
+  let bytes: Buffer;
+  try {
+    const stat = await fsp.stat(located.canonicalPath);
+    if (!stat.isFile()) return sendRefusal(res, notFound);
+    if (stat.size > MAX_DECISIONS_IMAGE_BYTES) {
+      return sendRefusal(res, refusal(
+        'image-too-large',
+        `The image ${requested} is ${stat.size} bytes, over the ${MAX_DECISIONS_IMAGE_BYTES}-byte limit, so it was not read.`,
+      ));
+    }
+    bytes = await fsp.readFile(located.canonicalPath);
+  } catch (err) {
+    // The file may go between being located and being read; that is not-found, as in readBytes.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return sendRefusal(res, notFound);
+    throw err;
   }
-  const bytes = await fsp.readFile(located.canonicalPath);
+  // Tower's own `Cache-Control: no-store` stands: the architect may replace an image at any time.
   res.writeHead(200, {
     'Content-Type': getMimeTypeForFile(located.canonicalPath),
     'Content-Length': bytes.length,
     'X-Content-Type-Options': 'nosniff',
     // An SVG opened as a document runs no script and loads nothing.
     'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-    'Cache-Control': 'no-cache',
   });
   res.end(bytes);
 }

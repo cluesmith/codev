@@ -210,6 +210,17 @@ describe('GET decisions/image (#1938)', () => {
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': expect.stringContaining('sandbox'),
     });
+    // Tower's global `Cache-Control: no-store` is left to stand.
+    expect(r.headers).not.toHaveProperty('Cache-Control');
+  });
+
+  it('is not-found when the image goes between being located and being read', async () => {
+    writeImage('codev/state/going.png');
+    const enoent = Object.assign(new Error('gone'), { code: 'ENOENT' });
+    vi.spyOn(fs.promises, 'readFile').mockRejectedValueOnce(enoent);
+    const r = await image('going.png');
+    expect(r.status).toBe(404);
+    expect(r.json().code).toBe('not-found');
   });
 
   it('resolves a `/`-rooted path against the workspace root', async () => {

@@ -169,12 +169,13 @@ function decisionsHtml(source: string): string {
   return page.body.innerHTML;
 }
 
-/** The workspace path an image source names, as written, or null for a URL of any other kind. */
+/** The workspace path an image source names, or null for a URL of any other kind. */
 function workspaceImagePath(src: string): string | null {
   if (src === '' || src.startsWith('//') || URL_SCHEME_RE.test(src)) return null;
   try {
-    // The renderer percent-encodes the source (`my shot.png` → `my%20shot.png`); the file is the decoded name.
-    return decodeURIComponent(src);
+    // The source is a URL reference: a `?query` or `#fragment` is not part of the file name, and the
+    // renderer percent-encodes the rest (`my shot.png` → `my%20shot.png`), so the file is the decoded path.
+    return decodeURIComponent(src.replace(/[?#].*$/s, ''));
   } catch {
     return null;
   }

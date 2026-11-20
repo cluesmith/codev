@@ -110,6 +110,22 @@ describe('DecisionsView images (#1938)', () => {
     expect(requestedPaths()).toEqual(['/docs/stacked.svg', 'decision-assets/my shot.png']);
   });
 
+  it('fetches the file a source names, without its ?query or #fragment', async () => {
+    show({ bodyMarkdown: '![cached](shot.png?v=2) ![anchored](diagram.svg#part)' });
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(2));
+    expect(requestedPaths()).toEqual(['shot.png', 'diagram.svg']);
+  });
+
+  it('drops srcset, which would make the browser load a candidate itself', async () => {
+    const { container } = show({
+      bodyMarkdown: '<img alt="raw" src="a.png" srcset="a.png 1x, a@2x.png 2x"> <img alt="web" src="https://example.com/x.png" srcset="local.png 2x">',
+    });
+    expect(container.querySelectorAll('img[srcset]')).toHaveLength(0);
+    expect(screen.getByRole('img', { name: 'web' })).toHaveAttribute('src', 'https://example.com/x.png');
+    await waitFor(() => expect(screen.getByRole('img', { name: 'raw' })).toHaveAttribute('src', 'blob:http://dashboard.test/1'));
+    expect(requestedPaths()).toEqual(['a.png']);
+  });
+
   it('loads images in the body, the question-and-answer thread and the ruled section', async () => {
     show(
       {

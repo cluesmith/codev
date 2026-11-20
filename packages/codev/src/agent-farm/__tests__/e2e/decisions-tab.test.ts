@@ -534,7 +534,7 @@ ${YOUR_WORD_IMAGES}
     await expect(notes.nth(1)).toHaveText('Image not loaded Escaping layout ../../../outside.png');
     await expect(notes.nth(1)).toHaveAttribute('title', /outside the workspace/);
 
-    // Every workspace image came through the keyed route; the browser never asked for a path itself.
+    // Every workspace image came through the keyed route; the browser never asked for an image path itself.
     const towerRequests = requested.filter((url) => url.startsWith(TOWER_URL));
     expect(towerRequests.filter((url) => /\.(png|svg)$/.test(new URL(url).pathname))).toEqual([]);
     expect(towerRequests.filter((url) => url.includes('/api/decisions/image?')).map((url) => new URL(url).searchParams.get('path')).sort())

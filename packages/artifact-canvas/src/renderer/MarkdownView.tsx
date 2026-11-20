@@ -14,11 +14,9 @@ export interface MarkdownViewProps {
  * reaches `dangerouslySetInnerHTML`.
  */
 export function MarkdownView({ source }: MarkdownViewProps): React.ReactElement {
-  const html = React.useMemo(() => renderMarkdown(source), [source]);
-  return (
-    <div
-      className="codev-artifact-canvas-rendered"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
+  // The object itself is memoized: React 19 compares `dangerouslySetInnerHTML` by identity and
+  // re-sets the HTML whenever it changes, which would undo any host's changes to the rendered DOM
+  // (and the reader's selection) on every render, not only when the source changes.
+  const markup = React.useMemo(() => ({ __html: renderMarkdown(source) }), [source]);
+  return <div className="codev-artifact-canvas-rendered" dangerouslySetInnerHTML={markup} />;
 }
