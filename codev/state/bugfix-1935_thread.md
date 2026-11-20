@@ -10,3 +10,8 @@
 - Pinned dashboard-e2e `playwright`, test.yml `canvas-browser` and `web-browser` to `ubuntu-24.04` with a #1935 comment; Decisions tab step now also requires `steps.install-browsers.outcome == 'success'`.
 - Regression test `bugfix-1935-playwright-runner-pin.test.ts` scans every workflow for jobs that run `playwright install`; 4 assertions fail on HEAD's workflows, pass with the fix.
 - Adjacent fix: `protocol-drift-audit.test.ts` offline-lookup test failed deterministically on this machine because a user `~/.npmrc` `@cluesmith:registry=` outranks `npm_config_registry`; the test now overrides the scoped key too.
+
+## PR (2026-11-20)
+- PR #1936. Dashboard E2E dispatched on the branch (run 44718205786): all steps green on ubuntu-24.04. canvas-browser + web-browser green on the PR.
+- CMAP: gemini skipped (agy exit 1); codex REQUEST_CHANGES only over porch-authored `chore(porch):` commit prefixes (not rewritten, porch owns those); claude APPROVE (test-header escape-hatch nit addressed).
+- Suggested follow-up for the architect: bump Playwright >=1.61 and unpin before ubuntu-24.04 retires.
