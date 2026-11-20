@@ -23,6 +23,8 @@
  * from this process's environment before anything else runs.
  */
 
+// First: never run a program from the current folder on Windows (#1911).
+import '../lib/exe-search-hardening.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
