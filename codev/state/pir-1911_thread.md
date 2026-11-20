@@ -6,3 +6,9 @@
 - No shell-string site uses pipes/redirects/||; only quoting. argv conversion is a straight swap.
 - Static guard as a vitest AST test (like windows-console-spawn-guard), not a script.
 - Plan at codev/plans/1911-windows-bare-name-user-tool-sp.md; waiting at plan-approval.
+
+## 2026-11-20 — plan revised (small version, owner direction)
+- Measured: libuv and cmd.exe both honour `NoDefaultCurrentDirectoryInExePath` set in-process. My first draft's claim that libuv ignores it was untested and wrong.
+- Gotcha: the Claude Code shell on this host already exports that variable, which masks the hazard in any naive probe. Tests must spawn a child with it unset as a control.
+- New approach: a side-effect module imported first in every bin + tower-server + shellper-main; VS Code cli-process refuses unresolved bare names; node-pty unresolved case to be tested.
+- Deferred to a follow-up: commandExists unification and shell-string-to-argv conversion.
