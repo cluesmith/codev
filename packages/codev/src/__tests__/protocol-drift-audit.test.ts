@@ -180,9 +180,15 @@ describe('protocol-drift-audit', () => {
       // registry, asserting the non-functional guarantee from the plan: it returns null and
       // completes within a bound. ECONNREFUSED is immediate; the spawnSync timeout
       // (NPM_LATEST_TIMEOUT_MS) is the hard backstop, so a generous ceiling never flakes.
+      // A scoped registry (`@cluesmith:registry=` in a user .npmrc) outranks
+      // npm_config_registry for this package, so it is overridden too, or the lookup
+      // still reaches the live registry on such a machine.
+      const scopedRegistryKey = 'npm_config_@cluesmith:registry';
       const prevRegistry = process.env.npm_config_registry;
+      const prevScopedRegistry = process.env[scopedRegistryKey];
       const prevRetries = process.env.npm_config_fetch_retries;
       process.env.npm_config_registry = 'http://127.0.0.1:1';
+      process.env[scopedRegistryKey] = 'http://127.0.0.1:1';
       process.env.npm_config_fetch_retries = '0';
       try {
         const start = performance.now();
@@ -193,6 +199,8 @@ describe('protocol-drift-audit', () => {
       } finally {
         if (prevRegistry === undefined) delete process.env.npm_config_registry;
         else process.env.npm_config_registry = prevRegistry;
+        if (prevScopedRegistry === undefined) delete process.env[scopedRegistryKey];
+        else process.env[scopedRegistryKey] = prevScopedRegistry;
         if (prevRetries === undefined) delete process.env.npm_config_fetch_retries;
         else process.env.npm_config_fetch_retries = prevRetries;
       }
