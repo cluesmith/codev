@@ -12,3 +12,10 @@
 - Gotcha: the Claude Code shell on this host already exports that variable, which masks the hazard in any naive probe. Tests must spawn a child with it unset as a control.
 - New approach: a side-effect module imported first in every bin + tower-server + shellper-main; VS Code cli-process refuses unresolved bare names; node-pty unresolved case to be tested.
 - Deferred to a follow-up: commandExists unification and shell-string-to-argv conversion.
+
+## 2026-11-20 — implement
+- node-pty: does its own C++ lookup (path_util::get_shell_path), PATH only, no PATHEXT, never the terminal cwd. Unresolved bare names fail "File not found". pty-command.ts unchanged.
+- Terminals get a hand-built env (windowsPtyBaseEnv allowlist), so they do NOT inherit the variable. Docs say so; told the architect.
+- Real-path proof: `porch init` in a repo with a planted git.exe (variable unset). Without the hardening import: "Command failed: git add" and no commit, so the planted file ran. With it: real commit. `codev doctor` is NOT a good probe: it never runs bare git in the cwd.
+- Windows CI dispatched: https://github.com/cluesmith/codev/actions/runs/44725012668
+- Full codev suite on this host: 8123 passed, 2 failed (load flakes, pass on re-run: launch-loop-exit-code EPERM temp cleanup; bugfix-1814-check-timeout 2574ms > 2500ms). Tower PID 37868 before and after. VS Code suite 1282 passed.
