@@ -29,8 +29,11 @@ export interface RulingRequest {
   fingerprint: string;
 }
 
-/** The refusals a splice can return; the rest belong to the route (file and config). */
-export type SpliceRefusalCode = Exclude<DecisionsRefusalCode, 'not-utf8' | 'write-failed' | 'not-found' | 'outside-workspace' | 'config-error'>;
+/** The refusals a splice can return; the rest belong to the routes (file, config and images). */
+export type SpliceRefusalCode = Exclude<
+  DecisionsRefusalCode,
+  'not-utf8' | 'write-failed' | 'not-found' | 'outside-workspace' | 'config-error' | 'not-an-image' | 'image-too-large'
+>;
 
 export interface SpliceRefusal {
   ok: false;

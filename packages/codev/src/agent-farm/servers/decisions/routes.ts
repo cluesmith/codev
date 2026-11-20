@@ -1,18 +1,22 @@
 // Tower routes for the Decisions tab (Spec 1819).
 //
-//   GET  /workspace/<enc>/api/decisions       → the parsed decisions document
-//   POST /workspace/<enc>/api/decisions/rule  → write the owner's ruling into the file
+//   GET  /workspace/<enc>/api/decisions             → the parsed decisions document
+//   POST /workspace/<enc>/api/decisions/rule        → write the owner's ruling into the file
+//   GET  /workspace/<enc>/api/decisions/image?path= → one image an item references (#1938)
 //
-// Neither route reads a path from the request: the file is the configured one,
-// resolved and contained by file.ts at every call. A write takes its turn on the file,
-// re-reads it, splices, and replaces it atomically; success returns the document
-// re-parsed from the bytes just written, then tells the hub architect (#1828).
+// The document and ruling routes never read a path from the request: the file is the
+// configured one, resolved and contained by file.ts at every call. A write takes its turn
+// on the file, re-reads it, splices, and replaces it atomically; success returns the
+// document re-parsed from the bytes just written, then tells the hub architect (#1828).
+// The image route is the one that takes a path, so it fails closed (see handleDecisionsImage).
 
 import type http from 'node:http';
 import { promises as fsp } from 'node:fs';
+import path from 'node:path';
 import type { DecisionsRefusalCode, DecisionsReadResponse, DecisionsRuleResponse } from '@cluesmith/codev-types';
 import { parseJsonBody } from '../../utils/server-utils.js';
-import { configuredDecisionsPath, decisionsWriteQueue, resolveDecisionsPath, writeFileAtomic, type DecisionsLog } from './file.js';
+import { getMimeTypeForFile } from '../tower-utils.js';
+import { configuredDecisionsPath, decisionsWriteQueue, isInside, resolveDecisionsPath, writeFileAtomic, type DecisionsLog } from './file.js';
 import { rulingNotice, type RulingNotifier } from './notice.js';
 import { parseDecisions, toDecisionsDocument } from './parse.js';
 import { spliceRuling, type RulingRequest } from './splice.js';
@@ -20,7 +24,16 @@ import { spliceRuling, type RulingRequest } from './splice.js';
 /** Largest ruling request body accepted: a maximum-length comment, JSON-escaped, with room to spare. */
 export const MAX_RULE_BODY_BYTES = 256 * 1024;
 
-/** HTTP status per refusal: bad input 400, absent 404, the file's state 409, a structure the splice would break 422. */
+/** The image types the image route serves, by extension. */
+export const DECISIONS_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
+
+/** Largest image the image route serves. */
+export const MAX_DECISIONS_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * HTTP status per refusal: bad input 400, absent 404, the file's state 409, an image too large 413
+ * or of a type not served 415, a structure the splice would break 422.
+ */
 export const DECISIONS_REFUSAL_STATUS: Record<DecisionsRefusalCode, number> = {
   'invalid-request': 400,
   'empty-ruling': 400,
@@ -39,6 +52,8 @@ export const DECISIONS_REFUSAL_STATUS: Record<DecisionsRefusalCode, number> = {
   'unknown-word': 409,
   'item-changed': 409,
   'structure-changed': 422,
+  'image-too-large': 413,
+  'not-an-image': 415,
   'not-utf8': 422,
   'config-error': 500,
   'write-failed': 500,
@@ -114,6 +129,71 @@ export async function handleDecisionsGet(res: http.ServerResponse, workspacePath
   const bytes = await readBytes(located.canonicalPath, located.displayPath);
   if (!Buffer.isBuffer(bytes)) return sendRefusal(res, bytes);
   send(res, 200, { ok: true, document: toDecisionsDocument(parseDecisions(bytes.toString('utf8')), located.displayPath) });
+}
+
+function isImagePath(file: string): boolean {
+  return DECISIONS_IMAGE_EXTENSIONS.has(path.extname(file).slice(1).toLowerCase());
+}
+
+/** The image's canonical path, inside the workspace and of a type served, or why not. */
+async function locateImage(workspacePath: string, requested: string): Promise<{ ok: true; canonicalPath: string } | Refusal> {
+  const notAnImage = (what: string) =>
+    refusal('not-an-image', `${what} is not a ${[...DECISIONS_IMAGE_EXTENSIONS].join(', ')} image, so it was not read.`);
+  if (!isImagePath(requested)) return notAnImage(requested);
+  const located = await locate(workspacePath);
+  if (!located.ok) return located;
+  const root = await fsp.realpath(workspacePath);
+  // Relative to the decisions file, as any markdown viewer reads it; `/` is the workspace root.
+  const target = requested.startsWith('/')
+    ? path.join(root, requested)
+    : path.resolve(root, path.dirname(located.displayPath), requested);
+  const outside = refusal('outside-workspace', `The image ${requested} is outside the workspace, so it was not read.`);
+  // Checked before the path touches the disk, so nothing outside the workspace is even probed.
+  if (!isInside(root, target)) return outside;
+  let canonicalPath: string;
+  try {
+    canonicalPath = await fsp.realpath(target);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return refusal('not-found', `There is no image at ${requested}.`);
+    throw err;
+  }
+  if (!isInside(root, canonicalPath)) return outside;
+  if (!isImagePath(canonicalPath)) return notAnImage(`${requested} (a link to ${path.relative(root, canonicalPath)})`);
+  return { ok: true, canonicalPath };
+}
+
+/**
+ * GET …/api/decisions/image?path=<path> — one image an item's markdown references (#1938). The
+ * only decisions route that takes a path from the request, so it fails closed: a relative path
+ * resolves against the decisions file's directory and a `/`-rooted one against the workspace
+ * root; the file served must sit inside the workspace with symlinks followed, have an image
+ * extension (the link's and its target's), and be at most {@link MAX_DECISIONS_IMAGE_BYTES}.
+ */
+export async function handleDecisionsImage(res: http.ServerResponse, workspacePath: string, requested: string | null): Promise<void> {
+  if (!requested || requested.includes('\0')) {
+    return sendRefusal(res, refusal('invalid-request', '"path" must be a non-empty path.'));
+  }
+  const located = await locateImage(workspacePath, requested);
+  if (!located.ok) return sendRefusal(res, located);
+  const stat = await fsp.stat(located.canonicalPath);
+  if (!stat.isFile()) return sendRefusal(res, refusal('not-found', `There is no image file at ${requested}.`));
+  if (stat.size > MAX_DECISIONS_IMAGE_BYTES) {
+    return sendRefusal(res, refusal(
+      'image-too-large',
+      `The image ${requested} is ${stat.size} bytes, over the ${MAX_DECISIONS_IMAGE_BYTES}-byte limit, so it was not read.`,
+    ));
+  }
+  const bytes = await fsp.readFile(located.canonicalPath);
+  res.writeHead(200, {
+    'Content-Type': getMimeTypeForFile(located.canonicalPath),
+    'Content-Length': bytes.length,
+    'X-Content-Type-Options': 'nosniff',
+    // An SVG opened as a document runs no script and loads nothing.
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    'Cache-Control': 'no-cache',
+  });
+  res.end(bytes);
 }
 
 /**

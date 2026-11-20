@@ -452,6 +452,114 @@ _Zone: PT_
   });
 });
 
+test.describe('Issue #1938: images in decision items', () => {
+  const REMOTE_IMAGE = 'https://decisions-e2e.invalid/remote.png';
+  const QUESTION_IMAGES = 'Compact or stacked rows?';
+  const YOUR_WORD_IMAGES = '**Your word:** `compact` / `stacked` / `hold`';
+  const IMAGES = `# Pending owner decisions — all architects (hub: main)
+
+## Open
+
+### web-4 · 2026-10-17 9:00 pm PT · ${QUESTION_IMAGES}
+
+- **Options:** (a) \`compact\` = one row (b) \`stacked\` = two rows
+
+![Compact layout](decision-assets/web-4-compact.png)
+![Stacked layout](/docs/web-4-stacked.svg)
+![Remote layout](${REMOTE_IMAGE})
+
+![Missing layout](decision-assets/missing.png) ![Escaping layout](../../../outside.png)
+
+${YOUR_WORD_IMAGES}
+
+## Ruled
+`;
+  const STACKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="200" viewBox="0 0 480 200">
+  <rect width="480" height="200" fill="#0f766e"/>
+  <rect x="20" y="20" width="440" height="70" rx="8" fill="#5eead4"/>
+  <rect x="20" y="110" width="440" height="70" rx="8" fill="#99f6e4"/>
+  <text x="240" y="62" font-family="sans-serif" font-size="28" text-anchor="middle" fill="#134e4a">stacked: row one</text>
+  <text x="240" y="152" font-family="sans-serif" font-size="28" text-anchor="middle" fill="#134e4a">row two</text>
+</svg>
+`;
+
+  /** A real PNG, drawn and captured by the browser. */
+  async function drawPng(page: Page, label: string, color: string, width: number, height: number): Promise<Buffer> {
+    await page.setContent(
+      `<div id="art" style="width:${width}px;height:${height}px;background:${color};color:#fff;` +
+        `font:600 32px sans-serif;display:flex;align-items:center;justify-content:center">${label}</div>`,
+    );
+    return page.locator('#art').screenshot();
+  }
+
+  async function naturalWidth(image: Locator): Promise<number> {
+    return image.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0));
+  }
+
+  test('workspace, /-rooted and http(s) images show inline; a missing or escaping one shows not loaded; ruling still works', async ({ page, context }) => {
+    const painter = await context.newPage();
+    const compact = await drawPng(painter, 'compact: one row', '#1d4ed8', 1600, 240);
+    const remote = await drawPng(painter, 'remote', '#9333ea', 320, 160);
+    await painter.close();
+    await context.route((url) => url.href === REMOTE_IMAGE, (route) =>
+      route.fulfill({ status: 200, contentType: 'image/png', body: remote }),
+    );
+    const ws = makeWorkspace({ [DEFAULT_FILE]: IMAGES, 'docs/web-4-stacked.svg': STACKED_SVG });
+    mkdirSync(ws.path('codev/state/decision-assets'));
+    writeFileSync(ws.path('codev/state/decision-assets/web-4-compact.png'), compact);
+    const file = ws.path(DEFAULT_FILE);
+
+    const requested: string[] = [];
+    page.on('request', (req) => requested.push(req.url()));
+    await openDecisions(page, ws);
+
+    const web = card(page, QUESTION_IMAGES);
+    for (const name of ['Compact layout', 'Stacked layout', 'Remote layout']) {
+      const image = web.getByRole('img', { name });
+      await expect.poll(() => naturalWidth(image), { message: `${name} loads`, timeout: 10_000 }).toBeGreaterThan(0);
+    }
+    await expect(web.getByRole('img', { name: 'Compact layout' })).toHaveAttribute('src', /^blob:/);
+    await expect(web.getByRole('img', { name: 'Stacked layout' })).toHaveAttribute('src', /^blob:/);
+    await expect(web.getByRole('img', { name: 'Remote layout' })).toHaveAttribute('src', REMOTE_IMAGE);
+
+    // A 1600px image never widens the card.
+    const cardBox = await web.boundingBox();
+    const imageBox = await web.getByRole('img', { name: 'Compact layout' }).boundingBox();
+    expect(imageBox!.width).toBeLessThanOrEqual(cardBox!.width);
+
+    const notes = web.locator('.decisions-image-missing');
+    await expect(notes).toHaveCount(2);
+    await expect(notes.nth(0)).toHaveText('Image not loaded Missing layout decision-assets/missing.png');
+    await expect(notes.nth(0)).toHaveAttribute('title', 'There is no image at decision-assets/missing.png.');
+    await expect(notes.nth(1)).toHaveText('Image not loaded Escaping layout ../../../outside.png');
+    await expect(notes.nth(1)).toHaveAttribute('title', /outside the workspace/);
+
+    // Every workspace image came through the keyed route; the browser never asked for a path itself.
+    const towerRequests = requested.filter((url) => url.startsWith(TOWER_URL));
+    expect(towerRequests.filter((url) => /\.(png|svg)$/.test(new URL(url).pathname))).toEqual([]);
+    expect(towerRequests.filter((url) => url.includes('/api/decisions/image?')).map((url) => new URL(url).searchParams.get('path')).sort())
+      .toEqual(['../../../outside.png', '/docs/web-4-stacked.svg', 'decision-assets/missing.png', 'decision-assets/web-4-compact.png'].sort());
+    await screenshot(page, 'decisions-images');
+
+    // A click opens the image full size in a new tab, shown through an <img>.
+    const [opened] = await Promise.all([
+      context.waitForEvent('page'),
+      web.getByRole('img', { name: 'Compact layout' }).click(),
+    ]);
+    const full = opened.getByRole('img', { name: 'Compact layout' });
+    await expect.poll(() => naturalWidth(full), { timeout: 10_000 }).toBe(1600);
+    await opened.close();
+
+    // Ruling on the item writes exactly the word; the images stay loaded.
+    await web.getByRole('radio', { name: /^stacked/ }).check();
+    const before = readFileSync(file, 'utf8');
+    await web.getByRole('button', { name: 'Submit' }).click();
+    await expect(rulingText(web)).toHaveText('stacked');
+    expect(readFileSync(file, 'utf8')).toBe(withRuling(before, YOUR_WORD_IMAGES, 'stacked\n'));
+    await expect.poll(() => naturalWidth(web.getByRole('img', { name: 'Compact layout' }))).toBeGreaterThan(0);
+  });
+});
+
 test.describe('Spec 1819: Decisions tab at phone width', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 

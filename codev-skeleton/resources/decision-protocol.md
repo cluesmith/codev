@@ -90,6 +90,14 @@ per option and a comment box.
 - **Questions and answers** are body lines above the word line, `- **You asked (<time>):** …`
   and `- **<Name>'s answer (<time>):** …`, continued on lines indented two spaces. The tab shows
   them on the card as a thread (section 3c).
+- **Images** are ordinary markdown in the body, above the `**Your word:**` line:
+  `![Compact layout](decision-assets/web-4-compact.png)`. A relative path is read from the
+  decisions file's directory and a path starting with `/` from the workspace root; keep the files
+  in `decision-assets/` beside the decisions file. The tab shows PNG, JPEG, GIF, WebP and SVG
+  files up to 10 MB that are inside the workspace (symlinks followed), and `http(s)` URLs as
+  they are. An image it cannot show (missing, outside the workspace, another type, too large, or
+  a `data:` URL) appears as its alt text and path, marked not loaded. A click opens an image full
+  size in a new tab.
 - **Whatever follows the `**Your word:**` line is the ruling.** While nothing follows it, the
   card takes a submit, which writes the chosen word on the next line and then the comment after
   a blank line, exactly as the owner would type them. Once any text follows the line, typed by
