@@ -1,0 +1,7 @@
+# bugfix-1935 thread
+
+## Investigate (2026-11-20)
+- Reproduced from CI logs: run 44264876229 (2026-11-18) ran on `Image: ubuntu-24.04`; run 44485513618 (2026-11-19) ran on `Image: ubuntu-26.04` (20261111.196.1). Install step: `Error: ERROR: Playwright does not support chromium on ubuntu26.04-x64`, exit 1.
+- Lockfile resolves playwright/playwright-core 1.59.1. Checked playwright-core tarballs: 1.60.0 has no ubuntu26.04 entry; 1.61.0+ (through latest 1.65.1) do. So a Playwright bump is a real alternative, but it is a dependency + browser-revision jump; pinning the runner is the minimal, deterministic fix.
+- Correction to the issue text: the install step DID fail its own step (bash -e, exit 1), and "Run Playwright tests" was skipped. The launch-error noise came from "Run Decisions tab tests", whose `if: ${{ !cancelled() }}` (meant to run it even if the main suite fails) also runs it after the browser install failed. Fix: gate it on the install step's outcome too.
+- Other ubuntu-latest workflows (e2e, post-release-e2e, sdk-canary) do not use Playwright: out of scope.
