@@ -1,8 +1,13 @@
 # Spec 1940 — final review pass: verdicts and what is still open
 
 The second of the two passes the architect asked for, run on the text committed at `23ad14da5`.
-That commit is the version at the gate. **Nothing was changed after this pass**, by instruction,
-so every point below is open. None has been applied and none has been rebutted.
+Nothing was changed straight after this pass, by instruction.
+
+**Update, later the same day:** on the architect's instruction all eleven numbered points and the
+four smaller ones were applied in commit `90ebb0245`, which touches only the spec, so
+`git diff 23ad14da5 90ebb0245` reads point by point. No review round followed, also by
+instruction: the text at the gate is one step ahead of what the reviewers read. For number 11 the
+choice was to serialise relay calls per peer, not to narrow the promise.
 
 | Reviewer | Final verdict |
 |---|---|

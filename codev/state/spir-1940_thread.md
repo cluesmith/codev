@@ -145,3 +145,13 @@ text, and stop there whatever the verdicts. No edits while a lane is running.
   all eleven; none needs a design change, each is a sentence or a row.
 - Slip, corrected: force-staged an ignored review output (`*.txt` under `codev/projects/` is
   gitignored on purpose); unstaged before committing.
+
+## 2026-11-21 — the fifteen open points applied (architect instruction, 03:57Z)
+
+Applied all eleven numbered points and the four smaller ones from the final pass, in a commit
+that touches only the spec (`90ebb0245`), so the diff against `23ad14da5` reads point by point.
+No further review round, by instruction: the gate text is now one step ahead of what codex and
+claude read. Number 11: chose to serialise relay calls per peer (one sentence, one test) over
+narrowing the ordering promise. Checked in source before writing point 6: the resolver intercepts
+only the literal `architect` before a colon, so `arch:review` today is agent `review` in a
+workspace called `arch`. Gate still pending; the owner has not approved.
