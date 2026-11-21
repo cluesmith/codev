@@ -115,7 +115,7 @@ Facts below are from the Tower code and from the codev-cloud repository at `orig
 
 ### Stage 1: Named architects across workspaces, one Tower, no cloud
 
-- Any architect, builder or human shell on a Tower can address a named architect in **another workspace on the same Tower**:
+- Any architect or human shell on a Tower can address a named architect in **another workspace on the same Tower**. Builders keep today's reach: their own spawning architect, plus other workspaces' front doors (Q7).
 
   ```bash
   afx send shannon/architect:ob-refine "…"
@@ -181,18 +181,25 @@ Facts below are from the Tower code and from the codev-cloud repository at `orig
 - [ ] A 1-, 2- and 3-segment address resolves as defined in the recommended grammar below.
   - A 4-or-more-segment address fails with a "reserved form" error.
   - No address ever resolves to a recipient other than the one it names. Unresolvable means a loud error that states the reason.
-- [ ] Bare `architect` sent from a builder still routes to its spawning architect. The Spec 755 spoofing rule still rejects a builder naming a sibling architect in its own workspace, whether the address is written unqualified (`architect:x`) or qualified with its own workspace (`codev/architect:x`).
+- [ ] Bare `architect` sent from a builder still routes to its spawning architect.
+- [ ] The builder rule is enforced in every position. A builder may **name** an architect only if it is its own spawning architect, whether the address is written unqualified (`architect:x`), qualified with its own workspace (`codev/architect:x`), qualified with another workspace, or Tower-qualified. A builder reaches any other workspace's architects only through the front door, `ws/architect` (recommended, Q7).
 - [ ] The legacy form `<workspace>:<agent>` keeps resolving exactly as today. Every use prints a deprecation notice naming the replacement (`<workspace>/<agent>`). `architect:<name>` is not deprecated.
+- [ ] A colon in a multi-segment address is valid only as the `architect:<name>` agent segment. Anything else (`devvm/codev:architect`, `shannon/ws:architect`) fails as a malformed address, never as a quiet `NOT_FOUND`.
 - [ ] No address depends on a filesystem path or its spelling. Workspaces are resolved through the registry keyed by `workspaceKey()`. A Windows test proves that two spellings of the same directory yield the same workspace name.
 
 ### Stage 1
 
-- [ ] Every registered workspace has either a Tower-unique name or an explicit "unnamed" status with the reason (collision, or a basename that is not a valid name).
-  - A command lists this Tower's workspace names and their architects as full addresses.
-  - A human can set a name.
-  - A name pinned in the workspace's committed config survives moving or re-cloning the directory.
-- [ ] `afx send <ws>/architect:<name>` from any sender on the Tower delivers to that named architect through the mailbox and gate (closing the #1605 gap).
-- [ ] Every message whose sender is in a different workspace from its recipient carries the sender's workspace-qualified address in its frame. A builder-bound frame's reply hint names that address instead of bare `architect`.
+- [ ] Every registered workspace has either a Tower-unique name or an explicit "unnamed" status with the reason (collision, or a basename that is not a valid name). Naming follows the deterministic contract under "Workspace and Tower names":
+  - an assigned name is never taken away by another workspace registering;
+  - a human-set name never steals one;
+  - registry rows that resolve to the same directory are one workspace for naming purposes.
+- [ ] A command lists this Tower's workspace names and their architects as full addresses.
+- [ ] A human can set a name.
+- [ ] A name pinned in the workspace's committed config survives moving or re-cloning the directory.
+- [ ] `afx send <ws>/architect:<name>` from any architect or human shell on the Tower delivers to that named architect through the mailbox and gate (closing the #1605 gap).
+- [ ] Every message whose sender is in a different workspace from its recipient carries the sender's workspace-qualified address in its frame.
+- [ ] The reply hint is the shortest address the **recipient is permitted to use** that reaches the sender. When no permitted address reaches the sender (for example, a builder messaged by a named architect it may not name), the hint says to reply through the recipient's own architect.
+- [ ] Short frames keep their single-write path: a builder-bound frame stays within the #1567 bounds (3 lines, 256 bytes), so the added provenance does not move short messages onto bracketed paste.
 - [ ] The stage 1 headline path works with no `cloud-config.json` present.
 
 ### Stage 2
@@ -200,7 +207,9 @@ Facts below are from the Tower code and from the codev-cloud repository at `orig
 - [ ] The headline path works between two real Towers registered to the same Codev Cloud account. The recipient's frame is marked remote and names `tower/workspace/agent`.
 - [ ] A message to a remote Tower is persisted locally **before** the first relay attempt. The sender sees one of `delivered` / `held:<reason>` / `queued:<reason>` / `rejected:<reason>`.
 - [ ] A `queued` message delivers automatically once the target Tower is reachable again, within the retry window. Past the window it becomes `expired`. Queued and expired outbound messages are listable and dismissable by a human on the sending Tower.
-- [ ] A retried message is never delivered twice: the receiving Tower deduplicates on (origin Tower, message id).
+- [ ] A retried message is never delivered twice. The receiving Tower deduplicates on (origin Tower, message id), and keeps dedupe records strictly longer than the longest sender retry window.
+- [ ] Queued messages to the same remote agent are relayed in the order they were sent (FIFO per target agent). There is no ordering guarantee across different targets.
+- [ ] A relay delivery whose attestation does not verify is refused by the receiving Tower. This covers forged attestation headers arriving through the owner proxy, a replayed delivery, and a local caller posting to the relay route.
 - [ ] A remote message is persisted to the receiving Tower's mailbox before any delivery attempt, and delivered only through the render gate. `raw`, `interrupt`, ESC, `no-enter`, `--all` and `--delay` are refused for remote targets, each with a clear error.
 - [ ] A Tower-qualified address naming this Tower's own name resolves locally without contacting the cloud.
 - [ ] An unknown Tower name fails fast with `rejected: unknown-tower`. For the sender's own account, the error lists the account's Tower names.
@@ -208,12 +217,21 @@ Facts below are from the Tower code and from the codev-cloud repository at `orig
 
 ### Stage 3
 
-- [ ] With no grant, every message from another owner's Tower is rejected with a uniform `not-authorized`. The response does not reveal whether the target workspace or agent exists.
+- [ ] Tower existence does not leak. An address naming a Tower that is neither the sender's own nor one that has granted the sender anything yields `rejected: unknown-tower`, identical whether the slug exists or not. On a Tower that has granted the sender something, any target outside the grant yields a uniform `not-authorized` that does not reveal whether the target exists.
+- [ ] An email grant binds to exactly one account. A pending grant binds to the account that first presents that verified email; from then on the grant follows that account's user id, not the email.
+  - The account changing its email keeps the grant (the frame shows the current email).
+  - Deleting the account voids the grant.
+  - A different account that later verifies the same email does not inherit it.
+- [ ] The stage 3 human surfaces exist and are usable without editing files or the database:
+  - **grants:** create, list and revoke, on the receiving side;
+  - **reachable peers:** a list of what I can reach, on the sending side;
+  - **held messages:** see a message held for release, read its body, release it or dismiss it.
 - [ ] A grant scoped to `ws/architect` (front door) or `ws/architect:<name>` admits exactly that scope. Builder targets are never admitted for another owner.
 - [ ] A message from another owner under a `hold` grant becomes `held: awaiting-release`, and the target agent receives nothing until a human releases it. A release through a non-interactive agent shell is refused.
 - [ ] A frame from another owner shows the cloud-verified owner email and the sending Tower's name, and is visibly distinct from same-owner frames. A body line that imitates a frame delimiter is neutralized.
 - [ ] Revoking a grant on the receiving Tower rejects the next message from that owner even if the cloud still forwards it.
 - [ ] A reply from the exact remote agent I messaged is admitted inside the reply window without a grant. A message from any other agent on that Tower is not.
+- [ ] A reply-path message is delivered in my delivery mode for that owner: the mode of my grant to them if one exists, otherwise `hold`.
 - [ ] Per-peer rate limits and a per-peer cap on messages held for release are enforced on the receiving Tower. Exceeding them yields `rejected: rate-limited` or `rejected: queue-full`.
 
 ## Constraints
@@ -225,6 +243,11 @@ Facts below are from the Tower code and from the codev-cloud repository at `orig
 - **Server/client isolation (#1189).** Wire contracts (the relay envelope, outcomes, discovery payloads) live in `codev-types`. `codev-core` and `codev-sdk` do not import each other. The address parser must be usable by both the Tower and the SDK, so it must be environment-agnostic.
 - **Windows.** Workspaces are keyed by `workspaceKey()`'s canonical spelling, and an address must not depend on how a path is spelled.
 - **Message ceiling.** 48 KB per body, enforced by the sender, the cloud and the receiver.
+- **Existing frame contracts the provenance work must honour.** These are named so the plan cannot trip on them:
+  - `isSafeSenderId` (`^[A-Za-z0-9._:-]{1,128}$`) is enforced on `POST /api/send` and **excludes `/`**. A qualified sender identity therefore cannot travel as today's `from` string unchanged. The wire must carry origin as structured fields, or the validator must change deliberately.
+  - `architectHeaderLabel` recognizes only senders that begin with `architect:`. A qualified sender would degrade to a bare `ARCHITECT` and lose exactly the provenance stage 1 adds.
+  - #1567: a builder-bound frame is typed as one short write only while it is under 4 lines and at most 256 bytes. The added provenance and reply hint must not move short messages onto the bracketed-paste path.
+- **Path spelling on POSIX.** `workspaceKey()` canonicalizes only on Windows. On POSIX it is the path as given (#1870, open), so one macOS directory can hold two registry rows. Naming must treat rows that resolve to the same directory as one workspace.
 - **Proportionality.** Design the address and trust model for all three stages, and nothing a hypothetical fourth stage alone would need. The grammar reserves one extra leading segment for a future owner/organisation component, as room rather than machinery.
 - **Cross-repository work.** The relay, the directory and the grant registry are Codev Cloud work in the codev-cloud repository. This repository owns the Tower, the CLI and the shared contracts.
 - **Gates.** Decisions that are the owner's (above all the posture toward other owners) are surfaced in Open Questions, not settled silently.
@@ -384,13 +407,17 @@ Short forms (`architect`, `arch`, `spir-42`, `42`) are resolution inputs only. T
 | Segments | Resolves | Rules |
 |---|---|---|
 | 1 (`agent`) | in the sender's workspace | Exactly today's rules: Spec 755 affinity for bare `architect` from a builder; the spoofing rule for `architect:<name>` from a builder; builder exact match, then tail match (an ambiguous tail is `AMBIGUOUS`); shells. |
-| 2 (`ws/agent`) | in workspace `ws` on this Tower | If `ws` is the sender's own workspace, identical to the 1-segment form (affinity and spoofing apply). Otherwise: bare `architect` means that workspace's `main`, else its first registered architect (unchanged); `architect:<name>` means that named architect (**new**, goal 1); builders and shells as in the 1-segment form. The Spec 755 spoofing rule does not apply across workspaces (see "Answering #1605"). |
+| 2 (`ws/agent`) | in workspace `ws` on this Tower | If `ws` is the sender's own workspace, identical to the 1-segment form (affinity and spoofing apply). Otherwise: bare `architect` means that workspace's `main`, else its first registered architect (unchanged); `architect:<name>` means that named architect (**new**, goal 1), for architect and human-shell senders; builders and shells as in the 1-segment form. **The builder rule generalizes Spec 755:** a builder may name an architect only if it is its own spawning architect, in any workspace or on any Tower. Elsewhere it uses the front door, `ws/architect`. This keeps builders' reach exactly where it is today (Q7). |
 | 3 (`tower/ws/agent`) | on Tower `tower` | If `tower` is this Tower's own name: identical to the 2-segment form, with no cloud contact. Otherwise the sender's Tower relays it (Part D), and the receiving Tower resolves `ws/agent` under its own rules **for a remote sender**: no affinity, so bare `architect` means `main`, and then its authorization (Part C). |
 | 4 or more | — | `rejected: reserved-form`. |
 
 - **Legacy `<ws>:<agent>`.** This is a single segment containing `:` whose left side is not `architect`. It is accepted as `<ws>/<agent>`. Each use returns a deprecation notice in the response, which the CLI prints to stderr, naming the replacement. The workspace is matched as today, by registered name.
   - The edge case of a workspace literally named `architect` keeps today's reading of `architect:<x>` (a named architect). Such a workspace is reachable as `architect/<agent>`.
   - How long the legacy form survives is Q10.
+- **Colons in multi-segment addresses.** The legacy colon form is honoured **only in a 1-segment address**. In a multi-segment address a colon is valid only as the `architect:<name>` agent segment. Anything else is a malformed address, with a purposeful error:
+  - `devvm/codev:architect`;
+  - `shannon/marketmaker:architect`;
+  - a colon in a Tower or workspace segment.
 - **Errors** are loud and specific, and never a fallback:
   - `NOT_FOUND` lists, for a local workspace, the registered workspace names or that workspace's architects;
   - `AMBIGUOUS` lists the candidates;
@@ -406,9 +433,17 @@ Short forms (`architect`, `arch`, `spir-42`, `42`) are resolution inputs only. T
   2. a name pinned in the workspace's committed Codev config, which travels with the repository and so survives moves and re-clones;
   3. the lowercased path basename, if it fits `ws-name` and is unique.
 
-  Otherwise the workspace is **unnamed**: it works normally, but it cannot be addressed from outside itself until a human names it. There is no silent `-2` suffix, because an address that changes depending on which workspace registered first would be unpredictable.
-  - Two clones of one repository on one Tower whose pinned names collide: the second is unnamed until overridden locally. The error says so.
-  - Renaming a workspace changes only its label. Grants and mailbox rows key on the registry identity, not the label. The old name simply stops resolving, and the resulting `NOT_FOUND` lists the current names.
+  Otherwise the workspace is **unnamed**: it works normally, but it cannot be addressed from outside itself until a human names it. There is no silent `-2` suffix.
+
+  The contract is deterministic, and it never takes a valid address away as a side effect:
+  1. **Assignment is persistent.** A name, once assigned to a workspace, is stored in the registry and kept until a human changes it, a changed pin re-applies (rule 4), or the workspace is removed.
+  2. **First holder keeps it.** An automatic name (pinned or basename) is assigned only if no other workspace holds it. A workspace registering later whose automatic name is taken is left unnamed, and the error names the holder. Registering a new clone never invalidates an existing workspace's address.
+  3. **Humans never steal.** Setting a name another workspace holds fails loudly. The human must rename or remove the holder first.
+  4. **Pins re-apply only if free.** A pin added or changed in config is applied on the next registration if the name is free. If it is taken, the workspace keeps its current name and the conflict is reported.
+  5. **One directory is one workspace.** Registry rows that resolve to the same real directory (symlinks, trailing slashes, `/tmp` against `/private/tmp`) are one workspace for naming, so a workspace never collides with itself. Full path-independence on POSIX depends on #1870.
+  6. **Upgrade.** Workspaces that already collide on basename at upgrade are all left unnamed. They are `AMBIGUOUS` today, so nothing that worked before stops working.
+
+  Renaming a workspace changes only its label. Grants and mailbox rows key on the registry identity, not the label. The old name simply stops resolving, and the resulting `NOT_FOUND` lists the current names.
 - **Tower name.** This is the Tower's Codev Cloud slug. It is globally unique and canonical per #1871. A Tower with no cloud registration has no Tower name: 3-segment addresses are unavailable on it (a loud error pointing at `afx tower connect`), while 1- and 2-segment addressing is unaffected.
   - A rename in the cloud re-slugs the Tower. The old slug fails as `unknown-tower`, and for the owner's own account the error lists the account's current Tower names.
   - Trust records and grants key on the stable `towerId` and owner user id, so a rename never breaks trust. It only breaks addresses typed with the old name, and loudly.
@@ -420,7 +455,8 @@ Short forms (`architect`, `arch`, `spir-42`, `42`) are resolution inputs only. T
   - `ws/agent`, across workspaces;
   - `tower/ws/agent`, across Towers.
 
-  So the provenance *is* the reply address, and every cross-workspace or remote builder-bound frame's reply hint carries it in place of bare `architect`.
+  So the provenance *is* the reply address.
+- The reply hint is the shortest address **the recipient is permitted to use** that reaches the sender. For a builder recipient that is never a named architect other than its own spawning architect. When nothing permitted reaches the sender, the hint says to reply through the recipient's own architect. The hint never suggests an address the recipient's send would refuse.
 - Remote frames carry a distinct **REMOTE** marker. Frames from another owner also carry that owner's **cloud-verified email**. The receiving Tower attests to that email; the agent name is only the sending Tower's claim (see Part C, "Provenance and spoofing").
 - A remote body cannot contain a line the recipient would read as a frame delimiter. The receiving Tower neutralizes delimiter-shaped lines in remote bodies, so a body cannot forge a local header after the real one.
 - `afx inbox`, the message-bus frames the dashboard reads, and Tower logs show sender and recipient in the same grammar. Mailbox rows store origin as structured fields (Tower, workspace, agent, owner, remote message id), not as a concatenated string.
@@ -432,7 +468,9 @@ The exact frame wording is plan-level. The invariants above are spec-level.
 #1605 argued that per-name cross-workspace addressing breaks **encapsulation** (seats come and go) and bypasses a **single trust ingress** (claims Tower cannot attest). This design reverses its out-of-scope clause for the owner's own workspaces, as goal 1 asks. Each argument is answered:
 
 - **Encapsulation.** `ws/architect` stays the stable public front door, and nothing about it changes. Naming a seat directly is the sender's explicit choice, and a seat that has gone fails loudly with the current architect list. That is the same contract `architect:<name>` already has inside a workspace.
-- **Trust ingress.** On one Tower every workspace belongs to the same owner, and every cross-workspace frame now *states* its origin (`codev/architect:local`), so the receiving seat can apply its own scrutiny. For other owners (stage 3) the front door *is* the default: a grant names exactly the scope it admits, and `ws/architect` is the natural one.
+- **Trust ingress.** On one Tower every workspace belongs to the same owner, and every cross-workspace frame now *states* its origin (`codev/architect:local`), so the receiving seat can apply its own scrutiny.
+  - Named seats are opened to **architects and human shells** only. Builders keep the front door, so a prompt-injected builder gains no new direct line to any seat (Q7).
+  - For other owners (stage 3) the front door *is* the default: a grant names exactly the scope it admits, and `ws/architect` is the natural one.
 - **Opt-out.** A workspace that wants front-door-only behaviour can declare it in its config. Its named seats then refuse senders from other workspaces with a purposeful error that names the front door. That error is #1605's requested change 1.
 
 #1605's requested error message and documentation are subsumed by stage 1 (Q5).
@@ -464,14 +502,18 @@ Online/offline status is unavoidably revealed to grantees, because `queued: towe
 #### Identity
 
 - **Tower.** The cloud's `towerId` (ULID), proven to the cloud by the Tower's `ctk_` key on every relay call, over TLS. The name (slug) is a label over it.
-- **Owner.** The cloud `userId`. Between owners it is presented as the account's **verified email**.
+- **Owner.** The cloud `userId`. Between owners it is presented as the account's **verified email**. Grants are *entered* by email but *bound* to a `userId`:
+  - A pending email grant binds to the first account that presents that verified email in an attested delivery. The receiving Tower records the `userId` at that moment.
+  - From then on the grant follows that `userId`. A later email change keeps the grant, and the frame shows the current verified email.
+  - Account deletion voids the grant. The cloud reports a `userId` that no longer exists, and the Tower treats it as revoked.
+  - A different account that later verifies a released email never inherits a grant already bound to a `userId`.
 - **Agent.** The sending Tower asserts it, exactly as `from` is asserted locally today. Builders are verified against `global.db`, and architects come from `CODEV_ARCHITECT_NAME`. The receiving Tower can verify the owner and the Tower, through the cloud's attestation. It can never verify the agent name, so provenance labels the agent as the sending Tower's claim.
 
 #### Trust model alternatives
 
 | Approach | Description | Trade-offs |
 |---|---|---|
-| R1: Cloud-attested identity, policy enforced at both ends **(recommended)** | The cloud authenticates the sending Tower, attaches its `towerId`, `userId` and verified email to the relayed delivery, and enforces coarse policy: same owner, or an active grant between the two. The receiving Tower re-checks everything it can on its own (below). | Simple, and needs no key management. It relies on the cloud for identity, but **the cloud is already in every connected Tower's trusted computing base**: the tunnel can drive any local route with the local key stamped. R1 adds no new trust in the cloud. It adds defence in depth against cloud *bugs*: the Tower's own grants bound what any relay mistake can deliver. |
+| R1: Cloud-attested identity, signed per tunnel session, policy enforced at both ends **(recommended)** | The cloud authenticates the sending Tower and enforces coarse policy: same owner, or an active grant between the two. It attaches an **attestation** to the relayed delivery: the origin `towerId`, `userId` and verified email, the message id, a timestamp and a hash of the body. It **MACs** the attestation with a secret it issued to the receiving Tower in that tunnel's authenticated handshake. The secret lives in memory on both ends, is never written to disk, and is replaced on every reconnect. The receiving Tower verifies the MAC, rejects stale or replayed attestations, then re-checks its own policy (below). | Little key management: no pairing and no per-peer keys, one secret per tunnel session. It relies on the cloud for identity, but **the cloud is already in every connected Tower's trusted computing base**: the tunnel can drive any local route with the local key stamped. R1 adds no new trust in the cloud. The MAC makes the Tower's check **real** rather than nominal: owner-proxied browser traffic and local callers do not hold the session secret, so neither can fabricate a relay delivery. A cloud *bug* in proxy separation therefore yields a refused delivery, not a message. The Tower's own grants bound what any relay mistake can deliver. |
 | R2: Pinned Tower keypairs with end-to-end signatures (optionally encryption) | Each Tower holds a signing key. Peers pin each other's public keys at pairing, with out-of-band fingerprint checks between owners. Messages are signed and verified end to end, and the cloud only routes. | Protects against a *malicious* cloud forging messages. But while the tunnel lets the cloud drive terminals, a malicious cloud does not need to forge messages. Adds key generation, storage, rotation, reinstall re-pairing and fingerprint UX. Worth revisiting only if a "messaging-only" connection mode, without the owner proxy, is ever offered (Q4). |
 | R3: Cloud-only policy (the Tower trusts the relay) | The cloud decides everything, and the Tower delivers whatever arrives on the relay route. | Rejected. The brief requires that the Tower not trust the relay blindly, and one cloud authorization bug would expose every Tower's agents. |
 
@@ -496,15 +538,18 @@ Online/offline status is unavoidably revealed to grantees, because `queued: towe
 
   Builders are not a grantable scope (Q6). Grants live on the **receiving Tower**, which is the source of truth for fine-grained authorization and is keyed by workspace registry identity, so a workspace rename keeps its grants. They are mirrored to the cloud only as a coarse pairing ("owner X may send to Tower Y").
 - **Who may change trust.** Granting, narrowing and revoking are **human actions**, offered through interactive surfaces: the dashboard, and an interactive CLI confirmation that refuses a non-interactive shell. They are never reachable from `afx send`, a message body or any automatic path. Every change is audited.
-- **Reply path.** Sending a message from my agent X to a remote agent Y opens, on my Tower, a reply path admitting messages **from exactly Y to exactly X** for a window (7 days suggested; Q12). It needs no grant. The reply still follows my delivery mode for that owner: `hold` unless I set `direct`.
+- **Reply path.** Sending a message from my agent X to a remote agent Y opens, on my Tower, a reply path admitting messages **from exactly Y to exactly X** for a window (7 days suggested; Q12). It needs no grant.
+  - It applies only to other owners. Same-owner traffic needs no reply path.
+  - A reply-path message is delivered in my delivery mode for that owner: the mode of my grant to them if I have one, otherwise **`hold`**. A reply from a stranger I messaged first still waits for my release unless I chose `direct` for them.
 
 #### Authorization: who may message whom
 
 | Sender ↓ / Target → | Architect, same Tower | Builder, same Tower | Architect, own other Tower | Builder, own other Tower | Another owner's architect | Another owner's builder |
 |---|---|---|---|---|---|---|
 | Architect or human shell | ✓ | ✓ | ✓ (default trust) | ✓ (default trust) | only with a grant covering it, or on a reply path | ✗ |
-| Builder | own workspace: own spawning architect by name, or bare `architect`; other workspaces: ✓ | ✓ | ✓ (default trust) | ✓ (default trust) | ✗, refused at the sending Tower | ✗ |
+| Builder | by name only its own spawning architect; otherwise front doors (`architect`, `ws/architect`) | ✓ | front doors (`tower/ws/architect`) | ✓ (default trust) | ✗, refused at the sending Tower | ✗ |
 
+- **Builders name no architect but their own** (Q7). In every position a builder can name only its own spawning architect. Elsewhere it reaches front doors, which is today's reach, unchanged by stage 1.
 - **Builders never originate cross-owner messages** (Q7). A builder takes direction from its architect, and the architect can relay. This also keeps a prompt-injected builder from exfiltrating to a trusted peer.
 - **A remote sender never gets affinity routing.** Bare `architect` from a remote sender always means `main`.
 
@@ -515,12 +560,15 @@ Online/offline status is unavoidably revealed to grantees, because `queued: towe
    - The cloud attests the Tower and the owner.
    - The sending Tower asserts the agent.
    - The frame shows the attested owner and Tower and the claimed agent, labelled as such.
-3. **The relay route accepts only relay traffic.** It accepts requests arriving through the tunnel (the client-owned proxy marker) carrying cloud attestation. The cloud must:
-   - strip attestation headers from owner-proxied browser traffic;
-   - refuse to forward the relay route through the owner proxy;
-   - never deliver peer traffic through the owner-proxied path (`/api/send`).
+3. **The relay route accepts only verified relay traffic.** It accepts a request only if its attestation MAC verifies against the current tunnel session's secret, and its timestamp and message id are fresh. The proxy marker alone is not trusted: a local caller can set any header, and the owner proxy forwards arbitrary browser headers.
+   - **This defends against:** owner-proxied browser traffic, local callers, and replays.
+   - **It does not defend against:** a malicious cloud, which is in the trusted computing base, as Q4 states.
+   - **The cloud must still:**
+     - strip attestation headers from owner-proxied browser traffic;
+     - refuse to forward the relay route through the owner proxy;
+     - never deliver peer traffic through the owner-proxied path (`/api/send`).
 
-   These are explicit cloud obligations (Part D).
+   These are explicit cloud obligations (Part D), and the MAC is the Tower's independent check on them.
 4. **No forged frames.** Delimiter-shaped lines in remote bodies are neutralized, and `raw` is refused for remote messages, because a raw body carries no provenance.
 5. **The Spec 755 rule is unchanged inside the sender's own workspace,** and stays enforced by the sender's Tower.
 
@@ -542,7 +590,8 @@ Online/offline status is unavoidably revealed to grantees, because `queued: towe
 
 | Where | Record | Contents |
 |---|---|---|
-| Receiving Tower | the mailbox row | Every remote message, with origin Tower id and name, owner id and email, claimed agent, remote message id and outcome. This is the record that already exists for every local send. |
+| Receiving Tower | the mailbox row | Every **accepted** remote message (delivered or held), with origin Tower id and name, owner id and email, claimed agent, remote message id and outcome. This is the record that already exists for every local send. |
+| Receiving Tower | the inbound relay log | Every relay attempt **including rejected ones**, as metadata only: time, origin Tower, owner, claimed agent, message id, size, the target as written, the outcome and its reason. **No body.** A rejected attempt is not a mailbox row: nothing deliverable is kept. The target as written stays on the receiving owner's own machine and is never echoed to the sender. |
 | Sending Tower | an outbox record | Every outbound remote message and its outcomes. |
 | Cloud | a relay log | **Metadata only:** time, sending and receiving Tower, owner ids, message id, size, outcome. Never bodies. Each owner can see the entries for their own traffic. Retention is Q13. |
 
@@ -573,8 +622,8 @@ The release action must be human-only, exactly like trust changes: it is offered
 
 | Responsibility | Codev Cloud (the choke point) | Receiving Tower (trusts the relay only for what it cannot check) |
 |---|---|---|
-| Identity | authenticates the sending Tower by its `ctk_` key; attests `towerId`, `userId`, verified email | requires the attestation and the tunnel-origin marker; rejects anything else on the relay route |
-| Authorization | coarse: same owner, or an active pairing | fine-grained: its own grants, scopes, reply paths, blocks, same-owner switch; builder targets never admitted for other owners |
+| Identity | authenticates the sending Tower by its `ctk_` key; attests `towerId`, `userId`, verified email; MACs the attestation with the receiving tunnel's session secret | verifies the MAC and freshness; rejects anything else on the relay route; binds pending email grants to the attested `userId` |
+| Authorization | coarse: same owner, or an active pairing; **non-enumerating** (an unknown slug and an ungranted Tower answer alike) | fine-grained: its own grants, scopes, reply paths, blocks, same-owner switch; builder targets never admitted for other owners |
 | Rate limiting | per sending Tower and per Tower pair | per peer owner, plus the held-for-release cap |
 | Audit | relay log, metadata only | mailbox row with origin fields; trust-change log |
 | Revocation | stops forwarding on revocation, deregistration or delete | effective immediately, regardless of the cloud |
@@ -593,17 +642,18 @@ The release action must be human-only, exactly like trust changes: it is offered
    - records the relay log.
 
    This is the first cloud API other than delete that a `ctk_` key may call.
-2. **Separation of relay and owner-proxy traffic:**
+2. **A per-session attestation secret.** The cloud issues it in the tunnel handshake (alongside `auth_ok`), holds it in memory only, and replaces it on every reconnect. It MACs every relay delivery's attestation with it.
+3. **Separation of relay and owner-proxy traffic:**
    - strip attestation headers from proxied browser requests;
    - refuse the relay route on the owner proxy;
    - never route peer traffic to `/api/send`.
-3. **The directory (B1):**
+4. **The directory (B1):**
    - list the account's Towers with online state;
    - list other owners' Towers that granted me, with their scopes;
    - pull workspace and agent listings on demand from the owner's online Towers.
-4. **The pairing registry:** coarse grants keyed by owner `userId` and `towerId`; email-pending entries; mirroring of revocations.
-5. **Cross-instance routing** if the relay ever runs on more than one instance (pub/sub or sticky routing by tower). Not needed while it is single-instance.
-6. **Optional:** answering a recently renamed slug for the owner's own account, so the error can name the new slug. Nice to have.
+5. **The pairing registry:** coarse grants keyed by owner `userId` and `towerId`; email-pending entries that bind once to the first verified account; mirroring of revocations; reporting deleted accounts.
+6. **Cross-instance routing** if the relay ever runs on more than one instance (pub/sub or sticky routing by tower). Not needed while it is single-instance.
+7. **Optional:** answering a recently renamed slug for the owner's own account, so the error can name the new slug. Nice to have.
 
 #### Delivery semantics
 
@@ -624,9 +674,19 @@ The release action must be human-only, exactly like trust changes: it is offered
 | `delivered` | remote PTY, via the gate | the same as local, including the #1584/#1473 verification flags when present |
 | `held: <reason>` | the remote mailbox | a local reason (`busy`, `no-live-pty`, `no-profile`), or `awaiting-release` (H1). The remote Tower delivers or releases it later. |
 | `queued: <reason>` | the **sender's** outbox | `tower-offline`, `cloud-unreachable`, or `outcome-unknown` (the relay timed out after possibly persisting). It is retried with backoff for the retry window (24 hours suggested; Q12), then becomes `expired`. |
-| `rejected: <reason>` | nowhere; nothing is kept remotely | `unknown-tower`, `not-authorized`, `not-found` / `ambiguous` (own Towers only; other owners always see `not-authorized`), `rate-limited`, `queue-full`, `too-large`, `option-not-allowed`, `peer-unsupported`, `reserved-form`, `not-connected` (this Tower has no cloud registration) |
+| `rejected: <reason>` | nowhere deliverable; recorded only as metadata in the relay logs | `unknown-tower`, `not-authorized`, `not-found` / `ambiguous` (own Towers only; other owners always see `not-authorized`), `rate-limited`, `queue-full`, `too-large`, `option-not-allowed`, `peer-unsupported`, `reserved-form`, `not-connected` (this Tower has no cloud registration) |
+
+- **A non-enumerating decision rule.** Slugs are global, so the reason the sender sees depends on its relationship to the target Tower, never on whether something exists:
+
+| Target Tower is… | Sender sees, for a bad Tower | Sender sees, for a bad target inside it |
+|---|---|---|
+| one of the sender's own Towers | `unknown-tower`, plus the list of own Towers | full detail: `not-found` / `ambiguous` |
+| another owner's Tower that granted the sender something | — | `not-authorized`, identical for nonexistent and ungranted targets |
+| any other slug, existing or not | `unknown-tower`, identical either way, with no list | — |
 
 - **Idempotency.** The receiving Tower deduplicates on (origin `towerId`, message id). A retry of a message already persisted returns that row's current state and never delivers twice. This is what makes `outcome-unknown` retries safe.
+  - Dedupe records are kept **strictly longer than the longest sender retry window**, and the retry window is bounded by that retention. Pruning can never make a late retry look new.
+- **Ordering.** The sender's outbox relays queued messages to the same target agent in send order (FIFO per target agent), and a later message is not relayed while an earlier one to the same target is still queued. There is no ordering guarantee across targets.
 - **What the sender learns, and when.** The sender gets the first outcome synchronously, which is parity with local `afx send`. A later delivery of a message held remotely is not pushed back to the sender in this design (Q14). Queued messages update locally as retries resolve, and a human can list and dismiss them.
 - **Cloud or tunnel down.**
   - Stage 1 is unaffected, and so is every local or cross-workspace send.
@@ -643,8 +703,8 @@ The release action must be human-only, exactly like trust changes: it is offered
 | Names | Tower = cloud slug. Workspace = Tower-unique registry name (human-set, then config-pinned, then basename); unnamed rather than auto-suffixed |
 | Provenance | The shortest reply address from the recipient's position; REMOTE marker; owner email for other owners; neutralized remote bodies |
 | Discovery | B1: cloud directory plus on-demand pull; disclosure follows ownership and grants |
-| Identity and trust | R1: cloud-attested Tower and owner, sender-asserted agent; same owner trusted by default; other owners default-deny, E1 email allow-list; capability-shaped grants on the receiving Tower |
-| Authorization | Other owners reach architects only; builders never originate cross-owner messages; a remote sender never gets affinity routing |
+| Identity and trust | R1: cloud-attested Tower and owner, MAC-signed per tunnel session; sender-asserted agent; same owner trusted by default; other owners default-deny, E1 email allow-list; capability-shaped grants on the receiving Tower |
+| Authorization | Builders name only their own spawning architect, anywhere, and otherwise use front doors; other owners reach architects only; builders never originate cross-owner messages; a remote sender never gets affinity routing |
 | Human in the loop | H1: hold for release by default for other owners, `direct` per grant; release and trust changes are human-only actions |
 | Transport | T1: cloud relay (HTTPS out, tunnel in) with a sender-side outbox, idempotent delivery, synchronous first outcome |
 
@@ -653,8 +713,8 @@ The release action must be human-only, exactly like trust changes: it is offered
 | Stage | Headline | Depends on | Lands in |
 |---|---|---|---|
 | 1 | Named architects across workspaces on one Tower | nothing external | codev only: grammar, parser, workspace names, resolution, provenance, docs (CLAUDE.md/AGENTS.md and skeleton twins) |
-| 2 | My Towers talk to my other Towers | stage 1's grammar; #1871 (canonical slug); cloud relay, separation and directory (cloud items 1–3) | codev and codev-cloud |
-| 3 | Another owner's Tower | stage 2; cloud pairing registry (item 4); owner decisions Q1, Q2, Q6, Q8 | codev and codev-cloud |
+| 2 | My Towers talk to my other Towers | stage 1's grammar; #1871 (canonical slug); cloud relay, session attestation secret, separation and directory (cloud items 1–4) | codev and codev-cloud |
+| 3 | Another owner's Tower | stage 2; cloud pairing registry (item 5); owner decisions Q1, Q2, Q6, Q7, Q8 | codev and codev-cloud |
 
 Stage 1 ships first, and nothing in it waits for stage 2 or 3. Stage 2 is usable among the owner's own Towers before stage 3 exists.
 
@@ -671,7 +731,7 @@ Stage 1 ships first, and nothing in it waits for stage 2 or 3. Stage 2 is usable
 
 5. **Reversing #1605.** Confirm that named architects in my own workspaces are directly addressable from other workspaces, with a per-workspace front-door-only opt-out, and that #1605 is closed as superseded by stage 1.
 6. **Builders and other owners.** Confirm that builders are never reachable by other owners in this design, rather than reachable as a grantable scope.
-7. **Builders originating remote sends.** Confirm that builders may send to the owner's other Towers but never to other owners.
+7. **Builder reach.** Confirm the builder rule, which keeps builders' reach exactly where it is today: in every position a builder may *name* only its own spawning architect, reaching any other workspace's or Tower's architects only through the front door (`ws/architect`, `tower/ws/architect`). Builders may send to the owner's other Towers, and never to other owners. Without this rule, stage 1 would let a builder name every architect seat on the Tower, since today only a parse failure stops it. The alternative is to let builders name any seat on the owner's own Towers, which is simpler to explain but widens what a prompt-injected builder can reach directly. The front-door opt-out in workspace config is no substitute, because it is per recipient workspace, not per sender kind.
 8. **How trust is established with other owners.** E1, an email allow-list (recommended); E2, an email-bound invitation; or E3, a contact request in the cloud.
 9. **Mail for an unreachable Tower.** A sender-side outbox with a retry window (recommended), or fail fast?
 10. **Deprecating the legacy colon form.** How many releases does `<ws>:<agent>` keep working with a notice before it becomes an error? This spec says only "deprecated, then removed".
@@ -692,17 +752,22 @@ Stage 1 ships first, and nothing in it waits for stage 2 or 3. Stage 2 is usable
    - Forms 1–9 under A1 parse to the expected (Tower, workspace, agent).
    - `a/b/c/d` gives `reserved-form`.
    - Empty segments (`a//b`), `.`, `..`, a leading `-`, and uppercase input (normalized) each behave as specified.
+   - Mixed grammar: `devvm/codev:architect`, `shannon/marketmaker:architect` and `dev:vm/codev/architect` each fail as malformed, with a purposeful error, never a quiet `NOT_FOUND`.
 2. **Legacy forms.**
    - `marketmaker:architect` and `codev-public:spir-42` resolve as today, with a deprecation notice.
    - `architect:ob-refine` resolves with no notice.
    - A workspace literally named `architect` is reachable as `architect/<agent>`.
 3. **Spec 755 regression matrix.**
    - Single architect; multiple architects with affinity; legacy builder; architect gone.
-   - The spoofing rule rejects `architect:x` **and** `<own-ws>/architect:x` from a builder not spawned by `x`.
-   - A builder sending `<other-ws>/architect:x` is allowed.
+   - The builder rule rejects `architect:x`, `<own-ws>/architect:x`, `<other-ws>/architect:x` and `<tower>/<ws>/architect:x` from a builder not spawned by `x`.
+   - A builder sending `<other-ws>/architect` (the front door) is allowed.
+   - An architect or human shell sending `<other-ws>/architect:x` is allowed.
 4. **Workspace names.**
-   - Two directories with basename `codev`: both unnamed for addressing, and `NOT_FOUND`/`WORKSPACE_UNNAMED` says how to name them.
-   - A human-set name wins over a pinned config name, which wins over the basename.
+   - Collision on registration. `/a/codev` is registered and named `codev`; `/b/codev` registers later. `/a/codev` keeps `codev`; `/b/codev` is unnamed, and the error names the holder and how to set a name.
+   - Collision at upgrade. Two pre-existing `codev` workspaces are both unnamed after upgrade, and both were `AMBIGUOUS` before.
+   - Humans never steal. Setting `/b/codev`'s name to `codev` fails while `/a/codev` holds it. Setting it to `codev-b` succeeds.
+   - Precedence. A human-set name wins over a pinned config name, which wins over the basename. A newly added pin applies on the next registration only if it is free.
+   - Same directory, two spellings. On macOS, `/tmp/ws` and `/private/tmp/ws` (or a symlinked path) registered as two rows are one workspace for naming and never collide with each other.
    - A rename makes the old name `NOT_FOUND`, listing the current names.
    - Windows: `C:\repo` and `c:\repo` give the same name.
 5. **Fail fast.** No 2- or 3-segment address that fails to resolve ever falls back to `main` or to the sender's workspace.
@@ -714,7 +779,7 @@ Stage 1 ships first, and nothing in it waits for stage 2 or 3. Stage 2 is usable
    - the frame names `codev/architect:local`;
    - the reply via the frame's address lands in `local`;
    - no `cloud-config.json` exists.
-7. **Builder-bound cross-workspace frame.** The reply hint names `ws/architect:<name>`, not bare `architect`.
+7. **Builder-bound cross-workspace frame.** From `marketmaker/architect:main` (the front door's architect) to a builder in `codev`: the frame names `marketmaker/architect:main` and the reply hint is `marketmaker/architect`, the address the builder may use. From a named seat `shannon/architect:ob-refine`, which the builder may not name: the hint says to reply through its own architect. The hint never names an address the builder's send would refuse. The frame stays within 3 lines and 256 bytes (#1567).
 8. **Front-door opt-out.** A workspace configured front-door-only rejects `ws/architect:<name>` from another workspace, with the purposeful error. `ws/architect` still works.
 9. **Cron.** A cron target written in the new grammar and one in the legacy grammar both deliver. A 3-segment cron target is refused at load with a clear error.
 
@@ -729,27 +794,43 @@ Stage 1 ships first, and nothing in it waits for stage 2 or 3. Stage 2 is usable
 14. **Refused options to a remote target.** `--raw`, `--interrupt`, ESC, `--no-enter`, `--delay` and `--all` each give `rejected: option-not-allowed`.
 15. **Addressing my own Tower by name.** A 3-segment address naming this Tower resolves locally, with zero relay calls.
 16. **Not connected.** A Tower with no cloud registration sending a 3-segment address: `rejected: not-connected`, pointing at `afx tower connect`.
-17. **Unknown Tower.** `rejected: unknown-tower`, listing the account's Towers.
+17. **Unknown Tower.** A typo of one of my own Towers' names gives `rejected: unknown-tower`, listing the account's Towers. For slugs that are not mine, see test 21: no list.
 18. **Origin checks on the relay route.**
-    - A request to the relay route **without** the tunnel marker (a local caller) is refused.
-    - A request through the owner proxy carrying forged attestation headers is refused. This is tested against the cloud's separation, plus the Tower's own check.
+    - A local caller posting to the relay route, even with the proxy marker and well-formed attestation headers, is refused: no valid session MAC.
+    - Owner-proxied traffic carrying forged attestation headers is refused **by the Tower**, because it has no valid MAC. This is tested with the cloud's header stripping disabled, to prove the Tower's check stands alone.
+    - A replayed relay delivery (same MAC, stale timestamp or a seen message id) is refused or deduplicated.
+    - An attestation MAC'd under a previous tunnel session's secret is refused after a reconnect.
 19. **Version skew.** A peer on an older Codev without the relay route: `rejected: peer-unsupported`.
 20. **Mailbox-first on the receiver.** The row exists before the delivery attempt, a busy recipient gives `held: busy`, and the render gate and per-terminal lock are honoured (no direct PTY write). This reuses the Spec 1313 test harness.
+20a. **Dedupe retention.** A retry arriving just inside the maximum retry window, after ordinary mailbox pruning has run, is still recognized as a duplicate.
+20b. **Ordering.** Three messages to one remote agent, queued while its Tower is offline, are delivered in send order when it returns. A fourth message, to a different agent, is not held back by them.
 
 ### Stage 3 (integration with a mock relay attesting two owners; then a real two-account manual pass)
 
-21. **No grant.** `rejected: not-authorized`, identical for an existing and a non-existent target.
+21. **No grant, and no enumeration.**
+    - Alice addresses `bob-mbp`, which exists but has granted her nothing, and `no-such-tower`, which does not exist. Both give `rejected: unknown-tower`, byte-identical apart from the timestamp, and neither lists any Towers.
+    - On a Tower that granted Alice `ansari/architect`, an ungranted existing workspace and a non-existent one both give an identical `not-authorized`.
+    - The receiving Tower's inbound relay log records each rejected attempt as metadata, with no body.
+21a. **Email grant binding.**
+    - A grant to `alice@example.com` binds on Alice's first attested delivery.
+    - After Alice changes her email, her messages are still admitted, and the frame shows the new email.
+    - After Alice's account is deleted and a new account verifies `alice@example.com`, the new account is `not-authorized`.
 22. **Grant scoped to `ansari/architect`.**
     - `ansari/architect` is admitted and held for release.
     - `ansari/architect:other` is `not-authorized`.
     - `ansari/spir-42` is `not-authorized`.
-23. **Release.** A human release delivers through the gate. A dismiss never delivers. A release attempted from a non-interactive shell is refused.
+23. **Release, through the human surfaces.** Bob sees the held message on the dashboard and in the interactive CLI, and reads its body.
+    - A release delivers through the gate.
+    - A dismiss never delivers.
+    - A release attempted from a non-interactive shell is refused.
+    - Grants can be created, listed and revoked through the same surfaces, with no file or database editing.
 24. **Direct grant.** A `direct` grant delivers without a hold.
 25. **Revocation.** Revoke on the receiving Tower while the cloud (mocked) still forwards: the next message is `not-authorized`, and messages still held for release become dismissed.
 26. **Reply path.**
     - A reply from exactly the agent I messaged is admitted within the window.
     - A message from another agent on that Tower is not.
     - After the window, neither is.
+    - With no grant to that owner, the admitted reply is `held: awaiting-release`. With a `direct` grant to them, it delivers directly.
 27. **Forged frames.** A remote body containing `### [ARCHITECT:main MESSAGE → main | …] ###` is neutralized in the delivered frame.
 28. **Builder origination.** A builder addressing another owner's Tower is refused at the sending Tower, and nothing reaches the relay.
 29. **Flood.** Exceeding the per-peer rate gives `rate-limited`. Exceeding the held cap gives `queue-full`. Other peers and local senders are unaffected.
@@ -767,12 +848,16 @@ Stage 1 ships first, and nothing in it waits for stage 2 or 3. Stage 2 is usable
 |---|---|---|---|
 | A remote message prompt-injects an agent with shell access | Medium | High | Other owners are default-deny and held for release by default (H1); scopes are architects only; frames are visibly REMOTE with the attested owner; frame forgery is neutralized; `raw` and the bypass options are refused; rate and held-queue caps apply |
 | A cloud authorization bug delivers beyond what the owner granted | Low | High | The receiving Tower re-checks its own grants, scopes, blocks and reply paths (R1), so a relay mistake can deliver nothing the Tower would not admit |
-| The cloud routes peer traffic through the owner proxy (local key stamped) | Low | Critical | An explicit cloud obligation (separation, item 2); the Tower refuses the relay route without attestation and the tunnel marker; tested on both sides |
+| The cloud routes peer traffic through the owner proxy (local key stamped) | Low | Critical | An explicit cloud obligation (separation, item 3), independently checked by the Tower: a relay delivery must carry an attestation MAC under the tunnel session's secret, which owner-proxied browser traffic cannot produce; tested on both sides |
 | A stolen `ctk_` key reaches agents on all of the owner's Towers | Low | High | Surfaced as Q2; per-Tower opt-out of same-owner inbound; revoking the key in the cloud ends it; the relay log records sends by origin Tower |
 | An agent changes trust or releases held mail on its owner's behalf | Medium | High | Trust changes and releases are human-only interactive actions, never reachable through `afx send` or message content, and audited. The residual limit is stated: an agent running as the owner can in principle do what the owner can |
-| Duplicate delivery after a relay timeout | Medium | Medium | Idempotent delivery keyed by (origin Tower, message id) |
+| Duplicate delivery after a relay timeout | Medium | Medium | Idempotent delivery keyed by (origin Tower, message id); dedupe records kept longer than the longest retry window |
+| An email address is reused by a different account and inherits a grant | Low | High | A grant binds once to the first verified `userId` and follows that id, never the email; a deleted account voids it |
+| Stage 1 silently widens what a prompt-injected builder can reach | Medium | Medium | The builder rule keeps builders on front doors outside their own spawning architect; surfaced as Q7 rather than decided in a table row |
+| One macOS directory registered under two spellings collides with itself and becomes unaddressable | Medium | Medium | Rows that resolve to the same real directory are one workspace for naming; full POSIX canonicalization is #1870 |
+| Remote messages to one agent arrive out of order after retries | Medium | Low | FIFO per target agent in the sender's outbox |
 | A cloud deploy drops every tunnel mid-conversation | High | Low | Sender-side outbox with retry; `queued` is visible, not silent |
-| The cloud scales to several instances and the relay cannot reach a tunnel on another instance | Low (single-instance today) | High | Cloud item 5 must land before any scale-out; named as a cloud dependency |
+| The cloud scales to several instances and the relay cannot reach a tunnel on another instance | Low (single-instance today) | High | Cloud item 6 must land before any scale-out; named as a cloud dependency |
 | Legacy colon forms in prompts, docs and cron files break | Medium | Medium | The legacy form keeps working with a deprecation notice; docs and both template trees are updated in stage 1; removal timing is the owner's call (Q10) |
 | Workspace-name collisions make addresses unpredictable | Medium | Medium | No auto-suffix: an unnamed workspace with a loud, actionable error; pinned names in config; this also removes #1391's root cause |
 | An address quoted inside a message body is read relative to a different position | Low | Low | Frames carry each party's full address when crossing Towers; documentation states that an address is interpreted by whoever types it |

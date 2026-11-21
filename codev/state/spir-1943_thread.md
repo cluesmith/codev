@@ -39,3 +39,28 @@ Issue #1943. This is a second spec draft written from the same brief as #1940. T
   - Q3: grammar choice;
   - Q4: the cloud as identity root, and whether it may read bodies.
 - **Important:** Q5–Q11, including the #1605 reversal and #655 subsumption.
+
+### CMAP iteration 1 (codex and claude both REQUEST_CHANGES); all findings accepted
+- **Attestation.**
+  - The Tower could not tell forged owner-proxy headers or local callers from a real relay delivery.
+  - Now: the cloud MACs each relay attestation with a per-tunnel-session secret issued in the tunnel handshake, held in memory and rotated on reconnect.
+  - That makes the Tower's check real, and test 18 proves it with the cloud's stripping disabled.
+- **Builder reach.**
+  - Stage 1 would have let builders name every seat on the Tower.
+  - Now: the generalized Spec 755 rule, under which a builder names only its own spawning architect anywhere and otherwise uses front doors. Surfaced as Q7.
+- **Non-enumerating rule.** Unknown and ungranted slugs both answer `unknown-tower`. Inside a Tower that granted the sender something, the answer is a uniform `not-authorized`.
+- **Email grants.** A grant binds once to a `userId` and follows that id. Account deletion voids it, and email reuse never inherits it.
+- **Reply-path messages.** Delivered in the grant's mode when a grant exists, otherwise `hold`.
+- **Rejected attempts.** Recorded as metadata only, in an inbound relay log. They are not mailbox rows.
+- **Workspace names.** The contract is now deterministic:
+  - first holder keeps the name;
+  - humans never steal;
+  - pins apply only when free;
+  - one directory counts as one workspace (POSIX, #1870);
+  - colliding workspaces at upgrade are all unnamed.
+- **Delivery.**
+  - Dedupe records outlive the retry window.
+  - The outbox is FIFO per target agent.
+  - A colon in a multi-segment address is malformed.
+- **Constraints** now name `isSafeSenderId`, which excludes `/`, `architectHeaderLabel`, and the #1567 3-line/256-byte single-write bound.
+- **Stage 3 human surfaces** are now success criteria.
