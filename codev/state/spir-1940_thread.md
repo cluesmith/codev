@@ -131,3 +131,17 @@ second draft and take what is better, not its grammar.
 
 Review plan, as instructed: codex + claude on this text, apply, then both again on the final
 text, and stop there whatever the verdicts. No edits while a lane is running.
+
+## 2026-11-21 — third revision: two review passes done; stopped as instructed
+
+- Pass 1 (iter3): codex REQUEST_CHANGES, claude COMMENT. All points applied, none rebutted
+  (statement id + consume-before-authorization on the attestation; exact code-point list for
+  remote bodies; stage 1 refuses every `afx://`; held-for-release never expires; narrow grants in
+  the stage 2 walkthrough; "At a glance" table). Committed `23ad14da5`.
+- Pass 2 (iter4), on `23ad14da5`: codex REQUEST_CHANGES, claude COMMENT. **Not applied** — the
+  architect said to stop after the second pass whatever the verdicts, so the gate version is one
+  both reviewers actually read. Eleven open points plus four small ones, listed in
+  `codev/projects/1940-tower-to-tower-messaging-proto/1940-specify-iter4-open.md`. I agree with
+  all eleven; none needs a design change, each is a sentence or a row.
+- Slip, corrected: force-staged an ignored review output (`*.txt` under `codev/projects/` is
+  gitignored on purpose); unstaged before committing.
