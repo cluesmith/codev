@@ -25,10 +25,10 @@ gates:
     status: pending
     requested_at: '2026-11-17T05:15:30.353Z'
 iteration: 1
-build_complete: false
+build_complete: true
 history: []
 started_at: '2026-11-17T00:17:34.881Z'
-updated_at: '2026-11-17T05:15:30.355Z'
+updated_at: '2026-11-21T01:36:40.340Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-17T00:43:47.408Z'
