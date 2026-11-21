@@ -234,6 +234,8 @@ describe('resolveClaudeBin', () => {
     process.env.CODEV_ALLOW_REAL_CLAUDE = '1';
     process.env.PATH = path.join(tmpDir, 'nothing-here');
     expect(() => resolveClaudeBin()).toThrow(/curl -fsSL https:\/\/claude\.ai\/install\.sh \| bash/);
+    // A locked-down CI image needs the npm route (#1941).
+    expect(() => resolveClaudeBin()).toThrow('`npm install -g @anthropic-ai/claude-code` for an npm install');
     expect(() => resolveClaudeBin()).toThrow(/CODEV_CLAUDE_BIN/);
   });
 
@@ -439,11 +441,28 @@ describe('readClaudeAuthStatus (scenario 16)', () => {
 });
 
 describe('assertLoggedIn', () => {
+  const loggedOut: ClaudeAuthStatus = { loggedIn: false, authMethod: 'none' };
+
   it('names a withheld key and the one-line opt-in, for key-only machines', () => {
-    const status: ClaudeAuthStatus = { loggedIn: false, authMethod: 'none' };
-    expect(() => assertLoggedIn(status, ['ANTHROPIC_API_KEY'])).toThrow(
+    expect(() => assertLoggedIn(loggedOut, { withheld: ['ANTHROPIC_API_KEY'] })).toThrow(
       'ANTHROPIC_API_KEY is set but not used: to bill the API with it instead, set consult.claudeAuth to "api-key"',
     );
+  });
+
+  it('in login mode, says to run `claude auth login`', () => {
+    expect(() => assertLoggedIn(loggedOut, { mode: 'login' })).toThrow(
+      'claude reports no login (authMethod: none). Run `claude auth login`.',
+    );
+  });
+
+  it('in api-key mode, points at the key and the config file, not `claude auth login` (#1941)', () => {
+    const { message } = thrown(() => assertLoggedIn(loggedOut, { mode: 'api-key', modeSource: '/repo/.codev/config.json' }));
+    expect(message).toBe(
+      'claude reports no login (authMethod: none). consult.claudeAuth is "api-key" (set in /repo/.codev/config.json), ' +
+      'so the lane authenticates with ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN, not a claude login: check that the ' +
+      'key is valid, or remove consult.claudeAuth to use your claude login.',
+    );
+    expect(message).not.toContain('claude auth login');
   });
 });
 
@@ -548,6 +567,27 @@ describe('consult.claudeAuth config', () => {
   });
 });
 
+describe('consult.claudeMaxTurns and consult.claudeMaxBudgetUsd config (#1941)', () => {
+  it('accepts a positive whole number of turns and a positive, fractional budget', () => {
+    writeConfig(projectConfig(), { consult: { claudeMaxTurns: 400, claudeMaxBudgetUsd: 0.5 } });
+    expect(loadConfig(workspace).consult).toMatchObject({ claudeMaxTurns: 400, claudeMaxBudgetUsd: 0.5 });
+  });
+
+  it.each([0, -1, 2.5, '200', true])('rejects claudeMaxTurns %j at config load', (value) => {
+    writeConfig(projectConfig(), { consult: { claudeMaxTurns: value } });
+    expect(() => loadConfig(workspace)).toThrow(
+      `Invalid consult.claudeMaxTurns in Codev config: expected a positive whole number of turns, got ${JSON.stringify(value)}.`,
+    );
+  });
+
+  it.each([0, -5, '25', false])('rejects claudeMaxBudgetUsd %j at config load', (value) => {
+    writeConfig(projectConfig(), { consult: { claudeMaxBudgetUsd: value } });
+    expect(() => loadConfig(workspace)).toThrow(
+      `Invalid consult.claudeMaxBudgetUsd in Codev config: expected a positive number of US dollars, got ${JSON.stringify(value)}.`,
+    );
+  });
+});
+
 describe('preflightClaude', () => {
   it('returns the binary, version, child env, status and both report lines', () => {
     const healthy = pinnedStub();
@@ -644,6 +684,18 @@ describe('preflightClaude', () => {
     const { processEnv, fromDotenv } = consultEnv({ ANTHROPIC_API_KEY: 'sk-global' });
     expect(preflightClaude({ workspaceRoot: workspace, processEnv, fromDotenv }).authLine)
       .toContain(`consult.claudeAuth="api-key" in ${global}`);
+  });
+
+  it('in api-key mode, a logged-out status fails with advice about the key, not `claude auth login` (#1941)', () => {
+    writeConfig(projectConfig(), { consult: { claudeAuth: 'api-key' } });
+    pinnedStub({ authStatus: { stdout: JSON.stringify(STUB_LOGGED_OUT_STATUS), exitCode: 1 } });
+    const { processEnv, fromDotenv } = consultEnv({ ANTHROPIC_API_KEY: 'sk-ci' });
+    const err = preflightError(() => preflightClaude({ workspaceRoot: workspace, processEnv, fromDotenv }));
+    expect(err.message).toContain('claude reports no login (authMethod: none).');
+    expect(err.message).toContain(`consult.claudeAuth is "api-key" (set in ${projectConfig()})`);
+    expect(err.message).toContain('check that the key is valid');
+    expect(err.message).not.toContain('claude auth login');
+    expect(err.authLine).toBe(`none — not logged in, consult.claudeAuth="api-key" in ${projectConfig()}`);
   });
 
   it('in api-key mode with no key, fails before auth status and prints no auth line (scenario 9)', () => {
