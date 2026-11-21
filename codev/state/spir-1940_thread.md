@@ -32,3 +32,26 @@
     cloud session.
   - Offline Tower: hold at the sender (never in the cloud), exactly-once by message id.
   - Open question 4 asks whether this project goes on to plan+implement stage 1 or stops at the spec.
+
+## 2026-11-21 — specify, iteration 1 review (codex + claude, both REQUEST_CHANGES)
+
+- Both reviews were about precision, not direction. Accepted every point; nothing rebutted.
+- codex: scope of this project vs follow-ups made explicit (stage 1 criteria are 1940's, under the
+  recommended answer to Open Question 4); builder "reply" reach defined (a mailbox row from that
+  sender, identity-keyed, lapses with retention); grant withdrawal spelled out in three effects;
+  exactly-once given a lifecycle (id + send time, dedupe record lives as long as the row, receiver
+  refuses mail older than the retention window as expired); hold-for-release described honestly as
+  a safeguard against the remote sender, not a barrier against a local process holding the Tower
+  key; body normalisation given a testable invariant; workspace naming rules completed; limits
+  table with defaults and fixed outcomes.
+- claude (verified against the code): shells are addressable today and my grammar had dropped them
+  — grammar widened to a local id; shells never reachable from another Tower. Sender-held outbound
+  mail must be a distinct kind so Spec 1313's drainer and 60s escalation do not treat a closed
+  laptop as a starved agent. The sending leg is outbound HTTPS, only the receiving leg is the
+  tunnel — corrected. Four header cases, not three. Frame growth must not flip the write path
+  (short frame vs chunked paste). Ordering per sender Tower and recipient stated.
+- Process note: I edited the spec while the claude lane was still running, which tripped the
+  working-tree-changed warning (#1649) on its output. The writer was me. Next time, wait for every
+  lane before touching the file.
+- Slip: the first draft commit carries a Co-Authored-By trailer, against the owner's global rule.
+  Already pushed by porch before I noticed; left as is rather than force-push. No trailers since.
