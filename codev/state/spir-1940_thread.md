@@ -55,3 +55,34 @@
   lane before touching the file.
 - Slip: the first draft commit carries a Co-Authored-By trailer, against the owner's global rule.
   Already pushed by porch before I noticed; left as is rather than force-push. No trailers since.
+
+## 2026-11-21 — spec sent back by the owner at the gate (not approved); second revision
+
+Three architect messages (02:48Z, 02:49Z, 02:51Z), all applied:
+
+1. **Owner in the address; Tower names per owner (owner ruling).** Checked codev-cloud's current
+   source: slugs are globally unique and a taken name is silently bumped to `<name>-2`; accounts
+   have a verified email and display name but no handle; `/t/<slug>/` already looks up by slug AND
+   owner. So per-owner names need a cloud change (slug unique per account) and an owner part needs
+   a new cloud concept (account handle). Decision 1 redone with seven candidates, eleven rows
+   (three cross-owner, two owners each with a Tower `mbp`, one owner with two Towers), shortest and
+   full forms. **Recommendation changed from F to G**: today's colon grammar on one Tower, and
+   `afx://[owner@]tower/` in front of it to leave the Tower. Reason: with the owner in, F is five
+   positional parts and the count is what tells a person from a machine. Stage-1 form
+   `codev-cloud:architect:tunnel` is identical under F and G. Runner-up: F with a marked owner.
+2. **Invitation flow** (new Decision 8): four alternatives; recommended is an invitation emailed
+   by Codev Cloud to a named address, usable only by that account. Seven-step walkthrough of what
+   each owner does and sees, plus failure cases and the first grant. Nothing about a pending
+   invitation is ever shown on the invitee's Towers (it is text from a stranger).
+3. **Command surface** (new Decision 9): one noun, `afx peer`, plus `afx workspace list|name` and
+   `afx inbox release`; table of stage / who may run it / Tower or cloud; sample output for the
+   most-used commands; what `afx status` and the dashboard show. `afx tower log` and
+   `afx tower disconnect` already exist with other meanings, so the record is `afx peer log` and
+   ending a connection is `afx peer end`.
+
+Also moved hold-for-release and its release command from stage 3 to stage 2, because removing a
+grant already converts mail to held-for-release in stage 2.
+
+Second review requested by the architect. Porch is parked at the gate and hands out no further
+consultation, so the two lanes are run by hand with the same command shape porch used (iter2
+output files), on the architect's instruction.

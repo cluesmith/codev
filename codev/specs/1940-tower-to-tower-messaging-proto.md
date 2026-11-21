@@ -25,8 +25,8 @@ Three things the owner wants are impossible today, in this order of priority:
 3. **My Tower cannot exchange messages with someone else's.** There is no way for a collaborator's
    architect and mine to talk.
 
-Behind all three sits one missing piece: an address that can name a Tower, a workspace, a kind of
-agent and the agent itself. Behind the second and third sits a security problem that has to be
+Behind all three sits one missing piece: an address that can name an owner, a Tower, a workspace, a
+kind of agent and the agent itself. Behind the second and third sits a security problem that has to be
 treated as what it is. A message delivered to an agent is text typed into the prompt of a coding
 agent that usually runs with permission checks skipped. **Accepting a message from another Tower is
 accepting remote instructions for an agent with shell access.**
@@ -82,10 +82,12 @@ them with `afx inbox`. Messages are capped at 48 KB. There is no rate limit on s
   HTTP/2 over it. Only the cloud opens requests on that tunnel; Tower has no way to send a request
   to the cloud over it. Separately, Tower makes a few plain HTTPS calls to the cloud, authenticated
   with its `ctk_` key.
-- The cloud knows each Tower by an immutable id, a name, a slug that is unique across the whole
-  cloud, and the account that owns it. Locally, Tower stores the id, the key and the name the user
-  typed, which can differ from the slug (issue #1871, not yet implemented). Tower stores nothing
-  about who its owner is.
+- The cloud knows each Tower by an immutable id, a name, a slug, and the account that owns it. The
+  slug is unique across the whole cloud: a name someone else already holds is silently bumped to
+  `<name>-2`. Locally, Tower stores the id, the key and the name the user typed, which can differ
+  from the slug (issue #1871, not yet implemented). Tower stores nothing about who its owner is.
+- A cloud account has a verified email and a display name. It has no short, unique name that could
+  stand for an owner in an address.
 - The cloud exposes each Tower at `/t/<slug>/…` to that Tower's owner only (browser session or
   personal access token). There are no teams, no sharing between accounts and no Tower-to-Tower
   path.
@@ -103,7 +105,7 @@ them with `afx inbox`. Messages are capped at 48 KB. There is no rate limit on s
 
 ## Desired State
 
-One address grammar names a Tower, a workspace, a kind of agent and an agent. Every address valid
+One address grammar names an owner, a Tower, a workspace, a kind of agent and an agent. Every address valid
 today keeps its meaning. The three goals ship as three stages, each usable on its own.
 
 **Stage 1 — architects on one Tower.** No second Tower, no transport, no Codev Cloud.
@@ -112,19 +114,20 @@ today keeps its meaning. The three goals ship as three stages, each usable on it
 > message appears at the `tunnel` architect's prompt in `codev-cloud`, under a header that names
 > `codev:architect:review` and shows the command to reply. The reply arrives the same way.
 
-**Stage 2 — my own Towers.** Through the Codev Cloud tunnel.
+**Stage 2 — my own Towers.** Through Codev Cloud.
 
 > On my dev VM I allow my laptop once. From the laptop's `main` architect I run
-> `afx send devvm:codev:architect:local "…"`. It appears at the `local` architect's prompt on the VM,
+> `afx send afx://devvm/codev:architect:local "…"`. It appears at the `local` architect's prompt on the VM,
 > marked as coming from my Tower `mbp`. If the VM is switched off, the message is held on the laptop
 > and arrives when the VM comes back.
 
 **Stage 3 — someone else's Tower.**
 
-> A collaborator and I connect our Towers through an invitation that each of us confirms while
-> signed in to Codev Cloud. I allow their Tower to message one architect of mine. Their message
-> arrives held; I read it and release it; my architect sees it marked as from another owner, with
-> their email and address. Anything they send to any other agent of mine is refused.
+> I invite a collaborator by email from Codev Cloud; they accept and pick one of their Towers. I
+> allow that Tower, `sam@studio`, to message one architect of mine. Their message arrives held; I
+> read it and release it; my architect sees it marked as from another owner, with their email and
+> the address `afx://sam@studio/codev-cloud:architect:data` to reply to. Anything they send to any
+> other agent of mine is refused.
 
 Across all stages: an address that does not resolve fails with the reason and never reaches a
 different recipient; a remote message is persisted to the receiving Tower's mailbox and delivered
@@ -133,8 +136,9 @@ always sees an address it can reply to.
 
 The design that delivers this is argued under **Solution Approaches**: the address grammar
 (Decision 1), names and renames (Decision 2), the transport and what each party enforces
-(Decision 3), the trust model (Decision 4), delivery semantics (Decision 5), discovery (Decision 6)
-and provenance (Decision 7).
+(Decision 3), the trust model (Decision 4), delivery semantics (Decision 5), discovery
+(Decision 6), provenance (Decision 7), how two owners connect (Decision 8) and the commands
+(Decision 9).
 
 ## Success Criteria
 
@@ -160,8 +164,8 @@ they are not acceptance criteria for this project.
 - [ ] One command lists every workspace on this Tower with its architects, each as an address ready
       to paste.
 - [ ] All of the above works on a Tower that has never connected to Codev Cloud. Until stage 2
-      ships, a Tower-qualified address is refused with a reason that says cross-Tower messaging is
-      not available, whether or not the Tower is connected.
+      ships, an `afx://` address is refused with a reason that says cross-Tower messaging is not
+      available, whether or not the Tower is connected.
 - [ ] The address is a structured wire contract in `codev-types`, with one parser and one formatter
       shared by the CLI, Tower and the VS Code extension.
 - [ ] Docs, skills and role files that teach addressing are updated in both `codev/` and
@@ -170,6 +174,9 @@ they are not acceptance criteria for this project.
 **Stage 2 (my own Towers)**
 
 - [ ] The headline path works between two Towers on one account, both behind NAT.
+- [ ] A Tower's name is unique within its owner's account only. The name I give a Tower is not
+      affected by what any other account has registered, and an address for one of my own Towers
+      never contains an owner.
 - [ ] A Tower accepts no remote message until its owner has granted a peer. A fresh install, and an
       upgraded one, refuse everything.
 - [ ] The sender is told `delivered`, `held` with where and why, or `refused` with the reason. A
@@ -199,8 +206,14 @@ they are not acceptance criteria for this project.
 **Stage 3 (another owner's Tower)**
 
 - [ ] Two Towers of different owners can be connected only through an invitation that both owners
-      confirm in a signed-in Codev Cloud session. A Tower credential alone cannot create or accept
-      one.
+      act on in a signed-in Codev Cloud session. A Tower credential alone cannot create or accept
+      one. The walkthrough in Decision 8 can be followed by two people as written.
+- [ ] An invitation can be accepted only by the account it was addressed to, and before it is
+      accepted nothing about it appears on any Tower of the invitee.
+- [ ] Another owner's Tower is always written with its owner, `afx://sam@mbp/…`. When Sam and I
+      each have a Tower called `mbp`, each address reaches the right one from either side, and
+      every header, listing and reply command prints the owner when the Tower is not the reader's
+      own.
 - [ ] After connecting, nothing is deliverable until the receiving owner grants a specific
       recipient. Builders cannot be granted to another owner's Tower.
 - [ ] A message from another owner is held for release unless the grant says otherwise. Nothing in
@@ -242,7 +255,10 @@ they are not acceptance criteria for this project.
   and has its own architect; stages 2 and 3 cannot ship before it does.
 - Issue #1871 (Tower persists and displays the cloud's canonical slug) lands before stage 2. The
   Tower part of an address is that slug.
-- A Tower's slug is unique across Codev Cloud, as it is today.
+- Codev Cloud makes Tower slugs unique per account before stage 2, and gives accounts a handle
+  before stage 3 (Decision 2). Both are changes to what it does today.
+- Shells pass an argument containing `://` through unchanged, including Git Bash on Windows. Stage
+  2's Windows test confirms this before the form is relied on.
 - The cloud stays as trusted as Spec 97 made it: it can already reach every route of a connected
   Tower on the owner's behalf.
 - Local trust is unchanged. Any process holding the local Tower key acts as the owner.
@@ -253,35 +269,61 @@ they are not acceptance criteria for this project.
 
 ### Decision 1: the address grammar
 
-Six candidates from genuinely different families. Each is given its best form. The same nine
-addresses are written in each, using two Towers of mine (`mbp`, `devvm`), a collaborator's
-(`sam-laptop`), and three workspaces (`codev`, `codev-cloud`, and `codevos.ai`, a real directory
-name with a dot in it). The sender is in workspace `codev` on `mbp`.
+An address may have to say up to five things: whose Tower, which Tower, which workspace, what kind
+of agent, and which one. Tower names are unique per owner, not across the cloud (owner ruling;
+Decision 2), so two owners may each have a Tower called `mbp`, and another owner's Tower can only be
+named together with its owner.
 
-- **A. URI scheme.** `afx://<tower>/<workspace>/<kind>/<name>`. Short forms are URI relative
-  references: a path relative to the sender's workspace, a leading `/` for another workspace on the
-  same Tower.
-- **B. Email-like.** `<agent>@<workspace>.<tower>`. Short forms drop from the right.
-- **C. Slash path, no scheme.** `<tower>/<workspace>/<kind>/<name>`. Short forms drop leading
-  segments; the kind word shows where the agent part starts.
-- **D. Dotted, DNS-style.** `<agent>.<workspace>.<tower>`, most specific first.
-- **E. Handles through a directory.** `@<handle>`. Each addressable agent registers a short handle;
-  a directory maps it to the Tower, workspace and agent. Another owner's handles are `@<owner>/…`.
-- **F. Colon path.** `<tower>:<workspace>:<agent>`, most general first, where the agent part is
-  `architect`, `architect:<name>` or a builder id. It extends today's grammar from two slots to a
-  path; short forms drop leading components.
+**Does the owner belong in the address? Yes**, for three reasons.
 
-| # | Recipient | A. URI | C. Slash path | F. Colon path |
-|---|---|---|---|---|
-| 1 | My spawning architect | `architect` | `architect` | `architect` |
-| 2 | Architect `review`, my workspace | `architect/review` | `architect/review` | `architect:review` |
-| 3 | Builder 1940, my workspace | `builder/spir-1940` | `builder/spir-1940` | `builder-spir-1940` |
-| 4 | Main architect of `codev-cloud`, this Tower | `/codev-cloud/architect` | `codev-cloud/architect` | `codev-cloud:architect` |
-| 5 | Architect `tunnel` in `codev-cloud`, this Tower | `/codev-cloud/architect/tunnel` | `codev-cloud/architect/tunnel` | `codev-cloud:architect:tunnel` |
-| 6 | Main architect of `codevos.ai`, this Tower | `/codevos.ai/architect` | `codevos.ai/architect` | `codevos.ai:architect` |
-| 7 | Architect `local` in `codev` on `devvm` | `afx://devvm/codev/architect/local` | `devvm/codev/architect/local` | `devvm:codev:architect:local` |
-| 8 | Builder 1940 in `codev` on `devvm` | `afx://devvm/codev/builder/spir-1940` | `devvm/codev/builder/spir-1940` | `devvm:codev:builder-spir-1940` |
-| 9 | Main architect of `codev-cloud` on `sam-laptop` | `afx://sam-laptop/codev-cloud/architect` | `sam-laptop/codev-cloud/architect` | `sam-laptop:codev-cloud:architect` |
+1. It is needed. With per-owner Tower names, `mbp` alone does not say whose.
+2. Whose Tower it is matters more for trust than anything else in the address. It should be visible
+   wherever an address is written or read: by an agent composing a reply, in a discovery listing,
+   in a grant a human is about to approve.
+3. Addresses for my own Towers leave it out, so its presence is itself the signal that a message is
+   leaving my own machines.
+
+The alternative is to keep the owner out and resolve a bare Tower name through the sender's peer
+list, as the first draft of this spec did. It needs either global Tower names or private nicknames,
+and it hides the one fact a reader most needs.
+
+**Seven candidates**, each in its best form, each with a place for the owner. The same eleven
+addresses are written in each. The setting: my account's handle is `ana` and I have two Towers,
+`mbp` and `devvm`. A collaborator, `sam`, also has two, `mbp` and `studio`, so one Tower name is
+used by both of us. Workspaces are `codev`, `codev-cloud` and `codevos.ai` (a real directory name
+with a dot in it). Rows 1 to 10 are written by an architect in `codev` on my `mbp`. Row 11 is the
+reverse direction, written on Sam's side.
+
+- **A. URI scheme.** `afx://<owner>@<tower>/<workspace>/<kind>/<name>`. The owner sits in the user
+  part of the authority, as in `ssh user@host`. Short forms are URI relative references.
+- **B. Email-like.** `<agent>@<workspace>.<tower>.<owner>`. Short forms drop from the right.
+- **C. Slash path, no scheme.** `<owner>/<tower>/<workspace>/<kind>/<name>`. Short forms drop
+  leading segments.
+- **D. Dotted, DNS-style.** `<agent>.<workspace>.<tower>.<owner>`, most specific first.
+- **E. Handles through a directory.** `@<owner>/<handle>`. Each addressable agent registers a
+  handle with its owner's directory; within my own account the owner is dropped.
+- **F. Colon path.** `<owner>:<tower>:<workspace>:<agent>`, most general first, where the agent
+  part is `architect`, `architect:<name>` or a builder or shell id. Short forms drop leading
+  components.
+- **G. Colon address within a Tower, URI to leave it.** On one Tower, today's colon grammar with one
+  new form. To reach another Tower, `afx://<owner>@<tower>/` goes in front of the address as that
+  Tower would write it.
+
+**Shortest correct form** — what the sender types:
+
+| # | Recipient | A. URI | C. Slash path | F. Colon path | G. Colon within, URI across |
+|---|---|---|---|---|---|
+| 1 | My spawning architect | `architect` | `architect` | `architect` | `architect` |
+| 2 | Architect `review`, my workspace | `architect/review` | `architect/review` | `architect:review` | `architect:review` |
+| 3 | Builder 1940, my workspace | `builder/spir-1940` | `builder/spir-1940` | `builder-spir-1940` | `builder-spir-1940` |
+| 4 | Main architect of `codev-cloud`, this Tower | `/codev-cloud/architect` | `codev-cloud/architect` | `codev-cloud:architect` | `codev-cloud:architect` |
+| 5 | Architect `tunnel` in `codev-cloud`, this Tower | `/codev-cloud/architect/tunnel` | `codev-cloud/architect/tunnel` | `codev-cloud:architect:tunnel` | `codev-cloud:architect:tunnel` |
+| 6 | Main architect of `codevos.ai`, this Tower | `/codevos.ai/architect` | `codevos.ai/architect` | `codevos.ai:architect` | `codevos.ai:architect` |
+| 7 | Architect `local` in `codev` on my `devvm` | `afx://devvm/codev/architect/local` | `devvm/codev/architect/local` | `devvm:codev:architect:local` | `afx://devvm/codev:architect:local` |
+| 8 | Builder 1940 in `codev` on my `devvm` | `afx://devvm/codev/builder/spir-1940` | `devvm/codev/builder/spir-1940` | `devvm:codev:builder-spir-1940` | `afx://devvm/codev:builder-spir-1940` |
+| 9 | Main architect of `codev-cloud` on Sam's `mbp` | `afx://sam@mbp/codev-cloud/architect` | `sam/mbp/codev-cloud/architect` | `sam:mbp:codev-cloud:architect` | `afx://sam@mbp/codev-cloud:architect` |
+| 10 | Architect `data` in `codev-cloud` on Sam's `studio` | `afx://sam@studio/codev-cloud/architect/data` | `sam/studio/codev-cloud/architect/data` | `sam:studio:codev-cloud:architect:data` | `afx://sam@studio/codev-cloud:architect:data` |
+| 11 | Sam's side writing my `main` architect in `codev` on my `mbp` | `afx://ana@mbp/codev/architect` | `ana/mbp/codev/architect` | `ana:mbp:codev:architect` | `afx://ana@mbp/codev:architect` |
 
 | # | B. Email-like | D. Dotted | E. Handles |
 |---|---|---|---|
@@ -289,110 +331,246 @@ name with a dot in it). The sender is in workspace `codev` on `mbp`.
 | 2 | `review` | `review` | `@review` |
 | 3 | `spir-1940` | `spir-1940` | `1940` (builders get no handle) |
 | 4 | `architect@codev-cloud` | `architect.codev-cloud` | `@codev-cloud` |
-| 5 | `tunnel@codev-cloud` | `tunnel.codev-cloud` | `@tunnel`, or `@codev-cloud-tunnel` if `tunnel` is taken |
-| 6 | `main@codevos.ai` | `main.codevos.ai` | `@codevos` |
+| 5 | `tunnel@codev-cloud` | `tunnel.codev-cloud` | `@tunnel` |
+| 6 | `architect@codevos.ai` | `architect.codevos.ai` | `@codevos` |
 | 7 | `local@codev.devvm` | `local.codev.devvm` | `@devvm-local` |
 | 8 | `builder-spir-1940@codev.devvm` | `builder-spir-1940.codev.devvm` | none; needs a structural form |
-| 9 | `main@codev-cloud.sam-laptop` | `main.codev-cloud.sam-laptop` | `@sam/codev-cloud` |
+| 9 | `architect@codev-cloud.mbp.sam` | `architect.codev-cloud.mbp.sam` | `@sam/mbp-codev-cloud` |
+| 10 | `data@codev-cloud.studio.sam` | `data.codev-cloud.studio.sam` | `@sam/data` |
+| 11 | `architect@codev.mbp.ana` | `architect.codev.mbp.ana` | `@ana/codev` |
 
-Rows 2, 3 and 4 of candidate F are exactly what is typed today.
+**Full form** — every component written out. Rows 1 and 11 name the same agent, so their full forms
+are identical, and row 1 assumes the sender's spawning architect is `main`.
 
-| Criterion | A. URI | B. Email-like | C. Slash path | D. Dotted | E. Handles | F. Colon path |
-|---|---|---|---|---|---|---|
-| Typed at a shell | No quoting; longest. Rows 4 to 6 start with `/`, which Git Bash on Windows rewrites into a file path | No quoting; shortest structural form | No quoting; the shell offers file names as completions | No quoting; compact | `@` at the start of a word is PowerShell's splat operator, so every handle needs quotes there | No quoting in bash, zsh, PowerShell or cmd |
-| Written by an agent | Familiar shape. Two syntaxes to keep apart (full and relative); risk of percent-encoding or a trailing slash being added | Order is the reverse of everything agents write today. Row 6 is indistinguishable from a real email address | Looks like a file path; an agent may treat it as one | Looks like a hostname | Shortest, but the agent has to look the handle up | The shape agents already write, with one rule |
-| Short forms | Standard relative references, but two of the three need a leading `/` or `//` | Bare name cannot say architect or builder (rows 2, 3) | Fall out cleanly | Ambiguous: two labels could be agent and workspace or workspace and Tower | A handle is already short; no hierarchy to shorten | Fall out cleanly: today's forms are the short forms |
-| Dots in workspace names | Fine | Row 6 could be workspace `codevos` on Tower `ai` | Fine | Row 6 cannot be parsed | Fine | Fine |
-| Survives a rename | Names only; stable ids sit underneath (Decision 2) | Same | Same | Same | Best: a handle is bound to ids, not names | Same |
-| Room for a future component | Best: query, fragment, user part | Poor | A new leading segment | Poor | Directory fields | A new leading component; anything orthogonal becomes a flag |
-| Migration from colon forms | Every qualified form changes; colon forms need a deprecation period; docs, skills and prompt strings change in both trees | Everything changes | As A | Everything changes | Everything changes, plus a new directory to build and keep correct | None. Every address valid today keeps its meaning |
+| # | A. URI | C. Slash path | F. Colon path | G. Colon within, URI across |
+|---|---|---|---|---|
+| 1, 11 | `afx://ana@mbp/codev/architect/main` | `ana/mbp/codev/architect/main` | `ana:mbp:codev:architect:main` | `afx://ana@mbp/codev:architect:main` |
+| 2 | `afx://ana@mbp/codev/architect/review` | `ana/mbp/codev/architect/review` | `ana:mbp:codev:architect:review` | `afx://ana@mbp/codev:architect:review` |
+| 3 | `afx://ana@mbp/codev/builder/spir-1940` | `ana/mbp/codev/builder/spir-1940` | `ana:mbp:codev:builder-spir-1940` | `afx://ana@mbp/codev:builder-spir-1940` |
+| 4 | `afx://ana@mbp/codev-cloud/architect/main` | `ana/mbp/codev-cloud/architect/main` | `ana:mbp:codev-cloud:architect:main` | `afx://ana@mbp/codev-cloud:architect:main` |
+| 5 | `afx://ana@mbp/codev-cloud/architect/tunnel` | `ana/mbp/codev-cloud/architect/tunnel` | `ana:mbp:codev-cloud:architect:tunnel` | `afx://ana@mbp/codev-cloud:architect:tunnel` |
+| 6 | `afx://ana@mbp/codevos.ai/architect/main` | `ana/mbp/codevos.ai/architect/main` | `ana:mbp:codevos.ai:architect:main` | `afx://ana@mbp/codevos.ai:architect:main` |
+| 7 | `afx://ana@devvm/codev/architect/local` | `ana/devvm/codev/architect/local` | `ana:devvm:codev:architect:local` | `afx://ana@devvm/codev:architect:local` |
+| 8 | `afx://ana@devvm/codev/builder/spir-1940` | `ana/devvm/codev/builder/spir-1940` | `ana:devvm:codev:builder-spir-1940` | `afx://ana@devvm/codev:builder-spir-1940` |
+| 9 | `afx://sam@mbp/codev-cloud/architect/main` | `sam/mbp/codev-cloud/architect/main` | `sam:mbp:codev-cloud:architect:main` | `afx://sam@mbp/codev-cloud:architect:main` |
+| 10 | `afx://sam@studio/codev-cloud/architect/data` | `sam/studio/codev-cloud/architect/data` | `sam:studio:codev-cloud:architect:data` | `afx://sam@studio/codev-cloud:architect:data` |
+
+| # | B. Email-like | D. Dotted | E. Handles |
+|---|---|---|---|
+| 1, 11 | `main@codev.mbp.ana` | `main.codev.mbp.ana` | `@ana/codev` |
+| 2 | `review@codev.mbp.ana` | `review.codev.mbp.ana` | `@ana/review` |
+| 3 | `builder-spir-1940@codev.mbp.ana` | `builder-spir-1940.codev.mbp.ana` | none |
+| 4 | `main@codev-cloud.mbp.ana` | `main.codev-cloud.mbp.ana` | `@ana/codev-cloud` |
+| 5 | `tunnel@codev-cloud.mbp.ana` | `tunnel.codev-cloud.mbp.ana` | `@ana/tunnel` |
+| 6 | `main@codevos.ai.mbp.ana` | `main.codevos.ai.mbp.ana` | `@ana/codevos` |
+| 7 | `local@codev.devvm.ana` | `local.codev.devvm.ana` | `@ana/devvm-local` |
+| 8 | `builder-spir-1940@codev.devvm.ana` | `builder-spir-1940.codev.devvm.ana` | none |
+| 9 | `main@codev-cloud.mbp.sam` | `main.codev-cloud.mbp.sam` | `@sam/mbp-codev-cloud` |
+| 10 | `data@codev-cloud.studio.sam` | `data.codev-cloud.studio.sam` | `@sam/data` |
+
+Rows 1 to 6 of F and G are identical, and rows 2, 3 and 4 are exactly what is typed today.
+
+| Criterion | A. URI | B. Email-like | C. Slash path | D. Dotted | E. Handles | F. Colon path | G. Colon within, URI across |
+|---|---|---|---|---|---|---|---|
+| Typed at a shell | No quoting; longest. Rows 4 to 6 start with `/`, which Git Bash on Windows rewrites into a file path | No quoting; short | No quoting; the shell offers file names as completions | No quoting; compact | A leading `@` is PowerShell's splat operator, so handles need quotes there | No quoting in bash, zsh, PowerShell or cmd | No quoting; one-Tower forms as F, remote forms nearly as long as A |
+| Written by an agent | Familiar. Two syntaxes to keep apart (full, relative); risk of percent-encoding or a trailing slash | Order is the reverse of today's; rows 9 to 11 look like real email addresses | Looks like a file path | Looks like a hostname | Shortest, but has to be looked up | Today's shape, but what each word means depends on counting | Today's shape on one Tower; a remote address is copied whole from a header or a listing |
+| Short forms | Relative references; two of three need a leading `/` or `//` | A bare name cannot say architect or builder | Drop leading segments; depth is found by counting | Ambiguous by label count | None needed | Drop leading components; depth is found by counting | Two tiers and no counting: a local address, or `afx://` and a Tower in front of one |
+| Whose Tower is visible | Yes: `sam@` | Last label, unmarked | First segment, unmarked | Last label, unmarked | Yes: `@sam/` | First component, unmarked | Yes: `sam@`; and `afx://` marks every address that leaves this Tower |
+| Same Tower name under two owners (rows 9, 11) | `afx://mbp/` is mine, `afx://sam@mbp/` is Sam's | `.mbp` and `.mbp.sam` | `mbp/` and `sam/mbp/` | As B | The handle hides which Tower | `mbp:` and `sam:mbp:` | As A |
+| Dots in workspace names (row 6) | Fine | `codevos.ai.mbp.ana` cannot be split reliably | Fine | Cannot be parsed | Fine | Fine | Fine |
+| Survives a rename | Names, with stable ids underneath (Decision 2) | Same | Same | Same | Best: a handle is bound to ids | Same | Same |
+| Room for a future component | Best: query, fragment | Poor | A sixth positional segment | Poor | Directory fields | A sixth positional component | As A for remote forms |
+| Migration from today's colon forms | Every qualified form changes; colon forms need a deprecation period; docs, skills and prompt strings change in both trees | Everything changes | As A | Everything changes | Everything changes, plus a directory to build and keep correct | None | None: the `afx://` forms are new and nothing existing changes |
 
 **What decides it.**
 
 - **B and D** fail on real data. Workspace directories contain dots (`codevos.ai`,
-  `cluesmith.com`), so `main@codevos.ai` has two readings and `main.codevos.ai` has none. Both also
-  put the agent first with no room to say what kind of agent it is.
-- **E** is the only candidate where a rename costs nothing, and it is the shortest to type. It pays
-  for that with a directory: handles must be unique, kept in step with agents that come and go, and
-  for other owners published somewhere, which turns discovery into a standing disclosure. A handle
-  can be re-bound, so the same text can reach a different agent later, which is the failure the
-  "no fallback" constraint exists to prevent. Builders are too short-lived to register, so a
-  structural form is needed anyway and the system ends up with two grammars.
-- **A, C and F are one idea** — a path from the most general component to the most specific, with a
-  kind word marking the agent — in three spellings. The choice between them is about the separator
-  and whether the full form carries a scheme.
-  - **A** is the most self-describing and the most extensible. A full address is unmistakable in
-    prose and always has every component in a fixed position. Its costs are a second syntax for
-    short forms, a hazard on Windows for exactly the stage-1 forms, and a migration: the colon forms
-    would have to be deprecated and every doc, skill, role file and runtime hint that teaches them
-    rewritten, with agents mixing the two for as long as both work.
-  - **C** has A's short forms without its scheme, and so without its one clear advantage. It looks
-    like a file path to shells and to agents.
-  - **F** costs nothing to adopt. Stage 1 is one new form, `<workspace>:architect:<name>`. Stages 2
-    and 3 add one leading component. Nothing is deprecated, nothing already written stops working,
-    and there is only ever one syntax.
+  `cluesmith.com`), and with an owner label added there are now three places a dot can mean a
+  boundary. Both also put the agent first with no room to say what kind of agent it is, and B's
+  cross-owner rows read as real email addresses.
+- **E** is the only candidate where a rename costs nothing, and the shortest to type. It pays with a
+  directory: handles must be unique per owner across all that owner's Towers (Sam has a
+  `codev-cloud` on each of two Towers, so one of them needs a longer handle), kept in step with
+  agents that come and go, and published to other owners, which turns discovery into a standing
+  disclosure. A handle can be re-bound, so the same text can reach a different agent later.
+  Builders are too short-lived to register, so a structural form is needed as well.
+- **A, C, F and G are one idea** — a path from the most general component to the most specific,
+  with a kind word marking the agent. They differ in how the levels are marked.
+  - **C and F** mark every level the same way, so the owner, the Tower and the workspace are told
+    apart only by how many components precede the kind word.
+  - **A** marks the owner and the Tower distinctly and is the most extensible. It costs a second
+    syntax for short forms, a Windows hazard on exactly the stage-1 forms, and a migration away
+    from every colon form in use.
+  - **G** takes A's marking for the part that names a machine and leaves everything on a machine
+    as it is today.
 
-**Recommendation: F, the colon path.** The issue's diagnosis is right that the current grammar
-cannot carry a Tower, but the defect is the two-slot split, not the colon. A path with an explicit
-kind word removes the overload: the word `architect` stops being a special case the resolver
-intercepts and becomes the part of the grammar that says where the agent begins.
+**What the five-part positional form costs, if F is kept.**
 
-A is the runner-up, and the right choice if the owner values a self-describing, extensible address
-over continuity. The design in the rest of this spec does not depend on which is chosen: it needs
-only that an address parses into `{tower?, workspace?, kind, name?}`.
+- `sam:mbp:codev-cloud:architect` and `devvm:codev:architect:local` both have four components. The
+  first begins with a person and the second with a machine, and only the position of the word
+  `architect` says which. The most trust-relevant part of the address is the one found by counting.
+- A builder or shell address has no kind word at all, so its depth is known only from the count:
+  `a:b:c:d` is owner, Tower, workspace, id.
+- A miscount does not produce a malformed address; it produces a well-formed one at the wrong
+  level. Most of those fail loudly because the name does not exist at that level. Some do not: a
+  Tower and a workspace can share a name.
+- `architect`, `arch` and `builder` must be reserved at three levels, including as account handles
+  in Codev Cloud.
+- A variant, **F with a marked owner** (`sam@mbp:codev-cloud:architect`, the shape of an `scp`
+  target), removes the first cost and keeps the rest. It is the runner-up below.
+
+**Recommendation: G. Keep today's colon grammar for everything on one Tower, and put
+`afx://[owner@]tower/` in front of it to leave the Tower.** This changes the first draft's
+recommendation (F). With the owner in the address, F becomes five positional parts, three of them
+optional, and the count is what tells a person from a machine.
+
+1. **Three boundaries, three marks.** `@` follows an owner, `//…/` encloses the machine, `:`
+   separates what is on it. Nothing is found by counting.
+2. **Leaving this Tower is visible.** `afx://` appears exactly when a message goes through Codev
+   Cloud, is subject to another Tower's grants, and follows the cross-Tower delivery rules. An
+   address with an `@` is someone else's Tower; one without is mine.
+3. **No migration.** Nothing written today changes, and nothing is deprecated.
+4. **One grammar for the part after the Tower.** The path of an `afx://` address is, character for
+   character, the address as that Tower would write it. A reply address is made by putting a prefix
+   on, never by translating.
+5. **It is the owner's `afx://` idea, used where a URI earns its keep.** `sam@mbp` reads the way
+   `ssh sam@mbp` does.
+
+Its costs: two tiers of syntax; remote addresses are the longest of the colon-based candidates;
+`afx://devvm/codev:architect:local` mixes `/` and `:`, which is legal in a URI path but unusual; and
+it relies on shells leaving an argument containing `://` alone, which stage 2's Windows test must
+confirm.
+
+**The stage-1 form is the same under F, F with a marked owner, and G:
+`codev-cloud:architect:tunnel`.** Those three differ only in how a Tower and an owner are written,
+which stage 1 does not use. Runner-up: F with a marked owner, which is shorter and has no scheme but
+still tells a Tower from a workspace by counting. Then A, for an owner who would rather have one
+syntax everywhere and accept the migration.
+
+The rest of this spec is written in G. It needs only that an address parses into
+`{owner?, tower?, workspace?, kind, name?}`.
 
 **The recommended grammar in full.**
 
 ```
-address   = [ tower ":" ] [ workspace ":" ] agent
-agent     = "architect" [ ":" architect-name ]      ; "arch" stays an alias for "architect"
-          | local-id                                ; a builder id (or a tail such as 1940), or a
+address    = local | remote
+local      = [ workspace ":" ] agent
+remote     = "afx://" [ owner "@" ] tower "/" workspace ":" agent
+agent      = "architect" [ ":" architect-name ]     ; "arch" stays an alias for "architect"
+           | local-id                               ; a builder id (or a tail such as 1940), or a
                                                     ; shell id, resolved as today
+tower-ref  = [ owner "@" ] tower                    ; how commands, grants and listings name a Tower
 ```
 
-- **Parsing.** If the address contains the word `architect` as a component, the components before
-  it are the workspace, or the Tower then the workspace, and at most one component may follow: the
-  architect's name. Otherwise the last component is a local id, resolved as it is today (builders by
-  exact id then tail, then shells by exact id), and the components before it are the workspace, or
-  the Tower then the workspace. Any other shape is malformed and fails naming the
-  shape that was expected. A Tower can be named only together with a workspace.
-- **Short forms.** Leaving out the Tower means this Tower. Leaving out the workspace means the
-  sender's workspace. Bare `architect` keeps today's meaning exactly: from a builder, its spawning
-  architect; from anyone else, `main`.
-- **Components** are lower-cased and must match `[a-z0-9][a-z0-9._-]*`. No escaping or encoding
-  exists; a name outside that set is not addressable until it is given one that fits (Decision 2).
-  `architect`, `arch` and `builder` are reserved and cannot name a Tower or a workspace. This rule
-  bounds what an address can carry. It does not loosen the existing rules for naming an architect
-  or a builder, which stay as they are.
+- **Parsing a local address.** If it contains the word `architect` as a component, at most one
+  component may precede it, the workspace, and at most one may follow, the architect's name.
+  Otherwise it is a local id, optionally preceded by a workspace, resolved as it is today (builders
+  by exact id then tail, then shells by exact id). Any other shape is malformed and fails naming the
+  shape that was expected.
+- **A remote address always names the workspace.** There is no "sender's workspace" on another
+  Tower.
+- **Leaving parts out.** No owner means my own account. No `afx://` means this Tower. No workspace
+  means the sender's workspace. Bare `architect` keeps today's meaning exactly: from a builder, its
+  spawning architect; from anyone else, `main`.
+- **Naming myself is allowed.** `afx://ana@mbp/…` written on my own `mbp` means the same as the
+  local address, and resolves without the cloud.
+- **Components** are lower-cased and must match `[a-z0-9][a-z0-9._-]*`; owner handles and Tower
+  names are further limited to letters, digits and hyphens. No escaping or encoding exists; a name
+  outside that set is not addressable until it is given one that fits (Decision 2). `architect`,
+  `arch` and `builder` cannot name a workspace. A port, a query, a fragment or a percent-encoded
+  character makes the address malformed; they are free for later use. This rule bounds what an
+  address can carry. It does not loosen the existing rules for naming an architect or a builder.
 - **Shells stay local.** A shell id is addressable within a Tower exactly as today, and never from
   another Tower, including my own: text sent to a shell prompt is a command, with no agent between
   the sender and the machine.
-- **Helpful failures.** When a component does not resolve as what its position says but does match
-  something else, the error says so: `devvm:architect` fails with "no workspace named `devvm` on
-  this Tower; `devvm` is a Tower, and a Tower address needs a workspace:
-  `devvm:<workspace>:architect`".
+- **Helpful failures.** When an address is malformed or a name does not resolve, and the text
+  matches something at another level, the error says so. `devvm:codev:architect` fails with "a
+  local address has at most a workspace before `architect`; `devvm` is one of your Towers, so
+  write `afx://devvm/codev:architect`". `afx://sam@laptop/…` fails with "no Tower named `laptop`
+  owned by `sam` is connected to this Tower; connected: `sam@studio`".
+- **One hazard no candidate avoids.** Leaving the owner off an address for someone else's Tower
+  gives a valid address for my own Tower of the same name, if I have one. It errs toward my own
+  agents and never toward a stranger's. Headers, listings and reply commands always print the
+  owner when the Tower is not the reader's own, so a copied address is right; a retyped one is the
+  risk.
 - **Wire form.** On the wire an address is the structured object, never the string. The string is
   for people and agents.
-- **Canonical display.** An address is shown in the shortest form that is correct for the reader:
-  agent only within a workspace, workspace-qualified within a Tower, Tower-qualified across Towers.
+- **Canonical display.** An address is shown in the shortest form that is correct for the reader,
+  in four tiers: `architect:review` within a workspace, `codev:architect:review` within a Tower,
+  `afx://mbp/codev:architect:review` to another Tower of the same owner, and
+  `afx://ana@mbp/codev:architect:review` to anyone else.
 
 ### Decision 2: names, identity and renames
 
 An address is made of names. Names change. Everything durable is therefore bound to an identity
 that does not change, and names are resolved to identities at the moment of sending.
 
-| Component | Name used in an address | Identity underneath | On rename |
-|---|---|---|---|
-| Tower | Its Codev Cloud slug (canonical per #1871) | The cloud's immutable Tower id | Peers learn the new slug from the cloud the next time they refresh. The old name stops resolving, and the error names the new one |
-| Workspace | An explicit address name if one has been set, else the directory basename | The workspace key Tower already uses (`workspaceKey()` of its path) | The old name stops resolving on that Tower |
-| Architect | Its name (Spec 755) | Name within workspace | Not renameable today |
-| Builder | Its id | Id within workspace | Not renameable |
+**What Codev Cloud does today** (read from its current source, not assumed).
 
+- A Tower's slug is derived from the name its owner typed and is **unique across the whole cloud**.
+  If any account already holds the slug, the newcomer is silently given `<name>-2`, then `-3`. A
+  rename onto a taken slug is refused.
+- An account has a verified email and a display name. It has **no handle**: nothing short, unique
+  and typeable names an owner.
+- The `/t/<slug>/` route already looks a Tower up by slug **and** owner.
+
+A flat global namespace means my own stage-2 addresses depend on strangers. Whoever registered
+`mbp` first has it; I become `mbp-2`, and the name I type on every send is one I did not choose. It
+gets worse with every new account.
+
+**Owner ruling: Tower names are per owner.** Each name is unique only inside the level above it.
+
+| Level | Name used in an address | Unique within | Identity underneath | On rename |
+|---|---|---|---|---|
+| Owner | The account's handle | Codev Cloud | The cloud's account id | Connected owners learn the new handle from the cloud. The old one stops resolving, and the error names the new one |
+| Tower | Its name (the cloud's slug, canonical per #1871) | Its owner's account | The cloud's immutable Tower id | The same, for peers |
+| Workspace | An explicit address name if one is set, else the directory basename | Its Tower | The workspace key Tower already uses (`workspaceKey()` of its path) | The old name stops resolving on that Tower |
+| Architect | Its name (Spec 755) | Its workspace | Name within workspace | Not renameable today |
+| Builder, shell | Its id | Its workspace | Id within workspace | Not renameable |
+
+**What identifies an owner in an address.** It has to be stable, typeable and not a secret.
+
+| Option | Stable | Typeable | Verdict |
+|---|---|---|---|
+| Verified email | Mostly | Has an `@` and dots, which collide with every candidate grammar; long | Rejected as the address part. It stays the thing a human checks |
+| The account id | Yes | No: an opaque string | Rejected. It is the identity underneath |
+| A private nickname each side picks for the other | Yes | Yes | Rejected. The two sides would write the same Tower differently, and an address quoted inside a message would not resolve for its reader |
+| **An account handle** (recommended) | Yes | Yes: lower-case letters, digits and hyphens, starting with a letter | Recommended |
+
+- A **handle** is chosen by the account holder and is unique across Codev Cloud. This is the one
+  global namespace in the design. A collision there happens once per person, not once per machine,
+  and is resolved by the person choosing another; a handle is never bumped silently, because other
+  people type it.
+- It is asked for the first time an account creates or accepts an invitation (Decision 8). Stages 1
+  and 2 need no handle, because my own addresses never contain one.
+- It is not what establishes who someone is. The verified email does that: it is shown when
+  connecting, in the peer list and in every header from another owner. A look-alike handle gets
+  nowhere by itself, because a name resolves only among Towers already connected to mine.
+
+**Collisions and renames.**
+
+- Two owners with a Tower of the same name: no conflict. `afx://mbp/…` is mine and
+  `afx://sam@mbp/…` is Sam's; from Sam's side the reverse.
+- A second Tower on my own account registered under a name I already use: it is bumped to `-2`
+  within my account, as today, and Tower shows the name it actually got (#1871). I can rename it or
+  take the name over from a Tower that is no longer connected, both of which exist today.
+- A Tower already bumped by the global rule (`mbp-2` because a stranger held `mbp`) can be renamed
+  to `mbp` once uniqueness is per owner.
 - **Grants, mailbox rows, held outbound mail and audit records store identities**, so a rename
   never silently changes who is allowed or where held mail is going.
-- **A Tower name is resolved only through the sender's own peer list** (Decision 6), never by
-  looking the slug up globally. If a peer renames its Tower and a stranger later registers the old
-  slug, the old name does not start reaching the stranger: the stranger is not a peer.
+- **A name is resolved only through the sender's own peer list** (Decision 6), never by a global
+  lookup: a Tower name with no owner among my account's Towers, and `owner@tower` among that
+  owner's Towers that are connected to mine. If a peer renames its Tower or its handle and a
+  stranger later takes the old one, the old text does not start reaching the stranger.
+
+**The Codev Cloud changes this needs** (also listed under Decision 3).
+
+- Tower slugs become unique per account instead of across the cloud: at registration, on rename and
+  on takeover. The `/t/` route needs no change. Stage 2 depends on this.
+- Accounts gain a handle. Stage 3 depends on this.
+
+**Workspace names.**
+
 - **A workspace gets an explicit address name** through one command, stored by Tower against the
   workspace key. This is the remedy for two workspaces sharing a basename and for a basename that
   is not address-safe, both of which have no remedy today. The rules:
@@ -410,13 +588,10 @@ that does not change, and names are resolved to identities at the moment of send
     Removing a workspace from Tower frees its name.
   - Moving a directory still makes a new workspace as far as Tower is concerned. That is existing
     behaviour and is not changed here.
-- **A Tower not connected to Codev Cloud has no Tower name** and does not need one: nothing outside
-  it can address it.
+- **A Tower not connected to Codev Cloud has no Tower name and no owner** and needs neither:
+  nothing outside it can address it.
 
-Alternatives considered: local aliases for peers (my own nickname for someone's Tower) — rejected
-because the sender and the recipient would then write the same Tower differently, and a reply
-address would not be the address the other side knows itself by. Workspace ids in addresses —
-rejected as unreadable; the id belongs underneath.
+Also considered: workspace ids in addresses — rejected as unreadable; the id belongs underneath.
 
 ### Decision 3: transport, and who enforces what
 
@@ -448,7 +623,7 @@ receiving owner did not grant.
 
 | Concern | Codev Cloud (the choke point) | Receiving Tower | Sending Tower |
 |---|---|---|---|
-| Who is sending | Authenticates the sending Tower by its key on every relayed message and stamps the Tower id, current name, owner account and whether sender and recipient share an owner. No field of the message can set these | Takes the sender's Tower and owner only from that stamp, and only on the tunnel | Stamps the sending workspace and agent, as well as it can identify them (see Decision 7) |
+| Who is sending | Authenticates the sending Tower by its key on every relayed message and stamps the Tower id and current name, the owner's account id, handle and verified email, and whether sender and recipient share an owner. No field of the message can set these | Takes the sender's Tower and owner only from that stamp, and only on the tunnel | Stamps the sending workspace and agent, as well as it can identify them (see Decision 7) |
 | Who may talk to whom | Relays only between two Towers of one account, or two Towers joined by an accepted connection that has not been ended | Delivers only what a local grant allows: this peer, this recipient, this mode. No grant means refusal. This is the authoritative check | Refuses a Tower name that is not in its peer list, before anything leaves |
 | Human hold | None | Holds for release where the grant says so | None |
 | Flooding | Limits per sending Tower and per pair; caps message size | Its own limit per peer, a cap on undelivered mail per peer, the same size cap | None |
@@ -490,15 +665,22 @@ that exists only for the cloud's relay. It is not served on Tower's local listen
 1. A relay: accept a message from an authenticated Tower, apply the cloud's checks in the table,
    forward it to the recipient Tower's tunnel with the identity stamp, and return the recipient
    Tower's answer. No body is stored or logged.
-2. A peer listing for a Tower credential: the other Towers on the same account, and the Towers
-   connected by invitation, each with id, current slug, owner and whether it is online.
-3. Cross-owner connections (stage 3): create an invitation, accept it, list and end connections.
-   Creation and acceptance require a signed-in user session, and a page where an owner sees and
-   ends their connections.
+2. A peer listing for a Tower credential: the other Towers on the same account, the Towers
+   connected by invitation, and invitations this Tower's owner has sent; each Tower with its id,
+   current name, owner handle and verified email, and whether it is online.
+3. Cross-owner connections (stage 3), as walked through in Decision 8: the invitation page, the
+   invitation email, the acceptance page with its Tower picker, the notice to the inviter, the
+   Connections page where an owner sees and ends connections, and the daily limit on invitations.
+   Creating, accepting, declining and cancelling require a signed-in user session. Ending a
+   connection is also accepted from either Tower.
 4. Carrying discovery queries the same way as messages (Decision 6).
 5. Guaranteeing that the browser proxy cannot reach the relay entry point or forge its stamp.
 6. Rate limits and the metadata record.
 7. Ending a Tower's cross-owner connections when the Tower is deregistered.
+8. Tower slugs unique per account instead of across the cloud: at registration, on rename and on
+   takeover (stage 2).
+9. Account handles: chosen by the account holder, unique across the cloud, changeable, asked for
+   when an account first creates or accepts an invitation (stage 3).
 
 Stage 1 needs none of this.
 
@@ -507,9 +689,10 @@ Stage 1 needs none of this.
 **Identity.**
 
 - A **Tower** is identified by its Codev Cloud registration: the immutable Tower id, proved to the
-  cloud by the Tower's key each time it authenticates. The slug is a label for that id.
+  cloud by the Tower's key each time it authenticates. Its name is a label for that id, unique
+  within its owner's account.
 - An **owner** is a Codev Cloud account with a verified email. The cloud binds each Tower to one
-  owner.
+  owner. The account's handle is a label for it; the verified email is what a person checks.
 - A receiving Tower learns both from the cloud's stamp. It does not learn them from the message.
 
 Alternatives for how identity is proved:
@@ -539,18 +722,20 @@ to name a sender; it would become worthwhile if the tunnel's general exposure we
   knows they are mine. Nothing is deliverable until I add a grant on the receiving Tower, one
   command per direction. A grant to one of my own Towers may cover every agent and defaults to
   *deliver*.
-- **Between two owners (stage 3):** one owner creates an invitation naming one of their Towers; the
-  other accepts it for one of theirs. Both steps happen in a signed-in Codev Cloud session, so no
-  agent on either machine can connect a Tower to a stranger using credentials it can read from
-  disk. Invitations are single-use and expire. There is no way to send an unsolicited request to a
-  Tower. Once connected, each owner adds grants on their own Tower. A grant to another owner's
-  Tower must name its recipients and defaults to *hold for release*.
+- **Between two owners (stage 3):** one owner invites the other by email for one of their Towers;
+  the other accepts for one of theirs. Decision 8 walks through it step by step. Both acts happen
+  in a signed-in Codev Cloud session, so no agent on either machine can connect a Tower to a
+  stranger using credentials it can read from disk. An invitation is single-use, expires, and can
+  be used only by the account it was addressed to. Nothing unsolicited is ever shown on a Tower.
+  Once connected, each owner adds grants on their own Tower. A grant to another owner's Tower must
+  name its recipients and defaults to *hold for release*.
 
 **Authorization.**
 
 - Default deny, on every Tower, for every peer including my own.
-- A grant names the peer Tower and a set of recipients: one architect in one workspace, every
-  architect in a workspace, or (own Towers only) everything.
+- A grant names the peer Tower (`devvm`, or `sam@studio` for another owner's) and a set of
+  recipients written as local addresses: one architect in one workspace
+  (`codev:architect:main`), every architect in a workspace, or (own Towers only) everything.
 - The unit of trust on the sending side is the **Tower**, not an agent on it. A receiving Tower
   cannot verify which agent on the other Tower wrote a message, so a grant to a Tower is a grant to
   everything running on it.
@@ -660,11 +845,11 @@ the receiving Tower's real answer.
 
 | Question | Answer |
 |---|---|
-| Which Towers can I reach? | My peer list: one command shows every Tower on my account and every Tower connected by invitation, with its name, owner, whether it is online, and what I have granted it |
+| Which Towers can I reach? | My peer list (`afx peer list`): every Tower on my account by name, and every Tower connected by invitation as `owner@tower` with the owner's verified email; whether each is online, and what I have granted it |
 | How did I come to know them? | My own: they are registered to my account. Someone else's: I accepted, or issued, an invitation. There is no directory of other people's Towers and no search |
-| What is running on a peer? | One command asks the peer through the relay. The peer's Tower answers; the cloud passes the answer through and keeps no directory of workspaces or agents |
+| What is running on a peer? | `afx peer show` asks the peer through the relay. The peer's Tower answers; the cloud passes the answer through and keeps no directory of workspaces or agents. Every line of the answer is an address the asker can paste: `afx://devvm/codev:architect:local` for my own Tower, `afx://sam@studio/codev-cloud:architect:data` for another owner's |
 | How much does a peer reveal? | Exactly what the asker could message. One of my own Towers with a full grant sees every active workspace, architects by name, builders by id, and which are live. Another owner sees the recipients they have been granted, as addresses, and nothing else: no other workspace names, no builders, no liveness |
-| And on one Tower (stage 1)? | One command lists every workspace on this Tower with its architects, as addresses |
+| And on one Tower (stage 1)? | `afx workspace list` shows every workspace on this Tower with its architects, as local addresses |
 
 Discovery queries are rate limited and recorded like messages. A peer with no grant gets the same
 answer as a Tower that does not exist.
@@ -684,11 +869,14 @@ answer as a Tower that does not exist.
 
   ```
   ### [ARCHITECT codev:architect:review MESSAGE → tunnel | <time>] ###
-  ### [REMOTE, your Tower mbp · mbp:codev:architect:main → local | <time>] ###
-  ### [REMOTE, OTHER OWNER sam@example.com · sam-laptop:codev-cloud:architect:main → main | <time>] ###
+  ### [REMOTE, your Tower · afx://mbp/codev:architect:main → local | <time>] ###
+  ### [REMOTE, OTHER OWNER sam@example.com · afx://sam@studio/codev-cloud:architect:data → main | <time>] ###
   ```
 
-  Cases 2 to 4 end with a reply command carrying that address.
+  Cases 2 to 4 end with a reply command carrying that address, for example
+  `(reply: afx send afx://sam@studio/codev-cloud:architect:data "…")`. The address is always in
+  the shortest form correct for the recipient, so a Tower of another owner is always printed with
+  its owner, even when the recipient has a Tower of the same name.
 - **A body cannot counterfeit a header.** A remote body is normalised by the receiving Tower before
   it is stored, and the stored form is what is delivered.
   - It must be valid UTF-8; if it is not, the message is refused.
@@ -708,13 +896,162 @@ answer as a Tower that does not exist.
   message marked as from another owner is a request from a third party, to be weighed, and is not
   an instruction from the agent's own human.
 
+### Decision 8: how two owners connect
+
+A connection joins one Tower of one owner to one Tower of another. It is the only way a Tower of
+another owner becomes a peer. What has to be decided is what carries the invitation from one person
+to the other, and who is able to use it.
+
+| | What carries it | Who can use it | Does Codev Cloud send email? | What a stranger can do |
+|---|---|---|---|---|
+| **A. Emailed to a named address** (recommended) | An email from Codev Cloud to the address the inviter typed, containing a link | Only the account whose verified email is that address | Yes | Nothing. The link does nothing for any other account |
+| B. A link the inviter passes on | A link shown to the inviter, who sends it by chat or their own email | Whoever holds it. The inviter must therefore confirm who accepted before the connection exists | No | Whoever obtains the link can ask to connect; the inviter's confirmation is the only check |
+| C. A request by handle | Nothing is sent. The request appears on the other owner's Connections page in Codev Cloud | The named account | Optional, as a notice | Anyone who knows a handle can put a request in front of its owner |
+| D. Mutual naming | Nothing is sent. Each owner enters the other's handle and picks a Tower; the connection forms when both have | The two named accounts | No | Nothing is shown to anyone until both sides have named each other |
+
+Recommended: **A**. The invitation is bound to the invitee's account, so a forwarded or leaked link
+is harmless; the invitee is prompted and has something to click; and Codev Cloud already sends
+account-verification email, so it is no new capability. B is the one to choose if the owner does not
+want Codev Cloud emailing people who may not have an account: it needs no email but adds a
+confirmation step and a link that works for whoever holds it. D needs no email and shows nothing
+unsolicited to anyone, but gives the invitee nothing to act on and lets a mistyped handle wait in
+silence.
+
+**Walkthrough of A.** Ana (handle `ana`, Tower `mbp`) invites Sam, who will connect his Tower
+`studio`.
+
+| Step | Who | Does | Sees |
+|---|---|---|---|
+| 1 | Ana | Runs `afx peer invite` on `mbp`, or clicks "Invite another owner" in the dashboard's Peers panel, or opens Tower `mbp` on Codev Cloud. All three open the same Codev Cloud page in her browser, where she is signed in | A form with Tower `mbp` selected and a field for the invitee's email. If her account has no handle yet, she is asked to choose one first |
+| 2 | Ana | Types `sam@example.com` and submits | Exactly what Sam will be shown. The invitation, listed as pending with its expiry (24 hours) and a Cancel button. On her Tower, `afx peer list` and the Peers panel show one pending line. Nothing else changes |
+| 3 | Codev Cloud | Emails `sam@example.com` | Sam's email: Ana's name, verified email and handle; the Tower `mbp`; what connecting means; a link; when it expires. **Nothing appears on any of Sam's Towers**: not in a dashboard, the inbox or the peer list. An invitation is text from a stranger and is kept away from anywhere an agent reads |
+| 4 | Sam | Opens the link and signs in, creating and verifying an account for that address if he has none | Ana's name, verified email and handle; the Tower `mbp`; when the invitation was made and when it expires; the sentence "Connecting lets these two Towers exchange messages once each of you allows it. It allows nothing by itself."; a list of his own Towers to choose from; Connect and Decline. If he has no handle he chooses one. If he has no Tower registered he is told to run `afx tower connect` first, and the invitation waits |
+| 5 | Sam | Chooses `studio` and clicks Connect | "Connected: `sam@studio` and `ana@mbp`. Nothing can be delivered to `studio` until you add a grant there", with the command to add one |
+| 6 | Both Towers | Learn of the connection from Codev Cloud | Ana's pending line becomes `sam@studio  sam@example.com  connected  may message this Tower: nothing`. Sam's peer list gains `ana@mbp  ana@example.com  connected  may message this Tower: nothing`. Each dashboard shows a notice of the new connection. Codev Cloud emails Ana that Sam accepted, naming his Tower. Both owners' Connections pages list it with an End button |
+| 7 | Each owner, on their own Tower | Adds a first grant, for example `afx peer grant sam@studio codev:architect:main` on `mbp` | The grant, echoed with Sam's verified email and the mode (held for release by default). The peer list prints this command under any peer that has no grant. Until Sam adds a grant on `studio`, Ana's messages to it are refused |
+
+**When it does not go to plan.**
+
+- **It expires.** The link says so. Ana's pending line shows expired and then goes. Nothing was
+  created; she can invite again.
+- **Ana cancels it.** The link says it was withdrawn.
+- **Sam declines.** Ana's pending line shows declined. Nothing was created.
+- **The link reaches someone else.** It is useless to them: opened under any other account it says
+  only that the invitation was sent to a different address.
+- **Ana typed the wrong address.** Whoever owns that address can accept. Step 6 shows Ana exactly
+  who did, by verified email and handle. Nothing is deliverable without a grant she adds herself,
+  and she ends the connection from her Tower or from Codev Cloud.
+- **The two Towers are already connected.** Refused when the invitation is created.
+- **Someone uses invitations to send unwanted email.** An account may send a limited number a day
+  (10 by default), and each email carries a link that refuses further invitations from that
+  account.
+
+One invitation connects one pair of Towers. Connecting a second Tower takes a second invitation,
+because the unit of trust is the Tower.
+
+### Decision 9: the command surface
+
+Everything cross-Tower sits under one new noun, `afx peer`. Spellings are illustrative; the plan
+settles exact names. "Human only" means a trust-widening act: role files tell agents not to run it
+unprompted, and it takes the same explicit flag `porch approve` does. That is a convention, not a
+barrier (Decision 4).
+
+| Command | What it does | Stage | Who may run it | Acts on |
+|---|---|---|---|---|
+| **Sending** | | | | |
+| `afx send <address> "…"` | Changed: accepts `workspace:architect:name`; then `afx://tower/…`; then `afx://owner@tower/…`. Prints the new outcomes (held on this Tower, refused) | 1, 2, 3 | Agent or human | Tower |
+| **This Tower** | | | | |
+| `afx workspace list` | New: every workspace on this Tower, its address name, and its architects, builders and shells as addresses ready to paste | 1 | Agent or human | Tower |
+| `afx workspace name <name>` | New: sets the current workspace's explicit address name; `--clear` removes it | 1 | Agent or human | Tower |
+| `afx whoami` | Changed: also prints the caller's own address | 1 | Agent or human | Tower |
+| **Peers** | | | | |
+| `afx peer list` | My other Towers, connected Towers of other owners with their verified email, and invitations I have sent; whether each is online and what it may message here | 2 (other owners: 3) | Agent or human | Tower, which asks Codev Cloud |
+| `afx peer show <tower-ref>` | What runs on a peer that I may message, as addresses | 2 | Agent or human | Tower, through the relay |
+| `afx peer grants [<tower-ref>]` | Lists this Tower's grants | 2 | Agent or human | Tower |
+| `afx peer grant <tower-ref> <recipients> [--deliver \| --hold]` | Adds a grant on this Tower | 2 | Human only | Tower |
+| `afx peer revoke <tower-ref> [<recipients>]` | Removes a grant, or all grants for a peer | 2 | Agent or human; it only narrows access | Tower |
+| `afx peer on`, `afx peer off` | The remote-messaging switch. Off refuses everything and is where a Tower starts | 2 | On: human only. Off: agent or human | Tower |
+| `afx peer log [--peer <tower-ref>]` | The record of cross-Tower attempts, in and out, with outcomes; no bodies | 2 | Agent or human | Tower |
+| `afx peer limits` | Shows the limits in force. They are changed in the user's Codev config file, next to the mailbox retention setting | 2 | Show: anyone. Change: human only | Tower |
+| `afx peer invite` | Opens Codev Cloud's invitation page for this Tower in the browser. It creates nothing itself | 3 | Human, in the browser | Codev Cloud |
+| `afx peer end <owner@tower>` | Ends a connection with another owner's Tower | 3 | Agent or human; it only narrows access | Tower, which tells Codev Cloud |
+| **Inbox** | | | | |
+| `afx inbox` | Changed: three groups — waiting for a local agent (as today), held for release, waiting for a peer | 2 | Agent or human | Tower |
+| `afx inbox show <id>` | Changed: for remote mail, shows the sender's full address and the owner's verified email | 2 | Agent or human | Tower |
+| `afx inbox release <id>` | New: releases a message held for release; it is then delivered through the gate | 2 | Human only | Tower |
+| `afx inbox dismiss <id>` | Changed: also dismisses mail held for release and mail waiting for a peer | 2 | As today | Tower |
+| **Status** | | | | |
+| `afx status` | Changed: one line for remote messaging — on or off, peers online, mail held for release, mail waiting for a peer | 2 | Agent or human | Tower |
+| `afx tower status` | Changed: this Tower's name, the owner's handle once there is one, and the switch state | 2 | Agent or human | Tower |
+
+**Deliberately not `afx` commands.** These happen on Codev Cloud pages under a signed-in session,
+because they are the acts that must not be possible with credentials an agent can read from disk:
+creating an invitation (step 2 above), accepting or declining one, cancelling one, and choosing an
+account handle. `afx peer invite` only opens the page. Codev Cloud's Connections page also lists and
+ends connections, for an owner who is away from their Tower.
+
+**The dashboard** gains a Peers panel on the Tower home page: the peer list, read-only, with the
+"Invite another owner" link that opens Codev Cloud. The held-mail indicator shows three counts
+instead of one, and mail held for release puts it in its attention state. Release and dismissal
+stay in the CLI, as dismissal is today.
+
+**The commands a person will use most.**
+
+```
+$ afx workspace list
+codev          /Users/ana/dev/codev
+  codev:architect:main            live
+  codev:architect:review          live
+  codev:builder-spir-1940         live
+codev-cloud    /Users/ana/dev/codev-cloud
+  codev-cloud:architect:main      live
+  codev-cloud:architect:tunnel    no live terminal
+```
+
+```
+$ afx send afx://devvm/codev:architect:local "CI is green on the tunnel branch"
+[ok] Message delivered to afx://devvm/codev:architect:local (32 bytes)
+
+$ afx send afx://devvm/codev:architect:local "CI is green on the tunnel branch"   # VM switched off
+[info] Message held on this Tower (tower-offline) — mailbox id 7c1e52aa. It is sent when devvm returns.
+
+$ afx send afx://sam@studio/codev-cloud:architect:main "Is the relay endpoint on staging?"
+[error] Refused by sam@studio.
+```
+
+```
+$ afx peer list
+Remote messaging: on
+TOWER        OWNER              STATE     MAY MESSAGE THIS TOWER
+devvm        you                online    everything (deliver)
+sam@studio   sam@example.com    online    codev:architect:main (hold for release)
+sam@mbp      sam@example.com    offline   nothing — afx peer grant sam@mbp <recipients>
+(invited)    pat@example.com    pending   expires in 19h
+```
+
+```
+$ afx peer grant sam@studio codev:architect:main --a-human-explicitly-approved-this
+[ok] sam@studio (sam@example.com) may message codev:architect:main on this Tower. Mail is held for release.
+```
+
+```
+$ afx inbox
+WAITING FOR A LOCAL AGENT
+  3fa2b1c0  to architect:review   busy:composer-redraw   from builder-spir-1940                2m
+HELD FOR RELEASE
+  91bc04de  to architect:main     from afx://sam@studio/codev-cloud:architect:data (sam@example.com)   6m
+            afx inbox show 91bc04de · afx inbox release 91bc04de · afx inbox dismiss 91bc04de
+WAITING FOR A PEER
+  7c1e52aa  to afx://devvm/codev:architect:local   tower-offline   from architect:main        41m
+```
+
 ### Staging
 
 | Stage | Delivers | Needs |
 |---|---|---|
 | 1. Architects on one Tower | The grammar and its structured wire form; `<workspace>:architect:<name>`; qualified provenance and replies; the builder rule; explicit workspace names; the one-Tower listing; docs in both trees | Nothing outside this repository |
-| 2. My own Towers | Peers, grants, the relay path, remote headers, sender-side hold, exactly-once, discovery, rate limits, records, the off switch | #1871; `codev-cloud` items 1, 2, 4, 5, 6 |
-| 3. Another owner's Tower | Invitations and connections, hold for release and its release command, other-owner headers and role guidance, collapsed outcomes, filtered discovery | `codev-cloud` items 3 and 7 |
+| 2. My own Towers | The `afx://tower/` form; peers, grants, hold for release and its release command, the relay path, remote headers, sender-side hold, exactly-once, discovery, rate limits, records, the off switch; the `afx peer` commands | #1871; `codev-cloud` items 1, 2, 4, 5, 6, 8 |
+| 3. Another owner's Tower | The `afx://owner@tower/` form; invitations and connections; other-owner headers and role guidance; collapsed outcomes; filtered discovery | `codev-cloud` items 3, 7 and 9 |
 
 **Issue #655** (cloud messaging) asked for two things. Agents on different machines messaging each
 other through the cloud, and the question of how such a sender is authenticated, are subsumed by
@@ -725,8 +1062,10 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
 
 **Critical (blocks progress)**
 
-1. **Which address grammar?** Recommended: F, the colon path. Runner-up: A, the URI. Everything
-   else in this spec holds under either.
+1. **Which address grammar?** Recommended: G — today's colon grammar on one Tower, and
+   `afx://[owner@]tower/` in front of it to leave the Tower. Runner-up: F with a marked owner
+   (`sam@mbp:codev-cloud:architect`). The stage-1 form is the same under both, so stage 1 does not
+   wait on this choice unless the owner prefers a full URI (A).
 2. **Posture toward another owner's Tower.** Recommended: default deny; a grant names specific
    architects; mail is held for the owner to release unless a grant is explicitly set to deliver;
    builders are never reachable. The alternatives are stricter (always hold, with no way to opt a
@@ -754,15 +1093,22 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
 9. **How much the cloud records.** Recommended: Tower-level metadata only; full addresses stay in
    each Tower's own record. Recording addresses centrally would make the choke point's log more
    useful and put workspace and architect names in it.
-10. **Where a cross-owner connection is confirmed.** Recommended: only in a signed-in Codev Cloud
-    session, never by a command an agent could run.
+10. **How an invitation travels.** Recommended: Codev Cloud emails it to an address the inviter
+    names, and only that account can accept (Decision 8, alternative A). The alternative that
+    needs no email from Codev Cloud is a link the inviter passes on, confirmed by the inviter
+    after someone accepts (alternative B). Either way it is acted on only in a signed-in Codev
+    Cloud session, never by a command an agent could run.
+11. **What names an owner in an address.** Tower names per owner is ruled. Recommended for the
+    owner part: an account handle chosen by the account holder, unique across Codev Cloud. This
+    is new in Codev Cloud and needs its architect's agreement, as does per-account slug
+    uniqueness.
 
 **Nice-to-know**
 
-11. Disposition of #655: narrow it, as recommended above, or close it.
-12. Whether a sender should be told when a held message is finally delivered.
-13. Whether the default limits in Decision 3 are the right size.
-14. If grammar A is chosen: how long the colon forms keep working.
+12. Disposition of #655: narrow it, as recommended above, or close it.
+13. Whether a sender should be told when a held message is finally delivered.
+14. Whether the default limits in Decision 3 are the right size.
+15. If grammar A is chosen: how long the colon forms keep working.
 
 ## Test Scenarios
 
@@ -772,8 +1118,10 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
   legacy builder and from a non-builder.
 - `codev-cloud:architect:tunnel` reaches `tunnel`; an unknown architect name fails naming the
   workspace; an architect registered but with no live terminal is held `no-live-pty`.
-- Malformed shapes fail with the expected shape: two components after `architect`, a Tower with no
-  workspace, an empty component, a character outside the allowed set, a reserved word used as a
+- Malformed shapes fail with the expected shape: two components after `architect`, two before it
+  (`devvm:codev:architect`, with the hint to write `afx://devvm/codev:architect` when `devvm` is
+  one of my Towers), an `afx://` address with no workspace, an empty component, a character
+  outside the allowed set, a port, query, fragment or percent-encoding, a reserved word used as a
   workspace.
 - Two workspaces share a basename: the address fails listing both; after one is given an explicit
   name, both resolve.
@@ -790,14 +1138,18 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
 - The same parser result is produced by the CLI, Tower and the extension for a shared table of
   addresses.
 - A shell id resolves within the workspace and as `<workspace>:<shell-id>`, as today.
-- With Tower never connected to the cloud, all of the above pass and `devvm:codev:architect` is
-  refused with the stated reason; it is refused the same way on a connected Tower.
+- With Tower never connected to the cloud, all of the above pass and `afx://devvm/codev:architect`
+  is refused with the stated reason; it is refused the same way on a connected Tower.
 - A same-workspace message has a byte-identical header to today's, and a short cross-workspace
   message is typed by the same write path as a short same-workspace one.
 
 **Between my own Towers (stage 2)**
 
 - Headline path, both directions, each direction needing its own grant.
+- Another account holds a Tower with the same name as mine: my registration is not bumped, and
+  `afx://<that name>/…` reaches mine.
+- `afx://ana@mbp/…` written on my own `mbp` resolves as the local address, without the cloud.
+- An `afx://` address typed unquoted in Git Bash, PowerShell and cmd arrives unchanged.
 - No grant: refused, nothing persisted on the receiving Tower.
 - Recipient Tower offline, then online: held at the sender, then delivered once. While held, the
   row is not attempted by the local drainer, raises no escalation after the escalation age, and is
@@ -832,8 +1184,18 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
 
 **Between owners (stage 3)**
 
+- The Decision 8 walkthrough, step by step, with two accounts: each step shows what the table says
+  it shows, and before acceptance nothing appears on any Tower of the invitee.
 - An invitation cannot be created or accepted with a Tower key; it can with a signed-in session;
-  it cannot be used twice or after it expires.
+  it cannot be used twice, after it expires, or after it is cancelled; opened under an account
+  other than the one it was addressed to, it reveals nothing and cannot be accepted.
+- Sam and I each have a Tower called `mbp`. From my side `afx://mbp/…` reaches mine and
+  `afx://sam@mbp/…` reaches Sam's; from Sam's side the reverse. A message from Sam's `mbp` arrives
+  on my `mbp` with a header and reply command that both say `sam@mbp`.
+- Sam changes his handle: the old one stops resolving and the error names the new one; my grant to
+  his Tower still applies; a stranger who then takes the old handle is not reachable by it.
+- An unknown owner, and a Tower of a known owner that is not connected to mine, each fail naming
+  what is connected.
 - Connected but ungranted: every send is refused, and the refusal is identical for an agent that
   exists and one that does not.
 - Granted one architect: mail to it is held for release; released, it is delivered through the
@@ -861,10 +1223,12 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
 | Codev Cloud or an owner's cloud account is compromised | Low | High | No worse than today, when the cloud can already reach every route of a connected Tower; the receiving Tower still applies its own grants and holds; stated plainly as residual |
 | An agent on my own machine widens my grants or releases held mail | Low | High | Cross-owner connections need a signed-in cloud session; trust changes are recorded and shown; the same agent can already do anything on that machine |
 | Stages 2 and 3 stall on `codev-cloud` | Medium | Medium | Stage 1 has no dependency on it; the cloud work is listed item by item |
-| Colon positions misread (a Tower name where a workspace was meant) | Medium | Low | Parsing is anchored on the kind word; errors say what the name is |
+| The owner is left off a retyped address for someone else's Tower, and I have a Tower of that name | Low | Medium | It reaches my own agent, never a stranger's; headers, listings and reply commands always print the owner; copying is the normal path |
+| Codev Cloud does not take per-account slugs or handles | Low | High | Raised as Open Question 11 and listed item by item under Decision 3; stage 1 is unaffected; stages 2 and 3 wait on it |
+| An invitation is accepted by the wrong person after a mistyped address | Low | Medium | The inviter is shown who accepted by verified email; a connection permits nothing without a grant; one command ends it |
 | Stale mail arrives long after it was sent | Medium | Medium | Held rows are visible and dismissable on the sending side; the header carries the send time |
 | Discovery or outcome reasons leak what someone is working on | Medium | Medium | Discovery limited to granted recipients; outcomes collapsed for other owners; cloud record is Tower-level |
-| A slug is reused by a stranger after a rename | Low | High | Tower names resolve only through the peer list, by id |
+| A Tower name or a handle is taken by a stranger after a rename, or a look-alike handle is registered | Low | High | Names resolve only among Towers already connected to mine, by id; the verified email is shown wherever another owner appears |
 | Flooding through the relay | Low | Medium | Limits at the cloud and at the Tower; cap on undelivered mail per peer |
 
 ## References
