@@ -45,6 +45,8 @@ const {
   CLAUDE_CAPABILITY_NOTE,
   CLAUDE_REVIEW_TOOLS,
   DEFAULT_CLAUDE_MODEL,
+  DEFAULT_CLAUDE_MAX_TURNS,
+  DEFAULT_CLAUDE_MAX_BUDGET_USD,
 } = await import('../index.js');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -309,7 +311,10 @@ describe('a default successful review', () => {
       '--system-prompt-file', systemPromptFile,
       '--add-dir', sandboxDir,
     ]);
-    expect(review.argv).toEqual(buildClaudeReviewArgs({ model: DEFAULT_CLAUDE_MODEL, systemPromptFile, sandboxDir }));
+    expect(review.argv).toEqual(buildClaudeReviewArgs({
+      model: DEFAULT_CLAUDE_MODEL, systemPromptFile, sandboxDir,
+      caps: { maxTurns: DEFAULT_CLAUDE_MAX_TURNS, maxBudgetUsd: DEFAULT_CLAUDE_MAX_BUDGET_USD },
+    }));
     expect(review.argv).not.toContain('--mcp-config');
     expect(review.argv).not.toContain('--dangerously-skip-permissions');
     expect(CLAUDE_REVIEW_TOOLS).toEqual(['Read', 'Glob', 'Grep']);
@@ -602,7 +607,7 @@ describe('a review run that fails is reported by how it failed', () => {
     {
       name: 'error_max_turns, naming the subtype (scenario 21)',
       print: { stdout: readClaudeFixture('claude-stream-error-max-turns.jsonl'), exitCode: 1 },
-      message: [/Claude CLI error \(error_max_turns\)/, /used all 200 turns/],
+      message: [/Claude CLI error \(error_max_turns\)/, /used all 200 turns\. To allow more, raise consult\.claudeMaxTurns in \.codev\/config\.json\./],
       usage: { inputTokens: 2, cachedInputTokens: 0, outputTokens: 4, costUsd: 0.03259 },
     },
     {
@@ -611,7 +616,7 @@ describe('a review run that fails is reported by how it failed', () => {
         stdout: withResult('claude-stream-error-max-turns.jsonl', (r) => ({ ...r, subtype: 'error_max_budget_usd' })),
         exitCode: 1,
       },
-      message: [/Claude CLI error \(error_max_budget_usd\)/, /\$25 budget cap/],
+      message: [/Claude CLI error \(error_max_budget_usd\)/, /\$25 budget cap\. To allow more, raise consult\.claudeMaxBudgetUsd in \.codev\/config\.json\./],
     },
     {
       name: '"Prompt is too long", as context exhaustion (scenario 22)',
@@ -718,9 +723,9 @@ describe('a protocol failure mid-stream stops the review child before the lane f
       message: /claude did not honour --tools; refusing a review without Grep\./,
     },
     {
-      name: 'an init event repeating a tool on top of all three',
-      stdout: jsonl({ ...INIT, tools: ['Glob', 'Grep', 'Read', 'Read'] }),
-      message: /claude did not honour --tools; refusing a review without each tool exactly once\./,
+      name: 'an init event with a duplicate and an extra tool',
+      stdout: jsonl({ ...INIT, tools: ['Glob', 'Grep', 'Read', 'Read', 'Bash'] }),
+      message: /claude did not honour --tools; refusing a review with tools consult did not grant: "Bash"\./,
     },
     {
       name: 'an assistant event before any init event',
@@ -749,6 +754,122 @@ describe('a protocol failure mid-stream stops the review child before the lane f
     expect(run.stdout).toBe('');
     expect(fs.existsSync(run.outputPath)).toBe(false);
     expect(run.metrics[0]).toMatchObject({ exitCode: 1 });
+  });
+});
+
+// --- #1941: the tool guard compares sets ----------------------------------------------------------
+
+describe('the init guard compares the session tools as sets (#1941)', () => {
+  const ctx = freshContextPerTest();
+
+  it('runs the review when a tool is listed twice', async () => {
+    const run = await runLane(ctx(), {
+      stub: { print: { stdout: jsonl({ ...INIT, tools: ['Glob', 'Grep', 'Read', 'Read'] }, assistant(text('VERDICT: APPROVE')), RESULT_OK) } },
+    });
+
+    expect(run.error).toBeUndefined();
+    expect(fs.readFileSync(run.outputPath, 'utf-8')).toBe('VERDICT: APPROVE');
+  });
+});
+
+// --- #1941: a logged-out answer gets the remedy for the auth mode ---------------------------------
+
+describe('a logged-out answer names the remedy for the auth mode (#1941)', () => {
+  const ctx = freshContextPerTest();
+  const NOT_LOGGED_IN_RESULT = 'Not logged in · Please run /login';
+  const notLoggedIn = withResult('claude-stream-error-result.jsonl', (r) => ({ ...r, result: NOT_LOGGED_IN_RESULT }));
+  const API_KEY_STATUS = { loggedIn: true, authMethod: 'api_key', apiProvider: 'firstParty', apiKeySource: 'ANTHROPIC_API_KEY' };
+
+  function apiKeyMode(c: Ctx): string {
+    process.env.ANTHROPIC_API_KEY = 'sk-ci';
+    return writeProjectConfig(c, { consult: { claudeAuth: 'api-key' } });
+  }
+
+  it('login mode: a logged-out review result says to run `claude auth login`', async () => {
+    const run = await runLane(ctx(), { stub: { print: { stdout: notLoggedIn, exitCode: 1 } } });
+
+    expect(run.error!.message).toContain(`Claude returned an error instead of a review: ${NOT_LOGGED_IN_RESULT}`);
+    expect(run.error!.message).toContain('Run `claude auth login`.');
+    expect(fs.existsSync(run.outputPath)).toBe(false);
+  });
+
+  it('api-key mode: a logged-out review result points at the key, not `claude auth login`', async () => {
+    const configFile = apiKeyMode(ctx());
+    const run = await runLane(ctx(), {
+      stub: { authStatus: { stdout: JSON.stringify(API_KEY_STATUS) }, print: { stdout: notLoggedIn, exitCode: 1 } },
+    });
+
+    expect(run.error!.message).toContain(`Claude returned an error instead of a review: ${NOT_LOGGED_IN_RESULT}`);
+    expect(run.error!.message).toContain(`consult.claudeAuth is "api-key" (set in ${configFile})`);
+    expect(run.error!.message).toContain('check that the key is valid');
+    expect(run.error!.message).not.toContain('claude auth login');
+    expect(fs.existsSync(run.outputPath)).toBe(false);
+  });
+
+  it('api-key mode: a logged-out auth status points at the key, not `claude auth login`', async () => {
+    const configFile = apiKeyMode(ctx());
+    const run = await runLane(ctx(), { stub: { authStatus: { stdout: JSON.stringify(STUB_LOGGED_OUT_STATUS), exitCode: 1 } } });
+
+    expect(run.error!.message).toContain('claude reports no login (authMethod: none).');
+    expect(run.error!.message).toContain(`consult.claudeAuth is "api-key" (set in ${configFile})`);
+    expect(run.error!.message).not.toContain('claude auth login');
+    expect(run.review).toBeUndefined();
+  });
+
+  it('adds no login remedy to an error result that is not about the login', async () => {
+    const run = await runLane(ctx(), { stub: { print: { stdout: readClaudeFixture('claude-stream-error-result.jsonl'), exitCode: 1 } } });
+
+    expect(run.error!.message).toContain('You have hit your org monthly usage limit');
+    expect(run.error!.message).not.toContain('claude auth login');
+  });
+});
+
+// --- #1941: configurable caps ---------------------------------------------------------------------
+
+describe('consult.claudeMaxTurns and consult.claudeMaxBudgetUsd set the review caps (#1941)', () => {
+  const ctx = freshContextPerTest();
+
+  it('pass the configured caps to the claude argv', async () => {
+    writeProjectConfig(ctx(), { consult: { claudeMaxTurns: 350, claudeMaxBudgetUsd: 7.5 } });
+    const run = await runLane(ctx());
+
+    expect(run.error).toBeUndefined();
+    expect(flagValue(run.review!.argv, '--max-turns')).toBe('350');
+    expect(flagValue(run.review!.argv, '--max-budget-usd')).toBe('7.5');
+  });
+
+  it('name the configured turn cap and its setting when the review reaches it', async () => {
+    writeProjectConfig(ctx(), { consult: { claudeMaxTurns: 350 } });
+    const run = await runLane(ctx(), { stub: { print: { stdout: readClaudeFixture('claude-stream-error-max-turns.jsonl'), exitCode: 1 } } });
+
+    expect(run.error!.message).toContain('The review used all 350 turns. To allow more, raise consult.claudeMaxTurns in .codev/config.json.');
+  });
+
+  it('name the configured budget cap and its setting when the review reaches it', async () => {
+    writeProjectConfig(ctx(), { consult: { claudeMaxBudgetUsd: 7.5 } });
+    const run = await runLane(ctx(), {
+      stub: {
+        print: {
+          stdout: withResult('claude-stream-error-max-turns.jsonl', (r) => ({ ...r, subtype: 'error_max_budget_usd' })),
+          exitCode: 1,
+        },
+      },
+    });
+
+    expect(run.error!.message).toContain(
+      'The review reached the $7.5 budget cap. To allow more, raise consult.claudeMaxBudgetUsd in .codev/config.json.',
+    );
+  });
+
+  it.each([
+    [{ claudeMaxTurns: 0 }, /Invalid consult\.claudeMaxTurns in Codev config: .* got 0\./],
+    [{ claudeMaxBudgetUsd: 'lots' }, /Invalid consult\.claudeMaxBudgetUsd in Codev config: .* got "lots"\./],
+  ])('fail the lane before any review on a bad value: %j', async (consult, message) => {
+    writeProjectConfig(ctx(), { consult });
+    const run = await runLane(ctx());
+
+    expect(run.error!.message).toMatch(message);
+    expect(run.review).toBeUndefined();
   });
 });
 

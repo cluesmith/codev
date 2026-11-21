@@ -40,7 +40,13 @@ export const CLAUDE_MIN_VERSION = '2.1.141';
 /** Pins the binary the lane runs. Mirrors `CODEV_AGY_BIN`. */
 export const CLAUDE_BIN_ENV = 'CODEV_CLAUDE_BIN';
 
-export const CLAUDE_INSTALL_HINT = 'curl -fsSL https://claude.ai/install.sh | bash';
+/**
+ * How to install `claude`, for both install routes: the native installer, and npm for a locked-down
+ * CI image that cannot run it. A sentence fragment, so callers end it.
+ */
+export const CLAUDE_INSTALL_HINT =
+  'Install claude: `curl -fsSL https://claude.ai/install.sh | bash` for the native install, or ' +
+  '`npm install -g @anthropic-ai/claude-code` for an npm install';
 
 /**
  * How to update `claude`, for both install routes: `claude update` serves the native installer, and an
@@ -152,7 +158,7 @@ export function resolveClaudeBin(env: NodeJS.ProcessEnv = process.env): string {
   }
   throw new Error(
     `The claude CLI was not found on PATH. Codev runs your installed claude (the claude review lane, and the merge session of \`codev update\` and \`codev adopt\`). ` +
-    `Install it with \`${CLAUDE_INSTALL_HINT}\`, or set ${CLAUDE_BIN_ENV} to its absolute path.`
+    `${CLAUDE_INSTALL_HINT}. Or set ${CLAUDE_BIN_ENV} to its absolute path.`
   );
 }
 
@@ -351,13 +357,33 @@ export function readClaudeAuthStatus(bin: string, env: Record<string, string>): 
   return parseClaudeAuthStatus(bin, stdout);
 }
 
-export function assertLoggedIn(status: ClaudeAuthStatus, withheld: readonly string[] = []): void {
+/**
+ * What to do when claude says it is not logged in, for the mode the lane ran in. In `login` mode
+ * that is a claude login. In `api-key` mode it is the key: the lane authenticates with it, never
+ * with a stored login, so `claude auth login` would not change the outcome.
+ */
+export function claudeLoginRemedy(mode: ClaudeAuthMode, modeSource: string | null = null): string {
+  if (mode === 'login') return 'Run `claude auth login`.';
+  return (
+    `consult.claudeAuth is "api-key"${modeSource ? ` (set in ${modeSource})` : ''}, so the lane ` +
+    `authenticates with ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN, not a claude login: check that ` +
+    `the key is valid, or remove consult.claudeAuth to use your claude login.`
+  );
+}
+
+export function assertLoggedIn(
+  status: ClaudeAuthStatus,
+  opts: { mode?: ClaudeAuthMode; modeSource?: string | null; withheld?: readonly string[] } = {},
+): void {
   if (status.loggedIn) return;
+  const { mode = 'login', modeSource = null, withheld = [] } = opts;
   const keyHint = withheld.length > 0
     ? ` ${withheld.join(' and ')} ${withheld.length > 1 ? 'are' : 'is'} set but not used: to bill ` +
       `the API with it instead, set consult.claudeAuth to "api-key" in .codev/config.json.`
     : '';
-  throw new Error(`claude reports no login (authMethod: ${status.authMethod}). Run \`claude auth login\`.${keyHint}`);
+  throw new Error(
+    `claude reports no login (authMethod: ${status.authMethod}). ${claudeLoginRemedy(mode, modeSource)}${keyHint}`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -462,6 +488,8 @@ export interface ClaudePreflight {
   bin: string;
   version: string;
   mode: ClaudeAuthMode;
+  /** The config file that set `consult.claudeAuth`, or null for the default. */
+  modeSource: string | null;
   env: Record<string, string>;
   status: ClaudeAuthStatus;
   /** Content of the `[CLAUDE] binary:` line. */
@@ -499,9 +527,9 @@ export function preflightClaude(opts: {
 
     const status = readClaudeAuthStatus(bin, env);
     authLine = describeClaudeAuth({ status, env, mode, modeSource: source, withheld, fromDotenv: opts.fromDotenv });
-    assertLoggedIn(status, withheld);
+    assertLoggedIn(status, { mode, modeSource: source, withheld });
 
-    return { bin, version, mode, env, status, binaryLine, authLine };
+    return { bin, version, mode, modeSource: source, env, status, binaryLine, authLine };
   } catch (err) {
     throw new ClaudePreflightError(errorText(err), binaryLine, authLine, { cause: err });
   }
