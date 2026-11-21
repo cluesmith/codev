@@ -7,14 +7,17 @@ Keep implementation phases, file paths, code, and "first we will… then we will
 out of the spec — those belong in codev/plans/<id>-*.md.
 -->
 
-Issue: #1940. Command names, header layouts and limits shown here are illustrative; the plan settles
-exact spellings. The decisions that are the owner's are collected under **Open Questions**, each with
+Issue: #1940. The address grammar, once the owner has chosen it, is fixed by this spec. Command
+names and header layouts are the proposed ones; the plan may change a spelling only where it
+collides with something that exists. The decisions that are the owner's are collected under **Open Questions**, each with
 a recommendation.
 
 ## Problem Statement
 
 `afx send` reaches an agent only if the sender can name it, and only if it lives on the same Tower.
-Three things the owner wants are impossible today, in this order of priority:
+Three things the owner wants are impossible today. They are listed in the owner's order, as the
+issue was updated on 2026-11-21; the issue as first filed, and the builder's spawn prompt, had
+named architects last:
 
 1. **Named architects cannot be reached from outside their own workspace.** From workspace `codev`
    there is no way to write "the architect named `tunnel` in workspace `codev-cloud`". Only that
@@ -74,7 +77,8 @@ can claim any sender.
 **Delivery.** Spec 1313 made sends mailbox-first: the message is persisted, then typed only onto a
 prompt the render gate has verified empty. The response is `delivered`, or `held` with a reason
 (`busy`, `no-profile`, `no-live-pty`). Held rows never expire; a human lists, reads and dismisses
-them with `afx inbox`. Messages are capped at 48 KB. There is no rate limit on sends.
+them with `afx inbox`. Message text is capped at 48 KB, by the CLI and again by Tower. There is no
+rate limit on sends.
 
 **Tower and Codev Cloud.**
 
@@ -182,7 +186,8 @@ they are not acceptance criteria for this project.
 - [ ] The sender is told `delivered`, `held` with where and why, or `refused` with the reason. A
       refusal exits non-zero and leaves nothing on the receiving Tower.
 - [ ] A message for a Tower that is offline, or sent while the cloud is unreachable, is held on the
-      sending Tower, visible in `afx inbox`, and arrives exactly once when the route returns.
+      sending Tower, visible in `afx inbox`, and is accepted exactly once when the route returns,
+      provided that is within the message's 30-day lifetime. After that it is shown as expired.
 - [ ] Mail held on the sending Tower is a distinct kind of held mail: the local delivery drainer
       never tries to type it into a terminal, it never raises the starved-agent escalation, and
       `afx inbox` and the held-mail indicator show it apart from mail waiting for a local agent.
@@ -191,8 +196,10 @@ they are not acceptance criteria for this project.
       sender's full address; the reply command in it works.
 - [ ] The sending Tower's identity shown to the recipient comes from Codev Cloud's authentication
       of that Tower. No field of the message can change it.
-- [ ] The cross-Tower entry point cannot be reached from Tower's local listener or through the
-      cloud's `/t/` browser proxy.
+- [ ] The cross-Tower entry point is not served on Tower's local listener, and Codev Cloud's `/t/`
+      browser proxy can neither reach it nor supply the relay's identity stamp.
+- [ ] A send to a peer that does not speak the protocol, or through a cloud without the relay, is
+      refused with that reason and not held.
 - [ ] `--raw`, `--interrupt` and `--no-enter` are refused for a remote recipient, and control
       characters in a remote body never reach a terminal.
 - [ ] From one Tower I can list my other Towers, and for one I have been granted, its workspaces and
@@ -230,10 +237,14 @@ they are not acceptance criteria for this project.
 - **Transport is directed by the owner:** every cross-Tower message travels through Codev Cloud,
   which is the single security choke point. It reaches the receiving Tower down that Tower's
   existing tunnel. No Tower accepts an inbound connection.
-- **A new header must not change how a message is typed.** Tower writes a short frame in one piece
-  and a longer one as a chunked paste, and the current frame is sized to stay on the first path.
-  Any header or reply line this work adds is sized deliberately against that threshold.
-- **Stage 1 involves no transport** and must not depend on a Tower being connected to Codev Cloud.
+- **Every frame stays three lines.** Tower types a frame in one short write only while it has
+  fewer than four lines and is at most 256 bytes; anything else goes by chunked paste. Today's
+  frame is three lines, with the reply hint on the footer line, precisely so that short messages
+  stay on the short path. Every new frame in this spec keeps to three lines, with its reply
+  command on the footer line. The byte limit is not changed, so a longer address leaves less room
+  for a body on the short path: roughly 90 bytes for a cross-workspace frame and roughly 30 for a
+  frame from another owner's Tower. Longer messages take the paste path, as every message of
+  ordinary length already does; on agy that path is slower, line by line.
 - **Mailbox-first (Spec 1313).** A remote message is persisted to the receiving Tower's mailbox and
   delivered through the render gate, under the same per-agent and per-terminal locks as any other
   message. Nothing remote writes a terminal directly, and there is no force path.
@@ -480,6 +491,12 @@ tower-ref  = [ owner "@" ] tower                    ; how commands, grants and l
   `arch` and `builder` cannot name a workspace. A port, a query, a fragment or a percent-encoded
   character makes the address malformed; they are free for later use. This rule bounds what an
   address can carry. It does not loosen the existing rules for naming an architect or a builder.
+- **No local address stops working.** The component rule governs explicit names and everything in
+  an `afx://` address. A local address still matches a workspace by its directory basename exactly
+  as it does today, whatever characters the basename has; such a workspace needs an explicit name
+  only to be reached from another Tower.
+- **Other terminal kinds.** Dev-server terminals are not message recipients today and do not
+  become so.
 - **Shells stay local.** A shell id is addressable within a Tower exactly as today, and never from
   another Tower, including my own: text sent to a shell prompt is a command, with no agent between
   the sender and the machine.
@@ -576,12 +593,14 @@ gets worse with every new account.
   is not address-safe, both of which have no remedy today. The rules:
   - A workspace's address name is its explicit name if it has one, otherwise its directory
     basename. Names are compared lower-cased.
-  - An explicit name must fit the component rule in Decision 1, must not be a reserved word, and
-    must not equal the address name of any other workspace Tower knows. Setting one that breaks a
-    rule is refused with the reason.
-  - An explicit name outranks a basename. If a workspace's basename equals another workspace's
-    explicit name, the explicit name resolves and the other workspace is not addressable by name
-    until it is given one; the error says so.
+  - **Setting a name.** An explicit name must fit the component rule in Decision 1, must not be a
+    reserved word, and must not equal the address name, explicit or basename, of any other
+    workspace Tower knows at that moment. Setting one that breaks a rule is refused with the
+    reason. So a name can never be taken from a workspace that is already using it.
+  - **A workspace that arrives later.** If a workspace is registered afterwards and its basename
+    equals an existing explicit name, the explicit name keeps resolving to the workspace that
+    holds it. The newcomer is not addressable by name until it is given one of its own, and
+    `afx workspace list` and the error for its bare basename both say so.
   - Two workspaces with the same basename and no explicit names are both unaddressable by that
     name: the address fails as ambiguous, listing both paths and the naming command.
   - Changing or clearing an explicit name takes effect at once; the old name stops resolving.
@@ -642,7 +661,7 @@ is exceeded is fixed.
 | Mail from one peer accepted but not yet delivered | 50 messages | Receiving Tower | Refused as rate limited until some is delivered, released or dismissed |
 | Discovery queries from one peer | 10 a minute | Cloud and receiving Tower | Refused as rate limited |
 | Invitation lifetime (stage 3) | 24 hours, single use | Cloud | The invitation no longer works |
-| Age of a message on arrival | 30 days, the mailbox retention window | Receiving Tower | Refused as expired (Decision 5) |
+| Lifetime of a message | 30 days from its send time; fixed by the protocol, not configurable | Sending Tower and receiving Tower | Marked expired by the sender; refused as expired by the receiver (Decision 5) |
 
 A refusal for rate is never retried automatically by the sending Tower; the sender is told, and
 decides.
@@ -657,8 +676,31 @@ leave is held on the sending Tower (Decision 5). Nothing arrives at a Tower whos
 There is no alternate route.
 
 **The entry point is narrow.** The receiving Tower accepts cross-Tower messages at one entry point
-that exists only for the cloud's relay. It is not served on Tower's local listener, and the cloud's
-`/t/` browser proxy cannot address it. Every other tunnel route keeps its current behaviour.
+that exists only for the cloud's relay. Two parties keep it narrow.
+
+- Tower does not serve it on its local listener, so nothing on the machine can post a message
+  dressed as remote.
+- The cloud guarantees that its `/t/` browser proxy can neither address it nor supply the relay's
+  identity stamp. Tower cannot check this for itself: the proxy and the relay arrive down the same
+  tunnel. It is the cloud's obligation (item 5 below) and is tested there.
+
+Every other tunnel route keeps its current behaviour.
+
+**Mixed versions.** Towers and the cloud are upgraded at different times.
+
+- Every relayed message and discovery query carries a protocol version. A receiving Tower refuses
+  a version it does not speak, naming the versions it does; the refusal is final, not held.
+- A peer Tower too old to have the entry point at all is reported by the cloud as not supporting
+  cross-Tower messaging. The send is refused with that reason. It is not held, because waiting
+  will not fix it.
+- A Tower talking to a cloud that has no relay yet says so on any `afx://` send and in
+  `afx peer list`, and refuses the send.
+- The CLI and Tower ship in one package and are upgraded together. Tower goes on accepting the
+  address as a string from a CLI, the extension or a script, and parses it itself; only
+  Tower-to-Tower traffic requires the structured form. An older Tower given an `afx://` address
+  fails it as an unknown recipient, which is loud and correct.
+- Additions to the wire form are optional fields. Anything that changes meaning raises the
+  version.
 
 **Work that lands in the `codev-cloud` repository.**
 
@@ -815,28 +857,35 @@ the receiving Tower's real answer.
     indicator list it separately, so a closed laptop does not look like a starved agent.
   - Alternative, fail fast: simpler, but the report is lost unless the agent remembers to retry.
   - Alternative, hold in the cloud: rejected, because the cloud would then store message bodies.
-- **Exactly once.** Each message carries an id and a send time chosen by the sending Tower, and
-  both stay the same across retries.
+- **Accepted once.** Each message carries an id and a send time chosen by the sending Tower, and
+  both stay the same across retries. A message has a fixed lifetime of 30 days from its send time.
+  The lifetime is part of the protocol, not a setting, so both Towers know it.
   - The receiving Tower records the id on the mailbox row it creates. A second arrival of the same
-    id from the same peer creates nothing and is answered with the current state of the first:
-    `delivered`, `held`, or `refused` if the owner dismissed it. That record lives exactly as long
-    as the row: for ever while held, and for the retention window (30 days by default) after it is
-    delivered or dismissed. A restart or a rename does not affect it, because it is keyed by peer
-    Tower id and message id.
-  - The receiving Tower refuses, as expired, any message whose send time is older than that
-    retention window. A retry can therefore never outlive the record that would have recognised it,
-    and a message cannot be resurrected after its row is gone.
+    id from the same peer creates no second row and is answered with the current state of the
+    first: `delivered`, `held`, or `refused` if the owner dismissed it. A restart or a rename does
+    not affect this, because the record is keyed by peer Tower id and message id.
+  - The receiving Tower keeps that record for at least the message's lifetime, whatever its mailbox
+    retention is set to, and refuses as expired any message past its lifetime. A retry can
+    therefore never outlive the record that would have recognised it.
   - If no answer comes back, the sending Tower keeps its row held and retries with the same id. A
-    sender-held row ends in one of three ways: accepted by the peer, refused by the peer (including
-    as expired), or dismissed by its owner. It is never dropped without one of these.
+    sender-held row ends in one of four ways: accepted by the peer, refused by the peer, dismissed
+    by its owner, or marked expired by the sending Tower itself when its lifetime runs out. It is
+    never dropped silently, and an expired row stays visible like any other resolved row.
+  - What this guarantees is one mailbox row per message. Typing that row into the terminal has the
+    guarantee every local message has under Spec 1313, no more: the gate before the write, and a
+    row that is never typed again once the write was accepted.
 - **Order.** Messages from one sending Tower to one recipient are delivered in the order they were
   sent. The sending Tower sends its held mail for a peer oldest first, and a new message for a peer
   that still has held mail queues behind it. At the recipient, Spec 1313 already drains held mail
-  for an agent in arrival order. No order is promised between different senders.
+  for an agent in arrival order. No order is promised between different senders. Two consequences:
+  the queue is per peer, which costs nothing because everything that holds mail at the sender is a
+  condition of the whole peer; and a refused message leaves the order, so if one is refused for
+  rate the next may arrive without it.
 - **Later changes are not pushed back.** A message held at the recipient and delivered an hour
   later does not notify the sender, exactly as with local held mail today.
-- **Not available across Towers:** `--raw`, `--interrupt`, `--no-enter`, `--all` and `--delay`. Each
-  is refused by the sending Tower with a reason; the receiving Tower refuses them again.
+- **Not available across Towers:** `--raw`, `--interrupt`, `--no-enter` and `--delay`. Each is
+  refused by the sending Tower with a reason; the receiving Tower refuses them again. `--all`
+  takes no address and stays what it is: every builder in the sender's own workspace.
 - **Replies.** Every header carries the sender's address in the form the recipient must type, and a
   reply command. Whether the reply is accepted depends on the grants of the Tower it goes back to;
   if they do not allow it, the refusal says so.
@@ -858,6 +907,11 @@ answer as a Tower that does not exist.
 
 - **The receiving Tower writes the header.** It uses the cloud's stamp for the Tower and owner, and
   the sending Tower's statement for the workspace and agent. Nothing in the body can alter it.
+- **Two parts of a remote address carry different weight.** The owner and the Tower
+  (`sam@studio`, and the verified email) are authenticated by Codev Cloud. The workspace and agent
+  after the slash are what the sending Tower says, and are worth exactly as much as that Tower:
+  if it is compromised, they can be anything. Grants are per Tower for this reason, and the role
+  guidance says so.
 - **Four cases, visibly different:**
   1. Same workspace: the header is exactly today's. Unchanged.
   2. Another workspace on this Tower (stage 1): today's header with the sender's
@@ -873,7 +927,8 @@ answer as a Tower that does not exist.
   ### [REMOTE, OTHER OWNER sam@example.com · afx://sam@studio/codev-cloud:architect:data → main | <time>] ###
   ```
 
-  Cases 2 to 4 end with a reply command carrying that address, for example
+  Cases 2 to 4 carry a reply command on the footer line, where builder-bound frames carry theirs
+  today, so the frame stays three lines. For example
   `(reply: afx send afx://sam@studio/codev-cloud:architect:data "…")`. The address is always in
   the shortest form correct for the recipient, so a Tower of another owner is always printed with
   its owner, even when the recipient has a Tower of the same name.
@@ -894,7 +949,8 @@ answer as a Tower that does not exist.
     guidance below are what an agent relies on, not the body.
 - **Agents are told what the markings mean.** The architect and builder role files say that a
   message marked as from another owner is a request from a third party, to be weighed, and is not
-  an instruction from the agent's own human.
+  an instruction from the agent's own human; and that in a remote address only the owner and Tower
+  are verified.
 
 ### Decision 8: how two owners connect
 
@@ -951,8 +1007,8 @@ because the unit of trust is the Tower.
 
 ### Decision 9: the command surface
 
-Everything cross-Tower sits under one new noun, `afx peer`. Spellings are illustrative; the plan
-settles exact names. "Human only" means a trust-widening act: role files tell agents not to run it
+Everything cross-Tower sits under one new noun, `afx peer`. These are the proposed names; the plan
+may change one only where it collides with an existing command. "Human only" means a trust-widening act: role files tell agents not to run it
 unprompted, and it takes the same explicit flag `porch approve` does. That is a convention, not a
 barrier (Decision 4).
 
@@ -1050,7 +1106,7 @@ WAITING FOR A PEER
 | Stage | Delivers | Needs |
 |---|---|---|
 | 1. Architects on one Tower | The grammar and its structured wire form; `<workspace>:architect:<name>`; qualified provenance and replies; the builder rule; explicit workspace names; the one-Tower listing; docs in both trees | Nothing outside this repository |
-| 2. My own Towers | The `afx://tower/` form; peers, grants, hold for release and its release command, the relay path, remote headers, sender-side hold, exactly-once, discovery, rate limits, records, the off switch; the `afx peer` commands | #1871; `codev-cloud` items 1, 2, 4, 5, 6, 8 |
+| 2. My own Towers | The `afx://tower/` form; peers, grants, hold for release and its release command, the relay path, remote headers, sender-side hold, accepted-once, discovery, rate limits, records, the off switch; the `afx peer` commands | #1871; `codev-cloud` items 1, 2, 4, 5, 6, 8 |
 | 3. Another owner's Tower | The `afx://owner@tower/` form; invitations and connections; other-owner headers and role guidance; collapsed outcomes; filtered discovery | `codev-cloud` items 3, 7 and 9 |
 
 **Issue #655** (cloud messaging) asked for two things. Agents on different machines messaging each
@@ -1059,6 +1115,10 @@ stages 2 and 3. A human sending and reading messages from the web or a phone is 
 Recommendation: narrow #655 to that remainder and point it at this spec for addressing and grants.
 
 ## Open Questions
+
+These are the owner's decisions. The spec is written under the recommended answer to each, so it
+can be planned from as it stands; approving it at the gate adopts those answers except where the
+owner rules otherwise.
 
 **Critical (blocks progress)**
 
@@ -1087,8 +1147,8 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
 6. **Builders.** Recommended: reachable from my own Towers, never from another owner's; and a
    builder may use the new reach only to reply. Alternatives: architects only everywhere; or
    builders unrestricted between my own Towers.
-7. **A Tower that is offline.** Recommended: hold at the sender, never expiring, dismissable.
-   Alternative: fail fast.
+7. **A Tower that is offline.** Recommended: hold at the sender until the message is accepted,
+   dismissed, or 30 days old. Alternative: fail fast.
 8. **What another owner's sender learns.** Recommended: outcome only, with no reasons.
 9. **How much the cloud records.** Recommended: Tower-level metadata only; full addresses stay in
    each Tower's own record. Recording addresses centrally would make the choke point's log more
@@ -1126,8 +1186,11 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
 - Two workspaces share a basename: the address fails listing both; after one is given an explicit
   name, both resolve.
 - An explicit workspace name is refused when it is a reserved word, has a character outside the
-  allowed set, or equals another workspace's address name in any letter case. A workspace whose
-  basename equals another's explicit name is reported as needing a name of its own.
+  allowed set, or equals another workspace's address name (explicit or basename) in any letter
+  case. A workspace registered later whose basename equals an existing explicit name does not take
+  the name; it is reported as needing one of its own.
+- A workspace whose basename contains a space is still reached by its local address as today, and
+  is refused in an `afx://` address until it has an explicit name.
 - A builder's reply reach survives a Tower restart and a rename of the sender's workspace, and is
   gone once the original message has been pruned from the mailbox.
 - A builder addressing `<own workspace>:architect:<other>` is refused under the Spec 755 rule; a
@@ -1140,8 +1203,8 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
 - A shell id resolves within the workspace and as `<workspace>:<shell-id>`, as today.
 - With Tower never connected to the cloud, all of the above pass and `afx://devvm/codev:architect`
   is refused with the stated reason; it is refused the same way on a connected Tower.
-- A same-workspace message has a byte-identical header to today's, and a short cross-workspace
-  message is typed by the same write path as a short same-workspace one.
+- A same-workspace message has a byte-identical header to today's. Every new frame has exactly
+  three lines, and a cross-workspace message with a 40-byte body is typed by the short write path.
 
 **Between my own Towers (stage 2)**
 
@@ -1161,18 +1224,23 @@ Recommendation: narrow #655 to that remainder and point it at this spec for addr
 - The relay's answer is lost after the receiving Tower accepted: the retry does not deliver twice,
   and is answered with the first message's current state, including after the owner dismissed it
   and after a Tower restart.
-- A message whose send time is older than the retention window is refused as expired.
+- A message past its 30-day lifetime is refused as expired by the receiver, including on a
+  receiver whose mailbox retention is set shorter; a sender-held row reaching that age is marked
+  expired by the sender and is not sent.
 - A sender-held message is refused by the peer on retry (its grant was removed meanwhile): the
   sender's row ends as refused and is not retried again.
 - A message whose payload claims a different sending Tower is shown with the Tower the cloud
   authenticated.
-- A request to the cross-Tower entry point from localhost, and one through the `/t/` proxy, are
-  both rejected.
+- A request to the cross-Tower entry point from localhost is rejected by Tower; one through the
+  `/t/` proxy, with or without a forged stamp, is rejected by the cloud.
+- A message in an unknown protocol version is refused naming the supported versions; a send to a
+  peer Tower that predates the protocol is refused, not held; an address sent as a string by an
+  older client is parsed by Tower and resolves.
 - A body containing escape sequences, a bracketed-paste terminator, C1 controls, bidirectional
   overrides, zero-width characters, a forged header line, or a leading `!` or `/` arrives as inert
   text under a genuine header, and satisfies the invariant in Decision 7. A body that is not valid
   UTF-8 is refused.
-- `--raw`, `--interrupt`, `--no-enter`, `--delay` and `--all` with a remote recipient are refused.
+- `--raw`, `--interrupt`, `--no-enter` and `--delay` with a remote recipient are refused.
 - A recipient Tower renamed in the cloud: the old name fails naming the new one; mail already held
   for it still reaches it.
 - Exceeding the per-peer limit is refused as rate limited, at the cloud and, with the cloud's limit

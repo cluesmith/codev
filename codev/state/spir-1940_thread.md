@@ -86,3 +86,18 @@ grant already converts mail to held-for-release in stage 2.
 Second review requested by the architect. Porch is parked at the gate and hands out no further
 consultation, so the two lanes are run by hand with the same command shape porch used (iter2
 output files), on the architect's instruction.
+
+## 2026-11-21 — second review round (codex + claude, run by hand at the architect's request)
+
+- Both REQUEST_CHANGES again, both on precision. Applied all but two.
+- Rebutted with evidence: (1) claude said the stage order inverts the owner's — it read the stale
+  `.builder-prompt.txt`; the issue was reordered by the owner at 01:35Z. (2) claude said the 48 KB
+  cap is only the `--file` cap — it is `MAX_MESSAGE_BYTES`, enforced on the message in the CLI and
+  in Tower's `/api/send`.
+- Real catches: the frame must stay three lines (4+ lines or >256 bytes flips a message onto the
+  paste path, and the reply hint lives on the footer line for exactly that reason); "exactly once"
+  was really "one mailbox row"; a fixed 30-day message lifetime replaces the receiver-dependent
+  expiry; workspace-name collisions now defined for both orders of events; mixed-version behaviour
+  added; workspace/agent in a remote header are the sending Tower's claim, only owner and Tower
+  are cloud-authenticated.
+- No edits were made while a lane was running this time; neither output carries the #1649 warning.
