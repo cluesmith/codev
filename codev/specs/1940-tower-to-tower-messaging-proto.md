@@ -9,8 +9,24 @@ out of the spec — those belong in codev/plans/<id>-*.md.
 
 Issue: #1940. The address grammar, once the owner has chosen it, is fixed by this spec. Command
 names and header layouts are the proposed ones; the plan may change a spelling only where it
-collides with something that exists. The decisions that are the owner's are collected under **Open Questions**, each with
-a recommendation.
+collides with something that exists. The decisions that are the owner's are collected under
+**Open Questions**, each with a recommendation.
+
+**At a glance.** What the spec recommends, and where the owner's decision on it is asked.
+
+| Matter | Recommendation | Open Question |
+|---|---|---|
+| Stages | 1: named architects across workspaces on one Tower. 2: my own Towers. 3: another owner's Tower | — |
+| What this project builds | Stage 1 only; stages 2 and 3 become their own issues | 4 |
+| Address | Today's colon grammar on one Tower; `afx://[owner@]tower/` in front of it to leave the Tower | 1 |
+| Names | Tower names unique per owner (ruled); an account handle names the owner; a workspace may be given an explicit name | 11 |
+| Front door (#1605) | Named architects addressable from other workspaces by default; a workspace may choose front door only; #1605 closes as superseded | 12 |
+| Transport | Codev Cloud relays (directed); it holds no mail; an offline Tower's mail waits at the sender for up to 30 days | 7 |
+| Identity | The cloud says who is sending, in a statement the receiving Tower can verify came from the relay | 3 |
+| Authorization | Default deny; grants live on the receiving Tower and name a peer Tower and its recipients; one switch per Tower, off to start | 2, 5 |
+| Builders | Name only their own architect; otherwise front doors; never cross owners | 6 |
+| Another owner | One emailed invitation connects two owners; grants stay per Tower; mail is held for the owner to release | 2, 10, 13 |
+| Commands | One new noun, `afx peer`, plus `afx workspace list` and `name`, and `afx inbox release` | — |
 
 ## Problem Statement
 
@@ -152,6 +168,10 @@ What project 1940 goes on to build is the owner's call (Open Question 4). Under 
 answer, the stage 1 criteria are this project's acceptance criteria and are sufficient to plan
 from. The stage 2 and stage 3 criteria are written here so that the follow-up issues inherit them;
 they are not acceptance criteria for this project.
+
+Approving this spec with Open Question 4 answered as recommended makes the stage 1 checklist the
+acceptance criteria for project 1940. The architect then files one issue for stage 2 and one for
+stage 3, each citing this spec and inheriting its checklist as written.
 
 **Stage 1 (architects on one Tower)**
 
@@ -497,8 +517,9 @@ tower-ref  = [ owner "@" ] tower                    ; how commands, grants and l
 - **Leaving parts out.** No owner means my own account. No `afx://` means this Tower. No workspace
   means the sender's workspace. Bare `architect` keeps today's meaning exactly: from a builder, its
   spawning architect; from anyone else, `main`.
-- **Naming myself is allowed.** `afx://ana@mbp/…` written on my own `mbp` means the same as the
-  local address, and resolves without the cloud.
+- **Naming myself is allowed, from stage 2.** `afx://ana@mbp/…` written on my own `mbp` means the
+  same as the local address, and resolves without the cloud. In stage 1 every `afx://` address is
+  refused, this one included: a Tower does not yet know its own canonical name.
 - **Components** are lower-cased and must match `[a-z0-9][a-z0-9._-]*`; owner handles and Tower
   names are further limited to letters, digits and hyphens. No escaping or encoding exists; a name
   outside that set is not addressable until it is given one that fits (Decision 2). `architect`,
@@ -712,6 +733,8 @@ So the proof has to be something only the relay and this Tower hold.
    - the sending owner's account id, handle and verified email, and whether the two Towers share
      an owner;
    - the message id (or query id) and the time the cloud issued the statement;
+   - a statement id: 128 random bits the cloud generates for this one statement, so that no two
+     statements are ever the same, including two for one message in the same millisecond;
    - a SHA-256 hash of the payload exactly as forwarded: the body, the recipient, and the sending
      Tower's statement of workspace and agent.
 3. **The check, made before anything is stored.** The receiving Tower accepts the request only if
@@ -720,12 +743,16 @@ So the proof has to be something only the relay and this Tower hold.
    - the receiving Tower id is its own;
    - the payload hashes to the stated value;
    - the statement was issued within five minutes of the Tower's clock;
-   - this statement has not been accepted before. Tower remembers accepted statements for the five
-     minutes in which they could still be fresh.
+   - its statement id has not been presented before. Tower remembers statement ids for the five
+     minutes in which a statement could still be fresh.
+
+   A statement is used up the moment it passes these checks, before the address is resolved, the
+   grant is looked up or any limit is applied, and whatever the request's outcome turns out to
+   be. So a statement whose message was refused for want of a grant cannot be presented again.
 
    A failure is refused, stores nothing, and is recorded as a rejected attempt. A legitimate retry
-   is a new call to the relay and carries a new statement; its message id then finds the existing
-   mailbox row (Decision 5).
+   is a new call to the relay and carries a new statement with a new id; its message id then
+   finds the existing mailbox row (Decision 5).
 
 | | Stops a local caller holding the key | Stops the `/t/` browser proxy | Stops a replay | Stops a malicious cloud |
 |---|---|---|---|---|
@@ -889,6 +916,13 @@ its own reason. It appears in the held-mail indicator and in `afx inbox`. The ow
 either releases it, after which it is delivered through the gate like any other message, or
 dismisses it. The delivery machinery never releases it by itself.
 
+Mail held for release has no lifetime. Tower neither expires it nor dismisses it, however long it
+waits. The 30-day lifetime in Decision 5 governs whether a message is accepted, not what happens
+to one already in the mailbox. What bounds the pile is the cap on undelivered mail per peer
+(Decision 3): once 50 messages from one peer are waiting, further mail from it is refused as rate
+limited until the owner releases or dismisses some. That is the intended backpressure. The
+held-mail indicator is in its attention state the whole time, and the sender is told.
+
 What this protects, stated exactly: it keeps a remote sender's text out of an agent's prompt until
 something acting with the owner's local authority lets it in. It is a safeguard against the remote
 sender. It is not a barrier against a process on the same machine that already holds the local
@@ -1000,7 +1034,9 @@ the receiving Tower's real answer.
 | And on one Tower (stage 1)? | `afx workspace list` shows every workspace on this Tower with its architects, as local addresses |
 
 Discovery queries are rate limited and recorded like messages. A peer with no grant gets the same
-answer as a Tower that does not exist.
+answer as a Tower that does not exist. A query to a peer that is offline, or made while the cloud
+is unreachable, is refused with that reason. It is never held: an answer that arrives later is no
+use to the command that asked.
 
 ### Decision 7: provenance
 
@@ -1043,18 +1079,29 @@ answer as a Tower that does not exist.
   | A builder | Another builder | `(reply: afx send codev:builder-spir-12 "…")` |
   | A builder | The `main` architect of another workspace | `(reply: afx send codev:architect "…")`, the front door, which reaches it |
   | A builder | A named architect that is not its own | `(reply through your architect: afx send architect "…")` |
+  | A builder | An agent on another of my Towers (stage 2) | The same three rows, with the `afx://` form: a builder's address, the front door `afx://mbp/codev:architect` when the sender is that workspace's `main`, and otherwise `(reply through your architect: afx send architect "…")` |
   | An architect | An architect on another owner's Tower | The reply command as usual, `(reply: afx send afx://sam@studio/codev-cloud:architect:data "…")`. Whether the reply is accepted is decided by the other Tower's grants, and the architect is told when it sends |
 - **A body cannot counterfeit a header.** A remote body is normalised by the receiving Tower before
   it is stored, and the stored form is what is delivered.
   - It must be valid UTF-8; if it is not, the message is refused.
-  - Line endings become a single line feed.
-  - Removed: every C0 control character except line feed and tab, DEL, every C1 control character
-    (U+0080 to U+009F), and the Unicode characters that reorder or hide text (the bidirectional
-    embedding, override and isolate controls, zero-width characters, and the byte-order mark).
-  - Any line of the body that begins with the frame's marker is altered so that it no longer does.
+  - Line endings first: CR LF, a lone CR, U+2028 and U+2029 each become one line feed.
+  - Then these code points are removed, and no others. The list is fixed by this spec and does
+    not follow a Unicode version:
+    - U+0000 to U+001F except U+0009 (tab) and U+000A (line feed);
+    - U+007F to U+009F (DEL and the C1 controls);
+    - U+00AD (soft hyphen), U+061C, U+180E;
+    - U+200B to U+200F (zero-width space, non-joiner, joiner, and the two direction marks);
+    - U+202A to U+202E and U+2066 to U+2069 (the embedding, override and isolate controls);
+    - U+2060 to U+2064, and U+FEFF (word joiner, invisible operators, byte-order mark).
+  - The cost is known: without the joiner and non-joiner some Persian words and some emoji
+    sequences display differently. The text stays readable, and this applies to remote bodies
+    only.
+  - Any line whose first character other than a space or a tab begins the frame's marker is
+    altered so that it no longer does.
   - The invariant, which is what the tests assert for arbitrary input: what reaches the terminal is
-    a header written by Tower, then body text containing none of the removed characters and no line
-    that begins with the frame marker, then a footer written by Tower.
+    a header written by Tower, then body text containing none of the listed code points and no line
+    whose first character other than a space or a tab begins the frame marker, then a footer
+    written by Tower.
   - Because the header comes first, a body that starts with `/` or `!` is never read by the agent's
     harness as a command.
   - Printable text can still claim, in words, to be something it is not. The header and the role
@@ -1253,9 +1300,9 @@ Each has a workspace `codev`; `main` runs on the laptop and `local` on the VM.
 | 1 | `mbp` | `afx peer list` | `Remote messaging: off — a human turns it on with: afx peer on`, then one line: `devvm  you  online  may message this Tower: nothing`. The listing works while the switch is off, so she can see what turning it on will involve |
 | 2 | `mbp` | `afx peer on --a-human-explicitly-approved-this` | `[ok] Remote messaging is on for mbp. No Tower may message it yet. Allow one with: afx peer grant <tower> …` |
 | 3 | `devvm` | `afx peer on --a-human-explicitly-approved-this` | The same, for `devvm` |
-| 4 | `devvm` | `afx peer grant mbp --all --a-human-explicitly-approved-this` | `[ok] mbp (your Tower) may message every architect and builder on this Tower. Mail is delivered directly.` |
-| 5 | `mbp` | `afx peer grant devvm --all --a-human-explicitly-approved-this` | The same, for `devvm`. This is what lets the reply in step 9 arrive |
-| 6 | `mbp` | `afx peer show devvm` | `afx://devvm/codev:architect:main   live` and `afx://devvm/codev:architect:local  live`, one address a line, ready to paste |
+| 4 | `devvm` | `afx peer grant mbp codev:architect:local --a-human-explicitly-approved-this` | `[ok] mbp (your Tower) may message codev:architect:local on this Tower. Mail is delivered directly.` |
+| 5 | `mbp` | `afx peer grant devvm codev:architect:main --a-human-explicitly-approved-this` | The same, for `devvm` and `codev:architect:main`. This is what lets the reply in step 9 arrive |
+| 6 | `mbp` | `afx peer show devvm` | `afx://devvm/codev:architect:local  live`: one address a line, ready to paste, and only what `mbp` has been granted |
 | 7 | `mbp`, architect `main` | `afx send afx://devvm/codev:architect:local "CI is green on the tunnel branch"` | `[ok] Message delivered to afx://devvm/codev:architect:local (32 bytes)` |
 | 8 | `devvm`, architect `local` | Nothing; the message arrives | The frame below |
 | 9 | `devvm`, architect `local` | `afx send afx://mbp/codev:architect:main "Thanks, taking over"`, pasted from the frame's footer | `[ok] Message delivered to afx://mbp/codev:architect:main (19 bytes)`, and `main` on the laptop sees the matching frame |
@@ -1273,6 +1320,12 @@ to hold in the head than one for each direction. So a round trip costs four huma
 switch on each Tower, and a grant on each Tower. Steps 2 to 5 are done once per pair of Towers.
 Under the alternative in Open Question 5, where my own Towers trust each other automatically,
 steps 4 and 5 disappear.
+
+**The grants here are narrow on purpose.** Each names the one architect that should hear from the
+other machine, because accepting a remote message is accepting remote instructions for an agent
+with a shell. The shortcut for an owner who wants two of their own machines fully open to each
+other is `afx peer grant mbp --all`, which covers every architect and builder on the Tower. It is
+offered for own Towers only and is not what the documentation teaches first.
 
 **What a skipped step looks like**, at step 7:
 
@@ -1333,10 +1386,11 @@ case where it is. The other default is Open Question 12.
   rewritten by stage 1 for the new rule, front door and opt-in included.
 - Its out-of-scope clause is what this section argues against, in the way it asked.
 
-### Existing code the plan will meet
+### Compatibility: existing code the design must not break
 
-Each of these was read in the source for this spec. None is a reason to change the design; each is
-a place where a plan that did not know about it would go wrong.
+This section is not design. It records how today's code behaves at the points this design
+touches, so that the constraints it implies are requirements and not discoveries. Each was read
+in the source for this spec. How the changes are made is the plan's business.
 
 | Code | What it does today | What changes |
 |---|---|---|
@@ -1518,7 +1572,8 @@ owner rules otherwise.
 - A relayed request is refused, and nothing is stored, when: it comes from localhost with the
   local key and the tunnel's marker header; its MAC was made with another secret; its payload was
   altered after the MAC was made; it names another receiving Tower; its statement is more than
-  five minutes old; the same statement is presented twice; or its secret belongs to a tunnel
+  five minutes old; the same statement is presented twice, including one whose first presentation was refused for
+  want of a grant; or its secret belongs to a tunnel
   session that has since reconnected.
 - On the cloud side: a request through the `/t/` proxy to the relay's path is refused, and an
   attestation header sent by a browser does not reach the Tower.
@@ -1528,7 +1583,8 @@ owner rules otherwise.
   peer Tower that predates the protocol is refused, not held; an address sent as a string by an
   older client is parsed by Tower and resolves.
 - A body containing escape sequences, a bracketed-paste terminator, C1 controls, bidirectional
-  overrides, zero-width characters, a forged header line, or a leading `!` or `/` arrives as inert
+  overrides, zero-width characters, a forged header line (also one indented with spaces or tabs),
+  or a leading `!` or `/` arrives as inert
   text under a genuine header, and satisfies the invariant in Decision 7. A body that is not valid
   UTF-8 is refused.
 - `--raw`, `--interrupt`, `--no-enter` and `--delay` with a remote recipient are refused.
@@ -1542,7 +1598,8 @@ owner rules otherwise.
   sending Tower: the send is refused locally and no relay call is made; mail already waiting for a
   peer stays held and is sent after the switch is turned on.
 - The stage 2 walkthrough, step by step, and each row of its skipped-step table.
-- Discovery lists what the grant covers and nothing more.
+- Discovery lists what the grant covers and nothing more. `afx peer show` for an offline peer is
+  refused, not held.
 
 **Between owners (stage 3)**
 
