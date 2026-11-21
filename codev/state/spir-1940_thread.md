@@ -101,3 +101,33 @@ output files), on the architect's instruction.
   added; workspace/agent in a remote header are the sending Tower's claim, only owner and Tower
   are cloud-authenticated.
 - No edits were made while a lane was running this time; neither output carries the #1649 warning.
+
+## 2026-11-21 — third revision (owner read it against the second draft, spir-1943; gate still pending)
+
+Owner leans to grammar G (not a ruling). Six changes asked for; all made. Allowed to read the
+second draft and take what is better, not its grammar.
+
+1. **#1605 (front door only)** — new Decision 10 answers its three arguments one by one, adds a
+   front-door-only setting per workspace (in `.codev/config.json`) with the error message #1605
+   asked for, and recommends closing #1605 as superseded when stage 1 merges. Default is open.
+2. **Genuine relay traffic** — adopted the second draft's mechanism: a secret per tunnel session
+   issued in the handshake, in memory only; every relayed request carries a MAC'd statement of
+   sender Tower, owner, message id, time and payload hash; replays refused. Found in source why
+   this is needed: the tunnel client forwards over loopback with the real local key and a marker
+   header, so neither the listener nor any header proves anything.
+3. **Builder rule** — replaced reply-reach (mailbox lookup) with the plain rule: a builder names
+   only its own spawning architect, otherwise front doors. Footer never offers an address the
+   recipient may not use. No case found that the plain rule fails; it costs one hop in a rare one.
+4. **Stage 2 walkthrough** — nine steps, two machines, every command and its output, plus what a
+   skipped step looks like. The switch covers sending too, so both Towers need `afx peer on`.
+5. **Connections** — now join two owners, once; grants stay per Tower. Cost bounded by showing a
+   Tower to other owners only while its remote messaging is on.
+6. **Existing code** — new section. `isSafeSenderId` pattern does not change (the address is
+   composed by Tower from validated parts; remote senders go in new mailbox columns);
+   `architectHeaderLabel`/`senderHeaderLabel` would mislabel an address, so new frames take the
+   role from the structured kind; `formatMessageForTarget` has six call sites and no sender
+   workspace; measured body budgets on the short path (103 / 87 / 68 / 26 bytes); cron,
+   interrupt/refresh, SDK and VS Code callers each stated.
+
+Review plan, as instructed: codex + claude on this text, apply, then both again on the final
+text, and stop there whatever the verdicts. No edits while a lane is running.

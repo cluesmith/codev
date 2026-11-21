@@ -127,8 +127,8 @@ today keeps its meaning. The three goals ship as three stages, each usable on it
 
 **Stage 3 — someone else's Tower.**
 
-> I invite a collaborator by email from Codev Cloud; they accept and pick one of their Towers. I
-> allow that Tower, `sam@studio`, to message one architect of mine. Their message arrives held; I
+> I invite a collaborator by email from Codev Cloud, and they accept. I allow one of their
+> Towers, `sam@studio`, to message one architect of mine. Their message arrives held; I
 > read it and release it; my architect sees it marked as from another owner, with their email and
 > the address `afx://sam@studio/codev-cloud:architect:data` to reply to. Anything they send to any
 > other agent of mine is refused.
@@ -141,8 +141,9 @@ always sees an address it can reply to.
 The design that delivers this is argued under **Solution Approaches**: the address grammar
 (Decision 1), names and renames (Decision 2), the transport and what each party enforces
 (Decision 3), the trust model (Decision 4), delivery semantics (Decision 5), discovery
-(Decision 6), provenance (Decision 7), how two owners connect (Decision 8) and the commands
-(Decision 9).
+(Decision 6), provenance (Decision 7), how two owners connect (Decision 8), the commands
+(Decision 9) and the front door (Decision 10). Two walkthroughs show setup step by step: my own
+Towers after Decision 9, another owner in Decision 8.
 
 ## Success Criteria
 
@@ -158,11 +159,15 @@ they are not acceptance criteria for this project.
       delivered or held exactly as a same-workspace message would be, including `no-live-pty` when
       the architect is registered but has no live terminal.
 - [ ] Every address form valid before this change resolves to the same recipient as before.
-- [ ] A message from another workspace shows the sender's qualified address in its header, plus a
-      reply command that works when pasted unchanged. Same-workspace headers are unchanged.
-- [ ] The Spec 755 rule still holds when a builder qualifies an address with its own workspace
-      name, and a builder cannot open a conversation with a named architect in another workspace
-      (it can reply to one that messaged it).
+- [ ] A message from another workspace shows the sender's qualified address in its header. Its
+      footer tells the recipient how to reply: a command that works when pasted unchanged, or, for
+      a builder messaged by an architect it may not name, to reply through its own architect.
+      Same-workspace frames are unchanged.
+- [ ] A builder can name an architect only if it is its own spawning architect, however the
+      address is qualified. It reaches every other architect through a front door, as today.
+- [ ] No reply command in a footer is one the recipient's own send would refuse.
+- [ ] A workspace set to front door only refuses mail from outside to its named architects, with
+      an error that names its front door; nothing is rerouted.
 - [ ] An ambiguous workspace name fails with an error naming every match and the remedy; giving one
       workspace an explicit address name removes the ambiguity.
 - [ ] One command lists every workspace on this Tower with its architects, each as an address ready
@@ -177,7 +182,10 @@ they are not acceptance criteria for this project.
 
 **Stage 2 (my own Towers)**
 
-- [ ] The headline path works between two Towers on one account, both behind NAT.
+- [ ] The headline path works between two Towers on one account, both behind NAT. The stage 2
+      walkthrough can be followed as written: the same commands, in that order, with those results.
+- [ ] With remote messaging off, a Tower refuses an `afx://` send to another Tower before anything
+      leaves the machine, and says how a human turns it on.
 - [ ] A Tower's name is unique within its owner's account only. The name I give a Tower is not
       affected by what any other account has registered, and an address for one of my own Towers
       never contains an owner.
@@ -195,9 +203,11 @@ they are not acceptance criteria for this project.
 - [ ] The recipient's header marks the message as remote and names the sending Tower and the
       sender's full address; the reply command in it works.
 - [ ] The sending Tower's identity shown to the recipient comes from Codev Cloud's authentication
-      of that Tower. No field of the message can change it.
-- [ ] The cross-Tower entry point is not served on Tower's local listener, and Codev Cloud's `/t/`
-      browser proxy can neither reach it nor supply the relay's identity stamp.
+      of that Tower, carried in the attested statement. No field of the message can change it.
+- [ ] A relayed request is accepted only with a statement whose MAC verifies under the current
+      tunnel session's secret. A request from this machine that holds the local key, a request
+      through Codev Cloud's `/t/` browser proxy with any headers, a replayed statement, and one
+      from an earlier tunnel session are each refused, and nothing is stored.
 - [ ] A send to a peer that does not speak the protocol, or through a cloud without the relay, is
       refused with that reason and not held.
 - [ ] `--raw`, `--interrupt` and `--no-enter` are refused for a remote recipient, and control
@@ -212,9 +222,11 @@ they are not acceptance criteria for this project.
 
 **Stage 3 (another owner's Tower)**
 
-- [ ] Two Towers of different owners can be connected only through an invitation that both owners
-      act on in a signed-in Codev Cloud session. A Tower credential alone cannot create or accept
-      one. The walkthrough in Decision 8 can be followed by two people as written.
+- [ ] Two owners can be connected only through an invitation that both act on in a signed-in
+      Codev Cloud session. A Tower credential alone cannot create or accept one. One invitation
+      connects the two owners, whatever number of Towers each has. The walkthrough in Decision 8
+      can be followed by two people as written.
+- [ ] A Tower is shown to a connected owner only while its remote messaging is on.
 - [ ] An invitation can be accepted only by the account it was addressed to, and before it is
       accepted nothing about it appears on any Tower of the invitee.
 - [ ] Another owner's Tower is always written with its owner, `afx://sam@mbp/…`. When Sam and I
@@ -222,15 +234,17 @@ they are not acceptance criteria for this project.
       every header, listing and reply command prints the owner when the Tower is not the reader's
       own.
 - [ ] After connecting, nothing is deliverable until the receiving owner grants a specific
-      recipient. Builders cannot be granted to another owner's Tower.
+      recipient on a specific Tower. Builders cannot be granted to another owner's Tower, and a
+      builder's send to another owner's Tower is refused by its own Tower.
 - [ ] A message from another owner is held for release unless the grant says otherwise. Nothing in
       Tower releases or dismisses it automatically.
 - [ ] The header states that the message is from another owner and shows their verified email.
 - [ ] An ungranted sender cannot distinguish "no such agent" from "not allowed", and learns nothing
       about why a message is held.
 - [ ] Discovery shows another owner exactly the recipients they have been granted and nothing else.
-- [ ] Either owner can end the connection from their Tower or from Codev Cloud, and relaying stops
-      at once in both directions.
+- [ ] Either owner can end the connection from any of their Towers or from Codev Cloud. Relaying
+      stops at once in both directions between all their Towers, and the grants to the other
+      owner's Towers are removed.
 
 ## Constraints
 
@@ -242,8 +256,8 @@ they are not acceptance criteria for this project.
   frame is three lines, with the reply hint on the footer line, precisely so that short messages
   stay on the short path. Every new frame in this spec keeps to three lines, with its reply
   command on the footer line. The byte limit is not changed, so a longer address leaves less room
-  for a body on the short path: roughly 90 bytes for a cross-workspace frame and roughly 30 for a
-  frame from another owner's Tower. Longer messages take the paste path, as every message of
+  for a body on the short path: 87 bytes for the cross-workspace example frame, 68 for one from my
+  own Tower and 26 for one from another owner's Tower, against 103 today. Longer messages take the paste path, as every message of
   ordinary length already does; on agy that path is slower, line by line.
 - **Mailbox-first (Spec 1313).** A remote message is persisted to the receiving Tower's mailbox and
   delivered through the render gate, under the same per-agent and per-terminal locks as any other
@@ -642,12 +656,12 @@ receiving owner did not grant.
 
 | Concern | Codev Cloud (the choke point) | Receiving Tower | Sending Tower |
 |---|---|---|---|
-| Who is sending | Authenticates the sending Tower by its key on every relayed message and stamps the Tower id and current name, the owner's account id, handle and verified email, and whether sender and recipient share an owner. No field of the message can set these | Takes the sender's Tower and owner only from that stamp, and only on the tunnel | Stamps the sending workspace and agent, as well as it can identify them (see Decision 7) |
-| Who may talk to whom | Relays only between two Towers of one account, or two Towers joined by an accepted connection that has not been ended | Delivers only what a local grant allows: this peer, this recipient, this mode. No grant means refusal. This is the authoritative check | Refuses a Tower name that is not in its peer list, before anything leaves |
+| Who is sending | Authenticates the sending Tower by its key on every relayed message and states, under a MAC the receiving Tower can verify, the Tower id and current name, the owner's account id, handle and verified email, and whether sender and recipient share an owner. No field of the message can set these | Takes the sender's Tower and owner only from the cloud's attested statement, after verifying its MAC (below) | Stamps the sending workspace and agent, as well as it can identify them (see Decision 7) |
+| Who may talk to whom | Relays only between two Towers of one account, or two Towers whose owners are connected, and lists a Tower to another owner only while its remote messaging is on | Delivers only what a local grant allows: this peer, this recipient, this mode. No grant means refusal. This is the authoritative check | Refuses a Tower name that is not in its peer list, before anything leaves |
 | Human hold | None | Holds for release where the grant says so | None |
 | Flooding | Limits per sending Tower and per pair; caps message size | Its own limit per peer, a cap on undelivered mail per peer, the same size cap | None |
 | Record | Every relay attempt as metadata (when, which Towers, message id, size, outcome class) and every connection event | Every inbound decision, release and dismissal | Every outbound attempt and outcome |
-| Withdrawal | Ending a connection or deregistering a Tower stops relaying immediately, both ways | Removing a grant, or switching remote messaging off, stops delivery immediately | Not applicable |
+| Withdrawal | Ending a connection, or deregistering a Tower, stops relaying immediately, both ways | Removing a grant, or switching remote messaging off, stops delivery immediately | Not applicable |
 | Content | Does not inspect it | Strips control characters, frames the message itself, persists first, delivers through the gate | Not applicable |
 
 **Limits.** Each is a default that the owner of the enforcing side can change; the outcome when one
@@ -675,14 +689,70 @@ bodies end to end would need Tower keys (Decision 4, alternative B) and is not p
 leave is held on the sending Tower (Decision 5). Nothing arrives at a Tower whose tunnel is down.
 There is no alternate route.
 
-**The entry point is narrow.** The receiving Tower accepts cross-Tower messages at one entry point
-that exists only for the cloud's relay. Two parties keep it narrow.
+**How the receiving Tower knows a relayed message is genuine.** Neither where a request arrives
+nor any header on it can prove it came from the relay.
 
-- Tower does not serve it on its local listener, so nothing on the machine can post a message
-  dressed as remote.
-- The cloud guarantees that its `/t/` browser proxy can neither address it nor supply the relay's
-  identity stamp. Tower cannot check this for itself: the proxy and the relay arrive down the same
-  tunnel. It is the cloud's obligation (item 5 below) and is tested there.
+- Tower's tunnel client runs inside the Tower process. It forwards every request that comes down
+  the tunnel to Tower's own local listener, with the real local key and a marker header.
+- A process on the machine that holds the local key can send the same marker, or any other header.
+- The cloud's `/t/` browser proxy passes a browser's own headers down the same tunnel.
+
+So the proof has to be something only the relay and this Tower hold.
+
+1. **A secret per tunnel session.** When a Tower's tunnel is authenticated, the cloud issues it a
+   fresh random 256-bit secret in the handshake reply. Both sides keep it in memory only: it is
+   never written to disk and never logged. Every new tunnel connection gets a new secret, and the
+   old one stops working.
+2. **An attestation on every relayed request.** With each relayed message and each discovery
+   query the cloud sends a statement and a MAC over it (HMAC-SHA-256, keyed with the receiving
+   Tower's session secret). The statement covers:
+   - the protocol version and the kind of request;
+   - the receiving Tower's id;
+   - the sending Tower's id and current name;
+   - the sending owner's account id, handle and verified email, and whether the two Towers share
+     an owner;
+   - the message id (or query id) and the time the cloud issued the statement;
+   - a SHA-256 hash of the payload exactly as forwarded: the body, the recipient, and the sending
+     Tower's statement of workspace and agent.
+3. **The check, made before anything is stored.** The receiving Tower accepts the request only if
+   all of these hold:
+   - the MAC verifies under the current session's secret;
+   - the receiving Tower id is its own;
+   - the payload hashes to the stated value;
+   - the statement was issued within five minutes of the Tower's clock;
+   - this statement has not been accepted before. Tower remembers accepted statements for the five
+     minutes in which they could still be fresh.
+
+   A failure is refused, stores nothing, and is recorded as a rejected attempt. A legitimate retry
+   is a new call to the relay and carries a new statement; its message id then finds the existing
+   mailbox row (Decision 5).
+
+| | Stops a local caller holding the key | Stops the `/t/` browser proxy | Stops a replay | Stops a malicious cloud |
+|---|---|---|---|---|
+| Trust the tunnel's marker header | No | Only if the cloud strips it | No | No |
+| Keep the entry point off the local listener | Yes | Only if the cloud keeps the two apart | No | No |
+| **Session secret and attestation** (recommended) | Yes | Yes | Yes | No |
+| A signing key per Tower (Decision 4, alternative B) | Yes | Yes | Yes | Yes |
+
+**What this does not defend against.** A malicious or compromised cloud, which holds the secret.
+The cloud is already inside every connected Tower's trust: the tunnel can drive any route the
+tunnel does not block, with the local key stamped. Nor a process that can read Tower's memory,
+which already owns the machine as that user.
+
+**What the cloud must still do.**
+
+- Authenticate the sending Tower by its key on every relay call, and build the statement only from
+  its own records, never from anything the sender supplied.
+- Keep each session secret in memory, one per tunnel session, and never log it.
+- Drop any attestation header from requests coming through the `/t/` browser proxy, and refuse the
+  relay's path there. With the MAC this is a second barrier, not the only one: if it fails, the
+  result is a refused request, not a message.
+- Never deliver peer traffic through `/api/send` or any other route.
+- Hash exactly the bytes it forwards.
+
+**A wrong clock.** A Tower whose clock is more than five minutes out refuses every relayed
+request. It says so in `afx peer list` and in its record, and the sender of one of my own Towers
+is told the reason.
 
 Every other tunnel route keeps its current behaviour.
 
@@ -693,8 +763,8 @@ Every other tunnel route keeps its current behaviour.
 - A peer Tower too old to have the entry point at all is reported by the cloud as not supporting
   cross-Tower messaging. The send is refused with that reason. It is not held, because waiting
   will not fix it.
-- A Tower talking to a cloud that has no relay yet says so on any `afx://` send and in
-  `afx peer list`, and refuses the send.
+- A cloud that has no relay yet issues no session secret in the handshake. A Tower that received
+  none says so on any `afx://` send and in `afx peer list`, and refuses the send.
 - The CLI and Tower ship in one package and are upgraded together. Tower goes on accepting the
   address as a string from a CLI, the extension or a script, and parses it itself; only
   Tower-to-Tower traffic requires the structured form. An older Tower given an `afx://` address
@@ -705,20 +775,24 @@ Every other tunnel route keeps its current behaviour.
 **Work that lands in the `codev-cloud` repository.**
 
 1. A relay: accept a message from an authenticated Tower, apply the cloud's checks in the table,
-   forward it to the recipient Tower's tunnel with the identity stamp, and return the recipient
+   forward it to the recipient Tower's tunnel with the attested statement, and return the recipient
    Tower's answer. No body is stored or logged.
-2. A peer listing for a Tower credential: the other Towers on the same account, the Towers
-   connected by invitation, and invitations this Tower's owner has sent; each Tower with its id,
-   current name, owner handle and verified email, and whether it is online.
-3. Cross-owner connections (stage 3), as walked through in Decision 8: the invitation page, the
-   invitation email, the acceptance page with its Tower picker, the notice to the inviter, the
-   Connections page where an owner sees and ends connections, and the daily limit on invitations.
-   Creating, accepting, declining and cancelling require a signed-in user session. Ending a
-   connection is also accepted from either Tower.
+2. A peer listing for a Tower credential: the other Towers on the same account; the Towers of
+   connected owners that have remote messaging on; and invitations this Tower's owner has sent.
+   Each Tower comes with its id, current name, owner handle and verified email, and whether it is
+   online. A Tower reports its switch state to the cloud for this.
+3. Connections between owners (stage 3), as walked through in Decision 8: the invitation page, the
+   invitation email, the acceptance page, the notice to the inviter, the Connections page where an
+   owner sees and ends connections, and the daily limit on invitations. A connection is a record
+   of two account ids. Creating, accepting, declining and cancelling require a signed-in user
+   session. Ending a connection is also accepted from any Tower of either owner.
 4. Carrying discovery queries the same way as messages (Decision 6).
-5. Guaranteeing that the browser proxy cannot reach the relay entry point or forge its stamp.
+5. The session secret in the tunnel handshake and the attested statement on every relayed request;
+   and keeping the browser proxy apart from the relay, as listed under "What the cloud must still
+   do".
 6. Rate limits and the metadata record.
-7. Ending a Tower's cross-owner connections when the Tower is deregistered.
+7. Dropping a deregistered Tower from every peer list at once, and ending an account's
+   connections when the account is deleted.
 8. Tower slugs unique per account instead of across the cloud: at registration, on rename and on
    takeover (stage 2).
 9. Account handles: chosen by the account holder, unique across the cloud, changeable, asked for
@@ -735,13 +809,14 @@ Stage 1 needs none of this.
   within its owner's account.
 - An **owner** is a Codev Cloud account with a verified email. The cloud binds each Tower to one
   owner. The account's handle is a label for it; the verified email is what a person checks.
-- A receiving Tower learns both from the cloud's stamp. It does not learn them from the message.
+- A receiving Tower learns both from the cloud's attested statement (Decision 3). It does not
+  learn them from the message.
 
 Alternatives for how identity is proved:
 
 | | How | For | Against |
 |---|---|---|---|
-| **A. Cloud-vouched identity, grants held by the Tower** (recommended) | The cloud says who is sending; the receiving Tower decides what that sender may do | One place proves identity, as the owner directed. No keys to create, exchange, rotate or lose. The Tower still makes its own authorization decision | A compromised cloud could forge a sender |
+| **A. Cloud-vouched identity, grants held by the Tower** (recommended) | The cloud says who is sending, in a statement the receiving Tower can verify came from the relay (Decision 3); the receiving Tower decides what that sender may do | One place proves identity, as the owner directed. No keys to create, exchange, rotate or lose. The Tower still makes its own authorization decision | A compromised cloud could forge a sender |
 | **B. End-to-end Tower keys** | Each Tower holds a signing key; peers pin it when they connect; every message is signed | The relay could not forge a sender | A pairing ceremony and key lifecycle on every Tower. It buys little today: the cloud can already reach every route of a connected Tower, and someone who takes over an owner's cloud account can drive that owner's real Tower, signatures and all |
 | **C. Everything decided by the cloud** | The cloud holds the grants; the Tower delivers whatever the relay hands it | Simplest Tower | The Tower trusts the relay blindly, and workspace and architect names move into the cloud's database |
 | **D. A shared secret per pair** | A token copied between two Towers | No cloud involvement | A secret to move by hand; no owner identity; nothing for the choke point to enforce |
@@ -752,24 +827,25 @@ to name a sender; it would become worthwhile if the tunnel's general exposure we
 **Peers, connections and grants.** Three terms carry the whole model.
 
 - A **peer** is a Tower the cloud is willing to relay to or from: every other Tower on my account,
-  and every Tower joined to mine by a connection.
-- A **connection** joins two Towers of different owners. It is created by invitation and held by
-  the cloud. It says the two may be relayed between; it permits no delivery.
+  and every Tower of an owner I am connected with that has remote messaging on.
+- A **connection** joins two owners (Decision 8). It is created by invitation and held by the
+  cloud. It makes each owner's Towers peers of the other's; it permits no delivery.
 - A **grant** lives on the receiving Tower and says: this peer may message these recipients, in
   this mode. The modes are *deliver* and *hold for release*. With no grant, the answer is refusal.
 
 **How trust is established.**
 
 - **Between my own Towers (stage 2):** my other Towers are peers automatically, because the cloud
-  knows they are mine. Nothing is deliverable until I add a grant on the receiving Tower, one
-  command per direction. A grant to one of my own Towers may cover every agent and defaults to
-  *deliver*.
-- **Between two owners (stage 3):** one owner invites the other by email for one of their Towers;
-  the other accepts for one of theirs. Decision 8 walks through it step by step. Both acts happen
+  knows they are mine. Nothing is deliverable until remote messaging is on for both Towers and I
+  have added a grant on the receiving Tower, one command per direction. A grant to one of my own
+  Towers may cover every agent and defaults to *deliver*. The stage 2 walkthrough after Decision 9
+  shows every command, from nothing to a reply.
+- **Between two owners (stage 3):** one owner invites the other by email, and the other accepts.
+  Decision 8 walks through it step by step. Both acts happen
   in a signed-in Codev Cloud session, so no agent on either machine can connect a Tower to a
   stranger using credentials it can read from disk. An invitation is single-use, expires, and can
   be used only by the account it was addressed to. Nothing unsolicited is ever shown on a Tower.
-  Once connected, each owner adds grants on their own Tower. A grant to another owner's Tower must
+  Once connected, each owner adds grants, Tower by Tower. A grant to another owner's Tower must
   name its recipients and defaults to *hold for release*.
 
 **Authorization.**
@@ -781,9 +857,32 @@ to name a sender; it would become worthwhile if the tunnel's general exposure we
 - The unit of trust on the sending side is the **Tower**, not an agent on it. A receiving Tower
   cannot verify which agent on the other Tower wrote a message, so a grant to a Tower is a grant to
   everything running on it.
-- **Builders** are reachable from my own Towers, as they are across workspaces today. They are never
-  reachable from another owner's Tower: a builder is driven by its architect and by porch, and a
-  message from outside would bypass both.
+- A grant is checked against the recipient an address resolves to. `codev:architect` in a grant
+  means the workspace's front door, whichever architect that is at the time.
+
+**Builders.** One rule, the same at every distance: **a builder may name an architect only if it
+is its own spawning architect.** Everywhere else it reaches architects through a front door:
+`architect` (its own), `<workspace>:architect`, and from stage 2 `afx://tower/workspace:architect`.
+
+- This is exactly the reach a builder has today, when the only thing that stops it writing
+  `<workspace>:architect:<name>` is that the form does not parse. Stage 1 makes the form parse, so
+  the rule has to be stated, or every builder would gain a line to every architect on the Tower.
+- Builder to builder is unchanged on one Tower. Between my own Towers it follows the grant.
+- A builder neither sends to another owner's Tower nor is reachable from one. Its own Tower
+  refuses the send, and a grant naming a builder for another owner's Tower is refused when it is
+  made. A builder is driven by its architect and by porch, and a message from outside would bypass
+  both.
+- Architects and humans have the new reach in full.
+
+*The alternative: reply reach.* A builder could also be allowed to use the new reach to reply to
+an agent that has messaged it, judged by finding that message in the mailbox. That needs a lookup
+keyed by identity, a lifetime tied to mailbox pruning, and tests for restart and rename, all in
+stage 1. The
+rule above needs one comparison that Tower already makes for Spec 755. The case the reply rule
+served is a named architect in another workspace messaging a builder, and the builder answering it
+directly. Under the plain rule that answer takes one hop more, through the builder's own architect
+or the other workspace's front door. That is what happens today, it is uncommon, and the footer of
+the message says which to use (Decision 7). No case was found that the plain rule fails outright.
 
 **The human in the loop.** A message under a *hold for release* grant is persisted and held with
 its own reason. It appears in the held-mail indicator and in `afx inbox`. The owner reads it and
@@ -807,30 +906,29 @@ does not hold is creating a cross-owner connection, which needs a signed-in clou
 - Mail the peer's Tower is still holding for mine is refused when it next tries, and its row ends
   as refused on that side.
 
-Either owner can end a connection, from their Tower or from the cloud; relaying stops in both
-directions and each side treats the other as a peer with no grant. A Tower has one switch that
-turns all remote messaging off; it starts off.
+Either owner can end a connection, from any of their Towers or from the cloud. Relaying stops in
+both directions between every Tower of the two owners, and each Tower removes its grants to the
+other owner's Towers.
+
+**The switch.** A Tower has one switch for remote messaging, covering sending and receiving. It
+starts off. While it is off the Tower makes no relay call and accepts none, mail already waiting
+for a peer stays held, and the Tower is not shown to other owners. The Tower tells the cloud the
+state of its switch when it connects and when it changes; the Tower's own check remains the one
+that counts.
 
 **The cross-Tower equivalent of the Spec 755 rule.**
 
 1. A Tower speaks only for itself. Its identity comes from the cloud's authentication; a Tower
    cannot relay on behalf of another.
-2. A builder keeps exactly the reach it has today. The new reach — a named architect in another
-   workspace, any agent on another Tower — is open to a builder only as a reply to an agent that
-   has messaged it. Architects and humans have the new reach in full.
-3. Qualifying an address with the sender's own workspace or Tower does not escape the Spec 755
-   check.
+2. A builder may name only its own spawning architect, however the address is written. Qualifying
+   an address with the sender's own workspace or Tower does not escape the check.
+3. A sender outside the workspace never gets a builder's affinity. The front door,
+   `<workspace>:architect`, means `main`, else the first registered, for every sender outside the
+   workspace, on this Tower or another.
 
-**What counts as a reply.** A builder may send to an address outside its existing reach when its
-own Tower's mailbox holds a message from that sender to that builder. The check compares
-identities (Tower id, workspace key, agent), not names, so it survives a rename. It is not used up
-by replying, it survives a Tower restart because it is read from the mailbox, and it lapses when
-the mailbox prunes the message (30 days after it was delivered or dismissed, by default). It
-permits sending; whether the other side accepts is still decided by that side's grants.
-
-Like Spec 755's rule, this rests on a sender id the CLI asserts. It limits what an agent does by
-mistake or under bad instructions. The boundary that holds against a hostile peer is the grant on
-the receiving Tower.
+Like Spec 755's rule, the builder rule rests on a sender id the CLI asserts. It limits what an
+agent does by mistake or under bad instructions. The boundary that holds against a hostile peer is
+the grant on the receiving Tower.
 
 ### Decision 5: delivery semantics
 
@@ -842,7 +940,7 @@ the receiving Tower's real answer.
 | `delivered` | The receiving Tower's gate passed and the write completed | Receiving Tower, delivered |
 | `held`, at the recipient | Persisted on the receiving Tower and waiting: `busy`, `no-profile`, `no-live-pty` as today, or awaiting release by its owner | Receiving Tower, held |
 | `held`, at the sender | It has not left: the recipient Tower is offline, or the cloud is unreachable | Sending Tower, held |
-| `refused` | Not accepted, with the reason: unknown Tower, no grant, no such agent, rate limited, too large, expired, remote messaging off, option not allowed | Nowhere. The command exits non-zero |
+| `refused` | Not accepted, with the reason: unknown Tower, no grant, no such agent, front door only, rate limited, too large, expired, remote messaging off, option not allowed, protocol not supported, clock out of range | Nowhere. The command exits non-zero |
 
 - **To another owner**, the receiving Tower reports only `delivered`, `held` or `refused`, with no
   reason and no difference between "no such agent" and "not allowed". Reasons would reveal who
@@ -886,16 +984,17 @@ the receiving Tower's real answer.
 - **Not available across Towers:** `--raw`, `--interrupt`, `--no-enter` and `--delay`. Each is
   refused by the sending Tower with a reason; the receiving Tower refuses them again. `--all`
   takes no address and stays what it is: every builder in the sender's own workspace.
-- **Replies.** Every header carries the sender's address in the form the recipient must type, and a
-  reply command. Whether the reply is accepted depends on the grants of the Tower it goes back to;
-  if they do not allow it, the refusal says so.
+- **Replies.** Every header carries the sender's address in the form the recipient would type, and
+  the footer says how to reply, by the rule in Decision 7. Whether a reply to another Tower is
+  accepted depends on the grants of the Tower it goes back to; if they do not allow it, the
+  refusal says so.
 
 ### Decision 6: discovery
 
 | Question | Answer |
 |---|---|
-| Which Towers can I reach? | My peer list (`afx peer list`): every Tower on my account by name, and every Tower connected by invitation as `owner@tower` with the owner's verified email; whether each is online, and what I have granted it |
-| How did I come to know them? | My own: they are registered to my account. Someone else's: I accepted, or issued, an invitation. There is no directory of other people's Towers and no search |
+| Which Towers can I reach? | My peer list (`afx peer list`): every Tower on my account by name, and every Tower of a connected owner as `owner@tower` with the owner's verified email; whether each is online, and what I have granted it |
+| How did I come to know them? | My own: they are registered to my account. Someone else's: their owner and I are connected, and the Tower has remote messaging on. There is no directory of other people's Towers and no search |
 | What is running on a peer? | `afx peer show` asks the peer through the relay. The peer's Tower answers; the cloud passes the answer through and keeps no directory of workspaces or agents. Every line of the answer is an address the asker can paste: `afx://devvm/codev:architect:local` for my own Tower, `afx://sam@studio/codev-cloud:architect:data` for another owner's |
 | How much does a peer reveal? | Exactly what the asker could message. One of my own Towers with a full grant sees every active workspace, architects by name, builders by id, and which are live. Another owner sees the recipients they have been granted, as addresses, and nothing else: no other workspace names, no builders, no liveness |
 | And on one Tower (stage 1)? | `afx workspace list` shows every workspace on this Tower with its architects, as local addresses |
@@ -905,7 +1004,8 @@ answer as a Tower that does not exist.
 
 ### Decision 7: provenance
 
-- **The receiving Tower writes the header.** It uses the cloud's stamp for the Tower and owner, and
+- **The receiving Tower writes the header.** It uses the cloud's attested statement for the Tower
+  and owner, and
   the sending Tower's statement for the workspace and agent. Nothing in the body can alter it.
 - **Two parts of a remote address carry different weight.** The owner and the Tower
   (`sam@studio`, and the verified email) are authenticated by Codev Cloud. The workspace and agent
@@ -927,11 +1027,23 @@ answer as a Tower that does not exist.
   ### [REMOTE, OTHER OWNER sam@example.com · afx://sam@studio/codev-cloud:architect:data → main | <time>] ###
   ```
 
-  Cases 2 to 4 carry a reply command on the footer line, where builder-bound frames carry theirs
-  today, so the frame stays three lines. For example
-  `(reply: afx send afx://sam@studio/codev-cloud:architect:data "…")`. The address is always in
-  the shortest form correct for the recipient, so a Tower of another owner is always printed with
-  its owner, even when the recipient has a Tower of the same name.
+  The address in a header is always in the shortest form correct for the recipient, so a Tower of
+  another owner is always printed with its owner, even when the recipient has a Tower of the same
+  name.
+- **The footer never offers an address the recipient may not use.** Cases 2 to 4 carry a reply
+  command on the footer line, where builder-bound frames carry theirs today, so the frame stays
+  three lines. The command is the shortest address that reaches the sender *and that the recipient
+  is allowed to send to*. When there is none, the footer says how to reply instead. Case 1 keeps
+  today's footer unchanged.
+
+  | Recipient | Sender | Footer |
+  |---|---|---|
+  | An architect | Any agent it may address | `(reply: afx send codev:architect:review "…")`, or the `afx://` form for another Tower |
+  | An architect | A named architect in a front-door-only workspace | `(reply via its front door: afx send codev-cloud:architect "…")` |
+  | A builder | Another builder | `(reply: afx send codev:builder-spir-12 "…")` |
+  | A builder | The `main` architect of another workspace | `(reply: afx send codev:architect "…")`, the front door, which reaches it |
+  | A builder | A named architect that is not its own | `(reply through your architect: afx send architect "…")` |
+  | An architect | An architect on another owner's Tower | The reply command as usual, `(reply: afx send afx://sam@studio/codev-cloud:architect:data "…")`. Whether the reply is accepted is decided by the other Tower's grants, and the architect is told when it sends |
 - **A body cannot counterfeit a header.** A remote body is normalised by the receiving Tower before
   it is stored, and the stored form is what is delivered.
   - It must be valid UTF-8; if it is not, the message is refused.
@@ -954,16 +1066,43 @@ answer as a Tower that does not exist.
 
 ### Decision 8: how two owners connect
 
-A connection joins one Tower of one owner to one Tower of another. It is the only way a Tower of
-another owner becomes a peer. What has to be decided is what carries the invitation from one person
-to the other, and who is able to use it.
+A connection joins two **owners**. It is the only way a Tower of another owner becomes a peer.
+Two things have to be decided: what a connection joins, and what carries the invitation.
+
+**What a connection joins: two owners, or one pair of Towers.** An invitation could connect one
+Tower of each owner, in which case two owners with two Towers each need four invitations. A
+connection permits no delivery by itself, so the question is only what it should cost to say "we
+know each other".
+
+| | One pair of Towers | Two owners (recommended) |
+|---|---|---|
+| Invitations for two owners with two Towers each | Four, each emailed and accepted | One |
+| A Tower either owner adds later | Another invitation | Already a peer; still needs a grant |
+| What permits delivery | A grant on the receiving Tower, naming the peer Tower | The same. Grants stay per Tower |
+| What each owner sees of the other | The one Tower named in the invitation: its name, and whether it is online | Every Tower of the other owner that has remote messaging on, including ones added later: its name, and whether it is online |
+| What an ungranted Tower of the other owner can do | Attempt a send, which is refused, counted and recorded | The same, from any of their Towers |
+| Must the invitee have a Tower before accepting? | Yes; they pick one | No |
+| If the wrong person accepts | They learn one Tower name | They learn the names of my Towers that have remote messaging on |
+| Ending | Pair by pair | Once, for every Tower on both sides. To cut off one Tower, remove its grants |
+
+Recommended: **two owners**. The address already says so: `sam@studio` is Sam's Tower, and the
+connection is what gives `sam@` a meaning on my Towers. Knowing each other is a fact about two
+people; permission is a fact about two Towers, and it stays exactly where it was, in a grant.
+
+The cost is the row in the table: each owner sees the names and online state of the other's
+Towers. It is bounded by a switch that already exists. A Tower is shown to other owners only while
+its remote messaging is on, and that is off until its owner turns it on. If the owner prefers the
+least disclosure, a connection per pair of Towers is the alternative; grants, addresses and every
+command but `afx peer end` are the same under it.
+
+**What carries the invitation.**
 
 | | What carries it | Who can use it | Does Codev Cloud send email? | What a stranger can do |
 |---|---|---|---|---|
 | **A. Emailed to a named address** (recommended) | An email from Codev Cloud to the address the inviter typed, containing a link | Only the account whose verified email is that address | Yes | Nothing. The link does nothing for any other account |
 | B. A link the inviter passes on | A link shown to the inviter, who sends it by chat or their own email | Whoever holds it. The inviter must therefore confirm who accepted before the connection exists | No | Whoever obtains the link can ask to connect; the inviter's confirmation is the only check |
 | C. A request by handle | Nothing is sent. The request appears on the other owner's Connections page in Codev Cloud | The named account | Optional, as a notice | Anyone who knows a handle can put a request in front of its owner |
-| D. Mutual naming | Nothing is sent. Each owner enters the other's handle and picks a Tower; the connection forms when both have | The two named accounts | No | Nothing is shown to anyone until both sides have named each other |
+| D. Mutual naming | Nothing is sent. Each owner enters the other's handle; the connection forms when both have | The two named accounts | No | Nothing is shown to anyone until both sides have named each other |
 
 Recommended: **A**. The invitation is bound to the invitee's account, so a forwarded or leaked link
 is harmless; the invitee is prompted and has something to click; and Codev Cloud already sends
@@ -973,18 +1112,18 @@ confirmation step and a link that works for whoever holds it. D needs no email a
 unsolicited to anyone, but gives the invitee nothing to act on and lets a mistyped handle wait in
 silence.
 
-**Walkthrough of A.** Ana (handle `ana`, Tower `mbp`) invites Sam, who will connect his Tower
-`studio`.
+**Walkthrough.** Ana (handle `ana`, Towers `mbp` and `devvm`) invites Sam (Towers `studio` and
+`mbp`). All four Towers have remote messaging on.
 
 | Step | Who | Does | Sees |
 |---|---|---|---|
-| 1 | Ana | Runs `afx peer invite` on `mbp`, or clicks "Invite another owner" in the dashboard's Peers panel, or opens Tower `mbp` on Codev Cloud. All three open the same Codev Cloud page in her browser, where she is signed in | A form with Tower `mbp` selected and a field for the invitee's email. If her account has no handle yet, she is asked to choose one first |
-| 2 | Ana | Types `sam@example.com` and submits | Exactly what Sam will be shown. The invitation, listed as pending with its expiry (24 hours) and a Cancel button. On her Tower, `afx peer list` and the Peers panel show one pending line. Nothing else changes |
-| 3 | Codev Cloud | Emails `sam@example.com` | Sam's email: Ana's name, verified email and handle; the Tower `mbp`; what connecting means; a link; when it expires. **Nothing appears on any of Sam's Towers**: not in a dashboard, the inbox or the peer list. An invitation is text from a stranger and is kept away from anywhere an agent reads |
-| 4 | Sam | Opens the link and signs in, creating and verifying an account for that address if he has none | Ana's name, verified email and handle; the Tower `mbp`; when the invitation was made and when it expires; the sentence "Connecting lets these two Towers exchange messages once each of you allows it. It allows nothing by itself."; a list of his own Towers to choose from; Connect and Decline. If he has no handle he chooses one. If he has no Tower registered he is told to run `afx tower connect` first, and the invitation waits |
-| 5 | Sam | Chooses `studio` and clicks Connect | "Connected: `sam@studio` and `ana@mbp`. Nothing can be delivered to `studio` until you add a grant there", with the command to add one |
-| 6 | Both Towers | Learn of the connection from Codev Cloud | Ana's pending line becomes `sam@studio  sam@example.com  connected  may message this Tower: nothing`. Sam's peer list gains `ana@mbp  ana@example.com  connected  may message this Tower: nothing`. Each dashboard shows a notice of the new connection. Codev Cloud emails Ana that Sam accepted, naming his Tower. Both owners' Connections pages list it with an End button |
-| 7 | Each owner, on their own Tower | Adds a first grant, for example `afx peer grant sam@studio codev:architect:main` on `mbp` | The grant, echoed with Sam's verified email and the mode (held for release by default). The peer list prints this command under any peer that has no grant. Until Sam adds a grant on `studio`, Ana's messages to it are refused |
+| 1 | Ana | Runs `afx peer invite` on either Tower, or clicks "Invite another owner" in the dashboard's Peers panel, or opens Connections on Codev Cloud. All three open the same Codev Cloud page in her browser, where she is signed in | A form with one field, the invitee's email. If her account has no handle yet, she is asked to choose one first |
+| 2 | Ana | Types `sam@example.com` and submits | Exactly what Sam will be shown. The invitation, listed as pending with its expiry (24 hours) and a Cancel button. On her Towers, `afx peer list` and the Peers panel show one pending line. Nothing else changes |
+| 3 | Codev Cloud | Emails `sam@example.com` | Sam's email: Ana's name, verified email and handle; what connecting means; a link; when it expires. **Nothing appears on any of Sam's Towers**: not in a dashboard, the inbox or the peer list. An invitation is text from a stranger and is kept away from anywhere an agent reads |
+| 4 | Sam | Opens the link and signs in, creating and verifying an account for that address if he has none | Ana's name, verified email and handle; when the invitation was made and when it expires; the sentence "Connecting lets your Towers and Ana's exchange messages once each of you allows it, Tower by Tower. It allows nothing by itself."; what each will see of the other (the names of the other's Towers that have remote messaging on, and whether they are online); Connect and Decline. If he has no handle he chooses one. He needs no Tower registered to accept |
+| 5 | Sam | Clicks Connect | "Connected with `ana` (ana@example.com). Nothing can be delivered to any of your Towers until you add a grant on it", with the command to add one |
+| 6 | Every Tower of both owners | Learns of the connection from Codev Cloud | Ana's pending line is replaced by `sam@studio` and `sam@mbp`, each `connected  may message this Tower: nothing`. Sam's Towers gain `ana@mbp` and `ana@devvm` the same way. Each dashboard shows a notice of the new connection. Codev Cloud emails Ana that Sam accepted. Both owners' Connections pages list it with an End button |
+| 7 | Each owner, on each Tower that should receive | Adds a first grant, for example `afx peer grant sam@studio codev:architect` on `mbp` | The grant, echoed with Sam's verified email and the mode (held for release by default). The peer list prints this command under any peer that has no grant. Until Sam adds a grant on `studio`, Ana's messages to it are refused |
 
 **When it does not go to plan.**
 
@@ -995,15 +1134,17 @@ silence.
 - **The link reaches someone else.** It is useless to them: opened under any other account it says
   only that the invitation was sent to a different address.
 - **Ana typed the wrong address.** Whoever owns that address can accept. Step 6 shows Ana exactly
-  who did, by verified email and handle. Nothing is deliverable without a grant she adds herself,
-  and she ends the connection from her Tower or from Codev Cloud.
-- **The two Towers are already connected.** Refused when the invitation is created.
+  who did, by verified email and handle. They learn the names of her Towers that have remote
+  messaging on. Nothing is deliverable without a grant she adds herself, and she ends the
+  connection from any Tower or from Codev Cloud.
+- **The two owners are already connected.** Refused when the invitation is created.
 - **Someone uses invitations to send unwanted email.** An account may send a limited number a day
   (10 by default), and each email carries a link that refuses further invitations from that
   account.
 
-One invitation connects one pair of Towers. Connecting a second Tower takes a second invitation,
-because the unit of trust is the Tower.
+**Ending a connection.** `afx peer end sam` on any of Ana's Towers, or End on the Connections
+page. Relaying stops at once between every Tower of the two owners, in both directions, and each
+Tower removes its grants to the other owner's Towers, so reconnecting later starts from nothing.
 
 ### Decision 9: the command surface
 
@@ -1017,20 +1158,20 @@ barrier (Decision 4).
 | **Sending** | | | | |
 | `afx send <address> "…"` | Changed: accepts `workspace:architect:name`; then `afx://tower/…`; then `afx://owner@tower/…`. Prints the new outcomes (held on this Tower, refused) | 1, 2, 3 | Agent or human | Tower |
 | **This Tower** | | | | |
-| `afx workspace list` | New: every workspace on this Tower, its address name, and its architects, builders and shells as addresses ready to paste | 1 | Agent or human | Tower |
+| `afx workspace list` | New: every workspace on this Tower, its address name, whether it is front door only, and its architects, builders and shells as addresses ready to paste | 1 | Agent or human | Tower |
 | `afx workspace name <name>` | New: sets the current workspace's explicit address name; `--clear` removes it | 1 | Agent or human | Tower |
 | `afx whoami` | Changed: also prints the caller's own address | 1 | Agent or human | Tower |
 | **Peers** | | | | |
 | `afx peer list` | My other Towers, connected Towers of other owners with their verified email, and invitations I have sent; whether each is online and what it may message here | 2 (other owners: 3) | Agent or human | Tower, which asks Codev Cloud |
 | `afx peer show <tower-ref>` | What runs on a peer that I may message, as addresses | 2 | Agent or human | Tower, through the relay |
 | `afx peer grants [<tower-ref>]` | Lists this Tower's grants | 2 | Agent or human | Tower |
-| `afx peer grant <tower-ref> <recipients> [--deliver \| --hold]` | Adds a grant on this Tower | 2 | Human only | Tower |
+| `afx peer grant <tower-ref> (<address>… \| --workspace <name> \| --all) [--deliver \| --hold]` | Adds a grant on this Tower. An address names one recipient; `codev:architect` is the workspace's front door, whichever architect that is. `--workspace` covers every architect in one workspace. `--all` covers everything and is for my own Towers only | 2 | Human only | Tower |
 | `afx peer revoke <tower-ref> [<recipients>]` | Removes a grant, or all grants for a peer | 2 | Agent or human; it only narrows access | Tower |
-| `afx peer on`, `afx peer off` | The remote-messaging switch. Off refuses everything and is where a Tower starts | 2 | On: human only. Off: agent or human | Tower |
+| `afx peer on`, `afx peer off` | The remote-messaging switch, for sending and receiving. Off is where a Tower starts: it sends nothing, accepts nothing and is not shown to other owners | 2 | On: human only. Off: agent or human | Tower, which tells Codev Cloud |
 | `afx peer log [--peer <tower-ref>]` | The record of cross-Tower attempts, in and out, with outcomes; no bodies | 2 | Agent or human | Tower |
 | `afx peer limits` | Shows the limits in force. They are changed in the user's Codev config file, next to the mailbox retention setting | 2 | Show: anyone. Change: human only | Tower |
-| `afx peer invite` | Opens Codev Cloud's invitation page for this Tower in the browser. It creates nothing itself | 3 | Human, in the browser | Codev Cloud |
-| `afx peer end <owner@tower>` | Ends a connection with another owner's Tower | 3 | Agent or human; it only narrows access | Tower, which tells Codev Cloud |
+| `afx peer invite` | Opens Codev Cloud's invitation page in the browser. It creates nothing itself | 3 | Human, in the browser | Codev Cloud |
+| `afx peer end <owner>` | Ends the connection with another owner, for every Tower on both sides | 3 | Agent or human; it only narrows access | Tower, which tells Codev Cloud |
 | **Inbox** | | | | |
 | `afx inbox` | Changed: three groups — waiting for a local agent (as today), held for release, waiting for a peer | 2 | Agent or human | Tower |
 | `afx inbox show <id>` | Changed: for remote mail, shows the sender's full address and the owner's verified email | 2 | Agent or human | Tower |
@@ -1042,7 +1183,7 @@ barrier (Decision 4).
 
 **Deliberately not `afx` commands.** These happen on Codev Cloud pages under a signed-in session,
 because they are the acts that must not be possible with credentials an agent can read from disk:
-creating an invitation (step 2 above), accepting or declining one, cancelling one, and choosing an
+creating an invitation (step 2 of Decision 8), accepting or declining one, cancelling one, and choosing an
 account handle. `afx peer invite` only opens the page. Codev Cloud's Connections page also lists and
 ends connections, for an owner who is away from their Tower.
 
@@ -1101,13 +1242,130 @@ WAITING FOR A PEER
   7c1e52aa  to afx://devvm/codev:architect:local   tower-offline   from architect:main        41m
 ```
 
+### Walkthrough: two of my own Towers, from nothing to a reply (stage 2)
+
+Ana has a laptop, `mbp`, and a dev VM, `devvm`. Both are registered to her Codev Cloud account
+with `afx tower connect` and their tunnels are up. Neither has ever sent a cross-Tower message.
+Each has a workspace `codev`; `main` runs on the laptop and `local` on the VM.
+
+| Step | Machine | Command | Prints |
+|---|---|---|---|
+| 1 | `mbp` | `afx peer list` | `Remote messaging: off — a human turns it on with: afx peer on`, then one line: `devvm  you  online  may message this Tower: nothing`. The listing works while the switch is off, so she can see what turning it on will involve |
+| 2 | `mbp` | `afx peer on --a-human-explicitly-approved-this` | `[ok] Remote messaging is on for mbp. No Tower may message it yet. Allow one with: afx peer grant <tower> …` |
+| 3 | `devvm` | `afx peer on --a-human-explicitly-approved-this` | The same, for `devvm` |
+| 4 | `devvm` | `afx peer grant mbp --all --a-human-explicitly-approved-this` | `[ok] mbp (your Tower) may message every architect and builder on this Tower. Mail is delivered directly.` |
+| 5 | `mbp` | `afx peer grant devvm --all --a-human-explicitly-approved-this` | The same, for `devvm`. This is what lets the reply in step 9 arrive |
+| 6 | `mbp` | `afx peer show devvm` | `afx://devvm/codev:architect:main   live` and `afx://devvm/codev:architect:local  live`, one address a line, ready to paste |
+| 7 | `mbp`, architect `main` | `afx send afx://devvm/codev:architect:local "CI is green on the tunnel branch"` | `[ok] Message delivered to afx://devvm/codev:architect:local (32 bytes)` |
+| 8 | `devvm`, architect `local` | Nothing; the message arrives | The frame below |
+| 9 | `devvm`, architect `local` | `afx send afx://mbp/codev:architect:main "Thanks, taking over"`, pasted from the frame's footer | `[ok] Message delivered to afx://mbp/codev:architect:main (19 bytes)`, and `main` on the laptop sees the matching frame |
+
+```
+### [REMOTE, your Tower · afx://mbp/codev:architect:main → local | 2026-11-21T03:34:47.452Z] ###
+CI is green on the tunnel branch
+###############################  (reply: afx send afx://mbp/codev:architect:main "…")
+```
+
+**Does the sending Tower need `afx peer on` too? Yes.** The switch covers both directions. While
+it is off a Tower makes no relay call and accepts none, so an agent on it cannot send off the
+machine until a human has turned remote messaging on. One switch with one meaning is also easier
+to hold in the head than one for each direction. So a round trip costs four human commands: the
+switch on each Tower, and a grant on each Tower. Steps 2 to 5 are done once per pair of Towers.
+Under the alternative in Open Question 5, where my own Towers trust each other automatically,
+steps 4 and 5 disappear.
+
+**What a skipped step looks like**, at step 7:
+
+| Skipped | The sender sees |
+|---|---|
+| Step 2 (the switch on `mbp`) | `[error] Remote messaging is off on this Tower (mbp). A human turns it on with: afx peer on`. Nothing leaves the machine |
+| Step 3 (the switch on `devvm`) | `[error] Refused by devvm: remote messaging is off there.` |
+| Step 4 (the grant on `devvm`) | `[error] Refused by devvm: mbp has no grant there for codev:architect:local. On devvm: afx peer grant mbp codev:architect:local` |
+| Step 5 (the grant on `mbp`) | Step 7 succeeds. The reply in step 9 is refused the same way, naming the command to run on `mbp` |
+| `devvm` is switched off or asleep | `[info] Message held on this Tower (tower-offline) — mailbox id 7c1e52aa. It is sent when devvm returns.` |
+
+Full reasons are shown because both Towers are Ana's. Another owner's Tower answers only
+`refused` (Decision 5).
+
+### Decision 10: the front door, and issue #1605
+
+Issue #1605 is open and records a decision that stage 1 reverses. It says a message from another
+workspace should reach only that workspace's default architect, which forwards it. It put
+`<workspace>:architect:<name>` out of scope, and said that anyone who wanted it later should argue
+against its reasons, not add it as a grammar completion. This section does that.
+
+| #1605's argument | Answer |
+|---|---|
+| **Encapsulation.** A workspace's architects are a private detail, and seats come and go. `<workspace>:architect` survives a reorganisation; an address per name breaks senders on every rename or removal | The front door does not change. `<workspace>:architect` still means `main`, else the first registered, and is still the right address when the sender does not mind which seat answers. Naming a seat is the sender's explicit choice. When that seat has gone, the send fails at once, naming the workspace's current architects and its front door. That is the contract `architect:<name>` already has inside a workspace, where seats come and go just the same |
+| **Single trust ingress.** A cross-workspace message can carry claims Tower cannot attest. One front door lets the default architect apply the workspace's conventions before anything reaches a specialised seat | Three things have changed. First, every cross-workspace frame now states the sender's workspace and agent (Decision 7); when #1605 was written the header named no sender workspace, so only a front door could give a seat that context. Second, builders gain no new reach: a builder still cannot name any architect but its own (Decision 4). Only architects and humans get the new form. Third, on one Tower every workspace has one owner and sits behind one local key. The front door was a convention there, not a boundary, and a claim is no better attested after `main` has forwarded it by hand. Where there is a real boundary, another owner, the ingress is the grant, and a grant names its recipients one by one |
+| **Adequate in practice.** Forwarding once handled the real case with no friction | The owner's own later comment on the issue withdraws this. Over four days one named architect coordinated a sweep across the machine, and fifteen reports from eight workspaces landed on its `main`, which relayed each by hand, two of them as files because they would not fit in a message. That cost is why issue #1940 has the goal it has |
+
+**A workspace can still choose front door only.** It is one setting in the workspace's own
+`.codev/config.json`, so it travels with the repository and is reviewed like any other change.
+With it on:
+
+- A message from outside the workspace to one of its named architects is refused. The sender sees:
+  "`codev-cloud` takes mail from other workspaces only at `codev-cloud:architect`. Send it there,
+  and name the seat you want in the first line." This is the error message #1605 asked for.
+- Nothing is rerouted. Tower does not deliver to `main` instead; the sender sends again.
+- It applies to every sender outside the workspace, on this Tower or another. A grant that names
+  one of the workspace's architects by name is refused when it is made; a grant for its front door
+  is not.
+- Mail inside the workspace, the front door itself, and `<workspace>:<builder>` are unchanged.
+  The last works today and #1605 did not ask to close it.
+- A message *from* a named architect in such a workspace still names its true sender in the
+  header. Its reply command is the workspace's front door, because that is the address the
+  recipient is allowed to use (Decision 7).
+- `afx workspace list` marks the workspace "front door only" and shows other workspaces only its
+  front door.
+
+**The default is open.** A named architect is addressable from outside unless its workspace has
+chosen front door only. Issue #1940 says a named architect "must be addressable from outside its
+own workspace"; a default that needed every workspace to opt in would leave the owner's fan-out
+case where it is. The other default is Open Question 12.
+
+**What happens to #1605.** Recommended: close it as superseded when stage 1 merges.
+
+- Its requested change 1, a purposeful error for `<workspace>:architect:<name>`, ships as the
+  refusal above for a front-door-only workspace, and as a clear error naming the current
+  architects for a name that does not exist.
+- Its requested change 2, the addressing table in `CLAUDE.md`, `AGENTS.md` and the skeleton, is
+  rewritten by stage 1 for the new rule, front door and opt-in included.
+- Its out-of-scope clause is what this section argues against, in the way it asked.
+
+### Existing code the plan will meet
+
+Each of these was read in the source for this spec. None is a reason to change the design; each is
+a place where a plan that did not know about it would go wrong.
+
+| Code | What it does today | What changes |
+|---|---|---|
+| `parseAddress` (`utils/agent-names.ts`) | Splits on the first colon and lower-cases. `codev-cloud:architect:tunnel` becomes workspace `codev-cloud`, agent `architect:tunnel`, which is then looked up as a builder id and fails `NOT_FOUND`. `afx://devvm/…` becomes workspace `afx`, agent `//devvm/…` | Replaced by the one shared parser, which returns the structured form. `resolveTarget` and `resolveAgentInRegistry` both take it. The second is the path that holds mail for a recipient with no live terminal; if only the first changes, mail to a named architect in another workspace that is between sessions is refused when it should be held |
+| `isSafeSenderId` (`utils/message-format.ts`, enforced on `POST /api/send`) | Accepts a sender id of 1 to 128 characters from letters, digits, `.`, `_`, `:` and `-`. An `afx://` address has `/` and `@` and fails it | **The pattern does not change.** `from` on `/api/send` stays what it is, the sender's local id (`architect:local`, `builder-spir-1940`), with the sender's workspace path beside it. Tower composes the address shown to the recipient from those and the workspace's address name. A remote sender never comes through `/api/send`: it arrives on the relay's entry point as separate fields (owner, Tower, workspace, kind, name), each checked by its own rule, and is stored in new mailbox columns. It is never joined into `from_agent`. Nor does a remote workspace name go into `from_workspace`, which holds a local path that other code reads as one (the delivery event takes its basename; `afx inbox` prints it) |
+| `architectHeaderLabel` and `senderHeaderLabel` (`utils/message-format.ts`) | Decide the header's role word from the sender string: one that begins `architect:` is `ARCHITECT:<name>`, anything else is `BUILDER <id>`, and one that fails the safe-id pattern is `BUILDER <unknown>` | Given an address they would mislabel it: `codev:architect:local` as `BUILDER codev:architect:local`, and any `afx://` address as `BUILDER <unknown>`. They keep their meaning and keep taking a local id. The new frames (cases 2 to 4 in Decision 7) take the role from the structured kind and build the address from parts already validated. A same-workspace send does not pass through the new code, which is what keeps its header byte-identical |
+| `formatMessageForTarget` (`servers/tower-routes.ts`) | Chooses the frame from the recipient's kind and the sender id. It is not told the sender's workspace. It has six call sites, among them the delayed send, the hold for a recipient with no live terminal, and the Decisions tab notice | The sender's workspace is passed to every call site. Missing one gives a cross-workspace message a same-workspace header on that path only |
+| `REPLY_HINT` (`utils/message-format.ts`) | One constant, `(reply: afx send architect "…")`, added to the footer line of builder-bound frames only | Computed per frame for cases 2 to 4, by the rule in Decision 7. The same-workspace builder-bound footer stays the constant |
+| The short-frame limits from #1567 (`BRACKET_MIN_LINES` 4, `BRACKET_MIN_BYTES` 256, `isLongFrame` in `servers/message-write.ts`) | A frame of four lines or more, or over 256 bytes, is typed by chunked paste and not by one short write. Today's frame is three lines with the reply hint on the footer line for exactly this reason | Neither number changes and every new frame is three lines. Measured with a full timestamp, the example frames in this spec leave this much body on the short path: 103 bytes today (architect to builder), 87 cross-workspace, 68 from one of my own Towers, 26 from another owner's Tower. Past that a message takes the paste path, which is where any message of ordinary length already goes; on agy that path is typed line by line and is slower |
+| `MAX_MESSAGE_BYTES` (48 KB, checked in the CLI and on `/api/send`) | Refuses a larger message loudly | The relay's entry point applies the same constant |
+
+**Other callers that take an address.** There is one resolver, and they all go through it.
+
+| Caller | What it accepts | Why |
+|---|---|---|
+| Cron task `target` (default `architect`; resolved when the task fires, through `resolveTarget` and then `resolveAgentInRegistry`) | Every local form, including `<workspace>:architect:<name>`, and an `afx://` address that names this Tower. An address for another Tower is refused when the task file is loaded, with the task named | Cron is unattended, and its sender, `af-cron`, is not an agent any peer could have granted |
+| `afx interrupt`, `afx refresh` and `afx self-refresh` (they send through the same route, some with its escape option) | Local forms only. An address for another Tower is refused by the CLI and again by Tower | They act on a terminal of this machine. Their options are among those refused across Towers (Decision 5) |
+| `afx send --all` | No address | Every builder in the sender's own workspace, as today |
+| The SDK's `TowerClient.sendMessage(to, …)` | Any address, as a string | It passes `to` through and Tower parses it, so its signature does not change. Its result type gains the new outcomes: held on this Tower with a reason, and the refusal reasons. The structured address type lives in `codev-types`; the parser and formatter sit in the SDK beside `resolveAgentName`, where Tower and the extension already share address code |
+| The VS Code extension (three sends: a builder picked from the current workspace, `architect:main` for "add architect", and `architect:<name>` for a gate approval) | Same-workspace local forms, each sent with its workspace | None changes. The extension gains no cross-workspace or remote send in this spec |
+| The dashboard | Sends nothing through this route | The Decisions tab's notice is built inside Tower |
+
 ### Staging
 
 | Stage | Delivers | Needs |
 |---|---|---|
-| 1. Architects on one Tower | The grammar and its structured wire form; `<workspace>:architect:<name>`; qualified provenance and replies; the builder rule; explicit workspace names; the one-Tower listing; docs in both trees | Nothing outside this repository |
+| 1. Architects on one Tower | The grammar and its structured wire form; `<workspace>:architect:<name>`; qualified provenance and reply commands; the builder rule; the front-door-only setting; explicit workspace names; the one-Tower listing; docs in both trees; issue #1605 closed as superseded | Nothing outside this repository |
 | 2. My own Towers | The `afx://tower/` form; peers, grants, hold for release and its release command, the relay path, remote headers, sender-side hold, accepted-once, discovery, rate limits, records, the off switch; the `afx peer` commands | #1871; `codev-cloud` items 1, 2, 4, 5, 6, 8 |
-| 3. Another owner's Tower | The `afx://owner@tower/` form; invitations and connections; other-owner headers and role guidance; collapsed outcomes; filtered discovery | `codev-cloud` items 3, 7 and 9 |
+| 3. Another owner's Tower | The `afx://owner@tower/` form; invitations and connections between owners; other-owner headers and role guidance; collapsed outcomes; filtered discovery | `codev-cloud` items 3, 7 and 9 |
 
 **Issue #655** (cloud messaging) asked for two things. Agents on different machines messaging each
 other through the cloud, and the question of how such a sender is authenticated, are subsumed by
@@ -1122,8 +1380,9 @@ owner rules otherwise.
 
 **Critical (blocks progress)**
 
-1. **Which address grammar?** Recommended: G — today's colon grammar on one Tower, and
-   `afx://[owner@]tower/` in front of it to leave the Tower. Runner-up: F with a marked owner
+1. **Which address grammar?** Recommended, and the owner's lean (not yet a ruling): G — today's
+   colon grammar on one Tower, and `afx://[owner@]tower/` in front of it to leave the Tower. The
+   spec is written in G. Runner-up: F with a marked owner
    (`sam@mbp:codev-cloud:architect`). The stage-1 form is the same under both, so stage 1 does not
    wait on this choice unless the owner prefers a full URI (A).
 2. **Posture toward another owner's Tower.** Recommended: default deny; a grant names specific
@@ -1141,12 +1400,16 @@ owner rules otherwise.
 
 **Important (shapes the design)**
 
-5. **My own Towers: opt in per Tower, or trusted automatically?** Recommended: one grant per
-   receiving Tower. Automatic trust would let a less careful machine instruct agents on a more
-   careful one the moment it registers.
-6. **Builders.** Recommended: reachable from my own Towers, never from another owner's; and a
-   builder may use the new reach only to reply. Alternatives: architects only everywhere; or
-   builders unrestricted between my own Towers.
+5. **My own Towers: opt in per Tower, or trusted automatically?** Recommended: one switch per
+   Tower, covering sending and receiving, and one grant per receiving Tower. That is four human
+   commands for a round trip between two Towers (the stage 2 walkthrough). Automatic trust would
+   remove the two grants, and would let a less careful machine instruct agents on a more careful
+   one the moment it registers.
+6. **Builders.** Recommended: a builder may name only its own spawning architect and otherwise
+   uses front doors, exactly as today; it is reachable from my own Towers under a grant and never
+   sends to or receives from another owner's. Alternative: let a builder also reply directly to
+   any agent that has messaged it, which saves a hop in an uncommon case and adds a mailbox lookup
+   to stage 1.
 7. **A Tower that is offline.** Recommended: hold at the sender until the message is accepted,
    dismissed, or 30 days old. Alternative: fail fast.
 8. **What another owner's sender learns.** Recommended: outcome only, with no reasons.
@@ -1163,12 +1426,21 @@ owner rules otherwise.
     is new in Codev Cloud and needs its architect's agreement, as does per-account slug
     uniqueness.
 
+12. **Reversing #1605.** Recommended: named architects are addressable from other workspaces by
+    default, a workspace can choose front door only, and #1605 closes as superseded when stage 1
+    merges (Decision 10). Alternative: front door only by default, with workspaces opting in to
+    being addressed by name.
+13. **What a connection joins.** Recommended: two owners, once, with grants still per Tower. The
+    cost is that each owner sees the names and online state of the other's Towers that have remote
+    messaging on. Alternative: one pair of Towers per invitation, which discloses one Tower and
+    takes four invitations for two owners with two Towers each (Decision 8).
+
 **Nice-to-know**
 
-12. Disposition of #655: narrow it, as recommended above, or close it.
-13. Whether a sender should be told when a held message is finally delivered.
-14. Whether the default limits in Decision 3 are the right size.
-15. If grammar A is chosen: how long the colon forms keep working.
+14. Disposition of #655: narrow it, as recommended above, or close it.
+15. Whether a sender should be told when a held message is finally delivered.
+16. Whether the default limits in Decision 3 are the right size.
+17. If grammar A is chosen: how long the colon forms keep working.
 
 ## Test Scenarios
 
@@ -1191,13 +1463,25 @@ owner rules otherwise.
   the name; it is reported as needing one of its own.
 - A workspace whose basename contains a space is still reached by its local address as today, and
   is refused in an `afx://` address until it has an explicit name.
-- A builder's reply reach survives a Tower restart and a rename of the sender's workspace, and is
-  gone once the original message has been pruned from the mailbox.
-- A builder addressing `<own workspace>:architect:<other>` is refused under the Spec 755 rule; a
-  builder opening a conversation with a named architect in another workspace is refused; the same
-  builder replying to that architect succeeds.
-- A cross-workspace message shows the qualified sender and a reply command; pasting the reply
-  command delivers to the original sender.
+- A builder addressing `<own workspace>:architect:<other>` is refused under the Spec 755 rule. A
+  builder addressing a named architect in another workspace is refused, whether or not that
+  architect has messaged it, and the error names the front door. The same builder reaches
+  `<other workspace>:architect`, and its own architect by name with or without its workspace.
+- `<workspace>:architect` sent by a builder in another workspace reaches `main`, not the builder's
+  spawning architect.
+- A cross-workspace message between architects shows the qualified sender and a reply command;
+  pasting the reply command delivers to the original sender.
+- The footer, for each row of the table in Decision 7: the command shown is accepted when the
+  recipient runs it, and a builder messaged by a named architect that is not its own is told to
+  reply through its architect.
+- A workspace set to front door only: mail from another workspace to its named architect is
+  refused with the error in Decision 10 and nothing is delivered to `main`; mail to its front
+  door, mail inside it, and mail to one of its builders are delivered; a message from its named
+  architect carries the front door as its reply command; `afx workspace list` marks it.
+- Mail to a named architect in another workspace that is registered but has no live terminal is
+  held, on the immediate path and on the delayed path.
+- A cron task whose target is an `afx://` address for another Tower is refused when the task file
+  is loaded. `afx interrupt` with such an address is refused.
 - The same parser result is produced by the CLI, Tower and the extension for a shared table of
   addresses.
 - A shell id resolves within the workspace and as `<workspace>:<shell-id>`, as today.
@@ -1231,8 +1515,15 @@ owner rules otherwise.
   sender's row ends as refused and is not retried again.
 - A message whose payload claims a different sending Tower is shown with the Tower the cloud
   authenticated.
-- A request to the cross-Tower entry point from localhost is rejected by Tower; one through the
-  `/t/` proxy, with or without a forged stamp, is rejected by the cloud.
+- A relayed request is refused, and nothing is stored, when: it comes from localhost with the
+  local key and the tunnel's marker header; its MAC was made with another secret; its payload was
+  altered after the MAC was made; it names another receiving Tower; its statement is more than
+  five minutes old; the same statement is presented twice; or its secret belongs to a tunnel
+  session that has since reconnected.
+- On the cloud side: a request through the `/t/` proxy to the relay's path is refused, and an
+  attestation header sent by a browser does not reach the Tower.
+- A retry of a message after a tunnel reconnect is accepted under the new secret and finds the
+  existing mailbox row.
 - A message in an unknown protocol version is refused naming the supported versions; a send to a
   peer Tower that predates the protocol is refused, not held; an address sent as a string by an
   older client is parsed by Tower and resolves.
@@ -1247,7 +1538,10 @@ owner rules otherwise.
   raised, at the Tower.
 - Removing a grant while mail from that peer is held `busy`: it does not deliver; it waits for
   release.
-- Remote messaging switched off: everything is refused.
+- Remote messaging switched off on the receiving Tower: everything is refused. Switched off on the
+  sending Tower: the send is refused locally and no relay call is made; mail already waiting for a
+  peer stays held and is sent after the switch is turned on.
+- The stage 2 walkthrough, step by step, and each row of its skipped-step table.
 - Discovery lists what the grant covers and nothing more.
 
 **Between owners (stage 3)**
@@ -1270,8 +1564,13 @@ owner rules otherwise.
   gate; mail to a second architect and to a builder is refused.
 - A grant naming a builder for another owner's Tower is rejected when it is made.
 - The header shows the other owner's email as the cloud reports it.
-- Either owner ends the connection, from the Tower and from the cloud: the next send in each
-  direction is refused.
+- Either owner ends the connection, from a Tower and from the cloud: the next send in each
+  direction is refused, for every pair of their Towers, and the grants to the other owner's Towers
+  are gone.
+- Two owners with two Towers each connect with one invitation; all four Towers list the other
+  owner's two. A Tower with remote messaging off is not listed to the other owner and appears when
+  it is switched on. A Tower registered after the connection appears without a new invitation and
+  can deliver nothing until it is granted.
 - Discovery by another owner returns only granted recipients.
 
 **Non-functional**
@@ -1293,18 +1592,21 @@ owner rules otherwise.
 | Stages 2 and 3 stall on `codev-cloud` | Medium | Medium | Stage 1 has no dependency on it; the cloud work is listed item by item |
 | The owner is left off a retyped address for someone else's Tower, and I have a Tower of that name | Low | Medium | It reaches my own agent, never a stranger's; headers, listings and reply commands always print the owner; copying is the normal path |
 | Codev Cloud does not take per-account slugs or handles | Low | High | Raised as Open Question 11 and listed item by item under Decision 3; stage 1 is unaffected; stages 2 and 3 wait on it |
-| An invitation is accepted by the wrong person after a mistyped address | Low | Medium | The inviter is shown who accepted by verified email; a connection permits nothing without a grant; one command ends it |
+| An invitation is accepted by the wrong person after a mistyped address | Low | Medium | The inviter is shown who accepted by verified email; they learn only the names of Towers that have remote messaging on; a connection permits nothing without a grant; one command ends it |
 | Stale mail arrives long after it was sent | Medium | Medium | Held rows are visible and dismissable on the sending side; the header carries the send time |
 | Discovery or outcome reasons leak what someone is working on | Medium | Medium | Discovery limited to granted recipients; outcomes collapsed for other owners; cloud record is Tower-level |
 | A Tower name or a handle is taken by a stranger after a rename, or a look-alike handle is registered | Low | High | Names resolve only among Towers already connected to mine, by id; the verified email is shown wherever another owner appears |
+| A Tower's clock is wrong and every relayed request is refused as stale | Low | Medium | The refusal says so, on the Tower and to the sender of one of my own Towers; `afx peer list` shows it |
 | Flooding through the relay | Low | Medium | Limits at the cloud and at the Tower; cap on undelivered mail per peer |
 
 ## References
 
-- Issue #1940 (this work); issue #655 (cloud messaging); issue #1871 (canonical Tower slug);
+- Issue #1940 (this work); issue #1605 (front-door-only cross-workspace routing, answered in
+  Decision 10); issue #655 (cloud messaging); issue #1871 (canonical Tower slug);
   issue #1165 (device authorization for `afx tower connect`); issue #1189 (server/client isolation)
 - Spec 62 (secure remote access); Spec 97 (cloud Tower client); Spec 107 (cloud registration UI)
 - Spec 110 (messaging infrastructure, the original `project:agent` grammar)
 - Spec 755 (multi-architect support); Spec 786 and Spec 823 (multi-architect coordination)
-- Spec 1313 (mailbox-first delivery)
+- Spec 1313 (mailbox-first delivery); issue #1567 (short-frame write limits); issue #1478 and
+  PR #1486 (sender attribution and the safe sender id)
 - `codev-cloud` repository: Tower registry, `/t/` proxy and tunnel server
