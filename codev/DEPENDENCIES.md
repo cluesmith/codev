@@ -261,9 +261,11 @@ How it works and what to know:
   supported; `codev doctor` and Tower's log report it.
 - **Programs never run from the current folder.** Windows normally looks a program started by
   bare name (`git`, `npm`) up in the current folder before `PATH`, so a `git.exe` inside a
-  repository could run in place of Git. Codev turns that lookup off in its own processes and the
-  commands they run (it sets `NoDefaultCurrentDirectoryInExePath`), and runs its own Windows
-  tools by full system path. Terminal sessions keep the Windows default.
+  repository could run in place of Git. Codev turns that lookup off (it sets
+  `NoDefaultCurrentDirectoryInExePath`) in its own processes, the commands they run, and every
+  terminal Tower opens: architect and builder sessions and shell tabs alike. In a `cmd.exe`
+  shell, a program in the current folder then runs only when you name its folder (`.\name`);
+  PowerShell already works this way. Codev runs its own Windows tools by full system path.
 - **Known limitations.** Doctor cannot show Tower's environment on Windows (the process table does
   not expose it). Building this repository from source on ARM64 fails in one bundler; installing
   the published package on ARM64 works.

@@ -112,8 +112,10 @@ system paths or a `PATH`-only lookup.
 - **Risk: a Codev process that never loads an entry point** (e.g. a script run with `node
   dist/…` directly, or a future server entry). Mitigated by the guard over `bin/` and the server
   entries, and by inheritance: anything started from a hardened process inherits the variable
-  unless it is given a hand-built environment. Sites that build an env from scratch
-  (`windowsPtyBaseEnv` for human terminals) only affect that child's own lookups, not Codev's.
+  unless it is given a hand-built environment. Every persistent terminal Tower opens (architect,
+  builder, shell tab) is built from Tower's own environment, so all of them inherit it (owner
+  decision: no carve-out for human shells; `tower-lifecycle.windows.test.ts` covers it). Only the
+  non-persistent fallback starts from the `windowsPtyBaseEnv` allowlist.
 - **Risk: user-visible change in children.** Programs Codev starts inherit the variable, so a
   `cmd.exe` session inside a Codev terminal would no longer run `foo.exe` from its current
   folder by bare name (`.\foo` still works). PowerShell already behaves this way. Accepted as the
