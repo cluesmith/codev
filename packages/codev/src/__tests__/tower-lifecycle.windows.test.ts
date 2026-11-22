@@ -397,9 +397,13 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
       }, 60_000, 'the shell tab to answer');
       expect((await output(tower, tabId)).match(/NDC=([^=']*)=END/)?.[1]).toBe('1');
     } finally {
+      // Persistent sessions outlive `tower stop` by design: end every one this Tower
+      // recorded, plus any seen before an assertion failed, with their process trees.
+      const recorded = (db.prepare('SELECT shellper_pid FROM terminal_sessions WHERE shellper_pid IS NOT NULL').all() as Array<{ shellper_pid: number }>)
+        .map((row) => row.shellper_pid);
       db.close();
       afxRun(tower, ['tower', 'stop']);
-      for (const pid of shellperPids) await endSession(pid);
+      for (const pid of new Set([...shellperPids, ...recorded])) await endSession(pid);
     }
   }, 300_000);
 
