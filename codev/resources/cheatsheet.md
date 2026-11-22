@@ -198,4 +198,4 @@ In strict mode porch hands builders these commands itself.
 
 ---
 
-*For detailed documentation, see the full protocol files in `codev/protocols/`.*
+*Porch and `afx spawn` deliver each protocol's full text; a protocol resolves from the installed package unless this project customizes it under `codev/protocols/`.*

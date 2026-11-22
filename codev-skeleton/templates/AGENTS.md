@@ -58,7 +58,7 @@ The list above is what ships with Codev; a project can add its own under `.codev
 - **Specs**: `codev/specs/` - Feature specifications (WHAT to build)
 - **Plans**: `codev/plans/` - Implementation plans (HOW to build)
 - **Reviews**: `codev/reviews/` - Reviews and lessons learned
-- **Protocols**: `codev/protocols/` - Development protocols
+- **Protocols**: `codev/protocols/` - only the protocols this project customizes (the standard ones resolve from the installed package)
 
 ## Working with Project Labels
 
@@ -159,4 +159,4 @@ Agent Farm is configured via `.codev/config.json` at the project root. Created d
 
 ## For More Info
 
-Read the full protocol documentation in `codev/protocols/`.
+Porch and `afx spawn` deliver each protocol's full text to the agent running it; File Resolution above says where a customized copy goes.

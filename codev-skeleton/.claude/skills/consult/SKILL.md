@@ -66,8 +66,8 @@ The claude and codex lanes print what they authenticate with, e.g. `[CLAUDE] aut
 | `phase` | Phase-scoped review (builder context only) |
 | `integration` | Architect's integration review of a PR |
 
-`spec`, `plan`, `impl`, `pr` and `phase` need `--protocol` — their prompts live under
-`protocols/<name>/consult-types/`. Only `integration` works without it.
+`spec`, `plan`, `impl`, `pr` and `phase` need `--protocol` — their prompts resolve from
+`protocols/<name>/consult-types/` through the four-tier lookup. Only `integration` works without it.
 
 ## Usage patterns
 

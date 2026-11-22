@@ -8,8 +8,9 @@
  * "(`codev/protocols/experiment/protocol.md`)" reads as a location, and agents went looking for it
  * with `find /`. Content reaches agents through `{{> …}}` includes, the spawn prompt and porch.
  *
- * Allowed: resolver includes (`{{> protocols/…}}`), and lines that name a `codev/…` path as the
- * place a project's own customization goes (they say "customiz…", "local" or "override").
+ * Allowed: resolver includes (`{{> protocols/…}}`), lines that name a `codev/…` path as the place
+ * a project's own customization goes or that explain resolution, and markdown table rows (see
+ * ALLOWED below).
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -31,12 +32,22 @@ const ROOTS = [
 /** RELEASE is this repository's own protocol; it never ships, and its files exist here. */
 const EXCLUDED = [/^codev\/protocols\/release\//];
 
-/** A framework file named by location: `codev/protocols/x/…`, `protocols/x/templates/…`, `../roles/x.md`. */
+/**
+ * A framework file or directory named by location: any `codev/protocols/…` or `codev/roles/…`
+ * (directories and `<placeholder>` forms included), and the bare or relative
+ * `protocols/x/templates/…`, `../roles/x.md` forms.
+ */
 const FRAMEWORK_PATH =
-  /(?:\bcodev\/|\.\.\/|`|\(|\s)(?:protocols\/[a-z-]+\/(?:protocol\.md|templates\/|prompts\/|consult-types\/)|roles\/[a-z-]+\.md)/;
+  /\bcodev\/(?:protocols|roles)\/|(?:\.\.\/|`|\(|\s)(?:protocols\/[a-z<>-]+\/(?:protocol\.md|templates\/|prompts\/|consult-types\/)|roles\/[a-z-]+\.md)/;
 
+/**
+ * Allowed: a resolver include; a line that frames the path as where a customization goes, or
+ * explains resolution/absence; a markdown table row (risk-triage lists paths a PR diff touches).
+ */
 const ALLOWED = (line: string) =>
-  /\{\{>\s*protocols\//.test(line) || /customi[sz]|\blocal\b|override/i.test(line);
+  /\{\{>\s*protocols\//.test(line) ||
+  /customi[sz]|override|four-tier|resolves? via|is absent|add its own/i.test(line) ||
+  /^\s*\|/.test(line);
 
 function walk(rel: string): string[] {
   const full = path.join(repoRoot, rel);
@@ -89,6 +100,10 @@ describe('#1910 — shipped text never names a framework file by an on-disk path
       '- **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)',
       '- [SPIR Protocol](../protocols/spir/protocol.md) - Multi-phase development workflow',
       '- Builder role: `codev/roles/builder.md`',
+      'Read the full protocol documentation in `codev/protocols/`.',
+      'Protocol-specific prompts are loaded from `codev/protocols/<protocol>/consult-types/<type>-review.md`.',
+      '*For detailed documentation, see the full protocol files in `codev/protocols/`.*',
+      'See your local `codev/roles/consultant.md`.',
     ]) {
       expect(FRAMEWORK_PATH.test(line) && !ALLOWED(line), line).toBe(true);
     }
