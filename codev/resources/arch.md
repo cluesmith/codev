@@ -1076,6 +1076,16 @@ branches are testable on macOS/Linux.
   prompt (a `git fetch` / `git push` needing credentials) must be made non-interactive and fail
   instead, as `GitRefResolver`'s fetch (`GIT_TERMINAL_PROMPT=0`, a timeout) and porch's status
   push now are.
+- **Process bootstrap and current-folder lookup** (#1911): every Codev process entry point (each
+  `bin/*.js`, `tower-server.ts`, `shellper-main.ts`) imports `lib/process-bootstrap.ts` as its
+  FIRST import; `process-bootstrap.test.ts` enforces it. Its one step today, on Windows, sets
+  `NoDefaultCurrentDirectoryInExePath=1` (`lib/platform/windows/exe-search.ts`), so a bare-name
+  spawn (`git`, `npm`) never resolves to a same-named file in the cwd (libuv and `cmd.exe` both
+  honor it; node-pty already searches `PATH` only). Children inherit it, and every persistent
+  terminal Tower opens (architect, builder, shell tab) is built from Tower's own environment, so
+  all of them carry it: in a `cmd.exe` terminal a current-folder program runs only as `.\name`.
+  The VS Code extension host is shared, so it does not set the variable; `cli-process.ts`
+  refuses an unresolved bare `codev`/`afx` name instead.
 - **Resolvers**: `lib/platform/windows/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the
   System32 WSL launcher), `codev-sdk/node/executable` (`findExecutable` with `PATHEXT`,
   `resolveSpawnable` turns `.cmd` shims into `node <entry>` or `%COMSPEC% /d /s /c`),
