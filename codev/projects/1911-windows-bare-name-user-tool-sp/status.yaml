@@ -1,7 +1,7 @@
 id: '1911'
 title: windows-bare-name-user-tool-sp
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-11-20T10:37:24.033Z'
-updated_at: '2026-11-22T23:25:16.299Z'
+updated_at: '2026-11-22T23:25:19.529Z'
 pr_history:
   - phase: review
     pr_number: 1948
