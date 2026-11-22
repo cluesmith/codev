@@ -81,7 +81,8 @@ On Windows, a program started by bare name (`git`, `gh`, `npm`, `codev`) is look
 - Real user path: `porch init` in a repository containing a planted `git.exe`. Without the bootstrap the planted file ran (`Command failed: git add`, no commit); with it, the real Git made the commit.
 - **Local verification ran on Node 24.13.0 (the implementation and first suite runs) and Node 22.23.4 (all runs after the owner switched to nvm-windows, including the final porch checks).** node-pty and better-sqlite3 were confirmed to load and work under 22 before the re-runs.
 - Tower PID: unchanged across every full-suite run (37868 on the first session, 53132 after the Node switch).
-- Windows CI (on-demand `windows.yml`): https://github.com/cluesmith/codev/actions/runs/45080898387 on the final commit `e145f3cb9`. Earlier green runs: 45079432385 (`53a1f3cba`), 45078247361, 44725012668.
+- Windows CI (on-demand `windows.yml`): https://github.com/cluesmith/codev/actions/runs/45082298979 on the final commit (consultation fixes, `199c344d6` + porch state). Earlier green runs: 45080898387 (`e145f3cb9`), 45079432385 (`53a1f3cba`), 45078247361, 44725012668.
+- Final local run after the consultation fixes (alone, Node 22.23.4): `npm run build` pass; `npm test` 8127 passed, 247 skipped, 0 failed; VS Code `cli-process` + Spawn Builder tests pass. No shellper left running afterwards.
 
 ## Architecture Updates
 
