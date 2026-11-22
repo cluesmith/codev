@@ -1,0 +1,17 @@
+id: bugfix-1946
+title: windows-bugfix-1814-check-time
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-11-22T22:11:04.150Z'
+    approved_at: '2026-11-22T22:19:19.584Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-22T21:53:06.605Z'
+updated_at: '2026-11-22T22:19:19.585Z'
+pr_ready_for_human: false

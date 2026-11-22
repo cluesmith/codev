@@ -15,6 +15,20 @@ import { logCheckOverrides } from '../index.js';
 
 const env: CheckEnv = { PROJECT_ID: '1814', PROJECT_TITLE: 'check-timeout' };
 
+/**
+ * A check that only a kill can end early (#1946). With a 3-second sleep the check could finish on its own
+ * inside a slow Windows teardown and still report "Timed out", so a late kill and no kill looked the same.
+ */
+const SLOW_COMMAND = 'sleep 30';
+/**
+ * How soon a 300ms timeout must end the check. On Windows the teardown is a census, a job termination and a
+ * taskkill, each its own process launch: about 3s under full-suite load (#1946), so the bound is half the
+ * sleep. POSIX signals the process group directly and keeps the tight bound.
+ */
+const KILLED_WITHIN_MS = process.platform === 'win32' ? 15_000 : 2500;
+/** Long enough that a check nobody killed fails on KILLED_WITHIN_MS, not on the test timeout. */
+const SLOW_TEST_TIMEOUT_MS = 45_000;
+
 function writeProtocol(root: string, checks: Record<string, unknown>, defaults?: unknown): void {
   const dir = path.join(root, 'codev/protocols/timeouts');
   fs.mkdirSync(dir, { recursive: true });
@@ -62,7 +76,7 @@ describe('bugfix #1814: per-check timeout_ms', () => {
   });
 
   it('a protocol.json timeout_ms reaches the runner and kills the check at that value', async () => {
-    writeProtocol(root, { tests_py: { command: 'sleep 3', timeout_ms: 300 } });
+    writeProtocol(root, { tests_py: { command: SLOW_COMMAND, timeout_ms: 300 } });
 
     const checks = getPhaseChecks(loadProtocol(root, 'timeouts'), 'implement');
     expect(checks.tests_py.timeout_ms).toBe(300);
@@ -70,8 +84,8 @@ describe('bugfix #1814: per-check timeout_ms', () => {
     const [result] = await runPhaseChecks(checks, root, env);
     expect(result.passed).toBe(false);
     expect(result.error).toContain('Timed out after 0.3s');
-    expect(result.duration_ms).toBeLessThan(2500);
-  }, 15_000);
+    expect(result.duration_ms).toBeLessThan(KILLED_WITHIN_MS);
+  }, SLOW_TEST_TIMEOUT_MS);
 
   it('a timeout_ms in defaults.checks is parsed too', () => {
     writeProtocol(root, {}, { checks: { tests_py: { command: 'x', timeout_ms: 900_000 } } });
@@ -80,19 +94,21 @@ describe('bugfix #1814: per-check timeout_ms', () => {
   });
 
   it('a check without timeout_ms keeps the runner default', async () => {
-    writeProtocol(root, { build: { command: 'sleep 3' } });
+    writeProtocol(root, { build: { command: SLOW_COMMAND } });
 
     const checks = getPhaseChecks(loadProtocol(root, 'timeouts'), 'implement');
     expect(checks.build.timeout_ms).toBeUndefined();
 
     const [result] = await runPhaseChecks(checks, root, env, 300);
     expect(result.error).toContain('Timed out after 0.3s');
-  }, 15_000);
+    expect(result.duration_ms).toBeLessThan(KILLED_WITHIN_MS);
+  }, SLOW_TEST_TIMEOUT_MS);
 
   it('a check timeout_ms takes precedence over the runPhaseChecks default', async () => {
-    const [result] = await runPhaseChecks({ slow: { command: 'sleep 3', timeout_ms: 300 } }, root, env, 60_000);
+    const [result] = await runPhaseChecks({ slow: { command: SLOW_COMMAND, timeout_ms: 300 } }, root, env, 60_000);
     expect(result.error).toContain('Timed out after 0.3s');
-  }, 15_000);
+    expect(result.duration_ms).toBeLessThan(KILLED_WITHIN_MS);
+  }, SLOW_TEST_TIMEOUT_MS);
 
   it.each([0, -1, 1.5, '900000', 2 ** 31])('rejects timeout_ms %j at load', (value) => {
     writeProtocol(root, { tests_py: { command: 'x', timeout_ms: value } });
