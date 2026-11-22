@@ -558,12 +558,12 @@ session. If the CLI denies any of the reviewer's tool calls, consult says so:
 
 ## The Consultant Role
 
-The consultant role (`codev/roles/consultant.md`) defines behavior:
+The consultant role, which `consult` delivers to each reviewer, defines behavior:
 - Provides second perspectives on decisions
 - Offers alternatives and considerations
 - Works constructively (not adversarial, not a rubber stamp)
 
-Customize by editing your local `codev/roles/consultant.md`.
+Customize by creating a local `codev/roles/consultant.md`; without one, the role resolves from the installed package.
 
 ## Query Logging
 

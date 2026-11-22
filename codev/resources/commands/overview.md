@@ -130,6 +130,4 @@ Customize agent-farm commands via `.codev/config.json` (project root):
 
 ## Related Documentation
 
-- [SPIR Protocol](../protocols/spir/protocol.md) - Multi-phase development workflow
-- [Architect Role](../roles/architect.md) - Architect responsibilities
-- [Builder Role](../roles/builder.md) - Builder responsibilities
+- The SPIR protocol and the architect and builder roles are delivered to the agents that run them (by `afx spawn` and porch); they resolve from the installed package unless this project customizes them under `codev/protocols/` or `codev/roles/`.
