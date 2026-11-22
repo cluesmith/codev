@@ -1,0 +1,14 @@
+id: bugfix-1946
+title: windows-bugfix-1814-check-time
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-22T21:53:06.605Z'
+updated_at: '2026-11-22T21:53:06.606Z'
