@@ -1081,9 +1081,10 @@ branches are testable on macOS/Linux.
   FIRST import; `process-bootstrap.test.ts` enforces it. Its one step today, on Windows, sets
   `NoDefaultCurrentDirectoryInExePath=1` (`lib/platform/windows/exe-search.ts`), so a bare-name
   spawn (`git`, `npm`) never resolves to a same-named file in the cwd (libuv and `cmd.exe` both
-  honor it; node-pty already searches `PATH` only). Children inherit it, and every persistent
-  terminal Tower opens (architect, builder, shell tab) is built from Tower's own environment, so
-  all of them carry it: in a `cmd.exe` terminal a current-folder program runs only as `.\name`.
+  honor it; node-pty already searches `PATH` only). Children inherit it: every persistent
+  terminal Tower opens (architect, builder, shell tab) is built from Tower's own environment, and
+  the non-persistent fallback's `windowsPtyBaseEnv` allowlist sets it explicitly, so every
+  terminal carries it: in a `cmd.exe` terminal a current-folder program runs only as `.\name`.
   The VS Code extension host is shared, so it does not set the variable; `cli-process.ts`
   refuses an unresolved bare `codev`/`afx` name instead.
 - **Resolvers**: `lib/platform/windows/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the

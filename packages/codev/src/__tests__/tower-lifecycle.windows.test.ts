@@ -362,7 +362,9 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
       if (key.toLowerCase() === 'nodefaultcurrentdirectoryinexepath') delete tower.env[key];
     }
     expect(afxRun(tower, ['tower', 'start']).code).toBe(0);
-    leftovers.push(ownerPid(tower)!);
+    const towerPid = ownerPid(tower);
+    expect(towerPid).not.toBeNull();
+    leftovers.push(towerPid!);
     const shellperPids: number[] = [];
     const db = new Database(path.join(tower.stateDir, 'global.db'), { readonly: true });
     const shellperOf = (id: string) => (db.prepare('SELECT shellper_pid FROM terminal_sessions WHERE id = ?').get(id) as { shellper_pid: number }).shellper_pid;

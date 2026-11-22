@@ -265,7 +265,10 @@ How it works and what to know:
   `NoDefaultCurrentDirectoryInExePath`) in its own processes, the commands they run, and every
   terminal Tower opens: architect and builder sessions and shell tabs alike. In a `cmd.exe`
   shell, a program in the current folder then runs only when you name its folder (`.\name`);
-  PowerShell already works this way. Codev runs its own Windows tools by full system path.
+  PowerShell already works this way. One known effect: a .NET 10 NativeAOT `dotnet publish` fails
+  inside a Codev terminal, because Visual Studio's `vcvarsall.bat` does not support the setting
+  (fixed in .NET 11; [dotnet/runtime#129340](https://github.com/dotnet/runtime/issues/129340)).
+  Codev runs its own Windows tools by full system path.
 - **Known limitations.** Doctor cannot show Tower's environment on Windows (the process table does
   not expose it). Building this repository from source on ARM64 fails in one bundler; installing
   the published package on ARM64 works.

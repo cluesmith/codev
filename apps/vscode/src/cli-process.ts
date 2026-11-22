@@ -17,7 +17,7 @@ function unresolvedOnWindows(command: string, spawnable: SpawnableCommand): bool
 function notFoundError(command: string, args: string[]): NodeJS.ErrnoException {
   return Object.assign(new Error(`spawn ${command} ENOENT (not found on PATH)`), {
     code: 'ENOENT',
-    errno: -4058,
+    errno: -4058, // UV_ENOENT on Windows, the errno a real failed spawn carries
     syscall: `spawn ${command}`,
     path: command,
     spawnargs: args,

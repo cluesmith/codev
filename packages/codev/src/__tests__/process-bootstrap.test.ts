@@ -18,7 +18,11 @@ import { NO_CWD_EXE_SEARCH_ENV } from '../lib/platform/windows/exe-search.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-/** Process entry points that are not `bin/` commands, with the specifier each must import first. */
+/**
+ * Process entry points that are not `bin/` commands, with the specifier each must import first.
+ * Hand-listed (the bins are derived from package.json): add any new script Codev starts by path.
+ * A process started from a hardened one is covered anyway, because it inherits the variable.
+ */
 const SERVER_ENTRY_POINTS: Record<string, string> = {
   'src/agent-farm/servers/tower-server.ts': '../../lib/process-bootstrap.js',
   'src/terminal/shellper-main.ts': '../lib/process-bootstrap.js',
