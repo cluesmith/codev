@@ -1,7 +1,7 @@
 id: bugfix-1946
 title: windows-bugfix-1814-check-time
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-22T21:53:06.605Z'
-updated_at: '2026-11-22T21:56:33.509Z'
+updated_at: '2026-11-22T22:02:33.268Z'
