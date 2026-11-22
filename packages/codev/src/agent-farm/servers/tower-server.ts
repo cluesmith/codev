@@ -8,8 +8,8 @@
  * delegates HTTP request handling to tower-routes.ts.
  */
 
-// First: never run a program from the current folder on Windows (#1911).
-import '../../lib/exe-search-hardening.js';
+// First: per-process setup that must run before anything else (#1911).
+import '../../lib/process-bootstrap.js';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';

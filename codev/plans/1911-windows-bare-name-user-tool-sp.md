@@ -32,9 +32,12 @@ on `PATH` the spawn fails closed; the planted file never runs.
 
 ### 1. One hardening module, set first in every Codev process
 
-New `packages/codev/src/lib/exe-search-hardening.ts`: a side-effect module that, on `win32` only,
-sets `process.env.NoDefaultCurrentDirectoryInExePath = '1'`. It is a no-op on macOS/Linux (POSIX
-`execvp` never searches the cwd). It imports nothing, so it can be the first import evaluated.
+New `packages/codev/src/lib/process-bootstrap.ts`: a general side-effect module for setup every
+Codev process runs first. Its one step, on `win32` only, calls `hardenExeSearch` from the new
+`packages/codev/src/lib/platform/windows/exe-search.ts`, which sets
+`process.env.NoDefaultCurrentDirectoryInExePath = '1'`. It is a no-op on macOS/Linux (POSIX
+`execvp` never searches the cwd). Neither file imports anything else, so the bootstrap can be the
+first import evaluated.
 
 It is imported **first** (before any other import, so ESM hoisting cannot run a spawn ahead of it)
 in each process entry point:
@@ -66,7 +69,7 @@ then set the variable themselves (step 1).
 
 ### 4. Guard (static, every OS, runs in the existing unit job)
 
-`packages/codev/src/__tests__/exe-search-hardening.test.ts`:
+`packages/codev/src/__tests__/process-bootstrap.test.ts`:
 - every file in `packages/codev/bin/` and the two server entries has the hardening import as its
   **first** import (so a new bin or a reordered import fails CI);
 - the module sets the variable on `win32` and leaves `process.env` untouched elsewhere
@@ -93,12 +96,13 @@ system paths or a `PATH`-only lookup.
 
 ## Files to Change
 
-- `packages/codev/src/lib/exe-search-hardening.ts` — new, the side-effect module
+- `packages/codev/src/lib/process-bootstrap.ts` — new, the side-effect module
+- `packages/codev/src/lib/platform/windows/exe-search.ts` — new, the Windows step it runs
 - `packages/codev/bin/codev.js`, `afx.js`, `porch.js`, `consult.js`, `team.js`, `generate-image.js` — first import
 - `packages/codev/src/agent-farm/servers/tower-server.ts`, `packages/codev/src/terminal/shellper-main.ts` — first import
 - `packages/codev/src/lib/pty-command.ts` — only if the node-pty test shows it is needed
 - `apps/vscode/src/cli-process.ts` — refuse an unresolved bare name on Windows
-- `packages/codev/src/__tests__/exe-search-hardening.test.ts` — new guard
+- `packages/codev/src/__tests__/process-bootstrap.test.ts` — new guard
 - `packages/codev/src/__tests__/windows-exe-search.test.ts` — new Windows test
 - `README.md`, `codev/DEPENDENCIES.md`, `codev-skeleton/DEPENDENCIES.md` — preview wording removed
 - `codev/state/pir-1911_thread.md` — thread log

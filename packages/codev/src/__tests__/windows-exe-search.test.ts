@@ -15,7 +15,7 @@ import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { hardenExeSearch, NO_CWD_EXE_SEARCH_ENV } from '../lib/exe-search-hardening.js';
+import { hardenExeSearch, NO_CWD_EXE_SEARCH_ENV } from '../lib/platform/windows/exe-search.js';
 
 const isWindows = process.platform === 'win32';
 
@@ -56,7 +56,7 @@ describe.skipIf(!isWindows)('a planted git.exe in the cwd never runs (Windows)',
 
   it('hardened: execFileSync, spawnSync and an execSync string all run the PATH git', () => {
     delete process.env[NO_CWD_EXE_SEARCH_ENV];
-    hardenExeSearch(process.platform, process.env);
+    hardenExeSearch(process.env);
     const options = { cwd: worktree, encoding: 'utf8' as const, windowsHide: true };
     expect(execFileSync('git', ['--version'], options)).toMatch(/^git version /);
     expect(spawnSync('git', ['--version'], options).stdout).toMatch(/^git version /);
@@ -66,7 +66,7 @@ describe.skipIf(!isWindows)('a planted git.exe in the cwd never runs (Windows)',
 
   it('hardened, Git missing from PATH: the spawn fails and the planted file still never runs', () => {
     delete process.env[NO_CWD_EXE_SEARCH_ENV];
-    hardenExeSearch(process.platform, process.env);
+    hardenExeSearch(process.env);
     const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
     const withoutGit = (process.env[pathKey] ?? '')
       .split(path.delimiter)

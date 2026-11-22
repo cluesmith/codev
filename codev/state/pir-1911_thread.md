@@ -19,3 +19,6 @@
 - Real-path proof: `porch init` in a repo with a planted git.exe (variable unset). Without the hardening import: "Command failed: git add" and no commit, so the planted file ran. With it: real commit. `codev doctor` is NOT a good probe: it never runs bare git in the cwd.
 - Windows CI dispatched: https://github.com/cluesmith/codev/actions/runs/44725012668
 - Full codev suite on this host: 8123 passed, 2 failed (load flakes, pass on re-run: launch-loop-exit-code EPERM temp cleanup; bugfix-1814-check-timeout 2574ms > 2500ms). Tower PID 37868 before and after. VS Code suite 1282 passed.
+- Windows CI 44725012668: all green except Unit Node 22, tower-lifecycle scenario 5 ECONNRESET (also failed on pir-1919 run 44258108002 before this change; passes 3/3 locally). Re-ran the failed job.
+- porch tests check blocked twice by bugfix-1814-check-timeout under load (2574/3271/2690ms vs 2500); asked the architect.
+- Owner asked for a generic name: renamed to lib/process-bootstrap.ts (general first-run setup); the Windows step moved to lib/platform/windows/exe-search.ts. Guard test renamed process-bootstrap.test.ts. Build, tsc and both tests pass.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// First: never run a program from the current folder on Windows (#1911).
-import '../dist/lib/exe-search-hardening.js';
+// First: per-process setup that must run before anything else (#1911).
+import '../dist/lib/process-bootstrap.js';
 
 // afx - Agent Farm CLI (standalone command)
 // Issue #846: imports runAgentFarm directly. The `codev afx` / `codev agent-farm`

@@ -13,20 +13,13 @@
  * ENOENT instead of running the planted file. (node-pty does its own PATH-only
  * lookup and never searches the terminal's cwd.)
  *
- * This is a side-effect module: every Codev process entry point (each
- * `bin/*.js`, `tower-server.ts`, `shellper-main.ts`) imports it FIRST, so it runs
- * before any other module can spawn. It imports nothing for the same reason.
- * `exe-search-hardening.test.ts` enforces the import order.
+ * Applied once per process by `lib/process-bootstrap.ts`, which every Codev
+ * entry point imports first. Imports nothing, so loading it spawns nothing.
  */
 
 export const NO_CWD_EXE_SEARCH_ENV = 'NoDefaultCurrentDirectoryInExePath';
 
-/** Set the variable on Windows; a no-op elsewhere (POSIX never searches the cwd). */
-export function hardenExeSearch(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): void {
-  if (platform !== 'win32') {
-    return;
-  }
+/** Turn off the current-folder program lookup for this process and its children. */
+export function hardenExeSearch(env: NodeJS.ProcessEnv): void {
   env[NO_CWD_EXE_SEARCH_ENV] = '1';
 }
-
-hardenExeSearch(process.platform, process.env);

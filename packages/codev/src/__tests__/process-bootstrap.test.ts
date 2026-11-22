@@ -1,10 +1,9 @@
 /**
- * Issue #1911: every Codev process turns off Windows' current-folder program
- * lookup before anything can spawn.
+ * Every Codev process runs `lib/process-bootstrap.ts` before any other code.
  *
- * `lib/exe-search-hardening.ts` sets `NoDefaultCurrentDirectoryInExePath` on
- * Windows. It only protects a process that loads it before its first spawn, so
- * each process entry point must import it FIRST: every installed command in
+ * Its one step today (#1911) sets `NoDefaultCurrentDirectoryInExePath` on
+ * Windows, which only protects a process that loads it before its first spawn,
+ * so each process entry point must import the bootstrap FIRST: every installed command in
  * `bin/` and the two scripts Tower starts by path. Static, so it runs on every OS.
  * The behaviour itself is proven on Windows by `windows-exe-search.test.ts`.
  */
@@ -14,16 +13,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { hardenExeSearch, NO_CWD_EXE_SEARCH_ENV } from '../lib/exe-search-hardening.js';
+import { bootstrapProcess } from '../lib/process-bootstrap.js';
+import { NO_CWD_EXE_SEARCH_ENV } from '../lib/platform/windows/exe-search.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 /** Process entry points that are not `bin/` commands, with the specifier each must import first. */
 const SERVER_ENTRY_POINTS: Record<string, string> = {
-  'src/agent-farm/servers/tower-server.ts': '../../lib/exe-search-hardening.js',
-  'src/terminal/shellper-main.ts': '../lib/exe-search-hardening.js',
+  'src/agent-farm/servers/tower-server.ts': '../../lib/process-bootstrap.js',
+  'src/terminal/shellper-main.ts': '../lib/process-bootstrap.js',
 };
-const BIN_SPECIFIER = '../dist/lib/exe-search-hardening.js';
+const BIN_SPECIFIER = '../dist/lib/process-bootstrap.js';
 
 /** The module specifier of the first `import` declaration in a file, or null. */
 function firstImport(file: string): string | null {
@@ -44,21 +44,21 @@ function firstStatementIsImport(file: string): boolean {
   return source.statements.length > 0 && ts.isImportDeclaration(source.statements[0]);
 }
 
-describe('hardenExeSearch', () => {
+describe('bootstrapProcess', () => {
   it('turns off the current-folder lookup on Windows', () => {
     const env: NodeJS.ProcessEnv = {};
-    hardenExeSearch('win32', env);
+    bootstrapProcess('win32', env);
     expect(env).toEqual({ [NO_CWD_EXE_SEARCH_ENV]: '1' });
   });
 
   it.each(['linux', 'darwin'] as const)('leaves the environment alone on %s', (platform) => {
     const env: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
-    hardenExeSearch(platform, env);
+    bootstrapProcess(platform, env);
     expect(env).toEqual({ PATH: '/usr/bin' });
   });
 });
 
-describe('every Codev entry point loads the hardening first', () => {
+describe('every Codev entry point loads the bootstrap first', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8')) as { bin: Record<string, string> };
   const bins = Object.values(pkg.bin).map((p) => path.posix.normalize(p));
 
