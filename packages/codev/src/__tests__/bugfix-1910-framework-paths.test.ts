@@ -27,6 +27,9 @@ const ROOTS = [
   'codev/resources/commands',
   'codev/resources/workflow-reference.md',
   'codev/resources/risk-triage.md',
+  'codev/resources/cheatsheet.md',
+  '.claude/skills',
+  '.codex/skills',
 ];
 
 /** RELEASE is this repository's own protocol; it never ships, and its files exist here. */
@@ -108,6 +111,13 @@ describe('#1910 — shipped text never names a framework file by an on-disk path
       expect(FRAMEWORK_PATH.test(line) && !ALLOWED(line), line).toBe(true);
     }
     expect(ALLOWED('{{> protocols/spir/templates/spec.md}}')).toBe(true);
+    // The allow-list is keyword-based; words that merely sit near a path do not exempt it.
+    for (const line of [
+      'Open your local copy at `codev/protocols/spir/protocol.md`.',
+      'The full protocol lives in `codev/protocols/spir/` (see the package).',
+    ]) {
+      expect(ALLOWED(line), line).toBe(false);
+    }
   });
 
   it.each(['codev-skeleton', 'codev'])('%s roles and templates forbid searching from the filesystem root (owner ruling)', (tree) => {
