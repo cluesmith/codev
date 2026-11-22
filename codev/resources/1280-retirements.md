@@ -472,3 +472,32 @@ pre-existing flakiness".
 2. **Guard kept, not retired.** Only the baselines move.
 3. **Audit trail.** This entry and `bugfix-1902-prompt-sweep.test.ts`, which asserts no
    agent-facing file (PIR included) tells a builder to skip a flaky test.
+
+## R9 — re-baseline spir/aspir spec-review.md for Bugfix #1910 (framework paths named by location)
+
+**Status: applied in the #1910 PR, scope set by the architect (main) on 2026-11-22: reword every
+shipped site that sends an agent looking for a framework file by path. The owner sees it at the
+`pr` gate.**
+
+| | |
+|---|---|
+| **Assertion** | `spec-1280-prompt-deletion-guard.test.ts` → *"no baseline line has been deleted"* (kept, not retired) |
+| **Files (2)** | `codev/protocols/{spir,aspir}/consult-types/spec-review.md` |
+| **Originating issue** | #1910 (Spec 1658 finding M14) |
+| **Baselines** | `fixtures/spec-1280-baselines/{spir,aspir}-spec-review.md.baseline`, re-captured |
+
+### What was removed
+
+One line per file, the Structure bullet, replaced in place: "the spec follows the delivered
+template (`protocols/spir/templates/spec.md`)" now reads "the SPIR spec template, which the
+specify prompt inlines (it is delivered content, not a file to look for in this workspace)". In
+an adopter workspace that path exists only inside the installed package, so a reviewer that read
+it literally searched the disk for it (`find /` on Windows).
+
+### Class-invariant compliance
+
+1. **Behaviour grep green.** Both keep `Baked Decisions` and `do not autonomously`; mirror parity
+   holds.
+2. **Guard kept, not retired.** Only the baselines move.
+3. **Audit trail.** This entry and `bugfix-1910-framework-paths.test.ts`, which asserts no shipped
+   file names a framework file by an on-disk path outside a resolver include.
