@@ -39,5 +39,9 @@ export function windowsPtyBaseEnv(env: Record<string, string | undefined>): Reco
   if (home !== undefined) {
     base.HOME = home;
   }
+  // #1911: never run a program from the current folder, also in a terminal built
+  // from this allowlist (the non-persistent fallback when shellper is unavailable).
+  // The name is NO_CWD_EXE_SEARCH_ENV in `exe-search.ts`; spelled out to stay a leaf.
+  base.NoDefaultCurrentDirectoryInExePath = '1';
   return base;
 }

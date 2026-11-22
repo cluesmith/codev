@@ -44,6 +44,10 @@ export async function spawnBuilder(issueArg?: string): Promise<void> {
 
 function runAfxCommand(args: string[]): void {
   const child = spawnCodevCli('afx', args, { detached: true, stdio: 'ignore' });
+  child.on('error', (err: NodeJS.ErrnoException) => {
+    const reason = err.code === 'ENOENT' ? 'afx was not found on PATH (install @cluesmith/codev)' : err.message;
+    vscode.window.showErrorMessage(`Codev: could not run afx: ${reason}`);
+  });
   child.unref();
   vscode.window.showInformationMessage(`Codev: Running afx ${args.join(' ')}`);
 }

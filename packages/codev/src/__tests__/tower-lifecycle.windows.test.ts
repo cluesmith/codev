@@ -24,6 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
+import { encodeWorkspacePath } from '@cluesmith/codev-sdk/workspace';
 import { WindowsJobHelper, sessionJobName } from '../lib/platform/windows/job-objects.js';
 import { killSessionTree } from '../lib/process-tree.js';
 
@@ -44,6 +45,13 @@ fs.writeFileSync(stubScript, `
 process.stdout.write('STUB-READY ' + process.pid + '\\r\\n');
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => process.stdout.write('ECHO:' + d.trim() + '\\r\\n'));
+setInterval(() => {}, 1000);
+`);
+
+/** Prints whether the terminal's environment carries the #1911 variable, then idles. */
+const envProbeScript = path.join(workDir, 'env-probe.cjs');
+fs.writeFileSync(envProbeScript, `
+process.stdout.write('NDC[' + (process.env.NoDefaultCurrentDirectoryInExePath ?? 'unset') + ']\\r\\n');
 setInterval(() => {}, 1000);
 `);
 
@@ -344,6 +352,61 @@ describe.skipIf(!onWindows)('Tower lifecycle on native Windows', () => {
 
     afxRun(tower, ['tower', 'stop']);
     await endSession(shellperPid);
+  }, 300_000);
+
+  it('#1911: every persistent terminal, agent and human shell, runs with the current-folder program lookup off', async () => {
+    const tower = await isolatedTower();
+    // Tower must set it itself: some launching shells (Claude Code's) already export it,
+    // possibly in another case (`tower.env` is a plain copy, so its keys are case-sensitive).
+    for (const key of Object.keys(tower.env)) {
+      if (key.toLowerCase() === 'nodefaultcurrentdirectoryinexepath') delete tower.env[key];
+    }
+    expect(afxRun(tower, ['tower', 'start']).code).toBe(0);
+    const towerPid = ownerPid(tower);
+    expect(towerPid).not.toBeNull();
+    leftovers.push(towerPid!);
+    const shellperPids: number[] = [];
+    const db = new Database(path.join(tower.stateDir, 'global.db'), { readonly: true });
+    const shellperOf = (id: string) => (db.prepare('SELECT shellper_pid FROM terminal_sessions WHERE id = ?').get(id) as { shellper_pid: number }).shellper_pid;
+
+    try {
+      // An agent terminal and an API-created shell terminal, each running the probe.
+      for (const type of ['builder', 'shell'] as const) {
+        const created = await api(tower, 'POST', '/api/terminals', {
+          command: process.execPath, args: [envProbeScript], cwd: workDir, persistent: true,
+          workspacePath: workDir, type, roleId: `ndc-${type}`, label: `ndc-${type}`,
+        });
+        expect(created.status, JSON.stringify(created.json)).toBe(201);
+        expect(created.json.persistent).toBe(true);
+        const id = created.json.id as string;
+        shellperPids.push(shellperOf(id));
+        await waitFor(async () => /NDC\[/.test(await output(tower, id)), 30_000, `the ${type} probe`);
+        expect((await output(tower, id)).match(/NDC\[([^\]]*)\]/)?.[1], type).toBe('1');
+      }
+
+      // The dashboard's shell tab (Windows PowerShell by default): ask the shell itself.
+      const tab = await api(tower, 'POST', `/workspace/${encodeWorkspacePath(workDir)}/api/tabs/shell`);
+      expect(tab.status, JSON.stringify(tab.json)).toBe(200);
+      expect(tab.json.persistent).toBe(true);
+      const tabId = tab.json.terminalId as string;
+      shellperPids.push(shellperOf(tabId));
+      // The typed line echoes as `'NDC=' + ...`; only the shell's answer reads `NDC=1=END`.
+      const ask = "Write-Output ('NDC=' + $env:NoDefaultCurrentDirectoryInExePath + '=END')\r";
+      await waitFor(async () => {
+        await api(tower, 'POST', `/api/terminals/${tabId}/write`, { data: ask });
+        await new Promise((r) => setTimeout(r, 1000));
+        return /NDC=[^=']*=END/.test(await output(tower, tabId));
+      }, 60_000, 'the shell tab to answer');
+      expect((await output(tower, tabId)).match(/NDC=([^=']*)=END/)?.[1]).toBe('1');
+    } finally {
+      // Persistent sessions outlive `tower stop` by design: end every one this Tower
+      // recorded, plus any seen before an assertion failed, with their process trees.
+      const recorded = (db.prepare('SELECT shellper_pid FROM terminal_sessions WHERE shellper_pid IS NOT NULL').all() as Array<{ shellper_pid: number }>)
+        .map((row) => row.shellper_pid);
+      db.close();
+      afxRun(tower, ['tower', 'stop']);
+      for (const pid of new Set([...shellperPids, ...recorded])) await endSession(pid);
+    }
   }, 300_000);
 
   it('scenario 5: a row whose shellper pid was reused is refused and removed, and the pid is never signaled', async () => {

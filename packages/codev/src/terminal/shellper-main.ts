@@ -23,6 +23,8 @@
  * from this process's environment before anything else runs.
  */
 
+// First: per-process setup that must run before anything else (#1911).
+import '../lib/process-bootstrap.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
