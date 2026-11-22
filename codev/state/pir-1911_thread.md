@@ -22,3 +22,5 @@
 - Windows CI 44725012668: all green except Unit Node 22, tower-lifecycle scenario 5 ECONNRESET (also failed on pir-1919 run 44258108002 before this change; passes 3/3 locally). Re-ran the failed job.
 - porch tests check blocked twice by bugfix-1814-check-timeout under load (2574/3271/2690ms vs 2500); asked the architect.
 - Owner asked for a generic name: renamed to lib/process-bootstrap.ts (general first-run setup); the Windows step moved to lib/platform/windows/exe-search.ts. Guard test renamed process-bootstrap.test.ts. Build, tsc and both tests pass.
+- Node switched to nvm (22.23.4). Commands run with PATH prefix C:\nvm4w\nodejs and npm_config_script_shell=Git Bash (architect ruling, my commands only). node-pty and better-sqlite3 load and work on 22.
+- porch done x2 alone on Node 22: build pass; tests fail only on bugfix-1814 (2767ms); one Vitest worker-exit unhandled error. Tower PID 53132 unchanged. Owner: test fixed in #1946; wait, then merge main and re-run porch done.
