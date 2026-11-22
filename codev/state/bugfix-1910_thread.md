@@ -31,3 +31,13 @@
   prompt-load sentence and the consult SKILL line (all four copies). The guard now flags any
   `codev/protocols|roles/` mention unless the line explains customization or resolution, or is a
   risk-triage table row.
+
+## Owner scope addition (2026-11-22, via architect)
+
+- Added one rule, worded the same everywhere: never search from the filesystem root; search the
+  project or use built-in file search; a framework file not in the project is delivered another
+  way. Placed in builder.md (new "Finding files" section), architect.md (Boundaries),
+  consultant.md (File Access Rules) and the CLAUDE/AGENTS templates (File Resolution), both
+  trees. The guard test pins it.
+- The second full run caught the consult SKILL edit against the shipped-skill hash history.
+  Regenerated with `generate-skill-hashes`.

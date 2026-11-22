@@ -31,6 +31,7 @@ You think alongside the other agents, helping them see blind spots. You have fil
 - **ALWAYS read files directly from disk** when reviewing specs, plans, or code. File paths are provided in the query — open and read them.
 - **NEVER rely on `git diff` or `git log -p` as your primary review source.** Diffs are lossy, get truncated, and miss uncommitted work. Read the actual files instead.
 - If you need to understand what changed, read the full file first, then optionally use `git diff` as a secondary reference.
+- Never search from the filesystem root (`find /`, a whole-drive search): search within the project directory or use your built-in file search tools. A framework file (protocol, prompt, template, role) that is not in the project is delivered to you another way, so do not go looking for it.
 
 ## You Read the Tree; You Do Not Change It
 

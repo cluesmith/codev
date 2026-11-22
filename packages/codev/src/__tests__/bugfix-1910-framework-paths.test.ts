@@ -110,6 +110,14 @@ describe('#1910 — shipped text never names a framework file by an on-disk path
     expect(ALLOWED('{{> protocols/spir/templates/spec.md}}')).toBe(true);
   });
 
+  it.each(['codev-skeleton', 'codev'])('%s roles and templates forbid searching from the filesystem root (owner ruling)', (tree) => {
+    for (const f of ['roles/builder.md', 'roles/architect.md', 'roles/consultant.md', 'templates/CLAUDE.md', 'templates/AGENTS.md']) {
+      const body = fs.readFileSync(path.join(repoRoot, tree, f), 'utf-8');
+      expect(body, f).toContain('Never search from the filesystem root');
+      expect(body, f).toContain('is delivered to you another way, so do not go looking for it');
+    }
+  });
+
   it.each(['codev-skeleton', 'codev'])('%s CLAUDE.md/AGENTS.md templates say protocols are delivered, not opened', (tree) => {
     for (const t of ['CLAUDE.md', 'AGENTS.md']) {
       expect(fs.readFileSync(path.join(repoRoot, tree, 'templates', t), 'utf-8'), t).toContain('there is no protocol file to open');

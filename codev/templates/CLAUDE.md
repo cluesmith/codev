@@ -45,6 +45,8 @@ Codev resolves protocol files, prompts, agent definitions, and roles through a f
 
 **The absence of `codev/protocols/<name>/` on disk is not a missing reference** — it's the normal case for any protocol you haven't customized. The protocol resolves from the installed package's skeleton at runtime. Only protocols you want to customize need to live in your repo's `codev/protocols/`.
 
+**Finding files:** Never search from the filesystem root (`find /`, a whole-drive search): search within the project directory or use your built-in file search tools. A framework file (protocol, prompt, template, role) that is not in the project is delivered to you another way, so do not go looking for it.
+
 **Implication for `codev update` and CLAUDE.md / AGENTS.md merges:** when an updated template references a protocol, do NOT drop the reference because `codev/protocols/<name>/` is absent locally. The protocol resolves via the package skeleton, and dropping the reference removes it from your available-protocol list while it's still callable from the CLI.
 
 ## Protocol Names You Don't Recognize
