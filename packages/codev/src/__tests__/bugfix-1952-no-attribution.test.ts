@@ -25,19 +25,23 @@ describe('#1952 — Claude Code attribution is off for this repository', () => {
   });
 
   it('the skeleton shipped to adopters does not carry the setting', () => {
+    // Today the skeleton has no settings.json at all; if one is added later it must not carry
+    // the key.
     const skeletonSettings = path.join(repoRoot, 'codev-skeleton/.claude/settings.json');
-    if (fs.existsSync(skeletonSettings)) {
-      expect(JSON.parse(fs.readFileSync(skeletonSettings, 'utf-8'))).not.toHaveProperty('attribution');
-    }
+    const shipped = fs.existsSync(skeletonSettings)
+      ? JSON.parse(fs.readFileSync(skeletonSettings, 'utf-8'))
+      : {};
+    expect(shipped).not.toHaveProperty('attribution');
   });
 });
 
 describe('#1952 — CLAUDE.md and AGENTS.md state the rule for every harness', () => {
   it.each(['CLAUDE.md', 'AGENTS.md'])('%s forbids the Co-Authored-By trailer and the "Generated with" line', (rel) => {
-    const section = read(rel).split(/^## Git$/m)[1]?.split(/^## /m)[0] ?? '';
-    expect(section, `${rel} should have a ## Git section`).not.toBe('');
-    const git = section.replace(/\s+/g, ' ');
-    expect(git).toMatch(/no `Co-Authored-By` trailer for an AI agent/);
-    expect(git).toMatch(/no "Generated with" line/);
+    const git = read(rel).split(/^## Git$/m)[1]?.split(/^## /m)[0] ?? '';
+    expect(git, `${rel} should have a ## Git section`).not.toBe('');
+    // A prohibition earlier in the same sentence as each term: tolerant of rewording, but not of
+    // dropping the "no".
+    expect(git).toMatch(/\b(?:no|never|not)\b[^.]*Co-Authored-By/i);
+    expect(git).toMatch(/\b(?:no|never|not)\b[^.]*Generated with/i);
   });
 });
