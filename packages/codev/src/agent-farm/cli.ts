@@ -135,6 +135,21 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Spec 1940: the workspace's explicit address name, for `<name>:architect` addresses.
+  workspaceCmd
+    .command('name [name]')
+    .description('Set the name other workspaces address this workspace by (--clear removes it)')
+    .option('--clear', 'Remove the explicit name; the workspace is addressed by its directory name again')
+    .action(async (name: string | undefined, options: { clear?: boolean }) => {
+      const { workspaceName } = await import('./commands/workspace-name.js');
+      try {
+        await workspaceName({ name, clear: options.clear });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Issue #829: revive builders whose shellper died (e.g. after machine reboot).
   workspaceCmd
     .command('recover')

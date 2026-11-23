@@ -1,5 +1,6 @@
 /**
- * Spec 1940, phase 2 — named architects across workspaces, and the builder rule.
+ * Spec 1940, phases 2 and 3 — named architects across workspaces, the builder rule, and
+ * explicit workspace names in the resolvers.
  *
  * Drives the two resolvers (`resolveTarget` against live terminals, `resolveAgentInRegistry`
  * against the durable registry) with a fake terminal map and a fake registry. Most cases run
@@ -24,12 +25,14 @@ const {
   mockGetArchitects,
   mockGetArchitectByName,
   mockLookupBuilderSpawningArchitect,
+  mockGetRegisteredWorkspaces,
 } = vi.hoisted(() => ({
   mockGetWorkspaceTerminals: vi.fn<() => Map<string, WorkspaceTerminals>>(),
   mockGetBuilders: vi.fn<(ws?: string) => Builder[]>(),
   mockGetArchitects: vi.fn<(ws: string) => Array<{ name: string }>>(),
   mockGetArchitectByName: vi.fn<(ws: string, name: string) => { name: string } | null>(),
   mockLookupBuilderSpawningArchitect: vi.fn<(id: string, ws?: string) => string | null | undefined>(),
+  mockGetRegisteredWorkspaces: vi.fn<() => Array<{ workspacePath: string; explicitName: string | null }>>(),
 }));
 
 vi.mock('../servers/tower-terminals.js', () => ({
@@ -41,6 +44,7 @@ vi.mock('../state.js', () => ({
   getArchitects: (ws: string) => mockGetArchitects(ws),
   getArchitectByName: (ws: string, name: string) => mockGetArchitectByName(ws, name),
   lookupBuilderSpawningArchitect: (id: string, ws?: string) => mockLookupBuilderSpawningArchitect(id, ws),
+  getRegisteredWorkspaces: () => mockGetRegisteredWorkspaces(),
 }));
 
 import {
@@ -131,6 +135,10 @@ describe('Spec 1940 phase 2 — addresses across workspaces', () => {
       const scopes = ws === undefined ? Object.values(SPAWNED_BY) : [SPAWNED_BY[ws] ?? {}];
       return scopes.find((rows) => id in rows)?.[id];
     });
+    // No workspace has an explicit name: every workspace is addressed by its basename.
+    mockGetRegisteredWorkspaces.mockImplementation(() =>
+      [...mockGetWorkspaceTerminals().keys()].map((workspacePath) => ({ workspacePath, explicitName: null })),
+    );
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
@@ -466,9 +474,11 @@ describe('Spec 1940 phase 2 — addresses across workspaces', () => {
         builders: mockGetBuilders.mock.calls.length,
         architects: mockGetArchitects.mock.calls.length,
         architectByName: mockGetArchitectByName.mock.calls.length,
+        // Phase 3: the workspace name table, read only for an address that names a workspace.
+        names: mockGetRegisteredWorkspaces.mock.calls.length,
       };
     }
-    const NONE = { lookup: [], builders: 0, architects: 0, architectByName: 0 };
+    const NONE = { lookup: [], builders: 0, architects: 0, architectByName: 0, names: 0 };
 
     it('bare architect in a workspace whose only architect is main: none', () => {
       mockGetWorkspaceTerminals.mockReturnValue(new Map([[CODEV, entry(['main'], ['spir-100'])]]));
@@ -503,6 +513,20 @@ describe('Spec 1940 phase 2 — addresses across workspaces', () => {
       expect(live('architect:review', CODEV).reached).toBe('review');
       expect(queries()).toEqual(NONE);
     });
+
+    it('the registry resolver reads no name table either for an address that names no workspace', () => {
+      expect(registry('architect', CODEV, 'architect:main').reached).toBe('main');
+      expect(registry('architect:review', CODEV).reached).toBe('review');
+      expect(registry('spir-100', CODEV).reached).toBe('spir-100');
+      expect(queries().names).toBe(0);
+    });
+
+    it('an address that names a workspace reads the name table once', () => {
+      expect(live('codev-cloud:architect', CODEV, 'architect:main').reached).toBe('main');
+      expect(queries().names).toBe(1);
+      expect(live('codev:architect', CODEV, 'architect:main').reached).toBe('main');
+      expect(queries().names).toBe(2);
+    });
   });
 
   describe('a sender with no workspace', () => {
@@ -521,5 +545,149 @@ describe('Spec 1940 phase 2 — addresses across workspaces', () => {
       expect(live('architect', undefined, 'architect').error?.code).toBe('NO_CONTEXT');
       expect(registry('builder-spir-1', undefined, 'architect').error?.code).toBe('NO_CONTEXT');
     });
+  });
+});
+
+describe('Spec 1940 phase 3 — explicit workspace names, in both resolvers', () => {
+  // Two workspaces whose directories are both called `codev`, and a third.
+  const WORK = '/home/user/work/codev';
+  const NOTES = '/home/user/My Notes';
+  /** Explicit names, by workspace path. A test sets the ones it wants. */
+  let names: Record<string, string>;
+  /** Registered workspaces that are not running. */
+  let stopped: string[];
+
+  function running(...paths: string[]): void {
+    mockGetWorkspaceTerminals.mockReturnValue(new Map(paths.map((p) => [p, entry(['main', 'review'], [], ['shell-1'])])));
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    names = {};
+    stopped = [];
+    running(CODEV, WORK, CLOUD);
+    mockGetRegisteredWorkspaces.mockImplementation(() =>
+      [...mockGetWorkspaceTerminals().keys(), ...stopped].map((workspacePath) => ({
+        workspacePath,
+        explicitName: names[workspacePath] ?? null,
+      })),
+    );
+    mockGetArchitects.mockImplementation(() => [{ name: 'main' }, { name: 'review' }]);
+    mockGetArchitectByName.mockImplementation((_ws, name) => (['main', 'review'].includes(name) ? { name } : null));
+    mockGetBuilders.mockReturnValue([]);
+    mockLookupBuilderSpawningArchitect.mockReturnValue(undefined);
+  });
+
+  describe.each(BOTH)('against %s', (_where, resolve) => {
+    it('two workspaces that share a basename: the address fails, listing both paths and the command', () => {
+      const { error } = resolve('codev:architect', CLOUD, 'architect:main');
+      expect(error?.code).toBe('AMBIGUOUS');
+      expect(error?.message).toContain(CODEV);
+      expect(error?.message).toContain(WORK);
+      expect(error?.message).toContain('afx workspace name <name>');
+    });
+
+    it('after one is named, both resolve', () => {
+      names[WORK] = 'work';
+      expect(resolve('codev:architect', CLOUD, 'architect:main')).toEqual({ reached: 'main', workspacePath: CODEV });
+      expect(resolve('work:architect', CLOUD, 'architect:main')).toEqual({ reached: 'main', workspacePath: WORK });
+      expect(resolve('work:architect:review', CLOUD, 'architect:main')).toEqual({ reached: 'review', workspacePath: WORK });
+    });
+
+    it('an address is matched lower-cased, however the sender typed it', () => {
+      names[WORK] = 'work';
+      expect(resolve('Work:architect', CLOUD, 'architect:main')).toEqual({ reached: 'main', workspacePath: WORK });
+    });
+
+    it('a named workspace no longer answers to its basename, and the error says what it is called', () => {
+      names[CLOUD] = 'cloud';
+      const { error } = resolve('codev-cloud:architect', CODEV, 'architect:main');
+      expect(error?.code).toBe('NOT_FOUND');
+      expect(error?.message).toContain("addressed as 'cloud'");
+      expect(resolve('cloud:architect', CODEV, 'architect:main')).toEqual({ reached: 'main', workspacePath: CLOUD });
+    });
+
+    it('a workspace whose basename equals an existing explicit name does not take the name', () => {
+      // CLOUD holds the name `codev`. Only one `codev` directory is running here.
+      running(CODEV, CLOUD);
+      names[CLOUD] = 'codev';
+      expect(resolve('codev:architect', CODEV, 'architect:main')).toEqual({ reached: 'main', workspacePath: CLOUD });
+    });
+
+    it('an explicit name whose workspace is not running fails saying so, and is never delivered to a basename match', () => {
+      running(CODEV);
+      stopped = [CLOUD];
+      names[CLOUD] = 'codev';
+      const { error, reached } = resolve('codev:architect', CODEV, 'architect:main');
+      expect(reached).toBeNull();
+      expect(error?.code).toBe('NOT_FOUND');
+      expect(error?.message).toContain(`Workspace 'codev' (${CLOUD}) is not running.`);
+      // The running workspace with that basename is told it needs a name of its own.
+      expect(error?.message).toContain(CODEV);
+      expect(error?.message).toContain('a name of its own');
+    });
+
+    it('a registered workspace that is not running is reported as not running', () => {
+      running(CODEV);
+      stopped = [CLOUD];
+      const { error } = resolve('codev-cloud:architect', CODEV, 'architect:main');
+      expect(error?.code).toBe('NOT_FOUND');
+      expect(error?.message).toBe(`Workspace 'codev-cloud' (${CLOUD}) is not running.`);
+    });
+
+    it('changing a name takes effect on the next address: the old name stops resolving', () => {
+      names[WORK] = 'work';
+      expect(resolve('work:architect', CLOUD).reached).toBe('main');
+      names[WORK] = 'office';
+      expect(resolve('work:architect', CLOUD).error?.code).toBe('NOT_FOUND');
+      expect(resolve('office:architect', CLOUD)).toEqual({ reached: 'main', workspacePath: WORK });
+    });
+
+    it('clearing a name brings the basename back, and with it the ambiguity', () => {
+      names[WORK] = 'work';
+      expect(resolve('codev:architect', CLOUD).workspacePath).toBe(CODEV);
+      delete names[WORK];
+      expect(resolve('work:architect', CLOUD).error?.code).toBe('NOT_FOUND');
+      expect(resolve('codev:architect', CLOUD).error?.code).toBe('AMBIGUOUS');
+    });
+
+    it('a workspace whose basename has a space is still reached by its local address', () => {
+      running(CODEV, NOTES);
+      expect(resolve('my notes:architect', CODEV, 'architect:main')).toEqual({ reached: 'main', workspacePath: NOTES });
+    });
+
+    it('a sender writing its own workspace by its explicit name is in its own workspace', () => {
+      // Affinity and the Spec 755 wording depend on this: a builder may name its own
+      // spawning architect with its workspace's explicit name in front.
+      names[WORK] = 'work';
+      mockLookupBuilderSpawningArchitect.mockImplementation((id, ws) =>
+        id === 'spir-7' && (ws === undefined || ws === WORK) ? 'review' : undefined,
+      );
+      mockGetBuilders.mockImplementation((ws) => (ws === WORK ? [{ id: 'spir-7' } as unknown as Builder] : []));
+      expect(resolve('work:architect:review', WORK, 'spir-7')).toEqual({ reached: 'review', workspacePath: WORK });
+      expect(resolve('work:architect', WORK, 'spir-7')).toEqual({ reached: 'review', workspacePath: WORK });
+      // ...and naming another architect there is still the Spec 755 refusal, unchanged.
+      expect(resolve('work:architect:main', WORK, 'spir-7').error).toEqual({
+        code: 'NOT_FOUND',
+        message: addressSpoofingErrorMessage('spir-7'),
+      });
+    });
+
+    it('the builder rule names the front door by the name the sender wrote', () => {
+      names[WORK] = 'work';
+      mockLookupBuilderSpawningArchitect.mockImplementation((id, ws) =>
+        id === 'spir-100' && (ws === undefined || ws === CODEV) ? 'review' : undefined,
+      );
+      const { error } = resolve('work:architect:review', CODEV, 'spir-100');
+      expect(error).toEqual({
+        code: 'REFUSED',
+        message: crossWorkspaceBuilderErrorMessage('spir-100', 'work:architect'),
+      });
+    });
+  });
+
+  it('a shell in a named workspace is reached as <name>:<shell-id>', () => {
+    names[WORK] = 'work';
+    expect(live('work:shell-1', CLOUD, 'architect:main')).toEqual({ reached: 'shell-1', workspacePath: WORK });
   });
 });

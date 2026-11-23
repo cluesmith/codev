@@ -237,6 +237,61 @@ describe('canonicalizeWorkspacePathRows (boot, Windows)', () => {
     expect(report.droppedTerminalIds).toEqual([]);
   });
 
+  // Spec 1940: a workspace's explicit address name lives on its known_workspaces row.
+  describe('the explicit address name survives the merge of two spellings', () => {
+    function known(ws: string, launched: string, addressName: string | null) {
+      db.prepare("INSERT INTO known_workspaces (workspace_path, name, last_launched_at, address_name) VALUES (?, 'app', ?, ?)").run(ws, launched, addressName);
+    }
+    const survivors = () => rows('SELECT workspace_path, address_name FROM known_workspaces');
+
+    it('the surviving row takes the name the dropped row held', () => {
+      known(LOWER, '2026-11-01 08:00:00', 'core');
+      known(UPPER, '2026-11-02 09:00:00', null);
+
+      canonicalizeWorkspacePathRows(db, opts);
+
+      expect(survivors()).toEqual([{ workspace_path: UPPER, address_name: 'core' }]);
+    });
+
+    it('the surviving row keeps its own name when it has one', () => {
+      known(LOWER, '2026-11-02 09:00:00', 'old');
+      known(UPPER, '2026-11-01 08:00:00', 'core');
+
+      canonicalizeWorkspacePathRows(db, opts);
+
+      expect(survivors()).toEqual([{ workspace_path: UPPER, address_name: 'core' }]);
+    });
+
+    it('a single row carries its name to the canonical spelling', () => {
+      known(LOWER, '2026-11-01 08:00:00', 'core');
+
+      canonicalizeWorkspacePathRows(db, opts);
+
+      expect(survivors()).toEqual([{ workspace_path: UPPER, address_name: 'core' }]);
+    });
+
+    it('two unnamed spellings merge into one unnamed row', () => {
+      known(LOWER, '2026-11-01 08:00:00', null);
+      known(UPPER, '2026-11-02 09:00:00', null);
+
+      canonicalizeWorkspacePathRows(db, opts);
+
+      expect(survivors()).toEqual([{ workspace_path: UPPER, address_name: null }]);
+    });
+
+    it('a database that has not reached v20 (no address_name column) still merges', () => {
+      db.exec('DROP INDEX idx_known_workspaces_address_name; ALTER TABLE known_workspaces DROP COLUMN address_name;');
+      db.prepare("INSERT INTO known_workspaces (workspace_path, name, last_launched_at) VALUES (?, 'app', '2026-11-02 09:00:00')").run(LOWER);
+      db.prepare("INSERT INTO known_workspaces (workspace_path, name, last_launched_at) VALUES (?, 'app', '2026-11-01 08:00:00')").run(UPPER);
+
+      canonicalizeWorkspacePathRows(db, opts);
+
+      expect(rows('SELECT workspace_path, last_launched_at FROM known_workspaces')).toEqual([
+        { workspace_path: UPPER, last_launched_at: '2026-11-02 09:00:00' },
+      ]);
+    });
+  });
+
   it('collision, neither live: the later started_at wins and keeps its own terminal row (no dangling id)', () => {
     addArchitect(UPPER, 'main', 't-canonical', '2026-11-01 00:00:00');
     addTerminal(UPPER, 't-canonical', 'architect', 'main', 101);

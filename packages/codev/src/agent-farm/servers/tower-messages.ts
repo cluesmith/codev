@@ -19,9 +19,16 @@ import {
 } from '../utils/agent-names.js';
 import { getWorkspaceTerminals } from './tower-terminals.js';
 import type { WorkspaceTerminals } from './tower-types.js';
-import { lookupBuilderSpawningArchitect, getBuilders, getArchitects, getArchitectByName } from '../state.js';
+import {
+  lookupBuilderSpawningArchitect,
+  getBuilders,
+  getArchitects,
+  getArchitectByName,
+  getRegisteredWorkspaces,
+} from '../state.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { workspaceKey } from '../utils/workspace-path.js';
+import { findWorkspaceByAddressName, isSameWorkspace } from '../utils/workspace-address.js';
 
 // ============================================================================
 // Spec 755 error messages — exported as constants so producer and asserter
@@ -192,12 +199,18 @@ function locateWorkspace(address: AgentAddress, sender: SenderContext): TargetWo
   const sendersWorkspace = sender.workspace;
 
   if (address.workspace !== undefined) {
-    const found = findWorkspaceByBasename(address.workspace);
-    if ('code' in found) return found;
+    // The only place the name table is read: an address that names no workspace costs
+    // no query here.
+    const found = findWorkspaceByAddressName(
+      address.workspace,
+      getRegisteredWorkspaces(),
+      getWorkspaceTerminals().keys(),
+    );
+    if (!found.ok) return { code: found.code, message: found.message };
     return {
       workspacePath: found.workspacePath,
       writtenName: address.workspace,
-      isSendersOwn: found.workspacePath === sendersWorkspace,
+      isSendersOwn: sendersWorkspace !== undefined && isSameWorkspace(found.workspacePath, sendersWorkspace),
     };
   }
   if (!sendersWorkspace) {
@@ -263,8 +276,9 @@ function architectsHint(architectNames: string[], target: TargetWorkspace): stri
 /**
  * Resolve an address to a live terminal.
  *
- * 1. {@link locateWorkspace}: the workspace the address names, by basename (several
- *    matches → AMBIGUOUS), else the sender's (none → NO_CONTEXT).
+ * 1. {@link locateWorkspace}: the workspace the address names, by its address name (its
+ *    explicit name, else its basename; several matches → AMBIGUOUS), else the sender's
+ *    (none → NO_CONTEXT).
  * 2. Within it: a named architect by name, after the builder rule; bare `architect` by
  *    sender affinity or the front door; anything else as a builder id (exact, then tail;
  *    several tail matches → AMBIGUOUS) and then a shell id.
@@ -435,38 +449,6 @@ function resolveLocalId(agent: string, entry: WorkspaceTerminals, workspacePath:
     code: 'NOT_FOUND',
     message: `Agent '${agent}' not found in workspace '${path.basename(workspacePath)}'.`,
   };
-}
-
-/**
- * Find a workspace path by matching the basename of registered workspace paths.
- */
-function findWorkspaceByBasename(
-  projectName: string,
-): { workspacePath: string } | ResolveError {
-  const allWorkspaces = getWorkspaceTerminals();
-  const matches: string[] = [];
-
-  for (const wsPath of allWorkspaces.keys()) {
-    if (path.basename(wsPath).toLowerCase() === projectName) {
-      matches.push(wsPath);
-    }
-  }
-
-  if (matches.length === 0) {
-    return {
-      code: 'NOT_FOUND',
-      message: `Project '${projectName}' not found. No workspace with that basename is registered.`,
-    };
-  }
-
-  if (matches.length > 1) {
-    return {
-      code: 'AMBIGUOUS',
-      message: `Project '${projectName}' is ambiguous — matches ${matches.length} workspaces: ${matches.join(', ')}`,
-    };
-  }
-
-  return { workspacePath: matches[0] };
 }
 
 /**

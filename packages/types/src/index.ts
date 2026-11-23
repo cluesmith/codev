@@ -96,6 +96,8 @@ export {
   type DecisionsRefusalCode,
   type DecisionsReadResponse,
   type DecisionsRuleResponse,
+  type SetWorkspaceAddressNameRequest,
+  type SetWorkspaceAddressNameResponse,
   type TunnelStatus,
   type TowerVersionInfo,
   type ProtocolStats,

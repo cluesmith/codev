@@ -747,6 +747,35 @@ export type DecisionsRuleResponse =
   | { ok: true; document: DecisionsDocument }
   | { ok: false; code: DecisionsRefusalCode; message: string };
 
+// --- Workspace address name (PUT /api/workspaces/:encodedPath/address-name) ---
+
+/**
+ * Body of `PUT /api/workspaces/:encodedPath/address-name` (Spec 1940): the explicit name
+ * other workspaces address this one by. `null` clears it, and the workspace is addressed
+ * by its directory basename again.
+ */
+export interface SetWorkspaceAddressNameRequest {
+  name: string | null;
+}
+
+/**
+ * The 200 response: what the workspace is addressed by now. A refusal is the usual Tower
+ * error body, `{ error, message }`, with `error` one of `INVALID_NAME` or `RESERVED_NAME`
+ * (400), `NAME_TAKEN` (409), or `NOT_FOUND` (404, a workspace Tower has not registered).
+ */
+export interface SetWorkspaceAddressNameResponse {
+  /** The explicit name now stored, lower-cased; `null` after a clear. */
+  explicitName: string | null;
+  /**
+   * The name that reaches this workspace now: the explicit name, else its basename.
+   * `null` when it has none, which can only follow a clear (its basename is another
+   * workspace's name, or is shared with another running workspace).
+   */
+  addressName: string | null;
+  /** Why it has no address name. Present exactly when `addressName` is `null`. */
+  unaddressableReason?: string;
+}
+
 // --- Tunnel (GET /api/tunnel/status) ---
 
 export interface TunnelStatus {

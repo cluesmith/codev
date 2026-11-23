@@ -632,6 +632,143 @@ describe('Spec 1658 — shellper identity columns migration (v19) via runGlobalM
   });
 });
 
+/** The known_workspaces shape before v20: no `address_name`. */
+const PRE_V20_KNOWN_WORKSPACES_DDL = `
+  CREATE TABLE IF NOT EXISTS known_workspaces (
+    workspace_path TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    last_launched_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`;
+
+describe('Spec 1940 — workspace address name migration (v20) via runGlobalMigrations', () => {
+  const h = harness('.test-1940-v20-migration');
+
+  function buildPreV20Db(): void {
+    h.seedMarkers(19);
+    h.state.db.exec(PRE_V20_KNOWN_WORKSPACES_DDL);
+  }
+
+  const setName = (workspacePath: string, name: string | null) =>
+    h.state.db.prepare('UPDATE known_workspaces SET address_name = ? WHERE workspace_path = ?').run(name, workspacePath);
+
+  it('adds a null address_name to an existing table, keeping its rows', () => {
+    buildPreV20Db();
+    h.state.db.prepare("INSERT INTO known_workspaces (workspace_path, name) VALUES ('/ws/codev', 'codev')").run();
+    expect(h.columns('known_workspaces')).not.toContain('address_name');
+
+    h.migrate();
+
+    expect(h.columns('known_workspaces')).toContain('address_name');
+    expect(h.indexes('known_workspaces')).toEqual(['idx_known_workspaces_address_name']);
+    expect(h.state.db.prepare('SELECT version FROM _migrations WHERE version = 20').get()).toBeTruthy();
+    const row = h.state.db.prepare("SELECT * FROM known_workspaces WHERE workspace_path = '/ws/codev'").get() as Record<
+      string,
+      unknown
+    >;
+    expect(row.name).toBe('codev');
+    expect(row.address_name).toBeNull();
+  });
+
+  it('the index refuses a second workspace the same name, and allows any number with none', () => {
+    buildPreV20Db();
+    for (const ws of ['/ws/a', '/ws/b', '/ws/c']) {
+      h.state.db.prepare('INSERT INTO known_workspaces (workspace_path, name) VALUES (?, ?)').run(ws, 'x');
+    }
+    h.migrate();
+
+    setName('/ws/a', 'core');
+    expect(() => setName('/ws/b', 'core')).toThrow(/UNIQUE/);
+    // Clearing frees the name; several rows hold NULL at once.
+    setName('/ws/a', null);
+    expect(() => setName('/ws/b', 'core')).not.toThrow();
+    expect(
+      (h.state.db.prepare('SELECT COUNT(*) AS n FROM known_workspaces WHERE address_name IS NULL').get() as { n: number }).n
+    ).toBe(2);
+  });
+
+  it('removing a row frees its name', () => {
+    buildPreV20Db();
+    h.state.db.prepare("INSERT INTO known_workspaces (workspace_path, name) VALUES ('/ws/a', 'a'), ('/ws/b', 'b')").run();
+    h.migrate();
+    setName('/ws/a', 'core');
+
+    h.state.db.prepare("DELETE FROM known_workspaces WHERE workspace_path = '/ws/a'").run();
+
+    expect(() => setName('/ws/b', 'core')).not.toThrow();
+  });
+
+  it('is idempotent and skips the ALTER when the column already exists (fresh-install shape)', () => {
+    h.seedMarkers(19);
+    h.state.db.exec(
+      PRE_V20_KNOWN_WORKSPACES_DDL.replace(
+        "last_launched_at TEXT NOT NULL DEFAULT (datetime('now'))",
+        "last_launched_at TEXT NOT NULL DEFAULT (datetime('now')),\n    address_name TEXT"
+      )
+    );
+    expect(() => h.migrate()).not.toThrow();
+    expect(() => h.migrate()).not.toThrow();
+    const count = h.state.db.prepare('SELECT COUNT(*) AS n FROM _migrations WHERE version = 20').get() as { n: number };
+    expect(count.n).toBe(1);
+    expect(h.columns('known_workspaces').filter((c) => c === 'address_name')).toHaveLength(1);
+    expect(h.indexes('known_workspaces')).toEqual(['idx_known_workspaces_address_name']);
+  });
+
+  it('stamps the marker on a database with no known_workspaces table', () => {
+    h.seedMarkers(19);
+    expect(() => h.migrate()).not.toThrow();
+    expect(h.state.db.prepare('SELECT version FROM _migrations WHERE version = 20').get()).toBeTruthy();
+    expect(h.tableExists('known_workspaces')).toBe(false);
+  });
+
+  // The tables each earlier version's own outstanding steps alter, in that version's shape.
+  it.each([
+    [15, PRE_V16_TERMINAL_SESSIONS_DDL + PRE_V17_MAILBOX_DDL],
+    [16, PRE_V19_TERMINAL_SESSIONS_DDL + PRE_V17_MAILBOX_DDL],
+    [17, PRE_V19_TERMINAL_SESSIONS_DDL + PRE_V18_MAILBOX_DDL],
+    [18, PRE_V19_TERMINAL_SESSIONS_DDL],
+    [19, ''],
+  ])('a database at v%i reaches v20 with the column, keeping a workspace row', (version, ddl) => {
+    h.seedMarkers(version);
+    h.state.db.exec(ddl + PRE_V20_KNOWN_WORKSPACES_DDL);
+    h.state.db.prepare("INSERT INTO known_workspaces (workspace_path, name) VALUES ('/ws/codev', 'codev')").run();
+
+    h.migrate();
+
+    expect(h.markers()).toEqual(Array.from({ length: GLOBAL_CURRENT_VERSION }, (_, i) => i + 1));
+    expect(h.columns('known_workspaces')).toContain('address_name');
+    expect(h.indexes('known_workspaces')).toEqual(['idx_known_workspaces_address_name']);
+    expect(h.state.db.prepare('SELECT address_name FROM known_workspaces').all()).toEqual([{ address_name: null }]);
+  });
+
+  it('a fresh install (GLOBAL_SCHEMA) has the column and the index, matching the migrated shape', () => {
+    buildPreV20Db();
+    h.migrate();
+
+    const fresh = new Database(resolve(h.state.testDir, 'fresh.db'));
+    try {
+      fresh.exec(GLOBAL_SCHEMA);
+      const freshCols = (
+        fresh.prepare("SELECT name FROM pragma_table_info('known_workspaces')").all() as Array<{ name: string }>
+      )
+        .map((c) => c.name)
+        .sort();
+      const indexSql = (db: Database.Database) =>
+        (
+          db
+            .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name = 'idx_known_workspaces_address_name'")
+            .get() as { sql: string }
+        ).sql.replace(/\s+/g, ' ');
+      expect(freshCols).toEqual(h.columns('known_workspaces'));
+      // Same definition, not just the same name: a unique index over the non-null names.
+      expect(indexSql(fresh)).toBe(indexSql(h.state.db));
+      expect(indexSql(fresh)).toMatch(/UNIQUE INDEX .* WHERE address_name IS NOT NULL/);
+    } finally {
+      fresh.close();
+    }
+  });
+});
+
 /**
  * Whole-chain coverage — only possible now that the runner is callable (Issue #1476).
  * A replica test could assert one block at a time; driving the real function walks a

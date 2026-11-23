@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -546,6 +546,35 @@ export class TowerClient {
       stopped: result.data?.stopped,
       error: result.data?.error,
     };
+  }
+
+  /**
+   * Set a workspace's explicit address name, or clear it with `null` (Spec 1940). A refusal
+   * carries Tower's reason in `error` and its code (`INVALID_NAME`, `RESERVED_NAME`,
+   * `NAME_TAKEN`, `NOT_FOUND`) in `errorCode`.
+   */
+  async setWorkspaceAddressName(
+    workspacePath: string,
+    name: string | null,
+  ): Promise<
+    | { ok: true; result: SetWorkspaceAddressNameResponse }
+    | { ok: false; error: string; errorCode?: string }
+  > {
+    const encoded = encodeWorkspacePath(workspacePath);
+    const body: SetWorkspaceAddressNameRequest = { name };
+    const result = await this.request<SetWorkspaceAddressNameResponse>(
+      `/api/workspaces/${encoded}/address-name`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!result.ok || result.data === undefined) {
+      const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
+      return result.errorCode === undefined ? failure : { ...failure, errorCode: result.errorCode };
+    }
+    return { ok: true, result: result.data };
   }
 
   async getWorkspaceStatus(workspacePath: string): Promise<TowerWorkspaceStatus | null> {

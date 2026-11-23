@@ -4,7 +4,7 @@
  * When `resolveTarget` finds no LIVE terminal, `handleSend` falls back to this
  * resolver so a message to a KNOWN-but-offline agent is HELD (`no-live-pty`) rather
  * than 404'd. These tests drive it directly with mocked `getWorkspaceTerminals`
- * (used by the cross-workspace `findWorkspaceByBasename` mapping) and mocked
+ * (used by the cross-workspace lookup, `findWorkspaceByAddressName`) and mocked
  * `state.js` registry reads (`getBuilders` / architect lookups), so the resolution
  * logic is covered without a live Tower or a real global.db.
  */
@@ -36,6 +36,8 @@ vi.mock('../state.js', () => ({
   getArchitects: (ws: string) => mockGetArchitects(ws),
   getArchitectByName: (ws: string, name: string) => mockGetArchitectByName(ws, name),
   lookupBuilderSpawningArchitect: (id: string, ws?: string) => mockLookupBuilderSpawningArchitect(id, ws),
+  // Spec 1940: no workspace here has an explicit name, so each is found by its basename.
+  getRegisteredWorkspaces: () => [],
 }));
 
 import { parseTarget, resolveAgentInRegistry, isResolveError } from '../servers/tower-messages.js';
@@ -67,7 +69,7 @@ function builder(id: string): Builder {
 describe('Spec 1313 — resolveAgentInRegistry (offline-hold fallback)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: both workspaces are live-registered (so findWorkspaceByBasename can
+    // Default: both workspaces are live-registered (so the workspace lookup can
     // map a project basename → path); registries are empty unless a test sets them.
     mockGetWorkspaceTerminals.mockReturnValue(
       new Map([[WS_A, emptyEntry()], [WS_B, emptyEntry()]]),
@@ -103,7 +105,7 @@ describe('Spec 1313 — resolveAgentInRegistry (offline-hold fallback)', () => {
   // ---- Fix (Spec 1313 review): cross-workspace project:agent offline hold ----
 
   it('holds a cross-workspace project:builder against the TARGET workspace registry', () => {
-    // proj-b is live-registered (findWorkspaceByBasename maps it → WS_B); its
+    // proj-b is live-registered (the workspace lookup maps it → WS_B); its
     // builder spir-200 is registered but its PTY is down → hold against WS_B.
     mockGetBuilders.mockImplementation((ws) => (ws === WS_B ? [builder('spir-200')] : []));
 
@@ -112,7 +114,7 @@ describe('Spec 1313 — resolveAgentInRegistry (offline-hold fallback)', () => {
     expect(result).toEqual({ workspacePath: WS_B, agent: 'spir-200', kind: 'builder' });
   });
 
-  it('NOT_FOUND when the project workspace is not active (findWorkspaceByBasename boundary)', () => {
+  it('NOT_FOUND when the project workspace is not active (the boundary of the workspace lookup)', () => {
     // Only WS_A is live-registered; proj-b maps to no workspace.
     mockGetWorkspaceTerminals.mockReturnValue(new Map([[WS_A, emptyEntry()]]));
 

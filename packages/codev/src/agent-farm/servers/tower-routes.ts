@@ -28,8 +28,15 @@ import { sanitizeAgentEnv, withTowerPort } from '../../lib/agent-env.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage } from '@cluesmith/codev-types';
-import { getArchitectByName, getBuilders, setArchitectByName } from '../state.js';
+import type { AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
+import {
+  getArchitectByName,
+  getBuilders,
+  setArchitectByName,
+  getRegisteredWorkspaces,
+  setWorkspaceAddressName,
+} from '../state.js';
+import { isSameWorkspace, validateProposedName, workspaceAddressName } from '../utils/workspace-address.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
@@ -470,6 +477,12 @@ export async function handleRequest(
     const workspaceApiMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/(activate|deactivate|status)$/);
     if (workspaceApiMatch) {
       return await handleWorkspaceAction(req, res, ctx, workspaceApiMatch);
+    }
+
+    // Workspace API: PUT /api/workspaces/:encodedPath/address-name (Spec 1940)
+    const addressNameMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/address-name$/);
+    if (addressNameMatch) {
+      return await handleSetWorkspaceAddressName(req, res, addressNameMatch);
     }
 
     // Workspace API: /api/workspaces/:encodedPath/architects (Spec 755 — multi-architect)
@@ -917,6 +930,78 @@ async function handleRemoveArchitect(
     res.writeHead(status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: false, error: result.error }));
   }
+}
+
+/**
+ * PUT /api/workspaces/:encodedPath/address-name (Spec 1940)
+ * Body: { name: string | null }
+ *
+ * Gives a registered workspace its explicit address name, or clears it with `null`. The
+ * workspace need not be running. The rules are `utils/workspace-address.ts`'s; a refused
+ * name comes back with the reason: 400 `INVALID_NAME` / `RESERVED_NAME`, 409 `NAME_TAKEN`,
+ * 404 `NOT_FOUND` for a workspace Tower has no row for. The change takes effect on the
+ * next address resolved: nothing caches a name.
+ */
+async function handleSetWorkspaceAddressName(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  match: RegExpMatchArray,
+): Promise<void> {
+  if (req.method !== 'PUT') {
+    return sendJson(res, 405, { error: 'Method not allowed' });
+  }
+
+  let workspacePath: string;
+  try {
+    workspacePath = decodeWorkspacePath(match[1]);
+    if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
+      throw new Error('Invalid path');
+    }
+    workspacePath = workspaceKey(normalizeWorkspacePath(workspacePath));
+  } catch {
+    return sendJson(res, 400, { error: 'INVALID_PARAMS', message: 'Invalid workspace path encoding' });
+  }
+
+  let body: unknown;
+  try {
+    body = await parseJsonBody(req);
+  } catch {
+    return sendJson(res, 400, { error: 'INVALID_PARAMS', message: 'Invalid JSON body' });
+  }
+  const proposed = (body as { name?: unknown } | null)?.name;
+  if (proposed !== null && typeof proposed !== 'string') {
+    return sendJson(res, 400, {
+      error: 'INVALID_PARAMS',
+      message: 'Body must be { "name": <string> } to set a name or { "name": null } to clear it.',
+    });
+  }
+
+  const active = [...getWorkspaceTerminals().keys()];
+  const registered = getRegisteredWorkspaces();
+  if (!registered.some((w) => isSameWorkspace(w.workspacePath, workspacePath))) {
+    return sendJson(res, 404, {
+      error: 'NOT_FOUND',
+      message: `Workspace ${workspacePath} is not registered with Tower. Start it once first: afx workspace start`,
+    });
+  }
+
+  let explicitName: string | null = null;
+  if (proposed !== null) {
+    const checked = validateProposedName(proposed, workspacePath, registered, active);
+    if (!checked.ok) {
+      return sendJson(res, checked.code === 'NAME_TAKEN' ? 409 : 400, { error: checked.code, message: checked.message });
+    }
+    explicitName = checked.name;
+  }
+  setWorkspaceAddressName(workspacePath, explicitName);
+
+  const own = workspaceAddressName(workspacePath, getRegisteredWorkspaces(), active);
+  const response: SetWorkspaceAddressNameResponse =
+    own.name === null
+      ? { explicitName, addressName: null, unaddressableReason: own.reason }
+      : { explicitName, addressName: own.name };
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(response));
 }
 
 async function handleWorkspaceAction(

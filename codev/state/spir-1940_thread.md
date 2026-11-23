@@ -518,3 +518,90 @@ no resolver, so it is unchanged; the delayed path is covered in `tower-routes.te
 - The three existing e2e files checked by reading: `send-integration` and `tower-baseline`
   deactivate in teardown; `tower-api` deactivates in the test body with `cleanupAllTerminals` in
   `afterAll` as the backstop. No leak found there. Reported.
+
+## 2026-11-23 — phase 3 started: the shellper leak fixed first (`9725f56a3`)
+
+Resumed after a context refresh at the phase boundary.
+
+- `send-latency.e2e.test.ts` `afterAll` now deactivates the workspace before `tower.stop()`, then
+  polls and asserts that no process whose command line names that Tower's `socketDir` survives.
+  `beforeAll` asserts the same listing is non-empty while the terminals are up, so the teardown
+  check cannot pass vacuously. The listing is a new helper, `pidsNamingSocketDir`, in
+  `helpers/tower-test-utils.ts`.
+- Proof: two runs, one test Tower each. Both passed. My shellper list before and after is the same
+  18 PIDs (zero new), and the count of `sleep 3600` children is unchanged.
+- I did not prove the assertion by leaking on purpose: that would start shellpers I may not kill.
+  The `beforeAll` check is the evidence that the detector sees a live shellper.
+- The old 18 are NOT killed; the owner's word is still awaited.
+- The two runs read 3.10 ms and 5.03 ms at load 15 to 20 (baseline 2.19 ms, bound 3.19 ms). Single
+  loaded runs prove nothing either way; phase 6 takes five on a quiet machine. Noted so that a
+  high phase 6 reading is not a surprise.
+
+## 2026-11-23 — phase 3 built: explicit workspace names
+
+**What exists now.** Migration v20 adds a nullable `address_name` to `known_workspaces` with a
+partial unique index. `utils/workspace-address.ts` holds every naming rule (validate, find, own
+name, same-workspace comparison) and reads nothing itself. `locateWorkspace` calls it in place of
+the basename match. `PUT /api/workspaces/:encodedPath/address-name`, `setWorkspaceAddressName` in
+the SDK, and `afx workspace name <name>` / `--clear`.
+
+**Decisions I made, for the review to check:**
+
+1. **The spec and the plan disagree on one sentence, and I followed the spec.** The plan says of a
+   workspace registered later whose basename equals an existing explicit name: "its bare basename
+   fails with a message that says it needs a name of its own". The spec says "the explicit name
+   keeps resolving to the workspace that holds it". Both cannot hold for the same text. So:
+   the name resolves to its holder while the holder runs (no error exists to carry a message);
+   when the holder is NOT running the address fails, says the holder is not running, and names the
+   running workspace with that basename as needing a name of its own. `workspaceAddressName` also
+   reports such a workspace as having no name, with the reason, for phase 5's listing.
+2. **"Address name of any other workspace" is read by the spec's own definition**: explicit name
+   if it has one, otherwise basename. So a workspace may take a name equal to the basename of a
+   workspace that has an explicit name (that workspace no longer answers to its basename). If
+   that workspace later clears its name it is shadowed, and the clear says so: the response
+   carries `addressName: null` and the reason, and the CLI prints it as a warning.
+3. **Ambiguity is among running workspaces only**, as before this phase. A stopped workspace with
+   the same basename does not make a running one ambiguous. Setting a name is checked against
+   every registered workspace, running or not, as the spec says.
+4. **A running workspace with no `known_workspaces` row counts as registered and unnamed** (a
+   stray worktree architect, and every test that fakes the terminal map).
+5. **An explicit name is at most 64 characters**, and is lower-cased before the component rule.
+6. **Error codes on the naming route**: 400 `INVALID_NAME` and `RESERVED_NAME`, 409 `NAME_TAKEN`,
+   404 `NOT_FOUND` for a workspace Tower has no row for. The body is the usual
+   `{ error, message }`.
+7. **`afx workspace name` run in a builder worktree names the builder's workspace**, not the
+   worktree (it uses `detectWorkspaceRoot` from `send.ts`, which every `afx send` already uses).
+8. **Error wording changed** for an unknown or ambiguous workspace ("Workspace 'x' …", was
+   "Project 'x' …"). No test pinned the old text; the codes are unchanged. Three new cases have
+   their own text: not running, addressed under another name, and the shadowed newcomer.
+9. **Windows path merge**: the surviving `known_workspaces` row keeps its own name, else takes the
+   dropped row's. The code reads the column only where it exists.
+
+**Tests.** `workspace-address.test.ts` (47, pure, including two exhaustive checks over every
+arrangement of three workspaces: a workspace's own name resolves to it, and an accepted name
+never moves an existing one). Migration v20 from v15 to v19 and fresh. Both resolvers
+(`spec-1940-cross-workspace-resolve.test.ts`, now 121), including the name table being read only
+for an address that names a workspace. The route and the send route together against one
+registry in `tower-routes.test.ts`. The CLI, the SDK wire contract, and the path merge. Four
+mutations (drop the name in the merge, stop preferring the holder, lose "own workspace" for an
+explicit name, skip validation in the route) each fail tests.
+
+**Carry forward.** Phase 4: `workspaceAddressName` returns a basename as it is, which need not fit
+the component rule; check before formatting. Phase 5: `afx whoami` and the listing use the same
+module with `getRegisteredWorkspaces(db)` on a read-only handle; `whoami.ts` still reads the old
+`name` column for display.
+
+**Checked on a real Tower** (a one-off e2e file, not committed: phase 6 owns the kept one). Built
+Tower on an isolated port and directory, two workspaces whose directories are both `codev`:
+`codev:architect` fails 409 listing both paths; the real `workspaceName` command, run from a
+subdirectory of the second workspace with only the port replaced, names it `work`; then
+`codev:architect` and `work:architect` each store mail in the right workspace; `WORK`,
+`architect`, `my notes` and an unregistered path are refused with `NAME_TAKEN`, `RESERVED_NAME`,
+`INVALID_NAME`, `NOT_FOUND`; with the named workspace stopped, `work:architect` fails "is not
+running" and the name still cannot be taken; a clear reports no address name and the reason, and
+the ambiguity returns. Teardown deactivated both workspaces; shellper list unchanged.
+
+**Verification so far**: 75 targeted test files in `packages/codev` (1893 tests, 4 workers), the
+SDK suite (400), `npm run build` in `packages/codev`, type-check. One existing test needed its
+`state.js` mock extended (`spec-1313-registry-resolve.test.ts`). The full local suite was NOT
+run (standing order); GitHub's run on the pushed head is the full check.

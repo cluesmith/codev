@@ -2778,6 +2778,238 @@ describe('tower-routes', () => {
           expect(allRows()).toHaveLength(0);
         });
       });
+
+      // Spec 1940 phase 3. The naming route and the send route against the same registry:
+      // what is asserted is what `afx workspace name` and then `afx send` get back.
+      describe('explicit workspace names (PUT /api/workspaces/:path/address-name)', () => {
+        let WORK: string;
+
+        /** Register a workspace with Tower (a `known_workspaces` row), as activating it does. */
+        function register(...workspaces: string[]) {
+          for (const ws of workspaces) {
+            sendDbHolder.db
+              .prepare('INSERT OR IGNORE INTO known_workspaces (workspace_path, name) VALUES (?, ?)')
+              .run(ws, path.basename(ws));
+          }
+        }
+
+        async function setName(workspace: string, name: unknown, method = 'PUT') {
+          mockParseJsonBody.mockResolvedValue(name === undefined ? {} : { name });
+          const { res, statusCode, body } = makeRes();
+          const encoded = Buffer.from(workspace).toString('base64url');
+          await handleRequest(makeReq(method, `/api/workspaces/${encoded}/address-name`), res, makeCtx());
+          return { status: statusCode(), body: JSON.parse(body()) };
+        }
+
+        const storedName = (workspace: string) =>
+          (sendDbHolder.db.prepare('SELECT address_name FROM known_workspaces WHERE workspace_path = ?').get(workspace) as
+            | { address_name: string | null }
+            | undefined)?.address_name;
+
+        /** All three workspaces running, each with a `main`. Returns the write spies. */
+        function allRunning() {
+          return liveAgents({
+            [CODEV]: { architects: ['main', 'review'] },
+            [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+            [WORK]: { architects: ['main'] },
+          });
+        }
+
+        beforeEach(() => {
+          // A second directory called `codev`.
+          WORK = path.join(root, 'work', 'codev');
+          fs.mkdirSync(WORK, { recursive: true });
+          setArchitectByName(WORK, 'main', { name: 'main', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+          register(CODEV, CLOUD, WORK);
+          allRunning();
+        });
+
+        it('two workspaces share a basename: the address fails listing both; after one is named, both resolve', async () => {
+          const ambiguous = await send('codev:architect', 'architect:main', { workspace: CLOUD, fromWorkspace: CLOUD });
+          expect(ambiguous.status).toBe(409);
+          expect(ambiguous.body.error).toBe('AMBIGUOUS');
+          expect(ambiguous.body.message).toContain(CODEV);
+          expect(ambiguous.body.message).toContain(WORK);
+          expect(ambiguous.body.message).toContain('afx workspace name <name>');
+          expect(allRows()).toHaveLength(0);
+
+          const named = await setName(WORK, 'work');
+          expect(named).toEqual({ status: 200, body: { explicitName: 'work', addressName: 'work' } });
+
+          const writes = allRunning();
+          const toCodev = await send('codev:architect', 'architect:main', { workspace: CLOUD, fromWorkspace: CLOUD });
+          const toWork = await send('work:architect', 'architect:main', { workspace: CLOUD, fromWorkspace: CLOUD });
+          expect(toCodev.body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'main' });
+          expect(toWork.body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'main' });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([CODEV, WORK]);
+          await vi.waitFor(() => expect(writes['codev/main'].mock.calls.length).toBeGreaterThan(0));
+        });
+
+        it('stores the name lower-cased, whatever case it was given in', async () => {
+          const { status, body } = await setName(WORK, 'Work-2');
+          expect(status).toBe(200);
+          expect(body).toEqual({ explicitName: 'work-2', addressName: 'work-2' });
+          expect(storedName(WORK)).toBe('work-2');
+        });
+
+        it.each([
+          ['a reserved word', 'architect', 400, 'RESERVED_NAME'],
+          ['a reserved word in another case', 'Builder', 400, 'RESERVED_NAME'],
+          ['the alias arch', 'arch', 400, 'RESERVED_NAME'],
+          ['a character outside the allowed set', 'my notes', 400, 'INVALID_NAME'],
+          ['a colon', 'a:b', 400, 'INVALID_NAME'],
+          ['an empty name', '', 400, 'INVALID_NAME'],
+          ['a name over 64 characters', 'x'.repeat(65), 400, 'INVALID_NAME'],
+          ['the basename of another workspace', 'codev-cloud', 409, 'NAME_TAKEN'],
+          ['that basename in another letter case', 'Codev-Cloud', 409, 'NAME_TAKEN'],
+        ])('refuses %s, with the reason, and stores nothing', async (_what, name, status, code) => {
+          const result = await setName(WORK, name);
+          expect(result.status).toBe(status);
+          expect(result.body.error).toBe(code);
+          expect(typeof result.body.message).toBe('string');
+          expect(storedName(WORK)).toBeNull();
+        });
+
+        it('refuses the explicit name of another workspace, in any letter case', async () => {
+          expect((await setName(CLOUD, 'cloud')).status).toBe(200);
+          for (const name of ['cloud', 'CLOUD']) {
+            const result = await setName(WORK, name);
+            expect(result.status).toBe(409);
+            expect(result.body.error).toBe('NAME_TAKEN');
+            expect(result.body.message).toContain(CLOUD);
+          }
+          expect(storedName(WORK)).toBeNull();
+          expect(storedName(CLOUD)).toBe('cloud');
+        });
+
+        it('refuses the basename of a workspace that is registered but not running', async () => {
+          // CLOUD is registered and stopped.
+          liveAgents({ [CODEV]: { architects: ['main'] }, [WORK]: { architects: ['main'] } });
+          const result = await setName(WORK, 'codev-cloud');
+          expect(result.status).toBe(409);
+          expect(result.body.error).toBe('NAME_TAKEN');
+          expect(result.body.message).toContain(CLOUD);
+        });
+
+        it('names a workspace that is registered but not running', async () => {
+          liveAgents({ [CODEV]: { architects: ['main'] } });
+          expect(await setName(WORK, 'work')).toEqual({ status: 200, body: { explicitName: 'work', addressName: 'work' } });
+        });
+
+        it('refuses a workspace Tower has not registered (404), a body with no name (400) and another method (405)', async () => {
+          const unknown = await setName(path.join(root, 'nowhere'), 'x');
+          expect(unknown.status).toBe(404);
+          expect(unknown.body.error).toBe('NOT_FOUND');
+
+          for (const bad of [undefined, 7, { a: 1 }]) {
+            const result = await setName(WORK, bad);
+            expect(result.status).toBe(400);
+            expect(result.body.error).toBe('INVALID_PARAMS');
+          }
+          expect((await setName(WORK, 'work', 'POST')).status).toBe(405);
+          expect(storedName(WORK)).toBeNull();
+        });
+
+        it('lets a workspace set the name it already has, and change it; the old name stops resolving at once', async () => {
+          await setName(WORK, 'work');
+          expect((await setName(WORK, 'work')).status).toBe(200);
+          expect((await setName(WORK, 'office')).body).toEqual({ explicitName: 'office', addressName: 'office' });
+
+          const old = await send('work:architect', 'architect:main');
+          expect(old.status).toBe(404);
+          expect(old.body.error).toBe('NOT_FOUND');
+          expect((await send('office:architect', 'architect:main')).body).toMatchObject({ ok: true, resolvedTo: 'main' });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([WORK]);
+          // ...and the name it gave up is free for another workspace.
+          expect((await setName(CLOUD, 'work')).status).toBe(200);
+        });
+
+        it('a named workspace no longer answers to its basename', async () => {
+          await setName(CLOUD, 'cloud');
+          const result = await send('codev-cloud:architect', 'architect:main');
+          expect(result.status).toBe(404);
+          expect(result.body.message).toContain("addressed as 'cloud'");
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('--clear: the workspace resolves by its basename again, and the name is free', async () => {
+          await setName(CLOUD, 'cloud');
+          const cleared = await setName(CLOUD, null);
+          expect(cleared).toEqual({ status: 200, body: { explicitName: null, addressName: 'codev-cloud' } });
+          expect(storedName(CLOUD)).toBeNull();
+
+          expect((await send('cloud:architect', 'architect:main')).status).toBe(404);
+          expect((await send('codev-cloud:architect', 'architect:main')).body).toMatchObject({ ok: true, resolvedTo: 'main' });
+          expect((await setName(WORK, 'cloud')).status).toBe(200);
+        });
+
+        it('--clear on a workspace whose basename is shared says it now has no address name, and why', async () => {
+          await setName(WORK, 'work');
+          const cleared = await setName(WORK, null);
+          expect(cleared.status).toBe(200);
+          expect(cleared.body.explicitName).toBeNull();
+          expect(cleared.body.addressName).toBeNull();
+          expect(cleared.body.unaddressableReason).toContain(CODEV);
+          expect(cleared.body.unaddressableReason).toContain('afx workspace name <name>');
+        });
+
+        it('a workspace registered later whose basename equals an existing explicit name does not take the name', async () => {
+          // CLOUD is named `extra` while no directory is called that.
+          expect((await setName(CLOUD, 'extra')).status).toBe(200);
+          // Then a workspace whose directory is `extra` arrives.
+          const EXTRA = path.join(root, 'extra');
+          fs.mkdirSync(EXTRA);
+          setArchitectByName(EXTRA, 'main', { name: 'main', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+          register(EXTRA);
+          const writes = liveAgents({
+            [CODEV]: { architects: ['main'] },
+            [CLOUD]: { architects: ['main'] },
+            [EXTRA]: { architects: ['main'] },
+          });
+
+          // The name keeps reaching the workspace that holds it.
+          expect((await send('extra:architect', 'architect:main')).body).toMatchObject({ ok: true, delivered: true });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([CLOUD]);
+          expect(writes['extra/main']).not.toHaveBeenCalled();
+
+          // With the holder stopped the address fails: it is never delivered to the newcomer,
+          // which is reported as needing a name of its own.
+          liveAgents({ [CODEV]: { architects: ['main'] }, [EXTRA]: { architects: ['main'] } });
+          const stopped = await send('extra:architect', 'architect:main');
+          expect(stopped.status).toBe(404);
+          expect(stopped.body.message).toContain(`Workspace 'extra' (${CLOUD}) is not running.`);
+          expect(stopped.body.message).toContain(EXTRA);
+          expect(stopped.body.message).toContain('a name of its own');
+          expect(allRows()).toHaveLength(1);
+
+          // Given one, the newcomer is reached by it.
+          expect((await setName(EXTRA, 'extra-2')).status).toBe(200);
+          expect((await send('extra-2:architect', 'architect:main')).body).toMatchObject({ ok: true, resolvedTo: 'main' });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([CLOUD, EXTRA]);
+        });
+
+        it('a workspace whose basename has a space is still reached by its local address', async () => {
+          const NOTES = path.join(root, 'My Notes');
+          fs.mkdirSync(NOTES);
+          setArchitectByName(NOTES, 'main', { name: 'main', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+          register(NOTES);
+          liveAgents({ [CODEV]: { architects: ['main'] }, [NOTES]: { architects: ['main'] } });
+
+          const { status, body } = await send('My Notes:architect', 'architect:main');
+          expect(status).toBe(200);
+          expect(body).toMatchObject({ ok: true, resolvedTo: 'main' });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([NOTES]);
+        });
+
+        it('a builder reaches its own architect with its workspace\'s explicit name in front', async () => {
+          await setName(CODEV, 'core');
+          const own = await send('core:architect:review', BUILDER);
+          expect(own.body).toMatchObject({ ok: true, resolvedTo: 'review' });
+          // Affinity too: `core:architect` from the builder is its spawning architect, not `main`.
+          expect((await send('core:architect', BUILDER)).body).toMatchObject({ ok: true, resolvedTo: 'review' });
+          expect(allRows().map((r) => [r.workspace_path, r.to_agent])).toEqual([[CODEV, 'review'], [CODEV, 'review']]);
+        });
+      });
     });
 
     describe('interrupt honours the per-harness write strategy (Issue #1567)', () => {
