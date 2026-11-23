@@ -605,3 +605,38 @@ the ambiguity returns. Teardown deactivated both workspaces; shellper list uncha
 SDK suite (400), `npm run build` in `packages/codev`, type-check. One existing test needed its
 `state.js` mock extended (`spec-1313-registry-resolve.test.ts`). The full local suite was NOT
 run (standing order); GitHub's run on the pushed head is the full check.
+
+## 2026-11-23 — phase 3: porch's tests check failed once under its own load; conditions for main-32 met
+
+- Architect's answer (main-38 not ruled, so main-32 as written): plain `porch done` once at
+  one-minute load under 18. Run at load 12.7. Build passed (21 s); **tests check failed** (93 s).
+  Load was 33 when it ended: the suite itself is what loads the machine. Not rerun.
+- Failed files, from vitest's results cache
+  (`packages/codev/node_modules/.vite/vitest/<hash>/results.json`, a list of
+  `[":<file>", { duration, failed }]`), none touched by this project:
+  `src/__tests__/windows-console-spawn-guard.test.ts` (NEW to the list: a static scan that parses
+  the source tree with the TypeScript compiler), `agent-farm/__tests__/bugfix-1267-launch-loop`,
+  `ide-command`, `pir-1233-session-launch-loop`, `commands/consult/__tests__/agy-auth-cache`
+  (those four are among phase 2's 17).
+- The five alone, one vitest invocation, load about 15: 5 files, 76 tests, all passed.
+- GitHub on PR #1957 at `0a553e80b`: 8 of 8 green (Unit Tests run 45288994982). Told the
+  architect; waiting for the word before the one-time skip.
+- **For the review** (architect's instruction): record the plan/spec sentence and my reading, so
+  the owner sees it at the `pr` gate; include the real-Tower transcript below. The Flaky Tests
+  section gains this fourth failure of porch's tests check and the new file.
+
+**Transcript of the one-off real-Tower check** (isolated port and directories; `<tmp>` is the
+test's temp root; trimmed to the lines that matter):
+
+```
+AMBIGUOUS 409 {"error":"AMBIGUOUS","message":"Workspace 'codev' is ambiguous: 2 workspaces have that directory name: <tmp>/a/codev, <tmp>/b/codev. Give one a name of its own by running `afx workspace name <name>` in it."}
+[ok] This workspace is now addressed as 'work'.
+[info] Another workspace reaches its front door with: afx send work:architect "…"
+TO_A 200 {"ok":true,"resolvedTo":"main","deferred":true,"delivered":false,"held":true,"reason":"no-live-pty","detail":null,"bodyLength":5}
+TO_B 200 {"ok":true,"resolvedTo":"main","deferred":true,"delivered":false,"held":true,"reason":"no-live-pty","detail":null,"bodyLength":5}
+REFUSALS [{"ok":false,"error":"'work' is already the name of the workspace <tmp>/b/codev. (NAME_TAKEN)","errorCode":"NAME_TAKEN"},{"ok":false,"error":"'architect' is a reserved word in addresses and cannot be a workspace name. (RESERVED_NAME)","errorCode":"RESERVED_NAME"},{"ok":false,"error":"'my notes' cannot be a workspace name: use letters, digits, '.', '_' and '-', starting with a letter or a digit. (INVALID_NAME)","errorCode":"INVALID_NAME"},{"ok":false,"error":"Workspace <tmp>/nowhere is not registered with Tower. Start it once first: afx workspace start (NOT_FOUND)","errorCode":"NOT_FOUND"}]
+STOPPED 404 {"error":"NOT_FOUND","message":"Workspace 'work' (<tmp>/b/codev) is not running."}
+CLEARED {"ok":true,"result":{"explicitName":null,"addressName":null,"unaddressableReason":"it shares the directory name 'codev' with <tmp>/a/codev; give it a name of its own: afx workspace name <name>"}}
+ ✓ src/agent-farm/__tests__/tmp-phase3-check.e2e.test.ts > phase 3 one-off: names on a real Tower > ambiguous, then named through the CLI command, then both resolve; refusals; clear 1038ms
+      Tests  1 passed (1)
+```
