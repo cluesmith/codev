@@ -1304,14 +1304,43 @@ function printHelp(): void {
   console.log('  init <protocol> <id> <name>  Initialize a new project');
   console.log('');
   console.log('Flags:');
+  console.log('  -C <dir>                 Run as if porch was started in <dir> (before the command, like git -C)');
   console.log('  --version, -v            Print porch (codev) version');
   console.log('');
   console.log('Project ID is auto-detected from worktree path or when exactly one project exists.');
   console.log('');
 }
 
+/**
+ * #1950 `porch -C <dir>`: like `git -C`, run as if porch had been started in `<dir>`. Leading
+ * and repeatable, each resolved against the last. It changes where porch runs, nothing else —
+ * `approve` and `skip-phase` still require their human-approval flag.
+ */
+function applyDirectoryFlags(args: string[]): string[] {
+  let i = 0;
+  while (args[i] === '-C') {
+    const dir = args[i + 1];
+    if (!dir) throw new Error('-C requires a directory');
+    const resolved = path.resolve(dir);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      throw new Error(`-C ${dir}: not a directory (${resolved})`);
+    }
+    process.chdir(resolved);
+    i += 2;
+  }
+  if (i > 0) console.error(chalk.dim(`[porch -C: running in ${process.cwd()}]`));
+  return args.slice(i);
+}
+
 export async function cli(args: string[]): Promise<void> {
-  const [command, ...rest] = args;
+  let located: string[];
+  try {
+    located = applyDirectoryFlags(args);
+  } catch (err) {
+    console.error(chalk.red(`Error: ${(err as Error).message}`));
+    process.exit(1);
+  }
+  const [command, ...rest] = located;
 
   // `porch <command> --help` prints help and exits. Without this, the subcommand ran:
   // `porch done --help` executed `porch done` on the auto-detected project — checks and all —
@@ -1351,7 +1380,7 @@ export async function cli(args: string[]): Promise<void> {
   try {
     switch (command) {
       case 'pending':
-        await pending(workspaceRoot, { all: args.includes('--all') });
+        await pending(workspaceRoot, { all: rest.includes('--all') });
         break;
 
       case 'next': {

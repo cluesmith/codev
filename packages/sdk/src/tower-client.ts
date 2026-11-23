@@ -268,6 +268,21 @@ export interface TowerClientOptions {
 import { encodeWorkspacePath } from './workspace.js';
 
 /**
+ * Whether a fetch failure was a refused TCP connection: nothing was listening, so the
+ * request provably never reached Tower. Node's fetch reports it as `fetch failed` with the
+ * `ECONNREFUSED` on `err.cause`, which a check of `err.message` alone never sees (#1950).
+ */
+function isConnectionRefused(err: unknown): boolean {
+  if (!(err instanceof Error)) return String(err).includes('ECONNREFUSED');
+  const cause = (err as { cause?: { code?: unknown; message?: unknown } }).cause;
+  return (
+    err.message.includes('ECONNREFUSED') ||
+    cause?.code === 'ECONNREFUSED' ||
+    (typeof cause?.message === 'string' && cause.message.includes('ECONNREFUSED'))
+  );
+}
+
+/**
  * Extract a human-facing error string from a Tower error response body (#1333).
  *
  * Tower error responses carry a machine `error` code and, for many cases, a
@@ -311,10 +326,15 @@ export class TowerClient {
     this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
   }
 
+  /**
+   * `connectionRefused` is set only when the connection was refused: the request provably
+   * never reached Tower, so resending it cannot duplicate anything (#1950). A timeout or a
+   * reset leaves it unset — that request may have arrived.
+   */
   async request<T>(
     path: string,
     options: RequestInit = {}
-  ): Promise<{ ok: boolean; status: number; data?: T; error?: string }> {
+  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; connectionRefused?: boolean }> {
     try {
       const authKey = this.getAuthKey();
       const headers: Record<string, string> = {
@@ -345,8 +365,8 @@ export class TowerClient {
       return { ok: true, status: response.status, data };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('ECONNREFUSED')) {
-        return { ok: false, status: 0, error: 'Tower not running' };
+      if (isConnectionRefused(err)) {
+        return { ok: false, status: 0, error: 'Tower not running', connectionRefused: true };
       }
       if (message.includes('timeout')) {
         return { ok: false, status: 0, error: 'Request timeout' };
@@ -756,7 +776,7 @@ export class TowerClient {
       return { ok: true, path: data.path };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('ECONNREFUSED')) {
+      if (isConnectionRefused(err)) {
         return { ok: false, error: 'Tower not running' };
       }
       if (message.includes('timeout')) {
@@ -805,6 +825,11 @@ export class TowerClient {
   ): Promise<{
     ok: boolean;
     resolvedTo?: string;
+    /**
+     * #1950: the connection was refused, so this request never reached Tower and a resend
+     * cannot duplicate it. Absent on every other failure, a timeout included.
+     */
+    connectionRefused?: boolean;
     /** Tower is holding this for later delivery (`deliverAfter`). */
     scheduled?: boolean;
     /** Tower buffered this because the user was typing (Spec 403). */
@@ -914,7 +939,7 @@ export class TowerClient {
     );
 
     if (!result.ok) {
-      return { ok: false, error: result.error };
+      return { ok: false, error: result.error, connectionRefused: result.connectionRefused };
     }
 
     return {
@@ -1025,7 +1050,7 @@ export class TowerClient {
       return { status: response.status, body };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('ECONNREFUSED')) return { status: 0, body: null, error: 'Tower not running' };
+      if (isConnectionRefused(err)) return { status: 0, body: null, error: 'Tower not running' };
       if (message.includes('timeout')) return { status: 0, body: null, error: 'Request timeout' };
       return { status: 0, body: null, error: message };
     }
