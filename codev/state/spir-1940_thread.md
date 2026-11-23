@@ -388,3 +388,23 @@ no resolver, so it is unchanged; the delayed path is covered in `tower-routes.te
   finds mail stored for the wrong architect.
 - **Carry into phase 6:** `codev/resources/arch.md` (near line 817) still describes the old
   two-slot `parseAddress` intercept.
+
+## 2026-11-23 — phase 2 iteration 1: BLOCKED on porch's tests check under machine load
+
+- `porch done` on the fix commit `d106d3984` failed its `tests` check (build passed). This time
+  my own full-output run failed too, so the failures have names: **92 tests in 17 files, every
+  one a timeout** of 5 seconds or more. Load average was 33 when porch finished and 49 during my
+  run. Top CPU users were `fseventsd` and `XprotectService` at about 80 to 87 percent each, plus
+  another builder's test run. None of it is this builder.
+- The 17 files, none touched by this project: `commands/consult/__tests__/` (`claude-cli-lane`,
+  `tripwire-wiring`, `agy-lane-model`, `bugfix-1754-dotenv-auth`, `lane-models`,
+  `agy-auth-cache`), `src/__tests__/` (`doctor`, `claude-cli`, `bugfix-1455-pr-create-concept`,
+  `forge`, `consult`), `agent-farm/__tests__/` (`ide-extensions`, `bugfix-1267-launch-loop`,
+  `ide-version`, `pir-1233-session-launch-loop`, `ide-command`, `ide-server-unready`). They are
+  the tests that start a subprocess. Every test file this phase touches passed in that same run.
+- The phase 2 code before the fix passed the full suite twice (8494 passed). The fix changes one
+  function in `tower-messages.ts` and one call site in `mailbox-wiring.ts`.
+- NOT done: running the 17 files alone. At load 49 they would time out for the same reason and
+  add to the load.
+- Per ruling main-32 I have stopped and told the architect. Not looping on `porch done`.
+  Full output: scratchpad `full-suite-phase2-2.txt` (not committed).
