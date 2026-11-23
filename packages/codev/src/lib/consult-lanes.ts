@@ -248,6 +248,34 @@ export function validateClaudeAuth(claudeAuth: unknown): void {
   }
 }
 
+/**
+ * `consult.claudeMaxTurns` — the claude lane's turn cap, passed to `--max-turns` (#1941). A
+ * positive integer; unset → the lane's default.
+ */
+export function validateClaudeMaxTurns(maxTurns: unknown): void {
+  if (maxTurns === undefined) return;
+  if (typeof maxTurns !== 'number' || !Number.isInteger(maxTurns) || maxTurns < 1) {
+    fail(
+      `Invalid consult.claudeMaxTurns in Codev config: expected a positive whole number of turns, ` +
+      `got ${JSON.stringify(maxTurns)}.`
+    );
+  }
+}
+
+/**
+ * `consult.claudeMaxBudgetUsd` — the claude lane's spend cap in USD, passed to `--max-budget-usd`
+ * (#1941). A positive number; unset → the lane's default.
+ */
+export function validateClaudeMaxBudgetUsd(maxBudgetUsd: unknown): void {
+  if (maxBudgetUsd === undefined) return;
+  if (typeof maxBudgetUsd !== 'number' || !Number.isFinite(maxBudgetUsd) || maxBudgetUsd <= 0) {
+    fail(
+      `Invalid consult.claudeMaxBudgetUsd in Codev config: expected a positive number of US ` +
+      `dollars, got ${JSON.stringify(maxBudgetUsd)}.`
+    );
+  }
+}
+
 export function validatePricing(pricing: unknown): void {
   if (pricing === undefined) return;
   if (typeof pricing !== 'object' || pricing === null || Array.isArray(pricing)) {

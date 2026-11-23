@@ -2133,7 +2133,7 @@ consult -m claude spec 42
 |-------|-----------|----------------|-------------|
 | gemini | `agy` (Antigravity CLI; resolved real bin, not the IDE symlink) | Folded into the prompt (role + query) | OAuth / subscription (no API key) |
 | codex | `codex` | Temp file via `-c experimental_instructions_file=` flag | `OPENAI_API_KEY` |
-| claude | the installed `claude` CLI (`CODEV_CLAUDE_BIN` pin, else `PATH`; floor 2.1.141, Spec 1912) | Role + claude-lane capability note via `--system-prompt-file` | The CLI's own login (subscription for most). `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are withheld unless `consult.claudeAuth: "api-key"` |
+| claude | the installed `claude` CLI (`CODEV_CLAUDE_BIN` pin, else `PATH`; floor 2.1.141, Spec 1912) | Role + claude-lane capability note via `--system-prompt-file` | The CLI's own login (subscription for most). `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are withheld unless `consult.claudeAuth: "api-key"`: a billing guarantee, not secrecy (the reviewer can still Read the workspace `.env`). Caps: `consult.claudeMaxTurns` (200) and `consult.claudeMaxBudgetUsd` ($25) |
 
 **Query building**: Five subcommands (`pr`, `spec`, `plan`, `impl`, `general`) each build a prompt that includes the spec/plan/diff content plus a verdict template (`VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]`). PR diffs truncated to 50k chars, impl diffs to 80k chars.
 

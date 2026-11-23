@@ -147,6 +147,21 @@ picks what the lane bills:
 - What passes through in `login` mode, what the auth line says, and how the lane fails are in
   [Claude auth: subscription vs. metered API](#claude-auth-subscription-vs-metered-api).
 
+### `consult.claudeMaxTurns` and `consult.claudeMaxBudgetUsd`
+
+The claude lane caps each review at 200 turns (`--max-turns`) and $25 (`--max-budget-usd`). On a
+subscription login the dollars are notional: the CLI still counts them, so a large review can
+reach the budget cap without any real spend. Raise either cap here:
+
+```json
+{ "consult": { "claudeMaxTurns": 400, "claudeMaxBudgetUsd": 100 } }
+```
+
+- `claudeMaxTurns` must be a positive whole number; `claudeMaxBudgetUsd` a positive number (it may
+  be fractional). Any other value is an error at config load.
+- A review that reaches a cap fails, and the message names the cap and the key to raise:
+  `The review reached the $25 budget cap. To allow more, raise consult.claudeMaxBudgetUsd in .codev/config.json.`
+
 ### `consult.pricing.codex`
 
 Per-1M-token rates for the codex lane. Set this when Codev has no rates for the model you run
@@ -250,6 +265,7 @@ offending key and the valid alternatives. Nothing falls back to a default on err
 | Model ids | **The provider** | When the lane runs |
 | `codexPath` | **Codev**: absolute-path syntax, then `<path> --version` | Syntax at config load; a binary that doesn't run, when the codex lane starts |
 | `claudeAuth` | **Codev**, against a closed enum (`login`, `api-key`) | Config load, before anything runs |
+| `claudeMaxTurns`, `claudeMaxBudgetUsd` | **Codev**: a positive whole number, a positive number | Config load, before anything runs |
 
 Codev checks a model id's *syntax* only (ASCII alphanumerics plus `. _ : / @ + -`, 1–200 characters,
 no leading punctuation) — never its existence. **There is no allowlist of model ids anywhere in
@@ -483,6 +499,9 @@ your Claude subscription, for most people. That is `consult.claudeAuth: "login"`
   `claude` child in `login` mode, whether they come from the shell or from `<workspace>/.env`.
   Before #1912, an `ANTHROPIC_API_KEY` in `.env` (there for app code, say) billed review traffic
   to the metered API unless an OAuth token was also set (#985 covered only that case).
+  **This is a billing guarantee, not secrecy.** The reviewer runs in the workspace with a Read
+  tool, so it can still read the workspace `.env`, key included, as the Agent SDK lane before it
+  could.
 - **What passes through:** `CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token` subscription token,
   which is a login rather than API billing), and explicit provider and routing configuration
   (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, …, `ANTHROPIC_BASE_URL`, proxies).
@@ -523,33 +542,35 @@ That one config line is the fix.
 
 | Condition | What to do |
 |---|---|
-| `claude` is not on `PATH` | Install it (`curl -fsSL https://claude.ai/install.sh \| bash`), or set `CODEV_CLAUDE_BIN` |
+| `claude` is not on `PATH` | Install it (`curl -fsSL https://claude.ai/install.sh \| bash`, or `npm install -g @anthropic-ai/claude-code` where the native installer cannot run), or set `CODEV_CLAUDE_BIN` |
 | `CODEV_CLAUDE_BIN` is not an executable file | Fix the path. Codev does not fall back to `PATH` |
 | Older than 2.1.141, or a version it cannot parse | `claude update`, or `npm install -g @anthropic-ai/claude-code@latest` for an npm install |
-| `claude auth status` reports no login | `claude auth login` |
+| `claude auth status` reports no login | `claude auth login`; in `api-key` mode, check the key, or remove `consult.claudeAuth` |
 | `api-key` mode with neither key set | Set one, or remove `consult.claudeAuth` |
 
 It never falls back to another credential or to another `claude`. A run that fails before the
 auth status is known prints no auth line; its message is the explanation.
 
 Once the review runs, an error result (a usage limit, an invalid or expired credential) fails the
-run with no output file, and the message names the credential in use. A reviewer that fills its
+run with no output file, and the message names the credential in use. When the result says the
+session is not logged in, the message adds the remedy for the auth mode, as the preflight does. A reviewer that fills its
 context window ("Prompt is too long") fails with a message naming the model and #1641; consult
 does not retry. A successful result with no review text fails too, since it has no VERDICT. Every
 failure after the preflight also names the binary that ran, so an old or unexpected `claude` is
 visible:
 
 ```
-Claude CLI error (error_max_budget_usd). The review reached the $25 budget cap.
+Claude CLI error (error_max_budget_usd). The review reached the $25 budget cap. To allow more, raise consult.claudeMaxBudgetUsd in .codev/config.json.
 
 The claude lane ran /Users/you/.local/bin/claude, 2.1.326 (from PATH).
 ```
 
 **Read-only, isolated, and safe to nest.** The reviewer session has only Read, Glob and Grep: no
 edit, shell, web or MCP tools. Consult checks the tool list the session reports when it starts,
-and stops the review unless it is exactly those three. If a `claude` release changes the session's
-tools, every review stops; pin a known-good `claude` with `CODEV_CLAUDE_BIN` until Codev catches up.
-It has a 200-turn cap and a $25 budget cap. It loads none of your
+and stops the review unless it is exactly those three (a tool listed twice is fine). If a `claude`
+release changes the session's tools, every review stops; pin a known-good `claude` with
+`CODEV_CLAUDE_BIN` until Codev catches up. It has a 200-turn cap and a $25 budget cap, both
+configurable ([`consult.claudeMaxTurns` and `consult.claudeMaxBudgetUsd`](#consultclaudemaxturns-and-consultclaudemaxbudgetusd)). It loads none of your
 settings files, hooks, plugins, MCP servers or CLAUDE.md, and its sessions are not saved, so
 reviews do not fill `claude --resume`. Claude Code's session markers (`CLAUDECODE` and related
 variables) are removed from the child's environment, so consult works from inside a Claude Code
