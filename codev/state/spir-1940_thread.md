@@ -358,3 +358,17 @@ across workspaces (11 failures), then restored the code.
 
 `spec-1307-send-delay.test.ts` is listed in the plan but tests only the timer registry and calls
 no resolver, so it is unchanged; the delayed path is covered in `tower-routes.test.ts`.
+
+## 2026-11-23 — phase 2: porch's tests check failed once again, not identified
+
+- `porch done` on `d6124d76c` failed its `tests` check (build passed). Porch prints only the
+  first lines of a failed check, all npm warnings, and keeps no copy, so the failing test is
+  again unnamed even though I kept porch's whole output this time.
+- The same suite on the same commit then passed twice: my own full run (8494 passed, 108
+  skipped, exit 0) and porch's second run. Load average was 23 to 27 around all three runs.
+- Second occurrence on this project (the first was in phase 1, on a change that touched no
+  production path). An intermittent failure under load, cause unknown. For the review's Flaky
+  Tests section. Not blocked.
+- To name it next time: porch cannot tell me, so the only way is to have a full-output run of my
+  own fail. Running the suite in a loop to catch it would add load to a machine that is already
+  loaded, so I have not.
