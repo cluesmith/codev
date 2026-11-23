@@ -34,7 +34,7 @@
         },
         "spec_has_required_sections": {
           "command": "grep -qF '## Problem Statement' codev/specs/${PROJECT_TITLE}.md && grep -qF '## Current State' codev/specs/${PROJECT_TITLE}.md && grep -qF '## Desired State' codev/specs/${PROJECT_TITLE}.md && grep -qF '## Success Criteria' codev/specs/${PROJECT_TITLE}.md",
-          "description": "Spec must follow the canonical template delivered by the specify prompt (protocols/spir/templates/spec.md). Required headings: ## Problem Statement, ## Current State, ## Desired State, ## Success Criteria"
+          "description": "Spec must follow the canonical template the specify prompt inlines. Required headings: ## Problem Statement, ## Current State, ## Desired State, ## Success Criteria"
         }
       },
       "max_iterations": 3,

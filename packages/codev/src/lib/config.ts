@@ -24,6 +24,8 @@ import {
   validatePricing,
   validateCodexPath,
   validateClaudeAuth,
+  validateClaudeMaxTurns,
+  validateClaudeMaxBudgetUsd,
   validateConsultationConfig,
   type CodexPricing,
   type ClaudeAuthMode,
@@ -104,6 +106,14 @@ export interface CodevConfig {
      * Honoured from every config layer; the lane's auth line names the file that set it.
      */
     claudeAuth?: ClaudeAuthMode;
+    /** The claude lane's turn cap per review (`--max-turns`, #1941). A positive integer; default 200. */
+    claudeMaxTurns?: number;
+    /**
+     * The claude lane's spend cap per review in USD (`--max-budget-usd`, #1941). A positive number;
+     * default 25. On a subscription login the dollars are notional, so a large review can reach it
+     * without any spend.
+     */
+    claudeMaxBudgetUsd?: number;
   };
   forge?: Record<string, string | null> & { provider?: string };
   templates?: {
@@ -395,6 +405,8 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
   validatePricing(merged.consult?.pricing);
   validateCodexPath(merged.consult?.codexPath);
   validateClaudeAuth(merged.consult?.claudeAuth);
+  validateClaudeMaxTurns(merged.consult?.claudeMaxTurns);
+  validateClaudeMaxBudgetUsd(merged.consult?.claudeMaxBudgetUsd);
   validateConsultationConfig(merged.porch?.consultation, workspaceRoot);
 
   return merged;

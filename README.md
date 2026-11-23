@@ -123,7 +123,7 @@ On Linux and WSL, also install `build-essential` and `python3` (node-pty compile
 **Windows:** two paths. **Native**: Node.js 22 or 24 (x64 or ARM64), [Git for Windows](https://git-scm.com/download/win) and `jq`, no admin rights or Developer Mode needed. **WSL 2**: follow the Linux instructions inside your distribution. See [DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md#windows) for setup and limitations.
 
 **AI CLIs** (install all three for multi-model consultation):
-- Claude Code: `npm install -g @anthropic-ai/claude-code`
+- Claude Code: `curl -fsSL https://claude.ai/install.sh | bash`, or `npm install -g @anthropic-ai/claude-code`. The `claude` consult lane runs this CLI and needs version 2.1.141 or newer.
 - Antigravity CLI (`agy`, the `gemini` consult lane): `curl -fsSL https://antigravity.google/cli/install.sh | bash`, then run `agy` once to sign in (OAuth — replaces the retired Gemini CLI)
 - Codex CLI: `npm install -g @openai/codex`
 

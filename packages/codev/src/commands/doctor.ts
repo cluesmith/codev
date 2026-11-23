@@ -41,6 +41,7 @@ import {
   readClaudeVersion,
   resolveClaudeAuthMode,
   resolveClaudeBin,
+  type ClaudeAuthMode,
   type ClaudeAuthStatus,
 } from '../lib/claude-cli.js';
 import { readDotenvFile } from '../lib/dotenv.js';
@@ -946,7 +947,8 @@ function envWithWorkspaceDotenv(workspaceRoot: string | null): { env: NodeJS.Pro
  * key the lane would withhold is reported as withheld, naming where it came from, and a login the
  * review would not see is not reported as working.
  *
- * Any problem is a warning carrying the lane's own message: `claude auth login` when logged out,
+ * Any problem is a warning carrying the lane's own message: the mode's remedy when logged out
+ * (`claude auth login`, or the key in `api-key` mode),
  * the output excerpt when `auth status` is unparseable, the missing key in `api-key` mode, and a
  * config error for an unknown `consult.claudeAuth`.
  */
@@ -957,18 +959,20 @@ function verifyClaudeViaCli(
 ): CheckResult {
   let status: ClaudeAuthStatus;
   let withheld: string[];
+  let mode: ClaudeAuthMode;
+  let modeSource: string | null;
   try {
-    const { mode, source } = resolveClaudeAuthMode(workspaceRoot ?? process.cwd());
+    ({ mode, source: modeSource } = resolveClaudeAuthMode(workspaceRoot ?? process.cwd()));
     const child = buildClaudeChildEnv(processEnv, mode);
     withheld = child.withheld;
-    assertApiKeyPresent(child.env, mode, source);
+    assertApiKeyPresent(child.env, mode, modeSource);
     status = readClaudeAuthStatus(bin, child.env);
   } catch (err) {
     return { status: 'warn', version: 'auth unknown', note: errorMessage(err) };
   }
 
   try {
-    assertLoggedIn(status, withheld);
+    assertLoggedIn(status, { mode, modeSource, withheld });
   } catch (err) {
     return { status: 'warn', version: 'not logged in', note: errorMessage(err) };
   }

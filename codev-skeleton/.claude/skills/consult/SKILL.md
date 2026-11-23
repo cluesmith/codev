@@ -28,7 +28,7 @@ The `-m` / `--model` flag is **always required** except for `consult stats`.
 
 `consult` loads `<workspace>/.env` and sets every key the shell does not already define, **credentials included**. A key exported in the shell wins over `.env`.
 
-- claude: the lane runs your installed `claude` on its own login, which for most people is the subscription. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are withheld from it, from the shell or `.env`, unless config sets `"consult": { "claudeAuth": "api-key" }` (CI and key-only machines). `CLAUDE_CODE_OAUTH_TOKEN` is a login, so it passes through and beats the keychain login. A missing `claude`, one older than 2.1.141, or a logged-out one fails the lane with the command to run.
+- claude: the lane runs your installed `claude` on its own login, which for most people is the subscription. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are withheld from it, from the shell or `.env`, unless config sets `"consult": { "claudeAuth": "api-key" }` (CI and key-only machines). That is a billing guarantee, not secrecy: the reviewer can still read the workspace `.env` with its Read tool. `CLAUDE_CODE_OAUTH_TOKEN` is a login, so it passes through and beats the keychain login. A missing `claude`, one older than 2.1.141, or a logged-out one fails the lane with the command to run.
 - codex: `CODEX_API_KEY` beats the ChatGPT login. `OPENAI_API_KEY` is ignored.
 
 The claude and codex lanes print what they authenticate with, e.g. `[CLAUDE] auth: claude.ai (max) — stored claude login; ignoring ANTHROPIC_API_KEY (from .env) — set consult.claudeAuth to "api-key" to bill the API instead`. If a review fails with a usage-limit or auth error while your own login works, check that line first.
