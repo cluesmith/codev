@@ -71,3 +71,17 @@
 - Windows run 45093824937 (e3546f923): Node 22 + targeted green; Node 24 failed tower-lifecycle.windows scenario 5
   (afx tower stop exit 0xC0000142, DLL init failed) and pir-1233-session-launch-loop (Git Bash launch failed) — both
   pass on Node 22, in the targeted job and in the earlier run: runner load flakes. Fresh run on 148092136: 45098207402.
+
+## 2026-11-23 — CI rounds on the teardown guard
+- Run 45099192117: (a) guard failed open when the job listing failed -> fixed: failed listing or no census never
+  terminates the job; (b) process-tree.windows scenario 6 (never failed in 102 logs): two cold one-shot helpers per
+  teardown -> one helper per teardown; no-job teardown skips terminate and re-check. Commit 4f4a5fca2.
+- Run 45100689541: (a) guarded teardown killed other job members one by one and killed an inner shellper the census
+  check missed -> guarded teardown now ends only the root's live tree; (b) tower-lifecycle Phase 4(b): launcher's job
+  vanished (jobOpened=False, never seen elsewhere) -> my tests' afterAll SIGKILLed every recorded pid incl. long-exited
+  ones; now helpers/tracked-pids.ts kills only a pid whose process predates the recording.
+- Audit (architect): every new/touched test file checked for unchecked pid kills. Only session-orphans.windows and
+  windows-job.windows had it (both fixed); the rest use fakes/mocks or identity-checked kills. Pre-existing, untouched:
+  process-tree.windows and tower-lifecycle.windows still use the unchecked leftovers pattern — named in the PR.
+- Stop rule (architect): if the next two CI runs on this fix are not both green, no more patches: send a design note
+  (guard vs. preventing the case: Tower refusing to run inside any session job, harness starts Towers the supported way).
