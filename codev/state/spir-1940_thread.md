@@ -425,3 +425,23 @@ no resolver, so it is unchanged; the delayed path is covered in `tower-routes.te
   13 targeted test files, 610 tests, passed; VS Code type-check clean. The full `packages/codev`
   suite was NOT run locally (architect's instruction); CI is the check.
 - So CI tests the merge of this branch with `main`, not `d106d3984` alone. Told the architect.
+
+## 2026-11-23 — phase 2 recorded with the local tests check skipped under main-32
+
+- GitHub on PR #1957: 8 of 8 green at `6804f57c7` (branch with `main` merged in). The architect
+  checked the run and gave the word.
+- The 17 files that had timed out, run alone in one vitest invocation at load ~10: 17 files, 586
+  passed, 1 skipped. So the ruling's conditions are met: the failures were unrelated and each
+  file passes alone.
+- On the architect's instruction: `porch.checks.tests.skip = true` added to this worktree's
+  gitignored `.codev/config.local.json` only, `porch done 1940` run once (build check ran and
+  passed), the key removed in the same command, file compared byte-for-byte with its original.
+  `.codev/config.json` (a symlink to the shared config) was not touched. Nothing under `.codev`
+  is staged or committed.
+- The draft PR body says the phase 2 local suite was skipped and on what grounds.
+- **For phase 3 (architect's correction): build, push, then TELL THE ARCHITECT BEFORE running
+  `porch done`.** The owner is deciding (main-38) whether GitHub's run may come first without a
+  local failure. Do not assume an order. No local full-suite runs; targeted tests only.
+- Flaky Tests section for the review: the three failures of porch's tests check (one in phase 1,
+  two in phase 2) are load timeouts in subprocess-spawning tests; the 17 files are named in the
+  entry above.
