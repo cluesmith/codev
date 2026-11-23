@@ -408,3 +408,20 @@ no resolver, so it is unchanged; the delayed path is covered in `tower-routes.te
   add to the load.
 - Per ruling main-32 I have stopped and told the architect. Not looping on `porch done`.
   Full output: scratchpad `full-suite-phase2-2.txt` (not committed).
+
+## 2026-11-23 — draft PR #1957 opened for CI; main merged in to let CI start
+
+- Architect's answer to the blocker (relaying ruling main-32): open a draft PR so GitHub runs the
+  full suite on a clean runner; report the result; skip or reconfigure nothing until the
+  architect has checked the run. No more local full-suite runs for now.
+- Draft PR #1957 opened and recorded (`porch done 1940 --pr 1957 --branch builder/spir-1940`).
+- GitHub started **no** checks: the branch conflicted with `main` (112 commits ahead of the
+  branch point), and a conflicting pull request has no merge commit to test. So I merged
+  `origin/main` in. One conflict, `packages/sdk/src/tower-client.ts`: `main` (the #1950 CLI
+  additions) added `connectionRefused` to the same two result shapes this branch added
+  `errorCode` to. Kept both. One of my SDK tests changed to expect `connectionRefused: true` on
+  a refused connection.
+- After the merge: types and SDK build; SDK suite 392 passed; `packages/codev` type-check clean;
+  13 targeted test files, 610 tests, passed; VS Code type-check clean. The full `packages/codev`
+  suite was NOT run locally (architect's instruction); CI is the check.
+- So CI tests the merge of this branch with `main`, not `d106d3984` alone. Told the architect.
