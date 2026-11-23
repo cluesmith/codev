@@ -57,8 +57,11 @@ describe('parseAddress: malformed addresses', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe(error);
-    // Every refusal says what is wrong and names the shape that was expected.
+    // Every refusal says what is wrong and names the shape that was expected: the afx://
+    // shape when the text was (or was meant to be) a remote address, the local one otherwise.
     expect(result.error.message.length).toBeGreaterThan(10);
+    const meantRemote = /^afx(:\/|\/\/)/.test(input.trim().toLowerCase());
+    expect(result.error.expected.startsWith(ADDRESS_SCHEME)).toBe(meantRemote);
     expect(result.error.expected).toContain('architect');
   });
 
@@ -70,6 +73,13 @@ describe('parseAddress: malformed addresses', () => {
     if (local.ok || remote.ok) return;
     expect(local.error.expected.startsWith('[<workspace>:]')).toBe(true);
     expect(remote.error.expected.startsWith(ADDRESS_SCHEME)).toBe(true);
+  });
+
+  it('tells a mistyped scheme what was meant', () => {
+    const result = parseAddress('afx:/devvm/codev:architect');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain('`afx://`');
   });
 
   it('words the Tower-written-as-a-workspace error the way the spec does', () => {

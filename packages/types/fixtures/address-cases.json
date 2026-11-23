@@ -350,6 +350,33 @@
       }
     },
     {
+      "note": "a workspace may be called afx: its front door",
+      "input": "afx:architect",
+      "address": {
+        "workspace": "afx",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "a workspace may be called afx: a builder in it",
+      "input": "afx:builder-spir-1",
+      "address": {
+        "workspace": "afx",
+        "kind": "id",
+        "name": "builder-spir-1"
+      }
+    },
+    {
+      "note": "owner handle with digits and hyphens after its first letter",
+      "input": "afx://s4m-k@mbp/codev:architect",
+      "address": {
+        "owner": "s4m-k",
+        "tower": "mbp",
+        "workspace": "codev",
+        "kind": "architect"
+      }
+    },
+    {
       "note": "local workspace with a space",
       "input": "my project:architect",
       "address": {
@@ -496,6 +523,21 @@
       "error": "TOO_MANY_COMPONENTS"
     },
     {
+      "note": "scheme with one slash missing",
+      "input": "afx:/devvm/codev:architect",
+      "error": "REMOTE_BAD_SCHEME"
+    },
+    {
+      "note": "scheme with the colon missing",
+      "input": "afx//devvm/codev:architect",
+      "error": "REMOTE_BAD_SCHEME"
+    },
+    {
+      "note": "scheme with one slash missing, a builder",
+      "input": "afx:/devvm/codev:builder-spir-1940",
+      "error": "REMOTE_BAD_SCHEME"
+    },
+    {
       "note": "remote with no path",
       "input": "afx://devvm",
       "error": "REMOTE_NO_WORKSPACE"
@@ -598,6 +640,16 @@
     {
       "note": "owner with a dot",
       "input": "afx://sam.k@mbp/codev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "owner handle starting with a digit",
+      "input": "afx://123@mbp/codev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "owner handle starting with a hyphen",
+      "input": "afx://-sam@mbp/codev:architect",
       "error": "INVALID_COMPONENT"
     },
     {

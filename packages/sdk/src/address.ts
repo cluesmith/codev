@@ -40,8 +40,17 @@ export const RESERVED_WORKSPACE_NAMES: readonly string[] = ['architect', 'arch',
 
 /** What a workspace name, an architect name or an id may be in a remote address. */
 const COMPONENT_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
-/** Owner handles and Tower names: letters, digits and hyphens only. */
+/** A Tower name: letters, digits and hyphens only. */
 const TOWER_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+/** An owner's account handle: as a Tower name, and it starts with a letter (spec Decision 2). */
+const OWNER_PATTERN = /^[a-z][a-z0-9-]*$/;
+/**
+ * The scheme with a slash or the colon missing (`afx:/tower/…`, `afx//tower/…`). Read as a
+ * local address these would name a workspace or an id containing a slash, which nothing
+ * can have, so they are refused with the shape that was meant. `afx:architect` is not
+ * caught: a workspace may be called `afx`.
+ */
+const MISTYPED_SCHEME = /^afx(:\/|\/\/)/;
 
 const LOCAL_SHAPE = '[<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>';
 const REMOTE_SHAPE =
@@ -154,10 +163,10 @@ function parseRemote(rest: string): AddressParseResult {
   if (tower === '') {
     return fail('EMPTY_COMPONENT', 'an afx:// address must name a Tower', REMOTE_SHAPE);
   }
-  if (owner !== undefined && !TOWER_PATTERN.test(owner)) {
+  if (owner !== undefined && !OWNER_PATTERN.test(owner)) {
     return fail(
       'INVALID_COMPONENT',
-      `owner \`${owner}\` may contain only lower-case letters, digits and hyphens`,
+      `owner \`${owner}\` may contain only lower-case letters, digits and hyphens, and must start with a letter`,
       REMOTE_SHAPE,
     );
   }
@@ -229,6 +238,13 @@ export function parseAddress(text: string): AddressParseResult {
   }
   if (input.startsWith(ADDRESS_SCHEME)) {
     return parseRemote(input.slice(ADDRESS_SCHEME.length));
+  }
+  if (MISTYPED_SCHEME.test(input)) {
+    return fail(
+      'REMOTE_BAD_SCHEME',
+      `an address that leaves this Tower starts with \`${ADDRESS_SCHEME}\` (a colon and two slashes)`,
+      REMOTE_SHAPE,
+    );
   }
   return parseAgentPath(input, LOCAL_SHAPE);
 }

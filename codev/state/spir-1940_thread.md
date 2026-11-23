@@ -279,3 +279,16 @@ workspace called `arch`. Gate still pending; the owner has not approved.
     users in phase 2, when the resolvers switch over.
 - Checks: build passes; unit suite 8358 passed, 108 skipped; SDK 354 passed; VS Code unit 1388
   passed, check-types and lint clean.
+
+## 2026-11-23 — phase 1 review iteration 1 applied
+
+- codex REQUEST_CHANGES (owner handles must start with a letter, per spec Decision 2: applied,
+  separate `OWNER_PATTERN`). claude APPROVE with six observations; applied the mistyped-scheme
+  one (`afx:/…` and `afx//…` now fail as `REMOTE_BAD_SCHEME` naming `afx://`; `afx:architect`
+  stays valid because a workspace may be called `afx`) and tightened one test assertion.
+- **Carry into phase 3:** `isAddressComponent` rejects upper case. `afx workspace name Codev` must
+  lower-case BEFORE validating, or the user is told off for capitals that the spec says are
+  simply folded.
+- **Carry into phase 4:** `formatAddress` throws on an address with no text form. Check the name
+  with `isAddressComponent` first; the throw must never surface as a 500 on `/api/send`.
+- The review lanes ran against an untouched tree this time; no "working tree changed" warning.
