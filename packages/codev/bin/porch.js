@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// First: per-process setup that must run before anything else (#1911).
+import '../dist/lib/process-bootstrap.js';
 
 /**
  * Porch CLI - Protocol Orchestrator

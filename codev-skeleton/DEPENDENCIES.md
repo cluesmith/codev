@@ -210,7 +210,7 @@ sudo apt install nodejs npm git build-essential python3
 
 ### Windows
 
-Codev supports two paths on Windows: native, with Git for Windows (a preview), and WSL 2.
+Codev supports two paths on Windows: native, with Git for Windows, and WSL 2.
 
 #### Native Windows (Git for Windows)
 
@@ -259,12 +259,16 @@ How it works and what to know:
 - **PowerShell.** Tower uses the built-in `powershell.exe` (CIM) to list and stop the processes
   each session starts. A machine policy that blocks it, or Constrained Language Mode, is not
   supported; `codev doctor` and Tower's log report it.
-- **Preview: only work in repositories you trust.** On Windows, a program started by bare name
-  (`git`, `gh`, `npm`, `node`) is looked up in the current folder before `PATH`, and Codev runs
-  many of those commands with a builder worktree or a cloned repository as the current folder.
-  A repository that contains, say, a `git.exe` would have that file run instead of Git. Codev's
-  own Windows tools (`powershell.exe`, `taskkill`, `cmd.exe`) already run by full system path;
-  the user tools follow (#1911), and native Windows support leaves preview with that fix.
+- **Programs never run from the current folder.** Windows normally looks a program started by
+  bare name (`git`, `npm`) up in the current folder before `PATH`, so a `git.exe` inside a
+  repository could run in place of Git. Codev turns that lookup off (it sets
+  `NoDefaultCurrentDirectoryInExePath`) in its own processes, the commands they run, and every
+  terminal Tower opens: architect and builder sessions and shell tabs alike. In a `cmd.exe`
+  shell, a program in the current folder then runs only when you name its folder (`.\name`);
+  PowerShell already works this way. One known effect: a .NET 10 NativeAOT `dotnet publish` fails
+  inside a Codev terminal, because Visual Studio's `vcvarsall.bat` does not support the setting
+  (fixed in .NET 11; [dotnet/runtime#129340](https://github.com/dotnet/runtime/issues/129340)).
+  Codev runs its own Windows tools by full system path.
 - **Known limitations.** Doctor cannot show Tower's environment on Windows (the process table does
   not expose it). Building this repository from source on ARM64 fails in one bundler; installing
   the published package on ARM64 works.
