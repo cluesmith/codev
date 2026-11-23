@@ -37,6 +37,8 @@ import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml, decideForwardAuthorization, ideForwardSetCookie } from '../utils/server-utils.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
 import { isWindows } from '../../lib/platform.js';
+import { endOrphans, listOrphans, parseEndTargets } from './session-orphans.js';
+import { createTowerOrphanDeps } from './session-orphans-wiring.js';
 import { workspaceKey } from '../utils/workspace-path.js';
 import { expandHomePath } from '../../lib/host-paths.js';
 import { isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
@@ -218,6 +220,8 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /health':          (_req, res, _url, ctx) => handleHealthCheck(res, ctx),
   'GET /api/shellpers/husks': (_req, res, _url, ctx) => handleHuskPreview(res, ctx),
   'POST /api/shellpers/husks/sweep': (_req, res, _url, ctx) => handleHuskSweep(res, ctx),
+  'GET /api/orphans':     (_req, res, url, ctx) => handleOrphansList(res, url, ctx),
+  'POST /api/orphans/end': (req, res, _url, ctx) => handleOrphansEnd(req, res, ctx),
   'GET /api/workspaces':  (_req, res) => handleListWorkspaces(res),
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
@@ -671,6 +675,79 @@ async function handleHuskSweep(res: http.ServerResponse, ctx: RouteContext): Pro
     res.end(JSON.stringify(result));
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
+}
+
+/** A workspace filter from a request's `workspace` value; every workspace when absent. */
+function workspaceFilter(workspace: unknown): (workspacePath: string) => boolean {
+  if (typeof workspace !== 'string' || workspace === '') return () => true;
+  const wanted = workspaceKey(workspace);
+  return (workspacePath) => workspaceKey(workspacePath) === wanted;
+}
+
+/**
+ * #1915: GET /api/orphans[?workspace=] — read-only. Per session, the processes
+ * in its job whose parent has exited (Windows only; `supported: false`
+ * elsewhere). Never command lines.
+ */
+async function handleOrphansList(res: http.ServerResponse, url: URL, ctx: RouteContext): Promise<void> {
+  res.setHeader('Content-Type', 'application/json');
+  if (!isWindows()) {
+    res.writeHead(200);
+    res.end(JSON.stringify({ supported: false, sessions: [] }));
+    return;
+  }
+  try {
+    const listing = await listOrphans(createTowerOrphanDeps(ctx.getShellperManager), workspaceFilter(url.searchParams.get('workspace')));
+    res.writeHead(200);
+    res.end(JSON.stringify(listing));
+  } catch (err) {
+    res.writeHead(500);
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
+}
+
+/**
+ * #1915: POST /api/orphans/end `{workspace?, targets: [{terminalId, pid, createdAt}]}`.
+ * Ends exactly the named processes that are still orphans of their session
+ * with the same creation time; the `afx orphans --apply` CLI lists and asks
+ * first. Never ends anything on its own.
+ */
+async function handleOrphansEnd(req: http.IncomingMessage, res: http.ServerResponse, ctx: RouteContext): Promise<void> {
+  res.setHeader('Content-Type', 'application/json');
+  if (!isWindows()) {
+    res.writeHead(200);
+    res.end(JSON.stringify({ supported: false, results: [] }));
+    return;
+  }
+  // Ending processes is local-only, like shutdown: never through the cloud
+  // tunnel (which forwards with the real key), never from another machine.
+  if (req.headers[TUNNEL_PROXY_HEADER] !== undefined || !isLocalMachineAddress(req.socket.remoteAddress)) {
+    res.writeHead(403);
+    res.end(JSON.stringify({ error: 'ending orphaned processes is accepted from this machine only' }));
+    return;
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = await parseJsonBody(req);
+  } catch {
+    res.writeHead(400);
+    res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+    return;
+  }
+  const targets = parseEndTargets(body);
+  if (targets === null) {
+    res.writeHead(400);
+    res.end(JSON.stringify({ error: 'targets must be [{terminalId, pid, createdAt}]' }));
+    return;
+  }
+  try {
+    const response = await endOrphans(createTowerOrphanDeps(ctx.getShellperManager), targets, workspaceFilter(body.workspace), (msg) => ctx.log('INFO', msg));
+    res.writeHead(200);
+    res.end(JSON.stringify(response));
+  } catch (err) {
+    res.writeHead(500);
     res.end(JSON.stringify({ error: (err as Error).message }));
   }
 }

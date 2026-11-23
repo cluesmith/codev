@@ -219,6 +219,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--json', 'Output machine-readable JSON (builders carry spawnedByArchitect)')
     .option('--architect <name>', 'Only show builders spawned by this architect')
     .option('--mine', 'Only show builders spawned by the current architect (CODEV_ARCHITECT_NAME)')
+    .option('--port <port>', 'Tower port (default: 4100)')
     .action(async (options) => {
       const { status } = await import('./commands/status.js');
       try {
@@ -226,7 +227,26 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           json: options.json,
           architect: options.architect,
           mine: options.mine,
+          port: options.port ? parseInt(options.port, 10) : undefined,
         });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  // #1915: processes left in a session's job after their parent exited (Windows).
+  program
+    .command('orphans [agent]')
+    .description("List (or end, with --apply) processes left running in a session after their parent exited (Windows)")
+    .option('--all', 'With --apply: every session in this workspace')
+    .option('--apply', 'End the listed processes after confirming (default: list only)')
+    .option('-y, --yes', 'Skip the --apply confirmation')
+    .option('--port <port>', 'Tower port (default: 4100)')
+    .action(async (agent: string | undefined, options: { all?: boolean; apply?: boolean; yes?: boolean; port?: string }) => {
+      const { orphans } = await import('./commands/orphans.js');
+      try {
+        await orphans({ agent, all: options.all, apply: options.apply, yes: options.yes, port: options.port ? parseInt(options.port, 10) : undefined });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);

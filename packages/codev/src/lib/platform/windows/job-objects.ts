@@ -372,6 +372,7 @@ export function encodeHelperCommand(script: string): string {
 
 /** The process a helper runs in. Production spawns powershell.exe; tests inject a fake. */
 export interface HelperProcess {
+  pid?: number;
   stdin: Writable;
   stdout: Readable;
   kill(): void;
@@ -585,6 +586,11 @@ export class WindowsJobHelper {
     this.maxRestarts = opts.maxRestarts ?? 3;
     this.restartWindowMs = opts.restartWindowMs ?? 5 * 60_000;
     this.now = opts.now ?? Date.now;
+  }
+
+  /** The helper process's pid while one runs (it is Codev's own, never listed as an orphan). */
+  get pid(): number | null {
+    return this.proc?.pid ?? null;
   }
 
   /** Why jobs are unavailable for good, or null while the helper can still serve. */

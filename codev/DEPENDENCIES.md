@@ -259,6 +259,22 @@ How it works and what to know:
 - **PowerShell.** Tower uses the built-in `powershell.exe` (CIM) to list and stop the processes
   each session starts. A machine policy that blocks it, or Constrained Language Mode, is not
   supported; `codev doctor` and Tower's log report it.
+- **Everything a session starts stays in it.** Each terminal runs in its own Windows Job Object,
+  and programs cannot leave it: the agent, every command it runs, and anything those start.
+  Closing or cleaning up a session ends all of them, as a process group does on macOS and Linux.
+  This includes a GUI program or a background server started from that terminal (for example
+  `code .` when VS Code is not already running, or a dev server started with `&`). Start such a
+  program from outside Codev (a Windows Terminal or PowerShell window) when it must outlive the
+  session. Tower itself is started outside the session by `afx tower start`, and refuses to
+  start inside one.
+- **Processes left behind by a timed-out command.** When an agent's command times out, its
+  tooling ends the shell it started but not that shell's children, which keep running in the
+  session, often a root-wide file search using a full CPU. `afx status` and `codev doctor` list
+  them per session: process name, age and CPU time, never the command line. `afx orphans` lists
+  them for this workspace; `afx orphans <agent> --apply` (or `--all --apply`) shows what it will
+  end, asks, then ends exactly those. Nothing is ever ended automatically. A background process
+  you started on purpose and whose shell has since exited is listed the same way, so check the
+  list before ending. Tower, its helpers and other sessions are never listed or ended.
 - **Programs never run from the current folder.** Windows normally looks a program started by
   bare name (`git`, `npm`) up in the current folder before `PATH`, so a `git.exe` inside a
   repository could run in place of Git. Codev turns that lookup off (it sets

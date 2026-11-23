@@ -204,7 +204,22 @@ afx cleanup -p 585 -f           # Force (unmerged branch)
 afx status                      # Show all builders and workspace status
 ```
 
-No flags needed. Shows Tower status, workspace, and all active builders.
+No flags needed. Shows Tower status, workspace, and all active builders. On Windows it also lists
+orphaned processes per session (see `afx orphans`), when there are any.
+
+## afx orphans (Windows)
+
+```bash
+afx orphans                     # List processes left running in this workspace's sessions after their parent exited
+afx orphans <agent>             # One session (builder id or architect name)
+afx orphans <agent> --apply     # List, confirm, then end them
+afx orphans --all --apply -y    # Every session in this workspace, no prompt
+```
+
+Typically the children of an agent command that timed out. Read-only without `--apply`;
+`--apply` needs `<agent>` or `--all`. Shows name, pid, age and CPU, never command lines. A
+deliberately started background process whose shell exited is listed too. Tower, its helpers
+and other sessions are never listed or ended. On macOS and Linux it says it is Windows only.
 
 ## afx whoami
 

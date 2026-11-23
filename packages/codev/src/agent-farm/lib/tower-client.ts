@@ -16,6 +16,7 @@ import {
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { assertTunnelMutationAllowedUnderTest } from '../../lib/test-env.js';
+import type { OrphanEndTarget, OrphansEndResponse, OrphansListing } from './session-orphans-api.js';
 
 export class TowerClient extends SdkTowerClient {
   private readonly targetsDefaultTowerPort: boolean;
@@ -46,6 +47,25 @@ export class TowerClient extends SdkTowerClient {
   ): Promise<{ ok: boolean; status: number; data?: T; error?: string }> {
     assertTunnelMutationAllowedUnderTest(path, this.targetsDefaultTowerPort);
     return super.request<T>(path, options);
+  }
+
+  /** #1915: orphaned processes per session (Windows), for one workspace or all. */
+  async listOrphans(workspacePath?: string): Promise<{ ok: true; listing: OrphansListing } | { ok: false; error: string }> {
+    let path = '/api/orphans';
+    if (workspacePath) path += `?workspace=${encodeURIComponent(workspacePath)}`;
+    const result = await this.request<OrphansListing>(path);
+    if (!result.ok || !result.data) return { ok: false, error: result.error ?? `Tower answered ${result.status}` };
+    return { ok: true, listing: result.data };
+  }
+
+  /** #1915: end exactly these orphaned processes (each re-checked by Tower). */
+  async endOrphans(workspacePath: string, targets: OrphanEndTarget[]): Promise<{ ok: true; response: OrphansEndResponse } | { ok: false; error: string }> {
+    const result = await this.request<OrphansEndResponse>('/api/orphans/end', {
+      method: 'POST',
+      body: JSON.stringify({ workspace: workspacePath, targets }),
+    });
+    if (!result.ok || !result.data) return { ok: false, error: result.error ?? `Tower answered ${result.status}` };
+    return { ok: true, response: result.data };
   }
 }
 

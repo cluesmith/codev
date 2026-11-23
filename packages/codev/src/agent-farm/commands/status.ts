@@ -15,6 +15,10 @@ import type { OverviewData } from '@cluesmith/codev-types';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../../lib/config.js';
+import { isWindows } from '../../lib/platform.js';
+import { printOrphanTable } from './orphans.js';
+import type { SessionOrphans } from '../lib/session-orphans-api.js';
+import type { TowerClient } from '../lib/tower-client.js';
 import chalk from 'chalk';
 
 /**
@@ -29,6 +33,57 @@ export interface StatusOptions {
   json?: boolean;
   architect?: string;
   mine?: boolean;
+  /** Tower port (default 4100). */
+  port?: number;
+}
+
+/**
+ * How long `afx status` waits for the orphan listing (#1915). Tower lists each
+ * session's job in ~0.1s, plus one process census when a job has an orphan
+ * candidate (about 0.5s warm, up to 4s cold), so the budget covers a cold
+ * census; past it the section says so and the command carries on.
+ */
+export const ORPHAN_LISTING_BUDGET_MS = 5000;
+
+type OrphanSection = { sessions: SessionOrphans[] } | { error: string };
+
+/** #1915: this workspace's orphaned processes (Windows, Tower up), or why not; null elsewhere. */
+export async function fetchOrphanSection(client: TowerClient, workspacePath: string, budgetMs: number = ORPHAN_LISTING_BUDGET_MS): Promise<OrphanSection | null> {
+  if (!isWindows()) return null;
+  let timer: NodeJS.Timeout | undefined;
+  const overBudget = new Promise<OrphanSection>((resolve) => {
+    timer = setTimeout(() => resolve({ error: `no answer within ${Math.round(budgetMs / 1000)}s` }), budgetMs);
+  });
+  try {
+    const listing = client.listOrphans(workspacePath).then((r): OrphanSection => (r.ok ? { sessions: r.listing.sessions } : { error: r.error }));
+    return await Promise.race([listing, overBudget]);
+  } catch (err) {
+    return { error: (err as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The Orphaned processes section: printed only when there is something to show. */
+export function renderOrphanSection(section: OrphanSection | null, now: number = Date.now()): void {
+  if (section === null) return;
+  if ('error' in section) {
+    logger.blank();
+    logger.info(chalk.gray(`Orphaned processes: listing unavailable (${section.error})`));
+    return;
+  }
+  const withOrphans = section.sessions.filter((s) => s.orphans.length > 0);
+  const unlisted = section.sessions.filter((s) => !s.job || s.error !== undefined);
+  if (withOrphans.length === 0 && unlisted.length === 0) return;
+  logger.blank();
+  logger.info('Orphaned processes (parent exited; a timed-out command\'s leftovers or a deliberate background process):');
+  if (withOrphans.length > 0) {
+    printOrphanTable(withOrphans, now);
+    logger.info(chalk.gray('  End them with: afx orphans <agent> --apply'));
+  }
+  for (const s of unlisted) {
+    logger.info(chalk.yellow(`  ${s.agent}: ${s.error ?? 'no job, so its orphans cannot be listed'}`));
+  }
 }
 
 /** Placeholder shown for builders whose spawning architect is unknown (legacy rows). */
@@ -171,6 +226,8 @@ function renderBuilders(
  */
 function emitStatusJson(params: {
   towerRunning: boolean;
+  /** #1915: null off Windows or with Tower down. */
+  orphans: OrphanSection | null;
   // `name` is explicitly nullable (not optional): an unregistered workspace
   // must still emit `"name": null` so the machine-readable contract is stable
   // for tooling — `JSON.stringify` would otherwise drop an `undefined` key.
@@ -186,11 +243,12 @@ function emitStatusJson(params: {
   mailbox: { heldCount: number; escalated: boolean };
   heldByRoleId: Map<string, number>;
 }): void {
-  const { towerRunning, workspace, architects, builders, ownerFilter, fleet, mailbox, heldByRoleId } = params;
+  const { towerRunning, orphans, workspace, architects, builders, ownerFilter, fleet, mailbox, heldByRoleId } = params;
   const visible = sortByOwner(filterByOwner(builders, ownerFilter));
 
   const payload = {
     tower: { running: towerRunning },
+    orphans,
     workspace,
     fleet,
     mailbox,
@@ -224,7 +282,7 @@ export async function status(options: StatusOptions = {}): Promise<void> {
   const ownerFilter = resolveOwnerFilter(options);
 
   // Try tower API first (Phase 3 - Spec 0090)
-  const client = getTowerClient();
+  const client = getTowerClient(options.port);
   const towerRunning = await client.isRunning();
 
   // Builder ownership (`spawnedByArchitect`) lives in state.db, so load it up
@@ -268,8 +326,10 @@ export async function status(options: StatusOptions = {}): Promise<void> {
         };
       }
     }
+    const orphanSection = towerRunning ? await fetchOrphanSection(client, workspacePath) : null;
     emitStatusJson({
       towerRunning,
+      orphans: orphanSection,
       workspace: { path: workspacePath, name: workspaceName ?? null, active: workspaceActive },
       architects,
       builders,
@@ -366,6 +426,7 @@ export async function status(options: StatusOptions = {}): Promise<void> {
       renderBuilders(builders, ownerFilter, mailboxSummary.heldCount > 0 ? heldByRoleId : undefined);
       logger.blank();
       renderMailboxSummary(mailboxSummary.heldCount, mailboxSummary.escalated);
+      renderOrphanSection(await fetchOrphanSection(client, workspacePath));
 
       return;
     }
