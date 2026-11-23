@@ -712,6 +712,16 @@ At the start of this phase, check whether PR #1954 has merged.
   `utils/worktree-write-guard.ts`, built from the constants spawn already writes so the two
   cannot drift. Also exports `isBuilderScaffold(path)`.
 - `packages/codev/src/agent-farm/lib/keep-list.ts`: per the coordination above.
+- `packages/codev/src/agent-farm/commands/cleanup.ts`: **an owner-approved addition to the
+  spec's "cleanup is unchanged"** (decision main-36, 2026-11-23, "approve, fix cleanup").
+  - Do this after merging `origin/main` with PR #1954 in it.
+  - `hasUncommittedChanges` replaces its `^\?\? \.builder-` regex with `isBuilderScaffold()`,
+    so one exported list serves cleanup and `check worktree`.
+  - The notice stays informational. Nothing else about cleanup changes.
+  - Evidence: on 2026-11-23 cleanup printed "Worktree has uncommitted changes: 1 uncommitted
+    file(s)" for two bugfix builders that had nothing uncommitted.
+  - Test: a worktree holding only spawn's scaffold files, write-guard files included, is
+    reported as not dirty.
 - `packages/codev/src/commands/check/worktree.ts`
   - **Resolving the target.** A builder id resolves to `<mainRoot>/.builders/<id>`; a path is
     resolved to its real path. Either must appear in `git worktree list --porcelain`, compared
@@ -760,6 +770,7 @@ At the start of this phase, check whether PR #1954 has merged.
 - [ ] `codev check worktree <builder-id|path> [--json]`, with the checks `uncommitted`,
       `commits`, `remote`, `pr` and `ignored`, and the three verdict words
 - [ ] Pure scaffold and keep-list modules (per the coordination rule)
+- [ ] `afx cleanup`'s `hasUncommittedChanges` uses `isBuilderScaffold()` (main-36)
 - [ ] Tests for this phase
 
 #### Acceptance Criteria
@@ -773,6 +784,9 @@ At the start of this phase, check whether PR #1954 has merged.
       inspected worktree. That covers refs, `HEAD`, both index files, `FETCH_HEAD` and
       `status`.
 - [ ] `cleanup.keepIgnored: []` reports zero keep files.
+- [ ] A worktree holding only spawn's scaffold files, `.builder-*` and both write-guard files,
+      is not dirty to `afx cleanup`. Cleanup's other behavior is unchanged, and its existing
+      tests pass.
 - [ ] Keep-list agreement test (see coordination), or a note in the thread and the PR body
       saying which PR will add it.
 - [ ] `pr-search` disabled (as on gitea) → `pr` is `not run`, and the data verdict still comes
@@ -897,7 +911,7 @@ project's PR to exist:
 | The `commit-checks` call volume threatens Scenario 29's 30 s on a long porch tail | Low | Medium | Two GETs per commit, no workflow-name join. At most 10 lookups, and normally one to three, because the walk stops at the first complete result. |
 | gitlab and gitea `pr-view` mappings are unverified (no glab or Gitea server here) | High | Medium | Mapped from the documented API fields and marked UNVERIFIED like the sibling scripts. Stub-CLI tests pin the mapping. `commit-checks` and `workflow-runs` are explicitly disabled there, so nothing is guessed. |
 | PR #1954 lands `cleanup.keepIgnored` in a different shape, or late | Medium | Medium | The Phase 6 coordination rule: extract its pure definitions if merged, otherwise create the shared pure module and notify. The agreement test is owned by whichever PR lands second. |
-| `afx cleanup`'s scaffold regex (`^\?\? \.builder-`) is narrower than the exported scaffold set, which also has the write-guard files | Medium | Low | The spec says cleanup's behavior does not change, and #1954 is editing `cleanup.ts`, so cleanup is left alone here. The plan-approval message flags the discrepancy for the architect to decide: switch cleanup to `isBuilderScaffold()` in this PR, or not. |
+| `afx cleanup`'s scaffold regex (`^\?\? \.builder-`) is narrower than the exported scaffold set, which also has the write-guard files | Medium | Low | Owner ruling main-36: cleanup switches to `isBuilderScaffold()` in Phase 6, after #1954 is merged in. The change is scoped to `hasUncommittedChanges`. |
 | Exit 1 becomes routine noise, e.g. `mergeable: UNKNOWN` just after a push, or CI still running at the `pr` gate | Medium | Medium | The end-of-run `pr-view` re-read replaces `UNKNOWN`. The verdict line says `checks (running)` rather than a bare `checks`. `check.skip` lets a project make exit 0 meaningful. |
 | Merge conflicts with sibling PRs in `forge.ts`, `config.ts` or the skill hashes | Medium | Low | Merge `origin/main` before Phases 6 and 7. Edits to shared files stay small and additive. |
 

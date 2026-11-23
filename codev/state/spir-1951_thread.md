@@ -51,3 +51,11 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
 - Empty include pathspec list would become a bare `--` (= every file) — short-circuit.
 - Phase 3 split into merge-mechanics / forge-fed checks → 7 phases. Porch-only walk algorithm pinned.
 - plan-approval gate reached; waiting for the owner.
+
+## 2026-11-23 — plan approved (main-36)
+- Owner approved plan-approval on d213afdc3 ("approve, fix cleanup"); I ran porch approve.
+- Owner-approved addition to the spec's "cleanup is unchanged": in Phase 6, after merging origin/main
+  with PR #1954, `hasUncommittedChanges` in cleanup.ts uses the shared `isBuilderScaffold()` list.
+  Scoped to that function; notice stays informational. Evidence: 2026-11-23 cleanup reported
+  "1 uncommitted file(s)" for two bugfix builders with nothing uncommitted. Record in the review.
+- Standing ruling main-32 applies to all seven phases; pr gate is the owner's.
