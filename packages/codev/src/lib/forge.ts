@@ -34,6 +34,8 @@ function resolveScriptPath(provider: string, concept: string): string {
 
 /** Default maxBuffer for forge commands (10MB). Prevents truncation for large diffs. */
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
+/** Default time limit for one concept command (ms). */
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 // =============================================================================
 // Types
@@ -54,6 +56,8 @@ export interface ForgeCommandOptions {
   raw?: boolean;
   /** Maximum stdout buffer size in bytes. Defaults to 10MB. */
   maxBuffer?: number;
+  /** Kill the command after this many milliseconds. Defaults to 30 000. */
+  timeoutMs?: number;
 }
 
 // =============================================================================
@@ -64,7 +68,7 @@ const KNOWN_CONCEPTS = [
   'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
   'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
   'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-  'auth-status', 'repo-archive',
+  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs',
 ] as const;
 
 // =============================================================================
@@ -124,8 +128,12 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
   if (_providerPresets) return _providerPresets;
   _providerPresets = {
     github: getDefaultCommands(),
-    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps']),
-    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff']),
+    // commit-checks / workflow-runs (Spec 1951) are disabled, not omitted: an omitted
+    // concept falls through to the github default and would run `gh` on a GitLab or
+    // Gitea workspace. Neither could be verified against a real glab or Gitea server, so
+    // `codev check` reports them as "not run" by name until a project supplies an override.
+    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps', 'commit-checks', 'workflow-runs']),
+    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff', 'commit-checks', 'workflow-runs']),
     // Linear is a hybrid forge (spec 719): it owns *issues*, while every PR
     // concept — pr-create included — deliberately falls through to the github
     // default. Disabling pr-create here would leave Linear the one provider
@@ -373,6 +381,8 @@ export interface ForgeCommandError {
   stderr: string;
   /** Process exit code; null when the command was disabled, timed out, or config failed to load. */
   exitCode: number | null;
+  /** True when the command was killed for running past its time limit. */
+  timedOut: boolean;
 }
 
 export interface ForgeCommandResult {
@@ -396,7 +406,7 @@ export async function executeForgeCommandDetailed(
     const forgeConfig = resolveForgeConfig(options);
     const command = getForgeCommand(concept, forgeConfig);
     if (command === null) {
-      return { data: null, error: { message: `concept '${concept}' is disabled or unknown`, stderr: '', exitCode: null } };
+      return { data: null, error: { message: `concept '${concept}' is disabled or unknown`, stderr: '', exitCode: null, timedOut: false } };
     }
 
     const execEnv = { ...process.env, ...buildForgeEnv(forgeConfig), ...env };
@@ -404,7 +414,7 @@ export async function executeForgeCommandDetailed(
     const stdout = await commandLaunch().execShellString(command, {
       cwd: options?.cwd,
       env: execEnv,
-      timeout: 30_000,
+      timeout: options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxBuffer,
       workspaceRoot: options?.workspaceRoot ?? options?.cwd,
       msysPathEnvKeys: PATH_INPUTS,
@@ -412,13 +422,15 @@ export async function executeForgeCommandDetailed(
     return { data: parseOutput(stdout, options?.raw), error: null };
   } catch (err: unknown) {
     logDebug(concept, err);
-    const e = err as { message?: string; stderr?: string; code?: unknown };
+    const e = err as { message?: string; stderr?: string; code?: unknown; killed?: boolean };
     return {
       data: null,
       error: {
         message: e?.message ?? String(err),
         stderr: typeof e?.stderr === 'string' ? e.stderr : '',
         exitCode: typeof e?.code === 'number' ? e.code : null,
+        // Node kills the child on timeout and on maxBuffer overflow; only the former is a timeout.
+        timedOut: e?.killed === true && e?.code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
       },
     };
   }
@@ -483,7 +495,7 @@ export function executeForgeCommandSync(
     const stdout = commandLaunch().execShellStringSync(command, {
       cwd: options?.cwd,
       env: execEnv,
-      timeout: 30_000,
+      timeout: DEFAULT_TIMEOUT_MS,
       maxBuffer,
       workspaceRoot: options?.workspaceRoot ?? options?.cwd,
       msysPathEnvKeys: PATH_INPUTS,

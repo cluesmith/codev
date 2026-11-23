@@ -189,7 +189,76 @@ export interface PrViewResult {
   headRefName: string;
   additions: number;
   deletions: number;
+  /*
+   * The fields below are optional and additive (Spec 1951, consumed by `codev check`).
+   * A preset that cannot supply one omits it; the consumer then reports the dependent
+   * check as "not run", never as passing.
+   */
+  /** Full SHA of the PR's head commit as the forge sees it: GitHub `headRefOid`, GitLab `sha`, Gitea `head.sha`. */
+  headRefOid?: string;
+  /** Whether the PR is a draft. */
+  isDraft?: boolean;
+  /** The forge's own mergeability, normalized to GitHub's three words. */
+  mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
+  /**
+   * The forge's merge-state word in GitHub's vocabulary, where `CLEAN` is the clean state.
+   * Other presets map their clean state to `CLEAN` and pass any other state through
+   * upper-cased.
+   */
+  mergeStateStatus?: string;
+  /** The commit the merge produced (merge, squash or rebase tip); null while unmerged. */
+  mergeCommit?: { oid: string } | null;
+  /** ISO 8601 merge time; null while unmerged. */
+  mergedAt?: string | null;
+  /**
+   * The review state in GitHub's words (`APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`),
+   * which explains a `BLOCKED` merge state. Explicitly `null` from presets whose forge has
+   * no equivalent (gitlab, gitea).
+   */
+  reviewDecision?: string | null;
 }
+
+// =============================================================================
+// Commit and workflow concepts (Spec 1951)
+// =============================================================================
+
+/** A check result's state, normalized across forges. Skipped and neutral count as passed. */
+export type CommitCheckState = 'pass' | 'fail' | 'pending' | 'skipped' | 'neutral';
+
+/**
+ * Single item in `commit-checks` concept output: one check run or commit status
+ * reported for the commit named by `CODEV_COMMIT_SHA`.
+ */
+export interface CommitCheckItem {
+  name: string;
+  state: CommitCheckState;
+  /** Browser URL of the run's details, when the forge supplies one. */
+  url?: string;
+  /** Workflow the run belongs to, when the forge supplies it cheaply. */
+  workflow?: string;
+}
+
+/** Output of the `commit-checks` concept command. Empty when nothing reported on the commit. */
+export type CommitChecksResult = CommitCheckItem[];
+
+/**
+ * Single item in `workflow-runs` concept output: one run of the workflow named by
+ * `CODEV_WORKFLOW` on the branch named by `CODEV_BRANCH`.
+ */
+export interface WorkflowRunItem {
+  /** Full SHA the run was for. */
+  headSha: string;
+  /** `completed` once finished; anything else means still running or queued. */
+  status: string;
+  /** For a completed run, `success` means green. Empty or null while running. */
+  conclusion: string | null;
+  url: string;
+  /** ISO 8601. */
+  createdAt: string;
+}
+
+/** Output of the `workflow-runs` concept command, newest first. */
+export type WorkflowRunsResult = WorkflowRunItem[];
 
 /**
  * Output of the `pr-create` concept command.

@@ -324,7 +324,7 @@ describe('executeForgeCommandSync', () => {
 // =============================================================================
 
 describe('getKnownConcepts', () => {
-  it('returns all 18 known concept names', () => {
+  it('returns all 20 known concept names', () => {
     const concepts = getKnownConcepts();
     expect(concepts).toContain('issue-view');
     expect(concepts).toContain('pr-list');
@@ -344,7 +344,9 @@ describe('getKnownConcepts', () => {
     expect(concepts).toContain('pr-diff');
     expect(concepts).toContain('auth-status');
     expect(concepts).toContain('repo-archive');
-    expect(concepts.length).toBe(18);
+    expect(concepts).toContain('commit-checks');
+    expect(concepts).toContain('workflow-runs');
+    expect(concepts.length).toBe(20);
   });
 });
 
@@ -674,9 +676,9 @@ describe('graceful degradation when command not found', () => {
 // =============================================================================
 
 describe('resolveAllConcepts', () => {
-  it('returns all 18 concepts with default source when no config', () => {
+  it('returns all 20 concepts with default source when no config', () => {
     const resolutions = resolveAllConcepts();
-    expect(resolutions).toHaveLength(18);
+    expect(resolutions).toHaveLength(20);
     expect(resolutions.every(r => r.source === 'default')).toBe(true);
     expect(resolutions.every(r => r.executable !== null)).toBe(true);
   });
@@ -795,7 +797,7 @@ describe('executeForgeCommandDetailed (#1645)', () => {
 
   it('reports a disabled concept as an error without executing', async () => {
     const result = await executeForgeCommandDetailed('issue-view', {}, { forgeConfig: { 'issue-view': null } });
-    expect(result).toEqual({ data: null, error: { message: expect.stringContaining('disabled'), stderr: '', exitCode: null } });
+    expect(result).toEqual({ data: null, error: { message: expect.stringContaining('disabled'), stderr: '', exitCode: null, timedOut: false } });
   });
 
   it('reports a malformed .codev/config.json as an error instead of rejecting', async () => {
