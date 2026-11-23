@@ -12,10 +12,14 @@ import { parseWorktreeList, resolveRoots } from '../roots.js';
 import { createRunner } from '../runner.js';
 import { loadCheckSettings } from '../settings.js';
 import { createFixture, type Fixture } from './helpers/git-fixture.js';
+import { useFakeHome } from './helpers/fake-home.js';
 
 let fx: Fixture;
 
 const rootsFrom = (cwd: string) => resolveRoots(createRunner({ cwd, workspaceRoot: cwd, env: fx.env }));
+
+/** Never read the developer's own ~/.codev/config.json. */
+useFakeHome();
 
 beforeEach(() => {
   fx = createFixture();

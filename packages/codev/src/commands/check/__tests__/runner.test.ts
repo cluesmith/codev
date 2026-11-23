@@ -10,6 +10,7 @@ import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunnerRefusal } from '../allow-list.js';
 import { createRunner, formatDuration, type SpawnFn } from '../runner.js';
+import { useFakeHome } from './helpers/fake-home.js';
 
 const isWindows = process.platform === 'win32';
 
@@ -32,6 +33,9 @@ function writeForgeConfig(forge: Record<string, unknown>): void {
   fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
   fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), JSON.stringify({ forge }));
 }
+
+/** Never read the developer's own ~/.codev/config.json. */
+useFakeHome();
 
 beforeEach(() => {
   workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'codev-check-runner-')));

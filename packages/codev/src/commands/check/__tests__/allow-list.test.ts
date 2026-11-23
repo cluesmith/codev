@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { assertConceptAllowed, assertGitArgvAllowed, RunnerRefusal } from '../allow-list.js';
-import { allowedForms, argvOf as argv, FETCH_GLOBALS, SHA, SHA2, WRITE_FORMS } from './helpers/git-forms.js';
+import { allowedForms, argvOf as argv, FETCH_GLOBALS, OFF_GRAMMAR_FORMS, SHA, SHA2, WRITE_FORMS } from './helpers/git-forms.js';
 
 const ABS = process.platform === 'win32' ? 'C:\\repo' : '/repo';
 const ALLOWED = allowedForms(ABS);
@@ -12,6 +12,7 @@ const ALLOWED = allowedForms(ABS);
 /** Refusals beyond the shared write forms: grammar edges. */
 const REFUSED: Array<[string, string[]]> = [
   ...WRITE_FORMS,
+  ...OFF_GRAMMAR_FORMS,
   ['fetch without --no-recurse-submodules', [...FETCH_GLOBALS, 'fetch', '--no-write-fetch-head', '--refmap=', '--no-tags', 'origin', SHA]],
   ['config --get-regexp', ['config', '--get-regexp', 'remote']],
   ['-c on a subcommand other than fetch', ['-c', 'gc.auto=0', 'log', '--no-ext-diff', '--no-textconv', SHA]],
@@ -32,6 +33,7 @@ const REFUSED: Array<[string, string[]]> = [
   ['diff without --no-textconv', ['diff', '--no-ext-diff', SHA, SHA2]],
   ['log without --no-ext-diff --no-textconv', ['log', SHA]],
   ['show without --no-ext-diff --no-textconv', ['show', '-s', SHA]],
+  ['diff-tree without --no-ext-diff --no-textconv', ['diff-tree', '--name-only', '-r', SHA]],
 ];
 
 const BAD_FLAGS = ['--output=x', '--ext-diff', '--textconv', '--filters', '--upload-pack=x', '--exec=x', '--frobnicate'];

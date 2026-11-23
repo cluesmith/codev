@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CheckCommandError } from '../report.js';
 import { DEFAULT_NOT_FOR_READING, DEFAULT_WATCH, loadCheckSettings, parseCheckSettings } from '../settings.js';
+import { useFakeHome } from './helpers/fake-home.js';
 
 let root: string;
 let projectFile: string;
@@ -16,6 +17,9 @@ let localFile: string;
 function writeProject(check: unknown): void {
   fs.writeFileSync(projectFile, JSON.stringify({ check }));
 }
+
+/** Never read the developer's own ~/.codev/config.json. */
+const home = useFakeHome();
 
 beforeEach(() => {
   root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'codev-check-settings-')));
@@ -66,6 +70,16 @@ describe('Spec 1951 — check settings', () => {
     expect(settings.flag).toEqual(['CLAUDE.md']);
     expect(settings.deploy).toEqual({ branch: 'production', workflow: 'deploy.yml' });
     expect([...settings.skip]).toEqual(['size', 'overlap']);
+  });
+
+  it('reads ~/.codev/config.json as a layer, and names it on error', () => {
+    const homeFile = path.join(home.dir(), '.codev', 'config.json');
+    fs.mkdirSync(path.dirname(homeFile), { recursive: true });
+    fs.writeFileSync(homeFile, JSON.stringify({ check: { attribution: ['co-authored-by'] } }));
+    fs.writeFileSync(projectFile, '{}');
+    expect(loadCheckSettings(root).attribution.map((p) => p.source)).toEqual(['co-authored-by']);
+    fs.writeFileSync(homeFile, JSON.stringify({ check: { skip: ['colour'] } }));
+    expect(loadError().message).toBe(`check.skip names an unknown check id "colour" (in ${homeFile})`);
   });
 
   it('replaces the notForReading default rather than adding to it', () => {

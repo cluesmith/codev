@@ -32,7 +32,7 @@ export function allowedForms(dir: string): GitForm[] {
     form([], 'show', '--no-ext-diff', '--no-textconv', '-s', '--format=%B', SHA),
     form([], 'diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', '--no-renames', SHA, SHA2, '--', ':(top)', ':(top,exclude,glob)**/x'),
     form([], 'diff', '--no-ext-diff', '--no-textconv', '--numstat', '-z', SHA, SHA2),
-    form([], 'diff-tree', '--no-commit-id', '--name-only', '-r', '-z', SHA),
+    form([], 'diff-tree', '--no-ext-diff', '--no-textconv', '--no-commit-id', '--name-only', '-r', '-z', SHA),
     form([], 'cat-file', '-e', `${SHA}^{commit}`),
     form([], 'cat-file', '-t', SHA),
     form([], 'for-each-ref', '--format=%(refname)', 'refs/heads/main'),
@@ -75,4 +75,21 @@ export const WRITE_FORMS: Array<[string, string[]]> = [
   ['-c core.hooksPath=x log', ['-c', 'core.hooksPath=x', 'log', '--no-ext-diff', '--no-textconv', SHA]],
   ['log --output=x', ['log', '--no-ext-diff', '--no-textconv', '--output=x', SHA]],
   ['ls-remote --upload-pack=x', ['ls-remote', '--upload-pack=x', 'origin']],
+];
+
+/**
+ * Read-only in themselves, but outside the grammar: a diff-family command without its
+ * guards, or a flag no command uses. Both layers must refuse them, so a regression that
+ * drops a guard is caught by either.
+ */
+export const OFF_GRAMMAR_FORMS: Array<[string, string[]]> = [
+  ['log without its guards', ['log', SHA]],
+  ['diff without its guards', ['diff', SHA, SHA2]],
+  ['show without its guards', ['show', '-s', SHA]],
+  ['diff-tree without its guards', ['diff-tree', '--name-only', '-r', SHA]],
+  ['rev-list --all', ['rev-list', '--all']],
+  ['cat-file --batch', ['cat-file', '--batch']],
+  ['ls-files --stage', ['ls-files', '--stage']],
+  ['rev-parse --git-path', ['rev-parse', '--git-path', 'x']],
+  ['version --build-options', ['version', '--build-options']],
 ];

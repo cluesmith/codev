@@ -3,8 +3,8 @@
  *
  * A CLOSED grammar: every token of a git argv must be explicitly permitted, so an unknown
  * flag is refused rather than passed through. It covers the git subcommands the commands
- * run, and only the flags they use. Diff-family commands must carry
- * `--no-ext-diff --no-textconv`, so no repository-configured diff program runs; flags that
+ * run, and only the flags they use. Diff-family commands (`diff`, `diff-tree`, `log`,
+ * `show`) must carry `--no-ext-diff --no-textconv`, so no repository-configured diff program runs; flags that
  * write files (`--output`) or run programs (`--upload-pack`, `--exec`, `--textconv`,
  * `--filters`) are never permitted. `fetch` is allowed only in its ref-neutral form, which
  * adds objects and moves no ref (no tags, no submodules) and writes no FETCH_HEAD.
@@ -122,7 +122,8 @@ const RULES: Record<string, SubcommandRule> = {
     positionals: exactly(2, isRevision, 'revision'),
   },
   'diff-tree': {
-    flags: ['--no-commit-id', '--name-only', '-r', '-z', '--no-renames'],
+    flags: [...NO_EXT_DIFF, '--no-commit-id', '--name-only', '-r', '-z', '--no-renames'],
+    required: NO_EXT_DIFF,
     positionals: between(1, 2, isRevision, 'revision'),
   },
   'cat-file': {

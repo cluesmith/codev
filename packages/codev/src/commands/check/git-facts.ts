@@ -9,7 +9,7 @@
 
 import { CheckCommandError } from './report.js';
 import type { GitResult, Runner } from './runner.js';
-import { isFullSha } from './validate.js';
+import { isFullSha, isRefName } from './validate.js';
 
 export interface GitVersion {
   major: number;
@@ -74,7 +74,9 @@ export async function remoteDefaultBranch(runner: Runner): Promise<Lookup<string
   const result = await runner.git(['ls-remote', '--symref', 'origin', 'HEAD']);
   if (result.exitCode !== 0) return { ok: false, reason: failureReason('ls-remote', result, runner.timeoutLabel) };
   const match = /^ref: refs\/heads\/(\S+)\s+HEAD$/m.exec(result.stdout);
-  return { ok: true, value: match ? match[1] : null };
+  if (!match) return { ok: true, value: null };
+  if (!isRefName(match[1])) return { ok: false, reason: `origin's HEAD names an invalid branch ${JSON.stringify(match[1])}` };
+  return { ok: true, value: match[1] };
 }
 
 export async function hasCommit(runner: Runner, sha: string): Promise<boolean> {

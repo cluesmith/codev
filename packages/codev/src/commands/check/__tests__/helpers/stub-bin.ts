@@ -4,8 +4,8 @@
  *
  * Both record every invocation and check it against a read-only list THEY keep, separate
  * from the runner's allow-list, so a runner bug cannot hide behind a matching stub. A call
- * off the list is written to `violations` and fails with exit 99; `assertNoViolations()`
- * turns it into a test failure.
+ * off the list is written to `violations` and fails with exit 99; tests assert that
+ * `violations()` is empty.
  *
  *   - `git` then execs the real git, whose absolute path was resolved before PATH changed.
  *   - `gh` answers from fixtures: `answer(args, stdout, { exit, sleepSeconds })` matches the
@@ -20,12 +20,34 @@ import * as path from 'node:path';
 import { REAL_GIT } from './git-fixture.js';
 
 const GIT_STUB = `#!/bin/sh
-# Stub git (Spec 1951 tests): record, check a read-only grammar of its own, exec the real git.
+# Stub git (Spec 1951 tests): record, check a CLOSED read-only grammar of its own, exec the
+# real git. Globbing is off so the flag lists below are never expanded against files.
+set -f
 printf '%s\\n' "$*" >> "$STUB_DIR/git-calls"
 ALL="$*"
 violation() { printf 'git %s :: %s\\n' "$ALL" "$1" >> "$STUB_DIR/violations"; echo "stub git refused: $1" >&2; exit 99; }
-has() { want="$1"; shift; for a in "$@"; do [ "$a" = "$want" ] && return 0; done; return 1; }
+has() { want="$1"; shift; for a in "$@"; do [ "$a" = "--" ] && return 1; [ "$a" = "$want" ] && return 0; done; return 1; }
 is_sha40() { case "$1" in ''|*[!0-9a-f]*) return 1 ;; esac; [ "\${#1}" -eq 40 ]; }
+# flags_only "<allowed>" args…: every option before "--" must be on the allowed list.
+# An entry ending in "=*" is a prefix that needs a value; any other entry is exact.
+flags_only() {
+  allowed="$1"; shift
+  for a in "$@"; do
+    [ "$a" = "--" ] && return 0
+    case "$a" in
+      -*)
+        ok=0
+        for p in $allowed; do
+          case "$p" in
+            *'=*') case "$a" in "\${p%\\*}"?*) ok=1 ;; esac ;;
+            *) [ "$a" = "$p" ] && ok=1 ;;
+          esac
+        done
+        [ "$ok" = 1 ] || violation "$sub $a" ;;
+    esac
+  done
+}
+no_ext_diff() { { has --no-ext-diff "$@" && has --no-textconv "$@"; } || violation "$sub without --no-ext-diff --no-textconv"; }
 check() {
   gcauto=0; maint=0; locks=0
   while [ $# -gt 0 ]; do
@@ -38,35 +60,43 @@ check() {
     esac
   done
   sub="$1"; [ $# -gt 0 ] && shift
-  for a in "$@"; do
-    case "$a" in
-      --) break ;;
-      --output*|--ext-diff|--textconv|--filters|--upload-pack*|--exec*) violation "flag $a" ;;
-    esac
-  done
   if [ "$sub" != fetch ] && [ $((gcauto + maint)) -gt 0 ]; then violation "-c outside fetch"; fi
   case "$sub" in
-    version|rev-parse|rev-list|merge-base|log|show|diff|diff-tree|cat-file|for-each-ref|ls-files|ls-remote) ;;
-    merge-tree) has --write-tree "$@" || violation "merge-tree without --write-tree" ;;
-    status) [ "$locks" = 1 ] || violation "status without --no-optional-locks" ;;
+    version) [ $# -eq 0 ] || violation "version $*" ;;
+    rev-parse) flags_only "--show-toplevel --verify --quiet -q --abbrev-ref" "$@" ;;
+    rev-list) flags_only "--first-parent --parents --count --not --reverse --max-count=*" "$@" ;;
+    merge-base) flags_only "--is-ancestor" "$@" ;;
+    log) flags_only "--no-ext-diff --no-textconv --first-parent --no-merges -z --format=* --max-count=*" "$@"; no_ext_diff "$@" ;;
+    show) flags_only "--no-ext-diff --no-textconv -s --no-patch --format=*" "$@"; no_ext_diff "$@" ;;
+    diff) flags_only "--no-ext-diff --no-textconv --name-only --numstat -z --no-renames" "$@"; no_ext_diff "$@" ;;
+    diff-tree) flags_only "--no-ext-diff --no-textconv --no-commit-id --name-only -r -z --no-renames" "$@"; no_ext_diff "$@" ;;
+    cat-file) flags_only "-e -t -p" "$@" ;;
+    for-each-ref) flags_only "--format=*" "$@" ;;
+    ls-files) flags_only "--others --ignored --exclude-standard --directory -z" "$@" ;;
+    ls-remote) flags_only "--symref" "$@" ;;
+    merge-tree)
+      flags_only "--write-tree --name-only --no-messages -z" "$@"
+      has --write-tree "$@" || violation "merge-tree without --write-tree" ;;
+    status)
+      flags_only "--porcelain=v1 -z --untracked-files=all" "$@"
+      [ "$locks" = 1 ] || violation "status without --no-optional-locks" ;;
     worktree) [ "$*" = "list --porcelain" ] || [ "$*" = "list --porcelain -z" ] || violation "worktree $*" ;;
     config) { [ $# -eq 2 ] && [ "$1" = --get ]; } || violation "config other than --get <key>" ;;
     symbolic-ref)
+      flags_only "--short -q --quiet" "$@"
       refs=0
-      for a in "$@"; do
-        case "$a" in --short|-q|--quiet) ;; -*) violation "symbolic-ref $a" ;; *) refs=$((refs + 1)) ;; esac
-      done
+      for a in "$@"; do case "$a" in -*) ;; *) refs=$((refs + 1)) ;; esac; done
       [ "$refs" -eq 1 ] || violation "symbolic-ref write form" ;;
     fetch)
       [ "$gcauto" = 1 ] && [ "$maint" = 1 ] || violation "fetch without the housekeeping overrides"
+      flags_only "--no-write-fetch-head --refmap= --no-tags --no-recurse-submodules --quiet" "$@"
       for flag in --no-write-fetch-head --refmap= --no-tags --no-recurse-submodules; do
         has "$flag" "$@" || violation "fetch without $flag"
       done
       remote=""; shas=0
       for a in "$@"; do
         case "$a" in
-          --no-write-fetch-head|--refmap=|--no-tags|--no-recurse-submodules|--quiet) ;;
-          -*) violation "fetch $a" ;;
+          -*) ;;
           *) if [ -z "$remote" ]; then remote="$a"; elif is_sha40 "$a"; then shas=$((shas + 1)); else violation "fetch of $a, not a full SHA"; fi ;;
         esac
       done
@@ -85,9 +115,16 @@ printf '%s\\n' "$*" >> "$STUB_DIR/gh-calls"
 violation() { printf 'gh %s :: %s\\n' "$*" "$REASON" >> "$STUB_DIR/violations"; echo "stub gh refused: $REASON" >&2; exit 99; }
 case "$1 $2" in
   "pr view"|"pr list"|"run list"|"run view") ;;
-  api\\ *) for a in "$@"; do case "$a" in
-      -X|--method|-f|-F|--field|--raw-field|--input) REASON="api write flag $a"; violation "$@" ;;
-    esac; done ;;
+  api\\ *)
+    # Refuse every method and body flag, joined forms (--method=POST, -XPOST, -fx) and short
+    # clusters (-iX POST) included.
+    for a in "$@"; do
+      case "$a" in
+        --method*|--field*|--raw-field*|--input*) REASON="api write flag $a"; violation "$@" ;;
+        --*) ;;
+        -*X*|-*f*|-*F*) REASON="api write flag $a"; violation "$@" ;;
+      esac
+    done ;;
   *) REASON="$1 $2"; violation "$@" ;;
 esac
 for f in "$STUB_DIR"/answers/*.args; do

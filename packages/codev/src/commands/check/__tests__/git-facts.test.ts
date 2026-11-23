@@ -106,6 +106,22 @@ describe('Spec 1951 — live tips', () => {
     expect(await liveTip(slow, 'main')).toEqual({ ok: false, reason: 'ls-remote timed out after 50ms' });
   });
 
+  it("refuses an invalid branch name in origin's HEAD", async () => {
+    const answering = (() => {
+      const child = new EventEmitter() as ChildProcess;
+      child.stdout = new EventEmitter() as ChildProcess['stdout'];
+      child.stderr = new EventEmitter() as ChildProcess['stderr'];
+      child.kill = (() => true) as ChildProcess['kill'];
+      setImmediate(() => {
+        child.stdout!.emit('data', Buffer.from(`ref: refs/heads/a..b\tHEAD\n${'c'.repeat(40)}\tHEAD\n`));
+        child.emit('close', 0);
+      });
+      return child;
+    }) as SpawnFn;
+    const odd = createRunner({ cwd: fx.main, workspaceRoot: fx.main, spawn: answering });
+    expect(await remoteDefaultBranch(odd)).toEqual({ ok: false, reason: 'origin\'s HEAD names an invalid branch "a..b"' });
+  });
+
   it("reads origin's default branch", async () => {
     expect(await remoteDefaultBranch(runner)).toEqual({ ok: true, value: 'main' });
   });
