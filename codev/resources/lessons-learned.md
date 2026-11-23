@@ -315,6 +315,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Testing
 
+- [From #1915] A test's cleanup that kills every pid it recorded can kill an unrelated process: Windows reuses pids quickly, and the recorded process is often long dead by `afterAll`. Kill a recorded pid only if the live process with that pid was created no later than the recording (`__tests__/helpers/tracked-pids.ts`). This matters more than it looks because vitest 4 ignores `poolOptions.forks.singleFork`, so test files run in parallel workers: one file's cleanup ran inside another file's assertion window and is the likely killer of a CIM-created Tower in tower-lifecycle.windows Phase 4(b).
+
 - [From #1595] Harness hook semantics are claims to measure in a real session, not to read from docs. Two spikes and full unit coverage still missed that Claude's `Notification(idle_prompt)` fires 60 s after `Stop` even while the turn's background task runs (it flipped a working agent to idle), and that an approved permission fires no hook at all (#1851). Both surfaced only in Phase 8's scripted real-session run with permissions in `default` mode: the operator's `auto` mode never raises a prompt, so a verification run must set the mode it means to test.
 
 - [From #1740] A feature's acceptance check must follow the id through the whole lifecycle, not stop at the entry point. "`afx spawn ENG-123` parses" was true and nearly worthless; the breakage was in the overview, porch's cwd detection, `--resume`, PR linking and two editors. The real-path run (`codev doctor` against a live site) also caught a false "unknown concept" warning that no unit test exercised. Derive the check list from what a user does with the thing after creating it.
