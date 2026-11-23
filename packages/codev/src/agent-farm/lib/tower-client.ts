@@ -16,7 +16,6 @@ import {
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { assertTunnelMutationAllowedUnderTest } from '../../lib/test-env.js';
-import type { OrphansListing } from './session-orphans-api.js';
 
 export class TowerClient extends SdkTowerClient {
   private readonly targetsDefaultTowerPort: boolean;
@@ -47,15 +46,6 @@ export class TowerClient extends SdkTowerClient {
   ): Promise<{ ok: boolean; status: number; data?: T; error?: string }> {
     assertTunnelMutationAllowedUnderTest(path, this.targetsDefaultTowerPort);
     return super.request<T>(path, options);
-  }
-
-  /** #1915: orphaned processes per session (Windows), for one workspace or all. */
-  async listOrphans(workspacePath?: string): Promise<{ ok: true; listing: OrphansListing } | { ok: false; error: string }> {
-    let path = '/api/orphans';
-    if (workspacePath) path += `?workspace=${encodeURIComponent(workspacePath)}`;
-    const result = await this.request<OrphansListing>(path);
-    if (!result.ok || !result.data) return { ok: false, error: result.error ?? `Tower answered ${result.status}` };
-    return { ok: true, listing: result.data };
   }
 }
 

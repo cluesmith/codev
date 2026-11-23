@@ -21,7 +21,7 @@
  */
 
 import { processes, type ProcessCensusEntry } from './platform/processes.js';
-import type { JobMembersOutcome, JobResult } from './platform/windows/job-objects.js';
+import type { JobResult } from './platform/windows/job-objects.js';
 
 /** A process recorded by a teardown snapshot. */
 export interface TreeMember {
@@ -66,12 +66,6 @@ export interface KillSessionTreeOptions {
   jobName?: string;
   /** Seam (Windows): terminate a job by name, only if the root pid is in it. */
   terminateJob?: (name: string, rootPid: number) => Promise<JobResult>;
-  /**
-   * Seam (Windows): list a job's processes, only if the root pid is in it. The
-   * teardown guard (#1915) reads it before terminating the job: a job holding
-   * a Tower or another session's shellper is not terminated.
-   */
-  jobMembers?: (name: string, rootPid: number) => Promise<JobMembersOutcome>;
   /** Seam: the process census (must read the table fresh, never a cached copy). */
   census?: () => Promise<ProcessCensusEntry[]>;
   /** Seam (Windows): `taskkill /T /F /PID <pid>`; must not reject. */

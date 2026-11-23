@@ -99,9 +99,21 @@ async function isolatedTower(): Promise<IsolatedTower> {
   return { stateDir, port, env };
 }
 
+/**
+ * #1915: run from inside a codev session, `tower start` keeps the session marker,
+ * so afx creates Tower the supported way (through CIM, outside the session's
+ * job); a Tower started plainly there would be in the job and refuse to run.
+ * Every other command keeps the marker-free environment.
+ */
+function towerStartEnv(args: string[]): NodeJS.ProcessEnv {
+  const marker = process.env.CODEV_SHELLPER_SESSION;
+  if (args[0] !== 'tower' || args[1] !== 'start' || !marker) return {};
+  return { CODEV_SHELLPER_SESSION: marker };
+}
+
 function afxRun(tower: IsolatedTower, args: string[], extraEnv: NodeJS.ProcessEnv = {}): { code: number | null; output: string } {
   const r = spawnSync(process.execPath, [afx, ...args, '--port', String(tower.port)], {
-    env: { ...tower.env, ...extraEnv },
+    env: { ...tower.env, ...towerStartEnv(args), ...extraEnv },
     encoding: 'utf8',
     windowsHide: true,
     timeout: 120_000,

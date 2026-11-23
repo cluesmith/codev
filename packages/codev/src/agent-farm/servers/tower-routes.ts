@@ -37,8 +37,6 @@ import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml, decideForwardAuthorization, ideForwardSetCookie } from '../utils/server-utils.js';
 import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
 import { isWindows } from '../../lib/platform.js';
-import { listOrphans } from './session-orphans.js';
-import { createTowerOrphanDeps } from './session-orphans-wiring.js';
 import { workspaceKey } from '../utils/workspace-path.js';
 import { expandHomePath } from '../../lib/host-paths.js';
 import { isInsideCodevSession } from '../../terminal/shellper-endpoint.js';
@@ -220,7 +218,6 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /health':          (_req, res, _url, ctx) => handleHealthCheck(res, ctx),
   'GET /api/shellpers/husks': (_req, res, _url, ctx) => handleHuskPreview(res, ctx),
   'POST /api/shellpers/husks/sweep': (_req, res, _url, ctx) => handleHuskSweep(res, ctx),
-  'GET /api/orphans':     (_req, res, url, ctx) => handleOrphansList(res, url, ctx),
   'GET /api/workspaces':  (_req, res) => handleListWorkspaces(res),
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
@@ -674,36 +671,6 @@ async function handleHuskSweep(res: http.ServerResponse, ctx: RouteContext): Pro
     res.end(JSON.stringify(result));
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: (err as Error).message }));
-  }
-}
-
-/** A workspace filter from a request's `workspace` value; every workspace when absent. */
-function workspaceFilter(workspace: unknown): (workspacePath: string) => boolean {
-  if (typeof workspace !== 'string' || workspace === '') return () => true;
-  const wanted = workspaceKey(workspace);
-  return (workspacePath) => workspaceKey(workspacePath) === wanted;
-}
-
-/**
- * #1915: GET /api/orphans[?workspace=] — read-only (nothing ends orphans but the
- * end of their session). Per session, the processes
- * in its job whose parent has exited (Windows only; `supported: false`
- * elsewhere). Never command lines.
- */
-async function handleOrphansList(res: http.ServerResponse, url: URL, ctx: RouteContext): Promise<void> {
-  res.setHeader('Content-Type', 'application/json');
-  if (!isWindows()) {
-    res.writeHead(200);
-    res.end(JSON.stringify({ supported: false, sessions: [] }));
-    return;
-  }
-  try {
-    const listing = await listOrphans(createTowerOrphanDeps(ctx.getShellperManager), workspaceFilter(url.searchParams.get('workspace')));
-    res.writeHead(200);
-    res.end(JSON.stringify(listing));
-  } catch (err) {
-    res.writeHead(500);
     res.end(JSON.stringify({ error: (err as Error).message }));
   }
 }

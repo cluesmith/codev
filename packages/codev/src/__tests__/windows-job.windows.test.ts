@@ -265,55 +265,6 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(alive(leafPid)).toBe(true);
   }, 90_000);
 
-  it('#1915: snapshot and job-members against real processes', async () => {
-    const helper = newHelper();
-    expect(await helper.start()).toBeNull();
-
-    // The snapshot names this process with its real parent, cheaply.
-    const started = Date.now();
-    const snapshot = await helper.snapshot();
-    const coldMs = Date.now() - started;
-    const warmStarted = Date.now();
-    await helper.snapshot();
-    console.log(`JOB-COST snapshot_ms=${coldMs} warm_snapshot_ms=${Date.now() - warmStarted}`);
-    expect(snapshot.ok).toBe(true);
-    if (!snapshot.ok) return;
-    expect(snapshot.processes.find((p) => p.pid === process.pid)).toEqual({ pid: process.pid, ppid: process.ppid, name: 'node.exe' });
-
-    // A session root that plants an orphan (its parent, cmd, exits at once).
-    const name = jobName();
-    const pidFile = path.join(workDir, `members-${crypto.randomUUID()}.txt`);
-    const gate = path.join(workDir, `gate-${crypto.randomUUID()}`);
-    const root = spawn(process.execPath, ['-e', `
-      const fs = require('fs');
-      const { spawn } = require('child_process');
-      const wait = setInterval(() => {
-        if (!fs.existsSync(${JSON.stringify(gate)})) return;
-        clearInterval(wait);
-        spawn(process.execPath, [${JSON.stringify(treeScript)}, 'orphan', ${JSON.stringify(pidFile)}], { stdio: 'ignore' });
-      }, 50);
-      setInterval(() => {}, 1000);
-    `], { stdio: 'ignore', detached: true, windowsHide: true });
-    leftovers.push(root.pid!);
-    const outsider = idleProcess();
-    expect(await helper.assign(name, root.pid!)).toEqual({ assigned: true });
-    fs.writeFileSync(gate, '');
-    expect(await waitFor(() => readPids(pidFile).has('leaf'), 20_000)).toBe(true);
-    const leafPid = readPids(pidFile).get('leaf')!;
-    leftovers.push(leafPid, readPids(pidFile).get('orphan')!);
-
-    const listed = await helper.jobMembers(name, root.pid!);
-    expect(listed.ok && listed.member).toBe(true);
-    if (!listed.ok) return;
-    const byPid = new Map(listed.processes.map((p) => [p.pid, p]));
-    expect(byPid.get(root.pid!)).toMatchObject({ state: 'alive', name: 'node.exe', parent: 'alive' });
-    const leaf = byPid.get(leafPid);
-    expect(leaf).toMatchObject({ state: 'alive', name: 'node.exe', parent: 'gone' });
-    expect(leaf!.createdAt).toBeGreaterThan(0);
-    expect(byPid.has(outsider.pid!)).toBe(false);
-
-  }, 90_000);
-
   it('a stopped helper (Tower restart) does not kill a job member, and a new helper still finds the job by name', async () => {
     const helper = newHelper();
     const child = idleProcess();

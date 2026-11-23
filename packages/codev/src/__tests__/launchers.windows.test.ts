@@ -102,8 +102,19 @@ delete env.CODEV_SHELLPER_SESSION;
 delete env.NODE_ENV;
 delete env.AF_TEST_DB;
 
+/**
+ * #1915: run from inside a codev session, `tower start` keeps the session marker,
+ * so afx creates Tower the supported way (through CIM, outside the session's
+ * job); a Tower started plainly there would be in the job and refuse to run.
+ */
+function envFor(args: string[]): NodeJS.ProcessEnv {
+  const marker = process.env.CODEV_SHELLPER_SESSION;
+  if (args[0] !== 'tower' || args[1] !== 'start' || !marker) return env;
+  return { ...env, CODEV_SHELLPER_SESSION: marker };
+}
+
 function run(file: string, args: string[], cwd: string): { code: number | null; output: string } {
-  const r = spawnSync(process.execPath, [file, ...args], { cwd, env, encoding: 'utf8', windowsHide: true, timeout: 180_000 });
+  const r = spawnSync(process.execPath, [file, ...args], { cwd, env: envFor(args), encoding: 'utf8', windowsHide: true, timeout: 180_000 });
   return { code: r.status, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 

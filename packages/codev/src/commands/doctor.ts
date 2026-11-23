@@ -54,8 +54,6 @@ import { resolveGitBash, GitBashError, type GitBash } from '../lib/platform/wind
 import { findExecutable } from '@cluesmith/codev-sdk/node/executable';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
 import { WindowsJobHelper } from '../lib/platform/windows/job-objects.js';
-import { TowerClient } from '../agent-farm/lib/tower-client.js';
-import type { OrphansListing } from '../agent-farm/lib/session-orphans-api.js';
 import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING } from '../agent-farm/commands/windows/tower-lifecycle.js';
 import http from 'node:http';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
@@ -234,40 +232,6 @@ export function checkWindowsTowerSession(health: { insideCodevSession?: unknown 
 }
 
 /** GET /health on the local Tower; null when nothing answers with JSON. */
-/** #1915: what `codev doctor` reports about orphaned processes in Codev sessions. */
-export interface OrphanCheck {
-  status: 'ok' | 'warn' | 'skipped';
-  summary: string;
-  /** One line per session with orphans. */
-  details: string[];
-  recommendation?: string;
-}
-
-/**
- * The orphan check from Tower's listing (all workspaces): skipped when Tower
- * does not answer, a warning naming each session with orphans, else ok.
- */
-export function checkOrphans(listing: OrphansListing | null, error?: string): OrphanCheck {
-  if (listing === null) return { status: 'skipped', summary: `Orphaned processes: skipped (${error ?? 'Tower not running'})`, details: [] };
-  const withOrphans = listing.sessions.filter((s) => s.orphans.length > 0);
-  if (withOrphans.length === 0) return { status: 'ok', summary: 'No orphaned processes in Codev sessions', details: [] };
-  const total = withOrphans.reduce((n, s) => n + s.orphans.length, 0);
-  return {
-    status: 'warn',
-    summary: `${total} orphaned process(es) in ${withOrphans.length} Codev session(s), still running after their parent exited`,
-    details: withOrphans.map((s) => `${s.agent} (${s.workspacePath}): ${s.orphans.map((o) => `${o.name || '?'} pid ${o.pid}`).join(', ')}`),
-    recommendation: 'They end when their session does: close that terminal, or run `afx cleanup` for a builder (a deliberate background process is listed too)',
-  };
-}
-
-async function fetchOrphanListing(): Promise<{ listing: OrphansListing | null; error?: string }> {
-  const client = new TowerClient(DEFAULT_TOWER_PORT);
-  if (!(await client.isRunning())) return { listing: null, error: 'Tower not running' };
-  const result = await client.listOrphans();
-  if (!result.ok) return { listing: null, error: result.error };
-  return { listing: result.listing };
-}
-
 function fetchTowerHealth(port: number): Promise<Record<string, unknown> | null> {
   return new Promise((resolve) => {
     const req = http.request({ hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 15_000 }, (res) => {
@@ -1873,20 +1837,6 @@ export async function doctor(): Promise<number> {
       }
     } finally {
       jobHelper.stop();
-    }
-
-    // #1915: processes left in a session's job after their parent exited.
-    const { listing, error: orphanError } = await fetchOrphanListing();
-    const orphanCheck = checkOrphans(listing, orphanError);
-    if (orphanCheck.status === 'warn') {
-      console.log(`  ${chalk.yellow('⚠')} ${orphanCheck.summary}`);
-      for (const line of orphanCheck.details) console.log(`      ${line}`);
-      warnings++;
-      warningDetails.push({ name: 'Orphaned processes', issue: orphanCheck.summary, recommendation: orphanCheck.recommendation });
-    } else if (orphanCheck.status === 'skipped') {
-      console.log(`  ${chalk.blue('-')} ${orphanCheck.summary}`);
-    } else {
-      console.log(`  ${chalk.green('✓')} ${orphanCheck.summary}`);
     }
     console.log('');
   }

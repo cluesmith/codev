@@ -12,8 +12,7 @@ import { execFile } from 'node:child_process';
 import { windowsSystem32Path } from '../../platform.js';
 import { windowsCensus } from './process-census.js';
 import type { ProcessCensusEntry } from '../processes.js';
-import { WindowsJobHelper, getTowerJobHelper, type JobMembersOutcome } from './job-objects.js';
-import { protectedInfrastructure } from './codev-infrastructure.js';
+import { terminateSessionJob } from './job-objects.js';
 import type {
   KillSessionTreeOptions,
   KillSessionTreeResult,
@@ -163,53 +162,15 @@ async function isSameProcess(census: () => Promise<ProcessCensusEntry[]>, record
   return now.creationTime === recorded.creationTime;
 }
 
-/** Terminate the session job (named, and holding the root). */
-async function terminateJobFor(rootPid: number, jobName: string, terminateJob: NonNullable<KillSessionTreeOptions['terminateJob']>): Promise<JobTeardown> {
-  const result = await terminateJob(jobName, rootPid);
+/** Terminate the session job, if one is named and the root is in it. */
+async function terminateJobFor(rootPid: number, opts: KillSessionTreeOptions): Promise<JobTeardown> {
+  if (opts.jobName === undefined) return { terminated: false, attempted: false };
+  const result = await (opts.terminateJob ?? terminateSessionJob)(opts.jobName, rootPid);
   if (result.ok) return { terminated: result.member === true, attempted: true };
   if (result.disabled) return { terminated: false, attempted: false };
-  let error = `job ${jobName} not terminated: ${result.error ?? 'unknown failure'}`;
+  let error = `job ${opts.jobName} not terminated: ${result.error ?? 'unknown failure'}`;
   if (result.code !== undefined) error = `${error} (Win32 error ${result.code})`;
   return { terminated: false, attempted: true, error };
-}
-
-/**
- * The Tower and shellper processes (other than the root) in the root's tree or
- * its session job, with their descendants (#1915). Session jobs allow no
- * breakaway, so a Tower started from inside a session by a plain spawn is a
- * member of that session's job, with every shellper it creates: terminating
- * the job, or `taskkill /T` along live parent links, would end Tower and other
- * sessions with this one.
- */
-function infrastructureGuard(census: ProcessCensusEntry[], rootPid: number, tree: TreeMember[], jobPids: number[]): Set<number> {
-  const candidates = new Set([...tree.map((member) => member.pid), ...jobPids]);
-  return protectedInfrastructure(census, rootPid, candidates);
-}
-
-/**
- * What the job listing says the teardown may do with the session job (#1915):
- * - `member`: the job exists and holds the root; it may be terminated once
- *   the guard finds no Tower or other session in it.
- * - `none`: no job is named, none exists, the root is not in it, or jobs are
- *   disabled (reported once already): nothing to terminate, and no job round
- *   trip, so no root re-check either.
- * - `unlisted`: the listing failed. Fail closed: the job is never terminated,
- *   since nothing then shows it holds no Tower or other session; the tree
- *   teardown still runs.
- */
-type JobState =
-  | { kind: 'member'; pids: number[] }
-  | { kind: 'none' }
-  | { kind: 'unlisted'; error: string };
-
-function jobState(listing: JobMembersOutcome | null): JobState {
-  if (listing === null) return { kind: 'none' };
-  if (!listing.ok) {
-    if (listing.disabled) return { kind: 'none' };
-    return { kind: 'unlisted', error: listing.error };
-  }
-  if (!listing.found || !listing.member) return { kind: 'none' };
-  return { kind: 'member', pids: listing.processes.map((p) => p.pid) };
 }
 
 /** What became of the session job, for an error raised after it was handled. */
@@ -220,40 +181,14 @@ function jobNote(job: JobTeardown): string {
 }
 
 export async function killWindowsTree(rootPid: number, opts: KillSessionTreeOptions): Promise<KillSessionTreeResult> {
-  // One job helper per teardown: Tower's warm one, else a single one-shot for
-  // both the listing and the terminate (a cold PowerShell start each would
-  // double the teardown's wait on a loaded machine).
-  const pool: { oneShot: WindowsJobHelper | null } = { oneShot: null };
-  const helper = (): WindowsJobHelper => {
-    const tower = getTowerJobHelper();
-    if (tower) return tower;
-    pool.oneShot ??= new WindowsJobHelper();
-    return pool.oneShot;
-  };
-  try {
-    return await killWindowsTreeWith(rootPid, opts, {
-      jobMembers: opts.jobMembers ?? ((name, root) => helper().jobMembers(name, root)),
-      terminateJob: opts.terminateJob ?? ((name, root) => helper().terminate(name, root)),
-    });
-  } finally {
-    pool.oneShot?.stop();
-  }
-}
-
-async function killWindowsTreeWith(
-  rootPid: number,
-  opts: KillSessionTreeOptions,
-  jobs: Required<Pick<KillSessionTreeOptions, 'jobMembers' | 'terminateJob'>>,
-): Promise<KillSessionTreeResult> {
   const census = opts.census ?? freshCensus;
   const taskkill = opts.taskkill ?? runTaskkill;
   const kill = opts.kill ?? defaultKill;
 
-  // The snapshot is taken BEFORE the job ends. A session job allows no
-  // breakaway (#1915), but a session created by an older Tower still has a job
-  // that does (the MSYS runtime breaks native programs out of it), and a
-  // process outside the job survives it while its parents inside die; a
-  // snapshot taken afterwards would no longer link it to the root.
+  // The snapshot is taken BEFORE the job ends, while every descendant can still
+  // be linked to the root: a session without a job (the helper unavailable)
+  // relies on it entirely. Session jobs allow no breakaway (#1915), so the job
+  // itself ends everything the session started.
   let snapshotCensus: ProcessCensusEntry[] | null = null;
   let censusError: Error | null = null;
   try {
@@ -262,36 +197,11 @@ async function killWindowsTreeWith(
     censusError = err as Error;
   }
 
-  // One listing of the session job drives the job half of teardown (#1915).
-  const state = jobState(opts.jobName === undefined ? null : await jobs.jobMembers(opts.jobName, rootPid));
-
-  // Codev infrastructure inside the root's tree or job must outlive this
-  // session: then the job is not terminated and `taskkill /T` is not run; the
-  // session's own processes are killed one by one instead.
-  let protectedPids = new Set<number>();
-  if (snapshotCensus !== null) {
-    const jobPids = state.kind === 'member' ? state.pids : [];
-    protectedPids = infrastructureGuard(snapshotCensus, rootPid, collectTree(snapshotCensus, rootPid, opts.rootStartTime), jobPids);
-  }
-  const guarded = protectedPids.size > 0;
-
   // The job holds exactly this session's processes (the name carries the
   // session id, an existing name is never joined, and the helper terminates
   // it only when the root is a member), so it needs no creation-time check: a
-  // reused pid's process is not in it. It is terminated only when the listing
-  // and the census both show it holds no Tower or other session.
-  let job: JobTeardown = { terminated: false, attempted: false };
-  if (guarded) {
-    const pids = [...protectedPids].sort((a, b) => a - b).join(', ');
-    const what = opts.jobName === undefined ? 'its tree' : `job ${opts.jobName}`;
-    job.error = `${what} holds Tower or another session's shellper (pids ${pids}), which must outlive this session: ended only this session's own process tree, one by one`;
-  } else if (state.kind === 'unlisted') {
-    job.error = `job ${opts.jobName} not terminated: its processes could not be listed (${state.error}), so nothing shows it holds no Tower or other session; ended this session's tree only`;
-  } else if (state.kind === 'member' && snapshotCensus === null) {
-    job.error = `job ${opts.jobName} not terminated: without a process census it cannot be checked for Tower or another session`;
-  } else if (state.kind === 'member') {
-    job = await terminateJobFor(rootPid, opts.jobName!, jobs.terminateJob);
-  }
+  // reused pid's process is not in it.
+  const job = await terminateJobFor(rootPid, opts);
   const jobError = job.error;
 
   if (snapshotCensus === null) {
@@ -314,18 +224,14 @@ async function killWindowsTreeWith(
       `teardown of pid ${rootPid} skipped: the census has no creation time for it, so it cannot be told from a reused pid; its tree is left alive${jobNote(job)}`,
     );
   }
-  // Guarded: only what hangs off the root by live parent links, minus the
-  // protected. Other job members are left, even this session's orphans: a
-  // process the census could not recognize might be Tower's.
-  let members = collectTree(snapshotCensus, rootPid, opts.rootStartTime);
-  if (guarded) members = members.filter((member) => !protectedPids.has(member.pid));
+  const members = collectTree(snapshotCensus, rootPid, opts.rootStartTime);
 
   // A root absent from the census is already dead; `taskkill` on its pid could
   // only reach a process that reused it since. The job round trip can take
   // seconds, and a terminated job usually takes the root with it, so after one
   // the root is checked again on a fresh census: `/T` on a pid reused in that
   // window would kill an unrelated process and its whole tree.
-  if (root && !guarded) {
+  if (root) {
     let rootUnchanged = true;
     if (job.attempted) rootUnchanged = await isSameProcess(census, root);
     if (rootUnchanged) await taskkill(rootPid);

@@ -204,10 +204,7 @@ afx cleanup -p 585 -f           # Force (unmerged branch)
 afx status                      # Show all builders and workspace status
 ```
 
-No flags needed. Shows Tower status, workspace, and all active builders. On Windows it also lists,
-per session, processes still running after their parent exited (typically what a timed-out
-agent command left behind): name, pid, age and CPU, never command lines. They end with their
-session: close the terminal, or `afx cleanup` for a builder.
+No flags needed. Shows Tower status, workspace, and all active builders.
 
 ## afx whoami
 

@@ -56,23 +56,16 @@ export function sessionJobName(shellperSessionId: string): string {
  * - `{id, op:'terminate', name, pid}`: open job `name` and terminate it, only
  *   if `pid` (the session root) is a member (`member:false` otherwise);
  *   `found:false` when no such job exists (its root already exited).
- * - `{id, op:'snapshot'}` (#1915): every process's pid, parent pid and image
- *   name, from one kernel snapshot (`CreateToolhelp32Snapshot`). No command
- *   lines. A few milliseconds, against ~0.5s of CPU for the CIM census, so it is
- *   the table a frequent sweep can afford.
- * - `{id, op:'job-members', name, pid}` (#1915): the processes in job `name`,
- *   only if `pid` (the session root) is a member, each with its state, creation
- *   time and CPU time, its parent pid and image name from the snapshot, and its
- *   parent's state and creation time. A state is `alive`, `gone` (no such
- *   process, or it has exited) or `unknown` (it exists but cannot be opened).
- * - `{id, op:'in-job', name, pid}` (#1915): whether `pid` is in job `name`.
+ * - `{id, op:'in-job', name, pid}` (#1915): whether `pid` is a member of job
+ *   `name` (`found:false` when no such job exists). Tower asks it at boot, to
+ *   refuse to run inside any session's job.
  *
  * Errors carry the Win32 code. The readiness line reports a bind failure
  * instead of exiting silently, so the caller can name the cause.
  */
 export const HELPER_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
-function Out-Line($obj) { [Console]::Out.WriteLine(($obj | ConvertTo-Json -Compress -Depth 4)); [Console]::Out.Flush() }
+function Out-Line($obj) { [Console]::Out.WriteLine(($obj | ConvertTo-Json -Compress)); [Console]::Out.Flush() }
 try {
   $asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName 'CodevJob'), [Reflection.Emit.AssemblyBuilderAccess]::Run)
   $type = $asm.DefineDynamicModule('CodevJob').DefineType('CodevJob.Native', 'Public, Class')
@@ -95,12 +88,6 @@ try {
   Bind 'DuplicateHandle' ([bool]) @([IntPtr], [IntPtr], [IntPtr], [IntPtr].MakeByRefType(), [UInt32], [bool], [UInt32])
   Bind 'IsProcessInJob' ([bool]) @([IntPtr], [IntPtr], [bool].MakeByRefType())
   Bind 'CloseHandle' ([bool]) @([IntPtr])
-  Bind 'QueryInformationJobObject' ([bool]) @([IntPtr], [Int32], [IntPtr], [UInt32], [IntPtr])
-  Bind 'CreateToolhelp32Snapshot' ([IntPtr]) @([UInt32], [UInt32])
-  Bind 'Process32FirstW' ([bool]) @([IntPtr], [IntPtr])
-  Bind 'Process32NextW' ([bool]) @([IntPtr], [IntPtr])
-  Bind 'GetProcessTimes' ([bool]) @([IntPtr], [Int64].MakeByRefType(), [Int64].MakeByRefType(), [Int64].MakeByRefType(), [Int64].MakeByRefType())
-  Bind 'GetExitCodeProcess' ([bool]) @([IntPtr], [UInt32].MakeByRefType())
   $K = $type.CreateType()
 } catch {
   Out-Line @{ ready = $false; error = $_.Exception.Message; languageMode = $ExecutionContext.SessionState.LanguageMode.ToString() }
@@ -118,16 +105,7 @@ $CURRENT_PROCESS = [IntPtr](-1)
 # program out of a job that allows it) and no kill-on-close (sessions outlive Tower).
 $SESSION_JOB_LIMIT_FLAGS = 0
 $ERROR_FILE_NOT_FOUND = 2
-$ERROR_INVALID_PARAMETER = 87
 $ERROR_ALREADY_EXISTS = 183
-$ERROR_MORE_DATA = 234
-$STILL_ACTIVE = [UInt32]259
-$TH32CS_SNAPPROCESS = [UInt32]2
-$JOB_BASIC_PROCESS_ID_LIST = 3
-$FILETIME_UNIX_EPOCH = [Int64]116444736000000000
-# PROCESSENTRY32W: th32ParentProcessID and szExeFile sit after a pointer-sized field.
-$PE_SIZE = 556; $PE_PPID = 24; $PE_EXE = 36
-if ([IntPtr]::Size -eq 8) { $PE_SIZE = 568; $PE_PPID = 32; $PE_EXE = 44 }
 # The last Win32 error is read by the statement right after each call, with a
 # direct static call: anything PowerShell runs in between (even invoking a
 # script function) can make its own P/Invoke calls and overwrite it.
@@ -194,111 +172,24 @@ function Terminate($name, $procId) {
     return @{ ok = $true; found = $true; member = $true }
   } finally { [void]$K::CloseHandle($job) }
 }
-function Get-ProcessTable {
-  $snap = $K::CreateToolhelp32Snapshot($TH32CS_SNAPPROCESS, [UInt32]0)
-  $code = $M::GetLastWin32Error()
-  if ($snap -eq [IntPtr](-1)) { throw "CreateToolhelp32Snapshot failed (Win32 error $code)" }
-  $entry = $M::AllocHGlobal($PE_SIZE)
-  $table = New-Object 'System.Collections.Generic.List[object]'
-  try {
-    $M::WriteInt32($entry, 0, $PE_SIZE)
-    $more = $K::Process32FirstW($snap, $entry)
-    while ($more) {
-      $table.Add(@{ pid = $M::ReadInt32($entry, 8); ppid = $M::ReadInt32($entry, $PE_PPID); name = $M::PtrToStringUni([IntPtr]($entry.ToInt64() + $PE_EXE)) })
-      $more = $K::Process32NextW($snap, $entry)
-    }
-  } finally { $M::FreeHGlobal($entry); [void]$K::CloseHandle($snap) }
-  return ,$table
-}
-# A process's state, and for a live one its creation time and CPU time (epoch ms, ms).
-# An exited process whose handle someone still holds can be opened: the exit
-# code tells it from a live one.
-function Read-Process($procId) {
-  $h = $K::OpenProcess($PROCESS_QUERY_LIMITED, $false, [UInt32]$procId)
-  $code = $M::GetLastWin32Error()
-  if ($h -eq [IntPtr]::Zero) {
-    if ($code -eq $ERROR_INVALID_PARAMETER) { return @{ state = 'gone' } }
-    return @{ state = 'unknown' }
-  }
-  try {
-    $exit = [UInt32]0
-    if (-not $K::GetExitCodeProcess($h, [ref]$exit)) { return @{ state = 'unknown' } }
-    if ($exit -ne $STILL_ACTIVE) { return @{ state = 'gone' } }
-    $created = [Int64]0; $exited = [Int64]0; $kernel = [Int64]0; $user = [Int64]0
-    if (-not $K::GetProcessTimes($h, [ref]$created, [ref]$exited, [ref]$kernel, [ref]$user)) { return @{ state = 'unknown' } }
-    return @{ state = 'alive'; created = [Int64][Math]::Floor(($created - $FILETIME_UNIX_EPOCH) / 10000); cpuMs = [Int64][Math]::Floor(($kernel + $user) / 10000) }
-  } finally { [void]$K::CloseHandle($h) }
-}
-# $true when the process is in the job; $false when it is not, or cannot be opened.
-function Test-JobMember($job, $procId) {
-  $proc = $K::OpenProcess($PROCESS_QUERY_LIMITED, $false, [UInt32]$procId)
-  if ($proc -eq [IntPtr]::Zero) { return $false }
-  try {
-    $inJob = $false
-    $queried = $K::IsProcessInJob($proc, $job, [ref]$inJob)
-    $code = $M::GetLastWin32Error()
-    if (-not $queried) { throw "IsProcessInJob failed (Win32 error $code)" }
-    return $inJob
-  } finally { [void]$K::CloseHandle($proc) }
-}
-function Get-JobPids($job) {
-  $capacity = 1024
-  while ($true) {
-    $size = 8 + $capacity * [IntPtr]::Size
-    $buf = $M::AllocHGlobal($size)
-    try {
-      $queried = $K::QueryInformationJobObject($job, $JOB_BASIC_PROCESS_ID_LIST, $buf, [UInt32]$size, [IntPtr]::Zero)
-      $code = $M::GetLastWin32Error()
-      if ($queried) {
-        $count = $M::ReadInt32($buf, 4)
-        $ids = New-Object 'System.Collections.Generic.List[int]'
-        for ($i = 0; $i -lt $count; $i++) { $ids.Add([int]$M::ReadIntPtr($buf, 8 + $i * [IntPtr]::Size).ToInt64()) }
-        return ,$ids
-      }
-      if ($code -ne $ERROR_MORE_DATA) { throw "QueryInformationJobObject failed (Win32 error $code)" }
-    } finally { $M::FreeHGlobal($buf) }
-    $capacity = $capacity * 4
-    if ($capacity -gt 65536) { throw 'the job holds too many processes to list' }
-  }
-}
-function Open-JobForQuery($name) {
+function InJob($name, $procId) {
   $job = $K::OpenJobObjectW($JOB_QUERY, $false, $name)
   $code = $M::GetLastWin32Error()
-  if ($job -ne [IntPtr]::Zero) { return @{ job = $job } }
-  if ($code -eq $ERROR_FILE_NOT_FOUND) { return @{ result = @{ ok = $true; found = $false } } }
-  return @{ result = @{ ok = $false; error = 'OpenJobObjectW failed'; code = $code } }
-}
-function JobMembers($name, $rootPid) {
-  $opened = Open-JobForQuery $name
-  if ($null -ne $opened.result) { return $opened.result }
-  $job = $opened.job
+  if ($job -eq [IntPtr]::Zero) {
+    if ($code -eq $ERROR_FILE_NOT_FOUND) { return @{ ok = $true; found = $false; member = $false } }
+    return @{ ok = $false; error = 'OpenJobObjectW failed'; code = $code }
+  }
   try {
-    if (-not (Test-JobMember $job $rootPid)) { return @{ ok = $true; found = $true; member = $false } }
-    $ids = Get-JobPids $job
-    $byPid = @{}
-    foreach ($row in (Get-ProcessTable)) { $byPid[$row.pid] = $row }
-    $list = New-Object 'System.Collections.Generic.List[object]'
-    foreach ($id in $ids) {
-      $self = Read-Process $id
-      $entry = @{ pid = $id; state = $self.state; parent = 'unknown' }
-      if ($self.state -eq 'alive') { $entry.created = $self.created; $entry.cpuMs = $self.cpuMs }
-      $row = $byPid[$id]
-      if ($null -ne $row) {
-        $entry.ppid = $row.ppid
-        $entry.name = $row.name
-        $parent = Read-Process $row.ppid
-        $entry.parent = $parent.state
-        if ($parent.state -eq 'alive') { $entry.parentCreated = $parent.created }
-      }
-      $list.Add($entry)
-    }
-    return @{ ok = $true; found = $true; member = $true; processes = $list.ToArray() }
+    $proc = $K::OpenProcess($PROCESS_QUERY_LIMITED, $false, [UInt32]$procId)
+    if ($proc -eq [IntPtr]::Zero) { return @{ ok = $true; found = $true; member = $false } }
+    try {
+      $inJob = $false
+      $queried = $K::IsProcessInJob($proc, $job, [ref]$inJob)
+      $code = $M::GetLastWin32Error()
+      if (-not $queried) { return @{ ok = $false; error = 'IsProcessInJob failed'; code = $code } }
+      return @{ ok = $true; found = $true; member = $inJob }
+    } finally { [void]$K::CloseHandle($proc) }
   } finally { [void]$K::CloseHandle($job) }
-}
-function InJob($name, $procId) {
-  $opened = Open-JobForQuery $name
-  if ($null -ne $opened.result) { return $opened.result }
-  try { return @{ ok = $true; found = $true; member = (Test-JobMember $opened.job $procId) } } finally { [void]$K::CloseHandle($opened.job) }
 }
 Out-Line @{ ready = $true; languageMode = $ExecutionContext.SessionState.LanguageMode.ToString() }
 while ($true) {
@@ -311,8 +202,6 @@ while ($true) {
     $id = $req.id
     if ($req.op -eq 'assign') { $res = Assign $req.name $req.pid }
     elseif ($req.op -eq 'terminate') { $res = Terminate $req.name $req.pid }
-    elseif ($req.op -eq 'snapshot') { $res = @{ ok = $true; processes = (Get-ProcessTable).ToArray() } }
-    elseif ($req.op -eq 'job-members') { $res = JobMembers $req.name $req.pid }
     elseif ($req.op -eq 'in-job') { $res = InJob $req.name $req.pid }
     else { $res = @{ ok = $false; error = "unknown op $($req.op)" } }
   } catch {
@@ -330,7 +219,6 @@ export function encodeHelperCommand(script: string): string {
 
 /** The process a helper runs in. Production spawns powershell.exe; tests inject a fake. */
 export interface HelperProcess {
-  pid?: number;
   stdin: Writable;
   stdout: Readable;
   kill(): void;
@@ -338,30 +226,12 @@ export interface HelperProcess {
   on(event: 'error', listener: (err: Error) => void): this;
 }
 
-/**
- * What `-EncodedCommand` carries: read one line from stdin, the helper program
- * as base64 UTF-8, and run it in this scope. The program itself no longer fits
- * a command line (Windows caps one at 32,767 characters, and the encoding
- * nearly triples it), and it still never touches the disk.
- */
-export const HELPER_BOOTSTRAP =
-  '$program = [Console]::In.ReadLine(); . ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($program))))';
-
-/** The first stdin line a helper reads: the program, as base64 UTF-8. */
-export function helperProgramLine(script: string = HELPER_SCRIPT): string {
-  return `${Buffer.from(script, 'utf8').toString('base64')}\n`;
-}
-
 export function spawnPowerShellHelper(): HelperProcess {
-  const child = spawn(
+  return spawn(
     windowsPowerShellPath(),
-    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeHelperCommand(HELPER_BOOTSTRAP)],
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeHelperCommand(HELPER_SCRIPT)],
     { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true },
-  );
-  // An exited helper surfaces through 'exit'; the client also listens for stdin errors.
-  child.stdin.on('error', () => {});
-  child.stdin.write(helperProgramLine());
-  return child as unknown as HelperProcess;
+  ) as unknown as HelperProcess;
 }
 
 export interface JobResult {
@@ -370,104 +240,13 @@ export interface JobResult {
   helperFailure?: boolean;
   /** The helper is disabled for good; that was already reported once, when it happened. */
   disabled?: boolean;
-  /** terminate, job-members, in-job: false when no job had that name. */
+  /** terminate, in-job: false when no job had that name. */
   found?: boolean;
-  /** terminate, job-members: whether the session root was in the job. in-job: whether the pid is. */
+  /** terminate: whether the session root was in the job (it is terminated only then). in-job: whether the pid is. */
   member?: boolean;
-  /** snapshot and job-members: the raw rows, validated by the method that asked. */
-  processes?: unknown[];
   error?: string;
   /** Win32 error code, when a call failed. */
   code?: number;
-}
-
-/** One row of the kernel process snapshot. */
-export interface SnapshotProcess {
-  pid: number;
-  ppid: number;
-  /** Image file name, e.g. `find.exe`. Never a command line. */
-  name: string;
-}
-
-/**
- * `alive`, `gone` (no such process, or it has exited), or `unknown` (it exists
- * but cannot be opened, e.g. another user's or an elevated process).
- */
-export type ProcessState = 'alive' | 'gone' | 'unknown';
-
-/** One process in a session job, as `job-members` reports it. */
-export interface JobMemberProcess {
-  pid: number;
-  state: ProcessState;
-  /** Creation time (epoch ms) and CPU time (ms), for a live process. */
-  createdAt?: number;
-  cpuMs?: number;
-  /** From the snapshot; absent when the process was not in it. */
-  ppid?: number;
-  name?: string;
-  parent: ProcessState;
-  /** The live parent's creation time (epoch ms). */
-  parentCreatedAt?: number;
-}
-
-export type SnapshotOutcome =
-  | { ok: true; processes: SnapshotProcess[] }
-  | { ok: false; error: string; helperFailure: boolean };
-
-export type JobMembersOutcome =
-  /** `found: false`: no such job. `member: false`: the root is not in it, so it is not this session's. */
-  | { ok: true; found: boolean; member: boolean; processes: JobMemberProcess[] }
-  /** `disabled`: jobs are off for good (reported once, when it happened). */
-  | { ok: false; error: string; helperFailure: boolean; disabled?: boolean };
-
-function asInt(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
-}
-
-function asState(value: unknown): ProcessState {
-  if (value === 'alive' || value === 'gone') return value;
-  return 'unknown';
-}
-
-export function parseSnapshotRows(rows: unknown[]): SnapshotProcess[] {
-  const processes: SnapshotProcess[] = [];
-  for (const row of rows) {
-    if (row === null || typeof row !== 'object') continue;
-    const r = row as Record<string, unknown>;
-    const pid = asInt(r.pid);
-    const ppid = asInt(r.ppid);
-    if (pid === undefined || ppid === undefined) continue;
-    processes.push({ pid, ppid, name: typeof r.name === 'string' ? r.name : '' });
-  }
-  return processes;
-}
-
-export function parseJobMemberRows(rows: unknown[]): JobMemberProcess[] {
-  const processes: JobMemberProcess[] = [];
-  for (const row of rows) {
-    if (row === null || typeof row !== 'object') continue;
-    const r = row as Record<string, unknown>;
-    const pid = asInt(r.pid);
-    if (pid === undefined || pid <= 0) continue;
-    const member: JobMemberProcess = { pid, state: asState(r.state), parent: asState(r.parent) };
-    const createdAt = asInt(r.created);
-    const cpuMs = asInt(r.cpuMs);
-    const ppid = asInt(r.ppid);
-    const parentCreatedAt = asInt(r.parentCreated);
-    if (member.state === 'alive' && createdAt !== undefined) member.createdAt = createdAt;
-    if (member.state === 'alive' && cpuMs !== undefined) member.cpuMs = cpuMs;
-    if (ppid !== undefined) member.ppid = ppid;
-    if (typeof r.name === 'string') member.name = r.name;
-    if (member.parent === 'alive' && parentCreatedAt !== undefined) member.parentCreatedAt = parentCreatedAt;
-    processes.push(member);
-  }
-  return processes;
-}
-
-function failureText(result: JobResult): string {
-  let error = result.error ?? 'unknown failure';
-  if (result.code !== undefined) error = `${error} (Win32 error ${result.code})`;
-  return error;
 }
 
 export type JobAssignOutcome =
@@ -534,11 +313,6 @@ export class WindowsJobHelper {
     this.maxRestarts = opts.maxRestarts ?? 3;
     this.restartWindowMs = opts.restartWindowMs ?? 5 * 60_000;
     this.now = opts.now ?? Date.now;
-  }
-
-  /** The helper process's pid while one runs (it is Codev's own, never listed as an orphan). */
-  get pid(): number | null {
-    return this.proc?.pid ?? null;
   }
 
   /** Why jobs are unavailable for good, or null while the helper can still serve. */
@@ -655,7 +429,6 @@ export class WindowsJobHelper {
     const result: JobResult = { ok: message.ok === true };
     if (typeof message.found === 'boolean') result.found = message.found;
     if (typeof message.member === 'boolean') result.member = message.member;
-    if (Array.isArray(message.processes)) result.processes = message.processes;
     if (typeof message.error === 'string') result.error = message.error;
     if (typeof message.code === 'number') result.code = message.code;
     pending.resolve(result);
@@ -740,29 +513,9 @@ export class WindowsJobHelper {
     return this.request({ op: 'terminate', name, pid: rootPid });
   }
 
-  /** Every process's pid, parent pid and image name, from one kernel snapshot. */
-  async snapshot(): Promise<SnapshotOutcome> {
-    const result = await this.request({ op: 'snapshot' });
-    if (!result.ok) return { ok: false, error: failureText(result), helperFailure: result.helperFailure === true };
-    return { ok: true, processes: parseSnapshotRows(result.processes ?? []) };
-  }
-
-  /** The processes in job `name`, if `rootPid` (the session root) is in it. */
-  async jobMembers(name: string, rootPid: number): Promise<JobMembersOutcome> {
-    const result = await this.request({ op: 'job-members', name, pid: rootPid });
-    if (!result.ok) {
-      const failure: JobMembersOutcome = { ok: false, error: failureText(result), helperFailure: result.helperFailure === true };
-      if (result.disabled) failure.disabled = true;
-      return failure;
-    }
-    return { ok: true, found: result.found === true, member: result.member === true, processes: parseJobMemberRows(result.processes ?? []) };
-  }
-
   /** Whether `pid` is in job `name`; `found: false` when no such job exists. */
-  async inJob(name: string, pid: number): Promise<{ ok: true; found: boolean; member: boolean } | { ok: false; error: string }> {
-    const result = await this.request({ op: 'in-job', name, pid });
-    if (!result.ok) return { ok: false, error: failureText(result) };
-    return { ok: true, found: result.found === true, member: result.member === true };
+  inJob(name: string, pid: number): Promise<JobResult> {
+    return this.request({ op: 'in-job', name, pid });
   }
 
   /** Stop the helper. Jobs are not affected: they carry no kill-on-close. */
@@ -801,20 +554,6 @@ export function setTowerJobHelper(helper: WindowsJobHelper | null): void {
  * helper (an `afx cleanup` with Tower down). Teardown is not a hot path, so the
  * cold start is acceptable there.
  */
-/**
- * The members of job `name` with Tower's helper when it runs, else with a
- * one-shot helper, like `terminateSessionJob`.
- */
-export async function sessionJobMembers(name: string, rootPid: number, helper: WindowsJobHelper | null = towerHelper): Promise<JobMembersOutcome> {
-  if (helper) return helper.jobMembers(name, rootPid);
-  const oneShot = new WindowsJobHelper();
-  try {
-    return await oneShot.jobMembers(name, rootPid);
-  } finally {
-    oneShot.stop();
-  }
-}
-
 export async function terminateSessionJob(name: string, rootPid: number, helper: WindowsJobHelper | null = towerHelper): Promise<JobResult> {
   if (helper) return helper.terminate(name, rootPid);
   const oneShot = new WindowsJobHelper();

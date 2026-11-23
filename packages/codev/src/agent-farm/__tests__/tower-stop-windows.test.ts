@@ -14,7 +14,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { forceKillTowerWindows, stopTowerWindows, WINDOWS_STOP_EXIT_TIMEOUT_MS, type WindowsStopDeps } from '../commands/windows/tower-lifecycle.js';
 import type { TowerOwner } from '../db/tower-owner.js';
 import { checkWindowsTowerSession } from '../../commands/doctor.js';
-import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING, towerBootSessionWarning, towerSessionJobRefusal } from '../commands/windows/tower-lifecycle.js';
+import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING, sessionJobNamesToCheck, towerBootSessionWarning, towerSessionJobRefusal } from '../commands/windows/tower-lifecycle.js';
 import { windowsShellperCmdline } from '../../terminal/__tests__/windows-cmdline-fixtures.js';
 import { resetHostPlatformForTests } from '../../lib/platform.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
@@ -170,19 +170,34 @@ describe('Tower inside a codev session (boot self-check and doctor)', () => {
     expect(towerBootSessionWarning({ CODEV_SHELLPER_SESSION: 's' }, false)).toBeNull();
   });
 
-  it("#1915: Tower refuses to boot only when the marker's session job really holds it", async () => {
-    const member = vi.fn(async () => ({ ok: true as const, found: true, member: true }));
-    const refusal = await towerSessionJobRefusal({ CODEV_SHELLPER_SESSION: 's1' }, member, 4242);
-    expect(member).toHaveBeenCalledWith('Local\\codev-session-s1', 4242);
-    expect(refusal).toMatch(/refuses to start inside a codev session's job/);
+  it("#1915: the jobs to check are the marker's and every live shellper's, never Tower's own pid", () => {
+    forceHostPlatform('win32');
+    const census = [
+      { pid: 10, ppid: 1, rssKb: 0, cmdline: windowsShellperCmdline({ sessionId: 'a' }), creationTime: 1 },
+      { pid: 11, ppid: 1, rssKb: 0, cmdline: windowsShellperCmdline({ sessionId: 'b' }), creationTime: 1 },
+      { pid: 12, ppid: 1, rssKb: 0, cmdline: 'C:\\Windows\\notepad.exe', creationTime: 1 },
+      { pid: 4242, ppid: 1, rssKb: 0, cmdline: windowsShellperCmdline({ sessionId: 'self' }), creationTime: 1 },
+    ];
+    expect(sessionJobNamesToCheck({ CODEV_SHELLPER_SESSION: 'm' }, census, 4242).sort()).toEqual([
+      'Local\\codev-session-a',
+      'Local\\codev-session-b',
+      'Local\\codev-session-m',
+    ]);
+    expect(sessionJobNamesToCheck({}, [], 4242)).toEqual([]);
+  });
+
+  it('#1915: Tower refuses to run inside any session job, marker or not; a check that cannot be made does not refuse', async () => {
+    const inJob = vi.fn(async (name: string) => ({ ok: true, found: true, member: name === 'Local\\codev-session-b' }));
+    const refusal = await towerSessionJobRefusal(['Local\\codev-session-a', 'Local\\codev-session-b'], inJob, 4242);
+    expect(inJob).toHaveBeenCalledWith('Local\\codev-session-a', 4242);
+    expect(refusal).toMatch(/refuses to run inside a codev session's job/);
     expect(refusal).toContain('afx tower start');
 
-    // A stale marker (the job does not hold Tower, or is gone), no marker, or a failed check: start.
-    expect(await towerSessionJobRefusal({ CODEV_SHELLPER_SESSION: 's1' }, async () => ({ ok: true as const, found: true, member: false }))).toBeNull();
-    expect(await towerSessionJobRefusal({ CODEV_SHELLPER_SESSION: 's1' }, async () => ({ ok: true as const, found: false, member: false }))).toBeNull();
-    expect(await towerSessionJobRefusal({ CODEV_SHELLPER_SESSION: 's1' }, async () => ({ ok: false as const, error: 'helper down' }))).toBeNull();
+    expect(await towerSessionJobRefusal(['Local\\codev-session-a'], async () => ({ ok: true, found: true, member: false }))).toBeNull();
+    expect(await towerSessionJobRefusal(['Local\\codev-session-a'], async () => ({ ok: true, found: false }))).toBeNull();
+    expect(await towerSessionJobRefusal(['Local\\codev-session-a'], async () => ({ ok: false, error: 'helper down' }))).toBeNull();
     const unused = vi.fn();
-    expect(await towerSessionJobRefusal({}, unused)).toBeNull();
+    expect(await towerSessionJobRefusal([], unused)).toBeNull();
     expect(unused).not.toHaveBeenCalled();
   });
 
