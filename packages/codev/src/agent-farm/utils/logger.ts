@@ -2,6 +2,7 @@
  * Logging utilities for Agent Farm
  */
 
+import { stripVTControlCharacters } from 'node:util';
 import chalk from 'chalk';
 
 export const logger = {
@@ -54,7 +55,8 @@ export const logger = {
    * Print a table row
    */
   row(cols: string[], widths: number[]): void {
-    const padded = cols.map((col, i) => col.padEnd(widths[i] || 10));
+    // Pad by visible width: a chalk-colored cell carries escape codes padEnd would count.
+    const padded = cols.map((col, i) => col + ' '.repeat(Math.max(0, (widths[i] || 10) - stripVTControlCharacters(col).length)));
     console.log('  ' + padded.join('  '));
   },
 };

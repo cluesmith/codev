@@ -109,6 +109,10 @@ reads succeed, writes succeed, and nothing corrects you until a later `git add` 
 - In Bash, prefer relative paths — `cwd` is your worktree, so a relative path cannot be anchored
   to the wrong root.
 
+## Finding files
+
+Never search from the filesystem root (`find /`, a whole-drive search): search within the project directory or use your built-in file search tools. A framework file (protocol, prompt, template, role) that is not in the project is delivered to you another way, so do not go looking for it.
+
 ## Scope
 
 Build what the spec says. If part of it is blocked, finish everything else and say plainly what

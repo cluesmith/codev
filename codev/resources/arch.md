@@ -920,12 +920,12 @@ packages/codev/dashboard/
 **Decisions View** (Spec 1819):
 - A view of the workspace's pending-decisions file (`dashboard.decisionsFile`, workspace-relative, default `codev/state/pending-decisions.md`) that writes the owner's word back into it. The file is the only state: no store, no database.
 - Conditional, then sticky tab: `decisionsEnabled` in `DashboardState` (set by `decisionsFilePresent()` in `/api/state`) adds it; `useTabs` keeps it for the page session, so a file deleted while the tab is open shows not-found and any held drafts instead of the tab vanishing. The flag reuses the configured path for up to 5 s (`/api/state` is polled every second); a config error makes it false, is logged once per workspace, and never fails `/api/state`.
-- Routes: `GET /api/decisions` → `{ ok: true, document }` (the parsed `DecisionsDocument`); `POST /api/decisions/rule` with `{ id, fingerprint, word?, comment? }` → the re-parsed document. Both answer refusals as `{ ok: false, code, message }` with a status from `DECISIONS_REFUSAL_STATUS` (400 input, 404 not-found, 409 the file's state, 422 a structure the splice would break, 500 config or I/O). Wire types in `packages/types/src/api.ts`.
+- Routes: `GET /api/decisions` → `{ ok: true, document }` (the parsed `DecisionsDocument`); `POST /api/decisions/rule` with `{ id, fingerprint, word?, comment? }` → the re-parsed document. `GET /api/decisions/image?path=` (#1938) → the bytes of one image an item references: the only decisions route that takes a path, so it fails closed (relative to the decisions file's directory, `/` = workspace root; the realpath must be inside the workspace; png/jpg/jpeg/gif/webp/svg on both the link and its target; at most 10 MB; `nosniff` and a sandbox CSP). All answer refusals as `{ ok: false, code, message }` with a status from `DECISIONS_REFUSAL_STATUS` (400 input, 404 not-found, 409 the file's state, 413/415 an image too large or not an image, 422 a structure the splice would break, 500 config or I/O). Wire types in `packages/types/src/api.ts`.
 - Server-side parsing (`servers/decisions/`): `grammar.ts` (a CommonMark subset: ATX headings and fences), `parse.ts` (items, options, the Q&A thread, the current ruling, a per-item SHA-256 fingerprint), `stamp.ts` (item timestamps to instants by `Intl` offset probing; ambiguous abbreviations and DST gaps/folds stay unconverted), `splice.ts` (pure: inserts the word and comment on the lines after `**Your word:**`, refuses anything else, and re-parses to verify).
 - Writes (`file.ts`): the path is canonicalized (symlinks followed) on every read and write and refused outside the workspace; one `KeyedSerializer` per canonical path, so of two concurrent submits to an item the second refuses as already ruled; the file is replaced atomically by an fsynced temporary file renamed over it, keeping its mode and any symlink.
 - Hub notice (#1828): after a write succeeds and its response is sent, the route calls a `notify` port with `rulingNotice()` (`notice.ts`: `RULED <id>: <word>` or `QUESTION <id>:`, then the comment). `notifyHubOfRuling` in `tower-routes.ts` requires an architect registered as `main` — no fallback, since the registry's "first registered" order is by name (#1633) — so an offline `main` holds `no-live-pty` and a workspace without one is logged and skipped; it refuses a notice over `MAX_MESSAGE_BYTES`, enqueues one mailbox row (`from_agent` `DECISIONS_TAB_SENDER` from codev-types, which `formatMessageForTarget` frames as `[USER via Decisions tab]`), runs the gated delivery and logs its outcome. Best-effort: a failure is logged, never returned; `handleRequest`'s catch skips its 500 once headers are sent.
 - Race-safe polling (`useDecisions(isActive)`): a 2 s poll only while the tab is active and the page visible, skipping a tick while a fetch is in flight; a generation counter, bumped by each fetch and by `applyDocument` (a write's returned document), drops stale responses, so an old poll cannot overwrite a newer document.
-- `DecisionsView` keeps drafts by item id, reconciled against every document; a draft whose item stops being writable (ruled elsewhere, moved out of `## Open`, duplicated, file gone) is held, copyable, until discarded. Bodies render through `MarkdownView` from `@cluesmith/codev-artifact-canvas`; only literal `http(s)` links open, in a new tab, and other links are inert.
+- `DecisionsView` keeps drafts by item id, reconciled against every document; a draft whose item stops being writable (ruled elsewhere, moved out of `## Open`, duplicated, file gone) is held, copyable, until discarded. Bodies render through `renderMarkdown` from `@cluesmith/codev-artifact-canvas`; only literal `http(s)` links open, in a new tab, and other links are inert. Every image source that is not `http(s)` is parked in `data-decisions-src` in an inert document before the HTML reaches the page, so the browser never requests a workspace path itself; the view fetches it with the key, shows it as an object URL (revoked on cleanup), and shows a not-loaded note for a refusal or any other scheme (#1938). A click opens a workspace image on a page holding only an `<img>` of it, so an SVG never runs as a document of the dashboard's origin.
 
 **Responsive Design**:
 - Desktop (>768px): Split-pane layout with file browser sidebar
@@ -1076,6 +1076,17 @@ branches are testable on macOS/Linux.
   prompt (a `git fetch` / `git push` needing credentials) must be made non-interactive and fail
   instead, as `GitRefResolver`'s fetch (`GIT_TERMINAL_PROMPT=0`, a timeout) and porch's status
   push now are.
+- **Process bootstrap and current-folder lookup** (#1911): every Codev process entry point (each
+  `bin/*.js`, `tower-server.ts`, `shellper-main.ts`) imports `lib/process-bootstrap.ts` as its
+  FIRST import; `process-bootstrap.test.ts` enforces it. Its one step today, on Windows, sets
+  `NoDefaultCurrentDirectoryInExePath=1` (`lib/platform/windows/exe-search.ts`), so a bare-name
+  spawn (`git`, `npm`) never resolves to a same-named file in the cwd (libuv and `cmd.exe` both
+  honor it; node-pty already searches `PATH` only). Children inherit it: every persistent
+  terminal Tower opens (architect, builder, shell tab) is built from Tower's own environment, and
+  the non-persistent fallback's `windowsPtyBaseEnv` allowlist sets it explicitly, so every
+  terminal carries it: in a `cmd.exe` terminal a current-folder program runs only as `.\name`.
+  The VS Code extension host is shared, so it does not set the variable; `cli-process.ts`
+  refuses an unresolved bare `codev`/`afx` name instead.
 - **Resolvers**: `lib/platform/windows/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the
   System32 WSL launcher), `codev-sdk/node/executable` (`findExecutable` with `PATHEXT`,
   `resolveSpawnable` turns `.cmd` shims into `node <entry>` or `%COMSPEC% /d /s /c`),
@@ -2122,7 +2133,7 @@ consult -m claude spec 42
 |-------|-----------|----------------|-------------|
 | gemini | `agy` (Antigravity CLI; resolved real bin, not the IDE symlink) | Folded into the prompt (role + query) | OAuth / subscription (no API key) |
 | codex | `codex` | Temp file via `-c experimental_instructions_file=` flag | `OPENAI_API_KEY` |
-| claude | the installed `claude` CLI (`CODEV_CLAUDE_BIN` pin, else `PATH`; floor 2.1.141, Spec 1912) | Role + claude-lane capability note via `--system-prompt-file` | The CLI's own login (subscription for most). `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are withheld unless `consult.claudeAuth: "api-key"` |
+| claude | the installed `claude` CLI (`CODEV_CLAUDE_BIN` pin, else `PATH`; floor 2.1.141, Spec 1912) | Role + claude-lane capability note via `--system-prompt-file` | The CLI's own login (subscription for most). `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are withheld unless `consult.claudeAuth: "api-key"`: a billing guarantee, not secrecy (the reviewer can still Read the workspace `.env`). Caps: `consult.claudeMaxTurns` (200) and `consult.claudeMaxBudgetUsd` ($25) |
 
 **Query building**: Five subcommands (`pr`, `spec`, `plan`, `impl`, `general`) each build a prompt that includes the spec/plan/diff content plus a verdict template (`VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]`). PR diffs truncated to 50k chars, impl diffs to 80k chars.
 

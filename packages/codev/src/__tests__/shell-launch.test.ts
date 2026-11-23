@@ -34,6 +34,7 @@ import {
 import { windowsPowerShellPath } from '../lib/platform.js';
 import { ptyCommand } from '../lib/pty-command.js';
 import { windowsPtyBaseEnv } from '../lib/platform/windows/pty-env.js';
+import { NO_CWD_EXE_SEARCH_ENV } from '../lib/platform/windows/exe-search.js';
 import { defaultInteractiveShell, windowsSystem32Path } from '../lib/platform.js';
 import { getDefaultConfig } from '../lib/config.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
@@ -225,6 +226,11 @@ describe('windowsPtyBaseEnv', () => {
       HOME: 'C:\\Users\\dev',
     });
     expect(base.SECRET_TOKEN).toBeUndefined();
+  });
+
+  it('turns off the current-folder program lookup even when the parent did not (#1911)', () => {
+    const base = windowsPtyBaseEnv({ Path: 'C:\\Windows\\system32' });
+    expect(base[NO_CWD_EXE_SEARCH_ENV]).toBe('1');
   });
 
   it('keeps an explicit HOME', () => {

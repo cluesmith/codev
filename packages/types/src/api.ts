@@ -733,7 +733,9 @@ export type DecisionsRefusalCode =
   | 'write-failed'
   | 'not-found'
   | 'outside-workspace'
-  | 'config-error';
+  | 'config-error'
+  | 'not-an-image'
+  | 'image-too-large';
 
 /** GET …/api/decisions. */
 export type DecisionsReadResponse =

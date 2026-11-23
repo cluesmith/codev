@@ -43,7 +43,7 @@ export class TowerClient extends SdkTowerClient {
   override async request<T>(
     path: string,
     options: RequestInit = {},
-  ): Promise<{ ok: boolean; status: number; data?: T; error?: string }> {
+  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; connectionRefused?: boolean }> {
     assertTunnelMutationAllowedUnderTest(path, this.targetsDefaultTowerPort);
     return super.request<T>(path, options);
   }

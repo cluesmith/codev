@@ -185,7 +185,7 @@ describe('TowerClient.sendMessage — the error code of a failed send', () => {
   it('has no errorCode when Tower could not be reached', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:4100'); }));
     const result = await new TowerClient().sendMessage('architect', 'hi');
-    expect(result).toEqual({ ok: false, error: 'Tower not running' });
+    expect(result).toEqual({ ok: false, error: 'Tower not running', connectionRefused: true });
     expect('errorCode' in result).toBe(false);
   });
 

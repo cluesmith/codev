@@ -58,7 +58,7 @@ import { getWorktreeConfig, getActivityHooks, getResolvedCommands } from '../uti
 import { windowsShellRequest } from '../../lib/platform/windows/git-bash-launch.js';
 import { commandLaunch } from '../../lib/platform/command-launch.js';
 import { ensureCodevConfigWatcher } from './codev-config-watcher.js';
-import { handleDecisionsGet, handleDecisionsRule } from './decisions/routes.js';
+import { handleDecisionsGet, handleDecisionsImage, handleDecisionsRule } from './decisions/routes.js';
 import { decisionsFilePresent } from './decisions/file.js';
 import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
 import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
@@ -3307,6 +3307,10 @@ async function handleWorkspaceRoutes(
     // The file is the configured one; neither route takes a path from the request.
     if (req.method === 'GET' && apiPath === 'decisions') {
       return handleDecisionsGet(res, workspacePath);
+    }
+    // GET /api/decisions/image?path= — an image an item references (#1938), contained by the route.
+    if (req.method === 'GET' && apiPath === 'decisions/image') {
+      return handleDecisionsImage(res, workspacePath, url.searchParams.get('path'));
     }
     if (req.method === 'POST' && apiPath === 'decisions/rule') {
       return handleDecisionsRule(req, res, workspacePath, ctx.log, message => notifyHubOfRuling(workspacePath, message, ctx.log));

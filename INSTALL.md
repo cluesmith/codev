@@ -88,7 +88,7 @@ When a user requests Codev installation, check if the consultation tools are ava
 command -v consult >/dev/null && echo "✓ consult CLI available" || echo "✗ consult CLI not found"
 ```
 
-**Note**: The `consult` CLI is installed with `npm install -g @cluesmith/codev`. Multi-agent consultation requires at least one of: `claude`, `gemini-cli`, or `codex`.
+**Note**: The `consult` CLI is installed with `npm install -g @cluesmith/codev`. Multi-agent consultation requires at least one of: `claude`, `gemini-cli`, or `codex`. The `claude` lane runs your installed `claude` CLI, which must be version 2.1.141 or newer (`claude --version`).
 
 ### Step 2: Create and Populate the Codev Directory
 

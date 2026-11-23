@@ -249,6 +249,8 @@ afx spawn [number] --protocol <name> [options]
 - `--branch <name>` - Build on an existing remote branch instead of creating one (requires `--protocol`)
 - `--remote <name>` - Remote to fetch the `--branch` from (fork PRs)
 - `--no-role` - Skip loading role prompt
+- `--max-load <n>` - Read the one-minute load average first; at or above N, exit 75 with the load and the limit, creating nothing (no branch, worktree or registry row). Unsupported on native Windows, which reports no load average (exits 1).
+- `--wait <seconds>` - With `--max-load`: re-read every 15 seconds for up to this long, then spawn or exit 75
 
 **Preconditions:**
 
@@ -302,14 +304,26 @@ afx spawn 42 --resume
 Show status of all agents.
 
 ```bash
-afx status
+afx status [options]
 ```
+
+**Options:**
+- `--mine` - Only builders spawned by the current architect (`CODEV_ARCHITECT_NAME`)
+- `--architect <name>` - Only builders spawned by the named architect
+- `--activity` - Also show each builder's session activity and running test/review processes (slower)
+- `--json` - Machine-readable output (with `--activity`, includes the activity fields)
 
 **Description:**
 
-Displays the current state of Tower, the registered architects (one per
-sibling — Spec 786 Phase 5 replaces the pre-786 single-row collapse), and the
-running builders.
+Displays the current state of Tower, the registered architects, and every
+builder. Each builder row shows what the builder is doing now:
+
+- **Phase** - the porch phase, read from the builder's own worktree
+  `status.yaml` (`—` when the worktree has no porch project)
+- **Gate** - the human gate it is waiting at, and for how long
+- **Last active** - how long since its terminal last printed anything;
+  `stopped` when it has no live session, `unknown` when Tower is not running
+- **Held** - held-mail count, shown when the workspace has held mail
 
 **Example output (Tower running):**
 
@@ -326,33 +340,39 @@ Agent Farm Status
 
   Architects:
     main      (pid=12345 terminal=sess-abc-123)
-    ob-refine (pid=12346 terminal=sess-def-456)
 
-  Terminals:
-    builder - builder-spir-0042 (active)
+  Builders:
+    ID                    Owner           Type      Phase         Gate                  Last active
+    ──                    ─────           ────      ─────         ────                  ───────────
+    builder-spir-42       main            protocol  specify       spec-approval (2h)    5m ago
+    builder-air-43        main            protocol  complete      —                     stopped
+    builder-bugfix-44     main            bugfix    implement     —                     just now
+
+  Held mail: none
 ```
 
-**Example output (Tower not running — fallback mode):**
+`--activity` adds a section with, per builder: when its agent session
+transcript was last written, whether its last reply was an API error, its
+last three transcript lines, and the test or review processes (`vitest`,
+`pnpm test`, `consult`, …) running under its terminal. Transcript fields are
+read from the builder's pinned Claude session; on other harnesses, or when the
+file cannot be read, they show `unknown`. The process table read is bounded
+to a few seconds and also reports `unknown` when it cannot finish. The
+transcript lines are verbatim conversation text (control characters
+stripped): check them before pasting `--activity` output into a public issue.
 
 ```
-Agent Farm Status
-  Tower: not running
-  Run 'afx tower start' to start the tower daemon
-
-  Architects: 2 registered
-    (Tower not running — PID/port not available)
-    main:      cmd=claude started=2026-05-22T10:00:00Z
-    ob-refine: cmd=claude started=2026-05-22T11:00:00Z
-
-  Builders: none
+  Activity:
+    builder-spir-42  session write: 2m ago  ·  API error: no
+      > assistant: Running the suite before signalling porch.
+      > tool: Bash(pnpm test)
+      running: test pnpm test (pid 4242)
 ```
 
-Builder status values:
-- `spawning` - Worktree created, builder starting
-- `implementing` - Actively working
-- `blocked` - Stuck, needs architect help
-- `pr` - Implementation complete
-- `complete` - Merged, can be cleaned up
+In `--json`, each builder keeps its existing fields (`status` and `phase` are
+the values recorded at spawn) and adds `porchPhase`, `gate` (`{name, since}`
+or null), `lastActivityAt`, `terminalLive`, and `activity` (null without
+`--activity`). Any field that could not be read is `null`.
 
 ---
 
@@ -426,10 +446,18 @@ afx cleanup -p <id> [options]
 **Options:**
 - `-p, --project <id>` - Builder ID to clean up (required)
 - `-f, --force` - Force cleanup even if branch not merged
+- `--keep-ignored` - Before the worktree is removed, copy what it alone holds to `~/.agent-farm/kept/<workspace-name>/<builder-id>/`
 
 **Description:**
 
 Removes a builder's worktree and associated resources. By default, refuses to delete worktrees with uncommitted changes or unmerged branches.
+
+**`--keep-ignored`:** worktree removal is forced, so every untracked and ignored file in it goes too — review outputs, project status folders, scratch notes. With this flag, cleanup first copies out:
+
+- every untracked file that is not ignored;
+- ignored files matching the keep list — default `codev/projects/**`, `codev/state/**`, `.builder-*`, `tmp/**`, `scratch/**`, replaced by `cleanup.keepIgnored` (an array of globs) in `.codev/config.json`.
+
+Dependency and build output (`node_modules`, `dist`, `build`, `target`, virtualenvs and the like) is never copied, whatever the list says; nor are symlinks. Each copy is checked by SHA-256. If the kept folder already exists, cleanup stops naming it, before touching anything. If any copy or checksum fails, the partial kept folder is removed and cleanup stops **before** the worktree, the branch or the registry row is removed. On success it prints the kept folder, the number of files, and how many matches were left out as dependency or build output. Only bugfix and task cleanups remove a worktree; for other builders the flag keeps nothing.
 
 **Examples:**
 
@@ -439,6 +467,9 @@ afx cleanup -p 0042
 
 # Force cleanup (may lose work)
 afx cleanup -p 0042 --force
+
+# Keep untracked files and kept ignored files before the worktree goes
+afx cleanup -i 42 --keep-ignored
 ```
 
 ---
@@ -466,6 +497,9 @@ afx send [builder] [message] [options]
 - `--raw` - Skip structured message formatting
 - `--no-enter` - Do not send Enter after message
 - `--delay <seconds>` - Deliver after N seconds instead of immediately (Spec 1307)
+- `--message-file <path>` - Read the message body from a file. It never passes through a shell, so quotes, `$` and newlines arrive as written; only the single line ending that terminates the file is dropped. Distinct from `--file`, which appends a file to the message; the two combine, and the 48 KB limit applies to the result.
+- `--exit-code` - Exit by outcome (see **Exit codes** below). Without it, exit codes are unchanged.
+- `--retry <n>` - Up to N retries in total, only when the request provably never reached Tower (connection refused, Tower not running). Backs off 1s, 2s, 4s, then 8s, and says on stderr what happened.
 
 **Delayed delivery (`--delay`):**
 
@@ -552,6 +586,17 @@ as `[Pasted Content N chars]`; the echo verification behind the `(unverified —
 placard as well as the header, so a correct long delivery is reported verified. agy keeps the older
 line-by-line shape (also chunked) because its paste handling has not been measured.
 
+**Exit codes (`--exit-code`, Issue #1950):** opt-in, in the manner of `git diff --exit-code`.
+
+| Exit | Outcome |
+|------|---------|
+| 0 | delivered, or scheduled by `--delay` |
+| 1 | failed or refused |
+| 3 | held |
+| 4 | delivered but unverified — the header was not seen on the terminal, input raced the write, or the write was not serialized. Recorded as delivered and never re-sent. |
+
+With `--all`, the exit is the worst outcome across recipients (failed, then unverified, then held), and 1 when there are no builders to reach. **Without the flag a held message exits 0**, exactly as before: callers chain `afx send … && …`, and a held message is persisted and will deliver — read as a failure, it gets sent again and arrives twice. For the same reason `--retry` never resends after `held`, a refusal, or a timeout on a request that was sent: the mailbox may already hold it.
+
 **Examples:**
 
 ```bash
@@ -579,6 +624,9 @@ afx send --all "Time to wrap up, create PRs"
 
 # Include file content
 afx send spir-42 --file src/api.ts "Review this implementation"
+
+# Message body from a file — no shell quoting; script-friendly exit codes; ride out a Tower restart
+afx send architect --message-file /tmp/report.md --exit-code --retry 3
 ```
 
 **Discovering active agents** (Spec 823):
@@ -1232,7 +1280,7 @@ Both are Tower-global (they apply to the whole Tower, not per-project) and optio
 
 Turn the tab on with `afx decisions init`. It creates the decisions file from its template, prints where it went, and gives the one sentence to tell the main architect: "Route every ask for my word through the decisions file." It refuses a file that already exists, because that file holds the owner's rulings, and a path outside the workspace. `--path <file>` creates another file, relative to the workspace root; the tab shows it once `dashboard.decisionsFile` names it.
 
-When a workspace has a pending-decisions file, the dashboard shows a **Decisions** tab (Spec 1819). The tab is a view of that file. Each item under `## Open` becomes a card with a click box per option (the first option, the recommended one, is marked) and a comment box. Submitting writes the chosen word, then the comment, on the lines right after the item's `**Your word:**` line, exactly as the owner would type them, and changes nothing else. `## Ruled` is shown below as a collapsed, read-only list. The file is the only state. While the tab is open it re-reads the file every 2 seconds, so edits made elsewhere appear without a reload, and an unsent draft survives them.
+When a workspace has a pending-decisions file, the dashboard shows a **Decisions** tab (Spec 1819). The tab is a view of that file. Each item under `## Open` becomes a card with a click box per option (the first option, the recommended one, is marked) and a comment box. Submitting writes the chosen word, then the comment, on the lines right after the item's `**Your word:**` line, exactly as the owner would type them, and changes nothing else. `## Ruled` is shown below as a collapsed, read-only list. An image in an item's markdown shows inline: a relative path is read from the decisions file's directory (keep the files in `decision-assets/` beside it), a `/`-rooted one from the workspace root, and only PNG, JPEG, GIF, WebP and SVG files up to 10 MB inside the workspace are shown; any other image appears as its alt text and path, marked not loaded. The file is the only state. While the tab is open it re-reads the file every 2 seconds, so edits made elsewhere appear without a reload, and an unsent draft survives them.
 
 The file's format and the process around it are in [`decision-protocol.md`](../decision-protocol.md): one hub architect, `main`, is the only agent that edits the file, other architects send it their items, and the hub relays each ruling. The tab reads exactly the item format that document describes.
 
