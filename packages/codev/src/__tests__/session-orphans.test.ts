@@ -5,9 +5,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { JobMemberProcess, JobMembersOutcome, EndProcessOutcome } from '../lib/platform/windows/job-objects.js';
+import type { JobMemberProcess, JobMembersOutcome } from '../lib/platform/windows/job-objects.js';
 import { classifyOrphans, hasDeadParent, withLiveDescendants } from '../lib/platform/windows/session-orphans.js';
-import { endOrphans, listOrphans, parseEndTargets, type OrphanDeps, type OrphanSessionRef } from '../agent-farm/servers/session-orphans.js';
+import { listOrphans, type OrphanDeps, type OrphanSessionRef } from '../agent-farm/servers/session-orphans.js';
 import type { ProcessCensusEntry } from '../lib/platform/processes.js';
 
 /** A live member; `parent` defaults to a live parent created before it. */
@@ -95,7 +95,6 @@ function harness(opts: {
   census?: ProcessCensusEntry[] | Error;
   infrastructurePids?: number[];
   shellperJobs?: Record<number, string>;
-  end?: (target: number) => EndProcessOutcome;
 }) {
   const jobMembers = vi.fn(async (name: string, rootPid: number): Promise<JobMembersOutcome> => {
     const members = opts.jobs[name];
@@ -103,13 +102,12 @@ function harness(opts: {
     if (!members.some((p) => p.pid === rootPid)) return { ok: true, found: true, member: false, processes: [] };
     return { ok: true, found: true, member: true, processes: members };
   });
-  const endProcess = vi.fn(async (_name: string, _root: number, target: number) => opts.end?.(target) ?? ({ ok: true, ended: true } as EndProcessOutcome));
   const censusFn = vi.fn(async () => {
     if (opts.census instanceof Error) throw opts.census;
     return opts.census ?? [];
   });
   const deps: OrphanDeps = {
-    helper: () => ({ jobMembers, endProcess }),
+    helper: () => ({ jobMembers }),
     sessions: () => opts.sessions,
     infrastructurePids: () => opts.infrastructurePids ?? [],
     census: censusFn,
@@ -118,7 +116,7 @@ function harness(opts: {
       return null;
     },
   };
-  return { deps, jobMembers, endProcess, census: censusFn };
+  return { deps, jobMembers, census: censusFn };
 }
 
 const builder: OrphanSessionRef = { workspacePath: WS, terminalId: 't-b', agent: 'pir-1', kind: 'builder', rootPid: 100, jobName: 'J-b' };
@@ -187,43 +185,5 @@ describe('listOrphans (Tower)', () => {
     expect((await listOrphans(h.deps)).sessions[0]).toMatchObject({ job: false, orphans: [] });
     const noHelper = { ...h.deps, helper: () => null };
     expect((await listOrphans(noHelper)).sessions[0]).toMatchObject({ job: false, error: 'no job helper is running' });
-  });
-});
-
-describe('endOrphans (Tower)', () => {
-  const jobs = { 'J-b': [...sessionTree, m(110, 999, 2000, 'gone', undefined, 'find.exe'), m(111, 110, 2001, 'alive', 2000)] };
-
-  it('ends exactly the named orphan and descendant, with the listed creation times', async () => {
-    const h = harness({ sessions: [builder], jobs, census: census([]) });
-    const response = await endOrphans(h.deps, [{ terminalId: 't-b', pid: 110, createdAt: 2000 }, { terminalId: 't-b', pid: 111, createdAt: 2001 }]);
-    expect(response.results.map((r) => [r.pid, r.outcome])).toEqual([[110, 'ended'], [111, 'ended']]);
-    expect(h.endProcess.mock.calls).toEqual([['J-b', 100, 110, 2000], ['J-b', 100, 111, 2001]]);
-  });
-
-  it('refuses a stale creation time, a non-orphan, the root, the agent and an unknown session', async () => {
-    const h = harness({ sessions: [builder], jobs, census: census([]) });
-    const response = await endOrphans(h.deps, [
-      { terminalId: 't-b', pid: 110, createdAt: 1999 },
-      { terminalId: 't-b', pid: 100, createdAt: 1000 },
-      { terminalId: 't-b', pid: 104, createdAt: 1004 },
-      { terminalId: 't-x', pid: 110, createdAt: 2000 },
-    ]);
-    expect(response.results.map((r) => r.outcome)).toEqual(['refused', 'refused', 'refused', 'refused']);
-    expect(h.endProcess).not.toHaveBeenCalled();
-  });
-
-  it('refuses a session outside the requested workspace, and passes on the helper\'s refusal', async () => {
-    const h = harness({ sessions: [builder], jobs, census: census([]), end: () => ({ ok: true, ended: false, gone: false, reason: 'it is not in the session job' }) });
-    const other = await endOrphans(h.deps, [{ terminalId: 't-b', pid: 110, createdAt: 2000 }], (ws) => ws === 'C:\\elsewhere');
-    expect(other.results[0]).toMatchObject({ outcome: 'refused', reason: 'no such session in this workspace' });
-    const refused = await endOrphans(h.deps, [{ terminalId: 't-b', pid: 110, createdAt: 2000 }]);
-    expect(refused.results[0]).toMatchObject({ outcome: 'refused', reason: 'it is not in the session job' });
-  });
-
-  it('parseEndTargets accepts only well-formed targets', () => {
-    expect(parseEndTargets({ targets: [{ terminalId: 't', pid: 1, createdAt: 2 }] })).toEqual([{ terminalId: 't', pid: 1, createdAt: 2 }]);
-    expect(parseEndTargets({ targets: [{ terminalId: 't', pid: '1', createdAt: 2 }] })).toBeNull();
-    expect(parseEndTargets({})).toBeNull();
-    expect(parseEndTargets(null)).toBeNull();
   });
 });

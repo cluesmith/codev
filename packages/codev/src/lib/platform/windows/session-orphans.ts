@@ -27,7 +27,7 @@
  * The session's console host, launch loop and agent each have a live parent
  * all the way back to the root, so none of them can match. A background
  * process the user started on purpose and whose shell has exited does match:
- * it is listed, and ended only when the human asks.
+ * it is listed. Nothing here ends a process: an orphan ends with its session.
  */
 
 import type { JobMemberProcess } from './job-objects.js';
@@ -43,7 +43,7 @@ export interface ListedProcess {
 }
 
 export interface OrphanProcess extends ListedProcess {
-  /** Its unprotected job-member descendants, linked by live parents; ended with it. */
+  /** Its unprotected job-member descendants, linked by live parents. */
   descendants: ListedProcess[];
 }
 

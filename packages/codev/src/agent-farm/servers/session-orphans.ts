@@ -1,7 +1,9 @@
 /**
- * Tower's listing and ending of orphaned processes in its sessions (#1915).
- * Windows only. See `lib/platform/windows/session-orphans.ts` for which
- * processes count as orphaned.
+ * Tower's listing of orphaned processes in its sessions (#1915). Windows only.
+ * Read-only: session jobs allow no breakaway, so an orphan ends with its
+ * session (closing the terminal, or `afx cleanup`); nothing here ends a
+ * process. See `lib/platform/windows/session-orphans.ts` for which processes
+ * count as orphaned.
  *
  * Never protected processes. Before classifying a session's job, Tower builds
  * the set it must never list or end, with every descendant by live parent
@@ -15,26 +17,13 @@
  * The command lines come from the process census, read only when the job has
  * an orphan candidate; they are used to decide and are never returned or
  * logged.
- *
- * Ending re-lists the session and ends only a process named in the request
- * that is still an orphan (or an orphan's descendant) with the same creation
- * time, through the helper's `end-process`, which re-checks job membership and
- * creation time in the kernel call path. Nothing is ever ended without a
- * request naming it.
  */
 
-import type { JobMemberProcess, JobMembersOutcome, EndProcessOutcome } from '../../lib/platform/windows/job-objects.js';
+import type { JobMemberProcess, JobMembersOutcome } from '../../lib/platform/windows/job-objects.js';
 import { classifyOrphans, withLiveDescendants } from '../../lib/platform/windows/session-orphans.js';
 import { isCodevInfrastructure, protectedInfrastructure } from '../../lib/platform/windows/codev-infrastructure.js';
 import type { ProcessCensusEntry } from '../../lib/platform/processes.js';
-import type {
-  OrphanEndResult,
-  OrphanEndTarget,
-  OrphansEndResponse,
-  OrphansListing,
-  SessionKind,
-  SessionOrphans,
-} from '../lib/session-orphans-api.js';
+import type { OrphansListing, SessionKind, SessionOrphans } from '../lib/session-orphans-api.js';
 
 /** A shellper-backed session Tower holds. */
 export interface OrphanSessionRef {
@@ -50,7 +39,6 @@ export interface OrphanSessionRef {
 /** The helper calls the listing needs (Tower's `WindowsJobHelper` satisfies it). */
 export interface OrphanJobHelper {
   jobMembers(name: string, rootPid: number): Promise<JobMembersOutcome>;
-  endProcess(name: string, rootPid: number, target: number, createdAt: number): Promise<EndProcessOutcome>;
 }
 
 export interface OrphanDeps {
@@ -139,82 +127,4 @@ export async function listOrphans(deps: OrphanDeps, inWorkspace: (workspacePath:
     sessions.push(row);
   }
   return { supported: true, sessions };
-}
-
-/**
- * End exactly the requested processes that are still orphans (or orphans'
- * descendants) of their session, with the creation time the listing showed.
- */
-export async function endOrphans(
-  deps: OrphanDeps,
-  targets: OrphanEndTarget[],
-  inWorkspace: (workspacePath: string) => boolean = () => true,
-  log: (message: string) => void = () => {},
-): Promise<OrphansEndResponse> {
-  const all = deps.sessions();
-  const helper = deps.helper();
-  const results: OrphanEndResult[] = [];
-  const byTerminal = new Map<string, OrphanEndTarget[]>();
-  for (const target of targets) {
-    const list = byTerminal.get(target.terminalId);
-    if (list) list.push(target);
-    else byTerminal.set(target.terminalId, [target]);
-  }
-
-  for (const [terminalId, sessionTargets] of byTerminal) {
-    const session = selected(all, inWorkspace).find((s) => s.terminalId === terminalId);
-    const refuse = (reason: string) => sessionTargets.forEach((t) => results.push({ ...t, outcome: 'refused', reason }));
-    if (!session) {
-      refuse('no such session in this workspace');
-      continue;
-    }
-    if (!helper) {
-      refuse('no job helper is running');
-      continue;
-    }
-    const check = await checkSession(session, all, helper, deps);
-    if (check.error !== undefined) {
-      refuse(check.error);
-      continue;
-    }
-    const allowed = new Map<number, { createdAt: number; name: string }>();
-    for (const orphan of check.orphans) {
-      allowed.set(orphan.pid, orphan);
-      for (const d of orphan.descendants) allowed.set(d.pid, d);
-    }
-    for (const target of sessionTargets) {
-      const current = allowed.get(target.pid);
-      if (!current || current.createdAt !== target.createdAt) {
-        results.push({ ...target, outcome: 'refused', reason: 'it is no longer an orphan of this session' });
-        continue;
-      }
-      const outcome = await helper.endProcess(session.jobName, session.rootPid, target.pid, target.createdAt);
-      if (!outcome.ok) {
-        results.push({ ...target, outcome: 'failed', reason: outcome.error });
-      } else if (outcome.ended) {
-        log(`Ended orphaned process ${current.name} (pid ${target.pid}) in session ${session.agent} (${session.terminalId})`);
-        results.push({ ...target, outcome: 'ended' });
-      } else if (outcome.gone) {
-        results.push({ ...target, outcome: 'gone' });
-      } else {
-        results.push({ ...target, outcome: 'refused', reason: outcome.reason ?? 'refused by the job helper' });
-      }
-    }
-  }
-  return { supported: true, results };
-}
-
-/** Validates a POST body's targets; null when malformed. */
-export function parseEndTargets(body: unknown): OrphanEndTarget[] | null {
-  if (body === null || typeof body !== 'object') return null;
-  const raw = (body as { targets?: unknown }).targets;
-  if (!Array.isArray(raw)) return null;
-  const targets: OrphanEndTarget[] = [];
-  for (const item of raw) {
-    if (item === null || typeof item !== 'object') return null;
-    const t = item as Record<string, unknown>;
-    if (typeof t.terminalId !== 'string' || !Number.isInteger(t.pid) || !Number.isInteger(t.createdAt)) return null;
-    targets.push({ terminalId: t.terminalId, pid: t.pid as number, createdAt: t.createdAt as number });
-  }
-  return targets;
 }

@@ -21,6 +21,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
   ],
   '.claude/skills/afx': [
     '04cc0666eb98f5a4aa77e4e92a0eb7b3340926ae72c78d8a0e02c9d014b92ac4',
+    '071436b6888246055e0e2f8257142d41227d971a18c5a5f3a6dbe49183cb8a89',
     '14f2d63a22ead8f3cc0a51e05230594a050761ede76257b830ecb5328846de98',
     '1bfa5b78353707681e5a5236c9830a120b5c22dc42dec3b6f9d3db6c20d14907',
     '2b3df4505d3c1a47e7a99d5510837dd5bdd6ea20867e33fb079ae8b3bdcc063c',
@@ -133,6 +134,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
   ],
   '.codex/skills/afx': [
     '04cc0666eb98f5a4aa77e4e92a0eb7b3340926ae72c78d8a0e02c9d014b92ac4',
+    '071436b6888246055e0e2f8257142d41227d971a18c5a5f3a6dbe49183cb8a89',
     '14f2d63a22ead8f3cc0a51e05230594a050761ede76257b830ecb5328846de98',
     '2b3df4505d3c1a47e7a99d5510837dd5bdd6ea20867e33fb079ae8b3bdcc063c',
     '2df1b560a49af9108c2fa668d8cf5978640747ad4c5bd598d52e1335f74447b5',

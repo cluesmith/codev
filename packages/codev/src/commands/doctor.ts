@@ -256,7 +256,7 @@ export function checkOrphans(listing: OrphansListing | null, error?: string): Or
     status: 'warn',
     summary: `${total} orphaned process(es) in ${withOrphans.length} Codev session(s), still running after their parent exited`,
     details: withOrphans.map((s) => `${s.agent} (${s.workspacePath}): ${s.orphans.map((o) => `${o.name || '?'} pid ${o.pid}`).join(', ')}`),
-    recommendation: 'Review them with `afx orphans` in that workspace, then end them with `afx orphans <agent> --apply` (a deliberate background process is listed too)',
+    recommendation: 'They end when their session does: close that terminal, or run `afx cleanup` for a builder (a deliberate background process is listed too)',
   };
 }
 

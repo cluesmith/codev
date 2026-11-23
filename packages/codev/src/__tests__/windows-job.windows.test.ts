@@ -270,7 +270,7 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(alive(leafPid)).toBe(true);
   }, 90_000);
 
-  it('#1915: snapshot, job-members and end-process against real processes', async () => {
+  it('#1915: snapshot and job-members against real processes', async () => {
     const helper = newHelper();
     expect(await helper.start()).toBeNull();
 
@@ -317,17 +317,6 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(leaf!.createdAt).toBeGreaterThan(0);
     expect(byPid.has(outsider.pid!)).toBe(false);
 
-    // Refusals: the root, a process outside the job, a stale creation time.
-    expect(await helper.endProcess(name, root.pid!, root.pid!, 0)).toMatchObject({ ok: true, ended: false, reason: 'it is the session root' });
-    expect(await helper.endProcess(name, root.pid!, outsider.pid!, 0)).toMatchObject({ ok: true, ended: false, reason: 'it is not in the session job' });
-    expect(await helper.endProcess(name, root.pid!, leafPid, leaf!.createdAt! - 5000)).toMatchObject({ ok: true, ended: false, reason: 'the pid now belongs to another process' });
-    expect(alive(leafPid)).toBe(true);
-
-    expect(await helper.endProcess(name, root.pid!, leafPid, leaf!.createdAt!)).toEqual({ ok: true, ended: true });
-    expect(await waitFor(() => !alive(leafPid), 10_000)).toBe(true);
-    expect(alive(root.pid!)).toBe(true);
-    expect(alive(outsider.pid!)).toBe(true);
-    expect(await helper.endProcess(name, root.pid!, leafPid, leaf!.createdAt!)).toMatchObject({ ok: true, ended: false, gone: true });
   }, 90_000);
 
   it('a stopped helper (Tower restart) does not kill a job member, and a new helper still finds the job by name', async () => {

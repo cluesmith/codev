@@ -4,10 +4,10 @@
  * real job helper and real processes:
  *
  * - A shellper session plants a child whose parent then exits: it is listed
- *   as an orphan and ended on request, while the shellper, its console host
- *   and its shell keep running.
+ *   as an orphan (never the shellper, its console host or its shell), and
+ *   closing the session ends it with everything else the session started.
  * - A process outside every session job, also with a dead parent, is never
- *   listed, and a request to end it is refused.
+ *   listed, and survives that session's end.
  * - A Tower started from inside a session by a plain spawn: with the session
  *   marker set it refuses to start; with the marker removed it starts, the
  *   listing never shows it, its helper or its session, and tearing the outer
@@ -29,7 +29,7 @@ import { WindowsJobHelper, sessionJobName } from '../lib/platform/windows/job-ob
 import { resolveGitBash } from '../lib/platform/windows/git-bash.js';
 import { shellperTransport } from '../lib/platform/shellper-transport.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
-import { endOrphans, listOrphans, type OrphanDeps, type OrphanSessionRef } from '../agent-farm/servers/session-orphans.js';
+import { listOrphans, type OrphanDeps, type OrphanSessionRef } from '../agent-farm/servers/session-orphans.js';
 import { killSessionTree } from '../lib/process-tree.js';
 
 const onWindows = process.platform === 'win32';
@@ -188,7 +188,7 @@ async function rootInJob(helper: WindowsJobHelper, shellperSessionId: string, sc
 }
 
 describe.skipIf(!onWindows)('orphaned processes in session jobs (native Windows)', () => {
-  it('lists and ends a real session\'s orphan; never its shellper, console host or shell, nor a process outside the job', async () => {
+  it('lists a real session\'s orphan (never its shellper, console host or shell, nor a process outside the job); closing the session ends it', async () => {
     const helper = newHelper();
     expect(await helper.start()).toBeNull();
     const manager = new SessionManager({ socketDir: path.join(workDir, 'run'), shellperScript, nodeExecutable: process.execPath, jobHelper: () => helper });
@@ -224,15 +224,9 @@ describe.skipIf(!onWindows)('orphaned processes in session jobs (native Windows)
     expect(listedPids).toContain(leaf);
     for (const pid of [info.pid, shellChild, outside]) expect(listedPids).not.toContain(pid);
 
-    const refused = await endOrphans(deps, [{ terminalId: 't-1', pid: outside, createdAt: orphan.createdAt }, { terminalId: 't-1', pid: info.pid, createdAt: orphan.createdAt }]);
-    expect(refused.results.map((r) => r.outcome)).toEqual(['refused', 'refused']);
-
-    const targets = [orphan, ...orphan.descendants].map((p) => ({ terminalId: 't-1', pid: p.pid, createdAt: p.createdAt }));
-    const ended = await endOrphans(deps, targets);
-    expect(ended.results.map((r) => r.outcome).every((o) => o === 'ended' || o === 'gone')).toBe(true);
-    await waitFor(() => !alive(leaf), 10_000, 'the orphan to end');
-    expect(alive(info.pid)).toBe(true);
-    expect(alive(shellChild)).toBe(true);
+    // Closing the session ends the orphan with everything else it started; the outside process survives.
+    await manager.killSession(sessionId);
+    await waitFor(() => listedPids.every((pid) => !alive(pid)) && !alive(shellChild) && !alive(info.pid), 15_000, 'the session and its orphan to end');
     expect(alive(outside)).toBe(true);
   }, 120_000);
 

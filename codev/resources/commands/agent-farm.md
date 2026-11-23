@@ -356,37 +356,6 @@ Builder status values:
 
 ---
 
-### afx orphans
-
-Windows only (#1915). List, and on request end, the processes left running in a session after
-their parent exited: typically the children of an agent command that timed out, which keep
-running inside the session's job.
-
-```bash
-afx orphans [agent] [--all] [--apply] [-y] [--port <port>]
-```
-
-**Options:**
-- `agent` - One session: a builder id or architect name in this workspace. Omitted: every session.
-- `--apply` - End the listed processes after confirming. Needs `agent` or `--all`.
-- `--all` - With `--apply`, every session in this workspace.
-- `-y, --yes` - Skip the confirmation.
-- `--port <port>` - Tower port (default 4100).
-
-**Description:**
-
-Without `--apply` nothing changes. With it, the command shows what it will end (name, pid, age,
-CPU time; never command lines), asks, and asks Tower to end exactly those. Tower re-checks each
-one first: still in that session's job, still orphaned, same creation time. A process counts as
-orphaned when it is in the session's job, its parent has exited, and it is not Codev's own:
-Tower, its Job Object helper and IDE server, any session's shellper, and other sessions'
-processes are never listed or ended. A background process you started on purpose whose shell
-then exited is listed too, so check before ending. Nothing is ever ended automatically.
-`afx status` and `codev doctor` show the same list. On macOS and Linux it prints that it is
-Windows only.
-
----
-
 ### afx whoami
 
 Report this terminal's agent identity — workspace, type, and name — from

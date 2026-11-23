@@ -344,17 +344,6 @@ describe('WindowsJobHelper', () => {
     });
   });
 
-  it('#1915: end-process passes target and creation time, and reports ended, gone or a refusal', async () => {
-    const answers = [{ ok: true, ended: true }, { ok: true, ended: false, gone: true }, { ok: true, ended: false, reason: 'it is not in the session job' }, { ok: false, error: 'TerminateProcess failed', code: 5 }];
-    const f = fakeFactory({ respond: () => answers.shift()! });
-    const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
-    expect(await helper.endProcess('job', 10, 20, 1234)).toEqual({ ok: true, ended: true });
-    expect(f.spawned[0].requests[0]).toMatchObject({ op: 'end-process', name: 'job', pid: 10, target: 20, created: 1234 });
-    expect(await helper.endProcess('job', 10, 20, 1234)).toEqual({ ok: true, ended: false, gone: true });
-    expect(await helper.endProcess('job', 10, 20, 1234)).toEqual({ ok: true, ended: false, gone: false, reason: 'it is not in the session job' });
-    expect(await helper.endProcess('job', 10, 20, 1234)).toEqual({ ok: false, error: 'TerminateProcess failed (Win32 error 5)', helperFailure: false });
-  });
-
   it('#1915: in-job reports membership of any pid', async () => {
     const f = fakeFactory({ respond: () => ({ ok: true, found: true, member: true }) });
     const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });

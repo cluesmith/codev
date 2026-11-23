@@ -66,10 +66,6 @@ export function sessionJobName(shellperSessionId: string): string {
  *   parent's state and creation time. A state is `alive`, `gone` (no such
  *   process, or it has exited) or `unknown` (it exists but cannot be opened).
  * - `{id, op:'in-job', name, pid}` (#1915): whether `pid` is in job `name`.
- * - `{id, op:'end-process', name, pid, target, created}` (#1915): terminate
- *   process `target` only if the session root `pid` is in job `name`, `target`
- *   is in the same job, is not the root, and still has creation time `created`
- *   (epoch ms). Answers `ended`, or `gone`, or a refusal `reason`.
  *
  * Errors carry the Win32 code. The readiness line reports a bind failure
  * instead of exiting silently, so the caller can name the cause.
@@ -105,7 +101,6 @@ try {
   Bind 'Process32NextW' ([bool]) @([IntPtr], [IntPtr])
   Bind 'GetProcessTimes' ([bool]) @([IntPtr], [Int64].MakeByRefType(), [Int64].MakeByRefType(), [Int64].MakeByRefType(), [Int64].MakeByRefType())
   Bind 'GetExitCodeProcess' ([bool]) @([IntPtr], [UInt32].MakeByRefType())
-  Bind 'TerminateProcess' ([bool]) @([IntPtr], [UInt32])
   $K = $type.CreateType()
 } catch {
   Out-Line @{ ready = $false; error = $_.Exception.Message; languageMode = $ExecutionContext.SessionState.LanguageMode.ToString() }
@@ -126,8 +121,6 @@ $ERROR_FILE_NOT_FOUND = 2
 $ERROR_INVALID_PARAMETER = 87
 $ERROR_ALREADY_EXISTS = 183
 $ERROR_MORE_DATA = 234
-# PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION
-$PROCESS_TERMINATE_QUERY = [UInt32]0x1001
 $STILL_ACTIVE = [UInt32]259
 $TH32CS_SNAPPROCESS = [UInt32]2
 $JOB_BASIC_PROCESS_ID_LIST = 3
@@ -307,40 +300,6 @@ function InJob($name, $procId) {
   if ($null -ne $opened.result) { return $opened.result }
   try { return @{ ok = $true; found = $true; member = (Test-JobMember $opened.job $procId) } } finally { [void]$K::CloseHandle($opened.job) }
 }
-function EndProcess($name, $rootPid, $target, $created) {
-  if ([int]$target -eq [int]$rootPid) { return @{ ok = $true; ended = $false; reason = 'it is the session root' } }
-  $opened = Open-JobForQuery $name
-  if ($null -ne $opened.result) {
-    if ($opened.result.ok) { return @{ ok = $true; ended = $false; reason = 'the session job no longer exists' } }
-    return $opened.result
-  }
-  $job = $opened.job
-  try {
-    if (-not (Test-JobMember $job $rootPid)) { return @{ ok = $true; ended = $false; reason = 'the session root is not in the job' } }
-    $proc = $K::OpenProcess($PROCESS_TERMINATE_QUERY, $false, [UInt32]$target)
-    $code = $M::GetLastWin32Error()
-    if ($proc -eq [IntPtr]::Zero) {
-      if ($code -eq $ERROR_INVALID_PARAMETER) { return @{ ok = $true; ended = $false; gone = $true } }
-      return @{ ok = $false; error = 'OpenProcess failed'; code = $code }
-    }
-    try {
-      $exit = [UInt32]0
-      if ($K::GetExitCodeProcess($proc, [ref]$exit) -and $exit -ne $STILL_ACTIVE) { return @{ ok = $true; ended = $false; gone = $true } }
-      $inJob = $false
-      $queried = $K::IsProcessInJob($proc, $job, [ref]$inJob)
-      $code = $M::GetLastWin32Error()
-      if (-not $queried) { return @{ ok = $false; error = 'IsProcessInJob failed'; code = $code } }
-      if (-not $inJob) { return @{ ok = $true; ended = $false; reason = 'it is not in the session job' } }
-      $createdNow = [Int64]0; $exited = [Int64]0; $kernel = [Int64]0; $user = [Int64]0
-      if (-not $K::GetProcessTimes($proc, [ref]$createdNow, [ref]$exited, [ref]$kernel, [ref]$user)) { return @{ ok = $true; ended = $false; reason = 'its creation time cannot be read' } }
-      if ([Int64][Math]::Floor(($createdNow - $FILETIME_UNIX_EPOCH) / 10000) -ne [Int64]$created) { return @{ ok = $true; ended = $false; reason = 'the pid now belongs to another process' } }
-      $terminated = $K::TerminateProcess($proc, [UInt32]1)
-      $code = $M::GetLastWin32Error()
-      if (-not $terminated) { return @{ ok = $false; error = 'TerminateProcess failed'; code = $code } }
-      return @{ ok = $true; ended = $true }
-    } finally { [void]$K::CloseHandle($proc) }
-  } finally { [void]$K::CloseHandle($job) }
-}
 Out-Line @{ ready = $true; languageMode = $ExecutionContext.SessionState.LanguageMode.ToString() }
 while ($true) {
   $line = [Console]::In.ReadLine()
@@ -355,7 +314,6 @@ while ($true) {
     elseif ($req.op -eq 'snapshot') { $res = @{ ok = $true; processes = (Get-ProcessTable).ToArray() } }
     elseif ($req.op -eq 'job-members') { $res = JobMembers $req.name $req.pid }
     elseif ($req.op -eq 'in-job') { $res = InJob $req.name $req.pid }
-    elseif ($req.op -eq 'end-process') { $res = EndProcess $req.name $req.pid $req.target $req.created }
     else { $res = @{ ok = $false; error = "unknown op $($req.op)" } }
   } catch {
     $res = @{ ok = $false; error = $_.Exception.Message }
@@ -418,12 +376,6 @@ export interface JobResult {
   member?: boolean;
   /** snapshot and job-members: the raw rows, validated by the method that asked. */
   processes?: unknown[];
-  /** end-process: the target was terminated. */
-  ended?: boolean;
-  /** end-process: the target no longer exists. */
-  gone?: boolean;
-  /** end-process: why the target was not ended. */
-  reason?: string;
   error?: string;
   /** Win32 error code, when a call failed. */
   code?: number;
@@ -465,11 +417,6 @@ export type SnapshotOutcome =
 export type JobMembersOutcome =
   /** `found: false`: no such job. `member: false`: the root is not in it, so it is not this session's. */
   | { ok: true; found: boolean; member: boolean; processes: JobMemberProcess[] }
-  | { ok: false; error: string; helperFailure: boolean };
-
-export type EndProcessOutcome =
-  | { ok: true; ended: true }
-  | { ok: true; ended: false; gone: boolean; reason?: string }
   | { ok: false; error: string; helperFailure: boolean };
 
 function asInt(value: unknown): number | undefined {
@@ -708,9 +655,6 @@ export class WindowsJobHelper {
     if (typeof message.found === 'boolean') result.found = message.found;
     if (typeof message.member === 'boolean') result.member = message.member;
     if (Array.isArray(message.processes)) result.processes = message.processes;
-    if (typeof message.ended === 'boolean') result.ended = message.ended;
-    if (typeof message.gone === 'boolean') result.gone = message.gone;
-    if (typeof message.reason === 'string') result.reason = message.reason;
     if (typeof message.error === 'string') result.error = message.error;
     if (typeof message.code === 'number') result.code = message.code;
     pending.resolve(result);
@@ -814,19 +758,6 @@ export class WindowsJobHelper {
     const result = await this.request({ op: 'in-job', name, pid });
     if (!result.ok) return { ok: false, error: failureText(result) };
     return { ok: true, found: result.found === true, member: result.member === true };
-  }
-
-  /**
-   * Terminate `target`, only if it is in job `name` with the session root
-   * `rootPid`, is not the root, and still has creation time `createdAt`.
-   */
-  async endProcess(name: string, rootPid: number, target: number, createdAt: number): Promise<EndProcessOutcome> {
-    const result = await this.request({ op: 'end-process', name, pid: rootPid, target, created: createdAt });
-    if (!result.ok) return { ok: false, error: failureText(result), helperFailure: result.helperFailure === true };
-    if (result.ended === true) return { ok: true, ended: true };
-    const outcome: EndProcessOutcome = { ok: true, ended: false, gone: result.gone === true };
-    if (result.reason !== undefined) outcome.reason = result.reason;
-    return outcome;
   }
 
   /** Stop the helper. Jobs are not affected: they carry no kill-on-close. */

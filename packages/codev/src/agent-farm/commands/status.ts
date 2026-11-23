@@ -16,8 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../../lib/config.js';
 import { isWindows } from '../../lib/platform.js';
-import { printOrphanTable } from './orphans.js';
-import type { SessionOrphans } from '../lib/session-orphans-api.js';
+import type { ListedProcess, SessionOrphans } from '../lib/session-orphans-api.js';
 import type { TowerClient } from '../lib/tower-client.js';
 import chalk from 'chalk';
 
@@ -46,6 +45,38 @@ export interface StatusOptions {
 export const ORPHAN_LISTING_BUDGET_MS = 5000;
 
 type OrphanSection = { sessions: SessionOrphans[] } | { error: string };
+
+export function formatAge(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h${minutes % 60 > 0 ? `${minutes % 60}m` : ''}`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+export function formatCpu(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  return `${Math.floor(seconds / 60)}m${Math.round(seconds % 60)}s`;
+}
+
+const ORPHAN_WIDTHS = [22, 8, 24, 8, 9];
+
+/** The orphan rows: SESSION, PID, NAME, AGE, CPU, descendants indented. Never a command line. */
+export function orphanRows(sessions: SessionOrphans[], now: number): string[][] {
+  const rows: string[][] = [];
+  const row = (session: string, p: ListedProcess, indent: string) => [session, String(p.pid), `${indent}${p.name || '?'}`, formatAge(now - p.createdAt), formatCpu(p.cpuMs)];
+  for (const s of sessions) {
+    for (const orphan of s.orphans) {
+      rows.push(row(s.agent, orphan, ''));
+      for (const d of orphan.descendants) rows.push(row('', d, '  └ '));
+    }
+  }
+  return rows;
+}
 
 /** #1915: this workspace's orphaned processes (Windows, Tower up), or why not; null elsewhere. */
 export async function fetchOrphanSection(client: TowerClient, workspacePath: string, budgetMs: number = ORPHAN_LISTING_BUDGET_MS): Promise<OrphanSection | null> {
@@ -78,8 +109,10 @@ export function renderOrphanSection(section: OrphanSection | null, now: number =
   logger.blank();
   logger.info('Orphaned processes (parent exited; a timed-out command\'s leftovers or a deliberate background process):');
   if (withOrphans.length > 0) {
-    printOrphanTable(withOrphans, now);
-    logger.info(chalk.gray('  End them with: afx orphans <agent> --apply'));
+    logger.row(['SESSION', 'PID', 'NAME', 'AGE', 'CPU'], ORPHAN_WIDTHS);
+    logger.row(ORPHAN_WIDTHS.map((w) => '─'.repeat(w - 1)), ORPHAN_WIDTHS);
+    for (const r of orphanRows(withOrphans, now)) logger.row(r, ORPHAN_WIDTHS);
+    logger.info(chalk.gray("  They end when their session does: close the terminal, or run afx cleanup for a builder."));
   }
   for (const s of unlisted) {
     logger.info(chalk.yellow(`  ${s.agent}: ${s.error ?? 'no job, so its orphans cannot be listed'}`));

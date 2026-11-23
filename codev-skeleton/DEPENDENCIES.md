@@ -269,12 +269,11 @@ How it works and what to know:
   start inside one.
 - **Processes left behind by a timed-out command.** When an agent's command times out, its
   tooling ends the shell it started but not that shell's children, which keep running in the
-  session, often a root-wide file search using a full CPU. `afx status` and `codev doctor` list
-  them per session: process name, age and CPU time, never the command line. `afx orphans` lists
-  them for this workspace; `afx orphans <agent> --apply` (or `--all --apply`) shows what it will
-  end, asks, then ends exactly those. Nothing is ever ended automatically. A background process
-  you started on purpose and whose shell has since exited is listed the same way, so check the
-  list before ending. Tower, its helpers and other sessions are never listed or ended.
+  session until it ends, often a root-wide file search using a full CPU. `afx status` and
+  `codev doctor` list them per session: process name, age and CPU time, never the command line.
+  They end with their session: close the terminal, or run `afx cleanup` for a builder. A
+  background process you started on purpose and whose shell has since exited is listed the same
+  way. Tower, its helpers and other sessions are never listed.
 - **Programs never run from the current folder.** Windows normally looks a program started by
   bare name (`git`, `npm`) up in the current folder before `PATH`, so a `git.exe` inside a
   repository could run in place of Git. Codev turns that lookup off (it sets

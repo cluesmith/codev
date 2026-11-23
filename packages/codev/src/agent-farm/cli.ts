@@ -235,24 +235,6 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // #1915: processes left in a session's job after their parent exited (Windows).
-  program
-    .command('orphans [agent]')
-    .description("List (or end, with --apply) processes left running in a session after their parent exited (Windows)")
-    .option('--all', 'With --apply: every session in this workspace')
-    .option('--apply', 'End the listed processes after confirming (default: list only)')
-    .option('-y, --yes', 'Skip the --apply confirmation')
-    .option('--port <port>', 'Tower port (default: 4100)')
-    .action(async (agent: string | undefined, options: { all?: boolean; apply?: boolean; yes?: boolean; port?: string }) => {
-      const { orphans } = await import('./commands/orphans.js');
-      try {
-        await orphans({ agent, all: options.all, apply: options.apply, yes: options.yes, port: options.port ? parseInt(options.port, 10) : undefined });
-      } catch (error) {
-        logger.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
-      }
-    });
-
   // Whoami command (Spec 1134) — report this terminal's agent identity
   program
     .command('whoami')
