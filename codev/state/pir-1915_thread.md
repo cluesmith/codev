@@ -58,3 +58,16 @@
   architect kept running; closing the builder ended its whole tree; Tower restart kept the architect's shellper.
   Gotcha: Tower reconcile drops sessions whose workspace is under %TEMP% (pre-existing, deliberate).
 - Not run here: agy (not installed), Codex as a full agent session.
+
+## 2026-11-23 — dev-approval feedback: drop the manual ending path
+- Human: with no breakaway, afx cleanup / closing the session ends everything, so no command should be needed to end
+  orphans by hand. Removed afx orphans, POST /api/orphans/end, the helper's end-process (148092136). Kept the read-only
+  list in afx status / codev doctor; hint says they end with their session.
+- Real-session check rerun, 18/18: both afx cleanup paths (Tower kills the terminal; Tower down, shellper kill by
+  worktree) end the builder, its orphaned find and its whole tree; architect and Tower survive; Tower restart keeps the
+  architect. Main Tower 53132 throughout.
+- Full local suite rerun: 8162 passed, 1 failed: launch-loop-exit-code "still auto-restarts after a crash" — passes 3/3
+  alone and passed in the first full run; load flake, untouched code.
+- Windows run 45093824937 (e3546f923): Node 22 + targeted green; Node 24 failed tower-lifecycle.windows scenario 5
+  (afx tower stop exit 0xC0000142, DLL init failed) and pir-1233-session-launch-loop (Git Bash launch failed) — both
+  pass on Node 22, in the targeted job and in the earlier run: runner load flakes. Fresh run on 148092136: 45098207402.
