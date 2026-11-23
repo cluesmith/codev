@@ -111,3 +111,5 @@
   unit, runs 42547114468 (22:52 -> 23:39) and 42715696142 (01:44 -> 02:31), 47 min each, vs a normal 5-7 min job.
   Architect: pre-existing Node 22 runner pattern; worker-in-job theory ruled out.
 - Next: two consecutive greens on 3b4066839 (first: 45142055516).
+- Two consecutive fully green runs on 3b4066839: 45142055516 and 45143011938. Each: Node 22 unit, Node 24 unit and
+  targeted jobs logged 12 JOB-WORKER-CHECK lines, 0 member=true, 0 worker deaths.
