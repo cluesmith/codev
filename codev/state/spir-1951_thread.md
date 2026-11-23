@@ -12,3 +12,15 @@
 - Verified: 361 commits on origin/main since 2026-06-01 carry Co-Authored-By.
 - Surprise: this repo gitignores `.codev/config.json`, so the owner's attribution rule must live in
   `~/.codev/config.json` or the local layer — attribution check proposed off by default.
+
+## 2026-11-23 — specify, CMAP iter 1 (codex REQUEST_CHANGES, claude COMMENT)
+All points accepted and folded in:
+- base tip re-read at the end alongside head (race); per-call 30 s timeouts → named `not run`.
+- Dropped `linguist-generated` from "to read": needs `git check-attr --source` (git 2.40); rule is globs only.
+- Worktree verdict is now strictly *data* (uncommitted, unsafe commits, keep-list ignored); open PR is a
+  separate `pr` lifecycle attention item. Squash merges are judged exactly: local tip == merged PR head.
+- Concrete `--json` schema (per-command reports + per-check `details`).
+- Trust boundary stated precisely (runtime = git argv + concept names; shipped scripts via stub tests).
+- Added `linked-issue` check (closing keyword vs builder branch id), input validation, deploy
+  multi-PR error semantics (per-PR `not run`, exit 1), the #1950 landing-order rule, and all four
+  `codev` skill copies + hash regeneration in the docs criterion.

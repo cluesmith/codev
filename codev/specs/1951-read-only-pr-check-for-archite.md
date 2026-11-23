@@ -97,6 +97,7 @@ head  a1b2c3d  (local builder/spir-1951 matches)      base  main @ 7c0f3ab (orig
   ATTN   checks        code 57d2ec5: 7 passed, 1 failed (test.yml / unit)
                        head a1b2c3d: no runs — 3 porch-state commits above the code
   ATTN   watched       CLAUDE.md (flagged); codev/roles/architect.md
+  info   linked issue  "Fixes #1951" — matches builder/spir-1951
   info   overlap       2 files also changed on main since branch point: CHANGELOG.md, packages/codev/src/cli.ts
   info   size          +1,204 −88 in 23 files
   info   to read       14 files (9 not for reading): packages/codev/src/commands/check/pr.ts, … +12
@@ -142,13 +143,16 @@ NOT REMOVABLE  spir-1951 — 1 uncommitted file
 worktree  .builders/spir-1951   branch builder/spir-1951   base main @ 7c0f3ab (origin, live)
   ATTN   uncommitted   1 file: codev/state/spir-1951_thread.md (modified)   [5 scaffold files not counted]
   ok     commits       all 31 commits are on origin/main
-  ok     remote        origin/builder/spir-1951 matches local (a1b2c3d); PR #1957 MERGED
+  ok     remote        origin/builder/spir-1951 matches local (a1b2c3d)
+  ok     pr            #1957 MERGED
   ATTN   ignored       3 keep-list files would be lost: codev/projects/1951-…/1951-specify-iter1-codex.txt, … +2
+                       (1,204 other ignored files treated as regenerable: node_modules/, dist/, …)
                        → copy them out first, or use `afx cleanup --keep-ignored` (#1950)
 ```
 
-Verdicts: `REMOVABLE` (exit 0), `REMOVABLE AFTER KEEPING N FILES` (exit 1),
-`NOT REMOVABLE` (exit 1).
+Verdicts describe **data** only: `REMOVABLE`, `REMOVABLE AFTER KEEPING N FILES`,
+`NOT REMOVABLE`. Exit 0 only for `REMOVABLE` with nothing else needing attention (an open PR
+is attention even when no data would be lost). Exit 1 otherwise.
 
 ## Success Criteria
 
@@ -158,14 +162,16 @@ Verdicts: `REMOVABLE` (exit 0), `REMOVABLE AFTER KEEPING N FILES` (exit 1),
 - [ ] **Read-only, enforced in tests**: the suite runs all three commands with stub `gh` and `git` executables first on `PATH`; each stub records its argv and fails the test on any invocation not on the read-only list (including `gh api` with a method other than GET or with field flags).
 - [ ] **No state change, proven on a real repository**: a test builds a real git repository with a bare "remote", runs each command (including a conflicting trial merge and a run that must fetch missing objects), and asserts that the output of `git for-each-ref`, `HEAD`, the index file's bytes, `FETCH_HEAD`'s absence/contents, and `git status --porcelain` are identical before and after.
 - [ ] **Live base**: when the local `origin/<base>` is behind the remote, `check pr` trial-merges against the remote's current tip (test with a deliberately stale local ref).
-- [ ] **Exact head**: every head-dependent result is computed for the head SHA the forge reports; if the forge's head SHA changes during the run, the verdict is attention with "head moved during check (old → new); re-run" (test).
+- [ ] **Exact head, live base, no race**: every head-dependent result is computed for the head SHA the forge reports and every base-dependent result for the base tip `ls-remote` reports; both are re-read when the checks finish, and if either moved the verdict is attention with "head|base moved during check (old → new); re-run" (a test for each).
+- [ ] **Bounded time**: every forge call and every networked git call (`ls-remote`, `fetch`) has a timeout; a call that times out makes its check `not run: <call> timed out after Ns` (exit 1), or exit 2 when it is the anchoring `pr-view` (test with a stub that hangs).
 - [ ] **Porch-only head**: with N porch-state-only commits above the last code commit, the last code commit is identified per § Porch-only heads, its runs are shown beside the head's, and the checks verdict is driven by them (tests for: runs only on head; runs only on an earlier code-equivalent commit; runs on neither; a failed run on either).
 - [ ] **Never reported as passing**: for each forge-dependent check, a test with the concept disabled (`null`) and a test with the concept failing show that check as `not run: <concept> …` and exit 1 — never `ok`.
-- [ ] **Exit codes**: 0 / 1 / 2 exactly as defined in § Output, each covered by a test per command; `--json` carries the same verdict as the human form.
-- [ ] **`--json`** output for each command matches the documented schema (`schema: 1`), including on exit 2 (an `error` object on stdout).
+- [ ] **Exit codes**: 0 / 1 / 2 exactly as defined in § Output, each covered by a test per command; `--json` carries the same verdict as the human form. For `check deploy` with several PRs, one PR that cannot be read is a per-PR `not run` (exit 1) and the others are still reported.
+- [ ] **`--json`** output for each command matches the schema in § JSON schema (`schema: 1`), including on exit 2 (an `error` object on stdout).
+- [ ] **Input validation**: PR numbers, SHAs and config values are validated before any subprocess runs (§ Input validation); a violation exits 2 naming the value.
 - [ ] **Configuration**: each `check.*` key and the shared `cleanup.keepIgnored` changes behavior as specified; arrays replace defaults; an invalid value (wrong type, unparseable regex) exits 2 naming the key and the file it came from.
 - [ ] **Forge contract**: `pr-view` gains the optional fields listed in § Forge; two new concepts `commit-checks` and `workflow-runs` exist with documented contracts; every shipped preset (github, gitlab, gitea; linear and jira fall through to github) either implements each new concept/field or explicitly disables it — `codev doctor` lists the new concepts.
-- [ ] **Docs in both trees**: the architect role, `risk-triage.md`, the `codev` command reference and the `codev` skill change in both `codev/` and `codev-skeleton/`; `forge.md` documents the new concepts and fields; shipped skill hashes are regenerated.
+- [ ] **Docs in both trees**: the architect role, `risk-triage.md` and the `codev` command reference change in both `codev/` and `codev-skeleton/`; the `codev` skill changes in all four of its copies (`.claude/skills/codev/`, `.codex/skills/codev/`, `codev-skeleton/.claude/skills/codev/`, `codev-skeleton/.codex/skills/codev/`) and the shipped skill hashes are regenerated (`generate-shipped-skill-hashes`); `forge.md` documents the new concepts and fields.
 - [ ] Full test suite passes; the on-demand Windows workflow is dispatched on the branch and linked in the PR (the commands spawn processes).
 
 ## Constraints
@@ -202,7 +208,7 @@ From the codebase:
   projects anyway) or the local config — not in a committed file.
 - **Coordination with #1950.** The keep list for ignored files is `cleanup.keepIgnored` and
   the never-copy list (dependency/build output) is #1950's. `check worktree` reads the same
-  definitions — one source of truth — whichever PR lands second adopts the first's.
+  definitions — one source of truth. See Assumptions for the order-of-landing rule.
 
 ## Assumptions
 
@@ -217,6 +223,14 @@ From the codebase:
   (`.builder-*`, the `.claude/hooks/` write guard, and the other generated files spawn
   marks); that list is exported from spawn so `check worktree` and cleanup agree on it.
 - Issue #1950 lands `cleanup.keepIgnored` and the never-copy list as described in its body.
+  **If #1950 has not merged when this is implemented**, this project defines
+  `cleanup.keepIgnored` (with #1950's defaults) and the never-copy list in one shared place
+  that cleanup can import, and #1950 adopts it; whichever PR lands second adds the test that
+  `check worktree` reports exactly the files `afx cleanup --keep-ignored` would keep. This
+  project is not blocked on #1950.
+- A builder branch named `builder/<protocol>-<id>` belongs to issue `<id>` (the `afx spawn`
+  convention); the linked-issue check uses that, and says nothing about branches that do not
+  follow it.
 
 ## Solution Approaches
 
@@ -284,21 +298,36 @@ They share the keep list and never-copy list, so `check worktree` reports exactl
 2. **Git allow-list** (subcommand plus required/forbidden flags):
    `version`; `rev-parse`; `rev-list`; `merge-base`; `log`; `show`; `diff`, `diff-tree`
    (output only — no `--output`); `cat-file`; `for-each-ref`; `ls-files`; `ls-remote`;
-   `check-attr`; `worktree list`; `config --get`/`--get-regexp`; `symbolic-ref` with one
-   argument (the read form); `status` only with the global `--no-optional-locks` flag (a
-   plain `git status` may rewrite the index's stat cache); `merge-tree` only with
-   `--write-tree`; `fetch` only in the ref-neutral form below.
+   `worktree list`; `config --get`/`--get-regexp`; `symbolic-ref` with one argument (the
+   read form); `status` only with the global `--no-optional-locks` flag (a plain
+   `git status` may rewrite the index's stat cache); `merge-tree` only with `--write-tree`;
+   `fetch` only in the ref-neutral form below.
 3. **Forge allow-list**: the commands invoke only the read concepts `pr-view`, `pr-search`,
    `commit-checks` and `workflow-runs`. `pr-merge`, `pr-create`, `issue-comment` and every
-   other concept are refused by the runner. The shipped github preset scripts for these
-   concepts call only `gh pr view`, `gh pr list`, `gh run list` and `gh api` with GET.
-   *Limit, stated honestly*: a project's own concept override is a script Codev does not
-   control; the runner governs which concepts are called, not what a hand-written override
-   does inside — the same trust Codev extends to overrides everywhere.
-4. **Tests** put stub `gh` and `git` executables first on `PATH`. Each records its argv and
+   other concept are refused by the runner.
+4. **The trust boundary, stated precisely.** Runtime enforcement covers (a) every git argv
+   the commands run themselves and (b) *which* forge concepts they invoke. A concept is a
+   script the existing dispatcher runs through a shell, and the commands inside it are not
+   validated at runtime. For the **shipped** preset scripts of these four concepts, that gap
+   is closed by tests and review: the github scripts may call only `gh pr view`,
+   `gh pr list`, `gh run list` and `gh api` with GET, and the stub-`PATH` tests below see
+   every call they make. A project's **own** concept override is trusted, as Codev trusts
+   overrides everywhere; the docs say so.
+5. **Tests** put stub `gh` and `git` executables first on `PATH`. Each records its argv and
    fails the test on anything outside the read-only list (for `gh api`: any `-X`/`--method`
    other than GET, any `-f`/`-F`/`--field`/`--raw-field`/`--input`). A separate real-git
    test proves no ref, index, worktree or `FETCH_HEAD` change.
+
+#### Input validation
+
+Before any subprocess runs: a PR number must be a positive integer; a SHA must be 7–40 hex
+characters; a builder id must match the ids `afx spawn` creates and a path must be a
+registered worktree; config strings passed to git or a concept (`check.deploy.branch`,
+`check.deploy.workflow`) may not begin with `-` and may not contain control characters.
+Any violation exits 2 naming the value and, for config, the file it came from.
+`check.attribution` patterns are trusted configuration; they are compiled once, rejected
+when they do not parse (exit 2), and applied per line, which bounds the input any one match
+sees.
 
 #### The trial merge moves no ref — how
 
@@ -316,22 +345,29 @@ They share the keep list and never-copy list, so `check worktree` reports exactl
 3. **Merge in the object store.**
    `git merge-tree --write-tree --name-only --no-messages <base-tip> <head>` computes the
    merge without touching `HEAD`, any ref, the index or the working tree; exit 1 plus a file
-   list means conflicts. It writes the result's tree and blob objects into the object
-   store; they are unreachable and are collected by normal gc. That is the only write any
-   command performs, and it is stated in the docs.
+   list means conflicts.
+4. **No race.** When every check has finished, the base tip (`ls-remote`) and the head SHA
+   (`pr-view`) are read again. If either moved, the verdict is attention: "base|head moved
+   during check (old → new); re-run". A `CLEAR` therefore always describes the tips that
+   were live when the command finished.
+
+**The only writes** any `codev check` command makes are additions to the object store: the
+packs a ref-neutral fetch downloads, and the tree and blob objects `merge-tree` writes for
+its result (unreachable, collected by normal gc). No ref, `HEAD`, index, working-tree file
+or `FETCH_HEAD` is created, changed or removed. The docs say exactly this.
 
 #### Forge — what each check needs, and what happens without it
 
 | Check | From the forge | Concept | When the forge cannot provide it |
 |---|---|---|---|
 | head SHA (anchors everything) | PR head SHA | `pr-view` field `headRefOid` | **exit 2**: "pr-view did not return headRefOid (provider X / override in <file>)". Nothing is reported against a guessed head. |
-| state, draft, title, description | PR metadata | `pr-view` (`state`, `body`, new `isDraft`) | the missing field's line is `not run` |
+| state, draft, title, description, linked issue | PR metadata | `pr-view` (`state`, `body`, `headRefName`, new `isDraft`) | the missing field's line is `not run` |
 | forge mergeability | the forge's own verdict | `pr-view` new `mergeable`, `mergeStateStatus` | `not run` (the local trial merge still runs) |
 | attribution, size, overlap, trial merge, watched, to read | nothing — computed locally on the exact head SHA | — | — |
 | checks (head and code commit) | check results for a given commit | new **`commit-checks`** (`CODEV_COMMIT_SHA` → `[{name, state, url?, workflow?}]`, `state` normalized to `pass`/`fail`/`pending`/`skipped`/`neutral`) | `not run: commit-checks unavailable on <provider>` |
 | deploy: merged, merge commit | merge state and commit | `pr-view` new `mergeCommit`, `mergedAt` | `not run` for that PR |
 | deploy: latest green run | runs of a named workflow on a branch | new **`workflow-runs`** (`CODEV_WORKFLOW`, `CODEV_BRANCH` → `[{headSha, status, conclusion, url, createdAt}]`, newest first) | `not run: workflow-runs unavailable on <provider>` |
-| worktree: the branch's PR | PR for a head branch, and its state | `pr-search` (existing) | `info: PR state not available` — the git facts alone decide, conservatively |
+| worktree: the branch's PR | PR for a head branch, its state, and (when merged) its head SHA | `pr-search` (existing), then `pr-view` | `not run: PR state not available` — the git facts alone decide the data verdict, conservatively |
 
 The new `pr-view` fields are optional in the contract (additive; existing consumers are
 unaffected). The github preset implements everything. The gitlab and gitea presets either
@@ -364,20 +400,29 @@ because git already knows exactly which files moved.
 
 #### "Files a person still has to read"
 
-The files the PR changes (merge-base → head, i.e. what the forge's diff view shows) minus:
+The files the PR changes (merge-base → head, i.e. what the forge's diff view shows) minus the
+files matching `check.notForReading`. Default: `codev/projects/**` (porch state and review
+artifacts), `codev/state/**` (thread logs and architect state), and lockfiles
+(`**/pnpm-lock.yaml`, `**/package-lock.json`, `**/yarn.lock`, `**/Cargo.lock`,
+`**/poetry.lock`, `**/uv.lock`, `**/go.sum`, `**/Gemfile.lock`, `**/composer.lock`).
 
-1. files matching `check.notForReading` — default: `codev/projects/**` (porch state and
-   review artifacts), `codev/state/**` (thread logs and architect state), and lockfiles
-   (`**/pnpm-lock.yaml`, `**/package-lock.json`, `**/yarn.lock`, `**/Cargo.lock`,
-   `**/poetry.lock`, `**/uv.lock`, `**/go.sum`, `**/Gemfile.lock`, `**/composer.lock`);
-2. files the project marks generated in `.gitattributes` with `linguist-generated` (read with
-   `git check-attr`, at the head commit) — the same marker the forge uses to collapse them
-   in its diff view.
+A project changes the rule by setting `check.notForReading`, which replaces the default list —
+e.g. adding its generated files (`packages/*/dist/**`, a generated hash table). The rule is
+deliberately globs only: honoring `.gitattributes`' `linguist-generated` *as of the head
+commit* needs `git check-attr --source` (git ≥ 2.40), and reading it from the architect's
+working tree would apply the wrong attributes to a PR that changes them. The summary shows
+the count of files to read and of files excluded, and lists the files to read (largest first,
+truncated to fit); `--json` lists all of them with their line counts.
 
-A project changes the rule by setting `check.notForReading` (replaces the default list) or by
-marking files `linguist-generated`. The summary shows the count of files to read and of files
-excluded, and lists the files to read (largest first, truncated to fit); `--json` lists all
-of them with their line counts.
+#### Linked issue
+
+The architect role requires that the issue closes when the PR merges. `check pr` reads the
+PR description for a closing keyword (`Fixes`, `Closes`, `Resolves` and their inflections,
+followed by `#<id>`, the forms Codev's views already recognize). Result: `info` naming the
+keyword and the issue when one is present and, for a `builder/<protocol>-<id>` branch, it
+names that `<id>`; `info` "no closing keyword — close #<id> by hand after merge" when none is
+present (a partial fix legitimately has none); **attention** when the keyword names a
+different issue than the branch's id.
 
 #### Porch-only heads — finding the last code commit
 
@@ -408,44 +453,143 @@ of them with their line counts.
   files); `not run` (could not run — always counts as attention); `off` (no configuration
   for it); `skip` (declared skipped in `check.skip`).
 - **Exit codes**: `0` = clear (no attention, no not-run); `1` = something needs attention,
-  including any check that could not run; `2` = the command failed and produced no report
-  (usage error, not in a git repository, no `origin`, PR not found, forge auth failure on
-  the anchoring `pr-view`, invalid configuration, head SHA unavailable, or the runner
-  refused a command).
-- **`--json`**: one object on stdout, `schema: 1`, with `command`, `verdict`
-  (`clear`/`attention`), the target (PR, PRs, or worktree), and `checks: [{id, status,
-  summary, details}]`; on exit 2, `{schema: 1, command, error: {message, cause}}`. Human
-  output goes to stdout only without `--json`; diagnostics go to stderr.
+  including any check that could not run; `2` = the command failed and produced no report:
+  usage or input-validation error, not in a git repository, no `origin`, invalid
+  configuration, the runner refused a command, or — for `check pr` — the PR was not found or
+  the anchoring `pr-view` failed, timed out, or returned no head SHA; for `check worktree`,
+  the worktree was not found. For `check deploy`, a PR that cannot be read is a per-PR
+  `not run` (exit 1) and the other PRs are still reported; exit 2 is reserved for the
+  repository-, configuration- and usage-level failures above.
+- **Time bound**: every forge call uses the dispatcher's existing 30 s limit, and `ls-remote`
+  and `fetch` get the same limit. A call that times out makes the checks that needed it
+  `not run: <call> timed out after 30s`.
 - **Check ids** — `pr`: `head`, `state`, `forge`, `attribution`, `trial-merge`, `checks`,
-  `watched`, `overlap`, `size`, `to-read`. `deploy` (per PR): `merged`, `on-branch`,
-  `deploy-run`, `merge-checks`. `worktree`: `uncommitted`, `commits`, `remote`, `ignored`.
-- **What counts as attention, per check**: head moved during the run; PR not OPEN, or draft;
-  forge mergeability other than its clean state (`UNKNOWN` included — reported as "forge has
-  not computed mergeability yet", and the plan may re-read once); any attribution hit; any
-  trial-merge conflict; checks per the porch-only rule; a flagged watched file moved.
+  `watched`, `linked-issue`, `overlap`, `size`, `to-read`. `deploy` (per PR): `merged`,
+  `on-branch`, `deploy-run`, `merge-checks`. `worktree`: `uncommitted`, `commits`, `remote`,
+  `pr`, `ignored`. These ids are what `check.skip` names.
+- **What counts as attention, per check**: base or head moved during the run; local branch
+  ahead of the PR head (unpushed); PR not OPEN, or draft; forge mergeability other than its
+  clean state (`UNKNOWN` included — reported as "forge has not computed mergeability yet",
+  and the plan may re-read once); any attribution hit; any trial-merge conflict; checks per
+  the porch-only rule; a flagged watched file moved; a closing keyword naming the wrong
+  issue.
+
+#### JSON schema
+
+`--json` prints exactly one JSON object on stdout; nothing else goes to stdout. Diagnostics go
+to stderr. Version 1:
+
+```ts
+type Status = 'ok' | 'attention' | 'info' | 'not-run' | 'off' | 'skip';
+
+interface Check {
+  id: string;            // a check id from the list above
+  status: Status;
+  summary: string;       // the one-line text the human form prints
+  details: object;       // per-id shape below; {} when there is nothing more
+  reason?: string;       // for not-run / off / skip: why, naming the concept, key or git version
+}
+
+interface Report {
+  schema: 1;
+  command: 'pr' | 'deploy' | 'worktree';
+  verdict: 'clear' | 'attention';
+  generatedAt: string;   // ISO 8601
+}
+
+interface PrReport extends Report {
+  command: 'pr';
+  pr: { number: number; title: string; url?: string; state: string; draft: boolean | null;
+        headRef: string; head: string; baseRef: string; baseTip: string;
+        localBranch: { name: string; sha: string } | null };
+  checks: Check[];
+}
+
+interface DeployReport extends Report {
+  command: 'deploy';
+  deployBranch: string | null;  // check.deploy.branch; null = each PR's own base branch
+  workflow: string | null;
+  prs: Array<{ number: number; mergedAt: string | null; mergeCommit: string | null;
+               baseRef: string | null; verdict: 'clear' | 'attention'; checks: Check[] }>;
+}
+
+interface WorktreeReport extends Report {
+  command: 'worktree';
+  removable: 'removable' | 'removable-after-keeping' | 'not-removable';
+  worktree: { path: string; builderId: string | null; branch: string;
+              baseRef: string; baseTip: string };
+  checks: Check[];
+}
+
+interface ErrorReport {          // exit 2
+  schema: 1;
+  command: 'pr' | 'deploy' | 'worktree';
+  error: { message: string; cause?: string };
+}
+```
+
+`details` per id (all paths repo-relative, all SHAs full 40-hex):
+
+| id | `details` |
+|---|---|
+| `head` | `{ forgeHead, localBranchSha?, aheadOfPr?, movedTo? }` |
+| `state` | `{ state, draft }` |
+| `forge` | `{ mergeable, mergeStateStatus }` (forge's words, verbatim) |
+| `attribution` | `{ patterns: string[], hits: [{ where: 'description' \| 'commit', sha?, line: number, text }] }` |
+| `trial-merge` | `{ baseTip, head, conflicts: number, files: string[] }` |
+| `checks` | `{ head: CommitRuns, code?: CommitRuns, lastCodeCommit, porchOnlyAbove: number }` where `CommitRuns = { sha, runs: [{ name, state, url?, workflow? }], passed, failed, pending }` |
+| `watched` | `{ files: [{ path, flagged: boolean }] }` |
+| `linked-issue` | `{ keyword?, issue?, branchIssue? }` |
+| `overlap` | `{ files: string[] }` |
+| `size` | `{ additions, deletions, files }` |
+| `to-read` | `{ files: [{ path, additions, deletions }], excluded: string[] }` |
+| `merged` | `{ state, mergedAt, mergeCommit }` |
+| `on-branch` | `{ branch, tip, contains: boolean }` |
+| `deploy-run` | `{ workflow, run?: { headSha, url, createdAt }, contains?: boolean }` |
+| `merge-checks` | `CommitRuns` |
+| `uncommitted` | `{ files: [{ path, change }], scaffold: string[] }` |
+| `commits` | `{ total, notOnBase: string[] }` |
+| `remote` | `{ remoteSha: string \| null, relation: 'matches' \| 'ahead' \| 'behind' \| 'diverged' \| 'absent' }` |
+| `pr` | `{ number?, state?, mergedHead? }` |
+| `ignored` | `{ keep: string[], regenerable: number }` |
 
 #### `check worktree` — what "removable" means
 
-"Removable" means **removing it loses nothing**, not merely that `git worktree remove` would
-not need `--force` (the scaffold files alone make plain `git worktree remove` refuse on every
-builder worktree). The check reports:
+The verdict answers one question: **would removing this worktree and its local branch lose
+data?** Not merely whether `git worktree remove` would need `--force` — spawn's scaffold
+files alone make a plain `git worktree remove` refuse on every builder worktree.
+
+What counts as data, and how each is judged:
 
 - **uncommitted** — staged, unstaged and untracked-not-ignored files (via
-  `git --no-optional-locks status`), excluding spawn's scaffold files, which are counted
-  separately and never block;
-- **commits** — commits on the branch not reachable from the live remote base tip (read with
-  `ls-remote`; objects fetched ref-neutrally if missing). When some are not on the base, the
-  branch's PR state is looked up (`pr-search`): merged with differing commits (a squash or
-  rebase merge) is attention with that explanation; otherwise they are unmerged work;
-- **remote** — local branch vs `origin/<branch>` via `ls-remote`: matches / local ahead
-  (unpushed) / behind / diverged / no remote branch (fine when every commit is on the base);
-- **ignored** — ignored files matching `cleanup.keepIgnored` and not on the never-copy list:
-  these are deleted silently by any removal, forced or not.
+  `git --no-optional-locks status`). Spawn's scaffold files are counted separately and are
+  not data. Any other file here is data that would be lost.
+- **commits** — a branch commit is safe when it is reachable from the live remote base tip
+  or from the live remote branch tip (both read with `ls-remote`; objects fetched
+  ref-neutrally if missing). One more case is safe: when the branch's PR is merged by squash
+  or rebase, its commits are not on the base, but if the local branch tip **equals the
+  merged PR's head SHA** (from `pr-view`), every local commit was part of what merged. A
+  local tip that differs from the merged head means commits were made after the merge:
+  those are data.
+- **remote** — local branch vs `origin/<branch>`: matches / local ahead (unpushed) / behind /
+  diverged / absent. Reported for context; the commits rule above already decides whether
+  anything is lost (an absent remote branch is fine when every commit is on the base).
+- **ignored** — ignored files are data **only if they match the keep list**
+  (`cleanup.keepIgnored`) and are not on the never-copy list. Every other ignored file is
+  treated as regenerable — dependency and build output, caches — which is what the keep
+  list means; the summary still prints their count, so nothing is lost unseen. A project
+  that keeps something else worth saving adds it to the keep list.
 
-Verdict: `NOT REMOVABLE` when there are uncommitted files, or commits that exist neither on
-the base nor on the remote branch, or the PR is still open; `REMOVABLE AFTER KEEPING N FILES`
-when only keep-list ignored files stand in the way; otherwise `REMOVABLE`. The argument is a
-builder id (resolved to `<workspace>/.builders/<id>` and confirmed against
+Verdict: `NOT REMOVABLE` when there is uncommitted data or an unsafe commit;
+`REMOVABLE AFTER KEEPING N FILES` when the only data is keep-list ignored files; otherwise
+`REMOVABLE`.
+
+Separately from the data verdict, **lifecycle** is reported through the `pr` check: the
+branch's PR still OPEN is attention ("builder not finished") even when no data would be lost,
+and a PR state the forge cannot provide is `not run`. Either makes the exit 1 without
+changing the verdict word, so "removable" never silently means "finished".
+
+The argument is a builder id (resolved to `<workspace>/.builders/<id>` and confirmed against
 `git worktree list`) or a path to a registered worktree.
 
 #### Relation to existing tools and guidance
@@ -506,22 +650,26 @@ builder id (resolved to `<workspace>/.builders/<id>` and confirmed against
 6. Attribution hit in a commit message and in the description → both reported with location; commits already on base are not scanned.
 7. Porch-only head with runs only on the code commit; only on head; on a push tip between them; on none; failure on head while code commit green → displays and verdicts per § Porch-only heads.
 8. Flagged watched file moved → attention; unflagged watched → info.
-9. `.gitattributes` `linguist-generated` file and lockfile excluded from "to read"; `check.notForReading` replaces the default.
+9. Lockfile and `codev/projects/**` excluded from "to read"; `check.notForReading` replaces the default list.
 10. Draft PR, closed PR, merged PR → `state` attention.
-11. Forge head SHA changes between start and end of run → attention "head moved".
+11. Forge head SHA changes between start and end of run → attention "head moved"; remote base tip changes between start and end → attention "base moved".
 12. Local builder branch ahead of the PR head → `head` attention ("not pushed").
+12a. Linked issue: `Fixes #1951` on `builder/spir-1951` → info; no keyword → info with the close-by-hand note; `Fixes #1950` on `builder/spir-1951` → attention.
+12b. A forge stub that never answers → that check `not run: … timed out after 30s`; a hanging anchoring `pr-view` → exit 2.
 
 **`check deploy`**
 13. Merged, on deploy branch, inside latest green run → `ok`; not on branch → attention; on branch but newer than latest green run → attention.
 14. No `check.deploy` → base branch used; `merge-checks` reported; `deploy-run` `off`.
 15. PR not merged → `merged` attention; several PRs → verdict is the worst.
+15a. `check deploy 1948 99999` where 99999 does not exist → #1948 fully reported, #99999 `not run: PR not found`, exit 1.
 
 **`check worktree`**
-16. Clean, merged (`--merge`), remote branch deleted → `REMOVABLE`.
+16. Clean, merged (`--merge`), remote branch deleted → `REMOVABLE`, exit 0.
 17. Modified thread file → `NOT REMOVABLE`; only scaffold files untracked → not counted.
 18. Unpushed commit not on base → `NOT REMOVABLE`.
-19. Squash-merged PR (commits not on base, PR merged) → attention with explanation.
-20. Keep-list ignored files present; never-copy paths (`node_modules/`) excluded → `REMOVABLE AFTER KEEPING N FILES`.
+19. Squash-merged PR, local tip equals the merged head → `REMOVABLE`; local tip has a commit after the merged head → `NOT REMOVABLE`.
+20. Keep-list ignored files present; never-copy paths (`node_modules/`) excluded and counted as regenerable → `REMOVABLE AFTER KEEPING N FILES`.
+20a. Clean and fully pushed, PR still OPEN → verdict `REMOVABLE`, `pr` attention, exit 1.
 21. Builder id not found / path not a registered worktree → exit 2.
 
 **Read-only and errors (all commands)**
@@ -532,6 +680,7 @@ builder id (resolved to `<workspace>/.builders/<id>` and confirmed against
 26. Invalid config (non-array `check.watch`, bad regex) → exit 2 naming key and file.
 27. git older than 2.38 (stubbed `git version`) → trial merge `not run: requires git 2.38+`.
 28. `--json` for every scenario parses and matches the schema; exit 2 emits the `error` object.
+28a. Input validation: PR `12a`, SHA `zz12`, `check.deploy.workflow: "--repo=x"` → exit 2 naming the value, with no subprocess started.
 
 **Non-functional**
 29. A 25-file PR with a 3-commit porch tail completes in under 30 s against GitHub on a normal connection (the forge calls dominate).
@@ -548,8 +697,10 @@ builder id (resolved to `<workspace>/.builders/<id>` and confirmed against
 | Older git (< 2.38) on adopter machines | Medium | Medium | Trial merge `not run` naming the version; `codev doctor` reports git version |
 | Users read `info` lines as passes, or exit 1 becomes routine noise | Medium | Medium | `info` never claims a pass; `not run` and `off` are spelled out; `check.skip` exists so a project can make exit 0 meaningful for itself |
 | `cleanup.keepIgnored` definition diverges between #1950 and this spec | Medium | Medium | One shared definition; whichever PR lands second reuses the first's; a test asserts `check worktree` lists exactly what `--keep-ignored` would keep |
-| A project's own concept override performs writes | Low | Medium | Documented limit: the runner governs which concepts are called; overrides are trusted as elsewhere in Codev |
-| Unreachable objects from `merge-tree`/fetch accumulate | Low | Low | Collected by normal `git gc`; documented as the only write |
+| A project's own concept override performs writes | Low | Medium | Documented trust boundary: the runner governs git argv and which concepts are called; shipped scripts are covered by stub tests; overrides are trusted as elsewhere in Codev |
+| A stalled network makes the command hang at the `pr` gate | Medium | Medium | Every forge and networked git call has a 30 s limit; a timeout is a named `not run`, never a hang |
+| The base or head moves while the command runs, so a `CLEAR` describes stale tips | Low | High | Both are re-read at the end; any movement is attention "re-run" |
+| Unreachable objects from `merge-tree`/fetch accumulate | Low | Low | Collected by normal `git gc`; documented as the only writes |
 
 ## References
 
