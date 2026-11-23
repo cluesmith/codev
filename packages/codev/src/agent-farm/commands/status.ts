@@ -93,8 +93,11 @@ interface PorchState {
  */
 interface BuilderLiveView {
   porch: PorchState;
-  /** Last terminal output: an ISO time, `'stopped'` (no live session) or `'unknown'` (Tower unreachable). */
-  lastActivity: string;
+  /**
+   * The builder's terminal, from Tower: whether it has a live session (null when Tower
+   * could not be asked) and the ISO time of its last output (null when unknown).
+   */
+  terminal: { live: boolean | null; lastDataAt: string | null };
   /** Held mail addressed to the builder (Spec 1313); 0 when unknown. */
   heldCount: number;
   /** Session and process activity; null unless `--activity`. */
@@ -143,12 +146,9 @@ function buildLiveViews(
   const views = new Map<string, BuilderLiveView>();
   for (const builder of builders) {
     const live = fromTower.get(builder.id.toLowerCase());
-    let lastActivity = 'unknown';
-    if (overview && !live) lastActivity = 'stopped';
-    else if (live?.lastDataAt) lastActivity = live.lastDataAt;
     views.set(builder.id, {
       porch: porch.get(builder.worktree) ?? { phase: null, gate: null },
-      lastActivity,
+      terminal: { live: overview ? live !== undefined : null, lastDataAt: live?.lastDataAt ?? null },
       heldCount: live?.heldCount ?? 0,
       activity: activity?.get(builder.id) ?? null,
     });
@@ -163,9 +163,10 @@ function ago(iso: string | null): string {
   return age === 'just now' ? age : `${age} ago`;
 }
 
-function lastActivityCell(lastActivity: string): string {
-  if (lastActivity === 'stopped' || lastActivity === 'unknown') return chalk.gray(lastActivity);
-  return ago(lastActivity);
+function lastActivityCell(terminal: BuilderLiveView['terminal']): string {
+  if (terminal.live === false) return chalk.gray('stopped');
+  if (terminal.lastDataAt === null) return chalk.gray('unknown');
+  return ago(terminal.lastDataAt);
 }
 
 function gateCell(gate: PorchState['gate']): string {
@@ -239,7 +240,7 @@ function renderBuilders(
       typeColor(builder.type || 'spec'),
       view.porch.phase ?? chalk.gray('—'),
       gateCell(view.porch.gate),
-      lastActivityCell(view.lastActivity),
+      lastActivityCell(view.terminal),
     ];
     if (showHeld) {
       const n = view.heldCount;
@@ -266,6 +267,8 @@ function renderActivity(visible: Builder[], views: Map<string, BuilderLiveView>)
     logger.info(`  ${chalk.cyan(builder.id)}  session write: ${ago(activity.sessionWrittenAt)}  ·  API error: ${apiError}`);
     if (activity.lastTurns === null) {
       logger.info(`    turns: ${chalk.gray('unknown')}`);
+    } else if (activity.lastTurns.length === 0) {
+      logger.info(`    turns: ${chalk.gray('none')}`);
     } else {
       for (const turn of activity.lastTurns) logger.info(`    ${chalk.gray('>')} ${turn}`);
     }
@@ -334,12 +337,11 @@ function emitStatusJson(params: {
 
 /** A builder's #1893 live fields for `--json`. `null` means unknown; `activity` is null without `--activity`. */
 function liveJson(view: BuilderLiveView) {
-  const { lastActivity } = view;
   return {
     porchPhase: view.porch.phase,
     gate: view.porch.gate,
-    lastActivityAt: lastActivity === 'stopped' || lastActivity === 'unknown' ? null : lastActivity,
-    terminalLive: lastActivity === 'unknown' ? null : lastActivity !== 'stopped',
+    lastActivityAt: view.terminal.lastDataAt,
+    terminalLive: view.terminal.live,
     activity: view.activity,
   };
 }

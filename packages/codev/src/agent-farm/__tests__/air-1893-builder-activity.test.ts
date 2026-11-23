@@ -8,7 +8,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
+import { GLOBAL_SCHEMA } from '../db/schema.js';
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import {
+  builderShellperPids,
   summarizeTranscript,
   readSessionActivity,
   classifyProcess,
@@ -57,6 +61,14 @@ describe('summarizeTranscript', () => {
     expect(summarizeTranscript([user('go'), error].join('\n'), false).apiError).toBe(true);
     const recovered = [user('go'), error, assistant([{ type: 'text', text: 'Back on track.' }])].join('\n');
     expect(summarizeTranscript(recovered, false).apiError).toBe(false);
+  });
+
+  it('neutralizes terminal control sequences in transcript text (ANSI / OSC / bidi)', () => {
+    const hostile = 'ok\x1b[2J\x1b]52;c;cHduZWQ=\x07 done\u202e\x9b31m';
+    const { lastTurns } = summarizeTranscript(assistant([{ type: 'text', text: hostile }]), false);
+    // eslint-disable-next-line no-control-regex
+    expect(lastTurns![0]).not.toMatch(/[\x00-\x1f\x7f-\x9f\u202e]/);
+    expect(lastTurns![0]).toBe('assistant: ok [2J ]52;c;cHduZWQ= done 31m');
   });
 
   it('reports apiError unknown (null) when there is no assistant message', () => {
@@ -165,6 +177,40 @@ describe('classifyProcess', () => {
     'pnpm install',
   ])('does not classify %s', (cmdline) => {
     expect(classifyProcess(cmdline)).toBeNull();
+  });
+
+  it('neutralizes control sequences in the reported command', () => {
+    expect(classifyProcess('pnpm test \x1b]0;pwned\x07')).toEqual({ kind: 'test', command: 'pnpm test ]0;pwned' });
+  });
+});
+
+describe('builderShellperPids', () => {
+  it("maps each of the workspace's builder terminals to its shellper pid", () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(GLOBAL_SCHEMA);
+      const insert = db.prepare(
+        'INSERT INTO terminal_sessions (id, workspace_path, type, role_id, shellper_pid) VALUES (?, ?, ?, ?, ?)',
+      );
+      // Rows carry the canonical workspace spelling, as Tower writes them.
+      const ws = normalizeWorkspacePath('/ws');
+      insert.run('t1', ws, 'builder', 'builder-AIR-1', 101);
+      insert.run('t2', ws, 'builder', 'builder-air-2', null); // no shellper
+      insert.run('t3', ws, 'shell', 'shell-1', 102); // not a builder
+      insert.run('t4', normalizeWorkspacePath('/other'), 'builder', 'builder-air-3', 103); // another workspace
+      expect([...builderShellperPids('/ws', db)]).toEqual([['builder-air-1', 101]]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('is empty (every builder unknown) when the table cannot be read', () => {
+    const db = new Database(':memory:');
+    try {
+      expect(builderShellperPids('/ws', db).size).toBe(0);
+    } finally {
+      db.close();
+    }
   });
 });
 

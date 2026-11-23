@@ -171,6 +171,16 @@ describe('afx status — live builder state (#1893)', () => {
     expect(byId['builder-spir-43'].slice(3)).toEqual(['complete', '—', 'unknown']);
   });
 
+  it('a live session with no output time reads unknown, not stopped', async () => {
+    mockGetOverview.mockResolvedValue({ builders: [{ roleId: 'builder-spir-43', lastDataAt: null }], heldCount: 0 });
+    await status({});
+    const byId = Object.fromEntries(rows().map((r) => [r[0], r]));
+    expect(byId['builder-spir-43'][5]).toBe('unknown');
+    const payload = await runJson();
+    const b43 = payload.builders.find((b: any) => b.id === 'builder-spir-43');
+    expect(b43).toMatchObject({ terminalLive: true, lastActivityAt: null });
+  });
+
   it('--json keeps every existing field and adds the live ones', async () => {
     const payload = await runJson();
     const b42 = payload.builders.find((b: any) => b.id === 'builder-spir-42');
@@ -202,7 +212,7 @@ describe('afx status — live builder state (#1893)', () => {
       mockGather.mockResolvedValue(new Map<string, unknown>([
         ['builder-spir-42', known],
         ['builder-spir-43', unknown],
-        ['builder-task-AbCd', { ...unknown, processes: [] }],
+        ['builder-task-AbCd', { ...unknown, lastTurns: [], processes: [] }],
       ]));
     });
 
@@ -226,7 +236,8 @@ describe('afx status — live builder state (#1893)', () => {
         '    turns: unknown',
         '    running: unknown',
       ]);
-      expect(lines[at('builder-task-AbCd') + 2]).toBe('    running: none');
+      const iTask = at('builder-task-AbCd');
+      expect(lines.slice(iTask + 1, iTask + 3)).toEqual(['    turns: none', '    running: none']);
     });
 
     it('carries the activity, nulls included, in --json', async () => {

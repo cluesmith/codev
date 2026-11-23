@@ -355,7 +355,9 @@ last three transcript lines, and the test or review processes (`vitest`,
 `pnpm test`, `consult`, …) running under its terminal. Transcript fields are
 read from the builder's pinned Claude session; on other harnesses, or when the
 file cannot be read, they show `unknown`. The process table read is bounded
-to a few seconds and also reports `unknown` when it cannot finish.
+to a few seconds and also reports `unknown` when it cannot finish. The
+transcript lines are verbatim conversation text (control characters
+stripped): check them before pasting `--activity` output into a public issue.
 
 ```
   Activity:

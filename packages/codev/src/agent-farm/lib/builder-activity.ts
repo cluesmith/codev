@@ -11,6 +11,7 @@
 
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import type Database from 'better-sqlite3';
 import type { Builder } from '../types.js';
 import { findSessionFile } from '../utils/claude-session-discovery.js';
 import { getGlobalDb } from '../db/index.js';
@@ -22,8 +23,11 @@ const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 /** Transcript lines shown per builder. */
 export const LAST_TURN_COUNT = 3;
 const TURN_LINE_WIDTH = 100;
-/** The process table is read once for all builders and given up on after this long. */
-export const CENSUS_TIMEOUT_MS = 3000;
+/**
+ * The process table is read once for all builders and given up on after this
+ * long. Matches the POSIX `ps` timeout, so the command never outlives the bound.
+ */
+export const CENSUS_TIMEOUT_MS = 5000;
 
 export interface WorktreeProcess {
   pid: number;
@@ -52,8 +56,16 @@ export interface TranscriptSummary {
 // Session transcript
 // ---------------------------------------------------------------------------
 
+/**
+ * C0/C1 control characters (ESC among them) and bidi overrides. Transcript and
+ * argv text can carry untrusted content, and printed raw an ANSI/OSC sequence
+ * could rewrite the terminal or its clipboard.
+ */
+// eslint-disable-next-line no-control-regex
+const UNPRINTABLE = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
 function oneLine(text: string): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
+  const flat = text.replace(UNPRINTABLE, ' ').replace(/\s+/g, ' ').trim();
   return flat.length > TURN_LINE_WIDTH ? `${flat.slice(0, TURN_LINE_WIDTH - 1)}…` : flat;
 }
 
@@ -109,12 +121,13 @@ function readTail(file: string, size: number): { text: string; partial: boolean 
   const length = Math.min(size, TRANSCRIPT_TAIL_BYTES);
   const buffer = Buffer.alloc(length);
   const fd = openSync(file, 'r');
+  let read: number;
   try {
-    readSync(fd, buffer, 0, length, size - length);
+    read = readSync(fd, buffer, 0, length, size - length);
   } finally {
     closeSync(fd);
   }
-  return { text: buffer.toString('utf-8'), partial: length < size };
+  return { text: buffer.subarray(0, read).toString('utf-8'), partial: length < size };
 }
 
 /**
@@ -234,10 +247,10 @@ export async function readCensus(
 }
 
 /** Each builder terminal's shellper pid, keyed by lowercased builder id. Empty when unreadable. */
-export function builderShellperPids(workspacePath: string): Map<string, number> {
+export function builderShellperPids(workspacePath: string, db?: Database.Database): Map<string, number> {
   const pids = new Map<string, number>();
   try {
-    const rows = getGlobalDb()
+    const rows = (db ?? getGlobalDb())
       .prepare(
         "SELECT role_id, shellper_pid FROM terminal_sessions WHERE workspace_path = ? AND type = 'builder' AND role_id IS NOT NULL AND shellper_pid IS NOT NULL",
       )
