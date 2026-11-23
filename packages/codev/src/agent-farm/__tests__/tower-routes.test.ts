@@ -2525,6 +2525,37 @@ describe('tower-routes', () => {
         expect(allRows()[0]).toMatchObject({ workspace_path: CLOUD, to_agent: 'tunnel', from_agent: 'architect:review' });
       });
 
+      // Issue #1633. With no `main`, the front door is the first registered. The live resolver
+      // reads that off the terminal map and the registry off `getArchitects`, which sorted by
+      // name: the same address reached `zeta` with terminals up and was held for `alpha` with
+      // them down.
+      describe('the front door of a workspace with no main, where name order is not registration order', () => {
+        beforeEach(() => {
+          for (const name of ['main', 'review', 'tunnel']) setArchitectByName(CLOUD, name, null);
+          setArchitectByName(CLOUD, 'zeta', { name: 'zeta', cmd: 'claude', startedAt: '2026-01-01T00:00:00.000Z' });
+          setArchitectByName(CLOUD, 'alpha', { name: 'alpha', cmd: 'claude', startedAt: '2026-06-01T00:00:00.000Z' });
+        });
+
+        it('delivers to the first registered when its terminal is live', async () => {
+          const writes = liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['zeta', 'alpha'] } });
+          const { body } = await send('codev-cloud:architect', 'architect:review');
+
+          expect(body).toMatchObject({ ok: true, resolvedTo: 'zeta' });
+          expect(writes['codev-cloud/alpha']).not.toHaveBeenCalled();
+        });
+
+        it('holds for that same architect when no architect there has a live terminal', async () => {
+          // The workspace is still known to Tower (a shell is up); its architects are not.
+          liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { shells: ['shell-7'] } });
+          const { status, body } = await send('codev-cloud:architect', 'architect:review');
+
+          expect(status).toBe(200);
+          expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', resolvedTo: 'zeta' });
+          expect(mailbox.findHeldForAgent(sendDbHolder.db, CLOUD, 'zeta')).toHaveLength(1);
+          expect(mailbox.findHeldForAgent(sendDbHolder.db, CLOUD, 'alpha')).toHaveLength(0);
+        });
+      });
+
       it('holds it (no-live-pty) when the architect is registered and has no live terminal', async () => {
         const writes = liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
         const { status, body } = await send('codev-cloud:architect:tunnel', 'architect:review');

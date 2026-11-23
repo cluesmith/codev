@@ -163,27 +163,20 @@ describe('Issue #1477 — escalateHeldToOwner owner-resolution wiring', () => {
     expect(notices('air-1477')[0].to_agent).toBe('main');
   });
 
-  it('falls back to the workspace\'s first architect (getArchitects\' id order) when there is no `main`', () => {
-    // Registered zeta first and, crucially, with the EARLIER `started_at`. So id order and
-    // registration order disagree, and only one of them can produce `alpha`:
-    // `resolveRegistryArchitect` takes `architects[0]` from `getArchitects`, which is
-    // `ORDER BY id` — LEXICOGRAPHIC, not registration order.
+  it('falls back to the workspace\'s first-registered architect when there is no `main`', () => {
+    // zeta is registered first, with the EARLIER `started_at`, so name order and registration
+    // order disagree and only one of them can produce `zeta`.
     //
-    // Tracked as Issue #1633 — read that before "fixing" this assertion. It is pinned, not blessed:
-    // this asserts what ships, and what ships is not quite what the surrounding prose promises:
-    // the doc comments say "first registered", and both `loadState`
-    // (`ORDER BY (id != 'main'), started_at`) and the LIVE resolver (`entry.architects.values()`,
-    // registration order) implement it that way. Only this REGISTRY fallback sorts by id, so an
-    // offline hold can name a different architect than a live send would. That divergence is a
-    // production question, not something a test-only change should quietly fix — the test pins
-    // current behaviour so the discrepancy is visible rather than silent. When #1633 is fixed this
-    // test SHOULD fail; flip it to `zeta` and update the comment rather than deleting it.
+    // Issue #1633: this asserted `alpha` until `getArchitects` stopped sorting by id. It was
+    // pinned, not blessed: the registry fallback named the alphabetically first architect
+    // where `loadState`, `getArchitect` and the LIVE resolver all meant the first registered,
+    // so an offline hold could name a different architect than a live send would.
     setArchitectByName(WS, 'zeta', architect('zeta', '2026-01-01T00:00:00.000Z'));
     setArchitectByName(WS, 'alpha', architect('alpha', '2026-06-01T00:00:00.000Z'));
     registerBuilder('air-1477'); // legacy row: no spawning architect recorded
 
     expect(ports().escalateHeldToOwner!(info())).toBe(true);
-    expect(notices('air-1477')[0].to_agent).toBe('alpha');
+    expect(notices('air-1477')[0].to_agent).toBe('zeta');
   });
 
   it('no-ops (and logs why) when no architect is registered, leaving the alarm to retry', () => {

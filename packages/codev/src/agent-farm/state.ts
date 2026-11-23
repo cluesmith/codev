@@ -510,12 +510,17 @@ export function getArchitect(workspacePath: string): ArchitectState | null {
  * eliminating the cross-workspace leak by construction: a workspace's
  * `launchInstance` only sees its own architect rows, regardless of which other
  * workspaces this Tower process is serving.
+ *
+ * Order: `main` first, then the others in registration order (`started_at`), as `loadState`
+ * and `getArchitect` have it. Callers read "the first registered" off this list, so it must
+ * not be name order (Issue #1633): sorted by id, an offline hold named the alphabetically
+ * first architect where a live send reached the first registered.
  */
 export function getArchitects(workspacePath: string): ArchitectState[] {
   const db = getDb();
   const ws = canonicalize(workspacePath);
   const rows = db
-    .prepare('SELECT * FROM architect WHERE workspace_path = ? ORDER BY id')
+    .prepare("SELECT * FROM architect WHERE workspace_path = ? ORDER BY (id != 'main'), started_at")
     .all(ws) as DbArchitect[];
   return rows.map(dbArchitectToArchitectState);
 }

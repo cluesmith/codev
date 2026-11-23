@@ -445,3 +445,23 @@ no resolver, so it is unchanged; the delayed path is covered in `tower-routes.te
 - Flaky Tests section for the review: the three failures of porch's tests check (one in phase 1,
   two in phase 2) are load timeouts in subprocess-spawning tests; the 17 files are named in the
   entry above.
+
+## 2026-11-23 — phase 2 review iteration 2: issue #1633 fixed in place
+
+- codex REQUEST_CHANGES, claude APPROVE. Both confirm the iteration 1 misroute is fixed.
+- Codex's one point is issue #1633 (open, area/tower): with no `main`, the registry's "first
+  registered" was the alphabetically first architect, because `getArchitects` sorted by id.
+  Claude called it out of scope. I fixed it: the spec says "the first registered", the same
+  address reached two recipients depending on whether terminals were up, and the fix is the one
+  line the issue proposes (`ORDER BY (id != 'main'), started_at`). **PR body must name #1633 as
+  fixed; the ARCHITECT decides whether and when to close it.**
+- Other callers checked: `commands/stop.ts` (order irrelevant) and `tower-instances.ts` (sibling
+  relaunch order at workspace start, now registration order, so the first architect survives a
+  restart).
+- The pinned test in `air-1477-owner-escalation-wiring.test.ts` flipped from `alpha` to `zeta`,
+  as its own comment asked. Five new or flipped tests fail against the old query.
+- **Carry into phase 4** (claude): error strings interpolate a local workspace name that was not
+  checked against the component rule. Phase 4's rule about basenames in frames does not cover
+  those strings; do not assume it does.
+- Code changed, so the phase 2 skip no longer applies to this head. Order from the architect:
+  push, wait for GitHub green on the new head, tell the architect BEFORE the next `porch done`.
