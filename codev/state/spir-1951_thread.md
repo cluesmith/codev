@@ -24,3 +24,20 @@ All points accepted and folded in:
 - Added `linked-issue` check (closing keyword vs builder branch id), input validation, deploy
   multi-PR error semantics (per-PR `not run`, exit 1), the #1950 landing-order rule, and all four
   `codev` skill copies + hash regeneration in the docs criterion.
+
+## 2026-11-23 — plan
+- spec-approval approved by the owner (relayed by architect main); owner adopted the recommended
+  answers to Open Questions 1–4 (`codev check`; attribution off by default; gate text and builder
+  role unchanged).
+- Plan: 6 phases — forge read concepts → read-only core → `check pr` → `check deploy` →
+  `check worktree` → docs/guidance. Commit 9fbc2374c.
+- Decision: every glob (`check.*`, `cleanup.keepIgnored`) is a git `:(glob)` pathspec matched by git
+  itself — same semantics as #1950's `listKeepCandidates`, no glob dependency (Node 20 has no stable
+  `path.matchesGlob`).
+- gitlab/gitea get the new `pr-view` fields but explicitly disable `commit-checks`/`workflow-runs`
+  (unverifiable here; shows as a named `not run`).
+- Found: `afx cleanup`'s scaffold regex `^\?\? \.builder-` misses the write-guard files
+  (`.claude/hooks/…`); spec says cleanup unchanged and #1954 edits cleanup.ts — flagged for the
+  architect rather than changed.
+- PR #1954 (#1950, keep-files.ts with DEFAULT_KEEP_IGNORED) still open; Phase 5 has a
+  merged/not-merged rule.
