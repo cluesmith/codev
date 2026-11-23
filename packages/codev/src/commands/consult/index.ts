@@ -37,6 +37,7 @@ import {
   CLAUDE_UPDATE_HINT,
   ClaudePreflightError,
   claudeLaunch,
+  claudeLoginRemedy,
   credentialOrigin,
   excerpt,
   preflightClaude,
@@ -815,13 +816,32 @@ export async function runCodexConsultation(
 export const CLAUDE_REVIEW_TOOLS = ['Read', 'Glob', 'Grep'] as const;
 
 /**
- * Turn cap for a review. Claude explores the codebase with Read/Glob/Grep before producing its
- * verdict, so it needs a generous turn budget.
+ * Default turn cap for a review; `consult.claudeMaxTurns` overrides it. Claude explores the codebase
+ * with Read/Glob/Grep before producing its verdict, so it needs a generous turn budget.
  */
-const CLAUDE_MAX_TURNS = 200;
+export const DEFAULT_CLAUDE_MAX_TURNS = 200;
 
-/** Spend cap for a review, in USD. `--max-budget-usd` works in print mode only, which is how the lane runs. */
-const CLAUDE_MAX_BUDGET_USD = 25;
+/**
+ * Default spend cap for a review, in USD; `consult.claudeMaxBudgetUsd` overrides it.
+ * `--max-budget-usd` works in print mode only, which is how the lane runs. On a subscription login
+ * the dollars are notional, which is why the cap is configurable.
+ */
+export const DEFAULT_CLAUDE_MAX_BUDGET_USD = 25;
+
+/** The caps one review runs under. */
+export interface ClaudeReviewCaps {
+  maxTurns: number;
+  maxBudgetUsd: number;
+}
+
+/** `consult.claudeMaxTurns` and `consult.claudeMaxBudgetUsd`, or their defaults. Config load validates both. */
+export function resolveClaudeReviewCaps(workspaceRoot: string): ClaudeReviewCaps {
+  const consult = loadConfig(workspaceRoot).consult;
+  return {
+    maxTurns: consult?.claudeMaxTurns ?? DEFAULT_CLAUDE_MAX_TURNS,
+    maxBudgetUsd: consult?.claudeMaxBudgetUsd ?? DEFAULT_CLAUDE_MAX_BUDGET_USD,
+  };
+}
 
 /** The stderr tail a failure message quotes, bounded like `AGY_FAILURE_TAIL_MAX_CHARS`. */
 const CLAUDE_STDERR_TAIL_MAX_CHARS = 2000;
@@ -870,7 +890,12 @@ export const CLAUDE_CAPABILITY_NOTE = [
  * was run live only on 2.1.326. A flag added later must be verified at the floor, or the floor
  * raised in the same commit.
  */
-export function buildClaudeReviewArgs(opts: { model: string; systemPromptFile: string; sandboxDir: string }): string[] {
+export function buildClaudeReviewArgs(opts: {
+  model: string;
+  systemPromptFile: string;
+  sandboxDir: string;
+  caps: ClaudeReviewCaps;
+}): string[] {
   const tools = CLAUDE_REVIEW_TOOLS.join(',');
   return [
     '-p',
@@ -884,8 +909,8 @@ export function buildClaudeReviewArgs(opts: { model: string; systemPromptFile: s
     '--strict-mcp-config',
     '--disable-slash-commands',
     '--no-session-persistence',
-    '--max-turns', String(CLAUDE_MAX_TURNS),
-    '--max-budget-usd', String(CLAUDE_MAX_BUDGET_USD),
+    '--max-turns', String(opts.caps.maxTurns),
+    '--max-budget-usd', String(opts.caps.maxBudgetUsd),
     '--model', opts.model,
     '--system-prompt-file', opts.systemPromptFile,
     '--add-dir', opts.sandboxDir,
@@ -1017,8 +1042,10 @@ function startClaudeReview(opts: {
       }
 
       if (event.type === 'system' && event.subtype === 'init') {
-        // The session must have exactly the review tools: an extra one could write or run a shell,
-        // and a missing one means the reviewer reads less than the review assumes.
+        // The session must have exactly the review tools, compared as sets: an extra one could
+        // write or run a shell, and a missing one means the reviewer reads less than the review
+        // assumes. A tool listed twice is still the same tool, so a cosmetic duplicate in a claude
+        // release must not stop every review (#1941).
         const tools = event.tools;
         const allowed: readonly unknown[] = CLAUDE_REVIEW_TOOLS;
         const reported = `The session reported tools: ${excerpt(JSON.stringify(tools ?? null))}; expected exactly ${CLAUDE_REVIEW_TOOLS.join(', ')}.`;
@@ -1032,8 +1059,8 @@ function startClaudeReview(opts: {
           return;
         }
         const missing = CLAUDE_REVIEW_TOOLS.filter((tool) => !tools.includes(tool));
-        if (missing.length > 0 || tools.length !== CLAUDE_REVIEW_TOOLS.length) {
-          abort(toolsFailure(`without ${missing.length > 0 ? missing.join(', ') : 'each tool exactly once'}`, reported));
+        if (missing.length > 0) {
+          abort(toolsFailure(`without ${missing.join(', ')}`, reported));
           return;
         }
         sawInit = true;
@@ -1123,6 +1150,9 @@ function startClaudeReview(opts: {
 
 const PROMPT_TOO_LONG = /prompt is too long/i;
 
+/** A result saying the session has no login, e.g. `Not logged in · Please run /login` (2.1.330). */
+const NOT_LOGGED_IN = /not logged in|run \/login/i;
+
 /**
  * Whether a finished review child produced a review, or why not. Null means success.
  *
@@ -1133,7 +1163,12 @@ const PROMPT_TOO_LONG = /prompt is too long/i;
  * `is_error` is checked before a `success` subtype is trusted: the CLI reports an API error (a usage
  * limit, a bad credential) as subtype `success` with `is_error: true`.
  */
-function classifyClaudeRun(run: ClaudeReviewRun, modelId: string, authLine: string): Error | null {
+function classifyClaudeRun(
+  run: ClaudeReviewRun,
+  modelId: string,
+  preflight: Pick<ClaudePreflight, 'authLine' | 'mode' | 'modeSource'>,
+  caps: ClaudeReviewCaps,
+): Error | null {
   const exited = run.signal ? `was killed by ${run.signal}` : `exited with code ${run.exitCode}`;
   const stderr = run.stderrTail.trim()
     ? `\n\nclaude stderr (last ${CLAUDE_STDERR_TAIL_MAX_CHARS} chars):\n${run.stderrTail.trim()}`
@@ -1162,15 +1197,20 @@ function classifyClaudeRun(run: ClaudeReviewRun, modelId: string, authLine: stri
 
   if (result.subtype !== 'success') {
     const cap = result.subtype === 'error_max_turns'
-      ? ` The review used all ${CLAUDE_MAX_TURNS} turns.`
+      ? ` The review used all ${caps.maxTurns} turns. To allow more, raise consult.claudeMaxTurns in .codev/config.json.`
       : result.subtype === 'error_max_budget_usd'
-        ? ` The review reached the $${CLAUDE_MAX_BUDGET_USD} budget cap.`
+        ? ` The review reached the $${caps.maxBudgetUsd} budget cap. To allow more, raise consult.claudeMaxBudgetUsd in .codev/config.json.`
         : '';
     return new Error(`Claude CLI error (${result.subtype})${errors.length ? `: ${errors.join(', ')}` : ''}.${cap}`);
   }
 
   if (result.is_error) {
-    return new Error(`Claude returned an error instead of a review: ${resultText}\nCredential in use: ${authLine}`);
+    // The CLI's own advice for a missing login is its interactive `/login`, which is wrong in
+    // `api-key` mode, so the lane adds the remedy for the mode it ran in (#1941).
+    const remedy = NOT_LOGGED_IN.test(resultText) ? `\n${claudeLoginRemedy(preflight.mode, preflight.modeSource)}` : '';
+    return new Error(
+      `Claude returned an error instead of a review: ${resultText}\nCredential in use: ${preflight.authLine}${remedy}`
+    );
   }
 
   if (run.exitCode !== 0) {
@@ -1261,9 +1301,10 @@ export async function runClaudeConsultation(
     systemPromptFile = path.join(sandboxDir, `claude-system-prompt-${process.pid}-${Date.now()}.md`);
     fs.writeFileSync(systemPromptFile, `${role}\n\n${CLAUDE_CAPABILITY_NOTE}\n`, { mode: 0o600, flag: 'wx' });
 
+    const caps = resolveClaudeReviewCaps(workspaceRoot);
     const review = startClaudeReview({
       bin: preflight.bin,
-      args: buildClaudeReviewArgs({ model: choice.id, systemPromptFile, sandboxDir }),
+      args: buildClaudeReviewArgs({ model: choice.id, systemPromptFile, sandboxDir, caps }),
       prompt: queryText,
       cwd: workspaceRoot,
       env: preflight.env,
@@ -1279,7 +1320,7 @@ export async function runClaudeConsultation(
     const denials = describeClaudePermissionDenials(result?.permission_denials);
     if (denials) console.error(denials);
 
-    const failure = classifyClaudeRun(run, choice.id, preflight.authLine);
+    const failure = classifyClaudeRun(run, choice.id, preflight, caps);
     if (failure) throw failure;
     // A successful result with no assistant text has no VERDICT block to save.
     if (chunks.join('').trim() === '') {
