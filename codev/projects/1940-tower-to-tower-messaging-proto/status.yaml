@@ -5,10 +5,10 @@ phase: implement
 plan_phases:
   - id: phase_1
     title: Shared address contract and parser
-    status: in_progress
+    status: complete
   - id: phase_2
     title: Named architects across workspaces and the builder rule
-    status: pending
+    status: in_progress
   - id: phase_3
     title: Explicit workspace names
     status: pending
@@ -26,7 +26,7 @@ plan_phases:
     status: skipped
     skip_reason: 'dropped by owner at plan approval (main-31): front-door-only opt-in cut from stage 1'
     skipped_at: '2026-11-23T21:21:31.781Z'
-current_plan_phase: phase_1
+current_plan_phase: phase_2
 gates:
   spec-approval:
     status: approved
@@ -40,8 +40,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -56,8 +56,10 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1940/codev/projects/1940-tower-to-tower-messaging-proto/1940-phase_1-iter1-claude.txt
 started_at: '2026-11-21T01:30:58.126Z'
-updated_at: '2026-11-23T21:44:05.490Z'
+updated_at: '2026-11-23T21:49:16.005Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T18:57:14.334Z'
     acknowledged_at: '2026-11-23T18:58:17.774Z'
+  - boundary: plan-phase:phase_2
+    at: '2026-11-23T21:49:16.004Z'
