@@ -2542,6 +2542,36 @@ a.attention-row {
   overflow-wrap: anywhere;
 }
 
+/* An image in an item (#1938) never widens the card and keeps its aspect ratio; a click opens it
+   full size in a new tab. */
+.decisions-view .codev-artifact-canvas-rendered img {
+  max-width: 100%;
+  max-height: 480px;
+  object-fit: contain;
+  vertical-align: top;
+  cursor: zoom-in;
+}
+
+.decisions-view .codev-artifact-canvas-rendered a img {
+  cursor: pointer;
+}
+
+/* In place of an image that was not loaded: its alt text and its path, never a broken icon. */
+.decisions-image-missing {
+  display: inline-block;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px dashed var(--status-waiting);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.decisions-image-missing-label {
+  font-weight: 600;
+  color: var(--status-waiting);
+}
+
 .decisions-cards {
   display: flex;
   flex-direction: column;

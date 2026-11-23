@@ -488,6 +488,11 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## UI/UX
 
+- [From #1938] React 19 compares `dangerouslySetInnerHTML` by object identity, not by its
+  `__html` string: an inline `{ __html: html }` re-sets the element's HTML on every render, wiping
+  any DOM post-processing whose effect is keyed on the string (it does not re-run). Memoize the
+  object itself (`useMemo(() => ({ __html }), [source])`) and key the effect on it. The Decisions
+  tab's link rule silently regressed this way on every re-render until #1938.
 - [From #1049] VS Code's tab/focus model needs specific, tested signals, not the obvious API:
   the multi-file diff (`vscode.changes`) has **no typed tab input** even in @types/vscode 1.105
   (its `Tab.input` is `unknown`), so classify it via `activeTextEditor` gated by the active tab's

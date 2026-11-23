@@ -1,8 +1,8 @@
-import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, MouseEvent, ReactNode } from 'react';
-import { MarkdownView } from '@cluesmith/codev-artifact-canvas';
+import { renderMarkdown } from '@cluesmith/codev-artifact-canvas';
 import { useDecisions } from '../hooks/useDecisions.js';
-import { postDecisionRuling } from '../lib/api.js';
+import { fetchDecisionImage, postDecisionRuling } from '../lib/api.js';
 import type {
   DecisionRulingResult,
   DecisionItem,
@@ -103,28 +103,114 @@ export const STAMP_TIME_FORMAT: Intl.DateTimeFormatOptions = {
 
 const EXTERNAL_LINK_RE = /^https?:\/\//i;
 
+/** How long a full-size image page stays openable after the click that made it. */
+const FULL_SIZE_PAGE_MS = 60_000;
+
 /**
- * One handler for every link in the view, since item bodies are injected HTML: http(s) links
- * open in a new browser tab, any other link is inert, and the dashboard never navigates away.
+ * Open an image full size in a new tab. A workspace image is a blob of the dashboard's origin,
+ * so it is shown on a page holding only an `<img>` of it: an SVG opened as a document itself
+ * would run its scripts as the dashboard.
+ */
+function openFullSize(image: HTMLImageElement) {
+  const src = image.getAttribute('src') ?? '';
+  if (EXTERNAL_LINK_RE.test(src)) {
+    window.open(src, '_blank', 'noopener');
+    return;
+  }
+  if (!src.startsWith('blob:')) return;
+  const page = document.implementation.createHTMLDocument(image.alt || 'Image');
+  const full = page.createElement('img');
+  full.alt = image.alt;
+  full.src = src;
+  page.body.append(full);
+  const pageUrl = URL.createObjectURL(new Blob([`<!doctype html>${page.documentElement.outerHTML}`], { type: 'text/html' }));
+  window.open(pageUrl, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(pageUrl), FULL_SIZE_PAGE_MS);
+}
+
+/**
+ * One handler for every link and image in the view, since item bodies are injected HTML: http(s)
+ * links open in a new browser tab, any other link is inert, an image (outside a link) opens full
+ * size, and the dashboard never navigates away.
  */
 function handleLinkClick(event: MouseEvent<HTMLDivElement>) {
   if (!(event.target instanceof Element)) return;
   const anchor = event.target.closest('a');
-  if (!anchor) return;
+  if (!anchor) {
+    if (event.target instanceof HTMLImageElement) openFullSize(event.target);
+    return;
+  }
   event.preventDefault();
   const href = anchor.getAttribute('href')?.trim() ?? '';
   if (EXTERNAL_LINK_RE.test(href)) window.open(href, '_blank', 'noopener');
 }
 
+/** Where an image the browser must not load itself keeps its source until the tab loads it. */
+const PARKED_SRC = 'data-decisions-src';
+const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+/** The longest source a not-loaded note shows; a `data:` URL can run to megabytes. */
+const MAX_SHOWN_SOURCE = 200;
+
 /**
- * `MarkdownView` with the same rule applied to the rendered anchors themselves, so it also holds
- * for a middle-click, the context menu or the keyboard: an http(s) link opens in a new tab, and
- * any other link loses its `href`, leaving nothing to open. The shared renderer is unchanged.
+ * The item markdown as HTML, with every image source that is not an http(s) URL parked in
+ * {@link PARKED_SRC}: the browser would resolve a workspace path against the dashboard URL,
+ * where Tower's key-gated routes cannot answer it, and must not show a `data:` image at all.
+ * Parsed in an inert document, so nothing loads before the source is parked.
+ */
+function decisionsHtml(source: string): string {
+  const page = new DOMParser().parseFromString(renderMarkdown(source), 'text/html');
+  for (const image of page.querySelectorAll('img')) {
+    image.removeAttribute('srcset');
+    const src = image.getAttribute('src')?.trim() ?? '';
+    if (EXTERNAL_LINK_RE.test(src)) continue;
+    image.removeAttribute('src');
+    image.setAttribute(PARKED_SRC, src);
+  }
+  return page.body.innerHTML;
+}
+
+/** The workspace path an image source names, or null for a URL of any other kind. */
+function workspaceImagePath(src: string): string | null {
+  if (src === '' || src.startsWith('//') || URL_SCHEME_RE.test(src)) return null;
+  try {
+    // The source is a URL reference: a `?query` or `#fragment` is not part of the file name, and the
+    // renderer percent-encodes the rest (`my shot.png` → `my%20shot.png`), so the file is the decoded path.
+    return decodeURIComponent(src.replace(/[?#].*$/s, ''));
+  } catch {
+    return null;
+  }
+}
+
+/** Put a note in place of an image that was not loaded: its alt text and its source as written. */
+function showNotLoaded(image: HTMLImageElement, source: string, reason: string) {
+  const note = document.createElement('span');
+  note.className = 'decisions-image-missing';
+  note.title = reason;
+  const label = document.createElement('span');
+  label.className = 'decisions-image-missing-label';
+  label.textContent = 'Image not loaded';
+  const path = document.createElement('code');
+  path.textContent = source.length > MAX_SHOWN_SOURCE ? `${source.slice(0, MAX_SHOWN_SOURCE)}…` : source;
+  note.append(label, image.alt ? ` ${image.alt} ` : ' ', path);
+  image.replaceWith(note);
+}
+
+/**
+ * The shared markdown renderer, with the view's rules applied to what it renders. An http(s) link
+ * opens in a new tab and any other link loses its `href`, so the rule also holds for a
+ * middle-click, the context menu or the keyboard. An http(s) image loads as the browser would; any
+ * other image source is a workspace path the tab fetches with the key and shows as an object URL,
+ * revoked when the markdown changes or leaves, or it is a note saying the image was not loaded.
  */
 function DecisionsMarkdown({ source }: { source: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  // One object per source: React 19 compares this prop by identity and re-sets the HTML whenever
+  // it changes, which would wipe what the effect below did while the effect does not run again.
+  const markup = useMemo(() => ({ __html: decisionsHtml(source) }), [source]);
   useLayoutEffect(() => {
-    for (const anchor of ref.current?.querySelectorAll('a') ?? []) {
+    const root = ref.current;
+    if (!root) return;
+    for (const anchor of root.querySelectorAll('a')) {
       const href = anchor.getAttribute('href')?.trim() ?? '';
       if (EXTERNAL_LINK_RE.test(href)) {
         anchor.target = '_blank';
@@ -133,8 +219,37 @@ function DecisionsMarkdown({ source }: { source: string }) {
         anchor.removeAttribute('href');
       }
     }
-  }, [source]);
-  return <div ref={ref}><MarkdownView source={source} /></div>;
+    const controller = new AbortController();
+    const objectUrls: string[] = [];
+    for (const image of root.querySelectorAll<HTMLImageElement>(`img[${PARKED_SRC}]`)) {
+      const written = image.getAttribute(PARKED_SRC) ?? '';
+      const path = workspaceImagePath(written);
+      if (path === null) {
+        showNotLoaded(image, written, 'Only an http(s) URL or a path in the workspace is shown.');
+        continue;
+      }
+      void fetchDecisionImage(path, controller.signal).then(result => {
+        if (controller.signal.aborted) return;
+        if (result.kind === 'not-loaded') {
+          showNotLoaded(image, path, result.message);
+          return;
+        }
+        const url = URL.createObjectURL(result.blob);
+        objectUrls.push(url);
+        image.addEventListener('error', () => showNotLoaded(image, path, 'The browser could not show this file as an image.'), { once: true });
+        image.src = url;
+      });
+    }
+    return () => {
+      controller.abort();
+      for (const url of objectUrls) URL.revokeObjectURL(url);
+    };
+  }, [markup]);
+  return (
+    <div ref={ref}>
+      <div className="codev-artifact-canvas-rendered" dangerouslySetInnerHTML={markup} />
+    </div>
+  );
 }
 
 /** What a submit writes under the item, and what a held draft shows: the word, a blank line, the comment. */
