@@ -1,7 +1,7 @@
 id: '1915'
 title: windows-show-and-end-orphaned-
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-22T23:49:34.385Z'
-updated_at: '2026-11-23T22:35:12.504Z'
+updated_at: '2026-11-23T22:35:16.405Z'
