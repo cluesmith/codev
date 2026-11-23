@@ -465,3 +465,18 @@ no resolver, so it is unchanged; the delayed path is covered in `tower-routes.te
   those strings; do not assume it does.
 - Code changed, so the phase 2 skip no longer applies to this head. Order from the architect:
   push, wait for GitHub green on the new head, tell the architect BEFORE the next `porch done`.
+
+## 2026-11-23 — phase 2 iteration 3 build recorded; notes for the review and verify phases
+
+- GitHub green 8 of 8 on PR #1957 at `66ea5c747` (the #1633 fix), checked by the architect, who
+  allowed the one-time skip for both `porch done` calls on that head. Both run: build check
+  passed each time, tests check skipped, local config restored in the same command and
+  byte-identical to its original. Only `status.yaml`, this log and porch's context file have
+  changed since `66ea5c747`.
+- If code or tests change again in phase 2: push, wait for green, ask the architect.
+- The architect closes issue #1633 when the PR merges. Not me.
+- **For the PR body, the review document and the verify-phase notes** (architect's instruction):
+  sibling architects now relaunch `main` first, then by registration time, at workspace start.
+  It was name order. To verify: in a workspace with two siblings registered in non-alphabetical
+  order, restart the workspace and check they come back in registration order.
+- **Phase 3: build, push, tell the architect BEFORE `porch done`.**
