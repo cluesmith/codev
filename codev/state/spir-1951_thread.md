@@ -41,3 +41,13 @@ All points accepted and folded in:
   architect rather than changed.
 - PR #1954 (#1950, keep-files.ts with DEFAULT_KEEP_IGNORED) still open; Phase 5 has a
   merged/not-merged rule.
+
+## 2026-11-23 — plan, CMAP iter 1 (codex REQUEST_CHANGES, claude COMMENT)
+All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals.md). Notable:
+- My plan wrongly assumed `findWorkspaceRoot()` returns the main checkout from a worktree — it returns
+  the worktree root (#407). Roots now come from git (`worktree list` first entry = mainRoot).
+- Allow-list is now a closed per-subcommand grammar; diff/log/show forced `--no-ext-diff --no-textconv`;
+  `--upload-pack`/`--output`/`--textconv`/`--filters` refused everywhere.
+- Empty include pathspec list would become a bare `--` (= every file) — short-circuit.
+- Phase 3 split into merge-mechanics / forge-fed checks → 7 phases. Porch-only walk algorithm pinned.
+- plan-approval gate reached; waiting for the owner.
