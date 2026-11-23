@@ -113,3 +113,7 @@
 - Next: two consecutive greens on 3b4066839 (first: 45142055516).
 - Two consecutive fully green runs on 3b4066839: 45142055516 and 45143011938. Each: Node 22 unit, Node 24 unit and
   targeted jobs logged 12 JOB-WORKER-CHECK lines, 0 member=true, 0 worker deaths.
+
+## 2026-11-24 - merged origin/main
+
+Owner asked for a merge (not rebase) of origin/main, which includes PR #1949 (#1910). Clean merge, no conflicts; only codev/resources/arch.md changed on both sides and auto-merged with the #1915 section intact. New head 72e0e2f42. Build green; branch tests + merged tests (air-1893, bugfix-1910, bugfix-1952) 109 passed / 7 skipped; main Tower 53132 before and after. Fresh Windows run: https://github.com/cluesmith/codev/actions/runs/45276143657. Still at dev-approval.
