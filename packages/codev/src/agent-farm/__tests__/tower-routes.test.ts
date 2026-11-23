@@ -2859,7 +2859,6 @@ describe('tower-routes', () => {
           ['a character outside the allowed set', 'my notes', 400, 'INVALID_NAME'],
           ['a colon', 'a:b', 400, 'INVALID_NAME'],
           ['an empty name', '', 400, 'INVALID_NAME'],
-          ['a name over 64 characters', 'x'.repeat(65), 400, 'INVALID_NAME'],
           ['the basename of another workspace', 'codev-cloud', 409, 'NAME_TAKEN'],
           ['that basename in another letter case', 'Codev-Cloud', 409, 'NAME_TAKEN'],
         ])('refuses %s, with the reason, and stores nothing', async (_what, name, status, code) => {
@@ -2868,6 +2867,58 @@ describe('tower-routes', () => {
           expect(result.body.error).toBe(code);
           expect(typeof result.body.message).toBe('string');
           expect(storedName(WORK)).toBeNull();
+        });
+
+        it('accepts a long name: the spec sets no length limit', async () => {
+          const long = 'x'.repeat(200);
+          expect(await setName(WORK, long)).toEqual({ status: 200, body: { explicitName: long, addressName: long } });
+          expect(storedName(WORK)).toBe(long);
+        });
+
+        // The two answers left for when the table disagrees with the validation that just
+        // passed. Neither can be reached through the route on POSIX (it takes a row stored
+        // under another spelling of the path), so a trigger stands in for the disagreement.
+        describe('when the write does not store what validation allowed', () => {
+          afterEach(() => {
+            sendDbHolder.db.exec('DROP TRIGGER IF EXISTS test_name_race; DROP TRIGGER IF EXISTS test_name_ignored;');
+          });
+
+          it('the unique index refuses the name: 409 NAME_TAKEN, and nothing is stored', async () => {
+            // Another workspace takes the name between the check and the write.
+            sendDbHolder.db.exec(`
+              CREATE TRIGGER test_name_race BEFORE UPDATE OF address_name ON known_workspaces
+              WHEN NEW.address_name = 'raced' AND OLD.workspace_path <> '${CLOUD}'
+              BEGIN UPDATE known_workspaces SET address_name = 'raced' WHERE workspace_path = '${CLOUD}'; END;
+            `);
+            const result = await setName(WORK, 'raced');
+            expect(result.status).toBe(409);
+            expect(result.body.error).toBe('NAME_TAKEN');
+            expect(result.body.message).toContain("'raced'");
+            expect(storedName(WORK)).toBeNull();
+            expect(storedName(CLOUD)).toBeNull();
+          });
+
+          it('the write matches no row: 500, not a success that names nothing', async () => {
+            sendDbHolder.db.exec(`
+              CREATE TRIGGER test_name_ignored BEFORE UPDATE OF address_name ON known_workspaces
+              BEGIN SELECT RAISE(IGNORE); END;
+            `);
+            const result = await setName(WORK, 'work');
+            expect(result.status).toBe(500);
+            expect(result.body.error).toBe('INTERNAL_ERROR');
+            expect(result.body.message).toContain('was not stored');
+            expect(result.body.explicitName).toBeUndefined();
+            expect(storedName(WORK)).toBeNull();
+          });
+        });
+
+        it('an error about a named workspace calls it what the sender wrote, not its directory', async () => {
+          await setName(CLOUD, 'cloud');
+          const result = await send('cloud:architect:ghost', 'architect:main');
+          expect(result.status).toBe(404);
+          expect(result.body.message).toContain("workspace 'cloud'");
+          expect(result.body.message).toContain('Front door: cloud:architect');
+          expect(result.body.message).not.toContain('codev-cloud');
         });
 
         it('refuses the explicit name of another workspace, in any letter case', async () => {

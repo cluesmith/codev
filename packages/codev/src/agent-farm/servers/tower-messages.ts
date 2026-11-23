@@ -238,6 +238,14 @@ function sendersSpawningArchitect(sender: SenderContext): string | null | undefi
   return lookupBuilderSpawningArchitect(sender.id, sender.workspace);
 }
 
+/**
+ * The workspace as an error names it: what the sender wrote, else its directory name. A
+ * workspace with a name of its own is not known to the sender by its directory.
+ */
+function workspaceLabel(target: TargetWorkspace): string {
+  return target.writtenName ?? path.basename(target.workspacePath);
+}
+
 /** How the sender writes the front door of the workspace an address pointed into. */
 function frontDoorAddress(target: TargetWorkspace): string {
   return target.writtenName === undefined ? 'architect' : `${target.writtenName}:architect`;
@@ -312,7 +320,7 @@ export function resolveTarget(address: AgentAddress, from: SenderContext = {}): 
         return {
           code: 'NOT_FOUND',
           message:
-            `Architect '${address.name}' not found in workspace '${path.basename(workspacePath)}'. ` +
+            `Architect '${address.name}' not found in workspace '${workspaceLabel(target)}'. ` +
             architectsHint([...entry.architects.keys()], target),
         };
       }
@@ -321,7 +329,7 @@ export function resolveTarget(address: AgentAddress, from: SenderContext = {}): 
     return resolveBareArchitect(entry, target, sender);
   }
 
-  return resolveLocalId(address.name, entry, workspacePath);
+  return resolveLocalId(address.name, entry, target);
 }
 
 /**
@@ -343,7 +351,7 @@ function resolveBareArchitect(
   if (entry.architects.size === 0) {
     return {
       code: 'NOT_FOUND',
-      message: `No architect terminal found in workspace '${path.basename(workspacePath)}'.`,
+      message: `No architect terminal found in workspace '${workspaceLabel(target)}'.`,
     };
   }
 
@@ -404,7 +412,8 @@ function resolveBareArchitect(
 }
 
 /** A builder id (exact, then tail with leading zeros stripped) or a shell id, live. */
-function resolveLocalId(agent: string, entry: WorkspaceTerminals, workspacePath: string): ResolveResult | ResolveError {
+function resolveLocalId(agent: string, entry: WorkspaceTerminals, target: TargetWorkspace): ResolveResult | ResolveError {
+  const { workspacePath } = target;
   // Check builders — exact match (case-insensitive)
   for (const [builderId, terminalId] of entry.builders) {
     if (builderId.toLowerCase() === agent) {
@@ -447,7 +456,7 @@ function resolveLocalId(agent: string, entry: WorkspaceTerminals, workspacePath:
 
   return {
     code: 'NOT_FOUND',
-    message: `Agent '${agent}' not found in workspace '${path.basename(workspacePath)}'.`,
+    message: `Agent '${agent}' not found in workspace '${workspaceLabel(target)}'.`,
   };
 }
 
@@ -506,7 +515,7 @@ export function resolveAgentInRegistry(
       return {
         code: 'NOT_FOUND',
         message:
-          `Architect '${address.name}' is not registered in workspace '${path.basename(ws)}'. ` +
+          `Architect '${address.name}' is not registered in workspace '${workspaceLabel(target)}'. ` +
           architectsHint(getArchitects(ws).map((a) => a.name), target),
       };
     }
@@ -529,7 +538,7 @@ export function resolveAgentInRegistry(
     };
   }
 
-  return { code: 'NOT_FOUND', message: `Agent '${agent}' is not a live terminal and is not registered in workspace '${path.basename(ws)}'.` };
+  return { code: 'NOT_FOUND', message: `Agent '${agent}' is not a live terminal and is not registered in workspace '${workspaceLabel(target)}'.` };
 }
 
 /**
@@ -547,7 +556,7 @@ function resolveRegistryArchitect(
   const { workspacePath } = target;
   const architects = getArchitects(workspacePath);
   if (architects.length === 0) {
-    return { code: 'NOT_FOUND', message: `No architect registered in workspace '${path.basename(workspacePath)}'.` };
+    return { code: 'NOT_FOUND', message: `No architect registered in workspace '${workspaceLabel(target)}'.` };
   }
   const main = getArchitectByName(workspacePath, DEFAULT_ARCHITECT_NAME);
 

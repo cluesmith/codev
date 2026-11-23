@@ -26,8 +26,8 @@ export interface RegisteredWorkspace {
   explicitName: string | null;
 }
 
-/** The longest explicit name accepted. Nothing sensible comes near it; it bounds what is stored. */
-export const MAX_WORKSPACE_NAME_LENGTH = 64;
+/** How much of a refused value an error quotes back. */
+const MAX_QUOTED_LENGTH = 64;
 
 /** The remedy every naming error points at. */
 export const WORKSPACE_NAME_COMMAND = 'afx workspace name <name>';
@@ -50,9 +50,7 @@ function everyWorkspace(registered: readonly RegisteredWorkspace[], active: Iter
 /** A refused value quoted back: printable ASCII, and cut short. */
 function quoted(value: string): string {
   const printable = value.replace(/[^\x20-\x7e]/g, '?');
-  return printable.length > MAX_WORKSPACE_NAME_LENGTH
-    ? `${printable.slice(0, MAX_WORKSPACE_NAME_LENGTH)}...`
-    : printable;
+  return printable.length > MAX_QUOTED_LENGTH ? `${printable.slice(0, MAX_QUOTED_LENGTH)}...` : printable;
 }
 
 /**
@@ -81,6 +79,9 @@ export type NameValidation =
  * Refused when the name does not fit the address component rule, is a reserved word, or
  * is the address name of any other workspace Tower knows, running or not. So a name is
  * never taken from a workspace that is using it, including one that is stopped.
+ *
+ * There is no length limit of its own: the spec gives none. What bounds a usable name is
+ * the length of an address (`MAX_ADDRESS_LENGTH`), which the parser enforces on a send.
  */
 export function validateProposedName(
   proposed: string,
@@ -90,13 +91,6 @@ export function validateProposedName(
 ): NameValidation {
   // Lower-cased first: the component rule is written for lower case, and `Core` is `core`.
   const name = proposed.toLowerCase();
-  if (name.length > MAX_WORKSPACE_NAME_LENGTH) {
-    return {
-      ok: false,
-      code: 'INVALID_NAME',
-      message: `A workspace name is at most ${MAX_WORKSPACE_NAME_LENGTH} characters; this one has ${name.length}.`,
-    };
-  }
   if (!isAddressComponent(name)) {
     return {
       ok: false,

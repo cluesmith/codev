@@ -11,7 +11,6 @@ import {
   isSameWorkspace,
   validateProposedName,
   workspaceAddressName,
-  MAX_WORKSPACE_NAME_LENGTH,
   WORKSPACE_NAME_COMMAND,
   type RegisteredWorkspace,
 } from '../utils/workspace-address.js';
@@ -151,12 +150,17 @@ describe('validateProposedName', () => {
     expect(result).toMatchObject({ ok: false, code: 'INVALID_NAME' });
   });
 
-  it('refuses a name longer than the cap, without quoting it back', () => {
-    const long = 'a'.repeat(MAX_WORKSPACE_NAME_LENGTH + 1);
+  it('has no length limit of its own: the spec gives none', () => {
+    const long = 'a'.repeat(300);
+    expect(validateProposedName(long, A, registered, [A])).toEqual({ ok: true, name: long });
+  });
+
+  it('cuts a long refused name short when quoting it back', () => {
+    const long = `${'a'.repeat(300)} b`;
     const result = validateProposedName(long, A, registered, [A]);
     expect(result).toMatchObject({ ok: false, code: 'INVALID_NAME' });
     expect((result as { message: string }).message).not.toContain(long);
-    expect(validateProposedName('a'.repeat(MAX_WORKSPACE_NAME_LENGTH), A, registered, [A]).ok).toBe(true);
+    expect((result as { message: string }).message).toContain(`'${'a'.repeat(64)}...'`);
   });
 
   it('quotes a refused name as printable ASCII', () => {

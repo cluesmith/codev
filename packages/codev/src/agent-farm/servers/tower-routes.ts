@@ -993,7 +993,25 @@ async function handleSetWorkspaceAddressName(
     }
     explicitName = checked.name;
   }
-  setWorkspaceAddressName(workspacePath, explicitName);
+  // Validation above is the rule; these two are what is left when the table disagrees with
+  // it (a row stored under another spelling of this path, which only Windows can have and
+  // boot canonicalization removes). Either way nothing was stored, and the caller is told.
+  let stored: boolean;
+  try {
+    stored = setWorkspaceAddressName(workspacePath, explicitName);
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'SQLITE_CONSTRAINT_UNIQUE') throw err;
+    return sendJson(res, 409, {
+      error: 'NAME_TAKEN',
+      message: `'${explicitName}' is already the name of another workspace.`,
+    });
+  }
+  if (!stored) {
+    return sendJson(res, 500, {
+      error: 'INTERNAL_ERROR',
+      message: `The name was not stored: Tower has no row for ${workspacePath} under that spelling of its path.`,
+    });
+  }
 
   const own = workspaceAddressName(workspacePath, getRegisteredWorkspaces(), active);
   const response: SetWorkspaceAddressNameResponse =

@@ -587,6 +587,16 @@ describe('Spec 1940 phase 3 — explicit workspace names, in both resolvers', ()
       expect(error?.message).toContain('afx workspace name <name>');
     });
 
+    it('an error about a named workspace calls it what the sender wrote, not its directory', () => {
+      names[WORK] = 'work';
+      for (const to of ['work:architect:ghost', 'work:spir-404']) {
+        const { error } = resolve(to, CLOUD, 'architect:main');
+        expect(error?.code).toBe('NOT_FOUND');
+        expect(error?.message).toContain("workspace 'work'");
+        expect(error?.message).not.toContain("workspace 'codev'");
+      }
+    });
+
     it('after one is named, both resolve', () => {
       names[WORK] = 'work';
       expect(resolve('codev:architect', CLOUD, 'architect:main')).toEqual({ reached: 'main', workspacePath: CODEV });
