@@ -23,7 +23,9 @@ plan_phases:
     status: pending
   - id: phase_7
     title: Front-door-only workspace setting (separable)
-    status: pending
+    status: skipped
+    skip_reason: 'dropped by owner at plan approval (main-31): front-door-only opt-in cut from stage 1'
+    skipped_at: '2026-11-23T21:21:31.781Z'
 current_plan_phase: phase_1
 gates:
   spec-approval:
@@ -42,7 +44,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-21T01:30:58.126Z'
-updated_at: '2026-11-23T21:21:26.435Z'
+updated_at: '2026-11-23T21:21:31.782Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T18:57:14.334Z'
