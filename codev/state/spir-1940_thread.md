@@ -640,3 +640,25 @@ CLEARED {"ok":true,"result":{"explicitName":null,"addressName":null,"unaddressab
  ✓ src/agent-farm/__tests__/tmp-phase3-check.e2e.test.ts > phase 3 one-off: names on a real Tower > ambiguous, then named through the CLI command, then both resolve; refusals; clear 1038ms
       Tests  1 passed (1)
 ```
+
+## 2026-11-23 — phase 3, review iteration 1: codex REQUEST_CHANGES, claude APPROVE
+
+- `porch done` for the build ran with the one-time tests skip, on the architect's word after
+  they checked GitHub's run on `0a553e80b` (local config restored byte-identical in the same
+  command, nothing under `.codev` staged).
+- **Codex**: the 64-character limit on a workspace name is not in the spec. Correct, it was my
+  addition. **Removed.** Consequence left as it is and raised with the architect: an address is at
+  most 512 characters (`MAX_ADDRESS_LENGTH`, phase 1), so a name too long to fit in one can be set
+  and then not written; the sender gets the parser's length error.
+- **Claude** (non-blocking, fixed in place): the name route ignored the write's result (now 500
+  `INTERNAL_ERROR` when no row was updated); a unique-index refusal would have been an uncaught
+  throw (now 409 `NAME_TAKEN`); errors named a workspace by its directory, not by what the sender
+  wrote (`workspaceLabel(target)`, six error texts in both resolvers). Left: the handler reads
+  the name table twice.
+- The two write failures cannot be reached through the route on POSIX, so their tests put a
+  SQLite trigger on the real test database: one takes the name between check and write, one makes
+  the update skip its row.
+- Checked: three mutations (catch rethrows, unstored write answers 200, label back to the
+  directory) each fail tests; 38 test files that touch the resolver, the route or the naming
+  module (1053 tests) pass; type-check and `npm run build` pass. Code changed after the green
+  run, so: push, wait for GitHub, ask the architect before `porch done`.
