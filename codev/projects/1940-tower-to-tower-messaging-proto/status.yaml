@@ -1,9 +1,30 @@
 id: '1940'
 title: tower-to-tower-messaging-proto
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Shared address contract and parser
+    status: in_progress
+  - id: phase_2
+    title: Named architects across workspaces and the builder rule
+    status: pending
+  - id: phase_3
+    title: Explicit workspace names
+    status: pending
+  - id: phase_4
+    title: Qualified provenance and reply commands
+    status: pending
+  - id: phase_5
+    title: 'One-Tower discovery: workspace list and whoami'
+    status: pending
+  - id: phase_6
+    title: Addressing docs in both trees and end-to-end verification
+    status: pending
+  - id: phase_7
+    title: Front-door-only workspace setting (separable)
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -18,10 +39,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-21T01:30:58.126Z'
-updated_at: '2026-11-23T21:21:22.144Z'
+updated_at: '2026-11-23T21:21:26.435Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T18:57:14.334Z'
