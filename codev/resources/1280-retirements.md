@@ -473,11 +473,9 @@ pre-existing flakiness".
 3. **Audit trail.** This entry and `bugfix-1902-prompt-sweep.test.ts`, which asserts no
    agent-facing file (PIR included) tells a builder to skip a flaky test.
 
-## R9 — re-baseline spir/aspir spec-review.md for Bugfix #1910 (framework paths named by location)
+## R9 — re-baseline spir/aspir spec-review.md for Bugfix #1910 (framework path named by location)
 
-**Status: applied in the #1910 PR, scope set by the architect (main) on 2026-11-22: reword every
-shipped site that sends an agent looking for a framework file by path. The owner sees it at the
-`pr` gate.**
+**Status: proposed in the #1910 PR; needs the owner's sign-off at the `pr` gate.**
 
 | | |
 |---|---|
@@ -488,16 +486,15 @@ shipped site that sends an agent looking for a framework file by path. The owner
 
 ### What was removed
 
-One line per file, the Structure bullet, replaced in place: "the spec follows the delivered
-template (`protocols/spir/templates/spec.md`)" now reads "the SPIR spec template, which the
-specify prompt inlines (it is delivered content, not a file to look for in this workspace)". In
-an adopter workspace that path exists only inside the installed package, so a reviewer that read
-it literally searched the disk for it (`find /` on Windows).
+One line per file, the Structure bullet, replaced in place. "the spec follows the delivered
+template (`protocols/spir/templates/spec.md`), which the specify prompt inlines" now reads "the
+spec follows the SPIR spec template that the specify prompt inlines". In an adopter workspace that
+path exists only inside the installed package, so a reviewer that read it literally searched the
+disk for it.
 
 ### Class-invariant compliance
 
 1. **Behaviour grep green.** Both keep `Baked Decisions` and `do not autonomously`; mirror parity
    holds.
 2. **Guard kept, not retired.** Only the baselines move.
-3. **Audit trail.** This entry and `bugfix-1910-framework-paths.test.ts`, which asserts no shipped
-   file names a framework file by an on-disk path outside a resolver include.
+3. **Audit trail.** This entry and `bugfix-1910-framework-paths.test.ts`.

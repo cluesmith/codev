@@ -1,136 +1,42 @@
 /**
- * Regression guard for cluesmith/codev#1910 — shipped text named framework files by an on-disk
- * path that adopter workspaces do not have.
+ * Regression guard for cluesmith/codev#1910: shipped text named framework files by an on-disk
+ * path that adopter workspaces do not have (the files live only in the installed package), and
+ * agents searched the disk for them with `find /`.
  *
- * Protocols, roles and templates resolve at runtime through the four-tier lookup; in an adopter
- * workspace the standard ones live only inside the installed package. A prompt or template that
- * says "the template is at `protocols/spir/templates/spec.md`" or lists a protocol as
- * "(`codev/protocols/experiment/protocol.md`)" reads as a location, and agents went looking for it
- * with `find /`. Content reaches agents through `{{> …}}` includes, the spawn prompt and porch.
- *
- * Allowed: resolver includes (`{{> protocols/…}}`), lines that name a `codev/…` path as the place
- * a project's own customization goes or that explain resolution, and markdown table rows (see
- * ALLOWED below).
+ * Pins the sites the issue found, in both trees, and the owner's rule that agents never search
+ * from the filesystem root.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
+const read = (rel: string) => fs.readFileSync(path.join(repoRoot, rel), 'utf-8');
+const TREES = ['codev-skeleton', 'codev'];
 
-/** What ships to adopters (the skeleton) and our instance's copies of the same framework files. */
-const ROOTS = [
-  'codev-skeleton',
-  'codev/protocols',
-  'codev/roles',
-  'codev/templates',
-  'codev/resources/commands',
-  'codev/resources/workflow-reference.md',
-  'codev/resources/risk-triage.md',
-  'codev/resources/cheatsheet.md',
-  '.claude/skills',
-  '.codex/skills',
-];
+/** An on-disk framework path that is not a `{{> … }}` resolver include. */
+const linesNamingPath = (body: string, re: RegExp) =>
+  body.split('\n').filter((l) => re.test(l) && !/\{\{>/.test(l)).map((l) => l.trim());
 
-/** RELEASE is this repository's own protocol; it never ships, and its files exist here. */
-const EXCLUDED = [/^codev\/protocols\/release\//];
-
-/**
- * A framework file or directory named by location: any `codev/protocols/…` or `codev/roles/…`
- * (directories and `<placeholder>` forms included), and the bare or relative
- * `protocols/x/templates/…`, `../roles/x.md` forms.
- */
-const FRAMEWORK_PATH =
-  /\bcodev\/(?:protocols|roles)\/|(?:\.\.\/|`|\(|\s)(?:protocols\/[a-z<>-]+\/(?:protocol\.md|templates\/|prompts\/|consult-types\/)|roles\/[a-z-]+\.md)/;
-
-/**
- * Allowed: a resolver include; a line that frames the path as where a customization goes, or
- * explains resolution/absence; a markdown table row (risk-triage lists paths a PR diff touches).
- */
-const ALLOWED = (line: string) =>
-  /\{\{>\s*protocols\//.test(line) ||
-  /customi[sz]|override|four-tier|resolves? via|is absent|add its own/i.test(line) ||
-  /^\s*\|/.test(line);
-
-function walk(rel: string): string[] {
-  const full = path.join(repoRoot, rel);
-  if (!fs.existsSync(full)) return [];
-  if (fs.statSync(full).isFile()) return [rel];
-  const out: string[] = [];
-  for (const entry of fs.readdirSync(full, { withFileTypes: true })) {
-    const child = path.posix.join(rel, entry.name);
-    if (entry.isDirectory()) out.push(...walk(child));
-    else if (/\.(md|json)$/.test(entry.name)) out.push(child);
-  }
-  return out;
-}
-
-const FILES = [...new Set(ROOTS.flatMap(walk))].filter((f) => !EXCLUDED.some((re) => re.test(f)));
-
-describe('#1910 — shipped text never names a framework file by an on-disk path', () => {
-  it('scans the files that carried the bug', () => {
-    for (const f of [
-      'codev-skeleton/protocols/spir/consult-types/spec-review.md',
-      'codev-skeleton/protocols/aspir/protocol.json',
-      'codev-skeleton/templates/CLAUDE.md',
-      'codev-skeleton/templates/AGENTS.md',
-      'codev-skeleton/resources/workflow-reference.md',
-      'codev/templates/CLAUDE.md',
-    ]) {
-      expect(FILES).toContain(f);
+describe.each(TREES)('#1910 (%s)', (tree) => {
+  it.each(['spir', 'aspir'])('%s spec-review.md and protocol.json do not name the spec template path', (p) => {
+    for (const f of [`protocols/${p}/consult-types/spec-review.md`, `protocols/${p}/protocol.json`]) {
+      expect(linesNamingPath(read(`${tree}/${f}`), /protocols\/spir\/templates\/spec\.md/), f).toEqual([]);
     }
   });
 
-  it('every remaining framework path is a resolver include or a customization pointer', () => {
-    const hits: string[] = [];
-    for (const file of FILES) {
-      fs.readFileSync(path.join(repoRoot, file), 'utf-8').split('\n').forEach((text, i) => {
-        if (FRAMEWORK_PATH.test(text) && !ALLOWED(text)) hits.push(`  ${file}:${i + 1}  ${text.trim().slice(0, 160)}`);
-      });
-    }
-    expect(
-      hits,
-      `These name a framework file by a path adopter workspaces do not have; agents search the disk for it. ` +
-        `Deliver the content (include, spawn prompt, porch) or name the path only as where a customization goes.\n` +
-        hits.join('\n'),
-    ).toEqual([]);
+  it.each(['CLAUDE.md', 'AGENTS.md'])('templates/%s does not point at codev/protocols/ for protocol text', (t) => {
+    const body = read(`${tree}/templates/${t}`);
+    expect(linesNamingPath(body, /codev\/protocols\/[a-z]+\/protocol\.md/)).toEqual([]);
+    expect(body).not.toContain('Read the full protocol documentation in `codev/protocols/`');
   });
 
-  it('the guard bites on the shapes #1910 found', () => {
-    for (const line of [
-      'the spec follows the delivered template (`protocols/spir/templates/spec.md`), which the specify prompt inlines.',
-      '"description": "canonical template delivered by the specify prompt (protocols/spir/templates/spec.md)."',
-      '- **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)',
-      '- [SPIR Protocol](../protocols/spir/protocol.md) - Multi-phase development workflow',
-      '- Builder role: `codev/roles/builder.md`',
-      'Read the full protocol documentation in `codev/protocols/`.',
-      'Protocol-specific prompts are loaded from `codev/protocols/<protocol>/consult-types/<type>-review.md`.',
-      '*For detailed documentation, see the full protocol files in `codev/protocols/`.*',
-      'See your local `codev/roles/consultant.md`.',
-    ]) {
-      expect(FRAMEWORK_PATH.test(line) && !ALLOWED(line), line).toBe(true);
-    }
-    expect(ALLOWED('{{> protocols/spir/templates/spec.md}}')).toBe(true);
-    // The allow-list is keyword-based; words that merely sit near a path do not exempt it.
-    for (const line of [
-      'Open your local copy at `codev/protocols/spir/protocol.md`.',
-      'The full protocol lives in `codev/protocols/spir/` (see the package).',
-    ]) {
-      expect(ALLOWED(line), line).toBe(false);
-    }
-  });
-
-  it.each(['codev-skeleton', 'codev'])('%s roles and templates forbid searching from the filesystem root (owner ruling)', (tree) => {
-    for (const f of ['roles/builder.md', 'roles/architect.md', 'roles/consultant.md', 'templates/CLAUDE.md', 'templates/AGENTS.md']) {
-      const body = fs.readFileSync(path.join(repoRoot, tree, f), 'utf-8');
-      expect(body, f).toContain('Never search from the filesystem root');
-      expect(body, f).toContain('is delivered to you another way, so do not go looking for it');
-    }
-  });
-
-  it.each(['codev-skeleton', 'codev'])('%s CLAUDE.md/AGENTS.md templates say protocols are delivered, not opened', (tree) => {
-    for (const t of ['CLAUDE.md', 'AGENTS.md']) {
-      expect(fs.readFileSync(path.join(repoRoot, tree, 'templates', t), 'utf-8'), t).toContain('there is no protocol file to open');
-    }
-  });
+  it.each(['roles/builder.md', 'roles/architect.md', 'templates/CLAUDE.md', 'templates/AGENTS.md'])(
+    '%s says never to search from the filesystem root (owner ruling)',
+    (f) => {
+      const body = read(`${tree}/${f}`);
+      expect(body).toContain('Never search from the filesystem root');
+      expect(body).toContain('is delivered to you another way, so do not go looking for it');
+    },
+  );
 });

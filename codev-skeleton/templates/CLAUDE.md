@@ -22,8 +22,6 @@ This project uses **Codev** for AI-assisted development.
 
 ## Available Protocols
 
-Porch and `afx spawn` deliver each protocol's text to the agent running it, so there is no protocol file to open: a protocol resolves from the installed package (see File Resolution below) unless this project customized it.
-
 - **SPIR**: Multi-phase development with consultation
 - **ASPIR**: Autonomous SPIR — no human gates on spec/plan
 - **AIR**: Autonomous Implement & Review for small features
@@ -58,7 +56,7 @@ The list above is what ships with Codev; a project can add its own under `.codev
 - **Specs**: `codev/specs/` - Feature specifications (WHAT to build)
 - **Plans**: `codev/plans/` - Implementation plans (HOW to build)
 - **Reviews**: `codev/reviews/` - Reviews and lessons learned
-- **Protocols**: `codev/protocols/` - only the protocols this project customizes (the standard ones resolve from the installed package)
+- **Protocols**: `codev/protocols/` - Development protocols
 
 ## Working with Project Labels
 
@@ -159,4 +157,4 @@ Agent Farm is configured via `.codev/config.json` at the project root. Created d
 
 ## For More Info
 
-Porch and `afx spawn` deliver each protocol's full text to the agent running it; File Resolution above says where a customized copy goes.
+Porch and `afx spawn` give each agent the full text of the protocol it is running.

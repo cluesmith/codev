@@ -1,6 +1,6 @@
 # Architect-Builder Workflow Reference
 
-Quick reference for the 7-stage project workflow. Protocol details arrive with the work: `afx spawn` inlines the protocol into the builder's prompt and porch delivers each phase's prompt.
+Quick reference for the 7-stage project workflow. For protocol details, see `codev/protocols/spir/protocol.md`.
 
 ## Workflow Overview
 
@@ -271,4 +271,7 @@ afx cleanup -p <id> --force
 
 ## Related Documentation
 
-- The SPIR protocol and the builder, architect and consultant roles: delivered by `afx spawn`, porch and `consult`. They resolve from the installed package and exist under `codev/protocols/` and `codev/roles/` only when this project customizes them.
+- Full SPIR protocol: `codev/protocols/spir/protocol.md`
+- Builder role: `codev/roles/builder.md`
+- Architect role: `codev/roles/architect.md`
+- Consultant role: `codev/roles/consultant.md`

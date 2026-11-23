@@ -41,3 +41,17 @@
   trees. The guard test pins it.
 - The second full run caught the consult SKILL edit against the shipped-skill hash history.
   Regenerated with `generate-skill-hashes`.
+
+## Trim (2026-11-23, owner review of the PR)
+
+- The owner judged the PR too broad, and agreed that resolver jargon ("through the four-tier lookup") and
+  disclaimers ("delivered content, not a file to look for") add nothing an agent can act on.
+  The four-tier wording partly existed to satisfy the guard's keyword allow-list, which is a smell.
+- Reverted to main: the consult skill (4 copies) and shipped-skill-hashes.ts, consult.md,
+  overview.md, workflow-reference.md, risk-triage.md, the cheatsheets, the consultant role, and
+  the templates' Key Locations line.
+- Kept: the issue's sites (plain wording), the templates' protocol list and closing line, and the
+  owner's rule in the builder/architect roles and the CLAUDE/AGENTS templates (the owner named
+  templates). The keyword-allow-list guard is replaced by a short test that pins the exact sites.
+- R9 is marked as needing the owner's sign-off at the gate (R7/R8 were architect-approved
+  before they were applied; this one was not).

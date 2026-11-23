@@ -23,10 +23,7 @@
  *     user-evolved files (`arch.md`, `lessons-learned.md`) that builders and
  *     architects reference and write by path legitimately.
  *   - Plain documentation references (backtick mentions, "see codev/…") are
- *     NOT flagged here. The rule is about *fetching*, not *referencing*. A
- *     reference that reads as "the file is at this path" still sends agents
- *     searching the disk for it (#1910); the framework's own test
- *     `bugfix-1910-framework-paths.test.ts` guards the shipped text for that.
+ *     NOT flagged. The rule is about *fetching*, not *referencing*.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';

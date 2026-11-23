@@ -16,7 +16,7 @@ If the baked decisions themselves contradict each other (e.g., two different lan
 - **Correctness** — the requirements are technically sound and internally consistent; the problem statement is accurate.
 - **Feasibility** — implementable within the stated tools and constraints, with no obvious blockers.
 - **Clarity** — a builder would know what to build; acceptance criteria are testable; terminology is consistent.
-- **Structure** — the spec follows the SPIR spec template, which the specify prompt inlines (it is delivered content, not a file to look for in this workspace). A spec that ignores the template's headings — usually because the builder pattern-matched an older spec in `codev/specs/` — is a defect: `REQUEST_CHANGES` for a wholesale departure (most headings missing or renamed). A single genuinely-inapplicable section reduced to a one-line "N/A — [reason]" with its heading kept is fine, not grounds for `REQUEST_CHANGES`.
+- **Structure** — the spec follows the SPIR spec template that the specify prompt inlines. A spec that ignores the template's headings — usually because the builder pattern-matched an older spec in `codev/specs/` — is a defect: `REQUEST_CHANGES` for a wholesale departure (most headings missing or renamed). A single genuinely-inapplicable section reduced to a one-line "N/A — [reason]" with its heading kept is fine, not grounds for `REQUEST_CHANGES`.
 
 You are reviewing the specification (WHAT is built), not code or implementation (HOW) — that is the plan and implementation reviews. Be constructive: name the issue and suggest a fix.
 

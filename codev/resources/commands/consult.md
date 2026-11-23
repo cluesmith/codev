@@ -337,7 +337,7 @@ consult -m codex --type integration --issue 42 --base ci
 - **Architect context** (cwd outside `.builders/` or `--issue` provided): requires `--issue <N>` to identify the project
 
 **Prompt templates:**
-Protocol-specific prompts (`protocols/<protocol>/consult-types/<type>-review.md`) and the shared `integration` prompt (`consult-types/integration-review.md`) resolve through the four-tier lookup: a copy this project customizes under `codev/` overrides the one in the installed package.
+Protocol-specific prompts are loaded from `codev/protocols/<protocol>/consult-types/<type>-review.md`. The `integration` type uses the shared `codev/consult-types/integration-review.md`.
 
 ### Stats Mode
 
@@ -558,12 +558,12 @@ session. If the CLI denies any of the reviewer's tool calls, consult says so:
 
 ## The Consultant Role
 
-The consultant role, which `consult` delivers to each reviewer, defines behavior:
+The consultant role (`codev/roles/consultant.md`) defines behavior:
 - Provides second perspectives on decisions
 - Offers alternatives and considerations
 - Works constructively (not adversarial, not a rubber stamp)
 
-Customize by creating a local `codev/roles/consultant.md`; without one, the role resolves from the installed package.
+Customize by editing your local `codev/roles/consultant.md`.
 
 ## Query Logging
 

@@ -1,6 +1,6 @@
 # PR Review Risk Triage Guide
 
-Quick reference for the architect's risk-based PR review process. For the full integration review workflow, see Section 4 of the architect role, which `afx` delivers to the architect session.
+Quick reference for the architect's risk-based PR review process. For the full integration review workflow, see `codev/roles/architect.md` Section 4.
 
 ## Risk Assessment
 
