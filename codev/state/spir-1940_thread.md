@@ -372,3 +372,19 @@ no resolver, so it is unchanged; the delayed path is covered in `tower-routes.te
 - To name it next time: porch cannot tell me, so the only way is to have a full-output run of my
   own fail. Running the suite in a loop to catch it would add load to a machine that is already
   loaded, so I have not.
+
+## 2026-11-23 — phase 2 review iteration 1: a misroute in the registry fallback, fixed
+
+- codex REQUEST_CHANGES, claude APPROVE. Both pointed at the same thing: for bare `architect`
+  from a builder with no architect of its own, in a workspace with no `main`, the live resolver
+  refuses with the Spec 755 message and the registry resolver answered "the first registered".
+  Because the route goes to the registry on any `NOT_FOUND`, the builder's mail was held for, and
+  then delivered to, an unrelated architect. Older than this phase (the old code had the same
+  lines); fixed here because phase 2's claim is that the two resolvers agree.
+- The registry now refuses exactly where the live resolver does. The starved-mail notice keeps
+  its "else the first registered" step, now written in `escalateHeldToOwner` itself, with the
+  same results as before. **This goes in the PR body as an adjacent bug fixed in place.**
+- New tests reproduce it: three fail against the pre-fix resolver, one of them a route test that
+  finds mail stored for the wrong architect.
+- **Carry into phase 6:** `codev/resources/arch.md` (near line 817) still describes the old
+  two-slot `parseAddress` intercept.

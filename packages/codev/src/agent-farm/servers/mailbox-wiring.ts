@@ -464,9 +464,10 @@ export function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
 /**
  * Raise a starvation notice to a starving agent's OWNER architect (Spec 1313 round 3, change
  * 3). Skips agents that are themselves architects — the alarm would land in the same starved
- * mailbox, and `afx status` covers that case. Resolves the recipient EXACTLY as `afx send
- * architect` does — the starving builder's spawning architect (affinity), else the workspace's
- * `main`, else the first-registered architect — via the shared registry resolver. Then enqueues
+ * mailbox, and `afx status` covers that case. The recipient is the starving builder's spawning
+ * architect (affinity), else the workspace's `main`, else the first-registered architect — via
+ * the shared registry resolver. The last step is this notice's own: the builder's own
+ * `afx send architect` is refused there (Spec 755), where a notice still needs a reader. Then enqueues
  * ONE coalesced (supersede-keyed), GATE-delivered mailbox row: visibility only, never a force
  * path. No-op when no architect can be resolved (nowhere to send).
  *
@@ -478,9 +479,14 @@ export function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
 function escalateHeldToOwner(info: HeldOwnerNoticeInfo, log: LogFn): boolean {
   // An architect-addressed row gets no notice (it would starve in the same mailbox).
   if (getArchitectByName(info.workspacePath, info.toAgent)) return false;
-  // Resolve the owner architect the same way `afx send architect` does (bare `architect` form
-  // with the starving builder as sender → spawning affinity, else main, else first).
-  const owner = resolveAgentInRegistry({ kind: 'architect' }, { id: info.toAgent, workspace: info.workspacePath });
+  // The owner is the architect `afx send architect` from the starving builder would reach:
+  // its spawning architect, else `main`. A builder with neither (a legacy row, or an architect
+  // that has gone, in a workspace with no `main`) has no architect of its own, and its own send
+  // is refused; this notice is Tower's, not the builder's, so it goes to the workspace's front
+  // door, which is then the first registered. Someone must hear that mail is starving.
+  const workspace = info.workspacePath;
+  let owner = resolveAgentInRegistry({ kind: 'architect' }, { id: info.toAgent, workspace });
+  if (isResolveError(owner)) owner = resolveAgentInRegistry({ kind: 'architect' }, { workspace });
   if (isResolveError(owner)) {
     log('INFO', `[mailbox] starvation notice for ${info.toAgent} skipped: no architect to notify (${owner.message})`);
     return false;

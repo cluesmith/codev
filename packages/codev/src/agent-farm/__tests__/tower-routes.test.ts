@@ -2611,6 +2611,30 @@ describe('tower-routes', () => {
           const { body } = await send('codev:architect', BUILDER);
           expect(body.resolvedTo).toBe('review');
         });
+
+        // The live resolver refuses this with NOT_FOUND, which is also what sends the route to
+        // the registry. The registry must refuse it too: answering with "the first registered"
+        // held the builder's mail for an architect it has nothing to do with.
+        it('refuses bare architect when the builder\'s architect has gone and there is no main, and stores nothing', async () => {
+          setArchitectByName(CODEV, 'main', null);
+          setArchitectByName(CODEV, 'review', null);
+          for (const name of ['alpha', 'beta']) setArchitectByName(CODEV, name, { name, cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+          const writes = liveAgents({ [CODEV]: { architects: ['alpha', 'beta'] } });
+
+          for (const options of [undefined, { deliverAfter: 30 }]) {
+            const { status, body } = await send('architect', BUILDER, options ? { options } : {});
+            expect(status).toBe(404);
+            expect(body).toEqual({
+              error: 'NOT_FOUND',
+              message:
+                `builder ${BUILDER} was spawned by architect review, which is no longer registered, ` +
+                "and no 'main' architect is registered (registered: alpha, beta)",
+            });
+          }
+          expect(allRows()).toHaveLength(0);
+          expect(writes['codev/alpha']).not.toHaveBeenCalled();
+          expect(writes['codev/beta']).not.toHaveBeenCalled();
+        });
       });
 
       describe('malformed addresses are a 400 that names the expected shape', () => {

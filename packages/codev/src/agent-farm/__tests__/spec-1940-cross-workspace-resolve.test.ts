@@ -49,7 +49,9 @@ import {
   resolveAgentInRegistry,
   isResolveError,
   addressSpoofingErrorMessage,
+  architectGoneErrorMessage,
   crossWorkspaceBuilderErrorMessage,
+  legacyBuilderErrorMessage,
   type ResolveError,
 } from '../servers/tower-messages.js';
 import { CROSS_TOWER_UNAVAILABLE_MESSAGE } from '../utils/agent-names.js';
@@ -286,6 +288,50 @@ describe('Spec 1940 phase 2 — addresses across workspaces', () => {
       mockGetArchitects.mockImplementation((ws) => (ws === CLOUD ? [{ name: 'tunnel' }, { name: 'review' }] : []));
       mockGetArchitectByName.mockImplementation((ws, name) => (ws === CLOUD && name !== 'main' ? { name } : null));
       expect(resolve('codev-cloud:architect', CODEV, 'spir-100').reached).toBe('tunnel');
+    });
+  });
+
+  // The route asks the registry whenever the live resolver says NOT_FOUND, and the Spec 755
+  // refusals below are NOT_FOUND. A registry that answered them with "the first registered"
+  // would hold a builder's mail for an architect it has nothing to do with.
+  describe.each(BOTH)('a builder with no architect of its own, in a workspace with no main, against %s', (_where, resolve) => {
+    beforeEach(() => {
+      // codev has lost `main` and `review`; two unrelated architects remain.
+      mockGetWorkspaceTerminals.mockReturnValue(new Map([[CODEV, entry(['alpha', 'beta'], ['spir-100', 'legacy-1'])]]));
+      mockGetArchitects.mockImplementation((ws) => (ws === CODEV ? [{ name: 'alpha' }, { name: 'beta' }] : []));
+      mockGetArchitectByName.mockImplementation((ws, name) => (ws === CODEV && ['alpha', 'beta'].includes(name) ? { name } : null));
+    });
+
+    it('refuses bare architect from a builder whose architect has gone, with the Spec 755 message', () => {
+      for (const address of ['architect', 'codev:architect']) {
+        expect(resolve(address, CODEV, 'spir-100')).toEqual({
+          reached: null,
+          error: { code: 'NOT_FOUND', message: architectGoneErrorMessage('spir-100', 'review', ['alpha', 'beta']) },
+        });
+      }
+    });
+
+    it('refuses bare architect from a legacy builder, with the Spec 755 message', () => {
+      expect(resolve('architect', CODEV, 'legacy-1')).toEqual({
+        reached: null,
+        error: { code: 'NOT_FOUND', message: legacyBuilderErrorMessage('legacy-1', ['alpha', 'beta']) },
+      });
+    });
+
+    it('still gives the first registered to a sender that is not a builder, and to one from another workspace', () => {
+      expect(resolve('architect', CODEV, 'architect:alpha').reached).toBe('alpha');
+      expect(resolve('architect', CODEV).reached).toBe('alpha');
+      expect(resolve('codev:architect', CLOUD, 'architect:tunnel').reached).toBe('alpha');
+    });
+  });
+
+  describe.each(BOTH)('a builder whose architect has gone, in a workspace that has a main, against %s', (_where, resolve) => {
+    it('reaches main', () => {
+      mockGetWorkspaceTerminals.mockReturnValue(new Map([[CODEV, entry(['main', 'beta'], ['spir-100', 'legacy-1'])]]));
+      mockGetArchitects.mockImplementation((ws) => (ws === CODEV ? [{ name: 'beta' }, { name: 'main' }] : []));
+      mockGetArchitectByName.mockImplementation((ws, name) => (ws === CODEV && ['main', 'beta'].includes(name) ? { name } : null));
+      expect(resolve('architect', CODEV, 'spir-100').reached).toBe('main');
+      expect(resolve('architect', CODEV, 'legacy-1').reached).toBe('main');
     });
   });
 

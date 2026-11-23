@@ -550,7 +550,14 @@ export function resolveAgentInRegistry(
   return { code: 'NOT_FOUND', message: `Agent '${agent}' is not a live terminal and is not registered in workspace '${path.basename(ws)}'.` };
 }
 
-/** Registry analogue of bare `architect`: affinity inside the sender's workspace, else the front door. */
+/**
+ * Registry analogue of {@link resolveBareArchitect}, and the same answer: a builder in
+ * this workspace gets its spawning architect, else 'main', else the Spec 755 errors;
+ * anyone else gets the front door. It must not be more forgiving than the live resolver.
+ * The route comes here after the live resolver says NOT_FOUND, and that includes its
+ * legacy-builder and architect-gone refusals: answering those with "the first registered"
+ * would hold a builder's mail for an architect it has nothing to do with.
+ */
 function resolveRegistryArchitect(
   target: TargetWorkspace,
   sender: SenderContext,
@@ -560,15 +567,27 @@ function resolveRegistryArchitect(
   if (architects.length === 0) {
     return { code: 'NOT_FOUND', message: `No architect registered in workspace '${path.basename(workspacePath)}'.` };
   }
-  // A builder in this workspace → its spawning architect if still registered, else 'main'.
+  const main = getArchitectByName(workspacePath, DEFAULT_ARCHITECT_NAME);
+
   const spawning = target.isSendersOwn ? sendersSpawningArchitect(sender) : undefined;
-  if (spawning) {
-    if (getArchitectByName(workspacePath, spawning)) return { workspacePath, agent: spawning, kind: 'architect' };
+  if (spawning !== undefined && sender.id) {
+    // A builder in this workspace.
+    if (spawning !== null && getArchitectByName(workspacePath, spawning)) {
+      return { workspacePath, agent: spawning, kind: 'architect' };
+    }
+    if (main) return { workspacePath, agent: DEFAULT_ARCHITECT_NAME, kind: 'architect' };
+    const registered = architects.map((a) => a.name);
+    return {
+      code: 'NOT_FOUND',
+      message:
+        spawning === null
+          ? legacyBuilderErrorMessage(sender.id, registered)
+          : architectGoneErrorMessage(sender.id, spawning, registered),
+    };
   }
-  if (getArchitectByName(workspacePath, DEFAULT_ARCHITECT_NAME)) {
-    return { workspacePath, agent: DEFAULT_ARCHITECT_NAME, kind: 'architect' };
-  }
-  return { workspacePath, agent: architects[0].name, kind: 'architect' };
+
+  // The front door: 'main' first, then the first registered.
+  return { workspacePath, agent: main ? DEFAULT_ARCHITECT_NAME : architects[0].name, kind: 'architect' };
 }
 
 /**
