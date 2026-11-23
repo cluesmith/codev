@@ -122,6 +122,8 @@ export async function killShellperProcesses(worktreePath: string): Promise<numbe
  * `cwd` of each shellper's JSON config. A census failure is reported, not read
  * as "no shellpers" (Spec 1658), and cleanup carries on.
  */
+type JobSeams = Pick<KillSessionTreeOptions, 'terminateJob' | 'jobMembers'>;
+
 async function killWindowsShellperProcesses(worktreePath: string): Promise<number> {
   let census: ProcessCensusEntry[];
   try {
@@ -133,12 +135,16 @@ async function killWindowsShellperProcesses(worktreePath: string): Promise<numbe
   let killed = 0;
   // One helper for the whole pass, started on the first job: its cold start is paid once.
   const jobs: { helper: WindowsJobHelper | null } = { helper: null };
-  const terminateJob = (name: string, rootPid: number) => {
+  const helper = () => {
     if (!jobs.helper) jobs.helper = new WindowsJobHelper({ log: (message) => logger.warn(message) });
-    return jobs.helper.terminate(name, rootPid);
+    return jobs.helper;
+  };
+  const jobSeams: JobSeams = {
+    terminateJob: (name, rootPid) => helper().terminate(name, rootPid),
+    jobMembers: (name, rootPid) => helper().jobMembers(name, rootPid),
   };
   try {
-    killed = await killMatchingShellpers(census, worktreePath, terminateJob);
+    killed = await killMatchingShellpers(census, worktreePath, jobSeams);
   } finally {
     jobs.helper?.stop();
   }
@@ -148,7 +154,7 @@ async function killWindowsShellperProcesses(worktreePath: string): Promise<numbe
 async function killMatchingShellpers(
   census: ProcessCensusEntry[],
   worktreePath: string,
-  terminateJob: KillSessionTreeOptions['terminateJob'],
+  jobSeams: JobSeams,
 ): Promise<number> {
   let killed = 0;
   for (const entry of census) {
@@ -158,7 +164,7 @@ async function killMatchingShellpers(
     if (cwd === null || !sameWindowsPath(cwd, worktreePath)) continue;
     // The session job (Spec 1658 Phase 3b) also ends descendants with no live
     // parent; this pass has its own helper, since cleanup runs outside Tower.
-    const opts: KillSessionTreeOptions = { rootStartTime: entry.creationTime, terminateJob };
+    const opts: KillSessionTreeOptions = { rootStartTime: entry.creationTime, ...jobSeams };
     const shellperSessionId = readJsonStringField(config, 'sessionId');
     if (shellperSessionId) opts.jobName = sessionJobName(shellperSessionId);
     try {

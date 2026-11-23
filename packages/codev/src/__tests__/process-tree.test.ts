@@ -23,9 +23,25 @@ function esrch(): Error {
   return Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
 }
 
-function entry(pid: number, ppid: number, creationTime: number): ProcessCensusEntry {
-  return { pid, ppid, rssKb: 0, cmdline: `proc-${pid}`, creationTime };
+function entry(pid: number, ppid: number, creationTime: number, cmdline = `proc-${pid}`): ProcessCensusEntry {
+  return { pid, ppid, rssKb: 0, cmdline, creationTime };
 }
+
+/** A job listing with no processes: the guard (#1915) finds nothing to protect. */
+const noJobMembers = async () => ({ ok: true as const, found: true, member: true, processes: [] });
+
+/** A job listing naming `pids`. */
+function jobListing(pids: number[]) {
+  return vi.fn(async () => ({
+    ok: true as const,
+    found: true,
+    member: true,
+    processes: pids.map((pid) => ({ pid, state: 'alive' as const, parent: 'unknown' as const })),
+  }));
+}
+
+const SHELLPER_CMD = 'C:\\nvm4w\\nodejs\\node.exe C:\\codev\\dist\\terminal\\shellper-main.js "{\\"sessionId\\":\\"x\\"}"';
+const TOWER_CMD = '"C:\\Program Files\\nodejs\\node.exe" C:/codev/dist/agent-farm/servers/tower-server.js 4200 --log-file x.log';
 
 describe('killSessionTree on POSIX', () => {
   beforeEach(() => {
@@ -241,7 +257,7 @@ describe('killSessionTree on Windows', () => {
       return { ok: true, found: true, member: true };
     });
 
-    const result = await killSessionTree(40, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+    const result = await killSessionTree(40, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers: noJobMembers });
 
     // The root is re-checked after the job round trip, before taskkill.
     expect(h.events).toEqual(['census', 'terminate J 40', 'census', 'taskkill 40', 'census', 'kill 41']);
@@ -259,7 +275,7 @@ describe('killSessionTree on Windows', () => {
       return { ok: true, found: true, member: true };
     });
 
-    await killSessionTree(60, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+    await killSessionTree(60, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers: noJobMembers });
 
     expect(h.events).not.toContain('taskkill 60');
     expect(h.events).not.toContain('kill 60');
@@ -278,7 +294,7 @@ describe('killSessionTree on Windows', () => {
       return { ok: true, found: true, member: true };
     });
 
-    const result = await killSessionTree(50, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+    const result = await killSessionTree(50, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers: noJobMembers });
 
     expect(result.snapshot.members.map((m) => m.pid)).toEqual([50, 51, 52]);
     // The root died with the job, so its pid is not tree-killed.
@@ -289,19 +305,19 @@ describe('killSessionTree on Windows', () => {
     forceHostPlatform('win32');
     const h = windowsHarness({ censuses: [[]], alive: new Set() });
     const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
-    const result = await killSessionTree(45, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+    const result = await killSessionTree(45, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers: noJobMembers });
     expect(result.signaled).toBe(true);
 
     const notOurs = vi.fn(async () => ({ ok: true, found: true, member: false }));
     const other = windowsHarness({ censuses: [[]], alive: new Set() });
-    expect((await killSessionTree(46, { census: other.census, taskkill: other.taskkill, kill: other.kill, jobName: 'J', terminateJob: notOurs })).signaled).toBe(false);
+    expect((await killSessionTree(46, { census: other.census, taskkill: other.taskkill, kill: other.kill, jobName: 'J', terminateJob: notOurs, jobMembers: noJobMembers })).signaled).toBe(false);
   });
 
   it('does not report a job error when jobs are disabled (reported once already)', async () => {
     forceHostPlatform('win32');
     const h = windowsHarness({ censuses: [[entry(47, 1, 100)]], alive: new Set() });
     const terminateJob = vi.fn(async () => ({ ok: false, error: 'Per-session job objects disabled', helperFailure: true, disabled: true }));
-    const result = await killSessionTree(47, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+    const result = await killSessionTree(47, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers: noJobMembers });
     expect(result.jobError).toBeUndefined();
   });
 
@@ -311,7 +327,7 @@ describe('killSessionTree on Windows', () => {
     const h = windowsHarness({ censuses: [census], alive: new Set() });
     const terminateJob = vi.fn(async () => ({ ok: false, error: 'TerminateJobObject failed', code: 5 }));
 
-    const result = await killSessionTree(42, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob });
+    const result = await killSessionTree(42, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers: noJobMembers });
 
     expect(h.events).toEqual(['census', 'census', 'taskkill 42']);
     expect(result.jobError).toBe('job J not terminated: TerminateJobObject failed (Win32 error 5)');
@@ -321,21 +337,71 @@ describe('killSessionTree on Windows', () => {
     forceHostPlatform('win32');
     const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
     const reused = windowsHarness({ censuses: [[entry(43, 1, 900_000)]], alive: new Set([43]) });
-    const refused = await killSessionTree(43, { census: reused.census, taskkill: reused.taskkill, kill: reused.kill, rootStartTime: 100_000, jobName: 'J', terminateJob });
+    const refused = await killSessionTree(43, { census: reused.census, taskkill: reused.taskkill, kill: reused.kill, rootStartTime: 100_000, jobName: 'J', terminateJob, jobMembers: noJobMembers });
     expect(refused.refused).toBe('reused-pid');
     expect(terminateJob).toHaveBeenCalledTimes(1);
 
     const failing = windowsHarness({ censuses: [new Error('cim down')], alive: new Set() });
     await expect(
-      killSessionTree(44, { census: failing.census, taskkill: failing.taskkill, kill: failing.kill, jobName: 'J', terminateJob }),
+      killSessionTree(44, { census: failing.census, taskkill: failing.taskkill, kill: failing.kill, jobName: 'J', terminateJob, jobMembers: noJobMembers }),
     ).rejects.toThrow(/cim down; its session job was terminated/);
+  });
+
+  it('#1915: never terminates a job that holds a Tower; ends the session\'s own processes one by one', async () => {
+    forceHostPlatform('win32');
+    // 80 the session's shellper, 81 its shell, 82 an orphan of this session (parent gone).
+    // 90 a Tower started from inside the session (parent gone), 91 a shellper it created, 92 that session's agent.
+    const census = [
+      entry(80, 1, 100, SHELLPER_CMD),
+      entry(81, 80, 110),
+      entry(82, 999, 120),
+      entry(90, 998, 130, TOWER_CMD),
+      entry(91, 90, 140, SHELLPER_CMD),
+      entry(92, 91, 150),
+    ];
+    const h = windowsHarness({ censuses: [census, census], alive: new Set([80, 81, 82, 90, 91, 92]) });
+    const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
+    const jobMembers = jobListing([80, 81, 82, 90, 91, 92]);
+
+    const result = await killSessionTree(80, { census: h.census, taskkill: h.taskkill, kill: h.kill, rootStartTime: 100, jobName: 'J', terminateJob, jobMembers });
+
+    expect(terminateJob).not.toHaveBeenCalled();
+    expect(h.events.filter((e) => e.startsWith('taskkill'))).toEqual([]);
+    expect(h.events.filter((e) => e.startsWith('kill')).sort()).toEqual(['kill 80', 'kill 81', 'kill 82']);
+    expect(result.jobError).toMatch(/job J holds Tower or another session's shellper \(pids 90, 91, 92\)/);
+    expect(result.signaled).toBe(true);
+  });
+
+  it('#1915: protects another session\'s shellper reached through live parent links, with no job named', async () => {
+    forceHostPlatform('win32');
+    // 83 is a shellper that a Tower inside this session created; its parent link runs back to the root.
+    const census = [entry(80, 1, 100, SHELLPER_CMD), entry(81, 80, 110), entry(83, 81, 120, SHELLPER_CMD), entry(84, 83, 130)];
+    const h = windowsHarness({ censuses: [census, census], alive: new Set([80, 81, 83, 84]) });
+
+    await killSessionTree(80, { census: h.census, taskkill: h.taskkill, kill: h.kill });
+
+    expect(h.events.filter((e) => e.startsWith('taskkill'))).toEqual([]);
+    expect(h.events.filter((e) => e.startsWith('kill')).sort()).toEqual(['kill 80', 'kill 81']);
+  });
+
+  it('#1915: a job listing that fails leaves the guard to the tree, and a clean job is terminated as before', async () => {
+    forceHostPlatform('win32');
+    const census = [entry(80, 1, 100, SHELLPER_CMD), entry(81, 80, 110)];
+    const h = windowsHarness({ censuses: [census, census, census], alive: new Set([81]) });
+    const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
+    const failing = vi.fn(async () => ({ ok: false as const, error: 'no answer', helperFailure: true }));
+
+    await killSessionTree(80, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers: failing });
+
+    expect(terminateJob).toHaveBeenCalledTimes(1);
+    expect(h.events).toContain('taskkill 80');
   });
 
   it('ignores the job name on POSIX', async () => {
     forceHostPlatform('linux');
     const kill = vi.fn();
     const terminateJob = vi.fn();
-    await killSessionTree(4321, { kill, jobName: 'J', terminateJob });
+    await killSessionTree(4321, { kill, jobName: 'J', terminateJob, jobMembers: noJobMembers });
     expect(terminateJob).not.toHaveBeenCalled();
   });
 

@@ -46,7 +46,7 @@ import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { SHELLPER_SESSION_ENV, isInsideCodevSession } from '../../../terminal/shellper-endpoint.js';
 import { quoteWindowsArg } from '../../../lib/platform/windows/command-line.js';
-import { encodeHelperCommand } from '../../../lib/platform/windows/job-objects.js';
+import { encodeHelperCommand, sessionJobName } from '../../../lib/platform/windows/job-objects.js';
 import { windowsPowerShellPath } from '../../../lib/platform.js';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
@@ -85,13 +85,37 @@ export const TOWER_IN_SESSION_WARNING =
   'Tower is running inside a codev session; tearing down that session will stop Tower';
 
 /**
- * Tower's boot self-check: the warning to log once, or null. Windows only. A
- * warning, never a refusal: the marker is inherited and can be stale, and the
- * launcher is what refuses.
+ * Tower's boot self-check: the warning to log once, or null. Windows only. On
+ * its own a warning: the marker is inherited and can be stale. Tower refuses
+ * only when the marker's session job really holds it (`towerSessionJobRefusal`).
  */
 export function towerBootSessionWarning(env: NodeJS.ProcessEnv, windows: boolean): string | null {
   if (!windows || !isInsideCodevSession(env)) return null;
   return `${TOWER_IN_SESSION_WARNING}. To avoid it, ${SUPPORTED_TOWER_LAUNCH_PATHS}.`;
+}
+
+/**
+ * Why Tower must not start, when it sits in the job of the session its marker
+ * names (#1915), or null. Session jobs allow no breakaway, so a Tower started
+ * there by a plain spawn is a member: every shellper it creates would join
+ * that job too, and ending the session would end Tower and all of them. The
+ * marker alone proves nothing (it is inherited and can be stale), so this asks
+ * the job itself. Null when the marker is absent, the job no longer exists, or
+ * the check cannot be made (a degraded helper is reported by the helper).
+ */
+export async function towerSessionJobRefusal(
+  env: NodeJS.ProcessEnv,
+  inJob: (name: string, pid: number) => Promise<{ ok: true; found: boolean; member: boolean } | { ok: false; error: string }>,
+  pid: number = process.pid,
+): Promise<string | null> {
+  const marker = env[SHELLPER_SESSION_ENV];
+  if (typeof marker !== 'string' || marker === '') return null;
+  const result = await inJob(sessionJobName(marker), pid);
+  if (!result.ok || !result.member) return null;
+  return (
+    "Tower refuses to start inside a codev session's job: ending that session would end Tower and every " +
+    `session it serves. Use \`afx tower start\` (it starts Tower outside the job), or ${SUPPORTED_TOWER_LAUNCH_PATHS}.`
+  );
 }
 
 /**

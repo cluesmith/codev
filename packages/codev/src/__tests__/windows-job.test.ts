@@ -10,9 +10,12 @@ import { PassThrough } from 'node:stream';
 import {
   HELPER_READY_TIMEOUT_MS,
   HELPER_REQUEST_TIMEOUT_MS,
+  HELPER_BOOTSTRAP,
   HELPER_SCRIPT,
   WindowsJobHelper,
   encodeHelperCommand,
+  helperProgramLine,
+  sessionJobMembers,
   sessionJobName,
   terminateSessionJob,
   type HelperProcess,
@@ -289,5 +292,73 @@ describe('WindowsJobHelper', () => {
     const f = fakeFactory({ respond: () => ({ ok: true, found: false }) });
     const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
     expect(await terminateSessionJob('job', 7, helper)).toEqual({ ok: true, found: false });
+  });
+
+  it('#1915: the program travels on stdin, so the command line stays far below the 32,767-character cap', () => {
+    // The bootstrap is all `-EncodedCommand` carries; the program no longer fits a command line.
+    expect(encodeHelperCommand(HELPER_BOOTSTRAP).length).toBeLessThan(1000);
+    expect(encodeHelperCommand(HELPER_SCRIPT).length).toBeGreaterThan(32_767);
+    const line = helperProgramLine();
+    expect(line.endsWith('\n')).toBe(true);
+    expect(line.slice(0, -1)).not.toContain('\n');
+    expect(Buffer.from(line.trim(), 'base64').toString('utf8')).toBe(HELPER_SCRIPT);
+    expect(HELPER_BOOTSTRAP).toContain('[Console]::In.ReadLine()');
+    expect(HELPER_BOOTSTRAP).not.toMatch(/Add-Type|Out-File|Set-Content/i);
+  });
+
+  it('#1915: snapshot returns validated rows and never a command line', async () => {
+    const f = fakeFactory({
+      respond: (req) => (req.op === 'snapshot'
+        ? { ok: true, processes: [{ pid: 4, ppid: 0, name: 'System' }, { pid: 'x', ppid: 1 }, { pid: 9, ppid: 4, name: 'a.exe', cmdline: 'secret' }] }
+        : null),
+    });
+    const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
+    expect(await helper.snapshot()).toEqual({ ok: true, processes: [{ pid: 4, ppid: 0, name: 'System' }, { pid: 9, ppid: 4, name: 'a.exe' }] });
+  });
+
+  it('#1915: job-members asks with the root pid and keeps times only for live processes', async () => {
+    const f = fakeFactory({
+      respond: () => ({
+        ok: true,
+        found: true,
+        member: true,
+        processes: [
+          { pid: 10, state: 'alive', created: 1000, cpuMs: 5, ppid: 1, name: 'node.exe', parent: 'alive', parentCreated: 900 },
+          { pid: 11, state: 'gone', created: 2000, parent: 'gone', parentCreated: 1 },
+          { pid: 12, state: 'weird', parent: 'unknown' },
+        ],
+      }),
+    });
+    const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
+    const result = await sessionJobMembers('job', 10, helper);
+    expect(f.spawned[0].requests[0]).toMatchObject({ op: 'job-members', name: 'job', pid: 10 });
+    expect(result).toEqual({
+      ok: true,
+      found: true,
+      member: true,
+      processes: [
+        { pid: 10, state: 'alive', createdAt: 1000, cpuMs: 5, ppid: 1, name: 'node.exe', parent: 'alive', parentCreatedAt: 900 },
+        { pid: 11, state: 'gone', parent: 'gone' },
+        { pid: 12, state: 'unknown', parent: 'unknown' },
+      ],
+    });
+  });
+
+  it('#1915: end-process passes target and creation time, and reports ended, gone or a refusal', async () => {
+    const answers = [{ ok: true, ended: true }, { ok: true, ended: false, gone: true }, { ok: true, ended: false, reason: 'it is not in the session job' }, { ok: false, error: 'TerminateProcess failed', code: 5 }];
+    const f = fakeFactory({ respond: () => answers.shift()! });
+    const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
+    expect(await helper.endProcess('job', 10, 20, 1234)).toEqual({ ok: true, ended: true });
+    expect(f.spawned[0].requests[0]).toMatchObject({ op: 'end-process', name: 'job', pid: 10, target: 20, created: 1234 });
+    expect(await helper.endProcess('job', 10, 20, 1234)).toEqual({ ok: true, ended: false, gone: true });
+    expect(await helper.endProcess('job', 10, 20, 1234)).toEqual({ ok: true, ended: false, gone: false, reason: 'it is not in the session job' });
+    expect(await helper.endProcess('job', 10, 20, 1234)).toEqual({ ok: false, error: 'TerminateProcess failed (Win32 error 5)', helperFailure: false });
+  });
+
+  it('#1915: in-job reports membership of any pid', async () => {
+    const f = fakeFactory({ respond: () => ({ ok: true, found: true, member: true }) });
+    const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
+    expect(await helper.inJob('job', 33)).toEqual({ ok: true, found: true, member: true });
+    expect(f.spawned[0].requests[0]).toMatchObject({ op: 'in-job', name: 'job', pid: 33 });
   });
 });

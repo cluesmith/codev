@@ -191,6 +191,7 @@ describe('afx cleanup shellper kill on Windows', () => {
       rootStartTime: NOW - 2 * ONE_HOUR,
       jobName: 'Local\\codev-session-s-100',
       terminateJob: expect.any(Function),
+      jobMembers: expect.any(Function),
     });
   });
 

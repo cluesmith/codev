@@ -14,7 +14,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { forceKillTowerWindows, stopTowerWindows, WINDOWS_STOP_EXIT_TIMEOUT_MS, type WindowsStopDeps } from '../commands/windows/tower-lifecycle.js';
 import type { TowerOwner } from '../db/tower-owner.js';
 import { checkWindowsTowerSession } from '../../commands/doctor.js';
-import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING, towerBootSessionWarning } from '../commands/windows/tower-lifecycle.js';
+import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING, towerBootSessionWarning, towerSessionJobRefusal } from '../commands/windows/tower-lifecycle.js';
 import { windowsShellperCmdline } from '../../terminal/__tests__/windows-cmdline-fixtures.js';
 import { resetHostPlatformForTests } from '../../lib/platform.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
@@ -168,6 +168,22 @@ describe('Tower inside a codev session (boot self-check and doctor)', () => {
     expect(warning).toContain(SUPPORTED_TOWER_LAUNCH_PATHS);
     expect(towerBootSessionWarning({}, true)).toBeNull();
     expect(towerBootSessionWarning({ CODEV_SHELLPER_SESSION: 's' }, false)).toBeNull();
+  });
+
+  it("#1915: Tower refuses to boot only when the marker's session job really holds it", async () => {
+    const member = vi.fn(async () => ({ ok: true as const, found: true, member: true }));
+    const refusal = await towerSessionJobRefusal({ CODEV_SHELLPER_SESSION: 's1' }, member, 4242);
+    expect(member).toHaveBeenCalledWith('Local\\codev-session-s1', 4242);
+    expect(refusal).toMatch(/refuses to start inside a codev session's job/);
+    expect(refusal).toContain('afx tower start');
+
+    // A stale marker (the job does not hold Tower, or is gone), no marker, or a failed check: start.
+    expect(await towerSessionJobRefusal({ CODEV_SHELLPER_SESSION: 's1' }, async () => ({ ok: true as const, found: true, member: false }))).toBeNull();
+    expect(await towerSessionJobRefusal({ CODEV_SHELLPER_SESSION: 's1' }, async () => ({ ok: true as const, found: false, member: false }))).toBeNull();
+    expect(await towerSessionJobRefusal({ CODEV_SHELLPER_SESSION: 's1' }, async () => ({ ok: false as const, error: 'helper down' }))).toBeNull();
+    const unused = vi.fn();
+    expect(await towerSessionJobRefusal({}, unused)).toBeNull();
+    expect(unused).not.toHaveBeenCalled();
   });
 
   it('doctor: warns from /health, skips when no Tower answers', () => {

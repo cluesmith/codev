@@ -86,7 +86,7 @@ import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/serv
 import { version } from '../../version.js';
 import { isWindows } from '../../lib/platform.js';
 import { WindowsJobHelper, getTowerJobHelper, setTowerJobHelper } from '../../lib/platform/windows/job-objects.js';
-import { towerBootSessionWarning } from '../commands/windows/tower-lifecycle.js';
+import { towerBootSessionWarning, towerSessionJobRefusal } from '../commands/windows/tower-lifecycle.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -593,6 +593,15 @@ async function bootSequence(): Promise<void> {
     jobHelper.start().then((failure) => {
       if (failure === null) log('INFO', 'Per-session job objects available');
     });
+    // #1915: before any session is touched. Waits for the helper only when a
+    // session marker is set, which `afx tower start` never passes to a daemon.
+    const refusal = await towerSessionJobRefusal(process.env, (name, pid) => jobHelper.inJob(name, pid));
+    if (refusal !== null) {
+      log('ERROR', refusal);
+      jobHelper.stop();
+      releaseTowerOwnerIfMine(towerLockFile, process.pid);
+      process.exit(1);
+    }
   }
 
   // Initialize shellper session manager for persistent terminals
