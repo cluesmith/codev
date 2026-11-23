@@ -3,9 +3,10 @@
 # Input: CODEV_COMMIT_SHA (full or abbreviated commit SHA)
 # Output: JSON [{name, state, url?}]  (CommitCheckItem[] in forge-contracts.ts)
 #
-# Two read-only GETs: the commit's check runs (GitHub Actions and other apps, latest
-# attempt per name, paginated) and its legacy commit statuses. Both are normalized to
-# one state vocabulary: pass | fail | pending | skipped | neutral.
+# Two read-only GETs, both paginated (a truncated list could hide a failure): the
+# commit's check runs (GitHub Actions and other apps, latest attempt per name) and its
+# legacy commit statuses. Both are normalized to one state vocabulary:
+# pass | fail | pending | skipped | neutral.
 #   check run: not completed → pending; success → pass; skipped → skipped;
 #              neutral → neutral; any other conclusion (failure, cancelled,
 #              timed_out, action_required, stale, startup_failure) → fail
@@ -18,7 +19,7 @@
 # forge-executable: gh
 runs="$(gh api --paginate "repos/{owner}/{repo}/commits/${CODEV_COMMIT_SHA}/check-runs?per_page=100" \
   --jq '.check_runs[] | {kind: "run", name, status, conclusion, url: .html_url}')" || exit 1
-statuses="$(gh api "repos/{owner}/{repo}/commits/${CODEV_COMMIT_SHA}/status?per_page=100" \
+statuses="$(gh api --paginate "repos/{owner}/{repo}/commits/${CODEV_COMMIT_SHA}/status?per_page=100" \
   --jq '.statuses[] | {kind: "status", name: .context, state, url: .target_url}')" || exit 1
 printf '%s\n%s\n' "$runs" "$statuses" | jq -s '
   map(

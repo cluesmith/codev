@@ -197,10 +197,12 @@ describe.skipIf(!posixWithJq)('Spec 1951 — github scripts honour the contracts
       { name: 'legacy/bad', state: 'fail' },
       { name: 'legacy/wait', state: 'pending' },
     ]);
-    const calls = fs.readFileSync(path.join(tmp, 'gh-calls'), 'utf-8');
-    expect(calls).toContain(`repos/{owner}/{repo}/commits/${SHA}/check-runs`);
-    expect(calls).toContain('--paginate');
-    expect(calls).toContain(`repos/{owner}/{repo}/commits/${SHA}/status`);
+    // Both lists are paginated: a truncated list could hide a failure.
+    const calls = fs.readFileSync(path.join(tmp, 'gh-calls'), 'utf-8').trim().split('\n');
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain(`repos/{owner}/{repo}/commits/${SHA}/check-runs`);
+    expect(calls[1]).toContain(`repos/{owner}/{repo}/commits/${SHA}/status`);
+    for (const call of calls) expect(call).toContain('--paginate');
   });
 
   it('commit-checks reports a commit with nothing on it as an empty list', async () => {
@@ -289,10 +291,21 @@ describe.skipIf(!posixWithJq)('Spec 1951 — gitlab and gitea pr-view carry the 
     expect('mergeable' in data).toBe(false);
   });
 
+  it('gitlab reports a null description as an empty body, as github and gitea do', async () => {
+    const result = await runGitlab(glabMr({ description: null }));
+    expect(result.data).toMatchObject({ body: '' });
+  });
+
   it('gitlab fails when glab fails, instead of reporting jq\'s exit 0 (#1645)', async () => {
     const result = await runGitlab('', 1);
     expect(result.data).toBeNull();
     expect(result.error).not.toBeNull();
+  });
+
+  it('gitlab fails loudly when glab exits 0 with no output', async () => {
+    const result = await runGitlab('', 0);
+    expect(result.data).toBeNull();
+    expect(result.error?.stderr).toContain('empty `glab mr view` response');
   });
 
   const runGitea = async (pull: Record<string, unknown>) => {
