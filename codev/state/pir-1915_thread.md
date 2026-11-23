@@ -96,3 +96,18 @@
 - CI 45132497859: fully green. Run 2: 45133587326.
 - Boot cost of the refusal check, measured: ~0.6s with 9 live shellpers (warm PowerShell); a few seconds cold.
 - Plan file still describes the earlier design; the review will record the course change.
+
+## 2026-11-23 — worker death / lost runner evidence (for the review and PR)
+- Run 45133587326 (aad9c00a1), Node 22 unit: all 8135 tests that ran passed; 1 unhandled "Worker exited unexpectedly".
+  JSON report: the dead worker was in windows-job.windows.test.ts, during "a stopped helper (Tower restart) does not
+  kill a job member" (unchanged from main; it terminates a job holding only its own idle child). Precedent:
+  spir-1658 run 39927082964 (2026-10-23, Node 22), dead worker in agy-lane-model.test.ts; #1923 lists the symptom.
+- Architect check: terminateChecked (3b4066839, kept permanently) asks in-job for the worker and its parent before
+  every terminate in that file, logs JOB-WORKER-CHECK, throws if a member. Code review: no assign targets the worker
+  or its parent; the Git Bash test assigns only its own detached root; tracked-pids only kills.
+- Local loop, that file alone, Node 22.23.4: 32/32 runs green, 0 worker deaths, 384 checks all member=false.
+- Run 45135042446 (3b4066839): Node 24 unit + targeted green, 24 checks all member=false. Node 22 unit: "The hosted
+  runner lost communication with the server", 07:59 -> 08:47 (48 min); log lost. Same signature on spir-1658 Node 22
+  unit, runs 42547114468 (22:52 -> 23:39) and 42715696142 (01:44 -> 02:31), 47 min each, vs a normal 5-7 min job.
+  Architect: pre-existing Node 22 runner pattern; worker-in-job theory ruled out.
+- Next: two consecutive greens on 3b4066839 (first: 45142055516).
