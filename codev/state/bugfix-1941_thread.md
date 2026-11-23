@@ -39,3 +39,9 @@ The build check passes. Asked the architect whether to retry once load drops.
 Architect ruling: retry once when the 1-minute load average is below 18, run the three failed tests alone as evidence, and stop on another unrelated failure.
 - Alone, once each (load 29–31): windows-console-spawn-guard 7/7, ide-command 21/21, bugfix-1267-launch-loop 7/7.
 - One porch run at 18:15, load 14.02 at start and 38.61 at end (the suite raises it): build ✓, tests ✗ on `src/commands/consult/__tests__/agy-auth-cache.test.ts` (27.2s). It references nothing this change touched and passes alone (27/27). Stopped and reported, per the ruling.
+
+CI on draft PR #1942: 8/8 checks green; the Unit Tests job ran the full codev suite (403 files passed, 12 skipped), all four locally failing tests included. Phase not advanced; waiting for the owner's decision on whether CI stands in for the local check.
+
+## Owner ruling main-28 (2026-11-23): CI stands in for the local tests check
+
+For this phase of this project only: GitHub's green run on draft PR #1942 at head 30be01278 replaces porch's local `tests` check. Applied as instructed: `porch.checks.tests.skip = true` added to this worktree's gitignored `.codev/config.local.json`, `porch done` run once (load 10.09; build ✓, tests skipped, advanced to `pr`), and the file restored byte-for-byte straight after. Nothing under `.codev` is staged or committed. The shared `.codev/config.json` was not touched.
