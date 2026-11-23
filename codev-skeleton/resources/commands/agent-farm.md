@@ -334,7 +334,7 @@ Removes a builder's worktree and associated resources. By default, refuses to de
 - every untracked file that is not ignored;
 - ignored files matching the keep list — default `codev/projects/**`, `codev/state/**`, `.builder-*`, `tmp/**`, `scratch/**`, replaced by `cleanup.keepIgnored` (an array of globs) in `.codev/config.json`.
 
-Dependency and build output (`node_modules`, `dist`, `build`, `target`, virtualenvs and the like) is never copied, whatever the list says; nor are symlinks. Each copy is checked by SHA-256. If the kept folder already exists, cleanup stops naming it, before touching anything. If any copy or checksum fails, the partial kept folder is removed and cleanup stops **before** the worktree, the branch or the registry row is removed. On success it prints the kept folder and the number of files. Only bugfix and task cleanups remove a worktree; for other builders the flag keeps nothing.
+Dependency and build output (`node_modules`, `dist`, `build`, `target`, virtualenvs and the like) is never copied, whatever the list says; nor are symlinks. Each copy is checked by SHA-256. If the kept folder already exists, cleanup stops naming it, before touching anything. If any copy or checksum fails, the partial kept folder is removed and cleanup stops **before** the worktree, the branch or the registry row is removed. On success it prints the kept folder, the number of files, and how many matches were left out as dependency or build output. Only bugfix and task cleanups remove a worktree; for other builders the flag keeps nothing.
 
 **Examples:**
 
@@ -370,7 +370,7 @@ afx send [builder] [message] [options]
 - `--raw` - Skip structured message formatting
 - `--no-enter` - Do not send Enter after message
 - `--delay <seconds>` - Deliver after N seconds instead of immediately
-- `--message-file <path>` - Read the message body from a file. It never passes through a shell, so quotes and newlines arrive as written. Distinct from `--file`, which appends a file to the message; the two combine, and the 48 KB limit applies to the result.
+- `--message-file <path>` - Read the message body from a file. It never passes through a shell, so quotes, `$` and newlines arrive as written; only the single line ending that terminates the file is dropped. Distinct from `--file`, which appends a file to the message; the two combine, and the 48 KB limit applies to the result.
 - `--exit-code` - Exit by outcome (see **Exit codes** below). Without it, exit codes are unchanged.
 - `--retry <n>` - Up to N retries in total, only when the request provably never reached Tower (connection refused, Tower not running). Backs off 1s, 2s, 4s, then 8s, and says on stderr what happened.
 
@@ -461,7 +461,7 @@ line-by-line shape (also chunked) because its paste handling has not been measur
 | 3 | held |
 | 4 | delivered but unverified — the header was not seen on the terminal, input raced the write, or the write was not serialized. Recorded as delivered and never re-sent. |
 
-With `--all`, the exit is the worst outcome across recipients (failed, then unverified, then held). **Without the flag a held message exits 0**, exactly as before: callers chain `afx send … && …`, and a held message is persisted and will deliver — read as a failure, it gets sent again and arrives twice. For the same reason `--retry` never resends after `held`, a refusal, or a timeout on a request that was sent: the mailbox may already hold it.
+With `--all`, the exit is the worst outcome across recipients (failed, then unverified, then held), and 1 when there are no builders to reach. **Without the flag a held message exits 0**, exactly as before: callers chain `afx send … && …`, and a held message is persisted and will deliver — read as a failure, it gets sent again and arrives twice. For the same reason `--retry` never resends after `held`, a refusal, or a timeout on a request that was sent: the mailbox may already hold it.
 
 **Examples:**
 

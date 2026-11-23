@@ -29,3 +29,34 @@
   directory on stderr.
 - Noticed, not changed: `porch status --json` with an auto-detected project prints
   `[auto-detected …]` to stdout before the JSON. This predates the PR and is left out of scope.
+
+## Tests check vs. machine load
+
+- The local porch `tests` check failed three times on tests this PR doesn't touch: timeouts in the
+  consult lanes, the launch loops, `ide`, `doctor` and pr-create. Every failing file passes alone.
+  The third run started at load 7.7 and ended at 59, so the suite saturates this machine by itself.
+  Porch truncates failure output; vitest's results cache
+  (`node_modules/.vite/vitest/<hash>/results.json`) named the failed files without another run.
+- Draft PR #1954 opened so CI could run on a clean runner: 8/8 green at 666c0965c. Owner's
+  standing ruling main-32: a green GitHub run stands in for the local tests check under these
+  conditions. Applied once, through the worktree's gitignored `.codev/config.local.json`; the skip
+  was removed straight after.
+
+## PR review round 1
+
+- codex REQUEST_CHANGES:
+  - branch 20 commits behind main: merged; only the generated skill-hash file conflicted,
+    regenerated after the merge commit so main's skill versions are in its history;
+  - `--message-file` trimmed with `trimEnd()`: now drops only the file's single final line ending
+    (otherwise `--raw --no-enter` would submit);
+  - Windows workflow not linked: dispatched on the final head.
+- claude APPROVE, suggestions taken:
+  - an end-to-end `cleanup()` test with the real keep module and a real config keep list;
+  - the abort message now says the session was already stopped;
+  - denylisted matches are counted in the output;
+  - `--all` with zero recipients exits 1 under `--exit-code`;
+  - the directory walk no longer uses `readdirSync({recursive})`, which needs Node 20.1;
+  - the non-Error branch of the refusal check is tested.
+- My mistake: the first commit carried a Co-Authored-By trailer and the PR body a "Generated
+  with" line, against the repo and owner rules. Removed from the PR body. The pushed commit was
+  left as is; rewriting it needs a force-push, which is not mine to decide.

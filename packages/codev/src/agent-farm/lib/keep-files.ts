@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
-import { basename, dirname, join, sep } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 export const DEFAULT_KEEP_IGNORED: readonly string[] = [
   'codev/projects/**',
@@ -51,23 +51,34 @@ function gitList(worktree: string, args: string[]): string[] {
   return out.split('\0').filter(Boolean);
 }
 
-/** A directory entry (`dir/`, e.g. a nested repository) expands to the files under it. */
+/**
+ * A directory entry (`dir/`, e.g. a nested repository) expands to the files under it. Walked by
+ * hand: `readdirSync`'s `recursive` option needs Node 20.1, and `engines` allows 20.0.
+ */
 function expand(worktree: string, rel: string): string[] {
   if (!rel.endsWith('/')) return [rel];
-  const dir = join(worktree, rel);
-  return (readdirSync(dir, { recursive: true }) as string[])
-    .filter((child) => lstatSync(join(dir, child)).isFile())
-    .map((child) => rel + child.split(sep).join('/'));
+  return readdirSync(join(worktree, rel), { withFileTypes: true }).flatMap((entry) => {
+    const child = rel + entry.name;
+    if (entry.isDirectory()) return expand(worktree, `${child}/`);
+    return entry.isFile() ? [child] : [];
+  });
 }
 
-/** Worktree-relative paths (`/`-separated) to keep, sorted; symlinks included for the caller to skip. */
-export function listKeepCandidates(worktree: string, patterns: readonly string[]): string[] {
+export interface KeepCandidates {
+  /** Worktree-relative paths (`/`-separated), sorted; symlinks included for `keepFiles` to skip. */
+  files: string[];
+  /** How many matched but are dependency or build output, and so are never kept. */
+  excluded: number;
+}
+
+export function listKeepCandidates(worktree: string, patterns: readonly string[]): KeepCandidates {
   const untracked = gitList(worktree, ['--exclude-standard']);
   const ignored = patterns.length
     ? gitList(worktree, ['--ignored', '--exclude-standard', '--', ...patterns.map((p) => `:(glob)${p}`)])
     : [];
   const all = [...new Set([...untracked, ...ignored])].flatMap((rel) => expand(worktree, rel));
-  return all.filter((rel) => !rel.split('/').some((segment) => NEVER_KEEP.has(segment))).sort();
+  const files = all.filter((rel) => !rel.split('/').some((segment) => NEVER_KEEP.has(segment))).sort();
+  return { files, excluded: all.length - files.length };
 }
 
 function sha256(path: string): Promise<string> {

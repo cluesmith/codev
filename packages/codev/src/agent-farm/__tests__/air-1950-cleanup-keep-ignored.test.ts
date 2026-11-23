@@ -64,7 +64,7 @@ const mockKeepFiles = vi.fn();
 vi.mock('../lib/keep-files.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/keep-files.js')>()),
   keptDirFor: () => keptDir,
-  listKeepCandidates: () => ['notes.md'],
+  listKeepCandidates: () => ({ files: ['notes.md'], excluded: 0 }),
   keepFiles: (...args: unknown[]) => mockKeepFiles(...args),
 }));
 

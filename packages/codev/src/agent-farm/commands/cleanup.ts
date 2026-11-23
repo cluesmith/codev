@@ -433,16 +433,20 @@ async function cleanupBuilder(
     // failed copy or checksum stops here with the worktree, branch and builder row intact.
     if (keep) {
       try {
-        const files = listKeepCandidates(builder.worktree, keep.patterns);
-        const kept = await keepFiles(builder.worktree, keep.dir, files);
+        const candidates = listKeepCandidates(builder.worktree, keep.patterns);
+        const kept = await keepFiles(builder.worktree, keep.dir, candidates.files);
         logger.success(`Kept ${kept.copied} file(s) in ${keep.dir}`);
+        if (candidates.excluded > 0) {
+          logger.info(`Not kept (dependency or build output): ${candidates.excluded} file(s)`);
+        }
         if (kept.skippedSymlinks.length > 0) {
           logger.info(`Not kept (symlinks): ${kept.skippedSymlinks.join(', ')}`);
         }
       } catch (error) {
         fatal(
-          `--keep-ignored: ${(error as Error).message}. Nothing was removed: ` +
-            `the worktree, branch and builder row are as they were.`,
+          `--keep-ignored: ${(error as Error).message}. Nothing was removed: the worktree, branch ` +
+            `and builder row are as they were; only its session was already stopped. Fix the cause ` +
+            `and re-run afx cleanup.`,
         );
       }
     }

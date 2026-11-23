@@ -107,6 +107,11 @@ describe('afx send — #1950', () => {
       expect(await send({ all: true, message: 'hello' })).toBe('failed');
     });
 
+    it('--all with no builders is a failure under --exit-code: the broadcast reached nobody', async () => {
+      expect(await send({ all: true, message: 'hello' })).toBe('failed');
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+
     it('orders severity failed > unverified > held > scheduled/delivered', () => {
       expect(worstOutcome('held', 'unverified')).toBe('unverified');
       expect(worstOutcome('failed', 'unverified')).toBe('failed');
@@ -216,12 +221,23 @@ describe('afx send — #1950', () => {
   });
 
   describe('--message-file', () => {
-    it('sends the file verbatim — quotes, newlines and all', async () => {
-      const body = `it's "quoted" $HOME \`tick\`\nsecond line\n`;
-      writeFileSync(join(dir, 'msg.txt'), body);
+    it('sends the file as written — quotes, $, backticks, inner and trailing whitespace', async () => {
+      const content = `  it's "quoted" $HOME \`tick\`\n\nsecond line \t\n\n`;
+      writeFileSync(join(dir, 'msg.txt'), content + '\n');
       sendMessageMock.mockResolvedValue(delivered);
       await send({ builder: 't', messageFile: join(dir, 'msg.txt') });
-      expect(sendMessageMock.mock.calls[0][1]).toBe(body.trimEnd());
+      // Only the newline that terminates the file is dropped; everything else arrives exactly.
+      expect(sendMessageMock.mock.calls[0][1]).toBe(content);
+    });
+
+    it('drops only the final line ending, CRLF included, and keeps a file without one whole', async () => {
+      sendMessageMock.mockResolvedValue(delivered);
+      writeFileSync(join(dir, 'crlf.txt'), 'line one\r\nline two\r\n');
+      await send({ builder: 't', messageFile: join(dir, 'crlf.txt') });
+      expect(sendMessageMock.mock.calls[0][1]).toBe('line one\r\nline two');
+      writeFileSync(join(dir, 'bare.txt'), 'no terminator  ');
+      await send({ builder: 't', messageFile: join(dir, 'bare.txt') });
+      expect(sendMessageMock.mock.calls[1][1]).toBe('no terminator  ');
     });
 
     it('combines with --file, which appends', async () => {

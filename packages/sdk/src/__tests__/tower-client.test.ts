@@ -103,6 +103,12 @@ describe('TowerClient REST', () => {
     expect(res).toEqual({ ok: false, error: 'Tower not running', connectionRefused: true });
   });
 
+  it('recognises a refusal thrown as a non-Error value (#1950)', async () => {
+    const impl = vi.fn(async () => { throw 'connect ECONNREFUSED 127.0.0.1:4100'; }) as unknown as typeof fetch;
+    const res = await new TowerClient(opts(impl)).sendMessage('architect', 'hi');
+    expect(res).toEqual({ ok: false, error: 'Tower not running', connectionRefused: true });
+  });
+
   it('does not mark a timeout as refused: that request may have reached Tower (#1950)', async () => {
     const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
     const impl = vi.fn(async () => { throw timeout; }) as unknown as typeof fetch;

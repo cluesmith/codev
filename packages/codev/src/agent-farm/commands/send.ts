@@ -372,6 +372,8 @@ async function sendToAll(
 
   if (state.builders.length === 0) {
     logger.warn('No active builders found.');
+    // #1950: a broadcast that reached nobody is not a success. Only `--exit-code` reads this.
+    results.worst = 'failed';
     return results;
   }
 
@@ -431,12 +433,14 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
   let target = options.builder;
 
   // #1950 --message-file: the body comes from the file, never through a shell. With --all the
-  // first positional IS the message, so any positional there is a second message.
+  // first positional IS the message, so any positional there is a second message. Only the one
+  // line ending that terminates the file is dropped: it is the file's, not the message's, and
+  // under `--raw --no-enter` it would otherwise submit the line.
   if (options.messageFile) {
     if (message !== undefined || (options.all && target !== undefined)) {
       fatal('Give the message on the command line or with --message-file, not both.');
     }
-    message = readFileContent(options.messageFile, 'Message file').trimEnd();
+    message = readFileContent(options.messageFile, 'Message file').replace(/\r?\n$/, '');
   }
 
   // When using --all, the first positional arg (builder) is actually the message

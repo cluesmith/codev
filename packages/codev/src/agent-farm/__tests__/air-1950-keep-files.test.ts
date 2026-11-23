@@ -57,7 +57,10 @@ describe('afx cleanup --keep-ignored (#1950)', () => {
   });
 
   it('selects untracked files and keep-listed ignored files, never dependency or build output', () => {
-    expect(listKeepCandidates(worktree, DEFAULT_KEEP_IGNORED)).toEqual([
+    const { files, excluded } = listKeepCandidates(worktree, DEFAULT_KEEP_IGNORED);
+    // tmp/node_modules/pkg/index.js matched tmp/** but is dependency output: counted, not kept.
+    expect(excluded).toBe(1);
+    expect(files).toEqual([
       '.builder-prompt.txt',
       'codev/projects/7-x/status.yaml',
       'notes.md',
@@ -67,11 +70,11 @@ describe('afx cleanup --keep-ignored (#1950)', () => {
   });
 
   it('a configured keep list replaces the default', () => {
-    expect(listKeepCandidates(worktree, ['logs/**'])).toEqual(['logs/run.log', 'notes.md', 'src/draft.ts']);
+    expect(listKeepCandidates(worktree, ['logs/**']).files).toEqual(['logs/run.log', 'notes.md', 'src/draft.ts']);
   });
 
   it('copies each file and verifies it', async () => {
-    const files = listKeepCandidates(worktree, DEFAULT_KEEP_IGNORED);
+    const { files } = listKeepCandidates(worktree, DEFAULT_KEEP_IGNORED);
     const result = await keepFiles(worktree, keptDir, files);
     expect(result).toEqual({ copied: 5, skippedSymlinks: [] });
     expect(readFileSync(join(keptDir, 'tmp/review/out.md'), 'utf-8')).toBe('tmp/review/out.md');
@@ -81,7 +84,7 @@ describe('afx cleanup --keep-ignored (#1950)', () => {
 
   it.skipIf(process.platform === 'win32')('skips symlinks rather than copy what they point at', async () => {
     symlinkSync(join(worktree, '.env'), join(worktree, 'env-link'));
-    const files = listKeepCandidates(worktree, DEFAULT_KEEP_IGNORED);
+    const { files } = listKeepCandidates(worktree, DEFAULT_KEEP_IGNORED);
     expect(files).toContain('env-link');
     const result = await keepFiles(worktree, keptDir, files);
     expect(result).toEqual({ copied: 5, skippedSymlinks: ['env-link'] });
@@ -112,7 +115,10 @@ describe('afx cleanup --keep-ignored (#1950)', () => {
   it('expands an untracked nested repository into its files', () => {
     write(worktree, 'tmp/clone/readme.md');
     git(join(worktree, 'tmp/clone'), 'init', '-q');
-    expect(listKeepCandidates(worktree, ['tmp/**'])).toContain('tmp/clone/readme.md');
+    write(worktree, 'tmp/clone/deep/er/notes.md');
+    const { files } = listKeepCandidates(worktree, ['tmp/**']);
+    expect(files).toContain('tmp/clone/readme.md');
+    expect(files).toContain('tmp/clone/deep/er/notes.md');
   });
 
   it('places the kept folder under kept/<workspace-name>/<builder-id>', () => {

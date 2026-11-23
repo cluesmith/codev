@@ -85,7 +85,7 @@ The reply is `delivered`, or `held` with a reason: a held message waits in Tower
 delivers once the recipient's prompt is clear. See `afx inbox`. **Never resend a held message** —
 it is persisted and will deliver; a resend arrives twice.
 
-`--exit-code` (with `--all`, the worst across recipients):
+`--exit-code` (with `--all`, the worst across recipients; 1 if there are none):
 
 | Exit | Outcome |
 |------|---------|
