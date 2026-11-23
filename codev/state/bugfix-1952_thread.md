@@ -41,3 +41,14 @@
   run from a clone at the pre-fix commit got both the trailer and the "Generated with" line.
 - First porch `tests` run failed intermittently (load ~17-23; porch truncates output so the test
   is unnamed); the full suite then passed twice (405 files / 8266 tests, and porch's rerun).
+
+## PR (2026-11-23)
+
+- PR #1953. CMAP: claude APPROVE (nits taken: skeleton guard always asserts; PR body notes the
+  test covers presence not effectiveness; Test Plan heading). codex REQUEST_CHANGES ×2:
+  (1) loosened doc assertions dropped the prohibition, resolved by requiring no/never/not
+  earlier in the same sentence as each term; (2) `chore(porch):` commits violate protocol.md's
+  "every commit starts with [Bugfix #N]". Rebutted: porch writes those itself (19 of the last
+  21 builder merges carry them); the protocol-vs-porch contradiction is the owner's call, not
+  a history rewrite here. Flagged to the architect.
+- Correction: the diagnostic `vitest run` started at load 23, over the issue's ceiling of 18.
