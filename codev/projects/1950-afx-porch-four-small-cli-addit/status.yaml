@@ -1,7 +1,7 @@
 id: '1950'
 title: afx-porch-four-small-cli-addit
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-23T18:53:44.610Z'
-updated_at: '2026-11-23T22:16:55.334Z'
+updated_at: '2026-11-23T22:17:14.244Z'
 pr_history:
   - phase: implement
     pr_number: 1954
