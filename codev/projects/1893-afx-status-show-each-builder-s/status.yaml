@@ -1,7 +1,7 @@
 id: '1893'
 title: afx-status-show-each-builder-s
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-23T18:53:51.731Z'
-updated_at: '2026-11-23T18:53:51.732Z'
+updated_at: '2026-11-23T19:24:39.650Z'
