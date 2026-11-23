@@ -23,3 +23,14 @@
   detached spawn) was inconclusive because my tool processes are themselves outside the job.
 - Main Tower PID 53132 before and after all experiments; test processes I created were all ended.
 - Raised with the architect; waiting for a decision before revising the plan.
+
+## 2026-11-23 — owner chose option A (same PR); plan revision 2
+- Survey with no breakaway: git, gh, node->cmd, cmd, powershell, python, codex/code/claude --version, and a real
+  `claude -p` Bash tool call all exit 0; claude, its bash and sleep stay in the job.
+- Re-test: Tower plain-spawned from Git Bash inside a no-breakaway job IS a member, with its helper, a new session's
+  shellper and that session's children; TerminateJobObject ended all of them. Hence three guards: Tower boot refusal
+  inside a session job, teardown guard (no job terminate when the job holds a foreign shellper or a Tower), protected
+  set in the listing.
+- Gotcha: PowerShell variable names are case-insensitive ($k clobbered $K); leaked OpenProcess handles make
+  IsProcessInJob report a dead process as still a member — check exit with Get-Process.
+- Main Tower PID 53132 throughout; all test processes ended.
