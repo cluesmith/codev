@@ -106,6 +106,29 @@ export interface CodevConfig {
     claudeAuth?: ClaudeAuthMode;
   };
   forge?: Record<string, string | null> & { provider?: string };
+  /**
+   * `codev check` (Spec 1951). Every glob is a git pathspec with `:(glob)` magic; arrays
+   * replace the defaults. Validated, with the key and file named, by
+   * `commands/check/settings.ts`.
+   */
+  check?: {
+    /** Regexes (JavaScript, case-insensitive, per line) for forbidden attribution. Default `[]` (off). */
+    attribution?: string[];
+    /** Files whose movement is always listed. */
+    watch?: string[];
+    /** The subset of watched files whose movement needs attention. */
+    flag?: string[];
+    /** Files excluded from "files a person still has to read". */
+    notForReading?: string[];
+    deploy?: {
+      /** Deploy branch for `codev check deploy`; default: each PR's base branch. */
+      branch?: string;
+      /** Workflow whose latest green run on the deploy branch must contain the merge. */
+      workflow?: string;
+    };
+    /** Check ids to skip by declaration. */
+    skip?: string[];
+  };
   templates?: {
     dir?: string;
   };
