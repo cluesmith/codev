@@ -173,3 +173,51 @@ workspace called `arch`. Gate still pending; the owner has not approved.
 - Still unanswered: whether to rewrite history for the Co-Authored-By trailer on `d4cb7e648`.
   All later commits carry no trailer; keep it that way.
 - Porch's first plan-phase task is a context refresh at boundary `enter:plan`.
+
+## 2026-11-23 — plan drafted (stage 1 only); plan review running
+
+- Context refreshed at `enter:plan`, re-oriented from the state file, then read the spec and the
+  source the plan has to name: both resolvers in `tower-messages.ts`, the six
+  `formatMessageForTarget` call sites, `message-format.ts`, the send CLI, whoami, the
+  `known_workspaces` table and its migrations, the SDK's `sendMessage`.
+- Plan committed as `28af9b821`: seven phases. 1 shared parser; 2 the new form in both resolvers
+  plus the builder rule; 3 explicit workspace names (migration v20); 4 provenance and reply
+  footers; 5 `afx workspace list` and whoami; 6 docs in both trees and end-to-end checks; 7 the
+  front-door-only setting.
+- **Front-door-only is phase 7 and nothing depends on it**, as the architect asked: it can be
+  dropped with `porch skip-phase` at plan approval and phases 1 to 6 ship unchanged.
+- Things found in source that shaped the plan:
+  - The builder lookup in both resolvers is keyed on the TARGET workspace today. A builder id that
+    exists in two workspaces would get affinity in the wrong one. Phase 2 keys it on the sender's
+    workspace.
+  - `afx whoami` reads `global.db` read-only and does not need Tower. The naming rules go in a
+    pure module so whoami and Tower share them.
+  - `self-refresh` sends to its own id and takes no address; only `interrupt` and `refresh` need
+    the `afx://` refusal in the CLI.
+- Choices the spec left to the plan, stated in it: the footer asks the resolver's own permission
+  check before printing a reply command; a sender workspace with no usable name gets a footer
+  with no command; cron and UI senders keep today's frame; the "`devvm` is one of your Towers"
+  hint waits for stage 2's peer list.
+- Review lanes for the plan are codex and claude (porch's 2-way), running in the background.
+
+## 2026-11-23 — plan review iteration 1 applied
+
+- codex REQUEST_CHANGES (6 points), claude COMMENT (9). All checked against the source first.
+  Fourteen applied as asked; responses in
+  `codev/projects/1940-tower-to-tower-messaging-proto/1940-plan-iter1-rebuttals.md`.
+- Not applied as asked:
+  - codex wanted phase 7 (front-door-only) made mandatory and the docs phase moved after it. The
+    plan now says it IS built unless the owner drops it, and phase 7 reruns phase 6's checks. It
+    stays last and separable, because that is the architect's instruction pending the owner's
+    ruling.
+  - codex wanted the end-to-end test to run the built `afx send`. It cannot: the binary always
+    connects to port 4100, the live Tower. The test drives the CLI's own `send` function against
+    a test Tower with only the port replaced; the installed binary is the verify phase's check.
+- Real catches from the reviews: `loadConfig` merges global and local layers, so the
+  front-door key is read from the committed `.codev/config.json` only; `senderWorkspace` can be
+  the literal `unknown` and must not count as another workspace; `mailbox-wiring.ts` also calls
+  the registry resolver; the listing has to know its caller or it prints addresses a builder
+  cannot use; the latency baseline is taken in phase 1 before any code changes.
+- Slip: I appended to this log while the review lanes were running, and both reviews flagged
+  "working tree changed". The plan was not touched, so the reviews stand. No writes to the tree
+  during a review from now on.

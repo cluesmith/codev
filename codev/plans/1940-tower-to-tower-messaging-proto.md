@@ -29,13 +29,17 @@ The approach, in the order the phases take it:
 6. Docs in both trees, and the end-to-end checks.
 7. The front-door-only workspace setting, kept apart from everything else (see below).
 
-**The front-door-only setting is its own last phase, on purpose.** The owner has asked about the
-opt-in setting in spec Decision 10 and has not ruled; the architect recommended cutting it from
-stage 1. Phase 7 holds all of it: the config key, the refusal, its footer row, its mark in the
-listing, its doc sentences and its tests. No earlier phase depends on it. If the owner drops it at
-plan approval, phase 7 is removed with `porch skip-phase` and phases 1 to 6 ship unchanged. The
-default (named architects are addressable from other workspaces) and the builder front-door rule
-are not in question and live in phases 2 and 4.
+**The front-door-only setting is its own last phase, on purpose.** It is part of the approved
+spec and one of the stage 1 success criteria, so this plan builds it: phase 7 is not optional as
+the plan stands. It is kept apart because the owner has since asked about the opt-in setting in
+spec Decision 10 and has not ruled, and the architect, who recommended cutting it from stage 1,
+asked for it to be planned so that it can be removed at plan approval without reworking the rest.
+Phase 7 therefore holds all of it: the config key, the refusal, its footer row, its mark in the
+listing, its doc sentences and its tests, and it ends by rerunning the full checks of phase 6.
+No earlier phase depends on it. If the owner drops it, that is a change to the approved scope that
+only the owner can make; phase 7 is then removed with `porch skip-phase` and phases 1 to 6 ship
+unchanged. The default (named architects are addressable from other workspaces) and the builder
+front-door rule are not in question and live in phases 2 and 4.
 
 Each phase is one git commit on `builder/spir-1940`, inside a single PR opened in the review
 phase.
@@ -96,12 +100,15 @@ unchanged.
   It sits beside `agent-names.ts`, where Tower and the extension already share address code, and
   imports only `codev-types`.
 - `packages/sdk/package.json` — add the `./address` export.
-- `packages/sdk/src/__tests__/fixtures/address-cases.json` (new) — the shared table: input,
-  expected structured result or expected error code.
+- `packages/types/fixtures/address-cases.json` (new) — the shared table, kept beside the contract
+  it tests and not inside any one consumer: input, expected structured result or expected error
+  code, and for formatter rows the reader's context and the expected text.
 - `packages/sdk/src/__tests__/address.test.ts` (new).
 - `packages/codev/src/agent-farm/__tests__/address-conformance.test.ts` (new) and
   `apps/vscode/src/__tests__/address-conformance.test.ts` (new) — each loads the same JSON table
-  and runs it through that package's own import of the parser.
+  by its path in the repository and runs it through that package's own import of the parser.
+- `packages/codev/src/agent-farm/__tests__/send-latency.e2e.test.ts` (new) — the latency
+  measurement the spec's non-functional scenario asks for, written first (see the deliverables).
 
 #### Deliverables
 
@@ -121,7 +128,21 @@ unchanged.
 - [ ] The formatter prints the shortest form correct for the reader, in the spec's four tiers.
   Stage 1 only ever produces the first two; all four are implemented because the grammar is fixed
   and the round-trip tests need them.
-- [ ] `parse(format(a)) = a` for every valid row of the table.
+- [ ] **Round trip, stated with the reader in it.** The formatter drops what the reader already
+  has, so `parse(format(a, reader))` is not `a`. The invariant is: parse the formatted text, fill
+  each part it leaves out from the reader's context by the spec's "Leaving parts out" rule (no
+  owner means the reader's account, no `afx://` means the reader's Tower, no workspace means the
+  reader's workspace), and the result equals `a`. The reader's context is
+  `{ owner?, tower?, workspace }`: the reader's workspace address name, and its Tower name and
+  owner handle where it has them. On a stage 1 Tower only `workspace` is ever set. The table has
+  a row for each tier and each reader.
+- [ ] **The latency baseline is taken before any production code changes.** The measurement test
+  is the first thing written in this phase. It starts a real Tower in an isolated directory and
+  times 100 same-workspace sends through `POST /api/send` to a recipient whose mail is held, so
+  no terminal write is timed. It uses nothing this project adds, so the same file runs unchanged
+  on the code as it stands today and on the finished branch. It runs only when asked for
+  (an environment switch), never in the ordinary e2e run. The baseline median is recorded in the
+  thread log, with the commit it was taken on, before the parser is written.
 - [ ] Tests for this phase.
 
 #### Acceptance Criteria
@@ -160,6 +181,9 @@ the phase that closes the gap issue #1940 names first.
 - `packages/codev/src/agent-farm/servers/tower-routes.ts` — `handleSend`, `handleDelayedSend` and
   `deliverCronMessage` parse once and pass the sender context; the new error codes map to HTTP
   statuses (400 for malformed and for cross-Tower not available, 403 for refused).
+- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` — the starved-mail escalation to a
+  builder's owner calls `resolveAgentInRegistry('architect', …)` and moves to the new signature.
+  Its sender and target are in one workspace by construction.
 - `packages/codev/src/agent-farm/servers/tower-cron.ts` — a task whose `target` is an `afx://`
   address is refused when the task file is loaded, with the task named.
 - `packages/codev/src/agent-farm/commands/interrupt.ts` and
@@ -185,10 +209,22 @@ the phase that closes the gap issue #1940 names first.
   is its own spawning architect, with or without its own workspace in front. `<own
   workspace>:architect:<other>` is refused with today's Spec 755 message, unchanged. A named
   architect in another workspace is refused with a message that names that workspace's front door.
-- [ ] **Affinity stays inside the workspace.** The builder lookup uses the sender's workspace, not
-  the target's. `<other workspace>:architect` from a builder reaches `main` (else the first
-  registered), never that builder's spawning architect. `<own workspace>:architect` from a builder
-  keeps today's affinity.
+- [ ] **Two questions, kept apart.** Today both resolvers ask "is the sender a builder, and whose?"
+  by looking the sender up in the *target* workspace. That one lookup does two jobs, and they
+  separate here:
+  - *Permission* — is the sender a builder, and which architect may it name? Looked up in the
+    **sender's** workspace. This is what the builder rule above uses, for every target.
+  - *Affinity* — should bare `architect` go to the sender's spawning architect? Only when the
+    target workspace **is** the sender's workspace. For any other target workspace the front door
+    is `main`, else the first registered, whoever sends.
+
+  So `<other workspace>:architect` from a builder spawned by `review` reaches that workspace's
+  `main`, never an architect there that happens to be called `review`.
+  `<own workspace>:architect` from a builder keeps today's affinity.
+- [ ] The issue #1094 warning ("affinity routing bypassed") no longer fires for a builder writing
+  to another workspace's front door, where it fires today although nothing was bypassed. It still
+  fires for the case it was written for: a sender that looks like a builder and has no row in its
+  own workspace.
 - [ ] Malformed shapes fail with the expected shape, for example `devvm:codev:architect`: "a local
   address has at most a workspace before `architect`".
 - [ ] Every `afx://` address is refused with a reason that says cross-Tower messaging is not
@@ -200,8 +236,13 @@ the phase that closes the gap issue #1940 names first.
 
 #### Acceptance Criteria
 
-- [ ] Every address-resolution test that exists before this phase passes without its expectations
-  being changed, apart from call signatures.
+- [ ] Every *resolution* test that exists before this phase (`tower-messages`,
+  `spec-755-phase3-routing`, `spec-1313-registry-resolve`, `tower-routes`) passes without its
+  expectations being changed, apart from call signatures.
+- [ ] The old parser's own unit block in `agent-names.test.ts` goes with the parser; the phase 1
+  table replaces it. Two of its expectations do change, and are meant to: `:agent` and `a:b:c`
+  are now malformed. For a user, `afx send a:b:c` moves from a 404 "not found" to a 400 that
+  names the expected shape. No valid address is affected.
 - [ ] The spec's stage 1 test scenarios for resolution pass: the new form reaches its recipient;
   registered with no live terminal is held `no-live-pty` on the immediate path and on the
   `--delay` path; the builder bullets; the `arch:` and `builder:` reserved-word bullets; the cron
@@ -257,6 +298,8 @@ is named, both resolve.
   `afx workspace name <name>` and `afx workspace name --clear`, acting on the current workspace.
   No existing command is called `workspace name`; `afx rename` is a different command and is not
   touched.
+- `packages/codev/src/agent-farm/__tests__/send-architect-identity.test.ts` — it pins
+  `GLOBAL_CURRENT_VERSION = 19` as a source-level guard; the pin and its comment move to 20.
 - Tests: migration test, `workspace-address.test.ts` (new), resolver tests, route test, CLI test.
 
 #### Deliverables
@@ -307,8 +350,10 @@ by pasting one command. Same-workspace frames do not change by a byte.
   `REPLY_HINT` constant are not changed and keep taking a local id.
 - `packages/codev/src/agent-farm/servers/tower-routes.ts` — `formatMessageForTarget` takes a
   sender context whose workspace field is required by its type, so none of its six call sites can
-  leave it out: the Decisions tab notice, the delayed send, the registry hold, the dead-session
-  hold, the unwritable-session hold and the live path.
+  leave it out. Five of them carry a message from an agent and can cross workspaces: the delayed
+  send, the registry hold, the dead-session hold, the unwritable-session hold and the live path.
+  The sixth, the Decisions tab notice, is sent by Tower to the `main` architect of the same
+  workspace and has no sending agent; it passes that workspace and keeps today's frame.
 - `packages/codev/src/agent-farm/servers/tower-messages.ts` — export the phase 2 permission check
   so the footer can ask it "may this recipient send to that address?".
 - Tests: `message-format.test.ts`, `tower-routes.test.ts`, `air-1478-architect-attribution.test.ts`,
@@ -317,7 +362,11 @@ by pasting one command. Same-workspace frames do not change by a byte.
 #### Deliverables
 
 - [ ] **Case 1, same workspace**: the code path is the one that runs today. The new formatter is
-  entered only when the sender's workspace and the recipient's differ.
+  entered only when the sender's workspace is known and differs from the recipient's.
+- [ ] **An unknown sender workspace is not "another workspace".** `handleSend` falls back to the
+  literal string `unknown` when a caller supplies neither `fromWorkspace` nor `workspace`. That
+  value, and an absent one, keep today's frame: Tower does not claim a message came from
+  elsewhere when it does not know where it came from.
 - [ ] **Case 2, another workspace on this Tower**: the header carries the sender's
   workspace-qualified address, as in the spec:
   `### [ARCHITECT codev:architect:review MESSAGE → tunnel | <time>] ###`. A builder sender reads
@@ -358,14 +407,16 @@ by pasting one command. Same-workspace frames do not change by a byte.
   not changed).
 - [ ] For every row of the footer table, the printed command is accepted when the recipient sends
   it, and delivers to the original sender.
-- [ ] Each of the six call sites produces the cross-workspace header for a cross-workspace send:
-  one test per site.
+- [ ] Each of the five agent-bearing call sites produces the cross-workspace header for a
+  cross-workspace send: one test per site. The Decisions tab notice is asserted unchanged.
+- [ ] A send with no sender workspace, and one whose sender workspace is `unknown`, produce
+  today's frame.
 - [ ] Build and tests pass.
 
 #### Test Plan
 
-Unit tests on the formatter. Route-level tests that drive each of the six paths with a sender in
-another workspace and read the stored `formatted_message`. A table test that takes each footer
+Unit tests on the formatter. Route-level tests that drive each of the five agent-bearing paths
+with a sender in another workspace and read the stored `formatted_message`. A table test that takes each footer
 command and resolves it as the recipient.
 
 ### Phase 5: One-Tower discovery: workspace list and whoami
@@ -380,9 +431,12 @@ as addresses ready to paste, and `afx whoami` prints the caller's own.
 #### Files to Create / Modify
 
 - `packages/types/src/api.ts` — the listing's response type.
-- `packages/codev/src/agent-farm/servers/tower-routes.ts` — `GET /api/address-book`: each
-  workspace with its path, its address name (or why it has none), and its architects, builders
-  and shells, each with an address and whether it has a live terminal.
+- `packages/codev/src/agent-farm/servers/tower-routes.ts` — `GET /api/address-book`, which takes
+  the caller's workspace and sender id, as `/api/send` does. It returns each workspace with its
+  path, its address name (or why it has none), and its architects, builders and shells, each with
+  an address, whether it has a live terminal, and whether this caller may send to it. That last
+  field comes from the phase 2 permission check, asked as the caller. Taking the caller now means
+  phase 7 changes no wire contract.
 - `packages/sdk/src/tower-client.ts` — `getAddressBook`.
 - `packages/codev/src/agent-farm/commands/workspace-list.ts` (new), `cli.ts` —
   `afx workspace list`, with `--json`.
@@ -397,15 +451,20 @@ as addresses ready to paste, and `afx whoami` prints the caller's own.
   address a line, `live` or `no live terminal`. A registered workspace that is not running is
   listed as not running. A workspace whose name is ambiguous or shadowed says so and shows
   `afx workspace name <name>`.
-- [ ] Every address it prints resolves when passed to `afx send` from another workspace.
+- [ ] **The listing is true for whoever runs it.** An address the caller may send to is printed
+  ready to paste. One the caller may not name is still listed, so the caller can see the seat
+  exists, with the way to reach it beside it: for a builder, a named architect in another
+  workspace reads `reach through codev-cloud:architect`. Nothing is hidden in this phase.
+- [ ] Every address printed as ready to paste resolves when that caller passes it to `afx send`.
 - [ ] `afx whoami` prints the caller's address in the form another workspace would type:
   `codev:architect:main`, `codev:architect:review`, `codev:builder-spir-1940`.
 - [ ] Tests for this phase.
 
 #### Acceptance Criteria
 
-- [ ] The listing test feeds each printed address back through the resolver and gets the agent it
-  was printed for.
+- [ ] The listing test runs once as an architect and once as a builder. For each caller it feeds
+  every address back through the resolver as that caller: each one printed as ready to paste
+  reaches the agent it was printed for, and each one marked otherwise is refused.
 - [ ] whoami's existing output lines and exit codes are unchanged; the address is an added line.
 - [ ] Build and tests pass.
 
@@ -432,9 +491,8 @@ Docs, found by grepping both trees for the addressing forms, not from memory:
 - `codev-skeleton/templates/CLAUDE.md`, `codev-skeleton/templates/AGENTS.md`,
   `codev/templates/CLAUDE.md`, `codev/templates/AGENTS.md`.
 - The `afx` skill: `.claude/skills/afx/SKILL.md`, `.codex/skills/afx/SKILL.md` and both copies
-  under `codev-skeleton/`. If the build tracks hashes of shipped skills
-  (`packages/codev/src/lib/shipped-skill-hashes.ts`), they are regenerated the way the build
-  expects.
+  under `codev-skeleton/`. The shipped-skill hashes are regenerated with
+  `pnpm --filter @cluesmith/codev generate-skill-hashes`.
 - `codev/resources/commands/agent-farm.md` and `codev-skeleton/resources/commands/agent-farm.md` —
   `afx send`, `afx workspace list`, `afx workspace name`, `afx whoami`.
 - `codev/roles/architect.md`, `codev/roles/builder.md` and both under `codev-skeleton/roles/` —
@@ -450,7 +508,7 @@ Tests and checks:
 
 - `packages/codev/src/agent-farm/__tests__/cross-workspace-addressing.e2e.test.ts` (new), in the
   existing harness that spawns a real Tower in an isolated directory.
-- A send-latency measurement, kept as an opt-in test so it can be rerun.
+- `send-latency.e2e.test.ts` from phase 1, run again here.
 
 #### Deliverables
 
@@ -460,8 +518,13 @@ Tests and checks:
 - [ ] The stage 2 and stage 3 role guidance (what "REMOTE" and "OTHER OWNER" mean) is not added.
   Those headers do not exist yet.
 - [ ] **End-to-end test, on a Tower that has never connected to Codev Cloud**: two workspaces,
-  each with `main` and a named architect, and a builder. Through `POST /api/send` as the CLI
-  calls it:
+  each with `main` and a named architect, and a builder. The headline path and the refusals are
+  driven through the CLI's own `send` command (`commands/send.ts`), so that its workspace
+  detection, sender identity, SDK call, printed result and exit status are all the real ones. The
+  one thing replaced is the port its Tower client connects to. The built `afx` binary cannot be
+  used here: it always connects to port 4100, which on this machine is the owner's live Tower,
+  and adding a port override to the CLI for a test's sake is not in scope. The remaining cases go
+  through `POST /api/send` directly.
   - the named architect in the other workspace receives the message under a qualified header;
   - the footer's reply command, taken from the stored frame and sent unchanged as the recipient,
     reaches the original sender;
@@ -469,9 +532,15 @@ Tests and checks:
   - a builder naming another workspace's named architect is refused and nothing is stored;
   - `afx://devvm/codev:architect` is refused with the stated reason;
   - two workspaces with one basename fail as ambiguous, and both resolve after one is named.
-- [ ] **The non-functional check from the spec**: the median of 100 same-workspace sends to a
-  recipient whose mail is held, measured on the commit before phase 1 and on this branch. The
-  second is within 5%, or 1 ms, of the first, whichever is larger. Both numbers go in the review.
+- [ ] **The non-functional check from the spec**: the phase 1 measurement is run again on the
+  finished branch, on the same machine. The median is within 5%, or 1 ms, of the phase 1
+  baseline, whichever is larger. If it is outside the bound, the baseline is retaken from a clean
+  copy of the pre-phase-1 commit (`git archive` into the scratch directory, built there) before
+  anything is concluded, so that a noisy machine is not mistaken for a regression. Both numbers
+  go in the review.
+- [ ] **A cross-workspace figure, for the record.** The same test also times 100 sends to a named
+  architect in another workspace. The spec sets no bound for it; the number goes in the review so
+  the cost of the name lookup is known and not assumed.
 - [ ] **Windows**: the on-demand workflow is dispatched on the branch with the suites on, because
   the change touches workspace-keyed code, and the run is linked in the PR:
   `gh workflow run windows.yml --ref builder/spir-1940 -f purpose='Spec 1940 stage 1 addressing' -f suites=true`.
@@ -483,19 +552,26 @@ Tests and checks:
 - [ ] `diff CLAUDE.md AGENTS.md` is empty, and so is the diff of each template pair.
 - [ ] A grep of both trees for the old statement of the grammar ("four addressing forms",
   "cross-workspace" rows without the new form) finds nothing left to fix.
-- [ ] The end-to-end test passes against the built CLI and Tower.
+- [ ] The end-to-end test passes against a Tower process started from the build. It is run by
+  file, after `pnpm build`:
+  `pnpm --filter @cluesmith/codev exec vitest run --config vitest.e2e.config.ts src/agent-farm/__tests__/cross-workspace-addressing.e2e.test.ts`.
+  The whole e2e configuration is not run: it also contains the porch benchmark, which drives real
+  models for about forty minutes.
 - [ ] The latency check is within its bound.
-- [ ] Build, unit suites and the e2e suite pass.
+- [ ] Build and the unit suites of `codev-types`, `codev-sdk`, `packages/codev` and `apps/vscode`
+  pass, with the Tower e2e files this project touches or adds.
 
 #### Test Plan
 
 The e2e test above, the latency measurement, the Windows workflow run, and a read of every changed
 doc against the resolver's actual behaviour.
 
-**What this phase cannot check.** The check on the owner's own Tower, with real architect
-terminals in two real workspaces, needs the build installed there, which a builder does not do
-from its worktree. That is the `verify` phase after merge: from one workspace's named architect,
-`afx send <other-workspace>:architect:<name> "…"`, see it arrive, paste the reply.
+**What this phase cannot check.** The installed `afx` binary, typed by an agent in a real
+architect terminal, against the owner's own Tower with two real workspaces. That needs the build
+installed there, which a builder does not do from its worktree. It is the `verify` phase after
+merge: from one workspace's named architect, `afx send <other-workspace>:architect:<name> "…"`,
+see it arrive, paste the reply. If the owner wants that run before the PR is approved, the
+architect can install the branch build and run it; I will say so when the PR is ready.
 
 **Issue #1605.** The PR body says stage 1 supersedes it and why (spec Decision 10). I do not close
 it; the architect does when the PR merges.
@@ -516,17 +592,24 @@ nothing is rerouted.
 #### Files to Create / Modify
 
 - `packages/codev/src/lib/config.ts` — `messaging.frontDoorOnly` (boolean, default false) on
-  `CodevConfig`, read from the workspace's `.codev/config.json` through the existing loader.
+  `CodevConfig`, and a reader that returns it from **the workspace's own committed
+  `.codev/config.json` and nowhere else**. The existing `loadConfig` is not used for this: it
+  merges the framework cache, the user's global `~/.codev/config.json` and the per-engineer
+  `.codev/config.local.json`, and the spec makes this a setting that "travels with the repository
+  and is reviewed like any other change". A value for the key in any other layer has no effect,
+  and the reader's test says so for each layer.
 - `packages/codev/src/agent-farm/servers/tower-messages.ts` — the phase 2 permission check
-  refuses a sender outside the workspace that names one of its architects. The config is read
-  only on that path, so no other send pays for it.
+  refuses a sender outside the workspace that names one of its architects. The file is read only
+  on that path (a named architect, addressed from another workspace), so no other send pays for
+  it. It is one small file and is read each time, not cached, so that a change takes effect on the
+  next send without restarting Tower.
 - `packages/codev/src/agent-farm/utils/message-format.ts` and the footer rule from phase 4 — one
   more row: a message from a named architect in such a workspace carries
   `(reply via its front door: afx send codev-cloud:architect "…")`. The header still names the
   true sender.
 - `packages/codev/src/agent-farm/servers/tower-routes.ts` and `commands/workspace-list.ts` — the
   listing marks the workspace "front door only" and shows callers in other workspaces only its
-  front door.
+  front door. The route already knows the caller (phase 5), so its contract does not change.
 - The docs of phase 6, both trees — the opt-in sentence and the key, wherever
   `.codev/config.json` keys are documented.
 - Tests: resolver, footer, listing, and the e2e file from phase 6 gains one case.
@@ -545,6 +628,10 @@ nothing is rerouted.
 
 - [ ] The spec's front-door-only test scenario passes in full.
 - [ ] With the setting absent or false, every test of phases 2 to 6 passes unchanged.
+- [ ] The setting in `~/.codev/config.json` or in `.codev/config.local.json` alone changes nothing.
+- [ ] **The final checks are run again with this phase in**, since it is the last commit: the
+  unit suites, the end-to-end file, the doc-pair diffs and the both-trees grep of phase 6, and the
+  cross-workspace latency figure with the setting off and on.
 - [ ] Build and tests pass.
 
 #### Test Plan
@@ -578,7 +665,9 @@ shared parser.
 | The longer header pushes short messages onto the paste path | Low | Low | Limits unchanged; test that a 40-byte cross-workspace body stays on the short path |
 | Migration v20 fails on a database that skipped a version | Low | High | Run through the existing per-version migration harness; a nullable column needs no backfill |
 | The front-door-only setting is cut after work has been built on it | Medium | Low | It is the last phase and nothing depends on it |
-| Stage 1 slows every send | Low | Medium | The name table and the config are read only on cross-workspace paths; measured in phase 6 |
+| Stage 1 slows every send | Low | Medium | The name table and the front-door file are read only on cross-workspace paths; the baseline is taken in phase 1 before any code changes and compared in phase 6 |
+| The front-door-only setting is switched on or off from a layer that is not reviewed with the repository | Low | Medium | It is read from the committed `.codev/config.json` only; tested per layer |
+| The listing prints an address its reader cannot use | Medium | Low | The route takes the caller and marks each address with the resolver's own permission check; tested as an architect and as a builder |
 
 ## Documentation Updates
 
