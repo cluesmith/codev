@@ -61,11 +61,21 @@ The work goes in dependency order:
 - **The diff range for `watched`, `size`, `to-read` and `overlap` is merge-base → head**, which
   is what the forge's diff view shows. `overlap` adds merge-base → base tip and intersects the
   two.
-- **The `forge` check is `ok` for `MERGEABLE` with `mergeStateStatus` `CLEAN` or `HAS_HOOKS`.**
-  `HAS_HOOKS` goes slightly beyond the spec's "its clean state". It means "clean, with
-  pre-receive hooks" on GitHub Enterprise, and treating it as attention would be pure noise.
-  `UNSTABLE`, meaning non-required checks failing, is attention here *and* in `checks`. That
-  double report is deliberate and documented.
+- **The `forge` check's verdict follows `mergeable` only.** This was decided by the architect on
+  2026-11-23 and reported to the owner, who may overrule it. It narrows the spec's "forge
+  mergeability other than its clean state".
+  - `MERGEABLE` is `ok`. `CONFLICTING` and `UNKNOWN` are attention, and `UNKNOWN` keeps the
+    end-of-run re-read.
+  - `mergeStateStatus` is shown verbatim as context and never changes the verdict by itself.
+  - When the state is `BLOCKED` and the forge gives a `reviewDecision`, the line says why, e.g.
+    `ok forge MERGEABLE (state BLOCKED: review required)`. Without a `reviewDecision` it shows
+    the state alone.
+  - `--json` `details` carry `mergeable`, `mergeStateStatus` and `reviewDecision`. There is no
+    new config key.
+  - Why: on this repository every open PR reads `MERGEABLE`/`BLOCKED`, because PRs merge while
+    `REVIEW_REQUIRED`. A check that exits 1 on every PR would defeat the headline path.
+    Conflicts are covered by `trial-merge`, CI by `checks` and draft by `state`. And
+    `check.skip: ["forge"]` would throw away the `CONFLICTING` and `UNKNOWN` signals too.
 
 ## Phases (Machine Readable)
 
@@ -140,6 +150,9 @@ each new field or concept, or explicitly disabling it. Nothing is left silently 
       upper-cased.
     - `mergeCommit?: { oid: string } | null`
     - `mergedAt?: string | null`
+    - `reviewDecision?: string | null`, added by the architect's decision (see Decisions).
+      GitHub's words: `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`. The github preset
+      implements it; gitlab and gitea emit an explicit `null`.
   - New `CommitCheckItem` `{ name, state: 'pass'|'fail'|'pending'|'skipped'|'neutral', url?, workflow? }`
     and `CommitChecksResult`.
   - New `WorkflowRunItem` `{ headSha, status, conclusion, url, createdAt }` and
@@ -154,7 +167,7 @@ each new field or concept, or explicitly disabling it. Nothing is left silently 
   - `ForgeCommandError.timedOut: boolean`, derived from the exec error's `killed`/`signal`.
   - All of these are additive. Existing callers are unchanged.
 - `packages/codev/scripts/forge/github/pr-view.sh`: add
-  `headRefOid,isDraft,mergeable,mergeStateStatus,mergeCommit,mergedAt` to the `--json` list.
+  `headRefOid,isDraft,mergeable,mergeStateStatus,mergeCommit,mergedAt,reviewDecision` to the `--json` list.
 - `packages/codev/scripts/forge/github/commit-checks.sh` (new). Input `CODEV_COMMIT_SHA`.
   - Makes two read-only `gh api` GET calls:
     - `repos/{owner}/{repo}/commits/$SHA/check-runs?per_page=100` with `--paginate`
@@ -527,10 +540,12 @@ issue. After this phase the headline path is whole.
 - `packages/codev/src/commands/check/pr.ts`: add four checks.
   - `state`, from state and draft. Normalization: upper-case it; `OPENED` → `OPEN`; a
     non-null `mergedAt` → `MERGED`. Anything other than an open non-draft PR is attention.
-  - `forge`: `ok` for `MERGEABLE` with `mergeStateStatus` absent, `CLEAN` or `HAS_HOOKS`.
-    Anything else is attention, in the forge's own words. An `UNKNOWN` mergeability takes the
-    end-of-run re-read's value, the spec's "re-read once". If it is still `UNKNOWN`, the
-    summary says "forge has not computed mergeability yet".
+  - `forge`, per the architect's decision: the verdict follows `mergeable` only.
+    - `MERGEABLE` is `ok`; `CONFLICTING` and `UNKNOWN` are attention.
+    - `mergeStateStatus` is context, with the reason taken from `reviewDecision` when the state
+      is `BLOCKED`, e.g. `MERGEABLE (state BLOCKED: review required)`.
+    - An `UNKNOWN` mergeability takes the end-of-run re-read's value, the spec's "re-read once".
+      If it is still `UNKNOWN`, the summary says "forge has not computed mergeability yet".
   - `checks`, through `porch-only.ts`.
   - `linked-issue`, through `linked-issue.ts`.
 - `packages/codev/src/commands/check/porch-only.ts`. The selection is pure; the lookups go
