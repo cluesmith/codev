@@ -34,3 +34,17 @@
 - Gotcha: PowerShell variable names are case-insensitive ($k clobbered $K); leaked OpenProcess handles make
   IsProcessInJob report a dead process as still a member — check exit with Get-Process.
 - Main Tower PID 53132 throughout; all test processes ended.
+
+## 2026-11-23 — implement
+- Commit 1 (alone): 6b7f81940 session jobs set no limit flags (no breakaway). New .windows. test fails with the old flag.
+- Commit 2: 5c06db9bf helper ops snapshot / job-members / in-job / end-process; teardown guard (no job terminate or
+  taskkill /T when the root's tree or job holds a Tower or another shellper); Tower refuses to boot inside the job its
+  marker names. Surprise: the helper program outgrew the 32,767-char command line (-EncodedCommand) — now a tiny
+  bootstrap reads the program from stdin, still in memory only.
+- Commit 3: 74419b02a listing + ending, Tower routes (end is local-only like shutdown), afx orphans, afx status
+  (--port added for isolated Towers), codev doctor, docs in both trees.
+- Measured while testing: in Git Bash the dead-parent process is often the bash.exe stub MSYS keeps as parent of a
+  native program (the program is its descendant); a Tower started by `cmd start /b` keeps the conhost of that cmd,
+  whose parent is gone -> console hosts are never listed.
+- Snapshot: ~12ms warm; job-members on this session ~94ms.
+- Windows workflow: run 45092198798 (.windows. filter + suites).
