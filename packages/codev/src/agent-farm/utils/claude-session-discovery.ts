@@ -106,18 +106,28 @@ export function verifySessionOwnership(
   sessionId: string,
   opts?: { homeDir?: string },
 ): boolean {
+  return findSessionFile(absolutePath, sessionId, opts) !== null;
+}
+
+/**
+ * The on-disk transcript of session `sessionId` run in `absolutePath`, or null
+ * when there is none. Claude keys the store dir by its process cwd, which the
+ * OS may report in physical (symlink-resolved) form — e.g. /tmp/ws vs
+ * /private/tmp/ws on macOS — so both encodings of the directory are tried.
+ */
+export function findSessionFile(
+  absolutePath: string,
+  sessionId: string,
+  opts?: { homeDir?: string },
+): string | null {
   const home = opts?.homeDir ?? homedir();
-  // Claude keys the store dir by its process cwd, which the OS may report in
-  // physical (symlink-resolved) form — e.g. /tmp/ws vs /private/tmp/ws on
-  // macOS. Accept the session under either encoding of the same directory.
   const candidateDirs = new Set([
     encodeClaudeProjectDir(absolutePath),
     encodeClaudeProjectDir(realpathOrSelf(absolutePath)),
   ]);
   for (const dir of candidateDirs) {
-    if (existsSync(join(home, '.claude', 'projects', dir, `${sessionId}${JSONL_EXT}`))) {
-      return true;
-    }
+    const file = join(home, '.claude', 'projects', dir, `${sessionId}${JSONL_EXT}`);
+    if (existsSync(file)) return file;
   }
-  return false;
+  return null;
 }
