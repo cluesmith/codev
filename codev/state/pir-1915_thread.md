@@ -117,3 +117,8 @@
 ## 2026-11-24 - merged origin/main
 
 Owner asked for a merge (not rebase) of origin/main, which includes PR #1949 (#1910). Clean merge, no conflicts; only codev/resources/arch.md changed on both sides and auto-merged with the #1915 section intact. New head 72e0e2f42. Build green; branch tests + merged tests (air-1893, bugfix-1910, bugfix-1952) 109 passed / 7 skipped; main Tower 53132 before and after. Fresh Windows run: https://github.com/cluesmith/codev/actions/runs/45276143657. Still at dev-approval.
+
+## 2026-11-24 - review + PR
+- dev-approval approved by the owner (relayed). Review written; PR #1959 opened, no attribution.
+- Consultation: gemini COMMENT (skipped, no agy), codex COMMENT (LOW, sandbox blocked reads), claude COMMENT (HIGH). Acted on: exact flag assertion, openBrowser documented in DEPENDENCIES.md, full untested list, nits. Left to the architect: moving process-tree.windows afterAll to tracked-pids (suspected Phase 4(b) killer).
+- At the pr gate.
