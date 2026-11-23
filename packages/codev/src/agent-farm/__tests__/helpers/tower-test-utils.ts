@@ -4,7 +4,7 @@
  * Spec 0116: Socket isolation + cleanup helpers.
  */
 
-import { spawn, ChildProcess } from 'node:child_process';
+import { spawn, execFileSync, ChildProcess } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
@@ -291,6 +291,29 @@ export async function cleanupAllTerminals(port: number): Promise<void> {
       }
     }
   } catch { /* Tower may already be down */ }
+}
+
+/**
+ * PIDs of the processes whose command line names `socketDir`.
+ *
+ * A shellper's command line carries its socket path, so for a `TowerHandle.socketDir`
+ * this is the list of shellpers that Tower started and that are still alive. Shellpers
+ * outlive Tower by design, and `stop()` removing the socket directory does not end them:
+ * a teardown that wants to know it leaked nothing asks here, after `stop()`.
+ *
+ * POSIX only (`ps`).
+ */
+export function pidsNamingSocketDir(socketDir: string): number[] {
+  const listing = execFileSync('ps', ['-axo', 'pid=,command='], {
+    encoding: 'utf-8',
+    // A shellper's command line holds its whole environment; a machine with many of
+    // them prints far more than the 1 MB default.
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return listing
+    .split('\n')
+    .filter((line) => line.includes(socketDir))
+    .map((line) => Number.parseInt(line.trim(), 10));
 }
 
 /**

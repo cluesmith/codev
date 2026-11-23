@@ -37,6 +37,7 @@ import {
   createTestWorkspace,
   cleanupTestWorkspace,
   encodeWorkspacePath,
+  pidsNamingSocketDir,
   type TowerHandle,
 } from './helpers/tower-test-utils.js';
 
@@ -171,12 +172,33 @@ describe.skipIf(!ENABLED)('send latency (Spec 1940, opt-in measurement)', () => 
       }
     }
     if (ready !== true) throw ready;
+    // The teardown asserts that this list ends empty. Seeing the live shellpers in it now
+    // is what makes that assertion mean something.
+    expect(pidsNamingSocketDir(tower.socketDir).length).toBeGreaterThan(0);
   }, 120_000);
 
   afterAll(async () => {
-    await tower?.stop();
+    if (!tower) return;
+    // Shellpers outlive Tower by design: stopping Tower alone leaves the architect's and
+    // the builder's running for good. Deactivating the workspace is what ends them. A
+    // failed deactivation is not swallowed: the assertion below is what reports it.
+    if (workspace) {
+      await fetch(`http://localhost:${tower.port}/api/workspaces/${encodeWorkspacePath(workspace)}/deactivate`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(30_000),
+      }).catch(() => {});
+    }
+    const { socketDir } = tower;
+    await tower.stop();
     if (workspace) cleanupTestWorkspace(workspace);
-  });
+
+    let survivors = pidsNamingSocketDir(socketDir);
+    for (let i = 0; i < 40 && survivors.length > 0; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      survivors = pidsNamingSocketDir(socketDir);
+    }
+    expect(survivors, `shellpers started by this run's Tower (${socketDir}) are still alive`).toEqual([]);
+  }, 120_000);
 
   it('same-workspace send to a recipient whose mail is held', async () => {
     const stats = await measure(tower.port, {
