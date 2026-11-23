@@ -417,7 +417,8 @@ export type SnapshotOutcome =
 export type JobMembersOutcome =
   /** `found: false`: no such job. `member: false`: the root is not in it, so it is not this session's. */
   | { ok: true; found: boolean; member: boolean; processes: JobMemberProcess[] }
-  | { ok: false; error: string; helperFailure: boolean };
+  /** `disabled`: jobs are off for good (reported once, when it happened). */
+  | { ok: false; error: string; helperFailure: boolean; disabled?: boolean };
 
 function asInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
@@ -749,7 +750,11 @@ export class WindowsJobHelper {
   /** The processes in job `name`, if `rootPid` (the session root) is in it. */
   async jobMembers(name: string, rootPid: number): Promise<JobMembersOutcome> {
     const result = await this.request({ op: 'job-members', name, pid: rootPid });
-    if (!result.ok) return { ok: false, error: failureText(result), helperFailure: result.helperFailure === true };
+    if (!result.ok) {
+      const failure: JobMembersOutcome = { ok: false, error: failureText(result), helperFailure: result.helperFailure === true };
+      if (result.disabled) failure.disabled = true;
+      return failure;
+    }
     return { ok: true, found: result.found === true, member: result.member === true, processes: parseJobMemberRows(result.processes ?? []) };
   }
 

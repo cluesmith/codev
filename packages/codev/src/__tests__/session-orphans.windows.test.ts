@@ -291,7 +291,9 @@ describe.skipIf(!onWindows)('orphaned processes in session jobs (native Windows)
 
     // Tearing the outer session down must not take the inner Tower or its session with it.
     const result = await killSessionTree(root.pid!, { jobName: sessionJobName(outerId), terminateJob: (n, p) => helper.terminate(n, p), jobMembers: (n, p) => helper.jobMembers(n, p) });
-    expect(result.jobError).toMatch(/holds Tower or another session's shellper/);
+    // The guard protects it, or, if the job could not be listed, teardown fails closed and leaves the job.
+    console.log(`TEARDOWN-GUARD ${result.jobError}`);
+    expect(result.jobError).toMatch(/holds Tower or another session's shellper|its processes could not be listed/);
     await waitFor(() => !alive(root.pid!), 10_000, 'the outer root to end');
     await new Promise((r) => setTimeout(r, 1000));
     expect(alive(towerPid)).toBe(true);

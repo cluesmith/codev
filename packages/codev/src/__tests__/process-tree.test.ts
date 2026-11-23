@@ -333,7 +333,7 @@ describe('killSessionTree on Windows', () => {
     expect(result.jobError).toBe('job J not terminated: TerminateJobObject failed (Win32 error 5)');
   });
 
-  it('terminates the job even when the root pid was reused, and names it in a refusal or census failure', async () => {
+  it('terminates the job even when the root pid was reused; without a census it does not (fails closed, #1915)', async () => {
     forceHostPlatform('win32');
     const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
     const reused = windowsHarness({ censuses: [[entry(43, 1, 900_000)]], alive: new Set([43]) });
@@ -341,10 +341,13 @@ describe('killSessionTree on Windows', () => {
     expect(refused.refused).toBe('reused-pid');
     expect(terminateJob).toHaveBeenCalledTimes(1);
 
+    // No census, so nothing can show the job holds no Tower or other session: it stays.
     const failing = windowsHarness({ censuses: [new Error('cim down')], alive: new Set() });
     await expect(
       killSessionTree(44, { census: failing.census, taskkill: failing.taskkill, kill: failing.kill, jobName: 'J', terminateJob, jobMembers: noJobMembers }),
-    ).rejects.toThrow(/cim down; its session job was terminated/);
+    ).rejects.toThrow(/cim down; job J not terminated: without a process census/);
+    expect(terminateJob).toHaveBeenCalledTimes(1);
+    expect(failing.events).toContain('taskkill 44');
   });
 
   it('#1915: never terminates a job that holds a Tower; ends the session\'s own processes one by one', async () => {
@@ -384,17 +387,38 @@ describe('killSessionTree on Windows', () => {
     expect(h.events.filter((e) => e.startsWith('kill')).sort()).toEqual(['kill 80', 'kill 81']);
   });
 
-  it('#1915: a job listing that fails leaves the guard to the tree, and a clean job is terminated as before', async () => {
+  it('#1915: a job listing that fails never terminates the job (fails closed); the tree teardown still runs', async () => {
     forceHostPlatform('win32');
     const census = [entry(80, 1, 100, SHELLPER_CMD), entry(81, 80, 110)];
     const h = windowsHarness({ censuses: [census, census, census], alive: new Set([81]) });
     const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
-    const failing = vi.fn(async () => ({ ok: false as const, error: 'no answer', helperFailure: true }));
+    const failing = vi.fn(async () => ({ ok: false as const, error: 'no answer within 5000ms', helperFailure: true }));
 
-    await killSessionTree(80, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers: failing });
+    const result = await killSessionTree(80, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers: failing });
 
-    expect(terminateJob).toHaveBeenCalledTimes(1);
+    expect(terminateJob).not.toHaveBeenCalled();
     expect(h.events).toContain('taskkill 80');
+    expect(h.events).toContain('kill 81');
+    expect(result.jobError).toMatch(/job J not terminated: its processes could not be listed \(no answer within 5000ms\)/);
+  });
+
+  it('#1915: no job (or not ours, or jobs disabled): no terminate call and no root re-check before taskkill', async () => {
+    forceHostPlatform('win32');
+    const census = [entry(80, 1, 100), entry(81, 80, 110)];
+    const listings = [
+      async () => ({ ok: true as const, found: false, member: false, processes: [] }),
+      async () => ({ ok: true as const, found: true, member: false, processes: [] }),
+      async () => ({ ok: false as const, error: 'disabled', helperFailure: true, disabled: true }),
+    ];
+    for (const jobMembers of listings) {
+      const h = windowsHarness({ censuses: [census, census], alive: new Set([81]) });
+      const terminateJob = vi.fn(async () => ({ ok: true, found: true, member: true }));
+      const result = await killSessionTree(80, { census: h.census, taskkill: h.taskkill, kill: h.kill, jobName: 'J', terminateJob, jobMembers });
+      expect(terminateJob).not.toHaveBeenCalled();
+      // census (snapshot) -> taskkill -> census (kill pass): no re-check census between.
+      expect(h.events).toEqual(['census', 'taskkill 80', 'census', 'kill 81']);
+      expect(result.jobError).toBeUndefined();
+    }
   });
 
   it('ignores the job name on POSIX', async () => {
