@@ -1,7 +1,7 @@
 id: '1938'
 title: decisions-tab-show-images-from
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-20T22:31:59.155Z'
-updated_at: '2026-11-23T22:19:49.150Z'
+updated_at: '2026-11-23T22:19:52.185Z'
 pr_ready_for_human: false
 pr_history:
   - phase: pr
