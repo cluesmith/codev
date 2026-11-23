@@ -243,3 +243,39 @@ workspace called `arch`. Gate still pending; the owner has not approved.
 - Next gate is `pr`, the owner's. Stop there.
 - First act of phase 1, per the plan: write the send-latency measurement and record the baseline
   median, with its commit, before the parser is written.
+
+## 2026-11-23 — phase 1: latency baseline taken BEFORE any production change
+
+- `packages/codev/src/agent-farm/__tests__/send-latency.e2e.test.ts` written first, as planned.
+  Opt-in (`CODEV_SEND_LATENCY=1`), real Tower in an isolated dir, 15 warm-up + 100 timed
+  same-workspace sends through `POST /api/send` to an inert builder terminal (held `no-profile`),
+  each held row dismissed outside the timed region.
+- **Baseline, on `732ad0118`** (production code untouched; only the test file and the fixture
+  JSON existed), five runs, machine busy (load average 14.6):
+  medians 4.573, 2.152, 2.121, 2.217, 2.191 ms. **Baseline = 2.19 ms** (median of the five).
+  The first run was the outlier (max sample 151 ms). Bound for phase 6: max(5%, +1 ms) → 3.19 ms.
+- Note for phase 6: one run is not enough on this machine; take five and compare medians of
+  medians.
+- Gotchas met: the worktree had no `node_modules` and no `dist` (ran `pnpm install` and the
+  build); a workspace under the temp dir is left out of `GET /api/workspaces`, so the test waits
+  on a probe send instead of the listing; vitest only shows the test's stdout line with
+  `--reporter=verbose` when piped.
+
+## 2026-11-23 — phase 1 built: shared address contract and parser
+
+- `AgentAddress`, `AddressReader` and the parse-error types in `codev-types`; `parseAddress`,
+  `formatAddress`, `completeAddress` in `packages/sdk/src/address.ts` (new `./address` export).
+  Nothing in production calls them yet, so behaviour is unchanged.
+- One table, `packages/types/fixtures/address-cases.json` (90 parse rows, 18 format rows), run by
+  the SDK, by `packages/codev` and by `apps/vscode`, each through its own import.
+- Choices made while writing it:
+  - The first `architect` component is the kind word, so `architect:architect` is the architect
+    named `architect`, as today, and never a workspace.
+  - `formatAddress` reads its own output back before returning it and throws if it does not give
+    the same address. So it cannot print text that reaches someone else (a local workspace called
+    `architect`, an id `arch`, a name with a colon). Phase 4 checks a name before formatting; the
+    throw is the backstop.
+  - `:agent` and `a:b:c` are now parse errors (they resolved to NOT_FOUND before). They surface to
+    users in phase 2, when the resolvers switch over.
+- Checks: build passes; unit suite 8358 passed, 108 skipped; SDK 354 passed; VS Code unit 1388
+  passed, check-types and lint clean.
