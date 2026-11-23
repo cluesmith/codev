@@ -10,8 +10,11 @@ import { getConfig } from '../utils/config.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { getTypeColor } from '../utils/display.js';
 import { currentArchitectName } from '../utils/architect-name.js';
+import { discoverBuilders, type StoredBuilderIdentity } from '../servers/overview.js';
+import { gatherBuilderActivity, type BuilderActivity } from '../lib/builder-activity.js';
 import type { Builder } from '../types.js';
-import type { OverviewData } from '@cluesmith/codev-types';
+import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';
+import { formatAge } from '@cluesmith/codev-sdk/builder-helpers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../../lib/config.js';
@@ -24,11 +27,14 @@ import chalk from 'chalk';
  * - `architect`: only show builders spawned by this architect.
  * - `mine`:      only show builders spawned by the *current* architect, resolved
  *                from `CODEV_ARCHITECT_NAME` (see `currentArchitectName`).
+ * - `activity`:  also gather each builder's session transcript and running test
+ *                or review processes (#1893) — slower, so opt-in.
  */
 export interface StatusOptions {
   json?: boolean;
   architect?: string;
   mine?: boolean;
+  activity?: boolean;
 }
 
 /** Placeholder shown for builders whose spawning architect is unknown (legacy rows). */
@@ -71,22 +77,102 @@ function isBuilderRunning(builder: Builder): boolean {
   return !!builder.terminalId;
 }
 
+/** A builder's live porch state, read from its own worktree's status.yaml (#1893). */
+interface PorchState {
+  /** Protocol phase (`implement`, `review`, `complete`, …); null when the worktree has no porch project. */
+  phase: string | null;
+  /** The human gate the builder is waiting at, and since when. */
+  gate: { name: string; since: string | null } | null;
+}
+
 /**
- * Build a `builderId → heldCount` map from the overview payload (Spec 1313 round 3).
- * Keyed by the overview builder's `roleId` (lowercased), which equals the state.db builder
- * `id` whenever any mail attached (the mailbox addresses agents by that canonical id), so
- * `renderBuilders` can look it up by `builder.id`. Reuses the overview's per-builder count —
- * no re-derivation. Only non-zero counts are stored; a miss renders as 0.
+ * What `afx status` shows for a builder beyond its state.db row (#1893). The
+ * state.db `status` / `phase` are written once at spawn ('implementing' /
+ * 'init') and never updated, so they cannot say whether a builder is working,
+ * waiting on a human, or done.
  */
-function heldMapFromOverview(overview: OverviewData | null): Map<string, number> {
-  const map = new Map<string, number>();
-  if (!overview) return map;
-  for (const b of overview.builders) {
-    if (b.roleId && typeof b.heldCount === 'number' && b.heldCount > 0) {
-      map.set(b.roleId.toLowerCase(), b.heldCount);
-    }
+interface BuilderLiveView {
+  porch: PorchState;
+  /**
+   * The builder's terminal, from Tower: whether it has a live session (null when Tower
+   * could not be asked) and the ISO time of its last output (null when unknown).
+   */
+  terminal: { live: boolean | null; lastDataAt: string | null };
+  /** Held mail addressed to the builder (Spec 1313); 0 when unknown. */
+  heldCount: number;
+  /** Session and process activity; null unless `--activity`. */
+  activity: BuilderActivity | null;
+}
+
+/**
+ * Read each builder's porch state from its own worktree. The workspace root's
+ * copies of status.yaml go stale (#1229, #1703), so the worktree is the only
+ * live source. Reuses the overview's discovery, so `afx status` reads the same
+ * file the same way the dashboard does, with or without Tower.
+ */
+function readPorchStates(workspacePath: string, builders: Builder[]): Map<string, PorchState> {
+  const stored = new Map<string, StoredBuilderIdentity>(builders.map((b) => [b.worktree, {
+    roleId: b.id,
+    issueNumber: b.issueNumber != null ? String(b.issueNumber) : null,
+    spawnedByArchitect: b.spawnedByArchitect ?? null,
+  }]));
+  const byWorktree = new Map<string, PorchState>();
+  for (const found of discoverBuilders(workspacePath, stored)) {
+    byWorktree.set(found.worktreePath, {
+      phase: found.protocolPhase || null,
+      gate: found.blockedGate ? { name: found.blockedGate, since: found.blockedSince } : null,
+    });
   }
-  return map;
+  return byWorktree;
+}
+
+/**
+ * Assemble each builder's live view, keyed by builder id. Terminal activity and
+ * held counts reuse the overview payload, matched by its `roleId` (lowercased),
+ * which equals the state.db builder `id` — the key Tower's terminal registry and
+ * the mailbox both use. A null overview means Tower could not be asked.
+ */
+function buildLiveViews(
+  workspacePath: string,
+  builders: Builder[],
+  overview: OverviewData | null,
+  activity: Map<string, BuilderActivity> | null,
+): Map<string, BuilderLiveView> {
+  const porch = readPorchStates(workspacePath, builders);
+  const fromTower = new Map<string, OverviewBuilder>();
+  for (const b of overview?.builders ?? []) {
+    if (b.roleId) fromTower.set(b.roleId.toLowerCase(), b);
+  }
+  const views = new Map<string, BuilderLiveView>();
+  for (const builder of builders) {
+    const live = fromTower.get(builder.id.toLowerCase());
+    views.set(builder.id, {
+      porch: porch.get(builder.worktree) ?? { phase: null, gate: null },
+      terminal: { live: overview ? live !== undefined : null, lastDataAt: live?.lastDataAt ?? null },
+      heldCount: live?.heldCount ?? 0,
+      activity: activity?.get(builder.id) ?? null,
+    });
+  }
+  return views;
+}
+
+/** `"6m ago"` / `"just now"` for an ISO time; `"unknown"` when it cannot be read. */
+function ago(iso: string | null): string {
+  const age = formatAge(iso);
+  if (age === null) return 'unknown';
+  return age === 'just now' ? age : `${age} ago`;
+}
+
+function lastActivityCell(terminal: BuilderLiveView['terminal']): string {
+  if (terminal.live === false) return chalk.gray('stopped');
+  if (terminal.lastDataAt === null) return chalk.gray('unknown');
+  return ago(terminal.lastDataAt);
+}
+
+function gateCell(gate: PorchState['gate']): string {
+  if (!gate) return chalk.gray('—');
+  const age = formatAge(gate.since);
+  return chalk.yellow(age ? `${gate.name} (${age})` : gate.name);
 }
 
 /**
@@ -113,17 +199,18 @@ function renderMailboxSummary(heldCount: number, escalated: boolean): void {
  * (the canonical home of `spawnedByArchitect`), so it works identically whether
  * or not Tower is running. The Owner column is second; ID stays first.
  *
- * Spec 1313 round 3: when `heldByRoleId` is provided (Tower up, overview fetched), a trailing
- * `Held` column shows each builder's held-mail count so a starving builder is visible at a
- * glance; omitted entirely when Tower is down (no overview to reuse).
+ * #1893: Phase and Gate come from the builder's live worktree status.yaml, Last active from
+ * Tower's terminal sessions; the state.db Status/Phase pair (frozen at spawn) is not shown.
+ *
+ * Spec 1313 round 3: when `showHeld` (the workspace has held mail), a trailing `Held` column
+ * shows each builder's held-mail count so a starving builder is visible at a glance.
  */
 function renderBuilders(
-  builders: Builder[],
+  visible: Builder[],
   ownerFilter: string | undefined,
-  heldByRoleId?: Map<string, number>,
+  views: Map<string, BuilderLiveView>,
+  showHeld: boolean,
 ): void {
-  const visible = sortByOwner(filterByOwner(builders, ownerFilter));
-
   if (visible.length === 0) {
     if (ownerFilter) {
       logger.info(`Builders: none owned by ${chalk.cyan(ownerFilter)}`);
@@ -134,17 +221,15 @@ function renderBuilders(
   }
 
   logger.info('Builders:');
-  const showHeld = heldByRoleId !== undefined;
-  const widths = showHeld ? [20, 14, 8, 12, 10, 6] : [20, 14, 8, 12, 10];
-  const header = ['ID', 'Owner', 'Type', 'Status', 'Phase'];
-  const rule = ['──', '─────', '────', '──────', '─────'];
+  const widths = showHeld ? [20, 14, 8, 12, 20, 12, 6] : [20, 14, 8, 12, 20, 12];
+  const header = ['ID', 'Owner', 'Type', 'Phase', 'Gate', 'Last active'];
+  const rule = ['──', '─────', '────', '─────', '────', '───────────'];
   if (showHeld) { header.push('Held'); rule.push('────'); }
   logger.row(header, widths);
   logger.row(rule, widths);
 
   for (const builder of visible) {
-    const running = isBuilderRunning(builder);
-    const statusColor = getStatusColor(builder.status, running);
+    const view = views.get(builder.id)!;
     const typeColor = getTypeColor(builder.type || 'spec');
     const owner = builder.spawnedByArchitect;
     const ownerCell = owner ? chalk.cyan(owner) : chalk.gray(UNKNOWN_OWNER);
@@ -153,14 +238,47 @@ function renderBuilders(
       builder.id,
       ownerCell,
       typeColor(builder.type || 'spec'),
-      statusColor(builder.status),
-      builder.phase.substring(0, 8),
+      view.porch.phase ?? chalk.gray('—'),
+      gateCell(view.porch.gate),
+      lastActivityCell(view.terminal),
     ];
     if (showHeld) {
-      const n = heldByRoleId!.get(builder.id.toLowerCase()) ?? 0;
+      const n = view.heldCount;
       cells.push(n > 0 ? chalk.yellow(String(n)) : chalk.gray('0'));
     }
     logger.row(cells, widths);
+  }
+}
+
+/**
+ * The `--activity` section (#1893): per builder, when its session transcript was
+ * last written, whether its last reply was an API error, its last few transcript
+ * lines, and the test or review processes running under its terminal. A field
+ * that could not be read says "unknown".
+ */
+function renderActivity(visible: Builder[], views: Map<string, BuilderLiveView>): void {
+  if (visible.length === 0) return;
+  logger.info('Activity:');
+  for (const builder of visible) {
+    const activity = views.get(builder.id)!.activity;
+    if (!activity) continue;
+    let apiError = 'unknown';
+    if (activity.apiError !== null) apiError = activity.apiError ? chalk.red('yes') : 'no';
+    logger.info(`  ${chalk.cyan(builder.id)}  session write: ${ago(activity.sessionWrittenAt)}  ·  API error: ${apiError}`);
+    if (activity.lastTurns === null) {
+      logger.info(`    turns: ${chalk.gray('unknown')}`);
+    } else if (activity.lastTurns.length === 0) {
+      logger.info(`    turns: ${chalk.gray('none')}`);
+    } else {
+      for (const turn of activity.lastTurns) logger.info(`    ${chalk.gray('>')} ${turn}`);
+    }
+    if (activity.processes === null) {
+      logger.info(`    running: ${chalk.gray('unknown')}`);
+    } else if (activity.processes.length === 0) {
+      logger.info(`    running: ${chalk.gray('none')}`);
+    } else {
+      for (const p of activity.processes) logger.info(`    running: ${p.kind} ${p.command} (pid ${p.pid})`);
+    }
   }
 }
 
@@ -176,18 +294,17 @@ function emitStatusJson(params: {
   // for tooling — `JSON.stringify` would otherwise drop an `undefined` key.
   workspace: { path: string; name: string | null; active: boolean };
   architects: Array<{ name: string }>;
-  builders: Builder[];
   ownerFilter: string | undefined;
   // Issue #1227: null (not omitted) when Tower is down or the running Tower
   // predates these fields — same nullable-not-optional contract as `workspace.name`.
   fleet: { rssKb: number | null; unregisteredShellperCount: number | null };
-  // Spec 1313 round 3: workspace held-mail summary + per-builder counts (reused from the
-  // overview payload). Defaults (0 / false / empty map) when Tower is down.
+  // Spec 1313 round 3: workspace held-mail summary (reused from the overview payload).
+  // Defaults (0 / false) when Tower is down.
   mailbox: { heldCount: number; escalated: boolean };
-  heldByRoleId: Map<string, number>;
+  visible: Builder[];
+  views: Map<string, BuilderLiveView>;
 }): void {
-  const { towerRunning, workspace, architects, builders, ownerFilter, fleet, mailbox, heldByRoleId } = params;
-  const visible = sortByOwner(filterByOwner(builders, ownerFilter));
+  const { towerRunning, workspace, architects, visible, views, ownerFilter, fleet, mailbox } = params;
 
   const payload = {
     tower: { running: towerRunning },
@@ -208,11 +325,25 @@ function emitStatusJson(params: {
       branch: b.branch,
       issueNumber: b.issueNumber ?? null,
       protocolName: b.protocolName ?? null,
-      heldCount: heldByRoleId.get(b.id.toLowerCase()) ?? 0,
+      heldCount: views.get(b.id)!.heldCount,
+      // #1893: live fields. `status` / `phase` above are kept for existing scripts, but
+      // they are the spawn-time state.db values; these are what the builder is doing now.
+      ...liveJson(views.get(b.id)!),
     })),
   };
 
   console.log(JSON.stringify(payload, null, 2));
+}
+
+/** A builder's #1893 live fields for `--json`. `null` means unknown; `activity` is null without `--activity`. */
+function liveJson(view: BuilderLiveView) {
+  return {
+    porchPhase: view.porch.phase,
+    gate: view.porch.gate,
+    lastActivityAt: view.terminal.lastDataAt,
+    terminalLive: view.terminal.live,
+    activity: view.activity,
+  };
 }
 
 /**
@@ -239,11 +370,16 @@ export async function status(options: StatusOptions = {}): Promise<void> {
   // (overview.ts) — reuse it rather than re-deriving from global.db. Only available when
   // Tower is up; a null overview degrades to "no held info" (0 / false / empty map).
   const overview = towerRunning ? await client.getOverview(workspacePath) : null;
-  const heldByRoleId = heldMapFromOverview(overview);
   const mailboxSummary = {
     heldCount: overview?.heldCount ?? 0,
     escalated: overview?.mailboxEscalated ?? false,
   };
+
+  // #1893: each visible builder's live phase, gate, last activity and held count, plus its
+  // session/process activity when asked for (the costly part, so only behind --activity).
+  const visible = sortByOwner(filterByOwner(builders, ownerFilter));
+  const activity = options.activity ? await gatherBuilderActivity(workspacePath, visible) : null;
+  const views = buildLiveViews(workspacePath, visible, overview, activity);
 
   // Machine-readable mode (Spec 1057): gather workspace metadata when Tower is
   // up, then emit JSON and return before any human-facing output.
@@ -272,11 +408,11 @@ export async function status(options: StatusOptions = {}): Promise<void> {
       towerRunning,
       workspace: { path: workspacePath, name: workspaceName ?? null, active: workspaceActive },
       architects,
-      builders,
+      visible,
+      views,
       ownerFilter,
       fleet,
       mailbox: mailboxSummary,
-      heldByRoleId,
     });
     return;
   }
@@ -363,7 +499,11 @@ export async function status(options: StatusOptions = {}): Promise<void> {
       // `afx status` is noise; it appears precisely when there is starvation to see.
       // The workspace summary + remedy hint always print (they say "none" at zero).
       logger.blank();
-      renderBuilders(builders, ownerFilter, mailboxSummary.heldCount > 0 ? heldByRoleId : undefined);
+      renderBuilders(visible, ownerFilter, views, mailboxSummary.heldCount > 0);
+      if (options.activity) {
+        logger.blank();
+        renderActivity(visible, views);
+      }
       logger.blank();
       renderMailboxSummary(mailboxSummary.heldCount, mailboxSummary.escalated);
 
@@ -404,7 +544,11 @@ export async function status(options: StatusOptions = {}): Promise<void> {
   logger.blank();
 
   // Spec 1057: owner-aware Builders table (same renderer as the Tower-up path).
-  renderBuilders(builders, ownerFilter);
+  renderBuilders(visible, ownerFilter, views, false);
+  if (options.activity) {
+    logger.blank();
+    renderActivity(visible, views);
+  }
 
   logger.blank();
 
@@ -480,27 +624,3 @@ function showArtifactConfig(workspacePath: string): void {
     logger.kv('Artifacts', `${artifacts.backend} (codev/specs/, codev/plans/)`);
   }
 }
-
-function getStatusColor(status: string, running: boolean): (text: string) => string {
-  if (!running) {
-    return chalk.gray;
-  }
-
-  switch (status) {
-    case 'implementing':
-      return chalk.blue;
-    case 'blocked':
-      return chalk.yellow;
-    case 'pr':
-      return chalk.green;
-    case 'verify':
-      return chalk.green;
-    case 'verified':
-      return chalk.green;
-    case 'complete': // backward compat
-      return chalk.green;
-    default:
-      return chalk.white;
-  }
-}
-
