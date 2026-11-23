@@ -151,6 +151,15 @@ export interface CodevConfig {
      */
     escalationSeconds?: number;
   };
+  cleanup?: {
+    /**
+     * #1950 `afx cleanup --keep-ignored`: globs (git pathspec glob syntax, worktree-relative) of
+     * IGNORED files to copy out before a worktree is removed. Replaces the default list
+     * (`codev/projects/**`, `codev/state/**`, `.builder-*`, `tmp/**`, `scratch/**`). Untracked
+     * files that are not ignored are always kept; dependency and build output never is.
+     */
+    keepIgnored?: string[];
+  };
   dashboard?: {
     frontend?: 'react' | 'legacy';
     /**

@@ -27,6 +27,9 @@ import { SHELLPER_MARKER } from '../../terminal/shellper-cmdline.js';
 import { readJsonStringField } from '../../terminal/shellper-config-field.js';
 import { sameWindowsPath } from '../../lib/platform/windows/host-paths.js';
 import { unquoteWindowsCommandLine } from '../../lib/platform/windows/command-line.js';
+import { loadConfig } from '../../lib/config.js';
+import { AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { keepFiles, keepPatterns, keptDirFor, listKeepCandidates } from '../lib/keep-files.js';
 
 /**
  * Clean porch review artifacts for a project from codev/projects/,
@@ -177,6 +180,8 @@ export interface CleanupOptions {
   issue?: number | string;
   task?: string;
   force?: boolean;
+  /** #1950: copy untracked and kept ignored files out before the worktree is removed. */
+  keepIgnored?: boolean;
 }
 
 /**
@@ -324,7 +329,7 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
       // Try to find by name pattern
       const byName = state.builders.find((b) => b.name.includes(projectId));
       if (byName) {
-        return cleanupBuilder(byName, options.force, options.issue);
+        return cleanupBuilder(byName, options.force, options.issue, options.keepIgnored);
       }
       fatal(`Builder not found for project: ${projectId}`);
     }
@@ -332,10 +337,15 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
     fatal('Must specify either --project, --issue, or --task');
   }
 
-  await cleanupBuilder(builder, options.force, options.issue);
+  await cleanupBuilder(builder, options.force, options.issue, options.keepIgnored);
 }
 
-async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: number | string): Promise<void> {
+async function cleanupBuilder(
+  builder: Builder,
+  force?: boolean,
+  issueNumber?: number | string,
+  keepIgnored?: boolean,
+): Promise<void> {
   const config = getConfig();
   const isShellMode = builder.type === 'shell';
   const isBugfixMode = builder.type === 'bugfix';
@@ -349,6 +359,27 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
   if (!isShellMode) {
     logger.kv('Worktree', builder.worktree);
     logger.kv('Branch', builder.branch);
+  }
+
+  // #1950 --keep-ignored: settle the kept folder and keep list before anything is touched, so a
+  // refusal leaves the builder exactly as it was. The copy itself runs just before removal.
+  let keep: { dir: string; patterns: readonly string[] } | undefined;
+  if (keepIgnored) {
+    if (!isEphemeral || isShellMode || !existsSync(builder.worktree)) {
+      logger.info('--keep-ignored: this cleanup does not remove a worktree, so there is nothing to keep.');
+    } else {
+      const dir = keptDirFor(AGENT_FARM_DIR, config.workspaceRoot, builder.id);
+      if (existsSync(dir)) {
+        fatal(`--keep-ignored: kept folder already exists: ${dir}. Move or delete it, then re-run. Nothing was removed.`);
+      }
+      let patterns: readonly string[];
+      try {
+        patterns = keepPatterns(loadConfig(config.workspaceRoot).cleanup?.keepIgnored);
+      } catch (error) {
+        fatal(`--keep-ignored: ${(error as Error).message}. Nothing was removed.`);
+      }
+      keep = { dir, patterns };
+    }
   }
 
   // Check for uncommitted changes (informational - worktree is preserved)
@@ -398,6 +429,24 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
 
   // For ephemeral builders (bugfix, task): actually remove worktree and delete branches
   if (isEphemeral && !isShellMode) {
+    // #1950: copy out after the session is killed (the files are quiet) and before removal; a
+    // failed copy or checksum stops here with the worktree, branch and builder row intact.
+    if (keep) {
+      try {
+        const files = listKeepCandidates(builder.worktree, keep.patterns);
+        const kept = await keepFiles(builder.worktree, keep.dir, files);
+        logger.success(`Kept ${kept.copied} file(s) in ${keep.dir}`);
+        if (kept.skippedSymlinks.length > 0) {
+          logger.info(`Not kept (symlinks): ${kept.skippedSymlinks.join(', ')}`);
+        }
+      } catch (error) {
+        fatal(
+          `--keep-ignored: ${(error as Error).message}. Nothing was removed: ` +
+            `the worktree, branch and builder row are as they were.`,
+        );
+      }
+    }
+
     // Remove worktree
     if (existsSync(builder.worktree)) {
       logger.info('Removing worktree...');

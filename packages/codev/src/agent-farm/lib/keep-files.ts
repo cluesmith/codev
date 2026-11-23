@@ -1,0 +1,127 @@
+/**
+ * `afx cleanup --keep-ignored` (#1950): copy a worktree's evidence out before it is removed.
+ *
+ * Kept: every untracked file that is not ignored, and the ignored files matching the keep list
+ * (`cleanup.keepIgnored` in `.codev/config.json`). Never kept: dependency and build output,
+ * whatever the list says, and symlinks (a worktree's links point back into the workspace, and
+ * following one could copy a secret such as `.env`). Every copy is checked by SHA-256; any
+ * failure removes the partial kept folder and throws, so the caller stops before removing
+ * anything.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { createReadStream, existsSync, lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { copyFile } from 'node:fs/promises';
+import { basename, dirname, join, sep } from 'node:path';
+
+export const DEFAULT_KEEP_IGNORED: readonly string[] = [
+  'codev/projects/**',
+  'codev/state/**',
+  '.builder-*',
+  'tmp/**',
+  'scratch/**',
+];
+
+/** Path segments that mark dependency or build output. */
+const NEVER_KEEP = new Set([
+  'node_modules', 'bower_components', 'dist', 'build', 'target', '.next', '.nuxt', '.turbo',
+  '.parcel-cache', '.gradle', '.venv', 'venv', '__pycache__', '.pytest_cache', '.mypy_cache', '.tox',
+]);
+
+export function keptDirFor(agentFarmDir: string, workspaceRoot: string, builderId: string): string {
+  return join(agentFarmDir, 'kept', basename(workspaceRoot), builderId);
+}
+
+/** Validate a `cleanup.keepIgnored` value from config; undefined means the default list. */
+export function keepPatterns(configured: unknown): readonly string[] {
+  if (configured === undefined) return DEFAULT_KEEP_IGNORED;
+  if (!Array.isArray(configured) || configured.some((p) => typeof p !== 'string' || p.trim() === '')) {
+    throw new Error('cleanup.keepIgnored in .codev/config.json must be an array of non-empty glob strings');
+  }
+  return configured;
+}
+
+function gitList(worktree: string, args: string[]): string[] {
+  const out = execFileSync('git', ['-C', worktree, 'ls-files', '--others', '-z', ...args], {
+    encoding: 'utf-8',
+    maxBuffer: 256 * 1024 * 1024,
+    windowsHide: true,
+  });
+  return out.split('\0').filter(Boolean);
+}
+
+/** A directory entry (`dir/`, e.g. a nested repository) expands to the files under it. */
+function expand(worktree: string, rel: string): string[] {
+  if (!rel.endsWith('/')) return [rel];
+  const dir = join(worktree, rel);
+  return (readdirSync(dir, { recursive: true }) as string[])
+    .filter((child) => lstatSync(join(dir, child)).isFile())
+    .map((child) => rel + child.split(sep).join('/'));
+}
+
+/** Worktree-relative paths (`/`-separated) to keep, sorted; symlinks included for the caller to skip. */
+export function listKeepCandidates(worktree: string, patterns: readonly string[]): string[] {
+  const untracked = gitList(worktree, ['--exclude-standard']);
+  const ignored = patterns.length
+    ? gitList(worktree, ['--ignored', '--exclude-standard', '--', ...patterns.map((p) => `:(glob)${p}`)])
+    : [];
+  const all = [...new Set([...untracked, ...ignored])].flatMap((rel) => expand(worktree, rel));
+  return all.filter((rel) => !rel.split('/').some((segment) => NEVER_KEEP.has(segment))).sort();
+}
+
+function sha256(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    createReadStream(path)
+      .on('error', reject)
+      .on('data', (chunk) => hash.update(chunk))
+      .on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+export interface KeepResult {
+  copied: number;
+  skippedSymlinks: string[];
+}
+
+export interface KeepDeps {
+  copy(src: string, dst: string): Promise<void>;
+}
+
+/**
+ * Copy `files` from `worktree` into a NEW `keptDir`, verifying each by checksum. Refuses if
+ * `keptDir` exists. On any failure the partial `keptDir` is removed and the error rethrown.
+ */
+export async function keepFiles(
+  worktree: string,
+  keptDir: string,
+  files: readonly string[],
+  deps: KeepDeps = { copy: (src, dst) => copyFile(src, dst) },
+): Promise<KeepResult> {
+  if (existsSync(keptDir)) throw new Error(`kept folder already exists: ${keptDir}`);
+  mkdirSync(dirname(keptDir), { recursive: true });
+  mkdirSync(keptDir); // not recursive: a folder that appeared since the check fails here, atomically
+  const result: KeepResult = { copied: 0, skippedSymlinks: [] };
+  try {
+    for (const rel of files) {
+      const src = join(worktree, rel);
+      if (lstatSync(src).isSymbolicLink()) {
+        result.skippedSymlinks.push(rel);
+        continue;
+      }
+      const dst = join(keptDir, rel);
+      mkdirSync(dirname(dst), { recursive: true });
+      await deps.copy(src, dst);
+      const [expected, actual] = await Promise.all([sha256(src), sha256(dst)]);
+      if (expected !== actual) {
+        throw new Error(`checksum mismatch after copying ${rel} (source ${expected.slice(0, 12)}, copy ${actual.slice(0, 12)})`);
+      }
+      result.copied++;
+    }
+  } catch (err) {
+    rmSync(keptDir, { recursive: true, force: true });
+    throw err;
+  }
+  return result;
+}

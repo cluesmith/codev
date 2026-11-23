@@ -320,7 +320,9 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--resume', 'Resume builder in existing worktree (skip worktree creation)')
     .option('--branch <name>', 'Use existing remote branch instead of creating a new one')
     .option('--remote <name>', 'Specify which remote to fetch the branch from (for fork PRs)')
-    .option('--no-role', 'Skip loading role prompt');
+    .option('--no-role', 'Skip loading role prompt')
+    .option('--max-load <n>', 'Refuse (exit 75) while the one-minute load average is at or above N; creates nothing')
+    .option('--wait <seconds>', 'With --max-load: re-check every 15s for up to this long before refusing');
 
   // Catch removed flags with helpful migration messages
   spawnCmd.hook('preAction', (_thisCmd, actionCmd) => {
@@ -341,6 +343,15 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   spawnCmd.action(async (numberArg: string | undefined, options: Record<string, unknown>) => {
       const { spawn } = await import('./commands/spawn.js');
       try {
+        // #1950: before anything is created — no branch, no worktree, no registry row.
+        if (options.maxLoad !== undefined || options.wait !== undefined) {
+          const { checkLoad } = await import('./utils/load-gate.js');
+          const verdict = await checkLoad(options.maxLoad as string | undefined, options.wait as string | undefined);
+          if (!verdict.ok) {
+            logger.error(verdict.message);
+            process.exit(verdict.exitCode);
+          }
+        }
         const files = options.files ? (options.files as string).split(',').map((f: string) => f.trim()) : undefined;
         let issueNumber: number | string | undefined;
         if (numberArg) {
@@ -427,6 +438,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('-i, --issue <id>', 'Cleanup bugfix builder for an issue (number or tracker key)')
     .option('-t, --task <id>', 'Cleanup task builder (e.g., task-bEPd)')
     .option('-f, --force', 'Force cleanup even if branch not merged')
+    .option('--keep-ignored', 'Before removing the worktree, copy its untracked files and kept ignored files to ~/.agent-farm/kept/<workspace>/<builder-id>/')
     .action(async (options) => {
       const { cleanup } = await import('./commands/cleanup.js');
       try {
@@ -444,7 +456,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           logger.error('--project, --issue, and --task are mutually exclusive');
           process.exit(1);
         }
-        await cleanup({ project: options.project, issue, task: options.task, force: options.force });
+        await cleanup({ project: options.project, issue, task: options.task, force: options.force, keepIgnored: options.keepIgnored });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
@@ -461,9 +473,20 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--raw', 'Skip structured message formatting')
     .option('--no-enter', 'Do not send Enter after message')
     .option('--delay <seconds>', 'Deliver after N seconds (persisted; survives a Tower restart, except a delayed --interrupt ^C nudge)')
+    .option('--message-file <path>', 'Read the message body from a file (never passes through a shell)')
+    .option('--exit-code', 'Exit by outcome: 0 delivered/scheduled, 1 failed/refused, 3 held, 4 delivered but unverified')
+    .option('--retry <n>', 'Resend up to N times in total, only when the request provably never reached Tower')
     .action(async (builder, message, options) => {
-      const { send } = await import('./commands/send.js');
+      const { send, SEND_EXIT_CODES } = await import('./commands/send.js');
       try {
+        let retry: number | undefined;
+        if (options.retry !== undefined) {
+          retry = Number(options.retry);
+          if (!Number.isInteger(retry) || retry < 0) {
+            logger.error(`--retry '${options.retry}': must be a non-negative integer`);
+            process.exit(1);
+          }
+        }
         // Spec 1307: validated here AND server-side. A bad value does not
         // degrade the send — it silently changes when (or whether) the message
         // arrives. NaN in particular yields a timer that fires immediately,
@@ -485,16 +508,21 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           }
           delay = parsed;
         }
-        await send({
+        const outcome = await send({
           builder,
           message,
           all: options.all,
           file: options.file,
+          messageFile: options.messageFile,
           interrupt: options.interrupt,
           raw: options.raw,
           noEnter: !options.enter,
           delay,
+          retry,
         });
+        // #1950: opt-in only. Without the flag a held message exits 0, as it always has —
+        // callers chain `afx send … && …`, and a held message read as a failure gets resent.
+        if (options.exitCode) process.exitCode = SEND_EXIT_CODES[outcome];
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);

@@ -94,6 +94,24 @@ describe('TowerClient REST', () => {
     expect(res.error).toBe('Tower not running');
   });
 
+  it('recognises a refusal reported the way Node fetch does: `fetch failed`, ECONNREFUSED on cause (#1950)', async () => {
+    const refused = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:4100'), { code: 'ECONNREFUSED' }),
+    });
+    const impl = vi.fn(async () => { throw refused; }) as unknown as typeof fetch;
+    const res = await new TowerClient(opts(impl)).sendMessage('architect', 'hi');
+    expect(res).toEqual({ ok: false, error: 'Tower not running', connectionRefused: true });
+  });
+
+  it('does not mark a timeout as refused: that request may have reached Tower (#1950)', async () => {
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    const impl = vi.fn(async () => { throw timeout; }) as unknown as typeof fetch;
+    const res = await new TowerClient(opts(impl)).sendMessage('architect', 'hi');
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('Request timeout');
+    expect(res.connectionRefused).toBeUndefined();
+  });
+
   it('treats a non-2xx response as a failed result', async () => {
     const { impl } = jsonFetch(500, {});
     expect(await new TowerClient(opts(impl)).getOverview()).toBeNull();

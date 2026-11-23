@@ -28,6 +28,16 @@ porch init <protocol> <id> <name>   Initialize a new project
 
 Project ID auto-detects from the worktree path when inside a builder worktree. `porch run` was removed — use `porch next`.
 
+**`porch -C <dir> <command>`** runs as if porch had been started in `<dir>`, like `git -C`: before the
+command, repeatable, and it prints the directory it resolved on stderr. Use it instead of `cd`-ing into
+a builder worktree — a `cd` that persists later nests builders when `afx spawn` runs from there:
+
+```bash
+porch -C .builders/spir-42-feature status
+```
+
+`-C` grants nothing: `approve` and `skip-phase` still require `--a-human-explicitly-approved-this`.
+
 ## The strict-mode loop
 
 Run `porch next`, do the tasks it returns, run `porch done` when the phase work is complete, then `porch next` again. After `porch done` on a reviewed phase, `porch next` hands you the `consult` commands to run (three reviewers by default; `.codev/config.json` `porch.consultation` can change the lanes). Run exactly those, each as a background task. Porch commits only `status.yaml` — commit your own work.

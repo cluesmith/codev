@@ -238,19 +238,94 @@ export function architectSenderId(): string {
 }
 
 /**
- * Read file content for --file flag, with size validation.
+ * Read file content for --file (and, #1950, --message-file), with size validation.
  */
-function readFileContent(filePath: string): string {
+function readFileContent(filePath: string, label = 'File'): string {
   if (!existsSync(filePath)) {
-    throw new Error(`File not found: ${filePath}`);
+    throw new Error(`${label} not found: ${filePath}`);
   }
   const fileBuffer = readFileSync(filePath);
   if (fileBuffer.length > MAX_FILE_SIZE) {
     throw new Error(
-      `File too large: ${fileBuffer.length} bytes (max ${MAX_FILE_SIZE} bytes / 48KB)`
+      `${label} too large: ${fileBuffer.length} bytes (max ${MAX_FILE_SIZE} bytes / 48KB)`
     );
   }
   return fileBuffer.toString('utf-8');
+}
+
+/**
+ * #1950: what one send came to, for `--exit-code`. `unverified` is a delivery Tower could
+ * not confirm arrived clean — the header was never seen, input raced the write, or the write
+ * was not serialized. It is recorded as delivered and is never re-sent, so it gets its own code.
+ */
+export type SendOutcome = 'delivered' | 'scheduled' | 'held' | 'unverified' | 'failed';
+
+/** Exit code per outcome under `--exit-code`. Without the flag, exits are unchanged. */
+export const SEND_EXIT_CODES: Readonly<Record<SendOutcome, number>> = {
+  delivered: 0,
+  scheduled: 0,
+  failed: 1,
+  held: 3,
+  unverified: 4,
+};
+
+/** Least to most severe; `--all` reports the most severe outcome across recipients. */
+const SEVERITY: readonly SendOutcome[] = ['delivered', 'scheduled', 'held', 'unverified', 'failed'];
+
+export function worstOutcome(a: SendOutcome, b: SendOutcome): SendOutcome {
+  return SEVERITY.indexOf(a) >= SEVERITY.indexOf(b) ? a : b;
+}
+
+type SendResult = Awaited<ReturnType<TowerClient['sendMessage']>>;
+
+function classify(result: SendResult): SendOutcome {
+  if (!result.ok) return 'failed';
+  if (result.scheduled) return 'scheduled';
+  if (result.held) return 'held';
+  if (result.unverifiedCause || result.verified === false || result.degraded) return 'unverified';
+  return 'delivered';
+}
+
+/** Backoff before retry `n` (1-based): 1s, 2s, 4s, then 8s. */
+export function retryDelayMs(n: number): number {
+  return Math.min(1000 * 2 ** (n - 1), 8000);
+}
+
+/**
+ * #1950 `--retry`: one budget of retries for the whole invocation. A retry is spent only on a
+ * request that provably never reached Tower; each one is announced on stderr before the wait.
+ */
+function retryBudget(retries: number): (what: string) => Promise<boolean> {
+  let used = 0;
+  return async (what) => {
+    if (used >= retries) return false;
+    used++;
+    const ms = retryDelayMs(used);
+    console.error(`[retry] ${what} Retry ${used}/${retries} in ${ms / 1000}s.`);
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return true;
+  };
+}
+
+type SendMessageOptions = Parameters<TowerClient['sendMessage']>[2];
+
+/**
+ * Send once, resending only after a refused connection: the request never reached Tower, so
+ * nothing can be duplicated. A held, refused or timed-out request is returned as it came —
+ * the mailbox may already hold it.
+ */
+async function sendWithRetry(
+  client: TowerClient,
+  to: string,
+  message: string,
+  opts: SendMessageOptions,
+  retry: (what: string) => Promise<boolean>,
+): Promise<SendResult> {
+  for (;;) {
+    const result = await client.sendMessage(to, message, opts);
+    if (result.ok || !result.connectionRefused) return result;
+    if (!(await retry(`Tower refused the connection; the message to ${to} was not sent.`))) return result;
+  }
 }
 
 /**
@@ -268,6 +343,8 @@ async function readStdin(): Promise<string> {
  * Send a message to all builders via Tower API.
  */
 interface SendToAllResults {
+  /** #1950: the most severe outcome across recipients, for `--exit-code`. */
+  worst: SendOutcome;
   delivered: string[];
   held: Array<{ id: string; reason?: string; detail?: string; mailboxId?: string }>;
   /** Spec 1307 `--delay`: accepted for later delivery, not sent now. */
@@ -281,6 +358,7 @@ async function sendToAll(
   workspace: string | undefined,
   from: string,
   options: SendOptions,
+  retry: (what: string) => Promise<boolean>,
 ): Promise<SendToAllResults> {
   // Bugfix #826: loadState is workspace-scoped (for the architect read).
   // Builders are global per state.db; use the detected workspace root as
@@ -290,7 +368,7 @@ async function sendToAll(
   // Spec 1307 `--delay` + Spec 1313 mailbox: scheduled (delayed) and held
   // (persisted, awaiting a clean prompt) are tracked separately from delivered.
   // Reporting either as "Delivered" would claim a delivery that hasn't happened.
-  const results: SendToAllResults = { delivered: [], held: [], scheduled: [], failed: [] };
+  const results: SendToAllResults = { worst: 'delivered', delivered: [], held: [], scheduled: [], failed: [] };
 
   if (state.builders.length === 0) {
     logger.warn('No active builders found.');
@@ -299,7 +377,7 @@ async function sendToAll(
 
   for (const builder of state.builders) {
     try {
-      const result = await client.sendMessage(builder.id, message, {
+      const result = await sendWithRetry(client, builder.id, message, {
         from,
         workspace,
         fromWorkspace: workspace,
@@ -308,10 +386,11 @@ async function sendToAll(
         interrupt: options.interrupt,
         // Spec 1307: each target's delivery is scheduled independently.
         deliverAfter: options.delay,
-      });
+      }, retry);
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
       }
+      results.worst = worstOutcome(results.worst, classify(result));
       // Distinct outcomes, kept distinct (Spec 1307 `--delay` + Spec 1313 mailbox):
       // a scheduled (delayed) or held (persisted, awaiting a clean prompt) message
       // has NOT been delivered now — classifying either as "delivered" would claim a
@@ -331,6 +410,7 @@ async function sendToAll(
     } catch (error) {
       logger.error(`Failed to send to ${builder.id}: ${error instanceof Error ? error.message : String(error)}`);
       results.failed.push(builder.id);
+      results.worst = 'failed';
     }
   }
 
@@ -342,11 +422,22 @@ async function sendToAll(
  *
  * Delegates to Tower's POST /api/send for address resolution, formatting,
  * and terminal writing. Supports [project:]agent addressing.
+ *
+ * Returns the outcome (with `--all`, the most severe across recipients) for `--exit-code`.
  */
-export async function send(options: SendOptions): Promise<void> {
+export async function send(options: SendOptions): Promise<SendOutcome> {
   // Determine the message
   let message = options.message;
   let target = options.builder;
+
+  // #1950 --message-file: the body comes from the file, never through a shell. With --all the
+  // first positional IS the message, so any positional there is a second message.
+  if (options.messageFile) {
+    if (message !== undefined || (options.all && target !== undefined)) {
+      fatal('Give the message on the command line or with --message-file, not both.');
+    }
+    message = readFileContent(options.messageFile, 'Message file').trimEnd();
+  }
 
   // When using --all, the first positional arg (builder) is actually the message
   if (options.all && target && !message) {
@@ -355,7 +446,7 @@ export async function send(options: SendOptions): Promise<void> {
   }
 
   // Handle stdin input (message is "-")
-  if (message === '-') {
+  if (message === '-' && !options.messageFile) {
     message = await readStdin();
   }
 
@@ -402,16 +493,19 @@ export async function send(options: SendOptions): Promise<void> {
     fatal(err instanceof Error ? err.message : String(err));
   }
 
-  // Ensure Tower is running
+  // Ensure Tower is running. The health probe sends nothing, so under --retry every failure of
+  // it may be retried.
   const client = new TowerClient();
-  const towerRunning = await client.isRunning();
-  if (!towerRunning) {
-    fatal('Tower is not running. Start it with: afx tower start');
+  const retry = retryBudget(options.retry ?? 0);
+  while (!(await client.isRunning())) {
+    if (!(await retry('Tower is not running; nothing has been sent.'))) {
+      fatal('Tower is not running. Start it with: afx tower start');
+    }
   }
 
   if (options.all) {
     // Broadcast to all builders
-    const results = await sendToAll(client, message, workspace, from, options);
+    const results = await sendToAll(client, message, workspace, from, options, retry);
 
     if (results.delivered.length > 0) {
       logger.success(`Delivered to ${results.delivered.length} builder(s): ${results.delivered.join(', ')}`);
@@ -434,10 +528,11 @@ export async function send(options: SendOptions): Promise<void> {
     if (results.failed.length > 0) {
       logger.error(`Failed for ${results.failed.length} builder(s): ${results.failed.join(', ')}`);
     }
+    return results.worst;
   } else {
     // Send to specific target (architect, builder, or cross-project address)
     try {
-      const result = await client.sendMessage(target!, message, {
+      const result = await sendWithRetry(client, target!, message, {
         from,
         workspace,
         fromWorkspace: workspace,
@@ -445,7 +540,7 @@ export async function send(options: SendOptions): Promise<void> {
         noEnter: options.noEnter,
         interrupt: options.interrupt,
         deliverAfter: options.delay,
-      });
+      }, retry);
 
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
@@ -520,6 +615,7 @@ export async function send(options: SendOptions): Promise<void> {
           );
         }
       }
+      return classify(result);
     } catch (error) {
       fatal(error instanceof Error ? error.message : String(error));
     }

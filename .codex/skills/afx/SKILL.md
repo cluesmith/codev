@@ -30,6 +30,8 @@ afx spawn [number] [options]
 | `--branch <name>` | Build on an existing remote branch instead of creating one. **Requires `--protocol`.** |
 | `--remote <name>` | Remote to fetch the `--branch` from (fork PRs) |
 | `--no-role` | Skip loading role prompt |
+| `--max-load <n>` | Refuse while the one-minute load average is ≥ N: exit 75, nothing created. Unsupported on native Windows (exits 1). |
+| `--wait <seconds>` | With `--max-load`: re-check every 15s for up to this long, then spawn or exit 75 |
 
 **There is NO `-t`, `--title`, or `--name` flag.** The worktree is `.builders/<protocol>-<id>` and the branch `builder/<protocol>-<id>`, unless `--branch` reuses an existing one.
 
@@ -45,6 +47,7 @@ afx spawn 42 --protocol spir --soft    # Soft mode
 afx spawn 42 --resume                  # Resume existing builder
 afx spawn --task "fix the flaky test"  # Ad-hoc task (no issue)
 afx spawn 42 --protocol spir --force   # Skip dirty-worktree check
+afx spawn 42 --protocol air --max-load 18 --wait 300   # Wait up to 5 min for load < 18
 ```
 
 **Pre-spawn checklist:**
@@ -63,19 +66,33 @@ afx send [builder] [message]
 | Flag | Description |
 |------|-------------|
 | `--all` | Send to all builders |
-| `--file <path>` | Include file content |
+| `--file <path>` | Append a file's content to the message |
+| `--message-file <path>` | Read the message body from a file — no shell quoting. Combines with `--file`; 48 KB limit on the result. |
 | `--interrupt` | Send Ctrl+C first |
 | `--raw` | Skip structured formatting |
 | `--no-enter` | Don't press Enter after message |
 | `--delay <seconds>` | Deliver after N seconds (persisted; survives a Tower restart, except a delayed `--interrupt` ^C) |
+| `--exit-code` | Exit by outcome (below). Without it, a held message exits 0 like a delivered one. |
+| `--retry <n>` | Up to N retries in total, only when the request provably never reached Tower (connection refused, Tower down). Never after held, refused or a timeout. |
 
 ```bash
 afx send spir-42 "PR approved, please merge"
 afx send 585 "check the test output" --file /tmp/test-results.txt
+afx send architect --message-file /tmp/report.md --exit-code --retry 3
 ```
 
 The reply is `delivered`, or `held` with a reason: a held message waits in Tower's mailbox and
-delivers once the recipient's prompt is clear. See `afx inbox`.
+delivers once the recipient's prompt is clear. See `afx inbox`. **Never resend a held message** —
+it is persisted and will deliver; a resend arrives twice.
+
+`--exit-code` (with `--all`, the worst across recipients):
+
+| Exit | Outcome |
+|------|---------|
+| 0 | delivered, or scheduled by `--delay` |
+| 1 | failed or refused |
+| 3 | held |
+| 4 | delivered but unverified — header not seen, input raced the write, or the write was not serialized. Recorded as delivered; not resent. |
 
 **Addressing forms** — the recipient isn't only a builder ID:
 
@@ -190,11 +207,20 @@ afx cleanup [options]
 | `-i, --issue <number>` | Cleanup bugfix builder by issue number |
 | `-t, --task <id>` | Cleanup task builder (e.g., `task-bEPd`) |
 | `-f, --force` | Force cleanup even if branch not merged |
+| `--keep-ignored` | Before the worktree is removed, copy untracked files and keep-listed ignored files to `~/.agent-farm/kept/<workspace>/<builder-id>/` |
 
 ```bash
 afx cleanup -p 585              # Clean up project 585
 afx cleanup -p 585 -f           # Force (unmerged branch)
+afx cleanup -i 42 --keep-ignored   # Keep review outputs, notes, tmp/ before removal
 ```
+
+`--keep-ignored` keeps every untracked, non-ignored file plus ignored files matching
+`cleanup.keepIgnored` in `.codev/config.json` (default `codev/projects/**`, `codev/state/**`,
+`.builder-*`, `tmp/**`, `scratch/**`). Dependency and build output (`node_modules`, `dist`,
+virtualenvs, …) and symlinks are never copied. Each copy is checksum-verified. It refuses if the
+kept folder already exists, and any failure stops cleanup before the worktree, branch or builder
+row is removed. Only bugfix and task cleanups remove a worktree; for others it keeps nothing.
 
 **Note:** `afx cleanup -p` takes the plain number (`585`), not a zero-padded one (`0585`). `afx send` takes the full builder id (`spir-585`) or the bare number.
 

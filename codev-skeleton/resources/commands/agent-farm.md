@@ -129,6 +129,8 @@ afx spawn [issue-number] --protocol <name> [options]
 - `--branch <name>` - Build on an existing remote branch instead of creating one (requires `--protocol`)
 - `--remote <name>` - Remote to fetch the `--branch` from (fork PRs)
 - `--no-role` - Skip loading role prompt
+- `--max-load <n>` - Read the one-minute load average first; at or above N, exit 75 with the load and the limit, creating nothing (no branch, worktree or registry row). Unsupported on native Windows, which reports no load average (exits 1).
+- `--wait <seconds>` - With `--max-load`: re-read every 15 seconds for up to this long, then spawn or exit 75
 
 **Preconditions:**
 
@@ -275,10 +277,18 @@ afx cleanup -p <id> [options]
 **Options:**
 - `-p, --project <id>` - Builder ID to clean up (required)
 - `-f, --force` - Force cleanup even if branch not merged
+- `--keep-ignored` - Before the worktree is removed, copy what it alone holds to `~/.agent-farm/kept/<workspace-name>/<builder-id>/`
 
 **Description:**
 
 Removes a builder's worktree and associated resources. By default, refuses to delete worktrees with uncommitted changes or unmerged branches.
+
+**`--keep-ignored`:** worktree removal is forced, so every untracked and ignored file in it goes too — review outputs, project status folders, scratch notes. With this flag, cleanup first copies out:
+
+- every untracked file that is not ignored;
+- ignored files matching the keep list — default `codev/projects/**`, `codev/state/**`, `.builder-*`, `tmp/**`, `scratch/**`, replaced by `cleanup.keepIgnored` (an array of globs) in `.codev/config.json`.
+
+Dependency and build output (`node_modules`, `dist`, `build`, `target`, virtualenvs and the like) is never copied, whatever the list says; nor are symlinks. Each copy is checked by SHA-256. If the kept folder already exists, cleanup stops naming it, before touching anything. If any copy or checksum fails, the partial kept folder is removed and cleanup stops **before** the worktree, the branch or the registry row is removed. On success it prints the kept folder and the number of files. Only bugfix and task cleanups remove a worktree; for other builders the flag keeps nothing.
 
 **Examples:**
 
@@ -288,6 +298,9 @@ afx cleanup -p 42
 
 # Force cleanup (may lose work)
 afx cleanup -p 42 --force
+
+# Keep untracked files and kept ignored files before the worktree goes
+afx cleanup -i 42 --keep-ignored
 ```
 
 ---
@@ -311,6 +324,9 @@ afx send [builder] [message] [options]
 - `--raw` - Skip structured message formatting
 - `--no-enter` - Do not send Enter after message
 - `--delay <seconds>` - Deliver after N seconds instead of immediately
+- `--message-file <path>` - Read the message body from a file. It never passes through a shell, so quotes and newlines arrive as written. Distinct from `--file`, which appends a file to the message; the two combine, and the 48 KB limit applies to the result.
+- `--exit-code` - Exit by outcome (see **Exit codes** below). Without it, exit codes are unchanged.
+- `--retry <n>` - Up to N retries in total, only when the request provably never reached Tower (connection refused, Tower not running). Backs off 1s, 2s, 4s, then 8s, and says on stderr what happened.
 
 **Delayed delivery (`--delay`):**
 
@@ -390,6 +406,17 @@ as `[Pasted Content N chars]`; the echo verification behind the `(unverified —
 placard as well as the header, so a correct long delivery is reported verified. agy keeps the older
 line-by-line shape (also chunked) because its paste handling has not been measured.
 
+**Exit codes (`--exit-code`, Issue #1950):** opt-in, in the manner of `git diff --exit-code`.
+
+| Exit | Outcome |
+|------|---------|
+| 0 | delivered, or scheduled by `--delay` |
+| 1 | failed or refused |
+| 3 | held |
+| 4 | delivered but unverified — the header was not seen on the terminal, input raced the write, or the write was not serialized. Recorded as delivered and never re-sent. |
+
+With `--all`, the exit is the worst outcome across recipients (failed, then unverified, then held). **Without the flag a held message exits 0**, exactly as before: callers chain `afx send … && …`, and a held message is persisted and will deliver — read as a failure, it gets sent again and arrives twice. For the same reason `--retry` never resends after `held`, a refusal, or a timeout on a request that was sent: the mailbox may already hold it.
+
 **Examples:**
 
 ```bash
@@ -404,6 +431,9 @@ afx send --all "Time to wrap up, create PRs"
 
 # Include file content
 afx send 42 --file src/api.ts "Review this implementation"
+
+# Message body from a file — no shell quoting; script-friendly exit codes; ride out a Tower restart
+afx send architect --message-file /tmp/report.md --exit-code --retry 3
 ```
 
 ---
