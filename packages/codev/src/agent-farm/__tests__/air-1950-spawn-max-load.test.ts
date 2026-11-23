@@ -41,7 +41,13 @@ function fake(loads: number[]): LoadGateDeps & { sleeps: number[] } {
 }
 
 describe('afx spawn --max-load (#1950)', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The gate refuses on Windows by design, so the load-path cases pin a POSIX host through the
+    // platform seam; the Windows case below forces win32 itself. Without this they fail on a real
+    // Windows runner, where the refusal is the correct answer.
+    forceHostPlatform('linux');
+  });
 
   it('passes under the limit', async () => {
     expect(await checkLoad('8', undefined, fake([3.2]))).toEqual({ ok: true });
