@@ -1060,7 +1060,10 @@ branches are testable on macOS/Linux.
   fresh census snapshot (`windows/process-census.ts`, CIM via PowerShell; other callers share a
   short-TTL cached, coalesced read), then the session's Job Object (`windows/job-objects.ts`, one
   in-memory PowerShell helper per Tower, never KILL_ON_JOB_CLOSE), then `taskkill /T /F`, then the
-  recorded survivors. `servers/architect-session-holder.ts` keeps its own `ps` listing on POSIX
+  recorded survivors. Session jobs allow no breakaway (#1915, reversing Spec 1658 Phase 3b ruling
+  (c)): the MSYS runtime breaks every native program Git Bash starts out of a job that allows it,
+  which left the agent and all its tool-call processes outside their session's job. Without it they
+  stay in, so ending the job ends the whole agent tree, as a process group does on POSIX. `servers/architect-session-holder.ts` keeps its own `ps` listing on POSIX
   rather than the census, so its entries carry a creation time, and its pre-reap PID-reuse check
   runs, on Windows only.
 - **Console windows** (#1919): Tower started by `afx tower start` is `detached` (DETACHED_PROCESS),

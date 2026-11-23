@@ -227,7 +227,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 - [From #1658] A native dependency's supported platforms are its prebuild matrix, not `engines`. better-sqlite3's install script is `prebuild-install || node-gyp rebuild`, so a Node version with no prebuild silently becomes a source build: it succeeds on a machine with a toolchain and fails on a user's machine without one. Measure the install per Node version and OS on a clean runner, and gate unsupported combinations with a message that names the supported ones.
 
-- [From #1658] On Windows, Node's `detached: true` is not `setsid`. libuv never requests job breakaway, so a "detached" child stays in its parent's Job Object and dies with that session. A process that must outlive the session that starts it (the Tower daemon) has to be created outside the job, e.g. through CIM `Win32_Process.Create`.
+- [From #1658] On Windows, Node's `detached: true` is not `setsid`. libuv never requests job breakaway, so a "detached" child stays in its parent's Job Object and dies with that session. A process that must outlive the session that starts it (the Tower daemon) has to be created outside the job, e.g. through CIM `Win32_Process.Create`. [From #1915] The opposite trap: a job that ALLOWS breakaway loses everything Git Bash starts, because the MSYS runtime asks for breakaway on every native program. Measure job membership (`QueryInformationJobObject` process list) of a real session before trusting "the job holds the session".
 
 ## Process
 

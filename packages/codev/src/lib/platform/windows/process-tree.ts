@@ -185,10 +185,11 @@ export async function killWindowsTree(rootPid: number, opts: KillSessionTreeOpti
   const taskkill = opts.taskkill ?? runTaskkill;
   const kill = opts.kill ?? defaultKill;
 
-  // The snapshot is taken BEFORE the job ends. The job allows breakaway (Phase
-  // 3b), and a child that broke away (the MSYS runtime starts native programs
-  // that way) survives the job, while its parents inside the job die with it;
-  // a snapshot taken afterwards would no longer link it to the root.
+  // The snapshot is taken BEFORE the job ends. A session job allows no
+  // breakaway (#1915), but a session created by an older Tower still has a job
+  // that does (the MSYS runtime breaks native programs out of it), and a
+  // process outside the job survives it while its parents inside die; a
+  // snapshot taken afterwards would no longer link it to the root.
   let snapshotCensus: ProcessCensusEntry[] | null = null;
   let censusError: Error | null = null;
   try {

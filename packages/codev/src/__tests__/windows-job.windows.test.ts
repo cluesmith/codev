@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { WindowsJobHelper, sessionJobName } from '../lib/platform/windows/job-objects.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
+import { resolveGitBash } from '../lib/platform/windows/git-bash.js';
 
 const onWindows = process.platform === 'win32';
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-job-'));
@@ -203,6 +204,38 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     // libuv never requests CREATE_BREAKAWAY_FROM_JOB, so a Node detached child
     // stays in the job and ends with it (no setsid parity; architect ruling).
     expect(await waitFor(() => !alive(pids.get('leaf-detached')!), 10_000)).toBe(true);
+  }, 90_000);
+
+  it('#1915: a native program started by Git Bash stays in the session job and ends with it', async () => {
+    // The MSYS runtime asks for breakaway on every native program it starts. While session
+    // jobs allowed it, this node (and so an agent and every tool call) left the job.
+    const helper = newHelper();
+    const name = jobName();
+    const pidFile = path.join(workDir, `msys-${crypto.randomUUID()}.txt`);
+    const gate = path.join(workDir, `gate-${crypto.randomUUID()}`);
+    const bash = resolveGitBash().path;
+    const node = process.execPath.replace(/\\/g, '/');
+    const script = `"${node}" "${treeScript.replace(/\\/g, '/')}" msys-leaf "${pidFile.replace(/\\/g, '/')}" & sleep 600`;
+    const root = spawn(process.execPath, ['-e', `
+      const fs = require('fs');
+      const { spawn } = require('child_process');
+      const wait = setInterval(() => {
+        if (!fs.existsSync(${JSON.stringify(gate)})) return;
+        clearInterval(wait);
+        spawn(${JSON.stringify(bash)}, ['-c', ${JSON.stringify(script)}], { stdio: 'ignore', windowsHide: true });
+      }, 50);
+      setInterval(() => {}, 1000);
+    `], { stdio: 'ignore', detached: true, windowsHide: true });
+    leftovers.push(root.pid!);
+    expect(await helper.assign(name, root.pid!)).toEqual({ assigned: true });
+    fs.writeFileSync(gate, '');
+
+    expect(await waitFor(() => readPids(pidFile).has('msys-leaf'), 30_000)).toBe(true);
+    const leafPid = readPids(pidFile).get('msys-leaf')!;
+    leftovers.push(leafPid);
+
+    expect(await helper.terminate(name, root.pid!)).toEqual({ ok: true, found: true, member: true });
+    expect(await waitFor(() => !alive(root.pid!) && !alive(leafPid), 10_000)).toBe(true);
   }, 90_000);
 
   it('a CIM Win32_Process.Create launch from inside a session job escapes it', async () => {
