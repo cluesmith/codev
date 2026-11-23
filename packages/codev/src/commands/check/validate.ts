@@ -36,14 +36,15 @@ export function isFullSha(value: string): boolean {
 /**
  * A branch or ref name as git accepts it, restricted to what `codev check` ever passes:
  * no leading `-`, no whitespace or control characters, none of `~ ^ : ? * [ \`, no `..`,
- * no `@{`, no component beginning with `.`, and not ending in `/`, `.` or `.lock`.
+ * no `@{`, no component beginning with `.` or ending in `.lock`, and not ending in `/` or `.`.
  */
 export function isRefName(value: string): boolean {
   if (value === '' || value.startsWith('-') || value.startsWith('/')) return false;
   if (/[\s~^:?*[\\\u0000-\u001f\u007f]/.test(value)) return false;
   if (value.includes('..') || value.includes('@{') || value.includes('//') || value.includes('/.')) return false;
   if (value.startsWith('.') || value === '@') return false;
-  if (value.endsWith('/') || value.endsWith('.') || value.endsWith('.lock')) return false;
+  if (value.endsWith('/') || value.endsWith('.')) return false;
+  if (value.split('/').some((component) => component.endsWith('.lock'))) return false;
   return true;
 }
 

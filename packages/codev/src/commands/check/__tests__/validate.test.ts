@@ -64,7 +64,7 @@ describe('Spec 1951 — validation', () => {
     expect(isRefName(ref)).toBe(true);
   });
 
-  it.each(['', '-x', '/x', 'x/', 'x.', 'x.lock', 'a..b', 'a@{1}', 'a b', 'a~1', 'a^', 'a:b', 'a?', 'a*', 'a[', 'a\\b', '.x', 'a/.b', 'a//b', '@'])(
+  it.each(['', '-x', '/x', 'x/', 'x.', 'x.lock', 'a..b', 'a@{1}', 'a b', 'a~1', 'a^', 'a:b', 'a?', 'a*', 'a[', 'a\\b', '.x', 'a/.b', 'a//b', '@', 'foo.lock/bar', 'a/b.lock/c'])(
     'refuses ref name %j',
     (ref) => {
       expect(isRefName(ref)).toBe(false);

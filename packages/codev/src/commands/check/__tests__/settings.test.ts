@@ -97,6 +97,18 @@ describe('Spec 1951 — check settings', () => {
     expect(message).toContain(`(in ${projectFile})`);
   });
 
+  it('names what each array must hold', () => {
+    writeProject({ attribution: 'claude' });
+    expect(loadError().message).toBe(`check.attribution must be an array of regex strings (in ${projectFile})`);
+    writeProject({ skip: [3] });
+    expect(loadError().message).toBe(`check.skip must contain only non-empty check ids (got 3) (in ${projectFile})`);
+  });
+
+  it('refuses a deploy branch with a component ending in .lock', () => {
+    writeProject({ deploy: { branch: 'release.lock/x' } });
+    expect(loadError().message).toContain('check.deploy.branch "release.lock/x" is not a valid branch name');
+  });
+
   it('refuses an unknown check.skip id', () => {
     writeProject({ skip: ['size', 'colour'] });
     expect(loadError().message).toBe(`check.skip names an unknown check id "colour" (in ${projectFile})`);

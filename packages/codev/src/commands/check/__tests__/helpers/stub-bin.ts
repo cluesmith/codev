@@ -20,32 +20,62 @@ import * as path from 'node:path';
 import { REAL_GIT } from './git-fixture.js';
 
 const GIT_STUB = `#!/bin/sh
-# Stub git (Spec 1951 tests): record, check the read-only list, exec the real git.
+# Stub git (Spec 1951 tests): record, check a read-only grammar of its own, exec the real git.
 printf '%s\\n' "$*" >> "$STUB_DIR/git-calls"
-violation() { printf 'git %s :: %s\\n' "$*" "$REASON" >> "$STUB_DIR/violations"; echo "stub git refused: $REASON" >&2; exit 99; }
-sub=""; skip=0; for a in "$@"; do
-  if [ "$skip" = 1 ]; then skip=0; continue; fi
-  case "$a" in
-    -C|-c) skip=1 ;;
-    --no-optional-locks) ;;
-    -*) REASON="global option $a"; violation "$@" ;;
-    *) sub="$a"; break ;;
+ALL="$*"
+violation() { printf 'git %s :: %s\\n' "$ALL" "$1" >> "$STUB_DIR/violations"; echo "stub git refused: $1" >&2; exit 99; }
+has() { want="$1"; shift; for a in "$@"; do [ "$a" = "$want" ] && return 0; done; return 1; }
+is_sha40() { case "$1" in ''|*[!0-9a-f]*) return 1 ;; esac; [ "\${#1}" -eq 40 ]; }
+check() {
+  gcauto=0; maint=0; locks=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -C) case "$2" in /*) ;; *) violation "-C needs an absolute path" ;; esac; shift 2 ;;
+      -c) case "$2" in gc.auto=0) gcauto=1 ;; maintenance.auto=false) maint=1 ;; *) violation "-c $2" ;; esac; shift 2 ;;
+      --no-optional-locks) locks=1; shift ;;
+      -*) violation "global option $1" ;;
+      *) break ;;
+    esac
+  done
+  sub="$1"; [ $# -gt 0 ] && shift
+  for a in "$@"; do
+    case "$a" in
+      --) break ;;
+      --output*|--ext-diff|--textconv|--filters|--upload-pack*|--exec*) violation "flag $a" ;;
+    esac
+  done
+  if [ "$sub" != fetch ] && [ $((gcauto + maint)) -gt 0 ]; then violation "-c outside fetch"; fi
+  case "$sub" in
+    version|rev-parse|rev-list|merge-base|log|show|diff|diff-tree|cat-file|for-each-ref|ls-files|ls-remote) ;;
+    merge-tree) has --write-tree "$@" || violation "merge-tree without --write-tree" ;;
+    status) [ "$locks" = 1 ] || violation "status without --no-optional-locks" ;;
+    worktree) [ "$*" = "list --porcelain" ] || [ "$*" = "list --porcelain -z" ] || violation "worktree $*" ;;
+    config) { [ $# -eq 2 ] && [ "$1" = --get ]; } || violation "config other than --get <key>" ;;
+    symbolic-ref)
+      refs=0
+      for a in "$@"; do
+        case "$a" in --short|-q|--quiet) ;; -*) violation "symbolic-ref $a" ;; *) refs=$((refs + 1)) ;; esac
+      done
+      [ "$refs" -eq 1 ] || violation "symbolic-ref write form" ;;
+    fetch)
+      [ "$gcauto" = 1 ] && [ "$maint" = 1 ] || violation "fetch without the housekeeping overrides"
+      for flag in --no-write-fetch-head --refmap= --no-tags --no-recurse-submodules; do
+        has "$flag" "$@" || violation "fetch without $flag"
+      done
+      remote=""; shas=0
+      for a in "$@"; do
+        case "$a" in
+          --no-write-fetch-head|--refmap=|--no-tags|--no-recurse-submodules|--quiet) ;;
+          -*) violation "fetch $a" ;;
+          *) if [ -z "$remote" ]; then remote="$a"; elif is_sha40 "$a"; then shas=$((shas + 1)); else violation "fetch of $a, not a full SHA"; fi ;;
+        esac
+      done
+      [ "$remote" = origin ] || violation "fetch from $remote, not origin"
+      [ "$shas" -gt 0 ] || violation "fetch with no SHA" ;;
+    *) violation "subcommand $sub" ;;
   esac
-done
-case "$sub" in
-  version|rev-parse|rev-list|merge-base|log|show|diff|diff-tree|cat-file|for-each-ref|ls-files|ls-remote|merge-tree) ;;
-  worktree) case "$*" in *"worktree list --porcelain"*) ;; *) REASON="worktree other than list"; violation "$@" ;; esac ;;
-  config) case "$*" in *"config --get"*) ;; *) REASON="config without --get"; violation "$@" ;; esac ;;
-  status) case "$*" in *--no-optional-locks*) ;; *) REASON="status without --no-optional-locks"; violation "$@" ;; esac ;;
-  symbolic-ref) [ "$#" -le 6 ] || { REASON="symbolic-ref write form"; violation "$@"; } ;;
-  fetch) case "$*" in *--no-write-fetch-head*--refmap=*) ;; *) REASON="fetch that may move a ref"; violation "$@" ;; esac ;;
-  *) REASON="subcommand $sub"; violation "$@" ;;
-esac
-for a in "$@"; do
-  case "$a" in
-    --output*|--ext-diff|--textconv|--filters|--upload-pack*|--exec*) REASON="flag $a"; violation "$@" ;;
-  esac
-done
+}
+check "$@"
 exec "$REAL_GIT" "$@"
 `;
 

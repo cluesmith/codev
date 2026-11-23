@@ -46,6 +46,7 @@ export interface AttributionPattern {
 export interface CheckSettings {
   attribution: AttributionPattern[];
   watch: readonly string[];
+  /** Applies only to files `watch` matched: a flag glob outside the watch list has no effect. */
   flag: readonly string[];
   notForReading: readonly string[];
   deploy: { branch: string | null; workflow: string | null };
@@ -79,19 +80,20 @@ export function parseCheckSettings(raw: unknown, sourceOf: (keyPath: string[]) =
     if (!KNOWN_KEYS.has(key)) fail(['check', key], `is not a known key (known: ${[...KNOWN_KEYS].join(', ')})`);
   }
 
-  const globs = (key: string, fallback: readonly string[]): readonly string[] => {
+  const strings = (key: string, kind: string, fallback: readonly string[]): readonly string[] => {
     const value = section[key];
     if (value === undefined) return fallback;
-    if (!Array.isArray(value)) fail(['check', key], 'must be an array of glob strings');
+    if (!Array.isArray(value)) fail(['check', key], `must be an array of ${kind}`);
     for (const item of value as unknown[]) {
       if (typeof item !== 'string' || item.trim() === '' || hasControlChars(item)) {
-        fail(['check', key], `must contain only non-empty glob strings (got ${JSON.stringify(item)})`);
+        fail(['check', key], `must contain only non-empty ${kind} (got ${JSON.stringify(item)})`);
       }
     }
     return value as string[];
   };
+  const globs = (key: string, fallback: readonly string[]) => strings(key, 'glob strings', fallback);
 
-  const attributionSources = globs('attribution', []);
+  const attributionSources = strings('attribution', 'regex strings', []);
   const attribution = attributionSources.map((source): AttributionPattern => {
     try {
       return { source, regex: new RegExp(source, 'i') };
@@ -123,7 +125,7 @@ export function parseCheckSettings(raw: unknown, sourceOf: (keyPath: string[]) =
     }
   }
 
-  const skip = globs('skip', []);
+  const skip = strings('skip', 'check ids', []);
   for (const id of skip) {
     if (!ALL_CHECK_IDS.has(id)) fail(['check', 'skip'], `names an unknown check id ${JSON.stringify(id)}`);
   }

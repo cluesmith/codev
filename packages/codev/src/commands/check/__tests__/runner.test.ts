@@ -79,7 +79,7 @@ describe('Spec 1951 — runner: git', () => {
   it('bounds fetch by timeoutMs', async () => {
     const child = hangingChild();
     const runner = createRunner({ cwd: workspace, workspaceRoot: workspace, spawn: () => child, timeoutMs: 50 });
-    const result = await runner.git(['-c', 'gc.auto=0', '-c', 'maintenance.auto=false', 'fetch', '--no-write-fetch-head', '--refmap=', 'origin', 'a'.repeat(40)]);
+    const result = await runner.git(['-c', 'gc.auto=0', '-c', 'maintenance.auto=false', 'fetch', '--no-write-fetch-head', '--refmap=', '--no-tags', '--no-recurse-submodules', 'origin', 'a'.repeat(40)]);
     expect(result.timedOut).toBe(true);
   });
 

@@ -112,11 +112,15 @@ describe('Spec 1951 — live tips', () => {
 });
 
 describe('Spec 1951 — ensureCommits (the ref-neutral fetch)', () => {
-  it('fetches a missing commit and moves no ref, writes no FETCH_HEAD, leaves index and status alone', async () => {
+  it('fetches a missing commit and moves no ref or tag, writes no FETCH_HEAD, leaves index and status alone', async () => {
     const sha = pushFromElsewhere('feature', { 'feature.txt': 'feature\n' });
+    const other = path.join(fx.root, 'other');
+    fx.git(other, 'tag', 'v1', sha);
+    fx.git(other, 'tag', '-a', 'v1-annotated', '-m', 'annotated', sha);
+    fx.git(other, 'push', '-q', 'origin', 'v1', 'v1-annotated');
     expect(await hasCommit(runner, sha)).toBe(false);
     const before = snapshotRepoState(fx, fx.main);
-    expect(before.fetchHead).toBeNull();
+    expect(before.fetchHead).toEqual({ worktree: null, common: null });
 
     const result = await ensureCommits(runner, [sha], version);
 
@@ -152,6 +156,17 @@ describe('Spec 1951 — ensureCommits (the ref-neutral fetch)', () => {
     const old: GitVersion = { major: 2, minor: 28, patch: 0, text: 'git version 2.28.0' };
     const result = await ensureCommits(runner, [ghost], old);
     expect(result.get(ghost)).toBe('eeeeeee not available locally (git 2.28.0 cannot fetch without moving a ref; needs 2.29)');
+  });
+});
+
+describe('Spec 1951 — ensureCommits from a linked worktree', () => {
+  it('writes no FETCH_HEAD in the worktree or the common directory', async () => {
+    const worktree = fx.addWorktree('spir-1', 'builder/spir-1');
+    const sha = pushFromElsewhere('feature', { 'w.txt': 'w\n' });
+    const before = snapshotRepoState(fx, worktree);
+    const inWorktree = runnerIn(worktree);
+    expect((await ensureCommits(inWorktree, [sha], version)).get(sha)).toBeNull();
+    expect(snapshotRepoState(fx, worktree)).toEqual(before);
   });
 });
 

@@ -4,70 +4,16 @@
 
 import { describe, expect, it } from 'vitest';
 import { assertConceptAllowed, assertGitArgvAllowed, RunnerRefusal } from '../allow-list.js';
+import { allowedForms, argvOf as argv, FETCH_GLOBALS, SHA, SHA2, WRITE_FORMS } from './helpers/git-forms.js';
 
-const SHA = 'a'.repeat(40);
-const SHA2 = 'b'.repeat(40);
 const ABS = process.platform === 'win32' ? 'C:\\repo' : '/repo';
+const ALLOWED = allowedForms(ABS);
 
-interface Form {
-  globals: string[];
-  sub: string;
-  rest: string[];
-}
-
-const form = (globals: string[], sub: string, ...rest: string[]): Form => ({ globals, sub, rest });
-const argv = (f: Form): string[] => [...f.globals, f.sub, ...f.rest];
-
-/** Every form the commands use. Each must pass. */
-const ALLOWED: Form[] = [
-  form([], 'version'),
-  form([], 'rev-parse', '--show-toplevel'),
-  form([], 'rev-parse', '--verify', '--quiet', `${SHA}^{commit}`),
-  form([], 'rev-list', '--first-parent', '--max-count=10', SHA),
-  form([], 'rev-list', '--count', `${SHA}..${SHA2}`),
-  form([], 'merge-base', SHA, SHA2),
-  form([], 'merge-base', '--is-ancestor', SHA, 'refs/remotes/origin/main'),
-  form([], 'log', '--no-ext-diff', '--no-textconv', '-z', '--format=%H%x00%B', `${SHA}..${SHA2}`),
-  form([], 'show', '--no-ext-diff', '--no-textconv', '-s', '--format=%B', SHA),
-  form([], 'diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', '--no-renames', SHA, SHA2, '--', ':(top)', ':(top,exclude,glob)**/x'),
-  form([], 'diff', '--no-ext-diff', '--no-textconv', '--numstat', '-z', SHA, SHA2),
-  form([], 'diff-tree', '--no-commit-id', '--name-only', '-r', '-z', SHA),
-  form([], 'cat-file', '-e', `${SHA}^{commit}`),
-  form([], 'cat-file', '-t', SHA),
-  form([], 'for-each-ref', '--format=%(refname)', 'refs/heads/main'),
-  form(['-C', ABS], 'ls-files', '--others', '--ignored', '--exclude-standard', '-z', '--', ':(top,glob)codev/**'),
-  form([], 'ls-remote', 'origin', 'refs/heads/main'),
-  form([], 'ls-remote', '--symref', 'origin', 'HEAD'),
-  form([], 'worktree', 'list', '--porcelain'),
-  form([], 'config', '--get', 'remote.origin.url'),
-  form([], 'symbolic-ref', '--short', '-q', 'HEAD'),
-  form(['-C', ABS, '--no-optional-locks'], 'status', '--porcelain=v1', '-z', '--untracked-files=all'),
-  form([], 'merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', SHA, SHA2),
-  form(['-c', 'gc.auto=0', '-c', 'maintenance.auto=false'], 'fetch', '--no-write-fetch-head', '--refmap=', '--no-tags', '--quiet', 'origin', SHA, SHA2),
-];
-
-const FETCH_GLOBALS = ['-c', 'gc.auto=0', '-c', 'maintenance.auto=false'];
-
-/** Named refusals from the plan's acceptance table. */
+/** Refusals beyond the shared write forms: grammar edges. */
 const REFUSED: Array<[string, string[]]> = [
-  ['update-ref', ['update-ref', 'refs/heads/x', SHA]],
-  ['push', ['push', 'origin', 'main']],
-  ['branch -D', ['branch', '-D', 'x']],
-  ['fetch origin main', [...FETCH_GLOBALS, 'fetch', '--no-write-fetch-head', '--refmap=', 'origin', 'main']],
-  ['fetch without --refmap=', [...FETCH_GLOBALS, 'fetch', '--no-write-fetch-head', 'origin', SHA]],
-  ['fetch without --no-write-fetch-head', [...FETCH_GLOBALS, 'fetch', '--refmap=', 'origin', SHA]],
-  ['fetch without the housekeeping overrides', ['fetch', '--no-write-fetch-head', '--refmap=', 'origin', SHA]],
-  ['fetch from another remote', [...FETCH_GLOBALS, 'fetch', '--no-write-fetch-head', '--refmap=', 'upstream', SHA]],
-  ['fetch an abbreviated SHA', [...FETCH_GLOBALS, 'fetch', '--no-write-fetch-head', '--refmap=', 'origin', 'abc1234']],
-  ['merge-tree without --write-tree', ['merge-tree', SHA, SHA2]],
-  ['status without --no-optional-locks', ['status', '--porcelain=v1']],
-  ['config --unset', ['config', '--unset', 'x.y']],
-  ['config set', ['config', 'x.y', 'z']],
-  ['config read without --get', ['config', 'remote.origin.url']],
-  ['symbolic-ref HEAD refs/heads/x', ['symbolic-ref', 'HEAD', 'refs/heads/x']],
-  ['worktree remove', ['worktree', 'remove', '/x']],
-  ['worktree list without --porcelain', ['worktree', 'list']],
-  ['-c core.hooksPath=x log', ['-c', 'core.hooksPath=x', 'log', '--no-ext-diff', '--no-textconv', SHA]],
+  ...WRITE_FORMS,
+  ['fetch without --no-recurse-submodules', [...FETCH_GLOBALS, 'fetch', '--no-write-fetch-head', '--refmap=', '--no-tags', 'origin', SHA]],
+  ['config --get-regexp', ['config', '--get-regexp', 'remote']],
   ['-c on a subcommand other than fetch', ['-c', 'gc.auto=0', 'log', '--no-ext-diff', '--no-textconv', SHA]],
   ['--exec-path', ['--exec-path=/x', 'version']],
   ['--git-dir', ['--git-dir=/x', 'version']],

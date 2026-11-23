@@ -107,7 +107,8 @@ export interface RepoState {
   refs: string;
   head: string;
   index: string;
-  fetchHead: string | null;
+  /** FETCH_HEAD is per-worktree; both locations are read, so a linked worktree is covered. */
+  fetchHead: { worktree: string | null; common: string | null };
   status: string;
 }
 
@@ -116,12 +117,12 @@ export function snapshotRepoState(fixture: Fixture, repo: string): RepoState {
   const gitDir = path.resolve(repo, fixture.git(repo, 'rev-parse', '--git-dir').trim());
   const commonDir = path.resolve(repo, fixture.git(repo, 'rev-parse', '--git-common-dir').trim());
   const indexFile = path.join(gitDir, 'index');
-  const fetchHead = path.join(commonDir, 'FETCH_HEAD');
+  const read = (file: string): string | null => (fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null);
   return {
     refs: fixture.git(repo, 'for-each-ref', '--format=%(refname) %(objectname)'),
     head: fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf-8'),
     index: fs.existsSync(indexFile) ? fs.readFileSync(indexFile).toString('base64') : '',
-    fetchHead: fs.existsSync(fetchHead) ? fs.readFileSync(fetchHead, 'utf-8') : null,
+    fetchHead: { worktree: read(path.join(gitDir, 'FETCH_HEAD')), common: read(path.join(commonDir, 'FETCH_HEAD')) },
     status: fixture.git(repo, '--no-optional-locks', 'status', '--porcelain=v1'),
   };
 }

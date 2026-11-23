@@ -7,7 +7,7 @@
  * `--no-ext-diff --no-textconv`, so no repository-configured diff program runs; flags that
  * write files (`--output`) or run programs (`--upload-pack`, `--exec`, `--textconv`,
  * `--filters`) are never permitted. `fetch` is allowed only in its ref-neutral form, which
- * adds objects and moves no ref and writes no FETCH_HEAD.
+ * adds objects and moves no ref (no tags, no submodules) and writes no FETCH_HEAD.
  *
  * Forge concepts are allowed by name: only the four read concepts.
  */
@@ -47,8 +47,6 @@ interface SubcommandRule {
   valueFlags?: readonly string[];
   /** Flags that must be present. */
   required?: readonly string[];
-  /** Exactly one of these flags must be present. */
-  oneOf?: readonly string[];
   /** Whether `--` followed by pathspecs is permitted. */
   pathspecs?: boolean;
   /** Validates the positional arguments; returns a reason to refuse, or null. */
@@ -154,8 +152,8 @@ const RULES: Record<string, SubcommandRule> = {
     positionals: exactly(1, (v) => v === 'list', 'worktree subcommand (only "list")'),
   },
   config: {
-    flags: ['--get', '--get-regexp'],
-    oneOf: ['--get', '--get-regexp'],
+    flags: ['--get'],
+    required: ['--get'],
     positionals: exactly(1, (v) => /^[A-Za-z0-9._-]+$/.test(v), 'config key'),
   },
   'symbolic-ref': {
@@ -174,7 +172,9 @@ const RULES: Record<string, SubcommandRule> = {
   },
   fetch: {
     flags: ['--no-write-fetch-head', '--refmap=', '--no-tags', '--no-recurse-submodules', '--quiet'],
-    required: ['--no-write-fetch-head', '--refmap='],
+    // --refmap= stores no remote-tracking ref, but tag auto-following is separate: without
+    // --no-tags a fetch can still create refs/tags/*.
+    required: ['--no-write-fetch-head', '--refmap=', '--no-tags', '--no-recurse-submodules'],
     positionals: (p) => {
       if (p[0] !== 'origin') return 'fetch may only fetch from origin';
       if (p.length < 2) return 'fetch needs at least one commit SHA';
@@ -255,9 +255,6 @@ export function assertGitArgvAllowed(argv: readonly string[]): string {
 
   for (const required of rule.required ?? []) {
     if (!seen.has(required)) refuse(`git ${subcommand} must carry ${required}`);
-  }
-  if (rule.oneOf && rule.oneOf.filter((flag) => seen.has(flag)).length !== 1) {
-    refuse(`git ${subcommand} must carry exactly one of ${rule.oneOf.join(', ')}`);
   }
   const positionalProblem = rule.positionals(positionals);
   if (positionalProblem) refuse(positionalProblem);
