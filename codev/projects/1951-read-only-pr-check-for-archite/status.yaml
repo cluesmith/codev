@@ -5,10 +5,10 @@ phase: implement
 plan_phases:
   - id: forge_read_concepts
     title: Forge read concepts for PR mechanics
-    status: in_progress
+    status: complete
   - id: readonly_core
     title: Read-only runner, configuration and report core
-    status: pending
+    status: in_progress
   - id: check_pr_mechanics
     title: 'codev check pr: merge mechanics'
     status: pending
@@ -24,7 +24,7 @@ plan_phases:
   - id: docs_guidance
     title: Architect guidance and command documentation
     status: pending
-current_plan_phase: forge_read_concepts
+current_plan_phase: readonly_core
 gates:
   spec-approval:
     status: approved
@@ -39,11 +39,13 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-23T22:44:06.744Z'
+updated_at: '2026-11-23T22:50:05.115Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
     acknowledged_at: '2026-11-23T21:23:07.115Z'
+  - boundary: plan-phase:readonly_core
+    at: '2026-11-23T22:50:05.115Z'
