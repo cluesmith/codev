@@ -45,3 +45,13 @@ CI on draft PR #1942: 8/8 checks green; the Unit Tests job ran the full codev su
 ## Owner ruling main-28 (2026-11-23): CI stands in for the local tests check
 
 For this phase of this project only: GitHub's green run on draft PR #1942 at head 30be01278 replaces porch's local `tests` check. Applied as instructed: `porch.checks.tests.skip = true` added to this worktree's gitignored `.codev/config.local.json`, `porch done` run once (load 10.09; build ✓, tests skipped, advanced to `pr`), and the file restored byte-for-byte straight after. Nothing under `.codev` is staged or committed. The shared `.codev/config.json` was not touched.
+
+## PR phase: CMAP iteration 1 (2026-11-23)
+
+- **codex: REQUEST_CHANGES**, branch hygiene only; it found no code defects.
+  - "39 commits behind main": rebutted. Branch protection is not strict (`strict: false`), GitHub reports the PR `MERGEABLE`, and the `pull_request` CI tests the merge with current `main`.
+  - "`chore(porch):` commits off-format": rebutted. They are porch's own state commits, the standard form on `main` (28 of the last 60 commits).
+- **claude: REQUEST_CHANGES**, one real finding, **fixed** in 23767926f: `consult-readonly-review.e2e.test.ts:214` called `buildClaudeReviewArgs` without the now-required `caps`. `tsconfig` excludes `__tests__` and vitest excludes `*.e2e.test.ts`, so neither the build nor CI could see it. Verified with an ad-hoc tsc over the touched test files: the pre-fix line gives TS2345 and the fixed file is clean. The three `doctor.test.ts` errors that check reports are pre-existing spawnSync mock types, present both ways.
+  - Declined as cosmetic: naming the config file in the cap message (it stays `.codev/config.json`), and naming the specific key in the api-key remedy (the auth line printed just above already names the credential in use).
+  - Declined as out of scope: the floor in `INSTALL.md:390` (the `codev import` requirement), `arch.md:1691` and `DEPENDENCIES.md` (whose consult-lane row already states 2.1.141).
+- Not re-running CMAP: the only change is a one-line test fix.
