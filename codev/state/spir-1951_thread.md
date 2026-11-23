@@ -59,3 +59,12 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   Scoped to that function; notice stays informational. Evidence: 2026-11-23 cleanup reported
   "1 uncommitted file(s)" for two bugfix builders with nothing uncommitted. Record in the review.
 - Standing ruling main-32 applies to all seven phases; pr gate is the owner's.
+
+## 2026-11-23 — implement: forge_read_concepts (Phase 1)
+- Commits 01565e67b + 1e135c6c4. pr-view new optional fields (+ reviewDecision, architect ruling 2026-11-23:
+  forge verdict follows `mergeable` only; mergeStateStatus is context). commit-checks / workflow-runs on
+  github; gitlab/gitea explicitly null. Dispatcher timeoutMs + timedOut. gitlab pr-view pipefail fix.
+- Surprise: worktree had no node_modules / built sdk — `pnpm install` + `npm run build` first.
+- Full suite: run 1 failed on bugfix-1137 (mine: gitea pr-view shape, fixed) + 3 spawn-heavy tests that pass
+  alone (launch-loop, ide-command, agy-auth-cache). porch `tests` failed again at load ~30 (names not shown);
+  my next full run passed clean (8290/8290). Per main-32: stopped, opened draft PR #1958 for CI.
