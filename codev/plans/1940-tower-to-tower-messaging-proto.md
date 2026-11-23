@@ -41,6 +41,14 @@ only the owner can make; phase 7 is then removed with `porch skip-phase` and pha
 unchanged. The default (named architects are addressable from other workspaces) and the builder
 front-door rule are not in question and live in phases 2 and 4.
 
+**Owner ruling at plan approval (decision main-31, 2026-11-23): phase 7 is cut.** The plan was
+approved on its text at `5140a82a8` and the front-door-only opt-in was dropped from stage 1 in the
+same ruling, recorded with `porch skip-phase`. Phases 1 to 6 ship as written, and nothing in them
+adds the config key, the refusal, a "front door only" mark in `afx workspace list` or the opt-in
+sentences in the docs. The spec's stage 1 success criterion for a front-door-only workspace is
+dropped with it; the approved spec's design sections are not edited. The default stays open and
+the builder front-door rule stays. Issue #1605 still closes as superseded when the PR merges.
+
 Each phase is one git commit on `builder/spir-1940`, inside a single PR opened in the review
 phase.
 

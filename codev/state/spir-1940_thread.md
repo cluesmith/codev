@@ -221,3 +221,25 @@ workspace called `arch`. Gate still pending; the owner has not approved.
 - Slip: I appended to this log while the review lanes were running, and both reviews flagged
   "working tree changed". The plan was not touched, so the reviews stand. No writes to the tree
   during a review from now on.
+
+## 2026-11-23 — plan-approval APPROVED by the human; phase 7 cut; entering implement
+
+- Architect relayed (21:21Z) the human's ruling main-31 from the Decisions tab: "approve, cut".
+  Checked the plan was byte-identical to `5140a82a8`, then ran
+  `porch approve 1940 plan-approval --a-human-explicitly-approved-this`.
+- **Phase 7 (front-door-only setting) is CUT by the owner.** Recorded with `porch skip-phase 1940
+  phase_7` straight after porch copied the phases, before any phase 1 work. Phases 1 to 6 must not
+  add the config key, the refusal, a "front door only" mark in `afx workspace list`, or opt-in
+  sentences in the docs. The default (open) and the builder front-door rule stay.
+- The spec's stage 1 criterion for a front-door-only workspace is dropped with it. One paragraph
+  added to the plan's summary citing the ruling; the review must say the same. The approved spec's
+  design sections are not edited.
+- Issue #1605 still closes as superseded at merge. The architect closes it, not me.
+- **Standing owner ruling main-32, for every implement phase:** if the local full suite fails only
+  on tests unrelated to my change, each passing alone, STOP and tell the architect; do not loop.
+  A green GitHub run on a draft PR for the same code may then stand in for porch's local tests
+  check for that phase, and the architect checks that run before I skip anything. Run targeted
+  tests while iterating.
+- Next gate is `pr`, the owner's. Stop there.
+- First act of phase 1, per the plan: write the send-latency measurement and record the baseline
+  median, with its commit, before the parser is written.
