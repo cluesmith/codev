@@ -475,7 +475,8 @@ pre-existing flakiness".
 
 ## R9 — re-baseline spir/aspir spec-review.md for Bugfix #1910 (framework path named by location)
 
-**Status: proposed in the #1910 PR; needs the owner's sign-off at the `pr` gate.**
+**Status: APPROVED by the owner, 2026-11-23, for issue #1910 (relayed by the architect, main). Applied
+in PR #1949.**
 
 | | |
 |---|---|
