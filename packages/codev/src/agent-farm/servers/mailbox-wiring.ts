@@ -480,7 +480,7 @@ function escalateHeldToOwner(info: HeldOwnerNoticeInfo, log: LogFn): boolean {
   if (getArchitectByName(info.workspacePath, info.toAgent)) return false;
   // Resolve the owner architect the same way `afx send architect` does (bare `architect` form
   // with the starving builder as sender → spawning affinity, else main, else first).
-  const owner = resolveAgentInRegistry('architect', info.workspacePath, info.toAgent);
+  const owner = resolveAgentInRegistry({ kind: 'architect' }, { id: info.toAgent, workspace: info.workspacePath });
   if (isResolveError(owner)) {
     log('INFO', `[mailbox] starvation notice for ${info.toAgent} skipped: no architect to notify (${owner.message})`);
     return false;

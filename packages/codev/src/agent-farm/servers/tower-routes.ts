@@ -28,7 +28,7 @@ import { sanitizeAgentEnv, withTowerPort } from '../../lib/agent-env.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage } from '@cluesmith/codev-types';
+import type { AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage } from '@cluesmith/codev-types';
 import { getArchitectByName, getBuilders, setArchitectByName } from '../state.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
@@ -62,7 +62,16 @@ import { handleDecisionsGet, handleDecisionsRule } from './decisions/routes.js';
 import { decisionsFilePresent } from './decisions/file.js';
 import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
 import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
-import { resolveTarget, resolveAgentInRegistry, broadcastMessage, isResolveError, type ResolveResult } from './tower-messages.js';
+import {
+  parseTarget,
+  resolveTarget,
+  resolveAgentInRegistry,
+  broadcastMessage,
+  isResolveError,
+  type ResolveError,
+  type ResolveResult,
+  type SenderContext,
+} from './tower-messages.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import {
@@ -1862,6 +1871,29 @@ function architectNameForTerminal(workspacePath: string, terminalId: string): st
 }
 
 /**
+ * Answer a send whose address did not resolve. One mapping for every send path: 409 for
+ * an ambiguous name, 400 for text that is not an address, for one that needs a workspace
+ * the request did not give, and for one that names a Tower; 403 for a recipient this
+ * sender may not name; 404 for a recipient that does not exist. `NO_CONTEXT` keeps its
+ * older wire name, `INVALID_PARAMS`.
+ */
+const RESOLVE_ERROR_STATUS: Record<ResolveError['code'], number> = {
+  AMBIGUOUS: 409,
+  NO_CONTEXT: 400,
+  MALFORMED_ADDRESS: 400,
+  CROSS_TOWER_UNAVAILABLE: 400,
+  REFUSED: 403,
+  NOT_FOUND: 404,
+};
+
+function sendResolveError(res: http.ServerResponse, err: ResolveError): void {
+  sendJson(res, RESOLVE_ERROR_STATUS[err.code], {
+    error: err.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : err.code,
+    message: err.message,
+  });
+}
+
+/**
  * The canonical mailbox identity of a live-resolved target: architect targets are
  * stored under their SPECIFIC architect name (reverse-mapped from the terminal),
  * everything else under its resolved agent id.
@@ -1936,7 +1968,15 @@ export async function deliverCronMessage(
     supersedeKey: task.name,
   };
 
-  const live = resolveTarget(task.target, task.workspacePath);
+  // Cron is not an agent: it has a workspace to read the address in, and no sender id.
+  const sender: SenderContext = { workspace: task.workspacePath };
+  const address = parseTarget(task.target);
+  if (isResolveError(address)) {
+    log('WARN', `Cron '${task.name}': target '${task.target}' is not an address (${address.message}) — message not delivered`);
+    return { outcome: 'unresolved', reason: null, detail: null, mailboxId: null };
+  }
+
+  const live = resolveTarget(address, sender);
   if (!isResolveError(live)) {
     const { toAgent } = liveTargetIdentity(live);
     return deliverCronMail(ports, db, {
@@ -1952,7 +1992,7 @@ export async function deliverCronMessage(
   // live PTY (Tower restarting, builder between respawns) — hold its mail so a
   // respawn drains it, instead of the old blind drop-with-WARN (decision 9).
   if (live.code === 'NOT_FOUND') {
-    const reg = resolveAgentInRegistry(task.target, task.workspacePath);
+    const reg = resolveAgentInRegistry(address, sender);
     if (!isResolveError(reg)) {
       return deliverCronMail(ports, db, {
         ...base,
@@ -2073,8 +2113,10 @@ function logCeilingExpired(
 
 /** Inputs for a delayed (`--delay`) send, captured from the parsed request. */
 interface DelayedSendParams {
-  to: string;
-  workspace: string | undefined;
+  /** The recipient, already parsed. */
+  address: AgentAddress;
+  /** Who is asking: the sender's id and workspace, as the immediate path passes them. */
+  sender: SenderContext;
   from: string | undefined;
   message: string;
   raw: boolean;
@@ -2116,7 +2158,7 @@ function handleDelayedSend(
   db: ReturnType<typeof getGlobalDb>,
   params: DelayedSendParams,
 ): void {
-  const { to, workspace, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace } = params;
+  const { address, sender, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace } = params;
   const now = Date.now();
   const notBefore = now + deliverAfter * 1000;
 
@@ -2126,7 +2168,7 @@ function handleDelayedSend(
   let isArchitectTarget: boolean;
   let terminalId: string | null;
 
-  const live = resolveTarget(to, workspace, from);
+  const live = resolveTarget(address, sender);
   if (!isResolveError(live)) {
     const identity = liveTargetIdentity(live);
     workspacePath = live.workspacePath;
@@ -2134,11 +2176,9 @@ function handleDelayedSend(
     isArchitectTarget = identity.isArchitectTarget;
     terminalId = live.terminalId;
   } else if (live.code === 'NOT_FOUND') {
-    const reg = resolveAgentInRegistry(to, workspace, from);
+    const reg = resolveAgentInRegistry(address, sender);
     if (isResolveError(reg)) {
-      const statusCode = reg.code === 'AMBIGUOUS' ? 409 : reg.code === 'NO_CONTEXT' ? 400 : 404;
-      const errorCode = reg.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : reg.code;
-      sendJson(res, statusCode, { error: errorCode, message: reg.message });
+      sendResolveError(res, reg);
       return;
     }
     workspacePath = reg.workspacePath;
@@ -2146,9 +2186,7 @@ function handleDelayedSend(
     isArchitectTarget = reg.kind === 'architect';
     terminalId = null;
   } else {
-    const statusCode = live.code === 'AMBIGUOUS' ? 409 : live.code === 'NO_CONTEXT' ? 400 : 404;
-    const errorCode = live.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : live.code;
-    sendJson(res, statusCode, { error: errorCode, message: live.message });
+    sendResolveError(res, live);
     return;
   }
 
@@ -2344,6 +2382,19 @@ async function handleSend(
   const db = getGlobalDb();
   const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
 
+  // Spec 1940: the address is read once, here, by the one shared parser, and every path
+  // below resolves the structured form. Text that is not an address is refused before
+  // anything is resolved or stored, with the shape that was expected.
+  const address = parseTarget(to);
+  if (isResolveError(address)) {
+    sendResolveError(res, address);
+    return;
+  }
+  // Who is asking. `workspace` is where the sender reads addresses from, which is its own
+  // workspace; `fromWorkspace` says the same for provenance and stands in when the first
+  // is absent.
+  const sender: SenderContext = { id: from, workspace: workspace ?? fromWorkspace };
+
   // Spec 1313 round 3: a delayed send (`--delay`) is RESOLVED, authorized, formatted, and
   // PERSISTED here at REQUEST time, then deferred — it does NOT require a live session now,
   // so it is handled BEFORE the immediate live/dead/unwritable/escape/interrupt branches
@@ -2352,15 +2403,15 @@ async function handleSend(
   // makes the delay durable across a Tower restart.
   if (deliverAfter !== undefined) {
     handleDelayedSend(res, ctx, db, {
-      to, workspace, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace,
+      address, sender, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace,
     });
     return;
   }
 
   // Resolve the target address against LIVE terminals.
-  // Spec 755: pass `from` so architect resolution is sender-affinity-aware
+  // Spec 755: the sender is passed so architect resolution is sender-affinity-aware
   // when the sender is a builder. Non-builder senders see unchanged behavior.
-  const result = resolveTarget(to, workspace, from);
+  const result = resolveTarget(address, sender);
 
   // --- Resolution failed against live terminals ---
   if (isResolveError(result)) {
@@ -2369,7 +2420,7 @@ async function handleSend(
     // its mail instead of 404ing. escape/interrupt act on a live session only, so
     // an unresolved target keeps the original error for them.
     if (result.code === 'NOT_FOUND' && !escape && !interrupt) {
-      const reg = resolveAgentInRegistry(to, workspace, from);
+      const reg = resolveAgentInRegistry(address, sender);
       if (!isResolveError(reg)) {
         holdAndRespond(
           res,
@@ -2394,10 +2445,7 @@ async function handleSend(
       }
       // else: fall through to the original live-resolution error below.
     }
-    const statusCode = result.code === 'AMBIGUOUS' ? 409 : result.code === 'NO_CONTEXT' ? 400 : 404;
-    // Map NO_CONTEXT to INVALID_PARAMS per plan's error contract
-    const errorCode = result.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : result.code;
-    sendJson(res, statusCode, { error: errorCode, message: result.message });
+    sendResolveError(res, result);
     return;
   }
 

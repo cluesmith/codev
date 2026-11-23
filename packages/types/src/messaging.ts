@@ -37,19 +37,25 @@ export const DECISIONS_TAB_SENDER = 'decisions-tab';
  *   workspace's front door (`main`, else the first registered).
  * - `kind: 'architect'` with a `name` is that named architect.
  * - `kind: 'id'` always has a `name`: a builder id (or a tail of one, such as `1940`) or a
- *   shell id, resolved inside the workspace.
+ *   shell id, resolved inside the workspace. The type requires it; an object read off the
+ *   wire is still checked where it is used.
  */
-export interface AgentAddress {
+export type AgentAddress = AddressLocation & AddressAgent;
+
+/** Where the agent is: the parts of an address before the agent. */
+export interface AddressLocation {
   /** The account handle of the Tower's owner. Present only for another owner's Tower. */
   owner?: string;
   /** The Tower's name. Present only when the address leaves the reader's Tower. */
   tower?: string;
   /** The workspace's address name. Absent means the reader's workspace. */
   workspace?: string;
-  kind: 'architect' | 'id';
-  /** The architect's name, or the builder or shell id. Required when `kind` is `'id'`. */
-  name?: string;
 }
+
+/** Which agent: an architect, by name or not, or a builder or shell by its id. */
+export type AddressAgent =
+  | { kind: 'architect'; /** The architect's name. Absent is the bare `architect` form. */ name?: string }
+  | { kind: 'id'; /** The builder id (or a tail of one) or the shell id. */ name: string };
 
 /**
  * Where an address is being read from: what the reader may leave out when writing it, and
@@ -65,6 +71,7 @@ export interface AddressReader {
 /** Why a piece of text is not an address. One code per shape the parser refuses. */
 export type AddressParseErrorCode =
   | 'EMPTY_ADDRESS'
+  | 'ADDRESS_TOO_LONG'
   | 'EMPTY_COMPONENT'
   | 'TOO_MANY_BEFORE_ARCHITECT'
   | 'TOO_MANY_AFTER_ARCHITECT'

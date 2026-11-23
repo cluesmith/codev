@@ -23,6 +23,7 @@
 
 import type {
   AgentAddress,
+  AddressAgent,
   AddressReader,
   AddressParseError,
   AddressParseErrorCode,
@@ -52,6 +53,14 @@ const OWNER_PATTERN = /^[a-z][a-z0-9-]*$/;
  */
 const MISTYPED_SCHEME = /^afx(:\/|\/\/)/;
 
+/**
+ * The longest text read as an address. Nothing valid comes near it; the bound keeps a
+ * refusal, which quotes what was wrong, small whatever it was handed.
+ */
+export const MAX_ADDRESS_LENGTH = 512;
+/** The most of a refused value that a parse error quotes back. */
+const MAX_QUOTED_LENGTH = 64;
+
 const LOCAL_SHAPE = '[<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>';
 const REMOTE_SHAPE =
   'afx://[<owner>@]<tower>/<workspace>:architect[:<name>] or afx://[<owner>@]<tower>/<workspace>:<builder-id>';
@@ -73,6 +82,16 @@ export function isReservedWorkspaceName(text: string): boolean {
 /** Does this address leave the reader's Tower? */
 export function isRemoteAddress(address: AgentAddress): boolean {
   return address.tower !== undefined;
+}
+
+/**
+ * A value that has just failed a component rule, made safe to put in an error message:
+ * printable ASCII only, and cut short. The message travels in an HTTP body and is printed
+ * on a terminal, and the value is whatever the sender typed.
+ */
+function quoted(value: string): string {
+  const printable = value.replace(/[^\x20-\x7e]/g, '?');
+  return printable.length > MAX_QUOTED_LENGTH ? `${printable.slice(0, MAX_QUOTED_LENGTH)}...` : printable;
 }
 
 function fail(code: AddressParseErrorCode, message: string, expected: string): { ok: false; error: AddressParseError } {
@@ -166,14 +185,14 @@ function parseRemote(rest: string): AddressParseResult {
   if (owner !== undefined && !OWNER_PATTERN.test(owner)) {
     return fail(
       'INVALID_COMPONENT',
-      `owner \`${owner}\` may contain only lower-case letters, digits and hyphens, and must start with a letter`,
+      `owner \`${quoted(owner)}\` may contain only lower-case letters, digits and hyphens, and must start with a letter`,
       REMOTE_SHAPE,
     );
   }
   if (!TOWER_PATTERN.test(tower)) {
     return fail(
       'INVALID_COMPONENT',
-      `Tower name \`${tower}\` may contain only lower-case letters, digits and hyphens`,
+      `Tower name \`${quoted(tower)}\` may contain only lower-case letters, digits and hyphens`,
       REMOTE_SHAPE,
     );
   }
@@ -209,15 +228,14 @@ function parseRemote(rest: string): AddressParseResult {
     if (value !== undefined && !isAddressComponent(value)) {
       return fail(
         'INVALID_COMPONENT',
-        `${label} \`${value}\` may contain only lower-case letters, digits, \`.\`, \`_\` and \`-\`, and must start with a letter or digit`,
+        `${label} \`${quoted(value)}\` may contain only lower-case letters, digits, \`.\`, \`_\` and \`-\`, and must start with a letter or digit`,
         REMOTE_SHAPE,
       );
     }
   }
 
-  const address: AgentAddress = { tower, workspace, kind };
+  const address: AgentAddress = { ...agent.address, tower };
   if (owner !== undefined) address.owner = owner;
-  if (name !== undefined) address.name = name;
   return { ok: true, address };
 }
 
@@ -235,6 +253,13 @@ export function parseAddress(text: string): AddressParseResult {
   const input = text.trim().toLowerCase();
   if (input === '') {
     return fail('EMPTY_ADDRESS', 'the address is empty', LOCAL_SHAPE);
+  }
+  if (input.length > MAX_ADDRESS_LENGTH) {
+    return fail(
+      'ADDRESS_TOO_LONG',
+      `an address is at most ${MAX_ADDRESS_LENGTH} characters, and this one has ${input.length}`,
+      input.startsWith(ADDRESS_SCHEME) || MISTYPED_SCHEME.test(input) ? REMOTE_SHAPE : LOCAL_SHAPE,
+    );
   }
   if (input.startsWith(ADDRESS_SCHEME)) {
     return parseRemote(input.slice(ADDRESS_SCHEME.length));
@@ -260,7 +285,6 @@ export function completeAddress(address: AgentAddress, reader: AddressReader): A
   if (out.tower === undefined) {
     if (reader.tower !== undefined) out.tower = reader.tower;
     if (reader.owner !== undefined) out.owner = reader.owner;
-    else delete out.owner;
   } else if (out.owner === undefined && reader.owner !== undefined) {
     out.owner = reader.owner;
   }
@@ -279,14 +303,24 @@ export function sameAddress(a: AgentAddress, b: AgentAddress): boolean {
   );
 }
 
-function agentText(address: AgentAddress): string {
+/**
+ * The agent part of an address, lower-cased. The type says an id always has a name; an
+ * object read off the wire may not, so that is checked here and not assumed.
+ */
+function loweredAgent(address: AddressAgent): AddressAgent {
+  const name: unknown = address.name;
   if (address.kind === 'architect') {
-    return address.name === undefined ? 'architect' : `architect:${address.name}`;
+    return typeof name === 'string' ? { kind: 'architect', name: name.toLowerCase() } : { kind: 'architect' };
   }
-  if (address.name === undefined) {
+  if (typeof name !== 'string') {
     throw new Error('Cannot format an address of kind `id` that has no id.');
   }
-  return address.name;
+  return { kind: 'id', name: name.toLowerCase() };
+}
+
+function agentText(agent: AddressAgent): string {
+  if (agent.kind === 'id') return agent.name;
+  return agent.name === undefined ? 'architect' : `architect:${agent.name}`;
 }
 
 /**
@@ -303,11 +337,10 @@ function agentText(address: AgentAddress): string {
  * of unknown shape check it with {@link isAddressComponent} first.
  */
 export function formatAddress(address: AgentAddress, reader: AddressReader = {}): string {
-  const lowered: AgentAddress = { kind: address.kind };
+  const lowered: AgentAddress = loweredAgent(address);
   if (address.owner !== undefined) lowered.owner = address.owner.toLowerCase();
   if (address.tower !== undefined) lowered.tower = address.tower.toLowerCase();
   if (address.workspace !== undefined) lowered.workspace = address.workspace.toLowerCase();
-  if (address.name !== undefined) lowered.name = address.name.toLowerCase();
 
   if (lowered.owner !== undefined && lowered.tower === undefined) {
     throw new Error('Cannot format an address that names an owner and no Tower.');

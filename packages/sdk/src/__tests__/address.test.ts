@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import type { AgentAddress, AddressReader, AddressParseErrorCode } from '@cluesmith/codev-types';
 import {
   ADDRESS_SCHEME,
+  MAX_ADDRESS_LENGTH,
   RESERVED_WORKSPACE_NAMES,
   completeAddress,
   formatAddress,
@@ -90,6 +91,56 @@ describe('parseAddress: malformed addresses', () => {
   });
 });
 
+describe('parseAddress: what a refusal quotes back', () => {
+  // The message goes into an HTTP body and onto a terminal; the value is what was typed.
+  const hostile: Array<[string, string]> = [
+    ['an owner', 'afx://s\u001b[31mam@mbp/codev:architect'],
+    ['a Tower name', 'afx://dev\u001b]0;x\u0007vm/codev:architect'],
+    ['a workspace', 'afx://devvm/co\u001b[2Jdev:architect'],
+    ['an architect name', 'afx://devvm/codev:architect:re\u0007view'],
+    ['an id', 'afx://devvm/codev:builder\u009b-spir'],
+    ['a name outside ASCII', 'afx://devvm/codev:architect:caf\u00e9'],
+  ];
+  it.each(hostile)('%s with a character no terminal should be handed is quoted as `?`', (_note, input) => {
+    const result = parseAddress(input);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('INVALID_COMPONENT');
+    expect(result.error.message).toMatch(/^[\x20-\x7e]+$/);
+    expect(result.error.message).toContain('?');
+  });
+
+  it('cuts a long value short', () => {
+    const result = parseAddress(`afx://devvm/codev:architect:${'x'.repeat(200)}!`);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('INVALID_COMPONENT');
+    expect(result.error.message).toContain(`\`${'x'.repeat(64)}...\``);
+    expect(result.error.message).not.toContain('x'.repeat(65));
+  });
+});
+
+describe('parseAddress: the length bound', () => {
+  const longest = `codev:architect:${'a'.repeat(MAX_ADDRESS_LENGTH - 'codev:architect:'.length)}`;
+
+  it('reads an address of exactly the bound', () => {
+    expect(longest.length).toBe(MAX_ADDRESS_LENGTH);
+    expect(parseAddress(longest).ok).toBe(true);
+  });
+
+  it('refuses one character more, saying both lengths and quoting none of it', () => {
+    const result = parseAddress(`${longest}a`);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('ADDRESS_TOO_LONG');
+    expect(result.error.message).toBe('an address is at most 512 characters, and this one has 513');
+  });
+
+  it('measures the text after trimming, as it reads it', () => {
+    expect(parseAddress(`   ${longest}   `).ok).toBe(true);
+  });
+});
+
 describe('formatAddress: the shortest form correct for the reader', () => {
   it.each(table.format)('$note → $text', ({ address, reader, text }) => {
     expect(formatAddress(address, reader)).toBe(text);
@@ -141,7 +192,8 @@ describe('formatAddress refuses an address that has no text form', () => {
   });
 
   it('refuses structurally incomplete addresses', () => {
-    expect(() => formatAddress({ kind: 'id' }, reader)).toThrow(/no id/);
+    // The type forbids an id with no name; an object read off the wire can still be one.
+    expect(() => formatAddress({ kind: 'id' } as unknown as AgentAddress, reader)).toThrow(/no id/);
     expect(() => formatAddress({ owner: 'sam', workspace: 'codev', kind: 'architect' }, reader)).toThrow(/no Tower/);
     expect(() => formatAddress({ tower: 'devvm', kind: 'architect' }, reader)).toThrow(/no workspace/);
   });
@@ -162,6 +214,12 @@ describe('completeAddress', () => {
     expect(completeAddress({ kind: 'id', name: '1940' }, { workspace: 'codev' }))
       .toEqual({ workspace: 'codev', kind: 'id', name: '1940' });
     expect(completeAddress({ kind: 'id', name: '1940' }, {})).toEqual({ kind: 'id', name: '1940' });
+  });
+
+  it('leaves an owner with no Tower as it found it, for the formatter to refuse', () => {
+    const odd: AgentAddress = { owner: 'sam', workspace: 'codev', kind: 'architect' };
+    expect(completeAddress(odd, { workspace: 'codev' })).toEqual(odd);
+    expect(() => formatAddress(odd, { workspace: 'codev' })).toThrow(/no Tower/);
   });
 
   it('does not change its argument', () => {

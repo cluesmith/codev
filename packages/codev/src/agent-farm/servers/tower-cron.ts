@@ -13,6 +13,7 @@ import { parseCronExpression, isDue } from './tower-cron-parser.js';
 import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 import type { CronSchedule } from './tower-cron-parser.js';
 import { CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
+import { namesATower, CROSS_TOWER_UNAVAILABLE_MESSAGE } from '../utils/agent-names.js';
 import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { getGlobalDb } from '../db/index.js';
 
@@ -136,6 +137,16 @@ export function loadWorkspaceTasks(workspacePath: string): CronTask[] {
         continue;
       }
 
+      // Spec 1940: cron runs unattended and is no agent a peer could have granted, so a
+      // task aimed at another Tower is refused here, when the file is loaded, and not
+      // each time it fires. A target that is not an address at all is left to fail when
+      // the task fires, as an unknown one does.
+      const target = typeof doc.target === 'string' ? doc.target : 'architect';
+      if (namesATower(target)) {
+        deps?.log('WARN', `Skipping task '${name}' (${file}) in ${workspacePath}: its target is an afx:// address. ${CROSS_TOWER_UNAVAILABLE_MESSAGE}`);
+        continue;
+      }
+
       tasks.push({
         name,
         schedule,
@@ -143,7 +154,7 @@ export function loadWorkspaceTasks(workspacePath: string): CronTask[] {
         command,
         condition: typeof doc.condition === 'string' ? doc.condition : undefined,
         message,
-        target: typeof doc.target === 'string' ? doc.target : 'architect',
+        target,
         timeout: typeof doc.timeout === 'number' ? doc.timeout : 30,
         cwd: typeof doc.cwd === 'string' ? doc.cwd : undefined,
         workspacePath,

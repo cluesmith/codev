@@ -21,6 +21,8 @@ export {
   VSCODE_USER_SENDER,
   DECISIONS_TAB_SENDER,
   type AgentAddress,
+  type AddressLocation,
+  type AddressAgent,
   type AddressReader,
   type AddressParseErrorCode,
   type AddressParseError,

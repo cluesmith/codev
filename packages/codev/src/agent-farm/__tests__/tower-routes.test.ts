@@ -14,12 +14,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
-import { handleRequest } from '../servers/tower-routes.js';
+import { handleRequest, deliverCronMessage } from '../servers/tower-routes.js';
 import { resetHostPlatformForTests } from '../../lib/platform.js';
 import { setGitBashForTests } from '../../lib/platform/windows/git-bash-launch.js';
 import { getWorkspaceTerminals } from '../servers/tower-terminals.js';
 import type { DbMailbox } from '../db/types.js';
-import { setArchitectByName } from '../state.js';
+import { setArchitectByName, upsertBuilder } from '../state.js';
 import { DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
 import type { RouteContext } from '../servers/tower-routes.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
@@ -131,7 +131,10 @@ vi.mock('../servers/tower-tunnel.js', () => ({
   }),
 }));
 
-vi.mock('../servers/tower-messages.js', () => ({
+vi.mock('../servers/tower-messages.js', async (importOriginal) => ({
+  // Spec 1940: the route reads the address text itself, once, with the real parser, and
+  // hands the resolvers the structured address. Only the resolvers are faked.
+  parseTarget: (await importOriginal<typeof import('../servers/tower-messages.js')>()).parseTarget,
   resolveTarget: (...args: unknown[]) => mockResolveTarget(...args),
   resolveAgentInRegistry: (...args: unknown[]) => mockResolveAgentInRegistry(...args),
   broadcastMessage: (...args: unknown[]) => mockBroadcastMessage(...args),
@@ -2024,7 +2027,7 @@ describe('tower-routes', () => {
       const { res } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(mockResolveTarget).toHaveBeenCalledWith('architect', '/tmp/ws', 'spir-100');
+      expect(mockResolveTarget).toHaveBeenCalledWith({ kind: 'architect' }, { id: 'spir-100', workspace: '/tmp/ws' });
     });
 
     it('forwards undefined `from` when sender is not supplied (non-builder send)', async () => {
@@ -2042,7 +2045,7 @@ describe('tower-routes', () => {
       const { res } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(mockResolveTarget).toHaveBeenCalledWith('architect', '/tmp/ws', undefined);
+      expect(mockResolveTarget).toHaveBeenCalledWith({ kind: 'architect' }, { id: undefined, workspace: '/tmp/ws' });
     });
 
     it('returns 200 delivered:true on a successful send to a clean prompt (Spec 1313)', async () => {
@@ -2207,7 +2210,7 @@ describe('tower-routes', () => {
 
       it('passes the architect sender to resolveTarget unchanged (affinity routing still sees it)', async () => {
         await heldRowFrom('architect:main');
-        expect(mockResolveTarget).toHaveBeenCalledWith('spir-9', '/tmp/ws', 'architect:main');
+        expect(mockResolveTarget).toHaveBeenCalledWith({ kind: 'id', name: 'spir-9' }, { id: 'architect:main', workspace: '/tmp/ws' });
       });
 
       // Maintainer review (PR #1486): `from` was the one unguarded field on this route.
@@ -2422,6 +2425,306 @@ describe('tower-routes', () => {
     });
 
     // Issue #1567: the interrupt bypasses the GATE, not the per-harness write strategy.
+    // Spec 1940 phase 2. Every other test in this file fakes the two resolvers; these run
+    // the REAL ones behind the route, against the in-memory registry and a fake terminal
+    // map, so what is asserted is what `afx send` gets back: the address is read once, the
+    // recipient is found or held or refused, and each refusal has its own status.
+    describe('addresses across workspaces (Spec 1940), with the real resolvers', () => {
+      let root: string;
+      let CODEV: string;
+      let CLOUD: string;
+      const BUILDER = 'builder-spir-100';
+      const allRows = () => sendDbHolder.db.prepare('SELECT * FROM mailbox').all() as DbMailbox[];
+
+      /**
+       * Give these agents live terminals at a clean prompt. Returns each one's write spy,
+       * keyed `<workspace basename>/<agent>`.
+       */
+      function liveAgents(agents: Record<string, { architects?: string[]; shells?: string[] }>) {
+        const writes: Record<string, ReturnType<typeof vi.fn>> = {};
+        const terminals = new Map<string, ReturnType<typeof vi.fn>>();
+        const map = new Map(Object.entries(agents).map(([ws, { architects = [], shells = [] }]) => {
+          const ids = (names: string[]) => new Map(names.map((name) => {
+            const key = `${path.basename(ws)}/${name}`;
+            writes[key] = vi.fn();
+            terminals.set(`term-${key}`, writes[key]);
+            return [name, `term-${key}`] as const;
+          }));
+          return [ws, { architects: ids(architects), builders: new Map(), shells: ids(shells), fileTabs: new Map() }] as const;
+        }));
+        vi.mocked(getWorkspaceTerminals).mockImplementation(() => map as any);
+        mockGetTerminalManager.mockReturnValue({
+          listSessions: mockListSessions.mockReturnValue([]),
+          getSession: (id: string) => (terminals.has(id) ? gateSession(terminals.get(id)!, '❯ ', true, id) : null),
+        });
+        return writes;
+      }
+
+      /** POST /api/send as `from`, whose workspace is codev unless said otherwise. */
+      async function send(to: string, from: string | undefined, extra: Record<string, unknown> = {}) {
+        mockParseJsonBody.mockResolvedValue({ to, message: 'hello', from, workspace: CODEV, fromWorkspace: CODEV, ...extra });
+        const { res, statusCode, body } = makeRes();
+        await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+        return { status: statusCode(), body: JSON.parse(body()) };
+      }
+
+      beforeEach(async () => {
+        const actual = await vi.importActual<typeof import('../servers/tower-messages.js')>('../servers/tower-messages.js');
+        mockResolveTarget.mockImplementation(actual.resolveTarget as (...args: unknown[]) => unknown);
+        mockResolveAgentInRegistry.mockImplementation(actual.resolveAgentInRegistry as (...args: unknown[]) => unknown);
+
+        // realpath: on macOS the temp dir sits behind a symlink, and the registry keys rows
+        // by the path as it is given.
+        root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'spec1940-routes-'));
+        CODEV = path.join(root, 'codev');
+        CLOUD = path.join(root, 'codev-cloud');
+        fs.mkdirSync(path.join(CODEV, '.builders', 'spir-100'), { recursive: true });
+        fs.mkdirSync(CLOUD);
+
+        const architect = (name: string) => ({ name, cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+        for (const name of ['main', 'review']) setArchitectByName(CODEV, name, architect(name));
+        for (const name of ['main', 'review', 'tunnel']) setArchitectByName(CLOUD, name, architect(name));
+        upsertBuilder({
+          id: BUILDER,
+          name: BUILDER,
+          status: 'implementing',
+          phase: 'implement',
+          worktree: path.join(CODEV, '.builders', 'spir-100'),
+          branch: 'builder/spir-100',
+          type: 'spec',
+          spawnedByArchitect: 'review',
+        });
+        liveAgents({
+          [CODEV]: { architects: ['main', 'review'] },
+          [CLOUD]: { architects: ['main', 'review', 'tunnel'], shells: ['shell-7'] },
+        });
+      });
+
+      afterEach(() => {
+        mockResolveTarget.mockReset();
+        mockResolveAgentInRegistry.mockReset();
+        vi.mocked(getWorkspaceTerminals).mockImplementation(() => new Map());
+        fs.rmSync(root, { recursive: true, force: true });
+      });
+
+      it('delivers <workspace>:architect:<name> to that architect, as a same-workspace send would be', async () => {
+        const writes = liveAgents({
+          [CODEV]: { architects: ['main', 'review'] },
+          [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+        });
+        const { status, body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+
+        expect(status).toBe(200);
+        expect(body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'tunnel' });
+        await vi.waitFor(() => expect(writes['codev-cloud/tunnel'].mock.calls.at(-1)?.[0]).toBe('\r'));
+        expect(writes['codev-cloud/tunnel'].mock.calls.map((c) => c[0]).join('')).toContain('hello');
+        for (const other of ['codev-cloud/main', 'codev-cloud/review', 'codev/main', 'codev/review']) {
+          expect(writes[other]).not.toHaveBeenCalled();
+        }
+        expect(allRows()).toHaveLength(1);
+        expect(allRows()[0]).toMatchObject({ workspace_path: CLOUD, to_agent: 'tunnel', from_agent: 'architect:review' });
+      });
+
+      it('holds it (no-live-pty) when the architect is registered and has no live terminal', async () => {
+        const writes = liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
+        const { status, body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+
+        expect(status).toBe(200);
+        expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', resolvedTo: 'tunnel' });
+        expect(mailbox.findHeldForAgent(sendDbHolder.db, CLOUD, 'tunnel')).toHaveLength(1);
+        // Held for `tunnel`, and not rerouted to the front door.
+        expect(writes['codev-cloud/main']).not.toHaveBeenCalled();
+        expect(mailbox.findHeldForAgent(sendDbHolder.db, CLOUD, 'main')).toHaveLength(0);
+      });
+
+      it('schedules it on the --delay path too, with no live terminal', async () => {
+        liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
+        const { status, body } = await send('codev-cloud:architect:tunnel', 'architect:review', { options: { deliverAfter: 30 } });
+
+        expect(status).toBe(200);
+        expect(body).toMatchObject({ ok: true, scheduled: true, resolvedTo: 'tunnel', terminalId: null });
+        const row = mailbox.getById(sendDbHolder.db, body.mailboxId);
+        expect(row).toMatchObject({ workspace_path: CLOUD, to_agent: 'tunnel', status: 'held', terminal_id: null });
+        expect(row?.not_before).toBe(body.notBefore);
+      });
+
+      it('fails for an unknown architect name with a 404 that names the workspace, its architects and its front door', async () => {
+        const { status, body } = await send('codev-cloud:architect:ghost', 'architect:review');
+        expect(status).toBe(404);
+        expect(body.error).toBe('NOT_FOUND');
+        expect(body.message).toBe(
+          "Architect 'ghost' not found in workspace 'codev-cloud'. " +
+            'Architects there: main, review, tunnel. Front door: codev-cloud:architect.',
+        );
+        expect(allRows()).toHaveLength(0);
+      });
+
+      describe('the builder rule', () => {
+        it('refuses a builder naming an architect in another workspace: 403, the front door named, nothing stored', async () => {
+          for (const options of [undefined, { deliverAfter: 30 }]) {
+            const { status, body } = await send('codev-cloud:architect:tunnel', BUILDER, options ? { options } : {});
+            expect(status).toBe(403);
+            expect(body.error).toBe('REFUSED');
+            expect(body.message).toBe(
+              `builder ${BUILDER} may only address its own spawning architect; ` +
+                'reach that workspace through its front door: afx send codev-cloud:architect "…"',
+            );
+          }
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('refuses the same when the architect has no live terminal: it is refused, not held', async () => {
+          liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main'] } });
+          const { status, body } = await send('codev-cloud:architect:tunnel', BUILDER);
+          expect(status).toBe(403);
+          expect(body.error).toBe('REFUSED');
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('refuses <own workspace>:architect:<other> exactly as Spec 755 does: 404 and its message', async () => {
+          for (const to of ['architect:main', 'codev:architect:main']) {
+            const { status, body } = await send(to, BUILDER);
+            expect(status).toBe(404);
+            expect(body).toEqual({ error: 'NOT_FOUND', message: `builder ${BUILDER} may only address its own spawning architect` });
+          }
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('lets the builder reach its own architect by name, with or without its workspace in front', async () => {
+          for (const to of ['architect:review', 'codev:architect:review']) {
+            const { status, body } = await send(to, BUILDER);
+            expect(status).toBe(200);
+            expect(body.resolvedTo).toBe('review');
+          }
+          expect(allRows().map((r) => r.workspace_path)).toEqual([CODEV, CODEV]);
+        });
+
+        it('sends <other workspace>:architect from the builder to main there, not to a namesake of its own architect', async () => {
+          // The builder was spawned by codev's `review`; codev-cloud has a `review` as well.
+          const { status, body } = await send('codev-cloud:architect', BUILDER);
+          expect(status).toBe(200);
+          expect(body.resolvedTo).toBe('main');
+          expect(allRows()[0]).toMatchObject({ workspace_path: CLOUD, to_agent: 'main' });
+        });
+
+        it('keeps affinity for <own workspace>:architect', async () => {
+          const { body } = await send('codev:architect', BUILDER);
+          expect(body.resolvedTo).toBe('review');
+        });
+      });
+
+      describe('malformed addresses are a 400 that names the expected shape', () => {
+        it('a Tower written as a second workspace', async () => {
+          const { status, body } = await send('devvm:codev:architect', 'architect:review');
+          expect(status).toBe(400);
+          expect(body.error).toBe('MALFORMED_ADDRESS');
+          expect(body.message).toBe(
+            'Malformed address: a local address has at most a workspace before `architect`. ' +
+              'Expected [<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>.',
+          );
+        });
+
+        it.each(['a:b:c', ':architect', 'codev::architect', 'codev:architect:a:b'])('%s (was a 404 "not found")', async (to) => {
+          const { status, body } = await send(to, 'architect:review');
+          expect(status).toBe(400);
+          expect(body.error).toBe('MALFORMED_ADDRESS');
+          expect(body.message).toContain('Expected [<workspace>:]architect[:<name>]');
+        });
+
+        it('is refused before anything is resolved or stored, on the immediate and the delayed path', async () => {
+          await send('a:b:c', 'architect:review');
+          await send('a:b:c', 'architect:review', { options: { deliverAfter: 30 } });
+          expect(mockResolveTarget).not.toHaveBeenCalled();
+          expect(mockResolveAgentInRegistry).not.toHaveBeenCalled();
+          expect(allRows()).toHaveLength(0);
+        });
+      });
+
+      describe('an afx:// address', () => {
+        const UNAVAILABLE =
+          'Cross-Tower messaging is not available in this version: an afx:// address cannot be delivered yet. ' +
+          'Use a local address: [<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>.';
+
+        it.each([
+          ['never connected to Codev Cloud', null],
+          ['connected to Codev Cloud', { tower_id: 't-1', tower_name: 'mbp', server_url: 'https://cloud.example', api_key: 'k' }],
+        ])('is refused as cross-Tower messaging not available on a Tower %s', async (_note, cloud) => {
+          mockReadCloudConfig.mockReturnValue(cloud);
+          for (const to of ['afx://devvm/codev:architect', 'afx://mbp/codev-cloud:architect:tunnel', 'afx://sam@studio/codev:architect:data']) {
+            const { status, body } = await send(to, 'architect:review');
+            expect(status).toBe(400);
+            expect(body).toEqual({ error: 'CROSS_TOWER_UNAVAILABLE', message: UNAVAILABLE });
+          }
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('is refused on the delayed path, and for an interrupt (`afx interrupt`), by Tower itself', async () => {
+          for (const options of [{ deliverAfter: 30 }, { escape: true }, { interrupt: true }]) {
+            const { status, body } = await send('afx://devvm/codev:architect:local', 'architect:review', { options });
+            expect(status).toBe(400);
+            expect(body.error).toBe('CROSS_TOWER_UNAVAILABLE');
+          }
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it.each(['afx://devvm', 'afx://devvm/architect', 'afx://devvm:4100/codev:architect', 'afx:/devvm/codev:architect'])(
+          'that is malformed (%s) fails as malformed, not as unavailable',
+          async (to) => {
+            const { status, body } = await send(to, 'architect:review');
+            expect(status).toBe(400);
+            expect(body.error).toBe('MALFORMED_ADDRESS');
+            expect(body.message).toContain('Expected afx://');
+          },
+        );
+      });
+
+      it('resolves a shell id as <workspace>:<shell-id>, as today', async () => {
+        const { status, body } = await send('codev-cloud:shell-7', 'architect:review');
+        expect(status).toBe(200);
+        expect(body.resolvedTo).toBe('shell-7');
+      });
+
+      // Cron resolves a task's target through the same two resolvers when the task fires.
+      describe('a cron task\'s target', () => {
+        const task = (target: string) => ({ name: 'Nightly Report', target, workspacePath: CODEV });
+
+        it('reaches a named architect in another workspace, and holds for one with no live terminal', async () => {
+          liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
+          const log = vi.fn();
+
+          const result = await deliverCronMessage(task('codev-cloud:architect:tunnel'), 'report ready', log);
+
+          expect(result).toMatchObject({ outcome: 'held', reason: 'no-live-pty' });
+          expect(allRows()).toHaveLength(1);
+          expect(allRows()[0]).toMatchObject({ workspace_path: CLOUD, to_agent: 'tunnel', body: 'report ready' });
+        });
+
+        it('goes to the front door for bare architect, in its own workspace and in another', async () => {
+          await deliverCronMessage(task('architect'), 'one', vi.fn());
+          await deliverCronMessage(task('codev-cloud:architect'), 'two', vi.fn());
+          expect(allRows().map((r) => [r.workspace_path, r.to_agent])).toEqual([[CODEV, 'main'], [CLOUD, 'main']]);
+        });
+
+        it('is not delivered, and says why, when it is not an address', async () => {
+          const log = vi.fn();
+          const result = await deliverCronMessage(task('devvm:codev:architect'), 'report ready', log);
+
+          expect(result).toMatchObject({ outcome: 'unresolved', mailboxId: null });
+          expect(log).toHaveBeenCalledWith('WARN', expect.stringMatching(/^Cron 'Nightly Report': target 'devvm:codev:architect' is not an address \(Malformed address: /));
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('is not delivered for an afx:// address, should one get past the loader', async () => {
+          const log = vi.fn();
+          const result = await deliverCronMessage(task('afx://devvm/codev:architect'), 'report ready', log);
+
+          expect(result).toMatchObject({ outcome: 'unresolved', mailboxId: null });
+          expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining("target 'afx://devvm/codev:architect' not found"));
+          expect(allRows()).toHaveLength(0);
+        });
+      });
+    });
+
     describe('interrupt honours the per-harness write strategy (Issue #1567)', () => {
       const LONG = 'u'.repeat(300); // over BRACKET_MIN_BYTES → the bracketed/chunked path
 

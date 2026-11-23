@@ -9,14 +9,17 @@
  *
  * All names are stored and compared in lowercase per spec.
  *
- * `stripLeadingZeros` and `resolveAgentName` live in codev-sdk so the
- * VS Code extension can use the same matching semantics; we re-export
+ * `stripLeadingZeros`, `resolveAgentName` and the address parser live in codev-sdk
+ * so the VS Code extension can use the same matching semantics; we re-export
  * them here so existing agent-farm callsites are unaffected.
  */
 
 import type { BuilderType } from '../types.js';
 export { stripLeadingZeros, resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 import { stripLeadingZeros } from '@cluesmith/codev-sdk/agent-names';
+// The one address parser (Spec 1940), shared with the VS Code extension.
+export { parseAddress, isRemoteAddress } from '@cluesmith/codev-sdk/address';
+import { parseAddress, isRemoteAddress } from '@cluesmith/codev-sdk/address';
 
 /**
  * Build a canonical agent name from builder type and ID.
@@ -78,23 +81,19 @@ export function parseAgentName(name: string): { protocol: string; id: string } |
 }
 
 /**
- * Parse a target address into project and agent components.
- * Normalizes the agent portion to lowercase.
- *
- * Examples:
- *   parseAddress('architect')                  → { agent: 'architect' }
- *   parseAddress('builder-spir-109')           → { agent: 'builder-spir-109' }
- *   parseAddress('codev-public:architect')     → { project: 'codev-public', agent: 'architect' }
- *   parseAddress('codev-public:builder-spir-109') → { project: 'codev-public', agent: 'builder-spir-109' }
+ * Why an `afx://` address is refused (Spec 1940, stage 1). Said the same way by Tower, by
+ * the cron loader and by the commands that refuse before calling Tower. It holds whether
+ * or not the Tower is connected to Codev Cloud.
  */
-export function parseAddress(target: string): { project?: string; agent: string } {
-  const colonIndex = target.indexOf(':');
-  if (colonIndex > 0) {
-    return {
-      project: target.substring(0, colonIndex).toLowerCase(),
-      agent: target.substring(colonIndex + 1).toLowerCase(),
-    };
-  }
-  return { agent: target.toLowerCase() };
-}
+export const CROSS_TOWER_UNAVAILABLE_MESSAGE =
+  'Cross-Tower messaging is not available in this version: an afx:// address cannot be delivered yet. ' +
+  'Use a local address: [<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>.';
 
+/**
+ * Is `target` a well-formed address that names a Tower? A malformed one is not: it is
+ * left for Tower to refuse as malformed, with the shape that was expected.
+ */
+export function namesATower(target: string): boolean {
+  const parsed = parseAddress(target);
+  return parsed.ok && isRemoteAddress(parsed.address);
+}

@@ -303,3 +303,58 @@ workspace called `arch`. Gate still pending; the owner has not approved.
 - So: an unidentified intermittent failure under load, one occurrence. Not blocked. For the
   review's Flaky Tests section. From now on porch's output is kept whole in the scratchpad so a
   failing test can be named.
+
+## 2026-11-23 — phase 2 built: named architects across workspaces, the builder rule
+
+Resumed after a context refresh at the phase boundary.
+
+**First, the four items carried from claude's phase 1 review** (all in the SDK and the types):
+`completeAddress` no longer deletes an owner that has no Tower; `AgentAddress` is a discriminated
+union, so an id with no name is a type error (the formatter still checks it at runtime, for wire
+JSON); a parse error quotes a refused value as printable ASCII, cut at 64 characters; an address
+longer than 512 characters fails as `ADDRESS_TOO_LONG`. Five new rows in the shared table.
+
+**The resolvers.** `resolveTarget` and `resolveAgentInRegistry` take the structured address and a
+sender context `{ id, workspace }`. The old two-slot `parseAddress` is deleted; the routes read
+the text once with `parseTarget`. Both resolvers share one workspace lookup (`locateWorkspace`)
+and one permission check (`refusalToNameArchitect`).
+
+- *Permission* is asked of the sender's workspace for every target; *affinity* applies only when
+  the target workspace is the sender's. A builder writing `<other>:architect` reaches `main`
+  there and costs no database read; the #1094 warning no longer fires for it.
+- New error codes and statuses: `MALFORMED_ADDRESS` 400, `CROSS_TOWER_UNAVAILABLE` 400,
+  `REFUSED` 403. The SDK's `sendMessage` failure result carries `errorCode`.
+
+**Decisions I made, for the review to check:**
+
+1. **The Spec 755 refusal keeps its code.** A builder naming another architect in its *own*
+   workspace still gets `NOT_FOUND` / 404 with the unchanged message. Only the new case, a named
+   architect in *another* workspace, is `REFUSED` / 403. The plan says both "403 for refused" and
+   "every resolution test passes without its expectations changed"; the existing test pins
+   `NOT_FOUND` for the Spec 755 case, and `bugfix-1333` pins how the client shows it. So the two
+   refusals have different codes. If the owner would rather have one code, it is a two-line
+   change plus two test expectations.
+2. **Two test expectations did change**, beyond the two the plan names. `tower-messages.test.ts`
+   had two malformed-address tests (`project:` and a blank target) expecting `NO_CONTEXT`. They
+   now expect `MALFORMED_ADDRESS`. The status is 400 either way; on the wire `error` moves from
+   `INVALID_PARAMS` to `MALFORMED_ADDRESS` for text that is not an address. I read these as
+   parse tests, not resolution tests, but it is a change to an existing expectation and I am
+   saying so.
+3. **The sender's workspace is `workspace ?? fromWorkspace`** from the request body. Every caller
+   sends them equal or sends only `workspace`.
+4. **A builder id sent with no workspace is still held to the rule.** The lookup falls back to
+   matching the id alone, so leaving the workspace out of the request opens nothing.
+5. **A builder is refused before the name is looked up**, so it cannot learn which architects
+   another workspace has from the error.
+6. The cross-Tower refusal text is one constant, used by Tower, the cron loader, `afx interrupt`
+   and `afx refresh`. It does not quote the address.
+
+**Tests.** New `spec-1940-cross-workspace-resolve.test.ts` (both resolvers, fake terminal map and
+registry, including the query-count assertions). In `tower-routes.test.ts`, a block that runs the
+*real* resolvers behind `/api/send` against the in-memory registry: delivery, the immediate and
+`--delay` hold, the builder rule, each status code, `afx://` on a connected and a never-connected
+Tower, and cron targets. I checked the affinity tests fail when affinity is allowed to leak
+across workspaces (11 failures), then restored the code.
+
+`spec-1307-send-delay.test.ts` is listed in the plan but tests only the timer registry and calls
+no resolver, so it is unchanged; the delayed path is covered in `tower-routes.test.ts`.

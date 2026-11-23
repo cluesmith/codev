@@ -292,6 +292,20 @@ function extractTowerError(text: string): string {
   }
 }
 
+/**
+ * The machine-readable code of a Tower error body (`{ error: 'REFUSED', message }`), when
+ * it has one. {@link extractTowerError} folds the code into the text for people; a caller
+ * that must act on WHICH failure it was reads this, and never matches the text.
+ */
+function extractTowerErrorCode(text: string): string | undefined {
+  try {
+    const json = JSON.parse(text) as { error?: unknown };
+    return typeof json.error === 'string' ? json.error : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class TowerClient {
   private readonly baseUrl: string;
   private readonly getAuthKey: () => string | null;
@@ -314,7 +328,7 @@ export class TowerClient {
   async request<T>(
     path: string,
     options: RequestInit = {}
-  ): Promise<{ ok: boolean; status: number; data?: T; error?: string }> {
+  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; errorCode?: string }> {
     try {
       const authKey = this.getAuthKey();
       const headers: Record<string, string> = {
@@ -334,7 +348,10 @@ export class TowerClient {
       if (!response.ok) {
         const text = await response.text();
         const error = extractTowerError(text);
-        return { ok: false, status: response.status, error };
+        const errorCode = extractTowerErrorCode(text);
+        return errorCode === undefined
+          ? { ok: false, status: response.status, error }
+          : { ok: false, status: response.status, error, errorCode };
       }
 
       if (response.status === 204) {
@@ -811,6 +828,14 @@ export class TowerClient {
     deferred?: boolean;
     error?: string;
     /**
+     * Spec 1940: Tower's code for a failed send, when it gave one, so a caller can tell the
+     * failures apart without matching {@link error}'s text: `MALFORMED_ADDRESS` (the text
+     * is not an address), `REFUSED` (this sender may not name that recipient),
+     * `CROSS_TOWER_UNAVAILABLE` (an `afx://` address), and the older `NOT_FOUND`,
+     * `AMBIGUOUS` and `INVALID_PARAMS`. Absent when Tower could not be reached.
+     */
+    errorCode?: string;
+    /**
      * Spec 1313 mailbox-first delivery. `delivered` = written to the PTY now;
      * `held` = persisted to the durable mailbox and awaiting a clean prompt
      * (`reason` says why: `busy` | `no-profile` | `no-live-pty`), with `mailboxId`
@@ -914,7 +939,9 @@ export class TowerClient {
     );
 
     if (!result.ok) {
-      return { ok: false, error: result.error };
+      return result.errorCode === undefined
+        ? { ok: false, error: result.error }
+        : { ok: false, error: result.error, errorCode: result.errorCode };
     }
 
     return {
