@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
+import { trackedPids } from './helpers/tracked-pids.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -25,7 +26,7 @@ import { resolveGitBash } from '../lib/platform/windows/git-bash.js';
 
 const onWindows = process.platform === 'win32';
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-job-'));
-const leftovers: number[] = [];
+const leftovers = trackedPids();
 const helpers: WindowsJobHelper[] = [];
 
 /**
@@ -47,15 +48,9 @@ if (role === 'orphan') {
 setInterval(() => {}, 1000);
 `);
 
-afterAll(() => {
+afterAll(async () => {
   for (const helper of helpers) helper.stop();
-  for (const pid of leftovers) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already gone
-    }
-  }
+  await leftovers.killSurvivors();
   try {
     fs.rmSync(workDir, { recursive: true, force: true });
   } catch {

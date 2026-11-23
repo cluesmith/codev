@@ -350,7 +350,7 @@ describe('killSessionTree on Windows', () => {
     expect(failing.events).toContain('taskkill 44');
   });
 
-  it('#1915: never terminates a job that holds a Tower; ends the session\'s own processes one by one', async () => {
+  it('#1915: never terminates a job that holds a Tower; ends only the session\'s own tree, one by one', async () => {
     forceHostPlatform('win32');
     // 80 the session's shellper, 81 its shell, 82 an orphan of this session (parent gone).
     // 90 a Tower started from inside the session (parent gone), 91 a shellper it created, 92 that session's agent.
@@ -370,7 +370,8 @@ describe('killSessionTree on Windows', () => {
 
     expect(terminateJob).not.toHaveBeenCalled();
     expect(h.events.filter((e) => e.startsWith('taskkill'))).toEqual([]);
-    expect(h.events.filter((e) => e.startsWith('kill')).sort()).toEqual(['kill 80', 'kill 81', 'kill 82']);
+    // 82 (an orphan of this session, parent gone) is left with the job: only the root's live tree is ended.
+    expect(h.events.filter((e) => e.startsWith('kill')).sort()).toEqual(['kill 80', 'kill 81']);
     expect(result.jobError).toMatch(/job J holds Tower or another session's shellper \(pids 90, 91, 92\)/);
     expect(result.signaled).toBe(true);
   });

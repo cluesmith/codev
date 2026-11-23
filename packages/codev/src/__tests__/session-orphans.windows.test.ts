@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
+import { trackedPids } from './helpers/tracked-pids.js';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -36,7 +37,7 @@ const onWindows = process.platform === 'win32';
 const shellperScript = fileURLToPath(new URL('../../dist/terminal/shellper-main.js', import.meta.url));
 const towerServer = fileURLToPath(new URL('../../dist/agent-farm/servers/tower-server.js', import.meta.url));
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1915-orphans-'));
-const leftovers: number[] = [];
+const leftovers = trackedPids();
 const cleanups: Array<() => Promise<void> | void> = [];
 const helpers: WindowsJobHelper[] = [];
 
@@ -56,13 +57,7 @@ afterAll(async () => {
     }
   }
   for (const helper of helpers) helper.stop();
-  for (const pid of leftovers) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already gone
-    }
-  }
+  await leftovers.killSurvivors();
   try {
     fs.rmSync(workDir, { recursive: true, force: true });
   } catch {
