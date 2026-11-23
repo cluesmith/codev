@@ -68,3 +68,9 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
 - Full suite: run 1 failed on bugfix-1137 (mine: gitea pr-view shape, fixed) + 3 spawn-heavy tests that pass
   alone (launch-loop, ide-command, agy-auth-cache). porch `tests` failed again at load ~30 (names not shown);
   my next full run passed clean (8290/8290). Per main-32: stopped, opened draft PR #1958 for CI.
+- Phase 1 tests-check skipped once under main-32 (architect confirmed GitHub 8/8 green at bb2ad2710);
+  skip lived only in worktree .codev/config.local.json, removed in the same command; noted in PR #1958.
+- CMAP Phase 1: codex APPROVE, claude APPROVE. Follow-ups applied in 0448553f0: gitlab empty-output guard +
+  body "" default; legacy /status paginated. Probe: `gh pr view --json mergeStateStatus,reviewDecision` works
+  without push access (cli/cli). Claude also noted: gitlab pr-view now maps body/baseRefName/headRefName
+  (name in PR body); add the 2 concepts to repo-local `forge` skill tables in Phase 7.
