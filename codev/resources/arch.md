@@ -1076,6 +1076,17 @@ branches are testable on macOS/Linux.
   prompt (a `git fetch` / `git push` needing credentials) must be made non-interactive and fail
   instead, as `GitRefResolver`'s fetch (`GIT_TERMINAL_PROMPT=0`, a timeout) and porch's status
   push now are.
+- **Process bootstrap and current-folder lookup** (#1911): every Codev process entry point (each
+  `bin/*.js`, `tower-server.ts`, `shellper-main.ts`) imports `lib/process-bootstrap.ts` as its
+  FIRST import; `process-bootstrap.test.ts` enforces it. Its one step today, on Windows, sets
+  `NoDefaultCurrentDirectoryInExePath=1` (`lib/platform/windows/exe-search.ts`), so a bare-name
+  spawn (`git`, `npm`) never resolves to a same-named file in the cwd (libuv and `cmd.exe` both
+  honor it; node-pty already searches `PATH` only). Children inherit it: every persistent
+  terminal Tower opens (architect, builder, shell tab) is built from Tower's own environment, and
+  the non-persistent fallback's `windowsPtyBaseEnv` allowlist sets it explicitly, so every
+  terminal carries it: in a `cmd.exe` terminal a current-folder program runs only as `.\name`.
+  The VS Code extension host is shared, so it does not set the variable; `cli-process.ts`
+  refuses an unresolved bare `codev`/`afx` name instead.
 - **Resolvers**: `lib/platform/windows/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the
   System32 WSL launcher), `codev-sdk/node/executable` (`findExecutable` with `PATHEXT`,
   `resolveSpawnable` turns `.cmd` shims into `node <entry>` or `%COMSPEC% /d /s /c`),
@@ -2122,7 +2133,7 @@ consult -m claude spec 42
 |-------|-----------|----------------|-------------|
 | gemini | `agy` (Antigravity CLI; resolved real bin, not the IDE symlink) | Folded into the prompt (role + query) | OAuth / subscription (no API key) |
 | codex | `codex` | Temp file via `-c experimental_instructions_file=` flag | `OPENAI_API_KEY` |
-| claude | the installed `claude` CLI (`CODEV_CLAUDE_BIN` pin, else `PATH`; floor 2.1.141, Spec 1912) | Role + claude-lane capability note via `--system-prompt-file` | The CLI's own login (subscription for most). `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are withheld unless `consult.claudeAuth: "api-key"` |
+| claude | the installed `claude` CLI (`CODEV_CLAUDE_BIN` pin, else `PATH`; floor 2.1.141, Spec 1912) | Role + claude-lane capability note via `--system-prompt-file` | The CLI's own login (subscription for most). `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are withheld unless `consult.claudeAuth: "api-key"`: a billing guarantee, not secrecy (the reviewer can still Read the workspace `.env`). Caps: `consult.claudeMaxTurns` (200) and `consult.claudeMaxBudgetUsd` ($25) |
 
 **Query building**: Five subcommands (`pr`, `spec`, `plan`, `impl`, `general`) each build a prompt that includes the spec/plan/diff content plus a verdict template (`VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]`). PR diffs truncated to 50k chars, impl diffs to 80k chars.
 

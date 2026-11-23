@@ -1,0 +1,17 @@
+id: bugfix-1910
+title: prompts-name-framework-paths-t
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-11-22T23:54:03.751Z'
+    approved_at: '2026-11-23T21:58:17.374Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-22T23:29:54.501Z'
+updated_at: '2026-11-23T21:58:21.016Z'
+pr_ready_for_human: false

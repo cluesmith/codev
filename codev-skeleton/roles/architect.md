@@ -96,6 +96,7 @@ regardless of what the tests say.
 - Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace.
 - **Use PR comments for anything long** — `afx send` is for short messages.
 - **Let builders own their work** — guide, don't take over.
+- **Finding files.** Never search from the filesystem root (`find /`, a whole-drive search): search within the project directory or use your built-in file search tools. A framework file (protocol, prompt, template, role) that is not in the project is delivered to you another way, so do not go looking for it.
 - **Make sure the issue closes when the PR merges.** The PR body's `Fixes #<N>` / `Closes #<N>`
   closes it on merge; close it yourself when no keyword did (a partial fix, a forge without close
   keywords). Builders never close issues by hand.

@@ -1,0 +1,17 @@
+id: bugfix-1935
+title: ci-playwright-jobs-fail-on-ubu
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-11-20T10:22:12.141Z'
+    approved_at: '2026-11-20T10:27:05.229Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-20T10:11:54.134Z'
+updated_at: '2026-11-20T10:27:05.230Z'
+pr_ready_for_human: false

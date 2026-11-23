@@ -302,14 +302,26 @@ afx spawn 42 --resume
 Show status of all agents.
 
 ```bash
-afx status
+afx status [options]
 ```
+
+**Options:**
+- `--mine` - Only builders spawned by the current architect (`CODEV_ARCHITECT_NAME`)
+- `--architect <name>` - Only builders spawned by the named architect
+- `--activity` - Also show each builder's session activity and running test/review processes (slower)
+- `--json` - Machine-readable output (with `--activity`, includes the activity fields)
 
 **Description:**
 
-Displays the current state of Tower, the registered architects (one per
-sibling — Spec 786 Phase 5 replaces the pre-786 single-row collapse), and the
-running builders.
+Displays the current state of Tower, the registered architects, and every
+builder. Each builder row shows what the builder is doing now:
+
+- **Phase** - the porch phase, read from the builder's own worktree
+  `status.yaml` (`—` when the worktree has no porch project)
+- **Gate** - the human gate it is waiting at, and for how long
+- **Last active** - how long since its terminal last printed anything;
+  `stopped` when it has no live session, `unknown` when Tower is not running
+- **Held** - held-mail count, shown when the workspace has held mail
 
 **Example output (Tower running):**
 
@@ -326,33 +338,39 @@ Agent Farm Status
 
   Architects:
     main      (pid=12345 terminal=sess-abc-123)
-    ob-refine (pid=12346 terminal=sess-def-456)
 
-  Terminals:
-    builder - builder-spir-0042 (active)
+  Builders:
+    ID                    Owner           Type      Phase         Gate                  Last active
+    ──                    ─────           ────      ─────         ────                  ───────────
+    builder-spir-42       main            protocol  specify       spec-approval (2h)    5m ago
+    builder-air-43        main            protocol  complete      —                     stopped
+    builder-bugfix-44     main            bugfix    implement     —                     just now
+
+  Held mail: none
 ```
 
-**Example output (Tower not running — fallback mode):**
+`--activity` adds a section with, per builder: when its agent session
+transcript was last written, whether its last reply was an API error, its
+last three transcript lines, and the test or review processes (`vitest`,
+`pnpm test`, `consult`, …) running under its terminal. Transcript fields are
+read from the builder's pinned Claude session; on other harnesses, or when the
+file cannot be read, they show `unknown`. The process table read is bounded
+to a few seconds and also reports `unknown` when it cannot finish. The
+transcript lines are verbatim conversation text (control characters
+stripped): check them before pasting `--activity` output into a public issue.
 
 ```
-Agent Farm Status
-  Tower: not running
-  Run 'afx tower start' to start the tower daemon
-
-  Architects: 2 registered
-    (Tower not running — PID/port not available)
-    main:      cmd=claude started=2026-05-22T10:00:00Z
-    ob-refine: cmd=claude started=2026-05-22T11:00:00Z
-
-  Builders: none
+  Activity:
+    builder-spir-42  session write: 2m ago  ·  API error: no
+      > assistant: Running the suite before signalling porch.
+      > tool: Bash(pnpm test)
+      running: test pnpm test (pid 4242)
 ```
 
-Builder status values:
-- `spawning` - Worktree created, builder starting
-- `implementing` - Actively working
-- `blocked` - Stuck, needs architect help
-- `pr` - Implementation complete
-- `complete` - Merged, can be cleaned up
+In `--json`, each builder keeps its existing fields (`status` and `phase` are
+the values recorded at spawn) and adds `porchPhase`, `gate` (`{name, since}`
+or null), `lastActivityAt`, `terminalLive`, and `activity` (null without
+`--activity`). Any field that could not be read is `null`.
 
 ---
 

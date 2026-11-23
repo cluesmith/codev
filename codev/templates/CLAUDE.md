@@ -22,15 +22,15 @@ This project uses **Codev** for AI-assisted development.
 
 ## Available Protocols
 
-- **SPIR**: Multi-phase development with consultation (`codev/protocols/spir/protocol.md`)
-- **ASPIR**: Autonomous SPIR — no human gates on spec/plan (`codev/protocols/aspir/protocol.md`)
-- **AIR**: Autonomous Implement & Review for small features (`codev/protocols/air/protocol.md`)
-- **BUGFIX**: Bug fixes from GitHub issues (`codev/protocols/bugfix/protocol.md`)
-- **PIR**: Plan / Implement / Review — issue-driven with three human gates (plan-approval, dev-approval, pr) (`codev/protocols/pir/protocol.md`)
-- **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)
-- **MAINTAIN**: Codebase maintenance (`codev/protocols/maintain/protocol.md`)
-- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique (`codev/protocols/research/protocol.md`)
-- **SPIKE**: Time-boxed feasibility investigation — findings, not shipped code (`codev/protocols/spike/protocol.md`)
+- **SPIR**: Multi-phase development with consultation
+- **ASPIR**: Autonomous SPIR — no human gates on spec/plan
+- **AIR**: Autonomous Implement & Review for small features
+- **BUGFIX**: Bug fixes from GitHub issues
+- **PIR**: Plan / Implement / Review — issue-driven with three human gates (plan-approval, dev-approval, pr)
+- **EXPERIMENT**: Disciplined experimentation
+- **MAINTAIN**: Codebase maintenance
+- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique
+- **SPIKE**: Time-boxed feasibility investigation — findings, not shipped code
 
 ## File Resolution (How Codev Finds Protocols and Templates)
 
@@ -42,6 +42,8 @@ Codev resolves protocol files, prompts, agent definitions, and roles through a f
 4. **Installed package skeleton** — ships with `@cluesmith/codev` (the default for every standard protocol)
 
 **The absence of `codev/protocols/<name>/` on disk is not a missing reference** — it's the normal case for any protocol you haven't customized. The protocol resolves from the installed package's skeleton at runtime. Only protocols you want to customize need to live in your repo's `codev/protocols/`.
+
+**Finding files:** Never search from the filesystem root (`find /`, a whole-drive search): search within the project directory or use your built-in file search tools. A framework file (protocol, prompt, template, role) that is not in the project is delivered to you another way, so do not go looking for it.
 
 **Implication for `codev update` and CLAUDE.md / AGENTS.md merges:** when an updated template references a protocol, do NOT drop the reference because `codev/protocols/<name>/` is absent locally. The protocol resolves via the package skeleton, and dropping the reference removes it from your available-protocol list while it's still callable from the CLI.
 
@@ -155,4 +157,4 @@ Agent Farm is configured via `.codev/config.json` at the project root. Created d
 
 ## For More Info
 
-Read the full protocol documentation in `codev/protocols/`.
+Porch and `afx spawn` give each agent the full text of the protocol it is running.

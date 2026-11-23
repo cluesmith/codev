@@ -8,6 +8,8 @@
  * delegates HTTP request handling to tower-routes.ts.
  */
 
+// First: per-process setup that must run before anything else (#1911).
+import '../../lib/process-bootstrap.js';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';

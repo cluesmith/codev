@@ -122,7 +122,10 @@ jobs:
 
   canvas-browser:
     name: Artifact-Canvas Browser Tests
-    runs-on: ubuntu-latest
+    # #1935: pinned, not ubuntu-latest. The floating label rolled to ubuntu-26.04, and the
+    # Playwright this repo resolves (1.59.x) ships no Chromium build for it (support landed in
+    # 1.61). Move this pin only together with a Playwright bump, verified on the new image.
+    runs-on: ubuntu-24.04
     # Backstop for #1502. The stall's root cause is removed below (see the install
     # step), but every job stays bounded regardless: an unbounded job conceals its
     # own failure, which is #1502's real lesson. Healthy runs finish in ~4 min.
@@ -147,7 +150,7 @@ jobs:
       # system libraries, and that apt index fetch intermittently stalls indefinitely
       # (the fast azure.archive.ubuntu.com mirror is Ign-ored, and apt has no network
       # timeout on the fallback to archive.ubuntu.com). Those libraries are already
-      # present on the ubuntu-latest image: the sibling dashboard-e2e workflow installs
+      # present on the ubuntu-24.04 image: the sibling dashboard-e2e workflow installs
       # Chromium the same way without `--with-deps` and launches it successfully on
       # every scheduled run. Dropping the flag removes the stalling apt phase entirely.
       - name: Install Playwright Chromium
@@ -162,7 +165,10 @@ jobs:
 
   web-browser:
     name: Web Terminal Browser Tests
-    runs-on: ubuntu-latest
+    # #1935: pinned, not ubuntu-latest. The floating label rolled to ubuntu-26.04, and the
+    # Playwright this repo resolves (1.59.x) ships no Chromium build for it (support landed in
+    # 1.61). Move this pin only together with a Playwright bump, verified on the new image.
+    runs-on: ubuntu-24.04
     # Bounded like every job here (#1502). Healthy runs finish in ~3 min.
     timeout-minutes: 15
     steps:
