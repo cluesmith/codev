@@ -18,6 +18,12 @@
  *   created after it (the pid was reused). A parent that exists but cannot
  *   be opened (`unknown`) never makes an orphan.
  *
+ * A console host (`conhost.exe`, `OpenConsole.exe`) is never listed: it lives
+ * exactly as long as a process is attached to its console and exits on its own
+ * after, and ending it would cut that console from whatever still uses it
+ * (measured: a Tower started by `cmd start /b` keeps the console host of the
+ * `cmd` that started it, whose parent is gone).
+ *
  * The session's console host, launch loop and agent each have a live parent
  * all the way back to the root, so none of them can match. A background
  * process the user started on purpose and whose shell has exited does match:
@@ -45,6 +51,13 @@ type LiveMember = JobMemberProcess & { createdAt: number };
 
 function isLive(member: JobMemberProcess): member is LiveMember {
   return member.state === 'alive' && member.createdAt !== undefined;
+}
+
+const CONSOLE_HOSTS = new Set(['conhost.exe', 'openconsole.exe']);
+
+/** A console host, by image name. */
+export function isConsoleHost(member: JobMemberProcess): boolean {
+  return CONSOLE_HOSTS.has((member.name ?? '').toLowerCase());
 }
 
 function listed(member: LiveMember): ListedProcess {
@@ -92,7 +105,7 @@ export function withLiveDescendants(members: JobMemberProcess[], seeds: Iterable
 
 /** The orphans in one session's job listing, each with its descendants, oldest first. */
 export function classifyOrphans(rootPid: number, members: JobMemberProcess[], protectedPids: Set<number>): OrphanProcess[] {
-  const candidates = members.filter(isLive).filter((m) => m.pid !== rootPid && !protectedPids.has(m.pid));
+  const candidates = members.filter(isLive).filter((m) => m.pid !== rootPid && !protectedPids.has(m.pid) && !isConsoleHost(m));
   const children = liveChildren(candidates);
   const orphans: OrphanProcess[] = [];
   for (const member of candidates) {

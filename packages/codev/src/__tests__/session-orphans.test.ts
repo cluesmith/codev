@@ -52,6 +52,16 @@ describe('classifyOrphans', () => {
     expect(classifyOrphans(ROOT, [...sessionTree, unknownParent, exited, noTime], new Set())).toEqual([]);
   });
 
+  it('never lists a console host, as an orphan or a descendant', () => {
+    const members = [
+      ...sessionTree,
+      m(150, 999, 2000, 'gone', undefined, 'conhost.exe'),
+      m(151, 998, 2001, 'gone', undefined, 'cmd.exe'),
+      m(152, 151, 2002, 'alive', 2001, 'OpenConsole.exe'),
+    ];
+    expect(classifyOrphans(ROOT, members, new Set())).toEqual([{ pid: 151, name: 'cmd.exe', createdAt: 2001, cpuMs: 151, descendants: [] }]);
+  });
+
   it('never lists a protected process', () => {
     const members = [...sessionTree, m(140, 999, 2000, 'gone')];
     expect(classifyOrphans(ROOT, members, new Set([140]))).toEqual([]);
