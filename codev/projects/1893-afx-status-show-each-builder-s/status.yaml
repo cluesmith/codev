@@ -1,0 +1,14 @@
+id: '1893'
+title: afx-status-show-each-builder-s
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-23T18:53:51.731Z'
+updated_at: '2026-11-23T18:53:51.732Z'
