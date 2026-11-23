@@ -74,3 +74,15 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   body "" default; legacy /status paginated. Probe: `gh pr view --json mergeStateStatus,reviewDecision` works
   without push access (cli/cli). Claude also noted: gitlab pr-view now maps body/baseRefName/headRefName
   (name in PR body); add the 2 concepts to repo-local `forge` skill tables in Phase 7.
+
+## Phase 2 — readonly_core (built 66b6921c0)
+- Modules: allow-list, runner, validate, roots, settings, report, render, git-facts + helpers
+  (git-fixture with state snapshot, stub git/gh PATH recorders). 8 test files, 373 tests, all pass locally
+  (targeted run only; no local full suite per architect). Build passes.
+- Choices: runner bounds ls-remote/fetch automatically by subcommand (no caller flag); notRun summary is the
+  reason alone (the human line already says "not run"); pathspecs use `:(top,glob)` so matching is anchored at
+  the repo root from any cwd; diff uses --no-renames so a file renamed away from a watched path still shows.
+- Ref-neutral fetch by SHA works against a local bare origin (protocol v2); snapshot identical before/after.
+- Porch's context-refresh task at the Phase 1→2 boundary was not run: its commands were not captured before the
+  next `porch next` replaced the task, and a context compaction happened at the same point.
+- Waiting: architect's word on main-38 before `porch done` (GitHub run on the pushed head may come first).
