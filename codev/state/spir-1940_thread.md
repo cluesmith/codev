@@ -155,3 +155,21 @@ claude read. Number 11: chose to serialise relay calls per peer (one sentence, o
 narrowing the ordering promise. Checked in source before writing point 6: the resolver intercepts
 only the literal `architect` before a colon, so `arch:review` today is agent `review` in a
 workspace called `arch`. Gate still pending; the owner has not approved.
+
+## 2026-11-23 — spec-approval APPROVED by the human; entering plan
+
+- Architect relayed (18:57Z): the human approved `spec-approval`, decision main-26 via the
+  Decisions tab, on the spec text at `90ebb0245`. Checked first that the spec is byte-identical to
+  that commit, then ran `porch approve 1940 spec-approval --a-human-explicitly-approved-this`.
+- The approval adopts the recommended answer to every Open Question. In particular: grammar G;
+  Tower names per owner; and Open Question 4, so **this project plans and builds STAGE 1 ONLY**.
+  Stages 2 and 3 become follow-up issues that the architect files. Do not plan them.
+- **Carry into the plan:** the owner has asked about the front-door-only opt-in setting
+  (Decision 10) and has NOT ruled. The architect recommended cutting it from stage 1. Until he
+  rules, plan it as its own separable phase (or clearly separable item) so it can be dropped at
+  plan approval without reworking the rest. The default (open) and the builder front-door rule
+  are not in question.
+- Next gate is `plan-approval`, the owner's. Stop there.
+- Still unanswered: whether to rewrite history for the Co-Authored-By trailer on `d4cb7e648`.
+  All later commits carry no trailer; keep it that way.
+- Porch's first plan-phase task is a context refresh at boundary `enter:plan`.
