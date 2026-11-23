@@ -201,10 +201,13 @@ afx cleanup -p 585 -f           # Force (unmerged branch)
 ## afx status
 
 ```bash
-afx status                      # Show all builders and workspace status
+afx status                      # Tower, workspace, architects and every builder
+afx status --mine               # Only builders this architect spawned
+afx status --activity           # Also: last transcript lines, API-error flag, running test/review processes (slower)
+afx status --json               # Machine-readable (add --activity for the activity fields)
 ```
 
-No flags needed. Shows Tower status, workspace, and all active builders.
+Each builder row shows its live porch **Phase** and the **Gate** it waits at with its age (read from the builder's own worktree `status.yaml`), and **Last active** — time since its terminal last printed (`stopped` = no live session). A field that cannot be read shows `unknown`.
 
 ## afx whoami
 
