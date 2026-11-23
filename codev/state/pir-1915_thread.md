@@ -85,3 +85,14 @@
   process-tree.windows and tower-lifecycle.windows still use the unchecked leftovers pattern — named in the PR.
 - Stop rule (architect): if the next two CI runs on this fix are not both green, no more patches: send a design note
   (guard vs. preventing the case: Tower refusing to run inside any session job, harness starts Towers the supported way).
+
+## 2026-11-23 — prevent design (aad9c00a1)
+- Human: drop the listing entirely; prevent instead of guard. Tower refuses at boot to run in ANY session job (jobs of
+  every live shellper from the census + the marker's); teardown back to main's; helper gains only in-job (fits a
+  command line again). Harnesses keep the marker for `tower start` only so afx uses CIM inside a session.
+- 15 files / ~456 lines vs main (+ plan, thread, status.yaml). macOS/Linux: no runtime change.
+- Local: all .windows. green; full suite 8135 passed, 0 failed. Real-session check 17/17 (both afx cleanup paths end
+  the builder and its orphaned find; architect/Tower survive; restart OK). Main Tower 53132 throughout.
+- CI 45132497859: fully green. Run 2: 45133587326.
+- Boot cost of the refusal check, measured: ~0.6s with 9 live shellpers (warm PowerShell); a few seconds cold.
+- Plan file still describes the earlier design; the review will record the course change.
