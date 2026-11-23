@@ -48,3 +48,13 @@
   whose parent is gone -> console hosts are never listed.
 - Snapshot: ~12ms warm; job-members on this session ~94ms.
 - Windows workflow: run 45092198798 (.windows. filter + suites).
+- Full local suite (one run, main Tower 53132 before/after): 8170 passed, 6 failed — all skill parity: the afx skill
+  also lives in .codex/ trees and has a hash history. Fixed in e3546f923; the 4 files then pass.
+- Windows run 45092198798 (before that fix): targeted .windows. tests all green on the runner; unit jobs failed only on
+  those 6 parity tests. Fresh run on e3546f923: 45093824937.
+- Real-session dev check (isolated Tower via CIM from inside this session, throwaway workspace outside %TEMP%, real
+  Claude architect + builder, haiku): 18/18. claude.exe and the timed-out find.exe ran inside the builder's job; the find
+  kept burning CPU (3m59s in 3m); afx status and afx orphans listed it (no command line); --apply ended it; builder and
+  architect kept running; closing the builder ended its whole tree; Tower restart kept the architect's shellper.
+  Gotcha: Tower reconcile drops sessions whose workspace is under %TEMP% (pre-existing, deliberate).
+- Not run here: agy (not installed), Codex as a full agent session.
