@@ -292,3 +292,14 @@ workspace called `arch`. Gate still pending; the owner has not approved.
 - **Carry into phase 4:** `formatAddress` throws on an address with no text form. Check the name
   with `isAddressComponent` first; the throw must never surface as a 500 on `/api/send`.
 - The review lanes ran against an untouched tree this time; no "working tree changed" warning.
+
+## 2026-11-23 — phase 1: one intermittent failure of porch's tests check, not identified
+
+- After the review fixes (`05616e92f`), `porch done` failed its `tests` check once (build passed).
+  I had piped porch's output through `tail`, so the failing test's name was lost.
+- The same suite on the same code then passed twice: my own full run (8366 passed, 108 skipped)
+  and porch's second run. Load average was about 26 at the time. Nothing in the change touches
+  production code paths (only `packages/sdk/src/address.ts`, the types and the table).
+- So: an unidentified intermittent failure under load, one occurrence. Not blocked. For the
+  review's Flaky Tests section. From now on porch's output is kept whole in the scratchpad so a
+  failing test can be named.
