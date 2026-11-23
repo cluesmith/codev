@@ -5,7 +5,9 @@
  * Windows reuses pids quickly, and test files run in parallel, so a pid that
  * exited during the test may belong to another file's process by `afterAll`.
  * `killSurvivors` kills a pid only when the process holding it was created
- * before the test recorded it, which a reused pid's process cannot have been.
+ * no later than the recording, give or take `CLOCK_SLACK_MS` for skew between
+ * the census clock and `Date.now()`. A reused pid's process is created after
+ * the original exited, which in these tests is always well past that slack.
  */
 
 import { listProcessCensus } from '../../agent-farm/servers/process-census.js';

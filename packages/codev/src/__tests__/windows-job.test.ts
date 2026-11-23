@@ -83,7 +83,8 @@ describe('WindowsJobHelper', () => {
     expect(HELPER_SCRIPT).not.toMatch(/Add-Type/i);
     expect(HELPER_SCRIPT).not.toContain('KILL_ON_JOB_CLOSE');
     // #1915: no breakaway, so Git Bash's native children (the agent and its tool calls) stay in the job.
-    expect(HELPER_SCRIPT).toContain('$SESSION_JOB_LIMIT_FLAGS = 0');
+    expect(HELPER_SCRIPT).toMatch(/^\$SESSION_JOB_LIMIT_FLAGS = 0\s*$/m);
+    expect(HELPER_SCRIPT).not.toMatch(/\$SESSION_JOB_LIMIT_FLAGS = 0x/);
     expect(HELPER_SCRIPT).toContain('WriteInt32($info, 16, $SESSION_JOB_LIMIT_FLAGS)');
     expect(HELPER_SCRIPT).not.toMatch(/BREAKAWAY_OK\s*=/);
     // A terminate checks membership; the shellper's handle is query-only.

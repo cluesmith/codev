@@ -27,19 +27,19 @@ The guard went through three CI rounds and each found a real defect (fails open 
 
 ## Files Changed
 
-- `codev-skeleton/DEPENDENCIES.md` (+9 / -0)
-- `codev/DEPENDENCIES.md` (+9 / -0)
+- `codev-skeleton/DEPENDENCIES.md` (+11 / -0)
+- `codev/DEPENDENCIES.md` (+11 / -0)
 - `codev/plans/1915-windows-show-and-end-orphaned-.md` (+326 / -0)
 - `codev/projects/1915-windows-show-and-end-orphaned-/status.yaml` (+22 / -0)
-- `codev/resources/arch.md` (+6 / -1)
+- `codev/resources/arch.md` (+8 / -3)
 - `codev/resources/lessons-learned.md` (+3 / -1)
 - `codev/reviews/1915-windows-show-and-end-orphaned-.md` (new)
 - `codev/state/pir-1915_thread.md` (+119 / -0)
-- `packages/codev/src/__tests__/helpers/tracked-pids.ts` (+50 / -0)
+- `packages/codev/src/__tests__/helpers/tracked-pids.ts` (+52 / -0)
 - `packages/codev/src/__tests__/launchers.windows.test.ts` (+12 / -1)
 - `packages/codev/src/__tests__/session-job-containment.windows.test.ts` (+153 / -0)
 - `packages/codev/src/__tests__/tower-lifecycle.windows.test.ts` (+13 / -1)
-- `packages/codev/src/__tests__/windows-job.test.ts` (+16 / -1)
+- `packages/codev/src/__tests__/windows-job.test.ts` (+17 / -1)
 - `packages/codev/src/__tests__/windows-job.windows.test.ts` (+59 / -15)
 - `packages/codev/src/agent-farm/__tests__/tower-stop-windows.test.ts` (+32 / -1)
 - `packages/codev/src/agent-farm/commands/windows/tower-lifecycle.ts` (+50 / -4)
@@ -100,7 +100,13 @@ Implementation commits on top of the merge-base (porch bookkeeping and thread-on
   - A Tower restart kept the architect's shellper, and a new session worked afterwards.
   - The main Tower was untouched.
 - Survey of programs started inside a job with no breakaway: git, gh, node→cmd, cmd, powershell, python, codex, code and `claude --version` all ran normally, as did a real `claude -p` tool call. **No program was found that needs to leave the job.**
-- **Untested:** agy (not installed on this machine), and Codex running as a full agent session (only `codex --version` was run).
+- **Untested:**
+  - agy (not installed on this machine).
+  - Codex running as a full agent session (only `codex --version` was run).
+  - Browsers launched by Playwright or `start <url>` from a session. This includes the dashboard browser that `afx workspace start`, `afx attach` and `afx tower cloud login` open through `openBrowser` (`agent-farm/utils/shell.ts`).
+  - GUI apps launched from a terminal, beyond `code`, which was surveyed.
+
+  These come from the plan's risk list. Any of them failing would be a reason to revert `6b7f81940`.
 
 ### CI evidence trail (all judged pre-existing)
 
@@ -143,6 +149,22 @@ COLD `codev/resources/lessons-learned.md`:
   - `windows-job.windows` and the since-removed `session-orphans.windows` had that pattern; both now use `tracked-pids`.
   - The rest use fakes, mocks, or kills that check identity.
   - Untouched by this PR, two files still use the unchecked leftovers pattern: `process-tree.windows.test.ts:75` and `tower-lifecycle.windows.test.ts:64`. A follow-up should move them to `tracked-pids`. Not done here at the architect's direction, because one of them is the flaky Phase 4(b) test's own file.
+
+### Consultation (single pass)
+
+Verdicts:
+- **Claude:** COMMENT, high confidence.
+- **Codex:** COMMENT, low confidence. Its sandbox rejected every file read, so it reviewed no code.
+- **Gemini:** COMMENT, skipped. agy is not installed here.
+
+Disposition of Claude's findings:
+1. **The always-on flag test could pass with `0x800`.** Fixed. `windows-job.test.ts` now matches the whole line `$SESSION_JOB_LIMIT_FLAGS = 0` and rejects `= 0x…`. It is the only check of the flag that runs on the Linux PR CI, because `.windows.` tests skip themselves there.
+2. **`process-tree.windows.test.ts:75` is the suspected killer in the Phase 4(b) flake.** Not changed in this PR; it is a pre-existing test outside this change. I proposed moving it to `tracked-pids` to the architect, as this PR or a numbered follow-up issue; their call.
+3. **`openBrowser` starts a browser inside the session.** Documented: `DEPENDENCIES.md` (both trees) now names the dashboard browser that `afx workspace start`, `afx attach` and `afx tower cloud login` open. It ends with the session if no browser was already running. Launching it through CIM is a possible follow-up.
+4. **The untested list was narrower than the plan's risks.** Fixed; see Test Results.
+5. **Nits.**
+   - The `tracked-pids` comment now states the 1s clock slack.
+   - The `arch.md` line wrap is fixed.
 
 ## How to Test Locally
 

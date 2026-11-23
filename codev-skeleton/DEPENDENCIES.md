@@ -265,7 +265,9 @@ How it works and what to know:
   That includes what an agent's timed-out command leaves running (often a root-wide file
   search using a full CPU): it ends with its session. It also includes a GUI program or a
   background server started from that terminal (for example `code .` when VS Code is not already
-  running, or a dev server started with `&`). Start such a program from outside Codev (a Windows
+  running, or a dev server started with `&`), and a browser that a Codev command opens for you
+  (`afx workspace start`, `afx attach`, `afx tower cloud login`) when no browser was already
+  running. Start such a program from outside Codev (a Windows
   Terminal or PowerShell window) when it must outlive the session. Tower itself is started outside
   the session by `afx tower start`, and refuses to run inside any session.
 - **Programs never run from the current folder.** Windows normally looks a program started by
