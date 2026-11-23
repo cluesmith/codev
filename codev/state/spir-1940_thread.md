@@ -480,3 +480,41 @@ no resolver, so it is unchanged; the delayed path is covered in `tower-routes.te
   It was name order. To verify: in a workspace with two siblings registered in non-alphabetical
   order, restart the workspace and check they come back in registration order.
 - **Phase 3: build, push, tell the architect BEFORE `porch done`.**
+
+## 2026-11-23 — phase 2 COMPLETE (review round 3: codex APPROVE, claude APPROVE)
+
+- Porch advanced to phase 3. Phase 2's commits: `d6124d76c` (feature), `d106d3984` (registry
+  refuses where the live resolver does), `6df1df753` (merge of `main`), `66ea5c747` (issue #1633,
+  architects in registration order). GitHub green on PR #1957 at `66ea5c747`.
+- Claude's round 3 notes, none blocking, carried forward:
+  1. **Phase 3:** `locateWorkspace` decides "the sender's own workspace" by comparing paths
+     (`found.workspacePath === workspaceKey(sender.workspace)`). A sender whose workspace is
+     spelled differently from the live map's key loses affinity and is refused. It fails closed
+     and cannot break a send that works today. Phase 3's naming module is the place to put this
+     comparison behind one helper.
+  2. **Review document, known boundary:** the live front door is the terminal map's insertion
+     order. An architect terminal that is deleted and registered again moves to the end, so in a
+     workspace with no `main` the live front door can differ from the registry's until the next
+     workspace start. Not fixed.
+  3. **Phase 6:** `codev/resources/arch.md` lines 817 to 818 still describe the two-slot
+     intercept and `resolveAgentInWorkspace`, which no longer exists.
+
+## 2026-11-23 — I leaked 18 shellper processes; fix is the FIRST commit of phase 3
+
+- The architect found 18 orphaned shellpers started from this worktree's build between 13:25 and
+  13:27 PST. They are mine: `packages/codev/src/agent-farm/__tests__/send-latency.e2e.test.ts`
+  (the opt-in latency measurement from phase 1). Its `afterAll` calls `tower.stop()` and deletes
+  the workspace but never deactivates the workspace, and shellpers outlive Tower by design. Ten
+  test Towers: two runs that failed before the builder was registered (architect only), eight
+  full runs (architect and builder).
+- **Do NOT kill the 18.** The architect has asked the owner and will say. PIDs at the time:
+  51040 75335 82868 82873 84628 84873 87597 87599 88261 88269 88649 88666 88757 88771 90187
+  90190 91497 91520.
+- **Fix, agreed with the architect, to make before any phase 3 test run:** `afterAll`
+  deactivates the workspace (`POST /api/workspaces/<encoded>/deactivate`) before stopping Tower,
+  then polls and asserts that no process whose command line names that Tower's `socketDir`
+  survives. Run the test once to prove the assertion. Phase 6's latency rerun must be on the
+  fixed teardown.
+- The three existing e2e files checked by reading: `send-integration` and `tower-baseline`
+  deactivate in teardown; `tower-api` deactivates in the test body with `cleanupAllTerminals` in
+  `afterAll` as the backstop. No leak found there. Reported.
