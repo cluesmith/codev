@@ -11,6 +11,7 @@ gates:
     approved_at: '2026-11-23T21:21:55.621Z'
   plan-approval:
     status: pending
+    requested_at: '2026-11-23T21:41:08.788Z'
   pr:
     status: pending
   verify-approval:
@@ -19,7 +20,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-23T21:31:53.045Z'
+updated_at: '2026-11-23T21:41:08.788Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
