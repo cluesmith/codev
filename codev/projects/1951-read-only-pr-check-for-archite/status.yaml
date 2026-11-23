@@ -1,9 +1,30 @@
 id: '1951'
 title: read-only-pr-check-for-archite
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: forge_read_concepts
+    title: Forge read concepts for PR mechanics
+    status: in_progress
+  - id: readonly_core
+    title: Read-only runner, configuration and report core
+    status: pending
+  - id: check_pr_mechanics
+    title: 'codev check pr: merge mechanics'
+    status: pending
+  - id: check_pr_forge
+    title: 'codev check pr: forge state and CI checks'
+    status: pending
+  - id: check_deploy
+    title: codev check deploy
+    status: pending
+  - id: check_worktree
+    title: codev check worktree
+    status: pending
+  - id: docs_guidance
+    title: Architect guidance and command documentation
+    status: pending
+current_plan_phase: forge_read_concepts
 gates:
   spec-approval:
     status: approved
@@ -18,10 +39,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-23T22:10:01.005Z'
+updated_at: '2026-11-23T22:10:25.669Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
