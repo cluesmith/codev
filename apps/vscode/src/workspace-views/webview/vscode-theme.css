@@ -16,10 +16,16 @@
   --codev-wv-fg-secondary: var(--vscode-descriptionForeground);
   --codev-wv-fg-muted: var(--vscode-disabledForeground);
   --codev-wv-border: var(--vscode-panel-border, var(--vscode-contrastBorder));
-  /* Buttons and accents use the button pair, so their text keeps its contrast in every theme. */
-  --codev-wv-accent: var(--vscode-button-background, var(--vscode-focusBorder));
-  --codev-wv-accent-hover: var(--vscode-button-hoverBackground, var(--vscode-focusBorder));
-  --codev-wv-on-accent: var(--vscode-button-foreground);
+  /*
+   * The accent is text and borders on the page (item ids, links, selected options) as well as the
+   * fill of the primary buttons. VS Code's button background cannot be it: high-contrast themes
+   * make that black, which hides accent text on a black page. The link colour is made to read on
+   * the editor background in every theme, and contrast is symmetric, so the editor background
+   * reads on an accent-filled button just as well.
+   */
+  --codev-wv-accent: var(--vscode-textLink-foreground);
+  --codev-wv-accent-hover: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+  --codev-wv-on-accent: var(--vscode-editor-background);
   --codev-wv-accent-tint: color-mix(in srgb, var(--codev-wv-accent) 8%, transparent);
   --codev-wv-accent-tint-hover: color-mix(in srgb, var(--codev-wv-accent) 18%, transparent);
   --codev-wv-accent-tint-border: color-mix(in srgb, var(--codev-wv-accent) 20%, transparent);

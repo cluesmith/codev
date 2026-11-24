@@ -55,6 +55,17 @@ describe('vscode-theme.css', () => {
     }
   });
 
+  it("takes the accent from the link colour, and draws on it in the page colour (never the button's)", () => {
+    // High-contrast themes make the button background black, and the accent is also text on the
+    // page (item ids, links): with the button pair it vanished on a black page (found rendered).
+    // The link colour reads on the editor background in every theme; contrast is symmetric, so the
+    // editor background reads on an accent fill.
+    const map = mappings();
+    expect(map.get('--codev-wv-accent')).toBe('var(--vscode-textLink-foreground)');
+    expect(map.get('--codev-wv-on-accent')).toBe('var(--vscode-editor-background)');
+    expect([...map.values()].some(v => v.includes('--vscode-button-background'))).toBe(false);
+  });
+
   it('uses no literal colour of its own anywhere', () => {
     const literal = /#[0-9a-f]{3,8}\b|\b(rgba?|hsla?)\(|\b(white|black)\b/i;
     const declarations = [...withoutComments(THEME).matchAll(/([a-z-]+)\s*:\s*([^;{}]+);/g)]

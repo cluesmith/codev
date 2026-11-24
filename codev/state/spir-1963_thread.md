@@ -812,6 +812,60 @@ Tower call made by the extension host. Built:
   Windows. Its directory links are junctions, which need no privilege; a `win32`-only describe
   covers drive-letter case and separators on real paths.
 
-**Still to do in Phase 7:** the rendered harness check (scenarios 15, 16, 18), including whether
-Uint8Array image bytes survive `webview.postMessage` in VS Code and in /ide/, and how the
-high-contrast theme looks; then the Windows dispatch.
+### Phase 7: rendered verification (2026-11-24)
+
+New harness script, `verify decisions`: 15 checks, each run on its own `start` + `seed fleet`.
+It adds `main-2` to alpha's file (an https image served by the browser's route, and an image
+outside the workspace) and creates gamma's file.
+
+**Two bugs found and fixed:**
+1. **Reload restore closed the panel** (run 1, 14/15).
+   - `deserializeWebviewPanel` asked `unavailableReason()`, which read
+     `connectionManager.getWorkspacePath()`. That is null until the async `initialize()` runs, and
+     a restore reaches the serializer first, so the restored panel was disposed as "no workspace".
+   - **Fix:** availability now comes from the window's folders, `detectWorkspacePath()`, the same
+     thing the CLI preflight already uses for the same reason.
+   - A source test in `contributes-cockpit.test.ts` pins it.
+2. **High contrast hid accent text.**
+   - I had mapped `--codev-wv-accent` to VS Code's button background. HC Dark makes that black, and
+     the accent is also text and borders on the page (item ids, links, the selected option), so the
+     ids vanished on the black page.
+   - **Fix:** accent → `--vscode-textLink-foreground`, on-accent → `--vscode-editor-background`.
+     Contrast is symmetric, so text on an accent-filled button keeps the link's contrast. The
+     shared package is unchanged.
+   - The theme unit test pins the mapping. The rendered theme check now measures WCAG contrast:
+     item id on the page, and Submit's text on its fill, both ≥ 4.5 in all four themes (measured
+     6.3 to 9).
+
+**Final run (cycle 3, the committed build): 15/15.**
+Evidence: `codev/projects/1963-…/verification-phase7/`.
+- Entries: a Decisions entry under alpha, beta and gamma (beta and gamma have no file), none under
+  dormant delta. Beta's entry opens beta's window.
+- Alpha's entry opens one panel; a second click reveals the same panel.
+- Images:
+  - the workspace SVG renders from a `blob:` URL, so **Uint8Array bytes survive
+    `webview.postMessage` in serve-web**;
+  - the https image renders;
+  - the outside image shows "Image not loaded", with Tower's reason.
+- The full-size view opens; Escape and Close each close it.
+- The link opens after VS Code's own "open external website?" prompt.
+- Ruling `main-1`: the file is updated, the card shows the ruling, and Tower logs `Decisions notice
+  held (no-profile) → main @ alpha`. The notice is persisted to main's mailbox and held, because
+  the fixture architect is a bash shell, not an agent; the Codev panel shows "1 held".
+- A stale fingerprint is refused ("Item main-2 changed since it was shown…"), with the draft and
+  word kept.
+- Polling: 3 reads in 6 s while shown, 0 in 8 s while hidden, and reads resume when shown again.
+- Four themes switched live: the webview never reloaded and the draft was kept.
+- The panel is restored after a reload.
+- Explanations show in a worktree window and a no-workspace window, and the worktree window's
+  entry navigates to the parent.
+- Gamma: the empty state, then the real `afx decisions init` (it only writes the template; I
+  checked the CLI path: no Tower call), "0 open", then an added item appears.
+- The audit: 205 browser requests, none to the Tower port, none carrying the key. Webview frames
+  loaded only extension resources and the remote item image.
+
+**Not run:** the `/ide/` (ide-server) mode. It serves the same VS Code web workbench and webview
+code as serve-web.
+
+**Adjacent:** `.vscodeignore` now drops `**/tsconfig.*.json`. The vsix had been shipping
+`tsconfig.webview.json` since the markdown preview added it.

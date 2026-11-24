@@ -599,12 +599,15 @@ export async function activate(context: vscode.ExtensionContext) {
 	const cockpitView: vscode.TreeView<CockpitNode> = vscode.window.createTreeView(COCKPIT_VIEW_ID, { treeDataProvider: cockpitProvider });
 	// The Decisions panel (Spec 1963): one per window, for this window's workspace, with every Tower
 	// call made here. Its serializer restores an open panel after a window reload.
+	// Whether the window has a workspace is read from its folders, not from the connection manager:
+	// a reload's restore reaches the serializer before `initialize()` has set the manager's workspace,
+	// and a null there would close the restored panel.
 	const decisionsPanels = new DecisionsPanels({
 		extensionUri: context.extensionUri,
 		bridge: new DecisionsBridge(connectionManager),
 		unavailableReason: () => workspaceViewUnavailableReason('Decisions', {
 			builderWorktreeWindow: isBuilderWorktreeWindow,
-			workspacePath: connectionManager?.getWorkspacePath() ?? null,
+			workspacePath: detectWorkspacePath(),
 		}),
 		log: (line) => outputChannel?.appendLine(line),
 	});

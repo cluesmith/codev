@@ -15,6 +15,9 @@
 //   requests   request count: Cockpit alone vs Workspace + Agents + Tower alone (scenario 21)
 //   dashboard  the browser dashboard's Work and Decisions tabs render, act and rule as before
 //              (scenario 20); with --baseline, styles and DOM identical to a run on main's build
+//   decisions  the VS Code Decisions panel (Phase 7): the hierarchy's entries, images, full size,
+//              a link, a ruling and its notice, a stale refusal, hidden-panel polling, themes,
+//              reload restore, the unavailable windows, empty state → init, network audit
 //
 // Every result is recorded in --out as { script, results: [{ name, ok, detail, shots }] }. Any
 // browser request to the owner's port fails the run.
@@ -1523,6 +1526,400 @@ SCRIPTS.dashboard = async (R, context, page) => {
       return `work ${snapshot.work.length} and decisions ${snapshot.decisions.length} elements identical to ${path.basename(R.opts.baseline)}`;
     });
   }
+};
+
+// ── decisions (Phase 7) ──────────────────────────────────────────────────────────────────────
+
+const DECISIONS_PATH = 'codev/state/pending-decisions.md';
+const REMOTE_IMAGE = 'https://example.com/fixture/remote-board.svg';
+const REMOTE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80" viewBox="0 0 200 80"><rect width="200" height="80" fill="#38a169"/><rect x="16" y="32" width="168" height="16" fill="#f0fff4"/></svg>';
+const OUTSIDE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#e53e3e"/></svg>';
+
+/**
+ * `main-2`, added to alpha's file by this script: an https image, which the webview loads itself,
+ * and an image outside the workspace, which Tower refuses. It is also the item the stale-fingerprint
+ * check edits under the panel.
+ */
+const MAIN_2 = `### main-2 · 2026-11-21 10:00 UTC · Which board image should the fixture keep?
+
+- **Context:** an image from the web, and one from outside the workspace.
+
+![Remote board](${REMOTE_IMAGE})
+
+![Outside image](../../../outside.svg)
+
+**Your word:** \`remote\` / \`local\`
+
+`;
+
+/** An item for gamma's new file, added the way the hub adds one. */
+const GAMMA_1 = `### main-1 · 2026-11-24 12:00 UTC · Adopt the Decisions panel in gamma?
+
+- **Context:** added by the hub after \`afx decisions init\`.
+
+**Your word:** \`adopt\` / \`wait\`
+
+`;
+
+/** Add `item` at the top of a decisions file's Open section, and set its status line. */
+function addOpenItem(file, item, status) {
+  const text = fs.readFileSync(file, 'utf-8');
+  if (!text.includes('## Open\n\n')) throw new Error(`${file} has no "## Open" section`);
+  fs.writeFileSync(file, text.replace('## Open\n\n', `## Open\n\n${item}`).replace(/^_Status: .*_$/m, `_Status: ${status}_`));
+}
+
+/** The Decisions panel's document: VS Code nests a webview's page two iframes down. */
+async function decisionsFrame(page, timeout = 60_000) {
+  return waitFor('the Decisions webview', async () => {
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      if (await frame.locator('.decisions-view').count().catch(() => 0)) return frame;
+    }
+    return null;
+  }, timeout);
+}
+
+const decisionCard = (frame, id) => frame.locator('.decisions-card', { has: frame.locator('.decisions-item-id', { hasText: new RegExp(`^${escapeRe(id)}$`) }) });
+
+/** GETs of a decisions document the Tower received after request-log line `from`. */
+const decisionsReads = (R, from) => R.towerRequests().slice(from)
+  .filter((r) => r.method === 'GET' && (r.url ?? '').split('?')[0].endsWith('/api/decisions'));
+
+/** The isolated Tower's notices to a hub architect, from its log. */
+function rulingNotices(R) {
+  const log = path.join(path.dirname(R.opts['request-log']), 'tower.log');
+  if (!fs.existsSync(log)) return [];
+  return fs.readFileSync(log, 'utf-8').split('\n').filter((l) => /Decisions notice .* → main @ /.test(l));
+}
+
+const hexToRgb = (hex) => {
+  const h = hex.replace('#', '');
+  const n = (i) => parseInt(h.slice(i, i + 2), 16);
+  return h.length >= 6 ? `rgb(${n(0)}, ${n(2)}, ${n(4)})` : hex;
+};
+
+SCRIPTS.decisions = async (R, context, page) => {
+  const alphaFile = path.join(R.opts.fixtures, 'alpha', DECISIONS_PATH);
+  addOpenItem(alphaFile, MAIN_2, '3 open — main-2, main-1, web-1.');
+  fs.writeFileSync(path.join(R.opts.fixtures, 'outside.svg'), OUTSIDE_SVG);
+  // Item links and the remote image point at example.com: answer them here, so nothing leaves the machine.
+  await context.route(/^https?:\/\/example\.com\//, (route) => (route.request().url() === REMOTE_IMAGE
+    ? route.fulfill({ status: 200, contentType: 'image/svg+xml', body: REMOTE_SVG })
+    : route.fulfill({ status: 200, contentType: 'text/html', body: '<p>fixture link</p>' })));
+
+  // Every request the browser makes, with the frame that made it, for scenario 22.
+  const requests = [];
+  context.on('request', (r) => {
+    let frame = 'other';
+    try {
+      const f = r.frame();
+      frame = f === f.page().mainFrame() ? 'main' : f.url();
+    } catch { /* a service worker's request, or a popup's first navigation */ }
+    requests.push({ url: r.url(), frame, key: Object.keys(r.headers()).some((h) => h.toLowerCase() === 'codev-tower-key') });
+  });
+
+  let cockpit;
+  let frame;
+  const DRAFT = 'Draft that must survive a refusal.';
+
+  await R.check('scenario 12: a Decisions entry under every active workspace, none under the dormant one', async () => {
+    await loadWorkbench(page, R.folderUrl('alpha'));
+    cockpit = await openCockpit(page);
+    await waitRow(cockpit, A_MAIN, 60_000);
+    const got = {};
+    for (const [name, spec] of [['alpha', ALPHA], ['beta', BETA], ['gamma', GAMMA]]) {
+      await setExpanded(cockpit, spec, true);
+      const t = await subtree(cockpit, spec);
+      got[name] = t.rows.filter((r) => r.level === t.head.level + 1).map((r) => r.text);
+    }
+    await setExpanded(cockpit, ['Tower', /^Dormant \(1\)$/], true);
+    const dormant = await subtree(cockpit, ['Tower', /^Dormant \(1\)$/]);
+    const problems = [];
+    for (const [name, children] of Object.entries(got)) {
+      if (children.at(-1) !== 'Decisions') problems.push(`${name}'s last child is "${children.at(-1)}"`);
+      if (children.filter((c) => c === 'Decisions').length !== 1) problems.push(`${name} has ${children.filter((c) => c === 'Decisions').length} Decisions entries`);
+    }
+    const delta = dormant.rows.find((r) => r.text === 'delta');
+    if (!delta || delta.expanded !== null) problems.push('the dormant delta row is missing or expandable');
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${JSON.stringify(got)}`);
+    return { detail: `${JSON.stringify(got)}; Dormant: delta, a leaf (beta and gamma have no decisions file)`, shots: [await R.shot(page, 'entries')] };
+  });
+
+  await R.check("scenario 12: another workspace's Decisions entry opens that workspace's window", async () => {
+    const entry = await waitRow(cockpit, [...BETA, 'Decisions']);
+    const url = await nextPopup(R, context, () => entry.loc.click());
+    if (!decodeURIComponent(new URL(url).searchParams.get('folder') ?? '').endsWith('/beta')) throw new Error(`opened ${url}`);
+    return `beta's entry → ${url}`;
+  });
+
+  await R.check("scenario 12: this workspace's Decisions entry opens the panel, which renders the items", async () => {
+    const entry = await waitRow(cockpit, [...ALPHA, 'Decisions']);
+    await entry.loc.click();
+    await waitFor('the Decisions editor tab', async () => /^Decisions/.test(await activeEditorTab(page) ?? ''), 20_000);
+    frame = await decisionsFrame(page);
+    await waitFor('three decision cards', async () => (await frame.locator('.decisions-card').count()) === 3, 30_000);
+    const problems = [];
+    const count = (await frame.locator('.decisions-count').textContent())?.trim();
+    if (count !== '3 open') problems.push(`the count reads "${count}"`);
+    const words = await decisionCard(frame, 'main-1').locator('input[type="radio"]').evaluateAll((els) => els.map((e) => e.value));
+    if (JSON.stringify(words) !== JSON.stringify(['compact', 'stacked', 'hold'])) problems.push(`main-1 offers ${JSON.stringify(words)}`);
+    if (!/Written under this item/.test(await decisionCard(frame, 'web-1').textContent())) problems.push('web-1 does not show its written ruling');
+    // Clicking the entry again reveals the same panel: still one Decisions tab.
+    await entry.loc.click();
+    await page.waitForTimeout(1000);
+    const tabs = (await editorTabs(page)).filter((t) => /^Decisions/.test(t ?? ''));
+    if (tabs.length !== 1) problems.push(`${tabs.length} Decisions tabs after a second click`);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `tab "${await activeEditorTab(page)}"; ${count}; main-1 offers ${words.join(' / ')}; one tab after a second click`, shots: [await R.shot(page, 'panel')] };
+  });
+
+  await R.check('scenario 15: a workspace image (bytes through the host), an https image, and a refused image', async () => {
+    const local = decisionCard(frame, 'main-1').locator('img[alt="Compact board"]');
+    const remote = decisionCard(frame, 'main-2').locator('img[alt="Remote board"]');
+    const loaded = (img) => img.evaluate((el) => el.complete && el.naturalWidth > 0).catch(() => false);
+    await waitFor('the workspace image to render from an object URL', async () => (await local.getAttribute('src'))?.startsWith('blob:') && loaded(local), 20_000);
+    await waitFor('the https image to render', async () => (await remote.getAttribute('src')) === REMOTE_IMAGE && loaded(remote), 20_000);
+    const missing = decisionCard(frame, 'main-2').locator('.decisions-image-missing');
+    await waitFor('the refused image\'s note', async () => (await missing.count()) === 1, 20_000);
+    const note = (await missing.textContent()).replace(/\s+/g, ' ').trim();
+    const reason = await missing.getAttribute('title');
+    if (!/Image not loaded/.test(note) || !/outside\.svg/.test(note)) throw new Error(`the note reads "${note}"`);
+    if (!/outside/i.test(reason ?? '')) throw new Error(`the reason is "${reason}"`);
+    const size = await local.evaluate((el) => `${el.naturalWidth}×${el.naturalHeight}`);
+    return { detail: `workspace SVG ${size} from blob:; https image loaded; refused: "${note}" (${reason})`, shots: [await R.shot(page, 'images')] };
+  });
+
+  await R.check('scenario 15: the full-size view opens over the panel; Escape and Close each close it', async () => {
+    const local = decisionCard(frame, 'main-1').locator('img[alt="Compact board"]');
+    const overlay = frame.locator('.wv-fullsize[role="dialog"]');
+    await local.click();
+    await overlay.waitFor({ timeout: 10_000 });
+    const src = await overlay.locator('img').getAttribute('src');
+    if (src !== await local.getAttribute('src')) throw new Error(`the full-size image is ${src}`);
+    const shot = await R.shot(page, 'full-size');
+    await page.keyboard.press('Escape');
+    await waitFor('Escape to close the full-size view', async () => (await overlay.count()) === 0, 5000);
+    await local.click();
+    await overlay.waitFor({ timeout: 10_000 });
+    await overlay.locator('button', { hasText: 'Close' }).click();
+    await waitFor('Close to close the full-size view', async () => (await overlay.count()) === 0, 5000);
+    return { detail: `opened on ${src.slice(0, 5)}…; Escape closed it; Close closed it`, shots: [shot] };
+  });
+
+  await R.check('scenario 15: an http(s) link opens in the browser, through the extension host', async () => {
+    const link = decisionCard(frame, 'main-1').locator('a', { hasText: 'https://example.com/fixture/main-1' });
+    let asked = null;
+    const url = await nextPopup(R, context, async () => {
+      await link.click();
+      // VS Code asks before opening a domain it does not trust yet.
+      if (await page.locator('.monaco-dialog-box').waitFor({ timeout: 5000 }).then(() => true, () => false)) asked = await dialogButton(page, 'Open');
+    });
+    if (url !== 'https://example.com/fixture/main-1') throw new Error(`opened ${url}`);
+    return `→ ${url}${asked ? ` (after VS Code's prompt: "${asked.slice(0, 80)}")` : ''}`;
+  });
+
+  await R.check('scenario 15: rule an item — the file is updated, the card shows the ruling, the architect is notified', async () => {
+    const main1 = decisionCard(frame, 'main-1');
+    const noticesBefore = rulingNotices(R).length;
+    await main1.locator('input[type="radio"][value="stacked"]').check();
+    await main1.locator('textarea.decisions-comment').fill('Fixture comment from the VS Code panel.');
+    const formShot = await R.shot(page, 'draft');
+    await main1.locator('button.decisions-submit-btn').click();
+    await waitFor('main-1 to show the written ruling', async () => /Written under this item/.test(await main1.textContent()), 20_000);
+    const shown = (await main1.locator('.decisions-ruling-text').textContent()) ?? '';
+    const want = 'stacked\n\nFixture comment from the VS Code panel.';
+    if (shown !== want) throw new Error(`the card shows ${JSON.stringify(shown)}`);
+    const file = fs.readFileSync(alphaFile, 'utf-8');
+    if (!file.includes(`**Your word:** \`compact\` / \`stacked\` / \`hold\`\n${want}\n`)) throw new Error('the file does not hold the ruling under main-1');
+    const notice = await waitFor('Tower\'s notice to main', async () => rulingNotices(R).slice(noticesBefore)[0] ?? null, 20_000);
+    return { detail: `file updated; card shows it; Tower: ${notice.replace(/^\[[^\]]*\] \[INFO\] /, '')}`, shots: [formShot, await R.shot(page, 'ruled')] };
+  });
+
+  await R.check('scenario 15: a stale fingerprint is refused, and the draft is kept', async () => {
+    const main2 = decisionCard(frame, 'main-2');
+    await main2.locator('input[type="radio"][value="local"]').check();
+    await main2.locator('textarea.decisions-comment').fill(DRAFT);
+    const submit = main2.locator('button.decisions-submit-btn');
+    await submit.hover();
+    // Edit main-2 just after a poll, so Submit lands before the next one can read the edit.
+    const from = R.towerRequests().length;
+    await waitFor('a Decisions poll', async () => decisionsReads(R, from).length > 0, 10_000, 50);
+    fs.writeFileSync(alphaFile, fs.readFileSync(alphaFile, 'utf-8').replace('one from outside the workspace.', 'one from outside the workspace (edited under the panel).'));
+    await submit.click();
+    const alert = main2.locator('[role="alert"]');
+    await waitFor('the refusal on main-2', async () => (await alert.count()) === 1, 10_000);
+    const message = (await alert.textContent()).trim();
+    const draft = await main2.locator('textarea.decisions-comment').inputValue();
+    const word = await main2.locator('input[type="radio"]:checked').getAttribute('value');
+    const problems = [];
+    if (!/changed/i.test(message)) problems.push(`the refusal reads "${message}"`);
+    if (draft !== DRAFT) problems.push(`the comment box holds ${JSON.stringify(draft)}`);
+    if (word !== 'local') problems.push(`the chosen word is ${word}`);
+    const section = fs.readFileSync(alphaFile, 'utf-8').split('### main-2')[1]?.split('### main-1')[0] ?? '';
+    if (!section.endsWith('**Your word:** `remote` / `local`\n\n')) problems.push(`main-2's section now ends ${JSON.stringify(section.slice(-60))}`);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `"${message}"; draft and word kept`, shots: [await R.shot(page, 'stale-refused')] };
+  });
+
+  await R.check('scenario 21: the Decisions poll stops while its panel is hidden, and resumes when shown', async () => {
+    const t0 = R.towerRequests().length;
+    await page.waitForTimeout(6000);
+    const shown = decisionsReads(R, t0).length;
+    await runCommand(page, 'File: New Untitled Text File');
+    await waitFor('the untitled editor in front', async () => /^Untitled/.test(await activeEditorTab(page) ?? ''), 10_000);
+    await page.waitForTimeout(1000);
+    const t1 = R.towerRequests().length;
+    await page.waitForTimeout(8000);
+    const hidden = decisionsReads(R, t1).length;
+    await runCommand(page, 'View: Close Editor');
+    await waitFor('the Decisions editor in front again', async () => /^Decisions/.test(await activeEditorTab(page) ?? ''), 10_000);
+    const t2 = R.towerRequests().length;
+    await waitFor('a read once shown again', async () => decisionsReads(R, t2).length > 0, 6000);
+    if (shown < 2 || hidden !== 0) throw new Error(`reads: ${shown} in 6 s shown, ${hidden} in 8 s hidden`);
+    const kept = await decisionCard(frame, 'main-2').locator('textarea.decisions-comment').inputValue();
+    if (kept !== DRAFT) throw new Error(`the draft did not survive hiding: ${JSON.stringify(kept)}`);
+    return `${shown} reads in 6 s shown; ${hidden} in 8 s hidden; reading again once shown; draft kept (retained context)`;
+  });
+
+  await R.check('scenario 18: light, dark and high-contrast themes, switched live with the panel open', async () => {
+    await frame.evaluate(() => { window.__codevMarker = 'kept'; });
+    const shots = [];
+    const seen = {};
+    const themes = [['Dark Modern', 'vs-dark'], ['Dark High Contrast', 'hc-black'], ['Light High Contrast', 'hc-light'], ['Light Modern', 'vs']];
+    for (const [theme, cls] of themes) {
+      await setTheme(page, theme);
+      const applied = await page.locator('.monaco-workbench').evaluate((el, c) => el.classList.contains(c), cls);
+      if (!applied) throw new Error(`the workbench is not ${cls} after choosing ${theme}`);
+      await page.waitForTimeout(800);
+      seen[theme] = await frame.evaluate(() => {
+        const root = getComputedStyle(document.documentElement);
+        const card = document.querySelector('.decisions-card');
+        // WCAG contrast of two computed rgb() colours.
+        const lum = (c) => {
+          const [r, g, b] = c.match(/[\d.]+/g).slice(0, 3).map(Number).map((v) => v / 255)
+            .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return Math.round(((x + 0.05) / (y + 0.05)) * 10) / 10; };
+        const page = getComputedStyle(document.body).backgroundColor;
+        const id = document.querySelector('.decisions-item-id');
+        const submit = [...document.querySelectorAll('.decisions-submit-btn')].find((b) => !b.disabled);
+        return {
+          marker: window.__codevMarker ?? null,
+          body: page,
+          text: getComputedStyle(document.body).color,
+          editorBg: root.getPropertyValue('--vscode-editor-background').trim(),
+          card: card ? getComputedStyle(card).borderTopColor : null,
+          accent: root.getPropertyValue('--codev-wv-accent').trim(),
+          // Text drawn in the accent on the page, and on an accent-filled button.
+          idContrast: id ? contrast(getComputedStyle(id).color, page) : null,
+          submitContrast: submit ? contrast(getComputedStyle(submit).color, getComputedStyle(submit).backgroundColor) : null,
+        };
+      });
+      shots.push(await R.shot(page, `theme-${cls}`));
+    }
+    const problems = [];
+    for (const [theme, s] of Object.entries(seen)) {
+      if (s.marker !== 'kept') problems.push(`${theme}: the webview reloaded`);
+      if (s.body !== hexToRgb(s.editorBg)) problems.push(`${theme}: body ${s.body} is not the editor background ${s.editorBg}`);
+      if (!s.accent) problems.push(`${theme}: --codev-wv-accent resolves to nothing`);
+      if (!(s.idContrast >= 4.5)) problems.push(`${theme}: an item id's contrast is ${s.idContrast}`);
+      if (!(s.submitContrast >= 4.5)) problems.push(`${theme}: Submit's text contrast is ${s.submitContrast}`);
+    }
+    const tuples = new Set(Object.values(seen).map((s) => `${s.body}|${s.text}|${s.card}`));
+    if (tuples.size !== themes.length) problems.push(`only ${tuples.size} distinct looks across ${themes.length} themes`);
+    const draft = await decisionCard(frame, 'main-2').locator('textarea.decisions-comment').inputValue();
+    if (draft !== DRAFT) problems.push('the draft did not survive the switches');
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${JSON.stringify(seen)}`);
+    return { detail: Object.entries(seen).map(([t, s]) => `${t}: body ${s.body}, text ${s.text}, card border ${s.card}, contrast id ${s.idContrast} / Submit ${s.submitContrast}`).join('; '), shots };
+  });
+
+  await R.check('the panel is restored after a window reload', async () => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+    frame = await decisionsFrame(page, 120_000);
+    await waitFor('the restored panel\'s cards', async () => (await frame.locator('.decisions-card').count()) === 3, 60_000);
+    const tabs = (await editorTabs(page)).filter((t) => /^Decisions/.test(t ?? ''));
+    if (tabs.length !== 1) throw new Error(`${tabs.length} Decisions tabs after the reload`);
+    return { detail: 'one Decisions tab, its cards rendered', shots: [await R.shot(page, 'restored')] };
+  });
+
+  await R.check('scenario 19: in a builder-worktree window, Open Decisions explains, and the entry navigates to the parent', async () => {
+    const wt = fs.readdirSync(path.join(R.opts.fixtures, 'alpha', '.builders')).find((d) => d.includes('101'));
+    await loadWorkbench(page, R.folderUrl('alpha', '.builders', wt));
+    await runCommand(page, 'Codev: Open Decisions');
+    const note = await waitForNotification(page, /not offered in a builder-worktree window/);
+    const shot = await R.shot(page, 'worktree-explains');
+    const wtCockpit = await openCockpit(page);
+    await setExpanded(wtCockpit, ALPHA, true);
+    const entry = await waitRow(wtCockpit, [...ALPHA, 'Decisions']);
+    const url = await nextPopup(R, context, () => entry.loc.click());
+    if (!decodeURIComponent(new URL(url).searchParams.get('folder') ?? '').endsWith('/alpha')) throw new Error(`the entry opened ${url}`);
+    if ((await editorTabs(page)).some((t) => /^Decisions/.test(t ?? ''))) throw new Error('a Decisions panel opened in the worktree window');
+    return { detail: `"${note}"; entry → ${url}`, shots: [shot] };
+  });
+
+  await R.check('scenario 19: in a no-workspace window, Open Decisions explains', async () => {
+    await loadWorkbench(page, R.url('ew=true'), { needCodev: false });
+    await page.waitForTimeout(3000);
+    await runCommand(page, 'Codev: Open Decisions');
+    const note = await waitForNotification(page, /needs a Codev workspace/);
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'no-workspace-explains')] };
+  });
+
+  await R.check('scenario 16: no decisions file shows the empty state; afx decisions init, then an item, and it appears', async () => {
+    await loadWorkbench(page, R.folderUrl('gamma'));
+    const gammaCockpit = await openCockpit(page);
+    await waitRow(gammaCockpit, GAMMA, 60_000);
+    await setExpanded(gammaCockpit, GAMMA, true);
+    await (await waitRow(gammaCockpit, [...GAMMA, 'Decisions'])).loc.click();
+    frame = await decisionsFrame(page);
+    const status = frame.locator('.decisions-notice[role="status"]');
+    await waitFor('the empty state', async () => (await status.count()) === 1, 20_000);
+    const empty = (await status.textContent()).trim();
+    if (!/^There is no decisions file/.test(empty) || !/afx decisions init/.test(empty)) throw new Error(`the empty state reads "${empty}"`);
+    const emptyShot = await R.shot(page, 'empty-state');
+
+    // The real CLI, run in the fixture: `decisions init` only writes the template (no Tower call).
+    const gamma = path.join(R.opts.fixtures, 'gamma');
+    const init = spawnSync(process.execPath, [path.join(REPO, 'packages/codev/bin/afx.js'), 'decisions', 'init'], { cwd: gamma, env: process.env, encoding: 'utf-8', timeout: 60_000 });
+    if (init.status !== 0) throw new Error(`afx decisions init exited ${init.status}: ${init.stderr || init.stdout}`);
+    await waitFor('the new file in place of the empty state', async () => (await status.count()) === 0 && /0 open/.test(await frame.locator('.decisions-count').textContent().catch(() => '')), 15_000);
+    const initShot = await R.shot(page, 'initialized');
+    addOpenItem(path.join(gamma, DECISIONS_PATH), GAMMA_1, '1 open — main-1.');
+    await waitFor('gamma\'s first item', async () => (await decisionCard(frame, 'main-1').count()) === 1, 15_000);
+    const words = await decisionCard(frame, 'main-1').locator('input[type="radio"]').evaluateAll((els) => els.map((e) => e.value));
+    return {
+      detail: `"${empty}" → afx decisions init: "${init.stdout.split('\n').find((l) => /Created/.test(l))?.trim()}" → 0 open → main-1 appears (${words.join(' / ')})`,
+      shots: [emptyShot, initShot, await R.shot(page, 'item-appears')],
+    };
+  });
+
+  await R.check('scenario 22: the webview never contacts Tower; the key is in no request; remote item images are its only network loads', async () => {
+    const towerPort = R.opts['tower-port'];
+    const problems = [];
+    const toTower = requests.filter((r) => URL.canParse(r.url) && new URL(r.url).port === towerPort);
+    if (toTower.length) problems.push(`${toTower.length} browser request(s) to the Tower port: ${toTower.slice(0, 3).map((r) => r.url).join(', ')}`);
+    const keyed = requests.filter((r) => r.key);
+    if (keyed.length) problems.push(`${keyed.length} request(s) carry the key header`);
+    const webview = requests.filter((r) => /\/webview\/browser\/pre\//.test(r.frame));
+    const kinds = {};
+    for (const r of webview) {
+      const origin = URL.canParse(r.frame) ? new URL(r.frame).origin : '';
+      const kind = r.url === REMOTE_IMAGE ? 'remote item image'
+        : /^(blob|data):/.test(r.url) ? 'blob/data'
+          : URL.canParse(r.url) && /\.vscode-resource\./.test(new URL(r.url).hostname) ? 'extension resource'
+            : URL.canParse(r.url) && new URL(r.url).origin === origin ? "VS Code's webview host page"
+              : null;
+      if (!kind) problems.push(`unexpected webview request ${r.url}`);
+      else kinds[kind] = (kinds[kind] ?? 0) + 1;
+    }
+    if (!kinds['remote item image']) problems.push('the audit saw no webview request at all for the remote image (is it attributing frames?)');
+    const html = await frame.content();
+    if (html.includes(process.env.COCKPIT_TOWER_KEY) || html.includes(`:${towerPort}`)) problems.push('the webview document holds the key or the Tower port');
+    if (problems.length) throw new Error(problems.slice(0, 8).join('; '));
+    return `${requests.length} browser requests, none to :${towerPort}, none keyed; webview frames: ${JSON.stringify(kinds)}`;
+  });
 };
 
 async function main() {

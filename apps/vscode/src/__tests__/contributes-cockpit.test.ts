@@ -104,6 +104,14 @@ describe('the Decisions panel (Phase 7)', () => {
     expect(EXT_SRC).toMatch(/registerWebviewPanelSerializer\(DECISIONS_VIEW_TYPE, decisionsPanels\)/);
   });
 
+  it("decides availability from the window's folders, so a reload's restore is not closed before Tower connects", () => {
+    // The connection manager's workspace is null until its async initialize() runs, and a restored
+    // panel reaches the serializer before that (found by the harness's reload check).
+    const wiring = EXT_SRC.slice(EXT_SRC.indexOf('new DecisionsPanels({'), EXT_SRC.indexOf('registerWebviewPanelSerializer(DECISIONS_VIEW_TYPE'));
+    expect(wiring).toMatch(/workspacePath: detectWorkspacePath\(\),/);
+    expect(wiring).not.toMatch(/getWorkspacePath\(\)/);
+  });
+
   it('ships the built webview: dist is packaged, the build script is not', () => {
     const ignored = readFileSync(resolve(ROOT, '.vscodeignore'), 'utf8').split('\n').map(line => line.trim());
     expect(ignored).toContain('esbuild.webview.cjs');

@@ -9,6 +9,7 @@ esbuild.js
 esbuild.webview.cjs
 vsc-extension-quickstart.md
 **/tsconfig.json
+**/tsconfig.*.json
 **/eslint.config.mjs
 **/*.map
 **/*.ts
