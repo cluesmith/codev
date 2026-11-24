@@ -34,6 +34,19 @@
   --codev-wv-link: var(--vscode-textLink-foreground);
   --codev-wv-font-family: var(--vscode-font-family);
   --codev-wv-font-mono: var(--vscode-editor-font-family);
+  /*
+   * Type scale. The dashboard sizes for a browser page (16px rows); in VS Code the panels sit beside
+   * the workbench, whose UI text is --vscode-font-size (13px by default, the tree's size). Row and
+   * body text take that size, and the smaller steps keep their distance below it, so the scale
+   * follows the user's setting and small labels never shrink past legibility.
+   */
+  --codev-wv-font-size-xxl: calc(var(--vscode-font-size) + 4px);
+  --codev-wv-font-size-xl: var(--vscode-font-size);
+  --codev-wv-font-size-lg: var(--vscode-font-size);
+  --codev-wv-font-size-md: calc(var(--vscode-font-size) - 1px);
+  --codev-wv-font-size-sm: calc(var(--vscode-font-size) - 1px);
+  --codev-wv-font-size-xs: calc(var(--vscode-font-size) - 2px);
+  --codev-wv-font-size-xxs: calc(var(--vscode-font-size) - 3px);
 
   /*
    * Status. Waiting and error are text as well as marks (a refusal, "Image not loaded"), so they
@@ -165,8 +178,20 @@ summary:focus-visible {
     display: none;
   }
 
+  /* The state stays on one line ("Blocked: spec review" wrapped to three beside a short title);
+     the title takes what is left, and ellipsizes. */
   .builder-col-state {
     width: auto;
+  }
+
+  .builder-col-title {
+    width: auto;
+  }
+}
+
+/* Only a very narrow panel wraps the state, rather than scroll sideways. */
+@container work-view (max-width: 400px) {
+  .builder-col-state {
     white-space: normal;
   }
 }
@@ -182,4 +207,19 @@ summary:focus-visible {
    A faint mix of the text colour shows on every theme's row. */
 .progress-bar {
   background: color-mix(in srgb, var(--codev-wv-fg) 18%, transparent);
+}
+
+/* Both panels' headings at one size: side by side, the dashboard's 16px "Decisions" sat under a
+   19px "Work". */
+.decisions-title {
+  font-size: var(--codev-wv-font-size-xxl);
+}
+
+/* No decisions file is an empty state, not a problem: the dashboard draws it as an amber notice,
+   which reads as a warning beside the workbench. Here it is plain description text. */
+.decisions-notice--no-file {
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
 }

@@ -4,9 +4,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Spec 1963: every colour and font in the views' stylesheet is a `--codev-wv-*` token (its default
- * the dashboard's value), so each host can map all of them to its own theme. A literal colour would
- * stay the dashboard's in a VS Code light or high-contrast theme.
+ * Spec 1963: every colour, font and font size in the views' stylesheet is a `--codev-wv-*` token
+ * (its default the dashboard's value), so each host can map all of them to its own theme. A literal
+ * colour would stay the dashboard's in a VS Code light or high-contrast theme.
  */
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'styles.css'), 'utf8');
@@ -51,6 +51,19 @@ describe('styles.css tokens', () => {
       .filter(({ value }) => !NEUTRAL.has(value.replace(TOKEN, '').trim().toLowerCase()) && value.replace(TOKEN, '').trim() !== '')
       .map(({ line, value }) => `${line}: ${value}`);
     expect(fonts).toEqual([]);
+  });
+
+  it('sets every font size through a token, or relative to its parent', () => {
+    // A host whose UI text is smaller than the dashboard's (VS Code's is 13px) maps the type scale;
+    // a literal pixel size would stay the dashboard's there.
+    const sizes = decls
+      .filter(({ prop }) => prop === 'font-size' || prop === '--codev-canvas-font-size')
+      .filter(({ value }) => {
+        const rest = value.replace(TOKEN, '').trim();
+        return rest !== '' && rest !== 'inherit' && !/^[\d.]+(em|%)$/.test(rest);
+      })
+      .map(({ line, value }) => `${line}: ${value}`);
+    expect(sizes).toEqual([]);
   });
 
   it('defines no token of its own (each host maps them; the defaults are inline)', () => {

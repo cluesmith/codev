@@ -79,6 +79,10 @@ class Run {
 
   async shot(page, name) {
     const file = path.join(this.opts.shots, `${this.script}-${String(++this.shotIndex).padStart(2, '0')}-${name}.png`);
+    // Park the pointer on the title bar's empty left end, and let any hover tooltip it left close
+    // (one covered the Work heading in a side-by-side shot).
+    await page.mouse.move(160, 12);
+    await waitFor('hover tooltips to close', async () => (await page.locator('.workbench-hover-container, .monaco-hover:not(.hidden)').filter({ visible: true }).count()) === 0, 3_000).catch(() => {});
     await page.screenshot({ path: file });
     return file;
   }
@@ -1930,6 +1934,18 @@ SCRIPTS.decisions = async (R, context, page) => {
     await waitFor('the empty state', async () => (await status.count()) === 1, 20_000);
     const empty = (await status.textContent()).trim();
     if (!/^There is no decisions file/.test(empty) || !/afx decisions init/.test(empty)) throw new Error(`the empty state reads "${empty}"`);
+    // An empty state, not a warning: VS Code's description colour on no fill (the dashboard's
+    // amber notice read as one).
+    const look = await status.evaluate((el) => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--vscode-descriptionForeground)';
+      document.body.appendChild(probe);
+      const description = getComputedStyle(probe).color;
+      probe.remove();
+      const style = getComputedStyle(el);
+      return { color: style.color, description, background: style.backgroundColor, classes: el.className };
+    });
+    if (look.color !== look.description || look.background !== 'rgba(0, 0, 0, 0)') throw new Error(`the empty state is not plain description text: ${JSON.stringify(look)}`);
     const emptyShot = await R.shot(page, 'empty-state');
 
     // The real CLI, run in the fixture: `decisions init` only writes the template (no Tower call).
@@ -1942,7 +1958,7 @@ SCRIPTS.decisions = async (R, context, page) => {
     await waitFor('gamma\'s first item', async () => (await decisionCard(frame, 'main-1').count()) === 1, 15_000);
     const words = await decisionCard(frame, 'main-1').locator('input[type="radio"]').evaluateAll((els) => els.map((e) => e.value));
     return {
-      detail: `"${empty}" → afx decisions init: "${init.stdout.split('\n').find((l) => /Created/.test(l))?.trim()}" → 0 open → main-1 appears (${words.join(' / ')})`,
+      detail: `"${empty}" (${look.color}, the description colour, on no fill) → afx decisions init: "${init.stdout.split('\n').find((l) => /Created/.test(l))?.trim()}" → 0 open → main-1 appears (${words.join(' / ')})`,
       shots: [emptyShot, initShot, await R.shot(page, 'item-appears')],
     };
   });
@@ -2269,7 +2285,14 @@ SCRIPTS.work = async (R, context, page) => {
         const last = Math.min(Math.max(...drawn), main.getBoundingClientRect().right);
         return last > links.getBoundingClientRect().left + 0.5 ? [row.textContent.trim().slice(0, 30)] : [];
       });
+      // Lines each state's text is drawn on: one rect per line box.
+      const stateLines = [...document.querySelectorAll('.builder-col-state')].map((cell) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+      });
       return {
+        stateLines,
         width: Math.round(content.clientWidth),
         sideways: content.scrollWidth - content.clientWidth,
         opens, right: Math.round(right),
@@ -2280,11 +2303,11 @@ SCRIPTS.work = async (R, context, page) => {
         overlaps,
       };
     });
-    if (fit.sideways > 0 || fit.opens.length !== 3 || fit.opens.some((r) => r > fit.right) || fit.overlaps.length) throw new Error(`the half-width Work view does not fit: ${JSON.stringify(fit)}`);
+    if (fit.sideways > 0 || fit.opens.length !== 3 || fit.opens.some((r) => r > fit.right) || fit.overlaps.length || fit.stateLines.some((n) => n !== 1)) throw new Error(`the half-width Work view does not fit: ${JSON.stringify(fit)}`);
     const shots = [await R.shot(page, 'both-panels-dark')];
     await setTheme(page, 'Light Modern');
     shots.push(await R.shot(page, 'both-panels-light'));
-    return { detail: `active tabs by group ${JSON.stringify(groups)}; alpha, beta and gamma expanded to their Decisions entries; Work at ${fit.width} px: no sideways scroll, Open buttons end by ${Math.max(...fit.opens)} of ${fit.right}, hidden ${fit.hidden.join(', ') || 'nothing'}, no label overlaps`, shots };
+    return { detail: `active tabs by group ${JSON.stringify(groups)}; alpha, beta and gamma expanded to their Decisions entries; Work at ${fit.width} px: no sideways scroll, each state on one line, Open buttons end by ${Math.max(...fit.opens)} of ${fit.right}, hidden ${fit.hidden.join(', ') || 'nothing'}, no label overlaps`, shots };
   });
 
   await R.check('the panel is restored after a window reload', async () => {

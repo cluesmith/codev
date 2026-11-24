@@ -138,6 +138,8 @@ describe('DecisionsView shell', () => {
   it('shows the server message when the file is not found, and no cards', () => {
     showState({ status: 'not-found', message: 'There is no decisions file at codev/state/pending-decisions.md.' });
     expect(screen.getByRole('status')).toHaveTextContent('There is no decisions file at codev/state/pending-decisions.md.');
+    // A modifier a host can style as an empty state rather than a warning (VS Code does).
+    expect(screen.getByRole('status')).toHaveClass('decisions-notice', 'decisions-notice--no-file');
     expect(screen.queryByRole('article')).not.toBeInTheDocument();
     expect(screen.queryByText('Ruled')).not.toBeInTheDocument();
   });

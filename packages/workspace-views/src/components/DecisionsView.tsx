@@ -648,7 +648,7 @@ export function DecisionsView({ host, isActive }: DecisionsViewProps) {
           </div>
           {doc && <div className="decisions-path"><code>{doc.path}</code></div>}
           {state.status === 'loading' && <div className="decisions-loading">Loading decisions…</div>}
-          {state.status === 'not-found' && <div className="decisions-notice" role="status">{state.message}</div>}
+          {state.status === 'not-found' && <div className="decisions-notice decisions-notice--no-file" role="status">{state.message}</div>}
           {state.status === 'error' && (
             <div className="decisions-error" role="alert">
               {state.message}

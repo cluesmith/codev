@@ -1,9 +1,9 @@
 /*
  * @cluesmith/codev-workspace-views: the Work and Decisions views' styles (Spec 1963).
  *
- * Moved from the dashboard's index.css. Every colour and font is a `--codev-wv-*` token whose
- * default is the dashboard's value, so a host that maps nothing gets the dashboard's look. Each host
- * maps the tokens to its own theme:
+ * Moved from the dashboard's index.css. Every colour, font and font size is a `--codev-wv-*` token
+ * whose default is the dashboard's value, so a host that maps nothing gets the dashboard's look. Each
+ * host maps the tokens to its own theme:
  *
  * | Token                               | Default                   | Dashboard (index.css)   |
  * |-------------------------------------|---------------------------|-------------------------|
@@ -25,6 +25,14 @@
  * | --codev-wv-link                     | #60a5fa                   | (its own value)         |
  * | --codev-wv-font-family              | the system UI stack       | (its own value)         |
  * | --codev-wv-font-mono                | monospace                 | (its own value)         |
+ * | Type scale (font sizes)             |                           |                         |
+ * | --codev-wv-font-size-xxl            | 19px                      | (its own value)         |
+ * | --codev-wv-font-size-xl             | 16px                      | (its own value)         |
+ * | --codev-wv-font-size-lg             | 14px                      | (its own value)         |
+ * | --codev-wv-font-size-md             | 13px                      | (its own value)         |
+ * | --codev-wv-font-size-sm             | 12px                      | (its own value)         |
+ * | --codev-wv-font-size-xs             | 11px                      | (its own value)         |
+ * | --codev-wv-font-size-xxs            | 10px                      | (its own value)         |
  * | Status                              |                           |                         |
  * | --codev-wv-status-active            | #22c55e                   | --status-active         |
  * | --codev-wv-status-waiting           | #eab308                   | --status-waiting        |
@@ -66,7 +74,7 @@
 }
 
 .work-title {
-  font-size: 19px;
+  font-size: var(--codev-wv-font-size-xxl, 19px);
   font-weight: 600;
   color: var(--codev-wv-fg, #e0e0e0);
 }
@@ -82,7 +90,7 @@
   border: none;
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: var(--codev-wv-font-size-lg, 14px);
   cursor: pointer;
 }
 
@@ -108,7 +116,7 @@
 }
 
 .work-section-title {
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   font-weight: 600;
   color: var(--codev-wv-fg-secondary, #a0a0a0);
   text-transform: uppercase;
@@ -122,19 +130,19 @@
 .work-empty {
   color: var(--codev-wv-fg-muted, #666666);
   font-style: italic;
-  font-size: 14px;
+  font-size: var(--codev-wv-font-size-lg, 14px);
   padding: 8px 0;
 }
 
 .work-unavailable {
   color: var(--codev-wv-status-waiting, #eab308);
-  font-size: 14px;
+  font-size: var(--codev-wv-font-size-lg, 14px);
   padding: 8px 0;
 }
 
 .work-error {
   color: var(--codev-wv-status-error, #ef4444);
-  font-size: 14px;
+  font-size: var(--codev-wv-font-size-lg, 14px);
   padding: 8px;
   margin-bottom: 12px;
   background: var(--codev-wv-status-error-tint, rgba(239, 68, 68, 0.1));
@@ -155,7 +163,7 @@
 }
 
 .builder-table thead th {
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   font-weight: 500;
   color: var(--codev-wv-fg-secondary, #a0a0a0);
   text-align: left;
@@ -166,7 +174,7 @@
 .builder-row td {
   background: var(--codev-wv-bg-secondary, #252525);
   padding: 8px 10px;
-  font-size: 16px;
+  font-size: var(--codev-wv-font-size-xl, 16px);
   border-top: 1px solid var(--codev-wv-border, #333333);
   border-bottom: 1px solid var(--codev-wv-border, #333333);
 }
@@ -223,12 +231,12 @@
 }
 
 .builder-state-active {
-  font-size: 14px;
+  font-size: var(--codev-wv-font-size-lg, 14px);
   color: var(--codev-wv-accent, #3b82f6);
 }
 
 .builder-state-blocked {
-  font-size: 14px;
+  font-size: var(--codev-wv-font-size-lg, 14px);
   color: var(--codev-wv-status-waiting, #eab308);
 }
 
@@ -243,7 +251,7 @@
 
 /* Spec 1595: an exited agent reads distinctly from the waits (SC7). */
 .builder-state-dead {
-  font-size: 14px;
+  font-size: var(--codev-wv-font-size-lg, 14px);
   color: var(--codev-wv-status-error, #ef4444);
 }
 
@@ -278,14 +286,14 @@
 }
 
 .progress-pct {
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   color: var(--codev-wv-fg-secondary, #a0a0a0);
   margin-left: 6px;
   vertical-align: middle;
 }
 
 .builder-col-elapsed {
-  font-size: 14px;
+  font-size: var(--codev-wv-font-size-lg, 14px);
   color: var(--codev-wv-fg-secondary, #a0a0a0);
   white-space: nowrap;
   width: 70px;
@@ -297,7 +305,7 @@
 }
 
 .builder-row-open {
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   color: var(--codev-wv-accent, #3b82f6);
   background: var(--codev-wv-accent-tint, rgba(59, 130, 246, 0.08));
   border: 1px solid var(--codev-wv-accent-tint-border, rgba(59, 130, 246, 0.2));
@@ -340,7 +348,7 @@ a.attention-row {
 }
 
 .attention-row-id {
-  font-size: 16px;
+  font-size: var(--codev-wv-font-size-xl, 16px);
   font-weight: 500;
   color: var(--codev-wv-accent, #3b82f6);
   white-space: nowrap;
@@ -348,7 +356,7 @@ a.attention-row {
 
 .attention-row-title {
   flex: 1;
-  font-size: 16px;
+  font-size: var(--codev-wv-font-size-xl, 16px);
   color: var(--codev-wv-fg, #e0e0e0);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -356,7 +364,7 @@ a.attention-row {
 }
 
 .attention-row-kind {
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   white-space: nowrap;
 }
 
@@ -406,7 +414,7 @@ a.attention-row {
 }
 
 .attention-row-age {
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   color: var(--codev-wv-fg-muted, #666666);
   white-space: nowrap;
 }
@@ -451,7 +459,7 @@ a.attention-row {
 }
 
 .backlog-artifact-link {
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   padding: 1px 5px;
   border-radius: 3px;
   border: 1px solid var(--codev-wv-border, #333333);
@@ -487,14 +495,14 @@ a.attention-row {
 }
 
 .backlog-row-number {
-  font-size: 16px;
+  font-size: var(--codev-wv-font-size-xl, 16px);
   font-weight: 500;
   color: var(--codev-wv-accent, #3b82f6);
   white-space: nowrap;
 }
 
 .backlog-type-tag {
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   padding: 1px 5px;
   border-radius: 3px;
   font-weight: 500;
@@ -518,7 +526,7 @@ a.attention-row {
 
 .backlog-row-title {
   flex: 1;
-  font-size: 16px;
+  font-size: var(--codev-wv-font-size-xl, 16px);
   color: var(--codev-wv-fg, #e0e0e0);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -526,14 +534,14 @@ a.attention-row {
 }
 
 .backlog-row-age {
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   color: var(--codev-wv-fg-muted, #666666);
   white-space: nowrap;
 }
 
 .backlog-row-author,
 .backlog-row-assignees {
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   color: var(--codev-wv-fg-muted, #666666);
   white-space: nowrap;
 }
@@ -570,7 +578,7 @@ a.attention-row {
 }
 
 .recently-closed-check {
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   color: var(--codev-wv-status-active, #22c55e);
   flex-shrink: 0;
 }
@@ -592,7 +600,7 @@ a.attention-row {
   }
 
   .builder-table {
-    font-size: 14px;
+    font-size: var(--codev-wv-font-size-lg, 14px);
   }
 
   .builder-col-elapsed,
@@ -629,20 +637,20 @@ a.attention-row {
 }
 
 .decisions-title {
-  font-size: 16px;
+  font-size: var(--codev-wv-font-size-xl, 16px);
   font-weight: 600;
   color: var(--codev-wv-fg, #e0e0e0);
   margin: 0;
 }
 
 .decisions-count {
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   color: var(--codev-wv-fg-secondary, #a0a0a0);
   white-space: nowrap;
 }
 
 .decisions-path {
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   color: var(--codev-wv-fg-muted, #666666);
   margin-bottom: 12px;
   overflow-wrap: anywhere;
@@ -651,14 +659,14 @@ a.attention-row {
 .decisions-loading,
 .decisions-empty {
   color: var(--codev-wv-fg-secondary, #a0a0a0);
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   padding: 20px 0;
   text-align: center;
 }
 
 .decisions-notice,
 .decisions-error {
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   margin-bottom: 8px;
   padding: 6px 8px;
   border-radius: 4px;
@@ -686,7 +694,7 @@ a.attention-row {
   --codev-canvas-code-background: var(--codev-wv-bg-tertiary, #2a2a2a);
   --codev-canvas-code-foreground: var(--codev-wv-fg, #e0e0e0);
   --codev-canvas-link: var(--codev-wv-link, #60a5fa);
-  --codev-canvas-font-size: 13px;
+  --codev-canvas-font-size: var(--codev-wv-font-size-md, 13px);
   --codev-canvas-paragraph-spacing: 8px;
   overflow-wrap: anywhere;
 }
@@ -712,7 +720,7 @@ a.attention-row {
   padding: 4px 8px;
   border: 1px dashed var(--codev-wv-status-waiting, #eab308);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   color: var(--codev-wv-fg-secondary, #a0a0a0);
 }
 
@@ -740,7 +748,7 @@ a.attention-row {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 2px 10px;
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
 }
 
 .decisions-item-id {
@@ -759,12 +767,12 @@ a.attention-row {
 .decisions-stamp-flag {
   display: block;
   font-family: var(--codev-wv-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
-  font-size: 11px;
+  font-size: var(--codev-wv-font-size-xs, 11px);
   color: var(--codev-wv-status-waiting, #eab308);
 }
 
 .decisions-card-question {
-  font-size: 14px;
+  font-size: var(--codev-wv-font-size-lg, 14px);
   font-weight: 600;
   color: var(--codev-wv-fg, #e0e0e0);
   margin: 4px 0 8px;
@@ -776,7 +784,7 @@ a.attention-row {
 }
 
 .decisions-section-label {
-  font-size: 10px;
+  font-size: var(--codev-wv-font-size-xxs, 10px);
   color: var(--codev-wv-fg-muted, #666666);
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -799,7 +807,7 @@ a.attention-row {
   flex-wrap: wrap;
   gap: 6px;
   align-items: baseline;
-  font-size: 11px;
+  font-size: var(--codev-wv-font-size-xs, 11px);
   margin-bottom: 2px;
 }
 
@@ -817,7 +825,7 @@ a.attention-row {
 }
 
 .decisions-thread-awaiting {
-  font-size: 11px;
+  font-size: var(--codev-wv-font-size-xs, 11px);
   font-style: italic;
   color: var(--codev-wv-status-waiting, #eab308);
 }
@@ -838,7 +846,7 @@ a.attention-row {
   align-items: baseline;
   gap: 2px 8px;
   padding: 3px 0;
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   color: var(--codev-wv-fg, #e0e0e0);
   min-width: 0;
 }
@@ -864,7 +872,7 @@ a.attention-row {
 }
 
 .decisions-badge {
-  font-size: 10px;
+  font-size: var(--codev-wv-font-size-xxs, 10px);
   text-transform: uppercase;
   letter-spacing: 0.3px;
   color: var(--codev-wv-status-active, #22c55e);
@@ -877,7 +885,7 @@ a.attention-row {
   margin: 0;
   padding: 6px 8px;
   font-family: var(--codev-wv-font-mono, monospace);
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   color: var(--codev-wv-fg, #e0e0e0);
   background: var(--codev-wv-bg-tertiary, #2a2a2a);
   border-left: 3px solid var(--codev-wv-accent, #3b82f6);
@@ -888,7 +896,7 @@ a.attention-row {
 
 .decisions-ruling-note {
   margin: 4px 0 0;
-  font-size: 11px;
+  font-size: var(--codev-wv-font-size-xs, 11px);
   color: var(--codev-wv-fg-secondary, #a0a0a0);
 }
 
@@ -928,7 +936,7 @@ a.attention-row {
   background: none;
   border: none;
   padding: 2px 0;
-  font-size: 11px;
+  font-size: var(--codev-wv-font-size-xs, 11px);
   color: var(--codev-wv-fg-secondary, #a0a0a0);
   text-decoration: underline;
   cursor: pointer;
@@ -955,7 +963,7 @@ a.attention-row {
   resize: vertical;
   padding: 6px 8px;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   color: var(--codev-wv-fg, #e0e0e0);
   background: var(--codev-wv-bg, #1a1a1a);
   border: 1px solid var(--codev-wv-border, #333333);
@@ -984,7 +992,7 @@ a.attention-row {
 
 .decisions-submit-btn {
   padding: 5px 14px;
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   background: var(--codev-wv-accent, #3b82f6);
   color: var(--codev-wv-on-accent, white);
   border: none;
@@ -1014,14 +1022,14 @@ a.attention-row {
 }
 
 .decisions-held-tag {
-  font-size: 10px;
+  font-size: var(--codev-wv-font-size-xxs, 10px);
   text-transform: uppercase;
   letter-spacing: 0.3px;
   color: var(--codev-wv-status-waiting, #eab308);
 }
 
 .decisions-held-question {
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   font-weight: 600;
   color: var(--codev-wv-fg, #e0e0e0);
   margin: 4px 0 6px;
@@ -1037,7 +1045,7 @@ a.attention-row {
   border: 1px solid var(--codev-wv-border, #333333);
   border-radius: 4px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   color: var(--codev-wv-fg-secondary, #a0a0a0);
   cursor: pointer;
 }
@@ -1055,14 +1063,14 @@ a.attention-row {
 
 .decisions-ruled > summary {
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--codev-wv-font-size-md, 13px);
   font-weight: 600;
   color: var(--codev-wv-fg-secondary, #a0a0a0);
   padding: 4px 0;
 }
 
 .decisions-ruled-empty {
-  font-size: 12px;
+  font-size: var(--codev-wv-font-size-sm, 12px);
   color: var(--codev-wv-fg-muted, #666666);
 }
 
@@ -1077,11 +1085,11 @@ a.attention-row {
 
   /* 16px keeps iOS from zooming the page when the comment box takes focus. */
   .decisions-comment {
-    font-size: 16px;
+    font-size: var(--codev-wv-font-size-xl, 16px);
   }
 
   .decisions-submit-btn {
     padding: 8px 18px;
-    font-size: 14px;
+    font-size: var(--codev-wv-font-size-lg, 14px);
   }
 }

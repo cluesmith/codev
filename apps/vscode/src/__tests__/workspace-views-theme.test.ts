@@ -73,6 +73,24 @@ describe('vscode-theme.css', () => {
     expect([...map.values()].some(v => v.includes('--vscode-disabledForeground'))).toBe(false);
   });
 
+  it("sizes text from VS Code's UI font size: rows at it, smaller steps a fixed distance below", () => {
+    // The dashboard's 16px rows read larger than the 13px workbench around the panels.
+    const map = mappings();
+    const sizes = [...map.keys()].filter(token => token.startsWith('--codev-wv-font-size-'));
+    expect(sizes.sort()).toEqual(['lg', 'md', 'sm', 'xl', 'xs', 'xxl', 'xxs'].map(s => `--codev-wv-font-size-${s}`));
+    expect(map.get('--codev-wv-font-size-xl')).toBe('var(--vscode-font-size)');
+    for (const token of sizes) {
+      expect(map.get(token), token).toMatch(/^(var\(--vscode-font-size\)|calc\(var\(--vscode-font-size\) [+-] \dpx\))$/);
+    }
+  });
+
+  it('draws the no-file state as plain description text, not a warning', () => {
+    const rule = withoutComments(THEME).match(/\.decisions-notice--no-file\s*\{([^}]*)\}/);
+    expect(rule, 'a .decisions-notice--no-file rule').not.toBeNull();
+    expect(rule![1]).toMatch(/color:\s*var\(--vscode-descriptionForeground\)/);
+    expect(rule![1]).toMatch(/background:\s*transparent/);
+  });
+
   it("draws waiting and error text in VS Code's list colours, which are made to be read", () => {
     // Light themes' chart yellow and error foreground measured under 3:1 as text, rendered.
     const map = mappings();
