@@ -235,3 +235,16 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
     .codev/config.local.json `check.deploy: {branch: main, workflow: test.yml}`): `check deploy 1959 1955 1954
     99999` → three `ok on main` + `ok deploy run latest green test.yml run (2026-11-24 00:54, 77e2d82) contains …`,
     #99999 not read, exit 1, 7 s; `--json` matches DeployReport. Clone refs unchanged, no FETCH_HEAD written.
+- Architect (2026-11-24 02:27): confirmed 8/8 green at 53f7e6522 and the ci-first skip; re-ran `check deploy 1954
+  1939 1965` from the main checkout themselves (two merged `on main`, 8 merge checks passed; the open one `OPEN:
+  not merged`; 5.6 s; no ref changed). The 15a deviation is accepted: "the forge's own words for a PR it cannot
+  read, not a parsed 'not found'; record it" (for the REVIEW). Skip applied once (build-complete), noted in the PR
+  body. Next after review: Phase 6, merging origin/main first (PR #1954 is on main).
+- Review iter1: codex APPROVE (no issues), claude APPROVE (none blocking). Porch advanced → check_worktree
+  (de04c7295). Claude's non-blocking notes: (1) `runsOf` caches by branch only — key it by workflow+branch;
+  (2) "newest first" from workflow-runs is trusted, not enforced (deliberate; record in the REVIEW); (3) a git
+  failure in `isAncestor` mid-PR escalates to exit 2 and drops the other PRs' reports — should be that PR's check
+  not run; (4) `merge not read` also when `state` itself is missing — "state not read" truer; (5) test gaps: two
+  PRs on different bases with no deploy branch (per-branch cache, `on main, release`), and `check.skip` of
+  `merged`/`on-branch`. Plan: fold (1), (3), (4), (5) into the first Phase 6 commit as Phase 5 review fold-ins
+  (as Phase 3's were folded into Phase 4), listed in the PR body; (2) goes to the REVIEW.
