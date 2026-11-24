@@ -50,8 +50,8 @@ vi.mock('vscode', () => {
   };
 });
 
-const { MENU_RECORDS, ROW_CLICK_RECORDS, WELCOME_RECORDS, COCKPIT_ENTRIES } = await import('../views/cockpit-menu-map.js');
-const { CockpitProvider, cockpitWorkspaceContext, DEV_SLOT_KINDS } = await import('../views/cockpit.js');
+const { MENU_RECORDS, ROW_CLICK_RECORDS, WELCOME_RECORDS, COCKPIT_ENTRIES, COCKPIT_ROW_RECORDS } = await import('../views/cockpit-menu-map.js');
+const { CockpitProvider, cockpitWorkspaceContext, DEV_SLOT_KINDS, COCKPIT_DECISIONS_CONTEXT, COCKPIT_IDS } = await import('../views/cockpit.js');
 const { WorkspaceProvider } = await import('../views/workspace.js');
 const { REMOTE_CONTEXT } = await import('../views/architect-tree.js');
 
@@ -255,9 +255,15 @@ async function workspaceViewRows(devs: string[]) {
   return [...top, ...architects];
 }
 
-/** A Cockpit over one active workspace (this window's) whose overview lists `main` and a sibling. */
-function cockpitWith(opts: { fleetLoaded?: boolean; connection?: 'auto' | 'manual' | 'none'; state?: string } = {}): CockpitProviderType {
+/**
+ * A Cockpit over one active workspace (this window's) whose overview lists `main` and a sibling, and
+ * optionally a second active workspace with the same overview.
+ */
+function cockpitWith(opts: { fleetLoaded?: boolean; connection?: 'auto' | 'manual' | 'none'; state?: string; other?: string } = {}): CockpitProviderType {
   const data = { builders: [], architects: [{ name: 'main' }, { name: 'web' }], backlog: [], pendingPRs: [], recentlyClosed: [] } as unknown as OverviewData;
+  const listing = (path: string, name: string) =>
+    ({ workspace: { path, name, active: true, proxyUrl: '', terminals: 1 }, attention: deriveAttention(data), overview: data });
+  const fleet = [listing(HERE, 'codev'), ...(opts.other ? [listing(opts.other, 'other')] : [])];
   return new CockpitProvider({
     connectionManager: {
       getState: () => opts.state ?? 'connected',
@@ -269,7 +275,7 @@ function cockpitWith(opts: { fleetLoaded?: boolean; connection?: 'auto' | 'manua
     terminalManager: { listDevTerminals: () => [], onDidChangeDevTerminals: noEvent },
     loadWorktreeConfig: async () => null,
     towerCache: {
-      getFleet: () => [{ workspace: { path: HERE, name: 'codev', active: true, proxyUrl: '', terminals: 1 }, attention: deriveAttention(data), overview: data }],
+      getFleet: () => fleet,
       isLoaded: () => opts.fleetLoaded ?? true,
       getOverview: () => data,
       onDidChange: noEvent,
@@ -305,6 +311,41 @@ describe('every Workspace-view row click has a record', () => {
       expect(rows.length, `${record.row} → a Cockpit row matching ${contextValue}`).toBeGreaterThan(0);
       for (const row of rows) { expect((row.command as { command: string }).command).toBe(command); }
     }
+  });
+});
+
+// ── The Cockpit's own rows ───────────────────────────────────────────────────
+
+describe("the Cockpit's own rows: recorded, and no menu attaches to them", () => {
+  const OTHER = '/work/other';
+
+  it("each workspace's Decisions entry carries its recorded contextValue and click command", async () => {
+    const cockpit = cockpitWith({ other: OTHER });
+    const [root] = await cockpit.getChildren();
+    const rows = new Map<string, { contextValue?: string; command?: string }>();
+    for (const ws of await cockpit.getChildren(root)) {
+      const decisions = (await cockpit.getChildren(ws)).map(n => cockpit.getTreeItem(n)).at(-1)!;
+      rows.set(String(decisions.id), { contextValue: decisions.contextValue, command: (decisions.command as { command: string }).command });
+    }
+    const [here, there] = COCKPIT_ROW_RECORDS;
+    expect(rows.get(COCKPIT_IDS.decisions(HERE))).toEqual({ contextValue: here.contextValue, command: here.command });
+    expect(rows.get(COCKPIT_IDS.decisions(OTHER))).toEqual({ contextValue: there.contextValue, command: there.command });
+    expect(here.contextValue).toBe(COCKPIT_DECISIONS_CONTEXT);
+    expect(NAVIGATE_VALUES).toContain(there.contextValue);
+  });
+
+  it('no Cockpit row menu entry matches either value', () => {
+    const rowMenus = COCKPIT_MENU.filter(e => e.location === 'view/item/context');
+    const hits = rowMenus.flatMap(e =>
+      COCKPIT_ROW_RECORDS.filter(r => viewItemMatches(e.when, r.contextValue)).map(r => `${e.command} ← ${r.contextValue}`));
+    expect(hits).toEqual([]);
+  });
+
+  it('the commands they run are contributed, and Open Decisions stays in the palette', () => {
+    const commands = (PKG.contributes.commands as Array<{ command: string }>).map(c => c.command);
+    for (const { command } of COCKPIT_ROW_RECORDS) { expect(commands).toContain(command); }
+    const palette = PKG.contributes.menus.commandPalette as Array<{ command: string; when?: string }>;
+    expect(palette.filter(e => e.command === 'codev.openDecisions')).toEqual([]);
   });
 });
 

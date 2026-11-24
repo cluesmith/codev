@@ -42,7 +42,8 @@
   "activationEvents": [
     "workspaceContains:.codev",
     "workspaceContains:codev",
-    "onStartupFinished"
+    "onStartupFinished",
+    "onWebviewPanel:codev.decisions"
   ],
   "main": "./dist/extension.js",
   "capabilities": {
@@ -100,6 +101,11 @@
         "command": "codev.cockpit.openWebInterface",
         "title": "Codev: Open Web Interface",
         "icon": "$(globe)"
+      },
+      {
+        "command": "codev.openDecisions",
+        "title": "Codev: Open Decisions",
+        "icon": "$(law)"
       },
       {
         "command": "codev.helloWorld",
@@ -1609,6 +1615,7 @@
     "@cluesmith/codev-artifact-canvas": "workspace:*",
     "@cluesmith/codev-sdk": "workspace:*",
     "@cluesmith/codev-types": "workspace:*",
+    "@cluesmith/codev-workspace-views": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "ws": "^8.18.0"
@@ -1620,6 +1627,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.18.1",
+    "@testing-library/react": "^16.0.0",
+    "jsdom": "^26.0.0",
     "typescript-eslint": "^8.48.1",
     "eslint": "^9.39.1",
     "esbuild": "^0.27.1",

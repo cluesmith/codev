@@ -67,6 +67,10 @@ import { deriveAttention, isIdleWaiting } from '@cluesmith/codev-sdk/builder-hel
 import { BuildersProvider, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
 import { AgentTreeHosts, agentCycleRoster } from './views/agent-tree-hosts.js';
 import { CockpitProvider, COCKPIT_VIEW_ID, cockpitConnectionMode, type CockpitNode } from './views/cockpit.js';
+import { DecisionsPanels } from './workspace-views/decisions-panel.js';
+import { DecisionsBridge } from './workspace-views/decisions-bridge.js';
+import { DECISIONS_VIEW_TYPE } from './workspace-views/messages.js';
+import { workspaceViewUnavailableReason } from './workspace-views/availability.js';
 import { OverviewRefreshGate } from './views/overview-refresh-gate.js';
 // Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
 import { TowerFleetCache } from './views/tower-cache.js';
@@ -593,6 +597,18 @@ export async function activate(context: vscode.ExtensionContext) {
 		),
 	});
 	const cockpitView: vscode.TreeView<CockpitNode> = vscode.window.createTreeView(COCKPIT_VIEW_ID, { treeDataProvider: cockpitProvider });
+	// The Decisions panel (Spec 1963): one per window, for this window's workspace, with every Tower
+	// call made here. Its serializer restores an open panel after a window reload.
+	const decisionsPanels = new DecisionsPanels({
+		extensionUri: context.extensionUri,
+		bridge: new DecisionsBridge(connectionManager),
+		unavailableReason: () => workspaceViewUnavailableReason('Decisions', {
+			builderWorktreeWindow: isBuilderWorktreeWindow,
+			workspacePath: connectionManager?.getWorkspacePath() ?? null,
+		}),
+		log: (line) => outputChannel?.appendLine(line),
+	});
+	context.subscriptions.push(vscode.window.registerWebviewPanelSerializer(DECISIONS_VIEW_TYPE, decisionsPanels));
 	// Builders accordion (#913), row-click expand, follow-reveals, the
 	// builder-active hook and the badge act on whichever of the two views a row
 	// belongs to. The accordion is toggled via the header button /
@@ -1287,6 +1303,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			viewBacklogIssue(connectionManager!, extractIssueId(arg))),
 		reg('codev.openBacklogSearch', () =>
 			BacklogSearchPanel.createOrShow(connectionManager!, overviewCache, context.extensionUri)),
+		// The Decisions panel (Spec 1963): the palette and the Cockpit's Decisions entry. Where it is
+		// not offered (a builder-worktree or no-workspace window) it says why.
+		regCli('codev.openDecisions', () => decisionsPanels.show()),
 		reg('codev.searchBacklog', () => searchBacklog(connectionManager!, overviewCache)),
 		reg('codev.openIssueById', () => openIssueById(connectionManager!, () => overviewCache.getData())),
 		reg('codev.openPRById', () => openPRById(connectionManager!)),

@@ -1,4 +1,5 @@
 const esbuild = require("esbuild");
+const { decisionsWebviewConfig } = require('./esbuild.webview.cjs');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -83,8 +84,14 @@ const contextualPanelWebviewConfig = {
 	plugins: [esbuildProblemMatcherPlugin],
 };
 
+/** The Decisions panel's webview bundle (Spec 1963): `dist/webview/decisions.{js,css}`. */
+const decisionsPanelWebviewConfig = {
+	...decisionsWebviewConfig({ production }),
+	plugins: [esbuildProblemMatcherPlugin],
+};
+
 async function main() {
-	const configs = [extensionConfig, webviewConfig, contextualPanelWebviewConfig];
+	const configs = [extensionConfig, webviewConfig, contextualPanelWebviewConfig, decisionsPanelWebviewConfig];
 	if (watch) {
 		const contexts = await Promise.all(configs.map((c) => esbuild.context(c)));
 		await Promise.all(contexts.map((c) => c.watch()));

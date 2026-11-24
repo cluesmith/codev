@@ -770,3 +770,48 @@ host-side. Pass the Decisions view a stable host object (it keys image loads on 
   compares the class string.
 - `one-copy.test.ts`'s `statSync` would throw on a dangling symlink: none exist under `apps/` or
   `packages/`.
+
+### Phase 7: decisions_panel, implementation (2026-11-24)
+
+The Decisions panel in VS Code: the shared `DecisionsView` in an editor-area webview, with every
+Tower call made by the extension host. Built:
+- **SDK** (`tower-client.ts`): `getDecisions`, `ruleDecision`, `getDecisionImage`. A refusal stays
+  structured as `{code, message}` and is never flattened. Image bytes come through a new
+  `requestBinary`, which sets no Content-Type on the GET.
+- **Host** (`apps/vscode/src/workspace-views/`):
+  - `messages.ts`: the requestId contract and guards for untrusted webview messages;
+  - `security.ts`: realpath + `path.relative` containment, and an http(s)-only allowlist;
+  - `panel-template.ts`: nonce CSP with no `connect-src`;
+  - `decisions-bridge.ts`: maps each Tower outcome to the view's result;
+  - `availability.ts`;
+  - `decisions-panel.ts`: single instance, serializer, and the visibility relay.
+- **Webview** (`webview/`): `WebviewDecisionsHost` (postMessage, never rejects, image abort),
+  `DecisionsApp` (`isActive` = the relayed visibility, full-size image overlay), and
+  `vscode-theme.css` mapping all 28 `--codev-wv-*` tokens.
+- **Cockpit:** a "Decisions" leaf after the architects under every active workspace. This window's
+  entry runs `codev.openDecisions`; any other entry (another workspace, a worktree window, a
+  no-workspace window) navigates via Open Workspace.
+
+**Builder decisions / deviations (mine, not the architect's):**
+- `@cluesmith/codev-workspace-views/host` is a new subpath export. Host-side code imports the view
+  types from it, because the package index pulls in TSX, which the host tsconfig (no `jsx`) would
+  then compile.
+- The no-I/O rule for webview code: an ESLint `no-restricted-globals/properties` rule on
+  `src/workspace-views/webview/**`, plus `workspace-views-webview-source.test.ts`, which is what CI
+  runs. The shared package has no ESLint; its existing `import-boundary.test.ts` already bans
+  fetch, XHR, WebSocket, EventSource and sendBeacon there.
+- The panel opens in `ViewColumn.Active`.
+- The "no decisions file" empty state appends the `afx decisions init` hint host-side, as plain
+  text after Tower's message.
+- Vitest compiles TSX with `esbuild: { jsx: 'automatic' }`. Vite reads the host tsconfig.json,
+  which sets no `jsx`.
+- `decisions-webview-bundle.test.ts` builds the real bundle from `esbuild.webview.cjs` and boots
+  it in its own JSDOM window, from a node-environment test, because esbuild refuses to run inside
+  vitest's jsdom environment (TextEncoder realm check).
+- The Windows workflow's unit job gained a step that runs `workspace-views-security.test.ts` on
+  Windows. Its directory links are junctions, which need no privilege; a `win32`-only describe
+  covers drive-letter case and separators on real paths.
+
+**Still to do in Phase 7:** the rendered harness check (scenarios 15, 16, 18), including whether
+Uint8Array image bytes survive `webview.postMessage` in VS Code and in /ide/, and how the
+high-contrast theme looks; then the Windows dispatch.

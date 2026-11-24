@@ -39,14 +39,15 @@ const CONTEXT_FAMILY: Record<BuilderState, 'blocked-builder' | 'awaiting-builder
 };
 
 /**
- * `contextValue`s of navigate-only rows (another workspace's architects and builders, Spec 1963).
- * Deliberately outside every builder/architect menu's `viewItem` pattern, so none of this window's
- * row menus can attach to a row that does not belong to this window.
+ * `contextValue`s of navigate-only rows (another workspace's architects, builders and Decisions
+ * entry, Spec 1963). Deliberately outside every builder/architect menu's `viewItem` pattern, so none
+ * of this window's row menus can attach to a row that does not belong to this window.
  */
 export const REMOTE_CONTEXT = {
   architect: 'cockpit-remote-architect',
   builder: 'cockpit-remote-builder',
   idleArchitects: 'cockpit-remote-idle-architects',
+  decisions: 'cockpit-remote-decisions',
 } as const;
 
 /**
@@ -786,12 +787,12 @@ export class ArchitectTreeBuilder {
 }
 
 /** The click command of a navigate-only row: open its workspace (the Tower view's action). */
-function openWorkspaceCommand(target: WorkspaceTarget): vscode.Command {
+export function openWorkspaceCommand(target: WorkspaceTarget): vscode.Command {
   return { command: OPEN_WORKSPACE_COMMAND, title: 'Open Workspace', arguments: [target] };
 }
 
 /** A navigate-only row's tooltip: what the row shows, then which workspace a click opens. */
-function navigateTooltip(base: string, target: WorkspaceTarget): string {
+export function navigateTooltip(base: string, target: WorkspaceTarget): string {
   const where = `In workspace ${target.name}. Click to open its window, where this row can act.`;
   if (base === '') { return where; }
   return `${base}\n${where}`;

@@ -9,6 +9,9 @@
  * - **row clicks**: every Workspace-view row that runs a command when clicked;
  * - **welcome content**: every `viewsWelcome` entry of the source views.
  *
+ * A fourth kind records the Cockpit's own rows that no source view has (the Decisions entry): what
+ * a click runs, and that no menu entry attaches to them.
+ *
  * Each record says where the affordance went: `same` (the same command, group and `when` at the
  * Cockpit's own view, matching the given `viewItem` clause), `relocated` (to named Cockpit menu
  * entries, or to a Cockpit row's own click), or `excluded` (with the reason). Nothing disappears
@@ -239,4 +242,20 @@ export const WELCOME_RECORDS: readonly WelcomeRecord[] = [
         + "welcome's onboarding links (Open Folder, Open Recent, Get Started) stay on the Agents view, in the same window.",
     },
   },
+];
+
+// ── The Cockpit's own rows (no source-view counterpart) ─────────────────────
+
+/** A Cockpit row that no source view has: its `contextValue` and what a click on it runs. */
+export interface CockpitRowRecord {
+  row: string;
+  contextValue: string;
+  command: string;
+}
+
+export const COCKPIT_ROW_RECORDS: readonly CockpitRowRecord[] = [
+  // Opens, or reveals, this window's Decisions panel; no layout change.
+  { row: "this window's Decisions entry", contextValue: 'cockpit-decisions', command: 'codev.openDecisions' },
+  // Navigate-only, like another workspace's architects and builders: it opens that workspace's window.
+  { row: "another workspace's Decisions entry", contextValue: 'cockpit-remote-decisions', command: 'codev.tower.openWorkspace' },
 ];

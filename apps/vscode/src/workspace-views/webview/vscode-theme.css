@@ -1,0 +1,123 @@
+/*
+ * The Work and Decisions panels' theme in VS Code (Spec 1963): every `--codev-wv-*` token of the
+ * shared views' stylesheet (packages/workspace-views/src/styles.css) mapped to VS Code's theme
+ * variables, so the panels read correctly in light, dark and high-contrast themes and follow a
+ * theme change live. `workspace-views-theme.test.ts` holds this file to that stylesheet: a token
+ * left unmapped would keep the dashboard's dark default in every theme.
+ */
+
+:root {
+  /* Chrome */
+  --codev-wv-bg: var(--vscode-editor-background);
+  --codev-wv-bg-secondary: var(--vscode-editorWidget-background);
+  --codev-wv-bg-tertiary: var(--vscode-textCodeBlock-background);
+  --codev-wv-bg-hover: var(--vscode-list-hoverBackground);
+  --codev-wv-fg: var(--vscode-foreground);
+  --codev-wv-fg-secondary: var(--vscode-descriptionForeground);
+  --codev-wv-fg-muted: var(--vscode-disabledForeground);
+  --codev-wv-border: var(--vscode-panel-border, var(--vscode-contrastBorder));
+  /* Buttons and accents use the button pair, so their text keeps its contrast in every theme. */
+  --codev-wv-accent: var(--vscode-button-background, var(--vscode-focusBorder));
+  --codev-wv-accent-hover: var(--vscode-button-hoverBackground, var(--vscode-focusBorder));
+  --codev-wv-on-accent: var(--vscode-button-foreground);
+  --codev-wv-accent-tint: color-mix(in srgb, var(--codev-wv-accent) 8%, transparent);
+  --codev-wv-accent-tint-hover: color-mix(in srgb, var(--codev-wv-accent) 18%, transparent);
+  --codev-wv-accent-tint-border: color-mix(in srgb, var(--codev-wv-accent) 20%, transparent);
+  --codev-wv-link: var(--vscode-textLink-foreground);
+  --codev-wv-font-family: var(--vscode-font-family);
+  --codev-wv-font-mono: var(--vscode-editor-font-family);
+
+  /* Status */
+  --codev-wv-status-active: var(--vscode-charts-green);
+  --codev-wv-status-waiting: var(--vscode-charts-yellow);
+  --codev-wv-status-error: var(--vscode-errorForeground);
+  --codev-wv-status-implementing: var(--vscode-charts-orange);
+  --codev-wv-status-waiting-tint: color-mix(in srgb, var(--vscode-charts-yellow) 10%, transparent);
+  --codev-wv-status-error-tint: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent);
+  --codev-wv-tag-bug-bg: color-mix(in srgb, var(--vscode-errorForeground) 15%, transparent);
+  --codev-wv-tag-project: var(--vscode-charts-purple);
+  --codev-wv-tag-project-bg: color-mix(in srgb, var(--vscode-charts-purple) 12%, transparent);
+  --codev-wv-tag-spike: var(--vscode-charts-blue);
+  --codev-wv-tag-spike-bg: color-mix(in srgb, var(--vscode-charts-blue) 12%, transparent);
+}
+
+/* The panel fills the editor; the view scrolls inside it. VS Code's webview body has side padding. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+}
+
+/* Keyboard focus follows VS Code's focus colour. */
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+/* The full-size image, shown over the view (a webview cannot open a browser tab). */
+.wv-fullsize {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  background: var(--vscode-editor-background);
+}
+
+.wv-fullsize-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-contrastBorder));
+}
+
+.wv-fullsize-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+}
+
+.wv-fullsize-close {
+  padding: 4px 12px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wv-fullsize-close:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.wv-fullsize-body {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 12px;
+}
+
+/* Full size: the image's own size, scrolled when larger than the panel. */
+.wv-fullsize-body img {
+  max-width: none;
+  max-height: none;
+}

@@ -362,6 +362,12 @@ function shape(row: vscode.TreeItem, scope: string) {
   };
 }
 
+/** A workspace's rows below its architects: asserts the last is its Decisions entry, and drops it. */
+function withoutDecisions(rows: vscode.TreeItem[], path: string): vscode.TreeItem[] {
+  expect(rows.at(-1)?.id).toBe(COCKPIT_IDS.decisions(path));
+  return rows.slice(0, -1);
+}
+
 // ── Tower root ────────────────────────────────────────────────────────────────
 
 describe('Tower root and its state rows', () => {
@@ -542,7 +548,7 @@ describe('workspace rows', () => {
     w.here = ONE;
     w.fireOverview();
     const here = await w.provider.getChildren(await workspaceNode(w.provider, 'codev'));
-    expect(here.map(n => labelOf(w.provider, n))).toEqual(['MAIN (1)', 'REVIEWER (0)']);
+    expect(here.map(n => labelOf(w.provider, n))).toEqual(['MAIN (1)', 'REVIEWER (0)', 'Decisions']);
   });
 });
 
@@ -566,7 +572,8 @@ describe("this window's workspace: the Agents view's architect-axis rows", () =>
         await visitAgents();
 
         const w = world({ fleet: [entry(wsRow(HERE, 'codev', true), data)], here: data });
-        const cockpitRows = (await subtree(w.provider, await workspaceNode(w.provider, 'codev'))).map(r => item(w.provider, r.node));
+        const cockpitRows = withoutDecisions(
+          (await subtree(w.provider, await workspaceNode(w.provider, 'codev'))).map(r => item(w.provider, r.node)), HERE);
 
         expect(cockpitRows.map(r => shape(r, scope))).toEqual(agentRows.map(r => shape(r, '')));
         // Context values match, except that architect rows name main vs a sibling.
@@ -585,7 +592,7 @@ describe("this window's workspace: the Agents view's architect-axis rows", () =>
   it('folds a null owner into main, keeps a non-live owner, rolls up idle siblings and leaves a childless main a leaf', async () => {
     const w = world({ fleet: [entry(wsRow(HERE, 'codev', true), MANY)], here: MANY });
     const top = await w.provider.getChildren(await workspaceNode(w.provider, 'codev'));
-    expect(top.map(n => labelOf(w.provider, n))).toEqual(['MAIN (2)', 'GHOST (1)', 'WEB (2)', 'Idle Architects (2)']);
+    expect(top.map(n => labelOf(w.provider, n))).toEqual(['MAIN (2)', 'GHOST (1)', 'WEB (2)', 'Idle Architects (2)', 'Decisions']);
     const mainRows = await w.provider.getChildren(top[0]);
     expect(mainRows.map(n => (n as InstanceType<typeof BuilderTreeItem>).builderId)).toEqual(['spir-10', 'air-11']);
     expect(item(w.provider, top[1]).command).toEqual({ command: 'codev.openArchitectTerminal', title: 'Open Architect Terminal', arguments: ['ghost'] });
@@ -601,7 +608,7 @@ describe("this window's workspace: the Agents view's architect-axis rows", () =>
     const stale = overview([], [architect('main')]);
     const w = world({ fleet: [entry(wsRow(HERE, 'codev', true), stale)], here: ONE });
     const top = await w.provider.getChildren(await workspaceNode(w.provider, 'codev'));
-    expect(top.map(n => labelOf(w.provider, n))).toEqual(['MAIN (1)', 'REVIEWER (0)']);
+    expect(top.map(n => labelOf(w.provider, n))).toEqual(['MAIN (1)', 'REVIEWER (0)', 'Decisions']);
   });
 
   it('matches the window to its Tower row with isSameWorkspacePath (Windows drive-letter case)', async () => {
@@ -613,7 +620,7 @@ describe("this window's workspace: the Agents view's architect-axis rows", () =>
       expect(ws.description).toBe('current');
       expect(w.provider.actingScope()).toBe(cockpitScope('C:\\work\\codev'));
       const top = await w.provider.getChildren(await workspaceNode(w.provider, 'codev'));
-      expect(top.map(n => labelOf(w.provider, n))).toEqual(['MAIN (1)', 'REVIEWER (0)']);
+      expect(top.map(n => labelOf(w.provider, n))).toEqual(['MAIN (1)', 'REVIEWER (0)', 'Decisions']);
     } finally {
       Object.defineProperty(process, 'platform', platform);
     }
@@ -642,6 +649,7 @@ describe('other workspaces: state and navigate only', () => {
     expect(rows.map(r => r.label)).toEqual([
       'MAIN (2)', expect.stringContaining('#10'), expect.stringContaining('#11'), 'GHOST (1)', expect.stringContaining('#13'),
       'WEB (2)', expect.stringContaining('#14'), expect.stringContaining('#12'), 'Idle Architects (2)', 'DEMOS (0)', 'REVIEWER (0)',
+      'Decisions',
     ]);
     for (const row of rows) {
       expect(Object.values(REMOTE_CONTEXT)).toContain(row.contextValue);
@@ -690,6 +698,80 @@ describe('other workspaces: state and navigate only', () => {
     expect(scopes()).toEqual([cockpitScope(HERE)]);
     expect(await w.provider.getChildren(main)).toEqual([]);
     expect(await w.provider.getParent(main)).toBeUndefined();
+  });
+});
+
+// ── The Decisions entry ───────────────────────────────────────────────────────
+
+describe('the Decisions entry', () => {
+  const OLD = '/work/old';
+  const fleet = () => [
+    entry(wsRow(HERE, 'codev', true), ONE),
+    entry(wsRow(OTHER, 'marketmaker', true), NONE),
+    entry(wsRow(OLD, 'old', false), null),
+  ];
+  const decisionsOf = async (p: Provider, label: string) => {
+    const children = await p.getChildren(await workspaceNode(p, label));
+    return { node: children.at(-1)!, row: item(p, children.at(-1)!), labels: children.map(n => labelOf(p, n)) };
+  };
+  const navigate = (path: string, name: string) => ({
+    command: OPEN_WORKSPACE_COMMAND, title: 'Open Workspace', arguments: [{ path, active: true, name, isCurrent: false }],
+  });
+
+  it('follows the architects under every active workspace, as a leaf with no count; none under a dormant one', async () => {
+    const w = world({ fleet: fleet(), here: ONE });
+    expect((await decisionsOf(w.provider, 'codev')).labels).toEqual(['MAIN (1)', 'REVIEWER (0)', 'Decisions']);
+    expect((await decisionsOf(w.provider, 'marketmaker')).labels).toEqual(['MAIN (0)', 'Decisions']);
+    for (const label of ['codev', 'marketmaker']) {
+      const { node, row } = await decisionsOf(w.provider, label);
+      expect(row).toMatchObject({ label: 'Decisions', collapsibleState: 0 });
+      expect(row.description).toBeUndefined();
+      expect(row.iconPath).toMatchObject({ id: 'law' });
+      expect(await w.provider.getChildren(node)).toEqual([]);
+    }
+    expect(await w.provider.getChildren(await workspaceNode(w.provider, 'old'))).toEqual([]);
+  });
+
+  it('is not shown while a workspace is still loading: only Loading… is', async () => {
+    const w = world({ fleet: fleet(), here: null });
+    expect((await decisionsOf(w.provider, 'codev')).labels).toEqual(['Loading…']);
+  });
+
+  it("under this window's workspace opens the Decisions panel; under another, opens that workspace's window", async () => {
+    const w = world({ fleet: fleet(), here: ONE });
+    const here = (await decisionsOf(w.provider, 'codev')).row;
+    expect(here.contextValue).toBe('cockpit-decisions');
+    expect(here.command).toEqual({ command: 'codev.openDecisions', title: 'Open Decisions' });
+    expect(String(here.tooltip)).toContain('Click to open the Decisions panel.');
+
+    const there = (await decisionsOf(w.provider, 'marketmaker')).row;
+    expect(there.contextValue).toBe(REMOTE_CONTEXT.decisions);
+    expect(there.command).toEqual(navigate(OTHER, 'marketmaker'));
+    expect(String(there.tooltip)).toContain('In workspace marketmaker. Click to open its window');
+  });
+
+  it("navigates in a builder-worktree window (the parent's window) and in a no-workspace window", async () => {
+    const worktree = world({ fleet: fleet(), here: ONE, worktreeWindow: true });
+    const parent = (await decisionsOf(worktree.provider, 'codev')).row;
+    expect(parent.contextValue).toBe(REMOTE_CONTEXT.decisions);
+    expect(parent.command).toEqual(navigate(HERE, 'codev'));
+
+    const none = world({ fleet: fleet(), here: null, windowPath: null });
+    for (const [label, path] of [['codev', HERE], ['marketmaker', OTHER]] as const) {
+      const row = (await decisionsOf(none.provider, label)).row;
+      expect(row.contextValue).toBe(REMOTE_CONTEXT.decisions);
+      expect(row.command).toEqual(navigate(path, label));
+    }
+  });
+
+  it('has a per-workspace id, and reveal walks it to the Tower root', async () => {
+    const w = world({ fleet: fleet(), here: ONE });
+    const here = await decisionsOf(w.provider, 'codev');
+    const there = await decisionsOf(w.provider, 'marketmaker');
+    expect(here.row.id).toBe(COCKPIT_IDS.decisions(HERE));
+    expect(there.row.id).toBe(COCKPIT_IDS.decisions(OTHER));
+    expect(await revealPath(w.provider, here.node)).toEqual([COCKPIT_IDS.tower, COCKPIT_IDS.workspace(HERE), COCKPIT_IDS.decisions(HERE)]);
+    expect(await revealPath(w.provider, there.node)).toEqual([COCKPIT_IDS.tower, COCKPIT_IDS.workspace(OTHER), COCKPIT_IDS.decisions(OTHER)]);
   });
 });
 

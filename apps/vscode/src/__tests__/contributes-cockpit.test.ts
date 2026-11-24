@@ -84,3 +84,29 @@ describe('existing containers, views and menus are unchanged', () => {
     expect(notCockpit).toMatchSnapshot();
   });
 });
+
+describe('the Decisions panel (Phase 7)', () => {
+  const commands = PKG.contributes.commands as Array<{ command: string; title: string; icon?: string }>;
+
+  it('declares Codev: Open Decisions, and keeps it in the command palette', () => {
+    expect(commands.find(c => c.command === 'codev.openDecisions')).toEqual({
+      command: 'codev.openDecisions', title: 'Codev: Open Decisions', icon: '$(law)',
+    });
+    expect((menus.commandPalette ?? []).some(m => m.command === 'codev.openDecisions')).toBe(false);
+  });
+
+  it('activates to restore the panel after a reload', () => {
+    expect(PKG.activationEvents).toContain('onWebviewPanel:codev.decisions');
+  });
+
+  it('registers the command and the serializer for the panel in extension.ts', () => {
+    expect(EXT_SRC).toMatch(/regCli\('codev\.openDecisions', \(\) => decisionsPanels\.show\(\)\)/);
+    expect(EXT_SRC).toMatch(/registerWebviewPanelSerializer\(DECISIONS_VIEW_TYPE, decisionsPanels\)/);
+  });
+
+  it('ships the built webview: dist is packaged, the build script is not', () => {
+    const ignored = readFileSync(resolve(ROOT, '.vscodeignore'), 'utf8').split('\n').map(line => line.trim());
+    expect(ignored).toContain('esbuild.webview.cjs');
+    expect(ignored.some(line => line.startsWith('dist'))).toBe(false);
+  });
+});

@@ -8,7 +8,7 @@ import type { OverviewCache } from './overview-data.js';
 import type { BuilderDiffCache } from './builder-diff-cache.js';
 import { orderFleet, type LabelledEntry, type OrderedFleet } from './fleet-order.js';
 import { dormantGroupRow, targetOf, workspaceRow, type WorkspaceTarget } from './tower.js';
-import { ArchitectTreeBuilder, type AgentTarget } from './architect-tree.js';
+import { ArchitectTreeBuilder, REMOTE_CONTEXT, navigateTooltip, openWorkspaceCommand, type AgentTarget } from './architect-tree.js';
 import { architectGrouping } from './builder-grouping.js';
 import { BuilderGroupTreeItem, BuilderTreeItem, IdleArchitectsGroupTreeItem } from './builder-tree-item.js';
 import type { ActingRows } from './agent-tree-hosts.js';
@@ -23,7 +23,17 @@ export const COCKPIT_IDS = {
   dormant: 'cockpit-dormant',
   workspace: (path: string) => `cockpit-ws:${path}`,
   loading: (path: string) => `cockpit-loading:${path}`,
+  decisions: (path: string) => `cockpit-decisions:${path}`,
 } as const;
+
+/**
+ * The `contextValue` of this window's Decisions entry. Another workspace's entry navigates and
+ * carries `REMOTE_CONTEXT.decisions`. No menu entry keys on either: a click is the row's one action.
+ */
+export const COCKPIT_DECISIONS_CONTEXT = 'cockpit-decisions';
+
+/** The command this window's Decisions entry runs: open, or reveal, the Decisions panel. */
+export const OPEN_DECISIONS_COMMAND = 'codev.openDecisions';
 
 /** The id prefix of every architect and builder row under one workspace. */
 export function cockpitScope(path: string): string {
@@ -40,7 +50,8 @@ export type CockpitOwnNode =
   | { kind: 'message'; text: string; icon: string; command?: vscode.Command; tooltip?: string }
   | { kind: 'workspace'; ws: LabelledEntry }
   | { kind: 'dormant-group'; rows: LabelledEntry[] }
-  | { kind: 'loading'; ws: LabelledEntry };
+  | { kind: 'loading'; ws: LabelledEntry }
+  | { kind: 'decisions'; ws: LabelledEntry };
 
 export type CockpitNode = CockpitOwnNode | vscode.TreeItem;
 
@@ -249,6 +260,8 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
         item.iconPath = new vscode.ThemeIcon('sync~spin');
         return item;
       }
+      case 'decisions':
+        return this.decisionsRow(node.ws);
     }
   }
 
@@ -269,6 +282,7 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
         return node.rows.map((ws): CockpitNode => ({ kind: 'workspace', ws }));
       case 'message':
       case 'loading':
+      case 'decisions':
         return [];
     }
   }
@@ -302,6 +316,7 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
         return { kind: 'dormant-group', rows: this.ordered().dormant };
       }
       case 'loading':
+      case 'decisions':
         return { kind: 'workspace', ws: node.ws };
     }
   }
@@ -450,14 +465,41 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
     return 'collapsed';
   }
 
-  /** An active workspace's architects (with their builders), or *Loading…* until its overview lands. */
+  /**
+   * An active workspace's architects (with their builders), then its Decisions entry; or *Loading…*
+   * until its overview lands.
+   */
   private async workspaceNodeChildren(ws: LabelledEntry): Promise<CockpitNode[]> {
     if (!ws.entry.workspace.active) { return []; }
     const tree = this.treeFor(ws);
     if (this.dataFor(ws) === null) {
       return [{ kind: 'loading', ws }];
     }
-    return tree.getChildren(undefined);
+    return [...await tree.getChildren(undefined), { kind: 'decisions', ws }];
+  }
+
+  /**
+   * A workspace's Decisions entry. The overview says nothing about the decisions file, so the entry
+   * is under every active workspace and carries no count. This window's opens (or reveals) the
+   * Decisions panel without arranging anything, and a workspace with no file opens its empty state.
+   * Another workspace's (and, in a builder-worktree window, the parent's) navigates to its window.
+   */
+  private decisionsRow(ws: LabelledEntry): vscode.TreeItem {
+    const item = new vscode.TreeItem('Decisions', vscode.TreeItemCollapsibleState.None);
+    item.id = COCKPIT_IDS.decisions(ws.entry.workspace.path);
+    item.iconPath = new vscode.ThemeIcon('law');
+    const about = "This workspace's decisions file: the questions waiting for your ruling.";
+    if (this.actsHere(ws)) {
+      item.contextValue = COCKPIT_DECISIONS_CONTEXT;
+      item.tooltip = `${about}\nClick to open the Decisions panel.`;
+      item.command = { command: OPEN_DECISIONS_COMMAND, title: 'Open Decisions' };
+    } else {
+      const target: WorkspaceTarget = { ...targetOf(ws), isCurrent: false };
+      item.contextValue = REMOTE_CONTEXT.decisions;
+      item.tooltip = navigateTooltip(about, target);
+      item.command = openWorkspaceCommand(target);
+    }
+    return item;
   }
 
   // ── Row builders ──────────────────────────────────────────────────────────
