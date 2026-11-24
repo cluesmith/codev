@@ -90,7 +90,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_pr_forge-iter1-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-24T02:32:56.934Z'
+updated_at: '2026-11-24T02:33:21.252Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
@@ -109,6 +109,7 @@ context_refreshes:
     acknowledged_at: '2026-11-24T02:01:11.770Z'
   - boundary: plan-phase:check_worktree
     at: '2026-11-24T02:32:56.934Z'
+    acknowledged_at: '2026-11-24T02:33:21.252Z'
 force_advanced:
   phase: readonly_core
   iteration: 3
