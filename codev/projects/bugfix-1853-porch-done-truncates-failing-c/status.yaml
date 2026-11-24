@@ -1,7 +1,7 @@
 id: bugfix-1853
 title: porch-done-truncates-failing-c
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-24T01:06:35.062Z'
-updated_at: '2026-11-24T01:06:35.063Z'
+updated_at: '2026-11-24T01:10:58.521Z'
