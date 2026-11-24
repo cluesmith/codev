@@ -223,6 +223,37 @@ describe('opening the panel', () => {
   });
 });
 
+describe("a canary for VS Code's spelling of webview tab types (integration review)", () => {
+  const warning = (log: ReturnType<typeof vi.fn>) => log.mock.calls.filter(([line]) => String(line).includes('no editor tab matches'));
+  const tabsOf = (...viewTypes: string[]) => {
+    const group = { viewColumn: 1, tabs: [] as unknown[] };
+    group.tabs = viewTypes.map(viewType => ({ input: new TabInputWebview(viewType), group }));
+    tabGroups.all = [group];
+  };
+
+  it('logs once when the panel is on screen and no tab matches its type', () => {
+    const { manager, log } = setup();
+    manager.show();
+    tabsOf('mainThreadWebviewPanel-codev.work');
+    panels[0].setVisible(true);
+    panels[0].setVisible(true);
+    expect(warning(log)).toHaveLength(1);
+    expect(String(warning(log)[0][0])).toContain('"codev.work"');
+  });
+
+  it('stays quiet when a tab matches, in either spelling, or while the panel is hidden', () => {
+    const { manager, log } = setup();
+    manager.show();
+    tabsOf('mainThreadWebview-codev.work');
+    panels[0].setVisible(true);
+    tabsOf('codev.work');
+    panels[0].setVisible(true);
+    tabsOf();
+    panels[0].setVisible(false);
+    expect(warning(log)).toHaveLength(0);
+  });
+});
+
 describe('the periodic overview refresh counts the Work panel (scenario 5)', () => {
   it("disposing the manager drops the open panel's listeners, as closing the panel does (claude review)", () => {
     const { manager } = setup();

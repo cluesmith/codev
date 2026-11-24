@@ -61,6 +61,8 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
   private current: vscode.WebviewPanel | undefined;
   /** The open panel's listeners, kept until the panel closes or this is disposed. */
   private panelSubscriptions: vscode.Disposable[] = [];
+  /** Whether the tab-model canary ({@link checkTabModel}) has warned in this window session. */
+  private warnedNoTab = false;
   private readonly visibilityEmitter = new vscode.EventEmitter<void>();
   /** Fires when the panel opens, closes, or is shown or hidden. */
   readonly onDidChangeVisibility = this.visibilityEmitter.event;
@@ -142,6 +144,18 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
     return vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => isPanelTab(tab, this.kind.viewType));
   }
 
+  /**
+   * A canary for {@link isPanelTab}. A panel on screen has an editor tab, so if no tab matches,
+   * VS Code has changed how its tab model spells a webview panel's type. Restored tabs are then
+   * invisible to `show()`, and a reload can leave two panels with no error. Logged once per window
+   * session, from a view-state change, which VS Code sends after the tab change that opened it.
+   */
+  private checkTabModel(panel: vscode.WebviewPanel): void {
+    if (this.warnedNoTab || !panel.visible || this.tabs.length > 0) { return; }
+    this.warnedNoTab = true;
+    this.base.log(`Warning: the ${this.kind.title} panel is on screen, but no editor tab matches its type "${this.kind.viewType}" (isPanelTab). VS Code may have changed how it reports webview tabs; a ${this.kind.title} tab restored by a reload could then open a second panel.`);
+  }
+
   /** Start the session that answers a new or restored panel's webview. */
   protected abstract attach(panel: vscode.WebviewPanel): void;
 
@@ -156,7 +170,10 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
     });
     this.current = panel;
     const subscriptions = [
-      panel.onDidChangeViewState(() => this.visibilityEmitter.fire()),
+      panel.onDidChangeViewState(() => {
+        this.checkTabModel(panel);
+        this.visibilityEmitter.fire();
+      }),
       panel.onDidDispose(() => {
         if (this.current === panel) { this.current = undefined; }
         for (const subscription of subscriptions) { subscription.dispose(); }
