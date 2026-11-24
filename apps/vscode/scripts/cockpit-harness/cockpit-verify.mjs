@@ -475,8 +475,13 @@ async function editorTabs(page) {
   return page.locator('.tabs-container .tab').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? el.textContent));
 }
 
+/**
+ * The active editor group's active tab. Every group has an active tab, and the Cockpit arranges
+ * the window into three by default (`codev.cockpit.autoArrange`), so the first in the page would be
+ * the left group's, whichever group is in front.
+ */
 async function activeEditorTab(page) {
-  return page.locator('.tabs-container .tab.active').first().getAttribute('aria-label');
+  return page.locator('.editor-group-container.active .tabs-container .tab.active').first().getAttribute('aria-label');
 }
 
 async function waitFor(what, fn, timeout = 20_000, interval = 500) {
