@@ -195,3 +195,10 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   Not taken: `countRange` in head (broken repo → exit 2); origin tip not local stays info (fold-in's scope).
 - Architect (2026-11-24 01:47): keep the mergeable-only verdict, do not switch to codex's rule; "merge state not
   reported" on the line is the right correction. Claude's notes well taken (named `not run` for a walk failure).
+- Review iter2: codex APPROVE (no issues), claude APPROVE. Porch advanced → check_deploy (b357fe263).
+  Non-blocking notes for the REVIEW file: (1) the ten-lookup edge drops the oldest porch commit — if it alone
+  carried runs and C had none, "no runs" would show for tested code (documented trade-off); (2) `checks` is
+  computed before the head re-read, so after a head move the line describes the old head (the verdict is
+  attention via `head` anyway); (3) ok `state` in the header (deliberate); (4) `lastCodeCommit: null` widens the
+  spec's details type for the all-porch-only branch; (5) `checkCi` tests `check.skip` itself (so a skip makes no
+  forge call) and `applySkips` repeats it — worth a one-line comment when next touching pr.ts.
