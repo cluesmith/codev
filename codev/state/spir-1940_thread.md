@@ -1084,3 +1084,30 @@ check refuses a test file that names `/tmp` without an allowlist entry. No unit 
 job. Fixed by using a path that is not under `/tmp`; the allowlist is untouched.
 `node scripts/tmp-residue-check.mjs` passes locally, which I should have run before pushing: it is
 the first step of the job. The other seven jobs on that head were green.
+
+## 2026-11-24 — phase 5: build recorded; review round 1 starts
+
+- GitHub 8 of 8 green on `6462b2563` (runs 45305995695 Tests, 45305995758 CLI Integration
+  Tests). The architect checked the run and gave the word (01:53Z); `porch done` for the build
+  ran with the one-time tests skip under ruling main-38 (local config restored byte-identical in
+  the same command, sha1 confirmed, nothing under `.codev` staged). The build check ran and
+  passed. **For the PR body and the review's Flaky Tests section:** phase 5 ran no local full
+  suite, by that ruling.
+- **Architect's answers, for the review document:**
+  1. whoami's "running" (a `terminal_sessions` row plus the caller's own workspace): right.
+     Record it and its boundary: a stale row left after a crash counts a workspace as running
+     that is not.
+  2. The three readings (sendable from the real resolvers; live as the send route's test; a
+     stopped workspace listed with no agents and an unwritable directory name with no address
+     name): fine.
+- **FIRST COMMIT OF PHASE 6** (architect, found by running this build's CLI against the
+  INSTALLED Tower, the state every user is in right after upgrading: new CLI, old Tower):
+  1. `afx workspace list` prints a bare `[error] Not found`. A 404 on the address-book route
+     must say what it means: this Tower is older than this CLI and has no address book; restart
+     Tower to pick up the new version, with the commands.
+  2. `afx whoami` prints `address: none (global.db does not hold workspace names yet; start
+     Tower once: afx workspace start)`. Tower was running, so the advice is wrong. Say the
+     database has not been migrated by a Tower of this version, and that restarting Tower fixes
+     it.
+  3. Test both against a stub of the old shapes: a 404, and a database at schema 19.
+- **Phase 6 order** (architect): build, push, tell them when GitHub is green.
