@@ -151,6 +151,11 @@ describe('TowerClient.probeHealth (#1901)', () => {
     expect(await client.probeHealth()).toEqual({ state: 'not-running' });
   });
 
+  it('still reports not-running when ::1 is unreachable and 127.0.0.1 refused (broken IPv6)', async () => {
+    const client = new TowerClient(opts(throwing(nodeFetchFailure('ENETUNREACH', 'ECONNREFUSED'))));
+    expect(await client.probeHealth()).toEqual({ state: 'not-running' });
+  });
+
   it('does not let a refused ::1 mask a 127.0.0.1 that failed another way', async () => {
     const client = new TowerClient(opts(throwing(nodeFetchFailure('ECONNREFUSED', 'ECONNRESET'))));
     expect((await client.probeHealth()).state).toBe('unresponsive');

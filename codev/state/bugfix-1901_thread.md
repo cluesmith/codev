@@ -109,6 +109,26 @@ should do when the port is held but `/api/status` misses a 2 s probe.
 - `status --json` still reports `tower.running: false` for an unresponsive Tower; the human output
   says "not answering" with the reason. Left as is (minimal).
 
+## 2026-11-24 — PR #1976, CMAP round 1
+
+- codex REQUEST_CHANGES (real): `workspace stop` guarded only the health probe. A healthy probe
+  followed by an unanswered `deactivateWorkspace()` still fell into legacy cleanup and
+  `clearRuntime()`. Fixed: the SDK passes through `status`/`connectionRefused`, and stop aborts
+  when Tower took the request but never answered. A test pins it (fails without the guard).
+- claude APPROVE, non-blocking. Fixed in place:
+  - Broken-IPv6 regression: `ENETUNREACH` on `::1` plus a refused `127.0.0.1` read as unresponsive,
+    so `workspace start` would have exited instead of starting Tower. Refused now means "at least
+    one attempt refused and every attempt failed before reaching a server".
+  - `open` could exit 1 silently.
+  - The start/stop guards had no tests; added (start fails without its guard).
+- Deferred, suggested as follow-ups:
+  - `/health` cost under load (`getInstances` plus a full `ps` census, probed up to twice per gate);
+    server-side.
+  - `send` stacking `--retry` over `checkTower`'s own retry.
+  - `status --json` not distinguishing busy from down.
+- Owner ruling main-42: the 900000 ms tests timeout is now in the shared config.json, so I dropped
+  my local override.
+
 ### Planned fix (per the issue's Fix section)
 One shared helper over the SDK probe that classifies the failure:
 - connect refused (nothing listening) → "Tower is not running. Start it with: afx tower start"
