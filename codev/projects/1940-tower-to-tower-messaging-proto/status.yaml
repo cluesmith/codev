@@ -14,10 +14,10 @@ plan_phases:
     status: complete
   - id: phase_4
     title: Qualified provenance and reply commands
-    status: in_progress
+    status: complete
   - id: phase_5
     title: 'One-Tower discovery: workspace list and whoami'
-    status: pending
+    status: in_progress
   - id: phase_6
     title: Addressing docs in both trees and end-to-end verification
     status: pending
@@ -26,7 +26,7 @@ plan_phases:
     status: skipped
     skip_reason: 'dropped by owner at plan approval (main-31): front-door-only opt-in cut from stage 1'
     skipped_at: '2026-11-23T21:21:31.781Z'
-current_plan_phase: phase_4
+current_plan_phase: phase_5
 gates:
   spec-approval:
     status: approved
@@ -41,7 +41,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -104,7 +104,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1940/codev/projects/1940-tower-to-tower-messaging-proto/1940-phase_3-iter2-claude.txt
 started_at: '2026-11-21T01:30:58.126Z'
-updated_at: '2026-11-24T00:57:17.888Z'
+updated_at: '2026-11-24T01:02:00.135Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T18:57:14.334Z'
@@ -118,6 +118,8 @@ context_refreshes:
   - boundary: plan-phase:phase_4
     at: '2026-11-24T00:30:23.882Z'
     acknowledged_at: '2026-11-24T00:31:59.073Z'
+  - boundary: plan-phase:phase_5
+    at: '2026-11-24T01:02:00.135Z'
 pr_history:
   - phase: implement
     pr_number: 1957
