@@ -368,6 +368,25 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
   an index to the PR branch: each check, its pass count, and permalinks pinned to the evidence
   commit's SHA. Decide this before the first harness run: blobs already pushed stay in history.
 
+- [From #1963] **A tripwire that records and exits is not a guard, and a flag is not proof of a
+  config path.**
+  - A harness's first ide-server run wrote `codev.towerPort` under `--user-data-dir`. A VS Code
+    server ignores that flag: it forces the user data dir to `<server-data-dir>/data` and reads
+    `Machine/settings.json` there.
+  - So the extension under test used its default port, the owner's Tower. It sent about 9,100
+    requests over 25 minutes, all of them refused 401 by the isolated key.
+  - The tripwire saw the connection within a second, wrote a marker and exited. The run went on
+    until its script finished.
+  - The fixes:
+    - the tripwire stops the run when it fires: SIGSTOP the whole tree until no new process
+      appears, SIGKILL it, then report;
+    - a mode that could reach the protected service runs under prevention, here a `sandbox-exec`
+      profile denying outbound TCP to the port, with a launch canary on a throwaway port proving
+      it applies;
+    - the settings path is read from the server's own bundle, and the run refuses if that fails.
+
+  Self-test each fix: that the tripwire *stops* the run, not only that it *fires*.
+
 - [From #1915] A test's cleanup that kills every pid it recorded can kill an unrelated process: Windows reuses pids quickly, and the recorded process is often long dead by `afterAll`. Kill a recorded pid only if the live process with that pid was created no later than the recording (`__tests__/helpers/tracked-pids.ts`). This matters more than it looks because vitest 4 ignores `poolOptions.forks.singleFork`, so test files run in parallel workers: one file's cleanup ran inside another file's assertion window and is the likely killer of a CIM-created Tower in tower-lifecycle.windows Phase 4(b).
 
 - [From #1595] Harness hook semantics are claims to measure in a real session, not to read from docs. Two spikes and full unit coverage still missed that Claude's `Notification(idle_prompt)` fires 60 s after `Stop` even while the turn's background task runs (it flipped a working agent to idle), and that an approved permission fires no hook at all (#1851). Both surfaced only in Phase 8's scripted real-session run with permissions in `default` mode: the operator's `auto` mode never raises a prompt, so a verification run must set the mode it means to test.

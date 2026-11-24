@@ -13,8 +13,14 @@ three increments:
 - ***Arrange Cockpit***, which lays out the `main` architect | (Work over Decisions).
 
 Every increment was verified rendered in an isolated harness: its own Tower, VS Code 1.147.0
-serve-web and headless Chromium. Nothing touched the owner's Tower or IDE. The dashboard's Work and
-Decisions render identically, apart from two intended fixes in the shared views.
+serve-web and headless Chromium. Those serve-web runs never touched the owner's Tower or IDE. The
+dashboard's Work and Decisions render identically, apart from two intended fixes in the shared
+views.
+
+**VS Code 1.138.0 (the owner's Codev IDE server) and 1.128 (the engine floor) are unverified.**
+The one attempt, in the harness's ide-server mode, reached the owner's Tower. It was stopped, and
+no further run waits on anything but the owner's go-ahead (see *The tripwire incident* under
+Challenges, and Owner Decisions 5).
 
 ## Owner Decisions
 
@@ -38,6 +44,9 @@ These are the owner's to make at the `pr` gate. Each is described where it is ci
    - A `--merge` brings that history into main.
    - Whether to scrub it before merge is the owner's call. Nothing has been prepared.
 4. **The two Light Modern texts at 4.3:1**: above the 3:1 floor, below 4.5:1, and named in the PR.
+5. **Whether the ide-server runs (1.138.0 and 1.128) may happen.** The tripwire incident below
+   happened in that mode while the owner was away, so a retry is his call (the architect's ruling).
+   The harness fixes are in, with their self-tests. Until he rules, both versions are unverified.
 
 ## Spec Compliance
 
@@ -638,6 +647,35 @@ review is the first to see it.*
   running) kept the local suite trustworthy. One Phase 4 run failed without naming a test and was
   settled through CI.
 
+- **The tripwire incident (2026-11-24).** The architect asked for the split to be verified on the
+  owner's Codev IDE server (1.138.0) and on 1.128. Those runs used the harness's ide-server mode,
+  launching `codev-ide-server` directly on harness ports. It was that mode's first real run. The
+  harness wrote the machine settings (`codev.towerPort` = the isolated Tower's port) under
+  `--user-data-dir`. A VS Code server ignores that flag: it forces the user data dir to
+  `<server-data-dir>/data` and reads machine settings there. So the extension under test ran with
+  its default port, 4100, which is the owner's Tower.
+  - **What reached the owner's Tower** (from its log, read by the architect):
+    - requests from 16:56:19Z to 17:21:05Z, 25 minutes, about 9,100 in all, every one answered 401;
+    - `GET /api/overview`, `/api/events`, `/api/worktree-config`, `/api/activity-hooks` and
+      `/workspace/<enc>/api/state`, plus about 1,500 `POST /api/workspace/<enc>/activate`;
+    - nothing was read or changed: no 2xx, no fixture workspace registered, and the Tower stayed
+      healthy with the same 12 active workspaces.
+
+    The isolated key is what refused them.
+  - **Why it went on for 25 minutes.** The tripwire detected the connection at 16:56:20Z, one sample
+    after it opened. Then it wrote its marker and exited, and nothing stopped the run. The harness
+    read that marker only when the verify script ended. The script spent 25 minutes timing out its
+    checks, and only then did teardown kill the extension host. My first report to the architect
+    read as if it had stopped at detection. It had not.
+  - **Fixed in the harness** (with self-tests on throwaway listeners; no IDE server was launched):
+    - the tripwire now stops the run at first detection: it freezes and kills the whole harness tree
+      within a second, then reports;
+    - ide-server mode writes the settings where the server's code reads them, and gate 5 refuses a
+      server whose bundle does not show it;
+    - ide-server mode runs the server inside a `sandbox-exec` profile that denies outbound TCP to
+      `:4100`, so the connect itself fails. A canary proves the profile applies at every launch.
+  - 1.138.0 and 1.128 stay unverified until the owner allows a retry.
+
 ### What Would Be Done Differently
 
 - Write the harness's checks for a review fix in the same commit as the fix. The Phase 9 iteration-2
@@ -646,6 +684,10 @@ review is the first to see it.*
   saw faint text.
 - Push rendered evidence to a separate evidence branch from the first harness run, rather than
   into the PR's tree.
+- Build the harness's guard against the owner's Tower as prevention plus stop, not detection, before
+  any run. And confirm, from the server's own code, where a server reads its settings before the
+  first run of a new mode. The tripwire was proven to *fire*. Nothing proved that firing *stopped*
+  anything.
 
 ### Methodology Improvements
 
@@ -702,6 +744,11 @@ review is the first to see it.*
 - Routed: **cold**, *Testing*: screenshots bound for a public repo need a neutral shell prompt in
   the harness HOME and an OCR gate that fails the run. A one-off fix of the noticed shot left 11
   more.
+- Routed: **cold**, *Testing*: a tripwire that records and exits is not a guard. It must stop the
+  run when it fires (kill the whole tree, then report), and a mode that can reach a protected
+  service needs prevention, such as a sandbox that refuses the connect. Prove both with self-tests.
+  Before trusting a config path, read where the program actually loads it: a VS Code server
+  ignores `--user-data-dir`.
 - No hot-tier change. `lessons-critical.md` is at its 10-lesson cap, and these are subsystem or
   harness lessons. "Verify the real user path" already covers the cross-cutting part.
 
@@ -733,6 +780,6 @@ tracked in issue #1973 (pre-existing Windows test flakes) and were left running.
   - a worktree-config fetch that fails while connected holds `null` until the next drop signal.
 - **Untested ranges:**
   - The layout behaviour rests on VS Code 1.147.0, while the engine floor is 1.128. Nothing between
-    them was run.
+    them was run: the 1.138.0 and 1.128 runs await the owner (Owner Decisions 5).
   - The waited-out *closing* namesake stays unit-tested: it is a race inside the extension host,
     which the UI cannot time.

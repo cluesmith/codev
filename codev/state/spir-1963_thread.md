@@ -1183,3 +1183,35 @@ run.
     `verification.md`, generated from the results JSON: 127/127 checks, with SHA permalinks.
   - From here, no evidence binaries go to `builder/spir-1963`. The final `verify arrange` goes
     only to the evidence branch.
+- **Integration review (16:58Z): asks 2-4 and the confirmations**, at `20d2ce91f`:
+  - the `isPanelTab` canary;
+  - the CHANGELOG badge line;
+  - the WorkView dashboard-host test;
+  - the CI syntax check of the harness;
+  - the review's Owner Decisions section.
+- **Tripwire incident (ask 1, 1.138.0 via ide-server mode):**
+  - **What happened.** The harness wrote `codev.towerPort` under `--user-data-dir`. A VS Code
+    server ignores that flag and reads `<server-data-dir>/data/Machine/settings.json`, so the
+    extension host used port 4100, the owner's Tower.
+  - **What the owner's Tower log shows** (read by the architect, not me):
+    - requests from 16:56:19Z to 17:21:05Z, 25 minutes, about 9,100 in all, every one a 401;
+    - GET `/api/overview`, `/api/events`, `/api/worktree-config`, `/api/activity-hooks` and
+      `/workspace/<enc>/api/state`, plus about 1,500 POST `/api/workspace/<enc>/activate`;
+    - nothing read or changed, no fixture workspace registered, and the same 12 active workspaces.
+  - **Why it lasted 25 minutes.** The tripwire detected the connection at 16:56:20Z, wrote its marker
+    and exited. The run went on until the verify script finished, and only then did teardown kill
+    the extension host. My first report implied it had stopped at detection; it had not.
+  - **Ruled (architect, 17:24Z):**
+    - no ide-server run, 1.138 or 1.128, until the owner says so;
+    - fix the harness now (the tripwire stops the run, the settings path, a prevention layer);
+    - serve-web resumes only after the tripwire fix and its self-test.
+  - **Fixed:**
+    - **The tripwire stops the run.** On a hit it writes its marker, then freezes and kills the
+      whole harness tree, then reports. It trusts a pid file only while that pid's command still
+      carries the file's markers.
+    - **Gate 5 confirms the server's settings path from its bundle** (`out/server-main.js`) and
+      refuses a server where that fails. The two real servers were checked read-only.
+    - **ide-server runs inside a `sandbox-exec` profile** that denies outbound TCP to :4100. A
+      launch canary on a throwaway port proves the profile applies.
+  - **Self-tests:** `selftest tripwire settings sandbox` passed 17/17, with no Tower and no IDE
+    server. The tripwire killed a stand-in tree, including a detached grandchild, in 463 ms.
