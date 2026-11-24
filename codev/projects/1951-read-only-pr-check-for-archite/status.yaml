@@ -38,8 +38,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 3
+build_complete: false
 history:
   - iteration: 1
     plan_phase: readonly_core
@@ -101,8 +101,20 @@ history:
         verdict: APPROVE
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_worktree-iter1-claude.txt
+  - iteration: 2
+    plan_phase: check_worktree
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_worktree-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_worktree-iter2-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-24T03:23:25.595Z'
+updated_at: '2026-11-24T18:26:47.921Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
