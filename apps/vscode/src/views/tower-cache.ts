@@ -15,7 +15,8 @@ export interface FleetEntry {
   /**
    * The workspace's last-known-good overview: the latest successful fetch, kept across a failed
    * one. `null` for a dormant workspace (never fetched) and for an active one whose overview has
-   * not yet been fetched successfully.
+   * not yet been fetched successfully. The object is the cache's own copy, shared by every reader:
+   * treat it as read-only (copy before sorting or otherwise mutating).
    */
   overview: OverviewData | null;
 }
@@ -101,7 +102,8 @@ export class TowerFleetCache {
   /**
    * The last-known-good overview of the workspace at `path` (Tower's spelling, as in
    * `FleetEntry.workspace.path`). `null` when the workspace is dormant, not in the fleet, or has
-   * not yet been fetched successfully.
+   * not yet been fetched successfully. Returned by reference, the same object as the fleet entry's
+   * `overview`: read-only for callers.
    */
   getOverview(path: string): OverviewData | null {
     return this.lastOverview.get(path) ?? null;

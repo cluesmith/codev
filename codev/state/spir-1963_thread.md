@@ -298,6 +298,16 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
 - Mutation-checked: removing the sequence guard, the map rebuild, or the retain-on-null each makes
   its matching test fail.
 - `check-types` and `lint` are clean, apart from the two pre-existing `curly` warnings.
-  `porch done` checks passed: build 15.6 s, tests 56.4 s, at a 1-minute load of 3.44 with no other
-  vitest running.
   `test:unit` passed 1293/1293.
+- `porch done` checks passed: build 15.6 s, tests 56.4 s, at a 1-minute load of 3.44 with no other
+  vitest running.
+- Review: Codex and Claude both approved with high confidence, and neither raised a blocking issue.
+  - Taken now: Claude's note that the accessor hands out the cached object by reference. The doc
+    comments on `FleetEntry.overview` and `getOverview` now say it is read-only.
+  - Carried into Phase 4, not changed here:
+    - The window's own workspace is retained twice, in `OverviewCache` and in the fleet cache. The
+      Cockpit must keep reading `OverviewCache` for it, as the spec says. Reading the fleet copy
+      would lag.
+    - The fleet cache keys by Tower's path spelling. Phase 4's current-workspace match must use
+      the existing `isSameWorkspacePath` (`fleet-order.ts`), as `orderFleet` does, and a test should
+      assert it.
