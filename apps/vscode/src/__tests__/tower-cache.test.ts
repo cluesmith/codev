@@ -238,3 +238,176 @@ describe('TowerFleetCache', () => {
     expect(listWorkspaces).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Spec 1963 Phase 2: the fan-out's overviews are kept (last-known-good), not discarded after
+ * `deriveAttention`, so the Cockpit hierarchy can render other workspaces' architects and builders
+ * with no additional request.
+ */
+describe('TowerFleetCache overview retention', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  function entryFor(cache: InstanceType<typeof TowerFleetCache>, name: string) {
+    const entry = cache.getFleet().find((e) => e.workspace.name === name);
+    if (!entry) { throw new Error(`no fleet entry named ${name}`); }
+    return entry;
+  }
+
+  it('keeps each active workspace’s overview on success; a dormant one has none', async () => {
+    const overviewA = blockedOverview();
+    const overviewB = quietOverview();
+    const listWorkspaces = vi.fn().mockResolvedValue([
+      ws('/ws/a', 'a', true),
+      ws('/ws/b', 'b', true),
+      ws('/ws/dormant', 'dormant', false),
+    ]);
+    const getOverview = vi.fn(async (path: string) => (path === '/ws/a' ? overviewA : overviewB));
+    const cache = new TowerFleetCache(makeFake(listWorkspaces, getOverview).cm);
+    await cache.refresh();
+
+    expect(entryFor(cache, 'a').overview).toBe(overviewA);
+    expect(entryFor(cache, 'b').overview).toBe(overviewB);
+    expect(entryFor(cache, 'dormant').overview).toBeNull();
+    expect(cache.getOverview('/ws/a')).toBe(overviewA);
+    expect(cache.getOverview('/ws/b')).toBe(overviewB);
+    expect(cache.getOverview('/ws/dormant')).toBeNull();
+    expect(cache.getOverview('/ws/unknown')).toBeNull();
+    cache.dispose();
+  });
+
+  it('keeps the last-known-good overview when a later fetch fails (null)', async () => {
+    const first = blockedOverview();
+    const listWorkspaces = vi.fn().mockResolvedValue([ws('/ws/a', 'a', true)]);
+    const getOverview = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(null);
+    const cache = new TowerFleetCache(makeFake(listWorkspaces, getOverview).cm);
+    await cache.refresh();
+    expect(cache.getOverview('/ws/a')).toBe(first);
+
+    await cache.refresh(); // transient failure
+    expect(entryFor(cache, 'a').overview).toBe(first);
+    expect(cache.getOverview('/ws/a')).toBe(first);
+    expect(entryFor(cache, 'a').attention.isEmpty).toBe(false); // attention retained alongside
+    cache.dispose();
+  });
+
+  it('replaces the overview with the newer one on the next successful fetch', async () => {
+    const first = blockedOverview();
+    const second = quietOverview();
+    const listWorkspaces = vi.fn().mockResolvedValue([ws('/ws/a', 'a', true)]);
+    const getOverview = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const cache = new TowerFleetCache(makeFake(listWorkspaces, getOverview).cm);
+    await cache.refresh();
+    await cache.refresh();
+    expect(cache.getOverview('/ws/a')).toBe(second);
+    expect(entryFor(cache, 'a').attention.isEmpty).toBe(true);
+    cache.dispose();
+  });
+
+  it('has no overview for an active workspace whose first fetch fails', async () => {
+    const listWorkspaces = vi.fn().mockResolvedValue([ws('/ws/a', 'a', true)]);
+    const getOverview = vi.fn().mockResolvedValue(null);
+    const cache = new TowerFleetCache(makeFake(listWorkspaces, getOverview).cm);
+    await cache.refresh();
+    expect(entryFor(cache, 'a').overview).toBeNull();
+    expect(cache.getOverview('/ws/a')).toBeNull();
+    cache.dispose();
+  });
+
+  it('drops the retained overview when a workspace goes dormant, and does not revive it on reactivation failure', async () => {
+    const listWorkspaces = vi.fn()
+      .mockResolvedValueOnce([ws('/ws/a', 'a', true)])
+      .mockResolvedValueOnce([ws('/ws/a', 'a', false)])
+      .mockResolvedValueOnce([ws('/ws/a', 'a', true)]);
+    const getOverview = vi.fn().mockResolvedValueOnce(blockedOverview()).mockResolvedValueOnce(null);
+    const cache = new TowerFleetCache(makeFake(listWorkspaces, getOverview).cm);
+    await cache.refresh();
+    expect(cache.getOverview('/ws/a')).not.toBeNull();
+
+    await cache.refresh(); // now dormant
+    expect(entryFor(cache, 'a').overview).toBeNull();
+    expect(cache.getOverview('/ws/a')).toBeNull();
+
+    // Reactivated, but its first fetch fails: the pre-dormancy overview must not come back.
+    await cache.refresh();
+    expect(entryFor(cache, 'a').overview).toBeNull();
+    expect(cache.getOverview('/ws/a')).toBeNull();
+    cache.dispose();
+  });
+
+  it('drops the retained overview when a workspace leaves the list', async () => {
+    const listWorkspaces = vi.fn()
+      .mockResolvedValueOnce([ws('/ws/a', 'a', true), ws('/ws/b', 'b', true)])
+      .mockResolvedValueOnce([ws('/ws/b', 'b', true)]);
+    const getOverview = vi.fn().mockResolvedValue(quietOverview());
+    const cache = new TowerFleetCache(makeFake(listWorkspaces, getOverview).cm);
+    await cache.refresh();
+    expect(cache.getOverview('/ws/a')).not.toBeNull();
+
+    await cache.refresh();
+    expect(cache.getFleet().map((e) => e.workspace.name)).toEqual(['b']);
+    expect(cache.getOverview('/ws/a')).toBeNull();
+    expect(cache.getOverview('/ws/b')).not.toBeNull();
+    cache.dispose();
+  });
+
+  it('keeps the overview when the list momentarily returns empty', async () => {
+    const overview = blockedOverview();
+    const listWorkspaces = vi.fn().mockResolvedValueOnce([ws('/ws/a', 'a', true)]).mockResolvedValueOnce([]);
+    const getOverview = vi.fn().mockResolvedValue(overview);
+    const cache = new TowerFleetCache(makeFake(listWorkspaces, getOverview).cm);
+    await cache.refresh();
+    await cache.refresh(); // transient list failure surfaces as []
+    expect(cache.getOverview('/ws/a')).toBe(overview);
+    cache.dispose();
+  });
+
+  it('does not let a stale (out-of-sequence) fan-out overwrite a newer overview', async () => {
+    // `refresh()` serialises fan-outs, so two never overlap through the public API; the sequence
+    // guard is the backstop. Drive the private fan-out directly to pin that the guard covers the
+    // retained overview as well as attention.
+    const stale = blockedOverview();
+    const fresh = quietOverview();
+    let resolveStale: (v: OverviewData | null) => void = () => {};
+    const listWorkspaces = vi.fn().mockResolvedValue([ws('/ws/a', 'a', true)]);
+    const getOverview = vi.fn()
+      .mockImplementationOnce(() => new Promise<OverviewData | null>((res) => { resolveStale = res; }))
+      .mockResolvedValueOnce(fresh);
+    const cache = new TowerFleetCache(makeFake(listWorkspaces, getOverview).cm);
+    const fanOut = (cache as unknown as { fetchFleet(): Promise<void> }).fetchFleet.bind(cache);
+
+    const older = fanOut();
+    // Let the older fan-out reach its pending getOverview before the newer one starts.
+    await vi.waitFor(() => { expect(getOverview).toHaveBeenCalledTimes(1); });
+    await fanOut(); // newer fan-out lands first
+    expect(cache.getOverview('/ws/a')).toBe(fresh);
+
+    resolveStale(stale); // older fan-out lands late
+    await older;
+    expect(cache.getOverview('/ws/a')).toBe(fresh);
+    expect(entryFor(cache, 'a').overview).toBe(fresh);
+    expect(entryFor(cache, 'a').attention.isEmpty).toBe(true);
+    cache.dispose();
+  });
+
+  it('makes no extra requests: one getOverview per active workspace per refresh, none from the accessor', async () => {
+    const listWorkspaces = vi.fn().mockResolvedValue([
+      ws('/ws/a', 'a', true),
+      ws('/ws/b', 'b', true),
+      ws('/ws/c', 'c', true),
+      ws('/ws/dormant', 'dormant', false),
+    ]);
+    const getOverview = vi.fn().mockResolvedValue(quietOverview());
+    const cache = new TowerFleetCache(makeFake(listWorkspaces, getOverview).cm);
+    await cache.refresh();
+    expect(getOverview).toHaveBeenCalledTimes(3);
+    expect(listWorkspaces).toHaveBeenCalledTimes(1);
+
+    for (const path of ['/ws/a', '/ws/b', '/ws/c', '/ws/dormant', '/ws/unknown']) { cache.getOverview(path); }
+    expect(getOverview).toHaveBeenCalledTimes(3);
+
+    await cache.refresh();
+    expect(getOverview).toHaveBeenCalledTimes(6);
+    expect(listWorkspaces).toHaveBeenCalledTimes(2);
+    cache.dispose();
+  });
+});
