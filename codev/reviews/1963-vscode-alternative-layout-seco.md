@@ -16,6 +16,29 @@ Every increment was verified rendered in an isolated harness: its own Tower, VS 
 serve-web and headless Chromium. Nothing touched the owner's Tower or IDE. The dashboard's Work and
 Decisions render identically, apart from two intended fixes in the shared views.
 
+## Owner Decisions
+
+These are the owner's to make at the `pr` gate. Each is described where it is cited.
+1. **The dormant window** (Spec Compliance, Deviations). A dormant window is the marketplace
+   extension in plain VS Code, in a folder with no Codev project. It shows *Not connected to Tower*
+   and does not list the fleet, as #1144's inertness rule asks. This is the architect's option A.
+   The alternatives:
+   - connect read-only;
+   - connect on a click.
+
+   Whichever is chosen, the architect records it durably.
+2. **The wording "Failed to load overview: Not connected to Tower."** It is the dashboard's
+   template, kept for parity, and in VS Code it can show before any load (Consultation Feedback,
+   work_panel).
+3. **The old evidence blobs in this branch's history.**
+   - The rendered evidence now lives on the never-merged `evidence/spir-1963` branch (Deviations,
+     review phase).
+   - The PR branch's history still holds the earlier screenshots and snapshots, including the ten
+     with the machine's shell prompt.
+   - A `--merge` brings that history into main.
+   - Whether to scrub it before merge is the owner's call. Nothing has been prepared.
+4. **The two Light Modern texts at 4.3:1**: above the 3:1 floor, below 4.5:1, and named in the PR.
+
 ## Spec Compliance
 
 - [x] **Rotated button directly under Codev on a fresh profile** (Phases 4, 9). Rendered in serve-web
@@ -703,10 +726,7 @@ tracked in issue #1973 (pre-existing Windows test flakes) and were left running.
 - Issue #1970: a decisions summary in Tower's overview, so the Cockpit's Decisions entry can show a
   pending count.
 - Issue #1973: the two Windows flakes above.
-- **For the owner, at the PR gate:**
-  - the dormant-window deviation (connect read-only, connect on a click, or stay inert as built);
-  - the "Failed to load overview: Not connected to Tower." wording in VS Code;
-  - the two Light Modern texts at 4.3:1.
+- **For the owner, at the PR gate:** see Owner Decisions, near the top.
 - **Candidate refinements**, not filed:
   - a separate context value, without *Remove Architect*, for a row kept only as a builder's
     non-live owner;
