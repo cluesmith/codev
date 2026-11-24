@@ -64,7 +64,7 @@ export function WorkView({ host, slots = {}, architectCount }: WorkViewProps) {
   // claim the workspace has no builders or issues. With no error, a first read in flight keeps the
   // dashboard's empty sections, as before.
   const loading = overview === null && Boolean(overviewError);
-  const sectionLoading = <p className="work-empty work-section-loading">Loading...</p>;
+  const sectionLoading = <p className="work-empty">Loading...</p>;
 
   return (
     <div className={`work-view ${panelOpen ? 'file-panel-open' : ''}`}>

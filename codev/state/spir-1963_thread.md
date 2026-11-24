@@ -1057,3 +1057,7 @@ run.
     44-character title; it shows 42 at 473 px.
   - Rendered at 69587016: work 14/14, decisions 15/15, dashboard 6/6 (138 + 83 elements identical
     to the pre-change snapshot).
+- **Iteration 2: codex APPROVE, claude APPROVE.** I took claude's one actionable nit: the
+  `work-section-loading` class had no rule anywhere, so it is dropped (no rendering change). It
+  left two notes for the owner: the "Failed to load overview:" wording before any load (the
+  dashboard's template), and the two Light Modern texts at 4.3:1. Both go in the PR body.
