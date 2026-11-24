@@ -399,7 +399,7 @@ async function bringUpVscode(runCfg, st) {
 function startTripwire(L, st) {
   st.tripwirePid = launch(L, 'tripwire', process.execPath, [
     path.join(HERE, 'tripwire.mjs'), 'watch', '--port', String(OWNER_TOWER_PORT), '--pids', L.pids,
-    '--marker', L.tripMarker, ...socketPrefixes(L, st).flatMap((p) => ['--socket-prefix', p]), '--interval', '1000',
+    '--marker', L.tripMarker, ...socketPrefixes(L, st).flatMap((p) => ['--socket-prefix', p]), '--interval', '2000',
   ], { env: childEnv(L, 'tripwire'), cwd: L.home, markers: ['tripwire.mjs', 'watch'] });
   saveState(L, st);
 }
@@ -482,14 +482,35 @@ function assertTripwireClean(L, st) {
 }
 
 /** git: the vsix's inputs are unchanged since build-vsix (committed and in the working tree). */
+/**
+ * A digest of what the vsix is built from, as it is on disk now: every tracked or untracked (not
+ * ignored) file under VSIX_INPUTS, by path and content. Comparing digests rather than commits means
+ * an uncommitted edit that was built in counts as current, and a new untracked file counts as a
+ * change.
+ */
+function vsixInputsDigest() {
+  const r = run('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...VSIX_INPUTS], { cwd: REPO });
+  if (r.status !== 0) throw new Error(`git ls-files failed: ${r.stderr.trim()}`);
+  const hash = crypto.createHash('sha256');
+  for (const rel of [...new Set(r.stdout.split('\0').filter(Boolean))].sort()) {
+    const abs = path.join(REPO, rel);
+    const stat = fs.lstatSync(abs, { throwIfNoEntry: false });
+    let content;
+    if (!stat) content = 'missing';
+    else if (stat.isSymbolicLink()) content = `link:${fs.readlinkSync(abs)}`;
+    else if (stat.isFile()) content = sha256(abs);
+    else content = `mode:${stat.mode}`;
+    hash.update(`${rel}\0${content}\n`);
+  }
+  return hash.digest('hex');
+}
+
 function vsixIsCurrent(L) {
   if (!fs.existsSync(L.vsixMeta)) return `no build record ${L.vsixMeta}`;
   const meta = JSON.parse(fs.readFileSync(L.vsixMeta, 'utf-8'));
   if (meta.sha256 !== sha256(L.vsix)) return 'the vsix changed after build-vsix recorded it';
-  const committed = run('git', ['diff', '--quiet', meta.head, 'HEAD', '--', ...VSIX_INPUTS], { cwd: REPO });
-  if (committed.status !== 0) return `vsix inputs changed between ${meta.head.slice(0, 8)} and HEAD`;
-  const working = run('git', ['diff', '--quiet', 'HEAD', '--', ...VSIX_INPUTS], { cwd: REPO });
-  if (working.status !== 0) return 'vsix inputs have uncommitted changes';
+  if (!meta.inputsDigest) return 'the build record has no inputs digest; run build-vsix again';
+  if (meta.inputsDigest !== vsixInputsDigest()) return 'vsix inputs changed since build-vsix; run it again';
   return null;
 }
 
@@ -623,11 +644,14 @@ async function cmdBuildVsix() {
   const L = layout(scratchFromEnv());
   fs.mkdirSync(L.root, { recursive: true });
   const head = run('git', ['rev-parse', 'HEAD'], { cwd: REPO }).stdout.trim();
-  const dirty = run('git', ['diff', '--quiet', 'HEAD', '--', ...VSIX_INPUTS], { cwd: REPO }).status !== 0;
+  const dirty = run('git', ['status', '--porcelain', '--', ...VSIX_INPUTS], { cwd: REPO }).stdout.trim() !== '';
+  // Digest the inputs before packaging: an edit made during the build then reads as a change.
+  const inputsDigest = vsixInputsDigest();
   const r = spawnSync('pnpm', ['exec', 'vsce', 'package', '--no-dependencies', '--out', L.vsix], { cwd: VSCODE_APP, stdio: 'inherit' });
   if (r.status !== 0) throw new Error(`vsce package failed (${r.status})`);
-  fs.writeFileSync(L.vsixMeta, `${JSON.stringify({ head, dirtyAtBuild: dirty, sha256: sha256(L.vsix), builtAt: new Date().toISOString() }, null, 2)}\n`);
-  console.log(`built ${L.vsix} at ${head.slice(0, 8)}${dirty ? ' (with uncommitted input changes)' : ''}`);
+  const meta = { head, dirtyAtBuild: dirty, inputsDigest, sha256: sha256(L.vsix), builtAt: new Date().toISOString() };
+  fs.writeFileSync(L.vsixMeta, `${JSON.stringify(meta, null, 2)}\n`);
+  console.log(`built ${L.vsix} at ${head.slice(0, 8)}${dirty ? ' (with uncommitted or untracked input changes)' : ''}`);
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -252,3 +252,24 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
   - two new gate-1 self-test cases.
 - Re-verified in serve-web mode. Self-test 17/17, `start`, `check` 10/10, `seed one-builder`
   (gate 6: `builder-spir-101` spawned by `main`), `check` 10/10, `stop` (15 PIDs, none left).
+
+### Phase 1 review, iteration 2 (2026-11-24)
+
+- Both reviewers approved (Codex with no issues). I took Claude's non-blocking notes before
+  advancing, because one would have broken later phases:
+  - **vsix freshness.** `check` called any uncommitted input edit stale and missed untracked
+    files. So every edit, `build-vsix`, `check` cycle in Phases 5, 8 and 9 would have shown a
+    spurious FAIL. `build-vsix` now records a content digest of every tracked or untracked input
+    file, and `check` compares it. Verified all four cases: clean build passes; a file added after
+    the build fails only the vsix item; a change built in passes; removing it fails again.
+  - **Tripwire cost.** One sample is about 0.3 s of `ps` plus two `lsof` calls, so sampling at
+    1 s kept about a third of a core busy. Now it samples every 2 s and runs the machine-wide
+    `lsof -U` every 5th sample. Shellpers stay covered between scans as descendants of the live
+    Tower.
+  - The socket-prefix match now needs a trailing `/`.
+  - The README now explains why `selftest` needs the web port (its refusal cases run real `start`).
+- Full suite: the architect's standing rule (decision ide-1, 07:27Z) allows `porch done`'s suite
+  without asking when the 1-minute load is under 6 and no other vitest is running, checked right
+  before.
+  - Iteration-1 rebuttal run: load 2.55, passed.
+  - Iteration-2 run: I waited out a load of 8.18; at 4.85 it passed.

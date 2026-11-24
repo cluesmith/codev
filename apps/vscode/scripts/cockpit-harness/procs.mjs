@@ -90,9 +90,11 @@ export function listenerPids(port) {
 
 /** PIDs holding a Unix socket whose path starts with one of `prefixes`. */
 export function unixSocketHolders(prefixes) {
+  const dirs = prefixes.map((p) => p.replace(/\/+$/, ''));
+  const under = (n) => dirs.some((d) => n === d || n.startsWith(`${d}/`));
   const out = new Set();
   for (const proc of lsof(['-U', '-Fpcn'])) {
-    if (proc.names.some((n) => prefixes.some((p) => n.startsWith(p)))) out.add(proc.pid);
+    if (proc.names.some(under)) out.add(proc.pid);
   }
   return out;
 }

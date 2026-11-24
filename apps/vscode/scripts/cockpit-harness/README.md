@@ -3,8 +3,8 @@
 Dev-only. Excluded from the vsix (`.vscodeignore`) and not run in CI.
 
 This harness gives Spec 1963's rendered checkpoints an isolated Tower and an isolated VS Code
-(`code serve-web`, or the IDE server binary) running the branch's vsix. Neither can reach the owner's Tower (`:4100`),
-`~/.agent-farm`, `~/.codev/run` or IDE (`/ide/`). The plan's *Verification harness* section is the
+(`code serve-web`, or the IDE server binary) running the branch's vsix. Neither can reach the
+owner's Tower (`:4100`), `~/.agent-farm`, `~/.codev/run` or IDE (`/ide/`). The plan's *Verification harness* section is the
 design; this file covers how to run it.
 
 ## Running it
@@ -21,6 +21,14 @@ node $H seed one-builder    # seed a scenario; gate 6 asserts its overview
 node $H check               # gates 3-5 again, plus the extension running against the Tower
 node $H stop                # kill the harness's own PIDs; remove runtime dirs
 ```
+
+`selftest` needs both ports set and free, even though it serves no web. Its refusal cases run real
+`start` processes, and each must refuse for the gate under test, not for a missing port.
+
+`build-vsix` records a digest of every tracked or untracked file the vsix is built from. `check`
+treats the installed vsix as the branch's only while that digest still matches, so an
+uncommitted edit that was built in passes, and any edit since the build fails until you run
+`build-vsix` again. The loop while iterating is: edit, `build-vsix`, `stop`, `start`, `check`.
 
 If `code serve-web` cannot run, start with the IDE server binary instead:
 
@@ -46,10 +54,11 @@ Never run `playwright install`. The driver uses the Chromium already in
 | VS Code | Runs on `$COCKPIT_WEB_PORT` in one of two modes, set by `COCKPIT_VSCODE`:<ul><li>`serve-web` (default): `code serve-web`, with the CLI, server, user and extensions dirs all under the root.</li><li>`ide-server`: the plan's alternative for when serve-web cannot run. It launches the VS Code Server binary Tower's IDE support uses (`COCKPIT_IDE_SERVER_BIN`) **directly**, never through any Tower's `/api/ide`. It passes the flags `ide-server.ts` passes (`--host 127.0.0.1`, `--port`, `--server-base-path /ide`, `--connection-token-file`, `--extensions-dir`), plus `--server-data-dir` and `--user-data-dir`, all in the scratchpad.</li></ul>The mode is chosen explicitly. A serve-web failure fails the start; it does not switch modes by itself.<ul><li>Machine settings: `codev.towerPort=$COCKPIT_TOWER_PORT`, `codev.autoStartTower=false`, `files.autoSave=off`.</li><li>Environment: `CODEV_TOWER_KEY` is the isolated key, `HOME` is the scratch home, and `stubs/` comes first on `PATH`.</li></ul> |
 | Stubs (`stubs/afx`, `porch`, `codev`) | Each call appends `{ tool, argv, cwd, caller }` to `<root>/logs/stub-calls.jsonl` and exits 0, so CLI-shelling actions are verified by their recorded argv.<br>`codev --version` prints the branch version.<br>The stubs are on the Tower's `PATH` too. |
 | Browser (`workbench.mjs`) | Headless Chromium with a persistent profile under the root, so the folder-trust decision holds. Any request to `:4100` fails the check. |
-| Tripwire (`tripwire.mjs`) | Samples `lsof` for ESTABLISHED connections on `:4100` once a second. It fails the run (writes `tripwire.tripped`, exits 3) if one belongs to the harness tree:<ul><li>the PIDs in `<root>/pids/`;</li><li>holders of sockets in the run dir;</li><li>descendants of either.</li></ul>It never connects to `:4100`. |
+| Tripwire (`tripwire.mjs`) | Samples `lsof` for ESTABLISHED connections on `:4100` every 2 s. The machine-wide socket-holder scan runs on every 5th sample only. It fails the run (writes `tripwire.tripped`, exits 3) if one belongs to the harness tree:<ul><li>the PIDs in `<root>/pids/`;</li><li>holders of sockets in the run dir;</li><li>descendants of either.</li></ul>It never connects to `:4100`. |
 
-The tripwire **detects**; it does not enforce. It samples once a second, so a connect, request
-and close to `:4100` that completes between two samples would escape it. Isolation is enforced by
+The tripwire **detects**; it does not enforce. It samples every 2 s, so a connect, request and
+close to `:4100` that completes between two samples would escape it. (The extension's Tower
+connection is a long-lived event stream, so a misdirected one would not.) Isolation is enforced by
 the layers above:
 - no Tower-contacting CLI;
 - recording stubs on `PATH`;
