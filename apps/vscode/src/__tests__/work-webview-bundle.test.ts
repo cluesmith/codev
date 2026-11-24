@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build, type Metafile } from 'esbuild';
 import { inlineScriptText, inlineStyleText } from '../workspace-views/panel-template.js';
+import { escapeContexts, SAFE_CONTEXTS } from './escape-contexts.js';
 
 const require = createRequire(import.meta.url);
 const { workWebviewConfig } = require('../../esbuild.webview.cjs') as {
@@ -139,6 +140,11 @@ describe.each(BUILDS)('built for $label', ({ production }) => {
     it('inlines without a sequence that would end its element, though the bundle holds them', () => {
       expect(script).toMatch(/<!--/);
       expect(inlineScriptText(script)).not.toMatch(/<\/script|<!--/i);
+      // The escape keeps the program's meaning only where each rewritten '<' sits in a string, a
+      // regular expression, an untagged template or a comment (escape-contexts.ts).
+      const contexts = escapeContexts(script);
+      expect(contexts.length).toBeGreaterThan(0);
+      expect(contexts.filter(c => !SAFE_CONTEXTS.has(c.context))).toEqual([]);
       expect(inlineStyleText(readFileSync(join(outDir, 'work.css'), 'utf8'))).not.toMatch(/<\/style/i);
     });
   });

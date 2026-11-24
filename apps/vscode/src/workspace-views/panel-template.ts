@@ -66,6 +66,9 @@ function escapeLessThan(text: string, pattern: string, escape: string): string {
  * Script text safe inside `<script>`: `</script` would end the element, and `<!--` can put the
  * parser where a later `</script>` no longer does. `\x3C` is `<` in a JavaScript string, template
  * or regular expression (the `u` flag included); the bundle has these only there and in comments.
+ * The rewrite is right only there: in code it would be a syntax error, and in a tagged template it
+ * would change what the tag reads from `.raw`, so the bundle tests parse each real bundle and fail
+ * on a rewritten position anywhere else (`escape-contexts.ts`).
  */
 export function inlineScriptText(script: string): string {
   return escapeLessThan(script, '!--|/script', '\\x3C');

@@ -13,6 +13,7 @@ import {
   renderWorkspaceViewHtml,
   workspaceViewCsp,
 } from '../workspace-views/panel-template.js';
+import { escapeContexts } from './escape-contexts.js';
 
 const SCRIPT = 'window.mounted = true;';
 const STYLE = '.decisions-card { color: var(--vscode-foreground); }';
@@ -139,5 +140,24 @@ describe('escaping the bundle text', () => {
     const plain = 'if (a < b && c <!- d) { x = "<div>" + "<scriptx" }';
     expect(inlineScriptText(plain)).toBe(plain);
     expect(inlineStyleText(STYLE)).toBe(STYLE);
+  });
+});
+
+describe('where the escape rewrites (escape-contexts.ts, the check the bundle tests apply)', () => {
+  const contexts = (source: string) => escapeContexts(source).map(c => c.context);
+
+  it('finds strings, regular expressions, untagged templates and comments, which the escape keeps', () => {
+    expect(contexts('var a = "</script>"; var b = \'<!--\';')).toEqual(['string', 'string']);
+    expect(contexts('var r = /^<!--/, u = /<!--|<\\/script>/u, c = /[<]!--/;')).toEqual(['regex', 'regex']);
+    expect(contexts('var t = `</script>${`<!--`}`;')).toEqual(['template', 'template']);
+    expect(contexts('/* </script> */ var x = 1; // <!--\n/** <!-- */ function f() {}')).toEqual(['comment', 'comment', 'comment']);
+    expect(contexts('var t = String.raw`a${"</script>"}b`;')).toEqual(['string']);
+  });
+
+  it('flags a tagged template, whose .raw the escape would change, and code, which it would break', () => {
+    expect(contexts('var t = String.raw`</script>`;')).toEqual(['tagged-template']);
+    expect(contexts('var t = tag`x${y}<!--`;')).toEqual(['tagged-template']);
+    expect(contexts('var b = 0 </script/.test(x);')).toEqual(['code']);
+    expect(contexts('var c = a<!--b;')).toEqual(['code']);
   });
 });
