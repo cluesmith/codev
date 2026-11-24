@@ -206,7 +206,7 @@ describe('relocated commands, given the Cockpit node their entry attaches to', (
   it("Spawn Builder's extractIssueId yields no id from a workspace node, so the full picker opens", async () => {
     const { own } = await nodes();
     expect(extractIssueId(own)).toBeUndefined();
-    expect(registration(EXT_SRC, 'codev.spawnBuilder')).toMatch(/spawnBuilder\(extractIssueId\(arg\)\)/);
+    expect(registration(EXT_SRC, 'codev.spawnBuilder')).toMatch(/spawnBuilder\(extractIssueId\(arg\), detectWorkspacePath\(\)\)/);
   });
 
   it("Add Architect, New Shell, Start Dev, Stop Dev and Open Web Interface ignore the argument (this window's workspace)", () => {

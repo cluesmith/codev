@@ -1271,7 +1271,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		reg('codev.focusNextAgentTerminal', () => cycleAgentTerminal(1)),
 		reg('codev.focusPreviousAgentTerminal', () => cycleAgentTerminal(-1)),
 		regCli('codev.spawnBuilder', (arg: vscode.TreeItem | string | undefined) =>
-			spawnBuilder(extractIssueId(arg))),
+			spawnBuilder(extractIssueId(arg), detectWorkspacePath())),
 		reg('codev.openBacklogIssue', (arg: vscode.TreeItem | undefined) => {
 			if (arg instanceof BacklogTreeItem) {
 				void vscode.env.openExternal(vscode.Uri.parse(arg.issueUrl));

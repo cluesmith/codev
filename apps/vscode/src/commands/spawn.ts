@@ -10,8 +10,17 @@ import { spawnCodevCli } from '../cli-process.js';
  *    already known, so jump straight to the protocol pick and spawn. The
  *    branch prompt is skipped too — starting work on a backlog issue means
  *    a fresh branch.
+ *
+ * `afx spawn` resolves its workspace from its cwd, so it runs in
+ * `workspacePath`, this window's Tower workspace (the parent workspace in a
+ * builder-worktree window). Without one it refuses before prompting: in the
+ * extension host's own cwd it would spawn into whichever project that is.
  */
-export async function spawnBuilder(issueArg?: string): Promise<void> {
+export async function spawnBuilder(issueArg: string | undefined, workspacePath: string | null): Promise<void> {
+  if (!workspacePath) {
+    vscode.window.showErrorMessage('Codev: Spawn Builder needs a Codev workspace open in this window.');
+    return;
+  }
   let issueNumber = issueArg;
   if (!issueNumber) {
     issueNumber = await vscode.window.showInputBox({
@@ -39,11 +48,11 @@ export async function spawnBuilder(issueArg?: string): Promise<void> {
     }
   }
 
-  runAfxCommand(args);
+  runAfxCommand(args, workspacePath);
 }
 
-function runAfxCommand(args: string[]): void {
-  const child = spawnCodevCli('afx', args, { detached: true, stdio: 'ignore' });
+function runAfxCommand(args: string[], cwd: string): void {
+  const child = spawnCodevCli('afx', args, { cwd, detached: true, stdio: 'ignore' });
   child.on('error', (err: NodeJS.ErrnoException) => {
     const reason = err.code === 'ENOENT' ? 'afx was not found on PATH (install @cluesmith/codev)' : err.message;
     vscode.window.showErrorMessage(`Codev: could not run afx: ${reason}`);
