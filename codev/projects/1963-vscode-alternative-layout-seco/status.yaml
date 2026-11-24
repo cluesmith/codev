@@ -17,10 +17,10 @@ plan_phases:
     status: complete
   - id: cockpit_actions
     title: Placement-table actions on the hierarchy, parity mapping, increment-1 verification
-    status: in_progress
+    status: complete
   - id: workspace_views_package
     title: Shared Work/Decisions package; dashboard moved onto it unchanged
-    status: pending
+    status: in_progress
   - id: decisions_panel
     title: Decisions panel in VS Code, its host bridge, and the hierarchy's Decisions entry
     status: pending
@@ -30,7 +30,7 @@ plan_phases:
   - id: arrange_cockpit
     title: 'Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification'
     status: pending
-current_plan_phase: cockpit_actions
+current_plan_phase: workspace_views_package
 gates:
   spec-approval:
     status: approved
@@ -45,7 +45,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: verification_harness
@@ -72,7 +72,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-cockpit_hierarchy-iter1-claude.txt
 started_at: '2026-11-24T01:12:47.024Z'
-updated_at: '2026-11-24T11:00:40.090Z'
+updated_at: '2026-11-24T11:06:37.798Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-24T06:55:50.288Z'
@@ -89,3 +89,5 @@ context_refreshes:
   - boundary: plan-phase:cockpit_actions
     at: '2026-11-24T08:58:42.816Z'
     acknowledged_at: '2026-11-24T08:58:57.074Z'
+  - boundary: plan-phase:workspace_views_package
+    at: '2026-11-24T11:06:37.798Z'
