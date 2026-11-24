@@ -1,9 +1,11 @@
 /**
  * Spec 1658 Phase 10: the native-dependency install guard. The guard logic
- * (scripts/native-deps-guard.mjs) is pure and tested here on any host,
- * including its refusal of an unsupported Node; the real install on Windows
- * (Node 22 installs from prebuilds, node-gyp never runs) is the
- * `install-guard` job of windows.yml.
+ * (scripts/native-deps-guard.mjs) is pure and tested here on any host: the
+ * decision to refuse an unsupported Node and the message it prints. These tests
+ * do not prove the real install aborts (preinstall exiting non-zero before
+ * npm reaches better-sqlite3's node-gyp fallback); since #1944 no job checks
+ * that on a host. The `install-guard` job of windows.yml checks only that
+ * Node 22 installs from prebuilds without node-gyp running.
  */
 
 import { describe, expect, it } from 'vitest';

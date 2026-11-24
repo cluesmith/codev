@@ -18,8 +18,9 @@ run-name: "Windows: ${{ inputs.purpose || 'unlabelled' }}"
 #   targeted  runs the packages/codev vitest files matching `filter` (skipped when empty).
 #   install-guard (install_guard=true) packs the branch packages, then installs them globally
 #             with node-gyp replaced by a failing stub: the install must succeed from prebuilds
-#             and never reach the stub. (The guard's refusal of an unsupported Node is covered
-#             by its unit tests.)
+#             and never reach the stub. No job checks on a real host that an unsupported Node's
+#             install aborts before node-gyp (owner ruling, #1944): the unit tests cover only the
+#             guard's decision and message, not preinstall's exit or npm's script order.
 #   unit, cli-e2e, post-release-e2e (suites=true) the full suites on windows-latest:
 #             unit runs the sdk, core and codev unit tests; cli-e2e runs the built CLI tests;
 #             post-release-e2e packs the dispatched ref's packages and installs those tarballs
