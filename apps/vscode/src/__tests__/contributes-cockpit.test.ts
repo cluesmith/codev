@@ -181,7 +181,8 @@ describe('Arrange Cockpit (Phase 9)', () => {
     const wiring = EXT_SRC.slice(EXT_SRC.indexOf('const arrangeUnavailableReason'), EXT_SRC.indexOf('context.subscriptions.push(cockpitAutoArrange)'));
     expect(wiring).toMatch(/workspaceViewUnavailableReason\('Arrange Cockpit', \{/);
     expect(wiring).toMatch(/workspacePath: detectWorkspacePath\(\),/);
-    expect(wiring).toMatch(/terminalManager\?\.openArchitect\(terminalId, name, true, 'editor'\)/);
+    // No terminal manager is an error arrange reports, not a silent skip (claude PR review).
+    expect(wiring).toMatch(/if \(!terminalManager\) \{ throw new Error\('the terminal manager is not running'\); \}\n\t+return terminalManager\.openArchitect\(terminalId, name, true, 'editor'\);/);
     expect(wiring).toMatch(/\.update\('cockpit\.autoArrange', false, vscode\.ConfigurationTarget\.Global\)/);
   });
 
