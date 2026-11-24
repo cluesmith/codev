@@ -56,6 +56,7 @@ The commands are read-only by construction. One runner spawns every subprocess a
 - [x] **Full test suite and Windows.**
   - Under owner ruling main-38 ("ci-first"), the builder ran no full local suite during Phases 1–7. GitHub's run (8/8, which includes the full unit suite on Node 22 and 24) stood in for porch's local `tests` check at every phase head. The architect confirmed each run, and each skip is listed in the PR body.
   - The owner retired ci-first (decision main-39) once PR #1965's worker cap reached main. After merging it (`e9baeeec0`), one ordinary full local run on the final head (`30853b1fe`, the same tree as `e9baeeec0`), `npm test -- --exclude='**/e2e/**'` from `packages/codev`: 440 files passed and 14 skipped; 9,286 tests passed and 116 skipped; exit 0. Wall time 363 s; one-minute load 18.4 at the start, peak 27.7. No failures.
+  - Main then moved (Spec 1940, 105 files), and the branch merged it to clear the conflict `check pr` found (`5d802799f`). A second full run on that head: 449 files passed and 14 skipped; 9,885 tests passed and 116 skipped; exit 0. Wall time 342 s; one-minute load 11.0 at the start, peak 39.0. No failures.
   - Windows runs:
     - 45462452355 failed 9 fixture-side tests (8.3 short names), fixed in `f93aa60e1`;
     - 45465468867 and 45471312317 passed;
@@ -103,6 +104,21 @@ ATTENTION  PR #1640 — forge (conflicts), trial merge (conflicts)
 ```
 
 The forge's own mergeability agrees with the trial merge.
+
+**The run that stopped the gate.** Before presenting the `pr` gate, a final `codev check pr 1958` on head `5bede63` (5.4 s, exit 1) read:
+
+```
+ATTENTION  PR #1958 — forge (conflicts), trial merge (conflicts)
+
+head  5bede63  (local builder/spir-1951 matches)      base  main @ 707e0e9 (origin, live)
+
+  ATTN    forge          CONFLICTING, DIRTY
+  ATTN    trial merge    1 conflicting file merging into main @ 707e0e9: codev/resources/lessons-learned.md
+  ok      checks         head 5bede63: 8 passed
+  info    overlap        5 files also changed on main since the branch point: codev-skeleton/roles/architect.md, codev/resources/arch.md, … +3
+```
+
+Every check on the head was green, and the branch had merged main less than an hour earlier. In between, Spec 1940 landed on main and appended lessons at the same two places in `lessons-learned.md`. The trial merge found the one conflicting file and the forge agreed. The `overlap` line named the other files main had changed, which merged cleanly. The fix was a merge of `origin/main` (`5d802799f`, keeping both sides' lessons) before the gate went to the owner. This is the headline path doing its job: a run of one command, at the moment an architect would recommend a merge, naming the specific thing that blocks it.
 
 **Earlier phases**, from the thread log (`codev/state/spir-1951_thread.md`):
 - **Phase 4.**

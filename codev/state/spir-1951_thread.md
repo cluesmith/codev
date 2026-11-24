@@ -427,3 +427,9 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   rejected by the architect (two spellings of one state; one forge per run).
 - Full local run on 30853b1fe (architect order, the local evidence): npm test -- --exclude='**/e2e/**' →
   440 files passed / 14 skipped, 9286 tests passed / 116 skipped, exit 0, 363 s wall, load 18.4 start, 27.7 peak.
+- Final check pr 1958 on 5bede63 before the gate: ATTENTION, forge CONFLICTING/DIRTY + trial merge 1 conflict
+  (lessons-learned.md) against main @ 707e0e9 (Spec 1940 landed). Merged origin/main as 5d802799f, keeping both
+  sides' lessons; hashes regenerate identically after the merge commit (192 versions); skill/governance tests
+  127/127; rebuilt types+sdk (new ./address export), build, both tsc, residue OK.
+- Second full local run on 5d802799f: 449 files passed / 14 skipped, 9885 tests passed / 116 skipped, exit 0,
+  342 s, load 11.0 start, 39.0 peak. PR #1964 not yet on main at push time.
