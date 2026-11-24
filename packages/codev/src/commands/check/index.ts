@@ -18,6 +18,7 @@ import { checkDeploy, renderDeployHuman } from './deploy.js';
 import { checkPr, renderPrHuman } from './pr.js';
 import { renderErrorHuman, renderJson } from './render.js';
 import type { CommandName, CommandResult, ErrorReport, Report } from './report.js';
+import { checkWorktree, renderWorktreeHuman } from './worktree.js';
 
 export interface CheckCliDeps {
   /**
@@ -107,7 +108,7 @@ export function buildCheckCommand(deps: CheckCliDeps = PROCESS_DEPS): Command {
   };
 
   const group = new Command('check')
-    .description('Read-only checks: merge readiness of a PR, and whether merged PRs reached the deploy branch (never merges, pushes, comments or deletes)')
+    .description('Read-only checks: merge readiness of a PR, whether merged PRs reached the deploy branch, and whether a builder worktree can be removed (never merges, pushes, comments or deletes)')
     .configureOutput({ writeOut: (s) => track(deps.stdout(s)), writeErr: (s) => track(deps.stderr(s)) });
   group.exitOverride(onCommanderExit(null));
 
@@ -131,6 +132,17 @@ export function buildCheckCommand(deps: CheckCliDeps = PROCESS_DEPS): Command {
       await finish(result, options.json === true, renderDeployHuman);
     });
   deploy.exitOverride(onCommanderExit('deploy'));
+
+  const worktree = group
+    .command('worktree <target>')
+    .description('Whether removing a builder worktree (builder id or path) and its local branch would lose data: uncommitted files, unpushed commits, keep-list ignored files; and whether its PR is finished')
+    .option('--json', 'print one JSON object (schema 1) instead of the summary')
+    .allowExcessArguments(false)
+    .action(async (target: string, options: { json?: boolean }) => {
+      const result = await checkWorktree(target, { cwd: deps.cwd(), env: deps.env, timeoutMs: deps.timeoutMs });
+      await finish(result, options.json === true, renderWorktreeHuman);
+    });
+  worktree.exitOverride(onCommanderExit('worktree'));
 
   return group;
 }

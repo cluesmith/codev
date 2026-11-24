@@ -248,3 +248,45 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   PRs on different bases with no deploy branch (per-branch cache, `on main, release`), and `check.skip` of
   `merged`/`on-branch`. Plan: fold (1), (3), (4), (5) into the first Phase 6 commit as Phase 5 review fold-ins
   (as Phase 3's were folded into Phase 4), listed in the PR body; (2) goes to the REVIEW.
+
+## Phase 6 — check_worktree (2026-11-24)
+
+- Merged origin/main (112 commits, PR #1954 `afx cleanup --keep-ignored` among them) as b4ae91855: no conflicts.
+  The merge brought sdk changes (`connectionRefused`) whose stale local dist failed `tsc`; rebuilt types+sdk dist
+  locally, nothing to commit.
+- Phase 5 fold-ins, own commit ef9502a13: runsOf keyed workflow+branch; new `ancestry()` Lookup in git-facts so an
+  is-ancestor failure is that PR's on-branch/deploy-run `not run` (isAncestor now wraps it); `state not read`;
+  tests for two bases (`on main, release`, two ls-remotes), skip of merged+on-branch (no ls-remote), the per-PR
+  ancestry failure, the missing state.
+- #1950 coordination: PR #1954 merged → `agent-farm/lib/keep-list.ts` (pure: DEFAULT_KEEP_IGNORED, keepPatterns,
+  exported `isNeverKeep`); keep-files.ts imports it and re-exports the first two, so #1954's tests run unchanged.
+  Agreement test lands here (this PR is second): check worktree's keep files == the ignored part of
+  `listKeepCandidates()` (with the default list minus with `[]`).
+- `agent-farm/lib/builder-scaffold.ts` (pure): root-level `.builder-*`, the guard's two files, and opencode.json
+  (`OPENCODE_CONFIG_RELPATH`, now the constant harness.ts writes). A test asserts SCAFFOLD_PATHS equals what every
+  BUILTIN_HARNESSES `getWorktreeFiles` writes. Only an untracked file is ever scaffold.
+- cleanup.ts (main-36): `hasUncommittedChanges` uses `isBuilderScaffold()` AND `git status --porcelain
+  --untracked-files=all`. The second is needed for the fix to work: without -uall the guard shows as the directory
+  `?? .claude/hooks/`, which was the "1 uncommitted file(s)" the evidence saw. Exported for its test. Nothing else
+  in cleanup changed; its existing tests pass.
+- Decisions inside the spec's latitude (for the REVIEW):
+  - `commits` details: `{ total, notOnBase, unsafe }` — total/notOnBase are the commits not on the live base tip;
+    `unsafe` (added) is the subset on no remote branch and not covered by the squash rule. The spec's `total` can't
+    mean "commits on the branch": after a merge-commit merge there is no fork point to count from.
+  - `pr`: MERGED ok, CLOSED ok ("CLOSED without merging" — finished, data judged by git), OPEN attention, no PR
+    found attention (can't say finished), any other state attention. PR choice: exact headRefName, OPEN, newest
+    MERGED, newest CLOSED, then blank state; "newest" = highest number (pr-search has no dates).
+  - `remote`: matches ok; absent/ahead/behind/diverged `info` (context only); a failed read `not run`.
+  - Base: the PR's baseRefName; with no PR, PR unavailable or `pr` skipped, origin's HEAD via ls-remote --symref.
+    `worktree.baseRef`/`baseTip` may be null in the JSON (Phase 7 schema docs, like pr's baseTip).
+  - A data check that cannot run is conservative: uncommitted or ignored not run → NOT REMOVABLE; commits not run
+    → NOT REMOVABLE unless the local tip is on the live remote branch (spec rule).
+  - `check.skip`: a skipped check runs nothing of its own; `remote` skipped still reads the branch tip for
+    `commits`; `pr` skipped means no forge call and no squash rule. `ignored`'s ls-files nested-repo `dir/`
+    entries are reported as the entry (keep-files expands them) — agreement holds for files.
+  - Verdict line omits keep-list files (the verdict word or the data already says it), as the spec sample does.
+  - A target is a path when it contains a separator or is `.`/`..`; otherwise a builder id. Detached HEAD → exit 2.
+- LIVE RUNS (worktree build, before committing Phase 6): `codev check worktree spir-1951` → NOT REMOVABLE (20
+  uncommitted = this phase's uncommitted work, 2 unpushed = the merge + fold-in commits, PR #1958 OPEN);
+  `air-1938` → REMOVABLE, exit 0 (#1939 MERGED, 1 commit after the merge on its remote branch); `bugfix-1956` →
+  REMOVABLE AFTER KEEPING 2 FILES (two porch review .txt), PR #1965 OPEN, exit 1.

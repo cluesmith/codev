@@ -1,11 +1,13 @@
 /**
- * `check.*` configuration (Spec 1951 § What is configurable).
+ * `check.*` configuration (Spec 1951 § What is configurable), and `cleanup.keepIgnored`
+ * (#1950) for `check worktree`.
  *
  * Read from the main workspace root through the usual five-layer loader (arrays replace,
  * never concatenate). Every value is validated; a bad one is exit 2 naming the key and the
  * file that set it.
  */
 
+import { keepPatterns } from '../../agent-farm/lib/keep-list.js';
 import { findConfigSource, loadConfig } from '../../lib/config.js';
 import { ALL_CHECK_IDS, CheckCommandError } from './report.js';
 import { hasControlChars, isRefName, validateConfigString, InputError } from './validate.js';
@@ -56,14 +58,35 @@ export interface CheckSettings {
 const KNOWN_KEYS = new Set(['attribution', 'watch', 'flag', 'notForReading', 'deploy', 'skip']);
 const KNOWN_DEPLOY_KEYS = new Set(['branch', 'workflow']);
 
-export function loadCheckSettings(mainRoot: string): CheckSettings {
-  let raw: unknown;
+function readConfig(mainRoot: string): ReturnType<typeof loadConfig> {
   try {
-    raw = loadConfig(mainRoot).check;
+    return loadConfig(mainRoot);
   } catch (err) {
     throw new CheckCommandError('could not load configuration', err instanceof Error ? err.message : String(err));
   }
-  return parseCheckSettings(raw, (keyPath) => findConfigSource(mainRoot, keyPath));
+}
+
+export function loadCheckSettings(mainRoot: string): CheckSettings {
+  return parseCheckSettings(readConfig(mainRoot).check, (keyPath) => findConfigSource(mainRoot, keyPath));
+}
+
+/** `cleanup.keepIgnored`, read through the same `keepPatterns()` `afx cleanup --keep-ignored` uses. */
+export function loadKeepIgnored(mainRoot: string): readonly string[] {
+  return parseKeepIgnored(readConfig(mainRoot).cleanup?.keepIgnored, findConfigSource(mainRoot, ['cleanup', 'keepIgnored']));
+}
+
+/** Pure validation of `cleanup.keepIgnored`; `source` names the file that set it. Undefined is the default list. */
+export function parseKeepIgnored(raw: unknown, source: string | null): readonly string[] {
+  const where = source ? ` (in ${source})` : '';
+  let patterns: readonly string[];
+  try {
+    patterns = keepPatterns(raw);
+  } catch {
+    throw new CheckCommandError(`cleanup.keepIgnored must be an array of non-empty glob strings${where}`);
+  }
+  const bad = patterns.find((p) => hasControlChars(p));
+  if (bad !== undefined) throw new CheckCommandError(`cleanup.keepIgnored pattern ${JSON.stringify(bad)} contains a control character${where}`);
+  return patterns;
 }
 
 /** Pure validation; `sourceOf` names the file that set a key (for error messages). */

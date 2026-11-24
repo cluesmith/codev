@@ -7,7 +7,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CheckCommandError } from '../report.js';
-import { DEFAULT_NOT_FOR_READING, DEFAULT_WATCH, loadCheckSettings, parseCheckSettings } from '../settings.js';
+import { DEFAULT_KEEP_IGNORED } from '../../../agent-farm/lib/keep-list.js';
+import { DEFAULT_NOT_FOR_READING, DEFAULT_WATCH, loadCheckSettings, loadKeepIgnored, parseCheckSettings, parseKeepIgnored } from '../settings.js';
 import { useFakeHome } from './helpers/fake-home.js';
 
 let root: string;
@@ -151,5 +152,22 @@ describe('Spec 1951 — check settings', () => {
 
   it('refuses a glob with a control character', () => {
     expect(() => parseCheckSettings({ flag: ['a\nb'] }, () => null)).toThrow(/check\.flag must contain only non-empty glob strings/);
+  });
+});
+
+describe('Spec 1951 — cleanup.keepIgnored for check worktree', () => {
+  it("is #1950's default list when unset, and a configured list replaces it", () => {
+    expect(loadKeepIgnored(root)).toBe(DEFAULT_KEEP_IGNORED);
+    fs.writeFileSync(projectFile, JSON.stringify({ cleanup: { keepIgnored: ['notes/**'] } }));
+    expect(loadKeepIgnored(root)).toEqual(['notes/**']);
+    fs.writeFileSync(projectFile, JSON.stringify({ cleanup: { keepIgnored: [] } }));
+    expect(loadKeepIgnored(root)).toEqual([]);
+  });
+
+  it('refuses a bad value, naming the key and the file', () => {
+    fs.writeFileSync(projectFile, JSON.stringify({ cleanup: { keepIgnored: 'tmp/**' } }));
+    expect(() => loadKeepIgnored(root)).toThrow(`cleanup.keepIgnored must be an array of non-empty glob strings (in ${projectFile})`);
+    expect(() => parseKeepIgnored(['ok', ''], null)).toThrow('cleanup.keepIgnored must be an array of non-empty glob strings');
+    expect(() => parseKeepIgnored(['a\u0007b'], 'x.json')).toThrow('cleanup.keepIgnored pattern "a\\u0007b" contains a control character (in x.json)');
   });
 });

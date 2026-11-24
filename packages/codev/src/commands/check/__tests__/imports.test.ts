@@ -11,6 +11,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { WORKTREE_WRITE_GUARD_SCRIPT } from '../../../agent-farm/utils/worktree-write-guard.js';
 
 const CHECK_DIR = path.resolve(__dirname, '..');
 
@@ -31,6 +32,25 @@ const ALLOWED: Record<string, ImportRule> = {
     names: ['loadConfig', 'findConfigSource'],
     reason: 'reads configuration files; never writes or spawns',
   },
+  '../../agent-farm/lib/keep-list.js': {
+    names: ['keepPatterns', 'isNeverKeep'],
+    reason: "#1950's keep list as pure definitions, shared with afx cleanup --keep-ignored (audited below)",
+  },
+  '../../agent-farm/lib/builder-scaffold.js': {
+    names: ['isBuilderScaffold'],
+    reason: "spawn's scaffold file list, pure, shared with afx cleanup (audited below)",
+  },
+};
+
+/**
+ * The modules outside this directory that the check commands import, and everything each may
+ * import in turn: none of them spawns or does I/O. `scriptText` is a script a module only
+ * emits as text; a `require` that appears in it is not the module's own.
+ */
+const PURE_MODULES: Record<string, { imports: readonly string[]; scriptText?: string }> = {
+  '../../agent-farm/lib/keep-list.ts': { imports: [] },
+  '../../agent-farm/lib/builder-scaffold.ts': { imports: ['../utils/worktree-write-guard.js'] },
+  '../../agent-farm/utils/worktree-write-guard.ts': { imports: ['node:path'], scriptText: WORKTREE_WRITE_GUARD_SCRIPT },
 };
 
 /** index.ts alone parses arguments. */
@@ -99,7 +119,7 @@ describe('Spec 1951 — audited imports in commands/check/', () => {
     expect(sources).toEqual(
       expect.arrayContaining([
         'allow-list.ts', 'deploy.ts', 'git-facts.ts', 'index.ts', 'linked-issue.ts', 'porch-only.ts', 'pr.ts', 'render.ts', 'report.ts', 'roots.ts',
-        'runner.ts', 'settings.ts', 'validate.ts',
+        'runner.ts', 'settings.ts', 'validate.ts', 'worktree.ts',
       ]),
     );
   });
@@ -122,6 +142,13 @@ describe('Spec 1951 — audited imports in commands/check/', () => {
         expect(rule.names, `${file} imports ${name} from ${imp.specifier}`).toContain(name);
       }
     }
+  });
+
+  it.each(Object.entries(PURE_MODULES))('%s, imported from outside this directory, imports only what it lists', (file, rule) => {
+    const { imports, dynamic } = parseImports(fs.readFileSync(path.resolve(CHECK_DIR, file), 'utf-8'));
+    const own = dynamic.filter((d) => !rule.scriptText?.includes(d.replace(/^(\w+)\((.*)\)$/, "$1('$2')")));
+    expect(own, file).toEqual([]);
+    expect(imports.filter((i) => !i.typeOnly).map((i) => i.specifier)).toEqual(rule.imports);
   });
 
   it('only index.ts imports commander', () => {

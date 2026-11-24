@@ -29,6 +29,7 @@ import { sameWindowsPath } from '../../lib/platform/windows/host-paths.js';
 import { unquoteWindowsCommandLine } from '../../lib/platform/windows/command-line.js';
 import { loadConfig } from '../../lib/config.js';
 import { AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { isBuilderScaffold } from '../lib/builder-scaffold.js';
 import { keepFiles, keepPatterns, keptDirFor, listKeepCandidates } from '../lib/keep-files.js';
 
 /**
@@ -186,22 +187,23 @@ export interface CleanupOptions {
 
 /**
  * Check if a worktree has uncommitted changes
- * Returns: dirty (has real changes), scaffoldOnly (only has .builder-* files)
+ * Returns: dirty (has real changes), scaffoldOnly (only has spawn's scaffold files,
+ * `isBuilderScaffold()`: `.builder-*` and the write guard's files)
  */
-async function hasUncommittedChanges(worktreePath: string): Promise<{ dirty: boolean; scaffoldOnly: boolean; details: string }> {
+export async function hasUncommittedChanges(worktreePath: string): Promise<{ dirty: boolean; scaffoldOnly: boolean; details: string }> {
   if (!existsSync(worktreePath)) {
     return { dirty: false, scaffoldOnly: false, details: '' };
   }
 
   try {
-    // Check for uncommitted changes (staged and unstaged)
-    const result = await run('git status --porcelain', { cwd: worktreePath });
+    // Check for uncommitted changes (staged and unstaged). Untracked files are listed one by
+    // one, so the write guard's `.claude/hooks/` is judged by its file, not as a directory.
+    const result = await run('git status --porcelain --untracked-files=all', { cwd: worktreePath });
 
     if (result.stdout.trim()) {
-      // Count changed files, excluding builder scaffold files
-      const scaffoldPattern = /^\?\? \.builder-/;
+      // Count changed files, excluding builder scaffold files (only ever untracked)
       const allLines = result.stdout.trim().split('\n').filter(Boolean);
-      const nonScaffoldLines = allLines.filter((line) => !scaffoldPattern.test(line));
+      const nonScaffoldLines = allLines.filter((line) => !(line.startsWith('?? ') && isBuilderScaffold(line.slice(3))));
 
       if (nonScaffoldLines.length > 0) {
         return {

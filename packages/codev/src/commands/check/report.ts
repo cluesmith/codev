@@ -86,7 +86,16 @@ export type Removable = 'removable' | 'removable-after-keeping' | 'not-removable
 export interface WorktreeReport extends Report {
   command: 'worktree';
   removable: Removable;
-  worktree: { path: string; builderId: string | null; branch: string; baseRef: string; baseTip: string };
+  worktree: {
+    /** The worktree's real path. */
+    path: string;
+    builderId: string | null;
+    branch: string;
+    /** The PR's base, else origin's default branch; null when neither could be read. */
+    baseRef: string | null;
+    /** The live tip `ls-remote` reported; null when it could not be read (`commits` is then not run). */
+    baseTip: string | null;
+  };
   checks: Check[];
 }
 

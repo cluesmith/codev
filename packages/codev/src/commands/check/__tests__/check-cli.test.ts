@@ -13,6 +13,7 @@ import { useFakeHome } from './helpers/fake-home.js';
 import { createFixture, type Fixture } from './helpers/git-fixture.js';
 import { mergedView, mergePr } from './helpers/deploy-fixture.js';
 import { commitChecksOverride, passing, prView, prViewOverride, pushBranch, writeConfig } from './helpers/pr-fixture.js';
+import { addBuilder, builderView, prSearchOverride } from './helpers/worktree-fixture.js';
 
 class Exited extends Error {
   constructor(public readonly code: number) {
@@ -77,18 +78,18 @@ describe('Spec 1951 — codev check: commander wiring', () => {
     expect(exitCodeForCommander(e(1, 'commander.missingArgument'))).toBe(2);
   });
 
-  it.each([[['--help']], [['pr', '--help']], [['help', 'pr']], [['deploy', '--help']]])('%j exits 0 and prints help on stdout', async (args) => {
+  it.each([[['--help']], [['pr', '--help']], [['help', 'pr']], [['deploy', '--help']], [['worktree', '--help']]])('%j exits 0 and prints help on stdout', async (args) => {
     const outcome = await runCli(args);
     expect(outcome.code).toBe(0);
     expect(outcome.stdout).toMatch(/Usage: check/);
   });
 
-  it('lists pr and deploy with their arguments and --json', async () => {
+  it('lists pr, deploy and worktree with their arguments and --json', async () => {
     const help = (await runCli(['--help'])).stdout;
     expect(help).toMatch(/pr \[options\] <number>/);
     expect(help).toMatch(/deploy \[options\] <numbers\.\.\.>/);
-    expect((await runCli(['pr', '--help'])).stdout).toMatch(/--json/);
-    expect((await runCli(['deploy', '--help'])).stdout).toMatch(/--json/);
+    expect(help).toMatch(/worktree \[options\] <target>/);
+    for (const command of ['pr', 'deploy', 'worktree']) expect((await runCli([command, '--help'])).stdout, command).toMatch(/--json/);
   });
 
   it.each([
@@ -99,6 +100,8 @@ describe('Spec 1951 — codev check: commander wiring', () => {
     ['an unknown option', ['pr', '7', '--jsn']],
     ['deploy without a PR number', ['deploy']],
     ['an unknown deploy option', ['deploy', '7', '--jsn']],
+    ['worktree without a target', ['worktree']],
+    ['worktree with two targets', ['worktree', 'spir-1', 'spir-2']],
   ])('%s is a usage error: exit 2', async (_name, args) => {
     const outcome = await runCli(args);
     expect(outcome.code).toBe(2);
@@ -222,6 +225,49 @@ describe('Spec 1951 — codev check deploy through the CLI', { timeout: 30_000 }
     const outcome = await runCli(['deploy', '8', '12a'], { cwd: fx.main, env: fx.env });
     expect(outcome).toMatchObject({ code: 2, stdout: '' });
     expect(outcome.stderr).toBe('codev check deploy: invalid PR number "12a": expected a positive integer\n');
+  });
+});
+
+describe('Spec 1951 — codev check worktree through the CLI', { timeout: 30_000 }, () => {
+  let fx: Fixture;
+
+  beforeEach(() => {
+    fx = createFixture();
+    const forge = prViewOverride(fx);
+    const search = prSearchOverride(fx);
+    const b = addBuilder(fx, 'spir-8');
+    search.answer([{ number: 8, headRefName: b.branch, state: 'OPEN' }]);
+    forge.answerFor(8, builderView(b, 'OPEN'));
+    writeConfig(fx, { forge: { 'pr-view': forge.script, 'pr-search': search.script } });
+  });
+
+  afterEach(() => {
+    fx.cleanup();
+  });
+
+  it('prints the summary and exits 1 for an open PR', async () => {
+    const outcome = await runCli(['worktree', 'spir-8'], { cwd: fx.main, env: fx.env });
+    expect(outcome.code).toBe(1);
+    expect(outcome.stdout.split('\n')[0]).toBe('REMOVABLE  spir-8 — PR #8 open: builder not finished');
+    expect(outcome.stderr).toBe('');
+  });
+
+  it('--json prints exactly one WorktreeReport object', async () => {
+    const outcome = await runCli(['worktree', 'spir-8', '--json'], { cwd: fx.main, env: fx.env });
+    expect(outcome.code).toBe(1);
+    const report = JSON.parse(outcome.stdout);
+    expect(report).toMatchObject({ schema: 1, command: 'worktree', verdict: 'attention', removable: 'removable', worktree: { builderId: 'spir-8' } });
+    expect(report.checks.map((c: { id: string }) => c.id)).toEqual(['uncommitted', 'commits', 'remote', 'pr', 'ignored']);
+  });
+
+  it('a builder that does not exist is exit 2 naming it, on stderr or as an ErrorReport', async () => {
+    const outcome = await runCli(['worktree', 'spir-99'], { cwd: fx.main, env: fx.env });
+    expect(outcome).toMatchObject({ code: 2, stdout: '' });
+    expect(outcome.stderr).toMatch(/^codev check worktree: builder spir-99 not found: there is no worktree at /);
+
+    const json = await runCli(['worktree', 'spir-99', '--json'], { cwd: fx.main, env: fx.env });
+    expect(json.code).toBe(2);
+    expect(JSON.parse(json.stdout)).toMatchObject({ schema: 1, command: 'worktree', error: { message: expect.stringMatching(/^builder spir-99 not found/) } });
   });
 });
 

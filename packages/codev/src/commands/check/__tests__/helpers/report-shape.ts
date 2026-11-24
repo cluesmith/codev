@@ -1,10 +1,10 @@
 /**
- * Scenario 28 (Spec 1951 § JSON schema): a `PrReport` or `DeployReport` survives JSON and has the schema-1
- * shape, with every check id present in order and the verdict following the statuses.
+ * Scenario 28 (Spec 1951 § JSON schema): a `PrReport`, `DeployReport` or `WorktreeReport` survives JSON
+ * and has the schema-1 shape, with every check id present in order and the verdict following the statuses.
  */
 
 import { expect } from 'vitest';
-import { PR_CHECK_IDS, type DeployReport, type PrReport } from '../../report.js';
+import { PR_CHECK_IDS, WORKTREE_CHECK_IDS, type DeployReport, type PrReport, type WorktreeReport } from '../../report.js';
 
 const STATUSES = ['ok', 'attention', 'info', 'not-run', 'off', 'skip'];
 const WITH_REASON = new Set(['not-run', 'off', 'skip']);
@@ -94,4 +94,43 @@ export function expectDeployReportShape(report: DeployReport): void {
     expect(pr.verdict, where).toBe(attention ? 'attention' : 'clear');
   }
   expect(parsed.verdict).toBe(parsed.prs.some((p) => p.verdict === 'attention') ? 'attention' : 'clear');
+}
+
+/** A `WorktreeReport` survives JSON and has the schema-1 shape, its details as the spec's table says. */
+export function expectWorktreeReportShape(report: WorktreeReport): void {
+  const parsed = JSON.parse(JSON.stringify(report)) as WorktreeReport;
+  expect(parsed).toMatchObject({ schema: 1, command: 'worktree', verdict: expect.stringMatching(/^(clear|attention)$/), generatedAt: expect.any(String) });
+  expect(Number.isNaN(Date.parse(parsed.generatedAt))).toBe(false);
+  expect(['removable', 'removable-after-keeping', 'not-removable']).toContain(parsed.removable);
+  const { worktree } = parsed;
+  expect(typeof worktree.path).toBe('string');
+  expect(worktree.builderId === null || typeof worktree.builderId === 'string').toBe(true);
+  expect(typeof worktree.branch).toBe('string');
+  expect(worktree.baseRef === null || typeof worktree.baseRef === 'string').toBe(true);
+  expect(worktree.baseTip === null || SHA.test(worktree.baseTip)).toBe(true);
+
+  expect(parsed.checks.map((c) => c.id)).toEqual([...WORKTREE_CHECK_IDS]);
+  for (const c of parsed.checks) {
+    expect(STATUSES, c.id).toContain(c.status);
+    expect(typeof c.summary, c.id).toBe('string');
+    expect(typeof c.details === 'object' && c.details !== null && !Array.isArray(c.details), c.id).toBe(true);
+    expect(typeof c.reason === 'string', `${c.id} reason`).toBe(WITH_REASON.has(c.status));
+    if (c.status === 'not-run' || c.status === 'off' || c.status === 'skip') continue;
+    if (c.id === 'uncommitted') {
+      expect(c.details).toEqual({ files: expect.any(Array), scaffold: expect.any(Array) });
+      for (const f of c.details.files as unknown[]) expect(f).toEqual({ path: expect.any(String), change: expect.any(String) });
+    }
+    if (c.id === 'commits') {
+      expect(c.details).toEqual({ total: expect.any(Number), notOnBase: expect.any(Array), unsafe: expect.any(Array) });
+      for (const sha of [...(c.details.notOnBase as string[]), ...(c.details.unsafe as string[])]) expect(sha).toMatch(SHA);
+    }
+    if (c.id === 'remote') {
+      expect(c.details.remoteSha === null || SHA.test(String(c.details.remoteSha))).toBe(true);
+      expect(['matches', 'ahead', 'behind', 'diverged', 'absent']).toContain(c.details.relation);
+    }
+    if (c.id === 'pr' && 'mergedHead' in c.details) expect(c.details.mergedHead).toMatch(SHA);
+    if (c.id === 'ignored') expect(c.details).toEqual({ keep: expect.any(Array), regenerable: expect.any(Number) });
+  }
+  const attention = parsed.checks.some((c) => c.status === 'attention' || c.status === 'not-run');
+  expect(parsed.verdict).toBe(attention ? 'attention' : 'clear');
 }
