@@ -7,10 +7,12 @@
  * compared before and after. The parsers are tested on every platform.
  */
 
+import { spawn as realSpawn } from 'node:child_process';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { checkDeploy, parseDeployView, parseWorkflowRuns, renderDeployHuman, runsProblem } from '../deploy.js';
 import { summarizeRuns, type Check, type CommandOptions, type DeployReport } from '../report.js';
+import type { SpawnFn } from '../runner.js';
 import { useFakeHome } from './helpers/fake-home.js';
 import { createFixture, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
 import { green, mergedView, mergePr, run, setRemoteBranch, workflowRunsOverride, type WorkflowRunsOverride } from './helpers/deploy-fixture.js';
@@ -326,6 +328,45 @@ describe.skipIf(isWindows)('Spec 1951 — check deploy (stub git)', { timeout: 3
       expect(human).toContain(`#9  merged 2026-11-22 → main   merge ${s(second.merge)}\n  ATTN    on production`);
     });
 
+    it('check.skip ["merged", "on-branch"]: both skip by name, the deploy branch is never read, deploy-run still runs', async () => {
+      configure({ check: { deploy: DEPLOYED, skip: ['merged', 'on-branch'] } });
+      const pr = mergePr(fx, 8);
+      forge.answerFor(8, mergedView(pr));
+      runs.answer([green(pr.merge)]);
+
+      const { report, exitCode } = await runReadOnly(['8']);
+
+      expect(exitCode).toBe(0);
+      expect(byId(report, 8, 'merged')).toMatchObject({ status: 'skip', reason: 'check.skip' });
+      expect(byId(report, 8, 'on-branch')).toMatchObject({ status: 'skip', reason: 'check.skip' });
+      expect(byId(report, 8, 'deploy-run')).toMatchObject({ status: 'ok', details: { contains: true } });
+      expect(stub.gitCalls().filter((c) => c.startsWith('ls-remote'))).toEqual([]);
+      expect(renderDeployHuman(report).split('\n')[0]).toBe('CLEAR  #8 in the latest green deploy.yml run');
+    });
+
+    it('a git failure judging ancestry is that PR\'s check not run; every PR is still reported', async () => {
+      const first = mergePr(fx, 8);
+      const second = mergePr(fx, 9);
+      setRemoteBranch(fx, 'production', second.merge);
+      forge.answerFor(8, mergedView(first));
+      forge.answerFor(9, mergedView(second));
+      runs.answer([green(second.merge)]);
+      // Only PR 8's merge commit makes `merge-base --is-ancestor` fail.
+      const failingFor8: SpawnFn = (command, args, options) =>
+        args.includes('--is-ancestor') && args.includes(first.merge)
+          ? realSpawn(process.execPath, ['-e', 'process.stderr.write("fatal: simulated failure\\n"); process.exit(128)'], options)
+          : realSpawn(command, args, options);
+
+      const { report, exitCode } = await runReadOnly(['8', '9'], { spawn: failingFor8 });
+
+      expect(exitCode).toBe(1);
+      const reason = 'merge-base --is-ancestor failed: fatal: simulated failure';
+      expect(byId(report, 8, 'on-branch')).toMatchObject({ status: 'not-run', reason, details: { branch: 'production', tip: second.merge } });
+      expect(byId(report, 8, 'deploy-run')).toMatchObject({ status: 'not-run', reason, details: { workflow: 'deploy.yml', run: { headSha: second.merge } } });
+      expect(report.prs[1]).toMatchObject({ number: 9, verdict: 'clear' });
+      expect(renderDeployHuman(report).split('\n')[0]).toBe('ATTENTION  #8 on production not run, deploy run not run');
+    });
+
     it('check.skip ["deploy-run"] skips it by name without asking the forge', async () => {
       configure({ check: { deploy: DEPLOYED, skip: ['deploy-run'] } });
       const pr = mergePr(fx, 8);
@@ -369,6 +410,26 @@ describe.skipIf(isWindows)('Spec 1951 — check deploy (stub git)', { timeout: 3
           '',
         ].join('\n'),
       );
+    });
+
+    it('two PRs on different bases: each is judged on its own base, each base read once', async () => {
+      const first = mergePr(fx, 8);
+      const second = mergePr(fx, 9);
+      setRemoteBranch(fx, 'release', second.merge);
+      forge.answerFor(8, mergedView(first));
+      forge.answerFor(9, mergedView(second, { baseRefName: 'release' }));
+      ci.answer(first.merge, passing(2));
+      ci.answer(second.merge, passing(2));
+
+      const { report, exitCode } = await runReadOnly(['8', '9']);
+
+      expect(exitCode).toBe(0);
+      expect(byId(report, 8, 'on-branch')).toMatchObject({ status: 'ok', details: { branch: 'main', contains: true } });
+      expect(byId(report, 9, 'on-branch')).toMatchObject({ status: 'ok', details: { branch: 'release', tip: second.merge, contains: true } });
+      expect(stub.gitCalls().filter((c) => c.startsWith('ls-remote'))).toEqual(['ls-remote origin refs/heads/main', 'ls-remote origin refs/heads/release']);
+      const human = renderDeployHuman(report);
+      expect(human.split('\n')[0]).toBe('CLEAR  #8, #9 on main, release; checks on the merge commits passed');
+      expect(human).toContain(`#9  merged 2026-11-22 → release   merge ${s(second.merge)}\n  ok      on release`);
     });
 
     it('a merge commit since overtaken on main is still on it', async () => {
@@ -484,6 +545,18 @@ describe.skipIf(isWindows)('Spec 1951 — check deploy (stub git)', { timeout: 3
       expect(byId(report, 8, 'merged')).toMatchObject({ status: 'not-run', reason: 'pr-view did not return mergeCommit' });
       expect(byId(report, 8, 'on-branch')).toMatchObject({ status: 'not-run', reason: 'pr-view did not return mergeCommit' });
       expect(renderDeployHuman(report).split('\n')[0]).toBe('ATTENTION  #8 merge not read');
+    });
+
+    it('a pr-view without state: merged not run, read as "state not read"', async () => {
+      const pr = mergePr(fx, 8);
+      const view = mergedView(pr);
+      delete view.state;
+      forge.answerFor(8, view);
+
+      const { report } = await runReadOnly(['8']);
+
+      expect(byId(report, 8, 'merged')).toMatchObject({ status: 'not-run', reason: 'pr-view did not return state', details: { state: null } });
+      expect(renderDeployHuman(report).split('\n')[0]).toBe('ATTENTION  #8 state not read');
     });
 
     it('Scenario 15a: one PR that cannot be read is a per-PR not run; the others are reported in full', async () => {

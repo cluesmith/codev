@@ -18,7 +18,7 @@
  */
 
 import type { WorkflowRunItem } from '../../lib/forge-contracts.js';
-import { ensureCommits, gitVersion, isAncestor, liveTip, type GitVersion, type Lookup } from './git-facts.js';
+import { ancestry, ensureCommits, gitVersion, liveTip, type GitVersion, type Lookup } from './git-facts.js';
 import { lookupRuns } from './porch-only.js';
 import { normalizeState } from './pr.js';
 import { defaultLabel, renderHuman, short, type RenderOptions } from './render.js';
@@ -124,7 +124,9 @@ interface Context {
   runner: Runner;
   settings: CheckSettings;
   version: GitVersion;
+  /** By branch. */
   tips: Map<string, Promise<Lookup<string | null>>>;
+  /** By workflow and branch. */
   runs: Map<string, Promise<Lookup<WorkflowRunItem[]>>>;
 }
 
@@ -135,12 +137,13 @@ function tipOf(ctx: Context, branch: string): Promise<Lookup<string | null>> {
 }
 
 function runsOf(ctx: Context, workflow: string, branch: string): Promise<Lookup<WorkflowRunItem[]>> {
-  let runs = ctx.runs.get(branch);
+  const key = JSON.stringify([workflow, branch]);
+  let runs = ctx.runs.get(key);
   if (!runs) {
     runs = ctx.runner
       .forge('workflow-runs', { CODEV_WORKFLOW: workflow, CODEV_BRANCH: branch })
       .then((outcome) => (outcome.ok ? parseWorkflowRuns(outcome.data) : { ok: false, reason: outcome.reason }));
-    ctx.runs.set(branch, runs);
+    ctx.runs.set(key, runs);
   }
   return runs;
 }
@@ -178,7 +181,9 @@ async function checkOnBranch(ctx: Context, { merge, branch }: Target): Promise<C
   const problems = await ensureCommits(ctx.runner, [merge, tip.value], ctx.version);
   const problem = problems.get(merge) ?? problems.get(tip.value);
   if (problem) return notRun('on-branch', problem, { branch, tip: tip.value });
-  const contains = await isAncestor(ctx.runner, merge, tip.value);
+  const answer = await ancestry(ctx.runner, merge, tip.value);
+  if (!answer.ok) return notRun('on-branch', answer.reason, { branch, tip: tip.value });
+  const contains = answer.value;
   const words = `origin/${branch} @ ${short(tip.value)} ${contains ? 'contains' : 'does not contain'} ${short(merge)}`;
   return check('on-branch', contains ? 'ok' : 'attention', words, { branch, tip: tip.value, contains });
 }
@@ -198,7 +203,9 @@ async function checkDeployRun(ctx: Context, { merge, branch }: Target, workflow:
   const problems = await ensureCommits(ctx.runner, [merge, green.headSha], ctx.version);
   const problem = problems.get(green.headSha) ?? problems.get(merge);
   if (problem) return notRun('deploy-run', problem, { workflow, run });
-  const contains = await isAncestor(ctx.runner, merge, green.headSha);
+  const answer = await ancestry(ctx.runner, merge, green.headSha);
+  if (!answer.ok) return notRun('deploy-run', answer.reason, { workflow, run });
+  const contains = answer.value;
   const when = minutes(green.createdAt);
   const which = `latest green ${workflow} run (${when ? `${when}, ` : ''}${short(green.headSha)})`;
   return check('deploy-run', contains ? 'ok' : 'attention', `${which} ${contains ? 'contains' : 'does not contain'} ${short(merge)}`, {
@@ -344,8 +351,11 @@ const DEPLOY_RENDER: RenderOptions = {
 function problemWords(pr: DeployPr): string[] {
   const merged = pr.checks.find((c) => c.id === 'merged');
   if (merged?.status === 'attention') return ['not merged'];
-  // An unread PR's `merged` carries no state at all.
-  if (merged?.status === 'not-run') return ['state' in merged.details ? 'merge not read' : 'not read'];
+  // An unread PR's `merged` carries no state at all; a read one may lack only its state.
+  if (merged?.status === 'not-run') {
+    if (!('state' in merged.details)) return ['not read'];
+    return [merged.details.state === null ? 'state not read' : 'merge not read'];
+  }
   const words: string[] = [];
   for (const c of pr.checks.filter(needsAttention)) {
     const label = DEPLOY_RENDER.label!(c);

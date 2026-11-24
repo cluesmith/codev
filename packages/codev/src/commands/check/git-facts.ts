@@ -136,12 +136,22 @@ export async function mergeBase(runner: Runner, a: string, b: string): Promise<s
   return result.stdout.trim();
 }
 
-/** Whether `ancestor` is reachable from `descendant` (a commit is its own ancestor). */
-export async function isAncestor(runner: Runner, ancestor: string, descendant: string): Promise<boolean> {
+/**
+ * Whether `ancestor` is reachable from `descendant` (a commit is its own ancestor), or why git
+ * could not say, for a check that reports the failure as its own `not run`.
+ */
+export async function ancestry(runner: Runner, ancestor: string, descendant: string): Promise<Lookup<boolean>> {
   const result = await runner.git(['merge-base', '--is-ancestor', ancestor, descendant]);
-  if (result.exitCode === 0) return true;
-  if (result.exitCode === 1) return false;
-  throw new CheckCommandError(`git merge-base --is-ancestor ${ancestor} ${descendant} failed`, result.stderr.trim());
+  if (result.exitCode === 0) return { ok: true, value: true };
+  if (result.exitCode === 1) return { ok: true, value: false };
+  return { ok: false, reason: failureReason('merge-base --is-ancestor', result, runner.timeoutLabel) };
+}
+
+/** `ancestry`, where a git failure fails the whole command. */
+export async function isAncestor(runner: Runner, ancestor: string, descendant: string): Promise<boolean> {
+  const answer = await ancestry(runner, ancestor, descendant);
+  if (!answer.ok) throw new CheckCommandError(`git merge-base --is-ancestor ${ancestor} ${descendant} failed`, answer.reason);
+  return answer.value;
 }
 
 // =============================================================================
