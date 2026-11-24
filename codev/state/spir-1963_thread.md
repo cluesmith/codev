@@ -109,3 +109,48 @@ Iter 1: Codex REQUEST_CHANGES, Claude COMMENT. Iter 2: both COMMENT. All points 
 - Windows path cases + windows.yml dispatch for the containment code.
 
 At plan-approval. Owner pre-approved the plan; waiting on the architect's check and go.
+
+## 2026-11-24 — Harness revision (architect: "no go yet")
+
+The architect caught that the plan's `afx spawn --task` "against the isolated Tower" could not have
+worked, and the code confirms it:
+- `spawn.ts:110` and `spawn-worktree.ts:738` use `getTowerClient()` with no port, so they go to the
+  literal 4100;
+- there is no env override and no `--port`.
+
+Seeding a ported client in-process doesn't save it either:
+- spawn shells out to `porch init` (`spawn-worktree.ts:490`);
+- porch's dispatcher then posts `refreshOverview` via `new TowerClient()` to :4100 (`porch/index.ts:1505`).
+
+Other default-port paths:
+- `afx tower start`, `workspace add-architect` and notifications;
+- the extension, which shells out to `afx` and `porch` (spawn, approve, cleanup, auto-start);
+- the extension reads `~/.agent-farm/local-key` unless `CODEV_TOWER_KEY` is set.
+
+**Chosen mechanism: harness-only, no product change.** The harness runs no Tower-contacting CLI
+command:
+- **Tower:** `tower-server.js -p $PORT` directly, with `CODEV_AGENT_FARM_DIR` and
+  `SHELLPER_SOCKET_DIR` (the default socket dir is the owner's `~/.codev/run`).
+- **Fixtures:**
+  - activation and add-architect over HTTP to the explicit port;
+  - porch state and `upsertBuilder` in-process, with the db path pinned and checked;
+  - builder terminals via `POST :$PORT/api/terminals`;
+  - `afx decisions init`, which is file-only.
+- **VS Code:**
+  - `CODEV_TOWER_KEY`, `codev.towerPort` and `autoStartTower=false`;
+  - recording PATH stubs for `afx`, `porch` and `codev`, so CLI-shelling actions are verified by
+    their recorded argv.
+- **Safety checks:** a pre-flight that refuses 4100 and checks the listener PID, plus a :4100
+  connection tripwire.
+
+**Re-review:** Codex REQUEST_CHANGES, Claude COMMENT. Changes taken:
+- the harness became **Phase 1**, with self-tests proving every refusal and the tripwire;
+- the layout spike moved into Phase 1 (Codex wanted it before plan approval; offered to the
+  architect). b/c/d failures go to the owner, and Phase 9 waits;
+- the Cockpit holds the worktree config off `codev-config-updated`, so the request count matches;
+- WorkView's `DashboardState` prop leaves the shared surface, and the file-panel slot is the whole
+  wrapper;
+- the package declares its own test devDependencies and the lockfile changes with them;
+- the smoke test builds its own bundle, since CI never builds `dist`.
+
+Phases are now 1–9. Rebuttals are in `1963-plan-harness-rebuttals.md`.
