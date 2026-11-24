@@ -1061,3 +1061,10 @@ run.
   `work-section-loading` class had no rule anywhere, so it is dropped (no rendering change). It
   left two notes for the owner: the "Failed to load overview:" wording before any load (the
   dashboard's template), and the two Light Modern texts at 4.3:1. Both go in the PR body.
+- **Phase 8 closed (`abeff3c7e`); porch advanced to `arrange_cockpit`.** The PR #1971 body has a
+  Phase 8 section, including the adjacent dashboard fix and the owner notes. apps/web passes 37/459
+  with `NODE_OPTIONS=--no-experimental-webstorage`, the known Node 26 workaround already in the PR
+  body, so the earlier local failures were only that.
+- **Process note:** porch's `arrange_cockpit` refresh boundary was recorded as acknowledged when I
+  called `porch next` a second time, before I had refreshed. I am running the builder-refresh
+  procedure now, at that boundary, before starting Phase 9.
