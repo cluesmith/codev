@@ -735,3 +735,128 @@ list any commit no reviewer saw under its own heading in the PR body and the rev
     pass alone); every later `porch done` of phase 3 used the one-time skip on the architect's
     word after GitHub was green on the same head (heads `0a553e80b`, `18a9c86a8`, `4c9d9c967`).
 - **Phase 4 order** (architect): build, push, tell the architect BEFORE `porch done`.
+
+## 2026-11-24 — phase 4 built: qualified provenance and reply commands
+
+Resumed after a context refresh at the phase boundary.
+
+**Owner ruling main-38, "ci-first"** (relayed by the architect, 00:33Z), in force until issue
+#1956 is fixed: no local full-suite run and no plain `porch done`. Per phase: targeted tests,
+build and type-check locally; push; GitHub green on that exact head; tell the architect; on
+their word the one-time tests skip. A red GitHub run is fixed, never skipped. This replaces
+main-32's "let the local check fail once first".
+
+**What exists now.** A message from an agent in another workspace is framed with the sender's
+workspace-qualified address and a reply on the footer line:
+
+```
+### [ARCHITECT codev:architect:review MESSAGE → tunnel | <time>] ###
+hello
+###############################  (reply: afx send codev:architect:review "…")
+```
+
+- `utils/message-format.ts`: `formatCrossWorkspaceMessage`, with the types `CrossWorkspaceOrigin`
+  and `ReplyRoute`. The role word comes from the address's kind. Every address part is checked
+  against the component rule in the formatter itself, whatever the caller checked.
+- `servers/tower-messages.ts`: `refusalToAddress` (the builder rule on its own, exported) and
+  `crossWorkspaceOrigin` (who it is from, how to reply).
+- `servers/tower-routes.ts`: `formatMessageForTarget(recipient, sender, message, raw)`. The
+  sender's `workspace` is required by the type; all six call sites pass it.
+
+**The snapshot was taken first.** Commit `39bfd1f32` holds only the test of the frames that
+must not change (22 cases: every same-workspace sender and recipient kind, no sender workspace,
+the workspace `unknown`, the non-agent senders across workspaces, raw sends). It was written
+and passed against the code before any production change, and passes unchanged after.
+
+**Decisions I made, for the review to check:**
+
+1. **Where the logic lives.** The plan put the composition in `tower-routes.ts` with the
+   permission check exported from `tower-messages.ts`. I put the composition
+   (`crossWorkspaceOrigin`) in `tower-messages.ts` beside the resolvers, because it calls them,
+   and the route only asks it. `refusalToAddress` is exported as the plan says and the footer
+   asks it; the test table asks it too.
+2. **When the front door is offered.** A builder may not name an architect in another workspace,
+   so for a named architect sender the candidate is the front door `<ws>:architect`. It is
+   offered only when the front door, resolved as the recipient by the real resolvers (live, then
+   registry), reaches that sender NOW. So: `main` gets it while it is the front door; with no
+   `main`, the first registered architect gets it; `main` does not get it while it has no
+   terminal and another architect has one (the front door then reaches the other). The spec's
+   row says "the `main` architect"; the plan's says "the front door". I followed the plan's
+   wording and the acceptance criterion ("delivers to the original sender"). The answer is true
+   when the frame is written and can change after, as any address can.
+3. **A sender with no name of its own** (`from: architect`, a terminal that names no architect)
+   is shown as `<ws>:architect` and answered at the front door.
+4. **What counts as an agent.** The cross-workspace frame is used only when the sender's id reads
+   as a local agent id through the shared parser: `architect`, `architect:<name>` or an id, with
+   no workspace and no Tower, each name fitting the component rule. `af-cron`, `vscode-user` and
+   `decisions-tab` are excluded by name. `architect-3` (an id that only looks like an
+   architect's) is excluded, as today's label code refuses to call it a builder. Anything else
+   keeps today's frame.
+5. **No usable workspace name**: header `ARCHITECT architect:review (another workspace) MESSAGE`,
+   footer `(no reply address; the sender's workspace needs: afx workspace name <name>)`. Also
+   used for a directory called `architect` with a builder sender, whose address text would read
+   as a named architect.
+6. **An architect recipient that no candidate is allowed for** gets the plain footer. Stage 1
+   cannot produce it (architects are not restricted); it is there so the type is total.
+7. **Sender workspace for the frame is what the mailbox stores** (`fromWorkspace ?? workspace`),
+   and the literal `unknown` is now one constant used by the fallback and the check.
+
+**Known boundaries (for the review):**
+
+- A reply command names the sender's workspace by its address name. If that workspace is not
+  running, or was never registered with Tower (a send from a directory Tower does not know),
+  the reply fails with the resolver's "not running" / "not found" message. The footer checks
+  permission, not that the workspace is up.
+- `from` and `fromWorkspace` are what the sender says. A local sender can claim any id and any
+  workspace, as before this phase; the spec treats every local sender as the same owner.
+- A `from` that itself carries a workspace (`codev:builder-x`) keeps today's frame, which prints
+  it as `BUILDER codev:builder-x`. That is today's behaviour and is unchanged.
+
+**Tests.** `message-format.test.ts` (+19: frames, verbs, footers, three lines, a 40-byte body on
+the short path, the spec's 87 bytes of body for its example frame, forged parts refused).
+`spec-1940-reply-footer.test.ts` (new, 37: the footer table, each printed command resolved as
+the recipient by the real resolvers and reaching the sender; front door cases; unusable names;
+ids that are not agents). `tower-routes.test.ts` (+17 beyond the snapshot: one test per
+agent-bearing path plus `--interrupt`, the reply taken from the stored frame and sent back
+through the route, mailbox row fields, the short write, unusable names, an explicit name; the
+Decisions tab notice asserted whole). `air-1478-architect-attribution.test.ts` (+3) and
+`inbox-routes.test.ts` (+1). Eleven mutations each fail tests: front door always offered,
+permission always granted, no component check on the workspace name, each of the five paths
+losing the sender's workspace, `unknown` not treated as unknown, non-agent senders not excluded,
+the same-workspace check dropped.
+
+**Checked on a real Tower** (a one-off e2e file, not committed: phase 6 owns the kept one). Built
+Tower on an isolated port and directory; three workspaces, two of them directories called
+`codev`. Each frame below was read from the stored `formatted_message`; each reply was sent
+through `POST /api/send` as the recipient. `<tmp>` is the test's temp root.
+
+```
+SAME    ### [ARCHITECT:main MESSAGE → main | <time>] ###            (same workspace: today's frame, plain footer)
+UNNAMED ### [ARCHITECT architect:main (another workspace) MESSAGE → main | <time>] ###
+        ###############################  (no reply address; the sender's workspace needs: afx workspace name <name>)
+NAMED   200 {"explicitName":"one","addressName":"one"}
+CROSS   ### [ARCHITECT one:architect:main MESSAGE → main | <time>] ###
+        ###############################  (reply: afx send one:architect:main "…")
+REPLY   200, stored for main in <tmp>/a/codev:
+        ### [ARCHITECT codev-cloud:architect:main MESSAGE → main | <time>] ###
+        ###############################  (reply: afx send codev-cloud:architect:main "…")
+TO_BUILDER_FROM_MAIN    ### [ARCHITECT one:architect:main INSTRUCTION → builder-spir-7 | <time>] ###
+                        ###############################  (reply: afx send one:architect "…")
+BUILDER_REPLY           200, stored for main in <tmp>/a/codev:
+                        ### [BUILDER codev-cloud:builder-spir-7 MESSAGE → main | <time>] ###
+TO_BUILDER_FROM_REVIEW  ### [ARCHITECT one:architect:review INSTRUCTION → builder-spir-7 | <time>] ###
+                        ###############################  (reply through your architect: afx send architect "…")
+BUILDER_NAMES_REVIEW    403 REFUSED "builder builder-spir-7 may only address its own spawning architect; reach that workspace through its front door: afx send one:architect "…""
+THROUGH_ARCHITECT       200, stored for main in <tmp>/codev-cloud: ### [BUILDER builder-spir-7 MESSAGE → main | <time>] ###
+```
+
+The builder's registry row was inserted into that Tower's throwaway database by the test (there
+is no spawn on a test Tower). Teardown deactivated all three workspaces and asserted that no
+process naming that Tower's socket directory survived: passed. The 18 old leaked shellpers I
+was told not to kill are no longer running (first five PIDs checked: gone); I did not touch
+them.
+
+**Verification**: 58 test files in `packages/codev` that touch the resolver, the route, the
+formatter, the naming module or the write path (1810 tests, 4 workers); type-check;
+`npm run build`. The full local suite was NOT run (ruling main-38); GitHub's run on the pushed
+head is the full check.

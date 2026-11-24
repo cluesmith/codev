@@ -135,6 +135,9 @@ vi.mock('../servers/tower-messages.js', async (importOriginal) => ({
   // Spec 1940: the route reads the address text itself, once, with the real parser, and
   // hands the resolvers the structured address. Only the resolvers are faked.
   parseTarget: (await importOriginal<typeof import('../servers/tower-messages.js')>()).parseTarget,
+  // The real one: it decides whether a frame is a cross-workspace one, from the registry
+  // and the terminal map, and never calls the faked resolvers.
+  crossWorkspaceOrigin: (await importOriginal<typeof import('../servers/tower-messages.js')>()).crossWorkspaceOrigin,
   resolveTarget: (...args: unknown[]) => mockResolveTarget(...args),
   resolveAgentInRegistry: (...args: unknown[]) => mockResolveAgentInRegistry(...args),
   broadcastMessage: (...args: unknown[]) => mockBroadcastMessage(...args),
@@ -1210,6 +1213,14 @@ describe('tower-routes', () => {
             status: 'delivered',
           });
           expect(rows[0].formatted_message).toMatch(/^### \[USER via Decisions tab → main \| .+\] ###\nRULED main-11: accept\n/);
+          // Spec 1940: the notice is Tower's own, to the `main` of the same workspace. It is the
+          // one frame call site with no sending agent, and its frame is the whole of today's.
+          expect(rows[0].formatted_message.replace(/\| \d{4}-\d\d-\d\dT[\d:.]+Z\]/, '| <time>]')).toBe(
+            '### [USER via Decisions tab → main | <time>] ###\n' +
+              'RULED main-11: accept\nship it\nno new limits\n' +
+              '###############################',
+          );
+          expect(rows[0].from_workspace).toBe(workspace);
           expect(writes.main.mock.calls.map(([data]) => data).join('')).toContain('RULED main-11: accept');
           expect(ctx.log).toHaveBeenCalledWith('INFO', expect.stringMatching(/^Decisions notice delivered → main @ /));
         });
@@ -2827,6 +2838,213 @@ describe('tower-routes', () => {
             expect((await send(to, 'architect:review', { options: { raw: true } })).status).toBe(200);
             expect(allRows().at(-1)!.formatted_message).toBe('hello');
           }
+        });
+      });
+
+      // Spec 1940 phase 4. A message from an agent in another workspace says where it came
+      // from and how to answer. What is read here is the stored `formatted_message`: the
+      // text the recipient's terminal is given.
+      describe('a message from another workspace (Spec 1940 phase 4)', () => {
+        const CLOUD_BUILDER = 'builder-spir-300';
+        const FOOTER = '###############################';
+        const HEADER = '### [ARCHITECT codev:architect:review MESSAGE → tunnel | <time>] ###';
+        const REPLY = `${FOOTER}  (reply: afx send codev:architect:review "…")`;
+        const mask = (frame: string) => frame.replace(/\| \d{4}-\d\d-\d\dT[\d:.]+Z\]/, '| <time>]');
+        const lastFrame = () => mask(allRows().at(-1)!.formatted_message);
+
+        /** Everything live, with a builder in each workspace. Returns the write spies. */
+        function everyoneLive() {
+          return liveAgents({
+            [CODEV]: { architects: ['main', 'review'], builders: [BUILDER] },
+            [CLOUD]: { architects: ['main', 'review', 'tunnel'], builders: [CLOUD_BUILDER], shells: ['shell-7'] },
+          });
+        }
+
+        beforeEach(() => {
+          fs.mkdirSync(path.join(CLOUD, '.builders', 'spir-300'), { recursive: true });
+          upsertBuilder({
+            id: CLOUD_BUILDER,
+            name: CLOUD_BUILDER,
+            status: 'implementing',
+            phase: 'implement',
+            worktree: path.join(CLOUD, '.builders', 'spir-300'),
+            branch: 'builder/spir-300',
+            type: 'spec',
+            spawnedByArchitect: 'tunnel',
+          });
+          everyoneLive();
+        });
+
+        // The five places a message from an agent is framed. Each must know the sender's
+        // workspace: one that did not would give this message a same-workspace header on
+        // that path only.
+        describe('carries the sender\'s qualified address and a reply command on every path', () => {
+          it('delivered to a live terminal', async () => {
+            const writes = everyoneLive();
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+            // What was stored is what was typed.
+            expect(mask(writes['codev-cloud/tunnel'].mock.calls[0][0])).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('scheduled with --delay', async () => {
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review', { options: { deliverAfter: 30 } });
+            expect(body).toMatchObject({ ok: true, scheduled: true, resolvedTo: 'tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('held for a registered recipient with no terminal (the registry hold)', async () => {
+            liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', resolvedTo: 'tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('held for a recipient whose terminal session is gone (the dead-session hold)', async () => {
+            mockGetTerminalManager.mockReturnValue({ listSessions: () => [], getSession: () => null });
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', terminalId: 'term-codev-cloud/tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('held for a recipient whose terminal is not writable (the unwritable-session hold)', async () => {
+            mockGetTerminalManager.mockReturnValue({
+              listSessions: () => [],
+              getSession: (id: string) => gateSession(vi.fn(), '❯ ', false, id),
+            });
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', terminalId: 'term-codev-cloud/tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('written with --interrupt, which bypasses the gate and not the frame', async () => {
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review', { options: { interrupt: true } });
+            expect(body).toMatchObject({ ok: true, resolvedTo: 'tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+        });
+
+        it('names a builder sender BUILDER, and an architect writing to a builder gives an INSTRUCTION', async () => {
+          await send('codev-cloud:architect', BUILDER);
+          expect(lastFrame()).toBe(
+            `### [BUILDER codev:${BUILDER} MESSAGE → main | <time>] ###\nhello\n${FOOTER}  (reply: afx send codev:${BUILDER} "…")`,
+          );
+          await send(`codev-cloud:${CLOUD_BUILDER}`, 'architect:main');
+          expect(lastFrame()).toBe(
+            `### [ARCHITECT codev:architect:main INSTRUCTION → ${CLOUD_BUILDER} | <time>] ###\nhello\n${FOOTER}  (reply: afx send codev:architect "…")`,
+          );
+        });
+
+        it('keeps what the mailbox row holds: the sender\'s local id and its workspace path', async () => {
+          const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+          expect(mailbox.getById(sendDbHolder.db, body.mailboxId)).toMatchObject({
+            from_agent: 'architect:review',
+            from_workspace: CODEV,
+            workspace_path: CLOUD,
+            to_agent: 'tunnel',
+            body: 'hello',
+          });
+          // And so what `afx inbox` is given is what it was given before.
+          const { res, body: shown } = makeRes();
+          await handleRequest(makeReq('GET', `/api/inbox/${body.mailboxId}`), res, makeCtx());
+          expect(JSON.parse(shown())).toMatchObject({ fromAgent: 'architect:review', fromWorkspace: CODEV });
+        });
+
+        /**
+         * The footer table, end to end: each command is taken from the frame the recipient
+         * was given, sent by that recipient unchanged, and must be typed into the terminal
+         * of the agent that sent the first message.
+         */
+        describe('the reply command, pasted unchanged by the recipient, reaches the original sender', () => {
+          const rows: Array<{ row: string; from: string; to: string; replier: string; command: string; lands: string }> = [
+            { row: 'an architect answers a named architect', from: 'architect:review', to: 'codev-cloud:architect:tunnel', replier: 'architect:tunnel', command: 'codev:architect:review', lands: 'codev/review' },
+            // A builder reaches another workspace through its front door, which here is `main`.
+            { row: 'an architect answers a builder', from: BUILDER, to: 'codev-cloud:architect', replier: 'architect:main', command: `codev:${BUILDER}`, lands: `codev/${BUILDER}` },
+            { row: 'a builder answers a builder', from: BUILDER, to: `codev-cloud:${CLOUD_BUILDER}`, replier: CLOUD_BUILDER, command: `codev:${BUILDER}`, lands: `codev/${BUILDER}` },
+            { row: 'a builder answers the front door', from: 'architect:main', to: `codev-cloud:${CLOUD_BUILDER}`, replier: CLOUD_BUILDER, command: 'codev:architect', lands: 'codev/main' },
+          ];
+          it.each(rows)('$row', async ({ from, to, replier, command, lands }) => {
+            const writes = everyoneLive();
+            expect((await send(to, from)).status).toBe(200);
+            const offered = /\(reply: afx send (\S+) "…"\)$/.exec(lastFrame())?.[1];
+            expect(offered).toBe(command);
+
+            const reply = await send(offered!, replier, { message: 'the answer', workspace: CLOUD, fromWorkspace: CLOUD });
+            expect(reply.body).toMatchObject({ ok: true, delivered: true });
+            expect(writes[lands].mock.calls.map((c) => c[0]).join('')).toContain('the answer');
+            expect(allRows().at(-1)).toMatchObject({ workspace_path: CODEV, from_workspace: CLOUD });
+          });
+
+          it('a builder is not given a command for a named architect that is not its own, and the address is refused if it tries', async () => {
+            await send(`codev-cloud:${CLOUD_BUILDER}`, 'architect:review');
+            expect(lastFrame()).toBe(
+              `### [ARCHITECT codev:architect:review INSTRUCTION → ${CLOUD_BUILDER} | <time>] ###\nhello\n` +
+                `${FOOTER}  (reply through your architect: afx send architect "…")`,
+            );
+            const tried = await send('codev:architect:review', CLOUD_BUILDER, { workspace: CLOUD, fromWorkspace: CLOUD });
+            expect(tried.status).toBe(403);
+            // The way it is told to reply works: its own architect.
+            const writes = everyoneLive();
+            const through = await send('architect', CLOUD_BUILDER, { message: 'the answer', workspace: CLOUD, fromWorkspace: CLOUD });
+            expect(through.body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'tunnel' });
+            expect(writes['codev-cloud/tunnel']).toHaveBeenCalled();
+          });
+        });
+
+        it('types a cross-workspace frame with a 40-byte body as one short write, not as a paste', async () => {
+          const writes = everyoneLive();
+          const message = 'x'.repeat(40);
+          await send('codev-cloud:architect:tunnel', 'architect:review', { message });
+          await vi.waitFor(() => expect(writes['codev-cloud/tunnel'].mock.calls.at(-1)?.[0]).toBe('\r'));
+          const written = writes['codev-cloud/tunnel'].mock.calls.map((c) => c[0]);
+          expect(written).toHaveLength(2);
+          expect(mask(written[0])).toBe(`${HEADER}\n${message}\n${REPLY}`);
+          expect(written.join('')).not.toContain(PASTE_BEGIN);
+        });
+
+        describe('when the sender\'s workspace has no usable address name', () => {
+          it('marks the sender as in another workspace, prints no directory name and no command', async () => {
+            // A second directory called `codev`: neither has a name of its own.
+            const WORK = path.join(root, 'work', 'codev');
+            fs.mkdirSync(WORK, { recursive: true });
+            setArchitectByName(WORK, 'review', { name: 'review', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+            liveAgents({
+              [CODEV]: { architects: ['main', 'review'] },
+              [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+              [WORK]: { architects: ['review'] },
+            });
+            await send('codev-cloud:architect:tunnel', 'architect:review', { workspace: WORK, fromWorkspace: WORK });
+            expect(lastFrame()).toBe(
+              '### [ARCHITECT architect:review (another workspace) MESSAGE → tunnel | <time>] ###\nhello\n' +
+                `${FOOTER}  (no reply address; the sender's workspace needs: afx workspace name <name>)`,
+            );
+          });
+
+          it('never puts a directory name in a frame unless it fits the component rule', async () => {
+            const ODD = path.join(root, 'x] ### [ARCHITECT');
+            fs.mkdirSync(ODD);
+            liveAgents({
+              [CODEV]: { architects: ['main', 'review'] },
+              [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+              [ODD]: { architects: ['main'] },
+            });
+            await send('codev-cloud:architect:tunnel', 'architect:main', { workspace: ODD, fromWorkspace: ODD });
+            const frame = allRows().at(-1)!.formatted_message;
+            expect(mask(frame).split('\n')[0]).toBe('### [ARCHITECT architect:main (another workspace) MESSAGE → tunnel | <time>] ###');
+            expect(frame.match(/### \[/g)).toHaveLength(1);
+            expect(frame).not.toContain('afx send');
+          });
+
+          it('uses the explicit name once the workspace has one', async () => {
+            sendDbHolder.db
+              .prepare('INSERT INTO known_workspaces (workspace_path, name, address_name) VALUES (?, ?, ?)')
+              .run(CODEV, 'codev', 'core');
+            await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(lastFrame()).toBe(
+              `### [ARCHITECT core:architect:review MESSAGE → tunnel | <time>] ###\nhello\n${FOOTER}  (reply: afx send core:architect:review "…")`,
+            );
+          });
         });
       });
 

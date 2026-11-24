@@ -75,6 +75,8 @@ import {
   resolveAgentInRegistry,
   broadcastMessage,
   isResolveError,
+  crossWorkspaceOrigin,
+  type MessageRecipient,
   type ResolveError,
   type ResolveResult,
   type SenderContext,
@@ -85,6 +87,7 @@ import {
   formatArchitectMessage,
   formatArchitectToBuilderMessage,
   formatBuilderMessage,
+  formatCrossWorkspaceMessage,
   formatUserViaVsCodeMessage,
   formatUserViaDecisionsTabMessage,
   isSafeSenderId,
@@ -2007,25 +2010,62 @@ function liveTargetIdentity(result: ResolveResult): { toAgent: string; isArchite
 }
 
 /**
+ * What `handleSend` records as the sender's workspace when the caller gave neither
+ * `fromWorkspace` nor `workspace`. To a frame it means what an absent value would: Tower
+ * does not know where the message came from, so it does not say it came from elsewhere.
+ */
+const UNKNOWN_SENDER_WORKSPACE = 'unknown';
+
+/**
+ * Senders that are not agents: Tower's own cron and the two UIs that relay the owner's
+ * word. None has an address to reply to, so each keeps its own frame whatever workspace the
+ * recipient is in.
+ */
+const NON_AGENT_SENDERS: ReadonlySet<string> = new Set([CRON_SENDER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER]);
+
+/**
+ * Who a frame is from (Spec 1940). `workspace` is REQUIRED by the type so that no path can
+ * format a message without saying where it came from: a path that left it out would give a
+ * cross-workspace message a same-workspace header on that path only. It is the sender's
+ * workspace path, or {@link UNKNOWN_SENDER_WORKSPACE}.
+ */
+interface FrameSender {
+  /** The sender's local id, as `/api/send`'s `from` carries it; absent for an unattributed send. */
+  id: string | undefined;
+  workspace: string;
+}
+
+/**
  * Format a message per sender/target — preserves the pre-1313 formatting rules.
  *
- * #1574: `toAgent` is the CANONICAL recipient the mailbox row is keyed on (the
+ * #1574: `recipient.agent` is the CANONICAL recipient the mailbox row is keyed on (the
  * architect reverse-map for architect targets, the resolved agent id otherwise),
  * so the header a recipient reads names the same identity the row was addressed
  * to. Passing anything else here would make the frame attest to a fiction.
  *
- * #1478: `from` is the SENDER, and it is threaded on the any → builder path too —
+ * #1478: `sender.id` is the SENDER, and it is threaded on the any → builder path too —
  * that branch used to discard it, so an `architect:<name>` origin reached the
  * builder's composer as a bare `ARCHITECT INSTRUCTION`. The two are complementary:
  * #1574 answers "was this addressed to me?", #1478 answers "who sent it?".
+ *
+ * Spec 1940: a message from an agent in ANOTHER workspace gets the cross-workspace frame,
+ * with the sender's qualified address and a reply command. Everything else, which is every
+ * send inside one workspace, runs the code below it exactly as before.
  */
 function formatMessageForTarget(
-  isArchitectTarget: boolean,
-  from: string | undefined,
-  toAgent: string,
+  recipient: MessageRecipient,
+  sender: FrameSender,
   message: string,
   raw: boolean,
 ): string {
+  const { agent: toAgent, isArchitect: isArchitectTarget } = recipient;
+  const from = sender.id;
+
+  if (!raw && from !== undefined && !NON_AGENT_SENDERS.has(from) && sender.workspace !== UNKNOWN_SENDER_WORKSPACE) {
+    const origin = crossWorkspaceOrigin({ id: from, workspace: sender.workspace }, recipient);
+    if (origin !== null) return formatCrossWorkspaceMessage(origin, toAgent, isArchitectTarget, message);
+  }
+
   // #1494: a human's approval relayed by the VS Code extension gets its own
   // header, so the architect can tell it from a peer-architect instruction.
   if (isArchitectTarget && from === VSCODE_USER_SENDER) return formatUserViaVsCodeMessage(toAgent, message, undefined, raw);
@@ -2133,7 +2173,13 @@ async function notifyHubOfRuling(workspacePath: string, message: string, log: Ro
     workspacePath,
     toAgent,
     body: message,
-    formattedMessage: formatMessageForTarget(true, DECISIONS_TAB_SENDER, toAgent, message, false),
+    // Tower's own notice to this workspace's `main`: no sending agent, and the same workspace.
+    formattedMessage: formatMessageForTarget(
+      { workspacePath, agent: toAgent, isArchitect: true },
+      { id: DECISIONS_TAB_SENDER, workspace: workspacePath },
+      message,
+      false,
+    ),
     fromAgent: DECISIONS_TAB_SENDER,
     fromWorkspace: workspacePath,
   });
@@ -2293,7 +2339,12 @@ function handleDelayedSend(
     return;
   }
 
-  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw);
+  const formattedMessage = formatMessageForTarget(
+    { workspacePath, agent: toAgent, isArchitect: isArchitectTarget },
+    { id: from, workspace: senderWorkspace },
+    message,
+    raw,
+  );
 
   // Persist NOW, at request time, with the due time. reason=null → SCHEDULED, not stuck.
   const row = enqueueMailbox(db, {
@@ -2483,7 +2534,10 @@ async function handleSend(
   }
 
   const db = getGlobalDb();
-  const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
+  const senderWorkspace = fromWorkspace ?? workspace ?? UNKNOWN_SENDER_WORKSPACE;
+  // Who every frame built below is from. One value, so no path can frame the message as
+  // coming from somewhere the others do not.
+  const frameSender: FrameSender = { id: from, workspace: senderWorkspace };
 
   // Spec 1940: the address is read once, here, by the one shared parser, and every path
   // below resolves the structured form. Text that is not an address is refused before
@@ -2532,7 +2586,12 @@ async function handleSend(
             workspacePath: reg.workspacePath,
             toAgent: reg.agent,
             body: message,
-            formattedMessage: formatMessageForTarget(reg.kind === 'architect', from, reg.agent, message, raw),
+            formattedMessage: formatMessageForTarget(
+              { workspacePath: reg.workspacePath, agent: reg.agent, isArchitect: reg.kind === 'architect' },
+              frameSender,
+              message,
+              raw,
+            ),
             fromAgent: from ?? null,
             fromWorkspace: senderWorkspace,
             noEnter,
@@ -2556,6 +2615,7 @@ async function handleSend(
   const manager = getTerminalManager();
   const session = manager.getSession(result.terminalId);
   const { toAgent, isArchitectTarget } = liveTargetIdentity(result);
+  const recipient: MessageRecipient = { workspacePath: result.workspacePath, agent: toAgent, isArchitect: isArchitectTarget };
 
   // Dead session: the routing entry resolved but the PTY is gone (exited > 30s).
   // Hold a normal message; escape/interrupt need a live session → original 404.
@@ -2574,7 +2634,7 @@ async function handleSend(
         workspacePath: result.workspacePath,
         toAgent,
         body: message,
-        formattedMessage: formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw),
+        formattedMessage: formatMessageForTarget(recipient, frameSender, message, raw),
         fromAgent: from ?? null,
         fromWorkspace: senderWorkspace,
         noEnter,
@@ -2605,7 +2665,7 @@ async function handleSend(
         workspacePath: result.workspacePath,
         toAgent,
         body: message,
-        formattedMessage: formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw),
+        formattedMessage: formatMessageForTarget(recipient, frameSender, message, raw),
         fromAgent: from ?? null,
         fromWorkspace: senderWorkspace,
         noEnter,
@@ -2655,7 +2715,7 @@ async function handleSend(
     return;
   }
 
-  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw);
+  const formattedMessage = formatMessageForTarget(recipient, frameSender, message, raw);
 
   // NB: `--delay` (deliverAfter) is handled earlier by handleDelayedSend, before this
   // immediate-path block — a delayed send is resolved + persisted at request time and does

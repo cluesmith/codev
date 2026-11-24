@@ -28,7 +28,9 @@ import {
 } from '../state.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { workspaceKey } from '../utils/workspace-path.js';
-import { findWorkspaceByAddressName, isSameWorkspace } from '../utils/workspace-address.js';
+import { findWorkspaceByAddressName, isSameWorkspace, workspaceAddressName } from '../utils/workspace-address.js';
+import { isAddressComponent, tryFormatAddress } from '@cluesmith/codev-sdk/address';
+import type { CrossWorkspaceOrigin, ReplyRoute } from '../utils/message-format.js';
 
 // ============================================================================
 // Spec 755 error messages — exported as constants so producer and asserter
@@ -273,6 +275,30 @@ function refusalToNameArchitect(name: string, target: TargetWorkspace, sender: S
     return { code: 'NOT_FOUND', message: addressSpoofingErrorMessage(sender.id) };
   }
   return { code: 'REFUSED', message: crossWorkspaceBuilderErrorMessage(sender.id, frontDoorAddress(target)) };
+}
+
+/**
+ * The permission half of resolution on its own (Spec 1940): may `from` send to `address`,
+ * which names an agent in the workspace at `workspacePath`? Returns the refusal, or null.
+ *
+ * It is {@link refusalToNameArchitect}, the rule both resolvers apply, and nothing else: it
+ * does not ask whether the agent exists or has a terminal. The reply footer asks it with
+ * the RECIPIENT as the sender, so a frame never prints a command the resolver would then
+ * refuse, and the two cannot drift apart.
+ */
+export function refusalToAddress(
+  address: AgentAddress,
+  workspacePath: string,
+  from: SenderContext,
+): ResolveError | null {
+  if (address.kind !== 'architect' || address.name === undefined) return null;
+  const sender = canonicalSender(from);
+  const target: TargetWorkspace = {
+    workspacePath,
+    writtenName: address.workspace,
+    isSendersOwn: sender.workspace !== undefined && isSameWorkspace(workspacePath, sender.workspace),
+  };
+  return refusalToNameArchitect(address.name, target, sender);
 }
 
 /** What a failed lookup of a named architect tells the sender about the workspace. */
@@ -579,6 +605,118 @@ function resolveRegistryArchitect(
 
   // The front door: 'main' first, then the first registered.
   return { workspacePath, agent: main ? DEFAULT_ARCHITECT_NAME : architects[0].name, kind: 'architect' };
+}
+
+// ============================================================================
+// Provenance: who a message from another workspace is from, and how to answer it
+// ============================================================================
+
+/** The sender of a message, as `/api/send` carries it: a local id and a workspace path. */
+export interface MessageSender {
+  id: string;
+  workspace: string;
+}
+
+/** The agent a message is addressed to, as the mailbox row names it. */
+export interface MessageRecipient {
+  workspacePath: string;
+  /** The canonical recipient: an architect's name, or a builder or shell id. */
+  agent: string;
+  isArchitect: boolean;
+}
+
+/**
+ * A sender's local id as the agent part of an address, or null when it is not one. A local
+ * id names no workspace and no Tower, and its name fits the address component rule: that
+ * is every id `afx send` produces (`architect`, `architect:<name>`, a builder id). Anything
+ * else is not an agent Tower can give an address to.
+ */
+function senderAgent(id: string): AgentAddress | null {
+  const parsed = parseAddress(id);
+  if (!parsed.ok) return null;
+  const { address } = parsed;
+  if (address.workspace !== undefined || isRemoteAddress(address)) return null;
+  if (address.name !== undefined && !isAddressComponent(address.name)) return null;
+  // An id that merely looks like an architect's (`architect-3`) is neither: today's
+  // formatter refuses to call it a builder ({@link looksLikeBuilderId}), and so does this.
+  if (address.kind === 'id' && address.name.startsWith('architect')) return null;
+  return address;
+}
+
+/**
+ * The architect that `frontDoor` reaches when `recipient` sends to it now, found the way
+ * the send route finds it: live terminals first, then the registry. Null when it reaches
+ * nobody.
+ */
+function reachedByFrontDoor(
+  frontDoor: AgentAddress,
+  recipient: SenderContext,
+): { workspacePath: string; architect: string } | null {
+  const live = resolveTarget(frontDoor, recipient);
+  if (!isResolveError(live)) {
+    const architects = getWorkspaceTerminals().get(live.workspacePath)?.architects ?? new Map<string, string>();
+    for (const [architect, terminalId] of architects) {
+      if (terminalId === live.terminalId) return { workspacePath: live.workspacePath, architect };
+    }
+    return null;
+  }
+  if (live.code !== 'NOT_FOUND') return null;
+  const registered = resolveAgentInRegistry(frontDoor, recipient);
+  return isResolveError(registered) ? null : { workspacePath: registered.workspacePath, architect: registered.agent };
+}
+
+/**
+ * Who a message is from and how its recipient can reply, when the sender is an agent in
+ * ANOTHER workspace on this Tower (Spec 1940, Decision 7, case 2). Returns null when the
+ * message keeps today's frame: the sender is in the recipient's workspace, or its id is
+ * not an agent's.
+ *
+ * The sender's address is composed here, for the frame only, from its local id and its
+ * workspace's address name. A workspace whose name cannot be used (ambiguous, shadowed by
+ * another workspace's explicit name, or outside the component rule) gives an origin with
+ * no workspace and no reply address: a directory name is never put in a frame unchecked.
+ *
+ * The reply is the first of these that {@link refusalToAddress} allows the recipient to
+ * send to:
+ *
+ * 1. the sender's own address;
+ * 2. for a named architect, its workspace's front door, but only when the front door
+ *    reaches that architect.
+ *
+ * A builder that is allowed neither replies through its own architect.
+ */
+export function crossWorkspaceOrigin(sender: MessageSender, recipient: MessageRecipient): CrossWorkspaceOrigin | null {
+  if (isSameWorkspace(sender.workspace, recipient.workspacePath)) return null;
+  const agent = senderAgent(sender.id);
+  if (agent === null) return null;
+
+  const named = workspaceAddressName(sender.workspace, getRegisteredWorkspaces(), getWorkspaceTerminals().keys());
+  if (named.name === null || !isAddressComponent(named.name)) {
+    return { sender: agent, reply: { how: 'no-address' } };
+  }
+  const senderAddress: AgentAddress = { ...agent, workspace: named.name };
+  // A name that fits the component rule can still have no text form: `architect:<id>`
+  // reads as a named architect, not as an id in a workspace called `architect`.
+  if (!tryFormatAddress(senderAddress).ok) return { sender: agent, reply: { how: 'no-address' } };
+
+  const replier: SenderContext = {
+    id: recipient.isArchitect ? `architect:${recipient.agent}` : recipient.agent,
+    workspace: recipient.workspacePath,
+  };
+  const candidates: AgentAddress[] = [senderAddress];
+  if (agent.kind === 'architect' && agent.name !== undefined) {
+    const frontDoor: AgentAddress = { kind: 'architect', workspace: named.name };
+    const reached = reachedByFrontDoor(frontDoor, replier);
+    if (reached !== null && reached.architect === agent.name && isSameWorkspace(reached.workspacePath, sender.workspace)) {
+      candidates.push(frontDoor);
+    }
+  }
+  const allowed = candidates.find((address) => refusalToAddress(address, sender.workspace, replier) === null);
+
+  let reply: ReplyRoute;
+  if (allowed !== undefined) reply = { how: 'address', address: allowed };
+  else reply = recipient.isArchitect ? { how: 'none' } : { how: 'through-architect' };
+  return { sender: senderAddress, reply };
 }
 
 /**
