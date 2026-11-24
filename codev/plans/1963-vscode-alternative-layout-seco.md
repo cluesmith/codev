@@ -431,6 +431,14 @@ the first user-visible slice. Context-menu actions arrive in Phase 5.
 
 **Dependencies**: Phase 4
 
+This phase is large, so it lands as **two commits** within the one phase:
+- **5a:** menu entries, the two `WorkspaceProvider` extractions, context values and the
+  worktree-config hold;
+- **5b:** the mapping oracle, the parity and handler-argument tests, rendered verification and
+  docs.
+
+The increment boundary is unchanged.
+
 #### Objective
 
 Make every row of this window's workspace act exactly as it does in the source views, put every
@@ -513,6 +521,14 @@ The values themselves:
 
   It also has one record per Workspace-view row click: Open Web Interface, Spawn Builder, New
   Shell, Start/Stop Dev, dev URLs and architect rows.
+
+  It also has one record per `viewsWelcome` entry of the three views: `codev.agents` has three
+  today (`package.json:1168-1184`), including the no-workspace "Open Folder" / "Get Started"
+  links. A no-workspace window is one where the Cockpit appears, so each entry is recorded:
+  - mapped to the Tower root's state rows, which carry the same links;
+  - or `{ excluded: <reason> }`.
+
+  Nothing disappears silently.
 - **New `apps/vscode/src/__tests__/cockpit-menu-parity.test.ts`.**
 - **Docs:**
   - the `apps/vscode/README.md` Cockpit section;
@@ -583,7 +599,11 @@ is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect
   - the hierarchy with N=0, N=1 and N>1 builders and two or more workspaces;
   - the Dormant group;
   - *Not connected* → reconnect;
-  - light and dark themes.
+  - light and dark themes;
+  - **active-file reveal with the workspace and architect rows collapsed.** The Cockpit's chain is
+    two levels deeper than Agents' (Tower → workspace → architect → builder → folder → file).
+    The fake-TreeView unit test cannot show that the real `TreeView.reveal` expands collapsed
+    ancestors.
 - [ ] Type-check, lint and unit tests pass. The existing `contributes-*` tests are unmodified
       apart from additions.
 
@@ -630,8 +650,8 @@ npm-published):**
   - `@testing-library/react` and `@testing-library/jest-dom`;
   - `jsdom`, `vitest` and `typescript`.
 
-  `pnpm-lock.yaml` is updated in the same commit. The package's `test` runs in CI's existing
-  workspace test step, and Phase 6 checks that it does.
+  `pnpm-lock.yaml` is updated in the same commit. CI enumerates packages by hand
+  (`.github/workflows/test.yml:36-121`), so the package gets its own step under *Repo wiring*.
 - **`src/host.ts`:** the `WorkspaceViewsHost` adapter. Its members are optional unless stated:
   - `overview` (required): a subscribe/refresh source;
   - `decisions`: `read()`, `rule(req)`, `image(path, signal?)`.
@@ -668,12 +688,32 @@ npm-published):**
   - `components/DecisionsView.tsx`, `hooks/useDecisions.ts`;
   - `components/BuilderCard.tsx`, `NeedsAttentionList.tsx`, `BacklogList.tsx`,
     `RecentlyClosedList.tsx`;
-  - the `issueRef` part of `lib/issueIds.ts`. `findBuilderTab` stays in the dashboard; it is
-    dashboard tab logic.
+  - the `issueRef` part of `lib/issueIds.ts`, with `CANONICAL_KEY_SOURCE`. `findBuilderTab` stays
+    in the dashboard; it is dashboard tab logic.
+- **`packages/codev/src/__tests__/issue-id-parity.test.ts` is updated in the same commit:**
+  - line 21 reads `CANONICAL_KEY_SOURCE` from `apps/web/src/lib/issueIds.ts`, and `exportedSource`
+    throws when the constant is absent. It is repointed at the package's file;
+  - the hand-written-grammar guard on `apps/web/src/components/WorkView.tsx` (line 37) is
+    repointed at the package's `WorkView.tsx`, the real renderer. It is kept on the wrapper too.
+- **New `src/__tests__/import-boundary.test.ts`**, copied from
+  `packages/artifact-canvas/src/__tests__/import-boundary.test.ts`. It scans every non-test
+  `.ts`/`.tsx` and forbids:
+  - `vscode`, `node:*` and bare `fs`;
+  - `fetch(`, `XMLHttpRequest`, `WebSocket`, `EventSource` and `sendBeacon`.
+
+  This enforces the spec's boundary constraint and the no-direct-I/O rule in CI.
+  `DecisionsView` fetches through `lib/api.ts` today, so this is the rule the move most needs.
 - **`src/styles.css`:** the Work and Decisions CSS rules moved from `apps/web/src/index.css`
   (`.work-*`, `.backlog-*`, the builder-card, needs-attention, recently-closed and `.decisions-*`
   rules). They are rewritten against `--codev-wv-*` tokens, each with a default equal to today's
-  dashboard value.
+  dashboard value. **There are two token families:**
+  - chrome colours: background, foreground, border, muted, accent and link;
+  - **semantic status colours**, today's `--status-*` (50 uses in `index.css`; for example,
+    `NeedsAttentionList.test.tsx:300` checks `--status-implementing` and `--status-error`). These
+    become `--codev-wv-status-*`.
+
+  Each host maps both families. The VS Code host maps status colours to `--vscode-charts-*` /
+  `--vscode-testing-*` equivalents, with each mapping listed in the token table.
 - **Tests:** the existing `apps/web` tests for these components, moved into the package, with
   their assertions unchanged in intent:
   - `BuilderCard.test.tsx`, `NeedsAttentionList.test.tsx`, `BacklogList.test.tsx`;
@@ -709,7 +749,8 @@ npm-published):**
 
 - [ ] `apps/web` `test`, `check-types` and `build` pass. `App.decisions-tab` and
       `App.workview-scroll` pass unchanged.
-- [ ] The package's `test` and `check-types` pass.
+- [ ] The package's `test` and `check-types` pass, including `import-boundary.test.ts`.
+- [ ] `packages/codev`'s suite passes, in particular `issue-id-parity.test.ts`.
 - [ ] **Rendered:** in the harness's Tower dashboard, Work and Decisions look and behave as before
       (spec scenario 20, compared with screenshots taken on `main` beforehand). A ruling round-trips.
 - [ ] A grep check in the package tests asserts that the moved component files exist only in
@@ -827,7 +868,9 @@ stay green.
     - CI's `apps/vscode` step runs `check-types` then `test:unit`, and no esbuild run;
     - so the test builds the entry itself in `beforeAll`, through esbuild's API into a temp dir,
       using the same options object `esbuild.js` uses. That object is exported from a small
-      `esbuild.webview.mjs` both import.
+      `esbuild.webview.cjs`: `esbuild.js` is CommonJS and `apps/vscode` has no
+      `"type": "module"`, so `esbuild.js` can `require` it, and vitest imports it as CJS. It is added to
+      `.vscodeignore` next to `esbuild.js`.
 
     It therefore runs under `pnpm test:unit`, locally and in CI, on a clean tree.
 - `tsconfig.webview.json`: adds `jsx: react-jsx` and the new `src/workspace-views/webview`
@@ -1208,7 +1251,7 @@ told before its first start.
 | A source-exported TSX package does not type-check under one host's config | Medium | Medium | `codev-artifact-canvas` is a *built* package (`tsdown` → `dist`), so the closer precedent is `apps/web`'s own source exports. The risk sits in `apps/web`'s `tsc -b`, which type-checks the package's `.tsx` under the dashboard's config, and in the extension's webview tsconfig (`jsx: react-jsx` added). Phase 6 runs both type-checks before moving anything. If a host still cannot consume the source, the package gains a `tsdown` build like canvas. That is a build-wiring change, not scope, and it is named in the PR |
 | The harness accidentally touches the owner's Tower or IDE | Medium (several CLI paths default to `:4100`) | High | No Tower-contacting CLI commands. Every state-creating step names its route to the isolated port (harness table). Extension shell-outs are recording stubs, and auto-start is off. `CODEV_TOWER_KEY` is set, as are isolated state, socket and VS Code dirs. A pre-flight refuses 4100 and checks the listener PID, and a `:4100` connection tripwire runs throughout. The architect is told before the first start |
 | CSS moved out of `index.css` misses a rule, so the dashboard looks different | Medium | Low | A selector inventory before the move, and the rendered dashboard comparison |
-| `prepublish-workspace-deps.test.ts` or the vsix packaging misses the new workspace dependency | Medium | Medium | Run it at Phase 7, and build the vsix in the harness from Phase 1 onward |
+| `prepublish-workspace-deps.test.ts` or the vsix packaging misses the new workspace dependency | Medium | Medium | Run it at Phase 7, and build the vsix in the harness from Phase 1 onward. `vscode:prepublish` runs `pnpm --filter 'codev-vscode^...' build`. The package has no `build` script, which pnpm skips, and Phase 7 confirms that with a real `package` run |
 | Fixture builders do not appear, or appear without attribution | High if missed | Medium | Each fixture builder gets a real worktree, porch state, a `builders` row through the product's `upsertBuilder`, and a registered builder terminal. `/api/overview` is asserted, attribution included, before any screenshot |
 | Path containment behaves differently on Windows (case, separators, UNC, junctions) | Medium | High | `realpath` + `path.relative` (no prefix compare), `path.win32` table tests, and the on-demand Windows workflow linked in the PR |
 

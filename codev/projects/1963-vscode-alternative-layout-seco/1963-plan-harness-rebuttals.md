@@ -29,7 +29,8 @@ accepted (below).
    - **Confirmed:** CI's `apps/vscode` step runs `check-types` and `test:unit` only
      (`.github/workflows/test.yml:102-107`).
    - **Change:** the smoke test builds its own entry in `beforeAll` through esbuild's API, into
-     a temp dir. It uses the options object `esbuild.js` uses, shared from `esbuild.webview.mjs`.
+     a temp dir. It uses the options object `esbuild.js` uses, shared from `esbuild.webview.cjs`.
+     (The confirmation round corrected `.mjs` to `.cjs`.)
 3. **The package's test devDependencies and lockfile.**
    - **Change:** the package declares its own devDependencies, at `apps/web`'s versions:
      - `react` and `react-dom`;
@@ -94,3 +95,45 @@ accepted (below).
      - the tripwire shown to fire, aimed at a throwaway listener and never at `:4100`.
 
      The spike runs in it. The phases renumber from 1–8 to 1–9.
+
+## Confirmation round
+
+- Codex: REQUEST_CHANGES.
+- Claude: COMMENT.
+
+Both points from each were checked against the code and accepted.
+
+### Codex
+
+1. **CSP lacks `default-src 'none'`.**
+   - **Confirmed:** without it, leaving out `connect-src` restricts nothing. Both existing webviews
+     set it (`panel-template.ts:22`, `preview-template.ts:47`).
+   - **Change:** it is added, with a static CSP test.
+2. **Scenario 22 has no decisive test.**
+   - **Change:** it is tested three ways:
+     - an ESLint ban on `fetch`/XHR/WebSocket/EventSource/`sendBeacon` in the webview sources;
+     - a unit test that no host-to-webview message carries the key or the Tower URL;
+     - in the harness, Playwright records the webview frames' requests: assets, `blob:` and
+       fixture item images only, with nothing to the Tower port and no key header.
+
+### Claude
+
+1. **`issue-id-parity.test.ts` breaks.**
+   - **Confirmed:** `exportedSource` throws when `CANONICAL_KEY_SOURCE` is absent (line 21), and the
+     line-37 guard watches the wrapper.
+   - **Change:** both are repointed in Phase 6, and `packages/codev`'s suite is added to Phase 6's
+     acceptance.
+2. **No import-boundary test.**
+   - **Change:** canvas's `import-boundary.test.ts` is copied into the package, extended to forbid
+     `fetch(`, XHR, WebSocket, EventSource and `sendBeacon`.
+3. **A shared `.mjs` can't be `require`d.**
+   - **Confirmed:** `esbuild.js` is CommonJS, and `apps/vscode` has no `"type": "module"`.
+   - **Change:** the file is `esbuild.webview.cjs`, and it is added to `.vscodeignore`.
+4. **Comments.** All accepted:
+   - Phase 5 lands as two commits, 5a and 5b;
+   - `--status-*` is named as a second token family, `--codev-wv-status-*`;
+   - the rendered check covers active-file reveal with the rows collapsed;
+   - `viewsWelcome` entries are recorded in the oracle;
+   - the "existing CI step" sentence is replaced: `test.yml` enumerates packages, so the package
+     gets its own step;
+   - `vscode:prepublish` is confirmed at Phase 7 with a real `package` run.
