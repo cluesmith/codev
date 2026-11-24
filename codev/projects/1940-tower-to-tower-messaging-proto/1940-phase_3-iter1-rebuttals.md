@@ -16,11 +16,25 @@ the collision rule, and nothing else. The limit was my addition.
   300-character name is accepted; `tower-routes.test.ts`, a 200-character name is stored and
   reported), and a separate test keeps the quoting cut.
 
-One consequence, stated so nobody is surprised: an address is at most 512 characters
-(`MAX_ADDRESS_LENGTH`, phase 1). A name too long to fit in one can be set and then cannot be
-written by a sender, who gets the parser's length error. I have not added a rule for that, since
-it would again be a limit the spec does not give. Raised with the architect in case the owner
-wants one.
+Removing it left one hole, which I raised with the architect: an address is at most 512
+characters (`MAX_ADDRESS_LENGTH`, phase 1), so a name too long to fit in one could be set and
+then never written by a sender. **Architect's decision (2026-11-24), implemented:** the name is
+refused at set time when the shortest address to the workspace, its front door
+`<name>:architect`, would not pass the shared parser. This follows from the address limit the
+parser already enforces; it is not a second limit.
+
+- `packages/sdk/src/address.ts`: `tryFormatAddress`, the formatter's answer as a value (the
+  text, and the parser's refusal of it if any). `formatAddress` now calls it and throws exactly
+  as before.
+- `utils/workspace-address.ts`: `validateProposedName` formats the front door with it and
+  refuses with `INVALID_NAME`: "'<name>…' is too long to be used in an address: an address is at
+  most 512 characters, and this one has 513 (the shortest address to this workspace would be
+  <name>:architect)." The sentence with the number is the parser's own. The module holds no
+  length constant.
+- Tests: the longest name that fits is accepted and one character more is refused
+  (`workspace-address.test.ts`, with the bound computed from the SDK's exported limit); the same
+  pair at the formatter (`packages/sdk/src/__tests__/address.test.ts`); a 600-character name is
+  refused through the route (`tower-routes.test.ts`).
 
 ## Claude (non-blocking, all fixed in place except the last)
 
@@ -46,5 +60,6 @@ wants one.
 ## Verification
 
 - Each new test fails when its fix is removed (three mutations, restored afterwards).
-- The affected test files, the wider set of files that touch the resolver, the route or the
-  naming module, the type-check and the package build: results are in the thread log.
+- The SDK suite (404 tests), the 39 `packages/codev` test files that touch the resolver, the
+  route, the naming module or the address parser (1178 tests), the VS Code extension's address
+  conformance test (122), the type-check and the package build all pass.

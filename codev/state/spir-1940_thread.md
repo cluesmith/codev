@@ -662,3 +662,21 @@ CLEARED {"ok":true,"result":{"explicitName":null,"addressName":null,"unaddressab
   directory) each fail tests; 38 test files that touch the resolver, the route or the naming
   module (1053 tests) pass; type-check and `npm run build` pass. Code changed after the green
   run, so: push, wait for GitHub, ask the architect before `porch done`.
+
+## 2026-11-24 — phase 3: a name must fit in an address (architect's decision)
+
+- With the 64-character limit gone, a name too long for a 512-character address could be set and
+  never written. Raised it; the **architect decided** (not a new spec rule, it follows from the
+  spec's address limit, and the project fails fast): refuse at set time any name whose front door
+  `<name>:architect` would not pass the shared parser, derived from the parser, no constant of
+  mine, message says too long for an address and gives the parser's limit.
+- Done with one addition to the shared address module: `tryFormatAddress` (the formatter's
+  answer as a value; `formatAddress` calls it and throws as before). `validateProposedName`
+  formats the front door with it; the refusal quotes the parser's sentence.
+- Tests: longest that fits accepted, one more refused, at the naming module and at the formatter;
+  a 600-character name refused through the route. SDK suite 404, 39 codev files 1178, extension
+  conformance 122, type-check, build: all pass.
+- **For the review**: record this as following from the spec's 512-character address limit.
+- Order from here: push, GitHub green on the new head, tell the architect; they check the run;
+  then the one-time skip for BOTH `porch done` calls of this round (phase 3 already had its local
+  failure).
