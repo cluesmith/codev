@@ -518,3 +518,20 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
   3. **Polish, at the start of Phase 5.** `pruneTrees` runs only from `towerChildren()`, so departed
      workspaces' builders survive while the Tower root is collapsed. That is bounded and harmless;
      say so in its doc comment.
+
+### Architect ruling for Phase 5: agent cycle (2026-11-24T08:59Z)
+
+- **Option (b).** The approved spec already says "tree behaviours follow the view a row is in", so
+  this needs no owner ruling.
+- **Cockpit visible, Agents view not:** the agent cycle runs in the Cockpit's own visible order,
+  architects and their builders. The roster is **this window's workspace only**; other workspaces'
+  rows never enter the cycle.
+- **Agents view visible, or neither visible:** the existing order from
+  `buildersProvider.agentCycleOrder()` applies **unchanged**. Not (c): existing behaviour must not
+  move.
+- **To do in Phase 5:**
+  - tests for all three cases (Cockpit-only visible, Agents visible, neither visible);
+  - one line in the PR #1971 description.
+- Also opening Phase 5, from Claude's iteration-2 notes (see above):
+  - the parity `shape()` icon boundary;
+  - the `pruneTrees` doc comment.
