@@ -1462,3 +1462,18 @@ Resumed after a context refresh at the phase boundary (`enter:review`).
 - Order from here: push, GitHub 8 of 8 on the new head, tell the architect, and on their
   confirmation `porch approve 1940 pr --a-human-explicitly-approved-this`, then
   `gh pr merge 1957 --merge --admin`, and tell them the merge commit.
+
+## 2026-11-24 — PR #1957 merged; in verify
+
+- 21:17Z: the architect confirmed the run on `c281d4884` (15 checks, Windows run 45485565786
+  green) and that it stands without merging `main` again. `porch approve 1940 pr` run on the
+  owner's decision main-41; PR merged with `gh pr merge 1957 --merge --admin`, a merge commit,
+  not squashed: `707e0e904` (parents `fa4fc74ee` and `f56d6e42c`). Recorded with
+  `porch done 1940 --merged 1957`. `main` pulled into the worktree.
+- I closed no issue and cleaned up nothing. The architect closes #1633, and #1605 only on the
+  owner's word.
+- This entry is on the branch only: the PR had merged before it was written.
+- Verify needs a Tower of this version, so a Tower restart, which is the owner's call. The two
+  checks: the installed `afx send <workspace>:architect:<name>` between two workspaces with the
+  reply command pasted back; sibling architects relaunching `main` first, then in registration
+  order. Next gate is `verify-approval`. Not "ready for cleanup" until it is approved.
