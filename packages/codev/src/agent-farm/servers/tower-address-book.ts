@@ -25,6 +25,7 @@ import {
   refusalToAddress,
   resolveAgentInRegistry,
   resolveTarget,
+  runningWorkspacePaths,
   type SenderContext,
 } from './tower-messages.js';
 
@@ -140,7 +141,11 @@ function agentEntry(
   return entry;
 }
 
-/** A workspace Tower knows, in the spelling it runs under when it is running. */
+/**
+ * A workspace Tower knows, in the spelling it runs under when it is running. `entry` is its
+ * slot on the terminal map, set exactly when it is running: a stopped workspace can have a
+ * slot too (Issue #1978), and its slot is not read.
+ */
 interface ListedWorkspace {
   path: string;
   entry: WorkspaceTerminals | undefined;
@@ -151,9 +156,13 @@ interface ListedWorkspace {
  * them: the running ones first, then the registered ones that are not running, each group
  * in path order.
  */
-function listedWorkspaces(registeredPaths: string[], terminals: Map<string, WorkspaceTerminals>): ListedWorkspace[] {
+function listedWorkspaces(
+  registeredPaths: string[],
+  running: string[],
+  terminals: Map<string, WorkspaceTerminals>,
+): ListedWorkspace[] {
   const byKey = new Map<string, ListedWorkspace>();
-  for (const [path, entry] of terminals) byKey.set(workspaceKey(path), { path, entry });
+  for (const path of running) byKey.set(workspaceKey(path), { path, entry: terminals.get(path) });
   for (const path of registeredPaths) {
     const key = workspaceKey(path);
     if (!byKey.has(key)) byKey.set(key, { path, entry: undefined });
@@ -174,11 +183,10 @@ function listedWorkspaces(registeredPaths: string[], terminals: Map<string, Work
 export function addressBook(from: SenderContext = {}): AddressBookResponse {
   const caller: SenderContext = from.workspace ? { ...from, workspace: workspaceKey(from.workspace) } : from;
   const registered = getRegisteredWorkspaces();
-  const terminals = getWorkspaceTerminals();
-  const active = [...terminals.keys()];
+  const running = runningWorkspacePaths();
 
-  const workspaces = listedWorkspaces(registered.map((w) => w.workspacePath), terminals).map((listed): AddressBookWorkspace => {
-    const named = printableAddressName(listed.path, registered, active);
+  const workspaces = listedWorkspaces(registered.map((w) => w.workspacePath), running, getWorkspaceTerminals()).map((listed): AddressBookWorkspace => {
+    const named = printableAddressName(listed.path, registered, running);
     const isCallersOwn = caller.workspace !== undefined && isSameWorkspace(listed.path, caller.workspace);
     const agents =
       listed.entry === undefined

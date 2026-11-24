@@ -76,6 +76,7 @@ import {
   broadcastMessage,
   isResolveError,
   crossWorkspaceOrigin,
+  runningWorkspacePaths,
   type MessageRecipient,
   type ResolveError,
   type ResolveResult,
@@ -180,6 +181,7 @@ import {
   deleteFileTab,
   getRehydratedTerminalsEntry,
   isStartupReconcileSettled,
+  whenStartupReconcileSettled,
   getTerminalSessionById,
   getActiveShellLabels,
   updateTerminalLabel,
@@ -981,7 +983,7 @@ async function handleSetWorkspaceAddressName(
     });
   }
 
-  const active = [...getWorkspaceTerminals().keys()];
+  const active = runningWorkspacePaths();
   const registered = getRegisteredWorkspaces();
   if (!registered.some((w) => isSameWorkspace(w.workspacePath, workspacePath))) {
     return sendJson(res, 404, {
@@ -1035,7 +1037,7 @@ async function handleSetWorkspaceAddressName(
  * are optional. The answer is `tower-address-book.ts`'s; this only reads the query. `from`
  * is held to the rule `/api/send` holds it to, since it is the same identity.
  */
-function handleAddressBook(res: http.ServerResponse, url: URL): void {
+async function handleAddressBook(res: http.ServerResponse, url: URL): Promise<void> {
   const from = url.searchParams.get('from') ?? undefined;
   if (from !== undefined && !isSafeSenderId(from)) {
     return sendJson(res, 400, {
@@ -1046,6 +1048,10 @@ function handleAddressBook(res: http.ServerResponse, url: URL): void {
     });
   }
   const workspace = url.searchParams.get('workspace') || undefined;
+  // Issue #1978: right after a restart the terminal map fills as the startup reconcile
+  // adopts each session, and a workspace whose terminals are still being adopted would be
+  // listed as not running. The wait is bounded, as it is for the dashboard.
+  await whenStartupReconcileSettled();
   const book: AddressBookResponse = addressBook({ id: from, workspace });
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(book));
@@ -2564,6 +2570,12 @@ async function handleSend(
   // Who every frame built below is from. One value, so no path can frame the message as
   // coming from somewhere the others do not.
   const frameSender: FrameSender = { id: from, workspace: senderWorkspace };
+
+  // Issue #1978: a workspace counts as running only once Tower holds a terminal for it, and
+  // right after a restart the startup reconcile is still adopting them (usually well under a
+  // second). Resolving before it settles would refuse a workspace that is coming back as not
+  // running, so the send waits for it, bounded as the dashboard's reads are.
+  await whenStartupReconcileSettled();
 
   // Spec 1940: the address is read once, here, by the one shared parser, and every path
   // below resolves the structured form. Text that is not an address is refused before

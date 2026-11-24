@@ -813,7 +813,10 @@ export interface AddressBookAgent {
 /** One workspace in the address book: every workspace Tower has registered is listed. */
 export interface AddressBookWorkspace {
   path: string;
-  /** Whether it is running. A workspace that is not has no agents listed and takes no mail. */
+  /**
+   * Whether it is running: Tower holds at least one open terminal for it (Issue #1978). A
+   * workspace that is not has no agents listed, and an address that names it is refused.
+   */
   running: boolean;
   /** The name other workspaces write before the colon; `null` when it has none it can be written by. */
   addressName: string | null;
