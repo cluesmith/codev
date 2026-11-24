@@ -137,3 +137,7 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
     have no command name, so they stay human-only on stderr. The CLI deps take argv explicitly (commander's
     rawArgs is untyped/internal).
   - Fixed in place: a type error in Phase 2's allow-list.test.ts (readonly tuple), found type-checking the tests.
+- Architect verified Phase 3 on PR #1957 (draft, other project): CLEAR 4.5 s, +11,320 −464 in 69 files matching
+  GitHub, --json schema 1, exit 2 for missing PR / bad number, refs/status/FETCH_HEAD unchanged. Accepted both
+  deviations (fork-PR head rule; baseTip string|null) as deliberate. Open for Phase 4: a draft must not read CLEAR
+  (the `state` check), with a test; the architect reruns check pr 1957 then.
