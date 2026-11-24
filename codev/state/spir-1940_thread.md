@@ -1075,3 +1075,12 @@ naming that Tower's socket directory survived: passed.
 **A fifth bare `cd`.** In one command of this phase I wrote `cd packages/codev && python3 …` with
 no parentheses. The next command was `cd` back to the worktree root; nothing was written or staged
 from the wrong directory.
+
+## 2026-11-24 — phase 5: GitHub red on `f3ed3d453`, fixed
+
+GitHub's Unit Tests job failed at its first step, the `/tmp` residue check: a string in
+`workspace-list.test.ts` (a made-up path in the control-character test) began with `/tmp`, and the
+check refuses a test file that names `/tmp` without an allowlist entry. No unit test ran in that
+job. Fixed by using a path that is not under `/tmp`; the allowlist is untouched.
+`node scripts/tmp-residue-check.mjs` passes locally, which I should have run before pushing: it is
+the first step of the job. The other seven jobs on that head were green.
