@@ -1,11 +1,14 @@
 import type { OverviewBacklogItem } from '@cluesmith/codev-types';
 import { issueRef } from '../lib/issueIds.js';
+import { hostLinkClick } from '../lib/links.js';
 import { ArtifactLink } from './ArtifactLink.js';
 
 interface BacklogListProps {
   items: OverviewBacklogItem[];
   /** Open a spec / plan / review file. Without it, the item's artifact links are not shown. */
   onOpenArtifact?: (path: string) => void;
+  /** Open an issue or PR link. Without it, the link is a plain one the page opens itself. */
+  onOpenExternal?: (url: string) => void;
 }
 
 /** Compact age, or '' when the forge supplied no (or an unparseable) date (#1740). */
@@ -34,7 +37,7 @@ const TYPE_CLASS: Record<string, string> = {
   spike: 'type-tag--spike',
 };
 
-export function BacklogList({ items, onOpenArtifact }: BacklogListProps) {
+export function BacklogList({ items, onOpenArtifact, onOpenExternal }: BacklogListProps) {
   const visible = items.filter(i => !i.hasBuilder);
 
   if (visible.length === 0) {
@@ -45,7 +48,7 @@ export function BacklogList({ items, onOpenArtifact }: BacklogListProps) {
     <div className="backlog-rows">
       {visible.map(item => (
         <div key={item.id} className="backlog-row">
-          <a className="backlog-row-main" href={item.url} target="_blank" rel="noopener noreferrer">
+          <a className="backlog-row-main" href={item.url} target="_blank" rel="noopener noreferrer" onClick={hostLinkClick(onOpenExternal, item.url)}>
             <span className={`backlog-priority-dot ${PRIORITY_CLASS[item.priority] ?? 'priority-dot--low'}`} />
             <span className="backlog-row-number">{issueRef(item.id)}</span>
             <span className={`backlog-type-tag ${TYPE_CLASS[item.type] ?? ''}`}>{item.type}</span>

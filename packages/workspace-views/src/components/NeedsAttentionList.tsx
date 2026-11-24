@@ -1,12 +1,15 @@
 import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
 import type { OverviewPR, OverviewBuilder, ArchitectState } from '@cluesmith/codev-types';
 import { issueRef } from '../lib/issueIds.js';
+import { hostLinkClick } from '../lib/links.js';
 
 interface NeedsAttentionListProps {
   prs: OverviewPR[];
   builders: OverviewBuilder[];
   /** Spec 1595: the overview's architects, so one at a prompt or dead is listed under its name. */
   architects?: ArchitectState[];
+  /** Open an issue or PR link. Without it, the link is a plain one the page opens itself. */
+  onOpenExternal?: (url: string) => void;
 }
 
 interface AttentionItem {
@@ -190,7 +193,7 @@ function agentItems(builders: OverviewBuilder[], architects: ArchitectState[], n
   return items;
 }
 
-export function NeedsAttentionList({ prs, builders, architects = [] }: NeedsAttentionListProps) {
+export function NeedsAttentionList({ prs, builders, architects = [], onOpenExternal }: NeedsAttentionListProps) {
   const items = buildItems(prs, builders, architects);
 
   if (items.length === 0) {
@@ -211,7 +214,7 @@ export function NeedsAttentionList({ prs, builders, architects = [] }: NeedsAtte
 
         if (item.url) {
           return (
-            <a key={item.key} className="attention-row" href={item.url} target="_blank" rel="noopener noreferrer">
+            <a key={item.key} className="attention-row" href={item.url} target="_blank" rel="noopener noreferrer" onClick={hostLinkClick(onOpenExternal, item.url)}>
               {inner}
             </a>
           );

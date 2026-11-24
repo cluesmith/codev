@@ -56,12 +56,19 @@ function pageVisible(): boolean {
  *   write and lands after it is dropped rather than overwriting the newer document.
  * - An unchanged `version` leaves the state object as it was, so React bails out
  *   of the update and nothing below re-renders.
+ * - `read` may be a new function on every render (an inline arrow): the hook always
+ *   calls the latest one, and a new one neither restarts polling nor reads at once.
  */
 export function useDecisions(read: DecisionsViewHost['read'], isActive: boolean) {
   const [state, setState] = useState<DecisionsState>({ status: 'loading' });
   const [visible, setVisible] = useState(pageVisible);
   const generation = useRef(0);
   const inFlight = useRef(false);
+  const latestRead = useRef(read);
+
+  useEffect(() => {
+    latestRead.current = read;
+  }, [read]);
 
   useEffect(() => {
     const onVisibilityChange = () => setVisible(pageVisible());
@@ -74,14 +81,14 @@ export function useDecisions(read: DecisionsViewHost['read'], isActive: boolean)
     inFlight.current = true;
     const fetchGeneration = ++generation.current;
     try {
-      const result = await read();
+      const result = await latestRead.current();
       if (fetchGeneration === generation.current) {
         setState(prev => nextState(prev, result));
       }
     } finally {
       inFlight.current = false;
     }
-  }, [read]);
+  }, []);
 
   useEffect(() => {
     if (!isActive || !visible) return;

@@ -54,6 +54,7 @@ export function WorkView({ host, slots = {}, architectCount }: WorkViewProps) {
   // Through `host`, not destructured: a host may be a class whose methods use `this`.
   const openBuilder = host.openBuilder && ((builder: OverviewBuilder) => host.openBuilder?.(builder));
   const openArtifact = host.openArtifact && ((path: string) => host.openArtifact?.(path));
+  const openExternal = host.openExternal && ((url: string) => host.openExternal?.(url));
   const panelOpen = slots.filePanel !== undefined && filePanelOpen;
   // Spec 823: count once outside the render loop so each BuilderCard receives a stable prop. With
   // no architects counted, `architectCount > 1` is false and no attribution span renders.
@@ -126,6 +127,7 @@ export function WorkView({ host, slots = {}, architectCount }: WorkViewProps) {
               prs={overview?.pendingPRs ?? []}
               builders={overview?.builders ?? []}
               architects={overview?.architects ?? []}
+              onOpenExternal={openExternal}
             />
           )}
         </section>
@@ -136,7 +138,7 @@ export function WorkView({ host, slots = {}, architectCount }: WorkViewProps) {
           {overview?.errors?.issues ? (
             <p className="work-unavailable">{overview.errors.issues}</p>
           ) : (
-            <BacklogList items={overview?.backlog ?? []} onOpenArtifact={openArtifact} />
+            <BacklogList items={overview?.backlog ?? []} onOpenArtifact={openArtifact} onOpenExternal={openExternal} />
           )}
         </section>
 
@@ -144,7 +146,7 @@ export function WorkView({ host, slots = {}, architectCount }: WorkViewProps) {
         {overview?.recentlyClosed && overview.recentlyClosed.length > 0 && (
           <section className="work-section">
             <h3 className="work-section-title">Recently Closed</h3>
-            <RecentlyClosedList items={overview.recentlyClosed} onOpenArtifact={openArtifact} />
+            <RecentlyClosedList items={overview.recentlyClosed} onOpenArtifact={openArtifact} onOpenExternal={openExternal} />
           </section>
         )}
       </div>

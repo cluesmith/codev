@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
-import type { ArchitectState, OverviewBacklogItem, OverviewBuilder, OverviewData, OverviewRecentlyClosed } from '@cluesmith/codev-types';
+import type { ArchitectState, OverviewBacklogItem, OverviewBuilder, OverviewData, OverviewPR, OverviewRecentlyClosed } from '@cluesmith/codev-types';
 import { WorkView } from '../components/WorkView.js';
 import type { WorkViewHost } from '../host.js';
 import { fakeWorkHost } from './fakeHost.js';
@@ -50,6 +50,11 @@ const BACKLOG: OverviewBacklogItem = {
 const CLOSED: OverviewRecentlyClosed = {
   id: '399', title: 'Closed feature', url: 'https://example.com/issues/399', type: 'project',
   closedAt: new Date().toISOString(), reviewPath: 'codev/reviews/399-closed-feature.md', prUrl: 'https://example.com/pull/398',
+};
+
+const PR: OverviewPR = {
+  id: '301', title: 'A human-authored change', url: 'https://example.com/pull/301', reviewStatus: 'REVIEW_REQUIRED',
+  linkedIssue: null, createdAt: new Date().toISOString(), reviewRequests: [], isDraft: false,
 };
 
 const architect = (name: string): ArchitectState => ({ name } as ArchitectState);
@@ -158,7 +163,7 @@ describe('WorkView — slots', () => {
   it('renders no slot content, no file panel and no file-panel class without slots', () => {
     const { container } = show(fakeWorkHost({ overview: { data, error: null } }));
     const root = container.querySelector('.work-view')!;
-    expect(root.className).toBe('work-view ');
+    expect([...root.classList]).toEqual(['work-view']);
     expect(root.children).toHaveLength(1);
     expect(container.querySelector('.work-file-panel, .work-file-panel-search, .tip-banner')).toBeNull();
   });
@@ -201,5 +206,59 @@ describe('WorkView — the attribution count (Spec 823)', () => {
   it('counts what the host passes instead, when it passes a count', () => {
     show(fakeWorkHost({ overview: { data, error: null } }), { architectCount: 1 });
     expect(screen.queryByTitle('spawned by web')).toBeNull();
+  });
+});
+
+describe('WorkView — issue and PR links', () => {
+  const data = makeOverview({ pendingPRs: [PR] });
+  const LINKS: Array<[string, string]> = [
+    ['Needs Attention row', 'https://example.com/pull/301'],
+    ['Backlog row', 'https://example.com/issues/401'],
+    ['Recently Closed row', 'https://example.com/issues/399'],
+    ['Recently Closed PR', 'https://example.com/pull/398'],
+  ];
+
+  function link(which: string): HTMLAnchorElement {
+    switch (which) {
+      case 'Needs Attention row': return screen.getByText('A human-authored change').closest('a')!;
+      case 'Backlog row': return screen.getByText('Backlog feature').closest('a')!;
+      case 'Recently Closed row': return screen.getByText('Closed feature').closest('a')!;
+      default: return screen.getByRole('link', { name: 'PR' }) as HTMLAnchorElement;
+    }
+  }
+
+  /** Whether a click on `el` reaches the window, as a webview's own link handling would see it. */
+  function reachesWindow(el: Element): { notPrevented: boolean; reached: boolean } {
+    const outside = vi.fn();
+    window.addEventListener('click', outside);
+    try {
+      const notPrevented = fireEvent.click(el);
+      return { notPrevented, reached: outside.mock.calls.length > 0 };
+    } finally {
+      window.removeEventListener('click', outside);
+    }
+  }
+
+  it.each(LINKS)('opens the %s through a host that provides openExternal, and the click stops at the view', (which, url) => {
+    const host = fakeWorkHost({ overview: { data, error: null }, openExternal: vi.fn() });
+    show(host);
+    const anchor = link(which);
+    // Still a link: the same element, target and rel as without the host action.
+    expect(anchor).toHaveAttribute('href', url);
+    expect(anchor).toHaveAttribute('target', '_blank');
+    expect(reachesWindow(anchor)).toEqual({ notPrevented: false, reached: false });
+    expect(host.openExternal).toHaveBeenCalledExactlyOnceWith(url);
+  });
+
+  it.each(LINKS.slice(0, 3))('leaves the %s a plain link the page opens itself without openExternal', (which, url) => {
+    show(fakeWorkHost({ overview: { data, error: null } }));
+    const anchor = link(which);
+    expect(anchor).toHaveAttribute('href', url);
+    expect(reachesWindow(anchor)).toEqual({ notPrevented: true, reached: true });
+  });
+
+  it('keeps the Recently Closed PR link a plain link without openExternal, its click kept from the row', () => {
+    show(fakeWorkHost({ overview: { data, error: null } }));
+    expect(reachesWindow(link('Recently Closed PR'))).toEqual({ notPrevented: true, reached: false });
   });
 });

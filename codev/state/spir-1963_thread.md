@@ -727,3 +727,28 @@ caused by this branch: `getWebKey` is untouched.
 **Rendered proof (scenario 20):** the harness `dashboard` script, baseline run on the branch base's
 build, then on this build with `COCKPIT_BASELINE`. Evidence in
 `codev/projects/1963-vscode-alternative-layout-seco/verification-phase6/`.
+
+### Phase 6 review, iteration 1 (2026-11-24)
+
+**Verdicts:** Codex REQUEST_CHANGES (two issues); Claude APPROVE (five notes). Responses are in
+`1963-workspace_views_package-iter1-rebuttals.md`.
+
+**Fixed:**
+- **Host-owned links (Codex).** VS Code's webview script (`pre/index.html`, `handleInnerClick`)
+  opens any clicked anchor with an `href` through VS Code's own opener. It listens on the window,
+  in the bubble phase, and ignores `defaultPrevented`. Work's native issue/PR links would have
+  bypassed the host's http(s) allowlist, and Decisions' links would have opened twice. Now:
+  - `WorkViewHost.openExternal?` is new. With it, Work's four external links go to the host, with
+    default prevented and propagation stopped.
+  - Without it, they stay plain links, as in the dashboard, which does not pass it.
+  - Decisions' link clicks stop propagation too.
+- **`color: white` (Codex):** two buttons now use `--codev-wv-on-accent`. A new
+  `styles-tokens.test.ts` forbids any literal colour or font outside a token.
+- **`useDecisions` and `host.read` (Claude):** the view calls `host.read()` through the host (keeps
+  `this`), and the hook keeps the latest `read` in a ref, so a new function per render neither
+  restarts polling nor re-reads.
+- The dashboard's artifact-open handler now catches and logs, like + Shell (parity bug, fixed in
+  place). Two cosmetic test fixes.
+
+**For Phase 7:** the VS Code host must pass `openExternal` to both views, with the allowlist
+host-side. Pass the Decisions view a stable host object (it keys image loads on it).

@@ -42,8 +42,12 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
   }, [state?.builders, onSelectTab]);
 
   const handleOpenArtifact = useCallback(async (filePath: string) => {
-    await createFileTab(filePath);
-    onRefresh();
+    try {
+      await createFileTab(filePath);
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to open file:', err);
+    }
   }, [onRefresh]);
 
   const host: WorkViewHost = {

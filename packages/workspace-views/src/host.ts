@@ -6,6 +6,16 @@
  *
  * An optional action is optional on purpose: a control renders only when its host provides the
  * action, so a host never shows a button that does nothing.
+ *
+ * Members are always called through the host (`host.read()`), so a class instance keeps its
+ * `this`. Pass the Decisions view the same host object on every render: it keys effects on the
+ * host, so a new one reloads its images. The Work view keys nothing on its host, which carries the
+ * overview and so is a new object whenever that changes.
+ *
+ * Links. A link whose opening the host owns (`openExternal`) is handled entirely by the view: the
+ * click's default is prevented and the event stops at the view, so nothing outside it (the page,
+ * or a webview's own link handling) also opens the link. Of the external opens a view can make,
+ * the host decides which it allows; a webview host must allow only http(s).
  */
 
 import type {
@@ -63,6 +73,13 @@ export interface WorkViewHost {
   refresh?(): void;
   /** A Backlog or Recently Closed *spec* / *plan* / *review* link: open that workspace file. */
   openArtifact?(path: string): void;
+  /**
+   * An issue or PR link (Needs Attention, Backlog, Recently Closed): open that URL. The link is
+   * rendered either way. Without this it is a plain link the page opens itself, in a new tab,
+   * as the dashboard does; a host whose page must not open links itself (a VS Code webview)
+   * provides it.
+   */
+  openExternal?(url: string): void;
 }
 
 /** What the Decisions view reads and does. */

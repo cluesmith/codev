@@ -9,7 +9,7 @@ import type { DecisionsFetchResult } from '../host.js';
 import { useDecisions, DECISIONS_POLL_MS } from '../hooks/useDecisions.js';
 
 /** The host's `read`, as a fake: each test says what it answers. */
-const mockRead = vi.fn<() => Promise<DecisionsFetchResult>>();
+const mockRead = vi.fn<(tick?: number) => Promise<DecisionsFetchResult>>();
 const read = () => mockRead();
 
 function makeDocument(version: string): DecisionsDocument {
@@ -121,6 +121,27 @@ describe('useDecisions — fetching and polling', () => {
     renderHook(() => useDecisions(read, true));
     await advance(DECISIONS_POLL_MS * 3);
     expect(mockRead).not.toHaveBeenCalled();
+  });
+});
+
+describe('useDecisions — the host\'s read', () => {
+  it('neither reads nor restarts polling when re-rendered with a new read function', async () => {
+    mockRead.mockResolvedValue(documentResult('v1'));
+    // A new arrow on every render, as a view passing `() => host.read()` gives it.
+    const { rerender } = renderHook(({ tick }) => useDecisions(() => mockRead(tick), true), { initialProps: { tick: 0 } });
+    await flush();
+    expect(mockRead).toHaveBeenCalledTimes(1);
+
+    // Re-render (as each keystroke in a comment box does) partway through a poll interval.
+    await advance(DECISIONS_POLL_MS / 2);
+    for (let tick = 1; tick <= 5; tick++) rerender({ tick });
+    await flush();
+    expect(mockRead).toHaveBeenCalledTimes(1);
+
+    // The interval kept its schedule, and the next poll calls the latest function.
+    await advance(DECISIONS_POLL_MS / 2);
+    expect(mockRead).toHaveBeenCalledTimes(2);
+    expect(mockRead).toHaveBeenLastCalledWith(5);
   });
 });
 

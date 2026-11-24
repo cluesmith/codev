@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { basename, dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative as relativeNative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -13,6 +13,9 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const packageSrc = join(here, '..');
 const repoRoot = join(packageSrc, '..', '..', '..');
+
+/** A repo-relative path with `/` separators on every platform. */
+const relative = (from: string, to: string) => relativeNative(from, to).split(sep).join('/');
 
 /** The moved modules, by file name. */
 const MOVED = [

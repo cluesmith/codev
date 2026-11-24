@@ -129,7 +129,10 @@ function handleLinkClick(host: DecisionsViewHost, event: MouseEvent<HTMLDivEleme
     }
     return;
   }
+  // The view decides every link (host.ts, Links): the page never follows one, and the click stops
+  // here so a webview's own link handling does not open it a second time.
   event.preventDefault();
+  event.stopPropagation();
   const href = anchor.getAttribute('href')?.trim() ?? '';
   if (EXTERNAL_LINK_RE.test(href)) host.openExternal?.(href);
 }
@@ -569,7 +572,8 @@ function DecisionsBody({ doc, ruling, handlers }: { doc: DecisionsDocument; ruli
  * state — the drafts with it — survives being hidden.
  */
 export function DecisionsView({ host, isActive }: DecisionsViewProps) {
-  const { state, applyDocument } = useDecisions(host.read, isActive);
+  // Called through the host, so a class instance keeps its `this`.
+  const { state, applyDocument } = useDecisions(() => host.read(), isActive);
   const doc = state.status === 'ready' ? state.document
     : state.status === 'error' ? state.lastDocument
       : null;

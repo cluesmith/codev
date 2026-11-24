@@ -1,11 +1,14 @@
 import type { OverviewRecentlyClosed } from '@cluesmith/codev-types';
 import { issueRef } from '../lib/issueIds.js';
+import { hostLinkClick } from '../lib/links.js';
 import { ArtifactLink } from './ArtifactLink.js';
 
 interface RecentlyClosedListProps {
   items: OverviewRecentlyClosed[];
   /** Open a spec / plan / review file. Without it, the item's artifact links are not shown. */
   onOpenArtifact?: (path: string) => void;
+  /** Open an issue or PR link. Without it, the link is a plain one the page opens itself. */
+  onOpenExternal?: (url: string) => void;
 }
 
 function timeAgo(dateStr: string): string {
@@ -24,7 +27,7 @@ const TYPE_CLASS: Record<string, string> = {
   spike: 'type-tag--spike',
 };
 
-export function RecentlyClosedList({ items, onOpenArtifact }: RecentlyClosedListProps) {
+export function RecentlyClosedList({ items, onOpenArtifact, onOpenExternal }: RecentlyClosedListProps) {
   if (items.length === 0) return null;
 
   return (
@@ -34,7 +37,7 @@ export function RecentlyClosedList({ items, onOpenArtifact }: RecentlyClosedList
         const hasArtifacts = item.prUrl || hasFiles;
         return (
           <div key={item.id} className="recently-closed-row">
-            <a className="recently-closed-row-main" href={item.url} target="_blank" rel="noopener noreferrer">
+            <a className="recently-closed-row-main" href={item.url} target="_blank" rel="noopener noreferrer" onClick={hostLinkClick(onOpenExternal, item.url)}>
               <span className="recently-closed-check">&#10003;</span>
               <span className="backlog-row-number">{issueRef(item.id)}</span>
               <span className={`backlog-type-tag ${TYPE_CLASS[item.type] ?? ''}`}>{item.type}</span>
@@ -52,7 +55,7 @@ export function RecentlyClosedList({ items, onOpenArtifact }: RecentlyClosedList
                     href={item.prUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={hostLinkClick(onOpenExternal, item.prUrl) ?? ((e) => e.stopPropagation())}
                   >
                     PR
                   </a>
