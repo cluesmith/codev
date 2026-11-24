@@ -6,10 +6,12 @@
  * Evidence for the fix: cleanup reported "1 uncommitted file(s)" for two bugfix builders that
  * had nothing uncommitted. The one file was the write guard's `.claude/hooks/` directory,
  * which `git status --porcelain` lists as a directory and the old `.builder-` regex missed.
+ * The notice also leaves out the entries spawn linked in from the main checkout, by the rule
+ * the check uses (`isSpawnMade`).
  */
 
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -102,45 +104,85 @@ describe('Spec 1951 — keep-list.ts is the one definition keep-files.ts uses', 
 });
 
 describe('Spec 1951 — afx cleanup: hasUncommittedChanges and the scaffold (main-36)', () => {
+  let base: string;
+  let main: string;
   let worktree: string;
   const git = (...args: string[]) =>
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: worktree, stdio: 'pipe' });
-  const write = (rel: string, content = `${rel}\n`): void => {
-    mkdirSync(dirname(join(worktree, rel)), { recursive: true });
-    writeFileSync(join(worktree, rel), content);
+  const write = (rel: string, content = `${rel}\n`, root = worktree): void => {
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
+    writeFileSync(join(root, rel), content);
   };
 
   beforeEach(() => {
-    worktree = realpathSync(mkdtempSync(join(tmpdir(), 'spec-1951-scaffold-')));
+    base = realpathSync(mkdtempSync(join(tmpdir(), 'spec-1951-scaffold-')));
+    main = join(base, 'main');
+    worktree = join(base, 'wt');
+    mkdirSync(main);
+    mkdirSync(worktree);
     git('init', '-q');
     write('src/tracked.ts');
     git('add', '.');
     git('commit', '-qm', 'init');
     for (const rel of ['.builder-prompt.txt', '.builder-role.md', '.builder-start.sh', GUARD_SCRIPT_RELPATH, GUARD_SETTINGS_RELPATH]) write(rel);
+    write('shared/data.json', '{"from":"main"}\n', main);
   });
 
   afterEach(() => {
-    rmSync(worktree, { recursive: true, force: true });
+    rmSync(base, { recursive: true, force: true });
   });
 
   it('only scaffold files, the write guard included: not dirty', async () => {
-    expect(await hasUncommittedChanges(worktree)).toEqual({ dirty: false, scaffoldOnly: true, details: '' });
+    expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: false, scaffoldOnly: true, details: '' });
   });
 
   it('a clean worktree: not dirty, not scaffold-only', async () => {
     rmSync(join(worktree, '.claude'), { recursive: true });
     for (const rel of ['.builder-prompt.txt', '.builder-role.md', '.builder-start.sh']) rmSync(join(worktree, rel));
-    expect(await hasUncommittedChanges(worktree)).toEqual({ dirty: false, scaffoldOnly: false, details: '' });
+    expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: false, scaffoldOnly: false, details: '' });
   });
 
   it('another file next to the write guard is dirty, counted by itself', async () => {
     write('.claude/hooks/mine.cjs');
-    expect(await hasUncommittedChanges(worktree)).toEqual({ dirty: true, scaffoldOnly: false, details: '1 uncommitted file(s)' });
+    expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: true, scaffoldOnly: false, details: '1 uncommitted file(s)' });
   });
 
   it('a modified tracked file is dirty, whatever the scaffold', async () => {
     write('src/tracked.ts', 'changed\n');
     write('notes.md');
-    expect(await hasUncommittedChanges(worktree)).toEqual({ dirty: true, scaffoldOnly: false, details: '2 uncommitted file(s)' });
+    expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: true, scaffoldOnly: false, details: '2 uncommitted file(s)' });
+  });
+
+  // The same rule `codev check worktree` uses (isSpawnMade): an entry spawn linked in from the
+  // main checkout that git does not ignore is scaffold, however spawn had to make it.
+  describe('entries spawn linked in from the main checkout', () => {
+    it.skipIf(process.platform === 'win32')('a symbolic link to the same path in the main checkout: not counted', async () => {
+      mkdirSync(join(worktree, 'shared'));
+      symlinkSync(spawnLinkTarget(main, 'shared/data.json'), join(worktree, 'shared/data.json'));
+      expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: false, scaffoldOnly: true, details: '' });
+    });
+
+    it('a hard link of the main checkout\'s file: not counted', async () => {
+      mkdirSync(join(worktree, 'shared'));
+      linkSync(join(main, 'shared/data.json'), join(worktree, 'shared/data.json'));
+      expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: false, scaffoldOnly: true, details: '' });
+    });
+
+    it('an unchanged copy: not counted', async () => {
+      write('shared/data.json', '{"from":"main"}\n');
+      expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: false, scaffoldOnly: true, details: '' });
+    });
+
+    it('a changed copy is data: counted', async () => {
+      write('shared/data.json', '{"from":"the builder"}\n');
+      expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: true, scaffoldOnly: false, details: '1 uncommitted file(s)' });
+    });
+
+    it.skipIf(process.platform === 'win32')('a link at that path pointing anywhere else is data: counted', async () => {
+      write('elsewhere.json', '{"from":"main"}\n', base);
+      mkdirSync(join(worktree, 'shared'));
+      symlinkSync(join(base, 'elsewhere.json'), join(worktree, 'shared/data.json'));
+      expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: true, scaffoldOnly: false, details: '1 uncommitted file(s)' });
+    });
   });
 });

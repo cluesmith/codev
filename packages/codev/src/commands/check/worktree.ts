@@ -21,9 +21,9 @@
  * resolved against the main checkout, so the command reads the same from any worktree.
  */
 
-import { lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { isBuilderScaffold, spawnLinkTarget } from '../../agent-farm/lib/builder-scaffold.js';
+import { comparablePath, isBuilderScaffold, isSpawnMade, linkAt, realPath } from '../../agent-farm/lib/builder-scaffold.js';
+import type { WorktreeLink } from '../../agent-farm/lib/builder-scaffold.js';
 import { isNeverKeep } from '../../agent-farm/lib/keep-list.js';
 import {
   ancestry,
@@ -75,22 +75,12 @@ function splitNul(output: string): string[] {
 // =============================================================================
 
 interface Target {
-  /** Real path. */
+  /** The path as `git worktree list` gives it. Every comparison uses real paths (`realPath`). */
   path: string;
   builderId: string | null;
   branch: string;
   /** The worktree's HEAD, which is its branch's tip. */
   tip: string;
-}
-
-/** A real path for comparison (long names, on-disk case on Windows), or null when it does not exist. */
-function realPath(p: string): string | null {
-  try {
-    const real = realpathSync.native(p);
-    return process.platform === 'win32' ? real.toLowerCase() : real;
-  } catch {
-    return null;
-  }
 }
 
 /** A builder id is a bare name; anything with a separator, or `.`/`..`, is a path. */
@@ -133,7 +123,7 @@ async function resolveTarget(runner: Runner, roots: Roots, argument: TargetArgum
   if (!isRefName(entry.branch)) throw new CheckCommandError(`${entry.path} is on branch ${JSON.stringify(entry.branch)}, which codev check cannot pass to git`);
   if (entry.head === null || !isFullSha(entry.head)) throw new CheckCommandError(`git worktree list gave no commit for ${entry.path}`);
 
-  if (builderId === null && dirname(entry.path) === join(main.path, '.builders')) builderId = basename(entry.path);
+  if (builderId === null && dirname(wanted) === realPath(join(main.path, '.builders'))) builderId = basename(entry.path);
   return { path: entry.path, builderId, branch: entry.branch, tip: entry.head };
 }
 
@@ -265,68 +255,11 @@ async function revList(runner: Runner, args: string[]): Promise<Lookup<string[]>
   return { ok: true, value: shas };
 }
 
-/** A symbolic link: its target as written, where that points, and whether anything is there. */
-interface Link {
-  target: string;
-  resolved: string;
-  missing: boolean;
-}
-
-/** The link at a worktree-relative path, or null when the path is not a link. */
-function linkAt(facts: Facts, rel: string): Lookup<Link | null> {
-  const abs = join(facts.target.path, ...rel.split('/'));
-  try {
-    if (!lstatSync(abs).isSymbolicLink()) return { ok: true, value: null };
-    const target = readlinkSync(abs);
-    const resolved = resolve(dirname(abs), target);
-    return { ok: true, value: { target, resolved, missing: realPath(resolved) === null } };
-  } catch (err) {
-    return { ok: false, reason: `could not read ${rel}: ${err instanceof Error ? err.message : String(err)}` };
-  }
-}
-
-/** A path spelled for comparison: its real path, or, when it does not exist, its parent's. */
-function comparable(p: string): string {
-  const real = realPath(p);
-  if (real !== null) return real;
-  const parent = realPath(dirname(p));
-  const spelled = parent === null ? resolve(p) : join(parent, basename(p));
-  return process.platform === 'win32' ? spelled.toLowerCase() : spelled;
-}
-
-/** Whether a link is one spawn made: it points at the same path in the main checkout. */
-function isSpawnLink(facts: Facts, rel: string, link: Link): boolean {
-  return comparable(link.resolved) === comparable(spawnLinkTarget(facts.mainRoot, rel));
-}
-
-/**
- * Whether the entry at `rel` is one spawn made, so removing it loses nothing. Spawn links each
- * entry to the same path in the main checkout: a symbolic link where it may make one, else, on
- * native Windows, a hard link of that file, else a copy (`createWorktreeLink`). A copy counts
- * only while its bytes still equal the main checkout's file: one that has changed is data.
- */
-function isSpawnMade(facts: Facts, rel: string, link: Link | null): Lookup<boolean> {
-  if (link !== null) return { ok: true, value: isSpawnLink(facts, rel, link) };
-  const source = spawnLinkTarget(facts.mainRoot, rel);
-  const abs = join(facts.target.path, ...rel.split('/'));
-  try {
-    const main = statSync(source, { bigint: true, throwIfNoEntry: false });
-    if (main === undefined || !main.isFile()) return { ok: true, value: false };
-    const mine = statSync(abs, { bigint: true });
-    if (!mine.isFile()) return { ok: true, value: false };
-    if (mine.dev === main.dev && mine.ino === main.ino) return { ok: true, value: true };
-    if (mine.size !== main.size) return { ok: true, value: false };
-    return { ok: true, value: readFileSync(abs).equals(readFileSync(source)) };
-  } catch (err) {
-    return { ok: false, reason: `could not compare ${rel} with the main checkout's: ${err instanceof Error ? err.message : String(err)}` };
-  }
-}
-
 /** The worktree-relative path a link resolves to, or null when it resolves outside the worktree or to nothing. */
-function insideTarget(facts: Facts, link: Link): string | null {
+function insideTarget(facts: Facts, link: WorktreeLink): string | null {
   const real = realPath(link.resolved);
   if (real === null) return null;
-  const rel = relative(comparable(facts.target.path), real);
+  const rel = relative(comparablePath(facts.target.path), real);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null;
   return rel.split(sep).join('/');
 }
@@ -351,9 +284,9 @@ async function checkUncommitted(facts: Facts): Promise<Check> {
     if (e.change === 'untracked') {
       isScaffold = isBuilderScaffold(e.path);
       if (!isScaffold) {
-        const link = linkAt(facts, e.path);
+        const link = linkAt(facts.target.path, e.path);
         if (!link.ok) return notRun('uncommitted', link.reason);
-        const made = isSpawnMade(facts, e.path, link.value);
+        const made = isSpawnMade(facts.mainRoot, facts.target.path, e.path, link.value);
         if (!made.ok) return notRun('uncommitted', made.reason);
         isScaffold = made.value;
       }
@@ -459,11 +392,11 @@ async function checkIgnored(facts: Facts, patterns: readonly string[]): Promise<
     const result = await gitIn(facts, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z', ...pathspecs]);
     if (result.exitCode !== 0) return notRun('ignored', failureReason('ls-files', result, facts.runner.timeoutLabel));
     matched = splitNul(result.stdout).filter((p) => !isNeverKeep(p));
-    const linked: Array<[string, Link]> = [];
+    const linked: Array<[string, WorktreeLink]> = [];
     for (const p of matched) {
-      const link = linkAt(facts, p);
+      const link = linkAt(facts.target.path, p);
       if (!link.ok) return notRun('ignored', link.reason);
-      const made = isSpawnMade(facts, p, link.value);
+      const made = isSpawnMade(facts.mainRoot, facts.target.path, p, link.value);
       if (!made.ok) return notRun('ignored', made.reason);
       if (made.value) scaffold.push(p);
       else if (link.value === null) keep.push(p);

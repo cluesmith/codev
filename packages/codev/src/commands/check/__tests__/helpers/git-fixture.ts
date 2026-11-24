@@ -45,7 +45,9 @@ export interface Fixture {
 }
 
 export function createFixture(): Fixture {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'codev-check-')));
+  // The native real path: on Windows `os.tmpdir()` may be an 8.3 short name (`RUNNER~1`) that
+  // only the native call expands, and git and the code under test print the long one.
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'codev-check-')));
   const emptyConfig = path.join(root, 'gitconfig');
   fs.writeFileSync(emptyConfig, '[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n[init]\n\tdefaultBranch = main\n');
   const env: Record<string, string> = {
@@ -99,6 +101,28 @@ export function createFixture(): Fixture {
     },
     cleanup() {
       fs.rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+/**
+ * The fixture reached by another spelling of the same directories: a directory link (a
+ * junction on Windows, which needs no privilege) made under `os.tmpdir()` as the OS spells it,
+ * not as its real path (`/var/folders/…` on macOS, an 8.3 short name on a Windows runner).
+ * `via(p)` spells a path under the fixture root through the link. `remove()` deletes the link
+ * only, never what it points at.
+ */
+export function linkedSpelling(fixture: Fixture): { via: (p: string) => string; remove: () => void } {
+  const link = path.join(os.tmpdir(), `${path.basename(fixture.root)}-via`);
+  fs.symlinkSync(fixture.root, link, 'junction');
+  return {
+    via(p) {
+      const rel = path.relative(fixture.root, p);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`${p} is not under ${fixture.root}`);
+      return path.join(link, rel);
+    },
+    remove() {
+      fs.unlinkSync(link);
     },
   };
 }

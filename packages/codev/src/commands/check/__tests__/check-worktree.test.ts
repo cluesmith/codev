@@ -19,7 +19,7 @@ import type { Check, CommandOptions, ErrorReport, Status, WorktreeReport } from 
 import type { SpawnFn } from '../runner.js';
 import { checkWorktree, parseStatus, pickPr, removability, renderWorktreeHuman } from '../worktree.js';
 import { useFakeHome } from './helpers/fake-home.js';
-import { createFixture, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
+import { createFixture, linkedSpelling, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
 import { prViewOverride, writeConfig, type PrViewOverride } from './helpers/pr-fixture.js';
 import { expectWorktreeReportShape } from './helpers/report-shape.js';
 import {
@@ -154,7 +154,7 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
     expect(report).toMatchObject({
       verdict: 'clear',
       removable: 'removable',
-      worktree: { path: fs.realpathSync(b.dir), builderId: 'spir-8', branch: b.branch, baseRef: 'main', baseTip: main },
+      worktree: { path: fs.realpathSync.native(b.dir), builderId: 'spir-8', branch: b.branch, baseRef: 'main', baseTip: main },
     });
     expect(byId(report, 'uncommitted')).toMatchObject({ status: 'ok', details: { files: [], scaffold: SCAFFOLD_SORTED } });
     expect(byId(report, 'commits')).toMatchObject({ status: 'ok', details: { total: 0, notOnBase: [], unsafe: [] } });
@@ -681,6 +681,51 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
     for (const r of [fromOther, byRelative, byAbsolute, fromItself]) expect(withoutTime(r.report)).toEqual(withoutTime(fromMain.report));
   });
 
+  // Every comparison of two spellings of one directory goes through real paths: the target
+  // lookup (resolveTarget), "is it under .builders", "is it the main checkout", and spawn's
+  // link shape (isSpawnMade). A user whose directory is spelled differently from git's sees
+  // the same verdicts.
+  it('reached through a symlinked parent directory, every way of naming the builder gives the same report as the real path', async () => {
+    configure({ cleanup: { keepIgnored: ['.env*'] } });
+    fs.mkdirSync(path.join(fx.main, '.git', 'info'), { recursive: true });
+    fs.appendFileSync(path.join(fx.main, '.git', 'info', 'exclude'), '.env*\n');
+    fs.writeFileSync(path.join(fx.main, '.env'), 'A=1\n');
+    const link = linkedSpelling(fx);
+    try {
+      const b = addBuilder(fx, 'spir-8');
+      const via = link.via;
+      expect(via(b.dir)).not.toBe(b.dir);
+      expect(fs.realpathSync.native(via(b.dir))).toBe(b.dir);
+      // Spawn links `.env` to the main checkout as its workspace root spells it: here, through the link.
+      if (isWindows) fs.linkSync(path.join(fx.main, '.env'), path.join(b.dir, '.env'));
+      else fs.symlinkSync(via(spawnLinkTarget(fx.main, '.env')), path.join(b.dir, '.env'));
+      mergeBuilder(fx, b);
+      prIs(b, 8, 'MERGED');
+
+      const real = await runReport('spir-8', { inspected: b.dir });
+      const reports = [
+        await runReport('spir-8', { cwd: via(fx.main), inspected: b.dir }),
+        await runReport(path.join('.builders', 'spir-8'), { cwd: via(fx.main), inspected: b.dir }),
+        await runReport(via(b.dir), { inspected: b.dir }),
+        await runReport('.', { cwd: via(b.dir), inspected: b.dir }),
+      ];
+
+      expect(real.exitCode).toBe(0);
+      expect(real.report.removable).toBe('removable');
+      expect(real.report.worktree).toMatchObject({ path: b.dir, builderId: 'spir-8' });
+      expect(byId(real.report, 'ignored')).toMatchObject({ status: 'ok', details: { keep: [], links: [], scaffold: ['.env'] } });
+      for (const r of reports) {
+        expect(r.exitCode).toBe(real.exitCode);
+        expect(withoutTime(r.report)).toEqual(withoutTime(real.report));
+      }
+      const mainByLink = await checkWorktree(via(fx.main), { cwd: fx.main, env: fx.env, timeoutMs: 20_000 });
+      expect(mainByLink.exitCode).toBe(2);
+      expect((mainByLink.report as ErrorReport).error.message).toBe(`${fx.main} is the main worktree, not a builder's`);
+    } finally {
+      link.remove();
+    }
+  });
+
   it('a worktree outside .builders/ is reported by its path, with no builder id', async () => {
     configure();
     const dir = path.join(fx.root, 'elsewhere');
@@ -689,8 +734,8 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
 
     const { report } = await runReport(dir, { inspected: dir });
 
-    expect(report.worktree).toMatchObject({ path: fs.realpathSync(dir), builderId: null, branch: 'feature/x' });
-    expect(renderWorktreeHuman(report)).toContain(`worktree  ${fs.realpathSync(dir)}   branch feature/x`);
+    expect(report.worktree).toMatchObject({ path: fs.realpathSync.native(dir), builderId: null, branch: 'feature/x' });
+    expect(renderWorktreeHuman(report)).toContain(`worktree  ${fs.realpathSync.native(dir)}   branch feature/x`);
   });
 
   describe('Scenario 21: exit 2', () => {

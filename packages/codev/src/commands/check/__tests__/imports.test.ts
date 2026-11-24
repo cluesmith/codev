@@ -37,19 +37,20 @@ const ALLOWED: Record<string, ImportRule> = {
     reason: "#1950's keep list as pure definitions, shared with afx cleanup --keep-ignored (audited below)",
   },
   '../../agent-farm/lib/builder-scaffold.js': {
-    names: ['isBuilderScaffold', 'spawnLinkTarget'],
-    reason: "spawn's scaffold files and the shape of its links, pure, shared with afx cleanup (audited below)",
+    names: ['comparablePath', 'isBuilderScaffold', 'isSpawnMade', 'linkAt', 'realPath'],
+    reason: "spawn's scaffold files and the entries it links in, one rule shared with afx cleanup; read-only (audited below)",
   },
 };
 
 /**
  * The modules outside this directory that the check commands import, and everything each may
- * import in turn: none of them spawns or does I/O. `scriptText` is a script a module only
- * emits as text; a `require` that appears in it is not the module's own.
+ * import in turn: none of them spawns or writes. A `node:fs` import is held to the read-only
+ * names ALLOWED lists. `scriptText` is a script a module only emits as text; a `require` that
+ * appears in it is not the module's own.
  */
 const PURE_MODULES: Record<string, { imports: readonly string[]; scriptText?: string }> = {
   '../../agent-farm/lib/keep-list.ts': { imports: [] },
-  '../../agent-farm/lib/builder-scaffold.ts': { imports: ['node:path', '../utils/worktree-write-guard.js'] },
+  '../../agent-farm/lib/builder-scaffold.ts': { imports: ['node:fs', 'node:path', '../utils/worktree-write-guard.js'] },
   '../../agent-farm/utils/worktree-write-guard.ts': { imports: ['node:path'], scriptText: WORKTREE_WRITE_GUARD_SCRIPT },
 };
 
@@ -149,6 +150,10 @@ describe('Spec 1951 — audited imports in commands/check/', () => {
     const own = dynamic.filter((d) => !rule.scriptText?.includes(d.replace(/^(\w+)\((.*)\)$/, "$1('$2')")));
     expect(own, file).toEqual([]);
     expect(imports.filter((i) => !i.typeOnly).map((i) => i.specifier)).toEqual(rule.imports);
+    for (const imp of imports.filter((i) => !i.typeOnly && i.specifier === 'node:fs')) {
+      expect(imp.names, `${file} imports node:fs as a namespace`).not.toBe('*');
+      for (const name of imp.names as string[]) expect(ALLOWED['node:fs'].names, `${file} imports ${name} from node:fs`).toContain(name);
+    }
   });
 
   it('only index.ts imports commander', () => {

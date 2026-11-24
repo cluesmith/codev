@@ -16,7 +16,7 @@ import { checkPr } from '../pr.js';
 import type { Check, CommandOptions, ErrorReport, PrReport } from '../report.js';
 import type { SpawnFn } from '../runner.js';
 import { useFakeHome } from './helpers/fake-home.js';
-import { createFixture, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
+import { createFixture, linkedSpelling, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
 import {
   commitChecksOverride,
   otherClone,
@@ -153,6 +153,25 @@ describe('Spec 1951 — check pr on real repositories', { timeout: 30_000 }, () 
     expect(byId(fromMain, 'attribution').status).toBe('attention');
     expect(withoutTime(fromWorktree)).toEqual(withoutTime(fromMain));
     expect(withoutTime(fromSubdirectory)).toEqual(withoutTime(fromMain));
+  });
+
+  it('reached through a symlinked parent directory, it reports the same as through the real path', async () => {
+    const { dir, head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'a' }]);
+    forge.answer(prView(head));
+    configure();
+    const link = linkedSpelling(fx);
+    try {
+      expect(fs.realpathSync.native(link.via(dir))).toBe(dir);
+      const fromMain = await runReport();
+      const fromWorktreeByLink = await runReport({ cwd: link.via(dir) });
+      const fromMainByLink = await runReport({ cwd: link.via(fx.main) });
+
+      expect(fromMain.verdict).toBe('clear');
+      expect(withoutTime(fromWorktreeByLink)).toEqual(withoutTime(fromMain));
+      expect(withoutTime(fromMainByLink)).toEqual(withoutTime(fromMain));
+    } finally {
+      link.remove();
+    }
   });
 
   it('Scenario 11: a head that moves during the run needs attention, naming both SHAs', async () => {
