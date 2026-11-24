@@ -1134,3 +1134,29 @@ run.
     unrevived Work tab alone in group 1 used to let group 1 close and time the arrange out.
   - Disputed, with the 1.147.0 bundle as evidence: a column beyond the last group opens every
     missing group up to it (under 9), so the fake's `groupAt()` is right.
+
+## 2026-11-24, review phase (after the context refresh)
+
+- **Architect (15:35Z):** re-run `verify arrange` on the final head before the PR gate; the PR
+  should not say "unit-tested only" for arrange fixes the harness can render. There is a standing OK
+  for runs of the same harness.
+- **New rendered checks in `verify arrange`:**
+  - the namesake refusal, and arranging once that terminal is closed;
+  - a reload with Tower down and the Cockpit showing: automatic arrange, no error toast;
+  - a restored, never-shown panel tab: *Arrange Cockpit* keeps an empty left column.
+
+  The last two began as one check. It failed three runs, because VS Code 1.147.0 reopens its
+  Welcome page on a reload even with "show on startup" unticked. I read the bundle: it comes from
+  the startup editor and from walkthroughs. Split in two, the restored-tab check closes the Welcome
+  page and then runs the command, with the Cockpit hidden so nothing arranges first.
+
+  A scenario 13 setup flake (keys typed before the editor took focus) now waits for the tab to turn
+  dirty.
+- **Screenshot privacy:**
+  - **Found:** the panel shell's prompt `host:dir user$` showed in 12 committed shots. It is
+    macOS's `/etc/bashrc` prompt; the harness HOME had no profile.
+  - **Ruled (architect, 16:09Z):** option B. `start` writes `PS1='$ '` into the harness HOME, and
+    every `verify` run ends with an OCR check (`tesseract`) that fails on such a prompt. It flagged
+    exactly those 12 of the 110 committed shots.
+  - **Replaced:** the ten `verification-increment1` actions/reconnect shots, by final-code runs.
+  - **Not done:** no history rewrite. That is the owner's call, and the architect has told them.
