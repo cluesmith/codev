@@ -17,14 +17,14 @@ plan_phases:
     status: complete
   - id: check_deploy
     title: codev check deploy
-    status: in_progress
+    status: complete
   - id: check_worktree
     title: codev check worktree
-    status: pending
+    status: in_progress
   - id: docs_guidance
     title: Architect guidance and command documentation
     status: pending
-current_plan_phase: check_deploy
+current_plan_phase: check_worktree
 gates:
   spec-approval:
     status: approved
@@ -39,7 +39,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: readonly_core
@@ -90,7 +90,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_pr_forge-iter1-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-24T02:28:16.386Z'
+updated_at: '2026-11-24T02:32:56.934Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
@@ -107,6 +107,8 @@ context_refreshes:
   - boundary: plan-phase:check_deploy
     at: '2026-11-24T01:59:50.988Z'
     acknowledged_at: '2026-11-24T02:01:11.770Z'
+  - boundary: plan-phase:check_worktree
+    at: '2026-11-24T02:32:56.934Z'
 force_advanced:
   phase: readonly_core
   iteration: 3
