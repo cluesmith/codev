@@ -3,9 +3,62 @@ import { encodeWorkspacePath } from '@cluesmith/codev-sdk/workspace';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { TerminalManager } from '../terminal-manager.js';
 import { getTowerAddress } from '../workspace-detector.js';
-import { resolveWorkspaceDevTarget } from '../commands/dev-shared.js';
-import { loadWorktreeConfig, hasRunnableDevCommand } from '../load-worktree-config.js';
+import { resolveWorkspaceDevTarget, type DevTarget } from '../commands/dev-shared.js';
+import { loadWorktreeConfig, hasRunnableDevCommand, type ResolvedWorktreeConfig } from '../load-worktree-config.js';
 import { displayArchitectName } from './architect-display.js';
+
+/**
+ * The Tower dashboard URL of this window's workspace, or `null` with no workspace. Shared by the
+ * Workspace view's *Open Web Interface* row and the Cockpit's *Open Web Interface* action.
+ */
+export function buildDashboardUrl(connectionManager: Pick<ConnectionManager, 'getWorkspacePath'>): string | null {
+  const workspacePath = connectionManager.getWorkspacePath();
+  if (!workspacePath) { return null; }
+  const { host, port } = getTowerAddress();
+  return `http://${host}:${port}/workspace/${encodeWorkspacePath(workspacePath)}/`;
+}
+
+/**
+ * Which dev control this window offers, under the single-slot model (one dev at a time across main
+ * and every builder, `dev-shared.ts`):
+ * - `stop`: this window's own target is the running dev;
+ * - `stop-other`: a dev is running for a different target;
+ * - `start`: no dev is running and a runnable `worktree.devCommand` is configured;
+ * - `none`: no dev is running and there is nothing to run.
+ *
+ * The Workspace view's dev row and the Cockpit's workspace-row menu both read it, so they never
+ * disagree.
+ */
+export type WorkspaceDevSlot =
+  | { kind: 'stop'; target: DevTarget }
+  | { kind: 'stop-other'; runningFor: string }
+  | { kind: 'start'; target: DevTarget | null; devCommand: string }
+  | { kind: 'none' };
+
+/**
+ * This window's dev slot. The target is whatever folder the window is rooted at: the main checkout
+ * → `main`, a `.builders/<id>/` worktree → that builder. It is read from the window root, not the
+ * Tower workspace path, which is the parent root in a worktree window (#1809).
+ */
+export function workspaceDevSlot(
+  connectionManager: Pick<ConnectionManager, 'getWindowRoot'>,
+  terminalManager: Pick<TerminalManager, 'listDevTerminals'>,
+  worktreeConfig: ResolvedWorktreeConfig | null,
+): WorkspaceDevSlot {
+  const windowRoot = connectionManager.getWindowRoot();
+  const devTarget = windowRoot ? resolveWorkspaceDevTarget(windowRoot) : null;
+  const allDevs = terminalManager.listDevTerminals();
+  if (devTarget && allDevs.some(d => d.builderId === devTarget.id)) { return { kind: 'stop', target: devTarget }; }
+  const otherDev = allDevs[0]; // single-slot ⇒ at most one
+  if (otherDev) { return { kind: 'stop-other', runningFor: otherDev.builderId }; }
+  // Gating on hasRunnableDevCommand (not `devCommand !== null`) also treats `"devCommand": ""` as
+  // absent, matching dev-shared.ts's runnability check.
+  const devCommand = worktreeConfig?.devCommand ?? null;
+  if (devCommand !== null && hasRunnableDevCommand(worktreeConfig)) {
+    return { kind: 'start', target: devTarget, devCommand };
+  }
+  return { kind: 'none' };
+}
 
 /**
  * Workspace-level entry points: architect terminal, Tower web dashboard,
@@ -90,7 +143,7 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
       items.push(this.buildArchitectsRoot());
     }
 
-    const webUrl = this.buildDashboardUrl();
+    const webUrl = buildDashboardUrl(this.connectionManager);
     if (webUrl) {
       const web = new vscode.TreeItem('Open Web Interface');
       web.iconPath = new vscode.ThemeIcon('globe');
@@ -108,19 +161,10 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
       items.push(this.buildSpawnRow(), this.buildShellRow());
     }
 
-    // Target is whatever folder this VSCode window is rooted at: the main
-    // checkout → `main`, a `.builders/<id>/` worktree → that builder. The
-    // label stays generic; the tooltip names the resolved target. Read from
-    // the window root, not the Tower workspace path, which is the parent
-    // root in a worktree window (#1809).
-    const windowRoot = this.connectionManager.getWindowRoot();
-    const devTarget = windowRoot ? resolveWorkspaceDevTarget(windowRoot) : null;
-
     // Resolved worktree config (Tower-merged across all 5 layers). One
     // fetch drives both the dev row's visibility (gated on
     // devCommand presence) and the Open Dev URL row(s) below.
     const worktreeConfig = await loadWorktreeConfig(this.connectionManager);
-    const devCommand = worktreeConfig?.devCommand ?? null;
     const devUrls = worktreeConfig?.devUrls ?? [];
 
     // Mutually exclusive: show Start when no dev is running anywhere, Stop
@@ -138,25 +182,22 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
     //   - no dev running + runnable devCommand → show Start
     //   - no dev running + no runnable devCommand → show nothing
     // The third case removes the "click Start, get a toast saying
-    // devCommand isn't configured" footgun. Gating on hasRunnableDevCommand
-    // (not `devCommand !== null`) also treats `"devCommand": ""` as absent,
-    // matching dev-shared.ts's runnability check.
-    const allDevs = this.terminalManager.listDevTerminals();
-    const targetDev = devTarget ? allDevs.find(d => d.builderId === devTarget.id) : undefined;
-    const otherDev = !targetDev ? allDevs[0] : undefined; // single-slot ⇒ at most one
+    // devCommand isn't configured" footgun. The decision itself is
+    // `workspaceDevSlot`, shared with the Cockpit's workspace-row menu.
+    const slot = workspaceDevSlot(this.connectionManager, this.terminalManager, worktreeConfig);
 
-    if (targetDev) {
+    if (slot.kind === 'stop') {
       // This workspace's own dev is the running one. Today's Stop row.
       const stopDev = new vscode.TreeItem('Stop Dev');
       stopDev.iconPath = new vscode.ThemeIcon('debug-stop');
-      stopDev.tooltip = `Stop the dev for this workspace (target: ${devTarget!.id})`;
+      stopDev.tooltip = `Stop the dev for this workspace (target: ${slot.target.id})`;
       stopDev.contextValue = 'workspace-dev-stop';
       stopDev.command = {
         command: 'codev.stopWorkspaceDev',
         title: 'Stop Dev',
       };
       items.push(stopDev);
-    } else if (otherDev) {
+    } else if (slot.kind === 'stop-other') {
       // A dev is running, but for a different target — surface it so the
       // user can see/stop it without leaving the Workspace view. Goes
       // through codev.stopWorktreeDev which targets the dev slot directly
@@ -164,20 +205,20 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
       // means that's exactly the one running).
       const stopDev = new vscode.TreeItem('Stop Dev');
       stopDev.iconPath = new vscode.ThemeIcon('debug-stop');
-      stopDev.tooltip = `Stop the dev (currently running for ${otherDev.builderId})`;
+      stopDev.tooltip = `Stop the dev (currently running for ${slot.runningFor})`;
       stopDev.contextValue = 'workspace-dev-stop-other';
       stopDev.command = {
         command: 'codev.stopWorktreeDev',
         title: 'Stop Dev',
       };
       items.push(stopDev);
-    } else if (hasRunnableDevCommand(worktreeConfig)) {
+    } else if (slot.kind === 'start') {
       // No dev anywhere AND a runnable devCommand is configured — Start row.
       const startDev = new vscode.TreeItem('Start Dev');
       startDev.iconPath = new vscode.ThemeIcon('play');
-      startDev.tooltip = devTarget
-        ? `Run worktree.devCommand (\`${devCommand}\`) for this workspace (target: ${devTarget.id})`
-        : `Run worktree.devCommand (\`${devCommand}\`) for this workspace`;
+      startDev.tooltip = slot.target
+        ? `Run worktree.devCommand (\`${slot.devCommand}\`) for this workspace (target: ${slot.target.id})`
+        : `Run worktree.devCommand (\`${slot.devCommand}\`) for this workspace`;
       startDev.contextValue = 'workspace-dev-start';
       startDev.command = {
         command: 'codev.runWorkspaceDev',
@@ -247,13 +288,6 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
       title: 'New Shell',
     };
     return shell;
-  }
-
-  private buildDashboardUrl(): string | null {
-    const workspacePath = this.connectionManager.getWorkspacePath();
-    if (!workspacePath) { return null; }
-    const { host, port } = getTowerAddress();
-    return `http://${host}:${port}/workspace/${encodeWorkspacePath(workspacePath)}/`;
   }
 
   /**

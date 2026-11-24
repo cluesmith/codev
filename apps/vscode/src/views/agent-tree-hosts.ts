@@ -44,6 +44,25 @@ export interface AgentTreeHost {
   readonly revealWhenNoneVisible?: boolean;
 }
 
+/** One view's agent-cycle roster, and whether that view is visible now. */
+export interface CycleRosterSource {
+  readonly visible: boolean;
+  agentCycleOrder(): AgentTarget[];
+}
+
+/**
+ * The agent-cycle roster (#1563) of this window (Spec 1963, architect ruling (b) for Phase 5):
+ * - **the Cockpit visible and the Agents view not:** the Cockpit's own order, this window's
+ *   architects each followed by their builders. Only while the Cockpit has rows that act here; a
+ *   Cockpit with none (a builder-worktree window, or before Tower lists this workspace) has no
+ *   roster of its own, and the existing order applies;
+ * - **the Agents view visible, or neither:** the Agents view's order, unchanged.
+ */
+export function agentCycleRoster(agents: CycleRosterSource, cockpit: CycleRosterSource & { acting: boolean }): AgentTarget[] {
+  if (cockpit.visible && !agents.visible && cockpit.acting) { return cockpit.agentCycleOrder(); }
+  return agents.agentCycleOrder();
+}
+
 /** The `scope` a tree row carries, or `undefined` for a row that names none. */
 function scopeOf(row: unknown): string | undefined {
   if (row === null || typeof row !== 'object') { return undefined; }

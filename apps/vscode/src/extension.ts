@@ -22,6 +22,7 @@ import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
 import { stopDev, restartDev, switchDevTarget } from './commands/dev-actions.js';
 import { openDevUrl } from './commands/open-dev-url.js';
+import { architectNameFromArg, extractBuilderId, extractIssueId, extractIssueTitle, type IssueCommandArg } from './commands/command-args.js';
 import { pasteImage } from './commands/paste-image.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
 import { runWorktreeSetup } from './commands/run-worktree-setup.js';
@@ -64,7 +65,7 @@ import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { deriveAttention, isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import { BuildersProvider, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
-import { AgentTreeHosts } from './views/agent-tree-hosts.js';
+import { AgentTreeHosts, agentCycleRoster } from './views/agent-tree-hosts.js';
 import { CockpitProvider, COCKPIT_VIEW_ID, cockpitConnectionMode, type CockpitNode } from './views/cockpit.js';
 import { OverviewRefreshGate } from './views/overview-refresh-gate.js';
 // Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
@@ -79,7 +80,7 @@ import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
 import { ContextualPanelProvider } from './contextual-panel/panel-provider.js';
 import { formatTargetName } from './views/dev-format.js';
-import { WorkspaceProvider } from './views/workspace.js';
+import { WorkspaceProvider, buildDashboardUrl } from './views/workspace.js';
 import { displayArchitectName, sortArchitectsForPicker } from './views/architect-display.js';
 import { validateArchitectName } from '@cluesmith/codev-sdk/architect-name';
 import { resolveMainArchitect, addArchitectRequestMessage, ADD_ARCHITECT_RECIPIENT } from './commands/add-architect.js';
@@ -109,64 +110,6 @@ let devChipItem: vscode.StatusBarItem | null = null;
 // welcome notification + walkthrough, fired only on the very first
 // empty-window launch of the Codev IDE.
 const IDE_FIRST_RUN_KEY = 'codev.ideFirstRunShown';
-
-/**
- * Resolve a builder id from a command argument.
- *
- * Tree-item context-menu invocations pass a BuilderTreeItem; command-palette
- * invocations pass nothing; programmatic invocations may pass a string id.
- * Anything else → undefined → the command falls back to its quick-pick.
- */
-function extractBuilderId(arg: vscode.TreeItem | string | undefined): string | undefined {
-	if (typeof arg === 'string') { return arg; }
-	if (arg instanceof BuilderTreeItem) { return arg.builderId; }
-	return undefined;
-}
-
-/**
- * Resolve an issue number from a command argument.
- *
- * Backlog row-click passes the issue id as a string via
- * `item.command.arguments`; right-click context-menu invocations pass the
- * BacklogTreeItem itself; command-palette invocations pass nothing →
- * undefined → spawnBuilder falls back to its full quick-pick flow.
- */
-/**
- * Argument shape accepted by the backlog issue commands. Beyond the sidebar's
- * `TreeItem` and the row-click `string`, the Search Backlog webview (#920)
- * passes a plain `{ issueId, issueTitle }` object so its inline "reference in
- * architect" action can carry the title (which a bare id string can't).
- */
-type IssueCommandArg =
-	| vscode.TreeItem
-	| string
-	| { issueId: string; issueTitle?: string }
-	| undefined;
-
-function extractIssueId(arg: IssueCommandArg): string | undefined {
-	if (typeof arg === 'string') { return arg; }
-	if (arg instanceof BacklogTreeItem) { return arg.issueId; }
-	if (arg && typeof arg === 'object' && 'issueId' in arg) { return arg.issueId; }
-	return undefined;
-}
-
-/**
- * Resolve an issue title from a command argument.
- *
- * Only `BacklogTreeItem` carries the title; string args (used by row-click
- * which only passes the id) and undefined return undefined so callers can
- * fall back. An empty title is normalised to undefined so the fallback
- * branch handles it identically to a missing title.
- */
-function extractIssueTitle(arg: IssueCommandArg): string | undefined {
-	if (arg instanceof BacklogTreeItem) {
-		return arg.issueTitle || undefined;
-	}
-	if (arg && typeof arg === 'object' && 'issueId' in arg) {
-		return arg.issueTitle || undefined;
-	}
-	return undefined;
-}
 
 /** Map the pure `ConfigScope` onto the VS Code `ConfigurationTarget` enum (#1070). */
 function configTargetFor(scope: ConfigScope): vscode.ConfigurationTarget {
@@ -638,6 +581,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// every other workspace navigates to its own window.
 	const cockpitProvider = new CockpitProvider({
 		connectionManager,
+		terminalManager: terminalManager!,
+		loadWorktreeConfig: () => loadWorktreeConfig(connectionManager!),
 		towerCache,
 		overviewCache,
 		diffCache: builderDiffCache,
@@ -990,6 +935,16 @@ export async function activate(context: vscode.ExtensionContext) {
 		reg('codev.tower.refresh', () => towerCache.refresh()),
 		// The Cockpit reads both caches: this window's overview and the fleet.
 		reg('codev.cockpit.refresh', () => Promise.all([overviewCache.refresh(), towerCache.refresh()])),
+		// The Workspace view's *Open Web Interface* row, as an action on this window's workspace row.
+		// The row's menu passes the row; the URL is always this window's workspace.
+		reg('codev.cockpit.openWebInterface', async () => {
+			const url = buildDashboardUrl(connectionManager!);
+			if (!url) {
+				vscode.window.showErrorMessage('Codev: This window has no Codev workspace, so there is no web interface to open.');
+				return;
+			}
+			await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url));
+		}),
 	);
 	// Populate as soon as Tower is reachable; refreshes thereafter ride the shared SSE + poll.
 	towerCache.refresh();
@@ -1027,7 +982,16 @@ export async function activate(context: vscode.ExtensionContext) {
 	};
 
 	const cycleAgentTerminal = async (direction: 1 | -1): Promise<void> => {
-		const order = buildersProvider.agentCycleOrder();
+		// The Cockpit's own order while it is the visible agent view (Spec 1963); else the Agents
+		// view's order, unchanged.
+		const order = agentCycleRoster(
+			{ visible: buildersView?.visible ?? false, agentCycleOrder: () => buildersProvider.agentCycleOrder() },
+			{
+				visible: cockpitView.visible,
+				acting: cockpitProvider.actingScope() !== undefined,
+				agentCycleOrder: () => cockpitProvider.agentCycleOrder(),
+			},
+		);
 		// Current position = the focused agent terminal (builder id, else architect name).
 		// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
 		// last-focused agent; nothing focused starts at the ends.
@@ -1198,23 +1162,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		// from Phase 4. Wired to the right-click context menu on sibling
 		// entries (`viewItem == workspace-architect-sibling`) — see
 		// package.json's menus contribution. Refuses to remove `main`.
-		regCli('codev.removeArchitect', async (arg: vscode.TreeItem | string | undefined) => {
-				let name: string | undefined;
-			if (typeof arg === 'string') {
-				name = arg;
-			} else if (arg instanceof vscode.TreeItem) {
-				// Issue 841 Gap 3: the row label is now UPPERCASE (display-only),
-				// so it no longer equals the canonical name. Resolve the raw
-				// lowercase name from `item.id` (`workspace-architect-<name>`),
-				// which the Architects tree sets for exactly this reason. Fall
-				// back to the label only if the id is somehow absent.
-				const id = arg.id;
-				if (typeof id === 'string' && id.startsWith('workspace-architect-')) {
-					name = id.slice('workspace-architect-'.length);
-				} else if (typeof arg.label === 'string') {
-					name = arg.label;
-				}
-			}
+		regCli('codev.removeArchitect', async (arg: unknown) => {
+			// A Workspace-view row, a Cockpit architect row (Spec 1963) or a name.
+			const name = architectNameFromArg(arg);
 			if (!name) {
 				vscode.window.showErrorMessage('Codev: Could not determine which architect to remove.');
 				return;
@@ -1618,8 +1568,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		// The dev status-bar chip's click target (#1049 removed the Codev Dev panel it used to focus).
 		reg('codev.dev.reveal', () =>
 			terminalManager!.revealDevTerminal()),
-		reg('codev.openDevUrl', (urlArg?: unknown) =>
-			openDevUrl(connectionManager!, typeof urlArg === 'string' ? urlArg : undefined)),
+		// A dev-URL row passes its URL; the palette and a Cockpit row's menu pass none (or the
+		// row), which `openDevUrl` resolves from the config.
+		reg('codev.openDevUrl', (urlArg?: unknown) => openDevUrl(connectionManager!, urlArg)),
 		reg('codev.pasteImage', () =>
 			pasteImage(connectionManager!, terminalManager!)),
 		reg('codev.refreshTeam', () => teamProvider.refresh()),

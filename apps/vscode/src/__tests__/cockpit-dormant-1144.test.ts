@@ -88,6 +88,7 @@ const { ConnectionManager } = await import('../connection-manager.js');
 const { OverviewCache } = await import('../views/overview-data.js');
 const { TowerFleetCache } = await import('../views/tower-cache.js');
 const { CockpitProvider, cockpitConnectionMode } = await import('../views/cockpit.js');
+const { loadWorktreeConfig } = await import('../load-worktree-config.js');
 const { OverviewRefreshGate } = await import('../views/overview-refresh-gate.js');
 const { activationPolicy, decideActivationTier } = await import('../ide-mode.js');
 
@@ -131,6 +132,9 @@ describe('a dormant window with the Cockpit shown (#1144)', () => {
     const towerCache = new TowerFleetCache(connectionManager);
     const cockpit = new CockpitProvider({
       connectionManager,
+      terminalManager: { listDevTerminals: () => [], onDidChangeDevTerminals: () => ({ dispose() {} }) },
+      // The real loader: it must make no request in a window that never connects.
+      loadWorktreeConfig: () => loadWorktreeConfig(connectionManager),
       towerCache,
       overviewCache,
       diffCache: { getDiff: async () => { throw new Error('no diff in a dormant window'); } } as never,

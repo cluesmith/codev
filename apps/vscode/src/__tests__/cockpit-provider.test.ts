@@ -16,6 +16,8 @@ import type { TowerWorkspace } from '@cluesmith/codev-sdk/tower-client';
 import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
 import type { FleetEntry } from '../views/tower-cache.js';
 import type { BuilderFileChange } from '../views/builder-diff-cache.js';
+import type { ResolvedWorktreeConfig } from '../load-worktree-config.js';
+import type { AgentTarget } from '../views/architect-tree.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -65,7 +67,7 @@ vi.mock('vscode', () => {
   };
 });
 
-const { CockpitProvider, COCKPIT_IDS, cockpitScope, cockpitConnectionMode } = await import('../views/cockpit.js');
+const { CockpitProvider, COCKPIT_IDS, cockpitScope, cockpitConnectionMode, cockpitWorkspaceContext } = await import('../views/cockpit.js');
 const { TowerProvider, OPEN_WORKSPACE_COMMAND } = await import('../views/tower.js');
 const { BuildersProvider } = await import('../views/builders.js');
 const { REMOTE_CONTEXT } = await import('../views/architect-tree.js');
@@ -174,6 +176,10 @@ interface WorldOptions {
   state?: ConnectionState;
   worktreeWindow?: boolean;
   connection?: 'auto' | 'manual' | 'none';
+  /** The folder this window is rooted at (a worktree's own path in a builder-worktree window). */
+  windowRoot?: string | null;
+  config?: ResolvedWorktreeConfig | null;
+  devs?: Array<{ builderId: string; terminalId: string }>;
 }
 
 /** The mutable state the fakes read, and the events the Cockpit subscribes to. */
@@ -183,15 +189,33 @@ interface World {
   here: OverviewData | null;
   windowPath: string | null;
   state: ConnectionState;
+  /** What the next `loadWorktreeConfig` resolves to. */
+  config: ResolvedWorktreeConfig | null;
+  /** The dev terminals running now. */
+  devs: Array<{ builderId: string; terminalId: string }>;
+  loadWorktreeConfig: ReturnType<typeof vi.fn>;
+  /** How many times the Cockpit asked its view to redraw. */
+  redraws(): number;
   fireFleet(): void;
   fireOverview(): void;
   setState(state: ConnectionState): void;
+  /** Deliver one SSE envelope of this `type`, as Tower sends it (JSON in `data`, no event name). */
+  fireSSE(type: string): void;
+  /** Deliver one SSE event with this raw `data`. */
+  fireRawSSE(data: string): void;
+  fireDevTerminals(): void;
   provider: Provider;
 }
 
 /** A Cockpit over fake caches whose state a test can change. */
 function world(opts: WorldOptions = {}): World {
-  const listeners = { fleet: [] as Array<() => void>, overview: [] as Array<() => void>, state: [] as Array<(s: string) => void> };
+  const listeners = {
+    fleet: [] as Array<() => void>,
+    overview: [] as Array<() => void>,
+    state: [] as Array<(s: string) => void>,
+    sse: [] as Array<(e: { type: string; data: string }) => void>,
+    devs: [] as Array<() => void>,
+  };
   const sub = <T>(list: T[], l: T) => { list.push(l); return { dispose() { list.splice(list.indexOf(l), 1); } }; };
   const w: World = {
     fleet: opts.fleet ?? [],
@@ -199,17 +223,32 @@ function world(opts: WorldOptions = {}): World {
     here: opts.here === undefined ? null : opts.here,
     windowPath: opts.windowPath === undefined ? HERE : opts.windowPath,
     state: opts.state ?? 'connected',
+    config: opts.config ?? null,
+    devs: opts.devs ?? [],
+    loadWorktreeConfig: vi.fn(async () => w.config),
+    redraws: () => redraws,
     fireFleet: () => listeners.fleet.forEach(l => l()),
     fireOverview: () => listeners.overview.forEach(l => l()),
     setState: (s: ConnectionState) => { w.state = s; listeners.state.forEach(l => l(s)); },
+    fireSSE: (type: string) => w.fireRawSSE(JSON.stringify({ type })),
+    fireRawSSE: (data: string) => listeners.sse.forEach(l => l({ type: '', data })),
+    fireDevTerminals: () => listeners.devs.forEach(l => l()),
     provider: undefined as unknown as Provider,
   };
+  let redraws = 0;
   w.provider = new CockpitProvider({
     connectionManager: {
       getState: () => w.state,
       getWorkspacePath: () => w.windowPath,
+      getWindowRoot: () => (opts.windowRoot === undefined ? w.windowPath : opts.windowRoot),
       onStateChange: (l: (s: string) => void) => sub(listeners.state, l),
+      onSSEEvent: (l: (e: { type: string; data: string }) => void) => sub(listeners.sse, l),
     } as never,
+    terminalManager: {
+      listDevTerminals: () => w.devs,
+      onDidChangeDevTerminals: (l: () => void) => sub(listeners.devs, l),
+    },
+    loadWorktreeConfig: w.loadWorktreeConfig as never,
     towerCache: {
       getFleet: () => w.fleet,
       isLoaded: () => w.loaded,
@@ -224,6 +263,7 @@ function world(opts: WorldOptions = {}): World {
     builderWorktreeWindow: opts.worktreeWindow ?? false,
     connection: opts.connection ?? 'auto',
   });
+  w.provider.onDidChangeTreeData(() => { redraws += 1; });
   return w;
 }
 
@@ -302,14 +342,20 @@ function stripScope(id: string | undefined, scope: string): string | undefined {
   return id.slice(scope.length);
 }
 
-/** A row's rendered shape, minus the description (the Cockpit adds attention counts there). */
+/**
+ * A row's rendered shape, minus what the Cockpit's `attention` option may change on purpose: the
+ * description (attention counts) on every row, and an architect row's icon (a waiting architect
+ * shows its wait glyph, `applyArchitectAttention`). Builder and file rows keep the Agents icon.
+ */
 function shape(row: vscode.TreeItem, scope: string) {
   const command = row.command as { command: string; arguments?: unknown[] } | undefined;
+  let icon: vscode.TreeItem['iconPath'] | '<architect attention>' = row.iconPath;
+  if (row instanceof BuilderGroupTreeItem) { icon = '<architect attention>'; }
   return {
     id: stripScope(row.id, scope),
     label: row.label,
     state: row.collapsibleState,
-    icon: row.iconPath,
+    icon,
     tooltip: row.tooltip,
     command: command?.command,
     commandArgs: command?.arguments?.map(a => (a === row ? '<self>' : a)),
@@ -431,7 +477,12 @@ describe('workspace rows', () => {
     const visible = (row: vscode.TreeItem) => ({
       label: row.label, description: row.description, icon: row.iconPath, tooltip: row.tooltip, contextValue: row.contextValue,
     });
-    expect(cockpitTop.map(visible)).toEqual(towerTop.map(visible));
+    // Every row matches, except that this window's own row carries the Cockpit's own value (Phase 5:
+    // its menu offers this window's workspace actions; the Tower view's current row has none).
+    const towerShown = towerTop.map(visible);
+    towerShown[2] = { ...towerShown[2], contextValue: 'cockpit-workspace-current' };
+    expect(towerTop[2].contextValue).toBe('tower-workspace-active-current');
+    expect(cockpitTop.map(visible)).toEqual(towerShown);
     // Disambiguated labels, as in the Tower view, and the current marker on this window's own.
     expect(cockpitTop.map(r => r.label)).toEqual(['marketmaker', 'elsewhere/codev', 'work/codev', 'zeta', 'Dormant (2)']);
     expect(cockpitTop[2].description).toBe('current');
@@ -833,5 +884,195 @@ describe('re-render signals and per-view accordion state', () => {
     const w = world({ fleet: [entry(wsRow(HERE, 'codev', true), ONE)], here: ONE });
     const stray = new BuilderTreeItem('pir-1', 'x');
     await expect(w.provider.getChildren(stray)).rejects.toThrow(/carries no workspace scope/);
+  });
+});
+
+// ── Phase 5: this window's workspace row, its held config and its signals ─────
+
+function config(overrides: Partial<ResolvedWorktreeConfig> = {}): ResolvedWorktreeConfig {
+  return { symlinks: [], postSpawn: [], devCommand: null, devUrls: [], ...overrides };
+}
+
+const WITH_DEV = config({ devCommand: 'pnpm dev' });
+const WITH_URLS = config({ devCommand: 'pnpm dev', devUrls: [{ label: 'App', url: 'http://localhost:3000' }] });
+const WORKTREE_ROOT = `${HERE}/.builders/spir-7`;
+
+/** The `contextValue` of every top-level workspace row, by label (Dormant's rows included). */
+async function workspaceContexts(p: Provider): Promise<Record<string, string | undefined>> {
+  const out: Record<string, string | undefined> = {};
+  for (const n of await towerRows(p)) {
+    const row = item(p, n);
+    if (row.id === COCKPIT_IDS.dormant) {
+      for (const d of await p.getChildren(n)) { out[labelOf(p, d)] = item(p, d).contextValue; }
+      continue;
+    }
+    out[String(row.label)] = row.contextValue;
+  }
+  return out;
+}
+
+const TWO = [entry(wsRow(HERE, 'codev', true), ONE), entry(wsRow(OTHER, 'marketmaker', true), MANY), entry(wsRow('/work/old', 'old', false), null)];
+
+describe("this window's workspace row: what the Workspace view decides for this window", () => {
+  it('encodes role, dev slot and dev URLs in its context value', () => {
+    expect(cockpitWorkspaceContext('current', 'none', false)).toBe('cockpit-workspace-current');
+    expect(cockpitWorkspaceContext('current', 'start', false)).toBe('cockpit-workspace-current-dev-start');
+    expect(cockpitWorkspaceContext('current', 'stop', true)).toBe('cockpit-workspace-current-dev-stop-devurls');
+    expect(cockpitWorkspaceContext('parent', 'stop-other', false)).toBe('cockpit-workspace-parent-dev-stop-other');
+    expect(cockpitWorkspaceContext('parent', 'none', true)).toBe('cockpit-workspace-parent-devurls');
+  });
+
+  it('current row: no dev command, a runnable one, dev URLs; other rows keep the Tower values', async () => {
+    const bare = world({ fleet: TWO, here: ONE });
+    expect(await workspaceContexts(bare.provider)).toEqual({
+      codev: 'cockpit-workspace-current', marketmaker: 'tower-workspace-active', old: 'tower-workspace-dormant',
+    });
+    const dev = world({ fleet: TWO, here: ONE, config: WITH_DEV });
+    expect((await workspaceContexts(dev.provider)).codev).toBe('cockpit-workspace-current-dev-start');
+    const urls = world({ fleet: TWO, here: ONE, config: WITH_URLS });
+    expect((await workspaceContexts(urls.provider)).codev).toBe('cockpit-workspace-current-dev-start-devurls');
+    // `"devCommand": ""` is no dev command, as in the Workspace view.
+    const blank = world({ fleet: TWO, here: ONE, config: config({ devCommand: '  ' }) });
+    expect((await workspaceContexts(blank.provider)).codev).toBe('cockpit-workspace-current');
+  });
+
+  it("current row: Stop Dev for this window's own dev, the other-target Stop Dev for anyone else's", async () => {
+    const own = world({ fleet: TWO, here: ONE, config: WITH_DEV, devs: [{ builderId: 'main', terminalId: 't1' }] });
+    expect((await workspaceContexts(own.provider)).codev).toBe('cockpit-workspace-current-dev-stop');
+    const other = world({ fleet: TWO, here: ONE, config: WITH_URLS, devs: [{ builderId: 'spir-10', terminalId: 't2' }] });
+    expect((await workspaceContexts(other.provider)).codev).toBe('cockpit-workspace-current-dev-stop-other-devurls');
+  });
+
+  it("builder-worktree window: the parent row is `parent`, with the worktree's own dev slot", async () => {
+    const start = world({ fleet: TWO, here: ONE, worktreeWindow: true, windowRoot: WORKTREE_ROOT, config: WITH_URLS });
+    expect(await workspaceContexts(start.provider)).toEqual({
+      codev: 'cockpit-workspace-parent-dev-start-devurls', marketmaker: 'tower-workspace-active', old: 'tower-workspace-dormant',
+    });
+    // The worktree's dev (target = the builder id) is this window's own.
+    const stop = world({
+      fleet: TWO, here: ONE, worktreeWindow: true, windowRoot: WORKTREE_ROOT, config: WITH_DEV,
+      devs: [{ builderId: 'spir-7', terminalId: 't3' }],
+    });
+    expect((await workspaceContexts(stop.provider)).codev).toBe('cockpit-workspace-parent-dev-stop');
+  });
+
+  it('no-workspace window: no row is this window\'s, so none carries an own value', async () => {
+    const w = world({ fleet: TWO, here: null, windowPath: null, windowRoot: null, config: WITH_URLS });
+    expect(await workspaceContexts(w.provider)).toEqual({
+      codev: 'tower-workspace-active', marketmaker: 'tower-workspace-active', old: 'tower-workspace-dormant',
+    });
+  });
+
+  it('a dormant own workspace keeps the Tower value (nothing acts on it here)', async () => {
+    const w = world({ fleet: [entry(wsRow(HERE, 'codev', false), null)], here: null, config: WITH_URLS });
+    expect(await workspaceContexts(w.provider)).toEqual({ codev: 'tower-workspace-dormant' });
+  });
+});
+
+describe('the held worktree config: fetched once, dropped only on its own signals', () => {
+  it('N fleet and overview changes fetch nothing more; one codev-config-updated fetches exactly once', async () => {
+    const w = world({ fleet: TWO, here: ONE, config: WITH_DEV });
+    await workspaceContexts(w.provider);
+    expect(w.loadWorktreeConfig).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 5; i += 1) {
+      w.fireFleet();
+      w.fireOverview();
+      await workspaceContexts(w.provider);
+    }
+    expect(w.loadWorktreeConfig).toHaveBeenCalledTimes(1);
+
+    w.config = WITH_URLS;
+    w.fireSSE('codev-config-updated');
+    await workspaceContexts(w.provider);
+    await workspaceContexts(w.provider);
+    expect(w.loadWorktreeConfig).toHaveBeenCalledTimes(2);
+    expect((await workspaceContexts(w.provider)).codev).toBe('cockpit-workspace-current-dev-start-devurls');
+  });
+
+  it('a connection-state change drops it; so does a different workspace path', async () => {
+    const w = world({ fleet: TWO, here: ONE, config: WITH_DEV });
+    await workspaceContexts(w.provider);
+    w.setState('reconnecting');
+    w.setState('connected');
+    await workspaceContexts(w.provider);
+    expect(w.loadWorktreeConfig).toHaveBeenCalledTimes(2);
+    w.windowPath = OTHER;
+    await workspaceContexts(w.provider);
+    expect(w.loadWorktreeConfig).toHaveBeenCalledTimes(3);
+  });
+
+  it('other envelopes, and malformed ones, fetch nothing', async () => {
+    const w = world({ fleet: TWO, here: ONE, config: WITH_DEV });
+    await workspaceContexts(w.provider);
+    w.fireSSE('architects-updated');
+    w.fireSSE('overview-changed');
+    w.fireRawSSE('{not json');
+    await workspaceContexts(w.provider);
+    expect(w.loadWorktreeConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('concurrent renders share one request', async () => {
+    const w = world({ fleet: TWO, here: ONE, config: WITH_DEV });
+    await Promise.all([workspaceContexts(w.provider), workspaceContexts(w.provider), workspaceContexts(w.provider)]);
+    expect(w.loadWorktreeConfig).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("re-renders on the Workspace view's own signals", () => {
+  it('redraws on a dev-terminal change and on codev-config-updated and architects-updated envelopes', () => {
+    const w = world({ fleet: TWO, here: ONE });
+    const before = w.redraws();
+    w.fireDevTerminals();
+    expect(w.redraws()).toBe(before + 1);
+    w.fireSSE('codev-config-updated');
+    expect(w.redraws()).toBe(before + 2);
+    w.fireSSE('architects-updated');
+    expect(w.redraws()).toBe(before + 3);
+  });
+
+  it('ignores any other envelope and a malformed one', () => {
+    const w = world({ fleet: TWO, here: ONE });
+    const before = w.redraws();
+    w.fireSSE('overview-changed');
+    w.fireRawSSE('not json');
+    expect(w.redraws()).toBe(before);
+  });
+
+  it("Stop Dev replaces Start Dev once a dev starts from a builder's menu", async () => {
+    const w = world({ fleet: TWO, here: ONE, config: WITH_DEV });
+    expect((await workspaceContexts(w.provider)).codev).toBe('cockpit-workspace-current-dev-start');
+    const before = w.redraws();
+    w.devs = [{ builderId: 'spir-10', terminalId: 't9' }];
+    w.fireDevTerminals();
+    expect(w.redraws()).toBe(before + 1);
+    expect((await workspaceContexts(w.provider)).codev).toBe('cockpit-workspace-current-dev-stop-other');
+    // Stopped: back to Start, with no config fetch for any of it.
+    w.devs = [];
+    w.fireDevTerminals();
+    expect((await workspaceContexts(w.provider)).codev).toBe('cockpit-workspace-current-dev-start');
+    expect(w.loadWorktreeConfig).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the agent-cycle roster in the Cockpit\'s own order', () => {
+  it("is this window's architects, each followed by its builders, never another workspace's", async () => {
+    const w = world({ fleet: [entry(wsRow(HERE, 'codev', true), MANY), entry(wsRow(OTHER, 'marketmaker', true), ONE)], here: MANY });
+    // The rendered order of this workspace's agent rows, top to bottom (Idle Architects expanded).
+    const rendered = (await subtree(w.provider, await workspaceNode(w.provider, 'codev'))).flatMap(({ node }): AgentTarget[] => {
+      if (node instanceof BuilderTreeItem) { return [{ kind: 'builder', id: node.builderId }]; }
+      if (node instanceof BuilderGroupTreeItem) { return [{ kind: 'architect', name: node.groupName }]; }
+      return [];
+    });
+    expect(rendered.map(t => (t.kind === 'architect' ? t.name : t.id))).toEqual([
+      'main', 'spir-10', 'air-11', 'ghost', 'pir-13', 'web', 'aspir-14', 'bugfix-12', 'demos', 'reviewer',
+    ]);
+    expect(w.provider.agentCycleOrder()).toEqual(rendered);
+  });
+
+  it('is empty where nothing acts here: a builder-worktree window, and before Tower lists this workspace', () => {
+    const worktree = world({ fleet: [entry(wsRow(HERE, 'codev', true), MANY)], here: MANY, worktreeWindow: true });
+    expect(worktree.provider.agentCycleOrder()).toEqual([]);
+    const unlisted = world({ fleet: [entry(wsRow(OTHER, 'marketmaker', true), MANY)], here: MANY });
+    expect(unlisted.provider.agentCycleOrder()).toEqual([]);
   });
 });

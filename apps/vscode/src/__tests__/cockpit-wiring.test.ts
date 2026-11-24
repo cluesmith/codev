@@ -64,7 +64,7 @@ vi.mock('vscode', () => {
   };
 });
 
-const { AgentTreeHosts } = await import('../views/agent-tree-hosts.js');
+const { AgentTreeHosts, agentCycleRoster } = await import('../views/agent-tree-hosts.js');
 const { OverviewRefreshGate } = await import('../views/overview-refresh-gate.js');
 const { CockpitProvider, cockpitScope } = await import('../views/cockpit.js');
 const { BuildersProvider } = await import('../views/builders.js');
@@ -136,7 +136,11 @@ function setup(opts: { worktreeWindow?: boolean; agentsVisible?: boolean; cockpi
   const agents = new BuildersProvider(overviewCache as never, DIFFS);
   const fleet = [entry(wsRow(HERE, 'codev'), DATA), entry(wsRow(OTHER, 'marketmaker'), DATA)];
   const cockpit = new CockpitProvider({
-    connectionManager: { getState: () => 'connected', getWorkspacePath: () => HERE, onStateChange: noEvent } as never,
+    connectionManager: {
+      getState: () => 'connected', getWorkspacePath: () => HERE, getWindowRoot: () => HERE, onStateChange: noEvent, onSSEEvent: noEvent,
+    } as never,
+    terminalManager: { listDevTerminals: () => [], onDidChangeDevTerminals: noEvent },
+    loadWorktreeConfig: async () => null,
     towerCache: {
       getFleet: () => fleet, isLoaded: () => true, onDidChange: noEvent,
       getOverview: (path: string) => fleet.find(e => e.workspace.path === path)?.overview ?? null,
@@ -466,5 +470,50 @@ describe('the periodic overview refresh counts the Cockpit', () => {
   it('extension.ts gates on the four list views and the Cockpit', () => {
     expect(EXT_SRC).toMatch(/new OverviewRefreshGate\(\s*\[buildersView, pullRequestsView, backlogView, recentlyClosedView, cockpitView\],/);
     expect(EXT_SRC).toMatch(/\.\.\.overviewRefreshGate\.wire\(\)/);
+  });
+});
+
+/**
+ * The agent cycle's roster (#1563) by which agent view is visible: architect ruling (b) for Spec 1963
+ * Phase 5. The Agents view's default `stage` axis holds builders only; the Cockpit's own order puts
+ * each architect before its builders, so the two rosters tell the cases apart.
+ */
+describe('agent cycle: whose order the roster follows', () => {
+  const AGENTS_ORDER = [{ kind: 'builder', id: 'pir-1' }, { kind: 'builder', id: 'pir-2' }];
+  const COCKPIT_ORDER = [{ kind: 'architect', name: 'main' }, { kind: 'builder', id: 'pir-1' }, { kind: 'builder', id: 'pir-2' }];
+
+  /** The roster `cycleAgentTerminal` reads, built as extension.ts builds it. */
+  function roster(w: ReturnType<typeof setup>) {
+    return agentCycleRoster(
+      { visible: w.agentsView.visible, agentCycleOrder: () => w.agents.agentCycleOrder() },
+      { visible: w.cockpitView.visible, acting: w.cockpit.actingScope() !== undefined, agentCycleOrder: () => w.cockpit.agentCycleOrder() },
+    );
+  }
+
+  it('the Cockpit visible and the Agents view not: the Cockpit\'s own order', async () => {
+    const w = setup({ cockpitVisible: true });
+    expect(w.agents.agentCycleOrder()).toEqual(AGENTS_ORDER);
+    expect(roster(w)).toEqual(COCKPIT_ORDER);
+  });
+
+  it('the Agents view visible (with or without the Cockpit): the Agents order, unchanged', async () => {
+    expect(roster(setup({ agentsVisible: true }))).toEqual(AGENTS_ORDER);
+    expect(roster(setup({ agentsVisible: true, cockpitVisible: true }))).toEqual(AGENTS_ORDER);
+  });
+
+  it('neither visible: the Agents order, unchanged', async () => {
+    expect(roster(setup())).toEqual(AGENTS_ORDER);
+  });
+
+  it('a Cockpit with nothing acting here (builder-worktree window) has no roster of its own', async () => {
+    const w = setup({ cockpitVisible: true, worktreeWindow: true });
+    expect(w.cockpit.agentCycleOrder()).toEqual([]);
+    expect(roster(w)).toEqual(AGENTS_ORDER);
+  });
+
+  it('extension.ts builds the roster through agentCycleRoster from both views', () => {
+    const block = EXT_SRC.split('const cycleAgentTerminal = async')[1] ?? '';
+    expect(block).toMatch(/const order = agentCycleRoster\(\s*\{ visible: buildersView\?\.visible \?\? false, agentCycleOrder: \(\) => buildersProvider\.agentCycleOrder\(\) \},/);
+    expect(block).toMatch(/visible: cockpitView\.visible,\s*acting: cockpitProvider\.actingScope\(\) !== undefined,\s*agentCycleOrder: \(\) => cockpitProvider\.agentCycleOrder\(\),/);
   });
 });

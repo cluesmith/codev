@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import type { OverviewData } from '@cluesmith/codev-types';
 import type { ConnectionManager } from '../connection-manager.js';
+import type { TerminalManager } from '../terminal-manager.js';
+import type { ResolvedWorktreeConfig } from '../load-worktree-config.js';
 import type { TowerFleetCache } from './tower-cache.js';
 import type { OverviewCache } from './overview-data.js';
 import type { BuilderDiffCache } from './builder-diff-cache.js';
@@ -10,6 +12,7 @@ import { ArchitectTreeBuilder, type AgentTarget } from './architect-tree.js';
 import { architectGrouping } from './builder-grouping.js';
 import { BuilderGroupTreeItem, BuilderTreeItem, IdleArchitectsGroupTreeItem } from './builder-tree-item.js';
 import type { ActingRows } from './agent-tree-hosts.js';
+import { workspaceDevSlot, type WorkspaceDevSlot } from './workspace.js';
 
 /** The Cockpit's tree view id (Spec 1963). */
 export const COCKPIT_VIEW_ID = 'codev.cockpit';
@@ -41,8 +44,45 @@ export type CockpitOwnNode =
 
 export type CockpitNode = CockpitOwnNode | vscode.TreeItem;
 
+/**
+ * Whose row this window's workspace row is:
+ * - `current`: this window's workspace, which acts here (Spawn Builder, New Shell, Add Architect,
+ *   Open Web Interface, dev, dev URLs);
+ * - `parent`: the parent workspace of a builder-worktree window (#1809). It carries only the
+ *   worktree-scoped actions the Workspace view shows there: Open Web Interface, dev, dev URLs.
+ */
+export type CockpitWorkspaceRole = 'current' | 'parent';
+
+/** The `contextValue` suffix of each dev slot; `none` offers no dev action. */
+const DEV_SLOT_SUFFIX: Record<WorkspaceDevSlot['kind'], string> = {
+  stop: '-dev-stop',
+  'stop-other': '-dev-stop-other',
+  start: '-dev-start',
+  none: '',
+};
+
+/** Every dev-slot kind, for callers that enumerate the context values. */
+export const DEV_SLOT_KINDS = Object.keys(DEV_SLOT_SUFFIX) as Array<WorkspaceDevSlot['kind']>;
+
+/**
+ * The `contextValue` of this window's workspace row, encoding what the Workspace view decides for
+ * this window, so the menus can offer exactly that:
+ * `cockpit-workspace-<role>`, then the dev slot (`-dev-start`, `-dev-stop`, `-dev-stop-other`, or
+ * nothing), then `-devurls` when `worktree.devUrls` is non-empty. Every other workspace row keeps
+ * the Tower view's `tower-workspace-*` value, so the Tower menus' `viewItem` patterns apply as-is.
+ */
+export function cockpitWorkspaceContext(role: CockpitWorkspaceRole, devSlot: WorkspaceDevSlot['kind'], hasDevUrls: boolean): string {
+  let value = `cockpit-workspace-${role}${DEV_SLOT_SUFFIX[devSlot]}`;
+  if (hasDevUrls) { value += '-devurls'; }
+  return value;
+}
+
 export interface CockpitProviderOptions {
-  connectionManager: Pick<ConnectionManager, 'getState' | 'getWorkspacePath' | 'onStateChange'>;
+  connectionManager: Pick<ConnectionManager, 'getState' | 'getWorkspacePath' | 'getWindowRoot' | 'onStateChange' | 'onSSEEvent'>;
+  /** The dev slot (*Start Dev* / *Stop Dev*) follows the dev terminals, as in the Workspace view. */
+  terminalManager: Pick<TerminalManager, 'listDevTerminals' | 'onDidChangeDevTerminals'>;
+  /** This window's resolved worktree config (`loadWorktreeConfig`); the Cockpit holds the result. */
+  loadWorktreeConfig: () => Promise<ResolvedWorktreeConfig | null>;
   towerCache: Pick<TowerFleetCache, 'getFleet' | 'isLoaded' | 'getOverview' | 'onDidChange'>;
   overviewCache: Pick<OverviewCache, 'getData' | 'onDidChange'>;
   diffCache: BuilderDiffCache;
@@ -81,6 +121,22 @@ interface WorkspaceTree {
   ws: LabelledEntry;
 }
 
+/** The worktree config fetched for one workspace path: the request, then its result. */
+interface HeldWorktreeConfig {
+  path: string | null;
+  request: Promise<ResolvedWorktreeConfig | null>;
+  value: ResolvedWorktreeConfig | null;
+}
+
+/** The type inside one of Tower's SSE envelopes, or `undefined` for a malformed one. */
+function envelopeType(data: string): unknown {
+  try {
+    return (JSON.parse(data) as { type?: unknown }).type;
+  } catch {
+    return undefined;
+  }
+}
+
 const ARCHITECT_AXIS = architectGrouping();
 
 /**
@@ -98,7 +154,15 @@ const ARCHITECT_AXIS = architectGrouping();
  *   `OverviewCache` as the Agents view does; every other workspace navigates, reading the overview
  *   `TowerFleetCache` already fetched for it. No request of its own.
  *
- * Re-renders on the overview, the fleet and the connection state.
+ * - **This window's workspace row** carries the Workspace view's actions for this window
+ *   (`cockpitWorkspaceContext`). Its dev slot and dev URLs come from the worktree config, which the
+ *   Cockpit fetches once and holds: it re-renders on every fleet and overview change, including
+ *   the fleet's 20 s fallback poll, so fetching per render would add requests the Workspace view
+ *   does not make. The held config is dropped on `codev-config-updated`, a connection-state change
+ *   or a workspace change, and the next render fetches it again.
+ *
+ * Re-renders on the overview, the fleet and the connection state, and on the Workspace view's own
+ * signals: the dev terminals, `codev-config-updated` and `architects-updated`.
  */
 export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, ActingRows {
   private readonly changeEmitter = new vscode.EventEmitter<CockpitNode | undefined | void>();
@@ -108,16 +172,31 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
   private readonly trees = new Map<string, WorkspaceTree>();
   /** True once a connection attempt has failed (or a connection dropped). */
   private attemptFailed: boolean;
+  /** See `resolveWorktreeConfig`; `undefined` until fetched, and again once dropped. */
+  private worktreeConfig: HeldWorktreeConfig | undefined;
 
   constructor(private readonly options: CockpitProviderOptions) {
-    const { connectionManager, towerCache, overviewCache } = options;
+    const { connectionManager, terminalManager, towerCache, overviewCache } = options;
     this.attemptFailed = connectionManager.getState() === 'reconnecting';
     this.subscriptions.push(
       overviewCache.onDidChange(() => this.refresh()),
       towerCache.onDidChange(() => this.refresh()),
       connectionManager.onStateChange((state) => {
         if (state === 'disconnected' || state === 'reconnecting') { this.attemptFailed = true; }
+        this.worktreeConfig = undefined;
         this.refresh();
+      }),
+      // Start / Stop Dev stays honest across every start, stop and cleanup path.
+      terminalManager.onDidChangeDevTerminals(() => this.refresh()),
+      // Tower sends each event as a JSON envelope with no SSE `event:` name, so the type is inside.
+      connectionManager.onSSEEvent(({ data }) => {
+        const type = envelopeType(data);
+        if (type === 'codev-config-updated') {
+          this.worktreeConfig = undefined;
+          this.refresh();
+        } else if (type === 'architects-updated') {
+          this.refresh();
+        }
       }),
     );
   }
@@ -155,6 +234,8 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
       case 'workspace': {
         const item = workspaceRow(node.ws, this.workspaceChildren(node.ws));
         item.id = COCKPIT_IDS.workspace(node.ws.entry.workspace.path);
+        const role = this.workspaceRole(node.ws);
+        if (role) { item.contextValue = this.ownWorkspaceContext(role); }
         return item;
       }
       case 'dormant-group': {
@@ -180,6 +261,7 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
     }
     switch (node.kind) {
       case 'tower-root':
+        await this.resolveWorktreeConfig();
         return this.towerChildren();
       case 'workspace':
         return this.workspaceNodeChildren(node.ws);
@@ -246,6 +328,15 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
   }
 
   /**
+   * The agent-cycle roster in the Cockpit's own order: this window's architects, each followed by
+   * its builders, top to bottom (#1563). Only this window's workspace: other workspaces' rows
+   * navigate and never enter the cycle. Empty while nothing acts here.
+   */
+  agentCycleOrder(): AgentTarget[] {
+    return this.actTree()?.agentCycleOrder() ?? [];
+  }
+
+  /**
    * The acting row builder of this window's workspace, or `undefined` when nothing acts here: Tower
    * has not listed this workspace (yet), it is dormant, or the window is a builder-worktree or
    * no-workspace window.
@@ -254,6 +345,40 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
     const ws = this.ordered().active.find(entry => this.actsHere(entry));
     if (!ws) { return undefined; }
     return this.treeFor(ws);
+  }
+
+  // ── This window's workspace row ───────────────────────────────────────────
+
+  /**
+   * `ws`'s role when it is this window's workspace row: `current` when it acts here, `parent` in a
+   * builder-worktree window. `undefined` for every other row, which keeps the Tower view's value.
+   */
+  private workspaceRole(ws: LabelledEntry): CockpitWorkspaceRole | undefined {
+    if (!ws.isCurrent || !ws.entry.workspace.active) { return undefined; }
+    if (this.options.builderWorktreeWindow) { return 'parent'; }
+    return 'current';
+  }
+
+  private ownWorkspaceContext(role: CockpitWorkspaceRole): string {
+    const config = this.worktreeConfig?.value ?? null;
+    const slot = workspaceDevSlot(this.options.connectionManager, this.options.terminalManager, config);
+    const hasDevUrls = (config?.devUrls ?? []).length > 0;
+    return cockpitWorkspaceContext(role, slot.kind, hasDevUrls);
+  }
+
+  /**
+   * Fetch this window's worktree config unless it is already held for this workspace path. The
+   * rows are built synchronously in `getTreeItem`, so the root's async `getChildren` resolves the
+   * config first. Concurrent renders share the one request.
+   */
+  private async resolveWorktreeConfig(): Promise<void> {
+    const path = this.options.connectionManager.getWorkspacePath();
+    let held = this.worktreeConfig;
+    if (!held || held.path !== path) {
+      held = { path, request: this.options.loadWorktreeConfig(), value: null };
+      this.worktreeConfig = held;
+    }
+    held.value = await held.request;
   }
 
   // ── Levels ────────────────────────────────────────────────────────────────
@@ -401,7 +526,12 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
     return { ...targetOf(entry.ws), isCurrent: false };
   }
 
-  /** Drop the row builders of workspaces no longer active in the fleet. */
+  /**
+   * Drop the row builders of workspaces no longer active in the fleet. Runs only when the Tower
+   * root's children are listed, so while the root is collapsed a departed workspace's builder
+   * lingers until the next expand. That is bounded (one builder per workspace ever listed) and
+   * harmless: nothing renders or routes to it, since no row of that workspace is shown.
+   */
   private pruneTrees(active: readonly LabelledEntry[]): void {
     const live = new Set(active.map(ws => cockpitScope(ws.entry.workspace.path)));
     for (const scope of this.trees.keys()) {
