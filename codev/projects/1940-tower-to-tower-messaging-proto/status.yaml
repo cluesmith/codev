@@ -37,8 +37,9 @@ gates:
     requested_at: '2026-11-23T19:12:49.323Z'
     approved_at: '2026-11-23T21:21:22.141Z'
   pr:
-    status: pending
+    status: approved
     requested_at: '2026-11-24T18:36:35.026Z'
+    approved_at: '2026-11-24T21:17:41.864Z'
   verify-approval:
     status: pending
 iteration: 1
@@ -105,7 +106,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1940/codev/projects/1940-tower-to-tower-messaging-proto/1940-phase_3-iter2-claude.txt
 started_at: '2026-11-21T01:30:58.126Z'
-updated_at: '2026-11-24T18:36:35.026Z'
+updated_at: '2026-11-24T21:17:41.867Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T18:57:14.334Z'
@@ -133,4 +134,4 @@ pr_history:
     pr_number: 1957
     branch: builder/spir-1940
     created_at: '2026-11-23T22:23:02.428Z'
-pr_ready_for_human: true
+pr_ready_for_human: false
