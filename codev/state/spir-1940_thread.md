@@ -680,3 +680,23 @@ CLEARED {"ok":true,"result":{"explicitName":null,"addressName":null,"unaddressab
 - Order from here: push, GitHub green on the new head, tell the architect; they check the run;
   then the one-time skip for BOTH `porch done` calls of this round (phase 3 already had its local
   failure).
+
+## 2026-11-24 — phase 3, review iteration 2: codex REQUEST_CHANGES, claude APPROVE
+
+- Both `porch done` calls of iteration 1's round ran with the one-time tests skip, on the
+  architect's word after they checked GitHub's run on `18a9c86a8` (config restored each time).
+- **Codex**: the naming route refuses a Windows UNC workspace path. True, and not this phase's:
+  the path check is the same line the four existing `/api/workspaces/:path/…` routes use,
+  including activate, so a UNC workspace cannot be started through Tower today either.
+  **Architect's decision: rebut**, name it in the review as a known boundary, cite follow-up issue
+  #1960 ("tower: workspace routes refuse Windows UNC workspace paths; the path check is copied
+  inline in every route"). Do not refactor the shared check here.
+- **Claude**, two notes fixed on the architect's instruction: the naming module told workspaces
+  apart by the text of a path (now one list keyed by `workspaceKey`; a lookup returns a running
+  workspace in the spelling it runs under); `findWorkspaceByAddressName` trusted its caller to
+  lower-case (now does it itself). Two left on purpose, **to list in the review**: no `PUT` in
+  `Access-Control-Allow-Methods` (no browser caller), `quoted()` duplicated across the package
+  boundary.
+- Checked: the four pinning tests fail against the previous module; 39 codev test files (1184
+  tests), type-check and build pass. Next: push, GitHub green, tell the architect before
+  `porch done`.
