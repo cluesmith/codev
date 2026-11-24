@@ -47,7 +47,9 @@ describe('resolveWorkspaceFile (real files and symlinks)', () => {
   let outside: string;
 
   beforeAll(() => {
-    base = realpathSync(mkdtempSync(path.join(tmpdir(), 'codev-wv-security-')));
+    // The native realpath, which `fs.promises.realpath` in the code under test is: on Windows the
+    // JS one keeps an 8.3 short name (C:\Users\RUNNER~1\…) where the native one gives the long name.
+    base = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'codev-wv-security-')));
     root = path.join(base, 'ws');
     outside = path.join(base, 'outside');
     mkdirSync(path.join(root, 'codev', 'specs'), { recursive: true });
@@ -79,12 +81,15 @@ describe('resolveWorkspaceFile (real files and symlinks)', () => {
 
   it.each([
     ['a .. escape', '../outside/secret.md'],
-    ['an absolute path outside', '/etc/hosts'],
+    // A file that exists on every platform: one that does not is not-found, as on POSIX.
+    ['an absolute path outside', () => path.join(outside, 'secret.md')],
     ['a prefix sibling', '../ws-other/a.md'],
     ['a file symlink leading outside', 'escape-link.md'],
     ['a directory symlink leading outside', 'escape-dir/secret.md'],
-  ])('refuses %s', async (_name, requested) => {
-    expect(await resolveWorkspaceFile(root, requested)).toEqual({ ok: false, reason: 'outside-workspace' });
+  ] as Array<[string, string | (() => string)]>)('refuses %s', async (_name, requested) => {
+    // A function for a path built from the fixture, which does not exist when the table is read.
+    const target = typeof requested === 'function' ? requested() : requested;
+    expect(await resolveWorkspaceFile(root, target)).toEqual({ ok: false, reason: 'outside-workspace' });
   });
 
   it('says not-found for a path that does not exist, and for one with a NUL byte', async () => {

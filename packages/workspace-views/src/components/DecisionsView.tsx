@@ -191,7 +191,8 @@ function showNotLoaded(image: HTMLImageElement, source: string, reason: string) 
 /**
  * The shared markdown renderer, with the view's rules applied to what it renders. An http(s) link
  * opens in a new tab and any other link loses its `href`, so the rule also holds for a
- * middle-click, the context menu or the keyboard. An http(s) image loads as the browser would; any
+ * middle-click, the context menu or the keyboard. An http(s) image loads as the browser would, and
+ * one it refuses becomes a note; any
  * other image source is a workspace path the host's `image` loads and the view shows as an object
  * URL, revoked when the markdown changes or leaves, or it is a note saying the image was not loaded.
  */
@@ -215,6 +216,14 @@ function DecisionsMarkdown({ source }: { source: string }) {
     }
     const controller = new AbortController();
     const objectUrls: string[] = [];
+    // An http(s) image the browser refuses (mixed content, a 401 or 404, not an image) is a note,
+    // not a broken image. Its error is queued as a task, so a listener added here, in the commit
+    // that inserted it, does not miss it.
+    for (const image of root.querySelectorAll<HTMLImageElement>(`img:not([${PARKED_SRC}])`)) {
+      const src = image.getAttribute('src') ?? '';
+      if (!EXTERNAL_LINK_RE.test(src)) continue;
+      image.addEventListener('error', () => showNotLoaded(image, src, 'The browser could not load this image from its address.'), { once: true, signal: controller.signal });
+    }
     for (const image of root.querySelectorAll<HTMLImageElement>(`img[${PARKED_SRC}]`)) {
       const written = image.getAttribute(PARKED_SRC) ?? '';
       const path = workspaceImagePath(written);

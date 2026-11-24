@@ -869,3 +869,69 @@ code as serve-web.
 
 **Adjacent:** `.vscodeignore` now drops `**/tsconfig.*.json`. The vsix had been shipping
 `tsconfig.webview.json` since the markdown preview added it.
+
+### Phase 7: review, iteration 1 (2026-11-24)
+
+`porch done` passed (build 17.6 s, tests 49.6 s, no skip). The 2-way review followed: Codex
+REQUEST_CHANGES and Claude APPROVE, each with points that held up.
+
+**Codex: a refused http(s) image was a broken image, not "Image not loaded".**
+- The spec requires the note for an http(s) image the browser refuses (mixed content, a Tower
+  URL's 401). The shared view only handled failures of host-loaded images, and my harness only
+  tested Tower's refusal.
+- **Fix (in the shared package):** an error listener on every direct http(s) image, removed on
+  cleanup through the effect's abort signal. Package tests cover the refusal, and that a late
+  error on a detached image does nothing; that test fails without the signal.
+- The harness now adds a remote image the route answers 404 for, and checks that its note is
+  rendered.
+- **This changes the dashboard too:** a refused remote image there now shows the note instead of
+  a broken image, as the spec describes. No fixture of Phase 6's dashboard snapshot has a remote
+  image, so that comparison is unaffected.
+
+**Claude: the option words looked faint in Light High Contrast. They were invisible.**
+- **Cause:** VS Code's webview stylesheet colours every `code` with its preformat foreground.
+  `.decisions-option-word` is a `code` that paints its own background but set no colour, so in
+  HC Light it drew near-white text on a light background.
+- **Fix (in the package):** that rule sets `color: inherit`. It is a no-op in a browser, so the
+  dashboard is unchanged.
+- **Wider check:** following Claude's "coverage is not contrast", the theme check now measures
+  every visible text element in the panel (62) in all four themes, against its composited
+  background. It fails below 3:1, requires 4.5:1 for the item id, Submit and the option word,
+  and lists every text under 4.5:1 in the evidence. That found three more mappings of mine that
+  were wrong for text:
+  - `fg-muted` → `disabledForeground`, a disabled-control colour that Light Modern draws at half
+    alpha: section labels measured 2.1:1. It is now `input.placeholderForeground`, VS Code's
+    readable muted grey.
+  - The error colour: VS Code's `errorForeground` is `#F85149` in Light Modern, and the refusal
+    measured 2.8:1.
+  - The waiting colour: `charts.yellow`, "Image not loaded" measured 2.9:1.
+
+  The error and waiting colours now take `list.errorForeground` / `list.warningForeground`,
+  VS Code's colours for text. High-contrast themes leave those unset, so the fallbacks apply.
+  The tints follow the same colours.
+- **Result:** every text is at least 4.1:1 in all four themes. Under 4.5:1, only in Light
+  Modern: the section labels at 4.3 (VS Code's own placeholder grey) and the Recommended badge
+  at 4.1 (`charts.green`), left as they are and recorded.
+- **Not yet measured:** the Work view's status colours (implementing orange, the tags). That
+  panel is Phase 8, whose rendered check should run the same scan.
+
+**Claude's minor notes:**
+- The ruling guard's `word`/`comment` are unbounded on purpose: Tower caps the body and refuses
+  an over-long comment with a reason the panel shows, whereas a host cap would drop it silently.
+  This is now said in the guard's comment.
+- The "leak" on an aborted image is not one: once the resolver leaves `pending`, nothing
+  references the inner promise and it is collected. A comment now says so.
+- The Windows run: dispatched and linked in the PR (run 45394199925).
+
+**Final harness run (cycle 7): 15/15.** Evidence in `verification-phase7/` is replaced by that
+run.
+
+**Windows run on `36f7c4acd`:** the new path-containment step failed 4 of 39, all on the test side.
+- **Three:** the test canonicalized its temp dir with the JS `realpathSync`, which on Windows keeps
+  the runner's 8.3 short name (`RUNNER~1`). The code uses `fs.promises.realpath`, the native one,
+  which gives the long name. The test now uses `realpathSync.native`.
+- **One:** the "absolute path outside" case used `/etc/hosts`, which does not exist on Windows, so
+  `not-found` was correct. It now names the fixture's own outside file.
+- The code under test is unchanged, and `resolveWorkspaceFile` has no production caller yet.
+- The other suites, CLI tests, probes and install verification passed. The run is re-dispatched
+  after this commit.

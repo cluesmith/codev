@@ -845,6 +845,9 @@ a.attention-row {
 
 .decisions-option-word {
   font-family: var(--codev-wv-font-mono, monospace);
+  /* It paints its own background, so it owns its text colour too: a host may colour every `code`
+     for that host's own code background (VS Code's webview does), which this background is not. */
+  color: inherit;
   background: var(--codev-wv-bg-tertiary, #2a2a2a);
   padding: 0 4px;
   border-radius: 3px;

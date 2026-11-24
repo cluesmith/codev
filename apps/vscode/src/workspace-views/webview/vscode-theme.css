@@ -14,7 +14,9 @@
   --codev-wv-bg-hover: var(--vscode-list-hoverBackground);
   --codev-wv-fg: var(--vscode-foreground);
   --codev-wv-fg-secondary: var(--vscode-descriptionForeground);
-  --codev-wv-fg-muted: var(--vscode-disabledForeground);
+  /* Muted text is still read (section labels, counts, hints): VS Code's readable muted grey, not
+     its disabled-control colour, which a light theme draws at half alpha (2.1:1, found rendered). */
+  --codev-wv-fg-muted: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
   --codev-wv-border: var(--vscode-panel-border, var(--vscode-contrastBorder));
   /*
    * The accent is text and borders on the page (item ids, links, selected options) as well as the
@@ -33,14 +35,19 @@
   --codev-wv-font-family: var(--vscode-font-family);
   --codev-wv-font-mono: var(--vscode-editor-font-family);
 
-  /* Status */
+  /*
+   * Status. Waiting and error are text as well as marks (a refusal, "Image not loaded"), so they
+   * take VS Code's list colours, which are made to be read as text. Light themes' chart yellow and
+   * error foreground measured 2.9:1 and 2.8:1 rendered. High-contrast themes leave the list
+   * colours unset, so the fallbacks apply there.
+   */
   --codev-wv-status-active: var(--vscode-charts-green);
-  --codev-wv-status-waiting: var(--vscode-charts-yellow);
-  --codev-wv-status-error: var(--vscode-errorForeground);
+  --codev-wv-status-waiting: var(--vscode-list-warningForeground, var(--vscode-charts-yellow));
+  --codev-wv-status-error: var(--vscode-list-errorForeground, var(--vscode-errorForeground));
   --codev-wv-status-implementing: var(--vscode-charts-orange);
-  --codev-wv-status-waiting-tint: color-mix(in srgb, var(--vscode-charts-yellow) 10%, transparent);
-  --codev-wv-status-error-tint: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent);
-  --codev-wv-tag-bug-bg: color-mix(in srgb, var(--vscode-errorForeground) 15%, transparent);
+  --codev-wv-status-waiting-tint: color-mix(in srgb, var(--codev-wv-status-waiting) 10%, transparent);
+  --codev-wv-status-error-tint: color-mix(in srgb, var(--codev-wv-status-error) 10%, transparent);
+  --codev-wv-tag-bug-bg: color-mix(in srgb, var(--codev-wv-status-error) 15%, transparent);
   --codev-wv-tag-project: var(--vscode-charts-purple);
   --codev-wv-tag-project-bg: color-mix(in srgb, var(--vscode-charts-purple) 12%, transparent);
   --codev-wv-tag-spike: var(--vscode-charts-blue);

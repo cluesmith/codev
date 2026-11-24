@@ -1532,19 +1532,23 @@ SCRIPTS.dashboard = async (R, context, page) => {
 
 const DECISIONS_PATH = 'codev/state/pending-decisions.md';
 const REMOTE_IMAGE = 'https://example.com/fixture/remote-board.svg';
+/** A remote image the browser fails to load: the route answers 404. */
+const REMOTE_GONE = 'https://example.com/fixture/gone-board.svg';
 const REMOTE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80" viewBox="0 0 200 80"><rect width="200" height="80" fill="#38a169"/><rect x="16" y="32" width="168" height="16" fill="#f0fff4"/></svg>';
 const OUTSIDE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#e53e3e"/></svg>';
 
 /**
- * `main-2`, added to alpha's file by this script: an https image, which the webview loads itself,
- * and an image outside the workspace, which Tower refuses. It is also the item the stale-fingerprint
- * check edits under the panel.
+ * `main-2`, added to alpha's file by this script: an https image, which the webview loads itself;
+ * an https image the browser fails to load (404); and an image outside the workspace, which Tower
+ * refuses. It is also the item the stale-fingerprint check edits under the panel.
  */
 const MAIN_2 = `### main-2 · 2026-11-21 10:00 UTC · Which board image should the fixture keep?
 
 - **Context:** an image from the web, and one from outside the workspace.
 
 ![Remote board](${REMOTE_IMAGE})
+
+![Gone board](${REMOTE_GONE})
 
 ![Outside image](../../../outside.svg)
 
@@ -1605,7 +1609,9 @@ SCRIPTS.decisions = async (R, context, page) => {
   // Item links and the remote image point at example.com: answer them here, so nothing leaves the machine.
   await context.route(/^https?:\/\/example\.com\//, (route) => (route.request().url() === REMOTE_IMAGE
     ? route.fulfill({ status: 200, contentType: 'image/svg+xml', body: REMOTE_SVG })
-    : route.fulfill({ status: 200, contentType: 'text/html', body: '<p>fixture link</p>' })));
+    : route.request().url() === REMOTE_GONE
+      ? route.fulfill({ status: 404, contentType: 'text/plain', body: 'not found' })
+      : route.fulfill({ status: 200, contentType: 'text/html', body: '<p>fixture link</p>' })));
 
   // Every request the browser makes, with the frame that made it, for scenario 22.
   const requests = [];
@@ -1673,20 +1679,22 @@ SCRIPTS.decisions = async (R, context, page) => {
     return { detail: `tab "${await activeEditorTab(page)}"; ${count}; main-1 offers ${words.join(' / ')}; one tab after a second click`, shots: [await R.shot(page, 'panel')] };
   });
 
-  await R.check('scenario 15: a workspace image (bytes through the host), an https image, and a refused image', async () => {
+  await R.check('scenario 15: a workspace image (bytes through the host), an https image, and two not loaded (the browser\'s 404, Tower\'s refusal)', async () => {
     const local = decisionCard(frame, 'main-1').locator('img[alt="Compact board"]');
     const remote = decisionCard(frame, 'main-2').locator('img[alt="Remote board"]');
     const loaded = (img) => img.evaluate((el) => el.complete && el.naturalWidth > 0).catch(() => false);
     await waitFor('the workspace image to render from an object URL', async () => (await local.getAttribute('src'))?.startsWith('blob:') && loaded(local), 20_000);
     await waitFor('the https image to render', async () => (await remote.getAttribute('src')) === REMOTE_IMAGE && loaded(remote), 20_000);
     const missing = decisionCard(frame, 'main-2').locator('.decisions-image-missing');
-    await waitFor('the refused image\'s note', async () => (await missing.count()) === 1, 20_000);
-    const note = (await missing.textContent()).replace(/\s+/g, ' ').trim();
-    const reason = await missing.getAttribute('title');
-    if (!/Image not loaded/.test(note) || !/outside\.svg/.test(note)) throw new Error(`the note reads "${note}"`);
-    if (!/outside/i.test(reason ?? '')) throw new Error(`the reason is "${reason}"`);
+    await waitFor('two not-loaded notes', async () => (await missing.count()) === 2, 20_000);
+    const notes = await missing.evaluateAll((els) => els.map((el) => ({ text: el.textContent.replace(/\s+/g, ' ').trim(), reason: el.title })));
+    const gone = notes.find((n) => n.text.includes(REMOTE_GONE));
+    const outside = notes.find((n) => /outside\.svg/.test(n.text));
+    if (!gone || !/^Image not loaded Gone board/.test(gone.text)) throw new Error(`no note for the 404 image: ${JSON.stringify(notes)}`);
+    if (!outside || !/^Image not loaded/.test(outside.text) || !/outside/i.test(outside.reason)) throw new Error(`no note for the refused image: ${JSON.stringify(notes)}`);
+    if (await decisionCard(frame, 'main-2').locator('img[alt="Gone board"]').count()) throw new Error('the 404 image is still a (broken) img');
     const size = await local.evaluate((el) => `${el.naturalWidth}×${el.naturalHeight}`);
-    return { detail: `workspace SVG ${size} from blob:; https image loaded; refused: "${note}" (${reason})`, shots: [await R.shot(page, 'images')] };
+    return { detail: `workspace SVG ${size} from blob:; https image loaded; 404: "${gone.text}" (${gone.reason}); refused: "${outside.text}" (${outside.reason})`, shots: [await R.shot(page, 'images')] };
   });
 
   await R.check('scenario 15: the full-size view opens over the panel; Escape and Close each close it', async () => {
@@ -1794,16 +1802,45 @@ SCRIPTS.decisions = async (R, context, page) => {
       seen[theme] = await frame.evaluate(() => {
         const root = getComputedStyle(document.documentElement);
         const card = document.querySelector('.decisions-card');
-        // WCAG contrast of two computed rgb() colours.
-        const lum = (c) => {
-          const [r, g, b] = c.match(/[\d.]+/g).slice(0, 3).map(Number).map((v) => v / 255)
-            .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        // WCAG contrast of computed colours: rgb()/rgba(), or color(srgb …) from a color-mix().
+        const parse = (c) => {
+          const n = (c.match(/-?[\d.]+(?:e-?\d+)?/g) ?? []).map(Number);
+          const k = c.startsWith('color(') ? 255 : 1;
+          return c === 'transparent' ? { r: 0, g: 0, b: 0, a: 0 } : { r: n[0] * k, g: n[1] * k, b: n[2] * k, a: n.length > 3 ? n[3] : 1 };
         };
-        const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return Math.round(((x + 0.05) / (y + 0.05)) * 10) / 10; };
+        const over = (top, under) => ({ r: top.a * top.r + (1 - top.a) * under.r, g: top.a * top.g + (1 - top.a) * under.g, b: top.a * top.b + (1 - top.a) * under.b, a: 1 });
+        // What an element's text is drawn on: its own and its ancestors' backgrounds, composited.
+        const backdrop = (el) => {
+          const layers = [];
+          for (let e = el; e; e = e.parentElement) {
+            const bg = parse(getComputedStyle(e).backgroundColor);
+            if (bg.a > 0) layers.push(bg);
+            if (bg.a >= 1) break;
+          }
+          let base = layers.at(-1)?.a >= 1 ? layers.pop() : { r: 255, g: 255, b: 255, a: 1 };
+          for (const layer of layers.reverse()) base = over(layer, base);
+          return base;
+        };
+        const lum = ({ r, g, b }) => {
+          const [R, G, B] = [r, g, b].map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+          return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+        };
+        const ratio = (fg, bg) => { const [x, y] = [lum(fg), lum(bg)].sort((m, n) => n - m); return Math.round(((x + 0.05) / (y + 0.05)) * 10) / 10; };
+        const textContrast = (el) => { const bg = backdrop(el); return ratio(over(parse(getComputedStyle(el).color), bg), bg); };
+        const contrast = (a, b) => ratio(parse(a), parse(b));
         const page = getComputedStyle(document.body).backgroundColor;
         const id = document.querySelector('.decisions-item-id');
         const submit = [...document.querySelectorAll('.decisions-submit-btn')].find((b) => !b.disabled);
+        const word = document.querySelector('.decisions-option-word');
+        const badge = document.querySelector('.decisions-badge');
+        // Every rendered element in the panel with text of its own, on what it is drawn on.
+        const texts = [...document.querySelectorAll('.decisions-view *')]
+          .filter((el) => el.getClientRects().length && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()))
+          .map((el) => {
+            const kind = `${el.tagName.toLowerCase()}${[...el.classList].map((c) => `.${c}`).join('')}`;
+            return { kind, what: `${kind} "${el.textContent.trim().slice(0, 24)}"`, contrast: textContrast(el) };
+          })
+          .sort((a, b) => a.contrast - b.contrast);
         return {
           marker: window.__codevMarker ?? null,
           body: page,
@@ -1814,6 +1851,12 @@ SCRIPTS.decisions = async (R, context, page) => {
           // Text drawn in the accent on the page, and on an accent-filled button.
           idContrast: id ? contrast(getComputedStyle(id).color, page) : null,
           submitContrast: submit ? contrast(getComputedStyle(submit).color, getComputedStyle(submit).backgroundColor) : null,
+          wordContrast: word ? textContrast(word) : null,
+          badgeContrast: badge ? textContrast(badge) : null,
+          scanned: texts.length,
+          lowest: texts.slice(0, 3).map(({ what, contrast: c }) => ({ what, contrast: c })),
+          // Every kind of text under 4.5:1, at its lowest: shown in the evidence, not only failed on.
+          under45: [...new Map(texts.filter((t) => t.contrast < 4.5).reverse().map((t) => [t.kind, t.contrast])).entries()].map(([k, c]) => `${c} ${k}`),
         };
       });
       shots.push(await R.shot(page, `theme-${cls}`));
@@ -1825,13 +1868,18 @@ SCRIPTS.decisions = async (R, context, page) => {
       if (!s.accent) problems.push(`${theme}: --codev-wv-accent resolves to nothing`);
       if (!(s.idContrast >= 4.5)) problems.push(`${theme}: an item id's contrast is ${s.idContrast}`);
       if (!(s.submitContrast >= 4.5)) problems.push(`${theme}: Submit's text contrast is ${s.submitContrast}`);
+      if (!(s.wordContrast >= 4.5)) problems.push(`${theme}: an option word's contrast is ${s.wordContrast}`);
+      if (!(s.badgeContrast >= 3)) problems.push(`${theme}: the Recommended badge's contrast is ${s.badgeContrast}`);
+      // No text in the panel below 3:1, the floor for anything a reader is meant to see.
+      const faint = s.lowest.filter((t) => !(t.contrast >= 3));
+      if (faint.length) problems.push(`${theme}: faint text ${JSON.stringify(faint)}`);
     }
     const tuples = new Set(Object.values(seen).map((s) => `${s.body}|${s.text}|${s.card}`));
     if (tuples.size !== themes.length) problems.push(`only ${tuples.size} distinct looks across ${themes.length} themes`);
     const draft = await decisionCard(frame, 'main-2').locator('textarea.decisions-comment').inputValue();
     if (draft !== DRAFT) problems.push('the draft did not survive the switches');
     if (problems.length) throw new Error(`${problems.join('; ')} — ${JSON.stringify(seen)}`);
-    return { detail: Object.entries(seen).map(([t, s]) => `${t}: body ${s.body}, text ${s.text}, card border ${s.card}, contrast id ${s.idContrast} / Submit ${s.submitContrast}`).join('; '), shots };
+    return { detail: Object.entries(seen).map(([t, s]) => `${t}: body ${s.body}, text ${s.text}, card border ${s.card}, contrast id ${s.idContrast} / Submit ${s.submitContrast} / option word ${s.wordContrast} / badge ${s.badgeContrast}; lowest of ${s.scanned} texts ${s.lowest.map((x) => `${x.contrast} ${x.what}`).join(', ')}; under 4.5: ${s.under45.join(', ') || 'none'}`).join('; '), shots };
   });
 
   await R.check('the panel is restored after a window reload', async () => {
@@ -1906,7 +1954,7 @@ SCRIPTS.decisions = async (R, context, page) => {
     const kinds = {};
     for (const r of webview) {
       const origin = URL.canParse(r.frame) ? new URL(r.frame).origin : '';
-      const kind = r.url === REMOTE_IMAGE ? 'remote item image'
+      const kind = r.url === REMOTE_IMAGE || r.url === REMOTE_GONE ? 'remote item image'
         : /^(blob|data):/.test(r.url) ? 'blob/data'
           : URL.canParse(r.url) && /\.vscode-resource\./.test(new URL(r.url).hostname) ? 'extension resource'
             : URL.canParse(r.url) && new URL(r.url).origin === origin ? "VS Code's webview host page"

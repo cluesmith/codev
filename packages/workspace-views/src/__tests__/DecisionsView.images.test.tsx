@@ -175,6 +175,31 @@ describe('DecisionsView images (#1938)', () => {
     expect(host.image).not.toHaveBeenCalled();
   });
 
+  it('shows an http(s) image the browser refuses as not loaded, not as a broken image', () => {
+    // Mixed content inside an https IDE, a Tower URL answering 401 without the key, a 404 (spec 1963).
+    show({ bodyMarkdown: '![remote](https://example.com/gone.png) ![kept](https://example.com/ok.png)' });
+    fireEvent.error(screen.getByRole('img', { name: 'remote' }));
+    const note = screen.getByText('Image not loaded').parentElement;
+    expect(note).toHaveTextContent('Image not loaded remote https://example.com/gone.png');
+    expect(note).toHaveAttribute('title', 'The browser could not load this image from its address.');
+    expect(screen.queryByRole('img', { name: 'remote' })).toBeNull();
+    expect(screen.getByRole('img', { name: 'kept' })).toHaveAttribute('src', 'https://example.com/ok.png');
+    expect(host.image).not.toHaveBeenCalled();
+  });
+
+  it('stops listening for a remote image\'s error once the markdown changes', () => {
+    const { rerender } = show({ bodyMarkdown: '![first](https://example.com/one.png)' });
+    const first = screen.getByRole('img', { name: 'first' });
+    const parent = first.parentElement!;
+    mockUseDecisions.mockReturnValue({ state: { status: 'ready', document: makeDocument({ bodyMarkdown: '![second](https://example.com/two.png)' }) }, applyDocument: () => {} });
+    rerender(<DecisionsView host={host} isActive />);
+    expect(first.isConnected).toBe(false);
+    // A late error on the old, detached image finds no listener: it is not replaced by a note.
+    fireEvent.error(first);
+    expect(first.parentElement).toBe(parent);
+    expect(screen.getByRole('img', { name: 'second' })).toBeInTheDocument();
+  });
+
   it('revokes the object URL when the markdown changes and when the card goes', async () => {
     const { rerender, unmount } = show({ bodyMarkdown: '![first](first.png)' });
     await waitFor(() => expect(screen.getByRole('img', { name: 'first' })).toHaveAttribute('src', 'blob:http://dashboard.test/1'));

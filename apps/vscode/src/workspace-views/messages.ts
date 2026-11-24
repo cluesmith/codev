@@ -127,6 +127,10 @@ export function isDecisionsReadMessage(message: unknown): message is DecisionsRe
 /**
  * A ruling request of the shape Tower's rule route takes: a non-empty `id` and `fingerprint`,
  * and `word` and `comment` strings when present. Tower checks the content.
+ *
+ * Unlike `path` and `url`, these are not held to {@link MAX_WEBVIEW_STRING}, on purpose: the host
+ * only forwards them, and Tower bounds the body and refuses a comment over its limit with a reason
+ * the panel shows. A bound here would drop a long comment silently instead.
  */
 function isRuleRequest(value: unknown): value is DecisionsRuleRequest {
   return isRecord(value)

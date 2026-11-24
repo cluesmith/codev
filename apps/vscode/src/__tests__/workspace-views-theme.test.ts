@@ -66,6 +66,20 @@ describe('vscode-theme.css', () => {
     expect([...map.values()].some(v => v.includes('--vscode-button-background'))).toBe(false);
   });
 
+  it('draws muted text in a colour meant to be read, not the disabled-control colour', () => {
+    // Light Modern draws disabledForeground at half alpha: section labels measured 2.1:1 rendered.
+    const map = mappings();
+    expect(map.get('--codev-wv-fg-muted')).toMatch(/^var\(--vscode-input-placeholderForeground/);
+    expect([...map.values()].some(v => v.includes('--vscode-disabledForeground'))).toBe(false);
+  });
+
+  it("draws waiting and error text in VS Code's list colours, which are made to be read", () => {
+    // Light themes' chart yellow and error foreground measured under 3:1 as text, rendered.
+    const map = mappings();
+    expect(map.get('--codev-wv-status-waiting')).toMatch(/^var\(--vscode-list-warningForeground,/);
+    expect(map.get('--codev-wv-status-error')).toMatch(/^var\(--vscode-list-errorForeground,/);
+  });
+
   it('uses no literal colour of its own anywhere', () => {
     const literal = /#[0-9a-f]{3,8}\b|\b(rgba?|hsla?)\(|\b(white|black)\b/i;
     const declarations = [...withoutComments(THEME).matchAll(/([a-z-]+)\s*:\s*([^;{}]+);/g)]

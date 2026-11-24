@@ -99,6 +99,8 @@ export class WebviewDecisionsHost implements DecisionsViewHost {
       reply => (reply.type === 'decisions/image-result' ? imageResult(reply.result) : { kind: 'not-loaded', message: mismatch(reply) }),
     );
     return new Promise(resolve => {
+      // On abort the request's resolver leaves `pending`, so `result` can never settle; with that
+      // resolver gone nothing references `result`, and it is collected with its `then` below.
       const onAbort = () => {
         this.pending.delete(requestId);
         resolve(aborted);
