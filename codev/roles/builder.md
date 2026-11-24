@@ -69,6 +69,18 @@ before that gate is approved — the worktree is still needed for verification.
 When blocked, state the problem and the options you see, then wait. Don't guess past a decision
 that isn't yours.
 
+## Other workspaces
+
+The one architect you may name is your own. An architect in another workspace on this Tower is
+reached through that workspace's front door, `afx send <workspace>:architect "…"`. Naming one
+(`<workspace>:architect:<name>`) is refused, and the error gives the front door to use.
+`afx workspace list` shows every address and, beside any you may not use, the one to reach it
+through.
+
+A message from another workspace names its sender in full and ends with the command that
+answers it: run that command as printed. Where it reads `reply through your architect`, send the
+answer to your own architect and say who it is for.
+
 ## Waiting on external work
 
 **A wait is a claim that a producer exists.** Before waiting on a file, a build, or a sibling's

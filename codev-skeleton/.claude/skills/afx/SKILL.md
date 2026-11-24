@@ -100,19 +100,38 @@ it is persisted and will deliver; a resend arrives twice.
 |------|-----------|
 | `afx send spir-585 "…"` | Builder `spir-585`. A bare `585` also works when exactly one builder id ends in it; leading zeros are ignored. |
 | `afx send architect "…"` | From a builder: its spawning architect. From an architect: the `main` architect (else first registered). |
-| `afx send architect:<name> "…"` | A specific named architect (sibling-architect messaging). Architects can address any architect; a builder may only use its own `spawnedByArchitect`. |
-| `afx send <workspace>:architect "…"` | The architect in **another workspace** (cross-workspace). |
+| `afx send architect:<name> "…"` | A specific named architect in your own workspace (sibling-architect messaging). Architects can address any architect; a builder may only use its own `spawnedByArchitect`. |
+| `afx send <workspace>:architect "…"` | The **front door** of another workspace: its `main` architect, else the first registered. Any sender, builders included. |
+| `afx send <workspace>:architect:<name> "…"` | A named architect in **another workspace** on this Tower. Architects and humans only: a builder is refused, and the error names the front door to use instead. |
+| `afx send <workspace>:<builder-id> "…"` | A builder in another workspace. |
 
 ```bash
 afx send architect:ob-refine "PR-iter-2 feedback ready"   # sibling architect, same workspace
-afx send taqwabench:architect "use porch.checks, don't fork protocol.json"  # cross-workspace
+afx send taqwabench:architect "use porch.checks, don't fork protocol.json"  # another workspace's front door
+afx send codev-cloud:architect:tunnel "relay endpoint is on staging"         # a named architect in another workspace
 ```
 
-**Find the exact workspace name first** — guessing fails with `NOT_FOUND`. The name is the basename of the workspace path, which can differ from how someone refers to it. List active workspaces via the Tower API:
+**Find the address first: `afx workspace list`** — guessing fails with `NOT_FOUND`. It prints every
+workspace on this Tower with its agents, each as an address ready to paste (see `afx workspace`
+below). `<workspace>` is the workspace's directory name, or the name it was given with
+`afx workspace name`. A named architect that is not registered fails, listing the workspace's
+architects and its front door; nothing is rerouted. Mail to a registered architect with no live
+terminal is held (`no-live-pty`), like any other.
 
-```bash
-curl -s http://localhost:4100/api/workspaces | python3 -m json.tool   # → each .name is a valid <workspace> address
+**Replying to another workspace.** A message from another workspace names its sender by full
+address, and its last line is the command that answers it. Run it as printed:
+
 ```
+### [ARCHITECT codev:architect:review MESSAGE → tunnel | <time>] ###
+hello
+###############################  (reply: afx send codev:architect:review "…")
+```
+
+| Last line | Meaning |
+|-----------|---------|
+| `(reply: afx send <address> "…")` | The command that reaches the sender. A builder written to by an architect in another workspace is given that workspace's front door, and only when the front door reaches that architect. |
+| `(reply through your architect: afx send architect "…")` | To a builder, when the front door would not reach the architect that wrote: ask your own architect to pass the answer on. |
+| `(no reply address; the sender's workspace needs: afx workspace name <name>)` | The sender's workspace has no usable address name yet. |
 
 ## afx interrupt
 
@@ -238,7 +257,7 @@ Each builder row shows its live porch **Phase** and the **Gate** it waits at wit
 ## afx whoami
 
 ```bash
-afx whoami                      # Report this terminal's identity (workspace, type, name)
+afx whoami                      # Report this terminal's identity (workspace, type, name) and its address
 afx whoami --json               # Same, as a single JSON object
 ```
 
@@ -247,6 +266,11 @@ match first, then the Tower-injected `CODEV_ARCHITECT_NAME` env var. Exits 1
 with an explanation when identity cannot be determined — it never guesses and
 never defaults to `main` (issue #1094). Builders also get an `architect:`
 field naming their spawning architect when recorded. Works without Tower.
+
+The last line, `address:`, is this terminal's own address as another workspace on this Tower
+types it (`codev:architect:review`, `codev:builder-spir-42`); `address` in `--json`. When there is
+none it reads `address: none (<why, with the remedy>)` (`addressUnavailable` in `--json`): identity
+and exit code are unaffected.
 
 ## afx tower
 
@@ -304,7 +328,41 @@ afx workspace stop              # Stop workspace processes
 afx workspace add-architect --name <name>   # Add a named sibling architect terminal
 afx workspace remove-architect <name>       # Remove a sibling architect (cannot remove main)
 afx workspace recover           # Revive builders whose shellper died (e.g. after reboot)
+afx workspace list [--json]     # Every workspace on this Tower and its agents, as addresses
+afx workspace name <name>       # Give the current workspace an explicit address name
+afx workspace name --clear      # Remove it: addressed by its directory name again
 ```
+
+**`afx workspace list`** is how to find an address for `afx send`. One block per workspace, one
+address a line:
+
+```
+$ afx workspace list
+codev          /Users/ana/dev/codev
+  codev:architect:main            live
+  codev:architect:review          live
+  codev:builder-spir-1940         live
+codev-cloud    /Users/ana/dev/codev-cloud
+  codev-cloud:architect:main      live
+  codev-cloud:architect:tunnel    no live terminal
+```
+
+A line that is only an address and `live` / `no live terminal` is ready to paste; mail to an
+agent with no live terminal is held until it has one. The listing is for the caller: an agent
+you may not name carries `reach through <address>` (for a builder, another workspace's front
+door). A workspace that is not running is listed with no agents. A workspace shown as
+`(no address name)` says why on the next line, with the command that fixes it.
+
+**`afx workspace name <name>`** sets the name other workspaces write before the colon. It is the
+remedy when two workspaces share a directory name (neither can be addressed until one is named)
+or when a directory name cannot be written in an address. Letters, digits, `.`, `_` and `-`,
+starting with a letter or digit, stored lower-cased; `architect`, `arch` and `builder` are
+reserved; a name another workspace already answers to is refused. Run it from the workspace to name (from a
+builder worktree it names the builder's workspace).
+
+These (`workspace list`, `workspace name`, the `address:` line of `whoami`, and
+`afx send <workspace>:architect:<name>`) need a Tower of this version. Right after an upgrade the
+running Tower is the old one: each says so, and `afx tower stop && afx tower start` fixes it.
 
 **Recreating a dead architect** (its process died while Tower kept the registration):
 re-add it under the SAME name, then re-init its identity:
