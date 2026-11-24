@@ -499,3 +499,22 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
 - The Phase 4 `porch done` before this used the architect's one-time main-32 tests skip (GitHub
   green on `43f34f0f`; `bugfix-1267-launch-loop.test.ts` passed alone, 7/7). The skip was removed
   straight afterwards and is noted on PR #1971.
+
+### Phase 4 review, iteration 2 (2026-11-24): both APPROVE
+
+- Before the reviews, the iteration-2 `porch done` passed build (15.2 s) and the full local tests
+  (49.5 s) with no skip, starting at load 3.26.
+- Codex APPROVE, no issues. Claude APPROVE. It verified the iteration-1 fixes against
+  `connection-manager.ts` and `ide-mode.ts` itself, and left non-blocking notes, carried into Phase 5:
+  1. **Agent cycle in a Cockpit-only window (decide in Phase 5).** The cycle roster comes from
+     `buildersProvider.agentCycleOrder()`, which follows `codev.buildersGroupBy`. With the default
+     `stage` it holds builders only, so Cmd-cycling never lands on an architect, and its order is not
+     the Cockpit's top-to-bottom order. No Phase 4 criterion is broken: selection does act on Cockpit
+     rows. Raised with the architect.
+  2. **Polish, at the start of Phase 5.** In `cockpit-provider.test.ts`, the parity `shape()`
+     compares `iconPath`, but the Cockpit deliberately overrides a waiting architect's icon
+     (`applyArchitectAttention`). Exclude `icon` for `BuilderGroupTreeItem`, as `description` already
+     is, or comment the fixture, so a future waiting-architect fixture doesn't read as a regression.
+  3. **Polish, at the start of Phase 5.** `pruneTrees` runs only from `towerChildren()`, so departed
+     workspaces' builders survive while the Tower root is collapsed. That is bounded and harmless;
+     say so in its doc comment.
