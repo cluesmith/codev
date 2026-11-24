@@ -129,6 +129,24 @@ should do when the port is held but `/api/status` misses a 2 s probe.
 - Owner ruling main-42: the 900000 ms tests timeout is now in the shared config.json, so I dropped
   my local override.
 
+## 2026-11-24 — architect round: merge with Spec 1940, two follow-ups pulled in
+
+- Merged origin/main (merge 325ae5022), which brought PR #1957 (named architects). It also changes
+  `send.ts` and the SDK client. Read as one piece:
+  - an unresponsive `/health` stops at the gate, before any send or address-book question;
+  - an unanswered send is a timeout and never asks the address book, which only a NOT_FOUND triggers;
+  - **gap:** NOT_FOUND followed by an unanswered address-book check was reported as the bare
+    not-found. `getAddressBook()` now marks a failure with no HTTP answer as `unanswered`, and
+    send says the check went unanswered and to retry. An answered failure still leaves the
+    not-found, as Spec 1940's test pins.
+- Retry ownership: `checkTower` takes `retries` (default 1). `send --retry N` passes 0, so the budget
+  owns the retrying: N + 1 probes, not 2(N + 1). Without `--retry` it stays at 2.
+- `status --json`: `tower` is `{running, state, error}`. `running` is unchanged for existing
+  scripts, and `error` is null unless unresponsive.
+- Follow-up (1), the cheap liveness route, was filed by the architect as #1977.
+- Fails-without-change confirmed for each: retry-line revert → probe-count test fails; merged-head
+  send.ts/status.ts → address-book test and all 3 status-json tests fail.
+
 ### Planned fix (per the issue's Fix section)
 One shared helper over the SDK probe that classifies the failure:
 - connect refused (nothing listening) → "Tower is not running. Start it with: afx tower start"
