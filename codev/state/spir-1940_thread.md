@@ -1477,3 +1477,27 @@ Resumed after a context refresh at the phase boundary (`enter:review`).
   checks: the installed `afx send <workspace>:architect:<name>` between two workspaces with the
   reply command pasted back; sibling architects relaunching `main` first, then in registration
   order. Next gate is `verify-approval`. Not "ready for cleanup" until it is approved.
+
+## 2026-11-24 — verify, on the installed Tower (3.3.8): one finding of mine
+
+- The architect ran check (1) on the installed Tower: whoami, the listing, a send to a named
+  architect in another workspace and its reply by the printed command, an unknown name and an
+  `afx://` address refused. All as built. Check (2), the relaunch order, is with the owner
+  (main-44) together with `verify-approval`.
+- **My read-only check found that `afx workspace list` over-counts "running".** 46 of 52
+  workspaces are listed as running; 12 have a live terminal (global.db has `terminal_sessions`
+  rows for exactly 12 workspaces). 14 of the 46 list no agents, 20 list only registered agents
+  marked `no live terminal`.
+- Cause, read in the code: the address book's `running` is "the terminal map has an entry"
+  (`tower-address-book.ts`), and `getWorkspaceTerminalsEntry` is get-or-create and is called by
+  about 15 routes, so asking about a workspace gives it an empty entry. Which route made these
+  entries is inferred, not proved. My fixtures only ever put a workspace in the map with
+  terminals, so no test saw an empty entry.
+- Consequences: mail to a stopped workspace with an empty entry is held `no-live-pty`, where one
+  with no entry is refused "not running"; the naming rules use the same set, so an empty entry can
+  make a shared directory name ambiguous (the old resolver iterated the same map, so not new);
+  whoami counts from `terminal_sessions` and can disagree with Tower in that edge. Nothing is
+  ambiguous on this machine today. No wrong recipient in any case.
+- Changed nothing. Reported to the architect with a recommendation: a follow-up bugfix, one
+  definition of running ("has at least one terminal") for the listing and the naming rules.
+- This entry is on the branch only.
