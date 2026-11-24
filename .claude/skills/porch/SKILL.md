@@ -107,6 +107,8 @@ Override a protocol check per name in `.codev/config.json` under `porch.checks` 
 
 A phase check is killed after 5 minutes unless it sets `timeout_ms` — in `protocol.json` or in its `porch.checks` override. On timeout porch kills the check's whole process tree.
 
+A failed check prints the last 30 lines of its output and the path of a log holding all of it: `codev/projects/<id>-<name>/checks/<timestamp>-<phase>-<check>.log`, one per failed run, the newest 20 kept, ignored by git. Read the log to name the failure, even after a retry passes.
+
 ## State storage
 
 Project state lives in `codev/projects/<id>-<name>/status.yaml`, managed automatically by porch. The status file tracks current phase, gate states, consultation results, and timestamps.
