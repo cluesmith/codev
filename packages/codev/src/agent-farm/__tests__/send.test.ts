@@ -18,6 +18,7 @@ const { mockIsRunning, mockSendMessage, mockLoadState } = vi.hoisted(() => ({
 vi.mock('../lib/tower-client.js', () => ({
   TowerClient: vi.fn().mockImplementation(function (this: any) {
     this.isRunning = mockIsRunning;
+    this.probeHealth = async () => ((await mockIsRunning()) ? { state: 'running' } : { state: 'not-running' });
     this.sendMessage = mockSendMessage;
   }),
 }));

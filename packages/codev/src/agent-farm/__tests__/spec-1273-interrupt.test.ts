@@ -110,6 +110,7 @@ const { mockSendMessage, mockIsRunning, mockDetectWorkspaceRoot, mockDetectCurre
 vi.mock('../lib/tower-client.js', () => ({
   TowerClient: class {
     isRunning = mockIsRunning;
+    probeHealth = async () => ((await mockIsRunning()) ? { state: 'running' } : { state: 'not-running' });
     sendMessage = mockSendMessage;
   },
 }));

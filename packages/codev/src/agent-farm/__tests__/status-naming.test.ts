@@ -30,11 +30,13 @@ vi.mock('../state.js', () => ({
 vi.mock('../lib/tower-client.js', () => ({
   TowerClient: vi.fn().mockImplementation(function (this: any) {
     this.isRunning = (...a: any[]) => mockIsRunning(...a);
+    this.probeHealth = async () => ((await mockIsRunning()) ? { state: 'running' } : { state: 'not-running' });
     this.getHealth = (...a: any[]) => mockGetHealth(...a);
     this.getWorkspaceStatus = (...a: any[]) => mockGetWorkspaceStatus(...a);
   }),
   getTowerClient: () => ({
     isRunning: (...a: any[]) => mockIsRunning(...a),
+    probeHealth: async () => ((await mockIsRunning()) ? { state: 'running' } : { state: 'not-running' }),
     getHealth: (...a: any[]) => mockGetHealth(...a),
     getWorkspaceStatus: (...a: any[]) => mockGetWorkspaceStatus(...a),
     // Spec 1313 round 3: status reads the overview for held-mail awareness; null → "no held info".
