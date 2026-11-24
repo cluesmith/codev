@@ -1,6 +1,6 @@
 ## Install the Codev CLI
 
-> **Prerequisite:** Node.js **20 or newer** must be on your `PATH`
+> **Prerequisite:** Node.js **22 or newer** must be on your `PATH`
 > (VS Code's own bundled Node doesn't count). Get it from
 > [nodejs.org](https://nodejs.org). Check with `node --version`.
 

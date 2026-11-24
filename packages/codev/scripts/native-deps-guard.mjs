@@ -30,7 +30,7 @@ export function unsupportedWindowsNodeMessage(nodeVersion, arch) {
   return [
     `@cluesmith/codev: native Windows needs ${SUPPORTED_WINDOWS_NODE}.`,
     `This is Node.js ${nodeVersion} (win32-${arch}), which has no prebuilt binary for Codev's native dependencies, and Codev does not compile them from source.`,
-    'Install Node.js 22 (for example: winget install OpenJS.NodeJS.LTS), then run the install again. WSL 2 is the other supported way to run Codev on Windows.',
+    'Install Node.js 22 (for example: winget install OpenJS.NodeJS.22), then run the install again. WSL 2 is the other supported way to run Codev on Windows.',
   ].join('\n');
 }
 

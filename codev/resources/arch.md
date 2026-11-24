@@ -1099,8 +1099,8 @@ branches are testable on macOS/Linux.
   `lib/host-executable.ts` (host `which` and shell-free spawn form), `windows/msys-path.ts` (path
   translation across the Git Bash boundary), `lib/host-paths.ts`, and
   `agent-farm/lib/worktree-links.ts` (symlink, else junction / hard link / copy).
-- **Install**: Windows Node 22/24 only (better-sqlite3 prebuilds); a preinstall gate fails other
-  versions with that message instead of a node-gyp build. `engines.node` stays `>=20` for POSIX.
+- **Install**: Windows Node needs a better-sqlite3 prebuild (Node 22 is the supported, tested version); a
+  preinstall gate fails other versions with that message instead of a node-gyp build. `engines.node` is `>=22` (#1944).
 - **Workspace keys** (finding M6): Windows paths are case-insensitive but every workspace key
   (Tower's registry, `workspace_path` in global.db) is an exact string, and VS Code (`c:\`) and
   Git Bash (`C:\`) spell one directory differently. Invariant: every raw workspace path that
