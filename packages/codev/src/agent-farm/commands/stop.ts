@@ -54,6 +54,12 @@ export async function stop(): Promise<void> {
       return;
     }
 
+    // Tower took the request and never answered: it may or may not have deactivated, so nothing
+    // local is cleared on a guess (#1901).
+    if (result.status === 0 && !result.connectionRefused) {
+      fatal(`Tower did not answer the deactivation request (${result.error}); nothing was cleared. Retry afx workspace stop.`);
+    }
+
     // If tower returned error (e.g., workspace not found), fall through to legacy cleanup
     logger.debug(`Tower deactivation failed: ${result.error}, trying legacy cleanup`);
   }

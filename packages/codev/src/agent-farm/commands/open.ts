@@ -47,11 +47,9 @@ async function tryTowerApi(
     return { ok: false, refused: true };
   }
 
-  if (result.error) {
-    logger.error(`Tower API error (HTTP ${result.status}): ${result.error}`);
-    logger.kv('Workspace', workspacePath);
-    logger.kv('File', filePath);
-  }
+  logger.error(`Tower API error (HTTP ${result.status}): ${result.error ?? 'no file tab in the response'}`);
+  logger.kv('Workspace', workspacePath);
+  logger.kv('File', filePath);
 
   return { ok: false, refused: false };
 }

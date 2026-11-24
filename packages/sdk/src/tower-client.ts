@@ -288,15 +288,20 @@ import { encodeWorkspacePath } from './workspace.js';
  * `ECONNREFUSED` on `err.cause`, which a check of `err.message` alone never sees (#1950).
  *
  * `localhost` resolves to both `::1` and `127.0.0.1`, and when every address fails Node's cause
- * is an AggregateError whose `code` is copied from the FIRST attempt only. Tower binds IPv4, so
- * that first attempt is always a refused `::1`; the connection counts as refused only when every
- * attempt was (#1901), or a refused `::1` would mask a `127.0.0.1` that failed some other way.
+ * is an AggregateError whose `code` is copied from the FIRST attempt only. So each attempt is
+ * judged (#1901): the connection counts as refused when at least one attempt was refused and
+ * every other one also failed before reaching a server (an unreachable `::1` on a machine with
+ * broken IPv6, say). A refused `::1` must not mask a `127.0.0.1` that was reached and then
+ * failed, such as a reset.
  */
+const NEVER_REACHED_CODES = new Set(['ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EADDRNOTAVAIL']);
+
 function isConnectionRefused(err: unknown): boolean {
   if (!(err instanceof Error)) return String(err).includes('ECONNREFUSED');
   const cause = (err as { cause?: { code?: unknown; message?: unknown; errors?: unknown } }).cause;
   if (Array.isArray(cause?.errors) && cause.errors.length > 0) {
-    return cause.errors.every((attempt) => (attempt as { code?: unknown } | null)?.code === 'ECONNREFUSED');
+    const codes = cause.errors.map((attempt) => (attempt as { code?: unknown } | null)?.code);
+    return codes.includes('ECONNREFUSED') && codes.every((code) => typeof code === 'string' && NEVER_REACHED_CODES.has(code));
   }
   return (
     err.message.includes('ECONNREFUSED') ||
@@ -555,7 +560,7 @@ export class TowerClient {
 
   async deactivateWorkspace(
     workspacePath: string
-  ): Promise<{ ok: boolean; stopped?: number[]; error?: string }> {
+  ): Promise<{ ok: boolean; stopped?: number[]; error?: string; status?: number; connectionRefused?: boolean }> {
     const encoded = encodeWorkspacePath(workspacePath);
     const result = await this.request<{ success: boolean; stopped?: number[]; error?: string }>(
       `/api/workspaces/${encoded}/deactivate`,
@@ -563,7 +568,9 @@ export class TowerClient {
     );
 
     if (!result.ok) {
-      return { ok: false, error: result.error };
+      // `status` 0 without `connectionRefused` means Tower took the request and never answered,
+      // so the caller cannot know whether it deactivated (#1901).
+      return { ok: false, error: result.error, status: result.status, connectionRefused: result.connectionRefused };
     }
 
     return {
