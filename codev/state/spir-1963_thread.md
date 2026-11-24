@@ -311,3 +311,68 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
     - The fleet cache keys by Tower's path spelling. Phase 4's current-workspace match must use
       the existing `isSameWorkspacePath` (`fleet-order.ts`), as `orderFleet` does, and a test should
       assert it.
+
+### Phase 3 (`architect_tree_builder`), iteration 1 (2026-11-24): row building moved into `ArchitectTreeBuilder`
+
+- New `apps/vscode/src/views/architect-tree.ts`. `ArchitectTreeBuilder` now owns what
+  `BuildersProvider` did privately:
+  - row-id versioning (`AccordionRowIds`, now with a scope prefix) and the builder → group parent
+    map;
+  - group, builder, *Idle Architects* and changed-file rows, and their `getParent` reconstruction;
+  - `findFileItem`, `revealTargetForAgent` and `agentCycleOrder`.
+- `BuildersProvider` is a thin provider over one builder with scope `''`, mode `act` and its
+  active axis. `builders.ts` re-exports every symbol that moved (`orderForDisplay`,
+  `partitionArchitectGroups`, `findParentNode`, `AccordionRowIds`, `AgentTarget`), so no importer
+  changed. `agentTargetIsFocused`, `agentCycleAttemptOrder`, `AccordionGate` and
+  `runBuilderRowClick` stay in `builders.ts`: they are view wiring, not row building.
+- The five row classes take an optional trailing `scope` that prefixes their id and is kept as a
+  property. With `''` every id is the one it was.
+- Modes:
+  - `act` + scope `''` (Agents): unchanged.
+  - `act` + a scope (this window in the Cockpit): architect rows get `cockpit-architect-main` or
+    `cockpit-architect-sibling`. Builder, file and folder rows keep the Agents contextValues and
+    commands.
+  - `navigate`: builder rows are leaves; architect rows still expand. Every architect and builder
+    row clicks to `codev.tower.openWorkspace` with the target, and its tooltip names the workspace.
+    contextValues are `REMOTE_CONTEXT` (`cockpit-remote-architect`, `-builder`,
+    `-idle-architects`). `findFileItem` and `revealTargetForAgent` answer `undefined`, because the
+    agent cycle and the active-file reveal are about this window's agents only.
+  - `attentionCounts`: appends `N held · N queued` to builder-row descriptions, from
+    `deriveAttention` over the builder's own `getData()`, recomputed when the overview object
+    changes. It is off for the Agents view.
+- Deviations from the plan's wording, behaviour unchanged:
+  - The stage/area root branch and the lone-`Uncategorized` flatten moved into
+    `ArchitectTreeBuilder.rootRows()` with the architect branch. The plan said they would stay in
+    the provider. All three branches depend on the parent-map reset the builder owns, and the
+    builder already receives the active axis. Leaving them in the provider would have meant a
+    "reset, then call back in" protocol across two classes. The snapshot covers all three axes.
+  - Navigate options take no `grouping`: navigate mode is always the architect axis, so the type
+    rules out the other axes.
+  - Navigate `target` is a function, read on every render, so a workspace whose label changes
+    (disambiguation) never shows a stale name or target.
+  - The *Idle Architects* container in navigate mode has no click command, as in the Agents view:
+    clicking it toggles it. It carries `cockpit-remote-idle-architects`.
+- Three of the tests the plan names live in the Electron suite (`src/test/`), not `__tests__/`:
+  `builders.test.ts`, `area-grouping.test.ts` and `builder-file-tree-item.test.ts`. `check-types`
+  compiles them, and their imports and constructor calls are unchanged. They were not run, because
+  they need the vscode-test Electron harness.
+- Tests: `apps/vscode/src/__tests__/architect-tree.test.ts`, 33 tests.
+  - Equivalence: the walk covers N=0/1/>1 builders × 3 axes × flat/tree file modes (18 cases). It
+    records every row's id, label, description, contextValue, collapsible state, icon, command and
+    tooltip, its `getParent` answer, and the agent-cycle roster. The snapshot
+    (`__snapshots__/architect-tree.test.ts.snap`) was recorded from the **pre-refactor** provider
+    before any source change, and it matches after.
+  - Builder tests: scoped ids and disjointness, including two acting scopes and one navigating
+    scope over shared `main` and builder ids, in both file modes. Also: accordion re-versioning
+    under a scope, main/sibling contextValues, the null-owner fold, the non-live architect, the idle
+    roll-up, a childless leaf, `getParent` chains (file → folder → folder → builder → architect,
+    and idle sibling → container), and agent-cycle targets.
+  - Navigate tests: leaf shape, the click command, tooltips, labels and glyphs equal to the acting
+    rows, a target read on every render, and attention counts in both modes. Every `viewItem`
+    pattern in `package.json` is parsed, and none of them matches a `REMOTE_CONTEXT` value.
+  - Mutation-checked: unscoping each id kind, a non-leaf navigate builder, a remote contextValue
+    that a builder menu matches, dropping the cockpit-architect contextValues, a stale counts cache,
+    and the folder's default scope each fail a test. Giving the Agents view the cockpit contextValue
+    or an empty description fails the snapshot.
+- `check-types` is clean. `lint` shows only the two pre-existing `curly` warnings. `test:unit`
+  passed 1326/1326 (1293 + 33). `esbuild` bundles.

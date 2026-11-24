@@ -1,80 +1,27 @@
 import * as vscode from 'vscode';
-import { existsSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
-import type { OverviewBuilder } from '@cluesmith/codev-types';
 import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
-import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import type { OverviewCache } from './overview-data.js';
-import { builderWithWorktree, type OverviewBuilderWithWorktree } from '../builder-lookup.js';
-import { readBuildersFileViewAsTree } from '../builders-config.js';
-import { BuilderGroupTreeItem, BuilderTreeItem, IdleArchitectsGroupTreeItem } from './builder-tree-item.js';
-import { BuilderFileTreeItem } from './builder-file-tree-item.js';
-import { BuilderFolderTreeItem } from './builder-folder-tree-item.js';
-import { buildFilePathTree, type FilePathNode } from './file-path-tree.js';
+import type { BuilderTreeItem } from './builder-tree-item.js';
+import type { BuilderFileTreeItem } from './builder-file-tree-item.js';
 import type { BuilderDiffCache } from './builder-diff-cache.js';
 import {
-  type BuilderGroup,
   type BuilderGrouping,
   type BuildersGroupBy,
   stageGrouping,
   areaGrouping,
   architectGrouping,
 } from './builder-grouping.js';
-import {
-  builderRowLabel,
-  builderRowTooltip,
-  classifyBuilderRow,
-  gateIconFor,
-  rollupGroupState,
-  BUILDER_STATE_GLYPH,
-  type BuilderState,
-} from './builder-row.js';
+import { ArchitectTreeBuilder, type AgentTarget } from './architect-tree.js';
 
-/**
- * Builder state → `contextValue` family prefix. Drives menu `when`-clause
- * scoping (Approve Gate inline only on `blocked-builder-*`; the rest apply to
- * all three families). Keyed by the same `BuilderState` the icon uses so a
- * row's menu and glyph never disagree.
- */
-const CONTEXT_FAMILY: Record<BuilderState, 'blocked-builder' | 'awaiting-builder' | 'builder'> = {
-  blocked: 'blocked-builder',
-  'needs-input': 'awaiting-builder',
-  idle: 'awaiting-builder',
-  dead: 'awaiting-builder',
-  active: 'builder',
-};
-
-/**
- * Order builders for the Builders tree: three buckets, top-down.
- *  1. **blocked** (formal gate awaiting approval) — longest-waiting first.
- *  2. **waiting** (`classifyBuilderRow`: needs-input, idle or dead, from the
- *      served agent state or, without one, PTY silence past the threshold).
- *  3. **active** — everything else; overview order.
- * Blocked rows with no `blockedSince` sort last within the blocked group
- * (we don't pretend to know their wait time). Waiting and active
- * rows preserve Tower's source order within each bucket.
- */
-export function orderForDisplay(builders: OverviewBuilder[], now: number = Date.now()): OverviewBuilder[] {
-  const ms = (iso: string | null) => iso ? new Date(iso).getTime() : Infinity;
-  const blocked = builders
-    .filter(b => b.blocked)
-    .sort((a, b) => ms(a.blockedSince) - ms(b.blockedSince));
-  const rest = builders.filter(b => !b.blocked);
-  const waiting = rest.filter(b => classifyBuilderRow(b, now) !== 'active');
-  const active = rest.filter(b => classifyBuilderRow(b, now) === 'active');
-  return [...blocked, ...waiting, ...active];
-}
-
-/**
- * One entry in the agent-terminal cycle (`codev.focusNext/PreviousAgentTerminal`,
- * #1563): either an architect (addressed by name) or a builder (addressed by id) —
- * the two openable agent kinds the Agents tree renders. Non-agent rows (group
- * headers on the stage/area axes, changed-file rows) and non-agent terminals (the
- * dev PTY, shells) are never `AgentTarget`s.
- */
-export type AgentTarget =
-  | { kind: 'architect'; name: string }
-  | { kind: 'builder'; id: string };
+// The row building moved to `architect-tree.ts` (Spec 1963) so the Cockpit can reuse it per
+// workspace. Re-exported so existing importers of this module keep working unchanged.
+export {
+  orderForDisplay,
+  partitionArchitectGroups,
+  findParentNode,
+  AccordionRowIds,
+  type AgentTarget,
+} from './architect-tree.js';
 
 /**
  * Does a cycle entry address the currently-focused agent terminal (#1563)? The
@@ -142,30 +89,6 @@ export function agentCycleAttemptOrder(
 }
 
 /**
- * Split architect-axis groups into the top-level rows and the idle siblings, in
- * render order — the single ordering rule shared by `architectRootChildren` (which
- * builds tree rows) and `agentCycleOrder` (which builds the cycle roster), so the
- * two cannot drift (the shared-function lesson, #818). `groups` arrives from
- * `architectGrouping` already `main`-first then alphabetical; `topLevel` keeps that
- * order (`main` and every populated sibling), and the idle siblings (zero builders,
- * not `main`) are peeled off to be rendered/cycled last.
- */
-export function partitionArchitectGroups(
-  groups: BuilderGroup[],
-): { topLevel: BuilderGroup[]; idleSiblings: BuilderGroup[] } {
-  const topLevel: BuilderGroup[] = [];
-  const idleSiblings: BuilderGroup[] = [];
-  for (const g of groups) {
-    if (g.key !== 'main' && g.items.length === 0) {
-      idleSiblings.push(g);
-    } else {
-      topLevel.push(g);
-    }
-  }
-  return { topLevel, idleSiblings };
-}
-
-/**
  * Unified Builders view, with a switchable grouping axis (`codev.buildersGroupBy`,
  * #952), toggled via the title-bar button:
  *
@@ -196,24 +119,26 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
   // `codev.buildersGroupBy` setting. Strategies no longer own a collapse-state
   // store (#913 dropped Builders-view group persistence).
   private readonly groupings: Record<BuildersGroupBy, BuilderGrouping>;
-  // Populated each time `rootChildren()` returns groups; consulted by
-  // `getParent` so the accordion's `reveal(builderItem)` can walk the
-  // parent chain in grouping mode. Empty in the single-`Uncategorized`
-  // flatten case (area mode only — builders are root again), so `getParent`
-  // returns `undefined` and the accordion works unchanged on that branch.
-  private groupParentByBuilderId = new Map<string, BuilderGroupTreeItem>();
-  // Accordion row-id versioning (#913) — see AccordionRowIds.
-  private readonly rowIds = new AccordionRowIds();
+  // The rows themselves: built by the same `ArchitectTreeBuilder` the Cockpit
+  // uses (Spec 1963), unscoped so every id is the one this view always had.
+  private readonly tree: ArchitectTreeBuilder;
 
   constructor(
-    private cache: OverviewCache,
-    private readonly diffCache: BuilderDiffCache,
+    cache: OverviewCache,
+    diffCache: BuilderDiffCache,
   ) {
     this.groupings = {
       stage: stageGrouping(),
       area: areaGrouping(),
       architect: architectGrouping(),
     };
+    this.tree = new ArchitectTreeBuilder({
+      mode: 'act',
+      scope: '',
+      getData: () => cache.getData(),
+      grouping: () => this.active(),
+      diffCache,
+    });
     cache.onDidChange(() => this.changeEmitter.fire());
   }
 
@@ -225,7 +150,7 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
    * Group headers carry no version suffix, so the accordion can't touch them.
    */
   collapseBuildersExcept(item: BuilderTreeItem): void {
-    this.rowIds.keepOnly(item.builderId, item.id);
+    this.tree.keepOnlyOpen(item);
     this.changeEmitter.fire();
   }
 
@@ -260,577 +185,27 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     return element;
   }
 
-  // The accordion's `reveal(builderItem)` and the active-file sync's
-  // `reveal(fileItem)` (#1066) both need the parent chain.
-  //  - Builder rows return their cached group (or undefined in the
-  //    single-Uncategorized flatten case — VSCode treats them as roots).
-  //  - File / folder rows reconstruct their chain: file → folder(s) (tree
-  //    mode) → builder → group. Async because tree-mode reconstruction reads
-  //    the (cached) diff to rebuild the folder hierarchy; VSCode's `getParent`
-  //    accepts a Thenable.
-  //  - Group rows themselves are roots.
   getParent(element: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem> {
-    if (element instanceof BuilderTreeItem) {
-      // Builder → its group node (or undefined in the lone-Uncategorized flatten
-      // case — VSCode treats those builders as roots).
-      return this.groupParentByBuilderId.get(element.builderId);
-    }
-    if (element instanceof BuilderFileTreeItem || element instanceof BuilderFolderTreeItem) {
-      return this.parentForFileNode(element);
-    }
-    if (element instanceof BuilderGroupTreeItem) {
-      // An idle-sibling architect header is rendered INSIDE the collapsed "Idle
-      // Architects" container (#1182), not at root, so return that container as its
-      // parent — otherwise `reveal` treats the header as a root, never expands the
-      // container, and can't select the row (#1563). Top-level headers (main,
-      // populated siblings, a lone idle sibling) have no parent.
-      return this.idleArchitectsContainerParent(element.groupName);
-    }
-    // Other group rows (the container itself, etc.) are roots.
-    return undefined;
+    return this.tree.getParent(element);
   }
 
-  /**
-   * The "Idle Architects" container that renders `architectName` as a child, or
-   * `undefined` when the architect is not a folded idle sibling (wrong axis, fewer
-   * than two idle siblings so it renders top-level, or a populated / `main`
-   * architect). The returned container carries the stable `idle-architects-group`
-   * id, so `reveal` matches the rendered container and expands it (#1563).
-   */
-  private idleArchitectsContainerParent(architectName: string): IdleArchitectsGroupTreeItem | undefined {
-    const data = this.cache.getData();
-    if (!data) { return undefined; }
-    const grouping = this.active();
-    if (grouping.id !== 'architect') { return undefined; }
-    const roster = (data.architects ?? []).map(a => a.name);
-    const groups = grouping.group(orderForDisplay(data.builders, Date.now()), roster);
-    const { idleSiblings } = partitionArchitectGroups(groups);
-    // Fewer than two idle siblings → the lone one renders as its own top-level row.
-    if (idleSiblings.length < 2) { return undefined; }
-    if (!idleSiblings.some(g => g.key === architectName)) { return undefined; }
-    return new IdleArchitectsGroupTreeItem(idleSiblings.length);
+  getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
+    return this.tree.getChildren(element);
   }
 
-  /**
-   * Reconstruct the parent of a file or folder row so `reveal` can build the
-   * chain up to the root (#1066). Reconstruction (not a getChildren-populated
-   * map) is required because `reveal` walks parents while the subtree is still
-   * collapsed — `getChildren` for a file only runs once its builder is expanded.
-   *
-   *  - **Flat-list mode**: a file's parent is the builder row directly.
-   *  - **Tree mode**: rebuild the compacted folder tree (same `buildFilePathTree`
-   *    the rows were rendered from, off the 15s-TTL diff cache) and return the
-   *    enclosing folder row, or the builder row when the node sits at top level.
-   *
-   * The reconstructed builder row carries the current accordion-versioned id
-   * (`makeBuilderRow` → `rowIds.idFor`), and folder rows carry the same
-   * `<builderId>::folder::<fullPath>` id `materialiseNode` produces, so the
-   * chain matches what `getChildren` renders.
-   */
-  /**
-   * The builder with this id, but only if it has a worktree on record — the
-   * shared precondition for the changed-file methods (`fileChildren`,
-   * `parentForFileNode`, `findFileItem`). The return type narrows
-   * `worktreePath` to a non-null `string`, so callers can pass it to
-   * `diffCache.getDiff` without re-guarding.
-   */
-  private builderWithWorktree(builderId: string): OverviewBuilderWithWorktree | undefined {
-    return builderWithWorktree(this.cache.getData(), builderId);
+  /** The changed-file row for `(builderId, relPath)`, for the active-file reveal (#1066). */
+  findFileItem(builderId: string, relPath: string): Promise<BuilderFileTreeItem | undefined> {
+    return this.tree.findFileItem(builderId, relPath);
   }
 
-  private async parentForFileNode(
-    element: BuilderFileTreeItem | BuilderFolderTreeItem,
-  ): Promise<vscode.TreeItem | undefined> {
-    const builderId = element.builderId;
-    const builder = this.builderWithWorktree(builderId);
-    if (!builder) { return undefined; }
-    const builderRow = this.makeBuilderRow(builder, Date.now());
-
-    if (!this.viewAsTree()) {
-      // Flat list: folders don't exist here, so any file's parent is the builder.
-      return builderRow;
-    }
-
-    const result = await this.diffCache.getDiff(builderId, builder.worktreePath);
-    if (result.error) { return builderRow; }
-    const targetPath = element instanceof BuilderFolderTreeItem
-      ? element.node.fullPath
-      : element.plan.resourcePath;
-    const parentNode = findParentNode(buildFilePathTree(result.files), targetPath);
-    if (!parentNode) {
-      // Top-level node: parent is the builder row.
-      return builderRow;
-    }
-    return new BuilderFolderTreeItem(builderId, builder.worktreePath, result.baseRef, parentNode);
-  }
-
-  /**
-   * Build the `BuilderFileTreeItem` matching `(builderId, relPath)` so the
-   * active-file sync can hand it to `buildersView.reveal` (#1066). Returns
-   * `undefined` if the builder or file is no longer present. The constructed
-   * item's id matches the rendered row, so `reveal` + `getParent` locate and
-   * highlight the correct row (incl. the right builder when two builders share
-   * a relative path).
-   */
-  async findFileItem(builderId: string, relPath: string): Promise<BuilderFileTreeItem | undefined> {
-    const builder = this.builderWithWorktree(builderId);
-    if (!builder) { return undefined; }
-    const result = await this.diffCache.getDiff(builderId, builder.worktreePath);
-    if (result.error) { return undefined; }
-    const file = result.files.find(f => f.plan.resourcePath === relPath);
-    if (!file) { return undefined; }
-    return new BuilderFileTreeItem(builderId, builder.worktreePath, result.baseRef, file.change, file.plan);
-  }
-
-  async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
-    // Second level: a builder's changed files. VSCode only calls this for
-    // an *expanded* builder, so collapsed builders cost no git.
-    if (element instanceof BuilderTreeItem) {
-      return this.fileChildren(element.builderId);
-    }
-    // Folder rows (tree-mode only) expand to their child folders/files.
-    if (element instanceof BuilderFolderTreeItem) {
-      return element.node.children!.map(child =>
-        materialiseNode(element.builderId, element.worktreePath, element.baseRef, child),
-      );
-    }
-    // File rows are leaves.
-    if (element instanceof BuilderFileTreeItem) {
-      return [];
-    }
-    // The Idle Architects container (architect axis, Issue 1182) expands to the
-    // individual idle-sibling architect rows.
-    if (element instanceof IdleArchitectsGroupTreeItem) {
-      return this.idleArchitectRows(Date.now());
-    }
-    // Group rows expand to their builders.
-    if (element instanceof BuilderGroupTreeItem) {
-      return this.rowsForGroup(element.groupName);
-    }
-    // Root: group headers (one per active-axis group), or the lone-Uncategorized
-    // flatten case (area mode, unlabeled repos).
-    return this.rootChildren();
-  }
-
-  private rootChildren(): vscode.TreeItem[] {
-    this.groupParentByBuilderId.clear();
-
-    const data = this.cache.getData();
-    if (!data) {
-      return [];
-    }
-
-    const now = Date.now();
-    const grouping = this.active();
-    // The registered-architect roster (live sessions, main-first) — sourced from
-    // the overview cache the provider already holds, no second fetch. Only the
-    // architect axis consumes it, to emit a header for every architect including
-    // childless ones (Issue 1174); the other axes ignore the arg. Guard `??` for
-    // a pre-roster overview payload so `.map` never throws.
-    const roster = (data.architects ?? []).map(a => a.name);
-    const groups = grouping.group(orderForDisplay(data.builders, now), roster);
-
-    // A repo that doesn't use `area/*` labels yields a single `Uncategorized`
-    // group; in area mode its header adds no information, so flatten to root rows
-    // — zero visual regression for unlabeled repos. Stage and architect modes
-    // opt out of this (their lone group always carries information).
-    if (grouping.flattenLoneUncategorized && groups.length === 1 && groups[0].key === UNCATEGORIZED_AREA) {
-      return groups[0].items.map(b => this.makeBuilderRow(b, now));
-    }
-
-    // The architect axis rolls idle siblings into an "Idle Architects" container
-    // (Issue 1182), so it renders through its own method. Stage/area render every
-    // group as its own header.
-    if (grouping.id === 'architect') {
-      return this.architectRootChildren(groups, now);
-    }
-    // Populated groups render Expanded (#913) — no persisted state. VSCode's
-    // native per-id memory keeps a user-collapsed group collapsed for the
-    // rest of the session; on a fresh session this default applies again.
-    // Stage/area groups always hold ≥1 builder (no empty groups on these axes),
-    // so they never carry a command — they name no launchable entity.
-    return groups.map(g => this.makeGroupRow(g, now, false));
-  }
-
-  /**
-   * Root rows for the architect axis (Issue 1182). `main` and every populated
-   * sibling render as their own top-level group (unchanged from #1174); idle
-   * siblings (zero builders, not `main`) roll up under a single collapsed
-   * "Idle Architects" container — but only when ≥ 2 are idle. A lone idle
-   * sibling keeps its own row (the group would save no space for one row and
-   * only adds a click). Ordering: `main` first, then populated siblings, then
-   * the idle container / lone idle sibling at the bottom — "primary work first,
-   * roster second."
-   *
-   * `groups` arrives from `architectGrouping` already ordered `main`-first then
-   * the rest alphabetically. Iterating it preserves that order for the rows that
-   * stay top-level; the idle siblings are peeled off and re-emitted last.
-   *
-   * `main` is always its own row regardless of builder count: it is the
-   * always-present workspace home base (created by `launchInstance` on any
-   * workspace; every sibling is opt-in via `add-architect`), so burying it
-   * behind a chevron is a bad trade for one row of vertical space.
-   */
-  private architectRootChildren(groups: BuilderGroup[], now: number): vscode.TreeItem[] {
-    const { topLevel, idleSiblings } = partitionArchitectGroups(groups);
-    const rows: vscode.TreeItem[] = topLevel.map(g => this.makeGroupRow(g, now, true));
-    if (idleSiblings.length >= 2) {
-      rows.push(new IdleArchitectsGroupTreeItem(idleSiblings.length));
-    } else {
-      // 0 → nothing; 1 → the lone idle sibling renders as its own top-level row.
-      for (const g of idleSiblings) {
-        rows.push(this.makeGroupRow(g, now, true));
-      }
-    }
-    return rows;
-  }
-
-  /**
-   * The agent-terminal cycle roster (#1563), flattened top-to-bottom in the SAME
-   * order the Agents tree renders, so `codev.focusNext/PreviousAgentTerminal` mirror
-   * the sidebar exactly and stay grouping-aware. Built from the same primitives the
-   * renderer uses — `orderForDisplay` + the active grouping strategy — so there is no
-   * parallel ordering to drift (#818).
-   *
-   * The roster is axis-dependent, matching what each axis actually renders:
-   *  - **stage / area** (incl. the lone-`Uncategorized` flatten): only builder rows
-   *    are agents; architects render no rows on these axes, so they are not cycled.
-   *  - **architect**: architect headers are first-class agents (their rows carry the
-   *    open-terminal command), interleaved with their builders in top-level order via
-   *    the shared `partitionArchitectGroups`; idle siblings (zero builders) render —
-   *    and so cycle — last.
-   *
-   * Non-agent terminals (the dev PTY, shells) are never in the roster because only
-   * architects and builders appear here.
-   */
+  /** The agent-cycle roster in render order (#1563). */
   agentCycleOrder(): AgentTarget[] {
-    const data = this.cache.getData();
-    if (!data) { return []; }
-    const now = Date.now();
-    const grouping = this.active();
-    const roster = (data.architects ?? []).map(a => a.name);
-    const groups = grouping.group(orderForDisplay(data.builders, now), roster);
-
-    if (grouping.id !== 'architect') {
-      return groups.flatMap(g => g.items.map((b): AgentTarget => ({ kind: 'builder', id: b.id })));
-    }
-
-    // Emit each architect header followed by its builders, in render order:
-    // top-level groups first, then the idle siblings last (the "Idle Architects"
-    // container at the bottom). Idle siblings carry zero builders by construction, so
-    // the inner loop is simply empty for them — no separate pass needed.
-    const { topLevel, idleSiblings } = partitionArchitectGroups(groups);
-    const architectOrder = [...topLevel, ...idleSiblings];
-    const targets: AgentTarget[] = [];
-    for (const g of architectOrder) {
-      targets.push({ kind: 'architect', name: g.key });
-      for (const b of g.items) { targets.push({ kind: 'builder', id: b.id }); }
-    }
-    return targets;
+    return this.tree.agentCycleOrder();
   }
 
-  /**
-   * The tree item to `reveal({ select: true })` so the sidebar selection follows the
-   * agent-cycle commands (#1563) the same way a row click highlights the clicked row.
-   * Returns `undefined` when the agent is no longer in the cache.
-   *
-   *  - **builder**: the same versioned row `makeBuilderRow` renders, so `reveal` matches
-   *    it by id and expands its group ancestor to bring it into view.
-   *  - **architect**: a header carrying the stable `builder-group:<name>` id, which
-   *    matches the rendered architect header. For an idle-sibling architect folded into
-   *    the "Idle Architects" container, `getParent` returns that container (via
-   *    `idleArchitectsContainerParent`), so `reveal` expands the container and selects
-   *    the row rather than leaving it hidden.
-   */
+  /** The row to select when the agent cycle lands on `target` (#1563). */
   revealTargetForAgent(target: AgentTarget): vscode.TreeItem | undefined {
-    const data = this.cache.getData();
-    if (!data) { return undefined; }
-    if (target.kind === 'builder') {
-      const builder = data.builders.find(b => b.id === target.id);
-      if (!builder) { return undefined; }
-      return this.makeBuilderRow(builder, Date.now());
-    }
-    // Architect header: only the id is consulted by `reveal`, so the count / state
-    // passed here are placeholders — they never render.
-    return new BuilderGroupTreeItem(
-      target.name, 0, vscode.TreeItemCollapsibleState.None, { blocked: 0, idle: 0, active: 0 });
-  }
-
-  /**
-   * The individual idle-sibling architect rows shown when the "Idle Architects"
-   * container is expanded (Issue 1182). Each is a childless
-   * `BuilderGroupTreeItem` — the same leaf-like `(0)` row #1174 renders at top
-   * level — carrying its own `codev.openArchitectTerminal` command, so clicking a
-   * name inside the group opens that architect's terminal. Recomputed from the
-   * cache (not cached from `rootChildren`) so it stays correct across overview
-   * ticks; harmlessly returns `[]` if the axis is no longer `architect`.
-   */
-  private idleArchitectRows(now: number): vscode.TreeItem[] {
-    const data = this.cache.getData();
-    if (!data) { return []; }
-    const grouping = this.active();
-    if (grouping.id !== 'architect') { return []; }
-    const roster = (data.architects ?? []).map(a => a.name);
-    const groups = grouping.group(orderForDisplay(data.builders, now), roster);
-    return groups
-      .filter(g => g.key !== 'main' && g.items.length === 0)
-      .map(g => this.makeGroupRow(g, now, true));
-  }
-
-  /**
-   * Build one group header row. `isArchitectAxis` headers get a
-   * click-to-open-terminal `command` (#1108): the architect is first-class in
-   * this mode, so its header matches the builder-row affordance (row click opens
-   * the terminal; the chevron still toggles expand/collapse — VSCode routes the
-   * two gestures independently). A childless architect group (Issue 1174) has no
-   * builders to expand into, so it renders as a leaf-like row (`None`) rather
-   * than an empty accordion; the command still fires on the row body. Populated
-   * groups render Expanded (#913). Stage/area headers stay command-less
-   * containers. Registers each builder's parent group for `getParent`.
-   */
-  private makeGroupRow(g: BuilderGroup, now: number, isArchitectAxis: boolean): BuilderGroupTreeItem {
-    let collapsibleState: vscode.TreeItemCollapsibleState;
-    if (g.items.length === 0) {
-      collapsibleState = vscode.TreeItemCollapsibleState.None;
-    } else {
-      collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
-    }
-    const groupItem = new BuilderGroupTreeItem(
-      g.key,
-      g.items.length,
-      collapsibleState,
-      rollupGroupState(g.items, now),
-    );
-    if (isArchitectAxis) {
-      // The `g.key` (architect name; null owners folded into `main` by
-      // architectGrouping) is the optional name arg `codev.openArchitectTerminal`
-      // already accepts; it warns gracefully on a stale owner not in the roster.
-      groupItem.command = {
-        command: 'codev.openArchitectTerminal',
-        title: 'Open Architect Terminal',
-        arguments: [g.key],
-      };
-    }
-    for (const b of g.items) {
-      this.groupParentByBuilderId.set(b.id, groupItem);
-    }
-    return groupItem;
-  }
-
-  private rowsForGroup(key: string): vscode.TreeItem[] {
-    const data = this.cache.getData();
-    if (!data) { return []; }
-
-    const now = Date.now();
-    const ordered = orderForDisplay(data.builders, now);
-    const roster = (data.architects ?? []).map(a => a.name);
-    const group = this.active().group(ordered, roster).find(g => g.key === key);
-    if (!group) { return []; }
-
-    return group.items.map(b => this.makeBuilderRow(b, now));
-  }
-
-  private makeBuilderRow(b: OverviewBuilder, now: number): BuilderTreeItem {
-    // Classify once; the state drives the label, the tooltip, the contextValue
-    // family (menu scoping) and the icon.
-    const state = classifyBuilderRow(b, now);
-    const item = new BuilderTreeItem(b.id, builderRowLabel(b, state, now, this.active().rowPrefix(b)));
-    // Versioned id (#913). The base `b.id` is stable (not the churning label) so
-    // VSCode preserves a row's expansion across the frequent overview-poll
-    // refreshes; the `#<version>` suffix is the accordion lever (see
-    // AccordionRowIds). Group ids carry no suffix, so the accordion can't touch
-    // them.
-    item.id = this.rowIds.idFor(b.id);
-    // Expandable so the second-level changed-files list can hang off it.
-    // The row keeps its open-terminal command (single click); the chevron
-    // toggles the file list.
-    item.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
-    // A plain string, never a MarkdownString: the needs-input summary renders literally (SC19).
-    item.tooltip = builderRowTooltip(b, state);
-    // contextValue encodes the row's state-family + protocol so menus
-    // can scope by either (Approve Gate inline only on
-    // blocked-builder-*; everything else applies to all three
-    // families). The optional `-review` suffix signals that the
-    // builder has committed a review file on disk — the
-    // `codev.viewReviewFile` menu entry's `when` clause keys off it so
-    // PIR rows hide the entry until the review phase produces the file.
-    const protocol = b.protocol || 'unknown';
-    const reviewSuffix = builderHasReviewFile(b) ? '-review' : '';
-    item.contextValue = `${CONTEXT_FAMILY[state]}-${protocol}${reviewSuffix}`;
-    // Icon: the shared per-state glyph (single source of truth in
-    // builder-row.ts). A blocked row overrides the shape with the gate-specific
-    // `gateIconFor` codicon while keeping the shared warning color.
-    const { icon, color } = BUILDER_STATE_GLYPH[state];
-    let iconName = icon;
-    if (state === 'blocked') { iconName = gateIconFor(b.blockedGate); }
-    item.iconPath = new vscode.ThemeIcon(iconName, new vscode.ThemeColor(color));
-    // The row click runs `codev.openBuilderRow` — a wrapper that opens the
-    // builder terminal and, when `codev.buildersClickExpands` is on (the
-    // default), also expands the row (the file list). Pass the item itself so
-    // the handler can call `buildersView.reveal(...)` against this row. Other
-    // callers (terminal-link clicks, etc.) still use `codev.openBuilderById`
-    // directly with just the id and don't trigger expansion.
-    item.command = {
-      command: 'codev.openBuilderRow',
-      title: 'Open Builder Terminal',
-      arguments: [item],
-    };
-    return item;
-  }
-
-  /**
-   * Changed-file rows for one builder, rendered as a flat list or a
-   * folder tree depending on the `codev.buildersFileViewAsTree` setting.
-   * The diff data and the leaf shape (BuilderFileTreeItem) are identical
-   * in both modes — only the grouping around the leaves differs.
-   */
-  private async fileChildren(builderId: string): Promise<vscode.TreeItem[]> {
-    const builder = this.builderWithWorktree(builderId);
-    if (!builder) {
-      return [placeholder('No worktree on record')];
-    }
-
-    const result = await this.diffCache.getDiff(builderId, builder.worktreePath);
-    if (result.error) {
-      const row = placeholder('Diff unavailable');
-      row.tooltip = result.error;
-      return [row];
-    }
-    if (result.files.length === 0) {
-      return [placeholder('No changes yet')];
-    }
-
-    if (this.viewAsTree()) {
-      // Tree mode: group by folder, compact single-child folder chains.
-      // Top-level nodes may be folders or root-level files (e.g. README).
-      return buildFilePathTree(result.files).map(node =>
-        materialiseNode(builderId, builder.worktreePath, result.baseRef, node),
-      );
-    }
-    // List mode (today's behaviour): flat, one row per changed file.
-    return result.files.map(
-      f => new BuilderFileTreeItem(builderId, builder.worktreePath, result.baseRef, f.change, f.plan),
-    );
-  }
-
-  /** Read the file-view-as-tree setting; falls back to the spec default. */
-  private viewAsTree(): boolean {
-    return readBuildersFileViewAsTree();
-  }
-}
-
-/**
- * Render one tree-mode node as either a folder row (if it has children)
- * or a file row (if it carries a leaf). Folders carry the worktreePath
- * + baseRef forward so the renderer can construct file children on
- * subsequent expansion without re-fetching from the diff cache.
- */
-function materialiseNode(
-  builderId: string,
-  worktreePath: string,
-  baseRef: string,
-  node: FilePathNode,
-): vscode.TreeItem {
-  if (node.children) {
-    return new BuilderFolderTreeItem(builderId, worktreePath, baseRef, node);
-  }
-  // Leaf: must have a file (folder-without-children shouldn't be reachable
-  // from buildFilePathTree, but the type allows it — guard defensively).
-  if (!node.file) {
-    return placeholder(node.name);
-  }
-  return new BuilderFileTreeItem(builderId, worktreePath, baseRef, node.file.change, node.file.plan);
-}
-
-/**
- * Walk a (compacted) file-path tree and return the parent node of the node
- * whose `fullPath` matches `targetPath`, or `undefined` when the target sits at
- * top level (no parent folder) or isn't found. Used by `getParent` to
- * reconstruct a file/folder row's enclosing folder for `reveal` (#1066).
- *
- * Folder fullPaths are compacted (`packages/codev/src`), and a file leaf's
- * `fullPath` equals its `plan.resourcePath` (leaves aren't compacted), so a
- * direct `fullPath` match resolves both row kinds.
- *
- * Returns `undefined` for both "top-level node (no parent folder)" and "not
- * found"; the caller treats both as "parent is the builder row". Recursive
- * calls always pass a defined `parent`, so a node found below the top level
- * never resolves to `undefined`.
- */
-export function findParentNode(
-  nodes: FilePathNode[],
-  targetPath: string,
-  parent?: FilePathNode,
-): FilePathNode | undefined {
-  for (const node of nodes) {
-    if (node.fullPath === targetPath) { return parent; }
-    if (node.children) {
-      const found = findParentNode(node.children, targetPath, node);
-      if (found !== undefined) { return found; }
-    }
-  }
-  return undefined;
-}
-
-/**
- * Sync-check whether a builder has committed a review file on disk.
- *
- * Mirrors the prefix filter in `commands/view-artifact.ts`: a file
- * counts if it lives in `<worktree>/codev/reviews/`, ends in `.md`, and
- * either starts with `<id>-` or is exactly `<id>.md`. Used by the
- * Builders tree row builder to suffix `contextValue` with `-review` so
- * PIR rows can hide `codev.viewReviewFile` until the review phase emits
- * the file (non-PIR protocols always show the entry — they fall back to
- * the missing-file toast in `view-artifact.ts`).
- *
- * One `readdirSync` per builder per render — the reviews dir is small,
- * local, and only inspected when overview data changes. Cheaper than
- * the diff-cache work the row triggers on expansion.
- */
-function builderHasReviewFile(b: OverviewBuilder): boolean {
-  if (!b.worktreePath) { return false; }
-  const dir = resolve(b.worktreePath, 'codev/reviews');
-  if (!existsSync(dir)) { return false; }
-  const prefix = `${b.id}-`;
-  try {
-    return readdirSync(dir).some(
-      f => f.endsWith('.md') && (f.startsWith(prefix) || f === `${b.id}.md`),
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Builder-row id versioning for the accordion (#913). VSCode has no "collapse
- * this row" API and replays its remembered expand-state for any id it has seen,
- * so the only way to force a row collapsed is to render it under a never-seen
- * id. Every row id is `<builderId>#<version>`; bumping the version (`keepOnly`)
- * hands every row a fresh — hence collapsed — id, except the one being held
- * open, which keeps the exact id it was clicked at so VSCode keeps it expanded.
- *
- * The open row's id is stored verbatim (not reconstructed from a number), so a
- * render that lands between a bump and the next click can't leave the open row
- * pointing at a stale version.
- */
-export class AccordionRowIds {
-  private version = 0;
-  private openBuilderId: string | undefined;
-  private openRowId: string | undefined;
-
-  /** The id to render for `builderId` this pass. */
-  idFor(builderId: string): string {
-    if (builderId === this.openBuilderId && this.openRowId) {
-      return this.openRowId;
-    }
-    return `${builderId}#${this.version}`;
-  }
-
-  /** Hold `builderId` open at its current `rowId`; re-version everyone else. */
-  keepOnly(builderId: string, rowId: string | undefined): void {
-    this.openBuilderId = builderId;
-    this.openRowId = rowId;
-    this.version += 1;
+    return this.tree.revealTargetForAgent(target);
   }
 }
 
@@ -901,12 +276,4 @@ export async function runBuilderRowClick(
   } catch {
     // Benign if the row is no longer present (e.g. mid-cleanup).
   }
-}
-
-/** Non-clickable informational leaf (no worktree / no changes / error). */
-function placeholder(label: string): vscode.TreeItem {
-  const item = new vscode.TreeItem(label);
-  item.contextValue = 'builder-file-none';
-  item.iconPath = new vscode.ThemeIcon('circle-slash', new vscode.ThemeColor('disabledForeground'));
-  return item;
 }
