@@ -1,7 +1,7 @@
 id: '1963'
 title: vscode-alternative-layout-seco
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: verification_harness
     title: Isolated verification harness
@@ -29,8 +29,8 @@ plan_phases:
     status: complete
   - id: arrange_cockpit
     title: 'Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification'
-    status: in_progress
-current_plan_phase: arrange_cockpit
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: verification_harness
@@ -120,7 +120,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-arrange_cockpit-iter1-claude.txt
 started_at: '2026-11-24T01:12:47.024Z'
-updated_at: '2026-11-24T15:23:08.560Z'
+updated_at: '2026-11-24T15:31:20.358Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-24T06:55:50.288Z'
@@ -149,3 +149,5 @@ context_refreshes:
   - boundary: plan-phase:arrange_cockpit
     at: '2026-11-24T14:16:29.097Z'
     acknowledged_at: '2026-11-24T14:16:36.335Z'
+  - boundary: enter:review
+    at: '2026-11-24T15:31:20.357Z'
