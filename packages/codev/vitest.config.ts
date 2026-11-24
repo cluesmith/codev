@@ -6,6 +6,7 @@
  */
 
 import { defineConfig } from 'vitest/config';
+import { MAX_WORKERS } from './vitest-workers';
 
 /**
  * Native Windows (Spec 1658): process creation, Git Bash and the CIM census take
@@ -25,11 +26,7 @@ export default defineConfig({
     // Sandboxes the real agy binary and the user-global metrics DB (#1323).
     setupFiles: ['./vitest-setup.ts'],
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true,  // Prevent worker crash on CI during cleanup
-      },
-    },
+    maxWorkers: MAX_WORKERS,  // #1956; see vitest-workers.ts
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
