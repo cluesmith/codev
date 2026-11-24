@@ -70,6 +70,25 @@ touching Tower or machine load) feeds each shape through an exact copy of the SD
 architect, not changed here: `towerStart()`'s zombie-kill policy, i.e. what `afx tower start`
 should do when the port is held but `/api/status` misses a 2 s probe.
 
+### Architect ruling 2026-11-24: towerStart in this PR, option (b)
+1. `towerStart` goes through the same `probeHealth` helper.
+   - not-running (refused): start, as today.
+   - running: say it is already running, as today.
+   - unresponsive: **do not kill**. Exit non-zero and print the listening PID and its command
+     line. Say that if the machine is busy the user should wait and retry, and that to replace the
+     process deliberately they run `afx tower stop` and then `afx tower start`. Stopping a Tower is
+     a human decision, never a side effect of start.
+2. `afx tower stop` must still stop an unresponsive Tower. Verified: `towerStop()` kills the PIDs
+   from `getProcessesOnPort()` (lsof) and does no health probe. Leave it unrouted.
+3. Tests use a stalled local server (child process, ephemeral port):
+   - start does not signal the PID and exits non-zero with the message;
+   - a refused port starts normally;
+   - stop still kills the stalled server.
+4. This is Tower lifecycle code: dispatch the Windows workflow on the branch and link the run in
+   the PR.
+5. The PRFT write-up gives the towerStart change its own paragraph, as a behaviour change: start no
+   longer replaces a hung Tower by itself.
+
 ### Planned fix (per the issue's Fix section)
 One shared helper over the SDK probe that classifies the failure:
 - connect refused (nothing listening) → "Tower is not running. Start it with: afx tower start"
