@@ -2043,7 +2043,12 @@ function textContrasts({ rootSelector, probes }) {
       return { kind, what: `${kind} "${el.textContent.trim().slice(0, 24)}"`, contrast: textContrast(el) };
     })
     .sort((a, b) => a.contrast - b.contrast);
+  // A progress bar's track against its row, and its fill against the track (null when no bar).
+  const bar = root.querySelector('.progress-bar');
+  const fill = bar?.querySelector('.progress-fill');
+  const track = bar ? { onRow: ratio(backdrop(bar), backdrop(bar.parentElement)), fill: fill ? ratio(backdrop(fill), backdrop(bar)) : null } : null;
   return {
+    track,
     marker: window.__codevMarker ?? null,
     body: getComputedStyle(document.body).backgroundColor,
     text: getComputedStyle(document.body).color,
@@ -2220,12 +2225,14 @@ SCRIPTS.work = async (R, context, page) => {
       // No text in the panel below 3:1, the floor for anything a reader is meant to see.
       const faint = [...s.lowest, ...s.probed.map((p) => ({ what: p.label, contrast: p.contrast }))].filter((t) => !(t.contrast >= 3));
       if (faint.length) problems.push(`${theme}: faint text ${JSON.stringify(faint)}`);
+      // The track must show on its row (Light Modern once drew it in the row's own colour).
+      if (!s.track || !(s.track.onRow >= 1.2)) problems.push(`${theme}: progress track ${JSON.stringify(s.track)}`);
     }
     const looks = new Set(Object.values(seen).map((s) => `${s.body}|${s.text}`));
     if (looks.size !== themes.length) problems.push(`only ${looks.size} distinct looks across ${themes.length} themes`);
     if (problems.length) throw new Error(`${problems.join('; ')} — ${JSON.stringify(seen)}`);
     return {
-      detail: Object.entries(seen).map(([t, s]) => `${t}: body ${s.body}, text ${s.text}; lowest of ${s.scanned} texts ${s.lowest.map((x) => `${x.contrast} ${x.what}`).join(', ')}; probes ${s.probed.map((p) => `${p.label} ${p.contrast}`).join(', ')}; under 4.5: ${s.under45.join(', ') || 'none'}`).join('; '),
+      detail: Object.entries(seen).map(([t, s]) => `${t}: body ${s.body}, text ${s.text}; lowest of ${s.scanned} texts ${s.lowest.map((x) => `${x.contrast} ${x.what}`).join(', ')}; probes ${s.probed.map((p) => `${p.label} ${p.contrast}`).join(', ')}; progress track on its row ${s.track.onRow}, fill on track ${s.track.fill}; under 4.5: ${s.under45.join(', ') || 'none'}`).join('; '),
       shots,
     };
   });

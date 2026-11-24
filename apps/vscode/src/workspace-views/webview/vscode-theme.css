@@ -176,3 +176,10 @@ summary:focus-visible {
 .recently-closed-row-main {
   overflow: hidden;
 }
+
+/* A progress bar's track. The dashboard draws it in the tertiary background, which Light Modern
+   maps to the row's own colour: only the fill showed, a dash rather than a bar (found rendered).
+   A faint mix of the text colour shows on every theme's row. */
+.progress-bar {
+  background: color-mix(in srgb, var(--codev-wv-fg) 18%, transparent);
+}
