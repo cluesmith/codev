@@ -99,3 +99,15 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
 - ARCHITECT ORDER (2026-11-24): the review must list what each round found in the allow-list and the stubs,
   so the owner can see at the pr gate how the read-only claim was tightened. If round 3 asks for changes,
   tell the architect what it found BEFORE fixing.
+- CMAP Phase 2 iter 3: claude APPROVE; codex REQUEST_CHANGES (stub ls-remote args unchecked: another remote
+  or ext:: transport). Architect approved the fix + an audit of all path/URL-taking stub forms. Audit found the
+  stub left revision args of diff-family/etc. unchecked (implicit --no-index diff of files outside the repo);
+  also mirrored the runner for ls-files/status (no args) and for-each-ref (refs/ only). liveTip guard added.
+  Fixed in aa7e34f58 + c42251ec5 (ext:: case had a /tmp path → repo tmp-residue check failed CI once).
+- Phase 2 was FORCE-ADVANCED by porch at the 3-iteration ceiling (8c9715a4b): the round-3 fix was not re-reviewed
+  by CMAP. Told the architect.
+- REVIEW TABLE (architect order): per round, what was found in the allow-list and the stubs —
+  iter1: stub symbolic-ref write form + fetch by non-SHA; isRefName `.lock` components; fetch lacked --no-tags;
+         snapshot FETCH_HEAD per-worktree. iter2: stub flags not closed per subcommand (log/diff without guards);
+         stub gh joined write flags; diff-tree guards; origin HEAD branch validation; tests read real ~/.codev.
+         iter3: stub ls-remote args; (audit) stub revision args / implicit --no-index; ls-files/status/for-each-ref.
