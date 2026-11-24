@@ -129,9 +129,14 @@ export function off(id: string, reason: string): Check {
   return check(id, 'off', reason, {}, reason);
 }
 
+/** A check the project declared skipped in `check.skip`. Does not count as attention. */
+export function skipped(id: string): Check {
+  return check(id, 'skip', 'skipped (check.skip)', {}, 'check.skip');
+}
+
 /** Replace every check named in `check.skip` with a `skip` entry. */
 export function applySkips(checks: Check[], skip: ReadonlySet<string>): Check[] {
-  return checks.map((c) => (skip.has(c.id) ? check(c.id, 'skip', 'skipped (check.skip)', {}, 'check.skip') : c));
+  return checks.map((c) => (skip.has(c.id) ? skipped(c.id) : c));
 }
 
 export function needsAttention(c: Check): boolean {

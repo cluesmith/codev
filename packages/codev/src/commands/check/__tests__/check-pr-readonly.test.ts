@@ -1,8 +1,8 @@
 /**
  * Spec 1951 — `codev check pr` against real repositories, on every platform.
  *
- * The forge comes from a `pr-view` concept override (a `.sh` script Git Bash runs on
- * Windows), so neither `gh` nor a network is needed. These tests prove that no ref, `HEAD`,
+ * The forge comes from `pr-view` and `commit-checks` concept overrides (`.sh` scripts Git
+ * Bash runs on Windows), so neither `gh` nor a network is needed. These tests prove that no ref, `HEAD`,
  * index byte, `FETCH_HEAD` or status line changes (Scenario 23), that a head or base moving
  * during the run is caught (Scenario 11), that a hanging anchor read is exit 2 (Scenario
  * 12b), and that the command reports the same from a builder worktree as from the main
@@ -18,7 +18,9 @@ import type { SpawnFn } from '../runner.js';
 import { useFakeHome } from './helpers/fake-home.js';
 import { createFixture, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
 import {
+  commitChecksOverride,
   otherClone,
+  passing,
   PR_BRANCH,
   prView,
   prViewOverride,
@@ -26,6 +28,7 @@ import {
   pushFromElsewhere,
   shPath,
   writeConfig,
+  type CommitChecksOverride,
   type PrViewOverride,
 } from './helpers/pr-fixture.js';
 
@@ -33,10 +36,13 @@ useFakeHome();
 
 let fx: Fixture;
 let forge: PrViewOverride;
+let ci: CommitChecksOverride;
 
 beforeEach(() => {
   fx = createFixture();
   forge = prViewOverride(fx);
+  ci = commitChecksOverride(fx);
+  ci.answerAll(passing(3));
 });
 
 afterEach(() => {
@@ -44,7 +50,7 @@ afterEach(() => {
 });
 
 function configure(check: Record<string, unknown> = {}): string {
-  return writeConfig(fx, { forge: { 'pr-view': forge.script }, check });
+  return writeConfig(fx, { forge: { 'pr-view': forge.script, 'commit-checks': ci.script }, check });
 }
 
 async function run(extra: Partial<CommandOptions> = {}, number = '7') {

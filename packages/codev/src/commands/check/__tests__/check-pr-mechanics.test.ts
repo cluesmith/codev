@@ -5,6 +5,8 @@
  * a stub `git` first on PATH records every git call and passes it to the real git, so each
  * test also proves that nothing off the read-only list ran. Every scenario runs on a real
  * repository with a bare origin, and the repository state is compared before and after.
+ * `commit-checks` comes from an override that reports three passing runs on every commit;
+ * the CI selection itself is tested in check-pr-forge.test.ts.
  */
 
 import { spawn as realSpawn } from 'node:child_process';
@@ -16,7 +18,20 @@ import type { Check, CommandOptions, ErrorReport, PrReport } from '../report.js'
 import { createRunner, type SpawnFn } from '../runner.js';
 import { useFakeHome } from './helpers/fake-home.js';
 import { createFixture, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
-import { otherClone, PR_BRANCH, PR_NUMBER, PR_VIEW_FIELDS, prView, pushBranch, pushFromElsewhere, writeConfig } from './helpers/pr-fixture.js';
+import {
+  commitChecksOverride,
+  otherClone,
+  passing,
+  PR_BRANCH,
+  PR_NUMBER,
+  PR_VIEW_FIELDS,
+  prView,
+  pushBranch,
+  pushFromElsewhere,
+  writeConfig,
+  type CommitChecksOverride,
+} from './helpers/pr-fixture.js';
+import { expectPrReportShape } from './helpers/report-shape.js';
 import { createStubBin, type StubBin } from './helpers/stub-bin.js';
 
 const isWindows = process.platform === 'win32';
@@ -25,12 +40,21 @@ useFakeHome();
 
 let fx: Fixture;
 let stub: StubBin;
+let ci: CommitChecksOverride;
 let uninstall: () => void;
+
+/** The project configuration: `check` settings, with `commit-checks` from the override. */
+function configure(check?: Record<string, unknown>): void {
+  writeConfig(fx, { forge: { 'commit-checks': ci.script }, ...(check ? { check } : {}) });
+}
 
 beforeEach(() => {
   fx = createFixture();
   stub = createStubBin(path.join(fx.root, 'bin'));
   uninstall = stub.install();
+  ci = commitChecksOverride(fx);
+  ci.answerAll(passing(3));
+  configure();
 });
 
 afterEach(() => {
@@ -68,6 +92,7 @@ async function runReadOnly(extra: Partial<CommandOptions> = {}) {
   const result = await runReport(extra);
   expect(snapshotRepoState(fx, fx.main)).toEqual(before);
   expect(stub.violations()).toEqual([]);
+  expectPrReportShape(result.report);
   return result;
 }
 
@@ -84,9 +109,13 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: merge mechanics (stub gh and
     expect(report.verdict).toBe('clear');
     expect(statuses(report)).toEqual({
       head: 'ok',
+      state: 'ok',
+      forge: 'ok',
       attribution: 'off',
       'trial-merge': 'ok',
+      checks: 'ok',
       watched: 'ok',
+      'linked-issue': 'info',
       overlap: 'info',
       size: 'info',
       'to-read': 'info',
@@ -159,10 +188,12 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: merge mechanics (stub gh and
     const { report, exitCode } = await runReadOnly();
 
     expect(exitCode).toBe(1);
-    for (const id of ['trial-merge', 'watched', 'overlap', 'size', 'to-read']) {
+    for (const id of ['trial-merge', 'checks', 'watched', 'overlap', 'size', 'to-read']) {
       expect(byId(report, id), id).toMatchObject({ status: 'not-run', reason: expect.stringMatching(/^eeeeeee not available locally \(fetch failed/) });
     }
-    expect(report.checks.some((c) => c.status === 'ok' && c.id !== 'head')).toBe(false);
+    // Only what the forge itself reports can be ok without the head's objects.
+    expect(report.checks.filter((c) => c.status === 'ok').map((c) => c.id)).toEqual(['head', 'state', 'forge']);
+    expect(ci.calls()).toEqual([]);
   });
 
   it('a base branch origin does not have leaves the base checks not run', async () => {
@@ -178,7 +209,7 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: merge mechanics (stub gh and
   });
 
   it('Scenario 6: attribution in a commit and in the description is reported by place; base commits are not scanned', async () => {
-    writeConfig(fx, { check: { attribution: ['^\\s*Co-Authored-By:'] } });
+    configure({ attribution: ['^\\s*Co-Authored-By:'] });
     fx.commit(fx.main, { 'old.txt': 'old\n' }, 'already on main\n\nCo-Authored-By: Someone <x@example.invalid>');
     fx.git(fx.main, 'push', '-q', 'origin', 'main');
     const { head } = pushBranch(fx, [
@@ -211,12 +242,12 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: merge mechanics (stub gh and
       summary: 'no patterns configured (check.attribution)',
     });
 
-    writeConfig(fx, { check: { attribution: ['Generated with \\[Claude Code\\]'] } });
+    configure({ attribution: ['Generated with \\[Claude Code\\]'] });
     expect(byId((await runReadOnly()).report, 'attribution')).toMatchObject({ status: 'ok', summary: 'none in the description or 1 commit' });
   });
 
   it('Scenario 8: a flagged watched file needs attention; an unflagged one is info', async () => {
-    writeConfig(fx, { check: { flag: ['CLAUDE.md'] } });
+    configure({ flag: ['CLAUDE.md'] });
     const { head } = pushBranch(fx, [
       { files: { 'CLAUDE.md': 'rules\n', 'codev/roles/architect.md': 'role\n', 'src/a.ts': 'a\n' }, message: 'instructions' },
     ]);
@@ -232,7 +263,7 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: merge mechanics (stub gh and
     });
     expect(renderPrHuman(report).split('\n')[0]).toBe('ATTENTION  PR #7 — watched (flagged)');
 
-    writeConfig(fx, { check: { flag: ['src/**'] } });
+    configure({ flag: ['src/**'] });
     // check.flag applies only to watched files: src/a.ts is flagged but not watched.
     expect(byId((await runReadOnly()).report, 'watched')).toMatchObject({ status: 'info' });
   });
@@ -264,7 +295,7 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: merge mechanics (stub gh and
     });
     expect(first.summary).toBe('2 files (4 not for reading): src/big.ts, src/small.ts');
 
-    writeConfig(fx, { check: { notForReading: ['src/small.ts'] } });
+    configure({ notForReading: ['src/small.ts'] });
     const replaced = byId((await runReadOnly()).report, 'to-read');
     expect((replaced.details.files as Array<{ path: string }>).map((f) => f.path)).toEqual([
       'src/big.ts',
@@ -325,10 +356,39 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: merge mechanics (stub gh and
     expect(byId(report, 'head')).toMatchObject({
       status: 'info',
       summary: `origin's main is at ${originMain.slice(0, 7)}, not the PR head (a fork's PR, or the branch moved): local main not compared`,
-      details: { relation: 'not-origin-branch', originBranchSha: originMain },
+      details: { relation: 'not-origin-branch', originBranchSha: originMain, localBranchSha: originMain, forgeHead: head },
     });
     expect(byId(report, 'trial-merge').status).toBe('ok');
     expect(report.verdict).toBe('clear');
+  });
+
+  it("origin's branch past the forge head is a push the forge has not indexed: attention, not the fork note", async () => {
+    const { dir, head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'indexed' }]);
+    const pushed = fx.commit(dir, { 'b.txt': 'b\n' }, 'pushed, not indexed yet');
+    fx.git(dir, 'push', '-q', 'origin', PR_BRANCH);
+    answerPrView(prView(head));
+
+    const { report, exitCode } = await runReadOnly();
+
+    expect(exitCode).toBe(1);
+    expect(byId(report, 'head')).toMatchObject({
+      status: 'attention',
+      summary: `origin's ${PR_BRANCH} is 1 commit past the PR head (a push the forge has not indexed yet); re-run`,
+      details: { relation: 'origin-ahead', forgeHead: head, originBranchSha: pushed, localBranchSha: pushed, originAheadOfPr: 1 },
+    });
+    expect(renderPrHuman(report).split('\n')[0]).toBe('ATTENTION  PR #7 — head (forge behind)');
+  });
+
+  it("an origin tip that is not local is not compared: the fork note, nothing fetched for it", async () => {
+    const { dir, head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'indexed' }]);
+    fx.commit(dir, { 'mine.txt': 'm\n' }, 'local only');
+    const elsewhere = pushFromElsewhere(fx, PR_BRANCH, { 'theirs.txt': 't\n' });
+    answerPrView(prView(head));
+
+    const { report } = await runReadOnly();
+
+    expect(byId(report, 'head')).toMatchObject({ status: 'info', details: { relation: 'not-origin-branch', originBranchSha: elsewhere } });
+    expect(stub.gitCalls().filter((c) => c.includes(' fetch '))).toEqual([]);
   });
 
   it('Scenario 25: pr-view without headRefOid is exit 2 naming the concept and the field', async () => {

@@ -6,6 +6,8 @@
  * mapped to the same scheme: `--help` exits 0, and every usage error (unknown option,
  * missing or extra argument, unknown subcommand) exits 2, not commander's default 1. With
  * `--json`, a usage error on a subcommand prints that subcommand's `ErrorReport` on stdout.
+ * Commander's exits do not end the process here: they throw `CheckExit`, which carries the
+ * writes still in flight, and the caller (cli.ts) awaits them before exiting.
  *
  * Subcommands are action handlers only. Commander's executable-subcommand form, which
  * spawns a program, is never used, so the runner stays the only subprocess path.
@@ -17,7 +19,10 @@ import { renderErrorHuman, renderJson } from './render.js';
 import type { CommandName, CommandResult, ErrorReport, Report } from './report.js';
 
 export interface CheckCliDeps {
-  /** End the process with this code. Production never returns; tests record the code and throw. */
+  /**
+   * End the process with this code once a command has run. Production never returns; tests
+   * record the code and throw. Commander's own exits (help, usage errors) throw `CheckExit`.
+   */
   exit: (code: number) => void;
   /** Write to stdout; resolves once the text is flushed, so a large `--json` survives the exit. */
   stdout: (text: string) => void | Promise<void>;
@@ -42,6 +47,26 @@ const PROCESS_DEPS: CheckCliDeps = {
   argv: () => process.argv,
 };
 
+/**
+ * Thrown in place of commander's exit (help, version, usage errors): the exit code, and the
+ * writes still in flight, which must be flushed before the process exits.
+ */
+export class CheckExit extends Error {
+  constructor(
+    public readonly code: 0 | 2,
+    private readonly writes: ReadonlyArray<Promise<void>>,
+    public readonly commanderError: CommanderError,
+  ) {
+    super(commanderError.message);
+    this.name = 'CheckExit';
+  }
+
+  /** Resolves once everything commander and the `--json` report wrote is flushed. */
+  async flush(): Promise<void> {
+    await Promise.all(this.writes);
+  }
+}
+
 /** Commander's exit, mapped: help and version 0, anything else a usage error, 2. */
 export function exitCodeForCommander(err: CommanderError): 0 | 2 {
   if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') return 0;
@@ -50,18 +75,23 @@ export function exitCodeForCommander(err: CommanderError): 0 | 2 {
 }
 
 export function buildCheckCommand(deps: CheckCliDeps = PROCESS_DEPS): Command {
+  /** Writes commander made (help, usage errors), for `CheckExit` to flush. */
+  const inFlight: Array<Promise<void>> = [];
+  const track = (write: void | Promise<void>): void => {
+    inFlight.push(Promise.resolve(write));
+  };
+
   /**
    * The exit callback commander calls instead of `process.exit`. It must not return:
-   * commander exits with its own code if it does, so it rethrows after `deps.exit`.
+   * commander exits with its own code if it does, so it throws `CheckExit`.
    */
   const onCommanderExit = (command: CommandName | null) => (err: CommanderError): never => {
     const code = exitCodeForCommander(err);
     if (code === 2 && command !== null && deps.argv().includes('--json')) {
       const report: ErrorReport = { schema: 1, command, error: { message: err.message.replace(/^error: /, '') } };
-      void deps.stdout(renderJson(report));
+      track(deps.stdout(renderJson(report)));
     }
-    deps.exit(code);
-    throw err;
+    throw new CheckExit(code, [...inFlight], err);
   };
 
   const finish = async <R extends Report>(result: CommandResult<R>, json: boolean, human: (report: R) => string): Promise<void> => {
@@ -77,12 +107,12 @@ export function buildCheckCommand(deps: CheckCliDeps = PROCESS_DEPS): Command {
 
   const group = new Command('check')
     .description('Read-only checks: merge readiness of a PR (never merges, pushes, comments or deletes)')
-    .configureOutput({ writeOut: (s) => void deps.stdout(s), writeErr: (s) => void deps.stderr(s) });
+    .configureOutput({ writeOut: (s) => track(deps.stdout(s)), writeErr: (s) => track(deps.stderr(s)) });
   group.exitOverride(onCommanderExit(null));
 
   const pr = group
     .command('pr <number>')
-    .description('Merge mechanics of PR <number>: exact head, live base, trial merge, attribution, watched files, size, files to read')
+    .description('Merge readiness of PR <number>: exact head, state, forge mergeability, trial merge, CI on the code, attribution, watched files, linked issue, size, files to read')
     .option('--json', 'print one JSON object (schema 1) instead of the summary')
     .allowExcessArguments(false)
     .action(async (number: string, options: { json?: boolean }) => {

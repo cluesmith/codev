@@ -31,9 +31,13 @@ const ALLOWED: Record<string, ImportRule> = {
     names: ['loadConfig', 'findConfigSource'],
     reason: 'reads configuration files; never writes or spawns',
   },
+};
+
+/** index.ts alone parses arguments. */
+const INDEX_ALLOWED: Record<string, ImportRule> = {
   commander: {
     names: ['Command', 'CommanderError'],
-    reason: 'argument parsing for the check group (index.ts); only action-handler subcommands, never the executable form that spawns',
+    reason: 'argument parsing for the check group; only action-handler subcommands, never the executable form that spawns',
   },
 };
 
@@ -44,6 +48,12 @@ const RUNNER_ALLOWED: Record<string, ImportRule> = {
     names: ['executeForgeCommandDetailed', 'getForgeCommand', 'loadForgeConfig', 'ForgeConfig'],
     reason: 'the forge dispatcher, called only for the four read concepts',
   },
+};
+
+/** The extra imports each file may have, beyond ALLOWED. */
+const PER_FILE: Record<string, Record<string, ImportRule>> = {
+  'runner.ts': RUNNER_ALLOWED,
+  'index.ts': INDEX_ALLOWED,
 };
 
 interface ParsedImport {
@@ -88,7 +98,8 @@ describe('Spec 1951 — audited imports in commands/check/', () => {
   it('audits every source file in the directory', () => {
     expect(sources).toEqual(
       expect.arrayContaining([
-        'allow-list.ts', 'git-facts.ts', 'index.ts', 'pr.ts', 'render.ts', 'report.ts', 'roots.ts', 'runner.ts', 'settings.ts', 'validate.ts',
+        'allow-list.ts', 'git-facts.ts', 'index.ts', 'linked-issue.ts', 'porch-only.ts', 'pr.ts', 'render.ts', 'report.ts', 'roots.ts',
+        'runner.ts', 'settings.ts', 'validate.ts',
       ]),
     );
   });
@@ -96,7 +107,7 @@ describe('Spec 1951 — audited imports in commands/check/', () => {
   it.each(sources)('%s imports only what the list allows', (file) => {
     const { imports, dynamic } = parseImports(fs.readFileSync(path.join(CHECK_DIR, file), 'utf-8'));
     expect(dynamic, `${file} uses a dynamic import or require`).toEqual([]);
-    const rules = file === 'runner.ts' ? { ...ALLOWED, ...RUNNER_ALLOWED } : ALLOWED;
+    const rules = { ...ALLOWED, ...PER_FILE[file] };
     for (const imp of imports) {
       if (imp.typeOnly) continue;
       if (imp.specifier.startsWith('./')) {
@@ -110,6 +121,13 @@ describe('Spec 1951 — audited imports in commands/check/', () => {
       for (const name of imp.names as string[]) {
         expect(rule.names, `${file} imports ${name} from ${imp.specifier}`).toContain(name);
       }
+    }
+  });
+
+  it('only index.ts imports commander', () => {
+    for (const file of sources.filter((f) => f !== 'index.ts')) {
+      const { imports } = parseImports(fs.readFileSync(path.join(CHECK_DIR, file), 'utf-8'));
+      expect(imports.filter((i) => !i.typeOnly && i.specifier === 'commander').map((i) => i.specifier), file).toEqual([]);
     }
   });
 

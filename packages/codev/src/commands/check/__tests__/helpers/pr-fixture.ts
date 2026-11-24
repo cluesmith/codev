@@ -128,3 +128,65 @@ export function prViewOverride(fx: Fixture): PrViewOverride {
     },
   };
 }
+
+export interface Run {
+  name: string;
+  state: 'pass' | 'fail' | 'pending' | 'skipped' | 'neutral';
+  url?: string;
+  workflow?: string;
+}
+
+/** `n` passing runs named `ci-1` … `ci-n`. */
+export function passing(n: number): Run[] {
+  return Array.from({ length: n }, (_, i) => ({ name: `ci-${i + 1}`, state: 'pass' as const }));
+}
+
+export interface CommitChecksOverride {
+  /** The absolute script path, to put in `forge["commit-checks"]`. */
+  script: string;
+  /** The runs on `sha` (or raw output). A commit with no answer gets the default. */
+  answer(sha: string, runs: Run[] | string): void;
+  /** The answer for every commit without one of its own; `[]` (no runs) until set. */
+  answerAll(runs: Run[] | string): void;
+  /** Make every call fail with exit 1. */
+  fail(): void;
+  /** Make every call hang, for the time limit. */
+  hang(): void;
+  /** The SHAs asked for, in order. */
+  calls(): string[];
+}
+
+/** A `commit-checks` override answering per commit from files, like `prViewOverride`. */
+export function commitChecksOverride(fx: Fixture): CommitChecksOverride {
+  const dir = path.join(fx.root, 'forge-checks');
+  fs.mkdirSync(dir, { recursive: true });
+  const script = path.join(dir, 'commit-checks.sh');
+  const d = shPath(dir);
+  fs.writeFileSync(
+    script,
+    [
+      '#!/bin/sh',
+      `dir='${d}'`,
+      'printf \'%s\\n\' "$CODEV_COMMIT_SHA" >> "$dir/calls"',
+      '[ -f "$dir/hang" ] && exec sleep 60',
+      'if [ -f "$dir/fail" ]; then echo "commit-checks stub: forge unreachable" >&2; exit 1; fi',
+      'if [ -f "$dir/$CODEV_COMMIT_SHA.json" ]; then cat "$dir/$CODEV_COMMIT_SHA.json"',
+      'elif [ -f "$dir/default.json" ]; then cat "$dir/default.json"',
+      "else echo '[]'; fi",
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  const text = (runs: Run[] | string): string => (typeof runs === 'string' ? runs : JSON.stringify(runs));
+  return {
+    script,
+    answer: (sha, runs) => fs.writeFileSync(path.join(dir, `${sha}.json`), text(runs)),
+    answerAll: (runs) => fs.writeFileSync(path.join(dir, 'default.json'), text(runs)),
+    fail: () => fs.writeFileSync(path.join(dir, 'fail'), ''),
+    hang: () => fs.writeFileSync(path.join(dir, 'hang'), ''),
+    calls: () => {
+      const file = path.join(dir, 'calls');
+      return fs.existsSync(file) ? fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean) : [];
+    },
+  };
+}

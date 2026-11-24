@@ -141,3 +141,39 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   GitHub, --json schema 1, exit 2 for missing PR / bad number, refs/status/FETCH_HEAD unchanged. Accepted both
   deviations (fork-PR head rule; baseTip string|null) as deliberate. Open for Phase 4: a draft must not read CLEAR
   (the `state` check), with a test; the architect reruns check pr 1957 then.
+
+## Phase 4 — check_pr_forge
+- Built: `state`, `forge`, `checks` (porch-only.ts) and `linked-issue` (linked-issue.ts); all eleven checks now
+  present, in PR_CHECK_IDS order. Plus the three Phase 3 review fold-ins: commander exits throw `CheckExit`
+  carrying their pending writes and cli.ts awaits them before exiting; `head` is attention when origin's branch is
+  a descendant of the forge head (a push the forge has not indexed), decided only when the origin tip is local;
+  `localBranchSha` in the not-origin-branch details; the commander import allowance is now index.ts only.
+- Choices to note in the review:
+  - Bounds: finding C reads at most 11 commits (more than 10 porch-only → not run). The lookups stay at 10: with
+    exactly ten porch-only commits above C the walk skips the oldest of them, keeping C (the plan's two bounds
+    differ by one at that edge).
+  - Verdict-line qualifier precedence for `checks`: failed, then running, then none. "No code runs, head still
+    running" reads `checks (running)`: wait and re-run, not "nothing ran".
+  - `forge` summary: `MERGEABLE, CLEAN` (spec sample); `MERGEABLE, BLOCKED (review required)` (the plan's
+    example worded as `MERGEABLE (state BLOCKED: review required)`). REVIEW_REQUIRED and CHANGES_REQUESTED give a
+    reason; APPROVED gives none.
+  - `linked-issue`: several keywords, one of them the branch's issue → info naming the others. Attention only when
+    none names the branch's issue. details add `references` (every keyword found).
+  - An ok `state` reads in the header (`OPEN`), like an ok `head`; one needing attention gets its own line.
+  - `pr.state` in the report is the normalized word (OPENED → OPEN, merged → MERGED).
+  - A `check.skip` of `checks` makes no commit-checks call.
+- Targeted 644/644 (17 files), build, tsc on src and on the check tests, tmp-residue check OK.
+- LIVE RUNS (worktree build, 2026-11-23):
+  - PR #1965 from the main checkout, 6.5 s, exit 1: `ATTENTION — checks (running)`;
+    `code 31d3edf: 4 passed, 4 still running` / `head 0513558: porch-only, 8 still running`; forge
+    `MERGEABLE, BLOCKED (review required)`; linked issue `"Fixes #1956" — matches builder/bugfix-1956`.
+    Main's refs and FETCH_HEAD (md5) unchanged. From this worktree: `--json` identical except generatedAt.
+  - PR #1957 (draft): `ATTENTION — state (draft), checks (running)`; `head f3ed3d4: 8 still running`; linked
+    issue `no closing keyword — close #1940 by hand after merge`.
+  - PR #1958 (draft, this project): `ATTENTION — state (draft), checks (running)`;
+    `code ac72f4a: no runs` / `head 899e8e9: porch-only, 7 passed, 1 still running` — the porch-only head case.
+  - Attribution hit from a scratch clone (session scratchpad; origin = git@github.com:cluesmith/codev.git; its
+    own .codev/config.local.json with `^\s*Co-Authored-By:` and `Generated with \[Claude Code\]`) on PR #1657:
+    `5 lines: description line 118, commit 23de988 "Co-Authored-By: Claude Opus 5…", … +3`; forge
+    `CONFLICTING, DIRTY` agreeing with `trial merge 5 conflicting files`; `checks head 1fe1037: porch-only, 7
+    passed`. Clone refs unchanged, no FETCH_HEAD written. Main's config and ~/.codev untouched.

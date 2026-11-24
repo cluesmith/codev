@@ -6,17 +6,22 @@
  * ref-neutrally. Every check below is computed on those exact commits, with the diff range
  * merge-base → head (what the forge's diff view shows):
  *
- *   head         the local branch against the forge head (local ahead = not pushed)
- *   attribution  configured patterns, per line, in the description and each commit not on base
- *   trial-merge  `merge-tree --write-tree` in the object store: no ref, index or file moves
- *   watched      files matching `check.watch`; those also matching `check.flag` need attention
- *   overlap      files the base has also changed since the branch point
- *   size         lines and files changed
- *   to-read      the changed files minus `check.notForReading`, largest first
+ *   head          the local branch against the forge head (local ahead = not pushed)
+ *   state         an open PR that is not a draft
+ *   forge         the forge's own mergeability (`MERGEABLE` is ok)
+ *   attribution   configured patterns, per line, in the description and each commit not on base
+ *   trial-merge   `merge-tree --write-tree` in the object store: no ref, index or file moves
+ *   checks        CI on the code, past porch-only commits at the head (porch-only.ts)
+ *   watched       files matching `check.watch`; those also matching `check.flag` need attention
+ *   linked-issue  a closing keyword for the branch's issue (linked-issue.ts)
+ *   overlap       files the base has also changed since the branch point
+ *   size          lines and files changed
+ *   to-read       the changed files minus `check.notForReading`, largest first
  *
  * When the checks finish, `pr-view` and `ls-remote` are read again. If the head or the base
  * moved, the check anchored on it (`head`, `trial-merge`) needs attention, so a CLEAR always
- * describes the tips that were live at the end of the run.
+ * describes the tips that were live at the end of the run. A mergeability the forge had not
+ * computed at the first read takes the second read's value.
  */
 
 import { findConfigSource } from '../../lib/config.js';
@@ -26,6 +31,8 @@ import {
   ensureCommits,
   failureReason,
   gitVersion,
+  hasCommit,
+  isAncestor,
   liveTip,
   mergeBase,
   numstat,
@@ -36,6 +43,8 @@ import {
   type GitVersion,
   type Lookup,
 } from './git-facts.js';
+import { checkLinkedIssue } from './linked-issue.js';
+import { checkChecks, checksProblem } from './porch-only.js';
 import { attentionNames, renderHuman, short, type RenderOptions } from './render.js';
 import {
   applySkips,
@@ -46,10 +55,13 @@ import {
   fitList,
   notRun,
   off,
+  PR_CHECK_IDS,
+  skipped,
   verdictOf,
   type Check,
   type CommandOptions,
   type CommandResult,
+  type CommitRuns,
   type PrReport,
 } from './report.js';
 import { resolveRoots } from './roots.js';
@@ -67,6 +79,11 @@ interface PrView {
   headRef: string;
   baseRef: string;
   head: string;
+  /** The optional fields below are null when `pr-view` did not return them as strings. */
+  mergeable: string | null;
+  mergeStateStatus: string | null;
+  reviewDecision: string | null;
+  mergedAt: string | null;
 }
 
 /** Validate a `pr-view` result. A failure reason names the field. */
@@ -100,6 +117,10 @@ export function parsePrView(data: unknown): Lookup<PrView> {
       headRef: raw.headRefName as string,
       baseRef: raw.baseRefName as string,
       head: raw.headRefOid,
+      mergeable: text(raw.mergeable),
+      mergeStateStatus: text(raw.mergeStateStatus),
+      reviewDecision: text(raw.reviewDecision),
+      mergedAt: text(raw.mergedAt),
     },
   };
 }
@@ -162,15 +183,27 @@ async function checkHead(runner: Runner, pr: PrView, local: string | null, ancho
   // name is unrelated to it and must not be reported as unpushed work.
   const onOrigin = await liveTip(runner, name);
   if (!onOrigin.ok) return notRun('head', onOrigin.reason, details);
-  if (onOrigin.value !== pr.head) {
+  const originTip = onOrigin.value;
+  if (originTip !== pr.head) {
+    // origin's branch past the forge head is a push the forge has not indexed yet, so every
+    // forge answer describes an older head. Decided only when the origin tip is local.
+    if (originTip !== null && !anchors.headProblem && (await hasCommit(runner, originTip)) && (await isAncestor(runner, pr.head, originTip))) {
+      const past = await countRange(runner, pr.head, originTip);
+      return check(
+        'head',
+        'attention',
+        `origin's ${name} is ${plural(past, 'commit')} past the PR head (a push the forge has not indexed yet); re-run`,
+        { ...details, relation: 'origin-ahead', originBranchSha: originTip, originAheadOfPr: past },
+      );
+    }
     const where =
-      onOrigin.value === null
+      originTip === null
         ? `origin has no branch ${name} (a fork's PR, or the branch was deleted)`
-        : `origin's ${name} is at ${short(onOrigin.value)}, not the PR head (a fork's PR, or the branch moved)`;
+        : `origin's ${name} is at ${short(originTip)}, not the PR head (a fork's PR, or the branch moved)`;
     return check('head', 'info', `${where}: local ${name} not compared`, {
-      forgeHead: pr.head,
+      ...details,
       relation: 'not-origin-branch',
-      originBranchSha: onOrigin.value,
+      originBranchSha: originTip,
     });
   }
   if (anchors.headProblem) return notRun('head', anchors.headProblem, details);
@@ -190,6 +223,55 @@ async function checkHead(runner: Runner, pr: PrView, local: string | null, ancho
     });
   }
   return check('head', 'ok', `local ${name} is ${plural(behind, 'commit')} behind the PR head`, { ...counted, relation: 'behind' });
+}
+
+/** The forge's state word, normalized: upper-cased, `OPENED` → `OPEN`, and `MERGED` once merged. */
+export function normalizeState(state: string, mergedAt: string | null): string {
+  if (mergedAt) return 'MERGED';
+  const upper = state.toUpperCase();
+  return upper === 'OPENED' ? 'OPEN' : upper;
+}
+
+export function checkState(pr: PrView): Check {
+  if (pr.state === null || pr.state === '') return notRun('state', 'pr-view did not return state');
+  if (pr.draft === null) return notRun('state', 'pr-view did not return isDraft');
+  const state = normalizeState(pr.state, pr.mergedAt);
+  const details = { state, draft: pr.draft };
+  if (state !== 'OPEN') return check('state', 'attention', `${state}: only an open PR can be recommended`, details);
+  if (pr.draft) return check('state', 'attention', 'OPEN but a draft: it must be marked ready for review first', details);
+  return check('state', 'ok', 'OPEN, ready for review', details);
+}
+
+const MERGEABILITY = ['MERGEABLE', 'CONFLICTING', 'UNKNOWN'];
+
+/** Why a `BLOCKED` merge state is blocked, from the review decision. */
+const BLOCKED_BY: Record<string, string> = {
+  REVIEW_REQUIRED: 'review required',
+  CHANGES_REQUESTED: 'changes requested',
+};
+
+function mergeWords(view: PrView): string {
+  const state = view.mergeStateStatus;
+  if (!state) return view.mergeable!;
+  const why = state === 'BLOCKED' && view.reviewDecision ? BLOCKED_BY[view.reviewDecision] : undefined;
+  return why ? `${view.mergeable}, BLOCKED (${why})` : `${view.mergeable}, ${state}`;
+}
+
+/**
+ * The forge's own mergeability. The verdict follows `mergeable` alone; the merge state and
+ * review decision are context. An `UNKNOWN` at the first read takes the re-read's value.
+ */
+export function checkForge(first: PrView, reread: PrView | null): Check {
+  const view = first.mergeable === 'UNKNOWN' && reread?.mergeable ? reread : first;
+  const mergeable = view.mergeable;
+  if (mergeable === null) return notRun('forge', 'pr-view did not return mergeable');
+  if (!MERGEABILITY.includes(mergeable)) {
+    return notRun('forge', `pr-view returned mergeable ${JSON.stringify(mergeable)}, not ${MERGEABILITY.join(', ')}`);
+  }
+  const details = { mergeable, mergeStateStatus: view.mergeStateStatus, reviewDecision: view.reviewDecision };
+  if (mergeable === 'MERGEABLE') return check('forge', 'ok', mergeWords(view), details);
+  if (mergeable === 'CONFLICTING') return check('forge', 'attention', mergeWords(view), details);
+  return check('forge', 'attention', 'forge has not computed mergeability yet; re-run shortly', details);
 }
 
 interface AttributionHit {
@@ -322,6 +404,19 @@ async function rangeChecks(runner: Runner, pr: PrView, settings: CheckSettings, 
   return [await checkOverlap(runner, pr, changed, anchors), checkSize(changed), await checkToRead(runner, settings, changed, anchors)];
 }
 
+async function checkCi(runner: Runner, settings: CheckSettings, anchors: Anchors): Promise<Check> {
+  if (settings.skip.has('checks')) return skipped('checks');
+  const blocked = anchors.headProblem ?? anchors.baseProblem ?? anchors.rangeProblem;
+  if (blocked) return notRun('checks', blocked);
+  return checkChecks(runner, anchors.head, anchors.mergeBase!);
+}
+
+/** The checks in the order of PR_CHECK_IDS. */
+function inOrder(checks: readonly Check[]): Check[] {
+  const order: readonly string[] = PR_CHECK_IDS;
+  return [...checks].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+}
+
 // =============================================================================
 // Movement during the run
 // =============================================================================
@@ -376,15 +471,18 @@ async function buildPrReport(number: number, options: CommandOptions): Promise<P
   const localSha = await resolveCommit(runner, `refs/heads/${pr.headRef}`);
   let checks: Check[] = [
     await checkHead(runner, pr, localSha, anchors),
+    checkState(pr),
     await checkAttribution(runner, pr, settings, anchors),
     await checkTrialMerge(runner, pr, version, anchors),
+    await checkCi(runner, settings, anchors),
     await checkWatched(runner, settings, anchors),
+    checkLinkedIssue(pr.body, pr.headRef),
     ...(await rangeChecks(runner, pr, settings, anchors)),
   ];
-  checks = applySkips(checks, settings.skip);
 
   // Read both tips again: pr-view first, then ls-remote.
   const reread = await readPrView(runner, number);
+  checks = applySkips(inOrder([...checks, checkForge(pr, reread.ok ? reread.value : null)]), settings.skip);
   if (!reread.ok) {
     checks = flagCheck(checks, 'head', `could not confirm the head at the end of the run (${reread.reason}); re-run`, { recheck: reread.reason });
   } else if (reread.value.head !== pr.head) {
@@ -408,7 +506,7 @@ async function buildPrReport(number: number, options: CommandOptions): Promise<P
       number,
       title: pr.title ?? '',
       ...(pr.url ? { url: pr.url } : {}),
-      state: pr.state ?? '',
+      state: pr.state ? normalizeState(pr.state, pr.mergedAt) : '',
       draft: pr.draft,
       headRef: pr.headRef,
       head: pr.head,
@@ -439,18 +537,34 @@ const PR_RENDER: RenderOptions = {
   qualifier: (c) => {
     if (c.status === 'not-run') return 'not run';
     if ('movedTo' in c.details) return c.id === 'head' ? 'moved' : 'base moved';
-    if (c.id === 'head' && (c.details.relation === 'ahead' || c.details.relation === 'diverged')) return 'not pushed';
-    if (c.id === 'trial-merge' && c.status === 'attention' && 'conflicts' in c.details) return 'conflicts';
-    if (c.id === 'watched' && c.status === 'attention') return 'flagged';
-    return null;
+    if (c.status !== 'attention') return null;
+    switch (c.id) {
+      case 'head':
+        if (c.details.relation === 'ahead' || c.details.relation === 'diverged') return 'not pushed';
+        return c.details.relation === 'origin-ahead' ? 'forge behind' : null;
+      case 'state':
+        return c.details.state === 'OPEN' ? 'draft' : String(c.details.state).toLowerCase();
+      case 'forge':
+        return c.details.mergeable === 'CONFLICTING' ? 'conflicts' : 'not computed';
+      case 'trial-merge':
+        return 'conflicts' in c.details ? 'conflicts' : null;
+      case 'checks':
+        return checksProblem(c.details.head as CommitRuns, (c.details.code as CommitRuns | undefined) ?? null);
+      case 'watched':
+        return 'flagged';
+      case 'linked-issue':
+        return 'wrong issue';
+      default:
+        return null;
+    }
   },
 };
 
 export function renderPrHuman(report: PrReport): string {
   const { pr } = report;
-  // A head that is fine reads in the header; one that needs attention gets its own line.
+  // A head and a state that are fine read in the header; one that needs attention gets its own line.
   const headCheck = report.checks.find((c) => c.id === 'head' && c.status === 'ok');
-  const headInHeader = headCheck !== undefined;
+  const inHeader = (c: Check): boolean => (c.id === 'head' && c === headCheck) || (c.id === 'state' && c.status === 'ok');
   const verdictLine =
     report.verdict === 'clear'
       ? `CLEAR  PR #${pr.number} — ready to recommend`
@@ -463,7 +577,7 @@ export function renderPrHuman(report: PrReport): string {
     {
       verdictLine,
       header: [`PR #${pr.number}${title}   ${state}   ${pr.headRef} → ${pr.baseRef}`, `${headPart}      ${basePart}`, ''],
-      sections: [{ checks: report.checks.filter((c) => !(c.id === 'head' && headInHeader)) }],
+      sections: [{ checks: report.checks.filter((c) => !inHeader(c)) }],
     },
     PR_RENDER,
   );

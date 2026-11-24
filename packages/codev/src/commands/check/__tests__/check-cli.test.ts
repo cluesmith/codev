@@ -8,10 +8,10 @@
 
 import { CommanderError } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildCheckCommand, exitCodeForCommander } from '../index.js';
+import { buildCheckCommand, CheckExit, exitCodeForCommander } from '../index.js';
 import { useFakeHome } from './helpers/fake-home.js';
 import { createFixture, type Fixture } from './helpers/git-fixture.js';
-import { prView, prViewOverride, pushBranch, writeConfig } from './helpers/pr-fixture.js';
+import { commitChecksOverride, passing, prView, prViewOverride, pushBranch, writeConfig } from './helpers/pr-fixture.js';
 
 class Exited extends Error {
   constructor(public readonly code: number) {
@@ -25,7 +25,16 @@ interface Outcome {
   stderr: string;
 }
 
-async function runCli(args: string[], options: { cwd?: string; env?: Record<string, string> } = {}): Promise<Outcome> {
+type Write = (text: string, sink: string[]) => void | Promise<void>;
+
+const immediate: Write = (text, sink) => void sink.push(text);
+
+/**
+ * Parse as cli.ts does: a command's exit goes through `deps.exit`; commander's own (help,
+ * usage errors) throw `CheckExit`, whose writes are awaited before the code counts.
+ */
+async function runCli(args: string[], options: { cwd?: string; env?: Record<string, string>; write?: Write } = {}): Promise<Outcome> {
+  const write = options.write ?? immediate;
   const out: string[] = [];
   const err: string[] = [];
   let code: number | undefined;
@@ -34,8 +43,8 @@ async function runCli(args: string[], options: { cwd?: string; env?: Record<stri
       code = c;
       throw new Exited(c);
     },
-    stdout: (s) => void out.push(s),
-    stderr: (s) => void err.push(s),
+    stdout: (s) => write(s, out),
+    stderr: (s) => write(s, err),
     cwd: () => options.cwd ?? process.cwd(),
     argv: () => args,
     env: options.env,
@@ -44,8 +53,12 @@ async function runCli(args: string[], options: { cwd?: string; env?: Record<stri
   try {
     await group.parseAsync(args, { from: 'user' });
   } catch (e) {
-    // The exit callback rethrows commander's own error after recording the code.
-    if (!(e instanceof Exited) && !(e instanceof CommanderError)) throw e;
+    if (e instanceof CheckExit) {
+      await e.flush();
+      code = e.code;
+    } else if (!(e instanceof Exited)) {
+      throw e;
+    }
   }
   return { code, stdout: out.join(''), stderr: err.join('') };
 }
@@ -93,6 +106,26 @@ describe('Spec 1951 — codev check: commander wiring', () => {
     expect(JSON.parse(outcome.stdout)).toEqual({ schema: 1, command: 'pr', error: { message: expect.stringMatching(/^unknown option '--jsn'/) } });
   });
 
+  it('commander exits carry their writes: a slow stdout is flushed before the exit code is taken', async () => {
+    const slow: Write = (text, sink) => new Promise((resolve) => setTimeout(() => resolve(void sink.push(text)), 20));
+    const usage = await runCli(['pr', '7', '--jsn', '--json'], { write: slow });
+    expect(usage.code).toBe(2);
+    expect(JSON.parse(usage.stdout)).toMatchObject({ schema: 1, command: 'pr' });
+
+    const help = await runCli(['pr', '--help'], { write: slow });
+    expect(help.code).toBe(0);
+    expect(help.stdout).toMatch(/Usage: check pr/);
+  });
+
+  it('CheckExit carries commander\'s error and code', async () => {
+    const group = buildCheckCommand({ exit: () => undefined, stdout: () => undefined, stderr: () => undefined, cwd: () => '.', argv: () => ['pr'] });
+    const thrown = await group.parseAsync(['pr'], { from: 'user' }).catch((e: unknown) => e);
+    expect(thrown).toBeInstanceOf(CheckExit);
+    expect((thrown as CheckExit).code).toBe(2);
+    expect((thrown as CheckExit).commanderError).toBeInstanceOf(CommanderError);
+    expect((thrown as CheckExit).commanderError.code).toBe('commander.missingArgument');
+  });
+
   it('an invalid PR number is exit 2: on stderr, or as the ErrorReport with --json', async () => {
     const human = await runCli(['pr', '12a']);
     expect(human).toMatchObject({ code: 2, stdout: '' });
@@ -114,9 +147,11 @@ describe('Spec 1951 — codev check pr through the CLI', { timeout: 30_000 }, ()
   beforeEach(() => {
     fx = createFixture();
     const forge = prViewOverride(fx);
+    const ci = commitChecksOverride(fx);
+    ci.answerAll(passing(2));
     const { head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'a' }]);
     forge.answer(prView(head));
-    writeConfig(fx, { forge: { 'pr-view': forge.script } });
+    writeConfig(fx, { forge: { 'pr-view': forge.script, 'commit-checks': ci.script } });
   });
 
   afterEach(() => {
@@ -135,7 +170,9 @@ describe('Spec 1951 — codev check pr through the CLI', { timeout: 30_000 }, ()
     expect(outcome.code).toBe(0);
     const report = JSON.parse(outcome.stdout);
     expect(report).toMatchObject({ schema: 1, command: 'pr', verdict: 'clear', pr: { number: 7 } });
-    expect(report.checks.map((c: { id: string }) => c.id)).toEqual(['head', 'attribution', 'trial-merge', 'watched', 'overlap', 'size', 'to-read']);
+    expect(report.checks.map((c: { id: string }) => c.id)).toEqual([
+      'head', 'state', 'forge', 'attribution', 'trial-merge', 'checks', 'watched', 'linked-issue', 'overlap', 'size', 'to-read',
+    ]);
   });
 });
 
