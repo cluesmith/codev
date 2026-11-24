@@ -135,6 +135,21 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Spec 1940: every workspace on this Tower and its agents, as addresses ready to paste.
+  workspaceCmd
+    .command('list')
+    .description('List every workspace on this Tower with its agents, as addresses for afx send')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (options) => {
+      const { workspaceList } = await import('./commands/workspace-list.js');
+      try {
+        await workspaceList({ json: options.json });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Spec 1940: the workspace's explicit address name, for `<name>:architect` addresses.
   workspaceCmd
     .command('name [name]')

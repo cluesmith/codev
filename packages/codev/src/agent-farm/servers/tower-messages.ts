@@ -28,7 +28,7 @@ import {
 } from '../state.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { workspaceKey } from '../utils/workspace-path.js';
-import { findWorkspaceByAddressName, isSameWorkspace, workspaceAddressName } from '../utils/workspace-address.js';
+import { findWorkspaceByAddressName, isSameWorkspace, printableAddressName } from '../utils/workspace-address.js';
 import { isAddressComponent, tryFormatAddress } from '@cluesmith/codev-sdk/address';
 import type { CrossWorkspaceOrigin, ReplyRoute } from '../utils/message-format.js';
 
@@ -690,10 +690,8 @@ export function crossWorkspaceOrigin(sender: MessageSender, recipient: MessageRe
   const agent = senderAgent(sender.id);
   if (agent === null) return null;
 
-  const named = workspaceAddressName(sender.workspace, getRegisteredWorkspaces(), getWorkspaceTerminals().keys());
-  if (named.name === null || !isAddressComponent(named.name)) {
-    return { sender: agent, reply: { how: 'no-address' } };
-  }
+  const named = printableAddressName(sender.workspace, getRegisteredWorkspaces(), getWorkspaceTerminals().keys());
+  if (named.name === null) return { sender: agent, reply: { how: 'no-address' } };
   const senderAddress: AgentAddress = { ...agent, workspace: named.name };
   // A name that fits the component rule can still have no text form: `architect:<id>`
   // reads as a named architect, not as an id in a workspace called `architect`.

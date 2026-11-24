@@ -28,7 +28,7 @@ import { sanitizeAgentEnv, withTowerPort } from '../../lib/agent-env.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
+import type { AddressBookResponse, AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
 import {
   getArchitectByName,
   getBuilders,
@@ -81,6 +81,7 @@ import {
   type ResolveResult,
   type SenderContext,
 } from './tower-messages.js';
+import { addressBook } from './tower-address-book.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import {
@@ -264,6 +265,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/stop':       (req, res) => handleStopInstance(req, res),
   'POST /api/send':       (req, res, _url, ctx) => handleSend(req, res, ctx),
   'GET /api/inbox':       (_req, res, url) => handleInboxList(res, url),
+  'GET /api/address-book': (_req, res, url) => handleAddressBook(res, url),
   'GET /api/cron/tasks':  (_req, res, url) => handleCronList(res, url),
   'GET /':                (_req, res, _url, ctx) => handleDashboard(res, ctx),
   'GET /index.html':      (_req, res, _url, ctx) => handleDashboard(res, ctx),
@@ -1023,6 +1025,30 @@ async function handleSetWorkspaceAddressName(
       : { explicitName, addressName: own.name };
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(response));
+}
+
+/**
+ * GET /api/address-book?workspace=<path>&from=<id> (Spec 1940)
+ *
+ * Every workspace on this Tower and its agents, as addresses for the caller the query
+ * names: `workspace` and `from` are what `POST /api/send` takes as the sender's, and both
+ * are optional. The answer is `tower-address-book.ts`'s; this only reads the query. `from`
+ * is held to the rule `/api/send` holds it to, since it is the same identity.
+ */
+function handleAddressBook(res: http.ServerResponse, url: URL): void {
+  const from = url.searchParams.get('from') ?? undefined;
+  if (from !== undefined && !isSafeSenderId(from)) {
+    return sendJson(res, 400, {
+      error: 'INVALID_PARAMS',
+      message:
+        'Invalid "from" parameter: a sender identity must be 1-128 characters of ' +
+        '[A-Za-z0-9._:-] (no whitespace, brackets or newlines).',
+    });
+  }
+  const workspace = url.searchParams.get('workspace') || undefined;
+  const book: AddressBookResponse = addressBook({ id: from, workspace });
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(book));
 }
 
 async function handleWorkspaceAction(

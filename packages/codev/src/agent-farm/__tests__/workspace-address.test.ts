@@ -10,6 +10,7 @@ import { MAX_ADDRESS_LENGTH, parseAddress } from '@cluesmith/codev-sdk/address';
 import {
   findWorkspaceByAddressName,
   isSameWorkspace,
+  printableAddressName,
   validateProposedName,
   workspaceAddressName,
   WORKSPACE_NAME_COMMAND,
@@ -229,6 +230,21 @@ describe('validateProposedName', () => {
     }
   });
 
+  it('says what is true of an unnamed workspace with that directory name, and how to free the name', () => {
+    // CLOUD asks for `codev`, which A answers to by its directory name.
+    const taken = validateProposedName('codev', CLOUD, registered, [A, CLOUD]) as { message: string };
+    expect(taken.message).toBe(
+      `'codev' is the directory name of the workspace ${A}, which has no name of its own. ` +
+        'Choose another name, or first give that workspace one by running `afx workspace name <name>` in it.',
+    );
+    // B asks for `codev`, its own directory name, which A shares: neither is addressed by
+    // it, so the message must not say that A is.
+    const shared = validateProposedName('codev', B, rows([A, null], [B, null]), [A, B]) as { message: string };
+    expect(shared).toMatchObject({ ok: false, code: 'NAME_TAKEN' });
+    expect(shared.message).toContain(`is the directory name of the workspace ${A}`);
+    expect(shared.message).not.toContain('already the address');
+  });
+
   it('refuses the basename of a workspace that is registered but not running', () => {
     // A is registered and stopped: nothing is active.
     expect(validateProposedName('codev', CLOUD, registered, [])).toMatchObject({ ok: false, code: 'NAME_TAKEN' });
@@ -386,6 +402,70 @@ describe('one workspace under two spellings of its path (Windows keys)', () => {
   it('it may set the name it already has, under either spelling', () => {
     for (const spelling of [ROW, LIVE]) {
       expect(validateProposedName('core', spelling, registered, active)).toEqual({ ok: true, name: 'core' });
+    }
+  });
+
+  // Two ROWS for one directory: only a table read before boot canonicalization merged
+  // them can hold that. Which name the workspace has is fixed, and said in `everyWorkspace`.
+  describe('and two rows for it', () => {
+    it('takes the name of the later row that has one', () => {
+      const two = [
+        { workspacePath: ROW, explicitName: 'core' },
+        { workspacePath: LIVE, explicitName: 'kernel' },
+      ];
+      expect(workspaceAddressName(LIVE, two, [LIVE])).toEqual({ name: 'kernel', explicit: true });
+      expect(findWorkspaceByAddressName('kernel', two, [LIVE])).toEqual({ ok: true, workspacePath: LIVE });
+      // The earlier name refers to no workspace until the rows are merged.
+      expect(findWorkspaceByAddressName('core', two, [LIVE])).toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    });
+
+    it('a later row with no name does not clear the earlier row\'s', () => {
+      const two = [
+        { workspacePath: ROW, explicitName: 'core' },
+        { workspacePath: LIVE, explicitName: null },
+      ];
+      expect(workspaceAddressName(LIVE, two, [LIVE])).toEqual({ name: 'core', explicit: true });
+    });
+  });
+});
+
+describe('printableAddressName', () => {
+  it('is the address name when that can be written in an address', () => {
+    expect(printableAddressName(A, rows([A, null]), [A])).toEqual({ name: 'codev', explicit: false });
+    expect(printableAddressName(CLOUD, rows([CLOUD, 'cloud']), [CLOUD])).toEqual({ name: 'cloud', explicit: true });
+  });
+
+  it('is none, for the same reason, when the workspace has no address name', () => {
+    const registered = rows([A, null], [B, null]);
+    expect(printableAddressName(A, registered, [A, B])).toEqual(workspaceAddressName(A, registered, [A, B]));
+    expect(printableAddressName(A, registered, [A, B]).name).toBeNull();
+  });
+
+  it.each([
+    ['a space', '/home/ana/My Notes'],
+    ['a colon', '/home/ana/a:b'],
+    ['a leading dot', '/home/ana/.config'],
+    ['a letter outside ASCII', '/home/ana/café'],
+  ])('is none for a directory name with %s, and names the remedy', (_what, workspacePath) => {
+    // The resolver still matches such a name (a local address matches any basename); it is
+    // only never PRINTED as one.
+    expect(workspaceAddressName(workspacePath, rows([workspacePath, null]), [workspacePath]).name).not.toBeNull();
+    const result = printableAddressName(workspacePath, rows([workspacePath, null]), [workspacePath]);
+    expect(result.name).toBeNull();
+    expect((result as { reason: string }).reason).toContain('cannot be written in an address');
+    expect((result as { reason: string }).reason).toContain(WORKSPACE_NAME_COMMAND);
+  });
+
+  it('quotes a directory name it refuses as printable ASCII', () => {
+    const escape = '/home/ana/bad\u001b[31mname';
+    const result = printableAddressName(escape, rows([escape, null]), [escape]);
+    expect((result as { reason: string }).reason).not.toContain('\u001b');
+  });
+
+  it('accepts every name validateProposedName accepts: an explicit name is always printable', () => {
+    for (const name of ['core', 'a', 'x.y_z-1', '9lives']) {
+      expect(validateProposedName(name, A, rows([A, null]), [A])).toEqual({ ok: true, name });
+      expect(printableAddressName(A, rows([A, name]), [A])).toEqual({ name, explicit: true });
     }
   });
 });

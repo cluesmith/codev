@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -573,6 +573,25 @@ export class TowerClient {
     if (!result.ok || result.data === undefined) {
       const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
       return result.errorCode === undefined ? failure : { ...failure, errorCode: result.errorCode };
+    }
+    return { ok: true, result: result.data };
+  }
+
+  /**
+   * Every workspace on this Tower and its agents, as addresses for `caller` (Spec 1940):
+   * the caller's workspace and sender id, as `sendMessage` gives them. A caller that
+   * gives neither is treated as a sender outside every workspace.
+   */
+  async getAddressBook(
+    caller: { workspace?: string; from?: string } = {},
+  ): Promise<{ ok: true; result: AddressBookResponse } | { ok: false; error: string }> {
+    const query = new URLSearchParams();
+    if (caller.workspace !== undefined) query.set('workspace', caller.workspace);
+    if (caller.from !== undefined) query.set('from', caller.from);
+    const text = query.toString();
+    const result = await this.request<AddressBookResponse>(`/api/address-book${text === '' ? '' : `?${text}`}`);
+    if (!result.ok || result.data === undefined) {
+      return { ok: false, error: result.error ?? `Tower answered ${result.status}` };
     }
     return { ok: true, result: result.data };
   }

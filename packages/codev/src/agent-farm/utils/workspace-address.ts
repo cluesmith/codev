@@ -50,6 +50,12 @@ interface KnownWorkspace {
  * Workspaces are told apart by their key (`workspaceKey`), never by the text of a path, so
  * a row and a running workspace that spell one directory two ways are one workspace, with
  * the row's name.
+ *
+ * Two ROWS for one directory (two spellings of one Windows path, which boot
+ * canonicalization merges, so only a table read before it ran can hold them): the
+ * workspace takes the explicit name of the later row that has one, and a later row with
+ * no name does not clear an earlier row's. If each row holds a different name, the later
+ * row's wins and the earlier name refers to nothing until the rows are merged.
  */
 function everyWorkspace(registered: readonly RegisteredWorkspace[], active: Iterable<string>): KnownWorkspace[] {
   const byKey = new Map<string, KnownWorkspace>();
@@ -151,10 +157,14 @@ export function validateProposedName(
       return { ok: false, code: 'NAME_TAKEN', message: `'${name}' is already the name of the workspace ${other.path}.` };
     }
     if (other.explicitName === null && basenameOf(other.path) === name) {
+      // Not "is already its address": when this workspace has the same directory name,
+      // neither of the two is addressed by it. What is true either way is said.
       return {
         ok: false,
         code: 'NAME_TAKEN',
-        message: `'${name}' is already the address of the workspace ${other.path}, by its directory name.`,
+        message:
+          `'${name}' is the directory name of the workspace ${other.path}, which has no name of its own. ` +
+          `Choose another name, or first give that workspace one by running \`${WORKSPACE_NAME_COMMAND}\` in it.`,
       };
     }
   }
@@ -292,4 +302,28 @@ export function workspaceAddressName(
     };
   }
   return { name: basename, explicit: false };
+}
+
+/**
+ * {@link workspaceAddressName}, for a caller about to PRINT the name in an address: a
+ * frame, a listing, `afx whoami`. As that function, and one rule more: a directory name
+ * outside the address component rule (a space, a capital the file system kept, a colon)
+ * is not handed out, because an address printed for someone to paste must need no
+ * quoting and must read back as itself. The reason names the remedy, as the others do.
+ *
+ * An explicit name always fits the rule: it was checked when it was set.
+ */
+export function printableAddressName(
+  workspacePath: string,
+  registered: readonly RegisteredWorkspace[],
+  active: Iterable<string>,
+): WorkspaceAddressName {
+  const own = workspaceAddressName(workspacePath, registered, active);
+  if (own.name === null || isAddressComponent(own.name)) return own;
+  return {
+    name: null,
+    reason:
+      `its directory name '${quoted(own.name)}' cannot be written in an address ` +
+      `(letters, digits, '.', '_' and '-' only); give it a name: ${WORKSPACE_NAME_COMMAND}`,
+  };
 }
