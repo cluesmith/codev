@@ -16,7 +16,7 @@
  */
 
 import path from 'node:path';
-import { isAddressComponent, isReservedWorkspaceName } from '@cluesmith/codev-sdk/address';
+import { isAddressComponent, isReservedWorkspaceName, tryFormatAddress } from '@cluesmith/codev-sdk/address';
 import { workspaceKey } from './workspace-path.js';
 
 /** A workspace Tower knows, and the explicit address name it was given, if any. */
@@ -80,8 +80,12 @@ export type NameValidation =
  * is the address name of any other workspace Tower knows, running or not. So a name is
  * never taken from a workspace that is using it, including one that is stopped.
  *
- * There is no length limit of its own: the spec gives none. What bounds a usable name is
- * the length of an address (`MAX_ADDRESS_LENGTH`), which the parser enforces on a send.
+ * Also refused: a name that could never be written in an address. The shortest address to
+ * a workspace is its front door, `<name>:architect`; if the shared formatter cannot write
+ * that and have the shared parser read it back, nobody could ever send to the workspace by
+ * this name, and saying so now beats a name that is set and silently useless. The check is
+ * the parser's, so the limit it enforces (the length of an address) is the parser's too:
+ * there is no number here.
  */
 export function validateProposedName(
   proposed: string,
@@ -105,6 +109,19 @@ export function validateProposedName(
       ok: false,
       code: 'RESERVED_NAME',
       message: `'${name}' is a reserved word in addresses and cannot be a workspace name.`,
+    };
+  }
+  const frontDoor = tryFormatAddress({ kind: 'architect', workspace: name });
+  if (!frontDoor.ok) {
+    const why = frontDoor.error?.message ?? 'it would be read as another address';
+    return {
+      ok: false,
+      code: 'INVALID_NAME',
+      message:
+        frontDoor.error?.code === 'ADDRESS_TOO_LONG'
+          ? `'${quoted(name)}' is too long to be used in an address: ${why} ` +
+            `(the shortest address to this workspace would be <name>:architect).`
+          : `'${quoted(name)}' cannot be used in an address: ${why}.`,
     };
   }
   for (const [otherPath, otherExplicit] of everyWorkspace(registered, active)) {

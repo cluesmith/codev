@@ -20,6 +20,7 @@ import {
   isReservedWorkspaceName,
   parseAddress,
   sameAddress,
+  tryFormatAddress,
 } from '../address.js';
 
 interface ParseCase { note: string; input: string; address?: AgentAddress; error?: AddressParseErrorCode }
@@ -196,6 +197,37 @@ describe('formatAddress refuses an address that has no text form', () => {
     expect(() => formatAddress({ kind: 'id' } as unknown as AgentAddress, reader)).toThrow(/no id/);
     expect(() => formatAddress({ owner: 'sam', workspace: 'codev', kind: 'architect' }, reader)).toThrow(/no Tower/);
     expect(() => formatAddress({ tower: 'devvm', kind: 'architect' }, reader)).toThrow(/no workspace/);
+  });
+});
+
+describe('tryFormatAddress: the same answer as formatAddress, as a value', () => {
+  const reader: AddressReader = { workspace: 'codev' };
+  const frontDoorSuffix = ':architect';
+
+  it('gives the text formatAddress gives', () => {
+    const address: AgentAddress = { workspace: 'codev-cloud', kind: 'architect', name: 'tunnel' };
+    expect(tryFormatAddress(address, reader)).toEqual({ ok: true, text: formatAddress(address, reader) });
+  });
+
+  it('a front door exactly as long as an address may be is written; one character more is refused by the parser', () => {
+    const fits = 'w'.repeat(MAX_ADDRESS_LENGTH - frontDoorSuffix.length);
+    expect(tryFormatAddress({ workspace: fits, kind: 'architect' })).toEqual({ ok: true, text: `${fits}${frontDoorSuffix}` });
+
+    const tooLong = tryFormatAddress({ workspace: `${fits}w`, kind: 'architect' });
+    expect(tooLong).toMatchObject({ ok: false, error: { code: 'ADDRESS_TOO_LONG' } });
+    expect(() => formatAddress({ workspace: `${fits}w`, kind: 'architect' })).toThrow(/no text form/);
+  });
+
+  it('an address whose text reads as a different address has no parser error to report', () => {
+    expect(tryFormatAddress({ workspace: 'architect', kind: 'id', name: 'builder-spir-1' }, reader)).toEqual({
+      ok: false,
+      text: 'architect:builder-spir-1',
+      error: null,
+    });
+  });
+
+  it('still throws for an address that cannot be laid out at all', () => {
+    expect(() => tryFormatAddress({ tower: 'devvm', kind: 'architect' }, reader)).toThrow(/no workspace/);
   });
 });
 

@@ -337,6 +337,33 @@ function agentText(agent: AddressAgent): string {
  * of unknown shape check it with {@link isAddressComponent} first.
  */
 export function formatAddress(address: AgentAddress, reader: AddressReader = {}): string {
+  const formatted = tryFormatAddress(address, reader);
+  if (!formatted.ok) {
+    throw new Error(
+      `Address has no text form that reads back as itself (would print \`${formatted.text}\`` +
+        (formatted.error === null ? '' : `: ${formatted.error.message}`) +
+        ').',
+    );
+  }
+  return formatted.text;
+}
+
+/** What {@link tryFormatAddress} returns. */
+export type AddressTextResult =
+  | { ok: true; text: string }
+  /** `error` is the parser's refusal of `text`, or null when `text` reads as another address. */
+  | { ok: false; text: string; error: AddressParseError | null };
+
+/**
+ * {@link formatAddress} for a caller that wants the reason and not a throw: the text the
+ * address would be written as, and whether {@link parseAddress} reads that text back as
+ * the same address. It is how a caller asks "could this be written in an address?" with
+ * the parser's own rules and limits, and none of its own.
+ *
+ * An address that cannot be laid out at all (an owner and no Tower, a Tower and no
+ * workspace) still throws: that is a caller's mistake, not a property of a name.
+ */
+export function tryFormatAddress(address: AgentAddress, reader: AddressReader = {}): AddressTextResult {
   const lowered: AgentAddress = loweredAgent(address);
   if (address.owner !== undefined) lowered.owner = address.owner.toLowerCase();
   if (address.tower !== undefined) lowered.tower = address.tower.toLowerCase();
@@ -364,12 +391,9 @@ export function formatAddress(address: AgentAddress, reader: AddressReader = {})
   }
 
   const readBack = parseAddress(text);
-  if (!readBack.ok || !sameAddress(completeAddress(readBack.address, reader), completeAddress(lowered, reader))) {
-    throw new Error(
-      `Address has no text form that reads back as itself (would print \`${text}\`` +
-        (readBack.ok ? '' : `: ${readBack.error.message}`) +
-        ').',
-    );
+  if (!readBack.ok) return { ok: false, text, error: readBack.error };
+  if (!sameAddress(completeAddress(readBack.address, reader), completeAddress(lowered, reader))) {
+    return { ok: false, text, error: null };
   }
-  return text;
+  return { ok: true, text };
 }

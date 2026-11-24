@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { MAX_ADDRESS_LENGTH, parseAddress } from '@cluesmith/codev-sdk/address';
 import {
   findWorkspaceByAddressName,
   isSameWorkspace,
@@ -150,9 +151,36 @@ describe('validateProposedName', () => {
     expect(result).toMatchObject({ ok: false, code: 'INVALID_NAME' });
   });
 
-  it('has no length limit of its own: the spec gives none', () => {
-    const long = 'a'.repeat(300);
-    expect(validateProposedName(long, A, registered, [A])).toEqual({ ok: true, name: long });
+  // No length limit of its own: the spec gives none. What it must be is writable in an
+  // address, and the shortest address to a workspace is its front door.
+  describe('a name must fit in an address (the parser decides)', () => {
+    const longestThatFits = MAX_ADDRESS_LENGTH - ':architect'.length;
+
+    it('accepts a long name', () => {
+      const long = 'a'.repeat(300);
+      expect(validateProposedName(long, A, registered, [A])).toEqual({ ok: true, name: long });
+    });
+
+    it('accepts the longest name whose front door the parser reads', () => {
+      const name = 'a'.repeat(longestThatFits);
+      expect(parseAddress(`${name}:architect`).ok).toBe(true);
+      expect(validateProposedName(name, A, registered, [A])).toEqual({ ok: true, name });
+    });
+
+    it('refuses a name one character longer, saying it is too long for an address and giving the parser\'s limit', () => {
+      const name = 'a'.repeat(longestThatFits + 1);
+      const parsed = parseAddress(`${name}:architect`);
+      expect(parsed.ok).toBe(false);
+      const result = validateProposedName(name, A, registered, [A]);
+      expect(result).toMatchObject({ ok: false, code: 'INVALID_NAME' });
+      const { message } = result as { message: string };
+      expect(message).toContain('too long to be used in an address');
+      // The limit is the parser's sentence, not a number of this module's.
+      expect(message).toContain((parsed as { error: { message: string } }).error.message);
+      expect(message).toContain(String(MAX_ADDRESS_LENGTH));
+      expect(message).toContain('<name>:architect');
+      expect(message).not.toContain(name);
+    });
   });
 
   it('cuts a long refused name short when quoting it back', () => {

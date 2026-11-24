@@ -2859,6 +2859,7 @@ describe('tower-routes', () => {
           ['a character outside the allowed set', 'my notes', 400, 'INVALID_NAME'],
           ['a colon', 'a:b', 400, 'INVALID_NAME'],
           ['an empty name', '', 400, 'INVALID_NAME'],
+          ['a name too long to be written in an address', 'x'.repeat(600), 400, 'INVALID_NAME'],
           ['the basename of another workspace', 'codev-cloud', 409, 'NAME_TAKEN'],
           ['that basename in another letter case', 'Codev-Cloud', 409, 'NAME_TAKEN'],
         ])('refuses %s, with the reason, and stores nothing', async (_what, name, status, code) => {
@@ -2869,7 +2870,7 @@ describe('tower-routes', () => {
           expect(storedName(WORK)).toBeNull();
         });
 
-        it('accepts a long name: the spec sets no length limit', async () => {
+        it('accepts a long name: the only length limit is that it fits in an address', async () => {
           const long = 'x'.repeat(200);
           expect(await setName(WORK, long)).toEqual({ status: 200, body: { explicitName: long, addressName: long } });
           expect(storedName(WORK)).toBe(long);
