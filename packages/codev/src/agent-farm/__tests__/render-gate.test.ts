@@ -700,6 +700,9 @@ describe('render-gate — deterministic op count: one classify is O(viewport), n
     }
   });
 
+  // Sized, not a hang guard (#1944): this parses the ~4 MB ring through xterm twice. On Node 22 CI
+  // (ubuntu-latest) it measured 2.3-6.4 s across ten runs and hit the default 5 s limit on four of
+  // them (Node 20 CI: 0.6-1.2 s; locally about 0.4 s). It asserts op counts, not wall-clock time.
   it('negative control: the retired whole-ring path re-parses the WHOLE ring on EVERY classify', async () => {
     // Honesty check — the op count above is only meaningful if it can tell the two cost models
     // apart. Classify the same screen TWICE the pre-round-2 way: a throwaway terminal fed the whole
@@ -730,7 +733,7 @@ describe('render-gate — deterministic op count: one classify is O(viewport), n
     expect(viaMirror.ops.bytesParsed).toBe(0);
     expect(ops.bytesParsed).toBe(HUGE_HISTORY.length * ROUNDS);
     expect(ops.bytesParsed).toBeGreaterThan(8 * 1024 * 1024);
-  });
+  }, 20_000);
 });
 
 describe('render-gate — claude suggested-command ghost (Spec 1313 render-gate hardening)', () => {
