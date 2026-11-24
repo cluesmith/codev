@@ -81,8 +81,9 @@ at its initial `disconnected`, and no event follows.
 3. **`navigateTarget`'s `this.trees.get(scope)!`.** Changed, but not to the suggested fallback. The
    project rule is to fail fast, not fall back. `treeFor` stores the entry before building any row,
    so a miss is a routing bug, and it now throws a named error instead of a bare `TypeError`.
-4. **`entryOfRow` throws for unscoped rows; return `[]` instead?** Kept as a throw. This was a
-   Phase 3 review decision: mis-routed rows throw (`d1714a740`). The unscoped rows are the
+4. **`entryOfRow` throws for unscoped rows; return `[]` instead?** Kept as a throw. This is my
+   own decision from Phase 3, the builder's, made while answering that phase's review notes:
+   mis-routed rows throw (`d1714a740`). It is not an architect ruling. The unscoped rows are the
    placeholder rows (*No changes yet*, *Diff unavailable*, *No worktree on record*). They are leaves
    with no id, so VS Code calls neither `getChildren` nor `getParent` (reveal) on them. Returning
    `[]` would hide a real routing bug as an empty subtree.

@@ -492,7 +492,8 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
     is now `auto`, `manual` or `none`.
 - Claude's notes:
   - `navigateTarget` throws a named error instead of a bare `!`.
-  - `entryOfRow` keeps its throw (Phase 3 decision).
+  - `entryOfRow` keeps its throw. That is my own Phase 3 decision, not an architect ruling; the
+    architect agrees (fail fast, no silent `[]`).
   - An active workspace with an empty roster shows an empty chevron until Phase 7 adds the Decisions
     entry. Leave it; don't fix it twice.
 - The Phase 4 `porch done` before this used the architect's one-time main-32 tests skip (GitHub
