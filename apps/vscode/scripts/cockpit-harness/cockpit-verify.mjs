@@ -225,6 +225,14 @@ async function ensureTrusted(page) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(500);
   }
+  // VS Code 1.128 opens the Workspace Trust editor this step used as a modal
+  // (`workbench.editor.useModal` defaults to "some") that Escape leaves up, and it takes every
+  // click. Close it with its own Close action. Any other modal is left for the check to meet.
+  const modal = page.locator('.monaco-modal-editor-block');
+  if ((await modal.count()) && /Workspace Trust/.test((await modal.first().textContent()) ?? '')) {
+    await modal.locator('.action-label[aria-label^="Close"], .action-label.codicon-close').first().click({ timeout: 10_000 });
+    await modal.waitFor({ state: 'detached', timeout: 5000 });
+  }
 }
 
 /**
