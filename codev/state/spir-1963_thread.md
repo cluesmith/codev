@@ -956,3 +956,10 @@ run.
   - run the full-panel contrast scan on the Work view: implementing orange and the tag colours
     are unmeasured;
   - `resolveWorkspaceFile` gets its caller there.
+- **Windows attempt 2 (Node 24):** `ide-server-stub` 'npm-style shim' passed. A different test
+  failed: `pir-1233-session-launch-loop.test.ts` > "resumes the spawn-pinned session after an
+  unnatural exit…" (start.sh command failed). It passed in attempt 1, and the same file failed on
+  spir-1940's Windows run.
+  - Both are pre-existing flakes in code this branch does not touch. They are left running, named
+    under "Flaky tests" in PR #1971, and reported to the architect.
+  - **The review file's `## Flaky Tests` section must carry both.**
