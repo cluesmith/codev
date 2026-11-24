@@ -2340,8 +2340,15 @@ SCRIPTS.work = async (R, context, page) => {
 
   await R.check('scenario 19: Tower unreachable — both panels keep their content under a not-connected notice, no error toast, and recover', async () => {
     await closeNotifications(page);
-    // Decisions is open beside Work (restored with it after the reload), on screen, so it polls.
-    const dframe = await decisionsFrame(page);
+    // After the reload, Decisions is restored in a background tab, and the window arranges again
+    // only once its first connection attempt has ended (auto-arrange); then Decisions is on screen
+    // and reads. So wait for its cards before taking Tower down. The frame is found again on each
+    // try, in case arranging moved the panel.
+    let dframe;
+    await waitFor('Decisions on screen with its cards', async () => {
+      dframe = await decisionsFrame(page, 5_000).catch(() => null);
+      return dframe ? (await dframe.locator('.decisions-card').count().catch(() => 0)) > 0 : false;
+    }, 60_000);
     const cards = await dframe.locator('.decisions-card').count();
     const dAlert = dframe.locator('.decisions-content > .decisions-error[role="alert"]');
     const notice = work().locator('.work-error');
