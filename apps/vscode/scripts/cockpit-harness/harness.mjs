@@ -30,10 +30,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   OWNER_TOWER_PORT, REFUSAL_EXIT_CODE, Refusal, gateDbAgreement, gateDirs, gateFleet, gateListener, gateOverview,
-  gatePort, gateVscodeProfile, isWithin,
+  gatePort, gateVscodeProfile, ideServerMachineSettings, isWithin,
 } from './preflight.mjs';
-import { descendants, isAlive, killPids, listenerPids, processTable, run, tcpOn, unixSocketHolders } from './procs.mjs';
+import { descendants, isAlive, killPids, listenerPids, processTable, run, runningPids, tcpOn, unixSocketHolders } from './procs.mjs';
 import { CODEV_DIST, REPO, SCENARIOS, expectedOverview } from './fixtures.mjs';
+import { CANARY_EXIT_CODE, gateSandbox, networkDenyProfile, sandboxedCommand } from './sandbox.mjs';
 import { TRIPWIRE_EXIT_CODE, sample } from './tripwire.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -50,6 +51,8 @@ const PLAYWRIGHT_BROWSERS = process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(RE
 /** The vsix's inputs: what has to be unchanged since build-vsix for the install to be "the branch's". */
 const VSIX_INPUTS = ['apps/vscode', ':(exclude)apps/vscode/scripts/cockpit-harness', 'packages', 'pnpm-lock.yaml'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** The marker of a harness CLI process's pid file: its command line runs this script. */
+const CLI_MARKERS = ['harness.mjs'];
 
 // ---------------------------------------------------------------------------------------------
 // Layout and environment
@@ -73,6 +76,7 @@ function layout(scratch) {
     vscodeUser: path.join(vscode, 'user'),
     vscodeExt: path.join(vscode, 'ext'),
     vscodeToken: path.join(vscode, 'connection-token'),
+    sandboxProfile: path.join(vscode, 'network-deny.sb'),
     browserProfile: path.join(root, 'browser-profile'),
     state: path.join(root, 'state.json'),
     tripMarker: path.join(root, 'tripwire.tripped'),
@@ -419,7 +423,7 @@ async function bringUpTower(runCfg) {
     fs.symlinkSync(L.run, runCfg.socketLink);
     gateDirs({ scratch: L.scratch, agentFarmDir: runCfg.agentFarmDir, socketDir: runCfg.socketDir });
   }
-  writePid(L, `cli-${process.pid}`, process.pid, []);
+  writePid(L, `cli-${process.pid}`, process.pid, CLI_MARKERS);
   startTripwire(L, st);
   st.towerPid = launch(L, 'tower', process.execPath, towerArgs(runCfg), {
     env: towerEnv(L, runCfg), cwd: L.home, markers: ['tower-server.js', `-p ${runCfg.towerPort}`],
@@ -478,13 +482,63 @@ function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-function writeMachineSettings(L, towerPort) {
-  const dir = path.join(L.vscodeUser, 'Machine');
-  fs.mkdirSync(dir, { recursive: true });
+/**
+ * The machine settings the server will read. serve-web: `<user-data-dir>/Machine/settings.json`
+ * (every serve-web run's `check` sees the extension host connected to the isolated Tower, and its
+ * tripwire stayed clean). ide-server: wherever the server's own code says, which is
+ * `<server-data-dir>/data/Machine/settings.json`: such a server ignores --user-data-dir.
+ */
+function machineSettingsPath(runCfg) {
+  const { L } = runCfg;
+  if (runCfg.vscodeMode === 'ide-server') return ideServerMachineSettings({ serverBin: runCfg.ideServerBin, serverDataDir: L.vscodeServer });
+  return path.join(L.vscodeUser, 'Machine', 'settings.json');
+}
+
+function writeMachineSettings(file, towerPort) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   const settings = { 'codev.towerPort': towerPort, 'codev.autoStartTower': false, 'files.autoSave': 'off' };
-  const file = path.join(dir, 'settings.json');
   fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
   return file;
+}
+
+/** A listener in this process on a free port that counts what connects to it and holds it open. */
+async function countingListener() {
+  const sockets = [];
+  const server = net.createServer((c) => {
+    c.on('error', () => {});
+    sockets.push(c);
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return {
+    port: server.address().port,
+    accepted: () => sockets.length,
+    close: () => {
+      for (const c of sockets) c.destroy();
+      server.close();
+    },
+  };
+}
+
+/**
+ * Launch the ide-server inside its network sandbox (sandbox.mjs): outbound TCP to the owner's
+ * Tower port and to a canary port is denied for the server and every process it starts, and the
+ * launch canary must find the canary connect refused before the server starts.
+ */
+async function launchSandboxedIdeServer(runCfg, st, env, args, markers) {
+  const { L } = runCfg;
+  const canary = await countingListener();
+  try {
+    st.sandboxPorts = [OWNER_TOWER_PORT, canary.port];
+    fs.writeFileSync(L.sandboxProfile, networkDenyProfile(st.sandboxPorts));
+    gateSandbox(L.sandboxProfile, st.sandboxPorts);
+    const sb = sandboxedCommand({ profile: L.sandboxProfile, node: process.execPath, canaryPort: canary.port, cmd: runCfg.ideServerBin, args });
+    st.webPid = launch(L, 'vscode', sb.cmd, sb.args, { env: { ...env, ...sb.env }, cwd: L.home, markers });
+    saveState(L, st);
+    await waitForListener(runCfg.webPort, st.webPid, 300_000, `${runCfg.vscodeMode} (a sandbox canary failure is logged in vscode.log)`);
+    if (canary.accepted()) throw new Refusal(5, `the sandbox canary reached :${canary.port}; the server is not inside its network sandbox`);
+  } finally {
+    canary.close();
+  }
 }
 
 /**
@@ -503,7 +557,7 @@ async function bringUpVscode(runCfg, st) {
     stripCockpitContainer(st.extension.dest);
     st.extension.preCockpit = true;
   }
-  st.settingsPath = writeMachineSettings(L, runCfg.towerPort);
+  st.settingsPath = writeMachineSettings(machineSettingsPath(runCfg), runCfg.towerPort);
   const env = webEnv(L, runCfg);
   gateVscodeProfile({ settingsPath: st.settingsPath, port: runCfg.towerPort, env, stubsDir: STUBS });
   if (runCfg.vscodeMode === 'serve-web') {
@@ -516,11 +570,12 @@ async function bringUpVscode(runCfg, st) {
     ], { env, cwd: L.home, markers: ['serve-web', `--port ${runCfg.webPort}`] });
   } else {
     fs.writeFileSync(L.vscodeToken, crypto.randomBytes(24).toString('hex'), { mode: 0o600 });
-    st.webPid = launch(L, 'vscode', runCfg.ideServerBin, [
+    // No --user-data-dir: the server replaces it with <server-data-dir>/data (machineSettingsPath).
+    await launchSandboxedIdeServer(runCfg, st, env, [
       '--host', '127.0.0.1', '--port', String(runCfg.webPort), '--server-base-path', IDE_BASE_PATH,
       '--connection-token-file', L.vscodeToken, '--extensions-dir', L.vscodeExt,
-      '--server-data-dir', L.vscodeServer, '--user-data-dir', L.vscodeUser, '--accept-server-license-terms',
-    ], { env, cwd: L.home, markers: [`--port ${runCfg.webPort}`, `--connection-token-file ${L.vscodeToken}`] });
+      '--server-data-dir', L.vscodeServer, '--accept-server-license-terms',
+    ], [`--port ${runCfg.webPort}`, `--connection-token-file ${L.vscodeToken}`]);
   }
   saveState(L, st);
   await waitForListener(runCfg.webPort, st.webPid, 300_000, runCfg.vscodeMode);
@@ -530,7 +585,7 @@ async function bringUpVscode(runCfg, st) {
 function startTripwire(L, st) {
   st.tripwirePid = launch(L, 'tripwire', process.execPath, [
     path.join(HERE, 'tripwire.mjs'), 'watch', '--port', String(OWNER_TOWER_PORT), '--pids', L.pids,
-    '--marker', L.tripMarker, ...socketPrefixes(L, st).flatMap((p) => ['--socket-prefix', p]), '--interval', '2000',
+    '--marker', L.tripMarker, ...socketPrefixes(L, st).flatMap((p) => ['--socket-prefix', p]), '--interval', '1000',
   ], { env: childEnv(L, 'tripwire'), cwd: L.home, markers: ['tripwire.mjs', 'watch'] });
   saveState(L, st);
 }
@@ -605,7 +660,7 @@ async function cmdSeed(name) {
   const L = layout(scratchFromEnv());
   const st = loadState(L);
   assertTripwireClean(L, st);
-  writePid(L, `cli-${process.pid}`, process.pid, []);
+  writePid(L, `cli-${process.pid}`, process.pid, CLI_MARKERS);
   try {
     await seedScenario(L, runCfgFromState(L, st), st, name);
   } finally {
@@ -666,7 +721,7 @@ async function cmdCheck() {
       results.push({ name, ok: false, detail: err.message });
     }
   };
-  writePid(L, `cli-${process.pid}`, process.pid, []);
+  writePid(L, `cli-${process.pid}`, process.pid, CLI_MARKERS);
   try {
     await item('tripwire running and not tripped', () => { assertTripwireClean(L, st); return `pid ${st.tripwirePid}`; });
     await item('gate 4: Tower on its port is the harness pid and answers the isolated key', async () =>
@@ -677,6 +732,13 @@ async function cmdCheck() {
       gateVscodeProfile({ settingsPath: st.settingsPath, port: st.towerPort, env: webEnv(L, runCfg), stubsDir: STUBS });
       return st.settingsPath;
     });
+    if (st.vscodeMode === 'ide-server') {
+      await item('gate 5: the ide-server runs inside the network sandbox denying the owner\'s port', () => {
+        if (!st.sandboxPorts?.includes(OWNER_TOWER_PORT)) throw new Error(`the recorded sandbox ports are ${JSON.stringify(st.sandboxPorts)}`);
+        gateSandbox(L.sandboxProfile, st.sandboxPorts);
+        return L.sandboxProfile;
+      });
+    }
     await item(`${st.vscodeMode} listener belongs to the harness`, () => {
       const tree = descendants([st.webPid]);
       const listeners = listenerPids(st.webPort);
@@ -831,7 +893,7 @@ async function cmdTowerUp() {
   if (st.towerPid && isAlive(st.towerPid)) throw new Error(`the isolated Tower is already running (pid ${st.towerPid})`);
   const runCfg = runCfgFromState(L, st);
   gatePort('COCKPIT_TOWER_PORT', String(st.towerPort));
-  writePid(L, `cli-${process.pid}`, process.pid, []);
+  writePid(L, `cli-${process.pid}`, process.pid, CLI_MARKERS);
   try {
     st.towerPid = launch(L, 'tower', process.execPath, towerArgs(runCfg), {
       env: towerEnv(L, runCfg), cwd: L.home, markers: ['tower-server.js', `-p ${st.towerPort}`],
@@ -868,7 +930,7 @@ async function cmdVscodeRestart() {
   if (survivors.length) throw new Error(`${st.vscodeMode} pids survived: ${survivors.join(', ')}`);
   removePid(L, 'vscode');
   if (listenerPids(st.webPort).length) throw new Error(`:${st.webPort} still has a listener`);
-  writePid(L, `cli-${process.pid}`, process.pid, []);
+  writePid(L, `cli-${process.pid}`, process.pid, CLI_MARKERS);
   try {
     await bringUpVscode(runCfg, st);
   } finally {
@@ -936,7 +998,19 @@ function foreignListener() {
   });
 }
 
-async function selftest() {
+/**
+ * The self-test sections, each run when named (`selftest tripwire sandbox`) or all by default:
+ * - `gates`: gates 1 and 2 refuse `start` before it creates anything;
+ * - `tower`: gates 3 and 4 against a real isolated Tower on the harness ports;
+ * - `fixtures`: `stop` refuses to remove a fixtures dir that is not the harness's;
+ * - `tripwire`, `settings`, `sandbox`: throwaway listeners and processes only, no Tower or VS Code.
+ */
+const SELFTEST_SECTIONS = ['gates', 'tower', 'fixtures', 'tripwire', 'settings', 'sandbox'];
+
+async function selftest(...sections) {
+  const unknown = sections.filter((x) => !SELFTEST_SECTIONS.includes(x));
+  if (unknown.length) throw new Error(`unknown selftest section(s) ${unknown.join(', ')}; known: ${SELFTEST_SECTIONS.join(', ')}`);
+  const want = (section) => !sections.length || sections.includes(section);
   const scratch = scratchFromEnv();
   const towerPort = gatePort('COCKPIT_TOWER_PORT', process.env.COCKPIT_TOWER_PORT);
   const webPort = gatePort('COCKPIT_WEB_PORT', process.env.COCKPIT_WEB_PORT);
@@ -949,7 +1023,29 @@ async function selftest() {
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
   };
 
-  // --- Gates 1 and 2: `start` refuses before creating anything. ---
+  if (want('gates')) await gatesSelftest(base, record, towerPort, webPort);
+  if (want('tower')) await towerSelftest(base, record);
+
+  // --- Teardown refuses to remove a recorded fixtures dir that is not the harness's. ---
+  if (want('fixtures')) fixturesRemovalSelftest(base, record);
+
+  // --- The tripwire stops the whole harness tree on a connection from it, and only from it. ---
+  if (want('tripwire')) await tripwireSelftest(base, record);
+
+  // --- ide-server mode: the settings are written where the server reads them. ---
+  if (want('settings')) settingsSelftest(base, record);
+
+  // --- ide-server mode: the network sandbox and its launch canary. ---
+  if (want('sandbox')) await sandboxSelftest(base, record);
+
+  fs.rmSync(base, { recursive: true, force: true });
+  const failed = results.filter((r) => !r.ok).length;
+  console.log(failed ? `selftest FAILED (${failed} of ${results.length})` : `selftest passed (${results.length} cases)`);
+  if (failed) process.exitCode = 1;
+}
+
+/** Gates 1 and 2: `start` refuses before creating anything. */
+async function gatesSelftest(base, record, towerPort, webPort) {
   const busy = await foreignListener();
   const outsideAf = path.join(REPO, 'tmp-cockpit-selftest-af');
   const outsideSock = `/tmp/cckp-selftest-${crypto.randomBytes(3).toString('hex')}`;
@@ -983,8 +1079,10 @@ async function selftest() {
     record(name, !problems.length, problems.join('; ') || r.stderr.trim().split('\n').pop());
   }
   busy.kill();
+}
 
-  // --- Gates 3 and 4 against a real isolated Tower. ---
+/** Gates 3 and 4 against a real isolated Tower. */
+async function towerSelftest(base, record) {
   process.env.COCKPIT_SCRATCH = path.join(base, 'tower');
   fs.mkdirSync(process.env.COCKPIT_SCRATCH);
   delete process.env.CODEV_AGENT_FARM_DIR;
@@ -1024,17 +1122,6 @@ async function selftest() {
     record('selftest Tower torn down by PID, socket link removed', !left.length && linkGone,
       left.length ? `alive: ${left.join(', ')}` : (linkGone ? '' : `${runCfg.socketLink} remains`));
   }
-
-  // --- Teardown refuses to remove a recorded fixtures dir that is not the harness's. ---
-  fixturesRemovalSelftest(base, record);
-
-  // --- Tripwire fires on a connection from the harness tree, and only from it. ---
-  await tripwireSelftest(base, record);
-
-  fs.rmSync(base, { recursive: true, force: true });
-  const failed = results.filter((r) => !r.ok).length;
-  console.log(failed ? `selftest FAILED (${failed} of ${results.length})` : `selftest passed (${results.length} cases)`);
-  if (failed) process.exitCode = 1;
 }
 
 /**
@@ -1092,38 +1179,251 @@ function fixturesRemovalSelftest(base, record) {
   }
 }
 
+/**
+ * A fake harness tree for the tripwire and sandbox self-tests: `node fake-tree.cjs root <marker>
+ * <dir> <port> [control-port]` starts a child, which starts a detached grandchild (a new session,
+ * still a descendant). Each writes `<dir>/<role>.pid`. Once `<dir>/go` exists, the grandchild
+ * connects to `port` (and `control-port`) on 127.0.0.1 and ::1 and writes the outcomes to
+ * `<dir>/connect.json`, then holds its sockets open.
+ */
+const FAKE_TREE = `const { spawn } = require('child_process');
+const fs = require('fs');
+const net = require('net');
+const path = require('path');
+const [role, marker, dir, port, control] = process.argv.slice(2);
+fs.writeFileSync(path.join(dir, role + '.pid'), String(process.pid));
+const next = { root: 'child', child: 'grandchild' }[role];
+if (next) spawn(process.execPath, [__filename, next, marker, dir, port, control || ''], { detached: role === 'child', stdio: 'ignore' });
+const held = [];
+const attempt = (p, host) => new Promise((resolve) => {
+  const s = net.connect(Number(p), host);
+  held.push(s);
+  s.on('connect', () => resolve('connected'));
+  s.on('error', (e) => resolve(e.code));
+});
+if (role === 'grandchild') {
+  const t = setInterval(async () => {
+    if (!fs.existsSync(path.join(dir, 'go'))) return;
+    clearInterval(t);
+    const out = { port4: await attempt(port, '127.0.0.1'), port6: await attempt(port, '::1') };
+    if (control) out.control = await attempt(control, '127.0.0.1');
+    fs.writeFileSync(path.join(dir, 'connect.json'), JSON.stringify(out));
+  }, 50);
+}
+setInterval(() => {}, 1000);
+`;
+
+async function waitForFile(file, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (!fs.existsSync(file)) {
+    if (Date.now() > deadline) return false;
+    await sleep(50);
+  }
+  return true;
+}
+
+const readPid = (dir, role) => (fs.existsSync(path.join(dir, `${role}.pid`)) ? Number(fs.readFileSync(path.join(dir, `${role}.pid`), 'utf-8')) : null);
+
+/**
+ * The tripwire against a fake harness tree on a throwaway listener: it ignores a connection from
+ * outside the tree; on a connection from a detached grandchild it writes its marker, freezes and
+ * kills the whole tree (root, child, grandchild) within seconds, and reports what it killed; it
+ * kills nothing outside the tree, including a process recorded in a pid file whose command no
+ * longer carries that file's markers (a reused pid).
+ */
 async function tripwireSelftest(base, record) {
   const dir = path.join(base, 'tripwire');
   const pidsDir = path.join(dir, 'pids');
   const marker = path.join(dir, 'tripped.json');
   fs.mkdirSync(pidsDir, { recursive: true });
-  const server = net.createServer(() => {});
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  const port = server.address().port;
-  // The "harness child": connects to the throwaway listener when told to on stdin, then holds.
-  const child = spawn(process.execPath, ['-e',
-    `process.stdin.once('data',()=>{require('net').connect(${port},'127.0.0.1');});setInterval(()=>{},1000);`], { stdio: ['pipe', 'ignore', 'inherit'] });
-  fs.writeFileSync(path.join(pidsDir, 'child.json'), JSON.stringify({ pid: child.pid, markers: [] }));
-  const tw = spawn(process.execPath, [path.join(HERE, 'tripwire.mjs'), 'watch', '--port', String(port), '--pids', pidsDir,
-    '--marker', marker, '--interval', '200'], { stdio: ['ignore', 'pipe', 'inherit'] });
-  const twExit = new Promise((r) => tw.once('exit', (code) => r(code)));
+  const script = path.join(dir, 'fake-tree.cjs');
+  fs.writeFileSync(script, FAKE_TREE);
+  const listener = await countingListener();
+  const treeMarker = `cockpit-selftest-tree-${crypto.randomBytes(4).toString('hex')}`;
+  const root = spawn(process.execPath, [script, 'root', treeMarker, dir, String(listener.port)], { stdio: 'ignore' });
+  fs.writeFileSync(path.join(pidsDir, 'root.json'), JSON.stringify({ pid: root.pid, markers: [treeMarker] }));
+  // A recorded pid whose process runs something else now: never part of the tree.
+  const reused = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  fs.writeFileSync(path.join(pidsDir, 'reused.json'), JSON.stringify({ pid: reused.pid, markers: ['cockpit-selftest-not-this-process'] }));
+  const all = () => [root.pid, readPid(dir, 'child'), readPid(dir, 'grandchild')].filter(Boolean);
+  let tw = null;
   try {
+    if (!await waitForFile(path.join(dir, 'grandchild.pid'), 10_000)) throw new Error('the fake tree did not start');
+    tw = spawn(process.execPath, [path.join(HERE, 'tripwire.mjs'), 'watch', '--port', String(listener.port), '--pids', pidsDir,
+      '--marker', marker, '--interval', '200'], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const twExit = new Promise((r) => tw.once('exit', (code) => r(code)));
+
     // Control: a connection from a process outside the tree (this one) must not trip it.
-    const outsider = net.connect(port, '127.0.0.1');
+    const outsider = net.connect(listener.port, '127.0.0.1');
     await sleep(2000);
     const quiet = tw.exitCode === null && !fs.existsSync(marker);
     record('tripwire ignores a connection from outside the harness tree', quiet, quiet ? '' : 'it fired');
-    outsider.destroy();
 
-    child.stdin.write('go\n');
-    const code = await Promise.race([twExit, sleep(10_000).then(() => 'timeout')]);
+    const t0 = Date.now();
+    fs.writeFileSync(path.join(dir, 'go'), '');
+    const code = await Promise.race([twExit, sleep(15_000).then(() => 'timeout')]);
+    const stoppedIn = Date.now() - t0;
     const hit = fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, 'utf-8')) : null;
-    const ok = code === TRIPWIRE_EXIT_CODE && hit?.violations.some((v) => v.pid === child.pid);
-    record('tripwire fires on a connection from a harness child', ok, `exit ${code}, ${hit ? `flagged pid ${hit.violations.map((v) => v.pid).join(', ')}` : 'no marker'}`);
+    const grandchild = readPid(dir, 'grandchild');
+    record('tripwire fires on a connection from a detached grandchild of a recorded process',
+      code === TRIPWIRE_EXIT_CODE && Boolean(hit?.violations.some((v) => v.pid === grandchild)),
+      `exit ${code}, ${hit ? `flagged pid ${hit.violations.map((v) => v.pid).join(', ')}` : 'no marker'}`);
+
+    const tree = all();
+    const killed = new Set((hit?.killed ?? []).map((k) => k.pid));
+    const running = runningPids(tree);
+    record('tripwire stops the run at once: the whole tree (root, child, grandchild) killed within 5 s, then reported',
+      tree.length === 3 && !running.length && tree.every((p) => killed.has(p)) && Boolean(hit?.stoppedAt) && !hit?.survivors?.length && stoppedIn < 5000,
+      `${stoppedIn} ms; tree ${tree.join(', ')}; killed ${[...killed].join(', ') || 'none'}; still running ${running.join(', ') || 'none'}`);
+
+    const spared = runningPids([process.pid, reused.pid]);
+    record('tripwire kills nothing outside the tree: this process, and a recorded pid whose command lacks its markers',
+      spared.length === 2 && !killed.has(reused.pid) && !killed.has(process.pid), `running ${spared.join(', ')}`);
+    outsider.destroy();
+  } catch (err) {
+    record('tripwire self-test', false, err.message);
   } finally {
-    if (tw.exitCode === null) tw.kill('SIGKILL');
-    child.kill('SIGKILL');
-    server.close();
+    if (tw && tw.exitCode === null) tw.kill('SIGKILL');
+    for (const pid of [...all(), reused.pid]) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ }
+    }
+    listener.close();
+  }
+}
+
+/**
+ * ide-server settings: where the harness writes them is the file the server reads. Against
+ * stand-in bundles (one showing the three facts, one not) and, read-only, each real server named
+ * in COCKPIT_SELFTEST_SERVER_BINS (colon-separated). No server is launched.
+ */
+function settingsSelftest(base, record) {
+  const dir = path.join(base, 'settings');
+  const fakeServer = (name, code) => {
+    fs.mkdirSync(path.join(dir, name, 'bin'), { recursive: true });
+    fs.mkdirSync(path.join(dir, name, 'out'), { recursive: true });
+    fs.writeFileSync(path.join(dir, name, 'bin', 'server'), '#!/bin/sh\n');
+    fs.writeFileSync(path.join(dir, name, 'out', 'server-main.js'), code);
+    return path.join(dir, name, 'bin', 'server');
+  };
+  const facts = [
+    'a=hy(process.argv.slice(2),WT,gX),zh=xl["server-data-dir"]||process.env.VSCODE_AGENT_FOLDER||z(AB.homedir(),".vscode-remote"),DC=z(zh,"data"),JM=z(DC,"User");xl["user-data-dir"]=DC;',
+    'class es{get machineSettingsResource(){return fe(S.file(z(this.userDataPath,"Machine")),"settings.json")}}',
+    'function A(r,t){let e=process.env.VSCODE_PORTABLE;if(e)return Iu(e,"user-data");let n=process.env.VSCODE_APPDATA;if(n)return Iu(n,t);let o=r["user-data-dir"];return o||B$(t)}',
+  ].join('\n');
+  const serverDataDir = path.join(dir, 'server-data');
+  const confirmed = (bin) => {
+    try {
+      return { file: ideServerMachineSettings({ serverBin: bin, serverDataDir }) };
+    } catch (err) {
+      return { err };
+    }
+  };
+  const want = path.join(serverDataDir, 'data', 'Machine', 'settings.json');
+  const good = confirmed(fakeServer('good', facts));
+  record('ide-server settings: a server bundle showing the three facts gives <server-data-dir>/data/Machine/settings.json',
+    good.file === want, good.file ?? good.err.message);
+  const changed = confirmed(fakeServer('changed', facts.replace('xl["user-data-dir"]=DC;', '')));
+  record('ide-server settings: a bundle that does not force user-data-dir is refused (gate 5)',
+    changed.err instanceof Refusal && changed.err.gate === 5, changed.err?.message ?? `accepted: ${changed.file}`);
+  for (const bin of (process.env.COCKPIT_SELFTEST_SERVER_BINS ?? '').split(':').filter(Boolean)) {
+    const real = confirmed(bin);
+    record(`ide-server settings: the real bundle of ${bin} confirms <server-data-dir>/data/Machine/settings.json (read only)`,
+      real.file === want, real.file ?? real.err.message);
+  }
+
+  // The 2026-11-24 configuration: settings only under --user-data-dir, none where the server reads.
+  const userDataDir = path.join(dir, 'user-data');
+  writeMachineSettings(path.join(userDataDir, 'Machine', 'settings.json'), 18764);
+  const env = { PATH: `${STUBS}:${process.env.PATH}` };
+  const gate = (settingsPath, extraEnv = {}) => {
+    try {
+      gateVscodeProfile({ settingsPath, port: 18764, env: { ...env, ...extraEnv }, stubsDir: STUBS });
+      return null;
+    } catch (err) {
+      return err;
+    }
+  };
+  const incident = gate(want);
+  record('gate 5 refuses the incident\'s layout: settings under --user-data-dir, none where the server reads',
+    incident instanceof Refusal && incident.gate === 5, incident?.message ?? 'passed');
+  writeMachineSettings(want, 18764);
+  const ok = gate(want);
+  record('gate 5 passes with the settings where the server reads them (positive control)', ok === null, ok?.message ?? '');
+  const moved = gate(want, { VSCODE_APPDATA: dir });
+  record('gate 5 refuses VSCODE_APPDATA in the server environment (it moves the settings)',
+    moved instanceof Refusal && moved.gate === 5, moved?.message ?? 'passed');
+}
+
+/**
+ * The ide-server network sandbox, through the same `sandboxedCommand` and profile the launch uses,
+ * with a throwaway listener standing in for the owner's port. No VS Code server is launched: the
+ * target is the fake tree, whose detached grandchild tries the denied port and a control port.
+ */
+async function sandboxSelftest(base, record) {
+  const dir = path.join(base, 'sandbox');
+  fs.mkdirSync(dir, { recursive: true });
+  const script = path.join(dir, 'fake-tree.cjs');
+  fs.writeFileSync(script, FAKE_TREE);
+  const owner = await countingListener();
+  const control = await countingListener();
+  const canary = await countingListener();
+  const started = [];
+  const runCase = async (name, ports) => {
+    const caseDir = path.join(dir, name);
+    fs.mkdirSync(caseDir);
+    const profile = path.join(caseDir, 'profile.sb');
+    fs.writeFileSync(profile, networkDenyProfile(ports));
+    const sb = sandboxedCommand({
+      profile, node: process.execPath, canaryPort: canary.port, cmd: process.execPath,
+      args: [script, 'root', `cockpit-selftest-sandbox-${name}`, caseDir, String(owner.port), String(control.port)],
+    });
+    const child = spawn(sb.cmd, sb.args, { env: { ...process.env, ...sb.env }, stdio: ['ignore', 'ignore', 'pipe'] });
+    started.push(child.pid);
+    let stderr = '';
+    child.stderr.on('data', (d) => { stderr += d; });
+    const exit = new Promise((r) => child.once('exit', (code) => r(code)));
+    const up = await Promise.race([waitForFile(path.join(caseDir, 'grandchild.pid'), 10_000), exit.then(() => false)]);
+    for (const role of ['child', 'grandchild']) if (readPid(caseDir, role)) started.push(readPid(caseDir, role));
+    if (!up) return { started: false, code: await Promise.race([exit, sleep(2000).then(() => 'running')]), stderr };
+    fs.writeFileSync(path.join(caseDir, 'go'), '');
+    if (!await waitForFile(path.join(caseDir, 'connect.json'), 10_000)) return { started: true, result: null, stderr };
+    return { started: true, result: JSON.parse(fs.readFileSync(path.join(caseDir, 'connect.json'), 'utf-8')), stderr };
+  };
+  try {
+    const before = owner.accepted();
+    const denied = await runCase('denied', [owner.port, canary.port]);
+    const r = denied.result;
+    record('sandbox: the launch canary is refused, so the target starts',
+      denied.started && canary.accepted() === 0, denied.started ? '' : `exit ${denied.code}: ${denied.stderr.trim()}`);
+    record('sandbox: a detached grandchild cannot connect to the denied port (EPERM on 127.0.0.1 and ::1); the listener saw nothing',
+      r?.port4 === 'EPERM' && r?.port6 === 'EPERM' && owner.accepted() === before, JSON.stringify(r));
+    record('sandbox: the same process connects to another port (only the denied ports are cut)',
+      r?.control === 'connected' && control.accepted() >= 1, JSON.stringify(r));
+
+    const unguarded = await runCase('canary-not-denied', [owner.port]);
+    record('sandbox: a profile that does not cover the canary stops the launch before the target starts',
+      !unguarded.started && unguarded.code === CANARY_EXIT_CODE && canary.accepted() >= 1,
+      `started ${unguarded.started}, exit ${unguarded.code}; ${unguarded.stderr.trim()}`);
+
+    const profileFile = path.join(dir, 'real.sb');
+    fs.writeFileSync(profileFile, networkDenyProfile([OWNER_TOWER_PORT, canary.port]));
+    let refused = null;
+    try { gateSandbox(profileFile, [OWNER_TOWER_PORT, canary.port]); } catch (err) { refused = err; }
+    record(`sandbox: the launch profile denies :${OWNER_TOWER_PORT} and the canary (gate 5 accepts it)`,
+      refused === null && fs.readFileSync(profileFile, 'utf-8').includes(`(deny network-outbound (remote tcp "*:${OWNER_TOWER_PORT}"))`), refused?.message ?? '');
+    fs.writeFileSync(profileFile, networkDenyProfile([canary.port]));
+    refused = null;
+    try { gateSandbox(profileFile, [OWNER_TOWER_PORT, canary.port]); } catch (err) { refused = err; }
+    record(`sandbox: gate 5 refuses a profile without the :${OWNER_TOWER_PORT} rule`, refused instanceof Refusal && refused.gate === 5, refused?.message ?? 'accepted');
+  } catch (err) {
+    record('sandbox self-test', false, err.message);
+  } finally {
+    for (const pid of started) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ }
+    }
+    owner.close();
+    control.close();
+    canary.close();
   }
 }
 

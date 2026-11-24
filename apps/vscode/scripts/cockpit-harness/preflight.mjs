@@ -135,10 +135,47 @@ export async function gateListener({ port, pid, key }) {
 }
 
 /**
- * Gate 5: the serve-web profile pins the extension to the isolated Tower with auto-start off, and
- * `afx`, `porch` and `codev` resolve to the recording stubs in the serve-web environment.
+ * What a VS Code server's bundle (`out/server-main.js`, 1.128 and Codev IDE 1.138 alike) does,
+ * read from its code, which is minified, so each is a pattern:
+ * - it forces `user-data-dir` to `<server-data-dir>/data`, whatever `--user-data-dir` says;
+ * - it reads machine settings from `<userDataPath>/Machine/settings.json`;
+ * - `userDataPath` is `VSCODE_PORTABLE` or `VSCODE_APPDATA` when set, else `user-data-dir`.
+ */
+const SERVER_SETTINGS_FACTS = [
+  ['user-data-dir forced to <server-data-dir>/data',
+    /\["server-data-dir"\]\|\|process\.env\.VSCODE_AGENT_FOLDER\|\|[^;]{0,120}?,([\w$]+)=[\w$]+\([\w$]+,"data"\)[^;]{0,200}?;[\w$]+\["user-data-dir"\]=\1;/],
+  ['machine settings at <userDataPath>/Machine/settings.json',
+    /get machineSettingsResource\(\)\{return [\w$]+\([\w$]+\.file\([\w$]+\(this\.userDataPath,"Machine"\)\),"settings\.json"\)\}/],
+  ['userDataPath is VSCODE_PORTABLE, VSCODE_APPDATA, then user-data-dir',
+    /process\.env\.VSCODE_PORTABLE;if\([\w$]+\)return [\w$]+\([\w$]+,"user-data"\);let [\w$]+=process\.env\.VSCODE_APPDATA;if\([\w$]+\)return [\w$]+\([\w$]+,[\w$]+\);let ([\w$]+)=[\w$]+\["user-data-dir"\];return \1\|\|/],
+];
+/** Environment variables that move a VS Code server's user data, and with it its machine settings. */
+export const USER_DATA_OVERRIDES = ['VSCODE_PORTABLE', 'VSCODE_APPDATA'];
+
+/**
+ * Gate 5, ide-server half: the machine-settings file the server at `serverBin` will read, given
+ * `--server-data-dir serverDataDir`. Confirmed from the server's own bundle (the launcher script
+ * runs `<root>/node <root>/out/server-main.js`), never assumed from the flags. A bundle that
+ * does not show all three facts above is refused: the settings could land where it never looks,
+ * which is how the 2026-11-24 run reached the owner's Tower.
+ */
+export function ideServerMachineSettings({ serverBin, serverDataDir }) {
+  const bundle = path.join(path.dirname(path.dirname(fs.realpathSync(serverBin))), 'out', 'server-main.js');
+  if (!fs.existsSync(bundle)) throw new Refusal(5, `no server bundle at ${bundle}; cannot confirm where ${serverBin} reads machine settings`);
+  const code = fs.readFileSync(bundle, 'utf-8');
+  const missing = SERVER_SETTINGS_FACTS.filter(([, re]) => !re.test(code)).map(([fact]) => fact);
+  if (missing.length) throw new Refusal(5, `cannot confirm where ${bundle} reads machine settings (not found: ${missing.join('; ')})`);
+  return path.join(serverDataDir, 'data', 'Machine', 'settings.json');
+}
+
+/**
+ * Gate 5: the machine settings the server reads pin the extension to the isolated Tower with
+ * auto-start off; nothing in the server's environment moves where it reads them; `afx`, `porch`
+ * and `codev` resolve to the recording stubs in that environment.
  */
 export function gateVscodeProfile({ settingsPath, port, env, stubsDir }) {
+  const moved = USER_DATA_OVERRIDES.filter((k) => env[k] !== undefined);
+  if (moved.length) throw new Refusal(5, `${moved.join(', ')} set in the VS Code environment; the server would read its settings elsewhere`);
   if (!fs.existsSync(settingsPath)) throw new Refusal(5, `${settingsPath} does not exist`);
   const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
   if (settings['codev.towerPort'] !== port) {

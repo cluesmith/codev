@@ -50,6 +50,21 @@ export function isAlive(pid) {
   }
 }
 
+/**
+ * The members of `pids` that are still running: alive and not a zombie (a killed process whose
+ * parent has not reaped it yet still answers `kill(pid, 0)`).
+ */
+export function runningPids(pids) {
+  const r = run('ps', ['-A', '-o', 'pid=,stat=']);
+  if (r.status !== 0) throw new Error(`ps failed: ${r.stderr}`);
+  const running = new Set();
+  for (const line of r.stdout.split('\n')) {
+    const m = line.match(/^\s*(\d+)\s+(\S+)/);
+    if (m && !m[2].startsWith('Z')) running.add(Number(m[1]));
+  }
+  return [...pids].filter((pid) => running.has(pid));
+}
+
 /** Parse `lsof -F p…n…` output into [{ pid, command, names[] }]. */
 function parseLsofFields(stdout) {
   const procs = [];

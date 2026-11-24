@@ -14,24 +14,34 @@
 //   node tripwire.mjs watch --port <n> --pids <dir> --marker <file> [--socket-prefix <path>]...
 //                           [--interval <ms>] [--socket-scan-every <n>]
 //
-// On a hit it writes the marker (JSON: the offending pids and commands) and exits 3.
+// On a hit it stops the run at once. It writes the marker first, so every harness command refuses
+// from then on. It then freezes the harness's whole process tree (SIGSTOP, rescanning until no
+// new process appears, so nothing can start another or be reparented out of reach), SIGKILLs it,
+// completes the marker with what it killed and what survived, and exits 3. Detecting a
+// connection and letting the run continue is what let the 2026-11-24 incident go on for 25
+// minutes.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { descendants, isAlive, processTable, tcpOn, unixSocketHolders } from './procs.mjs';
+import { descendants, processTable, runningPids, tcpOn, unixSocketHolders } from './procs.mjs';
 
 export const TRIPWIRE_EXIT_CODE = 3;
 
-/** PIDs recorded in `pidsDir` (files `<name>.json` holding `{ pid }`) that are still alive. */
-export function recordedPids(pidsDir) {
+/**
+ * PIDs recorded in `pidsDir` (files `<name>.json` holding `{ pid, markers }`) whose process still
+ * runs a command carrying every marker. A pid file with no markers is not trusted. The tripwire
+ * kills what this returns, so a pid reused by another process must not match.
+ */
+export function recordedPids(pidsDir, table = processTable()) {
   if (!fs.existsSync(pidsDir)) return [];
   const pids = [];
   for (const f of fs.readdirSync(pidsDir)) {
     if (!f.endsWith('.json')) continue;
     try {
-      const { pid } = JSON.parse(fs.readFileSync(path.join(pidsDir, f), 'utf-8'));
-      if (Number.isInteger(pid) && isAlive(pid)) pids.push(pid);
+      const { pid, markers } = JSON.parse(fs.readFileSync(path.join(pidsDir, f), 'utf-8'));
+      const cmd = table.get(pid)?.command;
+      if (cmd && Array.isArray(markers) && markers.length && markers.every((m) => cmd.includes(m))) pids.push(pid);
     } catch {
       // A pid file being written right now; the next sample reads it.
     }
@@ -45,7 +55,7 @@ export function recordedPids(pidsDir) {
  */
 export function harnessTree({ pidsDir, socketPrefixes = [], socketHolders }) {
   const table = processTable();
-  const roots = new Set(recordedPids(pidsDir));
+  const roots = new Set(recordedPids(pidsDir, table));
   const holders = socketHolders ?? (socketPrefixes.length ? unixSocketHolders(socketPrefixes) : []);
   for (const pid of holders) roots.add(pid);
   return { tree: descendants(roots, table), table };
@@ -58,6 +68,46 @@ export function sample({ port, pidsDir, socketPrefixes = [], socketHolders }) {
     .filter((p) => tree.has(p.pid))
     .map((p) => ({ pid: p.pid, command: table.get(p.pid)?.command ?? p.command, sockets: p.names }));
   return { treeSize: tree.size, violations };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function signal(pid, sig) {
+  try {
+    process.kill(pid, sig);
+  } catch {
+    // Gone already.
+  }
+}
+
+/**
+ * Stop the harness: freeze every process of its tree (this one excepted), rescanning until a scan
+ * finds none not yet frozen, then SIGKILL them all and wait up to `waitMs` for them to go.
+ * `socketHolders` is the last socket-holder scan; one fresh scan runs after the first freeze.
+ * Returns `{ killed: [{ pid, command }], survivors: [pid] }`.
+ */
+export async function killHarnessTree({ pidsDir, socketPrefixes = [], socketHolders = [], waitMs = 3000 }) {
+  const frozen = new Map();
+  let holders = [...socketHolders];
+  for (let round = 0; round < 20; round++) {
+    if (round === 1 && socketPrefixes.length) holders = [...unixSocketHolders(socketPrefixes)];
+    const table = processTable();
+    const roots = new Set([...recordedPids(pidsDir, table), ...holders, ...frozen.keys()]);
+    const fresh = [...descendants(roots, table)].filter((pid) => pid !== process.pid && !frozen.has(pid));
+    for (const pid of fresh) {
+      frozen.set(pid, table.get(pid)?.command ?? '');
+      signal(pid, 'SIGSTOP');
+    }
+    if (!fresh.length && round >= 1) break;
+  }
+  for (const pid of frozen.keys()) signal(pid, 'SIGKILL');
+  const deadline = Date.now() + waitMs;
+  let survivors = runningPids(frozen.keys());
+  while (survivors.length && Date.now() < deadline) {
+    await sleep(100);
+    survivors = runningPids(survivors);
+  }
+  return { killed: [...frozen].map(([pid, command]) => ({ pid, command })), survivors };
 }
 
 function parseArgs(argv) {
@@ -92,9 +142,14 @@ async function watch(opts) {
     const { treeSize, violations } = sample({ ...opts, socketHolders });
     samples++;
     if (violations.length) {
-      const record = { at: stamp(), port: opts.port, samples, violations };
+      const record = { at: stamp(), port: opts.port, samples, violations, stopping: true };
       fs.writeFileSync(opts.marker, `${JSON.stringify(record, null, 2)}\n`);
-      console.log(`${stamp()} TRIPPED: ${JSON.stringify(violations)}`);
+      console.log(`${stamp()} TRIPPED: ${JSON.stringify(violations)}; stopping the harness`);
+      const { killed, survivors } = await killHarnessTree({ ...opts, socketHolders });
+      delete record.stopping;
+      Object.assign(record, { stoppedAt: stamp(), killed, survivors });
+      fs.writeFileSync(opts.marker, `${JSON.stringify(record, null, 2)}\n`);
+      console.log(`${stamp()} stopped the harness: killed ${killed.length} process(es)${survivors.length ? `; STILL RUNNING: ${survivors.join(', ')}` : '; none left'}`);
       process.exit(TRIPWIRE_EXIT_CODE);
     }
     if (samples % 30 === 1) console.log(`${stamp()} sample ${samples}: tree of ${treeSize}, no connection on :${opts.port}`);

@@ -14,7 +14,8 @@ export COCKPIT_SCRATCH=<the session scratchpad>   # must be under a temp root
 export COCKPIT_TOWER_PORT=18764 COCKPIT_WEB_PORT=18765
 H=apps/vscode/scripts/cockpit-harness/harness.mjs
 
-node $H selftest            # prove every pre-flight refusal and the tripwire
+node $H selftest            # prove every pre-flight refusal, the tripwire and the sandbox
+node $H selftest tripwire settings sandbox   # only these sections (no Tower, no VS Code)
 node $H build-vsix          # vsce package → $COCKPIT_SCRATCH/cockpit-harness/codev-vscode.vsix
 node $H start               # pre-flight, Tower, `empty` fixture, VS Code, tripwire
 node $H seed one-builder    # seed a scenario; gate 6 asserts its overview
@@ -27,7 +28,14 @@ node $H stop                # kill the harness's own PIDs; remove runtime dirs
 ```
 
 `selftest` needs both ports set and free, even though it serves no web. Its refusal cases run real
-`start` processes, and each must refuse for the gate under test, not for a missing port.
+`start` processes, and each must refuse for the gate under test, not for a missing port. Its
+sections, run when named or all by default:
+- `gates`: gates 1 and 2;
+- `tower`: gates 3 and 4 against a real isolated Tower;
+- `fixtures`: `stop`'s refusals;
+- `tripwire`, `settings`, `sandbox`: throwaway listeners and stand-in processes only. `settings`
+  also reads, without launching them, the bundles of any server binaries named in
+  `COCKPIT_SELFTEST_SERVER_BINS` (colon-separated).
 
 `build-vsix` records a digest of every tracked or untracked file the vsix is built from. `check`
 treats the installed vsix as the branch's only while that digest still matches, so an
@@ -39,6 +47,15 @@ If `code serve-web` cannot run, start with the IDE server binary instead:
 ```sh
 COCKPIT_VSCODE=ide-server COCKPIT_IDE_SERVER_BIN=<path to the VS Code Server's bin/code-server> node $H start
 ```
+
+**ide-server mode needs the owner's go-ahead** (the 2026-11-24 incident). Its first run wrote the
+machine settings under `--user-data-dir`, which this kind of server ignores. Its extension host
+then used the default port and sent about 9,100 requests to the owner's Tower over 25 minutes;
+every one was refused with a 401. The mode now:
+- writes the settings where the server's own code says it reads them, and refuses a server whose
+  bundle does not show where that is (gate 5);
+- runs the server inside a network sandbox (`sandbox.mjs`) that denies outbound TCP to `:4100`,
+  and proves the sandbox applies at each launch with a canary port.
 
 Prerequisites:
 - `packages/codev` is built, because the Tower and the fixture driver load its `dist`;
@@ -56,19 +73,20 @@ Never run `playwright install`. The driver uses the Chromium already in
 | Fixture driver (`fixtures.mjs`) | Runs in the isolated environment. Creates state only through:<ul><li>explicit-port HTTP calls (activation, builder terminals);</li><li>the dist's in-process writers (porch `writeState`, `upsertBuilder`);</li><li>git.</li></ul>It runs no Tower-contacting `afx` or `porch` command. |
 | Fixture workspaces | Git repos in a fresh `cockpit-fixtures-*` dir (`mkdtemp`) under the real per-user temp dir (`/private/var/folders/…/T`), **not** the scratchpad. Tower's `/api/workspaces` drops every workspace under `/tmp`, `/private/tmp` or its own `os.tmpdir()` (`isTempDirectory`), and the scratchpad is under `/private/tmp`, so fixtures there never reach the fleet the Tower and Cockpit views list. The Tower's own `TMPDIR` points into the scratchpad, so this dir is not its temp dir. `start` writes a marker holding a per-run token in it; see *Teardown*. |
 | Fixture sessions | Architects and builders are `/bin/bash --noprofile --norc`, through a no-op custom harness in each fixture's `.codev/config.json`. They are never agents. |
-| VS Code | Runs on `$COCKPIT_WEB_PORT` in one of two modes, set by `COCKPIT_VSCODE`:<ul><li>`serve-web` (default): `code serve-web`, with the CLI, server, user and extensions dirs all under the root.</li><li>`ide-server`: the plan's alternative for when serve-web cannot run. It launches the VS Code Server binary Tower's IDE support uses (`COCKPIT_IDE_SERVER_BIN`) **directly**, never through any Tower's `/api/ide`. It passes the flags `ide-server.ts` passes (`--host 127.0.0.1`, `--port`, `--server-base-path /ide`, `--connection-token-file`, `--extensions-dir`), plus `--server-data-dir` and `--user-data-dir`, all in the scratchpad.</li></ul>The mode is chosen explicitly. A serve-web failure fails the start; it does not switch modes by itself.<ul><li>Machine settings: `codev.towerPort=$COCKPIT_TOWER_PORT`, `codev.autoStartTower=false`, `files.autoSave=off`.</li><li>Environment: `CODEV_TOWER_KEY` is the isolated key, `HOME` is the scratch home, and `stubs/` comes first on `PATH`.</li></ul> |
+| VS Code | Runs on `$COCKPIT_WEB_PORT` in one of two modes, set by `COCKPIT_VSCODE`:<ul><li>`serve-web` (default): `code serve-web`, with the CLI, server, user and extensions dirs all under the root.</li><li>`ide-server`: the plan's alternative for when serve-web cannot run. It launches the VS Code Server binary Tower's IDE support uses (`COCKPIT_IDE_SERVER_BIN`) **directly**, never through any Tower's `/api/ide`. It passes the flags `ide-server.ts` passes (`--host 127.0.0.1`, `--port`, `--server-base-path /ide`, `--connection-token-file`, `--extensions-dir`), plus `--server-data-dir`, all in the scratchpad. It passes no `--user-data-dir`, because the server replaces it with `<server-data-dir>/data`. The server runs under `sandbox-exec` with a profile that denies outbound TCP to `:4100` and to a canary port, on any host. Before the server starts, a wrapper inside the sandbox connects to the canary port, and the server starts only if that connect is refused.</li></ul>The mode is chosen explicitly. A serve-web failure fails the start; it does not switch modes by itself.<ul><li>Machine settings: `codev.towerPort=$COCKPIT_TOWER_PORT`, `codev.autoStartTower=false`, `files.autoSave=off`. serve-web: in `<user-data-dir>/Machine/settings.json`. ide-server: in `<server-data-dir>/data/Machine/settings.json`. That is where the server's bundle (`out/server-main.js`) reads them, and gate 5 confirms it from the code before every start.</li><li>Environment: `CODEV_TOWER_KEY` is the isolated key, `HOME` is the scratch home, and `stubs/` comes first on `PATH`.</li></ul> |
 | Stubs (`stubs/afx`, `porch`, `codev`) | Each call appends `{ tool, argv, cwd, caller }` to `<root>/logs/stub-calls.jsonl` and exits 0, so CLI-shelling actions are verified by their recorded argv.<br>`codev --version` prints the branch version.<br>The stubs are on the Tower's `PATH` too. |
 | Browser (`workbench.mjs`) | Headless Chromium with a persistent profile under the root, so the folder-trust decision holds. Any request to `:4100` fails the check. |
-| Tripwire (`tripwire.mjs`) | Samples `lsof` for ESTABLISHED connections on `:4100` every 2 s. The machine-wide socket-holder scan runs on every 5th sample only. It fails the run (writes `tripwire.tripped`, exits 3) if one belongs to the harness tree:<ul><li>the PIDs in `<root>/pids/`;</li><li>holders of sockets in the run dir;</li><li>descendants of either.</li></ul>It never connects to `:4100`. |
+| Tripwire (`tripwire.mjs`) | Samples `lsof` for ESTABLISHED connections on `:4100` every second. The machine-wide socket-holder scan runs on every 5th sample only. A connection counts if it belongs to the harness tree:<ul><li>the PIDs in `<root>/pids/`, each only while its command still carries the markers its pid file records;</li><li>holders of sockets in the run dir;</li><li>descendants of either.</li></ul>On one, it **stops the run at once**:<ol><li>writes `tripwire.tripped`, so every harness command refuses from then on;</li><li>freezes the whole tree with SIGSTOP, rescanning until no new process appears;</li><li>SIGKILLs the tree, which includes the CLI that ran `start` or `verify`;</li><li>adds what it killed, and any survivor, to the marker;</li><li>exits 3.</li></ol>Read the marker, or the `NOTE` that `stop` prints. It never connects to `:4100`. |
 
-The tripwire **detects**; it does not enforce. It samples every 2 s, so a connect, request and
-close to `:4100` that completes between two samples would escape it. (The extension's Tower
+The tripwire **detects and stops**; it does not prevent. It samples every second, so a connect,
+request and close to `:4100` that completes between two samples would escape it. (The extension's Tower
 connection is a long-lived event stream, so a misdirected one would not.) Isolation is enforced by
 the layers above:
 - no Tower-contacting CLI;
 - recording stubs on `PATH`;
 - `codev.autoStartTower=false` and the pinned `codev.towerPort`;
-- the isolated `CODEV_TOWER_KEY`, so a stray request to the owner's Tower would get a 401.
+- the isolated `CODEV_TOWER_KEY`, so a stray request to the owner's Tower would get a 401;
+- in ide-server mode, the network sandbox, which refuses the connect itself.
 
 ## Pre-flight gates
 
