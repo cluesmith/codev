@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev",
-  "version": "3.3.7",
+  "version": "3.3.8",
   "description": "Codev CLI - AI-assisted software development framework",
   "type": "module",
   "bin": {
@@ -76,7 +76,7 @@
     "vitest": "^4.0.15"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "keywords": [
     "cli",

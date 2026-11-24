@@ -1060,9 +1060,14 @@ branches are testable on macOS/Linux.
   fresh census snapshot (`windows/process-census.ts`, CIM via PowerShell; other callers share a
   short-TTL cached, coalesced read), then the session's Job Object (`windows/job-objects.ts`, one
   in-memory PowerShell helper per Tower, never KILL_ON_JOB_CLOSE), then `taskkill /T /F`, then the
-  recorded survivors. `servers/architect-session-holder.ts` keeps its own `ps` listing on POSIX
-  rather than the census, so its entries carry a creation time, and its pre-reap PID-reuse check
-  runs, on Windows only.
+  recorded survivors. Session jobs allow no breakaway (#1915, reversing Spec 1658 Phase 3b ruling
+  (c)): the MSYS runtime breaks every native program Git Bash starts out of a job that allows it,
+  which left the agent and all its tool-call processes outside their session's job. Without it they
+  stay in, so ending the job ends the whole agent tree, as a process group does on POSIX.
+  Because nothing can leave a session job, Tower refuses to run inside any (it checks the job of
+  every live shellper at boot); `afx tower start` creates it outside through CIM.
+  `servers/architect-session-holder.ts` keeps its own `ps` listing on POSIX rather than the census,
+  so its entries carry a creation time, and its pre-reap PID-reuse check runs, on Windows only.
 - **Console windows** (#1919): Tower started by `afx tower start` is `detached` (DETACHED_PROCESS),
   so it has no console, and an unhidden console child (`git`, `gh`, `ps`, a cron command) gets a
   visible window of its own. Every spawn reachable from Tower, `afx spawn` / `afx tower`, and the
@@ -1094,8 +1099,8 @@ branches are testable on macOS/Linux.
   `lib/host-executable.ts` (host `which` and shell-free spawn form), `windows/msys-path.ts` (path
   translation across the Git Bash boundary), `lib/host-paths.ts`, and
   `agent-farm/lib/worktree-links.ts` (symlink, else junction / hard link / copy).
-- **Install**: Windows Node 22/24 only (better-sqlite3 prebuilds); a preinstall gate fails other
-  versions with that message instead of a node-gyp build. `engines.node` stays `>=20` for POSIX.
+- **Install**: Windows Node needs a better-sqlite3 prebuild (Node 22 is the supported, tested version); a
+  preinstall gate fails other versions with that message instead of a node-gyp build. `engines.node` is `>=22` (#1944).
 - **Workspace keys** (finding M6): Windows paths are case-insensitive but every workspace key
   (Tower's registry, `workspace_path` in global.db) is an exact string, and VS Code (`c:\`) and
   Git Bash (`C:\`) spell one directory differently. Invariant: every raw workspace path that
@@ -1253,7 +1258,7 @@ const CONFIG = {
 - macOS (Darwin)
 - Linux (GNU/Linux), including WSL 2
 - Native Windows 10/11, x64 and ARM64 (Spec 1658; see Platform Layer)
-- Requires: Node.js 20+ (native Windows: 22 or 24), Bash 4.0+ (Git Bash on Windows), Git 2.5+ (worktree support), standard Unix utilities (plus `jq` on Windows)
+- Requires: Node.js 22+ (tested on 22), Bash 4.0+ (Git Bash on Windows), Git 2.5+ (worktree support), standard Unix utilities (plus `jq` on Windows)
 - Native addon: node-pty (compiled during npm install on Linux, may need `npm rebuild node-pty`; prebuilt on Windows)
 - Runtime directory: `~/.codev/run/` for shellper Unix sockets (created automatically with `0700` permissions); Windows uses named pipes
 

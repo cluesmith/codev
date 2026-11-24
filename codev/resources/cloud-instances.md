@@ -16,7 +16,7 @@ Example configuration for a GCP dev instance:
 
 ### Installed Tools
 
-- Node.js v20.x
+- Node.js v22.x
 - npm 10.x
 - Claude Code
 - Codex CLI
@@ -158,8 +158,8 @@ apt install -y \
   build-essential \
   sqlite3
 
-# Node.js 20 LTS
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+# Node.js 22 LTS
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt install -y nodejs
 
 # AI CLIs

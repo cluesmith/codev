@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock node-pty to avoid native module dependency
-vi.mock('node-pty', () => ({
+vi.mock('../../terminal/node-pty-loader.js', () => ({ loadNodePty: () => ({
   spawn: () => ({
     onData: () => {},
     onExit: () => {},
@@ -17,7 +17,7 @@ vi.mock('node-pty', () => ({
     kill: () => {},
     pid: 12345,
   }),
-}));
+}) }));
 
 const { PtySession } = await import('../../terminal/pty-session.js');
 

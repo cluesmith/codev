@@ -21,7 +21,7 @@ import { SessionManager, ORPHAN_SWEEP_TIMEOUT_MS } from '../../terminal/session-
 import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup, persistableCommand, logSessionIdentity } from './tower-utils.js';
 import { sweepShellperHusks, resolveHuskGraceMs, livenessFromStartTimes } from './shellper-husk-sweep.js';
-import { listProcessCensus } from './process-census.js';
+import { listProcessCensus, type ProcessCensusEntry } from './process-census.js';
 import {
   sweepSessionLogs,
   measureSessionLogs,
@@ -86,7 +86,7 @@ import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/serv
 import { version } from '../../version.js';
 import { isWindows } from '../../lib/platform.js';
 import { WindowsJobHelper, getTowerJobHelper, setTowerJobHelper } from '../../lib/platform/windows/job-objects.js';
-import { towerBootSessionWarning } from '../commands/windows/tower-lifecycle.js';
+import { sessionJobNamesToCheck, towerBootSessionWarning, towerSessionJobRefusal } from '../commands/windows/tower-lifecycle.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -593,6 +593,21 @@ async function bootSequence(): Promise<void> {
     jobHelper.start().then((failure) => {
       if (failure === null) log('INFO', 'Per-session job objects available');
     });
+    // #1915: before any session is touched, refuse to run inside any session's
+    // job. Asks the helper only when a session job exists on the machine.
+    let census: ProcessCensusEntry[] = [];
+    try {
+      census = await listProcessCensus();
+    } catch (err) {
+      log('WARN', `Could not check whether Tower runs inside a session job: ${(err as Error).message}`);
+    }
+    const refusal = await towerSessionJobRefusal(sessionJobNamesToCheck(process.env, census), (name, pid) => jobHelper.inJob(name, pid));
+    if (refusal !== null) {
+      log('ERROR', refusal);
+      jobHelper.stop();
+      releaseTowerOwnerIfMine(towerLockFile, process.pid);
+      process.exit(1);
+    }
   }
 
   // Initialize shellper session manager for persistent terminals
