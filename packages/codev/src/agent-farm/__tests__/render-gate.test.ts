@@ -700,9 +700,11 @@ describe('render-gate — deterministic op count: one classify is O(viewport), n
     }
   });
 
-  // Sized, not a hang guard (#1944): this parses the ~4 MB ring through xterm twice. On Node 22 CI
-  // (ubuntu-latest) it measured 2.3-6.4 s across ten runs and hit the default 5 s limit on four of
-  // them (Node 20 CI: 0.6-1.2 s; locally about 0.4 s). It asserts op counts, not wall-clock time.
+  // Sized, not a hang guard (#1944): this parses the ~4 MB ring through xterm twice. CI runs it under
+  // V8 coverage (`--coverage`), which costs about 4x more on Node 22 than on Node 20. Measured on
+  // ubuntu-latest: Node 22 with coverage 4.1-6.0 s (it hit the default 5 s limit on four of ten
+  // branch runs), Node 20 with coverage 1.0-2.4 s, and about 0.25 s on either Node without
+  // coverage. It asserts op counts, not wall-clock time.
   it('negative control: the retired whole-ring path re-parses the WHOLE ring on EVERY classify', async () => {
     // Honesty check — the op count above is only meaningful if it can tell the two cost models
     // apart. Classify the same screen TWICE the pre-round-2 way: a throwaway terminal fed the whole

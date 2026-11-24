@@ -207,9 +207,11 @@ describe('Issue #1919: spawns reachable from a console-less process are hidden',
     expect(modules).toContain('apps/vscode/src/commands/view-diff.ts');
   });
 
-  // Sized, not a hang guard (#1944): this parses every reachable module. On Node 22 CI (ubuntu-latest)
-  // it measured 3.1-6.4 s across ten runs and hit the default 5 s limit on four of them (Node 20
-  // CI: 1.7-3.2 s; locally about 0.1 s). It asserts the scan's result, not its speed.
+  // Sized, not a hang guard (#1944): this parses every reachable module. CI runs it under V8
+  // coverage (`--coverage`), which costs about 3x more on Node 22 than on Node 20. Measured on
+  // ubuntu-latest: Node 22 with coverage 4.1-6.3 s (it hit the default 5 s limit on four of ten
+  // branch runs), Node 20 with coverage 1.5-2.2 s, and about 1 s on either Node without coverage.
+  // It asserts the scan's result, not its speed.
   it('every child_process call passes windowsHide or explains why not', () => {
     const violations = reachableModules().flatMap((file) =>
       findUnhiddenSpawns(parse(file), path.relative(REPO_ROOT, file).split(path.sep).join('/')));

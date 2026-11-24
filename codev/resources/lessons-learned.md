@@ -777,5 +777,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 - [From #1944] **Load a native CommonJS module (node-pty) with `createRequire`, never a dynamic `import()`.** On Node 22.17+ in the pnpm workspace, Tower's `import('node-pty')` after a workspace activation resolved through the package's pnpm symlink, so node-pty was loaded a second time and `import()` returned that copy's empty bindings (`spawn` undefined, a 500 from `POST /api/terminals`). Node 22.16 and CI on Node 20 never showed it; a published install has no symlinks. All loads now go through `terminal/node-pty-loader.ts`, and tests mock that module rather than `node-pty`.
 
+- [From #1944] **On Node 22, V8 coverage (`vitest --coverage`, which CI uses) makes CPU-heavy tests 3-4x slower than on Node 20; Node 22 without coverage is as fast as Node 20.** Measured on ubuntu-latest: the render-gate negative control took about 0.25 s on either Node without coverage, 1.0-2.4 s on Node 20 with coverage, and 4.1-6.0 s on Node 22 with coverage, past the default 5 s test timeout. A test that is fine locally can time out in CI after a Node bump; time it under `--coverage` and size the timeout from that.
+
 *Last updated: 2026-04-17 (Maintenance run 0007 — v3.0.0 pre-release)*
 *Source: codev/reviews/*
