@@ -86,3 +86,16 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
 - Porch's context-refresh task at the Phase 1→2 boundary was not run: its commands were not captured before the
   next `porch next` replaced the task, and a context compaction happened at the same point.
 - Waiting: architect's word on main-38 before `porch done` (GitHub run on the pushed head may come first).
+- Phase 2 tests check: one local porch run failed on 4 unrelated spawn-heavy files (names found in vitest's
+  results cache; porch's output truncation is #1853, another builder's). All 4 pass alone. One-time skip used
+  under main-32, then for each later porch done on GitHub-green heads 5dea9be3e and 93a87a41e (architect
+  confirmed each).
+- CMAP Phase 2 iter 1 (both REQUEST_CHANGES): stub git grammar not closed (symbolic-ref write form, fetch by
+  non-SHA); isRefName missed `.lock` components; fetch rule lacked --no-tags; snapshot read FETCH_HEAD only
+  from the common dir. Fixed in 5dea9be3e.
+- CMAP Phase 2 iter 2 (both REQUEST_CHANGES): stub git flags not closed per subcommand (log/diff without the
+  guards passed); stub gh missed joined write flags (-XPOST, --field=); tests read the real ~/.codev config;
+  diff-tree lacked the guards; origin HEAD branch not validated. Fixed in 93a87a41e.
+- ARCHITECT ORDER (2026-11-24): the review must list what each round found in the allow-list and the stubs,
+  so the owner can see at the pr gate how the read-only claim was tightened. If round 3 asks for changes,
+  tell the architect what it found BEFORE fixing.
