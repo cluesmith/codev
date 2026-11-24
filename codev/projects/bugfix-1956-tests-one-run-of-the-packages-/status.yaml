@@ -1,7 +1,7 @@
 id: bugfix-1956
 title: tests-one-run-of-the-packages-
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-24T01:06:29.068Z'
-updated_at: '2026-11-24T01:11:59.493Z'
+updated_at: '2026-11-24T01:18:29.219Z'
