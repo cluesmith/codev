@@ -111,3 +111,6 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
          snapshot FETCH_HEAD per-worktree. iter2: stub flags not closed per subcommand (log/diff without guards);
          stub gh joined write flags; diff-tree guards; origin HEAD branch validation; tests read real ~/.codev.
          iter3: stub ls-remote args; (audit) stub revision args / implicit --no-index; ls-files/status/for-each-ref.
+- ARCHITECT ORDER (2026-11-24 00:25): no extra consultation. The PR body (done) and the REVIEW file must list the
+  commits no reviewer saw (aa7e34f58 and c42251ec5: the stub ls-remote rule, the revision-argument audit, and the
+  liveTip guard) under a heading of their own, for the pr-phase reviewers.
