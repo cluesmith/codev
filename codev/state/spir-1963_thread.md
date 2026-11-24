@@ -963,3 +963,58 @@ run.
   - Both are pre-existing flakes in code this branch does not touch. They are left running, named
     under "Flaky tests" in PR #1971, and reported to the architect.
   - **The review file's `## Flaky Tests` section must carry both.**
+
+### Phase 8: Work panel (2026-11-24)
+
+- **Feature commit `d96d9c00b`.** `WorkPanels` (`workspace-views/work-panel.ts`): one retained
+  editor-area panel per window, restored after reload, pushing `OverviewCache` data and the
+  connection state. `workOverviewState` gives loading until the first overview, then the last
+  overview under "Not connected to Tower." while not connected. The mapped actions:
+  - Open → `openBuilderByRoleOrId(id, true)`, only for a builder the overview shows;
+  - + Shell → `codev.newShell`;
+  - Refresh → `client.refreshOverview()` (machine-wide POST) then `overviewCache.refresh()`;
+  - spec/plan/review → `resolveWorkspaceFile` (its first production caller) → `vscode.open`;
+    a refusal or a missing file warns the user, since they clicked;
+  - issue/PR links → `openExternal`, http(s) only.
+
+  No dashboard slots are passed, so the dropped affordances are absent.
+- **A builder decision, not a plan instruction:** `single-panel.ts` now holds what Work and
+  Decisions share (single instance, serializer, reveal, observable visibility, the session's
+  post-after-dispose drop and the http(s) gate). `DecisionsPanels` moved onto it. Its 13 tests
+  pass unchanged apart from an `EventEmitter` in the `vscode` mock. Phase 9's arrange needs
+  both panels to take a view column, so one place to add it.
+- **Refresh gate:** `workPanels` is a `GatedView`. An existing source-text test
+  (`cockpit-wiring.test.ts`) pinned the gate's view list and was updated to include it (the
+  spec allows that for wiring tests when the guarded behaviour is unchanged).
+- **Verified:** apps/vscode 130 files / 1764 tests, `tsc` host + webview clean, lint only the 2
+  existing `curly` warnings.
+- **Harness:** a `verify work` script (scenarios 17, 18, 19 Tower-down part, 22, reload
+  restore, the unavailable windows, and an increment-2 shot of the Cockpit's Decisions entries
+  beside both panels). Implementing orange (only `.attention-kind--dev`, a PIR gate the fixture
+  has no builder for) and the spike tag are measured by drawing a probe element in the real
+  webview; project and bug tags are in the fixture's rows.
+- **What rendering found (fixed in `f03eade1b`).** The first `verify work` run passed 12 of 14:
+  - Light Modern's chart orange (implementing, a PIR dev-approval row) measured 2.9:1 as
+    text. `--codev-wv-status-implementing` is now mixed 50/50 from the error and waiting text
+    colours (VS Code's list colours, made to be read): it stays between red and yellow, as the
+    dashboard's gate progression has it, and measured 6.7:1 on Dark Modern.
+  - The Tower-down check expected the fixture's 3 builders back after the restart. A restarted
+    Tower does not keep fixture sessions (harness README), so the check now compares with
+    the restarted Tower's own overview.
+  - The increment-2 shot showed Work broken in a half-width group (~470 px): every *Open* cut
+    off, backlog reviewer/assignee labels over the spec/plan links. VS Code-only container
+    queries in `vscode-theme.css` now drop Elapsed and the labels under 760 px, and Progress
+    under 600 px; row labels clip. The dashboard's layout is untouched. The side-by-side check
+    now fails on sideways scroll, a cut *Open*, or a label over its links.
+  - Scenario 19 says *both* panels keep their content under a not-connected notice; the check
+    covered only Work. It now also holds Decisions to its cards under "Not connected to Tower.
+    Showing the last version read." and to the notice clearing on recovery. It passed first time.
+- **A test race of my own:** the four real-filesystem containment tests in `work-panel.test.ts`
+  waited one `setTimeout(0)` for `fs.promises.realpath`; two failed under the loaded full suite
+  (harness running alongside) and passed alone. They now `vi.waitFor` the outcome. Not a
+  pre-existing flake, so not named as one.
+- **One more from looking at the shots (`b9e5af0f6`):** in Light Modern the progress bar's
+  track vanished (its tertiary background is the row's own colour there), so a bar read as a
+  dash. VS Code's stylesheet now draws the track as an 18% mix of the text colour, and the
+  theme check fails if a track does not show on its row (≥ 1.2:1), reporting the fill's
+  contrast on it.
