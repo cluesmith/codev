@@ -39,3 +39,22 @@ Codex COMMENT, Claude REQUEST_CHANGES — all points accepted, none disputed (re
   palette in worktree/no-workspace windows and explain themselves.
 
 Stopped at spec-approval.
+
+## 2026-11-24 — Owner revision at the gate: one hierarchy
+
+Owner: combined panel is ONE hierarchy — "towers -> workspaces -> architects / decisions ->
+builders" — not three sections. Spec otherwise approved as drafted ("Other than that spec sounds
+good"); porch approve is waiting on the architect's go after checking the revision.
+
+What the data check found:
+- TowerFleetCache already fetches getOverview(path) for every active workspace and discards it
+  after deriving attention — retaining it gives every workspace's architects + builders
+  (spawnedByArchitect) with no new requests or routes.
+- Overview has nothing about the decisions file → no pending count without an additive Tower field.
+- All actions (TerminalManager keys/URLs, #1497 resolution, every builder command, diff cache) are
+  scoped to the window's own workspace → spec makes other workspaces' rows navigate (open that
+  workspace's window); fully cross-workspace action is offered as a gate question / follow-up.
+- Attention rows fold onto the rows they concern; stage/area grouping stays in the Agents view;
+  dev URLs move to an "Open Dev URL…" context entry on the workspace row.
+
+Revision committed; re-consult (codex + claude, manual — porch is at the gate) running.
