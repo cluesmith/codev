@@ -58,3 +58,14 @@ What the data check found:
   dev URLs move to an "Open Dev URL…" context entry on the workspace row.
 
 Revision committed; re-consult (codex + claude, manual — porch is at the gate) running.
+
+## 2026-11-24 — Hierarchy revision re-consult
+
+Codex REQUEST_CHANGES, Claude COMMENT on 76e1dc498; all accepted (rebuttal:
+`1963-specify-revision1-rebuttals.md`). Main changes: remote item images are direct `<img>` loads
+(CSP img-src gains `http:`; no connect-src), other workspaces' rows get navigate-only
+contextValues, the parity test has a checked-in mapping oracle, an Increments subsection (button +
+hierarchy → shared package + panels → arrange), active workspace rows click-expand (Open moves to
+the inline action), Tower root shows "Not connected to Tower" + Reconnect after the first failed
+attempt (ConnectionManager retries forever, never gives up), Loading… child before an overview.
+New owner question offered, not specced: a one-time notice on the first auto-arrange.

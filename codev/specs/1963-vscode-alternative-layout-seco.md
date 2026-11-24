@@ -135,6 +135,8 @@ interfaces and themes through `--codev-canvas-*` tokens.
 `TowerClient` (`@cluesmith/codev-sdk`), which carries the key and the workspace-scoped route prefix.
 The SDK has no decisions methods today. Its generic `request()` drops the response body on a non-2xx
 status, so it would lose the decisions routes' structured refusal (`{ ok: false, code, message }`).
+The precedent for keeping it is the client's existing private `requestPreservingBody`, written so
+canvas commands keep a machine-readable `code` across a non-2xx.
 
 ## Desired State
 
@@ -171,13 +173,27 @@ Tower                                        ← root: this machine's Tower
 **Levels:**
 
 1. **Tower.** One root row for the machine's Tower, expanded by default. While there is nothing to
-   list it holds Tower's existing state rows (*Connecting to Tower…*, *No workspaces registered*).
+   list, it holds a state row that follows the connection:
+   - *Connecting to Tower…* during the first connection attempt;
+   - *Not connected to Tower* once an attempt has failed. `ConnectionManager` is then
+     `disconnected` or `reconnecting`: it keeps retrying with backoff and never gives up. The row
+     is clickable and runs the existing *Reconnect to Tower* command (`codev.reconnect`) to retry
+     now. So a window where Tower is not running never sits on "Connecting…" indefinitely;
+   - *No workspaces registered* when Tower lists none.
 2. **Workspaces.** Exactly the Tower view's workspaces, with the same labels (so twelve workspaces'
    `MAIN`s are told apart by their parent row), urgency order, *current* marker, icons, attention
    summary in the description, inline *Open* / *Deactivate*, and the collapsed *Dormant (N)* group.
-   This reuses `orderFleet` and `TowerProvider`'s row building. The window's own workspace and every
-   workspace that needs attention start expanded; quiet ones start collapsed. A dormant workspace
-   has no children, because it has no live session, as today.
+   This reuses `orderFleet` and `TowerProvider`'s row building, with one behavioural difference:
+   - **Clicking a workspace row.** In the Tower view, a quiet active workspace is a leaf whose click
+     opens it. In the hierarchy, every active workspace has children, so clicking its row expands or
+     collapses it, and *Open* is reached only through the row's inline and context-menu action.
+   - **Dormant workspaces** have no children, because they have no live session. They keep
+     click-to-open, as today.
+   - **Initial expansion.** The window's own workspace and every workspace that needs attention
+     start expanded; quiet ones start collapsed.
+   - **Before data arrives.** Until its overview arrives, the window's own workspace shows a single
+     *Loading…* child, as does any other active workspace whose overview the fleet cache has not
+     yet fetched, so a row never sprouts its chevron late.
 3. **Architects + Decisions.** Under an active workspace:
    - its live architects, `main` first, then siblings alphabetically. Two or more idle siblings roll
      up into *Idle Architects*. This is the Agents view's architect-axis rendering
@@ -223,8 +239,14 @@ window's** workspace today. So:
 - **Rows of any other workspace show state and navigate.** Its architects, builders and Decisions
   entry display what the overview says (glyphs, labels, descriptions). Clicking one opens that
   workspace's window, using the Tower view's existing *Open Workspace* action, where the same rows
-  are fully actionable. These rows carry no other actions and do not expand to changed files.
-  Acting on another workspace from this window is a separate, larger change; see Open Questions.
+  are fully actionable. Their tooltip says so.
+  - They carry their own **navigate-only `contextValue`s**, distinct from the source rows', so none
+    of this window's builder or architect menus can attach to them. Their only action is
+    *Open Workspace*, and they do not expand to changed files.
+  - This is not a regression against the issue's "every action on a row today works on the same
+    row". Rows of other workspaces' architects and builders do not exist anywhere in the extension
+    today, and Tower's attention rows carry no actions.
+  - Acting on another workspace from this window is a separate, larger change; see Open Questions.
 
 **Placement of everything the three source views do.** Nothing is dropped:
 
@@ -241,10 +263,10 @@ window's** workspace today. So:
 | Agents: changed-files expansion (flat/tree), file click → diff | Identical, for this window's workspace |
 | Agents: architect-axis headers (click opens architect), *Idle Architects* container | They are the architect level |
 | Agents: stage / area grouping axes, group-by cycle | **Not in the combined panel.** The hierarchy fixes the architect axis. Stage and area grouping stay in the Agents view, and the architect axis's `[stage]` row prefix stays |
-| Agents: refresh, accordion toggle, file-tree toggle (title bar) | The combined view's title bar |
+| Agents: refresh, accordion toggle, file-tree toggle (title bar) | The combined view's title bar. The toggles write the same global settings (`codev.buildersAutoCollapse`, `codev.buildersFileViewAsTree`), so flipping one in either view changes both |
 | Agents: live count in the title | Each architect row's builder count. The workspace row's attention summary |
 | Agents: activity badge | The combined view's badge (same count and suppression, as ruled at the gate) |
-| Tower: workspace rows, *current* marker, urgency order, inline *Open* / *Deactivate*, *Dormant* group | The workspace level: identical |
+| Tower: workspace rows, *current* marker, urgency order, inline *Open* / *Deactivate*, *Dormant* group | The workspace level: the same, except that clicking an active workspace's row expands it (it now has children), so *Open* is the inline/context action; dormant rows keep click-to-open |
 | Tower: refresh (title bar) | The combined view's *Refresh*, which refreshes both caches |
 | Tower attention row: pending gate | The blocked builder row (gate glyph + wait time) under its architect |
 | Tower attention row: waits (needs input / idle / dead) | The builder row's state glyph and label |
@@ -260,18 +282,32 @@ wait anywhere on the machine is visible on the row it concerns.
 **Other requirements:**
 
 - **Provider instances.** The combined panel has its own provider instances over the shared caches.
-  Its rows are built by the same code as the source views' rows, with the same labels,
-  `contextValue`s and `command`s, but they are distinct objects. Per-view state (accordion
-  versioning, the parent map used by `reveal`, expansion) stays per view, and a row belongs to
-  exactly one view. Tree-item ids are qualified by workspace, so two workspaces' `main` or a
-  builder id that appears in two workspaces never collide.
+  - **This window's workspace:** its rows are built by the same code as the source views' rows,
+    with the same labels, `contextValue`s and `command`s, but they are distinct objects.
+  - **Other workspaces:** their rows use the same labels and glyphs, with navigate-only
+    `contextValue`s and commands (above).
+  - **Per-view state:** row-id versioning for the accordion, the parent map used by `reveal`, and
+    expansion stay per view, and a row belongs to exactly one view. The *settings* behind the
+    title-bar toggles are shared and global.
+  - **Ids:** tree-item ids are qualified by workspace, so two workspaces' `main` or a builder id
+    that appears in two workspaces never collide.
 - **Tree behaviours follow the view a row is in.** Click-expands, the accordion, active-file reveal
   (when the combined panel is the visible one), agent-cycle selection and the `builder-active` hook
   act on the combined panel's rows for this window's workspace.
 - **Menu contributions are added, not edited.** The existing `view/item/context` and `view/title`
   entries for `codev.workspace`, `codev.agents` and `codev.tower` stay byte-for-byte. The combined
-  view gets its own entries, scoped to it, at the placements in the table above. A generated parity
-  test checks every source-view entry against its counterpart, so the two cannot drift.
+  view gets its own entries, scoped to it, at the placements in the table above.
+  - **The parity test's oracle** is a checked-in mapping, one record per existing source-view
+    entry. Each record says either *same command at a combined-view `viewItem`* (the builder,
+    architect, file and Tower workspace rows of this window's workspace) or *relocated to* a named
+    combined-view entry.
+  - **Relocations:** Workspace-view row entries move to this window's workspace row. Agents and
+    Tower `view/title` entries move to the combined title bar. Dev-URL rows become *Open Dev URL…*.
+  - **Excluded,** with the reason recorded: the three `codev.agentsCycleGroupFrom*` title entries
+    (the hierarchy fixes the axis).
+  - **What fails the test:** an unmapped source entry, or a mapped counterpart missing from
+    `package.json`. A navigate-only `contextValue` that matches any builder or architect menu
+    entry's `viewItem` pattern also fails it.
 - **Badge.** The combined view badges the new activity-bar button with the same workspace "needs me"
   count as the Codev button (`composeActivityBadge`), under the same suppression rules.
 - **Degraded windows:**
@@ -304,7 +340,12 @@ wait anywhere on the machine is visible on the row it concerns.
     the panel being hidden or moved between groups;
   - a ruling round-trips: Submit → Tower writes the file → the card shows the written ruling, and
     Tower's ruling notice to the hub architect (#1828) is sent as it is from the dashboard;
-  - workspace-path item images load through the host; http(s) images load as in the dashboard;
+  - workspace-path item images load through the host, as bytes the panel shows as object URLs;
+  - an item image given as an http(s) URL is loaded by the webview itself as a plain `<img>`, as
+    the dashboard loads it. This is an image load with no key and no script access, not a data
+    request. A URL the browser refuses (for example an `http:` image inside the IDE served over
+    `https:`, which mixed-content rules block, or a Tower URL, which answers 401 without the key)
+    shows the existing "Image not loaded" note;
   - an http(s) link opens in the user's browser;
   - clicking an image shows it full size inside the panel, because a webview cannot open browser
     tabs.
@@ -387,6 +428,17 @@ wait anywhere on the machine is visible on the row it concerns.
   and issue previews that target "group 2" land in the Work group, per today's placement rules.
   Changing those rules is #1671's scope.
 
+### Increments
+
+The three steps are independently shippable, in this order. Each one leaves the extension complete
+and usable, so the work can be cut after any of them; the plan phases against these boundaries.
+
+1. **The button and the combined hierarchy.** This includes the `TowerFleetCache` overview
+   retention and the generalised tree wiring. The Decisions entry is not added yet.
+2. **The shared component package and the Work and Decisions panels.** They are openable from the
+   palette and, now added, from the hierarchy's Decisions entry.
+3. ***Arrange Cockpit*.** The split, its triggers and `codev.cockpit.autoArrange`.
+
 ## Success Criteria
 
 - [ ] A new activity-bar button with the rotated Codev icon (same path, `rotate(90 400 400)`) appears
@@ -437,15 +489,18 @@ wait anywhere on the machine is visible on the row it concerns.
       card shows it, and the hub architect receives the ruling notice, the same as from the dashboard.
 - [ ] Decisions: a refused ruling (e.g. `item-changed`) shows the server's message on the card and
       keeps the draft.
-- [ ] Decisions: a workspace-path image and an http(s) image both render. A missing image shows the
-      "Image not loaded" note. Clicking an image shows it full size in the panel.
+- [ ] Decisions: a workspace-path image (through the host) and an http(s) image (a direct `<img>`
+      load) both render. A missing or browser-refused image shows the "Image not loaded" note.
+      Clicking an image shows it full size in the panel.
 - [ ] Decisions: a workspace without a decisions file shows the empty state, not an error. Creating
       the file makes its items appear without reopening the panel.
 - [ ] Work: builders, Needs Attention, Backlog and Recently Closed render from the overview. *Open*
       opens the builder's terminal, *+ Shell* opens a Tower shell, *Refresh* refreshes, artifact
       links open the file, and http(s) links open the browser. No dropped affordance is rendered.
-- [ ] Neither webview makes a network request to Tower, and the Tower key is absent from webview
-      state and messages.
+- [ ] Neither webview fetches from or opens a connection to Tower (no `fetch`, XHR or WebSocket;
+      the CSP has no `connect-src` beyond what VS Code itself requires). Every Tower request is the
+      host's, and the Tower key is absent from webview state and messages. The only network loads
+      a webview makes are http(s) `<img>` sources written in decision items, as in the dashboard.
 - [ ] The host opens externally only `http:`/`https:` URLs from a webview, and opens a file from a
       webview only when its canonical path is inside the workspace. A symlink escape, `..`, an
       absolute path outside the workspace or another URL scheme is refused.
@@ -537,13 +592,17 @@ From the system:
 - No Tower or decisions-route changes: the Spec 1819 / #1938 routes are consumed as they are.
 - VS Code engine floor `^1.128.0`. No API newer than that.
 - Webview hardening as in the existing webviews: nonce-gated scripts, a CSP that admits only what
-  the panels load, and every inbound webview message validated by a type guard before it is acted
-  on. A path from a webview is treated as untrusted. It is confined to the workspace by its
+  the panels load, `localResourceRoots` narrowed to the extension's bundled `dist` (as the
+  contextual panel and markdown preview do), and every inbound webview message validated by a type
+  guard before it is acted on. A path from a webview is treated as untrusted. It is confined to the workspace by its
   canonical, symlink-resolved location, not by string prefix. A URL from a webview is opened
   externally only if its scheme is `http:` or `https:`.
-- The panels' CSP `img-src` must admit host-delivered workspace images. That means `blob:` if they
-  are shown as object URLs, as the dashboard does, or `data:` if they are encoded. The existing
-  precedent is `img-src ${cspSource} https: data:`. It must not add `connect-src` for Tower.
+- The panels' CSP `img-src` is `${cspSource}` plus:
+  - `blob:`, for host-delivered workspace images shown as object URLs, as the dashboard does (or
+    `data:`, if the plan encodes them instead);
+  - `http:` and `https:`, for remote images written in items. Dashboard parity: it loads both.
+  The existing webviews' `img-src ${cspSource} https: data:` is the starting point. The CSP adds no
+  `connect-src`, so a webview cannot fetch from Tower or anywhere else.
 - The extension stays under the existing `regCli` / `reg` command-registration guard (#791).
 - UI changes are verified in a browser via Playwright before being called done
   (`codev/resources/testing-guide.md`). Verification must not replace or disturb the owner's live
@@ -559,8 +618,11 @@ From the system:
   the editor area, without ending its session. Same spike.
 - Webview `postMessage` can carry image bytes, or an equivalent encoding, efficiently enough for
   images up to Tower's 10 MB image cap.
-- `OverviewData.architects` gives the Work view what the dashboard's `DashboardState` gave it
-  (architect count for builder attribution), so Work needs no `/api/state` read.
+- `OverviewData.architects` stands in for the dashboard's `DashboardState.architects` as Work's
+  architect count, so Work needs no `/api/state` read. They differ: the overview lists *live*
+  architects, `DashboardState` all registered ones. In VS Code the builder-attribution tag
+  (shown when the count is above 1) therefore counts live architects. That is an accepted,
+  harmless divergence: a stale registration no longer turns the tag on.
 - The Codev IDE at `/ide/` can be driven by Playwright with a build of this branch loaded in an
   isolated extensions dir or server instance, so verification never touches the owner's live IDE.
 - A fixture workspace, with builder entries but no real agents, can produce the N=0 / N=1 / N>1
@@ -648,8 +710,9 @@ slots rather than moved.
   components or retarget the wrappers.
 - Risk: medium.
 
-**B2 — `apps/vscode` imports from `@cluesmith/codev-web`.** `apps/web` already exports `./*` source
-files.
+**B2 — `apps/vscode` imports from `@cluesmith/codev-web`.** `apps/web` exports `"./*":
+"./src/*.ts"`, which covers `.ts` modules only, so even its `.tsx` components would need export
+changes.
 
 - Pros: no move.
 - Cons: an app depending on an app. The components still hard-import `lib/api.ts` (relative URLs,
@@ -683,7 +746,8 @@ markdown artifacts. Work and Decisions are workspace-state surfaces. Not recomme
 
 ## Open Questions
 
-**Ruled at the spec gate (owner, 2026-11-24; recorded here, not reopened):**
+**Ruled at the spec gate (owner, 2026-11-24 UTC, relayed by the architect and recorded on issue
+#1963; recorded here, not reopened):**
 
 - **Trigger:** first show per window session, plus *Arrange Cockpit*, plus
   `codev.cockpit.autoArrange`.
@@ -728,6 +792,10 @@ markdown artifacts. Work and Decisions are workspace-state surfaces. Not recomme
 5. **Dev URLs.** They become one context-menu entry (*Open Dev URL…*) on the workspace row instead
    of one row each. Keeping them as rows under the workspace is the alternative, at the cost of
    hierarchy clutter.
+6. **A notice on the first auto-arrange.** VS Code has no "undo layout". A one-time notification
+   on the first auto-arrange, with a *Don't arrange automatically* action that turns
+   `codev.cockpit.autoArrange` off, would make the one surprising reshuffle dismissible. Not
+   specced, because it is not ruled; offered.
 
 ## Test Scenarios
 
@@ -760,10 +828,17 @@ markdown artifacts. Work and Decisions are workspace-state surfaces. Not recomme
 4. `TowerFleetCache`: it keeps each active workspace's overview from the fetch it already makes,
    with no additional request, last-known-good on a failed fetch, dropped when a workspace leaves
    the list or goes dormant; the Tower view's rendering is unchanged.
-5. Generalised tree behaviours: accordion, click-expands and reveal act on the view a row belongs
-   to, both for the Agents view (regression) and the combined view. Periodic-refresh visibility:
-   with only the combined view (or only the Work panel) visible the timer runs; with none visible it
-   stops.
+5. Generalised tree behaviours:
+   - accordion, click-expands and reveal act on the view a row belongs to, both for the Agents view
+     (regression) and the combined view;
+   - periodic-refresh visibility: with only the combined view (or only the Work panel) visible the
+     timer runs, and with none visible it stops;
+   - the badge: the combined view's badge equals the Codev button's for the same data, and is
+     suppressed in a builder-worktree window and when disconnected;
+   - Tower root state rows: connecting, then not connected with *Reconnect* (which runs
+     `codev.reconnect`), then no workspaces;
+   - workspace rows: clicking an active row expands it rather than opening it, a dormant row opens
+     on click, and an overview that has not loaded shows *Loading…*.
 6. Host message contract:
    - every inbound message guard rejects malformed input;
    - file-open paths outside the workspace, `..` escapes and symlinks resolving outside are refused;
@@ -815,8 +890,8 @@ markdown artifacts. Work and Decisions are workspace-state surfaces. Not recomme
 
 21. Tower request rate with the combined panel open is unchanged from the source views alone. The
     Decisions poll stops while its panel is hidden.
-22. Neither webview opens a network connection to Tower (CSP has no `connect-src` to Tower; the key
-    is not present in webview state).
+22. Neither webview fetches from or connects to Tower: the CSP has no `connect-src`, and the key
+    is not present in webview state. Remote item images are the only webview network loads.
 
 ## Risks and Mitigation
 
