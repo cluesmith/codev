@@ -5,10 +5,10 @@ phase: implement
 plan_phases:
   - id: verification_harness
     title: Isolated verification harness
-    status: in_progress
+    status: complete
   - id: fleet_overviews
     title: Fleet cache keeps every active workspace's overview
-    status: pending
+    status: in_progress
   - id: architect_tree_builder
     title: Reusable, workspace-scoped architect-axis row builder
     status: pending
@@ -30,7 +30,7 @@ plan_phases:
   - id: arrange_cockpit
     title: 'Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification'
     status: pending
-current_plan_phase: verification_harness
+current_plan_phase: fleet_overviews
 gates:
   spec-approval:
     status: approved
@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: verification_harness
@@ -60,8 +60,10 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-verification_harness-iter1-claude.txt
 started_at: '2026-11-24T01:12:47.024Z'
-updated_at: '2026-11-24T07:31:24.088Z'
+updated_at: '2026-11-24T07:40:44.236Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-24T06:55:50.288Z'
     acknowledged_at: '2026-11-24T06:56:42.376Z'
+  - boundary: plan-phase:fleet_overviews
+    at: '2026-11-24T07:40:44.236Z'
