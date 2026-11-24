@@ -193,3 +193,5 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   git diff-tree failed: …` instead of exit 2; one-line form by SHA, not object identity; the two new argv forms in
   git-forms.ts; a main-merged-into-porch-only-branch fixture (C = the merge; main's commit never asked for).
   Not taken: `countRange` in head (broken repo → exit 2); origin tip not local stays info (fold-in's scope).
+- Architect (2026-11-24 01:47): keep the mergeable-only verdict, do not switch to codex's rule; "merge state not
+  reported" on the line is the right correction. Claude's notes well taken (named `not run` for a walk failure).
