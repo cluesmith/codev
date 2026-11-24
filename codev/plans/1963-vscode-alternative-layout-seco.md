@@ -238,6 +238,14 @@ the first user-visible slice. Context-menu actions arrive in Phase 4.
       unattributed held mail and escalation.
   - **Re-render:** on `overviewCache.onDidChange`, `towerCache.onDidChange` and
     `connectionManager.onStateChange`.
+  - **Ids:** the Tower root, workspace rows and the Dormant group get explicit stable ids:
+    `cockpit-tower`, `cockpit-ws:<path>` and `cockpit-dormant`. `TowerProvider` sets none today,
+    but a Cockpit row must keep its expansion across refreshes and be matchable by `reveal`.
+  - **`getParent` across the whole chain**, over the union element type:
+    file → folder(s) → builder → architect → (*Idle Architects*) → workspace → Tower root. The
+    builder answers up to its architect row. The Cockpit bridges each scoped architect row (and
+    the *Idle Architects* container) to its workspace node, and each workspace node to the root
+    or the Dormant group. Active-file reveal and agent-cycle selection depend on this.
 - **`apps/vscode/src/extension.ts`:**
   - create `cockpitView`;
   - generalise the `buildersView`-bound wiring into a small registry, `AgentTreeHosts`
@@ -252,6 +260,9 @@ the first user-visible slice. Context-menu actions arrive in Phase 4.
     `cockpitView`, with the same suppression;
   - `cockpitView.visible` joins `anyVisible()` and its visibility event joins `reconcile` in
     `setupPeriodicOverviewRefresh`;
+  - the config listeners serve both views. The `codev.buildersFileViewAsTree` listener refreshes
+    the Cockpit provider as well as `buildersProvider`. The `codev.buildersAutoCollapse` listener
+    updates both views' `AccordionGate`s, and sets the context key that both title bars read;
   - `codev.cockpit.refresh` refreshes `overviewCache` and `towerCache`.
 - **Tests:**
   - new `apps/vscode/src/__tests__/cockpit-provider.test.ts`;
@@ -265,6 +276,9 @@ the first user-visible slice. Context-menu actions arrive in Phase 4.
 - [ ] `CockpitProvider` with every level, state row and fold rule in spec §2.
 - [ ] Generalised tree behaviours, the badge on both views, and periodic refresh with the Cockpit
       counted.
+- [ ] Stable ids for the Cockpit's own nodes, and a `getParent` chain that reaches the Tower root
+      from every row.
+- [ ] Config listeners that redraw and re-gate both views.
 - [ ] Tests listed below.
 
 #### Acceptance Criteria
@@ -294,12 +308,17 @@ the first user-visible slice. Context-menu actions arrive in Phase 4.
   - worktree and no-workspace variants;
   - colliding names across two workspaces;
   - `codev.buildersGroupBy = stage|area` leaves the tree unchanged;
-  - every attention kind lands on its row.
+  - every attention kind lands on its row;
+  - `getParent` from a file row of this window's workspace (flat and tree modes), from a builder,
+    from an idle-sibling architect and from an architect row returns the chain to `cockpit-tower`.
+    `reveal` then succeeds on a fake TreeView that walks `getParent`.
 - **`cockpit-wiring.test.ts`:**
   - `openBuilderRow` reveals in the owning view;
   - accordion per view;
   - the visibility gate runs with only the Cockpit visible and stops with nothing visible;
-  - the badge is equal on both views and suppressed when disconnected and in a worktree window.
+  - the badge is equal on both views and suppressed when disconnected and in a worktree window;
+  - toggling `codev.buildersFileViewAsTree` refreshes both providers, and toggling
+    `codev.buildersAutoCollapse` re-gates both accordions.
 - **`cockpit-icon.test.ts`:** same `d` attribute as `codev.svg`, wrapped in `rotate(90 400 400)`.
 
 ### Phase 4: Placement-table actions on the hierarchy, parity mapping, increment-1 verification
@@ -319,7 +338,7 @@ verification and docs.
 
 - `view/item/context` entries for `view == codev.cockpit`:
   - builder rows of this window's workspace: the same commands, groups and `viewItem` patterns as
-    the 13 Agents row entries;
+    the 12 Agents `view/item/context` entries;
   - architect rows: *Remove Architect* on siblings;
   - workspace rows:
     - *Open* / *Deactivate* inline, as in Tower;
@@ -370,9 +389,21 @@ window:
     fleet-overview retention and the act/navigate rule;
   - `CHANGELOG` entry for `apps/vscode`.
 
+**`codev.removeArchitect` handler (`extension.ts`).** It resolves the name from an id starting
+`workspace-architect-`, else from `arg.label`. A Cockpit architect row is a group row whose label
+is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect(ws, 'WEB (0)')`.
+
+- **Change:** a `BuilderGroupTreeItem` argument resolves to its `groupName`. The Workspace-view and
+  string paths are unchanged.
+- **Accepted difference:** the Cockpit's architect rows come from the overview's `architects`, as
+  the Agents architect axis does. The Workspace view lists architects from the workspace status's
+  terminals. Any difference between the two sets is accepted, as it is today between Workspace and
+  Agents.
+
 #### Deliverables
 
 - [ ] All placement-table entries for increment 1 (the Decisions entry is Phase 6).
+- [ ] The `removeArchitect` argument resolution for Cockpit architect rows, with a unit test.
 - [ ] The mapping oracle and the parity test.
 - [ ] Rendered verification of increment 1 and docs.
 
@@ -516,10 +547,17 @@ webview infrastructure that Phase 7 reuses.
 
 **`packages/sdk/src/tower-client.ts`:**
 
-- `getDecisions(workspacePath)`, `ruleDecision(workspacePath, req)` and
-  `getDecisionImage(workspacePath, path)`. They use the existing private `requestPreservingBody`,
-  so `{ ok:false, code, message }` survives a non-2xx;
-- the image result carries bytes and a content type.
+- `getDecisions(workspacePath)` and `ruleDecision(workspacePath, req)` use the existing private
+  `requestPreservingBody`, so `{ ok:false, code, message }` survives a non-2xx.
+- `getDecisionImage(workspacePath, path)` cannot use it: that helper reads `response.text()` and
+  JSON-parses the body, which destroys binary bytes and drops `Content-Type`. It uses a new private
+  `requestBinary(path)` instead:
+  - an authenticated `fetchFn` call (same key header, base URL and timeout);
+  - it returns `{ status, bytes: Uint8Array, contentType }` on 2xx;
+  - on a non-2xx it returns `{ status, body }`, the JSON-parsed body, so a refusal keeps its code
+    and message;
+  - like every method on this client, it never rejects. A transport failure comes back as
+    `status: 0`.
 
 Tests go in `packages/sdk/src/__tests__/tower-client.decisions.test.ts`, and the SDK boundary tests
 stay green.
@@ -527,8 +565,13 @@ stay green.
 **New `apps/vscode/src/workspace-views/` (host side):**
 
 - `messages.ts`: the host↔webview contract, with an `is*Message` guard for every inbound message;
-- `security.ts`: canonical, symlink-resolved workspace containment via `fs.realpath`, and an
-  `http:`/`https:` allowlist for external opens;
+- `security.ts`:
+  - canonical, symlink-resolved workspace containment. Both sides go through `fs.realpath`, then
+    `path.relative(root, target)` is taken. The target is inside only if the result is not
+    absolute, is not `..`, and does not start with `..` followed by a separator. There is no
+    string-prefix check, so on Windows drive-letter case and `\` / `/` are normalised by the
+    same calls;
+  - an `http:`/`https:` allowlist for external opens.
 - `panel-template.ts`: the nonce CSP.
   - `script-src 'nonce-…'`;
   - `style-src ${cspSource}`;
@@ -536,7 +579,15 @@ stay green.
   - no `connect-src`;
   - `localResourceRoots` set to `dist`.
 - `decisions-panel.ts`, a single-instance `WebviewPanel` (`retainContextWhenHidden`):
-  - polls through the host every 2 s while visible and stops while hidden;
+  - **Polling has one owner:** the shared `useDecisions` hook, with its existing 2 s cadence. Each
+    tick calls the host adapter's `read()`, and the host makes one Tower request per call. The host
+    runs no timer of its own.
+    - Hidden means the *panel* is hidden. A retained, hidden webview's iframe still reports
+      `document.visibilityState === 'visible'`, so the hook's page-visibility gate never fires
+      there.
+    - So the host relays `onDidChangeViewState` as a `{ type: 'visibility', visible }` message,
+      and the webview passes it as the hook's existing `isActive` input. Polling stops while the
+      panel is hidden and resumes when it is shown;
   - drops responses for a disposed panel;
   - supports not-connected, last-known-good and empty states;
   - workspace images are sent as bytes and shown as object URLs;
@@ -550,8 +601,16 @@ stay green.
 
 **Build:**
 
-- `apps/vscode/esbuild.js`: a new entry, `dist/webview/decisions.{js,css}`;
-- `tsconfig.webview.json`: adds `jsx: react-jsx` and the new webview directory;
+- `apps/vscode/esbuild.js`: a new entry, `dist/webview/decisions.{js,css}`.
+  - It sets `jsx: 'automatic'` explicitly, with `tsconfig: 'tsconfig.webview.json'`. The existing
+    webview entries are `.ts` (their JSX lives in canvas's prebuilt `dist`), and esbuild otherwise
+    reads the nearest `tsconfig.json`, which sets no `jsx`. These are the first TSX sources
+    compiled under `apps/vscode`.
+  - A bundle smoke test loads the built `dist/webview/decisions.js` in jsdom and asserts it mounts.
+- `tsconfig.webview.json`: adds `jsx: react-jsx` and the new `src/workspace-views/webview`
+  directory;
+- `apps/vscode/tsconfig.json`: adds `src/workspace-views/webview` to `exclude`, alongside the two
+  existing webview directories, so the host `tsc --noEmit` never compiles browser TSX;
 - `apps/vscode/package.json`: the dependency on `@cluesmith/codev-workspace-views` (and
   `prepublish-workspace-deps.test.ts` updated if it enumerates workspace dependencies).
 
@@ -578,6 +637,10 @@ stay green.
 - [ ] The Tower key never appears in any message sent to the webview (asserted on the message log
       in a host test).
 - [ ] Type-check (host and webview configs), lint, unit tests and the SDK boundary tests pass.
+- [ ] **Windows.** This phase adds path code: canonical-path containment that resolves symlinks.
+      The on-demand Windows workflow is dispatched on the branch and its run is linked in the PR:
+      `gh workflow run windows.yml --ref builder/spir-1963 -f purpose='Spec 1963: webview path
+      containment (realpath/relative, junctions)' -f suites=true`.
 
 #### Test Plan
 
@@ -585,11 +648,20 @@ stay green.
   - the guard rejects malformed messages;
   - containment refuses `..`, absolute-outside and symlink escapes (a real temporary directory
     with a symlink);
+  - **Windows path cases.** These run as `path.win32` table tests on every OS, and for real in the
+    Windows workflow:
+    - drive-letter case (`c:\ws` vs `C:\ws`);
+    - mixed separators;
+    - a different drive;
+    - a UNC root (`\\server\share`) against a local root;
+    - a prefix sibling (`C:\ws-other` vs `C:\ws`);
+    - on the Windows runner, a directory junction pointing outside the workspace;
   - the allowlist refuses `javascript:`, `file:` and `vscode:`;
   - a refusal passes through with its code and message;
   - transport errors are handled;
   - not-found maps to the empty state;
-  - polling stops when hidden;
+  - polling stops when hidden: after a `visibility: false` message, no `read` request reaches
+    the host until `visibility: true`;
   - a late response after dispose is dropped;
   - single instance.
 - **Webview unit tests** (jsdom): mounting with a fake bridge renders items, and Submit posts the
@@ -599,7 +671,8 @@ stay green.
   - a stale fingerprint is refused and the draft kept;
   - images: a workspace image, an https image, a refused image, and the full-size view;
   - with no file, the empty state, then `afx decisions init` in the fixture makes items appear;
-  - the Decisions entry from the hierarchy.
+  - the Decisions entry from the hierarchy;
+  - spec scenario 18 for Decisions: light, dark and high-contrast themes, and a live switch.
 
 ### Phase 7: Work panel in VS Code, increment-2 verification
 
@@ -621,7 +694,8 @@ every kept affordance mapped to a VS Code action and every dropped one absent.
     - *Open* → `terminalManager.openBuilderByRoleOrId`;
     - *+ Shell* → `codev.newShell`;
     - *Refresh* → `client.refreshOverview()` (the SDK's existing `POST /api/overview/refresh`),
-      then `overviewCache.refresh()`;
+      then `overviewCache.refresh()`. That route is machine-global, with no workspace argument,
+      unlike every other Work action. It is the same call the dashboard's *Refresh* makes;
     - artifact links → `openArtifact`, checked by containment;
     - external links → the allowlist.
   - It registers a serializer for reload restore.
@@ -764,12 +838,34 @@ checkpoint runs, and then stops, this harness:
   there, and the setting `codev.towerPort` is set to the isolated Tower's port.
 - **Fixture workspaces:** two or more small git repos under the scratchpad, registered only with
   the isolated Tower.
-  - `.builders/` entries give the N=0 / N=1 / N>1 builder states without spawning agents. Tower's
-    overview discovers builders by scanning `.builders/`.
-  - A second architect appears through `afx` against the isolated Tower.
-  - A `codev/decisions.md` comes from `afx decisions init`.
+  - Each fixture's `.codev/config.json` sets `shell.architect` and `shell.builder` to a plain
+    shell. So activating a workspace, or adding an architect, starts a shell session, never an AI
+    agent.
+  - **Builders need a live terminal.** `/api/overview` lists a discovered `.builders/` worktree
+    only when Tower's terminal registry holds a live builder session for its role id
+    (`activeBuilderRoleIds`). Directories alone render zero builders. So each fixture builder is:
+    - a real `git worktree add` under `.builders/<id>/`, with its porch `status.yaml` for
+      phase/gate;
+    - a builder terminal registered through Tower's existing `POST /api/terminals`, with
+      `type: 'builder'`, `roleId: 'builder-<id>'`, the fixture's `workspacePath`, `cwd` set to the
+      worktree, and a harmless long-running shell command;
+    - this gives the N=0 / N=1 / N>1 states, a blocked gate, a waiting builder, and
+      `spawnedByArchitect` values including a null one.
+  - **Validated before any screenshot.** The first checkpoint asserts that the isolated Tower's
+    `/api/overview` for each fixture returns the expected builders and architects. If the registry
+    path does not produce them, verification stops and the architect is told; it does not fall back
+    to faked data.
+  - **Driving the harness.** It goes through Tower's HTTP API (activation, terminals,
+    add-architect), using the isolated key. Where the CLI is needed (a second architect, or creating
+    the decisions file as `afx decisions init` does), the branch's built CLI runs with `cwd` in a
+    fixture repo and the isolated port and `CODEV_AGENT_FARM_DIR`. It never runs from this
+    worktree or against :4100.
 - **Driver:** Python/Node Playwright, headless Chromium, with screenshots saved to the scratchpad
   and attached to the PR.
+  - **Never `playwright install` on this machine.** It hangs at extraction and wedges the shared
+    browser cache.
+  - Use the Chromium already in the Playwright cache. If none is usable, install it by hand with
+    `curl -L` + `unzip` + the `INSTALLATION_COMPLETE` marker, and ask first.
 
 The harness is one extra Tower process and one VS Code web server, with no builders. The architect
 is told before its first start. Anything that would touch port 4100, `~/.agent-farm` or the owner's
@@ -787,6 +883,8 @@ is told before its first start. Anything that would touch port 4100, `~/.agent-f
 | The harness accidentally touches the owner's Tower or IDE | Low | High | Non-default port, isolated `CODEV_AGENT_FARM_DIR` and VS Code data dirs, no `afx` against :4100; the architect is told before the first start |
 | CSS moved out of `index.css` misses a rule, so the dashboard looks different | Medium | Low | A selector inventory before the move, and the rendered dashboard comparison |
 | `prepublish-workspace-deps.test.ts` or the vsix packaging misses the new workspace dependency | Medium | Medium | Run it at Phase 6, and build the vsix in the harness from Phase 4 onward |
+| Fixture builders do not appear because Tower lists only builders with a live terminal | High if missed | Medium | Each fixture builder gets a real worktree plus a registered builder terminal, and `/api/overview` is asserted before any screenshot (harness section) |
+| Path containment behaves differently on Windows (case, separators, UNC, junctions) | Medium | High | `realpath` + `path.relative` (no prefix compare), `path.win32` table tests, and the on-demand Windows workflow linked in the PR |
 
 ## Documentation Updates
 
