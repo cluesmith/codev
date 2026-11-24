@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build, type Metafile } from 'esbuild';
+import { inlineScriptText, inlineStyleText } from '../workspace-views/panel-template.js';
 import type { DecisionsDocument } from '@cluesmith/codev-types';
 
 const require = createRequire(import.meta.url);
@@ -77,7 +78,8 @@ beforeAll(async () => {
   win = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { runScripts: 'outside-only', pretendToBeVisual: true }).window;
   // Copied out of the window's realm, as postMessage's structured clone would.
   win.acquireVsCodeApi = () => ({ postMessage: (message: unknown) => posted.push(JSON.parse(JSON.stringify(message))) });
-  win.eval(script);
+  // Booted as the panel inlines it (panel-template.ts): the escaped text is what runs.
+  win.eval(inlineScriptText(script));
 }, 60_000);
 
 afterAll(() => {
@@ -120,5 +122,22 @@ describe('the Decisions webview bundle', () => {
     expect(css).toContain('.decisions-card');
     expect(css).toContain('--codev-wv-accent: var(--vscode-');
     expect(css).toContain('.wv-fullsize');
+  });
+
+  it('loads nothing by URL, so it renders where a webview cannot fetch (cluesmith/codev-ide#67)', () => {
+    const css = readFileSync(join(outDir, 'decisions.css'), 'utf8');
+    expect(css).not.toMatch(/url\(|@import|@font-face/i);
+    // No import of any kind is left in the output (a dynamic one would be fetched); React's dev
+    // warnings quote `import('./MyComponent')` as text, so the metafile is the check, not the text.
+    expect(Object.values(metafile.outputs).flatMap(output => output.imports)).toEqual([]);
+    expect(script).not.toMatch(/\bWorker\s*\(|importScripts|sourceMappingURL=(?!data:)/);
+    expect(decisionsWebviewConfig({ production: true }).sourcemap).toBe(false);
+    expect(decisionsWebviewConfig({ production: false }).sourcemap).toBe('inline');
+  });
+
+  it('inlines without a sequence that would end its element, though the bundle holds them', () => {
+    expect(script).toMatch(/<!--/);
+    expect(inlineScriptText(script)).not.toMatch(/<\/script|<!--/i);
+    expect(inlineStyleText(readFileSync(join(outDir, 'decisions.css'), 'utf8'))).not.toMatch(/<\/style/i);
   });
 });

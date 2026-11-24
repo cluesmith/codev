@@ -24,7 +24,9 @@ function workspaceViewWebviewConfig(name, { production }) {
 		bundle: true,
 		format: 'iife',
 		minify: production,
-		sourcemap: !production,
+		// Inline, as the panel inlines the bundle itself (panel-template.ts): a map file beside it
+		// could not be fetched by the webview.
+		sourcemap: production ? false : 'inline',
 		sourcesContent: false,
 		platform: 'browser',
 		outfile: `dist/webview/${name}.js`,

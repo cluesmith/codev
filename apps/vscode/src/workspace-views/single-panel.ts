@@ -12,11 +12,15 @@
  *   panel is hidden or moved between groups.
  * - **Its visibility is observable** (`visible`, `onDidChangeVisibility`), so a panel can count
  *   toward the periodic overview refresh as the sidebar's views do.
+ * - **Its bundle is inline** in the document (`panel-template.ts`, cluesmith/codev-ide issue #67):
+ *   read from `dist/webview` once per kind, and the webview may load nothing from the extension. A
+ *   bundle that cannot be read fails the open loudly, naming the file; no panel is left blank.
  *
  * A `PanelSession` is one panel's webview from creation until it is closed: it answers the
  * webview's messages and drops any reply that lands after the panel closed.
  */
 
+import { readFileSync } from 'node:fs';
 import * as vscode from 'vscode';
 import { renderWorkspaceViewHtml } from './panel-template.js';
 import { isAllowedExternalUrl } from './security.js';
@@ -51,9 +55,15 @@ export function isPanelTab(tab: vscode.Tab, viewType: string): boolean {
     && (tab.input.viewType === viewType || tab.input.viewType === `mainThreadWebview-${viewType}`);
 }
 
-/** What the webview may load: the bundle under `dist`, and nothing else from the extension. */
-function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions {
-  return { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'dist')] };
+/** What the webview may load from the extension: nothing, since its bundle is inline. */
+function webviewOptions(): vscode.WebviewOptions {
+  return { enableScripts: true, localResourceRoots: [] };
+}
+
+/** A bundle's script and stylesheet, as text. */
+interface BundleText {
+  script: string;
+  style: string;
 }
 
 /** The window's one panel of a kind, and its serializer. */
@@ -63,6 +73,8 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
   private panelSubscriptions: vscode.Disposable[] = [];
   /** Whether the tab-model canary ({@link checkTabModel}) has warned in this window session. */
   private warnedNoTab = false;
+  /** The bundle, read on first use: its files do not change while the extension runs. */
+  private bundleText: BundleText | undefined;
   private readonly visibilityEmitter = new vscode.EventEmitter<void>();
   /** Fires when the panel opens, closes, or is shown or hidden. */
   readonly onDidChangeVisibility = this.visibilityEmitter.event;
@@ -92,14 +104,15 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
       }
       return;
     }
+    const bundle = this.bundle();
     const restored = this.tabs;
     const panel = vscode.window.createWebviewPanel(
       this.kind.viewType,
       this.kind.title,
       placement ?? restored[0]?.group.viewColumn ?? vscode.ViewColumn.Active,
-      { ...webviewOptions(this.base.extensionUri), retainContextWhenHidden: true },
+      { ...webviewOptions(), retainContextWhenHidden: true },
     );
-    this.adopt(panel);
+    this.adopt(panel, bundle);
     for (const tab of restored) { void vscode.window.tabGroups.close(tab); }
   }
 
@@ -129,8 +142,15 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
       panel.dispose();
       return;
     }
-    panel.webview.options = webviewOptions(this.base.extensionUri);
-    this.adopt(panel);
+    let bundle: BundleText;
+    try {
+      bundle = this.bundle();
+    } catch (err) {
+      panel.dispose();
+      throw err;
+    }
+    panel.webview.options = webviewOptions();
+    this.adopt(panel, bundle);
   }
 
   dispose(): void {
@@ -159,15 +179,28 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
   /** Start the session that answers a new or restored panel's webview. */
   protected abstract attach(panel: vscode.WebviewPanel): void;
 
-  private adopt(panel: vscode.WebviewPanel): void {
-    const { webview } = panel;
-    const bundle = vscode.Uri.joinPath(this.base.extensionUri, 'dist', 'webview');
-    webview.html = renderWorkspaceViewHtml({
-      cspSource: webview.cspSource,
-      scriptUri: webview.asWebviewUri(vscode.Uri.joinPath(bundle, `${this.kind.bundle}.js`)).toString(),
-      styleUri: webview.asWebviewUri(vscode.Uri.joinPath(bundle, `${this.kind.bundle}.css`)).toString(),
-      title: this.kind.title,
-    });
+  /**
+   * The bundle's script and stylesheet, read once. A file that cannot be read is logged and thrown,
+   * naming it: the panel is not opened without its code.
+   */
+  private bundle(): BundleText {
+    if (this.bundleText) { return this.bundleText; }
+    const read = (extension: 'js' | 'css'): string => {
+      const file = vscode.Uri.joinPath(this.base.extensionUri, 'dist', 'webview', `${this.kind.bundle}.${extension}`).fsPath;
+      try {
+        return readFileSync(file, 'utf8');
+      } catch (err) {
+        const message = `the ${this.kind.title} panel cannot open: its bundle ${file} could not be read (${err instanceof Error ? err.message : String(err)}).`;
+        this.base.log(message);
+        throw new Error(message);
+      }
+    };
+    this.bundleText = { script: read('js'), style: read('css') };
+    return this.bundleText;
+  }
+
+  private adopt(panel: vscode.WebviewPanel, bundle: BundleText): void {
+    panel.webview.html = renderWorkspaceViewHtml({ script: bundle.script, style: bundle.style, title: this.kind.title });
     this.current = panel;
     const subscriptions = [
       panel.onDidChangeViewState(() => {

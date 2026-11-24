@@ -7,9 +7,14 @@
  * - A reply that lands after the panel closed is dropped: no post, no error, no new panel.
  * - A reload restores the panel through its serializer.
  * - No message the host posts carries the Tower key, Tower's URL or its port.
+ * - The bundle is inline in the document, read once from `dist/webview`; the webview may load
+ *   nothing from the extension. A bundle that cannot be read fails the open, naming the file.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { DecisionsDocument } from '@cluesmith/codev-types';
 
 type Listener<T> = (event: T) => void;
@@ -85,7 +90,10 @@ vi.mock('vscode', () => ({
   TabInputWebview,
   Uri: {
     parse: (value: string) => ({ toString: () => value }),
-    joinPath: (base: { path: string }, ...parts: string[]) => ({ path: [base.path, ...parts].join('/') }),
+    joinPath: (base: { path: string }, ...parts: string[]) => {
+      const path = [base.path, ...parts].join('/');
+      return { path, fsPath: path };
+    },
   },
 }));
 
@@ -93,7 +101,15 @@ const { DecisionsPanels } = await import('../workspace-views/decisions-panel.js'
 const { DecisionsBridge } = await import('../workspace-views/decisions-bridge.js');
 const { TowerClient } = await import('@cluesmith/codev-sdk/tower-client');
 
-const EXTENSION = { path: '/ext' };
+/** An extension directory holding the Decisions bundle's two files. */
+const EXTENSION_DIR = mkdtempSync(join(tmpdir(), 'codev-decisions-panel-'));
+const BUNDLE_SCRIPT = '/* the decisions bundle */ window.decisionsMounted = true;';
+const BUNDLE_STYLE = '.decisions-card { outline: none; }';
+mkdirSync(join(EXTENSION_DIR, 'dist', 'webview'), { recursive: true });
+writeFileSync(join(EXTENSION_DIR, 'dist', 'webview', 'decisions.js'), BUNDLE_SCRIPT);
+writeFileSync(join(EXTENSION_DIR, 'dist', 'webview', 'decisions.css'), BUNDLE_STYLE);
+afterAll(() => rmSync(EXTENSION_DIR, { recursive: true, force: true }));
+const EXTENSION = { path: EXTENSION_DIR };
 const DOC: DecisionsDocument = { path: 'codev/decisions.md', version: 'v1', items: [], ruledMarkdown: '', problems: [] };
 
 function fakeBridge() {
@@ -104,11 +120,12 @@ function fakeBridge() {
   };
 }
 
-function setup(opts: { reason?: string | null; bridge?: ReturnType<typeof fakeBridge> } = {}) {
+function setup(opts: { reason?: string | null; bridge?: ReturnType<typeof fakeBridge>; extensionDir?: string } = {}) {
   const bridge = opts.bridge ?? fakeBridge();
   const log = vi.fn();
   const reason = { value: opts.reason ?? null };
-  const manager = new DecisionsPanels({ extensionUri: EXTENSION as never, bridge, unavailableReason: () => reason.value, log });
+  const extensionUri = opts.extensionDir ? { path: opts.extensionDir } : EXTENSION;
+  const manager = new DecisionsPanels({ extensionUri: extensionUri as never, bridge, unavailableReason: () => reason.value, log });
   return { manager, bridge, log, reason };
 }
 
@@ -122,18 +139,47 @@ beforeEach(() => {
 });
 
 describe('opening the panel', () => {
-  it('creates one retained, script-enabled panel in the active group, loading only the bundle under dist', () => {
+  it('creates one retained, script-enabled panel in the active group, its bundle inline and nothing loadable from the extension', () => {
     const { manager } = setup();
     manager.show();
     expect(createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(createWebviewPanel).toHaveBeenCalledWith('codev.decisions', 'Decisions', -1, {
-      enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [{ path: '/ext/dist' }],
+      enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [],
     });
     const { html } = panels[0].webview;
-    expect(html).toContain('src="https://webview.vscode-cdn.net/ext/dist/webview/decisions.js"');
-    expect(html).toContain('href="https://webview.vscode-cdn.net/ext/dist/webview/decisions.css"');
+    expect(html).toMatch(/<script nonce="[^"]+">/);
+    expect(html).toContain(`">${BUNDLE_SCRIPT}</script>`);
+    expect(html).toMatch(/<style nonce="[^"]+">\.decisions-card \{ outline: none; \}<\/style>/);
+    expect(html).not.toMatch(/\bsrc=|\bhref=|webview\.vscode-cdn\.net/);
     expect(html).toContain("default-src 'none'");
     expect(manager.panel).toBe(panels[0]);
+  });
+
+  it('reads the bundle once: a later panel in the window reuses it', () => {
+    const { manager } = setup();
+    manager.show();
+    panels[0].dispose();
+    writeFileSync(join(EXTENSION_DIR, 'dist', 'webview', 'decisions.js'), 'window.changed = true;');
+    try {
+      manager.show();
+      expect(panels).toHaveLength(2);
+      expect(panels[1].webview.html).toContain(BUNDLE_SCRIPT);
+    } finally {
+      writeFileSync(join(EXTENSION_DIR, 'dist', 'webview', 'decisions.js'), BUNDLE_SCRIPT);
+    }
+  });
+
+  it('a bundle that cannot be read fails the open loudly, naming the file, and leaves no panel', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'codev-decisions-nobundle-'));
+    try {
+      const { manager, log } = setup({ extensionDir: empty });
+      expect(() => manager.show()).toThrow(`the Decisions panel cannot open: its bundle ${empty}/dist/webview/decisions.js could not be read`);
+      expect(createWebviewPanel).not.toHaveBeenCalled();
+      expect(manager.panel).toBeUndefined();
+      expect(log).toHaveBeenCalledWith(expect.stringContaining(`${empty}/dist/webview/decisions.js`));
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 
   it('reveals the open panel instead of creating a second one, and never reloads it', () => {
@@ -265,8 +311,8 @@ describe('restore after a window reload', () => {
     const { manager, bridge } = setup();
     const restored = new FakePanel();
     await manager.deserializeWebviewPanel(restored as never);
-    expect(restored.webview.options).toEqual({ enableScripts: true, localResourceRoots: [{ path: '/ext/dist' }] });
-    expect(restored.webview.html).toContain('decisions.js');
+    expect(restored.webview.options).toEqual({ enableScripts: true, localResourceRoots: [] });
+    expect(restored.webview.html).toContain(BUNDLE_SCRIPT);
     await restored.send({ type: 'decisions/read', requestId: 0 });
     expect(bridge.read).toHaveBeenCalledTimes(1);
     manager.show();
@@ -288,6 +334,20 @@ describe('restore after a window reload', () => {
     const third = new FakePanel();
     await manager.deserializeWebviewPanel(third as never);
     expect(third.disposed).toBe(true);
+  });
+
+  it('closes a restored panel whose bundle cannot be read, and fails naming the file', async () => {
+    const empty = mkdtempSync(join(tmpdir(), 'codev-decisions-nobundle-'));
+    try {
+      const { manager } = setup({ extensionDir: empty });
+      const restored = new FakePanel();
+      await expect(manager.deserializeWebviewPanel(restored as never)).rejects.toThrow(`${empty}/dist/webview/decisions.js could not be read`);
+      expect(restored.disposed).toBe(true);
+      expect(restored.webview.html).toBe('');
+      expect(manager.panel).toBeUndefined();
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 });
 

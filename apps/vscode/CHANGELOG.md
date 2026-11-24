@@ -10,6 +10,7 @@
 
 ### Fixes
 
+- **Work and Decisions render in the Codev IDE 1.138.** That IDE's webview host cannot deliver a webview's files, so a panel that loads its code by URL stays blank there (cluesmith/codev-ide#67). The Work and Decisions panels now carry their code inside the page, on every VS Code version. Their policy stays strict: only that code runs, and an inline `style` attribute in a decision item's Markdown (an aligned table column) is not applied. The contextual panel and the Markdown preview stay blank in that IDE until it is fixed.
 - **The Codev button's badge clears while Tower is disconnected.** It kept the last count of builders needing attention through a Tower outage; it now repaints whenever the connection changes, and shows nothing until Tower is back.
 - **Spawn Builder runs in this window's workspace.** It ran `afx spawn` in the extension host's own directory (Tower's, in the Codev IDE), so it could spawn into another project, or fail where that directory is no project. It now runs in this window's workspace, the parent workspace in a builder-worktree window, and without a workspace it says so instead of prompting.
 

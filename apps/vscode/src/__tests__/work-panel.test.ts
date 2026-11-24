@@ -9,9 +9,11 @@
  *   non-http(s) URL and an unknown builder are not acted on; a malformed message is ignored.
  * - Nothing is posted after the panel closed. A reload restores the panel through its serializer.
  * - No message the host posts carries the Tower key, Tower's URL or its port.
+ * - The bundle is inline in the document, read from `dist/webview`; the webview may load nothing
+ *   from the extension. A bundle that cannot be read fails the open, naming the file.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -92,7 +94,10 @@ vi.mock('vscode', () => ({
   TabInputWebview,
   Uri: {
     parse: (value: string) => ({ toString: () => value }),
-    joinPath: (base: { path: string }, ...parts: string[]) => ({ path: [base.path, ...parts].join('/') }),
+    joinPath: (base: { path: string }, ...parts: string[]) => {
+      const path = [base.path, ...parts].join('/');
+      return { path, fsPath: path };
+    },
   },
 }));
 
@@ -102,7 +107,15 @@ const { NOT_CONNECTED_MESSAGE } = await import('../workspace-views/decisions-bri
 const { TowerClient } = await import('@cluesmith/codev-sdk/tower-client');
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
-const EXTENSION = { path: '/ext' };
+/** An extension directory holding the Work bundle's two files. */
+const EXTENSION_DIR = mkdtempSync(join(tmpdir(), 'codev-work-panel-ext-'));
+const BUNDLE_SCRIPT = '/* the work bundle */ window.workMounted = true;';
+const BUNDLE_STYLE = '.work-view { outline: none; }';
+mkdirSync(join(EXTENSION_DIR, 'dist', 'webview'), { recursive: true });
+writeFileSync(join(EXTENSION_DIR, 'dist', 'webview', 'work.js'), BUNDLE_SCRIPT);
+writeFileSync(join(EXTENSION_DIR, 'dist', 'webview', 'work.css'), BUNDLE_STYLE);
+afterAll(() => rmSync(EXTENSION_DIR, { recursive: true, force: true }));
+const EXTENSION = { path: EXTENSION_DIR };
 
 function builder(id: string): OverviewBuilder {
   return {
@@ -126,7 +139,7 @@ function overviewOf(...builders: OverviewBuilder[]): OverviewData {
   return { builders, pendingPRs: [], backlog: [], recentlyClosed: [] } as unknown as OverviewData;
 }
 
-function setup(opts: { reason?: string | null; data?: OverviewData | null; state?: ConnectionState; root?: string | null } = {}) {
+function setup(opts: { reason?: string | null; data?: OverviewData | null; state?: ConnectionState; root?: string | null; extensionDir?: string } = {}) {
   const overviewChanged = new FakeEmitter<void>();
   const stateChanged = new FakeEmitter<ConnectionState>();
   const cache = { data: opts.data === undefined ? overviewOf(builder('spir-1963')) : opts.data };
@@ -147,7 +160,7 @@ function setup(opts: { reason?: string | null; data?: OverviewData | null; state
   const log = vi.fn();
   const reason = { value: opts.reason ?? null };
   const manager = new WorkPanels({
-    extensionUri: EXTENSION as never,
+    extensionUri: (opts.extensionDir ? { path: opts.extensionDir } : EXTENSION) as never,
     overview,
     connection: {
       getState: () => connection.state,
@@ -177,16 +190,18 @@ beforeEach(() => {
 });
 
 describe('opening the panel', () => {
-  it('creates one retained, script-enabled panel in the active group, loading only the Work bundle under dist', () => {
+  it('creates one retained, script-enabled panel in the active group, the Work bundle inline and nothing loadable from the extension', () => {
     const { manager } = setup();
     manager.show();
     expect(createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(createWebviewPanel).toHaveBeenCalledWith('codev.work', 'Work', -1, {
-      enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [{ path: '/ext/dist' }],
+      enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [],
     });
     const { html } = panels[0].webview;
-    expect(html).toContain('src="https://webview.vscode-cdn.net/ext/dist/webview/work.js"');
-    expect(html).toContain('href="https://webview.vscode-cdn.net/ext/dist/webview/work.css"');
+    expect(html).toMatch(/<script nonce="[^"]+">/);
+    expect(html).toContain(`">${BUNDLE_SCRIPT}</script>`);
+    expect(html).toContain(`">${BUNDLE_STYLE}</style>`);
+    expect(html).not.toMatch(/\bsrc=|\bhref=|webview\.vscode-cdn\.net/);
     expect(html).toContain("default-src 'none'");
     expect(html).not.toContain('connect-src');
     expect(manager.panel).toBe(panels[0]);
@@ -200,6 +215,19 @@ describe('opening the panel', () => {
     expect(createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(panels[0].reveal).toHaveBeenCalledTimes(1);
     expect(panels[0].webview.html).toBe(html);
+  });
+
+  it('a bundle that cannot be read fails the open loudly, naming the file, and leaves no panel', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'codev-work-nobundle-'));
+    try {
+      const { manager, log } = setup({ extensionDir: empty });
+      expect(() => manager.show()).toThrow(`the Work panel cannot open: its bundle ${empty}/dist/webview/work.js could not be read`);
+      expect(createWebviewPanel).not.toHaveBeenCalled();
+      expect(manager.panel).toBeUndefined();
+      expect(log).toHaveBeenCalledWith(expect.stringContaining(`${empty}/dist/webview/work.js`));
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 
   it('with a placement (Arrange Cockpit), opens the panel in that group, or moves the open one there, without taking focus', () => {
@@ -502,8 +530,8 @@ describe('restore after a window reload', () => {
     const { manager } = setup();
     const restored = new FakePanel();
     await manager.deserializeWebviewPanel(restored as never);
-    expect(restored.webview.options).toEqual({ enableScripts: true, localResourceRoots: [{ path: '/ext/dist' }] });
-    expect(restored.webview.html).toContain('work.js');
+    expect(restored.webview.options).toEqual({ enableScripts: true, localResourceRoots: [] });
+    expect(restored.webview.html).toContain(BUNDLE_SCRIPT);
     await restored.send({ type: 'ready' });
     expect(restored.posted).toHaveLength(1);
     expect(manager.visible).toBe(true);
