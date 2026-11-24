@@ -39,7 +39,7 @@ Codev now runs natively on Windows 11 without WSL, and the work since the first 
 
 ## Node.js 22 is the minimum
 
-Codev now requires Node.js 22 or newer; Node.js 20, which reached end of life in April 2026, is no longer supported (#1944, PR #1962). The package declares `node >=22.0.0`, `codev doctor` fails on anything older, and every CI job on every platform runs on Node 22, the one tested version. On macOS and Linux an install on an older Node prints npm's engine warning and proceeds; on native Windows the installer refuses a Node version that has no prebuilt native binaries, as before. Newer Node versions with prebuilt binaries still install but are not tested. The install docs, the Ubuntu and Debian quick-install steps and `codev doctor`'s Linux hint now install Node 22 from NodeSource, because the distribution packages are older.
+Codev now requires Node.js 22 or newer; Node.js 20, which reached end of life in April 2026, is no longer supported (#1944, PR #1962). The package declares `node >=22.0.0`, `codev doctor` fails on anything older and prints the command to upgrade, and every CI job on every platform runs on Node 22, the one tested version. On macOS and Linux an install on an older Node prints npm's engine warning and proceeds; on native Windows the installer refuses a Node version that has no prebuilt native binaries, as before. Newer Node versions with prebuilt binaries still install but are not tested. The install docs, the Ubuntu and Debian quick-install steps and `codev doctor`'s Linux hint now install Node 22 from NodeSource, because the distribution packages are older.
 
 ## Native Windows
 
