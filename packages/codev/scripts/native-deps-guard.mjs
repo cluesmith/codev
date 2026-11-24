@@ -15,7 +15,8 @@
  * Node ABIs (`process.versions.modules`) for which better-sqlite3 ships a
  * win32 prebuilt binary: Node 22 (127), 24 (137), 25 (141) and 26 (147), as
  * measured for better-sqlite3 12.10 (Spec 1658 audit, fact 1.1). Update this
- * list when the dependency adds prebuilds.
+ * list when the dependency adds prebuilds. Broader than the tested set: CI
+ * tests Node 22 only (#1944).
  */
 export const WINDOWS_PREBUILD_NODE_ABIS = ['127', '137', '141', '147'];
 

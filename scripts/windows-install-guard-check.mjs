@@ -12,7 +12,9 @@
  * npm's own node-gyp shim. So the stub is placed in `<root>/node_modules/.bin`,
  * and the control project and the install prefix both live under `<root>`.
  *
- * Usage (from the repo root, with the four packed tarballs in <dir>):
+ * Usage (from the repo root, with the four packed tarballs in <dir>). The
+ * workflow runs only --supported (Node 22, #1944); --control and --unsupported
+ * are for manual runs on a Node with no prebuild:
  *   node scripts/windows-install-guard-check.mjs --control <dir>
  *       better-sqlite3 alone, with no guard in front of it: the stub MUST be
  *       invoked on this Node (proves the stub intercepts the fallback).
