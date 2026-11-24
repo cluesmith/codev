@@ -36,6 +36,7 @@ gates:
     approved_at: '2026-11-23T22:10:01.002Z'
   pr:
     status: pending
+    requested_at: '2026-11-24T20:59:54.752Z'
   verify-approval:
     status: pending
 iteration: 1
@@ -138,7 +139,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-docs_guidance-iter1-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-24T20:27:15.801Z'
+updated_at: '2026-11-24T20:59:54.752Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
@@ -170,3 +171,4 @@ force_advanced:
   max_iterations: 3
   rebuttal_file: 1951-check_worktree-iter3-rebuttals.md
   at: '2026-11-24T18:44:00.290Z'
+pr_ready_for_human: true
