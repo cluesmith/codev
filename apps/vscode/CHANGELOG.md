@@ -10,6 +10,7 @@
 
 ### Fixes
 
+- **The Codev button's badge clears while Tower is disconnected.** It kept the last count of builders needing attention through a Tower outage; it now repaints whenever the connection changes, and shows nothing until Tower is back.
 - **Spawn Builder runs in this window's workspace.** It ran `afx spawn` in the extension host's own directory (Tower's, in the Codev IDE), so it could spawn into another project, or fail where that directory is no project. It now runs in this window's workspace, the parent workspace in a builder-worktree window, and without a workspace it says so instead of prompting.
 
 ## [3.3.8] - 2026-11-24
