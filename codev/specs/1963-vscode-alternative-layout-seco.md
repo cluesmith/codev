@@ -317,9 +317,14 @@ wait anywhere on the machine is visible on the row it concerns.
     The worktree-scoped actions the Workspace view shows in such a window (*Open Web Interface*,
     *Start* / *Stop Dev*, dev URLs) sit on that row's context menu.
   - In a **window with no Codev workspace**, every workspace's rows navigate; none acts here.
+  - A **dormant window** (the marketplace extension in plain VS Code, in a folder with no Codev project) does not connect. Its panel shows *Not connected to Tower*,
+    not Tower with the fleet. This keeps issue #1144's dormant-window inertness (owner's ruling of
+    2026-11-24, at the PR gate).
 - **Footprint.** The combined view has no `when`, so the new button appears in every window where
   the extension activates (`onStartupFinished`), including non-Codev windows, as the owner ruled at
-  the gate. This matches today's Codev and Codev Tower containers, which also appear there.
+  the gate. This matches today's Codev and Codev Tower containers, which also appear there. In a
+  dormant window the panel shows *Not connected to Tower*, not Tower with the fleet (owner's ruling
+  of 2026-11-24).
 
 ### 3. Work and Decisions in the extension, in a split with the `main` architect
 
@@ -529,7 +534,9 @@ and usable, so the work can be cut after any of them; the plan phases against th
 - [ ] In a builder-worktree window: the button and combined panel work. The parent workspace's rows
       navigate to the parent's window, the worktree-scoped actions are on its row, and the split,
       Work and Decisions are not offered. In a no-workspace window: the button and panel work, and
-      every workspace's rows navigate.
+      every workspace's rows navigate. A dormant window (the marketplace extension in plain VS Code,
+      in a folder with no Codev project) does not connect: its panel shows *Not connected to Tower*
+      and lists no fleet (owner's ruling of 2026-11-24).
 - [ ] The Decisions entry under this window's workspace opens, or reveals, the single Decisions
       panel without arranging the split. For a workspace without a decisions file it opens the empty
       state.
@@ -768,7 +775,8 @@ markdown artifacts. Work and Decisions are workspace-state surfaces. Not recomme
 - **Builder-worktree windows:** no split, Work or Decisions.
 - **Shared code:** a new `packages/` workspace package bundled by both hosts (B1). The plan names it.
 - **Name, rotation, badge:** "Codev Cockpit"; clockwise; the workspace "needs me" count.
-- **Footprint:** the button is present in every window.
+- **Footprint:** the button is present in every window. A dormant window's panel shows *Not
+  connected to Tower*, not Tower with the fleet (owner's ruling of 2026-11-24, at the PR gate).
 - **Builder terminals:** placement over the Work group is left to #1671.
 - **Reload persistence:** Work and Decisions panels are restored after a window reload, as specced.
 - **Combined panel:** one hierarchy, Tower → workspaces → architects + Decisions → builders. Section
