@@ -1377,3 +1377,36 @@ the source; saved in the session scratchpad as `scenario-table.md` and to be wri
 review. Three claims have no test: the `devvm` hint (the plan left it out: a stage 1 Tower has no
 list of the owner's Towers); the "until it has an explicit name" half of the two `afx://` bullets
 (nothing resolves an `afx://` address in stage 1; stage 2 does); front door only (phase 7, cut).
+
+## 2026-11-24 — review phase: the review file, the lessons, the PR body
+
+Resumed after a context refresh at the phase boundary (`enter:review`).
+
+- `codev/reviews/1940-tower-to-tower-messaging-proto.md` written to porch's template. Beyond the
+  template it carries what the architect asked for at 03:06Z: the scenario-to-test table, the
+  three claims with no test and the reason for each, the latency table with loads, the known
+  boundaries (a) to (e) and the rest collected per phase, the phase 3 and phase 4 real-Tower
+  transcripts, and which phases skipped porch's local tests check and on what run.
+- **The scenario table was checked before it went in.** A script looked up every one of its 220
+  test titles in the file the table names: all found. The line numbers were not all right any
+  more (`tower-routes.test.ts` moved when the Windows fixture line was added), so the review's
+  copy has no line column; titles are exact and can be searched. The 47 fixture references were
+  checked against `address-cases.json` too.
+- Checked across the whole branch diff before writing: no leftover `.only` / `.skip` / debug
+  output (the one `console.log` is the latency test's result line), nothing mentions the
+  front-door-only setting outside the spec and plan, `CLAUDE.md` equals `AGENTS.md`, the role
+  files, templates and four skill copies match across the two trees. `agent-farm.md` differs
+  between the trees, as recorded in phase 6.
+- **Governance docs.** `arch.md` was done in phase 6. Seven lessons added to the cold
+  `lessons-learned.md` (two Architecture, one Process, four Testing). Neither hot file changed:
+  both are at their cap and nothing here outranks what is in them.
+- The architect-command finding is now issue #1966 (filed by the architect); the review cites it.
+- **`Closes #1940` in the PR body**, on the approved spec's own words: the stage 1 checklist is
+  this project's acceptance criteria and stages 2 and 3 are new issues the architect files. Those
+  two issues do not exist yet. Told the architect, who can have it changed to `Part of`.
+- Issues #1605 and #1633 are named in the PR body without a closing keyword; the architect
+  closes them at merge.
+- A seventh bare `cd`, in the first minutes of this session (`cd codev/projects/… && for …`). The
+  next command returned to the worktree root; nothing was written from the wrong directory.
+- Order from here (ruling main-38): push, GitHub green on that head, tell the architect, and
+  only on their word `porch done 1940` with the one-time skip. Then porch's review lanes.
