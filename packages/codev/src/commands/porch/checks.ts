@@ -8,6 +8,7 @@
 import { execFile, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CheckResult, CheckDef } from './types.js';
 import type { ArtifactResolver } from './artifacts.js';
@@ -27,6 +28,15 @@ const KILL_GRACE_MS = 5000;
 /** Signals porch forwards to a running check's process group */
 const RELAYED_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
+/**
+ * Lines of a failed check's output printed at the terminal; the rest is in its log (#1853).
+ * Enough for a test runner's failure block and summary, which come last.
+ */
+export const OUTPUT_TAIL_LINES = 30;
+
+/** Failed-check logs kept per project; the oldest are deleted first (#1853) */
+export const MAX_CHECK_LOGS = 20;
+
 // ============================================================================
 // Check Execution
 // ============================================================================
@@ -35,6 +45,14 @@ const RELAYED_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 export interface CheckEnv {
   PROJECT_ID: string;
   PROJECT_TITLE: string;
+}
+
+/** Where porch saves the full output of a failed shell check (#1853) */
+export interface CheckLogTarget {
+  /** The project's `checks/` directory, beside its status.yaml */
+  dir: string;
+  /** The phase the check ran for, as it appears in the file name (e.g. `implement-phase_2`) */
+  phase: string;
 }
 
 /**
@@ -57,6 +75,9 @@ export async function runCheck(
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
+    // Both streams as one, as a terminal would have shown them: a test runner
+    // writes its warnings first and its failures last, across both (#1853).
+    let transcript = '';
     let killed = false;
 
     // detached: the check leads its own process group, so a timeout can kill
@@ -118,14 +139,18 @@ export async function runCheck(
     }, timeoutMs);
 
     proc.stdout.on('data', (data) => {
-      stdout += data.toString();
+      const text = data.toString();
+      stdout += text;
+      transcript += text;
     });
 
     proc.stderr.on('data', (data) => {
-      stderr += data.toString();
+      const text = data.toString();
+      stderr += text;
+      transcript += text;
     });
 
-    proc.on('close', async (code) => {
+    proc.on('close', async (code, signal) => {
       clearTimeout(timeout);
 
       if (killed) {
@@ -143,7 +168,9 @@ export async function runCheck(
           name,
           command,
           passed: false,
+          output: stdout.trim(),
           error: `Timed out after ${timeoutMs / 1000}s (raise this check's timeout_ms if it needs longer)`,
+          transcript,
           duration_ms: Date.now() - startTime,
         });
         return;
@@ -160,12 +187,14 @@ export async function runCheck(
           duration_ms: duration,
         });
       } else {
+        // stderr is in the transcript; `error` says only why the check failed.
         resolve({
           name,
           command,
           passed: false,
           output: stdout.trim(),
-          error: stderr.trim() || `Exit code ${code}`,
+          error: code !== null ? `Exit code ${code}` : `Killed by ${signal}`,
+          transcript,
           duration_ms: duration,
         });
       }
@@ -179,6 +208,7 @@ export async function runCheck(
         command,
         passed: false,
         error: err.message,
+        transcript,
         duration_ms: Date.now() - startTime,
       });
     });
@@ -353,6 +383,9 @@ export function runArtifactCheck(
  * Special handling: `pr_exists` checks are routed through the forge concept
  * command dispatcher instead of running the protocol.json command directly.
  * This allows per-project forge configuration while keeping protocol JSON unchanged.
+ *
+ * With a `log` target, each failed shell check's full output is saved there and
+ * its path recorded on the result (#1853).
  */
 export async function runPhaseChecks(
   checks: Record<string, string | CheckDef>,
@@ -361,6 +394,7 @@ export async function runPhaseChecks(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
   resolver?: ArtifactResolver,
   overriddenChecks?: Set<string>,
+  log?: CheckLogTarget,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
@@ -399,11 +433,52 @@ export async function runPhaseChecks(
 
     // Stop on first failure
     if (!result.passed) {
+      if (log) saveCheckLog(log, result, checkCwd);
       break;
     }
   }
 
   return results;
+}
+
+/**
+ * Save a failed check's full output, so the failure can still be read after a
+ * retry passes (#1853). A file that cannot be written is reported on the result
+ * rather than thrown, so the check's own failure is still printed.
+ */
+function saveCheckLog(target: CheckLogTarget, result: CheckResult, cwd: string): void {
+  const savedAt = new Date().toISOString();
+  // Timestamp first, so file names sort oldest to newest.
+  const fileName = [savedAt.replace(/[:.]/g, '-'), target.phase, result.name]
+    .map(part => part.replace(/[^A-Za-z0-9_-]/g, '_'))
+    .join('-') + '.log';
+  const logPath = path.join(target.dir, fileName);
+  const header = [
+    `check:    ${result.name}`,
+    `phase:    ${target.phase}`,
+    `command:  ${result.command}`,
+    `cwd:      ${cwd}`,
+    `result:   ${result.error}`,
+    `duration: ${((result.duration_ms ?? 0) / 1000).toFixed(1)}s`,
+    `saved at: ${savedAt}`,
+  ];
+
+  try {
+    fs.mkdirSync(target.dir, { recursive: true });
+    // Per-run output, never project state. Ignored from inside the directory
+    // because adopters' .gitignore carries no rule for codev/projects/.
+    const gitignore = path.join(target.dir, '.gitignore');
+    if (!fs.existsSync(gitignore)) fs.writeFileSync(gitignore, '*\n');
+    fs.writeFileSync(
+      logPath,
+      `${header.join('\n')}\n\n--- stdout and stderr, in the order porch read them ---\n${result.transcript ?? ''}`,
+    );
+    result.log_path = logPath;
+    const logs = fs.readdirSync(target.dir).filter(f => f.endsWith('.log')).sort();
+    for (const old of logs.slice(0, -MAX_CHECK_LOGS)) fs.rmSync(path.join(target.dir, old));
+  } catch (err) {
+    result.log_error = err instanceof Error ? err.message : String(err);
+  }
 }
 
 /**
@@ -452,6 +527,16 @@ async function runPrExistsViaConcept(
 // ============================================================================
 
 /**
+ * The last `max` lines of `text`. A failing command's useful lines come last:
+ * the first ones are tool and config warnings (#1853).
+ */
+function lastLines(text: string, max: number): string[] {
+  const lines = text.trimEnd().split('\n');
+  if (lines.length <= max) return lines;
+  return [`... (${lines.length - max} earlier lines)`, ...lines.slice(-max)];
+}
+
+/**
  * Format check results for terminal output
  */
 export function formatCheckResults(results: CheckResult[]): string {
@@ -465,15 +550,15 @@ export function formatCheckResults(results: CheckResult[]): string {
 
     lines.push(`  ${status} ${result.name}${duration}`);
 
-    if (!result.passed && result.error) {
-      // Indent error message
-      const errorLines = result.error.split('\n').slice(0, 5);
-      for (const line of errorLines) {
-        lines.push(`    ${line}`);
-      }
-      if (result.error.split('\n').length > 5) {
-        lines.push('    ...');
-      }
+    if (result.passed) continue;
+    const details = [
+      ...(result.error ? lastLines(result.error, OUTPUT_TAIL_LINES) : []),
+      ...(result.transcript?.trim() ? lastLines(result.transcript, OUTPUT_TAIL_LINES) : []),
+    ];
+    if (result.log_path) details.push(`Full output: ${result.log_path}`);
+    if (result.log_error) details.push(`Full output could not be saved: ${result.log_error}`);
+    for (const line of details) {
+      lines.push(`    ${line}`);
     }
   }
 

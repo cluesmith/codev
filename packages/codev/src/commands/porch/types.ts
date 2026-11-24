@@ -318,4 +318,10 @@ export interface CheckResult {
   output?: string;
   error?: string;
   duration_ms?: number;
+  /** A failed shell check's stdout and stderr, interleaved in the order porch read them (#1853) */
+  transcript?: string;
+  /** Where porch saved a failed shell check's full output (#1853) */
+  log_path?: string;
+  /** Why that output could not be saved, when it could not */
+  log_error?: string;
 }
