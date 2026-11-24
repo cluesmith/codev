@@ -200,7 +200,7 @@ describe('opening the panel', () => {
     const { html } = panels[0].webview;
     expect(html).toMatch(/<script nonce="[^"]+">/);
     expect(html).toContain(`">${BUNDLE_SCRIPT}</script>`);
-    expect(html).toContain(`">${BUNDLE_STYLE}</style>`);
+    expect(html).toContain(`<style>${BUNDLE_STYLE}</style>`);
     expect(html).not.toMatch(/\bsrc=|\bhref=|webview\.vscode-cdn\.net/);
     expect(html).toContain("default-src 'none'");
     expect(html).not.toContain('connect-src');

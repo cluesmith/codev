@@ -1,8 +1,8 @@
 /**
  * Spec 1963 scenario 22 (static): the Work and Decisions panels' document and Content Security
  * Policy. The bundle is inline (cluesmith/codev-ide issue #67), so the policy is parsed and held to
- * exactly that: the nonce for the one script and the one stylesheet, nothing loaded from anywhere,
- * and nothing that could reach Tower. The bundle text is escaped so it cannot end its element.
+ * exactly that: the nonce for the one script, inline styles, nothing loaded from anywhere, and
+ * nothing that could reach Tower. The bundle text is escaped so it cannot end its element.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -55,14 +55,16 @@ describe('the panel document', () => {
     expect(policyOf(render()).has('connect-src')).toBe(false);
   });
 
-  it('allows exactly the nonce for scripts and for styles: no unsafe-inline, no unsafe-eval, no source', () => {
-    const html = render();
-    const policy = policyOf(html);
-    const scripts = policy.get('script-src')!;
+  it('allows exactly the nonce for scripts: no unsafe-inline, no unsafe-eval, no source', () => {
+    const scripts = policyOf(render()).get('script-src')!;
     expect(scripts).toHaveLength(1);
     expect(scripts[0]).toMatch(/^'nonce-[A-Za-z0-9+/]{24}'$/);
-    expect(policy.get('style-src')).toEqual(scripts);
-    expect(html).not.toContain('unsafe-');
+  });
+
+  it("allows inline styles, with no nonce (it would switch 'unsafe-inline' off) and no source", () => {
+    const policy = policyOf(render());
+    expect(policy.get('style-src')).toEqual(["'unsafe-inline'"]);
+    expect(render()).not.toContain('unsafe-eval');
   });
 
   it('allows images from blob: and http(s) only, and no other directive', () => {
@@ -71,11 +73,11 @@ describe('the panel document', () => {
     expect([...policy.keys()].sort()).toEqual(['default-src', 'img-src', 'script-src', 'style-src']);
   });
 
-  it('carries the bundle inline: one script and one stylesheet, each with the nonce, and nothing loaded by URL', () => {
+  it('carries the bundle inline: one script with the nonce, one stylesheet, and nothing loaded by URL', () => {
     const html = render();
     const nonce = nonceOf(html);
     expect(elements(html, 'script')).toEqual([{ open: `<script nonce="${nonce}">`, text: SCRIPT }]);
-    expect(elements(html, 'style')).toEqual([{ open: `<style nonce="${nonce}">`, text: STYLE }]);
+    expect(elements(html, 'style')).toEqual([{ open: '<style>', text: STYLE }]);
     expect(html).not.toMatch(/\bsrc=|\bhref=|<link\b/);
   });
 
@@ -90,7 +92,7 @@ describe('the panel document', () => {
   });
 
   it('builds the same policy directly', () => {
-    expect(workspaceViewCsp('abc')).toBe("default-src 'none'; script-src 'nonce-abc'; style-src 'nonce-abc'; img-src blob: http: https:");
+    expect(workspaceViewCsp('abc')).toBe("default-src 'none'; script-src 'nonce-abc'; style-src 'unsafe-inline'; img-src blob: http: https:");
   });
 });
 

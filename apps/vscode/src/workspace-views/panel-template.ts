@@ -12,10 +12,12 @@
  * - `default-src 'none'` first, so anything not listed is refused. In particular there is no
  *   `connect-src`, so `fetch`, XHR, WebSocket and EventSource fall back to `'none'`: a panel cannot
  *   reach Tower, or anywhere else;
- * - `script-src` and `style-src` are the per-render nonce only: no `'unsafe-inline'`, no
- *   `'unsafe-eval'`, and no source, since nothing is loaded from the extension. React sets a
- *   component's `style` through the CSSOM, which the policy does not govern; a `style` attribute
- *   in markup (raw HTML or an aligned table column in a decision item) is refused;
+ * - `script-src` is the per-render nonce only: no `'unsafe-inline'`, no `'unsafe-eval'`, and no
+ *   source, since nothing is loaded from the extension;
+ * - `style-src` is `'unsafe-inline'`, with no nonce (a nonce in the directive would switch
+ *   `'unsafe-inline'` off) and no source. It admits the inline stylesheet and the `style`
+ *   attributes a decision item's Markdown carries (an aligned table column, raw HTML), as the
+ *   dashboard renders them. Inline styles run no code;
  * - `img-src` admits `blob:` (workspace images the host delivers as bytes, shown as object URLs)
  *   and `http:`/`https:` (remote images written in decision items, as the dashboard loads them).
  */
@@ -36,7 +38,7 @@ export function workspaceViewCsp(nonce: string): string {
   return [
     `default-src 'none'`,
     `script-src 'nonce-${nonce}'`,
-    `style-src 'nonce-${nonce}'`,
+    `style-src 'unsafe-inline'`,
     `img-src blob: http: https:`,
   ].join('; ');
 }
@@ -74,7 +76,7 @@ export function inlineStyleText(style: string): string {
   return escapeLessThan(style, '/style', '\\3C ');
 }
 
-/** The webview document, with a fresh nonce bound into the policy, the script and the style. */
+/** The webview document, with a fresh nonce bound into the policy and the script. */
 export function renderWorkspaceViewHtml(opts: WorkspaceViewHtmlOptions): string {
   const nonce = createNonce();
   const csp = workspaceViewCsp(nonce);
@@ -84,7 +86,7 @@ export function renderWorkspaceViewHtml(opts: WorkspaceViewHtmlOptions): string 
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="${escapeAttribute(csp)}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <style nonce="${nonce}">${inlineStyleText(opts.style)}</style>
+  <style>${inlineStyleText(opts.style)}</style>
   <title>${escapeAttribute(opts.title)}</title>
 </head>
 <body>
