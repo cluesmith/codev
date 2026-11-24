@@ -24,3 +24,18 @@ Findings that shaped the spec:
 Open points resolved with recommendations, for confirmation at spec-approval: trigger = first show
 per window + command; `terminalPosition: panel` overridden for the arrange action; no split/Work/
 Decisions in a builder-worktree window (#1809).
+
+## 2026-11-23 — Spec consultation (iter 1) → spec-approval
+
+Codex COMMENT, Claude REQUEST_CHANGES — all points accepted, none disputed (rebuttal in
+`codev/projects/1963-*/1963-specify-iter1-rebuttals.md`). Main changes:
+- Menus: existing source-view entries left byte-for-byte; the combined view gets mirrored entries
+  guarded by a generated parity test (widening `when`s would have broken `contributes-tower.test.ts`).
+- Freshness: the combined view and the Work panel count toward the existing periodic-overview
+  visibility gate — otherwise the Cockpit freezes whenever the Codev container is hidden.
+- Own provider instances over shared caches (per-view accordion/reveal state).
+- Added `codev.cockpit.autoArrange` (default on); defined "window session" (ends at reload);
+  connection/failure states; canonical-path + http(s)-only host checks; commands stay in the
+  palette in worktree/no-workspace windows and explain themselves.
+
+Stopped at spec-approval.
