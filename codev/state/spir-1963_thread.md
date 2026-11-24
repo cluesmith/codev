@@ -273,3 +273,31 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
   before.
   - Iteration-1 rebuttal run: load 2.55, passed.
   - Iteration-2 run: I waited out a load of 8.18; at 4.85 it passed.
+
+### Phase 2 (`fleet_overviews`), iteration 1 (2026-11-24)
+
+- `TowerFleetCache` now keeps the overview it already fetched for each active workspace, instead
+  of discarding it after `deriveAttention`.
+  - `FleetEntry` gains `overview: OverviewData | null`.
+  - A new `lastOverview` map holds the last-known-good overview, next to `lastAttention`.
+  - A new `getOverview(path)` accessor returns it.
+- Behaviour:
+  - A failed (`null`) fetch keeps the previous overview.
+  - A dormant workspace gets `null` and drops what it had. A reactivated workspace whose first
+    fetch fails does not get its pre-dormancy overview back.
+  - A workspace that leaves the list is dropped.
+  - A transiently empty list keeps everything, as before.
+- No new requests: per refresh there is still one `getOverview` call per active workspace.
+- I changed two files outside the plan's list, `tower-provider.test.ts` and
+  `switch-workspace.test.ts`. Their `entry()` helpers build `FleetEntry` literals, and `tsc`
+  type-checks the tests, so the helpers needed the new required field. It was a one-line change
+  in each.
+- The stale-fan-out test calls the private `fetchFleet` directly. `refresh()` serialises
+  fan-outs, so through the public API the sequence guard is only a backstop and the race cannot
+  be reached.
+- Mutation-checked: removing the sequence guard, the map rebuild, or the retain-on-null each makes
+  its matching test fail.
+- `check-types` and `lint` are clean, apart from the two pre-existing `curly` warnings.
+  `porch done` checks passed: build 15.6 s, tests 56.4 s, at a 1-minute load of 3.44 with no other
+  vitest running.
+  `test:unit` passed 1293/1293.
