@@ -381,3 +381,17 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
 - Fixed in place: risk-triage's `gh pr diff --stat` does not exist (gh pr diff has no --stat) — Step 1's raw
   commands now `gh pr view <N> --json additions,deletions,changedFiles` + `gh pr diff <N> --name-only`, and the
   worked examples use `git diff --stat origin/main...origin/<branch>`, which prints the diffstat they show.
+- Architect (19:11): ci-first (main-38) still stands; retiring it is part of open decision main-39 (PR #1965). No
+  local full suite, capped or not (machine load ~25). 8/8 green on 827eed9d4 confirmed by the architect (19:18);
+  skip applied once, config.local.json restored + cmp, build passed, porch commit d92a07d70. The Phase 7 review
+  context file (codev/projects/…/1951-docs_guidance-iter1-context.md) asked both reviewers to review f93aa60e1
+  with the docs, since it carries the unreviewed a1ccc442b logic.
+- Review iter1: codex REQUEST_CHANGES: cleanup parsed `git status --porcelain` without -z, so a quoted path (space,
+  quote, non-ASCII) failed linkAt and a spawn-made entry counted dirty. Verified on git 2.50. Claude APPROVE (it
+  probed the same-size/different-bytes copy branch and the linkedSpelling tests); note 3 = the same gap; note 1
+  (copy rule broader than "spawn made it") → one clause in codev.md; notes 2/4 no change. Architect agreed (19:26)
+  and asked for three more safe-direction tests. Fix: `gitStatusZ()` via execFile + windowsHide (NOT run(), which
+  trims stdout and would eat the first entry's leading status space), `parseStatusZ()` drops a rename's source.
+  Tests: hard link + unchanged copy at quoted names not counted (fails with the old parsing: mutation-checked);
+  ' M' first entry counted; quoted untracked name counted; staged rename counts once; a broken .git → "Unable to
+  check status" (dirty). Cleanup suites incl. the execFile-mocking ones still pass.

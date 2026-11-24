@@ -436,7 +436,9 @@ entries spawn links in from the main checkout: the root `.env`, `.codev/config.j
 `worktree.symlinks` entry. Spawn makes each of those as a symbolic link to the same path in the
 main checkout, or, where it may not, a hard link of that file, or a copy. Any of the three
 shapes is scaffold while it matches (a copy only while its bytes equal the main checkout's
-file); a changed copy is data. `afx cleanup`'s uncommitted-changes notice uses the same rule.
+file); a changed copy is data. So an untracked file whose bytes equal the main checkout's
+file at the same path is scaffold whoever made it: removing it loses nothing while the main
+checkout still holds that file. `afx cleanup`'s uncommitted-changes notice uses the same rule.
 A project that gitignores `.builder-*` sees those files under `ignored`, where the default keep
 list matches them, so they show as keep-list data instead.
 

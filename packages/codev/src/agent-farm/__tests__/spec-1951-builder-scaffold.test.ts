@@ -153,6 +153,39 @@ describe('Spec 1951 — afx cleanup: hasUncommittedChanges and the scaffold (mai
     expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: true, scaffoldOnly: false, details: '2 uncommitted file(s)' });
   });
 
+  // The notice gates no deletion; when in doubt it says "dirty". These pin that direction for
+  // the NUL-separated read (`git status --porcelain -z`).
+  describe('reading git status: the notice errs toward dirty', () => {
+    const noScaffold = (): void => {
+      rmSync(join(worktree, '.claude'), { recursive: true });
+      for (const rel of ['.builder-prompt.txt', '.builder-role.md', '.builder-start.sh']) rmSync(join(worktree, rel));
+    };
+
+    it("a single modified tracked file, the first entry (' M'), is counted", async () => {
+      noScaffold();
+      write('src/tracked.ts', 'changed\n');
+      expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: true, scaffoldOnly: false, details: '1 uncommitted file(s)' });
+    });
+
+    it('an untracked file whose name git would quote is counted', async () => {
+      write('my notes é.md');
+      expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: true, scaffoldOnly: false, details: '1 uncommitted file(s)' });
+    });
+
+    it('a staged rename counts once', async () => {
+      noScaffold();
+      git('mv', 'src/tracked.ts', 'src/moved.ts');
+      expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: true, scaffoldOnly: false, details: '1 uncommitted file(s)' });
+    });
+
+    it('git status failing reports "Unable to check status" as dirty', async () => {
+      const broken = join(base, 'broken');
+      mkdirSync(broken);
+      writeFileSync(join(broken, '.git'), `gitdir: ${join(base, 'no-such-gitdir')}\n`);
+      expect(await hasUncommittedChanges(broken, main)).toEqual({ dirty: true, scaffoldOnly: false, details: 'Unable to check status' });
+    });
+  });
+
   // The same rule `codev check worktree` uses (isSpawnMade): an entry spawn linked in from the
   // main checkout that git does not ignore is scaffold, however spawn had to make it.
   describe('entries spawn linked in from the main checkout', () => {
@@ -176,6 +209,15 @@ describe('Spec 1951 — afx cleanup: hasUncommittedChanges and the scaffold (mai
     it('a changed copy is data: counted', async () => {
       write('shared/data.json', '{"from":"the builder"}\n');
       expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: true, scaffoldOnly: false, details: '1 uncommitted file(s)' });
+    });
+
+    it('at a path git would quote: a hard link and an unchanged copy are not counted', async () => {
+      write('shared/my data é.json', '{"a":1}\n', main);
+      write('shared/copy ü.json', '{"b":2}\n', main);
+      mkdirSync(join(worktree, 'shared'));
+      linkSync(join(main, 'shared/my data é.json'), join(worktree, 'shared/my data é.json'));
+      write('shared/copy ü.json', '{"b":2}\n');
+      expect(await hasUncommittedChanges(worktree, main)).toEqual({ dirty: false, scaffoldOnly: true, details: '' });
     });
 
     it.skipIf(process.platform === 'win32')('a link at that path pointing anywhere else is data: counted', async () => {

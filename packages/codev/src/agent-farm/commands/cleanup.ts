@@ -203,25 +203,22 @@ export async function hasUncommittedChanges(
   try {
     // Check for uncommitted changes (staged and unstaged). Untracked files are listed one by
     // one, so the write guard's `.claude/hooks/` is judged by its file, not as a directory.
-    const result = await run('git status --porcelain --untracked-files=all', { cwd: worktreePath });
+    const entries = parseStatusZ(await gitStatusZ(worktreePath));
 
-    if (result.stdout.trim()) {
+    if (entries.length > 0) {
       // Count changed files, excluding spawn's scaffold (only ever untracked)
-      const allLines = result.stdout.trim().split('\n').filter(Boolean);
-      const nonScaffoldLines = allLines.filter((line) => !(line.startsWith('?? ') && isSpawnScaffold(mainRoot, worktreePath, line.slice(3))));
+      const nonScaffold = entries.filter((e) => !(e.xy === '??' && isSpawnScaffold(mainRoot, worktreePath, e.path)));
 
-      if (nonScaffoldLines.length > 0) {
+      if (nonScaffold.length > 0) {
         return {
           dirty: true,
           scaffoldOnly: false,
-          details: `${nonScaffoldLines.length} uncommitted file(s)`,
+          details: `${nonScaffold.length} uncommitted file(s)`,
         };
       }
 
       // Only scaffold files present
-      if (allLines.length > 0) {
-        return { dirty: false, scaffoldOnly: true, details: '' };
-      }
+      return { dirty: false, scaffoldOnly: true, details: '' };
     }
 
     return { dirty: false, scaffoldOnly: false, details: '' };
@@ -232,8 +229,35 @@ export async function hasUncommittedChanges(
 }
 
 /**
- * Whether an untracked entry is spawn's scaffold. An entry that cannot be read (a path git
- * printed quoted, say) is counted as a real change: the notice errs toward "dirty".
+ * `git status --porcelain -z`: NUL-separated, so git quotes no path, and read whole (the shared
+ * `run()` trims its output, which would drop the first entry's leading status space).
+ */
+function gitStatusZ(worktreePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      ['status', '--porcelain', '-z', '--untracked-files=all'],
+      { cwd: worktreePath, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024, windowsHide: true },
+      (err, out) => (err ? reject(err) : resolve(out)),
+    );
+  });
+}
+
+/** The entries of `status --porcelain -z`, each `XY path`; a rename or copy is followed by its source, which is dropped. */
+function parseStatusZ(output: string): Array<{ xy: string; path: string }> {
+  const tokens = output.split('\0').filter((t) => t !== '');
+  const entries: Array<{ xy: string; path: string }> = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const xy = tokens[i].slice(0, 2);
+    entries.push({ xy, path: tokens[i].slice(3) });
+    if (xy.includes('R') || xy.includes('C')) i++;
+  }
+  return entries;
+}
+
+/**
+ * Whether an untracked entry is spawn's scaffold. An entry that cannot be read is counted as a
+ * real change: the notice errs toward "dirty".
  */
 function isSpawnScaffold(mainRoot: string, worktreePath: string, rel: string): boolean {
   if (isBuilderScaffold(rel)) return true;
