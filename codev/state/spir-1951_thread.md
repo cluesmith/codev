@@ -433,3 +433,7 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   127/127; rebuilt types+sdk (new ./address export), build, both tsc, residue OK.
 - Second full local run on 5d802799f: 449 files passed / 14 skipped, 9885 tests passed / 116 skipped, exit 0,
   342 s, load 11.0 start, 39.0 peak. PR #1964 not yet on main at push time.
+- PR #1964 (porch saves failed check output) landed at 88bc5e9d1: merged origin/main as 80d25fc9a, clean; it
+  touches porch code, the porch skill x4 and the hash file only. Hashes regenerate identically after the merge
+  commit (194 versions); skill/governance/porch tests 161/161; build, tsc OK. No Windows run (no platform code;
+  architect). No full run (architect).
