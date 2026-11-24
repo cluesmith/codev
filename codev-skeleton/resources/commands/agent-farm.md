@@ -128,7 +128,8 @@ codev-cloud    /Users/ana/dev/codev-cloud
 ```
 
 - One block per workspace: its address name and path, then its architects, builders and shells.
-  Workspaces that are not running come last, marked `not running`, with no agents listed.
+  Workspaces that are not running (no open terminal) come last, marked `not running`, with no
+  agents listed; an address that names one is refused as not running.
 - A line that is only an address and `live` or `no live terminal` is ready to paste into
   `afx send`. Mail to an agent with no live terminal is held (`no-live-pty`) until it has one.
 - An agent the caller may not address is still listed, with `reach through <address>` beside

@@ -64,3 +64,19 @@ before the shellpers are re-adopted.
 - Step 5 (verify on a real Tower with many workspaces) needs the fix on the live Tower, which
   means an install plus a Tower restart: the owner's call. A test Tower on a copy of `global.db`
   would reconcile the live shellpers and take over their connections, so I didn't do that.
+
+## PR #1980 and CMAP (2026-11-24)
+
+- codex: REQUEST_CHANGES.
+  - (1) whoami can still disagree with Tower when Tower keeps a `terminal_sessions` row for a
+    shellper it has not re-adopted. This is the residual gap the architect accepted; it is now
+    stated in the PR body.
+  - (2) Commit prefixes: the three it named are porch's own `chore(porch)` commits.
+  - (3) PR headings: kept in PRFT form, as the architect asked.
+- claude: APPROVE, with nits. Fixed in place:
+  - the address book carries `running` structurally, and throws if a running workspace has no
+    slot;
+  - `runningWorkspacePaths()` stops at the first open terminal per workspace;
+  - the name route waits for the startup reconcile;
+  - the afx skill (4 copies) and `agent-farm.md` (2 copies) say that naming a stopped workspace is
+    refused, and the shipped-skill hashes were regenerated.

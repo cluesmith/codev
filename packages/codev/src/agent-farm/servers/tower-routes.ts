@@ -983,6 +983,9 @@ async function handleSetWorkspaceAddressName(
     });
   }
 
+  // Issue #1978: the answer depends on which workspaces are running, which is incomplete
+  // until the startup reconcile settles (see handleSend).
+  await whenStartupReconcileSettled();
   const active = runningWorkspacePaths();
   const registered = getRegisteredWorkspaces();
   if (!registered.some((w) => isSameWorkspace(w.workspacePath, workspacePath))) {

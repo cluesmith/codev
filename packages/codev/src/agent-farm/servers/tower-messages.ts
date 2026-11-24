@@ -195,13 +195,14 @@ function canonicalSender(sender: SenderContext): SenderContext {
  */
 export function runningWorkspacePaths(): string[] {
   const manager = getTerminalManager();
-  const openTerminals: string[] = [];
+  const isOpen = (terminalId: string) => manager.getSession(terminalId)?.status === 'running';
+  const withAnOpenTerminal: string[] = [];
   for (const [workspacePath, entry] of getWorkspaceTerminals()) {
-    for (const terminalId of [...entry.architects.values(), ...entry.builders.values(), ...entry.shells.values()]) {
-      if (manager.getSession(terminalId)?.status === 'running') openTerminals.push(workspacePath);
+    if ([entry.architects, entry.builders, entry.shells].some((terminals) => [...terminals.values()].some(isOpen))) {
+      withAnOpenTerminal.push(workspacePath);
     }
   }
-  return runningWorkspaces(openTerminals);
+  return runningWorkspaces(withAnOpenTerminal);
 }
 
 /** The workspace an address points into, and whether it is the sender's own. */

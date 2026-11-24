@@ -143,13 +143,10 @@ function agentEntry(
 
 /**
  * A workspace Tower knows, in the spelling it runs under when it is running. `entry` is its
- * slot on the terminal map, set exactly when it is running: a stopped workspace can have a
- * slot too (Issue #1978), and its slot is not read.
+ * slot on the terminal map, read only when it is running: a stopped workspace can have a
+ * slot too (Issue #1978).
  */
-interface ListedWorkspace {
-  path: string;
-  entry: WorkspaceTerminals | undefined;
-}
+type ListedWorkspace = { path: string; running: true; entry: WorkspaceTerminals } | { path: string; running: false };
 
 /**
  * Every workspace Tower knows, once each, told apart by key as the naming module tells
@@ -162,17 +159,19 @@ function listedWorkspaces(
   terminals: Map<string, WorkspaceTerminals>,
 ): ListedWorkspace[] {
   const byKey = new Map<string, ListedWorkspace>();
-  for (const path of running) byKey.set(workspaceKey(path), { path, entry: terminals.get(path) });
+  for (const path of running) {
+    const entry = terminals.get(path);
+    // `running` is read off these slots, so a running workspace without one is a bug here.
+    if (entry === undefined) throw new Error(`running workspace ${path} has no slot on the terminal map`);
+    byKey.set(workspaceKey(path), { path, running: true, entry });
+  }
   for (const path of registeredPaths) {
     const key = workspaceKey(path);
-    if (!byKey.has(key)) byKey.set(key, { path, entry: undefined });
+    if (!byKey.has(key)) byKey.set(key, { path, running: false });
   }
   const inPathOrder = (a: ListedWorkspace, b: ListedWorkspace) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   const all = [...byKey.values()];
-  return [
-    ...all.filter((w) => w.entry !== undefined).sort(inPathOrder),
-    ...all.filter((w) => w.entry === undefined).sort(inPathOrder),
-  ];
+  return [...all.filter((w) => w.running).sort(inPathOrder), ...all.filter((w) => !w.running).sort(inPathOrder)];
 }
 
 /**
@@ -188,13 +187,12 @@ export function addressBook(from: SenderContext = {}): AddressBookResponse {
   const workspaces = listedWorkspaces(registered.map((w) => w.workspacePath), running, getWorkspaceTerminals()).map((listed): AddressBookWorkspace => {
     const named = printableAddressName(listed.path, registered, running);
     const isCallersOwn = caller.workspace !== undefined && isSameWorkspace(listed.path, caller.workspace);
-    const agents =
-      listed.entry === undefined
-        ? []
-        : seatsOf(listed.path, listed.entry).map((seat) => agentEntry(seat, listed.path, named.name, isCallersOwn, caller));
+    const agents = listed.running
+      ? seatsOf(listed.path, listed.entry).map((seat) => agentEntry(seat, listed.path, named.name, isCallersOwn, caller))
+      : [];
     const workspace: AddressBookWorkspace = {
       path: listed.path,
-      running: listed.entry !== undefined,
+      running: listed.running,
       addressName: named.name,
       agents,
     };
