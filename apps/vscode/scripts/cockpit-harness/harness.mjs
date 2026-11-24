@@ -1,17 +1,19 @@
 #!/usr/bin/env node
-// Cockpit verification harness: an isolated Tower + an isolated VS Code (serve-web) running the
-// branch's vsix, for rendered verification that never touches the owner's Tower (:4100), agent-farm
-// dir, socket dir or IDE. See README.md.
+// Cockpit verification harness: an isolated Tower + an isolated VS Code (serve-web, or the VS Code
+// Server binary Tower's IDE support runs) with the branch's vsix installed, for rendered
+// verification that never touches the owner's Tower (:4100), agent-farm dir, socket dir or IDE.
+// See README.md.
 //
 //   node harness.mjs build-vsix         build the branch vsix into the harness root
-//   node harness.mjs start              pre-flight, isolated Tower, `empty` fixture, serve-web, tripwire
+//   node harness.mjs start              pre-flight, isolated Tower, `empty` fixture, VS Code, tripwire
 //   node harness.mjs seed <scenario>    seed a fixture scenario, then assert gate 6 on its overview
 //   node harness.mjs check              re-run gates 3-5 and prove the extension runs against the Tower
 //   node harness.mjs stop               kill only the harness's own PIDs; remove the runtime dirs
 //   node harness.mjs selftest           prove every refusal and the tripwire
 //
 // Inputs (environment): COCKPIT_SCRATCH (the session scratchpad), COCKPIT_TOWER_PORT,
-// COCKPIT_WEB_PORT; optional CODEV_AGENT_FARM_DIR / SHELLPER_SOCKET_DIR overrides (still gated).
+// COCKPIT_WEB_PORT; optional CODEV_AGENT_FARM_DIR / SHELLPER_SOCKET_DIR overrides (still gated);
+// COCKPIT_VSCODE=serve-web (default) | ide-server, the latter with COCKPIT_IDE_SERVER_BIN.
 
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -22,7 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   OWNER_TOWER_PORT, REFUSAL_EXIT_CODE, Refusal, gateDbAgreement, gateDirs, gateListener, gateOverview,
-  gatePort, gateVscodeProfile, isWithin, realpathLoose,
+  gatePort, gateVscodeProfile, isWithin,
 } from './preflight.mjs';
 import { descendants, isAlive, killPids, listenerPids, processTable, run, tcpOn, unixSocketHolders } from './procs.mjs';
 import { CODEV_DIST, REPO, SCENARIOS, expectedOverview } from './fixtures.mjs';
@@ -33,8 +35,12 @@ const STUBS = path.join(HERE, 'stubs');
 const VSCODE_APP = path.join(REPO, 'apps/vscode');
 const TOWER_SERVER = path.join(CODEV_DIST, 'agent-farm/servers/tower-server.js');
 const CODE_BIN = process.env.COCKPIT_CODE_BIN || '/usr/local/bin/code';
+/** How the isolated VS Code is served: `serve-web` (default) or `ide-server`. */
+const VSCODE_MODES = ['serve-web', 'ide-server'];
+/** The base path Tower's IDE support serves under; ide-server mode mirrors it. */
+const IDE_BASE_PATH = '/ide';
 const REAL_HOME = os.homedir();
-const PLAYWRIGHT_BROWSERS = path.join(REAL_HOME, 'Library/Caches/ms-playwright');
+const PLAYWRIGHT_BROWSERS = process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(REAL_HOME, 'Library/Caches/ms-playwright');
 /** The vsix's inputs: what has to be unchanged since build-vsix for the install to be "the branch's". */
 const VSIX_INPUTS = ['apps/vscode', ':(exclude)apps/vscode/scripts/cockpit-harness', 'packages', 'pnpm-lock.yaml'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -60,6 +66,7 @@ function layout(scratch) {
     vscodeServer: path.join(vscode, 'server'),
     vscodeUser: path.join(vscode, 'user'),
     vscodeExt: path.join(vscode, 'ext'),
+    vscodeToken: path.join(vscode, 'connection-token'),
     browserProfile: path.join(root, 'browser-profile'),
     state: path.join(root, 'state.json'),
     tripMarker: path.join(root, 'tripwire.tripped'),
@@ -265,18 +272,31 @@ function planRun({ needWeb }) {
   gateDirs({ scratch, agentFarmDir, socketDir, socketLinkTarget: socketLink ? L.run : undefined });
   if (fs.existsSync(L.state)) throw new Error(`a harness is already recorded at ${L.state}; run stop first`);
   if (!fs.existsSync(TOWER_SERVER)) throw new Error(`${TOWER_SERVER} is missing: build packages/codev first`);
+  let vscodeMode = null;
+  let ideServerBin = null;
   if (needWeb) {
     if (!fs.existsSync(L.vsix)) throw new Error(`no vsix at ${L.vsix}: run build-vsix first`);
-    if (!fs.existsSync(CODE_BIN)) throw new Error(`no VS Code CLI at ${CODE_BIN} (set COCKPIT_CODE_BIN)`);
+    vscodeMode = process.env.COCKPIT_VSCODE || 'serve-web';
+    if (!VSCODE_MODES.includes(vscodeMode)) throw new Error(`COCKPIT_VSCODE=${vscodeMode} is not one of ${VSCODE_MODES.join(', ')}`);
+    if (vscodeMode === 'serve-web' && !fs.existsSync(CODE_BIN)) throw new Error(`no VS Code CLI at ${CODE_BIN} (set COCKPIT_CODE_BIN)`);
+    if (vscodeMode === 'ide-server') {
+      ideServerBin = process.env.COCKPIT_IDE_SERVER_BIN;
+      if (!ideServerBin || !fs.existsSync(ideServerBin)) {
+        throw new Error(`COCKPIT_VSCODE=ide-server needs COCKPIT_IDE_SERVER_BIN, the VS Code Server binary Tower's IDE support runs (got '${ideServerBin ?? ''}')`);
+      }
+    }
   }
-  return { L, towerPort, webPort, agentFarmDir, socketDir, socketLink };
+  return { L, towerPort, webPort, agentFarmDir, socketDir, socketLink, vscodeMode, ideServerBin };
 }
 
 // ---------------------------------------------------------------------------------------------
 // Bring-up
 // ---------------------------------------------------------------------------------------------
 
-/** Create the state record and dirs, then the isolated Tower; gates 2 (again), 4 and 3. */
+/**
+ * Create the state record and dirs, enrol this CLI process and start the tripwire, then the
+ * isolated Tower; gates 2 (again), 4 and 3. The tripwire is up before anything the harness launches.
+ */
 async function bringUpTower(runCfg) {
   const { L } = runCfg;
   for (const dir of [L.root, L.af, L.run, L.home, L.fixtures, L.pids, L.logs, L.shots]) fs.mkdirSync(dir, { recursive: true });
@@ -291,6 +311,8 @@ async function bringUpTower(runCfg) {
     fs.symlinkSync(L.run, runCfg.socketLink);
     gateDirs({ scratch: L.scratch, agentFarmDir: runCfg.agentFarmDir, socketDir: runCfg.socketDir });
   }
+  writePid(L, `cli-${process.pid}`, process.pid, []);
+  startTripwire(L, st);
   st.towerPid = launch(L, 'tower', process.execPath, [TOWER_SERVER, '-p', String(runCfg.towerPort)], {
     env: towerEnv(L, runCfg), cwd: L.home, markers: ['tower-server.js', `-p ${runCfg.towerPort}`],
   });
@@ -338,21 +360,39 @@ function writeMachineSettings(L, towerPort) {
   return file;
 }
 
+/**
+ * Start the isolated VS Code. `serve-web` runs `code serve-web`. `ide-server` is the plan's
+ * alternative for when serve-web cannot run: it launches the VS Code Server binary Tower's IDE
+ * support uses, directly (never through any Tower's /api/ide), with the flags ide-server.ts passes
+ * (--host, --port, --server-base-path, --connection-token-file, --extensions-dir) plus the server
+ * and user data dirs, all in the scratchpad. The mode is chosen explicitly; a serve-web failure
+ * fails the start rather than switching modes on its own.
+ */
 async function bringUpVscode(runCfg, st) {
   const { L } = runCfg;
+  st.vscodeMode = runCfg.vscodeMode;
   st.extension = installVsix(L);
   st.settingsPath = writeMachineSettings(L, runCfg.towerPort);
   const env = webEnv(L, runCfg);
   gateVscodeProfile({ settingsPath: st.settingsPath, port: runCfg.towerPort, env, stubsDir: STUBS });
-  fs.mkdirSync(L.vscodeCli, { recursive: true });
-  st.webPid = launch(L, 'serve-web', CODE_BIN, [
-    'serve-web', '--host', '127.0.0.1', '--port', String(runCfg.webPort),
-    '--without-connection-token', '--accept-server-license-terms',
-    '--cli-data-dir', L.vscodeCli, '--server-data-dir', L.vscodeServer,
-    '--user-data-dir', L.vscodeUser, '--extensions-dir', L.vscodeExt,
-  ], { env, cwd: L.home, markers: ['serve-web', `--port ${runCfg.webPort}`] });
+  if (runCfg.vscodeMode === 'serve-web') {
+    fs.mkdirSync(L.vscodeCli, { recursive: true });
+    st.webPid = launch(L, 'vscode', CODE_BIN, [
+      'serve-web', '--host', '127.0.0.1', '--port', String(runCfg.webPort),
+      '--without-connection-token', '--accept-server-license-terms',
+      '--cli-data-dir', L.vscodeCli, '--server-data-dir', L.vscodeServer,
+      '--user-data-dir', L.vscodeUser, '--extensions-dir', L.vscodeExt,
+    ], { env, cwd: L.home, markers: ['serve-web', `--port ${runCfg.webPort}`] });
+  } else {
+    fs.writeFileSync(L.vscodeToken, crypto.randomBytes(24).toString('hex'), { mode: 0o600 });
+    st.webPid = launch(L, 'vscode', runCfg.ideServerBin, [
+      '--host', '127.0.0.1', '--port', String(runCfg.webPort), '--server-base-path', IDE_BASE_PATH,
+      '--connection-token-file', L.vscodeToken, '--extensions-dir', L.vscodeExt,
+      '--server-data-dir', L.vscodeServer, '--user-data-dir', L.vscodeUser, '--accept-server-license-terms',
+    ], { env, cwd: L.home, markers: [`--port ${runCfg.webPort}`, `--connection-token-file ${L.vscodeToken}`] });
+  }
   saveState(L, st);
-  await waitForListener(runCfg.webPort, st.webPid, 300_000, 'serve-web');
+  await waitForListener(runCfg.webPort, st.webPid, 300_000, runCfg.vscodeMode);
   saveState(L, st);
 }
 
@@ -365,7 +405,10 @@ function startTripwire(L, st) {
 }
 
 function runCfgFromState(L, st) {
-  return { L, towerPort: st.towerPort, webPort: st.webPort, agentFarmDir: st.agentFarmDir, socketDir: st.socketDir, socketLink: st.socketLink };
+  return {
+    L, towerPort: st.towerPort, webPort: st.webPort, agentFarmDir: st.agentFarmDir, socketDir: st.socketDir,
+    socketLink: st.socketLink, vscodeMode: st.vscodeMode,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -378,12 +421,10 @@ async function cmdStart() {
   let st;
   try {
     st = await bringUpTower(runCfg);
-    writePid(L, `cli-${process.pid}`, process.pid, []);
     console.log(`isolated Tower ${st.towerVersion} up on :${runCfg.towerPort} (pid ${st.towerPid}), db ${st.globalDb}`);
-    startTripwire(L, st);
     await seedScenario(L, runCfg, st, 'empty');
     await bringUpVscode(runCfg, st);
-    console.log(`serve-web up on :${runCfg.webPort} (pid ${st.webPid}) with ${st.extension.id}@${st.extension.version}`);
+    console.log(`${st.vscodeMode} up on :${runCfg.webPort} (pid ${st.webPid}) with ${st.extension.id}@${st.extension.version}`);
     assertTripwireClean(L, st);
     recordKnownPids(L, st);
     removePid(L, `cli-${process.pid}`);
@@ -396,7 +437,12 @@ async function cmdStart() {
 }
 
 function workbenchUrl(L, st) {
-  return `http://127.0.0.1:${st.webPort}/?folder=${encodeURIComponent(path.join(L.fixtures, 'alpha'))}`;
+  const folder = `folder=${encodeURIComponent(path.join(L.fixtures, 'alpha'))}`;
+  if (st.vscodeMode === 'ide-server') {
+    const token = fs.readFileSync(L.vscodeToken, 'utf-8').trim();
+    return `http://127.0.0.1:${st.webPort}${IDE_BASE_PATH}/?${folder}&tkn=${token}`;
+  }
+  return `http://127.0.0.1:${st.webPort}/?${folder}`;
 }
 
 async function seedScenario(L, runCfg, st, name) {
@@ -471,10 +517,10 @@ async function cmdCheck() {
       gateVscodeProfile({ settingsPath: st.settingsPath, port: st.towerPort, env: webEnv(L, runCfg), stubsDir: STUBS });
       return st.settingsPath;
     });
-    await item('serve-web listener belongs to the harness', () => {
+    await item(`${st.vscodeMode} listener belongs to the harness`, () => {
       const tree = descendants([st.webPid]);
       const listeners = listenerPids(st.webPort);
-      if (!listeners.length || !listeners.every((p) => tree.has(p))) throw new Error(`listeners ${listeners} not in serve-web tree`);
+      if (!listeners.length || !listeners.every((p) => tree.has(p))) throw new Error(`listeners ${listeners} not in the ${st.vscodeMode} tree`);
       return `pid ${listeners.join(', ')}`;
     });
     await item('installed extension is the branch vsix', () => {
@@ -494,7 +540,7 @@ async function cmdCheck() {
         const tree = descendants([st.webPid]);
         const conns = tcpOn(st.towerPort, 'ESTABLISHED').filter((p) => tree.has(p.pid));
         if (conns.length) return `pids ${[...new Set(conns.map((c) => c.pid))].join(', ')}`;
-        if (Date.now() > deadline) throw new Error(`no serve-web process holds a connection to :${st.towerPort}`);
+        if (Date.now() > deadline) throw new Error(`no ${st.vscodeMode} process holds a connection to :${st.towerPort}`);
         await sleep(1000);
       }
     });
@@ -618,7 +664,9 @@ async function selftest() {
   const longSockName = 'socket-dir-with-a-deliberately-long-name-to-exceed-the-unix-socket-path-limit';
   const cases = [
     ['gate 1 refuses COCKPIT_TOWER_PORT=4100', { COCKPIT_TOWER_PORT: '4100' }, 1],
+    ['gate 1 refuses an unset port', { COCKPIT_TOWER_PORT: '' }, 1],
     ['gate 1 refuses a non-numeric port', { COCKPIT_TOWER_PORT: '18x64' }, 1],
+    ['gate 1 refuses the web port equal to the Tower port', { COCKPIT_WEB_PORT: String(towerPort) }, 1],
     ['gate 1 refuses a port that already has a listener', { COCKPIT_TOWER_PORT: String(busy.port) }, 1],
     ['gate 2 refuses CODEV_AGENT_FARM_DIR=~/.agent-farm', { CODEV_AGENT_FARM_DIR: path.join(REAL_HOME, '.agent-farm') }, 2],
     ['gate 2 refuses an agent-farm dir outside the scratchpad', { CODEV_AGENT_FARM_DIR: outsideAf }, 2],
@@ -654,6 +702,8 @@ async function selftest() {
   try {
     const st = await bringUpTower(runCfg);
     record('isolated Tower passes gates 2-4 (positive control)', true, `pid ${st.towerPid}, db ${st.globalDb}`);
+    assertTripwireClean(L, st);
+    record('tripwire is running before the Tower launch and stays clean', true, `pid ${st.tripwirePid}`);
 
     const r = runDriver(L, runCfg, st, ['seed', 'one-builder'], { NODE_ENV: 'test' });
     const testDb = path.join(runCfg.agentFarmDir, 'test.db');

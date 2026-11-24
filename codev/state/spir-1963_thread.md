@@ -220,3 +220,35 @@ Findings that shaped the code:
 - teardown by PID, with the link removed;
 - the tripwire ignores a connection from outside the tree, and fires (exit 3) on one from a harness
   child.
+
+**Acceptance run from the committed tree (541d60aa0).** I rebuilt the vsix, then ran selftest
+(14/14), start, check (10/10), `seed one-builder` (gate 6 shows `builder-spir-101` spawned by
+`main`), check again (10/10), and stop (15 PIDs killed, none left, link removed, no listeners). The
+workbench renders Agents (1) → SPECIFY → #101 fixture-one from the isolated Tower.
+
+Two things the first live checks caught:
+- The trust banner and status item render after the Codev activity-bar item, so trust is now
+  detected by `#status.workspaceTrust` once the Codev status item has appeared.
+- In 1.147 the Workspace Trust editor is a *modal* editor that blocks clicks, so it is closed with
+  Escape.
+
+Separately, the extension activates `alpha` on the isolated Tower by itself when it loads, so
+`main` exists before any seed. That is expected and harmless.
+
+### Phase 1 review, iteration 1 (2026-11-24)
+
+- Checks: `porch done` ran the full suite once (build 17.1s, tests 54.0s), and it passed.
+- Codex asked for changes. The plan's IDE-server alternative to serve-web was missing. I added
+  `COCKPIT_VSCODE=ide-server` with `COCKPIT_IDE_SERVER_BIN`. It launches the VS Code Server
+  binary directly with `ide-server.ts`'s flags, all under the scratchpad. The mode is explicit,
+  never an automatic fallback, per the fail-fast rule. Verified `start`, `check` 10/10 and
+  `stop` (10 PIDs, none left) in that mode.
+- Claude approved, with non-blocking notes, and I took them all:
+  - the tripwire now starts before the Tower launch;
+  - the README now says the tripwire is a detector, not the enforcement;
+  - the README now says seeding is once per `start`;
+  - removed an unused import;
+  - honour `PLAYWRIGHT_BROWSERS_PATH`;
+  - two new gate-1 self-test cases.
+- Re-verified in serve-web mode. Self-test 17/17, `start`, `check` 10/10, `seed one-builder`
+  (gate 6: `builder-spir-101` spawned by `main`), `check` 10/10, `stop` (15 PIDs, none left).
