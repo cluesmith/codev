@@ -90,6 +90,10 @@ export interface PrViewOverride {
   answerOn(n: number, view: Record<string, unknown> | string): void;
   /** A shell snippet run before answering call `n`. */
   runOn(n: number, snippet: string): void;
+  /** The answer for PR `number` (`CODEV_PR_NUMBER`), ahead of the per-call answers. */
+  answerFor(number: number, view: Record<string, unknown> | string): void;
+  /** Make the call for PR `number` fail with exit 1, printing `stderr`. */
+  failFor(number: number, stderr: string): void;
   calls(): number;
 }
 
@@ -111,7 +115,9 @@ export function prViewOverride(fx: Fixture): PrViewOverride {
       'n=$((n + 1))',
       'echo "$n" > "$dir/count"',
       '[ -f "$dir/run.$n.sh" ] && . "$dir/run.$n.sh"',
-      'if [ -f "$dir/answer.$n.json" ]; then cat "$dir/answer.$n.json"; else cat "$dir/answer.json"; fi',
+      'if [ -f "$dir/fail.$CODEV_PR_NUMBER" ]; then cat "$dir/fail.$CODEV_PR_NUMBER" >&2; exit 1; fi',
+      'if [ -f "$dir/pr.$CODEV_PR_NUMBER.json" ]; then cat "$dir/pr.$CODEV_PR_NUMBER.json"',
+      'elif [ -f "$dir/answer.$n.json" ]; then cat "$dir/answer.$n.json"; else cat "$dir/answer.json"; fi',
       '',
     ].join('\n'),
     { mode: 0o755 },
@@ -122,6 +128,8 @@ export function prViewOverride(fx: Fixture): PrViewOverride {
     answer: (view) => fs.writeFileSync(path.join(dir, 'answer.json'), text(view)),
     answerOn: (n, view) => fs.writeFileSync(path.join(dir, `answer.${n}.json`), text(view)),
     runOn: (n, snippet) => fs.writeFileSync(path.join(dir, `run.${n}.sh`), `${snippet}\n`),
+    answerFor: (number, view) => fs.writeFileSync(path.join(dir, `pr.${number}.json`), text(view)),
+    failFor: (number, stderr) => fs.writeFileSync(path.join(dir, `fail.${number}`), `${stderr}\n`),
     calls: () => {
       const file = path.join(dir, 'count');
       return fs.existsSync(file) ? Number(fs.readFileSync(file, 'utf-8').trim()) : 0;

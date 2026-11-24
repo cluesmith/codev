@@ -14,6 +14,7 @@
  */
 
 import { Command, CommanderError } from 'commander';
+import { checkDeploy, renderDeployHuman } from './deploy.js';
 import { checkPr, renderPrHuman } from './pr.js';
 import { renderErrorHuman, renderJson } from './render.js';
 import type { CommandName, CommandResult, ErrorReport, Report } from './report.js';
@@ -106,7 +107,7 @@ export function buildCheckCommand(deps: CheckCliDeps = PROCESS_DEPS): Command {
   };
 
   const group = new Command('check')
-    .description('Read-only checks: merge readiness of a PR (never merges, pushes, comments or deletes)')
+    .description('Read-only checks: merge readiness of a PR, and whether merged PRs reached the deploy branch (never merges, pushes, comments or deletes)')
     .configureOutput({ writeOut: (s) => track(deps.stdout(s)), writeErr: (s) => track(deps.stderr(s)) });
   group.exitOverride(onCommanderExit(null));
 
@@ -120,6 +121,16 @@ export function buildCheckCommand(deps: CheckCliDeps = PROCESS_DEPS): Command {
       await finish(result, options.json === true, renderPrHuman);
     });
   pr.exitOverride(onCommanderExit('pr'));
+
+  const deploy = group
+    .command('deploy <numbers...>')
+    .description('Whether each merged PR reached the deploy branch (check.deploy.branch, else its base) and, with check.deploy.workflow, the latest green deploy run; without one, CI on the merge commit')
+    .option('--json', 'print one JSON object (schema 1) instead of the summary')
+    .action(async (numbers: string[], options: { json?: boolean }) => {
+      const result = await checkDeploy(numbers, { cwd: deps.cwd(), env: deps.env, timeoutMs: deps.timeoutMs });
+      await finish(result, options.json === true, renderDeployHuman);
+    });
+  deploy.exitOverride(onCommanderExit('deploy'));
 
   return group;
 }

@@ -98,7 +98,7 @@ describe('Spec 1951 — audited imports in commands/check/', () => {
   it('audits every source file in the directory', () => {
     expect(sources).toEqual(
       expect.arrayContaining([
-        'allow-list.ts', 'git-facts.ts', 'index.ts', 'linked-issue.ts', 'porch-only.ts', 'pr.ts', 'render.ts', 'report.ts', 'roots.ts',
+        'allow-list.ts', 'deploy.ts', 'git-facts.ts', 'index.ts', 'linked-issue.ts', 'porch-only.ts', 'pr.ts', 'render.ts', 'report.ts', 'roots.ts',
         'runner.ts', 'settings.ts', 'validate.ts',
       ]),
     );
