@@ -125,6 +125,11 @@ Agents view: same rows, same ids, same behaviour.
   - changed-file children and their parent reconstruction;
   - `findFileItem`, `revealTargetForAgent` and `agentCycleOrder`.
 
+  Architect rows in `act` mode carry the Agents view's `group-builder` contextValue when the scope
+  is `''`, so the Agents view is unchanged. A scoped (Cockpit) builder gives them
+  `cockpit-architect-main` or `cockpit-architect-sibling`, so a menu entry can tell `main` from a
+  sibling.
+
   In `navigate` mode:
   - builder rows are leaves (no changed files);
   - architect rows still expand to their builders;
@@ -135,6 +140,12 @@ Agents view: same rows, same ids, same behaviour.
   `ArchitectTreeBuilder` (scope `''`, mode `act`). Stage/area rendering and the lone-Uncategorized
   flatten stay where they are. They already use the same `makeGroupRow`/`makeBuilderRow`, now
   reached through the builder.
+  - `builders.ts` keeps exporting every symbol that moves: `partitionArchitectGroups`,
+    `agentTargetIsFocused`, `agentCycleAttemptOrder`, `AgentTarget`, `AccordionRowIds`,
+    `AccordionGate`, `findParentNode`, `runBuilderRowClick` and `orderForDisplay`, re-exported from
+    their new home where they move.
+  - So existing tests importing from `../views/builders.js` (for example
+    `agent-cycle-order.test.ts`) need no edit.
 - `apps/vscode/src/views/builder-tree-item.ts` and the group, idle-container, folder and file
   item classes:
   - each takes an optional `scope` that prefixes its id;
@@ -339,7 +350,8 @@ verification and docs.
 - `view/item/context` entries for `view == codev.cockpit`:
   - builder rows of this window's workspace: the same commands, groups and `viewItem` patterns as
     the 12 Agents `view/item/context` entries;
-  - architect rows: *Remove Architect* on siblings;
+  - architect rows: *Remove Architect* on `viewItem == cockpit-architect-sibling` only, never on
+    `cockpit-architect-main`;
   - workspace rows:
     - *Open* / *Deactivate* inline, as in Tower;
     - on the current row, inline *Spawn Builder*, *New Shell* and *Add Architect*;
@@ -354,7 +366,22 @@ verification and docs.
   shared `buildDashboardUrl`, extracted from `WorkspaceProvider`.
 
 **Context values on the current workspace row** encode what the Workspace view decides for this
-window:
+window. The data behind them follows the Workspace view's own sources:
+
+- **Worktree config.** It is async: `loadWorktreeConfig` awaits `client.getWorktreeConfig(...)`.
+  The Cockpit resolves it in its async `getChildren` for the Tower root, as `WorkspaceProvider`
+  does in its `getChildren`, and does not cache it across renders.
+- **Re-render signals.** The Cockpit re-renders on the same signals `WorkspaceProvider` subscribes
+  to:
+  - `terminalManager.onDidChangeDevTerminals`, so *Start Dev* / *Stop Dev* stays honest across
+    every start, stop and cleanup path;
+  - the `codev-config-updated` SSE envelope, for `devUrls` and dev-command edits;
+  - the `architects-updated` SSE envelope, for add and remove from the CLI.
+
+  These are in addition to the three Phase 3 signals. They need no new connection: the envelopes
+  come from `connectionManager.onSSEEvent`.
+
+The values themselves:
 
 - `cockpit-workspace-current` plus a dev-slot suffix: `-dev-start`, `-dev-stop` or
   `-dev-stop-other`. It is computed by a function extracted from `WorkspaceProvider`'s dev-row
@@ -414,6 +441,7 @@ is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect
   - a mapped Cockpit entry is missing from `package.json`;
   - a `cockpit-remote-*` or `cockpit-workspace-parent` value matches a builder or architect
     entry's `viewItem`;
+  - *Remove Architect*'s `when` matches `cockpit-architect-main`;
   - an existing source entry differs from its snapshot.
 - [ ] From the Cockpit, in the harness, these work on this window's workspace:
   - every builder context action;
@@ -421,6 +449,15 @@ is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect
   - every workspace-row action;
   - Remove Architect.
 - [ ] Another workspace's architect or builder row opens that workspace's window.
+- [ ] **Request count** (spec scenario 21). The isolated Tower's request log is compared for two
+      cases:
+      - the Cockpit alone visible;
+      - the Workspace, Agents and Tower views alone visible.
+
+      They match: the overview, the fleet fan-out, and one `getWorktreeConfig` per workspace-row
+      render, the same call the Workspace view makes per render. With both sets visible at once, the
+      only addition is that second view's own `getWorktreeConfig`. No poll, SSE stream or route is
+      added.
 - [ ] **Rendered** (see the harness below), with screenshots:
   - the button under Codev;
   - the hierarchy with N=0, N=1 and N>1 builders and two or more workspaces;
@@ -432,8 +469,15 @@ is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect
 
 #### Test Plan
 
-- Unit: the parity test, the dev-slot function (shared cases with `workspace.test.ts`), and
-  context values on the current, parent and remote workspace rows.
+- Unit:
+  - the parity test;
+  - the dev-slot function (shared cases with `workspace.test.ts`);
+  - context values on the current, parent and remote workspace rows;
+  - main versus sibling architect context values;
+  - the Cockpit re-renders on a dev-terminal change and on `codev-config-updated` and
+    `architects-updated` envelopes;
+  - *Stop Dev* replaces *Start Dev* after a dev starts from a builder's menu;
+  - `removeArchitect` given a Cockpit sibling row removes that architect by `groupName`.
 - Rendered: spec scenarios 11, 12 (hierarchy part) and 19 (worktree and no-workspace windows;
   Cockpit-only freshness).
 
@@ -461,7 +505,12 @@ npm-published):**
   `builder-helpers` only), `@cluesmith/codev-artifact-canvas`, and React as a peer dependency.
 - **`src/host.ts`:** the `WorkspaceViewsHost` adapter. Its members are optional unless stated:
   - `overview` (required): a subscribe/refresh source;
-  - `decisions`: `read()`, `rule(req)`, `image(path)`;
+  - `decisions`: `read()`, `rule(req)`, `image(path, signal?)`.
+    - `DecisionsView` keeps its per-image `AbortController`. The dashboard adapter passes the
+      signal to `fetch`, as today.
+    - The VS Code adapter tags each image request with an id. On abort it ignores the reply for
+      that id; the host's fetch may still finish and is discarded. A test covers an aborted image
+      whose reply arrives late;
   - `openBuilder(id)`;
   - `newShell()`;
   - `refresh()`;
@@ -574,7 +623,12 @@ stay green.
   - an `http:`/`https:` allowlist for external opens.
 - `panel-template.ts`: the nonce CSP.
   - `script-src 'nonce-…'`;
-  - `style-src ${cspSource}`;
+  - `style-src ${cspSource} 'unsafe-inline'`, the same as the existing webviews
+    (`contextual-panel/panel-template.ts`, `markdown-preview/preview-template.ts`).
+    - The shared components set React `style` attributes. For example, `BuilderCard`'s progress
+      bar uses `style={{ width: … }}`. A `style-src` without `'unsafe-inline'` would silently drop
+      those.
+    - Scripts stay nonce-only. Inline *styles* do not run code;
   - `img-src ${cspSource} blob: http: https:`;
   - no `connect-src`;
   - `localResourceRoots` set to `dist`.
@@ -719,7 +773,9 @@ every kept affordance mapped to a VS Code action and every dropped one absent.
   - no dropped affordance renders.
 - [ ] Periodic refresh runs with only the Work panel visible.
 - [ ] **Rendered:**
-  - spec scenarios 17 (Work actions), 18 (light, dark and high-contrast themes, and a live switch)
+  - spec scenarios 17 (Work actions, including a builder's progress bar rendering at its width
+    under the real webview CSP; jsdom does not enforce CSP), 18 (light, dark and high-contrast
+    themes, and a live switch)
     and 19 (the Tower-unreachable part, simulated by stopping the *harness's* Tower);
   - screenshots.
 - [ ] Type-check, lint and all unit suites pass.
@@ -841,20 +897,30 @@ checkpoint runs, and then stops, this harness:
   - Each fixture's `.codev/config.json` sets `shell.architect` and `shell.builder` to a plain
     shell. So activating a workspace, or adding an architect, starts a shell session, never an AI
     agent.
-  - **Builders need a live terminal.** `/api/overview` lists a discovered `.builders/` worktree
-    only when Tower's terminal registry holds a live builder session for its role id
-    (`activeBuilderRoleIds`). Directories alone render zero builders. So each fixture builder is:
-    - a real `git worktree add` under `.builders/<id>/`, with its porch `status.yaml` for
-      phase/gate;
-    - a builder terminal registered through Tower's existing `POST /api/terminals`, with
-      `type: 'builder'`, `roleId: 'builder-<id>'`, the fixture's `workspacePath`, `cwd` set to the
-      worktree, and a harmless long-running shell command;
-    - this gives the N=0 / N=1 / N>1 states, a blocked gate, a waiting builder, and
-      `spawnedByArchitect` values including a null one.
+  - **What makes a builder appear.** `/api/overview` lists a `.builders/` worktree only when:
+    - Tower's terminal registry holds a live builder session for its role id
+      (`activeBuilderRoleIds`). Directories alone render zero builders;
+    - its `spawnedByArchitect` is read from the isolated `global.db` `builders` row
+      (`spawned_by_architect`). `discoverBuilders` itself always emits `null`, so a builder with no
+      row folds into `main`.
+  - **So fixture builders are spawned for real by the branch's CLI** (`afx spawn --task "…"`, which
+    needs no GitHub issue):
+    - it runs with `cwd` in a fixture repo, against the isolated Tower;
+    - it sets `CODEV_ARCHITECT_NAME=<architect>` per spawn, the variable Tower injects into
+      architect terminals and `spawn.ts` records as `spawned_by_architect`;
+    - with the fixture's `shell.builder` set to a plain shell, this creates the worktree, the
+      `builders` row with its attribution, and a live builder terminal, and never starts an agent;
+    - this gives N=0, N=1 and N>1 builders under `main` and under a second architect, across two
+      workspaces;
+    - blocked-gate and waiting states come from the fixture builders' porch state, which is
+      synthetic test data in scratch repos, never a real project's;
+    - the null-attribution fold, which no spawn can produce, is covered by unit tests rather than
+      screenshots.
   - **Validated before any screenshot.** The first checkpoint asserts that the isolated Tower's
-    `/api/overview` for each fixture returns the expected builders and architects. If the registry
-    path does not produce them, verification stops and the architect is told; it does not fall back
-    to faked data.
+    `/api/overview` for each fixture returns the expected builders, **with their expected
+    `spawnedByArchitect` values**, and the expected architects.
+    - If spawning does not produce them, verification stops and the architect is told.
+    - It does not fall back to faked data, nor to hand-written database rows.
   - **Driving the harness.** It goes through Tower's HTTP API (activation, terminals,
     add-architect), using the isolated key. Where the CLI is needed (a second architect, or creating
     the decisions file as `afx decisions init` does), the branch's built CLI runs with `cwd` in a
