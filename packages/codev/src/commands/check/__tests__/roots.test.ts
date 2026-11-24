@@ -8,7 +8,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CheckCommandError } from '../report.js';
-import { parseWorktreeList, resolveRoots } from '../roots.js';
+import { parseWorktreeList, requireOrigin, resolveRoots } from '../roots.js';
 import { createRunner } from '../runner.js';
 import { loadCheckSettings } from '../settings.js';
 import { createFixture, type Fixture } from './helpers/git-fixture.js';
@@ -63,9 +63,12 @@ describe('Spec 1951 — roots', () => {
     }
   });
 
-  it('without an origin remote, fails', async () => {
+  it('without an origin remote, requireOrigin fails; finding the roots does not ask', async () => {
     fx.git(fx.main, 'remote', 'remove', 'origin');
-    await expect(rootsFrom(fx.main)).rejects.toThrow('this repository has no "origin" remote');
+    await expect(rootsFrom(fx.main)).resolves.toMatchObject({ mainRoot: fx.main });
+    await expect(requireOrigin(createRunner({ cwd: fx.main, workspaceRoot: fx.main, env: fx.env }))).rejects.toThrow(
+      'this repository has no "origin" remote',
+    );
   });
 });
 
@@ -84,5 +87,15 @@ describe('Spec 1951 — parseWorktreeList', () => {
       { path: 'x', head: 'b'.repeat(40), branch: null, bare: false },
       { path: 'bare.git', head: null, branch: null, bare: true },
     ]);
+  });
+
+  it('keeps a path that ends in a space (claude, pr review note 3)', () => {
+    const entries = parseWorktreeList(['worktree /repo/trail ', 'HEAD ' + 'a'.repeat(40), 'branch refs/heads/t', ''].join('\n'));
+    expect(entries.map((e) => e.path)).toEqual([path.resolve('/repo/trail ')]);
+  });
+
+  it('reads CRLF output like LF', () => {
+    const entries = parseWorktreeList(['worktree /repo', 'HEAD ' + 'a'.repeat(40), 'branch refs/heads/main', '', ''].join('\r\n'));
+    expect(entries).toEqual([{ path: path.resolve('/repo'), head: 'a'.repeat(40), branch: 'main', bare: false }]);
   });
 });

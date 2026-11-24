@@ -19,7 +19,7 @@ import type { Check, CommandOptions, ErrorReport, Status, WorktreeReport } from 
 import type { SpawnFn } from '../runner.js';
 import { checkWorktree, parseStatus, pickPr, removability, renderWorktreeHuman } from '../worktree.js';
 import { useFakeHome } from './helpers/fake-home.js';
-import { createFixture, linkedSpelling, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
+import { createFixture, DISCOVERY_ARGV, linkedSpelling, recordingSpawn, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
 import { prViewOverride, writeConfig, type PrViewOverride } from './helpers/pr-fixture.js';
 import { expectWorktreeReportShape } from './helpers/report-shape.js';
 import {
@@ -778,10 +778,12 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
       expect(spawn).not.toHaveBeenCalled();
     });
 
-    it('an invalid cleanup.keepIgnored names the key and the file', async () => {
+    it('an invalid cleanup.keepIgnored names the key and the file; only the two discovery calls ran', async () => {
       const file = configure({ cleanup: { keepIgnored: 'tmp/**' } });
       addBuilder(fx, 'spir-8');
-      expect(await failure('spir-8')).toBe(`cleanup.keepIgnored must be an array of non-empty glob strings (in ${file})`);
+      const recorder = recordingSpawn();
+      expect(await failure('spir-8', { spawn: recorder.spawn })).toBe(`cleanup.keepIgnored must be an array of non-empty glob strings (in ${file})`);
+      expect(recorder.calls).toEqual(DISCOVERY_ARGV);
     });
   });
 });

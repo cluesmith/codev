@@ -156,6 +156,19 @@ describe('Spec 1951 — state and forge from pr-view', () => {
     expect(checkForge(pr({ mergeable: 'CONFLICTING' }), pr())).toMatchObject({ status: 'attention', summary: 'CONFLICTING, CLEAN' });
   });
 
+  it("a re-read answer for a head that moved says which head it is about (claude, pr review note 1)", () => {
+    const next = 'b'.repeat(40);
+    expect(checkForge(pr({ mergeable: 'UNKNOWN' }), pr({ headRefOid: next }))).toMatchObject({
+      status: 'ok',
+      summary: 'MERGEABLE, CLEAN (for the new head bbbbbbb)',
+    });
+    expect(checkForge(pr({ mergeable: 'UNKNOWN' }), pr({ headRefOid: next, mergeable: 'UNKNOWN' }))).toMatchObject({
+      summary: 'forge has not computed mergeability yet; re-run shortly (for the new head bbbbbbb)',
+    });
+    // The first answer stands for the first head, whatever the re-read says.
+    expect(checkForge(pr(), pr({ headRefOid: next }))).toMatchObject({ summary: 'MERGEABLE, CLEAN' });
+  });
+
   it('a missing or off-contract mergeable is not run, naming the concept', () => {
     expect(checkForge(pr({ mergeable: undefined }), null)).toMatchObject({ status: 'not-run', reason: 'pr-view did not return mergeable' });
     expect(checkForge(pr({ mergeable: 'YES' }), null)).toMatchObject({

@@ -54,7 +54,7 @@ import {
   type Removable,
   type WorktreeReport,
 } from './report.js';
-import { listWorktrees, resolveRoots, type Roots } from './roots.js';
+import { listWorktrees, requireOrigin, resolveRoots, type Roots } from './roots.js';
 import { createRunner, type GitResult, type Runner } from './runner.js';
 import { loadCheckSettings, loadKeepIgnored } from './settings.js';
 import { hasControlChars, InputError, isFullSha, isRefName, validateBuilderId } from './validate.js';
@@ -489,10 +489,11 @@ async function buildWorktreeReport(argument: TargetArgument, options: CommandOpt
   const roots = await resolveRoots(createRunner({ cwd: options.cwd, workspaceRoot: options.cwd, ...runnerOptions }));
   const runner = createRunner({ cwd: roots.mainRoot, workspaceRoot: roots.mainRoot, ...runnerOptions });
   const settings = loadCheckSettings(roots.mainRoot);
-  const target = await resolveTarget(runner, roots, argument);
   const skip = (id: string): boolean => settings.skip.has(id);
   // A skipped check reads nothing of its own, its configuration included.
   const patterns = skip('ignored') ? [] : loadKeepIgnored(roots.mainRoot);
+  await requireOrigin(runner);
+  const target = await resolveTarget(runner, roots, argument);
 
   // The PR decides the base; without one (or with `pr` skipped), origin's default branch does.
   const pr = skip('pr') ? null : await lookupPr(runner, target.branch);

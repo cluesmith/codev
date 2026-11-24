@@ -16,7 +16,7 @@ import { checkPr } from '../pr.js';
 import type { Check, CommandOptions, ErrorReport, PrReport } from '../report.js';
 import type { SpawnFn } from '../runner.js';
 import { useFakeHome } from './helpers/fake-home.js';
-import { createFixture, linkedSpelling, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
+import { createFixture, DISCOVERY_ARGV, linkedSpelling, recordingSpawn, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
 import {
   commitChecksOverride,
   otherClone,
@@ -213,6 +213,74 @@ describe('Spec 1951 — check pr on real repositories', { timeout: 30_000 }, () 
     ]);
   });
 
+  describe('the end-of-run pr-view: a change to what the checks read needs attention (codex, pr review)', () => {
+    it('a PR closed during the run', async () => {
+      const { head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'a' }]);
+      forge.answer(prView(head));
+      forge.answerOn(2, prView(head, { state: 'CLOSED' }));
+      configure();
+
+      const report = await runReport();
+
+      expect(report.verdict).toBe('attention');
+      const state = byId(report, 'state');
+      expect(state).toMatchObject({ status: 'attention', details: { stateNow: 'CLOSED', draftNow: false } });
+      expect(state.summary.split('\n')).toEqual(['OPEN, ready for review', 'state changed during check (OPEN → CLOSED); re-run']);
+    });
+
+    it('a PR merged during the run', async () => {
+      const { head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'a' }]);
+      forge.answer(prView(head));
+      forge.answerOn(2, prView(head, { state: 'MERGED', mergedAt: '2026-11-24T20:00:00Z' }));
+      configure();
+
+      const state = byId(await runReport(), 'state');
+      expect(state.status).toBe('attention');
+      expect(state.summary).toContain('state changed during check (OPEN → MERGED); re-run');
+    });
+
+    it('a PR marked draft during the run, even with `state` skipped', async () => {
+      const { head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'a' }]);
+      forge.answer(prView(head));
+      forge.answerOn(2, prView(head, { isDraft: true }));
+      configure({ skip: ['state'] });
+
+      const report = await runReport();
+
+      expect(report.verdict).toBe('attention');
+      expect(byId(report, 'state')).toMatchObject({
+        status: 'attention',
+        summary: 'state changed during check (OPEN → OPEN (draft)); re-run',
+        details: { stateNow: 'OPEN', draftNow: true },
+      });
+    });
+
+    it('a PR retargeted to another base branch during the run', async () => {
+      const { head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'a' }]);
+      forge.answer(prView(head));
+      forge.answerOn(2, prView(head, { baseRefName: 'release' }));
+      configure();
+
+      const report = await runReport();
+
+      expect(report.verdict).toBe('attention');
+      const merge = byId(report, 'trial-merge');
+      expect(merge).toMatchObject({ status: 'attention', details: { baseRefNow: 'release' } });
+      expect(merge.summary.split('\n')).toContain('base branch changed during check (main → release); re-run');
+    });
+
+    it('nothing changed: CLEAR', async () => {
+      const { head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'a' }]);
+      forge.answer(prView(head));
+      configure();
+
+      const report = await runReport();
+
+      expect(forge.calls()).toBe(2);
+      expect(report.verdict).toBe('clear');
+    });
+  });
+
   it('a head that cannot be re-read at the end is not reported as confirmed', async () => {
     const { head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'a' }]);
     forge.answer(prView(head));
@@ -291,6 +359,19 @@ describe('Spec 1951 — check pr on real repositories', { timeout: 30_000 }, () 
       expect((result.report as ErrorReport).error.message, bad).toMatch(/^invalid PR number/);
     }
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('Scenario 26: an unparseable check.attribution regex is exit 2 naming the key and the file; only the two discovery calls ran', async () => {
+    const file = configure({ attribution: ['co-authored-by: (claude'] });
+    const recorder = recordingSpawn();
+
+    const result = await run({ spawn: recorder.spawn });
+
+    expect(result.exitCode).toBe(2);
+    expect((result.report as ErrorReport).error.message).toContain('check.attribution pattern "co-authored-by: (claude" is not a valid regex');
+    expect((result.report as ErrorReport).error.message).toContain(`(in ${file})`);
+    expect(recorder.calls).toEqual(DISCOVERY_ARGV);
+    expect(forge.calls()).toBe(0);
   });
 
   it('outside a git repository is exit 2', async () => {

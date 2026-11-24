@@ -16,7 +16,7 @@ import type { Check, CommandOptions, DeployReport, ErrorReport } from '../report
 import type { SpawnFn } from '../runner.js';
 import { green, mergedView, mergePr, setRemoteBranch, workflowRunsOverride, type MergedPr, type WorkflowRunsOverride } from './helpers/deploy-fixture.js';
 import { useFakeHome } from './helpers/fake-home.js';
-import { createFixture, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
+import { createFixture, DISCOVERY_ARGV, recordingSpawn, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
 import {
   commitChecksOverride,
   passing,
@@ -182,15 +182,17 @@ describe('Spec 1951 — check deploy on real repositories', { timeout: 30_000 },
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('Scenario 28a: check.deploy.workflow "--repo=x" is exit 2 naming the value and the file, before any forge call', async () => {
+  it('Scenario 28a: check.deploy.workflow "--repo=x" is exit 2 naming the value and the file; only the two discovery calls ran', async () => {
     const file = configure({ deploy: { workflow: '--repo=x' } });
+    const recorder = recordingSpawn();
 
-    const result = await checkDeploy(['8'], { cwd: fx.main, env: fx.env });
+    const result = await checkDeploy(['8'], { cwd: fx.main, env: fx.env, spawn: recorder.spawn });
 
     expect(result).toEqual({
       exitCode: 2,
       report: { schema: 1, command: 'deploy', error: { message: `check.deploy.workflow "--repo=x" may not begin with '-' (in ${file})` } },
     });
+    expect(recorder.calls).toEqual(DISCOVERY_ARGV);
     expect(forge.calls()).toBe(0);
   });
 

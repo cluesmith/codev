@@ -27,11 +27,15 @@ export interface WorktreeEntry {
   bare: boolean;
 }
 
-/** Parse `git worktree list --porcelain`. Paths are resolved to the platform's form. */
+/**
+ * Parse `git worktree list --porcelain`. Paths are resolved to the platform's form. A path is
+ * taken verbatim, so one ending in a space survives; `-z` would also carry a newline in a path,
+ * but it needs git 2.36, and the commands run on older git (only the trial merge needs 2.38).
+ */
 export function parseWorktreeList(output: string): WorktreeEntry[] {
   const entries: WorktreeEntry[] = [];
-  for (const block of output.split(/\n\s*\n/)) {
-    const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+  for (const block of output.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
+    const lines = block.split('\n').filter((l) => l !== '');
     const pathLine = lines.find((l) => l.startsWith('worktree '));
     if (!pathLine) continue;
     const headLine = lines.find((l) => l.startsWith('HEAD '));
@@ -52,7 +56,12 @@ export async function listWorktrees(runner: Runner): Promise<WorktreeEntry[]> {
   return parseWorktreeList(result.stdout);
 }
 
-/** Find both roots, and require an `origin` remote. Fails with exit 2 otherwise. */
+/**
+ * Find both roots: the only two git calls a command makes before its configuration is
+ * validated, since the configuration is read from the main checkout and only git can name it
+ * from a linked worktree. Neither takes a configuration value. Fails with exit 2 outside a
+ * checkout.
+ */
 export async function resolveRoots(runner: Runner): Promise<Roots> {
   const top = await runner.git(['rev-parse', '--show-toplevel']);
   if (top.exitCode !== 0) throw new CheckCommandError('not in a git repository', top.stderr.trim());
@@ -61,10 +70,13 @@ export async function resolveRoots(runner: Runner): Promise<Roots> {
   const [main] = await listWorktrees(runner);
   if (!main) throw new CheckCommandError('git worktree list returned no worktrees');
   if (main.bare) throw new CheckCommandError(`the main worktree ${main.path} is a bare repository; run codev check from a checkout`);
+  return { checkoutRoot, mainRoot: main.path };
+}
 
+/** Require an `origin` remote (exit 2 otherwise). Called after the configuration is validated. */
+export async function requireOrigin(runner: Runner): Promise<void> {
   const origin = await runner.git(['config', '--get', 'remote.origin.url']);
   if (origin.exitCode !== 0 || origin.stdout.trim() === '') {
     throw new CheckCommandError('this repository has no "origin" remote; codev check reads base and head from origin');
   }
-  return { checkoutRoot, mainRoot: main.path };
 }

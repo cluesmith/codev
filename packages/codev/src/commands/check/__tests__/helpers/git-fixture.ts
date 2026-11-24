@@ -8,10 +8,11 @@
  * machine cannot change the outcome.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn as realSpawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { SpawnFn } from '../../runner.js';
 
 const EXE = process.platform === 'win32' ? '.exe' : '';
 
@@ -149,4 +150,23 @@ export function snapshotRepoState(fixture: Fixture, repo: string): RepoState {
     fetchHead: { worktree: read(path.join(gitDir, 'FETCH_HEAD')), common: read(path.join(commonDir, 'FETCH_HEAD')) },
     status: fixture.git(repo, '--no-optional-locks', 'status', '--porcelain=v1'),
   };
+}
+
+/**
+ * The only subprocesses a command may start before its configuration is validated: finding the
+ * checkout and the main checkout, where the configuration lives. Neither takes a config value.
+ */
+export const DISCOVERY_ARGV: readonly string[][] = [
+  ['git', 'rev-parse', '--show-toplevel'],
+  ['git', 'worktree', 'list', '--porcelain'],
+];
+
+/** A spawn that runs the real command and records `[command, ...args]` for each call. */
+export function recordingSpawn(): { spawn: SpawnFn; calls: string[][] } {
+  const calls: string[][] = [];
+  const spawn: SpawnFn = (command, args, options) => {
+    calls.push([command, ...args]);
+    return realSpawn(command, args, options);
+  };
+  return { spawn, calls };
 }

@@ -38,7 +38,7 @@ import {
   type CommitRuns,
   type DeployReport,
 } from './report.js';
-import { resolveRoots } from './roots.js';
+import { requireOrigin, resolveRoots } from './roots.js';
 import { createRunner, type Runner } from './runner.js';
 import { loadCheckSettings, type CheckSettings } from './settings.js';
 import { InputError, isFullSha, isRefName, validatePrNumber } from './validate.js';
@@ -306,6 +306,7 @@ async function buildDeployReport(numbers: readonly number[], options: CommandOpt
   const roots = await resolveRoots(createRunner({ cwd: options.cwd, workspaceRoot: options.cwd, ...runnerOptions }));
   const runner = createRunner({ cwd: roots.mainRoot, workspaceRoot: roots.mainRoot, ...runnerOptions });
   const settings = loadCheckSettings(roots.mainRoot);
+  await requireOrigin(runner);
   const ctx: Context = { runner, settings, version: await gitVersion(runner), tips: new Map(), runs: new Map() };
 
   const prs: DeployPr[] = [];

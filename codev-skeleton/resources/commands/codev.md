@@ -460,7 +460,7 @@ replace, never concatenate). A bad value is exit 2, naming the key and the file 
 
 | Key | Meaning | Default |
 |---|---|---|
-| `check.attribution` | Regexes (JavaScript syntax, case-insensitive, matched per line) for forbidden attribution lines in the PR description and in every commit message not already on the base | `[]`: `off` |
+| `check.attribution` | Regexes (JavaScript syntax, case-insensitive, matched per line) for forbidden attribution lines in the PR description and in every commit message not already on the base. They are trusted configuration and run without a time limit, so keep them simple: a pattern that backtracks badly on a long line can hang the command | `[]`: `off` |
 | `check.watch` | Globs of files whose movement is always listed | `CLAUDE.md`, `AGENTS.md`, `.codev/**`, `.claude/**`, `codev/roles/**`, `codev/protocols/**`, `codev/templates/**`, `codev/resources/arch-critical.md`, `codev/resources/lessons-critical.md` |
 | `check.flag` | Globs, within what `check.watch` matches, whose movement is attention | `[]` |
 | `check.notForReading` | Globs left out of the files a person still has to read | `codev/projects/**`, `codev/state/**`, and the lockfiles `**/pnpm-lock.yaml`, `**/package-lock.json`, `**/yarn.lock`, `**/Cargo.lock`, `**/poetry.lock`, `**/uv.lock`, `**/go.sum`, `**/Gemfile.lock`, `**/composer.lock` |

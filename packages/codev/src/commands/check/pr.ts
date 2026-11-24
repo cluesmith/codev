@@ -64,7 +64,7 @@ import {
   type CommitRuns,
   type PrReport,
 } from './report.js';
-import { resolveRoots } from './roots.js';
+import { requireOrigin, resolveRoots } from './roots.js';
 import { createRunner, type Runner } from './runner.js';
 import { loadCheckSettings, type AttributionPattern, type CheckSettings } from './settings.js';
 import { isFullSha, isRefName, validatePrNumber } from './validate.js';
@@ -271,10 +271,12 @@ export function checkForge(first: PrView, reread: PrView | null): Check {
   if (!MERGEABILITY.includes(mergeable)) {
     return notRun('forge', `pr-view returned mergeable ${JSON.stringify(mergeable)}, not ${MERGEABILITY.join(', ')}`);
   }
+  // The re-read's answer is about the head it reports, which the rest of the report is not.
+  const forNewHead = view.head !== first.head ? ` (for the new head ${short(view.head)})` : '';
   const details = { mergeable, mergeStateStatus: view.mergeStateStatus, reviewDecision: view.reviewDecision };
-  if (mergeable === 'MERGEABLE') return check('forge', 'ok', mergeWords(view), details);
-  if (mergeable === 'CONFLICTING') return check('forge', 'attention', mergeWords(view), details);
-  return check('forge', 'attention', 'forge has not computed mergeability yet; re-run shortly', details);
+  if (mergeable === 'MERGEABLE') return check('forge', 'ok', mergeWords(view) + forNewHead, details);
+  if (mergeable === 'CONFLICTING') return check('forge', 'attention', mergeWords(view) + forNewHead, details);
+  return check('forge', 'attention', `forge has not computed mergeability yet; re-run shortly${forNewHead}`, details);
 }
 
 interface AttributionHit {
@@ -439,6 +441,13 @@ function flagCheck(checks: Check[], id: string, note: string, extra: Record<stri
   });
 }
 
+/** The PR's state as one phrase, for comparing two reads: `OPEN`, `OPEN (draft)`, `MERGED`. */
+function stateWords(view: PrView): string {
+  const state = view.state ? normalizeState(view.state, view.mergedAt) : 'state not reported';
+  if (view.draft === null) return `${state} (draft not reported)`;
+  return view.draft ? `${state} (draft)` : state;
+}
+
 function moved(from: string | null, to: string | null): string {
   return `${from ? short(from) : 'none'} → ${to ? short(to) : 'none'}`;
 }
@@ -452,6 +461,7 @@ async function buildPrReport(number: number, options: CommandOptions): Promise<P
   const roots = await resolveRoots(createRunner({ cwd: options.cwd, workspaceRoot: options.cwd, ...runnerOptions }));
   const runner = createRunner({ cwd: roots.mainRoot, workspaceRoot: roots.mainRoot, ...runnerOptions });
   const settings = loadCheckSettings(roots.mainRoot);
+  await requireOrigin(runner);
   const version = await gitVersion(runner);
 
   const anchor = await readPrView(runner, number);
@@ -489,8 +499,22 @@ async function buildPrReport(number: number, options: CommandOptions): Promise<P
   checks = applySkips(inOrder([...checks, checkForge(pr, reread.ok ? reread.value : null)]), settings.skip);
   if (!reread.ok) {
     checks = flagCheck(checks, 'head', `could not confirm the head at the end of the run (${reread.reason}); re-run`, { recheck: reread.reason });
-  } else if (reread.value.head !== pr.head) {
-    checks = flagCheck(checks, 'head', `head moved during check (${moved(pr.head, reread.value.head)}); re-run`, { movedTo: reread.value.head });
+  } else {
+    // A CLEAR describes the PR as it is when the command returns: whatever the checks read
+    // from the first pr-view and has since changed needs attention.
+    const now = reread.value;
+    if (now.head !== pr.head) {
+      checks = flagCheck(checks, 'head', `head moved during check (${moved(pr.head, now.head)}); re-run`, { movedTo: now.head });
+    }
+    if (now.baseRef !== pr.baseRef) {
+      checks = flagCheck(checks, 'trial-merge', `base branch changed during check (${pr.baseRef} → ${now.baseRef}); re-run`, { baseRefNow: now.baseRef });
+    }
+    if (stateWords(now) !== stateWords(pr)) {
+      checks = flagCheck(checks, 'state', `state changed during check (${stateWords(pr)} → ${stateWords(now)}); re-run`, {
+        stateNow: now.state === null ? null : normalizeState(now.state, now.mergedAt),
+        draftNow: now.draft,
+      });
+    }
   }
   if (base.ok) {
     const rebase = await liveTip(runner, pr.baseRef);
