@@ -1433,3 +1433,17 @@ Resumed after a context refresh at the phase boundary (`enter:review`).
   18:26Z restarted it.
 - `shipped-skill-hashes.ts` is a code file, so the head changes after the last green run: push,
   GitHub green, tell the architect, then `porch done`.
+
+## 2026-11-24 — the `pr` gate is pending; no second review round
+
+- 18:36Z, the architect's word after checking GitHub (8 of 8 green at `42f6d76c5`): `porch done`.
+  Porch went straight to the `pr` gate (`90b6ac8b7`); it ran no second review round, though the
+  architect and I both expected one. So `42f6d76c5` was seen by no reviewer. It is named under its
+  own heading in the review and in the PR body: a doc clause in six files, the regenerated
+  skill-hash list, the review document.
+- The architect's answers: no history rewrite without the owner's word (they put the trailer on
+  `d4cb7e648` to him at the gate); the frontmatter rebuttal stands; they check issue #1605
+  against what was built and show the owner the closing comment before closing it.
+- Stopped at the gate. Next act is the owner's. On approval relayed by the architect:
+  `porch approve 1940 pr --a-human-explicitly-approved-this`, `porch next`, merge with
+  `gh pr merge 1957 --merge` (never squash), `porch done 1940 --merged 1957`, then verify.

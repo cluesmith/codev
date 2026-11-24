@@ -662,6 +662,12 @@ points and their fixes are listed in
 - **Concern**: Whether the branch is current with `main` could not be checked. → **N/A**:
   GitHub reports the PR mergeable, and its runs test the merge with `main`.
 
+**One commit no reviewer saw.** Porch ran one review round in this phase and went to the `pr`
+gate after the rebuttal; there was no second round. So `42f6d76c5`, made in answer to round 1, was
+read by neither reviewer. It holds: one clause in the `afx` skill (four copies) and in
+`agent-farm.md` (both trees), the regenerated skill-hash list, and edits to this document.
+GitHub was green on it, 8 of 8.
+
 ## Lessons Learned
 
 ### What Went Well
