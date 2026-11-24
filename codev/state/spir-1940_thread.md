@@ -1325,3 +1325,22 @@ One other red test on Node 22 only, not mine and green on Node 24 in the same ru
 `pir-1233-session-launch-loop.test.ts` › "relaunches FRESH after a clean exit (per #1267) but
 pinned to a newly minted id": `Command failed: …\bash.exe …/start.sh`, then `EBUSY … rmdir` in its
 `afterEach`. **For the review's Flaky Tests section**; the architect is told.
+
+## 2026-11-24 — phase 6: GitHub on `ef6d5162c`
+
+- Tests (run 45314047718, 6 jobs) and CLI Integration Tests (run 45314047558): green.
+- Windows (run 45314039137): attempt 1 red, attempt 2 green. The 30 route-test failures were gone
+  on attempt 1 already; what was red there was not mine: on Node 24
+  `pir-1233-session-launch-loop.test.ts` › "degrades to a prompt-replay fresh launch under a new id
+  after 3 consecutive fast resume failures" (`Command failed: …\bash.exe …/start.sh`; a different
+  test of that file than the one that failed on Node 22 in the first run), and on Node 22 every
+  one of 8888 tests passed and vitest reported `Worker exited unexpectedly` (issue #1923 lists a
+  worker exit among the Windows suite's load-dependent failures). I reran the two failed jobs once,
+  as the flaky-test rule says; both passed. Both go in the review's Flaky Tests section.
+
+**03:06Z, the architect's word.** PR #1957 8 of 8 green at `ef6d5162c`, Windows green on attempt 2
+at the same head; go ahead under ci-first. One `porch done 1940` with the one-time tests skip; the
+local config restored in the same command (sha1 `2a213104…e51`, the original). For the review:
+(a) to (e) belong there; for (e) each untested scenario with its reason in one line; for (d) say
+whether a quoted architect command also dies on a real Tower. Next stop after the review rounds is
+the `pr` gate, the owner's.
