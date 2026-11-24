@@ -91,7 +91,8 @@ async function canonicalize(target: string): Promise<string> {
   }
 }
 
-function isInside(root: string, candidate: string): boolean {
+/** Whether `candidate` is strictly below `root` (both already resolved). */
+export function isInside(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
   return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }

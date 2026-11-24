@@ -1426,6 +1426,17 @@ describe('doctor command', () => {
       expect(stub.invocations('authStatus')[0].env.ANTHROPIC_API_KEY).toBe('sk-ant-doctor-api-key-mode');
     });
 
+    it('in api-key mode, a logged-out status warns about the key, not `claude auth login` (#1941)', async () => {
+      fs.mkdirSync(path.join(workspace, '.codev'));
+      fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), JSON.stringify({ consult: { claudeAuth: 'api-key' } }));
+      fs.writeFileSync(path.join(workspace, '.env'), 'ANTHROPIC_API_KEY=sk-ant-doctor-api-key-mode\n');
+      pinStub({ authStatus: { stdout: `${JSON.stringify(STUB_LOGGED_OUT_STATUS)}\n`, exitCode: 1 } });
+      const { claudeRows } = await runDoctor();
+      expect(claudeRows[1]).toContain(`⚠ ${CLAUDE} not logged in`);
+      expect(claudeRows[1]).toContain('consult.claudeAuth is "api-key"');
+      expect(claudeRows[1]).not.toContain('claude auth login');
+    });
+
     it('honours a CODEV_CLAUDE_BIN set only in the workspace .env, as consult does, without touching process.env', async () => {
       const stub = createStubClaude();
       stubs.push(stub);

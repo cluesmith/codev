@@ -53,6 +53,7 @@ import {
   CLAUDE_CAPABILITY_NOTE,
   CLAUDE_REVIEW_TOOLS,
   DEFAULT_CLAUDE_MODEL,
+  resolveClaudeReviewCaps,
 } from '../../commands/consult/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -211,7 +212,9 @@ describe.skipIf(!optedIn)('claude review lane leaves the tree under review alone
       console.error(`[CLAUDE] binary: ${preflight.binaryLine}\n[CLAUDE] auth: ${preflight.authLine}`);
       const systemPromptFile = path.join(sandbox, 'claude-system-prompt.md');
       fs.writeFileSync(systemPromptFile, `${fs.readFileSync(ROLE, 'utf-8')}\n\n${CLAUDE_CAPABILITY_NOTE}\n`, { mode: 0o600 });
-      const args = buildClaudeReviewArgs({ model: DEFAULT_CLAUDE_MODEL, systemPromptFile, sandboxDir: sandbox });
+      const args = buildClaudeReviewArgs({
+        model: DEFAULT_CLAUDE_MODEL, systemPromptFile, sandboxDir: sandbox, caps: resolveClaudeReviewCaps(repo),
+      });
 
       const events = await runClaude(preflight.bin, args, TEMPTING_REVIEW, repo, preflight.env);
 

@@ -180,6 +180,13 @@ export interface SendOptions {
    * are deliberate, not drift.
    */
   delay?: number;
+  /** #1950: read the message body from this file; it never passes through a shell. */
+  messageFile?: string;
+  /**
+   * #1950: retries, in total, for a request that provably never reached Tower (connection
+   * refused, Tower not running). Never applied after a request that may have arrived.
+   */
+  retry?: number;
 }
 
 /**

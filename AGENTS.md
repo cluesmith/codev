@@ -157,6 +157,9 @@ Commit messages:
 [Bugfix #42] Fix: URL-encode username before API call
 ```
 
+Commit messages and PR descriptions carry no `Co-Authored-By` trailer for an AI agent and no
+"Generated with" line (`.claude/settings.json` turns Claude Code's off).
+
 Branches: `builder/<protocol>-<id>` (e.g. `builder/spir-42`, `builder/bugfix-42`), created by
 `afx spawn`. Plan phases are commits on that branch, not branches of their own.
 

@@ -23,8 +23,7 @@
  *     user-evolved files (`arch.md`, `lessons-learned.md`) that builders and
  *     architects reference and write by path legitimately.
  *   - Plain documentation references (backtick mentions, "see codev/…") are
- *     NOT flagged. The rule is about *fetching*, not *referencing* — the
- *     protocol list in CLAUDE.md/AGENTS.md, for example, is intentional.
+ *     NOT flagged. The rule is about *fetching*, not *referencing*.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';

@@ -191,6 +191,31 @@ export async function fetchDecisions(): Promise<DecisionsFetchResult> {
     : { kind: 'error', message: result.message };
 }
 
+/** #1938: an image an item references, or why it was not loaded. Never thrown. */
+export type DecisionImageResult =
+  | { kind: 'image'; blob: Blob }
+  | { kind: 'not-loaded'; message: string };
+
+/**
+ * #1938: fetch an image from the workspace with the key, which an `<img>` request cannot carry.
+ * `path` is as written in the item: relative to the decisions file, or `/`-rooted at the workspace.
+ */
+export async function fetchDecisionImage(path: string, signal: AbortSignal): Promise<DecisionImageResult> {
+  try {
+    const res = await fetch(apiUrl(`api/decisions/image?path=${encodeURIComponent(path)}`), { headers: getAuthHeaders(), signal });
+    if (res.ok && res.headers.get('Content-Type')?.startsWith('image/')) {
+      return { kind: 'image', blob: await res.blob() };
+    }
+    const body: unknown = await res.json().catch(() => null);
+    if (isRecord(body) && body.ok === false && typeof body.message === 'string') {
+      return { kind: 'not-loaded', message: body.message };
+    }
+    return { kind: 'not-loaded', message: `Unexpected response from Tower (HTTP ${res.status})` };
+  } catch (err) {
+    return { kind: 'not-loaded', message: `Could not reach Tower: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
 /** Spec 1819: write the owner's ruling into the decisions file; success carries the re-parsed document. */
 export async function postDecisionRuling(request: DecisionsRuleRequest): Promise<DecisionRulingResult> {
   return requestDecisions('api/decisions/rule', {
