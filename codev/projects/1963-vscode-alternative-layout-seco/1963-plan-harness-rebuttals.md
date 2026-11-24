@@ -25,6 +25,11 @@ accepted (below).
        waits for the owner, and Phases 2–8 continue.
    - **Offered to the architect:** running the spike before the plan is approved, if they want
      the strict reading.
+   - **Update: the architect took the strict reading, and the spike has now run before approval.**
+     - Run on 2026-11-24, VS Code 1.147.0, isolated serve-web. All four cases held.
+     - The result is in the plan (*Layout spike result*). Phase 9 states the outcome that applies,
+       and the evidence is in `layout-spike/`.
+     - Codex 1 is now fully met.
 2. **The bundle smoke test needs `dist`, which CI never builds.**
    - **Confirmed:** CI's `apps/vscode` step runs `check-types` and `test:unit` only
      (`.github/workflows/test.yml:102-107`).

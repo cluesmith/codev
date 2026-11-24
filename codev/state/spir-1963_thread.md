@@ -154,3 +154,29 @@ command:
 - the smoke test builds its own bundle, since CI never builds `dist`.
 
 Phases are now 1–9. Rebuttals are in `1963-plan-harness-rebuttals.md`.
+
+## 2026-11-24 — Layout spike, run before plan approval (architect: strict reading)
+
+Setup: an isolated `code serve-web` on :18763, VS Code 1.147.0. The CLI, server, user and
+extensions dirs were all in the scratchpad. A throwaway extension was driven by headless Chromium
+from the existing Playwright cache, with no install. There was no Tower, and the serve-web tree had
+no :4100 connection. All processes were stopped by PID.
+
+**All four cases held:**
+- **(a)** `setEditorLayout` over 5 groups gave 3 (left | top/bottom). Nothing closed, all text was
+  intact and dirty stayed dirty. It is idempotent.
+- **(b)** An editor terminal moved from group 3 to group 1 with the same PID and shell.
+- **(c)** A panel terminal went to the editor area (`moveToEditor`) and then to group 1, intact.
+- **(d)** A retained webview moved while visible and while hidden, with no reload (same load id).
+
+**Design fact:** removed groups merge into the LAST group (bottom-right = Decisions). So arrange
+reveals Decisions after the layout call.
+
+**Harness lessons from the first run:**
+- web defaults `files.autoSave` to afterDelay, which silently saved the "modified" fixtures;
+- Restricted Mode raises a trust modal on terminal creation, which hung case b.
+
+Both are now in the harness section. A side gotcha: zsh doesn't word-split `$PIDS`, so a
+`kill $PIDS` silently did nothing. I killed per PID instead.
+
+The evidence is in `codev/projects/1963-…/layout-spike/`.

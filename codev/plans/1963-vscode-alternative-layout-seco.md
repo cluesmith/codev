@@ -7,11 +7,12 @@
 This plan implements the approved spec in its three shippable increments, in nine phases. Each
 phase is one commit on `builder/spir-1963`, and all of them go into one PR.
 
-0. **Verification harness and layout spike** (Phase 1). This is the isolated harness every rendered
-   checkpoint uses (section *Verification harness*), proven safe on an empty fixture. It also runs
-   the editor-layout spike the spec's Assumptions require, so its result is known before any
-   increment-1 code. If the spike shows that the arrangement needs an owner decision, the owner
-   gets it early.
+0. **Verification harness** (Phase 1). This is the isolated harness every rendered checkpoint
+   uses (section *Verification harness*), proven safe on an empty fixture.
+
+   The editor-layout spike the spec's Assumptions require **has already been run**, before plan
+   approval, on 2026-11-24 against VS Code 1.147.0. All four cases held; see *Layout spike result*
+   below. No owner decision is needed for the arrangement.
 1. **Button + hierarchy** (Phases 2–5). This uses spec approach **A1**: one tree view over the
    existing row-building code. Its single hierarchy is the owner's *"towers -> workspaces ->
    architects / decisions -> builders"*. Rows of this window's workspace act; rows of other
@@ -30,20 +31,58 @@ phase is one commit on `builder/spir-1963`, and all of them go into one PR.
      `ConnectionManager`'s client.
 3. ***Arrange Cockpit*** (Phase 9). This uses approaches **C1** (first show per window, plus the
    command and `codev.cockpit.autoArrange`) and **D1** (Work stacked over Decisions). It also adds
-   the one-time first-auto-arrange notice ruled at the gate. It builds on the Phase 1 spike result,
-   and writes no arrange code while a spike case is unresolved.
+   the one-time first-auto-arrange notice ruled at the gate. It is built on the spike result
+   recorded below.
 
 Rendered verification sits at the end of each increment: Phase 5, Phase 8 and Phase 9. It also
 runs at Phase 6 (the dashboard comparison) and Phase 7 (Decisions). It uses the isolated harness
 built in Phase 1, so the work can be cut after any increment with what has shipped already
 verified.
 
+## Layout spike result (run before plan approval)
+
+The spec says the layout assumptions are "to be confirmed in the plan by a spike against a running
+instance". At the architect's direction, the spike was run on **2026-11-24, before plan approval**.
+
+**Setup:**
+- a throwaway extension in an isolated `code serve-web`, VS Code **1.147.0**, on port 18763;
+- the CLI, server, user and extensions dirs were all under the session scratchpad;
+- the browser was headless Chromium from the existing Playwright cache, with no install;
+- no Tower was involved, and nothing in the serve-web process tree connected to `:4100`;
+- every process was stopped by PID afterwards.
+
+The raw results, the spike source and screenshots are committed in
+`codev/projects/1963-vscode-alternative-layout-seco/layout-spike/`.
+
+| Case | What was checked | Result |
+|---|---|---|
+| **(a)** `vscode.setEditorLayout` `{ orientation: 0, groups: [{}, { groups: [{}, {}] }] }` over **5** groups | Groups 5 → 3, and `vscode.getEditorLayout` shows left \| (top / bottom). No document closed (`onDidCloseTextDocument` was empty). All 7 editors are still open with identical text: 2 untitled-with-content, 3 modified files and 2 clean files. Every dirty editor stayed dirty. Applying it again with 3 groups changed nothing | **Holds** |
+| **(b)** editor-area terminal, group 3 → group 1, via `terminal.show()` + `workbench.action.moveEditorToFirstGroup` | It is in group 1 afterwards, with `exitStatus` unset and the same `processId`. The same shell (same `$$`) answered before and after the move | **Holds** |
+| **(c)** panel terminal → editor area via `workbench.action.terminal.moveToEditor`, then to group 1 as in (b) | It became an editor tab and then sat in group 1. Same PID, same shell, session intact | **Holds** |
+| **(d)** `retainContextWhenHidden` webview moved with `WebviewPanel.reveal(viewColumn)` | It moved from group 2 to 3 while visible, then from 3 to 1 **while hidden** under another editor. The webview's random load id was identical at all three pings, and its counter kept advancing. No reload | **Holds** |
+
+**What this fixes in the design:**
+
+- **Merge target.** Editors from groups that `setEditorLayout` removes are merged into the **last**
+  remaining group, which is the bottom-right one, where Decisions goes. Arrange therefore opens or
+  reveals Decisions there *after* the layout call, and makes it the active tab. The user's moved
+  editors sit behind it as tabs, never closed.
+- **No group-count special case.** The layout call is idempotent, so arrange always applies it.
+  A window that already has three groups is left as it is.
+
+**What the harness needs (found by the spike, now in the harness section):**
+
+- VS Code for the Web defaults `files.autoSave` to `afterDelay`. The first run silently wrote the
+  "modified" fixture files to disk, so the harness profile sets `files.autoSave: off`.
+- Restricted Mode raises a "Trust Folder & Continue" modal when a terminal is created. That modal
+  stalled the first run, so the harness trusts its fixture folders before any scenario.
+
 ## Phases (Machine Readable)
 
 ```json
 {
   "phases": [
-    {"id": "verification_harness", "title": "Isolated verification harness and editor-layout spike"},
+    {"id": "verification_harness", "title": "Isolated verification harness"},
     {"id": "fleet_overviews", "title": "Fleet cache keeps every active workspace's overview"},
     {"id": "architect_tree_builder", "title": "Reusable, workspace-scoped architect-axis row builder"},
     {"id": "cockpit_hierarchy", "title": "Cockpit button and the Tower → workspaces → architects → builders tree"},
@@ -58,15 +97,15 @@ verified.
 
 ## Phase Breakdown
 
-### Phase 1: Isolated verification harness and editor-layout spike
+### Phase 1: Isolated verification harness
 
 **Dependencies**: None
 
 #### Objective
 
 Build, once, the isolated environment every rendered checkpoint runs in, and prove it cannot reach
-the owner's Tower or IDE before it is used for anything. Then use it to run the editor-layout spike,
-so the arrangement's feasibility is known before increment-1 code is written.
+the owner's Tower or IDE before it is used for anything. (The editor-layout spike is already done;
+see *Layout spike result*.)
 
 #### Files to Create / Modify
 
@@ -83,36 +122,9 @@ so the arrangement's feasibility is known before increment-1 code is written.
 
 Scripts load the branch's built `packages/codev/dist`. They never use a globally installed CLI.
 
-**The spike is not committed.** It is a throwaway extension in the session scratchpad, loaded into
-the harness's isolated VS Code. Its result is recorded in the thread, and later in the review, with
-screenshots. It checks:
-
-- (a) `vscode.setEditorLayout` with `{ orientation: 0, groups: [{}, { groups: [{}, {}] }] }`, run
-  over three or more existing groups, merges the editors of the groups it removes into the remaining
-  groups. Dirty, untitled and modified editors survive with their content;
-- (b) an editor-area terminal tab moves between groups without ending its session. The method is
-  `terminal.show()`, then `workbench.action.moveEditorToFirstGroup`, then a check that the PTY still
-  echoes;
-- (c) a panel terminal moves into the editor area through `workbench.action.terminal.moveToEditor`,
-  with the session intact;
-- (d) `WebviewPanel.reveal(viewColumn)` moves a retained panel to another group without reloading it
-  (a counter in the webview survives the move).
-
-**Outcomes:**
-
-- **(a) fails:** arrange only adds or reuses groups and never removes one. The spec already
-  provides this, so no decision is needed.
-- **(b), (c) or (d) fails:** the spec does not provide a fallback, and every candidate fallback
-  changes ruled behaviour. Examples: leaving the architect where it is, or not honouring the
-  `terminalPosition` override.
-  - **The result goes to the architect at once, with the options**, and Phase 9 waits for the
-    owner's ruling.
-  - Phases 2–8 do not depend on it and continue.
-
 #### Deliverables
 
 - [ ] The harness scripts, stubs and README.
-- [ ] The spike run, with its result recorded in the thread.
 - [ ] Harness self-tests.
 
 #### Acceptance Criteria
@@ -134,14 +146,12 @@ screenshots. It checks:
 - [ ] **The tripwire is shown to fire**, without touching `:4100`. Its port is a parameter, and the
       self-test points it at a throwaway local listener the test opens, connects to it from a
       harness child process, and expects a failure.
-- [ ] The spike result is recorded, and the architect is told if (b), (c) or (d) failed.
 
 #### Test Plan
 
 - `harness.mjs selftest`: the refusals and the tripwire above.
 - A seeded fixture (one workspace, one builder) appears in the isolated Tower's `/api/overview`
   with its `spawnedByArchitect`.
-- The spike, as above.
 
 ### Phase 2: Fleet cache keeps every active workspace's overview
 
@@ -1000,7 +1010,7 @@ every kept affordance mapped to a VS Code action and every dropped one absent.
 
 ### Phase 9: Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification
 
-**Dependencies**: Phase 1 (the spike result), Phase 4, Phase 7, Phase 8
+**Dependencies**: Phase 4, Phase 7, Phase 8
 
 #### Objective
 
@@ -1009,13 +1019,19 @@ first show per window session, and on demand. It never closes or discards a user
 
 #### Files to Create / Modify
 
-**The Phase 1 spike result decides the mechanics.** If (a) failed, arrange only adds or reuses
-groups. If (b), (c) or (d) failed, this phase starts only after the owner's ruling on the options
-the architect was given.
+**Outcome that applies: all four spike cases held** (see *Layout spike result*). So:
+- arrange uses `vscode.setEditorLayout`, removing groups where needed. The spec's add/reuse-only
+  fallback is not used;
+- it moves the architect terminal with `show()` + `moveEditorToFirstGroup`. A panel terminal goes
+  through `workbench.action.terminal.moveToEditor` first;
+- it moves the retained panels with `reveal(viewColumn)`.
+
+No owner decision is pending.
 
 **New `apps/vscode/src/cockpit/arrange.ts`, `arrangeCockpit()`:**
 
-- shapes the layout, preserving editors per the spike;
+- applies the layout. Editors from removed groups merge into the last (bottom-right) group, so
+  Decisions is opened or revealed there after the layout call and made the active tab;
 - resolves `main` through `openResolvedArchitect`. A non-live `main` gets the existing warning and
   no substitute;
 - reuses an open architect terminal and moves it to group 1, even with `terminalPosition: panel`
@@ -1054,8 +1070,7 @@ The command stays in the palette everywhere and explains itself where it does no
 
 #### Deliverables
 
-- [ ] The spike result recorded; arrange; triggers; the setting; the notice; the explanations;
-      tests; docs.
+- [ ] Arrange; triggers; the setting; the notice; the explanations; tests; docs.
 - [ ] Rendered verification of increment 3 and the PR's screenshot set.
 
 #### Acceptance Criteria
@@ -1155,8 +1170,16 @@ can produce, is unit-tested.
 ### Isolated VS Code
 
 `code serve-web` (`/usr/local/bin/code` on this machine) runs on its own port, with
-`--server-data-dir`, `--user-data-dir` and `--extensions-dir` all under the scratchpad, and the
-branch's vsix installed there.
+`--cli-data-dir`, `--server-data-dir`, `--user-data-dir` and `--extensions-dir` all under the
+scratchpad, and the branch's vsix installed there. The layout spike ran exactly this way.
+
+- **Profile settings:**
+  - `files.autoSave: off`. Web defaults to `afterDelay`, which would silently save the
+    dirty-editor fixtures;
+  - the fixture folders are trusted before any scenario. Otherwise Restricted Mode blocks terminal
+    creation behind a modal.
+- **Driver:** Chromium from the existing Playwright cache, through the main checkout's
+  `playwright-core`. The spike used revision 1217 with `playwright-core` 1.59.1, with no install.
 
 - **Fallback:** if `serve-web` cannot run, the harness launches the IDE server binary that Tower's
   IDE support uses (`ide-server.ts`). It is launched **directly**, with the same flags
@@ -1245,8 +1268,7 @@ told before its first start.
 |------|-------------|--------|------------|
 | The row-builder extraction (Phase 3) changes an Agents id or behaviour | Medium | High | An id-equivalence snapshot taken from the pre-refactor provider in the same commit, plus every existing Agents test unmodified |
 | Generalised wiring regresses accordion, reveal or cycle in Agents | Medium | High | Per-view hosts with the Agents path unchanged; existing behaviour tests plus new per-view tests; rendered check of both views |
-| The layout primitive closes or discards an editor | Low | High | The Phase 1 spike, run before any increment code. If it fails, the spec's add/reuse-only rule applies. The dirty/untitled/modified scenario is rendered |
-| A terminal or retained-webview move fails in the spike (cases b–d) | Low | Medium | The spec gives no fallback, so the result goes to the architect from Phase 1 with the options. Phase 9 waits for the owner, and Phases 2–8 continue |
+| The layout primitive closes or discards an editor | Low | High | The spike before plan approval showed it merges and closes nothing (VS Code 1.147.0). Phase 9 still renders the dirty/untitled/modified scenario on the branch build. If a later VS Code regresses this, the spec's add/reuse-only rule is the fallback |
 | Moving components changes the dashboard | Medium | Medium | Wrappers keep `lib/api.ts`; the moved tests are unchanged in intent; the dashboard integration tests stay; a rendered before/after comparison |
 | A source-exported TSX package does not type-check under one host's config | Medium | Medium | `codev-artifact-canvas` is a *built* package (`tsdown` → `dist`), so the closer precedent is `apps/web`'s own source exports. The risk sits in `apps/web`'s `tsc -b`, which type-checks the package's `.tsx` under the dashboard's config, and in the extension's webview tsconfig (`jsx: react-jsx` added). Phase 6 runs both type-checks before moving anything. If a host still cannot consume the source, the package gains a `tsdown` build like canvas. That is a build-wiring change, not scope, and it is named in the PR |
 | The harness accidentally touches the owner's Tower or IDE | Medium (several CLI paths default to `:4100`) | High | No Tower-contacting CLI commands. Every state-creating step names its route to the isolated port (harness table). Extension shell-outs are recording stubs, and auto-start is off. `CODEV_TOWER_KEY` is set, as are isolated state, socket and VS Code dirs. A pre-flight refuses 4100 and checks the listener PID, and a `:4100` connection tripwire runs throughout. The architect is told before the first start |
@@ -1267,5 +1289,5 @@ told before its first start.
 
   Hot-tier files are not touched unless the review step routes a fact there.
 - `apps/vscode/CHANGELOG.md`: one entry per increment.
-- The review (`codev/reviews/1963-…`) at the end records the spike result and the
+- The review (`codev/reviews/1963-…`) at the end records the spike result (from *Layout spike result*) and the
   lessons-learned candidates.
