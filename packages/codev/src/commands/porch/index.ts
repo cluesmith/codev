@@ -57,6 +57,7 @@ import {
   formatCheckResults,
   allChecksPassed,
   type CheckEnv,
+  type CheckLogTarget,
 } from './checks.js';
 import { loadCheckOverrides, resolveConsultationModels } from './config.js';
 import { notifyTerminal, gateApprovedMessage } from './notify.js';
@@ -74,6 +75,17 @@ function header(text: string): string {
 
 function section(title: string, content: string): string {
   return `\n${chalk.bold(title)}:\n${content}`;
+}
+
+/**
+ * Where a failed check's full output is saved (#1853): `checks/` beside the
+ * project's status.yaml, one file per failed run.
+ */
+function checkLogTarget(statusPath: string, state: ProjectState): CheckLogTarget {
+  return {
+    dir: path.join(path.dirname(statusPath), 'checks'),
+    phase: state.current_plan_phase ? `${state.phase}-${state.current_plan_phase}` : state.phase,
+  };
 }
 
 /**
@@ -382,7 +394,8 @@ export async function check(workspaceRoot: string, projectId: string, resolver?:
     return;
   }
 
-  const results = await runPhaseChecks(checks, artifactRoot, checkEnv, undefined, scopedResolver);
+  const results = await runPhaseChecks(
+    checks, artifactRoot, checkEnv, undefined, scopedResolver, undefined, checkLogTarget(statusPath, state));
   console.log(formatCheckResults(results));
 
   console.log('');
@@ -470,7 +483,8 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
       logCheckOverrides(phaseCheckNames, checks, overrides);
 
       if (Object.keys(checks).length > 0) {
-        const results = await runPhaseChecks(checks, artifactRoot, checkEnv, undefined, scopedResolver);
+        const results = await runPhaseChecks(
+          checks, artifactRoot, checkEnv, undefined, scopedResolver, undefined, checkLogTarget(statusPath, state));
         console.log(formatCheckResults(results));
 
         if (!allChecksPassed(results)) {
@@ -801,7 +815,8 @@ export async function approve(
     logCheckOverrides(phaseCheckNames, checks, overrides);
 
     if (Object.keys(checks).length > 0) {
-      const results = await runPhaseChecks(checks, artifactRoot, checkEnv, undefined, scopedResolver);
+      const results = await runPhaseChecks(
+        checks, artifactRoot, checkEnv, undefined, scopedResolver, undefined, checkLogTarget(statusPath, state));
       console.log(formatCheckResults(results));
 
       if (!allChecksPassed(results)) {
