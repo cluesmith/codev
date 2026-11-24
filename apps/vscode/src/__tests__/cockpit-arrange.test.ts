@@ -156,6 +156,12 @@ class FakeEditorArea {
     return { all, activeTabGroup: all[this.groups.indexOf(this.activeGroup)] };
   }
 
+  /** Every terminal, in the editor area or the panel (`vscode.window.terminals`). */
+  get terminals(): FakeTerminal[] {
+    const inEditors = this.groups.flatMap(group => group.items).flatMap(item => item.kind === 'terminal' ? [item.terminal] : []);
+    return [...inEditors, ...this.panelTerminals];
+  }
+
   /** A comparable picture of the area: each group's labels, its active tab, and the panel. */
   snapshot() {
     return {
@@ -203,6 +209,7 @@ vi.mock('vscode', () => ({
   window: {
     get tabGroups() { return area.tabGroups; },
     get activeTerminal() { return area.activeTerminal; },
+    get terminals() { return area.terminals; },
     showInformationMessage,
     showWarningMessage,
     showErrorMessage,
@@ -265,7 +272,7 @@ function setup(opts: { roster?: ResolvableArchitect[] | undefined; reason?: stri
     area.open({ kind: 'terminal', terminal }, 1);
     terminal.show(false);
   });
-  const readArchitects = vi.fn(async () => roster);
+  const readArchitects = vi.fn(async (_quiet: boolean) => roster);
   const deps = {
     unavailableReason: () => opts.reason ?? null,
     readArchitects,
@@ -449,6 +456,35 @@ describe('Arrange Cockpit: the layout', () => {
 });
 
 describe('Arrange Cockpit: the architect', () => {
+  it("stops before moving an editor when another terminal carries the architect's name: its tab cannot be told apart", async () => {
+    const { deps, seedArchitect, openArchitect } = setup();
+    // A namesake in the left group, as a renamed terminal would be: matched by label, it would pass
+    // for the architect already in place, and the real one (in the panel) would never be moved.
+    area.open({ kind: 'terminal', terminal: new FakeTerminal('Codev: Architect') }, 1);
+    area.open(text('b.ts'), 2);
+    seedArchitect();
+    const before = area.snapshot();
+
+    await expect(arrangeCockpit(deps)).resolves.toBe(false);
+
+    expect(openArchitect).toHaveBeenCalledTimes(1);
+    expect(showErrorMessage).toHaveBeenCalledWith(
+      'Codev: Arrange Cockpit stopped: another terminal is also named "Codev: Architect", so the architect\'s tab cannot be told apart from it; rename or close that terminal and arrange again.',
+    );
+    expect(area.snapshot()).toEqual(before);
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('the automatic arrange reads the roster quietly (no error toast nobody asked for); the command does not', async () => {
+    const { deps, readArchitects } = setup();
+    const arranger = new CockpitArranger(deps);
+
+    await arranger.arrange('auto');
+    expect(readArchitects).toHaveBeenLastCalledWith(true);
+    await arranger.arrange();
+    expect(readArchitects).toHaveBeenLastCalledWith(false);
+  });
+
   it("delegates to openResolvedArchitect: a non-live main gets the existing warning, nothing is substituted, the right side is arranged", async () => {
     const { deps, openArchitect } = setup({ roster: [{ name: 'web', terminalId: 't-web' }] });
     area.open(text('a.ts'), 1);

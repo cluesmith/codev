@@ -30,7 +30,15 @@
  * **The architect** is resolved through `openResolvedArchitect` (#1497): always `main`, with no
  * picker. A non-live `main` gets the existing warning, nothing is substituted, and the right side
  * is still arranged. This action opens the architect in the editor area even when
- * `codev.terminalPosition` is `panel`; every other open path keeps honouring that setting.
+ * `codev.terminalPosition` is `panel`; every other open path keeps honouring that setting. The
+ * automatic arrange reads the roster quietly: with Tower down it logs, and shows no error toast.
+ *
+ * **Which tab is the architect's.** The tab API gives a terminal tab no terminal identity, only its
+ * label, which is the terminal's name; showing a panel terminal leaves the editor area's active tab
+ * as it was, so activation cannot tell either. The label is unambiguous only while no other terminal
+ * has the architect's name (a renamed terminal, or a shell that set its title, carries it in
+ * `Terminal.name`). Arrange checks that first and, when another one does, stops before moving
+ * an editor and says so, rather than move a terminal it cannot tell apart.
  *
  * Each move is waited for, up to a bound, before the next. A move that does not happen in time stops
  * the arrange with an error naming it. Arrange never acts on an editor it has not confirmed.
@@ -58,11 +66,17 @@ export interface CockpitPanel {
   readonly tab: vscode.Tab | undefined;
 }
 
+/** Who asked: the command (palette, title bar), or the Cockpit's first show in a window. */
+export type ArrangeTrigger = 'command' | 'auto';
+
 export interface ArrangeCockpitDeps {
   /** Why arranging is not offered in this window (a builder-worktree or no-workspace window), or null. */
   unavailableReason(): string | null;
-  /** The workspace's live architects, or undefined when they could not be read (the user was told why). */
-  readArchitects(): Promise<ResolvableArchitect[] | undefined>;
+  /**
+   * The workspace's live architects, or undefined when they could not be read: the user was told
+   * why, or, when `quiet`, it was logged.
+   */
+  readArchitects(quiet: boolean): Promise<ResolvableArchitect[] | undefined>;
   /**
    * Open the architect's terminal, or reuse the open one, and focus it (`TerminalManager.openArchitect`
    * with the editor-area override).
@@ -82,8 +96,8 @@ export class CockpitArranger {
   constructor(private readonly deps: ArrangeCockpitDeps) {}
 
   /** Resolves whether the editor area was arranged. */
-  arrange(): Promise<boolean> {
-    this.inFlight ??= arrangeCockpit(this.deps).finally(() => { this.inFlight = undefined; });
+  arrange(trigger: ArrangeTrigger = 'command'): Promise<boolean> {
+    this.inFlight ??= arrangeCockpit(this.deps, trigger).finally(() => { this.inFlight = undefined; });
     return this.inFlight;
   }
 }
@@ -92,14 +106,14 @@ export class CockpitArranger {
  * Arrange the editor area. Resolves true once it is arranged. Resolves false where it is not
  * offered, or when a move did not happen; in both cases the user is told why.
  */
-export async function arrangeCockpit(deps: ArrangeCockpitDeps): Promise<boolean> {
+export async function arrangeCockpit(deps: ArrangeCockpitDeps, trigger: ArrangeTrigger = 'command'): Promise<boolean> {
   const reason = deps.unavailableReason();
   if (reason) {
     void vscode.window.showInformationMessage(reason);
     return false;
   }
   try {
-    const architect = await placeArchitect(deps);
+    const architect = await placeArchitect(deps, trigger);
     if (!architect) { await keepLeftColumn(deps); }
     await placePanel(deps.work, vscode.ViewColumn.Two, 'Work');
     await placePanel(deps.decisions, vscode.ViewColumn.Three, 'Decisions');
@@ -132,8 +146,8 @@ export async function arrangeCockpit(deps: ArrangeCockpitDeps): Promise<boolean>
  * Resolve `main`, open or reuse its terminal, and move it into the first editor group. Returns the
  * terminal, or undefined when there is no architect to place (the user was told why).
  */
-async function placeArchitect(deps: ArrangeCockpitDeps): Promise<vscode.Terminal | undefined> {
-  const architects = await deps.readArchitects();
+async function placeArchitect(deps: ArrangeCockpitDeps, trigger: ArrangeTrigger): Promise<vscode.Terminal | undefined> {
+  const architects = await deps.readArchitects(trigger === 'auto');
   if (!architects) { return undefined; }
   const alreadyOpen = deps.architectTerminal(COCKPIT_ARCHITECT);
   const name = await openResolvedArchitect(architects, COCKPIT_ARCHITECT, {
@@ -144,6 +158,10 @@ async function placeArchitect(deps: ArrangeCockpitDeps): Promise<vscode.Terminal
   const terminal = deps.architectTerminal(name);
   // None: the terminal manager did not open one (too many terminals, no workspace) and said why.
   if (!terminal) { return undefined; }
+  // Its tab is found by label, which only this terminal may carry (see the module comment).
+  if (vscode.window.terminals.some(other => other !== terminal && other.name === terminal.name)) {
+    throw new Error(`another terminal is also named "${terminal.name}", so the architect's tab cannot be told apart from it; rename or close that terminal and arrange again`);
+  }
 
   if (terminal !== alreadyOpen) {
     // Opened just now, in the editor area (the override): wait for its tab.

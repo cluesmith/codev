@@ -171,6 +171,12 @@ describe('Arrange Cockpit (Phase 9)', () => {
     expect(EXT_SRC).toMatch(/regCli\('codev\.cockpit\.arrange', \(\) => cockpitArranger\.arrange\(\)\)/);
   });
 
+  it('arranges automatically as the auto trigger, whose roster read logs instead of showing an error toast', () => {
+    expect(EXT_SRC).toMatch(/arrange: \(\) => cockpitArranger\.arrange\('auto'\),/);
+    expect(EXT_SRC).toMatch(/const readArchitectRoster = async \(quiet = false\)/);
+    expect(EXT_SRC).toMatch(/if \(quiet\) \{ outputChannel\?\.appendLine\(/);
+  });
+
   it("opens the architect with the editor-area override, and offers arranging where Work and Decisions are", () => {
     const wiring = EXT_SRC.slice(EXT_SRC.indexOf('const arrangeUnavailableReason'), EXT_SRC.indexOf('context.subscriptions.push(cockpitAutoArrange)'));
     expect(wiring).toMatch(/workspaceViewUnavailableReason\('Arrange Cockpit', \{/);

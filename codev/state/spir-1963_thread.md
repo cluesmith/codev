@@ -1115,3 +1115,12 @@ run.
   kept, so preview is read from the italic label; a terminal takes focus a moment after its tab is
   clicked and would swallow the palette's typing; a reload right after a layout command can
   restore the previous layout.
+- **Phase 9 review, iteration 1:** codex REQUEST_CHANGES, claude APPROVE.
+  - Codex: the architect's tab is found by label, and names are not unique. Accepted. The tab API
+    gives a terminal tab no identity, and showing a panel terminal leaves the active editor tab as
+    it was, so activation tracking (codex's suggestion) cannot cover the panel case.
+    `Terminal.name` does follow renames (1.147.0's `$acceptTerminalTitleChange` sets it), so arrange
+    now refuses, before moving an editor, when another terminal has the architect's name.
+  - Claude note 1: the automatic arrange with Tower down showed an error toast nobody asked for. It
+    now reads the roster quietly and logs. Note 2: the empty-left-group branch is named in the PR
+    as unit-tested only. Note 4 (25 ms polling): kept.

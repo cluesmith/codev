@@ -643,12 +643,16 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerWebviewPanelSerializer(WORK_VIEW_TYPE, workPanels),
 	);
 	// The live architect roster of this window's workspace, read from Tower as `codev.openArchitectTerminal`
-	// and *Arrange Cockpit* resolve it. Undefined when it cannot be read; the user is told why.
-	const readArchitectRoster = async (): Promise<ResolvableArchitect[] | undefined> => {
+	// and *Arrange Cockpit* resolve it. Undefined when it cannot be read: the user is told why, or, with
+	// `quiet` (the Cockpit's automatic arrange, which nobody asked for), it is only logged.
+	const readArchitectRoster = async (quiet = false): Promise<ResolvableArchitect[] | undefined> => {
+		const tell = (message: string) => {
+			if (quiet) { outputChannel?.appendLine(`${message} (the architect was not placed)`); } else { vscode.window.showErrorMessage(message); }
+		};
 		const client = connectionManager?.getClient();
 		const workspacePath = connectionManager?.getWorkspacePath();
 		if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
-			vscode.window.showErrorMessage('Codev: Not connected to Tower');
+			tell('Codev: Not connected to Tower');
 			return undefined;
 		}
 		try {
@@ -659,7 +663,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			const architects = state?.architects ?? (state?.architect ? [state.architect] : []);
 			return architects;
 		} catch {
-			vscode.window.showErrorMessage('Codev: Failed to get workspace state');
+			tell('Codev: Failed to get workspace state');
 			return undefined;
 		}
 	};
@@ -686,7 +690,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		view: cockpitView,
 		offered: () => arrangeUnavailableReason() === null,
 		enabled: () => vscode.workspace.getConfiguration('codev').get<boolean>('cockpit.autoArrange', true),
-		arrange: () => cockpitArranger.arrange(),
+		arrange: () => cockpitArranger.arrange('auto'),
 		globalState: context.globalState,
 		disable: () => vscode.workspace.getConfiguration('codev')
 			.update('cockpit.autoArrange', false, vscode.ConfigurationTarget.Global),
