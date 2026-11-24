@@ -138,6 +138,31 @@ describe('bugfix #1853: a failed check names its failure and keeps its full outp
     expect(status).not.toContain('checks/');
   });
 
+  it('never deletes the log it just wrote, even when older logs sort after it', async () => {
+    fs.mkdirSync(target.dir, { recursive: true });
+    const later = Array.from({ length: MAX_CHECK_LOGS }, (_, i) =>
+      `2099-01-01T00-00-${String(i).padStart(2, '0')}-000Z-implement-tests.log`);
+    for (const name of later) fs.writeFileSync(path.join(target.dir, name), 'clock-skewed run');
+
+    const [result] = await runPhaseChecks({ tests: 'exit 1' }, root, env, undefined, undefined, undefined, target);
+
+    expect(fs.existsSync(result.log_path!)).toBe(true);
+    expect(logFiles(target.dir)).toHaveLength(MAX_CHECK_LOGS);
+    expect(logFiles(target.dir)).not.toContain(later[0]);
+  });
+
+  it('lines from the two streams never splice into each other', async () => {
+    // stderr's line is split across two writes, with a whole stdout line between them.
+    const [result] = await runPhaseChecks(
+      { tests: "printf 'first half ' >&2; sleep 0.2; echo 'stdout line'; sleep 0.2; echo 'second half' >&2; exit 1" },
+      root, env, undefined, undefined, undefined, target,
+    );
+
+    const lines = result.transcript!.split('\n');
+    expect(lines).toContain('first half second half');
+    expect(lines).toContain('stdout line');
+  });
+
   it('a log that cannot be written is reported, and the failure is still printed', async () => {
     fs.mkdirSync(path.dirname(target.dir), { recursive: true });
     fs.writeFileSync(target.dir, 'a file where the checks directory should be');
