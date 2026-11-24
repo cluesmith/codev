@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const [mode, packDir] = process.argv.slice(2);
-const SUPPORTED_MESSAGE = 'native Windows needs Node.js 22 or 24';
+const SUPPORTED_MESSAGE = 'native Windows needs Node.js 22 (LTS)';
 
 function fail(reason, output) {
   console.error(`FAIL (${mode}, Node ${process.version}): ${reason}`);

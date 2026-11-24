@@ -1,8 +1,9 @@
 /**
  * Spec 1658 Phase 10: the native-dependency install guard. The guard logic
- * (scripts/native-deps-guard.mjs) is pure and tested here on any host; the
- * real install on Windows (Node 20 refused before node-gyp, Node 22 installs)
- * is the `install-guard` job of windows.yml.
+ * (scripts/native-deps-guard.mjs) is pure and tested here on any host,
+ * including its refusal of an unsupported Node; the real install on Windows
+ * (Node 22 installs from prebuilds, node-gyp never runs) is the
+ * `install-guard` job of windows.yml.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -45,7 +46,7 @@ describe('checkWindowsNodeForPrebuilds', () => {
 
   it('refuses Node 20 (no better-sqlite3 prebuild: the source-build fallback) with the supported versions', () => {
     const message = checkWindowsNodeForPrebuilds({ platform: 'win32', arch: 'x64', abi: '115', nodeVersion: 'v20.18.0' });
-    expect(message).toContain('native Windows needs Node.js 22 or 24');
+    expect(message).toContain('native Windows needs Node.js 22 (LTS)');
     expect(message).toContain('v20.18.0 (win32-x64)');
     expect(message).toContain('does not compile them from source');
   });
@@ -72,7 +73,7 @@ describe('runtime twin of the message', () => {
 
     forceHostPlatform('win32');
     const explained = explainNativeLoadFailure(loadFailure) as Error;
-    expect(explained.message).toContain('native Windows needs Node.js 22 or 24');
+    expect(explained.message).toContain('native Windows needs Node.js 22 (LTS)');
     expect(explained.message).toContain('NODE_MODULE_VERSION 115');
     expect(explained.cause).toBe(loadFailure);
     const other = new Error('SQLITE_BUSY: database is locked');
@@ -90,7 +91,7 @@ describe('node-pty binding load failures', () => {
   it('withNativeLoadExplanation rethrows a load failure explained on Windows, anything else as is', () => {
     forceHostPlatform('win32');
     expect(() => withNativeLoadExplanation(() => { throw new Error('Failed to load native module: conpty.node'); }))
-      .toThrow('native Windows needs Node.js 22 or 24');
+      .toThrow('native Windows needs Node.js 22 (LTS)');
     expect(() => withNativeLoadExplanation(() => { throw new Error('boom'); })).toThrow(/^boom$/);
     expect(withNativeLoadExplanation(() => 42)).toBe(42);
   });
@@ -120,8 +121,8 @@ describe('package wiring', () => {
     expect(pkg.files).toEqual(expect.arrayContaining(['scripts/preinstall.mjs', 'scripts/native-deps-guard.mjs', 'scripts/postinstall.mjs']));
   });
 
-  it('keeps engines.node at >=20 so POSIX installs are unaffected', () => {
-    expect(pkg.engines.node).toBe('>=20.0.0');
+  it('declares the Node 22 floor in engines.node (#1944)', () => {
+    expect(pkg.engines.node).toBe('>=22.0.0');
   });
 
   it('preinstall is a no-op off Windows and on a supported Windows Node', () => {

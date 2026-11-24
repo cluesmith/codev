@@ -42,7 +42,7 @@ describe('PtySession.spawn with a binding that cannot load', () => {
     forceHostPlatform('win32');
     spawnImpl.fn = () => { throw new Error(CONPTY_LOAD_ERROR); };
     const err = await session().spawn().then(() => null, (e: Error) => e);
-    expect(err?.message).toContain('native Windows needs Node.js 22 or 24');
+    expect(err?.message).toContain('native Windows needs Node.js 22 (LTS)');
     expect(err?.message).toContain('conpty.node');
     expect((err?.cause as Error).message).toBe(CONPTY_LOAD_ERROR);
   });

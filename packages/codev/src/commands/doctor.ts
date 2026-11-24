@@ -743,7 +743,7 @@ const CORE_DEPENDENCIES: Dependency[] = [
     command: 'node',
     versionArg: '--version',
     versionExtract: (output) => output.replace(/^v/, ''),
-    minVersion: '18.0.0',
+    minVersion: '22.0.0',
     required: true,
     installHint: {
       macos: 'brew install node',

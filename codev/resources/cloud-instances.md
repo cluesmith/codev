@@ -158,8 +158,8 @@ apt install -y \
   build-essential \
   sqlite3
 
-# Node.js 20 LTS
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+# Node.js 22 LTS
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt install -y nodejs
 
 # AI CLIs

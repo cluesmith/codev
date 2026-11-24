@@ -76,7 +76,7 @@
     "vitest": "^4.0.15"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "keywords": [
     "cli",
