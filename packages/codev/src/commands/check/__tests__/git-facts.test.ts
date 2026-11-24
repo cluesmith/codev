@@ -83,6 +83,13 @@ describe('Spec 1951 — live tips', () => {
     expect(fx.git(fx.main, 'rev-parse', 'refs/remotes/origin/main').trim()).toBe(stale);
   });
 
+  it('reports an invalid branch name without running git', async () => {
+    const spawn = vi.fn<SpawnFn>();
+    const spied = createRunner({ cwd: fx.main, workspaceRoot: fx.main, spawn });
+    expect(await liveTip(spied, 'a..b')).toEqual({ ok: false, reason: 'invalid branch name "a..b"' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it('reports a branch origin does not have as null', async () => {
     expect(await liveTip(runner, 'no-such-branch')).toEqual({ ok: true, value: null });
   });

@@ -59,6 +59,7 @@ export function versionLabel(version: GitVersion): string {
 
 /** The live tip of `origin/<branch>`, or null when the branch does not exist there. */
 export async function liveTip(runner: Runner, branch: string): Promise<Lookup<string | null>> {
+  if (!isRefName(branch)) return { ok: false, reason: `invalid branch name ${JSON.stringify(branch)}` };
   const ref = `refs/heads/${branch}`;
   const result = await runner.git(['ls-remote', 'origin', ref]);
   if (result.exitCode !== 0) return { ok: false, reason: failureReason('ls-remote', result, runner.timeoutLabel) };

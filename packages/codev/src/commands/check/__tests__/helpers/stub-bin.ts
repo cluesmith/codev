@@ -48,6 +48,25 @@ flags_only() {
   done
 }
 no_ext_diff() { { has --no-ext-diff "$@" && has --no-textconv "$@"; } || violation "$sub without --no-ext-diff --no-textconv"; }
+# revisions_only args…: every argument before "--" that is not an option must look like a
+# revision, never a file system path (which can turn \`diff\` into a --no-index diff of files
+# outside the repository) or a transport URL.
+revisions_only() {
+  for a in "$@"; do
+    [ "$a" = "--" ] && return 0
+    case "$a" in
+      -*) ;;
+      /*|../*|*/../*|..|*::*|*:*|*\\\\*) violation "$sub argument $a is not a revision" ;;
+    esac
+  done
+}
+# no_positionals args…: nothing but options before "--".
+no_positionals() {
+  for a in "$@"; do
+    [ "$a" = "--" ] && return 0
+    case "$a" in -*) ;; *) violation "$sub takes no argument $a" ;; esac
+  done
+}
 check() {
   gcauto=0; maint=0; locks=0
   while [ $# -gt 0 ]; do
@@ -63,22 +82,46 @@ check() {
   if [ "$sub" != fetch ] && [ $((gcauto + maint)) -gt 0 ]; then violation "-c outside fetch"; fi
   case "$sub" in
     version) [ $# -eq 0 ] || violation "version $*" ;;
-    rev-parse) flags_only "--show-toplevel --verify --quiet -q --abbrev-ref" "$@" ;;
-    rev-list) flags_only "--first-parent --parents --count --not --reverse --max-count=*" "$@" ;;
-    merge-base) flags_only "--is-ancestor" "$@" ;;
-    log) flags_only "--no-ext-diff --no-textconv --first-parent --no-merges -z --format=* --max-count=*" "$@"; no_ext_diff "$@" ;;
-    show) flags_only "--no-ext-diff --no-textconv -s --no-patch --format=*" "$@"; no_ext_diff "$@" ;;
-    diff) flags_only "--no-ext-diff --no-textconv --name-only --numstat -z --no-renames" "$@"; no_ext_diff "$@" ;;
-    diff-tree) flags_only "--no-ext-diff --no-textconv --no-commit-id --name-only -r -z --no-renames" "$@"; no_ext_diff "$@" ;;
-    cat-file) flags_only "-e -t -p" "$@" ;;
-    for-each-ref) flags_only "--format=*" "$@" ;;
-    ls-files) flags_only "--others --ignored --exclude-standard --directory -z" "$@" ;;
-    ls-remote) flags_only "--symref" "$@" ;;
+    rev-parse) flags_only "--show-toplevel --verify --quiet -q --abbrev-ref" "$@"; revisions_only "$@" ;;
+    rev-list) flags_only "--first-parent --parents --count --not --reverse --max-count=*" "$@"; revisions_only "$@" ;;
+    merge-base) flags_only "--is-ancestor" "$@"; revisions_only "$@" ;;
+    log) flags_only "--no-ext-diff --no-textconv --first-parent --no-merges -z --format=* --max-count=*" "$@"; no_ext_diff "$@"; revisions_only "$@" ;;
+    show) flags_only "--no-ext-diff --no-textconv -s --no-patch --format=*" "$@"; no_ext_diff "$@"; revisions_only "$@" ;;
+    diff) flags_only "--no-ext-diff --no-textconv --name-only --numstat -z --no-renames" "$@"; no_ext_diff "$@"; revisions_only "$@" ;;
+    diff-tree) flags_only "--no-ext-diff --no-textconv --no-commit-id --name-only -r -z --no-renames" "$@"; no_ext_diff "$@"; revisions_only "$@" ;;
+    cat-file) flags_only "-e -t -p" "$@"; revisions_only "$@" ;;
+    for-each-ref)
+      flags_only "--format=*" "$@"
+      for a in "$@"; do case "$a" in -*|refs/*) ;; *) violation "for-each-ref pattern $a outside refs/" ;; esac; done ;;
+    ls-files) flags_only "--others --ignored --exclude-standard --directory -z" "$@"; no_positionals "$@" ;;
+    ls-remote)
+      # A remote, URL or path here can reach another repository or run a transport
+      # program (ext::); only origin, then HEAD or refs/… names.
+      flags_only "--symref" "$@"
+      seen_remote=0
+      for a in "$@"; do
+        case "$a" in
+          -*) ;;
+          *) if [ "$seen_remote" = 0 ]; then
+               [ "$a" = origin ] || violation "ls-remote of $a, not origin"; seen_remote=1
+             else
+               case "$a" in
+                 HEAD) ;;
+                 *::*|*..*) violation "ls-remote ref $a" ;;
+                 refs/*) ;;
+                 *) violation "ls-remote ref $a" ;;
+               esac
+             fi ;;
+        esac
+      done
+      [ "$seen_remote" = 1 ] || violation "ls-remote without origin" ;;
     merge-tree)
       flags_only "--write-tree --name-only --no-messages -z" "$@"
-      has --write-tree "$@" || violation "merge-tree without --write-tree" ;;
+      has --write-tree "$@" || violation "merge-tree without --write-tree"
+      revisions_only "$@" ;;
     status)
       flags_only "--porcelain=v1 -z --untracked-files=all" "$@"
+      no_positionals "$@"
       [ "$locks" = 1 ] || violation "status without --no-optional-locks" ;;
     worktree) [ "$*" = "list --porcelain" ] || [ "$*" = "list --porcelain -z" ] || violation "worktree $*" ;;
     config) { [ $# -eq 2 ] && [ "$1" = --get ]; } || violation "config other than --get <key>" ;;

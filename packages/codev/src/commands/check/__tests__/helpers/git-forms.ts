@@ -92,4 +92,15 @@ export const OFF_GRAMMAR_FORMS: Array<[string, string[]]> = [
   ['ls-files --stage', ['ls-files', '--stage']],
   ['rev-parse --git-path', ['rev-parse', '--git-path', 'x']],
   ['version --build-options', ['version', '--build-options']],
+  // Arguments, not flags: another repository, a transport that runs a program, a file
+  // system path. The second layer must not rely on the first having checked them.
+  ['ls-remote another remote', ['ls-remote', 'upstream', 'HEAD']],
+  ['ls-remote an ext:: transport', ['ls-remote', 'ext::sh -c touch% /tmp/codev-check-ext', 'HEAD']],
+  ['ls-remote a path to another repository', ['ls-remote', '/other/repo.git']],
+  ['ls-remote origin with an ext:: ref', ['ls-remote', 'origin', 'ext::x']],
+  ['diff of absolute paths (an implicit --no-index diff)', ['diff', '--no-ext-diff', '--no-textconv', '/etc/hosts', '/etc/passwd']],
+  ['diff of paths outside the work tree', ['diff', '--no-ext-diff', '--no-textconv', '../a', '../b']],
+  ['ls-files with a path argument', ['ls-files', 'README.md']],
+  ['status with a path argument', ['--no-optional-locks', 'status', '--porcelain=v1', 'README.md']],
+  ['for-each-ref outside refs/', ['for-each-ref', 'heads/']],
 ];
