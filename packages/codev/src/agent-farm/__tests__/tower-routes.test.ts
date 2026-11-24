@@ -58,6 +58,7 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockGetKnownWorkspacePaths,
   mockGetAllKnownWorkspacePaths,
   mockIsStartupReconcileSettled,
+  mockWhenStartupReconcileSettled,
   sendDbHolder } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
   mockGetTerminalManager: vi.fn(),
@@ -85,6 +86,7 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockGetKnownWorkspacePaths: vi.fn(() => []),
   mockGetAllKnownWorkspacePaths: vi.fn((): string[] => []),
   mockIsStartupReconcileSettled: vi.fn(() => true),
+  mockWhenStartupReconcileSettled: vi.fn(async () => {}),
   // Holder for the in-memory global.db used by the Spec 1313 send path (mailbox
   // persist + gate delivery). Re-created per test in beforeEach.
   sendDbHolder: { db: null as unknown as import('better-sqlite3').Database },
@@ -124,6 +126,7 @@ vi.mock('../servers/tower-terminals.js', () => ({
   getTerminalsForWorkspace: mockGetTerminalsForWorkspace,
   getRehydratedTerminalsEntry: mockGetRehydratedTerminalsEntry,
   isStartupReconcileSettled: mockIsStartupReconcileSettled,
+  whenStartupReconcileSettled: mockWhenStartupReconcileSettled,
 }));
 
 vi.mock('../servers/tower-tunnel.js', () => ({
@@ -143,6 +146,8 @@ vi.mock('../servers/tower-messages.js', async (importOriginal) => ({
   // The address book asks the permission rule on its own; it is the real one, as the
   // resolvers behind the route are wherever the address book is tested.
   refusalToAddress: (await importOriginal<typeof import('../servers/tower-messages.js')>()).refusalToAddress,
+  // The real definition of a running workspace (Issue #1978), read off the faked terminal map.
+  runningWorkspacePaths: (await importOriginal<typeof import('../servers/tower-messages.js')>()).runningWorkspacePaths,
   resolveTarget: (...args: unknown[]) => mockResolveTarget(...args),
   resolveAgentInRegistry: (...args: unknown[]) => mockResolveAgentInRegistry(...args),
   broadcastMessage: (...args: unknown[]) => mockBroadcastMessage(...args),
@@ -291,6 +296,8 @@ function gateSession(mockWrite: (data: string) => void, ring: string, writable =
     // input can hand in a `write` that skips the feed.
     write: (data: string): boolean => { mockWrite(data); gateScreen.feed(data.replace(/\n/g, '\r\n')); return true; },
     pid: 1234,
+    // A live PTY's session has not exited; whether it takes input is `writable`'s business.
+    status: 'running' as const,
     writable,
     isUserIdle: () => true,
     composing: false,
@@ -2587,6 +2594,32 @@ describe('tower-routes', () => {
         expect(mailbox.findHeldForAgent(sendDbHolder.db, CLOUD, 'main')).toHaveLength(0);
       });
 
+      // Issue #1978: right after a restart the terminal map is empty until the startup
+      // reconcile adopts each workspace's sessions, so a workspace that is coming back has no
+      // terminal yet and would be refused as not running. The send waits for the reconcile.
+      it('waits for the startup reconcile, so a workspace whose terminals are being adopted is not refused', async () => {
+        vi.mocked(getWorkspaceTerminals).mockImplementation(() => new Map() as any);
+        let settle!: () => void;
+        mockWhenStartupReconcileSettled.mockReturnValueOnce(new Promise<void>((resolve) => { settle = resolve; }));
+
+        const sending = send('codev-cloud:architect:tunnel', 'architect:review');
+        await new Promise((r) => setTimeout(r, 20));
+        expect(mockResolveTarget).not.toHaveBeenCalled();
+        expect(allRows()).toHaveLength(0);
+
+        // The reconcile adopts both workspaces' sessions, then settles.
+        const writes = liveAgents({
+          [CODEV]: { architects: ['main', 'review'] },
+          [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+        });
+        settle();
+        const { status, body } = await sending;
+
+        expect(status).toBe(200);
+        expect(body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'tunnel' });
+        await vi.waitFor(() => expect(writes['codev-cloud/tunnel'].mock.calls.at(-1)?.[0]).toBe('\r'));
+      });
+
       it('schedules it on the --delay path too, with no live terminal', async () => {
         liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
         const { status, body } = await send('codev-cloud:architect:tunnel', 'architect:review', { options: { deliverAfter: 30 } });
@@ -2910,7 +2943,12 @@ describe('tower-routes', () => {
           });
 
           it('held for a recipient whose terminal session is gone (the dead-session hold)', async () => {
-            mockGetTerminalManager.mockReturnValue({ listSessions: () => [], getSession: () => null });
+            // Only the recipient's session is gone: its workspace still has open terminals, so
+            // it is running (Issue #1978), and the map still names the dead terminal.
+            mockGetTerminalManager.mockReturnValue({
+              listSessions: () => [],
+              getSession: (id: string) => (id === 'term-codev-cloud/tunnel' ? null : gateSession(vi.fn(), '❯ ', true, id)),
+            });
             const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
             expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', terminalId: 'term-codev-cloud/tunnel' });
             expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);

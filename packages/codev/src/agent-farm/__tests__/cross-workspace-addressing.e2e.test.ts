@@ -56,6 +56,8 @@ vi.mock('../db/index.js', async (importOriginal) => {
 const { send } = await import('../commands/send.js');
 const { workspaceName } = await import('../commands/workspace-name.js');
 const { workspaceList } = await import('../commands/workspace-list.js');
+const { resolveIdentity } = await import('../commands/whoami.js');
+const { inboxList } = await import('../commands/inbox.js');
 
 /** An inert terminal: it stays alive, reads nothing, and shows no agent composer. */
 const INERT_SCRIPT = 'trap "" INT; while true; do sleep 3600; done';
@@ -222,6 +224,11 @@ async function activate(workspacePath: string): Promise<void> {
   throw new Error(`workspace ${workspacePath} did not activate: ${res?.status} ${await res?.text()}`);
 }
 
+async function deactivate(workspacePath: string): Promise<void> {
+  const res = await tower('POST', `/api/workspaces/${encodeWorkspacePath(workspacePath)}/deactivate`);
+  if (!res.ok) throw new Error(`workspace ${workspacePath} did not deactivate: ${res.status} ${await res.text()}`);
+}
+
 async function addArchitect(workspacePath: string, name: string): Promise<void> {
   const res = await tower('POST', `/api/workspaces/${encodeWorkspacePath(workspacePath)}/architects`, { name });
   if (!res.ok) throw new Error(`add-architect ${name} failed: ${res.status} ${await res.text()}`);
@@ -283,6 +290,8 @@ describe('Spec 1940: cross-workspace addressing on a real Tower that has never c
   /** `<root>/b/codev`: a second directory called `codev`, started only for the last cases. */
   let otherCodev: string;
   let builderWorktree: string;
+  /** The inert program every workspace here runs as its architect. */
+  let inertAgent: string;
   const active: string[] = [];
 
   const review = (): Agent => ({ cwd: codev, architect: 'review' });
@@ -302,7 +311,7 @@ describe('Spec 1940: cross-workspace addressing on a real Tower that has never c
     // The temp dir is behind a symlink on macOS (/var → /private/var); Tower keys a
     // workspace by its real path, and the CLI must name the same one.
     root = realpathSync(mkdtempSync(join(tmpdir(), 'codev-1940-')));
-    const inertAgent = writeInertAgent(root);
+    inertAgent = writeInertAgent(root);
     codev = makeWorkspace(join(root, 'a', 'codev'), inertAgent);
     cloud = makeWorkspace(join(root, 'codev-cloud'), inertAgent);
     otherCodev = makeWorkspace(join(root, 'b', 'codev'), inertAgent);
@@ -526,6 +535,114 @@ describe('Spec 1940: cross-workspace addressing on a real Tower that has never c
       'codev-cloud:architect:tunnel live reach through architect',
       `codev-cloud:${BUILDER} live`,
     ]);
+  });
+
+  describe('a stopped workspace that Tower holds an empty slot for (Issue #1978)', () => {
+    /**
+     * `<root>/parked/codev-cloud`: started once, so Tower registered it and its architect
+     * `main`, then stopped, which keeps that registration. It shares its directory name with
+     * the running codev-cloud.
+     */
+    let parked: string;
+    const HELD_WHILE_STOPPED = 'For main in the parked workspace, when it is back';
+
+    /** A person at a plain shell in the parked workspace: no terminal of Tower's. */
+    const atParked = (): Agent => ({ cwd: parked });
+
+    beforeAll(async () => {
+      parked = makeWorkspace(join(root, 'parked', 'codev-cloud'), inertAgent);
+      await activate(parked);
+      await deactivate(parked);
+      // What a dashboard or extension poll of a stopped workspace does: it asks for the
+      // workspace's state, and the route leaves an empty slot on the terminal map.
+      const res = await tower('GET', `/workspace/${encodeWorkspacePath(parked)}/api/state`);
+      expect(res.ok).toBe(true);
+    }, 60_000);
+
+    it('afx workspace list lists it as not running, with no agents, and the running codev-cloud keeps the name', async () => {
+      const listed = await runAs(builder(), () => workspaceList());
+
+      expect(listed.exitCode).toBeNull();
+      const lines = listed.stdout.map((line) => line.replace(/ +/g, ' ').trim());
+      // The running workspaces, exactly as before, then the stopped one, with no agents.
+      expect(lines).toEqual([
+        `codev ${codev}`,
+        'codev:architect:main live reach through codev:architect',
+        'codev:architect:review live reach through codev:architect',
+        `codev-cloud ${cloud}`,
+        'codev-cloud:architect:main live',
+        'codev-cloud:architect:data no live terminal reach through architect',
+        'codev-cloud:architect:tunnel live reach through architect',
+        `codev-cloud:${BUILDER} live`,
+        // The running codev-cloud keeps the directory name; the stopped one has none of its own.
+        `(no address name) ${parked} not running`,
+        `no address name: it shares the directory name 'codev-cloud' with ${cloud}; give it a name of its own: afx workspace name <name>`,
+      ]);
+    });
+
+    it('the shared directory name still reaches the running workspace: the stopped one is not a second match', async () => {
+      const sent = await afxSend(review(), 'codev-cloud:architect:tunnel', 'Tunnel, past the parked namesake');
+
+      expect(sent.exitCode).toBeNull();
+      expect(mailWithBody('Tunnel, past the parked namesake')).toMatchObject({ workspace_path: cloud, to_agent: 'tunnel' });
+    });
+
+    it('afx whoami gives the address the listing prints for the same agent', async () => {
+      const who = await runAs(builder(), async () => resolveIdentity());
+      const book = await tower('GET', `/api/address-book?workspace=${encodeURIComponent(cloud)}&from=${BUILDER}`);
+      const listed = ((await book.json()) as { workspaces: Array<{ path: string; agents: Array<{ name: string; address: string | null }> }> })
+        .workspaces.find((w) => w.path === cloud)!
+        .agents.find((a) => a.name === BUILDER)!;
+
+      expect(who.result).toMatchObject({ type: 'builder', name: BUILDER, address: `codev-cloud:${BUILDER}` });
+      expect(listed.address).toBe(`codev-cloud:${BUILDER}`);
+    });
+
+    it('mail held for its architect while it is stopped stays held, and is listed by afx inbox', async () => {
+      // A sender in the workspace itself addresses no workspace, and that path holds mail
+      // for a registered agent with no terminal, as it always has.
+      const sent = await afxSend(atParked(), 'architect', HELD_WHILE_STOPPED);
+      expect(sent.exitCode).toBeNull();
+      expect(sent.result).toBe('held');
+      const held = mailWithBody(HELD_WHILE_STOPPED);
+      expect(held).toMatchObject({ workspace_path: parked, to_agent: 'main', status: 'held', reason: 'no-live-pty' });
+
+      const inbox = await runAs(atParked(), () => inboxList());
+      expect(inbox.exitCode).toBeNull();
+      expect(inbox.stdout.some((line) => line.includes(held.id) && line.includes('no-live-pty'))).toBe(true);
+    });
+
+    it('once it has a name, a send to its registered architect is refused as not running, and nothing is stored', async () => {
+      const named = await runAs(atParked(), () => workspaceName({ name: 'parked' }));
+      expect(named.exitCode).toBeNull();
+      const before = mailCount();
+
+      const sent = await afxSend(review(), 'parked:architect', 'For the parked workspace, by its name');
+
+      expect(sent.exitCode).toBe(1);
+      expect(outcomeLines(sent)).toEqual([]);
+      expect(sent.stderr).toEqual([`[error] Workspace 'parked' (${parked}) is not running. (NOT_FOUND)`]);
+      expect(mailCount()).toBe(before);
+      // The mail it already held is untouched by the refusal.
+      expect(mailWithBody(HELD_WHILE_STOPPED)).toMatchObject({ status: 'held', reason: 'no-live-pty' });
+    });
+
+    it('when the workspace starts, the mail held for its architect is offered to the new terminal', async () => {
+      await start(parked);
+
+      // The inert terminal shows no agent composer, so the gate holds the message for that
+      // reason now: it was offered to a live terminal, and it is still on record, not dropped.
+      let mail = mailWithBody(HELD_WHILE_STOPPED);
+      for (let attempt = 0; attempt < 60 && mail.reason === 'no-live-pty'; attempt++) {
+        await new Promise((r) => setTimeout(r, 500));
+        mail = mailWithBody(HELD_WHILE_STOPPED);
+      }
+      expect(mail).toMatchObject({ workspace_path: parked, to_agent: 'main', status: 'held', reason: 'no-profile' });
+      // And the address that was refused while it was stopped now reaches it.
+      const sent = await afxSend(review(), 'parked:architect', 'For the parked workspace, now running');
+      expect(sent.exitCode).toBeNull();
+      expect(mailWithBody('For the parked workspace, now running')).toMatchObject({ workspace_path: parked, to_agent: 'main' });
+    }, 60_000);
   });
 
   describe('two running workspaces whose directories are both called codev', () => {

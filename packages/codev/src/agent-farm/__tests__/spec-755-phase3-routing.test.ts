@@ -28,6 +28,8 @@ const { mockGetWorkspaceTerminals, mockLookupBuilderSpawningArchitect } = vi.hoi
 
 vi.mock('../servers/tower-terminals.js', () => ({
   getWorkspaceTerminals: () => mockGetWorkspaceTerminals(),
+  // Every terminal on the fake map is open, so a workspace with one is running (Issue #1978).
+  getTerminalManager: () => ({ getSession: () => ({ status: 'running' }) }),
 }));
 
 vi.mock('../state.js', () => ({
