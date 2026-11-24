@@ -18,6 +18,10 @@
 //   decisions  the VS Code Decisions panel (Phase 7): the hierarchy's entries, images, full size,
 //              a link, a ruling and its notice, a stale refusal, hidden-panel polling, themes,
 //              reload restore, the unavailable windows, empty state → init, network audit
+//   work       the VS Code Work panel (Phase 8): every section, the progress bar under the CSP,
+//              Open / + Shell / Refresh / a spec link / issue and PR links, themes and contrast,
+//              both panels beside the Cockpit's Decisions entries, reload restore, network audit,
+//              Tower down and back, the unavailable windows
 //
 // Every result is recorded in --out as { script, results: [{ name, ok, detail, shots }] }. Any
 // browser request to the owner's port fails the run.
@@ -1967,6 +1971,407 @@ SCRIPTS.decisions = async (R, context, page) => {
     if (html.includes(process.env.COCKPIT_TOWER_KEY) || html.includes(`:${towerPort}`)) problems.push('the webview document holds the key or the Tower port');
     if (problems.length) throw new Error(problems.slice(0, 8).join('; '));
     return `${requests.length} browser requests, none to :${towerPort}, none keyed; webview frames: ${JSON.stringify(kinds)}`;
+  });
+};
+
+// ── work ─────────────────────────────────────────────────────────────────────────────────────
+// The VS Code Work panel (Phase 8): spec scenarios 17 (each mapped action), 18 (themes, live
+// switch, contrast), 19 (the unavailable windows; Tower unreachable, then back) and 22 (network
+// audit), plus the increment-2 shot of the Cockpit's Decisions entries beside both panels.
+
+/** The Work panel's document: VS Code nests a webview's page two iframes down. */
+async function workFrame(page, timeout = 60_000) {
+  return waitFor('the Work webview', async () => {
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      if (await frame.locator('.work-view').count().catch(() => 0)) return frame;
+    }
+    return null;
+  }, timeout);
+}
+
+/** Requests the Tower received after request-log line `from` whose path ends with `suffix`. */
+const towerHits = (R, from, method, suffix) => R.towerRequests().slice(from)
+  .filter((r) => r.method === method && (r.url ?? '').split('?')[0].endsWith(suffix));
+
+/**
+ * Run in a panel's frame: the WCAG contrast of every rendered text in `rootSelector`, on what it is
+ * drawn on (its own and its ancestors' backgrounds, composited), lowest first. The same probe as the
+ * Decisions theme check: rgb()/rgba() and color(srgb …) (a color-mix()) are both parsed.
+ * `probes` are [label, className, text]: each is drawn for the measurement inside the view's
+ * content, as the view would draw it, then removed (colours the fixture's data never shows).
+ */
+function textContrasts({ rootSelector, probes }) {
+  const parse = (c) => {
+    const n = (c.match(/-?[\d.]+(?:e-?\d+)?/g) ?? []).map(Number);
+    const k = c.startsWith('color(') ? 255 : 1;
+    return c === 'transparent' ? { r: 0, g: 0, b: 0, a: 0 } : { r: n[0] * k, g: n[1] * k, b: n[2] * k, a: n.length > 3 ? n[3] : 1 };
+  };
+  const over = (top, under) => ({ r: top.a * top.r + (1 - top.a) * under.r, g: top.a * top.g + (1 - top.a) * under.g, b: top.a * top.b + (1 - top.a) * under.b, a: 1 });
+  const backdrop = (el) => {
+    const layers = [];
+    for (let e = el; e; e = e.parentElement) {
+      const bg = parse(getComputedStyle(e).backgroundColor);
+      if (bg.a > 0) layers.push(bg);
+      if (bg.a >= 1) break;
+    }
+    let base = layers.at(-1)?.a >= 1 ? layers.pop() : { r: 255, g: 255, b: 255, a: 1 };
+    for (const layer of layers.reverse()) base = over(layer, base);
+    return base;
+  };
+  const lum = ({ r, g, b }) => {
+    const [R, G, B] = [r, g, b].map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  };
+  const ratio = (fg, bg) => { const [x, y] = [lum(fg), lum(bg)].sort((m, n) => n - m); return Math.round(((x + 0.05) / (y + 0.05)) * 10) / 10; };
+  const textContrast = (el) => { const bg = backdrop(el); return ratio(over(parse(getComputedStyle(el).color), bg), bg); };
+  const root = document.querySelector(rootSelector);
+  const host = document.querySelector('.work-content') ?? root;
+  const probed = probes.map(([label, className, text]) => {
+    const el = document.createElement('span');
+    el.className = className;
+    el.textContent = text;
+    host.appendChild(el);
+    const contrast = textContrast(el);
+    el.remove();
+    return { label, contrast };
+  });
+  const texts = [...root.querySelectorAll('*')]
+    .filter((el) => el.getClientRects().length && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()))
+    .map((el) => {
+      const kind = `${el.tagName.toLowerCase()}${[...el.classList].map((c) => `.${c}`).join('')}`;
+      return { kind, what: `${kind} "${el.textContent.trim().slice(0, 24)}"`, contrast: textContrast(el) };
+    })
+    .sort((a, b) => a.contrast - b.contrast);
+  return {
+    marker: window.__codevMarker ?? null,
+    body: getComputedStyle(document.body).backgroundColor,
+    text: getComputedStyle(document.body).color,
+    editorBg: getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-background').trim(),
+    scanned: texts.length,
+    lowest: texts.slice(0, 3).map(({ what, contrast }) => ({ what, contrast })),
+    under45: [...new Map(texts.filter((t) => t.contrast < 4.5).reverse().map((t) => [t.kind, t.contrast])).entries()].map(([k, c]) => `${c} ${k}`),
+    probed,
+  };
+}
+
+/** Colours the fixture never shows, drawn for the measurement: a PIR dev-approval row's orange, and the spike tag. */
+const WORK_PROBES = [
+  ['implementing orange (attention-kind--dev)', 'attention-kind attention-kind--dev', 'dev review'],
+  ['spike tag', 'backlog-type-tag type-tag--spike', 'spike'],
+];
+
+SCRIPTS.work = async (R, context, page) => {
+  // Issue and PR links point at example.com: answer them here, so no request leaves the machine.
+  await context.route(/^https?:\/\/example\.com\//, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>fixture link</p>' }));
+  // Every request the browser makes, with the frame that made it, for scenario 22.
+  const requests = [];
+  context.on('request', (r) => {
+    let frame = 'other';
+    try {
+      const f = r.frame();
+      frame = f === f.page().mainFrame() ? 'main' : f.url();
+    } catch { /* a service worker's request, or a popup's first navigation */ }
+    requests.push({ url: r.url(), frame, key: Object.keys(r.headers()).some((h) => h.toLowerCase() === 'codev-tower-key') });
+  });
+
+  let frame;
+  const work = () => frame.locator('.work-view');
+  const builderRow = (id) => frame.locator('.builder-row', { has: frame.locator('.builder-col-id', { hasText: new RegExp(`^#${id}\\b`) }) });
+
+  await R.check('scenario 17: Open Work opens one panel; builders, Needs Attention, Backlog and Recently Closed render; no dropped affordance', async () => {
+    // The overview Tower computed when VS Code first opened alpha (before the seed wrote its forge
+    // config) is cached with the forge concepts failed: drop it, and wait for one with every list.
+    const ws = Buffer.from(path.join(R.opts.fixtures, 'alpha')).toString('base64url');
+    await R.tower('POST', `/workspace/${ws}/api/overview/refresh`);
+    await waitFor('alpha\'s overview with its forge lists', async () => {
+      const o = await R.overview('alpha');
+      return !o.errors && o.pendingPRs?.length && o.backlog?.length && o.recentlyClosed?.length;
+    }, 60_000);
+    await loadWorkbench(page, R.folderUrl('alpha'));
+    await runCommand(page, 'Codev: Open Work');
+    await waitFor('the Work editor tab', async () => /^Work/.test(await activeEditorTab(page) ?? ''), 20_000);
+    frame = await workFrame(page);
+    await waitFor('three builder rows and the forge lists', async () => (await frame.locator('.builder-table tbody tr').count()) === 3
+      && (await frame.locator('.backlog-rows .backlog-row').count()) === 2, 60_000);
+    const problems = [];
+    const ids = await frame.locator('.builder-table .builder-col-id').allTextContents();
+    for (const id of ['#101', '#102', '#103']) if (!ids.some((t) => t.startsWith(id))) problems.push(`no builder row ${id}`);
+    if (await frame.locator('.builder-table .builder-row-open').count() !== 3) problems.push('not three Open buttons');
+    const buttons = (await work().locator('button').allTextContents()).map((t) => t.trim());
+    const headings = (await work().locator('h2, h3').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(headings) !== JSON.stringify(['Work', 'Builders', 'Needs Attention', 'Backlog', 'Recently Closed'])) problems.push(`headings ${JSON.stringify(headings)}`);
+    const attention = (await frame.locator('.attention-rows .attention-row').allTextContents()).join(' | ');
+    if (!/#101.*spec review/.test(attention)) problems.push(`Needs Attention lacks #101's spec review: "${attention}"`);
+    if (await frame.locator('a.attention-row', { hasText: '#301' }).getAttribute('href').catch(() => null) !== 'https://example.com/fixture/pull/301') problems.push('Needs Attention lacks PR #301 as a link');
+    const backlog = (await frame.locator('.backlog-rows .backlog-row').allTextContents()).join(' | ');
+    if (!/#401/.test(backlog) || !/#402/.test(backlog) || /#10[123]/.test(backlog)) problems.push(`Backlog is "${backlog}"`);
+    const artifacts = (await frame.locator('.backlog-row', { hasText: '#401' }).locator('.backlog-artifact-link').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(artifacts) !== JSON.stringify(['spec', 'plan'])) problems.push(`#401 offers ${JSON.stringify(artifacts)}`);
+    const closedLinks = (await frame.locator('.recently-closed-row', { hasText: '#399' }).locator('.backlog-artifact-link').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(closedLinks) !== JSON.stringify(['review', 'PR'])) problems.push(`#399 offers ${JSON.stringify(closedLinks)}`);
+    // The dashboard-only pieces are absent: Open Files & Shells, the Files panel, the tip of the day.
+    for (const [what, selector] of [['the Files panel', '.work-file-panel'], ['the tip banner', '.tip-banner'], ['Open Files & Shells', '.open-files-shells, .work-open-files']]) {
+      if (await frame.locator(selector).count()) problems.push(`${what} renders`);
+    }
+    if (/Open Files|Shells/i.test(await work().textContent())) problems.push('an Open Files & Shells section renders');
+    if ((await work().getAttribute('class')).includes('file-panel-open')) problems.push('the view is laid out for a file panel');
+    // Running the command again reveals the same panel.
+    await runCommand(page, 'Codev: Open Work');
+    await page.waitForTimeout(800);
+    const tabs = (await editorTabs(page)).filter((t) => /^Work/.test(t ?? ''));
+    if (tabs.length !== 1) problems.push(`${tabs.length} Work tabs after a second Open Work`);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `builders ${ids.join(', ')}; headings ${headings.join(' / ')}; buttons ${buttons.join(', ')}; one tab after a second Open Work`, shots: [await R.shot(page, 'panel')] };
+  });
+
+  await R.check("scenario 17: a builder's progress bar is drawn at its width under the panel's CSP", async () => {
+    const bars = await frame.locator('.builder-row').evaluateAll((trs) => trs.map((tr) => {
+      const fill = tr.querySelector('.progress-fill');
+      const bar = tr.querySelector('.progress-bar');
+      return {
+        id: tr.querySelector('.builder-col-id')?.textContent?.trim().slice(0, 5),
+        pct: tr.querySelector('.progress-pct')?.textContent?.trim(),
+        inline: fill?.style.width,
+        fill: fill ? Math.round(fill.getBoundingClientRect().width) : null,
+        bar: bar ? Math.round(bar.getBoundingClientRect().width) : null,
+      };
+    }));
+    const problems = bars.filter((b) => b.inline !== b.pct || Math.abs(b.fill - (b.bar * parseFloat(b.pct)) / 100) > 1);
+    if (!bars.length || problems.length) throw new Error(`bars ${JSON.stringify(bars)}`);
+    return bars.map((b) => `${b.id} ${b.pct}: ${b.fill}px of ${b.bar}px`).join('; ');
+  });
+
+  await R.check("scenario 17: Open opens the builder's terminal", async () => {
+    const e = await effects(R, context, page, () => builderRow(102).locator('.builder-row-open').click());
+    if (!e.tabs.some((t) => /102|second-main/.test(t))) throw new Error(`no builder terminal tab: ${describe(e)}`);
+    return { detail: describe(e), shots: [await R.shot(page, 'open-builder')] };
+  });
+
+  // Back to the panel for each action: Open left a terminal in front.
+  const showWork = async () => {
+    await runCommand(page, 'Codev: Open Work');
+    await waitFor('the Work editor in front', async () => /^Work/.test(await activeEditorTab(page) ?? ''), 10_000);
+  };
+
+  await R.check('scenario 17: + Shell opens a Tower shell', async () => {
+    await showWork();
+    const e = await effects(R, context, page, () => work().locator('.work-actions .work-btn', { hasText: '+ Shell' }).click());
+    if (!e.terminals.length) throw new Error(`no shell terminal: ${describe(e)}`);
+    return { detail: describe(e), shots: [await R.shot(page, 'new-shell')] };
+  });
+
+  await R.check("scenario 17: Refresh drops Tower's overview cache, then re-reads the overview", async () => {
+    await showWork();
+    const from = R.towerRequests().length;
+    await work().locator('.work-actions .work-btn', { hasText: 'Refresh' }).click();
+    const post = await waitFor('POST …/api/overview/refresh', async () => towerHits(R, from, 'POST', '/api/overview/refresh')[0] ?? null, 10_000);
+    const reads = await waitFor('a GET of the overview after it', async () => {
+      const after = R.towerRequests().slice(from);
+      const at = after.indexOf(post);
+      const gets = after.slice(at + 1).filter((r) => r.method === 'GET' && (r.url ?? '').split('?')[0].endsWith('/api/overview'));
+      return gets.length ? gets : null;
+    }, 10_000);
+    return `${post.method} ${post.url}, then ${reads.length} GET ${reads[0].url}`;
+  });
+
+  await R.check('scenario 17: a spec link opens the workspace file in an editor', async () => {
+    const e = await effects(R, context, page, () => frame.locator('.backlog-row', { hasText: '#401' }).locator('.backlog-artifact-link', { hasText: 'spec' }).click(), { wait: 3000 });
+    if (!e.tabs.some((t) => /401-fixture-backlog\.md/.test(t))) throw new Error(`no spec tab: ${describe(e)}`);
+    return { detail: describe(e), shots: [await R.shot(page, 'spec-link')] };
+  });
+
+  await R.check('scenario 17: an issue link and a PR link open in the browser, through the extension host', async () => {
+    await showWork();
+    const opened = [];
+    for (const link of [frame.locator('.backlog-row', { hasText: '#402' }).locator('a.backlog-row-main'), frame.locator('a.attention-row', { hasText: '#301' })]) {
+      let asked = null;
+      const url = await nextPopup(R, context, async () => {
+        await link.click();
+        // VS Code asks before opening a domain it does not trust yet.
+        if (await page.locator('.monaco-dialog-box').waitFor({ timeout: 5000 }).then(() => true, () => false)) asked = await dialogButton(page, 'Open');
+      });
+      opened.push(`${url}${asked ? ' (after VS Code\'s prompt)' : ''}`);
+    }
+    if (!/^https:\/\/example\.com\/fixture\/issues\/402\b/.test(opened[0]) || !/^https:\/\/example\.com\/fixture\/pull\/301\b/.test(opened[1])) throw new Error(`opened ${JSON.stringify(opened)}`);
+    // The webview did not follow the link itself: the panel is still the Work view.
+    if (!await frame.locator('.work-view').count()) throw new Error('the Work webview navigated away');
+    return opened.join('; ');
+  });
+
+  await R.check('scenario 18: light, dark and high-contrast themes, switched live with the panel open', async () => {
+    await showWork();
+    await frame.evaluate(() => { window.__codevMarker = 'kept'; });
+    const shots = [];
+    const seen = {};
+    const themes = [['Dark Modern', 'vs-dark'], ['Dark High Contrast', 'hc-black'], ['Light High Contrast', 'hc-light'], ['Light Modern', 'vs']];
+    for (const [theme, cls] of themes) {
+      await setTheme(page, theme);
+      const applied = await page.locator('.monaco-workbench').evaluate((el, c) => el.classList.contains(c), cls);
+      if (!applied) throw new Error(`the workbench is not ${cls} after choosing ${theme}`);
+      await page.waitForTimeout(800);
+      seen[theme] = await frame.evaluate(textContrasts, { rootSelector: '.work-view', probes: WORK_PROBES });
+      shots.push(await R.shot(page, `theme-${cls}`));
+    }
+    const problems = [];
+    for (const [theme, s] of Object.entries(seen)) {
+      if (s.marker !== 'kept') problems.push(`${theme}: the webview reloaded`);
+      if (s.body !== hexToRgb(s.editorBg)) problems.push(`${theme}: body ${s.body} is not the editor background ${s.editorBg}`);
+      // No text in the panel below 3:1, the floor for anything a reader is meant to see.
+      const faint = [...s.lowest, ...s.probed.map((p) => ({ what: p.label, contrast: p.contrast }))].filter((t) => !(t.contrast >= 3));
+      if (faint.length) problems.push(`${theme}: faint text ${JSON.stringify(faint)}`);
+    }
+    const looks = new Set(Object.values(seen).map((s) => `${s.body}|${s.text}`));
+    if (looks.size !== themes.length) problems.push(`only ${looks.size} distinct looks across ${themes.length} themes`);
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${JSON.stringify(seen)}`);
+    return {
+      detail: Object.entries(seen).map(([t, s]) => `${t}: body ${s.body}, text ${s.text}; lowest of ${s.scanned} texts ${s.lowest.map((x) => `${x.contrast} ${x.what}`).join(', ')}; probes ${s.probed.map((p) => `${p.label} ${p.contrast}`).join(', ')}; under 4.5: ${s.under45.join(', ') || 'none'}`).join('; '),
+      shots,
+    };
+  });
+
+  await R.check('increment 2: the Cockpit\'s Decisions entries, with the Work and Decisions panels side by side', async () => {
+    await setTheme(page, 'Dark Modern');
+    const cockpit = await openCockpit(page);
+    await waitRow(cockpit, A_MAIN, 60_000);
+    for (const spec of [ALPHA, BETA, GAMMA]) await setExpanded(cockpit, spec, true);
+    // One group first (the builder terminal may have opened a second): merges, closes nothing.
+    await runCommand(page, 'View: Single Column Editor Layout');
+    await (await waitRow(cockpit, [...ALPHA, 'Decisions'])).loc.click();
+    await waitFor('the Decisions editor tab', async () => /^Decisions/.test(await activeEditorTab(page) ?? ''), 20_000);
+    await decisionsFrame(page);
+    await runCommand(page, 'Codev: Open Work');
+    await waitFor('the Work editor in front', async () => /^Work/.test(await activeEditorTab(page) ?? ''), 10_000);
+    await runCommand(page, 'View: Move Editor into Next Group');
+    await page.waitForTimeout(1500);
+    // Each group's active tab, left to right.
+    const groups = await page.locator('.editor-group-container').evaluateAll((els) => els.map((g) => g.querySelector('.tabs-container .tab.active')?.getAttribute('aria-label') ?? null));
+    if (groups.length !== 2 || !/^Decisions/.test(groups[0] ?? '') || !/^Work/.test(groups[1] ?? '')) throw new Error(`active tabs by group ${JSON.stringify(groups)}`);
+    frame = await workFrame(page);
+    // In a half-width group the view fits: nothing scrolls sideways, each Open is whole, and no
+    // backlog or recently-closed label runs into the links after it.
+    const fit = await frame.evaluate(() => {
+      const content = document.querySelector('.work-content');
+      const right = content.getBoundingClientRect().right;
+      const opens = [...document.querySelectorAll('.builder-row-open')].map((b) => Math.round(b.getBoundingClientRect().right));
+      const overlaps = [...document.querySelectorAll('.backlog-row, .recently-closed-row')].flatMap((row) => {
+        const main = row.querySelector('.backlog-row-main, .recently-closed-row-main');
+        const links = row.querySelector('.backlog-artifacts');
+        if (!main || !links) return [];
+        const drawn = [...main.children].filter((c) => c.getClientRects().length).map((c) => c.getBoundingClientRect().right);
+        const last = Math.min(Math.max(...drawn), main.getBoundingClientRect().right);
+        return last > links.getBoundingClientRect().left + 0.5 ? [row.textContent.trim().slice(0, 30)] : [];
+      });
+      return {
+        width: Math.round(content.clientWidth),
+        sideways: content.scrollWidth - content.clientWidth,
+        opens, right: Math.round(right),
+        hidden: ['.builder-col-elapsed', '.builder-col-progress', '.backlog-row-author'].filter((sel) => {
+          const el = document.querySelector(sel);
+          return el && getComputedStyle(el).display === 'none';
+        }),
+        overlaps,
+      };
+    });
+    if (fit.sideways > 0 || fit.opens.length !== 3 || fit.opens.some((r) => r > fit.right) || fit.overlaps.length) throw new Error(`the half-width Work view does not fit: ${JSON.stringify(fit)}`);
+    const shots = [await R.shot(page, 'both-panels-dark')];
+    await setTheme(page, 'Light Modern');
+    shots.push(await R.shot(page, 'both-panels-light'));
+    return { detail: `active tabs by group ${JSON.stringify(groups)}; alpha, beta and gamma expanded to their Decisions entries; Work at ${fit.width} px: no sideways scroll, Open buttons end by ${Math.max(...fit.opens)} of ${fit.right}, hidden ${fit.hidden.join(', ') || 'nothing'}, no label overlaps`, shots };
+  });
+
+  await R.check('the panel is restored after a window reload', async () => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+    frame = await workFrame(page, 120_000);
+    await waitFor('the restored panel\'s builder rows', async () => (await frame.locator('.builder-table tbody tr').count()) === 3, 60_000);
+    const tabs = (await editorTabs(page)).filter((t) => /^Work/.test(t ?? ''));
+    if (tabs.length !== 1) throw new Error(`${tabs.length} Work tabs after the reload`);
+    return { detail: 'one Work tab, its builder rows rendered', shots: [await R.shot(page, 'restored')] };
+  });
+
+  await R.check('scenario 22: the webview never contacts Tower; the key is in no request', async () => {
+    const towerPort = R.opts['tower-port'];
+    const problems = [];
+    const toTower = requests.filter((r) => URL.canParse(r.url) && new URL(r.url).port === towerPort);
+    if (toTower.length) problems.push(`${toTower.length} browser request(s) to the Tower port: ${toTower.slice(0, 3).map((r) => r.url).join(', ')}`);
+    const keyed = requests.filter((r) => r.key);
+    if (keyed.length) problems.push(`${keyed.length} request(s) carry the key header`);
+    const webview = requests.filter((r) => /\/webview\/browser\/pre\//.test(r.frame));
+    const kinds = {};
+    for (const r of webview) {
+      const origin = URL.canParse(r.frame) ? new URL(r.frame).origin : '';
+      const kind = /^(blob|data):/.test(r.url) ? 'blob/data'
+        : URL.canParse(r.url) && /\.vscode-resource\./.test(new URL(r.url).hostname) ? 'extension resource'
+          : URL.canParse(r.url) && new URL(r.url).origin === origin ? "VS Code's webview host page"
+            : null;
+      if (!kind) problems.push(`unexpected webview request ${r.url}`);
+      else kinds[kind] = (kinds[kind] ?? 0) + 1;
+    }
+    if (!kinds['extension resource']) problems.push('the audit saw no extension resource load from a webview (is it attributing frames?)');
+    const html = await frame.content();
+    if (html.includes(process.env.COCKPIT_TOWER_KEY) || html.includes(`:${towerPort}`)) problems.push('the webview document holds the key or the Tower port');
+    if (problems.length) throw new Error(problems.slice(0, 8).join('; '));
+    return `${requests.length} browser requests, none to :${towerPort}, none keyed; webview frames: ${JSON.stringify(kinds)}`;
+  });
+
+  await R.check('scenario 19: Tower unreachable — both panels keep their content under a not-connected notice, no error toast, and recover', async () => {
+    await closeNotifications(page);
+    // Decisions is open beside Work (restored with it after the reload), on screen, so it polls.
+    const dframe = await decisionsFrame(page);
+    const cards = await dframe.locator('.decisions-card').count();
+    const dAlert = dframe.locator('.decisions-content > .decisions-error[role="alert"]');
+    const notice = work().locator('.work-error');
+    R.harness('tower-down');
+    await waitFor('the not-connected notice', async () => /Not connected to Tower/.test(await notice.textContent().catch(() => '') ?? ''), 60_000);
+    await waitFor('Decisions\' not-connected notice', async () => /Not connected to Tower/.test(await dAlert.textContent().catch(() => '') ?? ''), 20_000);
+    const kept = await frame.locator('.builder-table tbody tr').count();
+    const keptCards = await dframe.locator('.decisions-card').count();
+    const text = (await notice.textContent()).trim();
+    const dText = (await dAlert.textContent()).trim();
+    const downShot = await R.shot(page, 'tower-down');
+    const toasts = (await notifications(page)).filter((n) => /overview|work|error|failed/i.test(n));
+    R.harness('tower-up');
+    let reconnected = 'by itself';
+    try {
+      await waitFor('the notice to clear', async () => (await notice.count()) === 0, 60_000);
+    } catch {
+      await runCommand(page, 'Codev: Reconnect');
+      reconnected = 'after Codev: Reconnect';
+      await waitFor('the notice to clear', async () => (await notice.count()) === 0, 60_000);
+    }
+    // A restarted Tower does not keep the fixture's sessions (see the README), so the overview it
+    // serves now has its own builder count: the panel shows that one, under no notice.
+    const now = (await R.overview('alpha')).builders?.length ?? 0;
+    await waitFor(`the panel to show Tower's ${now} builder(s)`, async () => (now === 0
+      ? (await frame.locator('.work-empty', { hasText: 'No active builders' }).count()) === 1
+      : (await frame.locator('.builder-table tbody tr').count()) === now), 30_000);
+    await waitFor('Decisions\' notice to clear', async () => (await dAlert.count()) === 0, 30_000);
+    const cardsAfter = await dframe.locator('.decisions-card').count();
+    if (kept !== 3) throw new Error(`${kept} builder rows kept while down`);
+    if (!cards || keptCards !== cards || cardsAfter !== cards) throw new Error(`decision cards: ${cards} before, ${keptCards} while down, ${cardsAfter} after`);
+    if (toasts.length) throw new Error(`error toasts while down: ${JSON.stringify(toasts)}`);
+    return {
+      detail: `Work: "${text}" over ${kept} kept rows; Decisions: "${dText}" over ${keptCards} kept cards; no toast; recovered ${reconnected}: Work shows the restarted Tower's overview (${now} builders), Decisions its ${cardsAfter} cards under no notice`,
+      shots: [downShot, await R.shot(page, 'tower-back')],
+    };
+  });
+
+  await R.check('scenario 19: in a builder-worktree window, Open Work explains', async () => {
+    const wt = fs.readdirSync(path.join(R.opts.fixtures, 'alpha', '.builders')).find((d) => d.includes('101'));
+    await loadWorkbench(page, R.folderUrl('alpha', '.builders', wt));
+    await runCommand(page, 'Codev: Open Work');
+    const note = await waitForNotification(page, /Work is not offered in a builder-worktree window/);
+    if ((await editorTabs(page)).some((t) => /^Work/.test(t ?? ''))) throw new Error('a Work panel opened in the worktree window');
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'worktree-explains')] };
+  });
+
+  await R.check('scenario 19: in a no-workspace window, Open Work explains', async () => {
+    await loadWorkbench(page, R.url('ew=true'), { needCodev: false });
+    await page.waitForTimeout(3000);
+    await runCommand(page, 'Codev: Open Work');
+    const note = await waitForNotification(page, /Work needs a Codev workspace/);
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'no-workspace-explains')] };
   });
 };
 

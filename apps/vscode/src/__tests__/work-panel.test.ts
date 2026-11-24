@@ -377,11 +377,14 @@ describe('artifact links open a workspace file, and nothing outside it', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
+  // These resolve real paths (fs.promises.realpath, on libuv's thread pool), so they wait for the
+  // outcome: one turn of the event loop is not always enough under a loaded full-suite run.
+
   it('opens a spec by its workspace-relative path, at its canonical location', async () => {
     const { manager, actions } = setup({ root });
     manager.show();
     await panels[0].send({ type: 'work/open-artifact', path: 'codev/specs/1963-cockpit.md' });
-    expect(actions.openFile).toHaveBeenCalledWith(join(root, 'codev', 'specs', '1963-cockpit.md'));
+    await vi.waitFor(() => expect(actions.openFile).toHaveBeenCalledWith(join(root, 'codev', 'specs', '1963-cockpit.md')));
     expect(actions.warn).not.toHaveBeenCalled();
   });
 
@@ -394,16 +397,16 @@ describe('artifact links open a workspace file, and nothing outside it', () => {
     const { manager, actions } = setup({ root });
     manager.show();
     await panels[0].send({ type: 'work/open-artifact', path });
+    await vi.waitFor(() => expect(actions.warn).toHaveBeenCalledWith(`Codev: ${path} was not opened: it is outside this workspace.`));
     expect(actions.openFile).not.toHaveBeenCalled();
-    expect(actions.warn).toHaveBeenCalledWith(`Codev: ${path} was not opened: it is outside this workspace.`);
   });
 
   it('says a missing file was not found', async () => {
     const { manager, actions } = setup({ root });
     manager.show();
     await panels[0].send({ type: 'work/open-artifact', path: 'codev/specs/gone.md' });
+    await vi.waitFor(() => expect(actions.warn).toHaveBeenCalledWith('Codev: codev/specs/gone.md was not found in this workspace.'));
     expect(actions.openFile).not.toHaveBeenCalled();
-    expect(actions.warn).toHaveBeenCalledWith('Codev: codev/specs/gone.md was not found in this workspace.');
   });
 });
 

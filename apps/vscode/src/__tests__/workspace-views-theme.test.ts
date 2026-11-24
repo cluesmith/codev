@@ -78,6 +78,10 @@ describe('vscode-theme.css', () => {
     const map = mappings();
     expect(map.get('--codev-wv-status-waiting')).toMatch(/^var\(--vscode-list-warningForeground,/);
     expect(map.get('--codev-wv-status-error')).toMatch(/^var\(--vscode-list-errorForeground,/);
+    // Implementing sits between them, mixed from the two: the chart orange measured 2.9:1 as text
+    // on Light Modern's white, rendered.
+    expect(map.get('--codev-wv-status-implementing'))
+      .toBe('color-mix(in srgb, var(--codev-wv-status-error) 50%, var(--codev-wv-status-waiting))');
   });
 
   it('uses no literal colour of its own anywhere', () => {

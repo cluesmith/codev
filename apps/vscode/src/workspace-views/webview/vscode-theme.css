@@ -44,7 +44,10 @@
   --codev-wv-status-active: var(--vscode-charts-green);
   --codev-wv-status-waiting: var(--vscode-list-warningForeground, var(--vscode-charts-yellow));
   --codev-wv-status-error: var(--vscode-list-errorForeground, var(--vscode-errorForeground));
-  --codev-wv-status-implementing: var(--vscode-charts-orange);
+  /* Implementing (a dev-approval row) is orange between the error red and the waiting yellow, the
+     dashboard's red → orange → yellow gate progression. It is mixed from those two text colours, so
+     it reads as text where they do: Light Modern's chart orange measured 2.9:1 on white, rendered. */
+  --codev-wv-status-implementing: color-mix(in srgb, var(--codev-wv-status-error) 50%, var(--codev-wv-status-waiting));
   --codev-wv-status-waiting-tint: color-mix(in srgb, var(--codev-wv-status-waiting) 10%, transparent);
   --codev-wv-status-error-tint: color-mix(in srgb, var(--codev-wv-status-error) 10%, transparent);
   --codev-wv-tag-bug-bg: color-mix(in srgb, var(--codev-wv-status-error) 15%, transparent);
@@ -133,4 +136,43 @@ summary:focus-visible {
 .wv-fullsize-body img {
   max-width: none;
   max-height: none;
+}
+
+/*
+ * Narrow panels. The dashboard's Work view fills a browser page; in VS Code it is often a
+ * half-width editor group, beside Decisions. There the builders table's fixed columns overran the
+ * panel, cutting off each row's Open button, and a backlog row's reviewer and assignee labels ran
+ * over its spec / plan links (found rendered at about 470 px). These rules are VS
+ * Code's own, so the dashboard keeps its layout: as the panel narrows, the secondary columns and
+ * labels go first, and the issue, title, state and Open always fit.
+ */
+.work-view {
+  container: work-view / inline-size;
+}
+
+@container work-view (max-width: 760px) {
+  .builder-table thead th:nth-child(5),
+  .builder-col-elapsed,
+  .backlog-row-author,
+  .backlog-row-assignees {
+    display: none;
+  }
+}
+
+@container work-view (max-width: 600px) {
+  .builder-table thead th:nth-child(4),
+  .builder-col-progress {
+    display: none;
+  }
+
+  .builder-col-state {
+    width: auto;
+    white-space: normal;
+  }
+}
+
+/* Whatever is left in a backlog or recently-closed row clips at its edge, never overlaps the links after it. */
+.backlog-row-main,
+.recently-closed-row-main {
+  overflow: hidden;
 }
