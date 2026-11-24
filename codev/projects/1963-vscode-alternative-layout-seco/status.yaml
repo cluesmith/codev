@@ -11,23 +11,13 @@ gates:
     approved_at: '2026-11-24T05:59:40.990Z'
   plan-approval:
     status: pending
+    requested_at: '2026-11-24T06:16:46.617Z'
   pr:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
-history:
-  - iteration: 1
-    build_output: ''
-    reviews:
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-plan-iter1-codex.txt
-      - model: claude
-        verdict: COMMENT
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-plan-iter1-claude.txt
+iteration: 1
+build_complete: false
+history: []
 started_at: '2026-11-24T01:12:47.024Z'
-updated_at: '2026-11-24T06:11:36.225Z'
+updated_at: '2026-11-24T06:16:46.617Z'
