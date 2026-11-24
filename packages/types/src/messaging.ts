@@ -20,3 +20,82 @@ export const VSCODE_USER_SENDER = 'vscode-user';
  * never framed as a builder's message.
  */
 export const DECISIONS_TAB_SENDER = 'decisions-tab';
+
+/**
+ * A message address in structured form (Spec 1940). This is the wire contract: an address
+ * crosses a process boundary as this object, never as text. The text forms
+ * (`codev-cloud:architect:tunnel`, `afx://sam@studio/codev:architect:data`) are for people
+ * and agents, and are read and written only by the one parser and formatter in
+ * `@cluesmith/codev-sdk/address`.
+ *
+ * Every component is lower-case. A part that is absent means "the same as the reader's":
+ * no `owner` is the reader's own account, no `tower` is the reader's own Tower, no
+ * `workspace` is the reader's own workspace.
+ *
+ * - `kind: 'architect'` with no `name` is the bare `architect` form: from a builder in the
+ *   same workspace it means that builder's spawning architect, and from anyone else the
+ *   workspace's front door (`main`, else the first registered).
+ * - `kind: 'architect'` with a `name` is that named architect.
+ * - `kind: 'id'` always has a `name`: a builder id (or a tail of one, such as `1940`) or a
+ *   shell id, resolved inside the workspace. The type requires it; an object read off the
+ *   wire is still checked where it is used.
+ */
+export type AgentAddress = AddressLocation & AddressAgent;
+
+/** Where the agent is: the parts of an address before the agent. */
+export interface AddressLocation {
+  /** The account handle of the Tower's owner. Present only for another owner's Tower. */
+  owner?: string;
+  /** The Tower's name. Present only when the address leaves the reader's Tower. */
+  tower?: string;
+  /** The workspace's address name. Absent means the reader's workspace. */
+  workspace?: string;
+}
+
+/** Which agent: an architect, by name or not, or a builder or shell by its id. */
+export type AddressAgent =
+  | { kind: 'architect'; /** The architect's name. Absent is the bare `architect` form. */ name?: string }
+  | { kind: 'id'; /** The builder id (or a tail of one) or the shell id. */ name: string };
+
+/**
+ * Where an address is being read from: what the reader may leave out when writing it, and
+ * so what a formatter may leave out when printing it for that reader. A Tower that has
+ * never connected to Codev Cloud has no `tower` and no `owner`.
+ */
+export interface AddressReader {
+  owner?: string;
+  tower?: string;
+  workspace?: string;
+}
+
+/** Why a piece of text is not an address. One code per shape the parser refuses. */
+export type AddressParseErrorCode =
+  | 'EMPTY_ADDRESS'
+  | 'ADDRESS_TOO_LONG'
+  | 'EMPTY_COMPONENT'
+  | 'TOO_MANY_BEFORE_ARCHITECT'
+  | 'TOO_MANY_AFTER_ARCHITECT'
+  | 'TOO_MANY_COMPONENTS'
+  | 'INVALID_COMPONENT'
+  | 'RESERVED_WORKSPACE'
+  | 'REMOTE_BAD_SCHEME'
+  | 'REMOTE_NO_WORKSPACE'
+  | 'REMOTE_BAD_AUTHORITY'
+  | 'REMOTE_PORT'
+  | 'REMOTE_QUERY'
+  | 'REMOTE_FRAGMENT'
+  | 'REMOTE_PERCENT_ENCODING'
+  | 'REMOTE_EXTRA_PATH';
+
+/** A refused address: the reason, in words a sender can act on, and the shape expected. */
+export interface AddressParseError {
+  code: AddressParseErrorCode;
+  /** What is wrong with the text that was given. */
+  message: string;
+  /** The shape an address of this tier must have. */
+  expected: string;
+}
+
+export type AddressParseResult =
+  | { ok: true; address: AgentAddress }
+  | { ok: false; error: AddressParseError };

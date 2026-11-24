@@ -26,7 +26,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /** Current migration version — bump when adding new migrations. */
-export const GLOBAL_CURRENT_VERSION = 19;
+export const GLOBAL_CURRENT_VERSION = 20;
 
 export interface GlobalMigrationOptions {
   /**
@@ -591,5 +591,31 @@ export function runGlobalMigrations(
     }
     db.prepare('INSERT INTO _migrations (version) VALUES (19)').run();
     log('[info] Added shellper_session_id and shellper_secret columns to terminal_sessions (Spec 1658)');
+  }
+
+  // Migration v20: Add address_name to known_workspaces (Spec 1940).
+  // A workspace can be given an explicit address name, the remedy for two workspaces that
+  // share a directory basename. Nullable: a workspace with no explicit name is addressed by
+  // its basename, which is every row that exists before this migration. Stored lower-cased.
+  // The naming rules are enforced in utils/workspace-address.ts; the partial unique index is
+  // a backstop against a second writer, not the rule. Same PRAGMA-gated ADD COLUMN shape as
+  // v16-v19.
+  const v20 = db.prepare('SELECT version FROM _migrations WHERE version = 20').get();
+  if (!v20) {
+    const columns = (db.prepare(`PRAGMA table_info(known_workspaces)`).all() as Array<{ name: string }>)
+      .map((c) => c.name);
+    // An empty column list means there is no known_workspaces table to extend (a
+    // partial database, such as the per-migration test harness builds).
+    if (columns.length > 0) {
+      if (!columns.includes('address_name')) {
+        db.exec(`ALTER TABLE known_workspaces ADD COLUMN address_name TEXT`);
+      }
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_known_workspaces_address_name
+           ON known_workspaces(address_name) WHERE address_name IS NOT NULL`
+      );
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (20)').run();
+    log('[info] Added address_name column to known_workspaces (Spec 1940 explicit workspace names)');
   }
 }

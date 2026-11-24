@@ -121,20 +121,28 @@ For complete reference, see `codev/resources/commands/`:
 
 ## Inter-agent messaging
 
-Agents within a workspace communicate through `afx send`. Four addressing forms are supported:
+Agents communicate through `afx send`, within a workspace and between the workspaces on one Tower. These addressing forms are supported:
 
 | Form | Meaning | Allowed from |
 |---|---|---|
 | `afx send <builder-id> "msg"` | Send to a specific builder (e.g. `afx send spir-42 "..."`; a bare `42` also resolves when only one builder ends in it). | Any sender. |
 | `afx send architect "msg"` | From a builder: routes to the spawning architect via affinity. From an architect (or any non-builder sender): routes to the architect named `main` if present, else the first registered architect. | Any sender. |
 | `afx send architect:<name> "msg"` | Explicit per-architect addressing. **Architects (including `main`)**: open address grammar — any architect can address any other architect (sibling-architect messaging). **Builders**: allowed ONLY when `<name>` matches the builder's own spawning architect; mismatches are rejected by Tower's spoofing check. From a builder, this is an explicit form of the affinity routing, NOT an override. | Any sender (with the spoofing constraint above for builders). |
-| `afx send <workspace>:architect "msg"` | Cross-workspace addressing (e.g. `afx send marketmaker:architect "..."`). | Any sender. |
+| `afx send <workspace>:architect "msg"` | Another workspace's **front door** (e.g. `afx send marketmaker:architect "..."`): its architect named `main` if present, else the first registered architect. | Any sender, builders included. |
+| `afx send <workspace>:architect:<name> "msg"` | A named architect in another workspace on this Tower (e.g. `afx send marketmaker:architect:review "..."`). If no architect of that name is registered there the send fails, listing the workspace's architects and its front door; it is never rerouted. | Architects and humans. A **builder is refused**, with the workspace's front door named in the error. |
+| `afx send <workspace>:<builder-id> "msg"` | A builder in another workspace. | Any sender. |
 
 **Send outcomes (delivered vs held)**: `afx send` reports the real first outcome. **delivered** means the message was written to the recipient's prompt after a clean render-gate pass; **held** means the prompt wasn't clear, so the message was persisted in Tower's durable mailbox and delivers automatically once the prompt is clean — with a why-held reason (`busy`, `no-profile`, or `no-live-pty`) and a mailbox id. A held message is never force-injected onto a busy line, so it can't corrupt a draft the gate can see, and held rows survive a Tower restart. (The gate reads the composer off the rendered screen and counts input through `PtySession.write()`; `afx attach` writes the shellper socket directly, so a draft typed there is seen only once the app echoes it.) List held messages with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`; `afx send --interrupt` is the explicit bypass.
 
 **Sibling-architect messaging**: when a workspace hosts more than one architect (added via `afx workspace add-architect --name <name>`), sibling architects message each other via the `architect:<name>` form. Example: `main` running `afx send architect:ob-refine "PR-iter-2 feedback ready"` lands on the `ob-refine` architect's terminal. This works because sender = architect bypasses the spoofing check.
 
-**Builder spoofing-check**: a builder may only address its own spawning architect via `architect:<name>`. The spoofing check is enforced by Tower's message router; attempts to address a different architect from a builder are rejected.
+**Builder rule**: a builder may name only its own spawning architect, as `architect:<name>` or `<own workspace>:architect:<name>`. Tower's message router enforces it: another architect in the builder's workspace is rejected by the spoofing check, and a named architect in another workspace is refused with the address to use instead, that workspace's front door (`<workspace>:architect`).
+
+**Finding an address**: `afx workspace list` prints every workspace on this Tower with its architects, builders and shells, each as an address ready to paste into `afx send`, and marks what the caller may send to (an agent a builder may not name is shown with the address to `reach through`). Do not guess a workspace's name. `afx whoami` prints the caller's own address.
+
+**Workspace names**: `<workspace>` is the workspace's directory name, lower-cased, unless it has been given an explicit name with `afx workspace name <name>` (`--clear` removes it). Two running workspaces that share a directory name cannot be addressed by it: the send fails listing both, and naming one of them is the remedy.
+
+**Replying across workspaces**: a message from another workspace names its sender by full address in the header (`ARCHITECT codev:architect:review`), and its last line carries the command that answers it (`reply: afx send codev:architect:review "…"`). Run that command as printed. A builder written to by an architect in another workspace is shown that workspace's front door when the front door reaches that architect, and otherwise `reply through your architect`. A sender whose workspace has no usable name is shown with `no reply address` and the naming command its workspace needs.
 
 **Discovering active agents**:
 

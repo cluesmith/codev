@@ -212,6 +212,25 @@ describe('afx interrupt (Spec 1273)', () => {
     expect(mockSendMessage).not.toHaveBeenCalled();
   });
 
+  // Spec 1940: an interrupt acts on a terminal of this machine. An afx:// address is
+  // refused here, before Tower is even asked whether it is running.
+  it('refuses an afx:// address before calling Tower', async () => {
+    const { interrupt } = await import('../commands/interrupt.js');
+
+    await expect(interrupt({ builder: 'afx://devvm/codev:builder-spir-1273' }))
+      .rejects.toThrow(/afx interrupt takes a local address\. Cross-Tower messaging is not available/);
+    expect(mockIsRunning).not.toHaveBeenCalled();
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('leaves a malformed afx:// address for Tower to refuse as malformed', async () => {
+    const { interrupt } = await import('../commands/interrupt.js');
+
+    await interrupt({ builder: 'afx://devvm' });
+
+    expect(mockSendMessage.mock.calls[0][0]).toBe('afx://devvm');
+  });
+
   it('aborts when Tower is not running', async () => {
     mockIsRunning.mockResolvedValue(false);
     const { interrupt } = await import('../commands/interrupt.js');
