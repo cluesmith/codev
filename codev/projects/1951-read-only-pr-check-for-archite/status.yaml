@@ -65,8 +65,20 @@ history:
         verdict: REQUEST_CHANGES
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter2-claude.txt
+  - iteration: 3
+    plan_phase: readonly_core
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter3-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-24T00:04:04.559Z'
+updated_at: '2026-11-24T00:24:36.768Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
@@ -74,3 +86,9 @@ context_refreshes:
   - boundary: plan-phase:readonly_core
     at: '2026-11-23T22:50:05.115Z'
     acknowledged_at: '2026-11-23T22:50:10.516Z'
+force_advanced:
+  phase: readonly_core
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1951-readonly_core-iter3-rebuttals.md
+  at: '2026-11-24T00:24:36.768Z'
