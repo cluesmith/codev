@@ -27,7 +27,6 @@
 import '../lib/process-bootstrap.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { DEFER_PTY_DEADLINE_MS, ShellperProcess, type IShellperPty, type PtyOptions, type ShellperAuth } from './shellper-process.js';
 import { SHELLPER_SECRET_ENV, isPipeEndpoint, removeStaleEndpoint } from './shellper-endpoint.js';
 import { REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
@@ -35,10 +34,8 @@ import { isWindows } from '../lib/platform.js';
 import { ptyCommand } from '../lib/pty-command.js';
 import { withNativeLoadExplanation } from '../lib/native-deps.js';
 import { killSessionTree } from '../lib/process-tree.js';
+import { loadNodePty } from './node-pty-loader.js';
 
-// createRequire enables importing native/CJS modules (like node-pty) from ESM.
-// The package uses "type": "module", so bare `require()` is not available.
-const require = createRequire(import.meta.url);
 
 /** EPIPE-safe stderr logger with ISO timestamp. Silently ignores broken pipe errors. */
 function logStderr(message: string): void {
@@ -96,10 +93,8 @@ function createRealPty(): IShellperPty {
 
   return {
     spawn(command: string, args: string[], options: PtyOptions): void {
-      // Load node-pty at spawn time via createRequire (defined at module level).
-      // node-pty is a native CJS module; createRequire handles ESM→CJS interop.
-      // A binding that cannot load on Windows surfaces with the supported-versions message (Spec 1658).
-      const nodePty = withNativeLoadExplanation(() => require('node-pty') as typeof import('node-pty'));
+      // Load node-pty at spawn time through the one node-pty loader (see node-pty-loader.ts).
+      const nodePty = loadNodePty();
       ptyModule = nodePty;
       // A resize that landed before this spawn wins over the spawn options — it is the more
       // recent statement of the caller's intent (Issue #1482).

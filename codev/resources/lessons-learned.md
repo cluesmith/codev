@@ -775,5 +775,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 - [From #1658] Reproduce a hang against the release that was current when it was reported before hunting a mechanism. The 2026-09-09 `afx tower start` hang did not reproduce on that release or the next, and the leading theory was ruled out by direct test. The hunt still paid off: `afx tower stop` printed "not running" and exited 0 on Windows while Tower stayed alive (its `lsof` lookup fails under `cmd.exe`). A command that exits 0 having done nothing is the failure to look for.
 
+- [From #1944] **Load a native CommonJS module (node-pty) with `createRequire`, never a dynamic `import()`.** On Node 22.17+ in the pnpm workspace, Tower's `import('node-pty')` after a workspace activation resolved through the package's pnpm symlink, so node-pty was loaded a second time and `import()` returned that copy's empty bindings (`spawn` undefined, a 500 from `POST /api/terminals`). Node 22.16 and CI on Node 20 never showed it; a published install has no symlinks. All loads now go through `terminal/node-pty-loader.ts`, and tests mock that module rather than `node-pty`.
+
 *Last updated: 2026-04-17 (Maintenance run 0007 — v3.0.0 pre-release)*
 *Source: codev/reviews/*

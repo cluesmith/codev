@@ -12,7 +12,7 @@ import path from 'node:path';
 const CONPTY_LOAD_ERROR = 'Failed to load native module: conpty.node, checked: build/Release, build/Debug, prebuilds/win32-x64/: Error: The specified module could not be found.';
 
 const spawnImpl = vi.hoisted(() => ({ fn: (): unknown => { throw new Error('unset'); } }));
-vi.mock('node-pty', () => ({ spawn: () => spawnImpl.fn() }));
+vi.mock('../node-pty-loader.js', () => ({ loadNodePty: () => ({ spawn: () => spawnImpl.fn() }) }));
 vi.mock('../../lib/pty-command.js', () => ({
   ptyCommand: (file: string, args: string[]) => ({ file, args }),
 }));
