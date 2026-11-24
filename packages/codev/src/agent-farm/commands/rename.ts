@@ -40,8 +40,10 @@ export async function rename(options: RenameOptions): Promise<void> {
     fatal('Cannot rename builder/architect terminals');
   } else if (result.status === 404) {
     fatal('Session not found — it may have been closed');
-  } else if (result.status === 0) {
+  } else if (result.connectionRefused) {
     fatal('Tower is not running');
+  } else if (result.status === 0) {
+    fatal(`Tower did not answer (${result.error}); it appears to be up, retry`);
   } else {
     fatal(result.error || 'Rename failed');
   }

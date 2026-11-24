@@ -22,6 +22,7 @@ import { matchBuilderRow, parseBuilderWorktreePath, type BuilderWorktreeRow } fr
 import { BUILDER_WORKTREE_ENV } from '../../lib/agent-env.js';
 import { hostPaths } from '../../lib/platform/host-paths.js';
 import { TowerClient } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
@@ -501,10 +502,13 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
   // it may be retried.
   const client = new TowerClient();
   const retry = retryBudget(options.retry ?? 0);
-  while (!(await client.isRunning())) {
-    if (!(await retry('Tower is not running; nothing has been sent.'))) {
-      fatal('Tower is not running. Start it with: afx tower start');
+  let tower = await checkTower(client);
+  while (tower.state !== 'running') {
+    const why = tower.state === 'not-running' ? 'Tower is not running' : `Tower did not answer /health (${tower.error})`;
+    if (!(await retry(`${why}; nothing has been sent.`))) {
+      fatal(tower.message);
     }
+    tower = await checkTower(client);
   }
 
   if (options.all) {

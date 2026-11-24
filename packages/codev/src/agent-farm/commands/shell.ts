@@ -38,8 +38,9 @@ async function tryTowerApi(
     return { ok: true, connectionRefused: false };
   }
 
-  // status=0 means the request never reached the server (ECONNREFUSED, timeout, etc.)
-  const connectionRefused = result.status === 0;
+  // Only a refused connection means nothing is listening. A timeout (status 0 too) comes from a
+  // Tower that accepted the connection, so it is reported as an error, not "not running" (#1901).
+  const connectionRefused = result.connectionRefused === true;
   return { ok: false, connectionRefused, error: result.error };
 }
 

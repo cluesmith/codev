@@ -10,6 +10,7 @@ import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { openBrowser } from '../utils/shell.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
 import { towerStart } from './tower.js';
 
 /**
@@ -30,8 +31,13 @@ export async function start(options: StartOptions = {}): Promise<void> {
   // Create tower client
   const client = getTowerClient();
 
-  // Check if tower is running
-  const towerRunning = await client.isRunning();
+  // Check if tower is running. Only a refused connection means "start one": a Tower that
+  // accepted the connection but did not answer is left alone, never replaced (#1901).
+  const tower = await checkTower(client);
+  if (tower.state === 'unresponsive') {
+    fatal(tower.message);
+  }
+  const towerRunning = tower.state === 'running';
 
   if (!towerRunning) {
     logger.info('Starting tower daemon...');

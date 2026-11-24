@@ -22,6 +22,7 @@
 import type { InterruptOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { TowerClient } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
 import { detectWorkspaceRoot, detectCurrentBuilderId, architectSenderId } from './send.js';
 
 export async function interrupt(options: InterruptOptions): Promise<void> {
@@ -46,8 +47,9 @@ export async function interrupt(options: InterruptOptions): Promise<void> {
   }
 
   const client = new TowerClient();
-  if (!(await client.isRunning())) {
-    fatal('Tower is not running. Start it with: afx tower start');
+  const tower = await checkTower(client);
+  if (tower.state !== 'running') {
+    fatal(tower.message);
   }
 
   try {

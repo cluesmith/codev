@@ -20,6 +20,7 @@
 
 import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { TowerClient } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
 import { logger, fatal } from '../utils/logger.js';
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
@@ -109,8 +110,9 @@ export async function refresh(options: ResetOptions): Promise<void> {
   }
 
   const client = new TowerClient();
-  if (!(await client.isRunning())) {
-    fatal('Tower is not running. Start it with: afx tower start');
+  const tower = await checkTower(client);
+  if (tower.state !== 'running') {
+    fatal(tower.message);
   }
 
   const addendum = buildAddendum(options);

@@ -6,9 +6,10 @@
  */
 
 import { loadState, clearRuntime, getArchitects } from '../state.js';
-import { logger } from '../utils/logger.js';
+import { logger, fatal } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { getTowerClient } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
 
 /**
  * Stop all agent farm processes
@@ -24,7 +25,13 @@ export async function stop(): Promise<void> {
 
   // Try tower API first (Phase 3 - Spec 0090)
   const client = getTowerClient();
-  const towerRunning = await client.isRunning();
+  // An unresponsive Tower is not a stopped one: the legacy path below would clear the
+  // runtime state of builders that are still running (#1901).
+  const tower = await checkTower(client);
+  if (tower.state === 'unresponsive') {
+    fatal(tower.message);
+  }
+  const towerRunning = tower.state === 'running';
 
   if (towerRunning) {
     logger.info('Deactivating workspace via tower...');

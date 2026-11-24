@@ -8,6 +8,7 @@ import { loadState } from '../state.js';
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { getTowerClient } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
 import { getTypeColor } from '../utils/display.js';
 import { currentArchitectName } from '../utils/architect-name.js';
 import { discoverBuilders, type StoredBuilderIdentity } from '../servers/overview.js';
@@ -356,7 +357,8 @@ export async function status(options: StatusOptions = {}): Promise<void> {
 
   // Try tower API first (Phase 3 - Spec 0090)
   const client = getTowerClient();
-  const towerRunning = await client.isRunning();
+  const tower = await checkTower(client);
+  const towerRunning = tower.state === 'running';
 
   // Builder ownership (`spawnedByArchitect`) lives in state.db, so load it up
   // front — it's the canonical owner source whether or not Tower is running.
@@ -516,9 +518,14 @@ export async function status(options: StatusOptions = {}): Promise<void> {
     return;
   }
 
-  // Tower not running - show message and fall back to local state
-  logger.kv('Tower', chalk.gray('not running'));
-  logger.info(`Run 'afx tower start' to start the tower daemon`);
+  // Tower not reachable - show why and fall back to local state
+  if (tower.state === 'unresponsive') {
+    logger.kv('Tower', chalk.yellow('not answering'));
+    logger.warn(tower.message);
+  } else {
+    logger.kv('Tower', chalk.gray('not running'));
+    logger.info(`Run 'afx tower start' to start the tower daemon`);
+  }
 
   showArtifactConfig(workspacePath);
 

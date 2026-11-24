@@ -13,6 +13,7 @@
 import { getConfig } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
 import { getTowerClient } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
 
 export interface WorkspaceRemoveArchitectOptions {
   name: string;
@@ -35,9 +36,9 @@ export async function workspaceRemoveArchitect(
   }
 
   const client = getTowerClient();
-  const towerRunning = await client.isRunning();
-  if (!towerRunning) {
-    logger.error('Tower is not running. Start it with `afx workspace start` first.');
+  const tower = await checkTower(client, { startCommand: 'afx workspace start' });
+  if (tower.state !== 'running') {
+    logger.error(tower.message);
     process.exit(1);
   }
 
