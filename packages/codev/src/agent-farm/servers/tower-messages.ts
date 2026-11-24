@@ -2,18 +2,35 @@
  * Message routing, address resolution, and WebSocket message bus for Tower server.
  * Spec 0110: Messaging Infrastructure — Phases 2 & 3
  *
- * Resolves `[project:]agent` addresses to terminal IDs by querying
- * the workspace terminal registry maintained by tower-terminals.ts.
+ * Resolves addresses (`[<workspace>:]architect[:<name>]`, `[<workspace>:]<id>`; Spec 1940)
+ * to terminal IDs by querying the workspace terminal registry maintained by
+ * tower-terminals.ts.
  * Manages WebSocket subscribers and broadcasts structured message frames.
  */
 
 import path from 'node:path';
 import type { WebSocket } from 'ws';
-import { parseAddress, stripLeadingZeros } from '../utils/agent-names.js';
+import type { AgentAddress } from '@cluesmith/codev-types';
+import {
+  parseAddress,
+  isRemoteAddress,
+  stripLeadingZeros,
+  CROSS_TOWER_UNAVAILABLE_MESSAGE,
+} from '../utils/agent-names.js';
 import { getWorkspaceTerminals } from './tower-terminals.js';
-import { lookupBuilderSpawningArchitect, getBuilders, getArchitects, getArchitectByName } from '../state.js';
+import type { WorkspaceTerminals } from './tower-types.js';
+import {
+  lookupBuilderSpawningArchitect,
+  getBuilders,
+  getArchitects,
+  getArchitectByName,
+  getRegisteredWorkspaces,
+} from '../state.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { workspaceKey } from '../utils/workspace-path.js';
+import { findWorkspaceByAddressName, isSameWorkspace, printableAddressName } from '../utils/workspace-address.js';
+import { isAddressComponent, tryFormatAddress } from '@cluesmith/codev-sdk/address';
+import type { CrossWorkspaceOrigin, ReplyRoute } from '../utils/message-format.js';
 
 // ============================================================================
 // Spec 755 error messages — exported as constants so producer and asserter
@@ -120,108 +137,199 @@ export interface ResolveResult {
 }
 
 /**
- * Error from address resolution — distinguishes "not found" from "ambiguous".
+ * Error from address resolution. `NOT_FOUND`, `AMBIGUOUS` and `NO_CONTEXT` are as they
+ * were. Spec 1940 adds three: the text is not an address (`MALFORMED_ADDRESS`), this
+ * sender may not name that recipient (`REFUSED`), and the address names a Tower
+ * (`CROSS_TOWER_UNAVAILABLE`).
  */
 export interface ResolveError {
-  code: 'NOT_FOUND' | 'AMBIGUOUS' | 'NO_CONTEXT';
+  code: 'NOT_FOUND' | 'AMBIGUOUS' | 'NO_CONTEXT' | 'MALFORMED_ADDRESS' | 'REFUSED' | 'CROSS_TOWER_UNAVAILABLE';
   message: string;
 }
 
 /**
- * Resolve a `[project:]agent` address to a terminal ID.
- *
- * Resolution logic:
- * 1. Parse target using parseAddress() (case-insensitive)
- * 2. If project specified: find workspace by basename match
- *    - Multiple basename matches → AMBIGUOUS error
- * 3. If no project: use fallbackWorkspace
- *    - Missing fallbackWorkspace → NO_CONTEXT error
- * 4. Within workspace: match agent against architect, then builders map
- *    - Exact match (case-insensitive) first, then tail match
- *    - Multiple tail matches → AMBIGUOUS error
- *
- * Spec 755: when `sender` is supplied and refers to a builder, sender-affinity
- * routing applies to `architect` and `architect:<name>` targets. Non-builder
- * senders see the legacy main-first behavior, unchanged.
- *
- * @param target - Address string: "agent" or "project:agent"
- * @param fallbackWorkspace - Workspace path when no project: prefix is given
- * @param sender - Optional sender identity (a builder ID or 'architect').
- *                 Enables affinity-aware architect routing per Spec 755.
- * @returns ResolveResult on success, ResolveError on failure
+ * Who is asking (Spec 1940). `id` is the sender's local id, as `/api/send`'s `from`
+ * carries it. `workspace` is the sender's workspace: the one an address that names no
+ * workspace is read in, and the one the sender is looked up in to learn whether it is a
+ * builder.
  */
-export function resolveTarget(
-  target: string,
-  fallbackWorkspace?: string,
-  sender?: string,
-): ResolveResult | ResolveError {
-  const { project, agent } = parseAddress(target);
-  // Spec 1658 (M6): the caller's workspace arrives as the sender spelled it
-  // (VS Code `c:\`, Git Bash `C:\`); canonicalize it once so the registry,
-  // the architect/builder rows and the mailbox all see one key. POSIX: as given.
-  if (fallbackWorkspace) {
-    fallbackWorkspace = workspaceKey(fallbackWorkspace);
-  }
-
-  // Validate: empty or whitespace-only agent is a malformed address
-  if (!agent || !agent.trim()) {
-    return {
-      code: 'NO_CONTEXT' as const,
-      message: 'Malformed address: agent name is empty.',
-    };
-  }
-
-  // Spec 755: `architect:<name>` is a per-architect address WITHIN the
-  // current workspace, not a `project:agent` cross-workspace address.
-  // parseAddress can't distinguish them (the grammar is overloaded), so we
-  // intercept here. The resolver below applies the spoofing check when
-  // sender is a builder.
-  if (project && project.toLowerCase() === 'architect') {
-    if (!fallbackWorkspace) {
-      return {
-        code: 'NO_CONTEXT',
-        message: 'Cannot resolve architect:<name> address without workspace context.',
-      };
-    }
-    return resolveArchitectByName(agent, fallbackWorkspace, sender);
-  }
-
-  // Determine the workspace path
-  let workspacePath: string;
-  if (project) {
-    const result = findWorkspaceByBasename(project);
-    if ('code' in result) return result;
-    workspacePath = result.workspacePath;
-  } else {
-    if (!fallbackWorkspace) {
-      return {
-        code: 'NO_CONTEXT',
-        message: 'Cannot resolve agent without project context.',
-      };
-    }
-    workspacePath = fallbackWorkspace;
-  }
-
-  // Resolve agent within the workspace
-  return resolveAgentInWorkspace(agent, workspacePath, sender);
+export interface SenderContext {
+  id?: string;
+  workspace?: string;
 }
 
 /**
- * Resolve `architect:<name>` to a terminal ID within the given workspace.
- *
- * Spec 755 enforcement when sender is a builder:
- *   - If the builder's `spawned_by_architect` matches `<name>`: allowed.
- *   - If it doesn't match: rejected with the spoofing error.
- * Non-builder senders may address any architect by name.
+ * Read address text with the one shared parser. Callers parse once and hand the
+ * structured address to {@link resolveTarget} and {@link resolveAgentInRegistry}.
  */
-function resolveArchitectByName(
-  name: string,
-  workspacePath: string,
-  sender?: string,
-): ResolveResult | ResolveError {
-  const allWorkspaces = getWorkspaceTerminals();
-  const entry = allWorkspaces.get(workspacePath);
+export function parseTarget(target: string): AgentAddress | ResolveError {
+  const parsed = parseAddress(target);
+  if (parsed.ok) return parsed.address;
+  return {
+    code: 'MALFORMED_ADDRESS',
+    message: `Malformed address: ${parsed.error.message}. Expected ${parsed.error.expected}.`,
+  };
+}
 
+/**
+ * Spec 1658 (M6): the caller's workspace arrives as the sender spelled it (VS Code `c:\`,
+ * Git Bash `C:\`); canonicalize it once so the registry, the architect/builder rows and
+ * the mailbox all see one key. POSIX: as given.
+ */
+function canonicalSender(sender: SenderContext): SenderContext {
+  return sender.workspace ? { ...sender, workspace: workspaceKey(sender.workspace) } : sender;
+}
+
+/** The workspace an address points into, and whether it is the sender's own. */
+interface TargetWorkspace {
+  workspacePath: string;
+  /** What the sender wrote before the agent; absent when the address named no workspace. */
+  writtenName?: string;
+  /** Is this the sender's own workspace? Affinity and the Spec 755 wording depend on it. */
+  isSendersOwn: boolean;
+}
+
+/**
+ * The one workspace lookup, shared by the live and the registry resolver so they cannot
+ * disagree about where an address points. An address that names a Tower is refused here:
+ * until stage 2 a Tower delivers only to itself, and does not yet know its own name.
+ */
+function locateWorkspace(address: AgentAddress, sender: SenderContext): TargetWorkspace | ResolveError {
+  if (isRemoteAddress(address)) {
+    return { code: 'CROSS_TOWER_UNAVAILABLE', message: CROSS_TOWER_UNAVAILABLE_MESSAGE };
+  }
+  const sendersWorkspace = sender.workspace;
+
+  if (address.workspace !== undefined) {
+    // The only place the name table is read: an address that names no workspace costs
+    // no query here.
+    const found = findWorkspaceByAddressName(
+      address.workspace,
+      getRegisteredWorkspaces(),
+      getWorkspaceTerminals().keys(),
+    );
+    if (!found.ok) return { code: found.code, message: found.message };
+    return {
+      workspacePath: found.workspacePath,
+      writtenName: address.workspace,
+      isSendersOwn: sendersWorkspace !== undefined && isSameWorkspace(found.workspacePath, sendersWorkspace),
+    };
+  }
+  if (!sendersWorkspace) {
+    return {
+      code: 'NO_CONTEXT',
+      message:
+        address.kind === 'architect' && address.name !== undefined
+          ? 'Cannot resolve architect:<name> address without workspace context.'
+          : 'Cannot resolve agent without project context.',
+    };
+  }
+  return { workspacePath: sendersWorkspace, isSendersOwn: true };
+}
+
+/**
+ * Is the sender a builder, and if so which architect spawned it? Asked of the SENDER's
+ * workspace, wherever the message is going. Three-valued, as
+ * {@link lookupBuilderSpawningArchitect} is: a name, `null` for a legacy builder, and
+ * `undefined` for a sender that is not a builder. A sender that gave no workspace is
+ * matched by its id alone, so leaving the workspace out does not make a builder anything
+ * else.
+ */
+function sendersSpawningArchitect(sender: SenderContext): string | null | undefined {
+  if (!sender.id) return undefined;
+  return lookupBuilderSpawningArchitect(sender.id, sender.workspace);
+}
+
+/**
+ * The workspace as an error names it: what the sender wrote, else its directory name. A
+ * workspace with a name of its own is not known to the sender by its directory.
+ */
+function workspaceLabel(target: TargetWorkspace): string {
+  return target.writtenName ?? path.basename(target.workspacePath);
+}
+
+/** How the sender writes the front door of the workspace an address pointed into. */
+function frontDoorAddress(target: TargetWorkspace): string {
+  return target.writtenName === undefined ? 'architect' : `${target.writtenName}:architect`;
+}
+
+export function crossWorkspaceBuilderErrorMessage(builderId: string, frontDoor: string): string {
+  return `${addressSpoofingErrorMessage(builderId)}; reach that workspace through its front door: afx send ${frontDoor} "…"`;
+}
+
+/**
+ * The builder rule (Spec 755, extended by Spec 1940), shared by both resolvers: a builder
+ * may name an architect only if it is its own spawning architect, however the address is
+ * written. Returns the refusal, or null when this sender may name `name` in `target`.
+ *
+ * In its own workspace a builder naming another architect gets Spec 755's refusal,
+ * unchanged, with or without the workspace written in front. An architect in any other
+ * workspace is never the one that spawned it, whatever it is called, so that is refused
+ * with the way in: the workspace's front door.
+ */
+function refusalToNameArchitect(name: string, target: TargetWorkspace, sender: SenderContext): ResolveError | null {
+  const spawningArchitect = sendersSpawningArchitect(sender);
+  if (spawningArchitect === undefined || !sender.id) return null; // not a builder
+  if (target.isSendersOwn) {
+    if (spawningArchitect === name) return null;
+    return { code: 'NOT_FOUND', message: addressSpoofingErrorMessage(sender.id) };
+  }
+  return { code: 'REFUSED', message: crossWorkspaceBuilderErrorMessage(sender.id, frontDoorAddress(target)) };
+}
+
+/**
+ * The permission half of resolution on its own (Spec 1940): may `from` send to `address`,
+ * which names an agent in the workspace at `workspacePath`? Returns the refusal, or null.
+ *
+ * It is {@link refusalToNameArchitect}, the rule both resolvers apply, and nothing else: it
+ * does not ask whether the agent exists or has a terminal. The reply footer asks it with
+ * the RECIPIENT as the sender, so a frame never prints a command the resolver would then
+ * refuse, and the two cannot drift apart.
+ */
+export function refusalToAddress(
+  address: AgentAddress,
+  workspacePath: string,
+  from: SenderContext,
+): ResolveError | null {
+  if (address.kind !== 'architect' || address.name === undefined) return null;
+  const sender = canonicalSender(from);
+  const target: TargetWorkspace = {
+    workspacePath,
+    writtenName: address.workspace,
+    isSendersOwn: sender.workspace !== undefined && isSameWorkspace(workspacePath, sender.workspace),
+  };
+  return refusalToNameArchitect(address.name, target, sender);
+}
+
+/** What a failed lookup of a named architect tells the sender about the workspace. */
+function architectsHint(architectNames: string[], target: TargetWorkspace): string {
+  if (architectNames.length === 0) return 'No architect is registered there.';
+  return `Architects there: ${architectNames.join(', ')}. Front door: ${frontDoorAddress(target)}.`;
+}
+
+/**
+ * Resolve an address to a live terminal.
+ *
+ * 1. {@link locateWorkspace}: the workspace the address names, by its address name (its
+ *    explicit name, else its basename; several matches → AMBIGUOUS), else the sender's
+ *    (none → NO_CONTEXT).
+ * 2. Within it: a named architect by name, after the builder rule; bare `architect` by
+ *    sender affinity or the front door; anything else as a builder id (exact, then tail;
+ *    several tail matches → AMBIGUOUS) and then a shell id.
+ *
+ * Two questions about the sender are kept apart (Spec 1940). *Permission*, whether it is
+ * a builder and which architect it may name, is asked of the sender's own workspace for
+ * every target. *Affinity*, whether bare `architect` goes to the architect that spawned
+ * it, applies only inside the sender's own workspace: from anywhere else bare `architect`
+ * is the front door, `main` or else the first registered, whoever sends.
+ */
+export function resolveTarget(address: AgentAddress, from: SenderContext = {}): ResolveResult | ResolveError {
+  const sender = canonicalSender(from);
+  const target = locateWorkspace(address, sender);
+  if (isResolveError(target)) return target;
+  const { workspacePath } = target;
+
+  const entry = getWorkspaceTerminals().get(workspacePath);
   if (!entry) {
     return {
       code: 'NOT_FOUND',
@@ -229,161 +337,109 @@ function resolveArchitectByName(
     };
   }
 
-  // Spoofing check: builder senders can only address their own architect.
-  if (sender) {
-    const spawningArchitect = lookupBuilderSpawningArchitect(sender, workspacePath);
-    if (spawningArchitect !== undefined && spawningArchitect !== name) {
-      return {
-        code: 'NOT_FOUND',
-        message: addressSpoofingErrorMessage(sender),
-      };
+  if (address.kind === 'architect') {
+    if (address.name !== undefined) {
+      const refusal = refusalToNameArchitect(address.name, target, sender);
+      if (refusal) return refusal;
+      const terminalId = entry.architects.get(address.name);
+      if (!terminalId) {
+        return {
+          code: 'NOT_FOUND',
+          message:
+            `Architect '${address.name}' not found in workspace '${workspaceLabel(target)}'. ` +
+            architectsHint([...entry.architects.keys()], target),
+        };
+      }
+      return { terminalId, workspacePath, agent: address.name };
     }
+    return resolveBareArchitect(entry, target, sender);
   }
 
-  const terminalId = entry.architects.get(name);
-  if (!terminalId) {
-    return {
-      code: 'NOT_FOUND',
-      message: `Architect '${name}' not found in workspace '${path.basename(workspacePath)}'.`,
-    };
-  }
-  return { terminalId, workspacePath, agent: name };
+  return resolveLocalId(address.name, entry, target);
 }
 
 /**
- * Find a workspace path by matching the basename of registered workspace paths.
- */
-function findWorkspaceByBasename(
-  projectName: string,
-): { workspacePath: string } | ResolveError {
-  const allWorkspaces = getWorkspaceTerminals();
-  const matches: string[] = [];
-
-  for (const wsPath of allWorkspaces.keys()) {
-    if (path.basename(wsPath).toLowerCase() === projectName) {
-      matches.push(wsPath);
-    }
-  }
-
-  if (matches.length === 0) {
-    return {
-      code: 'NOT_FOUND',
-      message: `Project '${projectName}' not found. No workspace with that basename is registered.`,
-    };
-  }
-
-  if (matches.length > 1) {
-    return {
-      code: 'AMBIGUOUS',
-      message: `Project '${projectName}' is ambiguous — matches ${matches.length} workspaces: ${matches.join(', ')}`,
-    };
-  }
-
-  return { workspacePath: matches[0] };
-}
-
-/**
- * Resolve an agent name to a terminal ID within a specific workspace.
+ * Bare `architect` against live terminals.
  *
- * Checks architect first (with Spec 755 affinity-aware routing when `sender`
- * is a builder), then builders by exact match, then builders by tail match.
- *
- * Spec 755 architect resolution:
- *   - Fast path: single-architect workspace with name 'main' — return that
- *     terminal directly. Identical to today's behavior; avoids the state.db
- *     read entirely for the common case.
- *   - Builder sender, target 'architect': look up the builder's
- *     spawnedByArchitect. If that architect is registered, route there.
- *     Otherwise fall back to 'main', else error with the spec-mandated
- *     legacy-builder / architect-gone messages.
- *   - Builder sender, target 'architect:<name>': allowed only if <name>
- *     matches the sender's spawnedByArchitect. Otherwise rejected (spoofing).
- *   - Non-builder sender (or no sender), target 'architect': route to 'main'
- *     (or first registered if 'main' is absent). Unchanged from today.
+ *   - Fast path: a workspace whose only architect is 'main' returns it directly, with no
+ *     database read. This is the common case and it is the same answer either way.
+ *   - A builder in this workspace: its spawning architect if registered, otherwise
+ *     'main', otherwise the Spec 755 legacy-builder / architect-gone errors.
+ *   - Anyone else, and every sender from another workspace: 'main', else the first
+ *     registered.
  */
-function resolveAgentInWorkspace(
-  agent: string,
-  workspacePath: string,
-  sender?: string,
+function resolveBareArchitect(
+  entry: WorkspaceTerminals,
+  target: TargetWorkspace,
+  sender: SenderContext,
 ): ResolveResult | ResolveError {
-  const allWorkspaces = getWorkspaceTerminals();
-  const entry = allWorkspaces.get(workspacePath);
-
-  if (!entry) {
+  const { workspacePath } = target;
+  if (entry.architects.size === 0) {
     return {
       code: 'NOT_FOUND',
-      message: `Workspace '${workspacePath}' has no registered terminals.`,
+      message: `No architect terminal found in workspace '${workspaceLabel(target)}'.`,
     };
   }
 
-  // Check architect (Spec 755 affinity-aware path).
-  if (agent === 'architect' || agent === 'arch') {
-    if (entry.architects.size === 0) {
-      return {
-        code: 'NOT_FOUND',
-        message: `No architect terminal found in workspace '${path.basename(workspacePath)}'.`,
-      };
-    }
+  // Single-architect fast path: most workspaces have only 'main'. Identical answer to the
+  // full resolution path, but skips the database read entirely. Guarantees latency parity
+  // for solo-architect users.
+  if (entry.architects.size === 1 && entry.architects.has(DEFAULT_ARCHITECT_NAME)) {
+    const terminalId = entry.architects.get(DEFAULT_ARCHITECT_NAME)!;
+    return { terminalId, workspacePath, agent: 'architect' };
+  }
 
-    // Single-architect fast path: most workspaces have only 'main'.
-    // Identical answer to the full resolution path, but skips the state.db
-    // read entirely. Guarantees latency parity for solo-architect users.
-    if (entry.architects.size === 1 && entry.architects.has(DEFAULT_ARCHITECT_NAME)) {
-      const terminalId = entry.architects.get(DEFAULT_ARCHITECT_NAME)!;
-      return { terminalId, workspacePath, agent: 'architect' };
-    }
+  if (target.isSendersOwn && sender.id) {
+    // Builder-context detection via the builder row. Three-valued: "builder with explicit
+    // name" / "legacy builder" / "not a builder".
+    const spawningArchitect = sendersSpawningArchitect(sender);
 
-    // Builder-context detection via state.db row presence. Three-valued
-    // result distinguishes "builder with explicit name" / "legacy builder"
-    // / "not a builder" — see lookupBuilderSpawningArchitect.
-    const spawningArchitect = sender ? lookupBuilderSpawningArchitect(sender, workspacePath) : undefined;
-
-    if (spawningArchitect !== undefined && sender) {
-      // Sender is a builder.
+    if (spawningArchitect !== undefined) {
       if (spawningArchitect === null) {
-        // Legacy builder: row exists, spawnedByArchitect is null. Route to
-        // 'main' if present; else fail with the spec's verbatim message.
+        // Legacy builder: row exists, spawnedByArchitect is null. Route to 'main' if
+        // present; else fail with the spec's verbatim message.
         const main = entry.architects.get(DEFAULT_ARCHITECT_NAME);
         if (main) return { terminalId: main, workspacePath, agent: 'architect' };
         return {
           code: 'NOT_FOUND',
-          message: legacyBuilderErrorMessage(sender, [...entry.architects.keys()]),
+          message: legacyBuilderErrorMessage(sender.id, [...entry.architects.keys()]),
         };
       }
       // Builder has an explicit spawning architect.
-      const target = entry.architects.get(spawningArchitect);
-      if (target) return { terminalId: target, workspacePath, agent: 'architect' };
+      const own = entry.architects.get(spawningArchitect);
+      if (own) return { terminalId: own, workspacePath, agent: 'architect' };
       // Architect-gone fallback: route to 'main' if present; else fail.
       const main = entry.architects.get(DEFAULT_ARCHITECT_NAME);
       if (main) return { terminalId: main, workspacePath, agent: 'architect' };
       return {
         code: 'NOT_FOUND',
-        message: architectGoneErrorMessage(sender, spawningArchitect, [...entry.architects.keys()]),
+        message: architectGoneErrorMessage(sender.id, spawningArchitect, [...entry.architects.keys()]),
       };
     }
 
-    // Non-builder sender (or no sender): 'main' first, then first registered.
-    // Issue #1094 defense-in-depth: a sender that LOOKS like a builder id but
-    // had no state.db row (lookupBuilderSpawningArchitect → undefined) means
-    // affinity routing was silently bypassed — most likely a non-canonical,
-    // unverified builder id (e.g. a bare worktree name). Make it visible
-    // instead of quietly delivering to 'main'.
-    if (sender && !entry.architects.has(sender) && looksLikeBuilderId(sender)) {
+    // Issue #1094 defense-in-depth: a sender that LOOKS like a builder id but has no row
+    // in its own workspace means affinity routing was silently bypassed, most likely by a
+    // non-canonical, unverified builder id (e.g. a bare worktree name). Make it visible
+    // instead of quietly delivering to 'main'. A sender in another workspace has no
+    // affinity here to bypass, so this is not asked of it.
+    if (!entry.architects.has(sender.id) && looksLikeBuilderId(sender.id)) {
       console.warn(
-        `[tower] affinity routing bypassed: sender '${sender}' looks like a builder id but has ` +
+        `[tower] affinity routing bypassed: sender '${sender.id}' looks like a builder id but has ` +
           `no matching row in workspace '${path.basename(workspacePath)}' — routing 'architect' to ` +
           `'main'. The sender may be a non-canonical builder id (issue #1094).`,
       );
     }
-    const terminalId =
-      entry.architects.get(DEFAULT_ARCHITECT_NAME) ?? entry.architects.values().next().value!;
-    return { terminalId, workspacePath, agent: 'architect' };
   }
 
-  // `architect:<name>` addressing is handled earlier in resolveTarget via
-  // resolveArchitectByName. Reaching this point means the agent is a plain
-  // workspace-local name (builder/shell), so we fall through to those.
+  // The front door: 'main' first, then the first registered.
+  const terminalId =
+    entry.architects.get(DEFAULT_ARCHITECT_NAME) ?? entry.architects.values().next().value!;
+  return { terminalId, workspacePath, agent: 'architect' };
+}
 
+/** A builder id (exact, then tail with leading zeros stripped) or a shell id, live. */
+function resolveLocalId(agent: string, entry: WorkspaceTerminals, target: TargetWorkspace): ResolveResult | ResolveError {
+  const { workspacePath } = target;
   // Check builders — exact match (case-insensitive)
   for (const [builderId, terminalId] of entry.builders) {
     if (builderId.toLowerCase() === agent) {
@@ -426,7 +482,7 @@ function resolveAgentInWorkspace(
 
   return {
     code: 'NOT_FOUND',
-    message: `Agent '${agent}' not found in workspace '${path.basename(workspacePath)}'.`,
+    message: `Agent '${agent}' not found in workspace '${workspaceLabel(target)}'.`,
   };
 }
 
@@ -450,15 +506,16 @@ export interface RegistryResolveResult {
  * persistent global.db registry so a send to a known-but-offline agent is HELD,
  * not dropped. Deliberately narrower than the live resolver:
  *
- * - Bare `<builder>` (with a workspace context) — exact then tail match against
- *   `getBuilders(ws)`; ambiguous tail is still AMBIGUOUS (never guess).
- * - `architect` / `architect:<name>` — resolved to a SPECIFIC architect name via
- *   the persisted architect rows, preserving the Spec 755 spoofing constraint
- *   (a builder sender may only address its own spawning architect).
- * - `project:<agent>` cross-workspace — the target workspace is resolved by
- *   basename (the same mapping the live resolver uses) and the agent held against
- *   ITS registry, so the mailbox-first hold applies across every address form.
- *   Boundary: workspace resolution reads the live workspace map, so the target
+ * - A builder id — exact then tail match against `getBuilders(ws)`; ambiguous tail
+ *   is still AMBIGUOUS (never guess). Shells are not in the registry.
+ * - `architect` / `architect:<name>`, with or without a workspace in front —
+ *   resolved to a SPECIFIC architect name via the persisted architect rows, under
+ *   the same builder rule and the same affinity rule as the live resolver. Without
+ *   the named form here, mail to a named architect in another workspace that is
+ *   between sessions would be refused when it should be held (Spec 1940).
+ * - Any form with a workspace in front — the workspace comes from the same lookup
+ *   the live resolver uses ({@link locateWorkspace}), and the agent is held against
+ *   ITS registry. Boundary: that lookup reads the live workspace map, so the target
  *   workspace must be active (its agent's PTY may be dead); a fully-inactive
  *   workspace still NOT_FOUNDs, exactly as the live resolver does.
  *
@@ -467,55 +524,35 @@ export interface RegistryResolveResult {
  * exist in the registry.
  */
 export function resolveAgentInRegistry(
-  target: string,
-  fallbackWorkspace?: string,
-  sender?: string,
+  address: AgentAddress,
+  from: SenderContext = {},
 ): RegistryResolveResult | ResolveError {
-  // Spec 1658 (M6): canonical on Windows, as given on POSIX (see resolveTarget).
-  if (fallbackWorkspace) {
-    fallbackWorkspace = workspaceKey(fallbackWorkspace);
-  }
-  const { project, agent } = parseAddress(target);
+  const sender = canonicalSender(from);
+  const target = locateWorkspace(address, sender);
+  if (isResolveError(target)) return target;
+  const ws = target.workspacePath;
 
-  if (!agent || !agent.trim()) {
-    return { code: 'NO_CONTEXT', message: 'Malformed address: agent name is empty.' };
-  }
+  if (address.kind === 'architect') {
+    if (address.name === undefined) return resolveRegistryArchitect(target, sender);
 
-  // architect:<name> — per-architect address within the workspace (Spec 755).
-  if (project && project.toLowerCase() === 'architect') {
-    if (!fallbackWorkspace) {
-      return { code: 'NO_CONTEXT', message: 'Cannot resolve architect:<name> address without workspace context.' };
+    const refusal = refusalToNameArchitect(address.name, target, sender);
+    if (refusal) return refusal;
+    if (!getArchitectByName(ws, address.name)) {
+      return {
+        code: 'NOT_FOUND',
+        message:
+          `Architect '${address.name}' is not registered in workspace '${workspaceLabel(target)}'. ` +
+          architectsHint(getArchitects(ws).map((a) => a.name), target),
+      };
     }
-    return resolveRegistryArchitectByName(agent, fallbackWorkspace, sender);
+    return { workspacePath: ws, agent: address.name, kind: 'architect' };
   }
 
-  // Determine the workspace to resolve the agent within. An explicit `project:`
-  // maps to that workspace by basename (the same mapping the live resolver uses),
-  // so a cross-workspace send to a known agent whose PTY is down is held against
-  // ITS registry rather than dropped; otherwise the agent resolves within the
-  // sender's workspace.
-  let ws: string;
-  if (project) {
-    const wsResult = findWorkspaceByBasename(project);
-    if (isResolveError(wsResult)) return wsResult;
-    ws = wsResult.workspacePath;
-  } else {
-    if (!fallbackWorkspace) {
-      return { code: 'NO_CONTEXT', message: 'Cannot resolve agent without project context.' };
-    }
-    ws = fallbackWorkspace;
-  }
-
-  // Bare architect / arch.
-  if (agent === 'architect' || agent === 'arch') {
-    return resolveRegistryArchitect(ws, sender);
-  }
-
-  // Bare builder — exact (case-insensitive), then tail match with leading-zero strip.
+  // A builder — exact (case-insensitive), then tail match with leading-zero strip.
+  const agent = address.name;
   const builders = getBuilders(ws);
-  const lower = agent.toLowerCase();
   for (const b of builders) {
-    if (b.id.toLowerCase() === lower) return { workspacePath: ws, agent: b.id, kind: 'builder' };
+    if (b.id.toLowerCase() === agent) return { workspacePath: ws, agent: b.id, kind: 'builder' };
   }
   const stripped = stripLeadingZeros(agent).toLowerCase();
   const tail = builders.filter((b) => b.id.toLowerCase().endsWith(`-${stripped}`));
@@ -527,45 +564,162 @@ export function resolveAgentInRegistry(
     };
   }
 
-  return { code: 'NOT_FOUND', message: `Agent '${agent}' is not a live terminal and is not registered in workspace '${path.basename(ws)}'.` };
+  return { code: 'NOT_FOUND', message: `Agent '${agent}' is not a live terminal and is not registered in workspace '${workspaceLabel(target)}'.` };
 }
 
-/** Registry analogue of the bare-`architect` affinity resolution (offline hold). */
+/**
+ * Registry analogue of {@link resolveBareArchitect}, and the same answer: a builder in
+ * this workspace gets its spawning architect, else 'main', else the Spec 755 errors;
+ * anyone else gets the front door. It must not be more forgiving than the live resolver.
+ * The route comes here after the live resolver says NOT_FOUND, and that includes its
+ * legacy-builder and architect-gone refusals: answering those with "the first registered"
+ * would hold a builder's mail for an architect it has nothing to do with.
+ */
 function resolveRegistryArchitect(
-  workspacePath: string,
-  sender?: string,
+  target: TargetWorkspace,
+  sender: SenderContext,
 ): RegistryResolveResult | ResolveError {
+  const { workspacePath } = target;
   const architects = getArchitects(workspacePath);
   if (architects.length === 0) {
-    return { code: 'NOT_FOUND', message: `No architect registered in workspace '${path.basename(workspacePath)}'.` };
+    return { code: 'NOT_FOUND', message: `No architect registered in workspace '${workspaceLabel(target)}'.` };
   }
-  // Builder sender → its spawning architect if still registered, else 'main'.
-  const spawning = sender ? lookupBuilderSpawningArchitect(sender, workspacePath) : undefined;
-  if (spawning) {
-    if (getArchitectByName(workspacePath, spawning)) return { workspacePath, agent: spawning, kind: 'architect' };
+  const main = getArchitectByName(workspacePath, DEFAULT_ARCHITECT_NAME);
+
+  const spawning = target.isSendersOwn ? sendersSpawningArchitect(sender) : undefined;
+  if (spawning !== undefined && sender.id) {
+    // A builder in this workspace.
+    if (spawning !== null && getArchitectByName(workspacePath, spawning)) {
+      return { workspacePath, agent: spawning, kind: 'architect' };
+    }
+    if (main) return { workspacePath, agent: DEFAULT_ARCHITECT_NAME, kind: 'architect' };
+    const registered = architects.map((a) => a.name);
+    return {
+      code: 'NOT_FOUND',
+      message:
+        spawning === null
+          ? legacyBuilderErrorMessage(sender.id, registered)
+          : architectGoneErrorMessage(sender.id, spawning, registered),
+    };
   }
-  if (getArchitectByName(workspacePath, DEFAULT_ARCHITECT_NAME)) {
-    return { workspacePath, agent: DEFAULT_ARCHITECT_NAME, kind: 'architect' };
-  }
-  return { workspacePath, agent: architects[0].name, kind: 'architect' };
+
+  // The front door: 'main' first, then the first registered.
+  return { workspacePath, agent: main ? DEFAULT_ARCHITECT_NAME : architects[0].name, kind: 'architect' };
 }
 
-/** Registry analogue of `architect:<name>`, preserving the Spec 755 spoofing check. */
-function resolveRegistryArchitectByName(
-  name: string,
-  workspacePath: string,
-  sender?: string,
-): RegistryResolveResult | ResolveError {
-  if (sender) {
-    const spawning = lookupBuilderSpawningArchitect(sender, workspacePath);
-    if (spawning !== undefined && spawning !== name) {
-      return { code: 'NOT_FOUND', message: addressSpoofingErrorMessage(sender) };
+// ============================================================================
+// Provenance: who a message from another workspace is from, and how to answer it
+// ============================================================================
+
+/** The sender of a message, as `/api/send` carries it: a local id and a workspace path. */
+export interface MessageSender {
+  id: string;
+  workspace: string;
+}
+
+/** The agent a message is addressed to, as the mailbox row names it. */
+export interface MessageRecipient {
+  workspacePath: string;
+  /** The canonical recipient: an architect's name, or a builder or shell id. */
+  agent: string;
+  isArchitect: boolean;
+}
+
+/**
+ * A sender's local id as the agent part of an address, or null when it is not one. A local
+ * id names no workspace and no Tower, and its name fits the address component rule: that
+ * is every id `afx send` produces (`architect`, `architect:<name>`, a builder id). Anything
+ * else is not an agent Tower can give an address to.
+ */
+function senderAgent(id: string): AgentAddress | null {
+  const parsed = parseAddress(id);
+  if (!parsed.ok) return null;
+  const { address } = parsed;
+  if (address.workspace !== undefined || isRemoteAddress(address)) return null;
+  if (address.name !== undefined && !isAddressComponent(address.name)) return null;
+  // An id that merely looks like an architect's (`architect-3`) is neither: today's
+  // formatter refuses to call it a builder ({@link looksLikeBuilderId}), and so does this.
+  if (address.kind === 'id' && address.name.startsWith('architect')) return null;
+  return address;
+}
+
+/**
+ * The architect that `frontDoor` reaches when `recipient` sends to it now, found the way
+ * the send route finds it: live terminals first, then the registry. Null when it reaches
+ * nobody.
+ */
+function reachedByFrontDoor(
+  frontDoor: AgentAddress,
+  recipient: SenderContext,
+): { workspacePath: string; architect: string } | null {
+  const live = resolveTarget(frontDoor, recipient);
+  if (!isResolveError(live)) {
+    const architects = getWorkspaceTerminals().get(live.workspacePath)?.architects ?? new Map<string, string>();
+    for (const [architect, terminalId] of architects) {
+      if (terminalId === live.terminalId) return { workspacePath: live.workspacePath, architect };
     }
+    return null;
   }
-  if (!getArchitectByName(workspacePath, name)) {
-    return { code: 'NOT_FOUND', message: `Architect '${name}' is not registered in workspace '${path.basename(workspacePath)}'.` };
-  }
-  return { workspacePath, agent: name, kind: 'architect' };
+  if (live.code !== 'NOT_FOUND') return null;
+  const registered = resolveAgentInRegistry(frontDoor, recipient);
+  return isResolveError(registered) ? null : { workspacePath: registered.workspacePath, architect: registered.agent };
+}
+
+/**
+ * Who a message is from and how its recipient can reply, when the sender is an agent in
+ * ANOTHER workspace on this Tower (Spec 1940, Decision 7, case 2). Returns null when the
+ * message keeps today's frame: the sender is in the recipient's workspace, or its id is
+ * not an agent's.
+ *
+ * The sender's address is composed here, for the frame only, from its local id and its
+ * workspace's address name. A workspace whose name cannot be used (ambiguous, shadowed by
+ * another workspace's explicit name, or outside the component rule) gives an origin with
+ * no workspace and no reply address: a directory name is never put in a frame unchecked.
+ *
+ * The reply is the first of these that {@link refusalToAddress} allows the recipient to
+ * send to:
+ *
+ * 1. the sender's own address;
+ * 2. for a named architect, its workspace's front door, but only when the front door
+ *    reaches that architect.
+ *
+ * A builder that is allowed neither replies through its own architect.
+ */
+export function crossWorkspaceOrigin(sender: MessageSender, recipient: MessageRecipient): CrossWorkspaceOrigin | null {
+  if (isSameWorkspace(sender.workspace, recipient.workspacePath)) return null;
+  const agent = senderAgent(sender.id);
+  if (agent === null) return null;
+
+  const named = printableAddressName(sender.workspace, getRegisteredWorkspaces(), getWorkspaceTerminals().keys());
+  if (named.name === null) return { sender: agent, reply: { how: 'no-address' } };
+  const senderAddress: AgentAddress = { ...agent, workspace: named.name };
+  // A name that fits the component rule can still have no text form: `architect:<id>`
+  // reads as a named architect, not as an id in a workspace called `architect`.
+  if (!tryFormatAddress(senderAddress).ok) return { sender: agent, reply: { how: 'no-address' } };
+
+  const replier: SenderContext = {
+    id: recipient.isArchitect ? `architect:${recipient.agent}` : recipient.agent,
+    workspace: recipient.workspacePath,
+  };
+  const mayAddress = (address: AgentAddress): boolean =>
+    refusalToAddress(address, sender.workspace, replier) === null;
+  // The front door is resolved only when the sender's own address is refused: an architect
+  // recipient, which is never refused, costs no resolution here.
+  const frontDoorToSender = (): AgentAddress | null => {
+    if (agent.kind !== 'architect' || agent.name === undefined) return null;
+    const frontDoor: AgentAddress = { kind: 'architect', workspace: named.name };
+    if (!mayAddress(frontDoor)) return null;
+    const reached = reachedByFrontDoor(frontDoor, replier);
+    const reachesSender =
+      reached !== null && reached.architect === agent.name && isSameWorkspace(reached.workspacePath, sender.workspace);
+    return reachesSender ? frontDoor : null;
+  };
+  const allowed = mayAddress(senderAddress) ? senderAddress : frontDoorToSender();
+
+  let reply: ReplyRoute;
+  if (allowed !== null) reply = { how: 'address', address: allowed };
+  else reply = recipient.isArchitect ? { how: 'none' } : { how: 'through-architect' };
+  return { sender: senderAddress, reply };
 }
 
 /**

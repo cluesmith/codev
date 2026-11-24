@@ -17,7 +17,17 @@ export {
   type MailboxEscalationPayload,
 } from './sse.js';
 
-export { VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from './messaging.js';
+export {
+  VSCODE_USER_SENDER,
+  DECISIONS_TAB_SENDER,
+  type AgentAddress,
+  type AddressLocation,
+  type AddressAgent,
+  type AddressReader,
+  type AddressParseErrorCode,
+  type AddressParseError,
+  type AddressParseResult,
+} from './messaging.js';
 
 export {
   type CommandRequest,
@@ -86,6 +96,11 @@ export {
   type DecisionsRefusalCode,
   type DecisionsReadResponse,
   type DecisionsRuleResponse,
+  type SetWorkspaceAddressNameRequest,
+  type SetWorkspaceAddressNameResponse,
+  type AddressBookAgent,
+  type AddressBookWorkspace,
+  type AddressBookResponse,
   type TunnelStatus,
   type TowerVersionInfo,
   type ProtocolStats,

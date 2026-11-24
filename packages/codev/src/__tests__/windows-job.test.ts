@@ -82,7 +82,11 @@ describe('WindowsJobHelper', () => {
     expect(HELPER_SCRIPT).toContain('AssemblyBuilderAccess]::Run');
     expect(HELPER_SCRIPT).not.toMatch(/Add-Type/i);
     expect(HELPER_SCRIPT).not.toContain('KILL_ON_JOB_CLOSE');
-    expect(HELPER_SCRIPT).toContain('0x0800');
+    // #1915: no breakaway, so Git Bash's native children (the agent and its tool calls) stay in the job.
+    expect(HELPER_SCRIPT).toMatch(/^\$SESSION_JOB_LIMIT_FLAGS = 0\s*$/m);
+    expect(HELPER_SCRIPT).not.toMatch(/\$SESSION_JOB_LIMIT_FLAGS = 0x/);
+    expect(HELPER_SCRIPT).toContain('WriteInt32($info, 16, $SESSION_JOB_LIMIT_FLAGS)');
+    expect(HELPER_SCRIPT).not.toMatch(/BREAKAWAY_OK\s*=/);
     // A terminate checks membership; the shellper's handle is query-only.
     expect(HELPER_SCRIPT).toContain('IsProcessInJob');
     expect(HELPER_SCRIPT).not.toContain('DUPLICATE_SAME_ACCESS');
@@ -280,6 +284,18 @@ describe('WindowsJobHelper', () => {
   it('a cold helper plus one request fits the create budget, which fits the shellper deadline', () => {
     expect(HELPER_READY_TIMEOUT_MS + HELPER_REQUEST_TIMEOUT_MS).toBeLessThan(JOB_ASSIGN_BUDGET_MS);
     expect(JOB_ASSIGN_BUDGET_MS).toBeLessThan(DEFER_PTY_DEADLINE_MS);
+  });
+
+  it('#1915: in-job asks whether a pid is in a named job', async () => {
+    const f = fakeFactory({ respond: (req) => (req.op === 'in-job' ? { ok: true, found: true, member: true } : null) });
+    const helper = new WindowsJobHelper({ spawnHelper: f.spawnHelper });
+    expect(await helper.inJob('job', 33)).toEqual({ ok: true, found: true, member: true });
+    expect(f.spawned[0].requests[0]).toMatchObject({ op: 'in-job', name: 'job', pid: 33 });
+    expect(HELPER_SCRIPT).toContain("elseif ($req.op -eq 'in-job')");
+  });
+
+  it('#1915: the program still fits a Windows command line', () => {
+    expect(encodeHelperCommand(HELPER_SCRIPT).length).toBeLessThan(30_000);
   });
 
   it('terminateSessionJob uses the given helper', async () => {

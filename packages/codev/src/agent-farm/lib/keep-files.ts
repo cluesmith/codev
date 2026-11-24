@@ -53,7 +53,8 @@ function gitList(worktree: string, args: string[]): string[] {
 
 /**
  * A directory entry (`dir/`, e.g. a nested repository) expands to the files under it. Walked by
- * hand: `readdirSync`'s `recursive` option needs Node 20.1, and `engines` allows 20.0.
+ * hand on purpose: `readdirSync({ recursive: true })` also returns directories and joins names
+ * with `path.sep`, while this keeps regular files only and builds `/`-separated paths.
  */
 function expand(worktree: string, rel: string): string[] {
   if (!rel.endsWith('/')) return [rel];

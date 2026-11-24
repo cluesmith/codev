@@ -40,7 +40,8 @@ import { isDeliberateExit } from './shellper-protocol.js';
 import { killSessionTree } from '../lib/process-tree.js';
 import { PTY_TERMINAL_TYPE, withPtyTerminalType } from '../lib/agent-env.js';
 import { ptyCommand } from '../lib/pty-command.js';
-import { explainNativeLoadFailure, withNativeLoadExplanation } from '../lib/native-deps.js';
+import { withNativeLoadExplanation } from '../lib/native-deps.js';
+import { loadNodePty } from './node-pty-loader.js';
 
 /**
  * Terminal delivery-signal bus (Spec 1313, Phase 5).
@@ -259,14 +260,8 @@ export class PtySession extends EventEmitter {
 
   /** Spawn the PTY process. Must be called after construction. */
   async spawn(): Promise<void> {
-    // Dynamic import to avoid hard dependency at module level. A binding that cannot
-    // load on Windows surfaces with the supported-versions message (Spec 1658).
-    let nodePty: typeof import('node-pty');
-    try {
-      nodePty = await import('node-pty');
-    } catch (err) {
-      throw explainNativeLoadFailure(err);
-    }
+    // Loaded at spawn time through the one node-pty loader (#1944: never a dynamic import).
+    const nodePty = loadNodePty();
 
     // Ensure log directory exists
     if (this.diskLogEnabled) {

@@ -13,11 +13,18 @@
  * - One long-lived helper per Tower, started at boot, binds once and serves
  *   line-delimited JSON over stdin/stdout, so a session create pays a round trip
  *   to a warm helper, not a PowerShell start.
- * - Jobs carry BREAKAWAY_OK, for a launcher that requests breakaway
- *   explicitly. Node's `detached: true` does not (libuv never passes
- *   CREATE_BREAKAWAY_FROM_JOB), so a Node detached child stays in the session:
- *   there is no `setsid` parity on Windows (measured, audit 1.8). Never
- *   KILL_ON_JOB_CLOSE: the helper exiting or
+ * - Jobs allow no breakaway (#1915). Spec 1658 set BREAKAWAY_OK so a launcher
+ *   that asks for breakaway could leave, but the MSYS runtime asks for it on
+ *   every native program Git Bash starts: with it set, a session job held only
+ *   the shellper, its console host and the launch loop's `bash.exe`, while the
+ *   agent (`claude.exe`) and every tool-call process ran outside it, so neither
+ *   teardown nor an orphan listing could see them (measured on the owner's
+ *   host). Without it those programs start normally and stay in the job (git,
+ *   gh, node, cmd, powershell, python, codex, code, claude, and a Claude tool
+ *   call, measured). Node's `detached: true` never asked for breakaway anyway
+ *   (libuv never passes CREATE_BREAKAWAY_FROM_JOB): there is no `setsid` parity
+ *   on Windows, and a process that must outlive its session (the Tower daemon)
+ *   is created through CIM. Never KILL_ON_JOB_CLOSE: the helper exiting or
  *   Tower restarting must never kill sessions. The helper creates jobs for
  *   shellper pids only, never for itself or Tower.
  * - Degradation is reported, never silent and never thrown at a session
@@ -40,7 +47,7 @@ export function sessionJobName(shellperSessionId: string): string {
  * readiness line, then answers one JSON response per JSON request line:
  *
  * - `{id, op:'assign', name, pid}`: create job `name` (refusing a name that
- *   already exists), set BREAKAWAY_OK, assign `pid`, then hand `pid` its own
+ *   already exists), with no limit flags (no breakaway, no kill-on-close), assign `pid`, then hand `pid` its own
  *   query-only handle to the job. A job's NAME lives only while some handle to it is
  *   open (member processes do not keep it), so the helper's own handle is not
  *   enough: the helper exits with Tower. The handle duplicated into the
@@ -49,6 +56,9 @@ export function sessionJobName(shellperSessionId: string): string {
  * - `{id, op:'terminate', name, pid}`: open job `name` and terminate it, only
  *   if `pid` (the session root) is a member (`member:false` otherwise);
  *   `found:false` when no such job exists (its root already exited).
+ * - `{id, op:'in-job', name, pid}` (#1915): whether `pid` is a member of job
+ *   `name` (`found:false` when no such job exists). Tower asks it at boot, to
+ *   refuse to run inside any session's job.
  *
  * Errors carry the Win32 code. The readiness line reports a bind failure
  * instead of exiting silently, so the caller can name the cause.
@@ -91,7 +101,9 @@ $JOB_TERMINATE_QUERY = [UInt32]0x000C
 $PROCESS_ACCESS = [UInt32]0x0141
 $PROCESS_QUERY_LIMITED = [UInt32]0x1000
 $CURRENT_PROCESS = [IntPtr](-1)
-$BREAKAWAY_OK = 0x0800
+# Session jobs set no limit flags: no breakaway (#1915: Git Bash breaks every native
+# program out of a job that allows it) and no kill-on-close (sessions outlive Tower).
+$SESSION_JOB_LIMIT_FLAGS = 0
 $ERROR_FILE_NOT_FOUND = 2
 $ERROR_ALREADY_EXISTS = 183
 # The last Win32 error is read by the statement right after each call, with a
@@ -112,7 +124,7 @@ function Assign($name, $procId) {
     $info = $M::AllocHGlobal($size)
     try {
       for ($i = 0; $i -lt $size; $i += 4) { $M::WriteInt32($info, $i, 0) }
-      $M::WriteInt32($info, 16, $BREAKAWAY_OK)
+      $M::WriteInt32($info, 16, $SESSION_JOB_LIMIT_FLAGS)
       $set = $K::SetInformationJobObject($job, 9, $info, [UInt32]$size)
       $code = $M::GetLastWin32Error()
       if (-not $set) { return @{ ok = $false; error = 'SetInformationJobObject failed'; code = $code } }
@@ -160,6 +172,25 @@ function Terminate($name, $procId) {
     return @{ ok = $true; found = $true; member = $true }
   } finally { [void]$K::CloseHandle($job) }
 }
+function InJob($name, $procId) {
+  $job = $K::OpenJobObjectW($JOB_QUERY, $false, $name)
+  $code = $M::GetLastWin32Error()
+  if ($job -eq [IntPtr]::Zero) {
+    if ($code -eq $ERROR_FILE_NOT_FOUND) { return @{ ok = $true; found = $false; member = $false } }
+    return @{ ok = $false; error = 'OpenJobObjectW failed'; code = $code }
+  }
+  try {
+    $proc = $K::OpenProcess($PROCESS_QUERY_LIMITED, $false, [UInt32]$procId)
+    if ($proc -eq [IntPtr]::Zero) { return @{ ok = $true; found = $true; member = $false } }
+    try {
+      $inJob = $false
+      $queried = $K::IsProcessInJob($proc, $job, [ref]$inJob)
+      $code = $M::GetLastWin32Error()
+      if (-not $queried) { return @{ ok = $false; error = 'IsProcessInJob failed'; code = $code } }
+      return @{ ok = $true; found = $true; member = $inJob }
+    } finally { [void]$K::CloseHandle($proc) }
+  } finally { [void]$K::CloseHandle($job) }
+}
 Out-Line @{ ready = $true; languageMode = $ExecutionContext.SessionState.LanguageMode.ToString() }
 while ($true) {
   $line = [Console]::In.ReadLine()
@@ -171,6 +202,7 @@ while ($true) {
     $id = $req.id
     if ($req.op -eq 'assign') { $res = Assign $req.name $req.pid }
     elseif ($req.op -eq 'terminate') { $res = Terminate $req.name $req.pid }
+    elseif ($req.op -eq 'in-job') { $res = InJob $req.name $req.pid }
     else { $res = @{ ok = $false; error = "unknown op $($req.op)" } }
   } catch {
     $res = @{ ok = $false; error = $_.Exception.Message }
@@ -208,9 +240,9 @@ export interface JobResult {
   helperFailure?: boolean;
   /** The helper is disabled for good; that was already reported once, when it happened. */
   disabled?: boolean;
-  /** terminate: false when no job had that name. */
+  /** terminate, in-job: false when no job had that name. */
   found?: boolean;
-  /** terminate: whether the session root was in the job (it is terminated only then). */
+  /** terminate: whether the session root was in the job (it is terminated only then). in-job: whether the pid is. */
   member?: boolean;
   error?: string;
   /** Win32 error code, when a call failed. */
@@ -479,6 +511,11 @@ export class WindowsJobHelper {
    */
   terminate(name: string, rootPid: number): Promise<JobResult> {
     return this.request({ op: 'terminate', name, pid: rootPid });
+  }
+
+  /** Whether `pid` is in job `name`; `found: false` when no such job exists. */
+  inJob(name: string, pid: number): Promise<JobResult> {
+    return this.request({ op: 'in-job', name, pid });
   }
 
   /** Stop the helper. Jobs are not affected: they carry no kill-on-close. */

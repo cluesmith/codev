@@ -4,7 +4,7 @@
  * When `resolveTarget` finds no LIVE terminal, `handleSend` falls back to this
  * resolver so a message to a KNOWN-but-offline agent is HELD (`no-live-pty`) rather
  * than 404'd. These tests drive it directly with mocked `getWorkspaceTerminals`
- * (used by the cross-workspace `findWorkspaceByBasename` mapping) and mocked
+ * (used by the cross-workspace lookup, `findWorkspaceByAddressName`) and mocked
  * `state.js` registry reads (`getBuilders` / architect lookups), so the resolution
  * logic is covered without a live Tower or a real global.db.
  */
@@ -36,12 +36,25 @@ vi.mock('../state.js', () => ({
   getArchitects: (ws: string) => mockGetArchitects(ws),
   getArchitectByName: (ws: string, name: string) => mockGetArchitectByName(ws, name),
   lookupBuilderSpawningArchitect: (id: string, ws?: string) => mockLookupBuilderSpawningArchitect(id, ws),
+  // Spec 1940: no workspace here has an explicit name, so each is found by its basename.
+  getRegisteredWorkspaces: () => [],
 }));
 
-import { resolveAgentInRegistry, isResolveError } from '../servers/tower-messages.js';
+import { parseTarget, resolveAgentInRegistry, isResolveError } from '../servers/tower-messages.js';
 
 const WS_A = '/home/user/proj-a';
 const WS_B = '/home/user/proj-b';
+
+/**
+ * Resolve address text the way the send route does (Spec 1940): read it once with the
+ * shared parser, then resolve the structured address for a sender. `workspace` is the
+ * sender's workspace, which is also where an address that names none is read.
+ */
+function resolveInRegistry(target: string, workspace?: string, sender?: string) {
+  const address = parseTarget(target);
+  if (isResolveError(address)) return address;
+  return resolveAgentInRegistry(address, { id: sender, workspace });
+}
 
 /** A minimal WorkspaceTerminals; the resolver only cares that the key (path) exists. */
 function emptyEntry(): WorkspaceTerminals {
@@ -56,7 +69,7 @@ function builder(id: string): Builder {
 describe('Spec 1313 — resolveAgentInRegistry (offline-hold fallback)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: both workspaces are live-registered (so findWorkspaceByBasename can
+    // Default: both workspaces are live-registered (so the workspace lookup can
     // map a project basename → path); registries are empty unless a test sets them.
     mockGetWorkspaceTerminals.mockReturnValue(
       new Map([[WS_A, emptyEntry()], [WS_B, emptyEntry()]]),
@@ -70,7 +83,7 @@ describe('Spec 1313 — resolveAgentInRegistry (offline-hold fallback)', () => {
   it('holds a bare builder that is registered but has no live PTY', () => {
     mockGetBuilders.mockImplementation((ws) => (ws === WS_A ? [builder('spir-100')] : []));
 
-    const result = resolveAgentInRegistry('spir-100', WS_A);
+    const result = resolveInRegistry('spir-100', WS_A);
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result).toEqual({ workspacePath: WS_A, agent: 'spir-100', kind: 'builder' });
   });
@@ -78,40 +91,40 @@ describe('Spec 1313 — resolveAgentInRegistry (offline-hold fallback)', () => {
   it('tail-matches a bare builder by numeric suffix (leading zeros stripped)', () => {
     mockGetBuilders.mockImplementation((ws) => (ws === WS_A ? [builder('spir-100')] : []));
 
-    const result = resolveAgentInRegistry('100', WS_A);
+    const result = resolveInRegistry('100', WS_A);
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.agent).toBe('spir-100');
   });
 
   it('NOT_FOUND for a bare agent absent from the registry (mail is not held for a stranger)', () => {
     mockGetBuilders.mockReturnValue([]);
-    const result = resolveAgentInRegistry('spir-999', WS_A);
+    const result = resolveInRegistry('spir-999', WS_A);
     expect(isResolveError(result) && result.code).toBe('NOT_FOUND');
   });
 
   // ---- Fix (Spec 1313 review): cross-workspace project:agent offline hold ----
 
   it('holds a cross-workspace project:builder against the TARGET workspace registry', () => {
-    // proj-b is live-registered (findWorkspaceByBasename maps it → WS_B); its
+    // proj-b is live-registered (the workspace lookup maps it → WS_B); its
     // builder spir-200 is registered but its PTY is down → hold against WS_B.
     mockGetBuilders.mockImplementation((ws) => (ws === WS_B ? [builder('spir-200')] : []));
 
-    const result = resolveAgentInRegistry('proj-b:spir-200', WS_A, 'spir-100');
+    const result = resolveInRegistry('proj-b:spir-200', WS_A, 'spir-100');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result).toEqual({ workspacePath: WS_B, agent: 'spir-200', kind: 'builder' });
   });
 
-  it('NOT_FOUND when the project workspace is not active (findWorkspaceByBasename boundary)', () => {
+  it('NOT_FOUND when the project workspace is not active (the boundary of the workspace lookup)', () => {
     // Only WS_A is live-registered; proj-b maps to no workspace.
     mockGetWorkspaceTerminals.mockReturnValue(new Map([[WS_A, emptyEntry()]]));
 
-    const result = resolveAgentInRegistry('proj-b:spir-200', WS_A);
+    const result = resolveInRegistry('proj-b:spir-200', WS_A);
     expect(isResolveError(result) && result.code).toBe('NOT_FOUND');
   });
 
   it('NOT_FOUND for project:builder when the agent is absent from the target registry', () => {
     mockGetBuilders.mockReturnValue([]); // proj-b is live but has no such builder
-    const result = resolveAgentInRegistry('proj-b:spir-200', WS_A);
+    const result = resolveInRegistry('proj-b:spir-200', WS_A);
     expect(isResolveError(result) && result.code).toBe('NOT_FOUND');
   });
 });

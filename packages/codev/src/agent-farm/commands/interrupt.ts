@@ -23,12 +23,18 @@ import type { InterruptOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { detectWorkspaceRoot, detectCurrentBuilderId, architectSenderId } from './send.js';
+import { namesATower, CROSS_TOWER_UNAVAILABLE_MESSAGE } from '../utils/agent-names.js';
 
 export async function interrupt(options: InterruptOptions): Promise<void> {
   const target = options.builder;
 
   if (!target) {
     fatal('Must specify a builder. Usage: afx interrupt <builder>');
+  }
+  // Spec 1940: an interrupt acts on a terminal of this machine. Refused here, before
+  // Tower is asked, and again by Tower.
+  if (namesATower(target)) {
+    fatal(`afx interrupt takes a local address. ${CROSS_TOWER_UNAVAILABLE_MESSAGE}`);
   }
 
   logger.header('Sending Interrupt (ESC)');

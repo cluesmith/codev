@@ -27,9 +27,20 @@ vi.mock('../state.js', () => ({
   lookupBuilderSpawningArchitect: (id: string) => mockLookupBuilderSpawningArchitect(id),
 }));
 
-import { resolveTarget, isResolveError, looksLikeBuilderId } from '../servers/tower-messages.js';
+import { parseTarget, resolveTarget, isResolveError, looksLikeBuilderId } from '../servers/tower-messages.js';
 
 const WS = '/home/user/project';
+
+/**
+ * Resolve address text the way the send route does (Spec 1940): read it once with the
+ * shared parser, then resolve the structured address for a sender. `workspace` is the
+ * sender's workspace, which is also where an address that names none is read.
+ */
+function resolve(target: string, workspace?: string, sender?: string) {
+  const address = parseTarget(target);
+  if (isResolveError(address)) return address;
+  return resolveTarget(address, { id: sender, workspace });
+}
 
 function mkEntry(architects: Record<string, string>, builders: Record<string, string> = {}): WorkspaceTerminals {
   return {
@@ -76,7 +87,7 @@ describe('Tower guard — non-canonical builder sender warns before main fallbac
     );
     mockLookupBuilderSpawningArchitect.mockReturnValue(undefined); // no matching row
 
-    const result = resolveTarget('architect', WS, 'bugfix-2461');
+    const result = resolve('architect', WS, 'bugfix-2461');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     // Behavior unchanged: still falls through to main.
     expect(result.terminalId).toBe('term-main');
@@ -92,7 +103,7 @@ describe('Tower guard — non-canonical builder sender warns before main fallbac
     );
     mockLookupBuilderSpawningArchitect.mockReturnValue(undefined); // not a builder
 
-    const result = resolveTarget('architect', WS, 'architect');
+    const result = resolve('architect', WS, 'architect');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.terminalId).toBe('term-main');
     expect(warnSpy).not.toHaveBeenCalled();
@@ -103,7 +114,7 @@ describe('Tower guard — non-canonical builder sender warns before main fallbac
       new Map([[WS, mkEntry({ main: 'term-main', sibling: 'term-sibling' })]]),
     );
 
-    const result = resolveTarget('architect', WS);
+    const result = resolve('architect', WS);
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.terminalId).toBe('term-main');
     expect(warnSpy).not.toHaveBeenCalled();
