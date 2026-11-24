@@ -92,6 +92,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "codev.cockpit.refresh",
+        "title": "Codev: Refresh Cockpit",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "codev.helloWorld",
         "title": "Codev: Show Connection State"
       },
@@ -869,6 +874,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "codev.cockpit.refresh",
+          "when": "view == codev.cockpit",
+          "group": "navigation@1"
+        },
+        {
           "command": "codev.refreshOverview",
           "when": "view == codev.agents",
           "group": "navigation@2"
@@ -1131,6 +1141,11 @@
           "id": "codev",
           "title": "Codev",
           "icon": "icons/codev.svg"
+        },
+        {
+          "id": "codev-cockpit",
+          "title": "Codev Cockpit",
+          "icon": "icons/codev-cockpit.svg"
         }
       ],
       "secondarySidebar": [
@@ -1163,6 +1178,9 @@
       ],
       "codev-tower": [
         { "id": "codev.tower", "name": "Codev Tower" }
+      ],
+      "codev-cockpit": [
+        { "id": "codev.cockpit", "name": "Codev Cockpit" }
       ]
     },
     "viewsWelcome": [

@@ -400,3 +400,66 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
     (`Snapshots 18 written`) against the untouched `BuildersProvider`, then the source changes,
     after which the snapshot matched unchanged. The mutation runs also show the snapshot is not
     self-confirming: giving the Agents view a cockpit contextValue or a description fails it.
+
+### Phase 4 (`cockpit_hierarchy`), iteration 1 (2026-11-24): the Cockpit button and its tree
+
+- The button: `codev-cockpit` sits directly after `codev` in the activity bar, with
+  `icons/codev-cockpit.svg` (`codev.svg`'s path wrapped in `rotate(90 400 400)`). It holds one
+  view, `codev.cockpit`, with no `when`, and a title-bar *Refresh* (`codev.cockpit.refresh`, which
+  refreshes the overview and the fleet). Checked: the whole `contributes` block minus these
+  additions is byte-identical to the Phase 3 commit's.
+- `views/cockpit.ts`, `CockpitProvider`. Tower root → state rows (*Connecting…* until an attempt
+  fails, then *Not connected* → `codev.reconnect`; *No workspaces registered*) or the workspaces
+  in the Tower view's order, labels, *current* marker and *Dormant (N)* group. Then one
+  `ArchitectTreeBuilder` per active workspace, cached by scope `ws:<path>|` and pruned on leave:
+  this window's workspace acts on `OverviewCache`; every other one navigates on the fleet's
+  retained overview. *Loading…* until a workspace's overview lands. `getParent` reaches the Tower
+  root from every row.
+- Shared row code: `workspaceRow(ws, 'none' | 'collapsed' | 'expanded')` and `dormantGroupRow`
+  are extracted from `TowerProvider`, whose output is unchanged (its tests pass unmodified).
+- `views/agent-tree-hosts.ts`, `AgentTreeHosts`: the Agents view and the Cockpit are two hosts.
+  The row click, the per-view accordion (one `AccordionGate` each), the follow-reveals, the
+  `builder-active` selection hook and the badge act on whichever view a row belongs to, matched by
+  its `scope`. Another workspace's rows never act.
+- `views/overview-refresh-gate.ts`, `OverviewRefreshGate`: the periodic overview refresh, lifted
+  out of `extension.ts` unchanged, with the Cockpit added to its view list. It is a new module so
+  the visibility gate is unit-testable; Phase 8 adds the Work panel to the same list.
+- `mailbox-indicators.ts`, `workspaceActivityBadge`: the badge computation, lifted out of
+  `extension.ts` as a pure function. It is assigned to both views.
+- Decisions taken here, each small (raise any at review):
+  - Follow-reveals (active file, agent cycle) land in every *visible* host. When none is visible
+    they land in the Agents view, exactly as before. Revealing in a hidden view opens its
+    container, so revealing in both would flip the sidebar between them.
+  - A navigate row's target always has `isCurrent: false`. In a builder-worktree window the
+    parent is marked current, and `openOrActivateWorkspace` returns early on `isCurrent`, so the
+    click would do nothing. Its window is not this one.
+  - A dormant window (guest mode, no Codev workspace) never connects, so the root says *Not
+    connected to Tower* with no Reconnect command (the command is a no-op there) instead of
+    *Connecting…* forever.
+  - Once the fleet has loaded, a dropped connection keeps listing the last-known workspaces. The
+    spec puts the state row on the root only "while there is nothing to list".
+  - The architect rows' attention (Spec 1595 wait text and glyph) lives in `ArchitectTreeBuilder`
+    behind the Phase 3 option, renamed `attentionCounts` → `attention`. It is off for Agents, so the
+    Phase 3 snapshot still matches.
+  - `ArchitectTreeBuilder.getParent` builds the root rows when it does not yet know a builder's
+    group. The Cockpit asks before its workspace node was ever expanded (the active-file reveal
+    with collapsed ancestors), and the old answer, "root", broke the chain. The Agents view is
+    unchanged: its root always renders first.
+- Re-render cost, as carried from the Phase 3 review: the Cockpit redraws on every fleet tick as
+  well as every overview change, so this window's builder rows run `builderHasReviewFile` (one
+  `readdirSync` each) about twice as often as the Agents view, and an expanded builder row may
+  re-read its 15 s-TTL diff on a fleet tick. Accepted: it is a handful of small local reads.
+- Observation, not changed: an idle sibling at a prompt is folded inside the collapsed *Idle
+  Architects* container, so its wait text is one click down. The workspace row's summary still
+  shows it.
+- Tests:
+  - `cockpit-provider.test.ts` (40);
+  - `cockpit-wiring.test.ts` (21);
+  - `contributes-cockpit.test.ts` (8), with snapshots of the `codev` views and every non-Cockpit
+    menu entry, checked against the Phase 3 commit;
+  - `cockpit-icon.test.ts` (3);
+  - `worktree-window-1809.test.ts`: its badge match now follows the generalised wiring and asserts
+    both views, plus a behavioural check on `workspaceActivityBadge`.
+  - Mutation-checked, 45 mutations across the provider, the hosts, the gate, the badge, the tower
+    extraction and the `extension.ts` wiring; every one is killed. Three survivors on the first pass
+    (connected-before-load, pruning, `restart()`) got stronger tests.

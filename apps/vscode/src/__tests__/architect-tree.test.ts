@@ -539,9 +539,9 @@ describe('ArchitectTreeBuilder: navigate mode (another workspace\'s rows)', () =
   });
 });
 
-describe('ArchitectTreeBuilder: attentionCounts', () => {
+describe('ArchitectTreeBuilder: attention', () => {
   it('appends held and queued counts to builder-row descriptions only when on', async () => {
-    const on = await allRows(actTree(MANY, 'ws:/a|', { attentionCounts: true }));
+    const on = await allRows(actTree(MANY, 'ws:/a|', { attention: true }));
     expect(find(on, 'ws:/a|bugfix-12#0').description).toBe('2 held · 4 queued');
     for (const id of ['ws:/a|spir-10#0', 'ws:/a|air-11#0', 'ws:/a|pir-13#0', 'ws:/a|aspir-14#0']) {
       expect(find(on, id).description).toBeUndefined();
@@ -550,7 +550,7 @@ describe('ArchitectTreeBuilder: attentionCounts', () => {
     expect(find(off, 'ws:/a|bugfix-12#0').description).toBeUndefined();
 
     const remote = await allRows(new ArchitectTreeBuilder({
-      mode: 'navigate', scope: 'ws:/b|', getData: () => MANY, target: () => TARGET, attentionCounts: true,
+      mode: 'navigate', scope: 'ws:/b|', getData: () => MANY, target: () => TARGET, attention: true,
     }));
     expect(find(remote, 'ws:/b|bugfix-12#0').description).toBe('2 held · 4 queued');
   });
@@ -559,7 +559,7 @@ describe('ArchitectTreeBuilder: attentionCounts', () => {
     let data = overview(
       [builder({ id: 'q', spawnedByArchitect: 'main' })], [architect('main')], { queuedFeedback: { q: 1 } },
     );
-    const tree = actTree(data, '', { getData: () => data, attentionCounts: true } as Partial<TreeOptions>);
+    const tree = actTree(data, '', { getData: () => data, attention: true } as Partial<TreeOptions>);
     const row = async () => (await tree.getChildren(find(await tree.getChildren(), 'builder-group:main')))[0];
     expect((await row()).description).toBe('1 queued');
     data = overview(

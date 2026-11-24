@@ -193,6 +193,11 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     return this.tree.getChildren(element);
   }
 
+  /** The scope of this view's rows (`''`): every row here acts in this window. */
+  actingScope(): string | undefined {
+    return this.tree.scope;
+  }
+
   /** The changed-file row for `(builderId, relPath)`, for the active-file reveal (#1066). */
   findFileItem(builderId: string, relPath: string): Promise<BuilderFileTreeItem | undefined> {
     return this.tree.findFileItem(builderId, relPath);

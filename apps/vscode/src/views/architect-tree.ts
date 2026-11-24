@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
-import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
+import { deriveAttention, type AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
 import { builderWithWorktree, type OverviewBuilderWithWorktree } from '../builder-lookup.js';
 import { readBuildersFileViewAsTree } from '../builders-config.js';
 import { BuilderGroupTreeItem, BuilderTreeItem, IdleArchitectsGroupTreeItem } from './builder-tree-item.js';
@@ -22,6 +22,7 @@ import {
   type BuilderState,
 } from './builder-row.js';
 import { OPEN_WORKSPACE_COMMAND, type WorkspaceTarget } from './tower.js';
+import { describeWait } from './attention-format.js';
 
 /**
  * Builder state → `contextValue` family prefix. Drives menu `when`-clause
@@ -114,10 +115,12 @@ interface ArchitectTreeCommonOptions {
    */
   scope: string;
   /**
-   * Append *N held* / *N queued* (from `deriveAttention` over `getData()`) to builder-row
-   * descriptions. Off for the Agents view, whose builder rows carry no description.
+   * Show the Tower view's attention signals on the rows they concern, from `deriveAttention` over
+   * `getData()`: *N held* / *N queued* in builder-row descriptions, and an architect at a prompt
+   * or with its agent dead as its row's wait text and glyph (Spec 1595). Off for the Agents view,
+   * whose rows carry neither.
    */
-  attentionCounts?: boolean;
+  attention?: boolean;
 }
 
 /** Rows that act in this window: open terminals, expand to changed files, carry the source menus. */
@@ -163,8 +166,8 @@ export class ArchitectTreeBuilder {
   private readonly rowIds: AccordionRowIds;
   // The architect axis, for navigate mode (which has no `grouping` option).
   private readonly architectAxis = architectGrouping();
-  // `attentionCounts`: per-builder counts, derived once per overview object.
-  private attention: { data: OverviewData; counts: Map<string, { held: number; queued: number }> } | null = null;
+  // `attention`: the summary and per-builder counts, derived once per overview object.
+  private attentionCache: { data: OverviewData; summary: AttentionSummary; counts: Map<string, { held: number; queued: number }> } | null = null;
 
   constructor(private readonly options: ArchitectTreeOptions) {
     this.rowIds = new AccordionRowIds(options.scope);
@@ -271,6 +274,11 @@ export class ArchitectTreeBuilder {
   getParent(element: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem> {
     this.assertOwnRow(element);
     if (element instanceof BuilderTreeItem) {
+      // The group map is filled when the root rows render. A host that nests these
+      // rows under a node VS Code has not expanded yet (the Cockpit's workspace row)
+      // asks before that render, so build the root rows now rather than answer
+      // "root" for a builder that sits under an architect.
+      if (!this.groupParentByBuilderId.has(element.builderId)) { this.rootRows(); }
       return this.groupParentByBuilderId.get(element.builderId);
     }
     if (element instanceof BuilderFileTreeItem || element instanceof BuilderFolderTreeItem) {
@@ -594,10 +602,31 @@ export class ArchitectTreeBuilder {
         groupItem.contextValue = g.key === 'main' ? 'cockpit-architect-main' : 'cockpit-architect-sibling';
       }
     }
+    this.applyArchitectAttention(groupItem, g.key);
     for (const b of g.items) {
       this.groupParentByBuilderId.set(b.id, groupItem);
     }
     return groupItem;
+  }
+
+  /**
+   * With `attention` on, an architect at a prompt or with its agent dead shows it on its own row:
+   * the wait text (the Tower view's attention-row text) as the description and its glyph as the
+   * icon. Only architect-axis rows name an architect, so other axes' headers never match.
+   */
+  private applyArchitectAttention(row: BuilderGroupTreeItem, architectName: string): void {
+    if (this.grouping().id !== 'architect') { return; }
+    const summary = this.attentionSummary();
+    if (!summary) { return; }
+    const waiting = summary.architects.find(a => a.architect === architectName);
+    if (!waiting) { return; }
+    const glance = describeWait(waiting.state, waiting.since);
+    row.description = glance.text;
+    if (glance.color) {
+      row.iconPath = new vscode.ThemeIcon(glance.icon, new vscode.ThemeColor(glance.color));
+    } else {
+      row.iconPath = new vscode.ThemeIcon(glance.icon);
+    }
   }
 
   private rowsForGroup(key: string): vscode.TreeItem[] {
@@ -674,15 +703,14 @@ export class ArchitectTreeBuilder {
   }
 
   /**
-   * `N held · N queued` for a builder row when `attentionCounts` is on, or
-   * `undefined` when it is off or the builder has neither. The counts are the
-   * Tower view's own (`deriveAttention`), derived once per overview object.
+   * The attention summary of `getData()` when `attention` is on, else `undefined`. Derived once per
+   * overview object, with the per-builder held / queued counts alongside.
    */
-  private attentionCountsText(builderId: string): string | undefined {
-    if (!this.options.attentionCounts) { return undefined; }
+  private attentionOf(): { summary: AttentionSummary; counts: Map<string, { held: number; queued: number }> } | undefined {
+    if (!this.options.attention) { return undefined; }
     const data = this.options.getData();
     if (!data) { return undefined; }
-    if (this.attention?.data !== data) {
+    if (this.attentionCache?.data !== data) {
       const summary = deriveAttention(data);
       const counts = new Map<string, { held: number; queued: number }>();
       const entry = (id: string) => {
@@ -695,9 +723,24 @@ export class ArchitectTreeBuilder {
       };
       for (const item of summary.heldMail) { entry(item.builderId).held = item.count; }
       for (const item of summary.queuedFeedback) { entry(item.builderId).queued = item.count; }
-      this.attention = { data, counts };
+      this.attentionCache = { data, summary, counts };
     }
-    const found = this.attention.counts.get(builderId);
+    return this.attentionCache;
+  }
+
+  private attentionSummary(): AttentionSummary | undefined {
+    return this.attentionOf()?.summary;
+  }
+
+  /**
+   * `N held · N queued` for a builder row when `attention` is on, or `undefined`
+   * when it is off or the builder has neither. The counts are the Tower view's
+   * own (`deriveAttention`).
+   */
+  private attentionCountsText(builderId: string): string | undefined {
+    const attention = this.attentionOf();
+    if (!attention) { return undefined; }
+    const found = attention.counts.get(builderId);
     if (!found) { return undefined; }
     const parts: string[] = [];
     if (found.held > 0) { parts.push(`${found.held} held`); }
