@@ -147,11 +147,17 @@ CREATE TABLE IF NOT EXISTS file_tabs (
 CREATE INDEX IF NOT EXISTS idx_file_tabs_workspace ON file_tabs(workspace_path);
 
 -- Known workspaces (persistent workspace registry)
+-- address_name (Spec 1940, migration v20): the workspace's explicit address name, lower-cased,
+-- NULL when it is addressed by its directory basename. The rules live in
+-- utils/workspace-address.ts; the unique index is only a backstop for them.
 CREATE TABLE IF NOT EXISTS known_workspaces (
   workspace_path TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  last_launched_at TEXT NOT NULL DEFAULT (datetime('now'))
+  last_launched_at TEXT NOT NULL DEFAULT (datetime('now')),
+  address_name TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_known_workspaces_address_name
+  ON known_workspaces(address_name) WHERE address_name IS NOT NULL;
 
 -- Cron tasks (Spec 399)
 -- Tracks scheduled task state across all workspaces

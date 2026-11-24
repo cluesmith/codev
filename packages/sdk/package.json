@@ -32,6 +32,10 @@
       "types": "./dist/agent-names.d.ts",
       "default": "./dist/agent-names.js"
     },
+    "./address": {
+      "types": "./dist/address.d.ts",
+      "default": "./dist/address.js"
+    },
     "./architect-name": {
       "types": "./dist/architect-name.d.ts",
       "default": "./dist/architect-name.js"

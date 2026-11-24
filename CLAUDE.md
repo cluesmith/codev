@@ -179,8 +179,20 @@ Agents message each other with `afx send`:
 |---|---|
 | `afx send <builder-id> "…"` | A specific builder |
 | `afx send architect "…"` | From a builder: its spawning architect. From anyone else: the architect named `main`, else the first registered |
-| `afx send architect:<name> "…"` | A named architect. Architects may address any architect; a **builder may only use this for its own spawning architect** — mismatches are rejected as spoofing |
-| `afx send <workspace>:architect "…"` | Cross-workspace |
+| `afx send architect:<name> "…"` | A named architect in your own workspace. Architects may address any architect; a **builder may only use this for its own spawning architect** — mismatches are rejected as spoofing |
+| `afx send <workspace>:architect "…"` | Another workspace's **front door**: its `main` architect, else the first registered. Open to every sender, builders included |
+| `afx send <workspace>:architect:<name> "…"` | A named architect in another workspace on this Tower. Architects and humans may name any architect; a **builder is refused** and told the front door to use instead |
+| `afx send <workspace>:<builder-id> "…"` | A builder in another workspace |
+
+**Find an address with `afx workspace list`** rather than guessing one: it prints every workspace
+on this Tower and its agents as addresses ready to paste, marked for what *you* may send to.
+`afx whoami` prints your own address. `<workspace>` is the workspace's directory name unless it
+was given another with `afx workspace name <name>`, which is also the remedy when two workspaces
+share a directory name.
+
+A message from another workspace names its sender by full address in the header and carries the
+command that answers it on its last line (`reply: afx send codev:architect:review "…"`). Use that
+command as printed.
 
 `afx send` requires the workspace active in Tower (`afx workspace start`).
 

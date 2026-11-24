@@ -148,6 +148,19 @@ describe('afx refresh — command surface (Spec 1273)', () => {
   // Addressing parity
   // ==========================================================================
 
+  // Spec 1940: a refresh acts on a builder of this machine. An afx:// address is refused
+  // before the registry, Tower or the builder is touched.
+  it('refuses an afx:// address before looking the builder up or calling Tower', async () => {
+    const { refresh } = await import('../commands/reset.js');
+
+    await expect(refresh({ builder: 'afx://devvm/codev:builder-aspir-1273' }))
+      .rejects.toThrow(/afx refresh takes a local address\. Cross-Tower messaging is not available/);
+    expect(mockFindBuilderById).not.toHaveBeenCalled();
+    expect(mockIsRunning).not.toHaveBeenCalled();
+    expect(mockRunReset).not.toHaveBeenCalled();
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
   it('resolves the target through the shared resolver, not an exact-id lookup', async () => {
     // `getBuilder` matches the id EXACTLY. Using it meant `afx refresh 1273`
     // failed against a builder registered as `aspir-1273` while `afx send 1273`

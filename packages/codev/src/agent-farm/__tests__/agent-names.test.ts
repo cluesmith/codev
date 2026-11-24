@@ -8,6 +8,8 @@ import {
   buildAgentName,
   parseAgentName,
   parseAddress,
+  namesATower,
+  CROSS_TOWER_UNAVAILABLE_MESSAGE,
   resolveAgentName,
 } from '../utils/agent-names.js';
 import type { Builder } from '../types.js';
@@ -90,36 +92,60 @@ describe('parseAgentName', () => {
   });
 });
 
-describe('parseAddress', () => {
-  it('parses simple agent names', () => {
-    expect(parseAddress('architect')).toEqual({ agent: 'architect' });
-    expect(parseAddress('builder-spir-109')).toEqual({ agent: 'builder-spir-109' });
-  });
-
-  it('parses project:agent format', () => {
-    expect(parseAddress('codev-public:architect')).toEqual({
-      project: 'codev-public',
-      agent: 'architect',
-    });
-    expect(parseAddress('codev-public:builder-spir-109')).toEqual({
-      project: 'codev-public',
-      agent: 'builder-spir-109',
-    });
-  });
-
-  it('normalizes to lowercase', () => {
-    expect(parseAddress('ARCHITECT')).toEqual({ agent: 'architect' });
+// The old two-slot `parseAddress` and its unit block are gone (Spec 1940). The one shared
+// parser is re-exported here and is covered row by row by the shared table in
+// `address-conformance.test.ts`. What is left to pin in this file is that the re-export
+// IS that parser, and the two shapes whose meaning changed with it.
+describe('parseAddress (the shared parser, re-exported)', () => {
+  it('reads the forms the old parser read, into the structured address', () => {
+    expect(parseAddress('ARCHITECT')).toEqual({ ok: true, address: { kind: 'architect' } });
     expect(parseAddress('Codev-Public:Builder-SPIR-109')).toEqual({
-      project: 'codev-public',
-      agent: 'builder-spir-109',
+      ok: true,
+      address: { workspace: 'codev-public', kind: 'id', name: 'builder-spir-109' },
     });
   });
 
-  it('handles edge cases', () => {
-    // Colon at the very start means no project
-    expect(parseAddress(':agent')).toEqual({ agent: ':agent' });
-    // Multiple colons: first colon splits
-    expect(parseAddress('a:b:c')).toEqual({ project: 'a', agent: 'b:c' });
+  it('reads a named architect in another workspace, which the old parser could not', () => {
+    expect(parseAddress('codev-cloud:architect:tunnel')).toEqual({
+      ok: true,
+      address: { workspace: 'codev-cloud', kind: 'architect', name: 'tunnel' },
+    });
+  });
+
+  it('refuses `:agent` and `a:b:c`, which the old parser passed on to fail as not found', () => {
+    const leadingColon = parseAddress(':agent');
+    const threeParts = parseAddress('a:b:c');
+    expect(leadingColon.ok).toBe(false);
+    expect(threeParts.ok).toBe(false);
+    if (leadingColon.ok || threeParts.ok) return;
+    expect(leadingColon.error.code).toBe('EMPTY_COMPONENT');
+    expect(threeParts.error.code).toBe('TOO_MANY_COMPONENTS');
+    expect(threeParts.error.expected).toContain('[<workspace>:]architect[:<name>]');
+  });
+});
+
+describe('namesATower', () => {
+  it('is true for a well-formed afx:// address, with or without an owner', () => {
+    expect(namesATower('afx://devvm/codev:architect')).toBe(true);
+    expect(namesATower('afx://sam@studio/codev:architect:data')).toBe(true);
+    expect(namesATower('  AFX://devvm/codev:builder-spir-1940  ')).toBe(true);
+  });
+
+  it('is false for every local form', () => {
+    for (const local of ['architect', 'architect:review', 'codev:architect:review', 'builder-spir-1940', 'codev:1940', 'afx:architect']) {
+      expect(namesATower(local)).toBe(false);
+    }
+  });
+
+  it('is false for a malformed afx:// address, which is left to fail as malformed', () => {
+    for (const malformed of ['afx://devvm', 'afx://devvm/architect', 'afx://dev_vm/codev:architect', 'afx:/devvm/codev:architect']) {
+      expect(namesATower(malformed)).toBe(false);
+    }
+  });
+
+  it('has one refusal text, which says cross-Tower messaging is not available', () => {
+    expect(CROSS_TOWER_UNAVAILABLE_MESSAGE).toMatch(/^Cross-Tower messaging is not available/);
+    expect(CROSS_TOWER_UNAVAILABLE_MESSAGE).toContain('[<workspace>:]architect[:<name>]');
   });
 });
 
