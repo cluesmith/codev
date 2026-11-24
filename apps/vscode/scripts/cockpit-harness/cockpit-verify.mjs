@@ -1012,9 +1012,9 @@ SCRIPTS.reveal = async (R, context, page) => {
     await setExpanded(cockpit, ALPHA, false);
     const collapsedShot = await R.shot(page, 'collapsed');
     // Another editor, then back to the diff: the active-editor change drives the reveal.
-    await runCommand(page, 'Go to File...');
-    await quickType(page, 'README.md');
-    await waitFor('README active', async () => ((await activeEditorTab(page)) ?? '').includes('README'), 15_000);
+    // Waits for Quick Open to offer the file before choosing it: in the window the Cockpit arranges,
+    // with Work and Decisions loading, the search can take longer than a blind Enter allows.
+    await quickOpenFile(page, 'README.md');
     await page.locator('.tabs-container .tab', { hasText: 'alpha.ts' }).first().click();
     const revealed = await waitFor('alpha.ts row revealed', async () => {
       const r = await findRow(cockpit, [...b101, 'alpha.ts']);
