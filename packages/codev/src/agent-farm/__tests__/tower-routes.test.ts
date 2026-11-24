@@ -2440,17 +2440,17 @@ describe('tower-routes', () => {
        * Give these agents live terminals at a clean prompt. Returns each one's write spy,
        * keyed `<workspace basename>/<agent>`.
        */
-      function liveAgents(agents: Record<string, { architects?: string[]; shells?: string[] }>) {
+      function liveAgents(agents: Record<string, { architects?: string[]; builders?: string[]; shells?: string[] }>) {
         const writes: Record<string, ReturnType<typeof vi.fn>> = {};
         const terminals = new Map<string, ReturnType<typeof vi.fn>>();
-        const map = new Map(Object.entries(agents).map(([ws, { architects = [], shells = [] }]) => {
+        const map = new Map(Object.entries(agents).map(([ws, { architects = [], builders = [], shells = [] }]) => {
           const ids = (names: string[]) => new Map(names.map((name) => {
             const key = `${path.basename(ws)}/${name}`;
             writes[key] = vi.fn();
             terminals.set(`term-${key}`, writes[key]);
             return [name, `term-${key}`] as const;
           }));
-          return [ws, { architects: ids(architects), builders: new Map(), shells: ids(shells), fileTabs: new Map() }] as const;
+          return [ws, { architects: ids(architects), builders: ids(builders), shells: ids(shells), fileTabs: new Map() }] as const;
         }));
         vi.mocked(getWorkspaceTerminals).mockImplementation(() => map as any);
         mockGetTerminalManager.mockReturnValue({
@@ -2737,6 +2737,97 @@ describe('tower-routes', () => {
         const { status, body } = await send('codev-cloud:shell-7', 'architect:review');
         expect(status).toBe(200);
         expect(body.resolvedTo).toBe('shell-7');
+      });
+
+      // Spec 1940 phase 4. These frames were recorded on the commit before the phase (the test
+      // was written and run against that code first), with the timestamp masked. A send that
+      // stays inside one workspace, or whose sender has no workspace or is not an agent, must
+      // produce the frame it produced then, byte for byte.
+      describe('frames that Spec 1940 does not change', () => {
+        const BUILDER_2 = 'builder-spir-200';
+        const FOOTER = '###############################';
+        const HINT = `${FOOTER}  (reply: afx send architect "…")`;
+
+        /** The frame stored for the last send, with its timestamp masked. */
+        const lastFrame = () =>
+          allRows().at(-1)!.formatted_message.replace(/\| \d{4}-\d\d-\d\dT[\d:.]+Z\]/, '| <time>]');
+
+        beforeEach(() => {
+          liveAgents({
+            [CODEV]: { architects: ['main', 'review'], builders: [BUILDER, BUILDER_2], shells: ['shell-1'] },
+            [CLOUD]: { architects: ['main', 'review', 'tunnel'], builders: ['builder-spir-300'] },
+          });
+        });
+
+        // [sender, address, header]. A builder may name only its own architect, so it writes
+        // bare `architect` and reaches `review`.
+        const toAnArchitect: Array<[string | undefined, string, string]> = [
+          ['architect:review', 'architect:main', '### [ARCHITECT:review MESSAGE → main | <time>] ###'],
+          ['architect', 'architect:main', '### [ARCHITECT MESSAGE → main | <time>] ###'],
+          [BUILDER, 'architect', `### [BUILDER ${BUILDER} MESSAGE → review | <time>] ###`],
+          ['af-cron', 'architect:main', '### [BUILDER af-cron MESSAGE → main | <time>] ###'],
+          ['vscode-user', 'architect:main', '### [USER via VS Code → main | <time>] ###'],
+          [DECISIONS_TAB_SENDER, 'architect:main', '### [USER via Decisions tab → main | <time>] ###'],
+          [undefined, 'architect:main', '### [ARCHITECT INSTRUCTION → main | <time>] ###'],
+        ];
+        it.each(toAnArchitect)('same workspace, %s to an architect (%s)', async (from, to, header) => {
+          expect((await send(to, from)).status).toBe(200);
+          expect(lastFrame()).toBe(`${header}\nhello\n${FOOTER}`);
+        });
+
+        const toABuilderOrShell: Array<[string | undefined, string]> = [
+          ['architect:review', 'ARCHITECT:review'],
+          ['architect', 'ARCHITECT'],
+          [BUILDER, 'ARCHITECT'],
+          ['af-cron', 'ARCHITECT'],
+          ['vscode-user', 'ARCHITECT'],
+          [DECISIONS_TAB_SENDER, 'ARCHITECT'],
+          [undefined, 'ARCHITECT'],
+        ];
+        it.each(toABuilderOrShell)('same workspace, %s to a builder and to a shell', async (from, label) => {
+          for (const to of [BUILDER_2, 'shell-1']) {
+            expect((await send(to, from)).status).toBe(200);
+            expect(lastFrame()).toBe(`### [${label} INSTRUCTION → ${to} | <time>] ###\nhello\n${HINT}`);
+          }
+        });
+
+        it('same workspace with the workspace written in front of the address', async () => {
+          expect((await send('codev:architect:main', 'architect:review')).status).toBe(200);
+          expect(lastFrame()).toBe(`### [ARCHITECT:review MESSAGE → main | <time>] ###\nhello\n${FOOTER}`);
+        });
+
+        // Tower does not claim a message came from elsewhere when it does not know where it
+        // came from: neither field given, and the literal `unknown` the route falls back to.
+        it.each([
+          ['no sender workspace', { workspace: undefined, fromWorkspace: undefined }],
+          ['the sender workspace `unknown`', { workspace: undefined, fromWorkspace: 'unknown' }],
+        ])('another workspace addressed with %s', async (_label, fields) => {
+          expect((await send('codev-cloud:architect:tunnel', 'architect:review', fields)).status).toBe(200);
+          expect(lastFrame()).toBe(`### [ARCHITECT:review MESSAGE → tunnel | <time>] ###\nhello\n${FOOTER}`);
+          expect((await send('codev-cloud:builder-spir-300', 'architect:review', fields)).status).toBe(200);
+          expect(lastFrame()).toBe(`### [ARCHITECT:review INSTRUCTION → builder-spir-300 | <time>] ###\nhello\n${HINT}`);
+        });
+
+        // None of these has an address to reply to, whichever workspace the target is in.
+        const notAgents: Array<[string | undefined, string, string]> = [
+          ['af-cron', '### [BUILDER af-cron MESSAGE → tunnel | <time>] ###', 'ARCHITECT'],
+          ['vscode-user', '### [USER via VS Code → tunnel | <time>] ###', 'ARCHITECT'],
+          [DECISIONS_TAB_SENDER, '### [USER via Decisions tab → tunnel | <time>] ###', 'ARCHITECT'],
+          [undefined, '### [ARCHITECT INSTRUCTION → tunnel | <time>] ###', 'ARCHITECT'],
+        ];
+        it.each(notAgents)('another workspace, from %s, which is not an agent', async (from, header, label) => {
+          expect((await send('codev-cloud:architect:tunnel', from)).status).toBe(200);
+          expect(lastFrame()).toBe(`${header}\nhello\n${FOOTER}`);
+          expect((await send('codev-cloud:builder-spir-300', from)).status).toBe(200);
+          expect(lastFrame()).toBe(`### [${label} INSTRUCTION → builder-spir-300 | <time>] ###\nhello\n${HINT}`);
+        });
+
+        it('a raw send has no frame, in the same workspace and across workspaces', async () => {
+          for (const to of ['architect:main', 'codev-cloud:architect:tunnel', 'codev-cloud:builder-spir-300']) {
+            expect((await send(to, 'architect:review', { options: { raw: true } })).status).toBe(200);
+            expect(allRows().at(-1)!.formatted_message).toBe('hello');
+          }
+        });
       });
 
       // Cron resolves a task's target through the same two resolvers when the task fires.
