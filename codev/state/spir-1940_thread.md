@@ -700,3 +700,9 @@ CLEARED {"ok":true,"result":{"explicitName":null,"addressName":null,"unaddressab
 - Checked: the four pinning tests fail against the previous module; 39 codev test files (1184
   tests), type-check and build pass. Next: push, GitHub green, tell the architect before
   `porch done`.
+
+**Round 3 of phase 3's review starts** (2026-11-24). Both `porch done` calls of round 2 ran with
+the one-time skip after the architect checked GitHub on `4c9d9c967`. Architect's warning: porch
+force-advances a phase at its third review iteration, so a fix made after round 3 is never
+re-reviewed. If round 3 asks for changes: tell the architect what it found BEFORE fixing, and
+list any commit no reviewer saw under its own heading in the PR body and the review.
