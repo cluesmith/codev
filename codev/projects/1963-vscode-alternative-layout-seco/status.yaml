@@ -1,7 +1,7 @@
 id: '1963'
 title: vscode-alternative-layout-seco
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-24T01:12:47.024Z'
-updated_at: '2026-11-24T05:59:40.992Z'
+updated_at: '2026-11-24T05:59:46.569Z'
