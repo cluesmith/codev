@@ -33,9 +33,17 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Summary
+
+Codev now runs natively on Windows 11 without WSL, and the work since the first Windows build closes the gaps that kept it a preview: Windows never runs a program from the current folder, and everything a session starts ends with that session. Node.js 22 is now the minimum on every platform. The claude review lane runs on your installed Claude Code and your subscription login. The dashboard's Open IDE link works over Codev Cloud, the Decisions tab shows workspace images, and `afx status` shows what each builder is doing. `porch skip-phase` drops an unbuilt plan phase, and `afx send`, `afx cleanup`, `afx spawn` and `porch` gain small options. A set of terminal, Tower, consult and prompt fixes rounds it out.
+
+## Node.js 22 is the minimum
+
+Codev now requires Node.js 22 or newer; Node.js 20, which reached end of life in April 2026, is no longer supported (#1944, PR #1962). The package declares `node >=22.0.0`, `codev doctor` fails on anything older, and every CI job on every platform runs on Node 22, the one tested version. On macOS and Linux an install on an older Node prints npm's engine warning and proceeds; on native Windows the installer refuses a Node version that has no prebuilt native binaries, as before. Newer Node versions with prebuilt binaries still install but are not tested. The install docs, the Ubuntu and Debian quick-install steps and `codev doctor`'s Linux hint now install Node 22 from NodeSource, because the distribution packages are older.
+
 ## Native Windows
 
-Codev now runs natively on Windows 11, no WSL required (#1658, PR #1859). Install needs Node.js 22 or 24, Git for Windows and `jq`, with no admin rights or Developer Mode. Builders, Tower, the dashboard, `consult`, `codev doctor` and the Codev IDE server all work from a native checkout; the Windows Terminal is PowerShell while Codev's own plumbing runs in Git Bash. Platform-specific behaviour now lives behind a small set of capabilities with POSIX and Windows implementations, so macOS and Linux behaviour is unchanged. The preview label is gone now that Windows never runs a program from the current folder (#1911, below). WSL 2 remains a supported path.
+Codev now runs natively on Windows 11, no WSL required (#1658, PR #1859). Install needs Node.js 22, Git for Windows and `jq`, with no admin rights or Developer Mode. Builders, Tower, the dashboard, `consult`, `codev doctor` and the Codev IDE server all work from a native checkout; the Windows Terminal is PowerShell while Codev's own plumbing runs in Git Bash. Platform-specific behaviour now lives behind a small set of capabilities with POSIX and Windows implementations, so macOS and Linux behaviour is unchanged. The preview label is gone now that Windows never runs a program from the current folder (#1911, below). WSL 2 remains a supported path.
 
 Follow-ups since native support landed:
 
@@ -59,15 +67,7 @@ Follow-ups since native support landed:
 
 The dashboard's **Open IDE** link now appears when the dashboard is reached through Codev Cloud, not only on a local Tower (#1914, PR #1931). The IDE signal travels with the dashboard's regular status poll, the link opens the workbench relative to the page's own address so a cloud-side Tower rename cannot strand it, and over the cloud the page skips the local-only cookie step and lets the cloud session authorize the request. The forward also scopes the IDE's token cookie to this Tower's cloud prefix so Towers sharing the cloud origin cannot overwrite each other's, and the public prefix follows the cloud relay's stamp rather than a stored name. Locally nothing changes except that the dashboard no longer runs a blocking port probe on load.
 
-## Polish
-
-<!-- Small vscode items as bullets:
-       - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
-     Move out to its own ## section if the entry grows past ~3 sentences. -->
-
 ## Other fixes (dashboard, porch, infrastructure)
-
-<!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
 
 - **Tower no longer retries a shellper whose pid was reused after a reboot** (#1877, PR #1878). A persisted terminal row whose process id now belongs to an unrelated program was kept and retried every couple of seconds, growing the Tower log without bound (354 MB on one machine). The row is now deleted the first time Tower sees it, with one log line, and the unrelated process is never signalled.
 - **Mobile keyboards no longer duplicate text in the dashboard terminal** (#1883, PR #1884). Accepting a suggestion, autocorrect or smart punctuation on a phone resent the partial word and the clause before it. On touch devices every soft-keyboard edit is now sent as a replace: deletes for the text being replaced, then the new text. Desktop typing is unchanged.
@@ -86,20 +86,20 @@ The dashboard's **Open IDE** link now appears when the dashboard is reached thro
 
 ## Breaking changes
 
-None.
+- **Node.js 20 is no longer supported** (#1944). Upgrade to Node.js 22 before installing this release. On macOS and Linux an older Node still installs with a warning, but `codev doctor` reports it as failing and nothing is tested there.
+- **On native Windows, a program started from a Codev terminal ends with that terminal** (#1915), and in a `cmd.exe` session a program in the current folder needs `.\name` (#1911). Both apply only to native Windows, which is new in this release.
 
 ## Install
 
 ```bash
-npm install -g @cluesmith/codev@X.Y.Z
+npm install -g @cluesmith/codev@3.3.8
 afx tower stop && afx tower start
 ```
 
-The VS Code extension ships separately via the Marketplace — `Codev` extension by `cluesmith.codev`, version `X.Y.Z`.
+The VS Code extension ships separately via the Marketplace — `Codev` extension by `cluesmith.codev`, version `3.3.8`.
 
 ## Contributors
 
-<!-- Filled at release time. Use the topic-first voice from prior release notes:
-       - **<Name> (@<handle>)** — <topic>: <what they did across which PRs>.
-       - Builders working under AIR / BUGFIX / PIR / SPIR protocols across the PRs in this release.
-     Source: git log v<prev>..HEAD --merges --pretty=format:"%h %an %s" -->
+- **Amr Elsayed (@amrmelsayed)**: native Windows support and its follow-ups (Spec 1658, PRs #1859, #1918, #1926, #1928, #1932, #1934, #1948, #1959); Open IDE over Codev Cloud (PR #1931); the Node.js 22 floor (PR #1962); the CI health cron, pinned browser-test image and framework-path prompt fixes (PRs #1929, #1936, #1949).
+- **M Waleed Kadous (@waleedkadous)**: the claude review lane on the installed CLI and its follow-ups (PRs #1913, #1942); the codex lane and consult worktree fixes (PRs #1889, #1899); `porch skip-phase` (PR #1908); `afx status` live phases and the new CLI options (PRs #1955, #1954); Decisions tab images (PR #1939); mobile keyboard and touch-device terminal fixes (PRs #1884, #1888); the reused-pid shellper fix (PR #1878); the PIR prompt fix and prompt sweep (PRs #1904, #1905).
+- Builders working under AIR, BUGFIX, PIR and SPIR protocols across the PRs in this release.
