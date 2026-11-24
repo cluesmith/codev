@@ -1018,3 +1018,27 @@ run.
   dash. VS Code's stylesheet now draws the track as an 18% mix of the text colour, and the
   theme check fails if a track does not show on its row (≥ 1.2:1), reporting the fill's
   contrast on it.
+- **Architect review of the increment-2 shots (13:47Z), all taken (`b3aa8873b`):**
+  1. *(change)* Decisions' no-file state was the amber `.decisions-notice` — a warning look
+     for an empty state. The shared view now gives it a `decisions-notice--no-file` modifier;
+     VS Code draws it in `descriptionForeground` on no fill. The dashboard has no rule for the
+     modifier, so it keeps the amber. Scenario 16 now measures it (rgb(59,59,59), the
+     description colour, on no fill, in Light Modern).
+  2. Work's State wrapped to three lines in the half-width group: under 600 px the state now
+     stays on one line and the title gives way (it ellipsizes); only under 400 px does the state
+     wrap. The half-width check holds each state to one line.
+  3. Panel text read larger than the workbench: every `font-size` in the shared stylesheet is now
+     a `--codev-wv-font-size-{xxl..xxs}` token whose default is the dashboard's px size; VS Code
+     maps xl/lg to `--vscode-font-size` and the smaller steps 1–3px below it, headings +4px.
+     Both headings share one size. `styles-tokens.test.ts` fails on a literal px font size.
+  4. A "More Actions…" tooltip covered work-09/10: `R.shot` now parks the pointer on the title
+     bar and waits for hover tooltips to close, for every script's shots.
+  Re-rendered at b3aa8873: verify work 14/14, verify decisions 15/15.
+- **apps/web locally:** 10 terminal/toolbar test files fail on this machine with `localStorage`
+  undefined in `getWebKey` (Node 26's global `localStorage` shadows jsdom's); CI runs Node 20.
+  None of them touch the shared views; the 27 other files, including the dashboard's Work and
+  Decisions, pass. An environment issue, not a flake.
+- **The dashboard keeps its look (scenario 20, proven):** `verify dashboard` on the pre-change
+  build (b9e5af0f's apps/web) kept a snapshot; after rebuilding `packages/codev` with the type
+  scale, `verify dashboard` with `COCKPIT_BASELINE` found all 138 Work and 83 Decisions elements
+  identical in computed style and DOM. Evidence in `verification-phase8/dashboard/`.
