@@ -9,14 +9,17 @@
  *   remote       the local tip against `origin/<branch>`: context only
  *   pr           the branch's PR: OPEN is attention ("builder not finished")
  *   ignored      ignored files matching `cleanup.keepIgnored` that are not dependency or build
- *                output: the definitions `afx cleanup --keep-ignored` uses (`keep-list.ts`)
+ *                output: the definitions `afx cleanup --keep-ignored` uses (`keep-list.ts`).
+ *                A symbolic link among them is listed apart: cleanup never copies a link, and a
+ *                link holds no file data of its own (a target inside the worktree is judged
+ *                as itself)
  *
  * The verdict word describes data only. The exit code also counts the lifecycle and anything
  * that could not run, so "removable" never silently means "finished". The target is
  * resolved against the main checkout, so the command reads the same from any worktree.
  */
 
-import { realpathSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isBuilderScaffold } from '../../agent-farm/lib/builder-scaffold.js';
 import { isNeverKeep } from '../../agent-farm/lib/keep-list.js';
@@ -317,9 +320,15 @@ async function checkCommits(facts: Facts): Promise<Check> {
     });
   }
   if (unsafe.length === 0) return check('commits', 'ok', `${commits} not on origin/${base}, all on origin/${branch}`, details);
-  const remoteNote = remote.ok ? '' : ` (origin/${branch} not read: ${remote.reason})`;
+  // Without the remote branch's tip, whether these commits were pushed cannot be told.
+  if (!remote.ok) {
+    return notRun('commits', `${commits} not on origin/${base}, and origin/${branch} could not be read to check them: ${remote.reason}`, {
+      total,
+      notOnBase: notOnBase.value,
+    });
+  }
   const listed = fitList(unsafe.map(short), LIST_WIDTH);
-  return check('commits', 'attention', `${plural(unsafe.length, 'commit')} on no remote branch: ${listed}${remoteNote}`, details);
+  return check('commits', 'attention', `${plural(unsafe.length, 'commit')} on no remote branch: ${listed}`, details);
 }
 
 async function checkRemote(facts: Facts): Promise<Check> {
@@ -355,28 +364,44 @@ function checkPrState(lookup: PrLookup, branch: string): Check {
 }
 
 async function checkIgnored(facts: Facts, patterns: readonly string[]): Promise<Check> {
-  let keep: string[] = [];
+  const keep: string[] = [];
+  const links: string[] = [];
   const pathspecs = pathspecArgs({ include: patterns });
   if (pathspecs !== null) {
     const result = await gitIn(facts, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z', ...pathspecs]);
     if (result.exitCode !== 0) return notRun('ignored', failureReason('ls-files', result, facts.runner.timeoutLabel));
-    keep = splitNul(result.stdout).filter((p) => !isNeverKeep(p)).sort();
+    const matched = splitNul(result.stdout).filter((p) => !isNeverKeep(p));
+    for (const p of matched) {
+      let isLink: boolean;
+      try {
+        isLink = lstatSync(join(facts.target.path, p)).isSymbolicLink();
+      } catch (err) {
+        return notRun('ignored', `could not read ${p}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      (isLink ? links : keep).push(p);
+    }
+    keep.sort();
+    links.sort();
   }
   const all = await gitIn(facts, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']);
   if (all.exitCode !== 0) return notRun('ignored', failureReason('ls-files', all, facts.runner.timeoutLabel));
   // Every other ignored path, directories collapsed, is treated as regenerable.
-  const holdsKept = (entry: string): boolean => keep.some((k) => k === entry || (entry.endsWith('/') && k.startsWith(entry)));
-  const others = splitNul(all.stdout).filter((entry) => !holdsKept(entry)).sort();
-  const details = { keep, regenerable: others.length };
+  const matchedAll = [...keep, ...links];
+  const holdsMatch = (entry: string): boolean => matchedAll.some((k) => k === entry || (entry.endsWith('/') && k.startsWith(entry)));
+  const others = splitNul(all.stdout).filter((entry) => !holdsMatch(entry)).sort();
+  const details = { keep, regenerable: others.length, links };
   const examples = others.length > 0 ? `: ${fitList(others, 40)}` : '';
+  const linkLine =
+    links.length > 0 ? `${plural(links.length, 'keep-list symlink')} not counted (cleanup never copies a link): ${fitList(links, LIST_WIDTH)}` : null;
 
   if (keep.length === 0) {
     const none = patterns.length === 0 ? 'no keep list (cleanup.keepIgnored is empty)' : 'no keep-list files';
     const rest = others.length === 0 ? 'no other ignored files' : `${plural(others.length, 'ignored path')} treated as regenerable${examples}`;
-    return check('ignored', 'ok', `${none}; ${rest}`, details);
+    return check('ignored', 'ok', [`${none}; ${rest}`, ...(linkLine ? [linkLine] : [])].join('\n'), details);
   }
   const lines = [`${plural(keep.length, 'keep-list file')} would be lost: ${fitList(keep, LIST_WIDTH)}`];
   if (others.length > 0) lines.push(`(${plural(others.length, 'other ignored path')} treated as regenerable${examples})`);
+  if (linkLine) lines.push(linkLine);
   lines.push('→ copy them out first, or use `afx cleanup --keep-ignored`');
   return check('ignored', 'attention', lines.join('\n'), details);
 }
@@ -415,9 +440,10 @@ async function buildWorktreeReport(argument: TargetArgument, options: CommandOpt
   const roots = await resolveRoots(createRunner({ cwd: options.cwd, workspaceRoot: options.cwd, ...runnerOptions }));
   const runner = createRunner({ cwd: roots.mainRoot, workspaceRoot: roots.mainRoot, ...runnerOptions });
   const settings = loadCheckSettings(roots.mainRoot);
-  const patterns = loadKeepIgnored(roots.mainRoot);
   const target = await resolveTarget(runner, roots, argument);
   const skip = (id: string): boolean => settings.skip.has(id);
+  // A skipped check reads nothing of its own, its configuration included.
+  const patterns = skip('ignored') ? [] : loadKeepIgnored(roots.mainRoot);
 
   // The PR decides the base; without one (or with `pr` skipped), origin's default branch does.
   const pr = skip('pr') ? null : await lookupPr(runner, target.branch);
@@ -449,7 +475,7 @@ async function buildWorktreeReport(argument: TargetArgument, options: CommandOpt
     await run('uncommitted', () => checkUncommitted(facts)),
     await run('commits', () => checkCommits(facts)),
     await run('remote', () => checkRemote(facts)),
-    await run('pr', () => checkPrState(pr as PrLookup, target.branch)),
+    pr === null ? skipped('pr') : checkPrState(pr, target.branch),
     await run('ignored', () => checkIgnored(facts, patterns)),
   ];
   const commitsNotRun = checks.some((c) => c.id === 'commits' && c.status === 'not-run');
@@ -526,12 +552,16 @@ export function renderWorktreeHuman(report: WorktreeReport): string {
     .map(reasonWords)
     .filter((r): r is string => r !== null);
   const verdictLine = `${VERDICT_WORDS[report.removable](keepCount)}  ${name}${reasons.length > 0 ? ` — ${reasons.join(', ')}` : ''}`;
+  // With `commits` skipped the base tip is never read, so there is nothing to say about it.
+  const tipSkipped = report.checks.some((c) => c.id === 'commits' && c.status === 'skip');
   const base =
     worktree.baseRef === null
       ? 'base not read'
-      : worktree.baseTip === null
-        ? `base ${worktree.baseRef} (live tip not read)`
-        : `base ${worktree.baseRef} @ ${short(worktree.baseTip)} (origin, live)`;
+      : worktree.baseTip !== null
+        ? `base ${worktree.baseRef} @ ${short(worktree.baseTip)} (origin, live)`
+        : tipSkipped
+          ? `base ${worktree.baseRef}`
+          : `base ${worktree.baseRef} (live tip not read)`;
   return renderHuman({
     verdictLine,
     header: [`worktree  ${where}   branch ${worktree.branch}   ${base}`],

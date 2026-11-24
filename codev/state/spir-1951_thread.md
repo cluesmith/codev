@@ -290,3 +290,19 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   uncommitted = this phase's uncommitted work, 2 unpushed = the merge + fold-in commits, PR #1958 OPEN);
   `air-1938` → REMOVABLE, exit 0 (#1939 MERGED, 1 commit after the merge on its remote branch); `bugfix-1956` →
   REMOVABLE AFTER KEEPING 2 FILES (two porch review .txt), PR #1965 OPEN, exit 1.
+- Architect (2026-11-24 03:03): confirmed 8/8 green at b6f7d4d74; ran check worktree themselves from the main
+  checkout on air-1938 (REMOVABLE, exit 0), bugfix-1956 (REMOVABLE AFTER KEEPING 2 FILES, PR open), bugfix-1901
+  (REMOVABLE, no PR found, exit 1) and pir-1620 (REMOVABLE, PR #1203 open, 70 commits all on origin): all match the
+  spec incl. 20a, no ref changed. The -uall finding was exactly the main-36 evidence. Skip applied once for
+  build-complete (config.local.json restored, cmp identical), noted in the PR body. Review round iter1 started.
+  For Phase 7 the architect asks: guidance shows the three commands at the moments they are used — check pr before
+  recommending a gate, check deploy after merges, check worktree before cleanup — and says plainly that REMOVABLE
+  means no data would be lost, not that the builder is finished.
+- Review iter1: codex REQUEST_CHANGES — keep-list SYMLINKS counted as keep files, but keepFiles() skips every link
+  (cleanup logs "Not kept (symlinks)"), so the verdict and the --keep-ignored hint over-promised. Verified, fixed:
+  `ignored` details gain `links` (keep-list matches that are symlinks: listed on their own line, not keep, not data,
+  not regenerable); a failed lstat → ignored not run. Claude APPROVE with 6 notes; fixed 3 (header when commits
+  skipped; keepIgnored not loaded when ignored skipped; no `as PrLookup` cast) and 5 differently than suggested:
+  a remote-branch read failure with commits off the base now makes `commits` NOT RUN (truthful) rather than
+  "unpushed". Notes 1 (regenerable approximation in collapsed dirs) and 2 (nested-repo dir/ entries) → Phase 7
+  docs + REVIEW. Not on the read-only core. Targeted 910/910 (29 files), build, both tsc, tmp-residue OK.

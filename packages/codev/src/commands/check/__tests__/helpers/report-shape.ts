@@ -129,7 +129,7 @@ export function expectWorktreeReportShape(report: WorktreeReport): void {
       expect(['matches', 'ahead', 'behind', 'diverged', 'absent']).toContain(c.details.relation);
     }
     if (c.id === 'pr' && 'mergedHead' in c.details) expect(c.details.mergedHead).toMatch(SHA);
-    if (c.id === 'ignored') expect(c.details).toEqual({ keep: expect.any(Array), regenerable: expect.any(Number) });
+    if (c.id === 'ignored') expect(c.details).toEqual({ keep: expect.any(Array), regenerable: expect.any(Number), links: expect.any(Array) });
   }
   const attention = parsed.checks.some((c) => c.status === 'attention' || c.status === 'not-run');
   expect(parsed.verdict).toBe(attention ? 'attention' : 'clear');

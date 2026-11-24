@@ -8,6 +8,7 @@
  * stub-PATH audit of every git call is in check-worktree-stubs.test.ts (POSIX).
  */
 
+import { spawn as realSpawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +35,7 @@ import {
 } from './helpers/worktree-fixture.js';
 
 const s = (sha: string): string => sha.slice(0, 7);
+const isWindows = process.platform === 'win32';
 
 describe('Spec 1951 — check worktree: parsers and the verdict rule', () => {
   it('parseStatus: change words, a rename with its source, and conflicts', () => {
@@ -359,6 +361,51 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
       expect(cleanupKeeps).toEqual(['codev/projects/8-x/8-specify-iter1-codex.txt', 'tmp/notes.md']);
     });
 
+    // keepFiles() skips every symlink it is handed ("Not kept (symlinks)"), so check worktree
+    // must not count one as a file cleanup would keep. Symlinks need privileges on Windows.
+    it.skipIf(isWindows)('a keep-list symlink is listed apart: not a keep file, not data, as cleanup never copies it', async () => {
+      configure();
+      const b = withIgnored();
+      fs.symlinkSync('notes.md', path.join(b.dir, 'tmp/link.md'));
+      fs.symlinkSync(path.join(fx.root, 'outside-secret'), path.join(b.dir, 'tmp/env'));
+      const saved = { ...process.env };
+      Object.assign(process.env, fx.env);
+      let candidates: string[];
+      try {
+        const untracked = listKeepCandidates(b.dir, []).files;
+        candidates = listKeepCandidates(b.dir, DEFAULT_KEEP_IGNORED).files.filter((f) => !untracked.includes(f));
+      } finally {
+        for (const key of Object.keys(fx.env)) {
+          if (saved[key] === undefined) delete process.env[key];
+          else process.env[key] = saved[key];
+        }
+      }
+      const isLink = (f: string): boolean => fs.lstatSync(path.join(b.dir, f)).isSymbolicLink();
+
+      const { report } = await runReport('spir-8', { inspected: b.dir });
+
+      const ignored = byId(report, 'ignored');
+      expect(ignored.details).toEqual({ keep: candidates.filter((f) => !isLink(f)), regenerable: 3, links: candidates.filter(isLink) });
+      expect(ignored.details.links).toEqual(['tmp/env', 'tmp/link.md']);
+      expect(report.removable).toBe('removable-after-keeping');
+      expect(ignored.summary).toContain('2 keep-list symlinks not counted (cleanup never copies a link): tmp/env, tmp/link.md');
+    });
+
+    it.skipIf(isWindows)('keep-list symlinks alone leave it REMOVABLE', async () => {
+      configure({ cleanup: { keepIgnored: ['tmp/**'] } });
+      const b = addBuilder(fx, 'spir-8');
+      fs.mkdirSync(path.join(b.dir, 'tmp'));
+      fs.symlinkSync(path.join(fx.root, 'elsewhere'), path.join(b.dir, 'tmp/link'));
+      mergeBuilder(fx, b);
+      prIs(b, 8, 'MERGED');
+
+      const { report, exitCode } = await runReport('spir-8', { inspected: b.dir });
+
+      expect(exitCode).toBe(0);
+      expect(report.removable).toBe('removable');
+      expect(byId(report, 'ignored')).toMatchObject({ status: 'ok', details: { keep: [], links: ['tmp/link'] } });
+    });
+
     it('cleanup.keepIgnored [] reports no keep files: REMOVABLE', async () => {
       configure({ cleanup: { keepIgnored: [] } });
       const b = withIgnored();
@@ -380,7 +427,7 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
 
       const { report } = await runReport('spir-8', { inspected: b.dir });
 
-      expect(byId(report, 'ignored').details).toEqual({ keep: ['debug.log'], regenerable: 4 });
+      expect(byId(report, 'ignored').details).toEqual({ keep: ['debug.log'], regenerable: 4, links: [] });
     });
   });
 
@@ -468,7 +515,8 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
   });
 
   it('check.skip ["pr", "ignored"]: both skip by name, the forge is never asked, the base is origin\'s default', async () => {
-    configure({ check: { skip: ['pr', 'ignored'] } });
+    // A skipped check reads nothing of its own: an invalid keep list does not fail the run.
+    configure({ check: { skip: ['pr', 'ignored'] }, cleanup: { keepIgnored: 'not a list' } });
     const b = addBuilder(fx, 'spir-8');
 
     const { report, exitCode } = await runReport('spir-8', { inspected: b.dir });
@@ -479,6 +527,39 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
     expect(search.calls()).toEqual([]);
     expect(view.calls()).toBe(0);
     expect(report.worktree.baseRef).toBe('main');
+  });
+
+  it('check.skip ["commits"]: the base tip is never read, and the header says only the base', async () => {
+    configure({ check: { skip: ['commits'] } });
+    const b = addBuilder(fx, 'spir-8');
+    prIs(b, 8, 'OPEN');
+
+    const { report } = await runReport('spir-8', { inspected: b.dir });
+
+    expect(report.worktree).toMatchObject({ baseRef: 'main', baseTip: null });
+    expect(renderWorktreeHuman(report).split('\n')[2]).toBe('worktree  .builders/spir-8   branch builder/spir-8   base main');
+  });
+
+  it('a remote branch that cannot be read: commits not on the base are not run, never called unpushed', async () => {
+    configure();
+    const b = addBuilder(fx, 'spir-8');
+    prIs(b, 8, 'OPEN');
+    const failBranchRead: SpawnFn = (command, args, options) =>
+      args.includes('ls-remote') && args.includes(`refs/heads/${b.branch}`)
+        ? realSpawn(process.execPath, ['-e', 'process.stderr.write("fatal: simulated failure\\n"); process.exit(128)'], options)
+        : realSpawn(command, args, options);
+
+    const { report, exitCode } = await runReport('spir-8', { inspected: b.dir, spawn: failBranchRead });
+
+    expect(exitCode).toBe(1);
+    expect(byId(report, 'commits')).toMatchObject({
+      status: 'not-run',
+      reason: '1 commit not on origin/main, and origin/builder/spir-8 could not be read to check them: ls-remote failed: fatal: simulated failure',
+      details: { total: 1, notOnBase: [b.head] },
+    });
+    expect(byId(report, 'remote')).toMatchObject({ status: 'not-run', reason: 'ls-remote failed: fatal: simulated failure' });
+    expect(report.removable).toBe('not-removable');
+    expect(renderWorktreeHuman(report).split('\n')[0]).toBe('NOT REMOVABLE  spir-8 — commits not run, remote not run, PR #8 open: builder not finished');
   });
 
   it('run from inside another builder worktree, or given as a path, it resolves the same target', async () => {
