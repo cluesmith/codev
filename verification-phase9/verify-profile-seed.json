@@ -1,0 +1,18 @@
+{
+  "script": "profile-seed",
+  "at": "2026-11-24T15:06:20.157Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "existing profile, seeded: a new browser profile uses Codev on a build without the Cockpit container (origin/main's activity bar)",
+      "ok": true,
+      "detail": "activity bar [\"Explorer (\u21e7\u2318E)\",\"Search (\u21e7\u2318F)\",\"Source Control (\u2303\u21e7G)\",\"Run and Debug (\u21e7\u2318D)\",\"Extensions (\u21e7\u2318X)\",\"Codev (\u2325\u2318C)\",\"Accounts\",\"Manage\"]; Codev opened",
+      "shots": [
+        "shots/profile-seed-activity-bar.png",
+        "shots/profile-seed-01-seeded.png"
+      ],
+      "ms": 8377
+    }
+  ]
+}

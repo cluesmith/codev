@@ -1,0 +1,57 @@
+{
+  "script": "dashboard",
+  "at": "2026-11-24T11:43:09.639Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "scenario 20: the dashboard Work tab renders",
+      "ok": true,
+      "detail": "builders #101 · main, #102 · main, #103 · web; 138 elements",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/2f544acb-84f6-4651-9547-b1dfe34f76b0/scratchpad/cockpit-harness/shots/dashboard-01-work.png"
+      ],
+      "ms": 52767
+    },
+    {
+      "name": "scenario 20: the dashboard Decisions tab renders",
+      "ok": true,
+      "detail": "main-1 offers compact / stacked / hold; image loaded; 83 elements",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/2f544acb-84f6-4651-9547-b1dfe34f76b0/scratchpad/cockpit-harness/shots/dashboard-02-decisions.png"
+      ],
+      "ms": 801
+    },
+    {
+      "name": "scenario 20: a Decisions link and image open in a new tab",
+      "ok": true,
+      "detail": "link → https://example.com/fixture/main-1; image → a blob: page",
+      "shots": [],
+      "ms": 98
+    },
+    {
+      "name": "scenario 20: a ruling round-trips",
+      "ok": true,
+      "detail": "Submit → Tower wrote the file → the card shows the written ruling",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/2f544acb-84f6-4651-9547-b1dfe34f76b0/scratchpad/cockpit-harness/shots/dashboard-03-decisions-draft.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/2f544acb-84f6-4651-9547-b1dfe34f76b0/scratchpad/cockpit-harness/shots/dashboard-04-decisions-ruled.png"
+      ],
+      "ms": 614
+    },
+    {
+      "name": "scenario 20: Work actions (Open, + Shell, Refresh, spec link, issue link)",
+      "ok": true,
+      "detail": "Open → \"builder-spir-102\"; + Shell → \"Shell 1\"; spec → \"401-fixture-backlog.md\"; #402 → https://example.com/fixture/issues/402; Refresh → POST …/api/overview/refresh",
+      "shots": [],
+      "ms": 3698
+    },
+    {
+      "name": "scenario 20: computed styles and DOM unchanged from the baseline",
+      "ok": true,
+      "detail": "work 138 and decisions 83 elements identical to dashboard-snapshot.json",
+      "shots": [],
+      "ms": 4
+    }
+  ]
+}

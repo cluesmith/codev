@@ -1,0 +1,42 @@
+{
+  "script": "requests",
+  "at": "2026-11-24T10:41:41.788Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "scenario 21: cockpit-alone",
+      "ok": true,
+      "detail": "{\"parts\":{\"sidebar\":{\"visible\":true,\"title\":\"Codev Cockpit\",\"panes\":[{\"title\":\"Codev Cockpit\",\"expanded\":true}]},\"auxiliarybar\":{\"visible\":false},\"panel\":{\"visible\":false}},\"idle\":{\"GET /api/workspaces\":3,\"GET /api/overview?workspace=alpha\":4,\"GET /api/overview?workspace=gamma\":3,\"GET /api/overview?workspace=beta\":3},\"burst\":{\"GET /api/overview?workspace=alpha\":2,\"GET /api/worktree-config?workspace=alpha\":2,\"GET /api/activity-hooks?workspace=alpha\":1,\"GET /api/workspaces\":1,\"GET /api/overview?workspace=beta\":1,\"GET /api/overview?workspace=gamma\":1},\"events\":1}",
+      "shots": [
+        "shots/requests-01-cockpit-alone.png"
+      ],
+      "ms": 120347
+    },
+    {
+      "name": "scenario 21: source-views-alone",
+      "ok": true,
+      "detail": "{\"parts\":{\"sidebar\":{\"visible\":true,\"title\":\"Codev\",\"panes\":[{\"title\":\"Workspace\",\"expanded\":true},{\"title\":\"Agents\",\"expanded\":true},{\"title\":\"Backlog\",\"expanded\":false},{\"title\":\"Pull Requests\",\"expanded\":false},{\"title\":\"Recently Closed\",\"expanded\":false},{\"title\":\"Status\",\"expanded\":false}]},\"auxiliarybar\":{\"visible\":true,\"title\":\"Codev Tower - 2 workspaces need attention\",\"panes\":[{\"title\":\"Codev Tower\",\"expanded\":true}]},\"panel\":{\"visible\":false}},\"idle\":{\"GET /api/workspaces\":3,\"GET /api/overview?workspace=alpha\":4,\"GET /api/overview?workspace=beta\":3,\"GET /api/overview?workspace=gamma\":3},\"burst\":{\"GET /api/overview?workspace=alpha\":2,\"GET /api/worktree-config?workspace=alpha\":2,\"GET /api/activity-hooks?workspace=alpha\":1,\"GET /api/workspaces/:ws/status\":1,\"GET /api/workspaces\":1,\"GET /api/overview?workspace=beta\":1,\"GET /api/overview?workspace=gamma\":1},\"events\":1}",
+      "shots": [
+        "shots/requests-02-source-views-alone.png"
+      ],
+      "ms": 119633
+    },
+    {
+      "name": "scenario 21: both",
+      "ok": true,
+      "detail": "{\"parts\":{\"sidebar\":{\"visible\":true,\"title\":\"Codev\",\"panes\":[{\"title\":\"Workspace\",\"expanded\":true},{\"title\":\"Agents\",\"expanded\":true},{\"title\":\"Backlog\",\"expanded\":false},{\"title\":\"Pull Requests\",\"expanded\":false},{\"title\":\"Recently Closed\",\"expanded\":false},{\"title\":\"Status\",\"expanded\":false}]},\"auxiliarybar\":{\"visible\":true,\"title\":\"Codev Tower - 2 workspaces need attention\",\"panes\":[{\"title\":\"Codev Tower\",\"expanded\":true}]},\"panel\":{\"visible\":true,\"title\":\"Codev Cockpit - 2 blocked, 1 waiting on input\",\"panes\":[{\"title\":\"Codev Cockpit\",\"expanded\":true}]}},\"idle\":{\"GET /api/workspaces\":3,\"GET /api/overview?workspace=alpha\":4,\"GET /api/overview?workspace=beta\":3,\"GET /api/overview?workspace=gamma\":3},\"burst\":{\"GET /api/overview?workspace=alpha\":2,\"GET /api/worktree-config?workspace=alpha\":3,\"GET /api/activity-hooks?workspace=alpha\":1,\"GET /api/workspaces/:ws/status\":1,\"GET /api/workspaces\":1,\"GET /api/overview?workspace=beta\":1,\"GET /api/overview?workspace=gamma\":1},\"events\":1}",
+      "shots": [
+        "shots/requests-03-both.png"
+      ],
+      "ms": 121044
+    },
+    {
+      "name": "scenario 21: the request counts match",
+      "ok": true,
+      "detail": "[{\"route\":\"GET /api/activity-hooks?workspace=alpha\",\"cockpitIdle\":0,\"sourceIdle\":0,\"bothIdle\":0,\"cockpitBurst\":1,\"sourceBurst\":1,\"bothBurst\":1},{\"route\":\"GET /api/overview?workspace=alpha\",\"cockpitIdle\":4,\"sourceIdle\":4,\"bothIdle\":4,\"cockpitBurst\":2,\"sourceBurst\":2,\"bothBurst\":2},{\"route\":\"GET /api/overview?workspace=beta\",\"cockpitIdle\":3,\"sourceIdle\":3,\"bothIdle\":3,\"cockpitBurst\":1,\"sourceBurst\":1,\"bothBurst\":1},{\"route\":\"GET /api/overview?workspace=gamma\",\"cockpitIdle\":3,\"sourceIdle\":3,\"bothIdle\":3,\"cockpitBurst\":1,\"sourceBurst\":1,\"bothBurst\":1},{\"route\":\"GET /api/workspaces\",\"cockpitIdle\":3,\"sourceIdle\":3,\"bothIdle\":3,\"cockpitBurst\":1,\"sourceBurst\":1,\"bothBurst\":1},{\"route\":\"GET /api/workspaces/:ws/status\",\"cockpitIdle\":0,\"sourceIdle\":0,\"bothIdle\":0,\"cockpitBurst\":0,\"sourceBurst\":1,\"bothBurst\":1},{\"route\":\"GET /api/worktree-config?workspace=alpha\",\"cockpitIdle\":0,\"sourceIdle\":0,\"bothIdle\":0,\"cockpitBurst\":2,\"sourceBurst\":2,\"bothBurst\":3}]",
+      "shots": [],
+      "ms": 1
+    }
+  ]
+}

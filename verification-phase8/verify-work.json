@@ -1,0 +1,134 @@
+{
+  "script": "work",
+  "at": "2026-11-24T14:08:14.580Z",
+  "ownerPortRequests": [],
+  "popups": [
+    "https://example.com/fixture/issues/402",
+    "https://example.com/fixture/pull/301"
+  ],
+  "results": [
+    {
+      "name": "scenario 17: Open Work opens one panel; builders, Needs Attention, Backlog and Recently Closed render; no dropped affordance",
+      "ok": true,
+      "detail": "builders #101 · main, #102 · main, #103 · web; headings Work / Builders / Needs Attention / Backlog / Recently Closed; buttons + Shell, Refresh, Open, Open, Open, spec, plan, review; one tab after a second Open Work",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-01-panel.png"
+      ],
+      "ms": 60754
+    },
+    {
+      "name": "scenario 17: a builder's progress bar is drawn at its width under the panel's CSP",
+      "ok": true,
+      "detail": "#101  20%: 16px of 80px; #102  10%: 8px of 80px; #103  10%: 8px of 80px",
+      "shots": [],
+      "ms": 1
+    },
+    {
+      "name": "scenario 17: Open opens the builder's terminal",
+      "ok": true,
+      "detail": "{\"tabs\":[\"Codev: #102 second-main\"]}",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-02-open-builder.png"
+      ],
+      "ms": 4083
+    },
+    {
+      "name": "scenario 17: + Shell opens a Tower shell",
+      "ok": true,
+      "detail": "{\"tabs\":[\"Codev: Shell #2\"],\"terminals\":[\"Shell 1\"]}",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-03-new-shell.png"
+      ],
+      "ms": 5540
+    },
+    {
+      "name": "scenario 17: Refresh drops Tower's overview cache, then re-reads the overview",
+      "ok": true,
+      "detail": "POST /api/overview/refresh, then 5 GET /api/overview?workspace=%2Fprivate%2Fvar%2Ffolders%2Fdn%2Fwqcplnhn50bbp2gx1601dm040000gn%2FT%2Fcockpit-fixtures-q0IwVJ%2Falpha",
+      "shots": [],
+      "ms": 2008
+    },
+    {
+      "name": "scenario 17: a spec link opens the workspace file in an editor",
+      "ok": true,
+      "detail": "{\"tabs\":[\"401-fixture-backlog.md, preview\"]}",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-04-spec-link.png"
+      ],
+      "ms": 3078
+    },
+    {
+      "name": "scenario 17: an issue link and a PR link open in the browser, through the extension host",
+      "ok": true,
+      "detail": "https://example.com/fixture/issues/402 (after VS Code's prompt); https://example.com/fixture/pull/301 (after VS Code's prompt)",
+      "shots": [],
+      "ms": 3206
+    },
+    {
+      "name": "scenario 18: light, dark and high-contrast themes, switched live with the panel open",
+      "ok": true,
+      "detail": "Dark Modern: body rgb(31, 31, 31), text rgb(204, 204, 204); lowest of 70 texts 4.6 span.backlog-type-tag.type-tag--project \"project\", 4.6 span.backlog-type-tag.type-tag--project \"project\", 5.1 span.backlog-type-tag.type-tag--bug \"bug\"; probes implementing orange (attention-kind--dev) 6.7, spike tag 5.2; progress track on its row 1.5, fill on track 4.6; under 4.5: none; Dark High Contrast: body rgb(0, 0, 0), text rgb(255, 255, 255); lowest of 70 texts 6.2 span.backlog-type-tag.type-tag--project \"project\", 6.2 span.backlog-type-tag.type-tag--project \"project\", 6.3 button.builder-row-open \"Open\"; probes implementing orange (attention-kind--dev) 11.3, spike tag 7.2; progress track on its row 1.7, fill on track 7.6; under 4.5: none; Light High Contrast: body rgb(255, 255, 255), text rgb(41, 41, 41); lowest of 70 texts 5.1 span.backlog-type-tag.type-tag--bug \"bug\", 5.5 button.work-btn.work-btn-secondary \"Refresh\", 5.5 h3.work-section-title \"Builders\"; probes implementing orange (attention-kind--dev) 6.8, spike tag 4.7; progress track on its row 1.4, fill on track 4.4; under 4.5: none; Light Modern: body rgb(255, 255, 255), text rgb(59, 59, 59); lowest of 70 texts 4.3 span.attention-row-age \"5h\", 4.3 span.attention-row-age \"1m\", 4.3 span.attention-row-age \"1m\"; probes implementing orange (attention-kind--dev) 7.1, spike tag 4.7; progress track on its row 1.4, fill on track 4; under 4.5: 4.3 span.recently-closed-check, 4.3 span.attention-row-age",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-05-theme-vs-dark.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-06-theme-hc-black.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-07-theme-hc-light.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-08-theme-vs.png"
+      ],
+      "ms": 20391
+    },
+    {
+      "name": "increment 2: the Cockpit's Decisions entries, with the Work and Decisions panels side by side",
+      "ok": true,
+      "detail": "active tabs by group [\"Decisions, Editor Group 1\",\"Work, Editor Group 2\"]; alpha, beta and gamma expanded to their Decisions entries; Work at 473 px: no sideways scroll, a typical 44-character title shows 42 characters, each state on one line, Open buttons end by 450 of 473, hidden .builder-col-elapsed, .builder-col-progress, .backlog-row-author, no label overlaps",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-09-both-panels-dark.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-10-both-panels-light.png"
+      ],
+      "ms": 17132
+    },
+    {
+      "name": "the panel is restored after a window reload",
+      "ok": true,
+      "detail": "one Work tab, its builder rows rendered",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-11-restored.png"
+      ],
+      "ms": 1870
+    },
+    {
+      "name": "scenario 22: the webview never contacts Tower; the key is in no request",
+      "ok": true,
+      "detail": "256 browser requests, none to :18764, none keyed; webview frames: {\"extension resource\":12}",
+      "shots": [],
+      "ms": 5
+    },
+    {
+      "name": "scenario 19: Tower unreachable — both panels keep their content under a not-connected notice, no error toast, and recover",
+      "ok": true,
+      "detail": "Work: \"Failed to load overview: Not connected to Tower.\" over 3 kept rows; Decisions: \"Not connected to Tower. Showing the last version read.\" over 2 kept cards; no toast; recovered by itself: Work shows the restarted Tower's overview (0 builders), Decisions its 2 cards under no notice",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-12-tower-down.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-13-tower-back.png"
+      ],
+      "ms": 3738
+    },
+    {
+      "name": "scenario 19: in a builder-worktree window, Open Work explains",
+      "ok": true,
+      "detail": "\"Codev: Work is not offered in a builder-worktree window. Open it from the parent workspace's window.\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-14-worktree-explains.png"
+      ],
+      "ms": 4711
+    },
+    {
+      "name": "scenario 19: in a no-workspace window, Open Work explains",
+      "ok": true,
+      "detail": "\"Codev: Work needs a Codev workspace, and this window has none. Open a folder containing a Codev project.\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/work-15-no-workspace-explains.png"
+      ],
+      "ms": 5079
+    }
+  ]
+}
