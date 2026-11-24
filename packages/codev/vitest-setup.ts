@@ -121,11 +121,11 @@ process.stdin.on('end', () => {
 `;
 
 /**
- * setupFiles re-executes for every test file, but with `singleFork` all ~200 unit
- * files share one process. Creating a sandbox (and registering an exit hook) per
- * file would mean ~200 temp dirs and ~200 listeners on the same emitter — enough
- * to trip Node's MaxListenersExceededWarning. Cache on globalThis so the setup is
- * genuinely one-shot per process.
+ * setupFiles re-executes for every test file. Under vitest's default `isolate: true`
+ * each file gets its own fork, but with `isolate: false` one process runs many files,
+ * and a sandbox (and exit hook) per file would mean hundreds of temp dirs and
+ * listeners on the same emitter — enough to trip Node's MaxListenersExceededWarning.
+ * Cache on globalThis so the setup is genuinely one-shot per process.
  */
 const SANDBOX_KEY = '__codevTestSandbox1323';
 const g = globalThis as Record<string, unknown>;
