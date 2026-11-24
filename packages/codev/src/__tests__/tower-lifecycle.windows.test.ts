@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
+import { trackedPids } from './helpers/tracked-pids.js';
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -37,7 +38,8 @@ const testWorkspaces = path.join(os.homedir(), '.agent-farm', 'test-workspaces')
 fs.mkdirSync(testWorkspaces, { recursive: true });
 const workDir = fs.mkdtempSync(path.join(testWorkspaces, 'codev-1658-tower-'));
 const stubScript = path.join(workDir, 'stub.cjs');
-const leftovers: number[] = [];
+// Killed in afterAll only if each pid still belongs to the process recorded (#1915).
+const leftovers = trackedPids();
 const helpers: WindowsJobHelper[] = [];
 
 /** A builder stub: prints a banner, then echoes each input line back. */
@@ -61,15 +63,9 @@ interface IsolatedTower {
   env: NodeJS.ProcessEnv;
 }
 
-afterAll(() => {
+afterAll(async () => {
   for (const helper of helpers) helper.stop();
-  for (const pid of leftovers) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already gone
-    }
-  }
+  await leftovers.killSurvivors();
   try {
     fs.rmSync(workDir, { recursive: true, force: true });
   } catch {

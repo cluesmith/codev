@@ -23,6 +23,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { trackedPids } from './helpers/tracked-pids.js';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -52,7 +53,8 @@ const workDir = fs.mkdtempSync(path.join(testWorkspaces, 'codev-1658-p6-'));
 const binDir = path.join(workDir, 'bin');
 const workspace = path.join(workDir, 'ws');
 const stateDir = path.join(workDir, 'state');
-const leftovers: number[] = [];
+// Killed in afterAll only if each pid still belongs to the process recorded (#1915).
+const leftovers = trackedPids();
 const TOWER_PORT = 4100;
 
 /**
@@ -306,13 +308,7 @@ afterAll(async () => {
       );
     }
   }
-  for (const pid of leftovers) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already gone
-    }
-  }
+  await leftovers.killSurvivors();
   try {
     fs.rmSync(workDir, { recursive: true, force: true });
   } catch {
