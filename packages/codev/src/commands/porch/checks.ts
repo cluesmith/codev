@@ -74,10 +74,21 @@ export async function runCheck(
 
   return new Promise((resolve) => {
     let stdout = '';
-    let stderr = '';
     // Both streams as one, as a terminal would have shown them: a test runner
     // writes its warnings first and its failures last, across both (#1853).
+    // Each stream enters it a whole line at a time, so chunks from the two
+    // pipes never splice into each other mid-line.
     let transcript = '';
+    const partialLine = { stdout: '', stderr: '' };
+    const record = (stream: keyof typeof partialLine, text: string) => {
+      const buffered = partialLine[stream] + text;
+      const end = buffered.lastIndexOf('\n') + 1;
+      transcript += buffered.slice(0, end);
+      partialLine[stream] = buffered.slice(end);
+    };
+    /** The transcript, with each stream's unterminated last line */
+    const fullTranscript = () =>
+      transcript + [partialLine.stdout, partialLine.stderr].filter(Boolean).map(line => `${line}\n`).join('');
     let killed = false;
 
     // detached: the check leads its own process group, so a timeout can kill
@@ -141,13 +152,11 @@ export async function runCheck(
     proc.stdout.on('data', (data) => {
       const text = data.toString();
       stdout += text;
-      transcript += text;
+      record('stdout', text);
     });
 
     proc.stderr.on('data', (data) => {
-      const text = data.toString();
-      stderr += text;
-      transcript += text;
+      record('stderr', data.toString());
     });
 
     proc.on('close', async (code, signal) => {
@@ -170,7 +179,7 @@ export async function runCheck(
           passed: false,
           output: stdout.trim(),
           error: `Timed out after ${timeoutMs / 1000}s (raise this check's timeout_ms if it needs longer)`,
-          transcript,
+          transcript: fullTranscript(),
           duration_ms: Date.now() - startTime,
         });
         return;
@@ -194,7 +203,7 @@ export async function runCheck(
           passed: false,
           output: stdout.trim(),
           error: code !== null ? `Exit code ${code}` : `Killed by ${signal}`,
-          transcript,
+          transcript: fullTranscript(),
           duration_ms: duration,
         });
       }
@@ -208,7 +217,7 @@ export async function runCheck(
         command,
         passed: false,
         error: err.message,
-        transcript,
+        transcript: fullTranscript(),
         duration_ms: Date.now() - startTime,
       });
     });
@@ -474,8 +483,9 @@ function saveCheckLog(target: CheckLogTarget, result: CheckResult, cwd: string):
       `${header.join('\n')}\n\n--- stdout and stderr, in the order porch read them ---\n${result.transcript ?? ''}`,
     );
     result.log_path = logPath;
-    const logs = fs.readdirSync(target.dir).filter(f => f.endsWith('.log')).sort();
-    for (const old of logs.slice(0, -MAX_CHECK_LOGS)) fs.rmSync(path.join(target.dir, old));
+    // Never the file just written, whatever names sort after it.
+    const older = fs.readdirSync(target.dir).filter(f => f.endsWith('.log') && f !== fileName).sort();
+    for (const old of older.slice(0, -(MAX_CHECK_LOGS - 1))) fs.rmSync(path.join(target.dir, old));
   } catch (err) {
     result.log_error = err instanceof Error ? err.message : String(err);
   }
