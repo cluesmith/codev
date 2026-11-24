@@ -706,3 +706,32 @@ the one-time skip after the architect checked GitHub on `4c9d9c967`. Architect's
 force-advances a phase at its third review iteration, so a fix made after round 3 is never
 re-reviewed. If round 3 asks for changes: tell the architect what it found BEFORE fixing, and
 list any commit no reviewer saw under its own heading in the PR body and the review.
+
+## 2026-11-24 — phase 3 COMPLETE (round 3: codex APPROVE, claude APPROVE)
+
+- Round 3: both lanes approve, no blocking issue, so no commit of phase 3 went unreviewed.
+  Porch advanced to phase 4 (`60146eece`). No code changed after the last reviewed head.
+- Claude's two non-blocking notes from round 3, **not fixed now** (a fix after round 3 would be
+  seen by no reviewer); carried so a later phase's review sees them:
+  1. **`NAME_TAKEN` wording when the basename is shared.** A and B both `codev`, neither named:
+     A asking for `codev` is told "'codev' is already the address of the workspace B, by its
+     directory name". At that moment `codev` is the address of nothing (it is ambiguous), and
+     the message gives no way forward (name B something else first). Fix the sentence in
+     **phase 5**, which touches the naming module's texts for the listing, or say it in phase
+     6's docs.
+  2. Two rows for one directory under two spellings, each with a different name: which name
+     `everyWorkspace` keeps depends on row order. Unreachable after boot canonicalization; a
+     comment at most (phase 5, with note 1).
+- **For the review document** (collected from this phase):
+  - plan/spec disagreement on one sentence (a later workspace whose basename equals an existing
+    explicit name) and my reading (the spec's);
+  - the real-Tower transcript above;
+  - the address-fit rule as following from the spec's 512-character address limit (architect's
+    decision), via `tryFormatAddress`;
+  - known boundary: workspace routes refuse Windows UNC paths, issue #1960;
+  - left on purpose: no `PUT` in `Access-Control-Allow-Methods`; `quoted()` duplicated across
+    the package boundary; `getRegisteredWorkspaces()` read twice in the name route;
+  - Flaky Tests: porch's local tests check failed once in phase 3 on five unrelated files (all
+    pass alone); every later `porch done` of phase 3 used the one-time skip on the architect's
+    word after GitHub was green on the same head (heads `0a553e80b`, `18a9c86a8`, `4c9d9c967`).
+- **Phase 4 order** (architect): build, push, tell the architect BEFORE `porch done`.
