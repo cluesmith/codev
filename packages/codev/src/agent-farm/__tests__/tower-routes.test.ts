@@ -26,6 +26,7 @@ import type { RouteContext } from '../servers/tower-routes.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
 import { MAX_MESSAGE_BYTES, MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
+import { workspaceKey } from '../utils/workspace-path.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
 // Issue #1473: a REAL PtySession for the raw-write route test. The claim under test is that the
 // route's bytes reach the gate's input signal, and a session double cannot make that claim —
@@ -2489,8 +2490,11 @@ describe('tower-routes', () => {
         mockResolveAgentInRegistry.mockImplementation(actual.resolveAgentInRegistry as (...args: unknown[]) => unknown);
 
         // realpath: on macOS the temp dir sits behind a symlink, and the registry keys rows
-        // by the path as it is given.
-        root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'spec1940-routes-'));
+        // by the path as it is given. workspaceKey: on Windows the route keys a workspace by
+        // its canonical spelling, and the temp dir is handed out in its short one
+        // (`RUNNER~1` for `runneradmin`), so rows seeded under the
+        // short spelling would belong to a workspace the route never looks up.
+        root = workspaceKey(fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'spec1940-routes-')));
         CODEV = path.join(root, 'codev');
         CLOUD = path.join(root, 'codev-cloud');
         fs.mkdirSync(path.join(CODEV, '.builders', 'spir-100'), { recursive: true });
