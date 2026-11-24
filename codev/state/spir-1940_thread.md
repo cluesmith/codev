@@ -1447,3 +1447,18 @@ Resumed after a context refresh at the phase boundary (`enter:review`).
 - Stopped at the gate. Next act is the owner's. On approval relayed by the architect:
   `porch approve 1940 pr --a-human-explicitly-approved-this`, `porch next`, merge with
   `gh pr merge 1957 --merge` (never squash), `porch done 1940 --merged 1957`, then verify.
+
+## 2026-11-24 — `pr` gate: the owner ruled "approve, waive" (main-41); `main` merged in first
+
+- 20:50Z, relayed by the architect: the human approved the merge and waived the `Co-Authored-By`
+  trailer on `d4cb7e648`. History stays as it is: no rewrite, no force-push.
+- Before approving, on the architect's instruction, `origin/main` merged in (`f163054c3`, a
+  merge, 71 commits, no conflict). Both sides had changed the generated
+  `shipped-skill-hashes.ts`; regenerating it gave no change. Local: types, SDK and
+  `packages/codev` build; SDK suite 16 files / 411 tests; 67 `packages/codev` test files / 2159
+  tests at 4 workers (the skill and doc-integrity tests and this project's). No full suite.
+- GitHub at `c03354000`, the head before this merge: 8 of 8 green (runs 45461461242 and
+  45461461323). The architect ran the real-Tower e2e from the branch themselves: 13 of 13.
+- Order from here: push, GitHub 8 of 8 on the new head, tell the architect, and on their
+  confirmation `porch approve 1940 pr --a-human-explicitly-approved-this`, then
+  `gh pr merge 1957 --merge --admin`, and tell them the merge commit.
