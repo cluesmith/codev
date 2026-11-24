@@ -36,6 +36,40 @@ HTTP server or an injected fetch, then signal PHASE_COMPLETE.
   (`process-census.ts`, 5 s ps timeout). Caveat: my probes ran 10–12 `/health` calls concurrently,
   which inflated this.
 
+## 2026-11-24 — investigate complete (resumed after reboot)
+
+Load-free repro (`scratchpad/repro/stalled.mjs`: local servers on ephemeral ports, nothing
+touching Tower or machine load) feeds each shape through an exact copy of the SDK's catch mapping:
+
+| endpoint | fetch throws | `request()` keeps | `isRunning()` |
+|---|---|---|---|
+| nothing listening | `TypeError: fetch failed`, `cause.code=ECONNREFUSED` | `"fetch failed"` | false |
+| listening, never answers | `TimeoutError` | `"Request timeout"` | false |
+| listening, resets | `TypeError: fetch failed`, `cause.code=ECONNRESET` | `"fetch failed"` | false |
+
+**Root cause.**
+1. `isRunning()` returns a bare boolean, so every failure shape becomes "Tower is not running" in
+   the callers.
+2. `request()`'s `message.includes('ECONNREFUSED')` is dead code under Node's fetch, because the
+   errno code lives on `err.cause`. So even the raw result cannot tell refused from reset.
+3. Under load the live failure mode is (2) in the table: Tower is listening, but its event loop is
+   starved past the 10 s abort.
+
+**Worse adjacent paths found (same false negative, destructive follow-on):**
+- `afx workspace start` (`start.ts`): a false negative calls `towerStart()`. That probes
+  `/api/status` with a 2 s timeout, decides "port in use but not responding", and **SIGTERMs the PID
+  on 4100, i.e. the live Tower**. Running `afx tower start` by hand, as the old message suggests,
+  hits the same branch.
+- `afx workspace stop` (`stop.ts`): a false negative skips the Tower kills but still runs
+  `clearRuntime()`, wiping the builder registry while Tower keeps those builders running.
+- `rename.ts`, `shell.ts` and `open.ts` print "not running" for any `status === 0`.
+- `ide.ts` is already correct: it uses `http.request`, so `err.code` is reliable, and it reports
+  timeouts separately. No change needed.
+
+**Scope:** fits BUGFIX (estimate ~250 LOC with tests). One open decision is flagged to the
+architect, not changed here: `towerStart()`'s zombie-kill policy, i.e. what `afx tower start`
+should do when the port is held but `/api/status` misses a 2 s probe.
+
 ### Planned fix (per the issue's Fix section)
 One shared helper over the SDK probe that classifies the failure:
 - connect refused (nothing listening) → "Tower is not running. Start it with: afx tower start"
