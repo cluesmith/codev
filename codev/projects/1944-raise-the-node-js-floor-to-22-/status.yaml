@@ -1,7 +1,7 @@
 id: '1944'
 title: raise-the-node-js-floor-to-22-
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-24T01:00:19.199Z'
-updated_at: '2026-11-24T03:18:08.993Z'
+updated_at: '2026-11-24T03:18:16.313Z'
 pr_history:
   - phase: pr
     pr_number: 1962
