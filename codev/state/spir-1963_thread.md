@@ -935,3 +935,24 @@ run.
 - The code under test is unchanged, and `resolveWorkspaceFile` has no production caller yet.
 - The other suites, CLI tests, probes and install verification passed. The run is re-dispatched
   after this commit.
+
+### Phase 7: review, iteration 2: approved (2026-11-24)
+
+- `porch done` (iteration 2) passed: build 15.4 s and tests 47.8 s, no skip, run once the load
+  was back under 6 (it spiked to 14.9).
+- **Codex APPROVE:** both iteration-1 issues are addressed.
+- **Claude APPROVE.** Two non-blocking notes, carried to Phase 8:
+  - the Light Modern Recommended badge is 4.1:1 at 10 px; give it a small bump if Phase 8
+    touches badge styling;
+  - `resolveWorkspaceFile` gets its first caller in Phase 8.
+- **Windows on `b758f8ffb`:** the containment step passes on Node 22 and 24, 39/39. Node 22
+  passed everything.
+- **Node 24 failed one test outside this branch's code:** `ide-server-stub.windows.test.ts` >
+  'npm-style shim': "IDE server on port … was not stopped: the port query failed".
+  - This branch changes nothing in packages/codev except `issue-id-parity.test.ts`. The test
+    passed on Node 22 in the same run, and on main's run that morning.
+  - I re-ran only the failed job (attempt 2) to tell a flake from a failure.
+- **Carried to Phase 8 (Work panel):**
+  - run the full-panel contrast scan on the Work view: implementing orange and the tag colours
+    are unmeasured;
+  - `resolveWorkspaceFile` gets its caller there.
