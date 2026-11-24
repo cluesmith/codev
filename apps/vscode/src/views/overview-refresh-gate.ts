@@ -1,6 +1,6 @@
 import type * as vscode from 'vscode';
 
-/** A view whose visibility keeps the periodic overview refresh running. */
+/** A view (or editor-area panel) whose visibility keeps the periodic overview refresh running. */
 export interface GatedView {
   readonly visible: boolean;
   readonly onDidChangeVisibility: vscode.Event<unknown>;
@@ -14,7 +14,8 @@ export interface GatedView {
  * `OverviewCache.refresh()` is last-write-wins, so periodic and event-driven refreshes coexist.
  *
  * Every view that renders this window's overview is one of `views` — the Codev container's list
- * views and, since Spec 1963, the Cockpit — so with only the Cockpit visible the timer still runs.
+ * views and, since Spec 1963, the Cockpit and the Work panel — so with only one of those visible the
+ * timer still runs.
  */
 export class OverviewRefreshGate implements vscode.Disposable {
   private timer: ReturnType<typeof setInterval> | undefined;

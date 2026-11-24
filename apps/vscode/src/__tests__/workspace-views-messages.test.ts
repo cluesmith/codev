@@ -1,5 +1,5 @@
 /**
- * Spec 1963 scenario 6: the Decisions panel's host ↔ webview contract. Webview → host messages are
+ * Spec 1963 scenario 6: the Work and Decisions panels' host ↔ webview contract. Webview → host messages are
  * untrusted, so every guard must reject anything malformed before the host acts on it.
  */
 
@@ -11,6 +11,10 @@ import {
   isDecisionsRuleMessage,
   isOpenExternalMessage,
   isReadyMessage,
+  isWorkNewShellMessage,
+  isWorkOpenArtifactMessage,
+  isWorkOpenBuilderMessage,
+  isWorkRefreshMessage,
   ruleRequestOf,
 } from '../workspace-views/messages.js';
 
@@ -104,5 +108,53 @@ describe('isOpenExternalMessage', () => {
     ['an over-long url', { type: 'open-external', url: `https://x/${'a'.repeat(MAX_WEBVIEW_STRING)}` }],
   ])('rejects %s', (_name, message) => {
     expect(isOpenExternalMessage(message)).toBe(false);
+  });
+});
+
+describe('isWorkOpenBuilderMessage', () => {
+  it('accepts a builder id', () => {
+    expect(isWorkOpenBuilderMessage({ type: 'work/open-builder', builderId: 'spir-1963' })).toBe(true);
+  });
+
+  it.each<[string, unknown]>([
+    ...NOT_OBJECTS.map((v): [string, unknown] => [JSON.stringify(v) ?? 'undefined', v]),
+    ['no id', { type: 'work/open-builder' }],
+    ['an empty id', { type: 'work/open-builder', builderId: '' }],
+    ['a numeric id', { type: 'work/open-builder', builderId: 1963 }],
+    ['an over-long id', { type: 'work/open-builder', builderId: 'a'.repeat(MAX_WEBVIEW_STRING + 1) }],
+    ['another type', { type: 'open-builder', builderId: 'spir-1963' }],
+  ])('rejects %s', (_name, message) => {
+    expect(isWorkOpenBuilderMessage(message)).toBe(false);
+  });
+});
+
+describe('isWorkNewShellMessage and isWorkRefreshMessage', () => {
+  it('accept their type only', () => {
+    expect(isWorkNewShellMessage({ type: 'work/new-shell' })).toBe(true);
+    expect(isWorkRefreshMessage({ type: 'work/refresh' })).toBe(true);
+    for (const bad of [...NOT_OBJECTS, {}, { type: 'work/refresh' }, { type: 'new-shell' }]) {
+      expect(isWorkNewShellMessage(bad), JSON.stringify(bad)).toBe(false);
+    }
+    for (const bad of [...NOT_OBJECTS, {}, { type: 'work/new-shell' }, { type: 'refresh' }]) {
+      expect(isWorkRefreshMessage(bad), JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+
+describe('isWorkOpenArtifactMessage', () => {
+  it('accepts a path as the overview names it (whether it may be opened is security.ts’s decision)', () => {
+    expect(isWorkOpenArtifactMessage({ type: 'work/open-artifact', path: 'codev/specs/1963-cockpit.md' })).toBe(true);
+    expect(isWorkOpenArtifactMessage({ type: 'work/open-artifact', path: '../outside.md' })).toBe(true);
+  });
+
+  it.each<[string, unknown]>([
+    ...NOT_OBJECTS.map((v): [string, unknown] => [JSON.stringify(v) ?? 'undefined', v]),
+    ['no path', { type: 'work/open-artifact' }],
+    ['an empty path', { type: 'work/open-artifact', path: '' }],
+    ['a NUL byte', { type: 'work/open-artifact', path: 'codev/specs/a\0.md' }],
+    ['an over-long path', { type: 'work/open-artifact', path: 'a'.repeat(MAX_WEBVIEW_STRING + 1) }],
+    ['a non-string path', { type: 'work/open-artifact', path: ['codev'] }],
+  ])('rejects %s', (_name, message) => {
+    expect(isWorkOpenArtifactMessage(message)).toBe(false);
   });
 });

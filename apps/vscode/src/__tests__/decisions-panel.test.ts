@@ -72,6 +72,7 @@ const showInformationMessage = vi.fn();
 const openExternal = vi.fn(async (_uri: unknown) => true);
 
 vi.mock('vscode', () => ({
+  EventEmitter: class extends FakeEmitter<void> { dispose() {} },
   window: { createWebviewPanel, showInformationMessage },
   env: { openExternal },
   ViewColumn: { Active: -1 },

@@ -69,7 +69,8 @@ import { AgentTreeHosts, agentCycleRoster } from './views/agent-tree-hosts.js';
 import { CockpitProvider, COCKPIT_VIEW_ID, cockpitConnectionMode, type CockpitNode } from './views/cockpit.js';
 import { DecisionsPanels } from './workspace-views/decisions-panel.js';
 import { DecisionsBridge } from './workspace-views/decisions-bridge.js';
-import { DECISIONS_VIEW_TYPE } from './workspace-views/messages.js';
+import { WorkPanels } from './workspace-views/work-panel.js';
+import { DECISIONS_VIEW_TYPE, WORK_VIEW_TYPE } from './workspace-views/messages.js';
 import { workspaceViewUnavailableReason } from './workspace-views/availability.js';
 import { OverviewRefreshGate } from './views/overview-refresh-gate.js';
 // Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
@@ -611,7 +612,34 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		log: (line) => outputChannel?.appendLine(line),
 	});
-	context.subscriptions.push(vscode.window.registerWebviewPanelSerializer(DECISIONS_VIEW_TYPE, decisionsPanels));
+	context.subscriptions.push(
+		decisionsPanels,
+		vscode.window.registerWebviewPanelSerializer(DECISIONS_VIEW_TYPE, decisionsPanels),
+	);
+	// The Work panel (Spec 1963): one per window, fed from this window's OverviewCache (the
+	// sidebar's source), with each kept dashboard action mapped to its VS Code equivalent. Its
+	// availability is read from the window's folders, as Decisions' is.
+	const workPanels = new WorkPanels({
+		extensionUri: context.extensionUri,
+		overview: overviewCache,
+		connection: connectionManager,
+		actions: {
+			openBuilder: async (builderId) => terminalManager?.openBuilderByRoleOrId(builderId, true),
+			newShell: async () => vscode.commands.executeCommand('codev.newShell'),
+			openFile: async (fsPath) => vscode.commands.executeCommand('vscode.open', vscode.Uri.file(fsPath)),
+			warn: (message) => { void vscode.window.showWarningMessage(message); },
+		},
+		workspacePath: () => detectWorkspacePath(),
+		unavailableReason: () => workspaceViewUnavailableReason('Work', {
+			builderWorktreeWindow: isBuilderWorktreeWindow,
+			workspacePath: detectWorkspacePath(),
+		}),
+		log: (line) => outputChannel?.appendLine(line),
+	});
+	context.subscriptions.push(
+		workPanels,
+		vscode.window.registerWebviewPanelSerializer(WORK_VIEW_TYPE, workPanels),
+	);
 	// Builders accordion (#913), row-click expand, follow-reveals, the
 	// builder-active hook and the badge act on whichever of the two views a row
 	// belongs to. The accordion is toggled via the header button /
@@ -858,14 +886,15 @@ export async function activate(context: vscode.ExtensionContext) {
 	);
 
 	// Periodic overview refresh while any overview-backed view is visible
-	// (`OverviewRefreshGate`): the Codev container's list views and the Cockpit,
-	// so with only the Cockpit visible this workspace's rows stay current.
+	// (`OverviewRefreshGate`): the Codev container's list views, the Cockpit and
+	// the Work panel, so with only the Cockpit or only Work visible this
+	// workspace's overview stays current.
 	const readOverviewRefreshSeconds = (): number => {
 		const s = vscode.workspace.getConfiguration('codev').get<number>('overviewRefreshSeconds', 60);
 		return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : 0;
 	};
 	const overviewRefreshGate = new OverviewRefreshGate(
-		[buildersView, pullRequestsView, backlogView, recentlyClosedView, cockpitView],
+		[buildersView, pullRequestsView, backlogView, recentlyClosedView, cockpitView, workPanels],
 		readOverviewRefreshSeconds,
 		() => { if (connectionManager?.getState() === 'connected') { void overviewCache.refresh(); } },
 		() => { void overviewCache.refresh(); }, // resume → immediate refresh
@@ -1309,6 +1338,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		// The Decisions panel (Spec 1963): the palette and the Cockpit's Decisions entry. Where it is
 		// not offered (a builder-worktree or no-workspace window) it says why.
 		regCli('codev.openDecisions', () => decisionsPanels.show()),
+		// The Work panel (Spec 1963): the palette. Where it is not offered it says why.
+		regCli('codev.openWork', () => workPanels.show()),
 		reg('codev.searchBacklog', () => searchBacklog(connectionManager!, overviewCache)),
 		reg('codev.openIssueById', () => openIssueById(connectionManager!, () => overviewCache.getData())),
 		reg('codev.openPRById', () => openPRById(connectionManager!)),

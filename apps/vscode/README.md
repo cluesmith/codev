@@ -67,6 +67,17 @@ Dormant (2)
 
 The Cockpit reads what the Codev and Tower views already fetch. It adds no poll or stream of its own.
 
+## Work and Decisions
+
+The dashboard's **Work** and **Decisions** views open in the editor area, for this window's workspace:
+
+- **Codev: Open Work** shows builders, Needs Attention, Backlog and Recently Closed. A builder's *Open* shows its terminal, *+ Shell* opens a new Tower shell, and *Refresh* re-reads the overview from Tower. Issue and PR links open in your browser; *spec*, *plan* and *review* links open the file in an editor.
+- **Codev: Open Decisions**, or the *Decisions* entry under this window's workspace in the Cockpit, lets you rule on pending decisions as in the dashboard. Item images load inside the panel; click one to see it full size. A workspace without a decisions file shows how to start one (`afx decisions init`).
+- Each panel is one per window: opening it again brings it forward. It comes back after a window reload, and follows your color theme, including high contrast. A Decisions draft survives the panel being hidden or moved, but not a window reload.
+- While Tower is not connected, each panel keeps what it last showed, under a notice, and recovers when Tower returns.
+- Neither is offered in a builder-worktree window or a window with no Codev workspace. There, the commands say why.
+- Left out from the dashboard: *Open Files & Shells* (VS Code's editor tabs and terminal list do this), the *Files* panel (the Explorer does) and the tip of the day.
+
 ## Builder actions (right-click)
 
 Right-click any builder in the Agents view for three grouped action menus:

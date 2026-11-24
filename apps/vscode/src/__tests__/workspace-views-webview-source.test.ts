@@ -42,7 +42,7 @@ describe('the workspace-views webview sources', () => {
 
   it('finds the sources', () => {
     expect(files.map(f => f.slice(WEBVIEW.length + 1))).toEqual(
-      expect.arrayContaining(['DecisionsApp.tsx', 'decisions-host.ts', 'decisions-main.tsx']),
+      expect.arrayContaining(['DecisionsApp.tsx', 'decisions-host.ts', 'decisions-main.tsx', 'WorkApp.tsx', 'work-main.tsx']),
     );
   });
 

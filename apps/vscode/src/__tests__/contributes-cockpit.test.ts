@@ -118,3 +118,28 @@ describe('the Decisions panel (Phase 7)', () => {
     expect(ignored.some(line => line.startsWith('dist'))).toBe(false);
   });
 });
+
+describe('the Work panel (Phase 8)', () => {
+  const commands = PKG.contributes.commands as Array<{ command: string; title: string; icon?: string }>;
+
+  it('declares Codev: Open Work, and keeps it in the command palette', () => {
+    expect(commands.find(c => c.command === 'codev.openWork')).toEqual({ command: 'codev.openWork', title: 'Codev: Open Work' });
+    expect((menus.commandPalette ?? []).some(m => m.command === 'codev.openWork')).toBe(false);
+  });
+
+  it('activates to restore the panel after a reload', () => {
+    expect(PKG.activationEvents).toContain('onWebviewPanel:codev.work');
+  });
+
+  it('registers the command and the serializer for the panel in extension.ts', () => {
+    expect(EXT_SRC).toMatch(/regCli\('codev\.openWork', \(\) => workPanels\.show\(\)\)/);
+    expect(EXT_SRC).toMatch(/registerWebviewPanelSerializer\(WORK_VIEW_TYPE, workPanels\)/);
+  });
+
+  it("decides availability from the window's folders, as Decisions does", () => {
+    const wiring = EXT_SRC.slice(EXT_SRC.indexOf('new WorkPanels({'), EXT_SRC.indexOf('registerWebviewPanelSerializer(WORK_VIEW_TYPE'));
+    expect(wiring).toMatch(/unavailableReason: \(\) => workspaceViewUnavailableReason\('Work', \{/);
+    expect(wiring).toMatch(/workspacePath: detectWorkspacePath\(\),/);
+    expect(wiring).not.toMatch(/getWorkspacePath\(\)/);
+  });
+});

@@ -10,10 +10,13 @@
  */
 
 import type { DecisionsRuleRequest } from '@cluesmith/codev-types';
-import type { DecisionRulingResult, DecisionsFetchResult } from '@cluesmith/codev-workspace-views/host';
+import type { DecisionRulingResult, DecisionsFetchResult, OverviewState } from '@cluesmith/codev-workspace-views/host';
 
 /** The Decisions panel's webview type, as its serializer and restore know it. */
 export const DECISIONS_VIEW_TYPE = 'codev.decisions';
+
+/** The Work panel's webview type, as its serializer and restore know it. */
+export const WORK_VIEW_TYPE = 'codev.work';
 
 // ── Webview → host ──────────────────────────────────────────────────────────
 
@@ -53,6 +56,36 @@ export type DecisionsWebviewMessage =
   | DecisionsReadMessage
   | DecisionsRuleMessage
   | DecisionsImageMessage
+  | OpenExternalMessage;
+
+/** A builder row's *Open*: show that builder's terminal. */
+export interface WorkOpenBuilderMessage {
+  type: 'work/open-builder';
+  builderId: string;
+}
+
+/** *+ Shell*: open a new Tower shell. */
+export interface WorkNewShellMessage {
+  type: 'work/new-shell';
+}
+
+/** *Refresh*: re-read the overview, bypassing Tower's overview cache. */
+export interface WorkRefreshMessage {
+  type: 'work/refresh';
+}
+
+/** A *spec* / *plan* / *review* link: open that workspace file, as the overview names it. */
+export interface WorkOpenArtifactMessage {
+  type: 'work/open-artifact';
+  path: string;
+}
+
+export type WorkWebviewMessage =
+  | ReadyMessage
+  | WorkOpenBuilderMessage
+  | WorkNewShellMessage
+  | WorkRefreshMessage
+  | WorkOpenArtifactMessage
   | OpenExternalMessage;
 
 // ── Host → webview ──────────────────────────────────────────────────────────
@@ -95,9 +128,21 @@ export type DecisionsHostMessage =
   | DecisionsRuleResultMessage
   | DecisionsImageResultMessage;
 
+/**
+ * The overview the Work view shows, pushed whenever this window's overview or its connection
+ * changes: null while loading; otherwise the last overview read, with the not-connected notice
+ * as its `error` while Tower is not connected.
+ */
+export interface WorkOverviewMessage {
+  type: 'work/overview';
+  overview: OverviewState | null;
+}
+
+export type WorkHostMessage = WorkOverviewMessage;
+
 // ── Guards (webview → host is untrusted) ────────────────────────────────────
 
-/** The longest image path or URL a webview may send; item markdown never needs more. */
+/** The longest path, URL or builder id a webview may send; nothing a panel shows needs more. */
 export const MAX_WEBVIEW_STRING = 4096;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -148,6 +193,24 @@ export function isDecisionsRuleMessage(message: unknown): message is DecisionsRu
 export function isDecisionsImageMessage(message: unknown): message is DecisionsImageMessage {
   return isRecord(message) && message.type === 'decisions/image'
     && isRequestId(message.requestId) && isBoundedString(message.path) && !message.path.includes('\0');
+}
+
+export function isWorkOpenBuilderMessage(message: unknown): message is WorkOpenBuilderMessage {
+  return isRecord(message) && message.type === 'work/open-builder' && isBoundedString(message.builderId);
+}
+
+export function isWorkNewShellMessage(message: unknown): message is WorkNewShellMessage {
+  return isRecord(message) && message.type === 'work/new-shell';
+}
+
+export function isWorkRefreshMessage(message: unknown): message is WorkRefreshMessage {
+  return isRecord(message) && message.type === 'work/refresh';
+}
+
+/** The message's shape only: whether the file may be opened is `security.ts`'s decision. */
+export function isWorkOpenArtifactMessage(message: unknown): message is WorkOpenArtifactMessage {
+  return isRecord(message) && message.type === 'work/open-artifact'
+    && isBoundedString(message.path) && !message.path.includes('\0');
 }
 
 /** The message's shape only: whether its URL may be opened is `security.ts`'s decision. */

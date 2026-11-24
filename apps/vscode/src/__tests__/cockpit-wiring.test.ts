@@ -467,8 +467,8 @@ describe('the periodic overview refresh counts the Cockpit', () => {
     }
   });
 
-  it('extension.ts gates on the four list views and the Cockpit', () => {
-    expect(EXT_SRC).toMatch(/new OverviewRefreshGate\(\s*\[buildersView, pullRequestsView, backlogView, recentlyClosedView, cockpitView\],/);
+  it('extension.ts gates on the four list views, the Cockpit and the Work panel', () => {
+    expect(EXT_SRC).toMatch(/new OverviewRefreshGate\(\s*\[buildersView, pullRequestsView, backlogView, recentlyClosedView, cockpitView, workPanels\],/);
     expect(EXT_SRC).toMatch(/\.\.\.overviewRefreshGate\.wire\(\)/);
   });
 });

@@ -5,6 +5,7 @@
 ### What's new
 
 - **Codev Cockpit: the whole fleet in one tree.** A new button below Codev opens Tower → workspaces → architects → builders → changed files. This window's workspace keeps every action of the Workspace and Agents views, and another workspace's rows open that workspace's window (#1963).
+- **Work and Decisions in VS Code.** `Codev: Open Work` and `Codev: Open Decisions` (or the Cockpit's Decisions entry) open the dashboard's Work and Decisions views in the editor area, in your color theme. Rule on decisions, open a builder's terminal, start a shell, and follow issue, PR and spec links without leaving the editor (#1963).
 
 ### Fixes
 
