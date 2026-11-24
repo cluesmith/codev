@@ -395,3 +395,19 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   Tests: hard link + unchanged copy at quoted names not counted (fails with the old parsing: mutation-checked);
   ' M' first entry counted; quoted untracked name counted; staged rename counts once; a broken .git → "Unable to
   check status" (dirty). Cleanup suites incl. the execFile-mocking ones still pass.
+
+## Review phase (2026-11-24)
+- Context refresh at the review boundary; resumed from .builder-state.md.
+- Claude iter2 note 2 (architect order): three cleanup suites mocked execFile with 3 params, so the dirty
+  notice always took "Unable to check status". Fixed in 017f0baea: keep-ignored (new case asserts the real
+  notice), keep-ignored-e2e (real git status; asserts notes.md counted), spec-1658 ('ps' only for ps).
+  air-1477 never reaches git status; cleanup-shellper-kill never calls cleanup(). Both new assertions fail
+  with the old mocks (checked).
+- Targeted run at load ~31: 989/990; check-deploy's workflow-runs hang test failed (1 s limit bounds every
+  call, an earlier one timed out first), passes alone. My own test: limit 5 s there and in check-pr-forge.
+- Live runs (worktree build): check pr 1958 at 7d312a2 (4 porch-only commits above 0c02478): ATTENTION
+  state (draft), checks "head 7d312a2: porch-only, 8 passed", 7.3 s; check pr 1640 (44 files) forge
+  CONFLICTING/DIRTY + trial merge 15 conflicts, 7.6 s; check pr 1928 (merged) 6.4 s. No ref changed.
+  Scenario 29: no open ~25-file PR with a 3-commit porch tail exists (scanned 150 recent PRs); recorded.
+- Review file written; six cold lessons routed (Testing x4, Architecture, Protocol Orchestration); no hot change.
+- checkCi got its one-line skip comment (claude Phase 4 iter2 note 5).

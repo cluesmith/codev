@@ -408,6 +408,7 @@ async function rangeChecks(runner: Runner, pr: PrView, settings: CheckSettings, 
 }
 
 async function checkCi(runner: Runner, settings: CheckSettings, anchors: Anchors): Promise<Check> {
+  // Tested here as well as in applySkips, so a skipped `checks` makes no commit-checks call.
   if (settings.skip.has('checks')) return skipped('checks');
   const blocked = anchors.headProblem ?? anchors.baseProblem ?? anchors.rangeProblem;
   if (blocked) return notRun('checks', blocked);
