@@ -10,6 +10,7 @@ import {
   runArtifactCheck,
   formatCheckResults,
   allChecksPassed,
+  OUTPUT_TAIL_LINES,
   REQUIRED_SPEC_SECTIONS,
   type CheckEnv,
 } from '../checks.js';
@@ -54,7 +55,8 @@ describe('porch check runner', () => {
       const result = await runCheck('ls', 'ls /nonexistent/path/12345', cwd, defaultEnv);
 
       expect(result.passed).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).toMatch(/^Exit code \d+$/);
+      expect(result.transcript).toContain('/nonexistent/path/12345');
     });
 
     it('should pass project env variables to command', async () => {
@@ -129,15 +131,18 @@ describe('porch check runner', () => {
       expect(output).toContain('3 tests failed');
     });
 
-    it('should truncate long error messages', () => {
-      const longError = Array(10).fill('Error line').join('\n');
+    it('should truncate long output to its last lines', () => {
+      const transcript = Array.from({ length: OUTPUT_TAIL_LINES + 10 }, (_, i) => `line ${i + 1}`).join('\n');
       const results = [
-        { name: 'test', command: 'npm test', passed: false, error: longError, duration_ms: 1000 },
+        { name: 'test', command: 'npm test', passed: false, error: 'Exit code 1', transcript, duration_ms: 1000 },
       ];
 
       const output = formatCheckResults(results);
 
-      expect(output).toContain('...');
+      expect(output).toContain('... (10 earlier lines)');
+      expect(output).not.toContain('line 10\n');
+      expect(output).toContain('line 11\n');
+      expect(output).toContain(`line ${OUTPUT_TAIL_LINES + 10}`);
     });
   });
 
