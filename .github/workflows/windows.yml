@@ -49,7 +49,7 @@ on:
         required: false
         default: false
       suites:
-        description: 'Run the full unit, cli-e2e and post-release-e2e suites (about an hour)'
+        description: 'Run the full unit, cli-e2e and post-release-e2e suites (about 10 minutes)'
         type: boolean
         required: false
         default: false
@@ -167,7 +167,8 @@ jobs:
     name: Targeted tests
     if: ${{ inputs.filter != '' }}
     runs-on: windows-latest
-    # The full unit suite (filter `src`) runs about 50 minutes on windows-latest.
+    # The full unit suite (filter `src`) runs about 7 minutes on windows-latest (measured 2026-11-24);
+    # the timeout leaves headroom for slow runners.
     timeout-minutes: 120
     steps:
       - name: Checkout repository
@@ -209,7 +210,8 @@ jobs:
     name: Unit tests
     if: ${{ inputs.suites }}
     runs-on: windows-latest
-    # The codev unit suite alone runs about 50 minutes on windows-latest.
+    # The sdk, core and codev unit suites run about 7 minutes on windows-latest (measured 2026-11-24);
+    # the timeout leaves headroom for slow runners.
     timeout-minutes: 120
     steps:
       - name: Checkout repository
