@@ -1,6 +1,6 @@
 {
   "script": "arrange",
-  "at": "2026-11-24T16:29:33.459Z",
+  "at": "2026-11-24T16:49:41.762Z",
   "ownerPortRequests": [],
   "popups": [],
   "results": [
@@ -9,7 +9,7 @@
       "ok": true,
       "detail": "items 5: \"Codev (⌥⌘C) - 1 blocked, 2 waiting on input\", 6: \"Codev Cockpit - 1 blocked, 2 waiting on input\"",
       "shots": [],
-      "ms": 5539
+      "ms": 5589
     },
     {
       "name": "scenario 13 setup: editors across four groups, two dirty files, a clean file and two untitled buffers",
@@ -18,7 +18,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-01-before.png"
       ],
-      "ms": 12955
+      "ms": 12959
     },
     {
       "name": "scenario 7 / 9: the first show of the Cockpit arranges main | (Work over Decisions), each active in its group",
@@ -27,7 +27,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-02-arranged-dark.png"
       ],
-      "ms": 1134
+      "ms": 1140
     },
     {
       "name": "scenario 7: the one-time notice offers Don't arrange automatically; dismissing it changes nothing",
@@ -36,7 +36,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-03-notice.png"
       ],
-      "ms": 297
+      "ms": 280
     },
     {
       "name": "scenario 13: every pre-existing editor survives the arrange with its unsaved content; the architect is the live session; both panels render",
@@ -45,7 +45,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-04-editors-kept.png"
       ],
-      "ms": 3357
+      "ms": 3361
     },
     {
       "name": "scenario 13: re-running Arrange Cockpit (title bar, then palette) changes nothing; a typed Decisions draft persists; no notice",
@@ -54,7 +54,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-05-rerun-draft.png"
       ],
-      "ms": 8077
+      "ms": 8054
     },
     {
       "name": "the architect's 14:00Z ruling: at the split's Work width the view fits and a typical title stays readable (20+ of 44 characters)",
@@ -71,7 +71,7 @@
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-06-split-vs.png",
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-07-split-vs-dark.png"
       ],
-      "ms": 7649
+      "ms": 7654
     },
     {
       "name": "scenario 7: showing the Cockpit again leaves the editor area alone; the command arranges on demand",
@@ -80,7 +80,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-08-rearranged.png"
       ],
-      "ms": 11138
+      "ms": 11101
     },
     {
       "name": "the architect terminal moved into the panel comes back to the left group: the same session",
@@ -89,7 +89,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-09-from-panel.png"
       ],
-      "ms": 4579
+      "ms": 4615
     },
     {
       "name": "another terminal named like the architect: arrange stops before moving an editor and says why; with that terminal closed, it arranges (codex review)",
@@ -99,7 +99,7 @@
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-10-namesake-refused.png",
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-11-namesake-closed-arranged.png"
       ],
-      "ms": 52451
+      "ms": 52394
     },
     {
       "name": "existing profile: after a reload the restored Cockpit arranges again, the architect reopened on the left; no notice; the button is still below Codev",
@@ -108,7 +108,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-12-reloaded.png"
       ],
-      "ms": 5626
+      "ms": 5783
     },
     {
       "name": "scenario 14: main not live — the existing warning, no other architect opened, Work and Decisions still arranged",
@@ -117,7 +117,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-13-main-not-live.png"
       ],
-      "ms": 8208
+      "ms": 8207
     },
     {
       "name": "scenario 7 (second fresh profile): Don't arrange automatically turns codev.cockpit.autoArrange off at the user level; the command still arranges",
@@ -127,7 +127,7 @@
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-14-dont-arrange.png",
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-15-setting-off-command.png"
       ],
-      "ms": 23566
+      "ms": 23706
     },
     {
       "name": "scenario 19: in a builder-worktree window, no auto-arrange, no title-bar action, and the command explains",
@@ -136,7 +136,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-16-worktree-explains.png"
       ],
-      "ms": 10274
+      "ms": 10298
     },
     {
       "name": "scenario 19: in a no-workspace window, no auto-arrange, no title-bar action, and the command explains",
@@ -145,7 +145,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-17-no-workspace-explains.png"
       ],
-      "ms": 6916
+      "ms": 6948
     },
     {
       "name": "a reload with Tower down and the Cockpit showing: the automatic arrange places Work over Decisions and shows no error toast (claude review)",
@@ -154,7 +154,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-18-auto-tower-down.png"
       ],
-      "ms": 21359
+      "ms": 21388
     },
     {
       "name": "a restored, not yet revived panel tab counts: with no architect and only Work and Decisions in the first group after a reload, arrange keeps an empty left column (claude review)",
@@ -163,7 +163,7 @@
       "shots": [
         "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-19-restored-tab-empty-left.png"
       ],
-      "ms": 14751
+      "ms": 14700
     },
     {
       "name": "no screenshot shows the machine's shell prompt (host:dir user$)",

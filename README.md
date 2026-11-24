@@ -18,3 +18,11 @@ permalink into this branch.
 | `layout-spike/` | The plan's layout spike (VS Code 1.147.0) |
 
 Every screenshot here was read with OCR, and none shows a machine's shell prompt.
+
+## The final-head run
+
+The second commit on this branch replaces `verification-phase9/verify-arrange.json` and its 19
+`arrange-*` screenshots. They now hold the `verify arrange` run on the PR's final head
+`2780caa05297c4d027beb203836edb24b78818fe`, with the vsix built at that commit: 19/19, the shell-prompt check included
+(2026-11-24T16:49Z). The first commit holds the same check names from the run on the same
+extension code before the merge from main.
