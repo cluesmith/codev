@@ -1231,3 +1231,73 @@ run.
     - `builder/spir-1963` is rewritten in a fresh clone, removing only the evidence paths;
     - every check passes before `--force-with-lease`;
     - the worktree moves onto the new history with `reset --soft`.
+- **Test-then-merge (owner ruling ide-2, relayed 20:51Z; the pr gate is NOT approved):** one
+  fenced ide-server run on 1.138.0, then one on 1.128. Merge only if both pass and checks are
+  green.
+  - Waited for PR #1957 (named architects), which merged at 21:18Z. Merged `origin/main`
+    (`707e0e904`) as `b164e4898`. The one conflict, the codev-types import in
+    `packages/sdk/src/tower-client.ts`, was resolved as the union. The types and sdk build clean.
+  - `porch done` (plain, main-39) at 21:20Z, load 13.6: passed. At the review phase it runs
+    `pr_exists` and the two review-section checks, and `e2e_tests` is skipped by the repo config.
+    There is no tests check in this phase, so no local suite ran.
+  - The isolated Tower (`packages/codev` dist) and the vsix were rebuilt from `b164e4898`.
+  - Each version runs `verify arrange`, `work` and `decisions`, each on its own `start` and
+    `seed fleet`. Every start has the sandbox, its canary and the tripwire, and the run stops at
+    the first failure or trip.
+  - **1.138.0, 21:21Z: FAILED, and stopped as ordered.** `arrange` passed 14/19. All 5 failures
+    are the Work and Decisions webviews staying blank; every layout behaviour passed.
+    - The server reported commit `50cad256`, and the tripwire stayed clean.
+    - Load: 14.9 at the start, 11.5 at the failure, 32.1 at the end (the Tower rebuild).
+    - `work`, `decisions` and 1.128 were not run.
+  - **Cause (read-only diagnosis): a webview-protocol mismatch in Codev IDE 1.138's
+    `product.json`.** Its `webviewContentExternalBaseUrlTemplate` is pinned to an older insider
+    build's host page (`ef65ac1b`), instead of `{{quality}}/{{commit}}`.
+    - The 1.138 workbench sends webview resources as a transferred stream, or as chunk messages.
+    - That host page and its service worker read only `data.data`.
+    - So the panel HTML arrives (the host page fetched `fake.html`), but its scripts never do.
+    - The same blank panels appeared in the 16:56Z incident run, before the sandbox and before
+      the merge.
+    - Reported to the architect by 21:30Z. No new launch without their word.
+  - **Diagnostic, authorised 21:31Z.** `verify webviews` (harness-only commit `8cad56b2d`).
+    - 1.147 serve-web baseline: 6/6. The built-in Markdown preview, the Codev contextual panel, the
+      Codev Markdown preview and Work all render.
+    - 1.138.0: all four are blank, VS Code's own Markdown preview included. Every webview
+      resource stays pending.
+    - All 28 page errors are `DataCloneError: ... A ReadableStream could not be cloned because it
+      was not transferred`, thrown at line 447 of the CDN host page (`ef65ac1b`).
+    - So the defect is product-wide, in the Codev IDE 1.138 packaging, not in this PR.
+  - **1.128.0, 21:42Z: `arrange` 16/19, stopped as ordered.** Webviews render on 1.128, and
+    every Cockpit step on the first profile passed.
+    - The 3 failures are on the extra fresh browser profiles. 1.128 opens its Workspace Trust
+      editor as a modal (`workbench.editor.useModal` defaults to `some`), and the harness does not
+      close it, so it intercepts the Cockpit click.
+    - Load was 13.4 at the start, 23.1 at the first failure and 17.7 at the end. The tripwire
+      stayed clean.
+    - Reported 21:48Z. A harness-only fix and a 1.128 rerun await the architect's word.
+  - **1.128 rerun with the trust fix (`10f4d9cce`), pre-change build: `arrange` 19/19, `work` 15/15,
+    `decisions` 8/16.**
+    - The `decisions` failures are the harness's: `activeEditorTab()` read the first `.tab.active` in
+      the page. Since Phase 9 the window is arranged into three groups (`codev.cockpit.autoArrange`
+      defaults to true), so that tab was the left group's.
+    - The panel rendered. The `decisions` script had not run since Phase 8 on any version: my gap.
+    - The architect approved the helper fix (the active group's active tab), and widened step d:
+      every verify script, on the final head, on 1.147 serve-web.
+  - **Owner ruling ide-3 (21:54Z), "workaround".** Work and Decisions carry their bundle inline, on
+    every version. The ruling's order:
+    - merge main;
+    - make the change and run the unit tests;
+    - push, and send the architect the commit range;
+    - only after the architect's word: 1.147 baseline (every script), fenced 1.138, fenced 1.128.
+  - **What I found while building it:**
+    - The panel style policy was `${cspSource} 'unsafe-inline'`, not nonce-only as the ruling
+      assumed. I built nonce-only as ordered.
+    - Measured in Chromium:
+      - React `style` props still apply, through the CSSOM;
+      - a `style` attribute parsed from markup is refused, so a decision item's aligned table
+        columns and raw-HTML inline styles lose those styles;
+      - VS Code's default styles and API script sit before our CSP meta, so the policy does not
+        apply to them.
+    - The bundles fetch nothing else: no `url()`, `@import`, fonts, dynamic `import()` or
+      workers. Dev source maps are now inline.
+    - Both bundles hold `<!--` (DOMPurify and markdown-it regexes), so the escaping is exercised
+      for real: `\x3C`, valid in strings and regexes, `u` flag included.
