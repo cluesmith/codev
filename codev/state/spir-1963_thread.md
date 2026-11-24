@@ -1042,3 +1042,18 @@ run.
   build (b9e5af0f's apps/web) kept a snapshot; after rebuilding `packages/codev` with the type
   scale, `verify dashboard` with `COCKPIT_BASELINE` found all 138 Work and 83 Decisions elements
   identical in computed style and DOM. Evidence in `verification-phase8/dashboard/`.
+- **Review round, iteration 1 (`695870167`).** Codex REQUEST_CHANGES, claude APPROVE; responses in
+  `1963-work_panel-iter1-rebuttals.md`.
+  - *Codex:* before any overview, the not-connected notice sat over "No active builders" etc.,
+    claiming an empty workspace. With an error and no overview, `WorkView` now shows *Loading...*
+    in each section. This also fixes the dashboard's failed-first-read case (same misleading
+    empty sections; adjacent bug, named in the PR). A first read in flight keeps the
+    dashboard's empty sections as before.
+  - *Claude (nits taken):* a rejected `onMessage` is logged at the dispatch site, for both
+    panels. An artifact refusal that lands after close shows no toast.
+  - *Architect (14:00Z), correcting suggestion 2:* one-line state had cut titles to four
+    characters at half width. Under 600 px a builder row is now a two-line grid: issue, title
+    and Open, then the state under the title. The check requires 20+ characters of a typical
+    44-character title; it shows 42 at 473 px.
+  - Rendered at 69587016: work 14/14, decisions 15/15, dashboard 6/6 (138 + 83 elements identical
+    to the pre-change snapshot).
