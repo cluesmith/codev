@@ -92,7 +92,11 @@ async function check(opts) {
     await page.goto(opts.url, { timeout: 240_000, waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.monaco-workbench', { timeout: 240_000 });
 
-    const codevItem = page.locator('.activitybar .action-item a[aria-label^="Codev"]').first();
+    // The Codev item's label carries its keybinding and badge ("Codev (⌥⌘C) - 1 blocked"); the
+    // badge overlays the anchor, so the click goes to the action item that holds both.
+    const codevItem = page.locator('.activitybar .action-item').filter({
+      has: page.locator('a[aria-label="Codev"], a[aria-label^="Codev ("], a[aria-label^="Codev -"]'),
+    }).first();
     const deadline = Date.now() + 120_000;
     while (Date.now() < deadline) {
       const trust = page.getByRole('button', { name: TRUST_BUTTON });

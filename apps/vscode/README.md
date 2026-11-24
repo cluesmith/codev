@@ -40,6 +40,33 @@ The Codev sidebar contains seven collapsible views:
 - **Team** — per-member counts (`Assigned: N`, `Open PRs: N`, `Last 7d: X merged, Y closed`). Manual refresh from the title bar.
 - **Status** — connection state; click to reconnect if Tower drops.
 
+## Codev Cockpit
+
+The **Codev Cockpit** button sits directly below Codev in the Activity Bar. It opens one tree holding the machine's whole fleet:
+
+```
+Tower
+├─ my-project            (current)   ← this window's workspace
+│  ├─ MAIN
+│  │  └─ #42 builder …                ← changed files below each builder
+│  └─ WEB
+└─ other-project
+   └─ MAIN
+      └─ #7 builder …
+Dormant (2)
+```
+
+- **Workspaces** are the Tower view's rows, in the same urgency order and with the same labels, *current* marker and attention summary. Every active workspace expands to its architects; dormant workspaces fold into *Dormant (N)*.
+- **This window's workspace acts here.** Its builder rows carry the Agents view's full right-click menu and the inline Approve Gate. A sibling architect carries *Remove Architect*; `main` never does. The workspace row carries inline *Spawn Builder*, *New Shell* and *Add Architect*. Its right-click menu adds *Open Web Interface*, *Start Dev* or *Stop Dev*, and *Open Dev URL…* when `worktree.devUrls` is set.
+- **Other workspaces navigate.** Clicking another workspace's architect or builder opens that workspace's window. Their rows carry no actions that would act from this window. Their workspace rows keep the Tower view's inline *Open* and *Deactivate*.
+- **In a builder-worktree window**, the parent workspace's row carries only *Open Web Interface*, the worktree's *Start Dev* / *Stop Dev* and *Open Dev URL…*. It has no spawn, shell or architect actions.
+- **Title bar:** Refresh, plus the same accordion and tree-vs-list toggles as Agents.
+- **Following the active file:** a builder diff in the editor reveals its file row in the Cockpit, expanding the workspace, architect and builder rows above it.
+- **Agent cycling** (`ctrl+alt+n` / `ctrl+alt+p`) follows the Cockpit's order while the Cockpit is visible, Agents is not, and the Cockpit shows this window's agents. Otherwise it keeps the Agents order, as before (for example in a builder-worktree window).
+- **Before the first load** the Tower row holds a state row: *Connecting to Tower…*, then *Not connected to Tower* (click to reconnect) if the attempt fails. Once loaded, the tree keeps its last content through a Tower drop and refreshes when Tower returns.
+
+The Cockpit reads what the Codev and Tower views already fetch. It adds no poll or stream of its own.
+
 ## Builder actions (right-click)
 
 Right-click any builder in the Agents view for three grouped action menus:

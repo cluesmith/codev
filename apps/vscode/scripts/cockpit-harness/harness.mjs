@@ -9,6 +9,9 @@
 //   node harness.mjs seed <scenario>    seed a fixture scenario, then assert gate 6 on its overview
 //   node harness.mjs check              re-run gates 3-5 and prove the extension runs against the Tower
 //   node harness.mjs stop               kill only the harness's own PIDs; remove the runtime dirs
+//   node harness.mjs tower-down|tower-up  stop / restart the isolated Tower only (reconnect check)
+//   node harness.mjs vscode-restart     restart the isolated VS Code only (no lingering extension hosts)
+//   node harness.mjs verify <script>    run a scripted Cockpit verification (cockpit-verify.mjs)
 //   node harness.mjs selftest           prove every refusal and the tripwire
 //
 // Inputs (environment): COCKPIT_SCRATCH (the session scratchpad), COCKPIT_TOWER_PORT,
@@ -23,7 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  OWNER_TOWER_PORT, REFUSAL_EXIT_CODE, Refusal, gateDbAgreement, gateDirs, gateListener, gateOverview,
+  OWNER_TOWER_PORT, REFUSAL_EXIT_CODE, Refusal, gateDbAgreement, gateDirs, gateFleet, gateListener, gateOverview,
   gatePort, gateVscodeProfile, isWithin,
 } from './preflight.mjs';
 import { descendants, isAlive, killPids, listenerPids, processTable, run, tcpOn, unixSocketHolders } from './procs.mjs';
@@ -58,7 +61,7 @@ function layout(scratch) {
     af: path.join(root, 'af'),
     run: path.join(root, 'run'),
     home: path.join(root, 'home'),
-    fixtures: path.join(root, 'fixtures'),
+    towerTmp: path.join(root, 'tmp'),
     pids: path.join(root, 'pids'),
     logs: path.join(root, 'logs'),
     shots: path.join(root, 'shots'),
@@ -71,13 +74,100 @@ function layout(scratch) {
     state: path.join(root, 'state.json'),
     tripMarker: path.join(root, 'tripwire.tripped'),
     stubLog: path.join(root, 'logs', 'stub-calls.jsonl'),
+    requestLog: path.join(root, 'logs', 'tower-requests.jsonl'),
     vsix: path.join(root, 'codev-vscode.vsix'),
     vsixMeta: path.join(root, 'codev-vscode.vsix.json'),
   };
 }
 
-/** Runtime dirs `stop` removes. Logs, screenshots, the vsix and the VS Code server cache stay. */
-const RUNTIME_DIRS = ['af', 'run', 'home', 'fixtures', 'pids', 'vscode', 'browserProfile'];
+/**
+ * Runtime dirs `stop` removes (plus the fixtures dir, recorded in the state). Logs, screenshots,
+ * the vsix and the VS Code server cache stay.
+ */
+const RUNTIME_DIRS = ['af', 'run', 'home', 'towerTmp', 'pids', 'vscode', 'browserProfile'];
+
+/** The basename prefix of the fixtures dir `start` creates (`mkdtemp`) under the per-user temp dir. */
+const FIXTURES_PREFIX = 'cockpit-fixtures-';
+/** The marker `start` writes in the fixtures dir it creates, holding that run's token. */
+const FIXTURES_MARKER = '.cockpit-harness-fixtures';
+
+/**
+ * Where the fixture workspaces live: a fresh dir under the real per-user temp dir, NOT the
+ * scratchpad. Tower's `/api/workspaces` drops every workspace under `/tmp`, `/private/tmp` or its
+ * own `os.tmpdir()` (`isTempDirectory`, tower-instances.ts), and the session scratchpad is under
+ * `/private/tmp`, so fixtures there never reach the fleet the Tower and Cockpit views list. The
+ * isolated Tower's own TMPDIR points into the scratchpad (`towerTmp`), so this dir is not its temp
+ * dir. Refuses a parent that the Tower would still hide, or that lies in the owner's dirs.
+ */
+function fixturesParent() {
+  const parent = fs.realpathSync(os.tmpdir());
+  if (['/tmp', '/private/tmp'].some((t) => isWithin(parent, t))) {
+    throw new Refusal(2, `the per-user temp dir ${parent} is under /tmp, where the isolated Tower hides workspaces; set TMPDIR to a per-user temp dir outside it`);
+  }
+  for (const owner of [path.join(REAL_HOME, '.agent-farm'), path.join(REAL_HOME, '.codev')]) {
+    if (isWithin(parent, owner)) throw new Refusal(2, `the fixtures parent ${parent} is inside the owner's ${owner}`);
+  }
+  return parent;
+}
+
+/** Create the fixtures dir and its marker; returns the state fields that record them. */
+function createFixturesDir() {
+  const dir = fs.mkdtempSync(path.join(fixturesParent(), FIXTURES_PREFIX));
+  const token = crypto.randomBytes(16).toString('hex');
+  fs.writeFileSync(path.join(dir, FIXTURES_MARKER), `${token}\n`, { flag: 'wx' });
+  return { fixturesDir: dir, fixturesToken: token };
+}
+
+/**
+ * Why the recorded fixtures dir is not one this harness created, or null when it is. The dir lies
+ * outside the scratchpad, so a path read from the state is trusted only when ALL hold:
+ * - it is a real directory, not a symlink, and its realpath is the recorded path;
+ * - the realpath's parent is the per-user temp dir (`fixturesParent`);
+ * - its basename is `cockpit-fixtures-*`;
+ * - it holds the marker `start` wrote, with this run's recorded token.
+ */
+function fixturesDirProblem(st) {
+  const dir = st?.fixturesDir;
+  if (!dir) return 'no fixtures dir is recorded';
+  const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
+  if (!stat) return `${dir} does not exist`;
+  if (stat.isSymbolicLink() || !stat.isDirectory()) return `${dir} is not a real directory`;
+  const real = fs.realpathSync(dir);
+  if (real !== dir) return `${dir} resolves to ${real}`;
+  let parent;
+  try {
+    parent = fixturesParent();
+  } catch (err) {
+    return err.message;
+  }
+  if (path.dirname(real) !== parent) return `${real} is not directly under the per-user temp dir ${parent}`;
+  if (!path.basename(real).startsWith(FIXTURES_PREFIX)) return `${real} is not named ${FIXTURES_PREFIX}*`;
+  const marker = path.join(real, FIXTURES_MARKER);
+  const markerStat = fs.lstatSync(marker, { throwIfNoEntry: false });
+  if (!markerStat?.isFile()) return `${real} holds no ${FIXTURES_MARKER} marker`;
+  if (!st.fixturesToken || fs.readFileSync(marker, 'utf-8').trim() !== st.fixturesToken) {
+    return `${real}'s marker does not hold this run's token`;
+  }
+  return null;
+}
+
+/** The recorded fixtures dir, verified as this harness's before anything uses it. */
+function fixturesDir(st) {
+  const problem = fixturesDirProblem(st);
+  if (problem) throw new Error(`the recorded fixtures dir is not the harness's: ${problem}`);
+  return st.fixturesDir;
+}
+
+/**
+ * Remove the recorded fixtures dir, only after `fixturesDirProblem` finds nothing wrong. Otherwise
+ * it deletes nothing and returns the refusal.
+ */
+function removeFixturesDir(st) {
+  const problem = fixturesDirProblem(st);
+  if (problem) return `REFUSED to remove the fixtures dir, deleted nothing: ${problem}`;
+  fs.rmSync(st.fixturesDir, { recursive: true, force: true });
+  return null;
+}
 
 function scratchFromEnv() {
   const raw = process.env.COCKPIT_SCRATCH;
@@ -118,7 +208,16 @@ function childEnv(L, caller, extra = {}) {
 }
 
 function towerEnv(L, run) {
-  return childEnv(L, 'tower', { CODEV_AGENT_FARM_DIR: run.agentFarmDir, SHELLPER_SOCKET_DIR: run.socketDir });
+  return childEnv(L, 'tower', {
+    CODEV_AGENT_FARM_DIR: run.agentFarmDir, SHELLPER_SOCKET_DIR: run.socketDir, COCKPIT_REQUEST_LOG: L.requestLog,
+    // Its own temp dir, in the scratchpad: the fixtures dir must not be under it (see fixturesParent).
+    TMPDIR: L.towerTmp,
+  });
+}
+
+/** The isolated Tower's command line: the request log preloaded, then the dist's server. */
+function towerArgs(runCfg) {
+  return ['--require', path.join(HERE, 'request-log.cjs'), TOWER_SERVER, '-p', String(runCfg.towerPort)];
 }
 
 function driverEnv(L, run, st, extra = {}) {
@@ -128,7 +227,7 @@ function driverEnv(L, run, st, extra = {}) {
     COCKPIT_TOWER_PORT: String(run.towerPort),
     COCKPIT_TOWER_PID: String(st.towerPid),
     COCKPIT_TOWER_KEY: readKey(run),
-    COCKPIT_FIXTURES_DIR: L.fixtures,
+    COCKPIT_FIXTURES_DIR: fixturesDir(st),
     ...extra,
   });
 }
@@ -299,8 +398,9 @@ function planRun({ needWeb }) {
  */
 async function bringUpTower(runCfg) {
   const { L } = runCfg;
-  for (const dir of [L.root, L.af, L.run, L.home, L.fixtures, L.pids, L.logs, L.shots]) fs.mkdirSync(dir, { recursive: true });
+  for (const dir of [L.root, L.af, L.run, L.home, L.towerTmp, L.pids, L.logs, L.shots]) fs.mkdirSync(dir, { recursive: true });
   const st = {
+    ...createFixturesDir(),
     startedAt: new Date().toISOString(),
     towerPort: runCfg.towerPort, webPort: runCfg.webPort,
     agentFarmDir: runCfg.agentFarmDir, socketDir: runCfg.socketDir, socketLink: runCfg.socketLink,
@@ -313,7 +413,7 @@ async function bringUpTower(runCfg) {
   }
   writePid(L, `cli-${process.pid}`, process.pid, []);
   startTripwire(L, st);
-  st.towerPid = launch(L, 'tower', process.execPath, [TOWER_SERVER, '-p', String(runCfg.towerPort)], {
+  st.towerPid = launch(L, 'tower', process.execPath, towerArgs(runCfg), {
     env: towerEnv(L, runCfg), cwd: L.home, markers: ['tower-server.js', `-p ${runCfg.towerPort}`],
   });
   saveState(L, st);
@@ -437,12 +537,16 @@ async function cmdStart() {
 }
 
 function workbenchUrl(L, st) {
-  const folder = `folder=${encodeURIComponent(path.join(L.fixtures, 'alpha'))}`;
+  return workbenchUrlFor(L, st, `folder=${encodeURIComponent(path.join(fixturesDir(st), 'alpha'))}`);
+}
+
+/** The workbench URL with this query (a `folder=`, or `ew=true` for a window with no folder). */
+function workbenchUrlFor(L, st, query) {
   if (st.vscodeMode === 'ide-server') {
     const token = fs.readFileSync(L.vscodeToken, 'utf-8').trim();
-    return `http://127.0.0.1:${st.webPort}${IDE_BASE_PATH}/?${folder}&tkn=${token}`;
+    return `http://127.0.0.1:${st.webPort}${IDE_BASE_PATH}/?${query}&tkn=${token}`;
   }
-  return `http://127.0.0.1:${st.webPort}/?${folder}`;
+  return `http://127.0.0.1:${st.webPort}/?${query}`;
 }
 
 async function seedScenario(L, runCfg, st, name) {
@@ -455,11 +559,15 @@ async function seedScenario(L, runCfg, st, name) {
   }
   const key = readKey(runCfg);
   for (const ws of scenario.workspaces) {
-    const dir = path.join(L.fixtures, ws.name);
+    const dir = path.join(fixturesDir(st), ws.name);
     const want = expectedOverview(ws);
     await gateOverview({ port: runCfg.towerPort, key, workspace: dir, ...want });
     console.log(`gate 6: ${ws.name} overview has builders ${JSON.stringify(want.builders)} and architects ${JSON.stringify(want.architects)}`);
   }
+  const listed = scenario.workspaces.filter((ws) => ws.activate)
+    .map((ws) => ({ path: path.join(fixturesDir(st), ws.name), active: !ws.deactivate }));
+  await gateFleet({ port: runCfg.towerPort, key, workspaces: listed });
+  console.log(`gate 6: /api/workspaces lists ${listed.map((w) => `${path.basename(w.path)} (${w.active ? 'active' : 'dormant'})`).join(', ') || 'none of the fixtures'}`);
 }
 
 async function cmdSeed(name) {
@@ -627,6 +735,12 @@ async function teardown(L) {
   console.log(`teardown: killed ${pids.size} pid(s)${left.length ? `; STILL ALIVE: ${left.join(', ')}` : '; none left'}`);
   if (!left.length) {
     for (const key of RUNTIME_DIRS) fs.rmSync(L[key], { recursive: true, force: true });
+    const refused = st?.fixturesDir ? removeFixturesDir(st) : null;
+    if (refused) {
+      // Keep the state record: it names the dir that was not removed.
+      console.log(refused);
+      return [refused];
+    }
     fs.rmSync(L.state, { force: true });
   }
   return left;
@@ -652,6 +766,123 @@ async function cmdBuildVsix() {
   const meta = { head, dirtyAtBuild: dirty, inputsDigest, sha256: sha256(L.vsix), builtAt: new Date().toISOString() };
   fs.writeFileSync(L.vsixMeta, `${JSON.stringify(meta, null, 2)}\n`);
   console.log(`built ${L.vsix} at ${head.slice(0, 8)}${dirty ? ' (with uncommitted or untracked input changes)' : ''}`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Phase 5: Tower down / up (reconnect check) and the scripted Cockpit verification
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Stop the isolated Tower only, by its recorded PID (re-verified by its command line). Its shellpers
+ * are detached and survive, as they survive any Tower restart, so `tower-up` restores the sessions.
+ */
+async function cmdTowerDown() {
+  const L = layout(scratchFromEnv());
+  const st = loadState(L);
+  assertTripwireClean(L, st);
+  const cmd = processTable().get(st.towerPid)?.command ?? '';
+  if (!cmd.includes('tower-server.js') || !cmd.includes(`-p ${st.towerPort}`)) {
+    throw new Error(`pid ${st.towerPid} is not the isolated Tower (it runs '${cmd}')`);
+  }
+  const survivors = await killPids([st.towerPid]);
+  if (survivors.length) throw new Error(`the isolated Tower (pid ${st.towerPid}) survived`);
+  removePid(L, 'tower');
+  st.towerPid = null;
+  saveState(L, st);
+  console.log(`isolated Tower stopped; :${st.towerPort} ${listenerPids(st.towerPort).length ? 'STILL has a listener' : 'is free'}`);
+}
+
+/** Start the isolated Tower again on the same port, agent-farm dir and socket dir; gates 4 and 3. */
+async function cmdTowerUp() {
+  const L = layout(scratchFromEnv());
+  const st = loadState(L);
+  assertTripwireClean(L, st);
+  if (st.towerPid && isAlive(st.towerPid)) throw new Error(`the isolated Tower is already running (pid ${st.towerPid})`);
+  const runCfg = runCfgFromState(L, st);
+  gatePort('COCKPIT_TOWER_PORT', String(st.towerPort));
+  writePid(L, `cli-${process.pid}`, process.pid, []);
+  try {
+    st.towerPid = launch(L, 'tower', process.execPath, towerArgs(runCfg), {
+      env: towerEnv(L, runCfg), cwd: L.home, markers: ['tower-server.js', `-p ${st.towerPort}`],
+    });
+    saveState(L, st);
+    await waitForListener(st.towerPort, st.towerPid, 30_000, 'isolated Tower');
+    st.towerVersion = await gateListener({ port: st.towerPort, pid: st.towerPid, key: readKey(runCfg) });
+    st.globalDb = gateDbAgreement({ driver: probeDriver(L, runCfg, st), agentFarmDir: st.agentFarmDir, towerPid: st.towerPid });
+    saveState(L, st);
+  } finally {
+    removePid(L, `cli-${process.pid}`);
+  }
+  assertTripwireClean(L, st);
+  recordKnownPids(L, st);
+  console.log(`isolated Tower ${st.towerVersion} up again on :${st.towerPort} (pid ${st.towerPid})`);
+}
+
+/**
+ * Restart the isolated VS Code only: kill its process tree by PID (the server re-verified by its
+ * command line), then bring it up again with the same dirs, vsix and Tower. VS Code's server keeps a
+ * disconnected window's extension host alive for its reconnection grace period, so after earlier
+ * windows their hosts keep polling the Tower; a request count needs a server with none.
+ */
+async function cmdVscodeRestart() {
+  const L = layout(scratchFromEnv());
+  const st = loadState(L);
+  assertTripwireClean(L, st);
+  const runCfg = { ...runCfgFromState(L, st), ideServerBin: process.env.COCKPIT_IDE_SERVER_BIN };
+  const markers = st.vscodeMode === 'serve-web' ? ['serve-web', `--port ${st.webPort}`] : [`--port ${st.webPort}`, `--connection-token-file ${L.vscodeToken}`];
+  const cmd = processTable().get(st.webPid)?.command ?? '';
+  if (!markers.every((m) => cmd.includes(m))) throw new Error(`pid ${st.webPid} is not the harness's ${st.vscodeMode} (it runs '${cmd}')`);
+  const tree = [...descendants([st.webPid])];
+  const survivors = await killPids(tree);
+  if (survivors.length) throw new Error(`${st.vscodeMode} pids survived: ${survivors.join(', ')}`);
+  removePid(L, 'vscode');
+  if (listenerPids(st.webPort).length) throw new Error(`:${st.webPort} still has a listener`);
+  writePid(L, `cli-${process.pid}`, process.pid, []);
+  try {
+    await bringUpVscode(runCfg, st);
+  } finally {
+    removePid(L, `cli-${process.pid}`);
+  }
+  assertTripwireClean(L, st);
+  recordKnownPids(L, st);
+  console.log(`${st.vscodeMode} restarted on :${st.webPort} (pid ${st.webPid}); killed ${tree.length} pid(s) of the old tree`);
+}
+
+/**
+ * Run one script of the Cockpit verification driver (`cockpit-verify.mjs`) against the running
+ * harness. The installed vsix must still be the branch's.
+ */
+async function cmdVerify(script) {
+  const L = layout(scratchFromEnv());
+  const st = loadState(L);
+  assertTripwireClean(L, st);
+  const stale = vsixIsCurrent(L) ?? (st.extension.vsixSha256 === sha256(L.vsix) ? null : 'the vsix was rebuilt after start installed it; stop and start again');
+  if (stale) throw new Error(`the installed vsix is not the branch's: ${stale}`);
+  const out = path.join(L.logs, `verify-${script}.json`);
+  const r = spawnSync(process.execPath, [
+    path.join(HERE, 'cockpit-verify.mjs'), script, '--url-template', workbenchUrlFor(L, st, '__QUERY__'), '--fixtures', fixturesDir(st),
+    '--profile', L.browserProfile, '--shots', L.shots, '--out', out, '--owner-port', String(OWNER_TOWER_PORT),
+    '--stub-log', L.stubLog, '--request-log', L.requestLog, '--tower-port', String(st.towerPort),
+  ], {
+    env: childEnv(L, 'workbench', {
+      PLAYWRIGHT_BROWSERS_PATH: PLAYWRIGHT_BROWSERS,
+      COCKPIT_TOWER_KEY: readKey(runCfgFromState(L, st)),
+      // For the driver's own `tower-down` / `tower-up` calls back into this CLI.
+      COCKPIT_SCRATCH: L.scratch,
+      COCKPIT_TOWER_PORT: String(st.towerPort),
+      COCKPIT_WEB_PORT: String(st.webPort),
+    }),
+    cwd: L.home, encoding: 'utf-8', timeout: 1_800_000, stdio: ['ignore', 'inherit', 'inherit'],
+  });
+  if (r.error) throw r.error;
+  assertTripwireClean(L, st);
+  recordKnownPids(L, st);
+  if (r.status !== 0) {
+    process.exitCode = 1;
+    console.log(`verify ${script} FAILED; results in ${out}`);
+  } else {
+    console.log(`verify ${script} passed; results in ${out}`);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -735,7 +966,8 @@ async function selftest() {
     if (r.status !== REFUSAL_EXIT_CODE) problems.push(`exit ${r.status}: ${r.stderr.trim()}`);
     if (!r.stderr.includes('pre-flight gate 3 refused')) problems.push(`stderr: ${r.stderr.trim()}`);
     if (fs.existsSync(testDb)) problems.push(`created ${testDb}`);
-    if (fs.readdirSync(L.fixtures).length) problems.push(`created fixtures ${fs.readdirSync(L.fixtures).join(', ')}`);
+    const created = fs.readdirSync(fixturesDir(st)).filter((f) => f !== FIXTURES_MARKER);
+    if (created.length) problems.push(`created fixtures ${created.join(', ')}`);
     record('gate 3 refuses a NODE_ENV=test driver against the production-mode Tower', !problems.length, problems.join('; ') || r.stderr.trim());
 
     const foreign = await foreignListener();
@@ -756,6 +988,9 @@ async function selftest() {
       left.length ? `alive: ${left.join(', ')}` : (linkGone ? '' : `${runCfg.socketLink} remains`));
   }
 
+  // --- Teardown refuses to remove a recorded fixtures dir that is not the harness's. ---
+  fixturesRemovalSelftest(base, record);
+
   // --- Tripwire fires on a connection from the harness tree, and only from it. ---
   await tripwireSelftest(base, record);
 
@@ -763,6 +998,61 @@ async function selftest() {
   const failed = results.filter((r) => !r.ok).length;
   console.log(failed ? `selftest FAILED (${failed} of ${results.length})` : `selftest passed (${results.length} cases)`);
   if (failed) process.exitCode = 1;
+}
+
+/**
+ * `removeFixturesDir` (the step `stop` runs) refuses every recorded dir that fails a check and
+ * deletes nothing; a genuine one is removed. Decoys outside the scratchpad are created here under the
+ * per-user temp dir with their own `cockpit-selftest-*` / `cockpit-fixtures-*` names, and this
+ * function removes them itself by the paths it created.
+ */
+function fixturesRemovalSelftest(base, record) {
+  const parent = fixturesParent();
+  const made = [];
+  const decoyDir = (prefix) => {
+    const dir = fs.mkdtempSync(path.join(parent, prefix));
+    made.push(dir);
+    fs.writeFileSync(path.join(dir, 'keep.txt'), 'must survive\n');
+    return dir;
+  };
+  try {
+    const genuine = createFixturesDir();
+    made.push(genuine.fixturesDir);
+    fs.writeFileSync(path.join(genuine.fixturesDir, 'keep.txt'), 'must survive\n');
+    const noMarker = decoyDir(FIXTURES_PREFIX);
+    const wrongName = decoyDir('cockpit-selftest-');
+    fs.writeFileSync(path.join(wrongName, FIXTURES_MARKER), `${genuine.fixturesToken}\n`);
+    const inScratch = fs.mkdtempSync(path.join(base, FIXTURES_PREFIX));
+    fs.writeFileSync(path.join(inScratch, FIXTURES_MARKER), `${genuine.fixturesToken}\n`);
+    fs.writeFileSync(path.join(inScratch, 'keep.txt'), 'must survive\n');
+    const link = path.join(parent, `${FIXTURES_PREFIX}selftest-link-${crypto.randomBytes(3).toString('hex')}`);
+    fs.symlinkSync(genuine.fixturesDir, link);
+    made.push(link);
+    const cases = [
+      ['no fixtures dir recorded', {}, null],
+      ['a dir without the marker', { fixturesDir: noMarker, fixturesToken: genuine.fixturesToken }, noMarker],
+      ['a marker with another run\'s token', { fixturesDir: genuine.fixturesDir, fixturesToken: 'f'.repeat(32) }, genuine.fixturesDir],
+      ['a name other than cockpit-fixtures-*', { fixturesDir: wrongName, fixturesToken: genuine.fixturesToken }, wrongName],
+      ['a parent other than the per-user temp dir', { fixturesDir: inScratch, fixturesToken: genuine.fixturesToken }, inScratch],
+      ['a symlink to a genuine fixtures dir', { fixturesDir: link, fixturesToken: genuine.fixturesToken }, genuine.fixturesDir],
+    ];
+    for (const [what, st, survivor] of cases) {
+      const refused = removeFixturesDir(st);
+      const kept = !survivor || fs.existsSync(path.join(survivor, 'keep.txt'));
+      const linkKept = fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink();
+      record(`stop refuses to remove ${what}, deleting nothing`, Boolean(refused) && kept && linkKept,
+        refused ? refused : 'removed it');
+    }
+    const removed = removeFixturesDir(genuine);
+    record('stop removes the genuine fixtures dir (positive control)', !removed && !fs.existsSync(genuine.fixturesDir),
+      removed ?? genuine.fixturesDir);
+  } finally {
+    for (const p of made) {
+      const stat = fs.lstatSync(p, { throwIfNoEntry: false });
+      if (stat?.isSymbolicLink()) fs.unlinkSync(p);
+      else if (stat) fs.rmSync(p, { recursive: true, force: true });
+    }
+  }
 }
 
 async function tripwireSelftest(base, record) {
@@ -808,6 +1098,10 @@ const COMMANDS = {
   seed: cmdSeed,
   check: cmdCheck,
   stop: cmdStop,
+  'tower-down': cmdTowerDown,
+  'tower-up': cmdTowerUp,
+  'vscode-restart': cmdVscodeRestart,
+  verify: cmdVerify,
   selftest,
 };
 

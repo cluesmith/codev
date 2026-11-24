@@ -535,3 +535,105 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
 - Also opening Phase 5, from Claude's iteration-2 notes (see above):
   - the parity `shape()` icon boundary;
   - the `pruneTrees` doc comment.
+
+### Phase 5 (`cockpit_actions`), 2026-11-24
+
+**Commits.** Three, not the plan's two:
+- 5a `43946ed6c`: menus, workspace-row context values, held worktree config, agent cycle;
+- 5b-1 `aaefbfd0f`: the menu-parity oracle, the parity test and the handler-argument test;
+- 5b-2: the Spawn Builder cwd fix, the harness's rendered verification, docs and evidence.
+
+**Builder decisions (mine, not the architect's):**
+- **Agent cycle, ruling (b).** `agentCycleRoster` follows the Cockpit only while the Cockpit is
+  visible, Agents is not, *and the Cockpit has acting rows*. The last condition is my reading of
+  "this window's workspace only". A Cockpit with no acting rows, in a builder-worktree window or
+  before Tower lists this workspace, falls back to the Agents order, so existing behaviour does not
+  move there either.
+- **Command-argument helpers moved** from `extension.ts` to `commands/command-args.ts`, so the
+  handler-argument test can import them: `extractBuilderId`, `extractIssueId`, `extractIssueTitle`,
+  plus the new `architectNameFromArg`. `extractIssueId` now also checks that the id is a string.
+- **Icons** added to `codev.spawnBuilder` (`$(rocket)`) and `codev.newShell` (`$(terminal-new)`),
+  because inline actions need one. Titles are unchanged.
+- **`openDevUrl(urlArg?: unknown)`.** Only a non-empty string opens directly. Anything else, such
+  as the Cockpit row VS Code passes, falls through to the QuickPick.
+- **Mutation checks:** 9 mutations of the parity test and 4 of the handler-args test, all caught.
+
+**Adjacent bug, fixed in place: Spawn Builder's cwd.**
+- **How it was found.** The harness's `afx` stub recorded the Cockpit's Spawn Builder running
+  `afx spawn` in the harness's home directory. `spawnBuilder` passed no `cwd`, and `afx spawn`
+  resolves its workspace from its cwd. Every entry point was affected: the Workspace view, the
+  palette, the Backlog row and the Cockpit.
+- **The impact.** In the Codev IDE the extension host's cwd is Tower's (`ide-server.ts` spawns the
+  server with `process.cwd()`), so a window could spawn into another project.
+- **The fix.** It now runs in `detectWorkspacePath()`, this window's Tower workspace (the parent
+  workspace in a builder-worktree window), as Run Worktree Setup and Approve Gate already do.
+  Without a workspace it errors before prompting. Unit-tested.
+
+**Plan vs behaviour: Approve Gate.**
+- The plan says it is verified as `porch approve` through the stubs.
+- Since #1494 it relays to the spawning architect through `POST /api/send`. It runs `porch approve`
+  itself only when no architect is live.
+- The harness asserts the relay: one `/api/send`, no porch call, the "sent … to main" note.
+
+**Harness: two temp-dir filters in Tower, both by design.**
+1. `GET /api/workspaces` drops workspaces under `/tmp`, `/private/tmp` or Tower's `os.tmpdir()`
+   (`isTempDirectory`). The fixtures lived in the scratchpad under `/private/tmp`, so the fleet
+   rendered *No workspaces registered*.
+   - **Fix:** the fixtures now live in a `mkdtemp` `cockpit-fixtures-*` dir under the real
+     per-user temp dir, and the isolated Tower gets its own `TMPDIR` in the scratchpad. Gate 6
+     also asserts the fleet listing.
+   - The architect accepted this on one condition, implemented with 7 self-test cases: `stop`
+     deletes that dir only after the realpath, parent, name and per-run marker-token checks pass.
+2. Startup reconciliation skips and kills sessions of workspaces under `POSIX_TEMP_ROOTS`, which
+   include `/var/folders`. So fixture sessions do not survive a restart of the isolated Tower.
+   `reconnect` runs last, and checks the Cockpit's states and recovery, not session survival.
+
+**Harness lessons (each one cost a rerun):**
+- **VS Code keeps a closed window's extension host alive** for its reconnection grace period, and
+  those hosts kept polling the isolated Tower. They inflated the first request counts about
+  fourfold. `vscode-restart` gives each measured layout a fresh server.
+- **The first "alone" layouts were not alone.** The close commands' palette titles did not exist
+  in this VS Code, and `.catch(() => {})` hid it, so the Tower side bar and the Codev panel stayed
+  open. Now `runCommand` matches exact labels and throws, parts are toggled only when needed, and
+  every layout asserts the side bar, secondary side bar and panel before measuring.
+- **VS Code drops a context-menu click that lands just after the menu opens.** Measured: at once,
+  dropped; after 500 ms, it runs. That one dropped click left a menu open that blocked every later
+  check. `contextAction` now waits and asserts the menu closed. A failed check presses Escape so
+  it cannot cascade.
+- **A burst window that holds a fleet poll tick** counts one fan-out more or less, depending on the
+  poll's phase. The burst now starts 2 s after a tick and lasts 15 s.
+
+**Rendered results (isolated harness, VS Code 1.147.0 serve-web, fresh `fleet` seed):**
+- `render` 5/5: the button directly below Codev; the Codev container unchanged against
+  `origin/main`; the hierarchy with N=2/1/0 builders across three workspaces; Dormant (1); dark,
+  then a live switch to light.
+- `reveal` 1/1: the diff of #101's `alpha.ts` reveals its row, with the workspace and architect
+  rows collapsed beforehand.
+- `windows` 3/3:
+  - the worktree window's parent row offers only Open Web Interface, Start Dev (this workspace) and
+    Open Dev URL;
+  - the no-workspace tooltip;
+  - Cockpit-only freshness: #102's gate shown after 56.3 s, against the 60 s default.
+- `requests` 4/4, spec scenario 21:
+  - over a 60 s idle window, the three layouts make identical fleet and overview counts;
+  - Cockpit alone ⊆ source views alone;
+  - both at once add only `getWorktreeConfig` (3 vs 2 in the burst);
+  - none while idle;
+  - one event stream per window.
+- `reconnect` 3/3: content kept with Tower down; a fresh window reads *Not connected to Tower*;
+  Reconnect restores it.
+- `actions` 27/27:
+  - every builder context action, with the Agents/Cockpit menu parity;
+  - Approve Gate inline only on the blocked row, relayed to `main`;
+  - every workspace-row action, including Spawn Builder in alpha's cwd and Open Dev URL picking
+    Admin;
+  - Remove Architect:
+    - offered on siblings only;
+    - a childless sibling's row goes;
+    - WEB keeps its header as #103's owner (the Agents rule, "no builder is ever dropped");
+  - other workspaces navigate to their windows;
+  - Open and Deactivate.
+- **Totals: 43 checks, 0 failed.** `actions` ran on a fresh seed after the five others, which share one
+  seed. Each needs its own seed because it mutates state: it removes architects and deactivates gamma.
+
+Evidence: `codev/projects/1963-vscode-alternative-layout-seco/verification-increment1/`.

@@ -160,6 +160,25 @@ export function gateVscodeProfile({ settingsPath, port, env, stubsDir }) {
  * Gate 6: the isolated Tower's overview for `workspace` lists exactly the expected builders (by
  * role id, with their `spawnedByArchitect`) and the expected architects.
  */
+/**
+ * Gate 6, fleet half: Tower's `/api/workspaces` lists each `{ path, active }` exactly so. The
+ * Tower and Cockpit views list only what this route returns, and Tower drops workspaces under temp
+ * roots, so a fixture it hides would render an empty fleet rather than fail.
+ */
+export async function gateFleet({ port, key, workspaces }) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/workspaces`, { headers: { 'codev-tower-key': key } });
+  if (!res.ok) throw new Refusal(6, `GET /api/workspaces answered ${res.status}`);
+  const listed = new Map(((await res.json()).workspaces ?? []).map((w) => [w.path, w.active]));
+  for (const want of workspaces) {
+    if (!listed.has(want.path)) {
+      throw new Refusal(6, `/api/workspaces does not list ${want.path} (it lists ${JSON.stringify([...listed.keys()])})`);
+    }
+    if (listed.get(want.path) !== want.active) {
+      throw new Refusal(6, `/api/workspaces lists ${want.path} as ${listed.get(want.path) ? 'active' : 'dormant'}, expected ${want.active ? 'active' : 'dormant'}`);
+    }
+  }
+}
+
 export async function gateOverview({ port, key, workspace, builders, architects }) {
   const url = `http://127.0.0.1:${port}/api/overview?workspace=${encodeURIComponent(workspace)}`;
   const res = await fetch(url, { headers: { 'codev-tower-key': key } });

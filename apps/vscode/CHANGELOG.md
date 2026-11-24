@@ -1,5 +1,15 @@
 # Change Log
 
+## [Unreleased]
+
+### What's new
+
+- **Codev Cockpit: the whole fleet in one tree.** A new button below Codev opens Tower → workspaces → architects → builders → changed files. This window's workspace keeps every action of the Workspace and Agents views, and another workspace's rows open that workspace's window (#1963).
+
+### Fixes
+
+- **Spawn Builder runs in this window's workspace.** It ran `afx spawn` in the extension host's own directory (Tower's, in the Codev IDE), so it could spawn into another project, or fail where that directory is no project. It now runs in this window's workspace, the parent workspace in a builder-worktree window, and without a workspace it says so instead of prompting.
+
 ## [3.3.6] - 2026-10-29
 
 ### What's new

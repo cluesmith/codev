@@ -30,10 +30,28 @@ export const CODEV_DIST = path.join(REPO, 'packages/codev/dist');
 export const PLAIN_SHELL = ['/bin/bash', '--noprofile', '--norc'];
 const PLAIN_HARNESS = 'cockpit-plain-shell';
 
+/** Phase 5's dev config: a long-running no-op dev command and two dev URLs (never opened for real). */
+const DEV_CONFIG = {
+  devCommand: 'sleep 3600',
+  devUrls: [{ label: 'App', url: 'http://127.0.0.1:18799/' }, { label: 'Admin', url: 'http://127.0.0.1:18799/admin' }],
+};
+
 /**
  * Scenarios. A workspace is a git repo under the fixtures dir; `activate` starts it in the isolated
  * Tower (which starts `main`). A builder gets a worktree, porch state, a live builder terminal and
  * a `builders` row carrying `architect` as spawned_by_architect.
+ *
+ * Optional workspace fields:
+ * - `siblings`: architects added after activation through Tower's own add-architect route;
+ * - `deactivate`: activate, then deactivate, so Tower lists it as dormant;
+ * - `worktree`: merged into the fixture's `.codev/config.json` as its `worktree` block, committed
+ *   before any builder branches.
+ *
+ * Optional builder fields:
+ * - `gate`: a human gate porch has requested (`status: pending` + `requested_at`), so the builder
+ *   is blocked on it;
+ * - `spec`: commit a spec file, so *View Spec* has something to open;
+ * - `changedFile`: commit a file on the builder branch, so the builder has a changed file.
  */
 export const SCENARIOS = {
   empty: {
@@ -46,6 +64,27 @@ export const SCENARIOS = {
       architects: ['main'],
       builders: [{ project: '101', slug: 'fixture-one', architect: 'main' }],
     }],
+  },
+  // Phase 5: this window's workspace (alpha) with N>1 builders across main and a sibling, one
+  // gated; beta with N=1; gamma with N=0; delta dormant.
+  fleet: {
+    workspaces: [
+      {
+        name: 'alpha',
+        activate: true,
+        siblings: ['web'],
+        architects: ['main', 'web'],
+        worktree: DEV_CONFIG,
+        builders: [
+          { project: '101', slug: 'gated-spec', architect: 'main', gate: 'spec-approval', spec: true, changedFile: 'src/feature/alpha.ts' },
+          { project: '102', slug: 'second-main', architect: 'main' },
+          { project: '103', slug: 'web-work', architect: 'web' },
+        ],
+      },
+      { name: 'beta', activate: true, architects: ['main'], builders: [{ project: '201', slug: 'beta-one', architect: 'main' }] },
+      { name: 'gamma', activate: true, architects: ['main'], builders: [] },
+      { name: 'delta', activate: true, deactivate: true, architects: [], builders: [] },
+    ],
   },
 };
 
@@ -120,6 +159,27 @@ function tower() {
   };
 }
 
+/** Merge `worktree` into the fixture's committed `.codev/config.json`. */
+function writeWorktreeConfig(dir, worktree) {
+  const file = path.join(dir, '.codev', 'config.json');
+  const config = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  config.worktree = { ...(config.worktree ?? {}), ...worktree };
+  fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+  git(dir, ['add', '.codev/config.json']);
+  git(dir, ['commit', '-q', '-m', 'fixture: worktree config']);
+}
+
+async function addSibling(call, dir, name) {
+  const enc = Buffer.from(dir).toString('base64url');
+  const result = await call('POST', `/api/workspaces/${enc}/architects`, { name });
+  if (!result.success) throw new Error(`adding architect '${name}' to ${dir} failed: ${JSON.stringify(result)}`);
+}
+
+async function deactivate(call, dir) {
+  const enc = Buffer.from(dir).toString('base64url');
+  await call('POST', `/api/workspaces/${enc}/deactivate`, {});
+}
+
 async function activate(call, dir) {
   const enc = Buffer.from(dir).toString('base64url');
   const result = await call('POST', `/api/workspaces/${enc}/activate`, {});
@@ -133,11 +193,32 @@ async function seedBuilder(call, wsDir, builder) {
   const branch = `builder/${name}`;
   if (fs.existsSync(worktree)) throw new Error(`${worktree} already exists; seed scenarios onto a fresh harness`);
   git(wsDir, ['worktree', 'add', '-q', '-b', branch, worktree]);
+  const committed = [];
+  if (builder.spec) {
+    const spec = path.join('codev', 'specs', `${builder.project}-${builder.slug}.md`);
+    fs.mkdirSync(path.join(worktree, path.dirname(spec)), { recursive: true });
+    fs.writeFileSync(path.join(worktree, spec), `# Spec ${builder.project}: ${builder.slug}\n\nCockpit-harness fixture spec.\n`);
+    committed.push(spec);
+  }
+  if (builder.changedFile) {
+    fs.mkdirSync(path.join(worktree, path.dirname(builder.changedFile)), { recursive: true });
+    fs.writeFileSync(path.join(worktree, builder.changedFile), `export const fixture = '${builder.slug}';\n`);
+    committed.push(builder.changedFile);
+  }
+  if (committed.length) {
+    git(worktree, ['add', ...committed]);
+    git(worktree, ['commit', '-q', '-m', `fixture: ${builder.slug}`]);
+  }
 
   const { loadProtocol } = await loadDist('commands/porch/protocol.js');
   const { createInitialState, getStatusPath, writeState } = await loadDist('commands/porch/state.js');
   const protocol = loadProtocol(worktree, 'spir');
-  writeState(getStatusPath(worktree, builder.project, builder.slug), createInitialState(protocol, builder.project, builder.slug, worktree));
+  const state = createInitialState(protocol, builder.project, builder.slug, worktree);
+  if (builder.gate) {
+    if (!state.gates[builder.gate]) throw new Error(`protocol spir has no gate '${builder.gate}'`);
+    state.gates[builder.gate] = { ...state.gates[builder.gate], status: 'pending', requested_at: new Date().toISOString() };
+  }
+  writeState(getStatusPath(worktree, builder.project, builder.slug), state);
 
   const roleId = roleIdFor(builder);
   const [command, ...args] = PLAIN_SHELL;
@@ -167,8 +248,11 @@ async function seed(scenarioName) {
   for (const ws of scenario.workspaces) {
     const dir = path.join(fixturesDir, ws.name);
     ensureWorkspaceRepo(dir);
+    if (ws.worktree) writeWorktreeConfig(dir, ws.worktree);
     if (ws.activate) await activate(call, dir);
+    for (const name of ws.siblings ?? []) await addSibling(call, dir, name);
     for (const builder of ws.builders) await seedBuilder(call, dir, builder);
+    if (ws.deactivate) await deactivate(call, dir);
   }
   const { closeAllDbs } = await loadDist('agent-farm/db/index.js');
   closeAllDbs();
