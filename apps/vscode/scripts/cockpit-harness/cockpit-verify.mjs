@@ -35,6 +35,7 @@
 // browser request to the owner's port fails the run.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -2450,6 +2451,8 @@ const workFitProblems = (fit) => fit.sideways > 0 || fit.opens.length !== 3 || f
 // ── arrange ──────────────────────────────────────────────────────────────────────────────────
 
 const ARCHITECT_TAB = /^Codev: Architect(?! \()/;
+/** The `main` architect terminal's name (`TerminalManager`), which its editor tab carries as its label. */
+const ARCHITECT_NAME = 'Codev: Architect';
 const NOTICE = /The editor area was arranged for the Cockpit/;
 const ARRANGE_TITLE = 'Codev: Arrange Cockpit';
 
@@ -2619,15 +2622,25 @@ SCRIPTS.arrange = async (R, context, page) => {
     return `items ${order.codev}: "${order.labels[order.codev]}", ${order.cockpit}: "${order.labels[order.cockpit]}"`;
   });
 
+  /**
+   * Type a file's marker once its editor has focus, and wait for its tab to turn dirty. Typed the
+   * moment Quick Open closed, the keys can land before the editor takes focus and be lost.
+   */
+  const typeInto = async (name) => {
+    await page.waitForTimeout(500);
+    await page.keyboard.type(TYPED[name]);
+    await waitFor(`${name} to turn dirty`, async () => (await editorGroups(page)).some((g) => g.dirty.some((t) => t.startsWith(name))), 5000);
+  };
+
   let before;
   await R.check('scenario 13 setup: editors across four groups, two dirty files, a clean file and two untitled buffers', async () => {
     await quickOpenFile(page, 'arrange-a.txt');
-    await page.keyboard.type(TYPED['arrange-a.txt']);
+    await typeInto('arrange-a.txt');
     await runCommand(page, 'File: New Untitled Text File');
     await page.keyboard.type(UNTITLED_ONE);
     await runCommand(page, 'View: New Editor Group to the Right');
     await quickOpenFile(page, 'arrange-b.txt');
-    await page.keyboard.type(TYPED['arrange-b.txt']);
+    await typeInto('arrange-b.txt');
     await runCommand(page, 'View: New Editor Group to the Right');
     await quickOpenFile(page, 'arrange-c.txt');
     await runCommand(page, 'View: New Editor Group to the Right');
@@ -2752,6 +2765,52 @@ SCRIPTS.arrange = async (R, context, page) => {
     const architectTabs = groups.flatMap((g) => g.tabs).filter((t) => ARCHITECT_TAB.test(t));
     if (opened.length || architectTabs.length !== 1) throw new Error(`new Tower terminals ${JSON.stringify(opened.map((t) => t.id))}; architect tabs ${JSON.stringify(architectTabs)}`);
     return { detail: `${groupsText(groups)}; no new Tower terminal`, shots: [await R.shot(page, 'from-panel')] };
+  });
+
+  // The architect's tab is found by its label, the terminal's name (the tab API gives a terminal tab
+  // no identity). A second terminal carrying that name makes the label ambiguous: arrange refuses.
+  await R.check("another terminal named like the architect: arrange stops before moving an editor and says why; with that terminal closed, it arranges (codex review)", async () => {
+    await runCommand(page, 'View: Single Column Editor Layout');
+    await waitFor('one editor group', async () => (await editorGroups(page)).length === 1, 10_000);
+    await closeNotifications(page);
+    const terminalsBefore = await terminalIds(R);
+    // A plain shell in the panel, renamed to the architect terminal's name. A new terminal takes focus
+    // a moment after it opens: wait, so the palette's typing is not swallowed.
+    await runCommand(page, 'Terminal: Create New Terminal');
+    await page.waitForTimeout(2500);
+    await runCommand(page, 'Terminal: Rename...');
+    const rename = await quickInput(page);
+    await rename.locator('input').fill(ARCHITECT_NAME);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(2000);
+    const was = await editorGroups(page);
+    await runCommand(page, ARRANGE_TITLE);
+    const refusal = await waitForNotification(page, new RegExp(`Arrange Cockpit stopped: another terminal is also named "${escapeRe(ARCHITECT_NAME)}"`), 30_000);
+    const refused = await editorGroups(page);
+    const problems = [];
+    const tabsOf = (gs) => JSON.stringify(gs.map((g) => g.tabs));
+    if (tabsOf(refused) !== tabsOf(was)) problems.push(`the editors moved: ${groupsText(was)} → ${groupsText(refused)}`);
+    const refusedShot = await R.shot(page, 'namesake-refused');
+    // Close the namesake: focus it in the panel (the architect is in the editor area), then kill the
+    // active terminal. A panel terminal is killed without a confirmation; a dialog means the target
+    // was the architect's editor-area terminal, so it is cancelled and the check fails.
+    await closeNotifications(page);
+    await setPart(page, 'panel', true);
+    await page.locator('.part.panel .xterm').first().click();
+    await page.waitForTimeout(1500);
+    await runCommand(page, 'Terminal: Kill the Active Terminal Instance');
+    if (await page.locator('.monaco-dialog-box').waitFor({ timeout: 2000 }).then(() => true, () => false)) {
+      await page.keyboard.press('Escape');
+      throw new Error('killing the panel terminal asked for a confirmation: the active terminal was not the namesake');
+    }
+    await waitFor('the namesake to close', async () => (await page.locator('.part.panel .xterm').count()) === 0, 10_000);
+    if (!(await editorGroups(page)).some((g) => g.tabs.some((t) => ARCHITECT_TAB.test(t)))) problems.push('the architect tab is gone');
+    await runCommand(page, ARRANGE_TITLE);
+    const groups = await waitForCockpitLayout(page);
+    const opened = await newTerminals(R, terminalsBefore);
+    if (opened.length) problems.push(`Tower terminals opened: ${JSON.stringify(opened.map((t) => t.label ?? t.id))}`);
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+    return { detail: `"${refusal}"; editors unmoved: ${groupsText(refused)}; namesake closed, then ${groupsText(groups)}`, shots: [refusedShot, await R.shot(page, 'namesake-closed-arranged')] };
   });
 
   await R.check('existing profile: after a reload the restored Cockpit arranges again, the architect reopened on the left; no notice; the button is still below Codev', async () => {
@@ -2882,6 +2941,119 @@ SCRIPTS.arrange = async (R, context, page) => {
     if (problems.length) throw new Error(problems.join('; '));
     return { detail: `"${note}"`, shots: [await R.shot(page, 'no-workspace-explains')] };
   });
+
+  // Last: these two stop and restart the isolated Tower, which does not keep fixture sessions. They
+  // share a third fresh profile on alpha, whose page stands in for the run's page while they run.
+  // - With Tower down, the automatic arrange reads the roster quietly: logged, no toast (claude review,
+  //   iteration 1).
+  // - With no architect placed and the first group holding only the Cockpit's panels, arrange opens an
+  //   empty group to their left, or moving them right would close the left column. The panels are
+  //   counted by tab: after a reload the one behind is restored, not yet revived, and counts too
+  //   (claude review, iteration 2). VS Code may reopen its Welcome page on a reload, so that check
+  //   closes it and then runs the command, with the Cockpit hidden so nothing arranges first.
+  {
+    const dir = `${R.opts.profile}-arrange-restored`;
+    fs.rmSync(dir, { recursive: true, force: true });
+    const fresh = await newContext(R, dir);
+    const p = fresh.pages()[0] ?? await fresh.newPage();
+    const runPage = R.page;
+    R.page = p;
+    let towerDown = false;
+    const panelTab = /^(Work|Decisions)(,|$)/;
+    /** One group holding only Work and Decisions: close anything else, the architect to the panel. */
+    const onlyPanelsInOneGroup = async () => {
+      if ((await editorGroups(p)).length !== 1) {
+        await runCommand(p, 'View: Single Column Editor Layout');
+        await waitFor('one editor group', async () => (await editorGroups(p)).length === 1, 10_000);
+      }
+      // Closing the architect's tab would end its session: it goes to the panel. A lone group's tab
+      // labels carry no ", Editor Group N".
+      if ((await editorGroups(p))[0].tabs.some((t) => ARCHITECT_TAB.test(t))) {
+        await p.locator(`.tabs-container .tab[aria-label="${ARCHITECT_NAME}"], .tabs-container .tab[aria-label^="${ARCHITECT_NAME},"]`).first().click();
+        await p.waitForTimeout(1500);
+        await runCommand(p, 'Terminal: Move Terminal into Panel');
+        await waitFor('the architect tab to leave the editor area', async () => !(await editorGroups(p)).some((g) => g.tabs.some((t) => ARCHITECT_TAB.test(t))), 10_000);
+      }
+      // A visible terminal panel that a reload leaves empty (the architect cannot reconnect while
+      // Tower is down) gets a new local shell, whose prompt names the machine and the user, in a
+      // screenshot: keep the panel hidden.
+      await setPart(p, 'panel', false);
+      for (const label of (await editorGroups(p))[0].tabs.filter((t) => !panelTab.test(t))) {
+        await p.locator(`.tabs-container .tab[aria-label^="${label}"]`).first().click();
+        await p.waitForTimeout(500);
+        await runCommand(p, 'View: Close Editor');
+      }
+      return waitFor('Work and Decisions alone in one group', async () => {
+        const gs = await editorGroups(p);
+        return gs.length === 1 && gs[0].tabs.length === 2 && gs[0].tabs.every((t) => panelTab.test(t)) ? gs : null;
+      }, 10_000);
+    };
+    const reload = async () => {
+      // The layout must be stored before the reload, or the reload restores the previous one.
+      await p.waitForTimeout(3000);
+      await p.reload({ waitUntil: 'domcontentloaded' });
+      await p.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+      await p.locator('[id="cluesmith.codev-vscode"]').waitFor({ timeout: 120_000 });
+    };
+    try {
+      await R.check('a reload with Tower down and the Cockpit showing: the automatic arrange places Work over Decisions and shows no error toast (claude review)', async () => {
+        // Loading alpha activates it again, so its main is live: the first show arranges all three.
+        await loadWorkbench(p, R.folderUrl('alpha'));
+        await openContainer(p, 'Codev Cockpit', 'codev-cockpit');
+        await waitForCockpitLayout(p, { architect: false });
+        await closeNotifications(p);
+        await onlyPanelsInOneGroup();
+        R.harness('tower-down');
+        towerDown = true;
+        await reload();
+        const groups = await waitForCockpitLayout(p, { architect: false }, 120_000);
+        await p.waitForTimeout(3000);
+        const seen = await notifications(p);
+        const errors = seen.filter((n) => /Not connected to Tower|Failed to get workspace state|Arrange Cockpit stopped/.test(n));
+        if (errors.length) throw new Error(`error toasts ${JSON.stringify(errors)} — ${groupsText(groups)}`);
+        return { detail: `with Tower down: ${groupsText(groups)}; toasts ${JSON.stringify(seen)}`, shots: [await R.shot(p, 'auto-tower-down')] };
+      });
+
+      await R.check('a restored, not yet revived panel tab counts: with no architect and only Work and Decisions in the first group after a reload, arrange keeps an empty left column (claude review)', async () => {
+        const before = await onlyPanelsInOneGroup();
+        await p.locator('.tabs-container .tab[aria-label^="Decisions"]').first().click();
+        await waitFor('Decisions in front', async () => /^Decisions(,|$)/.test((await editorGroups(p))[0].active ?? ''), 10_000);
+        // Hide the Cockpit, so the reload's new window session does not arrange by itself. Clicked, not
+        // through the palette: focus is in the Decisions webview, and the palette's filter was lost.
+        await activityItem(p, 'Explorer').click();
+        await waitFor('the Explorer in the side bar', async () => /^explorer/i.test((await partState(p)).sidebar.title ?? ''), 10_000);
+        await reload();
+        if (!/^explorer/i.test((await partState(p)).sidebar.title ?? '')) throw new Error(`the side bar shows "${(await partState(p)).sidebar.title}" after the reload, not the Explorer`);
+        await p.waitForTimeout(5000);
+        await onlyPanelsInOneGroup();
+        const ready = await editorGroups(p);
+        const behind = ready[0].tabs.find((t) => t !== ready[0].active);
+        if (!behind) throw new Error(`no panel tab behind the active one: ${groupsText(ready)}`);
+        await closeNotifications(p);
+        await runCommand(p, ARRANGE_TITLE);
+        const groups = await waitForCockpitLayout(p, { architect: false }, 30_000);
+        await p.waitForTimeout(2000);
+        const problems = [];
+        if (groups[0].tabs.length) problems.push(`the left group holds ${JSON.stringify(groups[0].tabs)}`);
+        const seen = await notifications(p);
+        if (seen.some((n) => /Arrange Cockpit stopped/.test(n))) problems.push(`arrange stopped: ${JSON.stringify(seen)}`);
+        // The command, unlike the automatic arrange, says why the architect was not placed.
+        if (!seen.some((n) => /Not connected to Tower/.test(n))) problems.push(`no "Not connected to Tower" toast for the command: ${JSON.stringify(seen)}`);
+        if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+        return {
+          detail: `before the reload ${groupsText(before)}; after it, "${behind}" never shown, under "${ready[0].active}"; the command arranged ${groupsText(groups)}; toasts ${JSON.stringify(seen)}`,
+          shots: [await R.shot(p, 'restored-tab-empty-left')],
+        };
+      });
+    } finally {
+      R.page = runPage;
+      try {
+        if (towerDown) R.harness('tower-up');
+      } finally {
+        await fresh.close().catch(() => {});
+      }
+    }
+  }
 };
 
 // ── profile-seed / profile-existing ──────────────────────────────────────────────────────────
@@ -2947,7 +3119,35 @@ SCRIPTS['profile-existing'] = async (R) => {
   });
 };
 
+/** A shell prompt naming the machine and the user, as macOS's /etc/bashrc sets it: `host:dir user$`. */
+const HOST_PROMPT = /[\w-]+:[\w.~\/-]+ \w+ ?[$§]/;
+
+/**
+ * The screenshots are committed, and a shell VS Code opens by itself shows the machine's prompt
+ * unless the harness HOME overrides it. OCR every shot this run wrote and return the lines that show
+ * such a prompt, or the user's name before `$` or `@`. Tesseract is required: without it this
+ * throws, and the run fails rather than skip the check.
+ */
+function shellPromptLeaks(shotsDir, script, since) {
+  const user = os.userInfo().username;
+  const shots = fs.readdirSync(shotsDir)
+    .filter((f) => f.startsWith(`${script}-`) && f.endsWith('.png'))
+    .map((f) => path.join(shotsDir, f))
+    .filter((f) => fs.statSync(f).mtimeMs >= since);
+  const leaks = [];
+  for (const file of shots) {
+    const r = spawnSync('tesseract', [file, '-'], { encoding: 'utf-8' });
+    if (r.error || r.status !== 0) {
+      throw new Error(`tesseract could not read ${file} (${r.error?.message ?? r.stderr.trim()}); the shell-prompt check needs it (brew install tesseract)`);
+    }
+    const hit = r.stdout.split('\n').find((l) => HOST_PROMPT.test(l) || l.includes(` ${user}$`) || l.includes(`${user}@`));
+    if (hit) leaks.push(`${path.basename(file)}: "${hit.trim()}"`);
+  }
+  return { count: shots.length, leaks };
+}
+
 async function main() {
+  const startedAt = Date.now();
   const [script, ...rest] = process.argv.slice(2);
   if (!SCRIPTS[script]) {
     console.error(`usage: cockpit-verify.mjs <${Object.keys(SCRIPTS).join('|')}> --url-template … (run via harness.mjs verify)`);
@@ -2968,6 +3168,15 @@ async function main() {
     await context.close().catch(() => {});
     if (R.ownerPortRequests.length) {
       R.results.push({ name: 'no browser request to the owner port', ok: false, detail: R.ownerPortRequests.join(', ') });
+    }
+    const promptCheck = 'no screenshot shows the machine\'s shell prompt (host:dir user$)';
+    try {
+      const { count, leaks } = shellPromptLeaks(opts.shots, script, startedAt);
+      R.results.push({ name: promptCheck, ok: !leaks.length, detail: leaks.length ? leaks.join('; ') : `${count} screenshots read` });
+      console.log(`${leaks.length ? 'FAIL' : 'PASS'}  ${promptCheck} — ${leaks.length ? leaks.join('; ') : `${count} screenshots read`}`);
+    } catch (err) {
+      R.results.push({ name: promptCheck, ok: false, detail: String(err.message ?? err) });
+      console.log(`FAIL  ${promptCheck} — ${err.message ?? err}`);
     }
     R.write();
   }

@@ -200,6 +200,7 @@ function childEnv(L, caller, extra = {}) {
     LANG: process.env.LANG || 'en_US.UTF-8',
     TMPDIR: process.env.TMPDIR,
     SHELL: '/bin/bash',
+    BASH_SILENCE_DEPRECATION_WARNING: '1',
     TERM: 'xterm-256color',
     COCKPIT_STUB_LOG: L.stubLog,
     COCKPIT_STUB_CALLER: caller,
@@ -402,6 +403,10 @@ function planRun({ needWeb }) {
 async function bringUpTower(runCfg) {
   const { L } = runCfg;
   for (const dir of [L.root, L.af, L.run, L.home, L.towerTmp, L.pids, L.logs, L.shots]) fs.mkdirSync(dir, { recursive: true });
+  // A bash started under the harness HOME (a terminal VS Code opens by itself, a Tower shell) shows
+  // a bare prompt: macOS's /etc/bashrc prompt names the machine and the user, and the screenshots
+  // are committed.
+  for (const rc of ['.bash_profile', '.bashrc']) fs.writeFileSync(path.join(L.home, rc), "PS1='$ '\n");
   const st = {
     ...createFixturesDir(),
     startedAt: new Date().toISOString(),
