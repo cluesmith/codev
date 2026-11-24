@@ -78,6 +78,11 @@ interface Dependency {
     macos: string;
     linux: string;
   };
+  /** Shown when the installed version is below `minVersion` (an install hint may not upgrade). */
+  upgradeHint?: {
+    macos: string;
+    linux: string;
+  };
 }
 
 interface CheckResult {
@@ -749,6 +754,10 @@ const CORE_DEPENDENCIES: Dependency[] = [
       macos: 'brew install node',
       linux: 'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs',
     },
+    upgradeHint: {
+      macos: 'brew upgrade node (or install Node.js 22+ from https://nodejs.org)',
+      linux: 'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs',
+    },
   },
   {
     name: 'git',
@@ -834,10 +843,14 @@ function checkDependency(dep: Dependency): CheckResult {
     if (versionGte(version, dep.minVersion)) {
       return { status: 'ok', version };
     } else {
+      let note = `need >= ${dep.minVersion}`;
+      if (dep.upgradeHint) {
+        note += `; upgrade: ${isMacOS ? dep.upgradeHint.macos : dep.upgradeHint.linux}`;
+      }
       return {
         status: dep.required ? 'fail' : 'warn',
         version,
-        note: `need >= ${dep.minVersion}`,
+        note,
       };
     }
   }

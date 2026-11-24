@@ -36,7 +36,6 @@ import { withNativeLoadExplanation } from '../lib/native-deps.js';
 import { killSessionTree } from '../lib/process-tree.js';
 import { loadNodePty } from './node-pty-loader.js';
 
-
 /** EPIPE-safe stderr logger with ISO timestamp. Silently ignores broken pipe errors. */
 function logStderr(message: string): void {
   try {

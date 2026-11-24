@@ -216,6 +216,13 @@ describe('doctor command', () => {
       expect(result).toBe(1);
       const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join('\n');
       expect(printed).toContain('need >= 22.0.0');
+      // A too-old Node gets an upgrade command, not just the minimum (an install hint like
+      // `brew install node` does not upgrade an existing install).
+      if (process.platform === 'darwin') {
+        expect(printed).toContain('upgrade: brew upgrade node');
+      } else {
+        expect(printed).toContain('upgrade: curl -fsSL https://deb.nodesource.com/setup_22.x');
+      }
     });
 
     it('prints no Windows prerequisites section on POSIX (Spec 1658: POSIX output unchanged)', async () => {
