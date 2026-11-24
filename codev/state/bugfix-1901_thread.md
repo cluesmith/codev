@@ -89,6 +89,26 @@ should do when the port is held but `/api/status` misses a 2 s probe.
 5. The PRFT write-up gives the towerStart change its own paragraph, as a behaviour change: start no
    longer replaces a hung Tower by itself.
 
+## 2026-11-24 — fix committed (98d72e49f fix, 5522a861e test)
+
+- AIR #1950 (merged to main mid-project) had already fixed the dead ECONNREFUSED check and added
+  `connectionRefused` to `request()`. I reused it rather than adding a parallel flag, and tightened
+  it: a localhost AggregateError counts as refused only when every attempt refused.
+- The shared helper lives in its own module (`lib/tower-check.ts`), so the many tests that mock all
+  of `lib/tower-client.js` only needed a one-line `probeHealth` mapped from their `isRunning` mock.
+- Hazard caught: the #1691 and windows-launch towerStart tests stubbed `node:http` to fake a
+  refusal. With the probe moved to fetch they would have hit the LIVE Tower on 4100, so both now
+  stub `TowerClient.probeHealth`.
+- Fails-without-fix confirmed. Pre-fix `tower.ts` makes the stalled-holder test fail (it SIGTERMs
+  the holder). Removing the every-address rule fails the `::1` masking test.
+- End to end, with the real built CLI, isolated HOME, a stalled holder on a spare port:
+  `afx tower start --port P` exits 1 after 21 s naming the PID and command line, and the holder
+  survives. `afx tower stop --port P` kills it. Stop needed the SIGKILL fallback there only because
+  the harness parent was blocked in `spawnSync` and could not reap its child (zombie answers
+  kill -0).
+- `status --json` still reports `tower.running: false` for an unresponsive Tower; the human output
+  says "not answering" with the reason. Left as is (minimal).
+
 ### Planned fix (per the issue's Fix section)
 One shared helper over the SDK probe that classifies the failure:
 - connect refused (nothing listening) → "Tower is not running. Start it with: afx tower start"
