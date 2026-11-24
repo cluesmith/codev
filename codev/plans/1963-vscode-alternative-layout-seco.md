@@ -4,10 +4,15 @@
 
 ## Executive Summary
 
-This plan implements the approved spec in its three shippable increments, in eight phases. Each
+This plan implements the approved spec in its three shippable increments, in nine phases. Each
 phase is one commit on `builder/spir-1963`, and all of them go into one PR.
 
-1. **Button + hierarchy** (Phases 1–4). This uses spec approach **A1**: one tree view over the
+0. **Verification harness and layout spike** (Phase 1). This is the isolated harness every rendered
+   checkpoint uses (section *Verification harness*), proven safe on an empty fixture. It also runs
+   the editor-layout spike the spec's Assumptions require, so its result is known before any
+   increment-1 code. If the spike shows that the arrangement needs an owner decision, the owner
+   gets it early.
+1. **Button + hierarchy** (Phases 2–5). This uses spec approach **A1**: one tree view over the
    existing row-building code. Its single hierarchy is the owner's *"towers -> workspaces ->
    architects / decisions -> builders"*. Rows of this window's workspace act; rows of other
    workspaces navigate.
@@ -16,27 +21,29 @@ phase is one commit on `builder/spir-1963`, and all of them go into one PR.
    - The architect-axis row building moves out of `BuildersProvider` into a reusable builder,
      scoped by workspace. The Agents view and the Cockpit both use it, so there is no second copy
      of row logic.
-2. **Shared Work and Decisions** (Phases 5–7). This uses approach **B1**: a new workspace package,
+2. **Shared Work and Decisions** (Phases 6–8). This uses approach **B1**: a new workspace package,
    `@cluesmith/codev-workspace-views` (`packages/workspace-views`).
    - The dashboard's `WorkView`, `DecisionsView`, `useDecisions` and their sub-components move
      there. They take their I/O from a host adapter and their colours from `--codev-wv-*` tokens.
    - The dashboard keeps thin wrappers with its fetch adapter.
    - The extension hosts two editor-area webview panels whose host side relays to Tower through
      `ConnectionManager`'s client.
-3. ***Arrange Cockpit*** (Phase 8). This uses approaches **C1** (first show per window, plus the
+3. ***Arrange Cockpit*** (Phase 9). This uses approaches **C1** (first show per window, plus the
    command and `codev.cockpit.autoArrange`) and **D1** (Work stacked over Decisions). It also adds
-   the one-time first-auto-arrange notice ruled at the gate. Before any arrange code is written, the
-   phase starts with the spike the spec's Assumptions require.
+   the one-time first-auto-arrange notice ruled at the gate. It builds on the Phase 1 spike result,
+   and writes no arrange code while a spike case is unresolved.
 
-Rendered verification sits at the end of each increment: Phase 4, Phase 7 and Phase 8. It runs
-against an isolated harness (described below), so the work can be cut after any increment with what
-has shipped already verified.
+Rendered verification sits at the end of each increment: Phase 5, Phase 8 and Phase 9. It also
+runs at Phase 6 (the dashboard comparison) and Phase 7 (Decisions). It uses the isolated harness
+built in Phase 1, so the work can be cut after any increment with what has shipped already
+verified.
 
 ## Phases (Machine Readable)
 
 ```json
 {
   "phases": [
+    {"id": "verification_harness", "title": "Isolated verification harness and editor-layout spike"},
     {"id": "fleet_overviews", "title": "Fleet cache keeps every active workspace's overview"},
     {"id": "architect_tree_builder", "title": "Reusable, workspace-scoped architect-axis row builder"},
     {"id": "cockpit_hierarchy", "title": "Cockpit button and the Tower → workspaces → architects → builders tree"},
@@ -51,7 +58,92 @@ has shipped already verified.
 
 ## Phase Breakdown
 
-### Phase 1: Fleet cache keeps every active workspace's overview
+### Phase 1: Isolated verification harness and editor-layout spike
+
+**Dependencies**: None
+
+#### Objective
+
+Build, once, the isolated environment every rendered checkpoint runs in, and prove it cannot reach
+the owner's Tower or IDE before it is used for anything. Then use it to run the editor-layout spike,
+so the arrangement's feasibility is known before increment-1 code is written.
+
+#### Files to Create / Modify
+
+**New `apps/vscode/scripts/cockpit-harness/`.** It is dev-only: it is excluded from the vsix through
+`.vscodeignore` and is not run in CI. It holds:
+
+- `harness.mjs`: start, seed, check and stop, per the *Verification harness* section;
+- `preflight.mjs`;
+- `tripwire.mjs`;
+- `fixtures.mjs`, the fixture driver: in-process `upsertBuilder` and porch state, plus explicit-port
+  HTTP calls;
+- `stubs/` holding `afx`, `porch` and `codev`;
+- `README.md`.
+
+Scripts load the branch's built `packages/codev/dist`. They never use a globally installed CLI.
+
+**The spike is not committed.** It is a throwaway extension in the session scratchpad, loaded into
+the harness's isolated VS Code. Its result is recorded in the thread, and later in the review, with
+screenshots. It checks:
+
+- (a) `vscode.setEditorLayout` with `{ orientation: 0, groups: [{}, { groups: [{}, {}] }] }`, run
+  over three or more existing groups, merges the editors of the groups it removes into the remaining
+  groups. Dirty, untitled and modified editors survive with their content;
+- (b) an editor-area terminal tab moves between groups without ending its session. The method is
+  `terminal.show()`, then `workbench.action.moveEditorToFirstGroup`, then a check that the PTY still
+  echoes;
+- (c) a panel terminal moves into the editor area through `workbench.action.terminal.moveToEditor`,
+  with the session intact;
+- (d) `WebviewPanel.reveal(viewColumn)` moves a retained panel to another group without reloading it
+  (a counter in the webview survives the move).
+
+**Outcomes:**
+
+- **(a) fails:** arrange only adds or reuses groups and never removes one. The spec already
+  provides this, so no decision is needed.
+- **(b), (c) or (d) fails:** the spec does not provide a fallback, and every candidate fallback
+  changes ruled behaviour. Examples: leaving the architect where it is, or not honouring the
+  `terminalPosition` override.
+  - **The result goes to the architect at once, with the options**, and Phase 9 waits for the
+    owner's ruling.
+  - Phases 2–8 do not depend on it and continue.
+
+#### Deliverables
+
+- [ ] The harness scripts, stubs and README.
+- [ ] The spike run, with its result recorded in the thread.
+- [ ] Harness self-tests.
+
+#### Acceptance Criteria
+
+- [ ] On an empty fixture, `harness.mjs check` passes:
+  - every pre-flight gate;
+  - the isolated Tower is up on `$PORT`, owned by the harness PID;
+  - the isolated VS Code is serving the branch vsix;
+  - the stubs resolve.
+
+  `harness.mjs stop` leaves no process of its own behind (checked by PID).
+- [ ] **Each pre-flight gate is shown to refuse:**
+  - `PORT=4100`;
+  - an `AGENT_FARM_DIR` or socket dir outside the scratchpad;
+  - a mismatched db path (a `NODE_ENV=test` driver against a production-mode Tower);
+  - a listener PID that is not the harness's.
+
+  Each refuses before any state is created.
+- [ ] **The tripwire is shown to fire**, without touching `:4100`. Its port is a parameter, and the
+      self-test points it at a throwaway local listener the test opens, connects to it from a
+      harness child process, and expects a failure.
+- [ ] The spike result is recorded, and the architect is told if (b), (c) or (d) failed.
+
+#### Test Plan
+
+- `harness.mjs selftest`: the refusals and the tripwire above.
+- A seeded fixture (one workspace, one builder) appears in the isolated Tower's `/api/overview`
+  with its `spawnedByArchitect`.
+- The spike, as above.
+
+### Phase 2: Fleet cache keeps every active workspace's overview
 
 **Dependencies**: None
 
@@ -95,9 +187,9 @@ Unit tests with a fake client:
 - a stale (out-of-sequence) fan-out does not overwrite a newer overview;
 - the call count is unchanged.
 
-### Phase 2: Reusable, workspace-scoped architect-axis row builder
+### Phase 3: Reusable, workspace-scoped architect-axis row builder
 
-**Dependencies**: None (Phase 1 is not needed; ordered here so the hierarchy phase has both)
+**Dependencies**: None (Phase 2 is not needed; ordered here so the hierarchy phase has both)
 
 #### Objective
 
@@ -159,8 +251,11 @@ Agents view: same rows, same ids, same behaviour.
 - [ ] `ArchitectTreeBuilder` with `act` and `navigate` modes and scoped ids.
 - [ ] `BuildersProvider` rebuilt on it, with no behaviour change.
 - [ ] A builder option, `attentionCounts`, which is off for the Agents view, appends *N held* and
-      *N queued* to builder-row descriptions. The counts come from the same `deriveAttention`
-      summary the Tower view uses. Builder rows show neither today, so the Agents view keeps its
+      *N queued* to builder-row descriptions. The counts come from `deriveAttention`:
+      - for this window's workspace, run over `overviewCache.getData()`, so they never lag that
+        workspace's own rows;
+      - for other workspaces, run over the fleet cache's retained overview, the summary the Tower
+        view uses. Builder rows show neither today, so the Agents view keeps its
       labels byte-for-byte and only the Cockpit turns the option on (the placement table's held
       and queued rows).
 
@@ -195,15 +290,15 @@ Unit tests on `ArchitectTreeBuilder`:
 - a non-live recorded architect;
 - `getParent` chains for builder, idle-sibling header, folder and file rows.
 
-### Phase 3: Cockpit button and the Tower → workspaces → architects → builders tree
+### Phase 4: Cockpit button and the Tower → workspaces → architects → builders tree
 
-**Dependencies**: Phase 1, Phase 2
+**Dependencies**: Phase 2, Phase 3
 
 #### Objective
 
 Ship the new activity-bar button and its single hierarchy, with this window's builder rows
 behaving as they do in Agents: click, accordion, reveal, cycle selection and activity hook. This is
-the first user-visible slice. Context-menu actions arrive in Phase 4.
+the first user-visible slice. Context-menu actions arrive in Phase 5.
 
 #### Files to Create / Modify
 
@@ -228,7 +323,7 @@ the first user-visible slice. Context-menu actions arrive in Phase 4.
       `TowerProvider.workspaceItem`, with a `hasChildren` option. `TowerProvider` keeps its exact
       output.
     - In the Cockpit, every active workspace is collapsible and has no click command; *Open* is
-      added in Phase 4.
+      added in Phase 5.
     - Dormant rows keep click-to-open.
     - Initial expansion: this window's workspace and any with non-empty attention start
       `Expanded`; the rest start `Collapsed`.
@@ -244,7 +339,7 @@ the first user-visible slice. Context-menu actions arrive in Phase 4.
   - **Attention on rows:**
     - architect rows get `describeWait` text and glyph from the workspace's
       `AttentionSummary.architects`;
-    - builder rows get their glyph, gate and held/queued (Phase 2);
+    - builder rows get their glyph, gate and held/queued (Phase 3);
     - the workspace row's description keeps `describeAttention`, which already covers
       unattributed held mail and escalation.
   - **Re-render:** on `overviewCache.onDidChange`, `towerCache.onDidChange` and
@@ -332,9 +427,9 @@ the first user-visible slice. Context-menu actions arrive in Phase 4.
     `codev.buildersAutoCollapse` re-gates both accordions.
 - **`cockpit-icon.test.ts`:** same `d` attribute as `codev.svg`, wrapped in `rotate(90 400 400)`.
 
-### Phase 4: Placement-table actions on the hierarchy, parity mapping, increment-1 verification
+### Phase 5: Placement-table actions on the hierarchy, parity mapping, increment-1 verification
 
-**Dependencies**: Phase 3
+**Dependencies**: Phase 4
 
 #### Objective
 
@@ -369,8 +464,17 @@ verification and docs.
 window. The data behind them follows the Workspace view's own sources:
 
 - **Worktree config.** It is async: `loadWorktreeConfig` awaits `client.getWorktreeConfig(...)`.
-  The Cockpit resolves it in its async `getChildren` for the Tower root, as `WorkspaceProvider`
-  does in its `getChildren`, and does not cache it across renders.
+  - The Cockpit re-renders far more often than the Workspace view does: on every fleet and overview
+    change, including the fleet's 20 s fallback poll. So it **holds the resolved config** instead of
+    fetching per render.
+  - It resolves the config once, in its async root `getChildren`, and drops it on:
+    - the `codev-config-updated` envelope, the signal that exists for exactly this;
+    - a connection-state change;
+    - a workspace change.
+
+    The next render then fetches it again.
+  - A test asserts that N fleet and overview changes cause no `getWorktreeConfig` call, and that
+    one `codev-config-updated` causes exactly one.
 - **Re-render signals.** The Cockpit re-renders on the same signals `WorkspaceProvider` subscribes
   to:
   - `terminalManager.onDidChangeDevTerminals`, so *Start Dev* / *Stop Dev* stays honest across
@@ -378,7 +482,7 @@ window. The data behind them follows the Workspace view's own sources:
   - the `codev-config-updated` SSE envelope, for `devUrls` and dev-command edits;
   - the `architects-updated` SSE envelope, for add and remove from the CLI.
 
-  These are in addition to the three Phase 3 signals. They need no new connection: the envelopes
+  These are in addition to the three Phase 4 signals. They need no new connection: the envelopes
   come from `connectionManager.onSSEEvent`.
 
 The values themselves:
@@ -429,7 +533,7 @@ is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect
 
 #### Deliverables
 
-- [ ] All placement-table entries for increment 1 (the Decisions entry is Phase 6).
+- [ ] All placement-table entries for increment 1 (the Decisions entry is Phase 7).
 - [ ] The `removeArchitect` argument resolution for Cockpit architect rows, with a unit test.
 - [ ] The mapping oracle and the parity test.
 - [ ] Rendered verification of increment 1 and docs.
@@ -443,6 +547,15 @@ is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect
     entry's `viewItem`;
   - *Remove Architect*'s `when` matches `cockpit-architect-main`;
   - an existing source entry differs from its snapshot.
+- [ ] **Each relocated command handles a Cockpit tree element as its argument**, because VS Code
+      passes the clicked element to every menu entry. A unit test invokes each handler with the
+      Cockpit node its entry is attached to and asserts it acts on that node's target:
+      - *Remove Architect* resolves the name from the Cockpit row, not from `arg.label`;
+      - *Open Dev URL…* falls through to its QuickPick;
+      - *Spawn Builder*'s `extractIssueId` yields no id from a workspace node;
+      - *Add Architect*, *Start Dev* and *Stop Dev* ignore the argument.
+
+      A future handler change then fails the test instead of regressing silently.
 - [ ] From the Cockpit, in the harness, these work on this window's workspace:
   - every builder context action;
   - Approve Gate inline;
@@ -460,10 +573,11 @@ is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect
       - the Cockpit alone visible;
       - the Workspace, Agents and Tower views alone visible.
 
-      They match: the overview, the fleet fan-out, and one `getWorktreeConfig` per workspace-row
-      render, the same call the Workspace view makes per render. With both sets visible at once, the
-      only addition is that second view's own `getWorktreeConfig`. No poll, SSE stream or route is
-      added.
+      Each case is measured over the same idle window plus one scripted burst: a builder state
+      change and one `codev-config-updated`. They match: the overview, the fleet fan-out, and
+      `getWorktreeConfig` only on load and on `codev-config-updated`, never per fleet tick. With
+      both sets visible at once, the only addition is the Workspace view's own `getWorktreeConfig`
+      on its own renders. No poll, SSE stream or route is added.
 - [ ] **Rendered** (see the harness below), with screenshots:
   - the button under Codev;
   - the hierarchy with N=0, N=1 and N>1 builders and two or more workspaces;
@@ -487,9 +601,9 @@ is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect
 - Rendered: spec scenarios 11, 12 (hierarchy part) and 19 (worktree and no-workspace windows;
   Cockpit-only freshness).
 
-### Phase 5: Shared Work/Decisions package; dashboard moved onto it unchanged
+### Phase 6: Shared Work/Decisions package; dashboard moved onto it unchanged
 
-**Dependencies**: None (independent of Phases 1–4; ordered for the increment boundary)
+**Dependencies**: None (independent of Phases 2–5; ordered for the increment boundary)
 
 #### Objective
 
@@ -509,6 +623,15 @@ npm-published):**
   `check-types` scripts.
 - **Dependencies:** `@cluesmith/codev-types`, `@cluesmith/codev-sdk` (the environment-agnostic
   `builder-helpers` only), `@cluesmith/codev-artifact-canvas`, and React as a peer dependency.
+- **Its own devDependencies**, declared here rather than borrowed from `apps/web` under pnpm's strict
+  layout, at the versions `apps/web` uses:
+  - `react` and `react-dom`;
+  - `@types/react` and `@types/react-dom`;
+  - `@testing-library/react` and `@testing-library/jest-dom`;
+  - `jsdom`, `vitest` and `typescript`.
+
+  `pnpm-lock.yaml` is updated in the same commit. The package's `test` runs in CI's existing
+  workspace test step, and Phase 6 checks that it does.
 - **`src/host.ts`:** the `WorkspaceViewsHost` adapter. Its members are optional unless stated:
   - `overview` (required): a subscribe/refresh source;
   - `decisions`: `read()`, `rule(req)`, `image(path, signal?)`.
@@ -526,8 +649,22 @@ npm-published):**
 
   A control renders only when its action is provided.
 - **Moved here from `apps/web/src`:**
-  - `components/WorkView.tsx`, keeping its core sections. The dashboard-only pieces become optional
-    slots: `FileTree`, `OpenFilesShellsSection` and `TipBanner`;
+  - `components/WorkView.tsx`, keeping its core sections.
+    - **Its `state: DashboardState | null` prop is removed from the shared surface.** `state` feeds
+      three things today: the loading gate, `architectCount` from `state.architects`, and
+      `findBuilderTab`'s builder list. In the package:
+      - the loading gate keys on the overview;
+      - `architectCount` comes from `OverviewData.architects`, as the spec's Assumptions rule;
+      - builder opening goes through the host's `openBuilder(id)`. The dashboard wrapper maps it
+        to `findBuilderTab(builder, state.builders)` and `onSelectTab`, as today.
+
+      The dashboard wrapper keeps reading `/api/state` for its own pieces.
+    - The dashboard-only pieces become optional slots: the **whole file panel**,
+      `OpenFilesShellsSection` and `TipBanner`.
+      - The file panel slot is the `work-file-panel` wrapper (toggle, label, search input and
+        `FileTree`), together with the root's `file-panel-open` class, not `FileTree` alone. With
+        the slot absent nothing of it renders, so there is no empty strip and no dead search box.
+      - A test asserts this in the VS Code host;
   - `components/DecisionsView.tsx`, `hooks/useDecisions.ts`;
   - `components/BuilderCard.tsx`, `NeedsAttentionList.tsx`, `BacklogList.tsx`,
     `RecentlyClosedList.tsx`;
@@ -588,15 +725,15 @@ npm-published):**
   - `rule()` refusals render the server message.
 - Dashboard render comparison in the harness.
 
-### Phase 6: Decisions panel in VS Code, its host bridge, and the hierarchy's Decisions entry
+### Phase 7: Decisions panel in VS Code, its host bridge, and the hierarchy's Decisions entry
 
-**Dependencies**: Phase 3 (for the Decisions entry), Phase 5
+**Dependencies**: Phase 4 (for the Decisions entry), Phase 6
 
 #### Objective
 
 Let the owner rule on decisions without leaving VS Code. The panel is the shared `DecisionsView`
 in an editor-area webview, with every Tower call made by the host. This phase also builds the
-webview infrastructure that Phase 7 reuses.
+webview infrastructure that Phase 8 reuses.
 
 #### Files to Create / Modify
 
@@ -666,7 +803,13 @@ stay green.
     webview entries are `.ts` (their JSX lives in canvas's prebuilt `dist`), and esbuild otherwise
     reads the nearest `tsconfig.json`, which sets no `jsx`. These are the first TSX sources
     compiled under `apps/vscode`.
-  - A bundle smoke test loads the built `dist/webview/decisions.js` in jsdom and asserts it mounts.
+  - A bundle smoke test asserts the bundle mounts in jsdom. It does not depend on a prior `dist`:
+    - CI's `apps/vscode` step runs `check-types` then `test:unit`, and no esbuild run;
+    - so the test builds the entry itself in `beforeAll`, through esbuild's API into a temp dir,
+      using the same options object `esbuild.js` uses. That object is exported from a small
+      `esbuild.webview.mjs` both import.
+
+    It therefore runs under `pnpm test:unit`, locally and in CI, on a clean tree.
 - `tsconfig.webview.json`: adds `jsx: react-jsx` and the new `src/workspace-views/webview`
   directory;
 - `apps/vscode/tsconfig.json`: adds `src/workspace-views/webview` to `exclude`, alongside the two
@@ -693,7 +836,7 @@ stay green.
 
 - [ ] Spec scenarios 6 (host message contract), 8 (decisions bridge), 15, 16 and 22 pass. The
       rendered ones (15, 16) are run in the harness at this phase's end, with screenshots, because
-      Phase 7's verification focuses on Work.
+      Phase 8's verification focuses on Work.
 - [ ] The Tower key never appears in any message sent to the webview (asserted on the message log
       in a host test).
 - [ ] Type-check (host and webview configs), lint, unit tests and the SDK boundary tests pass.
@@ -734,9 +877,9 @@ stay green.
   - the Decisions entry from the hierarchy;
   - spec scenario 18 for Decisions: light, dark and high-contrast themes, and a live switch.
 
-### Phase 7: Work panel in VS Code, increment-2 verification
+### Phase 8: Work panel in VS Code, increment-2 verification
 
-**Dependencies**: Phase 6 (shared webview infrastructure)
+**Dependencies**: Phase 7 (shared webview infrastructure)
 
 #### Objective
 
@@ -792,9 +935,9 @@ every kept affordance mapped to a VS Code action and every dropped one absent.
   artifact path; an external URL scheme refused; dropped slots absent.
 - **Rendered:** as above.
 
-### Phase 8: Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification
+### Phase 9: Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification
 
-**Dependencies**: Phase 3, Phase 6, Phase 7
+**Dependencies**: Phase 1 (the spike result), Phase 4, Phase 7, Phase 8
 
 #### Objective
 
@@ -803,19 +946,9 @@ first show per window session, and on demand. It never closes or discards a user
 
 #### Files to Create / Modify
 
-**Spike first, in the harness, recorded in the thread and the review.** It confirms:
-
-- (a) `vscode.setEditorLayout` with
-  `{ orientation: 0, groups: [{}, { groups: [{}, {}] }] }` merges editors from groups it removes
-  into remaining groups. Dirty, untitled and modified editors survive, with their content;
-- (b) an editor-area terminal tab moves between groups without ending its session, using
-  `terminal.show()` then `workbench.action.moveEditorToFirstGroup`;
-- (c) a panel terminal moves into the editor area through `workbench.action.terminal.moveToEditor`;
-- (d) `WebviewPanel.reveal(viewColumn)` moves a retained panel without reloading it.
-
-If (a) does not hold, arrange only **adds or reuses** groups and never removes one, as the spec
-already allows. If (b) or (c) does not hold, the plan stops and the architect is told before
-another approach is chosen.
+**The Phase 1 spike result decides the mechanics.** If (a) failed, arrange only adds or reuses
+groups. If (b), (c) or (d) failed, this phase starts only after the owner's ruling on the options
+the architect was given.
 
 **New `apps/vscode/src/cockpit/arrange.ts`, `arrangeCockpit()`:**
 
@@ -887,7 +1020,7 @@ The command stays in the palette everywhere and explains itself where it does no
   - idempotent.
 - **Rendered:** as above.
 
-## Verification harness (Phases 4, 5, 6, 7, 8)
+## Verification harness (Phases 1, 5, 6, 7, 8, 9)
 
 The spec requires that verification never touches the owner's live IDE or Tower. Every step that
 creates state is listed below with **how it reaches the isolated Tower**, as checked against the
@@ -958,8 +1091,15 @@ can produce, is unit-tested.
 
 ### Isolated VS Code
 
-`code serve-web` runs on its own port, with `--server-data-dir`, `--user-data-dir` and
-`--extensions-dir` all under the scratchpad, and the branch's vsix installed there.
+`code serve-web` (`/usr/local/bin/code` on this machine) runs on its own port, with
+`--server-data-dir`, `--user-data-dir` and `--extensions-dir` all under the scratchpad, and the
+branch's vsix installed there.
+
+- **Fallback:** if `serve-web` cannot run, the harness launches the IDE server binary that Tower's
+  IDE support uses (`ide-server.ts`). It is launched **directly**, with the same flags
+  `ide-server.ts` passes (`--host 127.0.0.1`, `--port`, `--server-base-path`, `--extensions-dir`),
+  all pointed at scratch dirs and its own port.
+- It never goes through any Tower's `/api/ide`, and never through the owner's `/ide/`.
 
 - **Settings** in that profile:
   - `codev.towerPort = $PORT`;
@@ -986,9 +1126,19 @@ project.
 1. `$PORT` is set, numeric and **not 4100**, and nothing is listening on it before the start.
 2. `CODEV_AGENT_FARM_DIR` and `SHELLPER_SOCKET_DIR` are set, resolve under the session scratchpad,
    and are not `~/.agent-farm` or `~/.codev/run`.
-3. The driver imports `AGENT_FARM_DIR` from the branch's built `@cluesmith/codev-core/constants`
-   and asserts that it equals the isolated dir. This proves the in-process `upsertBuilder` and
-   porch writes land there.
+3. **The driver and the Tower agree on the database file.**
+   - `getGlobalDbPath()` resolves under `AGENT_FARM_DIR`, but switches to `AF_TEST_DB`, or
+     `test.db`, when `NODE_ENV=test` (`db/index.ts:123`).
+   - So the harness pins `NODE_ENV` and `AF_TEST_DB` to the same values for the Tower and for the
+     driver. It runs neither under vitest.
+   - The driver imports `AGENT_FARM_DIR` and `getGlobalDbPath` from the branch's built
+     `packages/codev/dist`, and asserts two things:
+     - `AGENT_FARM_DIR` equals the isolated dir;
+     - `getGlobalDbPath()` equals the file the isolated Tower opened. The Tower logs its dir when
+       it claims ownership (`tower-server.ts:578`), and the harness checks `lsof -p <tower pid>`
+       for the `.db` path.
+
+   This proves the in-process `upsertBuilder` writes land where the isolated Tower reads.
 4. After the start, the listener on `$PORT` (`lsof`) is the PID the harness spawned, and
    `GET http://127.0.0.1:$PORT/api/version` answers with the isolated key.
 5. The serve-web profile's `settings.json` holds `codev.towerPort = $PORT` and
@@ -1003,8 +1153,10 @@ project.
 
 - **Tripwire.** Throughout the run, the harness samples established TCP connections to `:4100`
   (`lsof -nP -iTCP:4100 -sTCP:ESTABLISHED`). It fails the run if any belongs to its own process
-  tree: the driver, the isolated Tower and its shellpers, serve-web and its extension host. The
-  owner's `:4100` is never probed or requested.
+  tree: the driver, the isolated Tower and its shellpers, serve-web and its extension host.
+  - The owner's `:4100` is never probed or requested.
+  - The watched port is a parameter, so the Phase 1 self-test proves the tripwire fires by aiming it
+    at a throwaway listener, not at `:4100`.
 - **"Tower unreachable" scenario.** It stops the *harness's* Tower by the PID the harness started.
   Auto-start is off and stubbed, so nothing restarts a Tower.
 - **Teardown.** It kills only:
@@ -1028,26 +1180,27 @@ told before its first start.
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| The row-builder extraction (Phase 2) changes an Agents id or behaviour | Medium | High | An id-equivalence snapshot taken from the pre-refactor provider in the same commit, plus every existing Agents test unmodified |
+| The row-builder extraction (Phase 3) changes an Agents id or behaviour | Medium | High | An id-equivalence snapshot taken from the pre-refactor provider in the same commit, plus every existing Agents test unmodified |
 | Generalised wiring regresses accordion, reveal or cycle in Agents | Medium | High | Per-view hosts with the Agents path unchanged; existing behaviour tests plus new per-view tests; rendered check of both views |
-| The layout primitive closes or discards an editor | Low | High | The Phase 8 spike before any arrange code, with the add/reuse-only rule from the spec if it fails; the dirty/untitled/modified scenario rendered |
+| The layout primitive closes or discards an editor | Low | High | The Phase 1 spike, run before any increment code. If it fails, the spec's add/reuse-only rule applies. The dirty/untitled/modified scenario is rendered |
+| A terminal or retained-webview move fails in the spike (cases b–d) | Low | Medium | The spec gives no fallback, so the result goes to the architect from Phase 1 with the options. Phase 9 waits for the owner, and Phases 2–8 continue |
 | Moving components changes the dashboard | Medium | Medium | Wrappers keep `lib/api.ts`; the moved tests are unchanged in intent; the dashboard integration tests stay; a rendered before/after comparison |
-| A source-exported TSX package does not type-check under one host's config | Low | Medium | `jsx: react-jsx` added to the webview tsconfig; if a host still cannot consume it, the package gains a `tsdown` build like `codev-artifact-canvas`. That is a build-wiring change, not scope, and it is named in the PR |
+| A source-exported TSX package does not type-check under one host's config | Medium | Medium | `codev-artifact-canvas` is a *built* package (`tsdown` → `dist`), so the closer precedent is `apps/web`'s own source exports. The risk sits in `apps/web`'s `tsc -b`, which type-checks the package's `.tsx` under the dashboard's config, and in the extension's webview tsconfig (`jsx: react-jsx` added). Phase 6 runs both type-checks before moving anything. If a host still cannot consume the source, the package gains a `tsdown` build like canvas. That is a build-wiring change, not scope, and it is named in the PR |
 | The harness accidentally touches the owner's Tower or IDE | Medium (several CLI paths default to `:4100`) | High | No Tower-contacting CLI commands. Every state-creating step names its route to the isolated port (harness table). Extension shell-outs are recording stubs, and auto-start is off. `CODEV_TOWER_KEY` is set, as are isolated state, socket and VS Code dirs. A pre-flight refuses 4100 and checks the listener PID, and a `:4100` connection tripwire runs throughout. The architect is told before the first start |
 | CSS moved out of `index.css` misses a rule, so the dashboard looks different | Medium | Low | A selector inventory before the move, and the rendered dashboard comparison |
-| `prepublish-workspace-deps.test.ts` or the vsix packaging misses the new workspace dependency | Medium | Medium | Run it at Phase 6, and build the vsix in the harness from Phase 4 onward |
+| `prepublish-workspace-deps.test.ts` or the vsix packaging misses the new workspace dependency | Medium | Medium | Run it at Phase 7, and build the vsix in the harness from Phase 1 onward |
 | Fixture builders do not appear, or appear without attribution | High if missed | Medium | Each fixture builder gets a real worktree, porch state, a `builders` row through the product's `upsertBuilder`, and a registered builder terminal. `/api/overview` is asserted, attribution included, before any screenshot |
 | Path containment behaves differently on Windows (case, separators, UNC, junctions) | Medium | High | `realpath` + `path.relative` (no prefix compare), `path.win32` table tests, and the on-demand Windows workflow linked in the PR |
 
 ## Documentation Updates
 
-- `apps/vscode/README.md`: the Cockpit button and hierarchy (Phase 4), the Work and Decisions panels
-  (Phase 7), *Arrange Cockpit* and `codev.cockpit.autoArrange` (Phase 8).
+- `apps/vscode/README.md`: the Cockpit button and hierarchy (Phase 5), the Work and Decisions panels
+  (Phase 8), *Arrange Cockpit* and `codev.cockpit.autoArrange` (Phase 9).
 - `codev/resources/arch.md`, *VS Code Extension*:
   - the Cockpit container and act/navigate rule;
-  - `ArchitectTreeBuilder` and fleet-overview retention (Phase 4);
-  - the shared `@cluesmith/codev-workspace-views` package and host adapter (Phase 7);
-  - the arrange flow (Phase 8).
+  - `ArchitectTreeBuilder` and fleet-overview retention (Phase 5);
+  - the shared `@cluesmith/codev-workspace-views` package and host adapter (Phase 8);
+  - the arrange flow (Phase 9).
 
   Hot-tier files are not touched unless the review step routes a fact there.
 - `apps/vscode/CHANGELOG.md`: one entry per increment.
