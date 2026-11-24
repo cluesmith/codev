@@ -11,10 +11,10 @@ plan_phases:
     status: complete
   - id: check_pr_mechanics
     title: 'codev check pr: merge mechanics'
-    status: in_progress
+    status: complete
   - id: check_pr_forge
     title: 'codev check pr: forge state and CI checks'
-    status: pending
+    status: in_progress
   - id: check_deploy
     title: codev check deploy
     status: pending
@@ -24,7 +24,7 @@ plan_phases:
   - id: docs_guidance
     title: Architect guidance and command documentation
     status: pending
-current_plan_phase: check_pr_mechanics
+current_plan_phase: check_pr_forge
 gates:
   spec-approval:
     status: approved
@@ -39,7 +39,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: readonly_core
@@ -78,7 +78,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter3-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-24T01:01:39.053Z'
+updated_at: '2026-11-24T01:07:01.800Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
@@ -89,6 +89,8 @@ context_refreshes:
   - boundary: plan-phase:check_pr_mechanics
     at: '2026-11-24T00:24:38.902Z'
     acknowledged_at: '2026-11-24T00:31:23.829Z'
+  - boundary: plan-phase:check_pr_forge
+    at: '2026-11-24T01:07:01.800Z'
 force_advanced:
   phase: readonly_core
   iteration: 3
