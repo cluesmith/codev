@@ -881,3 +881,43 @@ head is the full check.
 - **Phase 5 order** (architect): build, push, tell them when GitHub is green; carry the two
   phase 3 notes (the `NAME_TAKEN` wording for an ambiguous basename, and the comment on which
   name wins).
+
+## 2026-11-24 — phase 4 COMPLETE (round 1: codex APPROVE, claude APPROVE)
+
+- Round 1: both lanes approve, no blocking issue; no commit of phase 4 went unreviewed. Porch
+  advanced to phase 5 (`ce4bfb7d6`). No code changed after the reviewed head `ba33ee37b`.
+- One `porch done` in phase 4, with the one-time tests skip (ruling main-38) after GitHub was
+  green on `ba33ee37b`. **For the PR body and the review's Flaky Tests section:** phase 4 ran no
+  local full suite at all, by that ruling.
+- Claude's four non-blocking notes:
+  1. `crossWorkspaceOrigin` resolves the front door even when the first candidate is already
+     allowed (an architect recipient), and throws the answer away. **Fix as the first commit
+     of phase 5**, so phase 5's review sees it: ask about the front door only when the
+     sender's own address is refused.
+  2. **For the review document:** a stored frame's reply command can go stale. The frame is
+     composed when the message is stored and delivered as stored, so mail held for a long time
+     (or sent with `--delay`) carries the sender's workspace name as it was then; if that
+     workspace is renamed meanwhile, the pasted command fails. Inherent to mailbox-first, and
+     true of today's reply hint in spirit; not changed.
+  3. **For the review document:** with the sender's workspace stopped, an architect recipient
+     is still offered the sender's address (which would fail "not running") while a builder is
+     told to reply through its architect. Both follow from the rules; it cannot arise for a
+     message that was just sent from a running workspace.
+  4. **For the review document** (carried from phase 2, still out of scope): resolver error
+     strings interpolate an unchecked local workspace name. They travel in an HTTP body to the
+     sender's own CLI, never into another agent's prompt; `addressForFrame` does not cover
+     them.
+- **For the review document** (collected from this phase):
+  - the front door rule as a deliberate reading of the spec's "the `main` architect" row
+    (architect agreed): offered when the real resolver says the front door reaches the sender
+    now; the case it adds (no `main`, the sender is the first registered); a builder otherwise
+    sees `reply through your architect`;
+  - layout: the reply logic is in `tower-messages.ts`, not `tower-routes.ts` as planned;
+  - known boundaries: the footer checks permission, not that the sender's workspace is running
+    or registered; `from` and `fromWorkspace` are what the sender says; a `from` that carries
+    a workspace keeps today's frame;
+  - the real-Tower transcript above.
+- **Phase 5 order** (architect): build, push, tell them when GitHub is green, wait before
+  `porch done`. Carried into phase 5: the lazy front door (note 1), the `NAME_TAKEN` wording
+  for a shared basename and the comment on which name wins (phase 3), `afx whoami` and the
+  listing through the naming module with `getRegisteredWorkspaces(db)` on a read-only handle.
