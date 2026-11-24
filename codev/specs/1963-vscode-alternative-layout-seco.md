@@ -137,10 +137,25 @@ default, whose children are exactly the rows the corresponding source view rende
   existing caches (`OverviewCache`, `TowerFleetCache`, `BuilderDiffCache`, the Workspace provider's
   Tower reads). There is no second fetch path, no second SSE subscription and no copied grouping or
   ordering logic.
+  - **Provider instances:** the combined panel has its **own provider instances** over the
+    **shared caches**. Its rows are built by the same code as the source views' rows, so they have
+    the same labels, `contextValue`s and `command`s, but they are distinct objects. Per-view state
+    (accordion versioning, the group-parent map used by `reveal`, expansion) therefore stays per
+    view, and a row always belongs to exactly one view.
+  - **Freshness:** the combined panel takes part in the existing refresh paths, rather than adding
+    new ones. While it is visible it counts toward the periodic overview refresh
+    (`codev.overviewRefreshSeconds`) exactly as the Codev-container views do. So with the Codev
+    container hidden and only the Cockpit visible, Workspace and Agents stay current. The Tower
+    section rides `TowerFleetCache`'s existing poll and SSE.
 - **Same actions.** Every click, inline action and context-menu entry a row has in its source view
   works on the same row in the combined panel with the same effect. Tree behaviours bound to the
   source view follow the view the row is in: click-expands, accordion, active-file reveal (when the
   combined panel is the visible one), agent-cycle selection and the `builder-active` hook.
+- **Menu contributions are added, not edited.** The existing `view/item/context` and `view/title`
+  entries for `codev.workspace`, `codev.agents` and `codev.tower` stay byte-for-byte as they are. The
+  combined view gets its own entries, scoped to it, with the same commands, `viewItem` patterns,
+  extra `when` terms and groups. A generated parity test fails if any source-view row entry has no
+  combined-view counterpart, so the two sets cannot drift.
 - **Section-level actions.** Each source view's title-bar actions (Agents: refresh, group-by cycle,
   accordion toggle, file-tree toggle; Tower: refresh) are available in the combined panel, attached
   to the section they act on. The combined view's own title bar carries *Arrange Cockpit* (below)
@@ -156,6 +171,10 @@ default, whose children are exactly the rows the corresponding source view rende
     Workspace shows its worktree-scoped rows, and Tower shows the fleet;
   - in a **window with no Codev workspace** the Tower section is shown, and in place of Workspace
     and Agents a single row says no Codev workspace is open, with the open-folder action.
+- **Footprint.** The combined view has no `when`, so the new button appears in every window where
+  the extension activates (`onStartupFinished`), including non-Codev windows. That follows from the
+  no-workspace requirement, and matches today's Codev and Codev Tower containers, which also appear
+  there (Agents with its welcome content, Tower with the fleet).
 
 ### 3. Work and Decisions in the extension, in a split with the `main` architect
 
@@ -180,6 +199,15 @@ default, whose children are exactly the rows the corresponding source view rende
   - an http(s) link opens in the user's browser;
   - clicking an image shows it full size inside the panel, because a webview cannot open browser
     tabs.
+- **Connection and failure states.** Both panels keep last-known-good content, as the sidebar's
+  caches do:
+  - before the first data arrives, each shows a loading state;
+  - while Tower is unreachable or reconnecting, each keeps showing what it last had, with a notice
+    that it is not connected. Decisions keeps its existing error state (the last document read stays
+    on screen under the banner), and an in-flight submit that fails shows the error on its card and
+    keeps the draft;
+  - a response that arrives after its panel was closed is dropped silently: no toast, no error, no
+    re-created panel.
 - **No decisions file.** A workspace without one (no `afx decisions init`) shows an empty state:
   Tower's "There is no decisions file at …" message plus a hint to run `afx decisions init`. It is
   not an error banner. The panel keeps polling, so creating the file makes items appear.
@@ -191,7 +219,7 @@ default, whose children are exactly the rows the corresponding source view rende
   | *+ Shell* (dashboard shell tab) | Runs the existing *New Shell* action (a Tower shell opened by `TerminalManager`) |
   | *Refresh* | Re-reads the overview from Tower, bypassing Tower's overview cache as the dashboard's does, and updates every consumer of `OverviewCache` |
   | Needs Attention / Backlog / Recently Closed http(s) links (issues, PRs) | Open in the user's browser (as the dashboard and the Pull Requests view do) |
-  | Backlog / Recently Closed *spec* / *plan* / *review* links (dashboard annotation tab) | Open that file in a VS Code editor. The path is checked by the host to be inside the workspace |
+  | Backlog / Recently Closed *spec* / *plan* / *review* links (dashboard annotation tab) | Open that file in a VS Code editor. The host refuses the path unless its canonical (symlink-resolved) location is inside the workspace |
   | *Open Files & Shells* section (dashboard tabs) | **Dropped.** VS Code's own terminal list and editor tabs are the equivalent |
   | Collapsible *Files* panel (`FileTree`) | **Dropped.** VS Code's Explorer is the equivalent |
   | *Tip of the day* banner | **Dropped.** Its tips are CLI/dashboard tips, some of which do not apply in VS Code |
@@ -220,16 +248,27 @@ default, whose children are exactly the rows the corresponding source view rende
 - **The user's open editors are never closed, discarded or reloaded**, including dirty and untitled
   ones. They stay open with their unsaved content and may end up in a different group.
 - **Triggers:**
-  - the first time the Cockpit container becomes visible in a window, that window is arranged;
-  - after that, showing the container again leaves the editor area alone;
+  - the first time the Cockpit container is visible in a window session, that window is arranged.
+    This includes a window restored with the container already visible, where no visibility-change
+    event fires, so the check runs when the view is created as well as on change;
+  - a window session ends at reload. After a reload the next first show arranges again. Because
+    arranging is idempotent, an intact layout (panels restored in their groups) changes nothing
+    visible. The architect terminal, which VS Code does not restore across a reload, is reopened on
+    the left;
+  - after the first show, showing the container again leaves the editor area alone;
   - *Arrange Cockpit* (Command Palette and the combined view's title bar) arranges on demand at any
-    time, and is idempotent: running it on an already-arranged window changes nothing visible.
+    time, and is idempotent: running it on an already-arranged window changes nothing visible;
+  - a setting, `codev.cockpit.autoArrange` (default on), turns the first-show auto-arrange off. With
+    it off, only the command arranges.
 - **Where it is offered:**
-  - in a **builder-worktree window** the split is not offered: no auto-arrange, the title-bar action
-    is hidden, and the command explains why. This follows #1809: surfaces that act on the parent
-    workspace stay in the parent's window. Work and Decisions likewise are not offered there;
-  - in a **window with no Codev workspace** there is nothing to arrange: no auto-arrange, and the
-    command says no Codev workspace is open.
+  - in a **builder-worktree window** the split is not offered. There is no auto-arrange and the
+    title-bar action is hidden. This follows #1809: surfaces that act on the parent workspace stay
+    in the parent's window. Work and Decisions likewise are not offered there;
+  - in a **window with no Codev workspace** there is nothing to arrange, and there is no
+    auto-arrange;
+  - in both kinds of window, *Arrange Cockpit*, *Open Work* and *Open Decisions* stay invocable
+    from the Command Palette. Invoking one shows a message saying why it does nothing there,
+    instead of being silently absent.
 - **Placement interaction (accepted, not changed here):** with the split in place, builder terminals
   and issue previews that target "group 2" land in the Work group, per today's placement rules.
   Changing those rules is #1671's scope.
@@ -239,8 +278,9 @@ default, whose children are exactly the rows the corresponding source view rende
 - [ ] A new activity-bar button with the rotated Codev icon (same path, `rotate(90 400 400)`) appears
       directly under the Codev button on a fresh profile, in VS Code and in the Codev IDE (including
       `/ide/`).
-- [ ] The existing `codev`, `codev-tower` and `codevPanel` containers, their views, view ids, menus
-      and badges are byte-for-byte unchanged in `package.json` (additions only), and behave as before.
+- [ ] The existing `codev`, `codev-tower` and `codevPanel` containers, their views, view ids, menu
+      entries and badges are byte-for-byte unchanged in `package.json` (additions only), and behave
+      as before.
 - [ ] Clicking the new button opens one tree view with Workspace, Tower and Agents sections showing
       the same rows as the three source views for the same data.
 - [ ] Every row click, inline action and context-menu entry of the three source views is present
@@ -249,8 +289,12 @@ default, whose children are exactly the rows the corresponding source view rende
 - [ ] Builder-row click-expands, the accordion, active-file reveal and agent-cycle selection act on
       the combined panel's rows when it is the visible view.
 - [ ] Source-view title-bar actions are reachable from the combined panel on their sections.
-- [ ] No new Tower polling or SSE subscription is added for the combined panel. The Tower request
-      count while it is open equals the count with the source views open.
+- [ ] No second poll loop or SSE subscription is added for the combined panel. It takes part in the
+      existing ones, so the Tower request count while it is open equals the count with the source
+      views open.
+- [ ] With the Codev container hidden and only the Cockpit visible, the overview still refreshes on
+      the `codev.overviewRefreshSeconds` cadence. With neither visible (nor the Work panel), the
+      periodic refresh stops, as today.
 - [ ] *Arrange Cockpit* produces `main` architect | (Work over Decisions), each active in its group,
       with live data in both panels.
 - [ ] With `main` not live, *Arrange Cockpit* shows the existing warning, opens no other architect,
@@ -272,6 +316,14 @@ default, whose children are exactly the rows the corresponding source view rende
       links open the file, and http(s) links open the browser. No dropped affordance is rendered.
 - [ ] Neither webview makes a network request to Tower, and the Tower key is absent from webview
       state and messages.
+- [ ] The host opens externally only `http:`/`https:` URLs from a webview, and opens a file from a
+      webview only when its canonical path is inside the workspace. A symlink escape, `..`, an
+      absolute path outside the workspace or another URL scheme is refused.
+- [ ] With Tower unreachable and then back, both panels keep their last content with a
+      not-connected notice and recover on reconnect, with no error toast. This is simulated in the
+      isolated verification instance, never by stopping the owner's Tower.
+- [ ] With `codev.cockpit.autoArrange` off, showing the container never arranges, and the command
+      still does.
 - [ ] The dashboard's Work and Decisions views look and behave as before. Existing `apps/web` tests
       (`DecisionsView*.test.tsx`, `useDecisions.test.ts`, `BuilderCard.test.tsx`,
       `NeedsAttentionList.test.tsx`, `BacklogList.test.tsx`, `App.decisions-tab.test.tsx`, …) pass
@@ -282,8 +334,11 @@ default, whose children are exactly the rows the corresponding source view rende
       with Tower plus the no-workspace row.
 - [ ] Both panels render correctly in a light, a dark and a high-contrast theme and follow a live
       theme change.
-- [ ] `contributes-*` tests cover the new container, view, commands, menus and their `when` clauses.
-      The existing `contributes-*` tests pass unmodified apart from additions.
+- [ ] `contributes-*` tests cover the new container, view, commands, setting, menus and their
+      `when` clauses. The existing `contributes-*` tests pass unmodified apart from additions. Other
+      existing tests that assert on `extension.ts` source text, such as
+      `worktree-window-1809.test.ts`'s badge-suppression match, may be updated to follow
+      generalised wiring, provided the behaviour they guard is unchanged.
 - [ ] **Verified by rendering:** the PR carries screenshots taken from a running extension (the
       Codev IDE at `/ide/` driven by Playwright, or an equivalent isolated instance). They show the
       button; the combined panel with N=0, N=1 and N>1 builders; the split with a pending decision;
@@ -335,7 +390,12 @@ From the system:
 - VS Code engine floor `^1.128.0`. No API newer than that.
 - Webview hardening as in the existing webviews: nonce-gated scripts, a CSP that admits only what
   the panels load, and every inbound webview message validated by a type guard before it is acted
-  on. A path from a webview is treated as untrusted and confined to the workspace.
+  on. A path from a webview is treated as untrusted. It is confined to the workspace by its
+  canonical, symlink-resolved location, not by string prefix. A URL from a webview is opened
+  externally only if its scheme is `http:` or `https:`.
+- The panels' CSP `img-src` must admit host-delivered workspace images. That means `blob:` if they
+  are shown as object URLs, as the dashboard does, or `data:` if they are encoded. The existing
+  precedent is `img-src ${cspSource} https: data:`. It must not add `connect-src` for Tower.
 - The extension stays under the existing `regCli` / `reg` command-registration guard (#791).
 - UI changes are verified in a browser via Playwright before being called done
   (`codev/resources/testing-guide.md`). Verification must not replace or disturb the owner's live
@@ -363,12 +423,13 @@ From the system:
 ### A. The combined panel
 
 **A1 — Composite tree over the existing providers (recommended).** One `TreeDataProvider` whose
-roots are the three section headers. Each section's children, `getTreeItem`, `getParent` and element
-identity delegate to a Workspace / Tower / Builders provider instance over the shared caches. The
-rows are the same objects with the same `contextValue`s and `command`s. Menu `when` clauses that name
-a source view also name the combined view. The TreeView-bound behaviours (reveal on click,
-accordion, active-file reveal, agent cycle, selection hook, badge, count) are generalised from "the
-Agents view" to "the view the row is in".
+roots are the three section headers. Each section's children, `getTreeItem` and `getParent`
+delegate to the combined panel's own Workspace / Tower / Builders provider instances, which read the
+same shared caches as the source views. The rows are built by the same code, with the same
+`contextValue`s and `command`s. The combined view gets its own menu entries, mirroring the source
+views' entries; the existing entries are left as they are. The TreeView-bound behaviours (reveal on
+click, accordion, active-file reveal, agent cycle, selection hook, badge, count, periodic-refresh
+visibility) are generalised from "the Agents view" to "the view the row is in".
 
 - Pros: zero copied row logic; every action works because it is the same row; native tree
   affordances (keyboard nav, context menus, theming) for free.
@@ -426,9 +487,10 @@ markdown artifacts. Work and Decisions are workspace-state surfaces. Not recomme
 ### C. What triggers the split
 
 - **C1 — First show per window, plus command (recommended).** Auto-arranges the first time the
-  container becomes visible in a window, including on a restore with the container visible. After
-  that only *Arrange Cockpit* does it. Predictable: re-showing the sidebar (Cmd+B, switching back
-  from Explorer) never rearranges tabs the user has since changed.
+  container is visible in a window session, including on a restore with the container visible.
+  After that only *Arrange Cockpit* does it, and `codev.cockpit.autoArrange` turns the auto-arrange
+  off. Predictable: re-showing the sidebar (Cmd+B, switching back from Explorer) never rearranges
+  tabs the user has since changed.
 - **C2 — Every show (idempotent).** Closest to "clicking the button gives you the layout". But VS
   Code cannot tell a click from a sidebar toggle, so tabs the user rearranged, or a panel they closed
   on purpose, keep coming back.
@@ -479,10 +541,14 @@ confirmation at this gate.
 
 **Unit / contribution (vitest, existing harness):**
 
-1. `contributes-*`: new container after `codev`, the rotated icon file, the combined view with no
-   `when` (always present), the new commands with palette `when`s (hidden in worktree windows where
-   specified), and menu entries. Each existing source-view menu entry has a combined-view
-   counterpart (generated check).
+1. `contributes-*`:
+   - the new container after `codev`, the rotated icon file, and the combined view with no `when`
+     (always present);
+   - the new commands, which stay in the palette everywhere, and the `codev.cockpit.autoArrange`
+     setting;
+   - the title-bar entries (*Arrange Cockpit* hidden in worktree and no-workspace windows);
+   - menu parity, a generated check that every existing source-view row entry has a combined-view
+     counterpart while the existing entries themselves are unchanged.
 2. Rotated SVG: same `d` path as `codev.svg`, wrapped in `rotate(90 400 400)`.
 3. Composite provider:
    - section roots and order;
@@ -492,42 +558,57 @@ confirmation at this gate.
    - id uniqueness across sections;
    - worktree-window and no-workspace variants.
 4. Generalised tree behaviours: accordion, click-expands and reveal act on the view a row belongs
-   to, both for the Agents view (regression) and the combined view.
-5. Host message contract: every inbound message guard rejects malformed input; file-open paths
-   outside the workspace and `..` escapes are refused.
-6. Host decisions bridge: document, refusal (structured code/message preserved), transport error,
+   to, both for the Agents view (regression) and the combined view. Periodic-refresh visibility:
+   with only the combined view (or only the Work panel) visible the timer runs; with none visible it
+   stops.
+5. Host message contract:
+   - every inbound message guard rejects malformed input;
+   - file-open paths outside the workspace, `..` escapes and symlinks resolving outside are refused;
+   - external-open accepts only `http:`/`https:`;
+   - a response landing after its panel is disposed is dropped.
+6. Auto-arrange trigger: fires once per window session, including when the view is already visible
+   at creation; does not fire again on later shows; does not fire with `codev.cockpit.autoArrange`
+   off, in a worktree window or in a no-workspace window. In those windows the commands explain why
+   instead of acting.
+7. Host decisions bridge: document, refusal (structured code/message preserved), transport error,
    image bytes / not-loaded; not-found maps to the empty state.
-7. Arrange: architect resolution delegates to `openResolvedArchitect` (non-live `main` → warning, no
+8. Arrange: architect resolution delegates to `openResolvedArchitect` (non-live `main` → warning, no
    substitute); single-instance panels; idempotent re-run.
-8. Shared components: the existing `apps/web` tests pass against the moved components through the
+9. Shared components: the existing `apps/web` tests pass against the moved components through the
    dashboard adapter. New tests run the same components with a fake host adapter, asserting that
    dropped affordances are absent and mapped actions call the adapter.
 
 **Rendered (Playwright against a running extension, isolated from the owner's live IDE):**
 
-9. Button: rotated icon directly below Codev; the existing Codev container unchanged.
-10. Combined panel with N=0, N=1 and N>1 builders. A builder row's context menu shows the same
+10. Button: rotated icon directly below Codev; the existing Codev container unchanged.
+11. Combined panel with N=0, N=1 and N>1 builders. A builder row's context menu shows the same
     entries as in Agents. Approve, open terminal and view diff work from it. A Tower row opens or
     deactivates a workspace.
-11. Arrange on a window with pre-existing editors (one dirty) → the layout appears and the dirty
+12. Arrange on a window with pre-existing editors (one dirty) → the layout appears and the dirty
     editor survives with its content. Arrange again → nothing changes, and a typed Decisions draft
     persists.
-12. `main` not live → warning; Work and Decisions still render.
-13. Decisions: rule a pending item → file updated, card shows the ruling, architect notified. A
+13. `main` not live → warning; Work and Decisions still render.
+14. Decisions: rule a pending item → file updated, card shows the ruling, architect notified. A
     stale fingerprint gives a refusal with the draft kept. Workspace and http(s) images render;
     full-size view opens and closes.
-14. No decisions file → empty state. Run `afx decisions init` → items appear.
-15. Work: Open / + Shell / Refresh / artifact link / external link each do what the mapping table
+15. No decisions file → empty state. Run `afx decisions init` → items appear.
+16. Work: Open / + Shell / Refresh / artifact link / external link each do what the mapping table
     says.
-16. Light, dark and high-contrast themes, and a live theme switch.
-17. Builder-worktree window and no-workspace window variants.
-18. Dashboard regression: the browser dashboard's Work and Decisions tabs render and rule as before.
+17. Light, dark and high-contrast themes, and a live theme switch.
+18. Window variants and degraded states:
+    - builder-worktree window and no-workspace window, including the commands' explanations;
+    - Codev container hidden, Cockpit visible: a builder change made in the fixture workspace
+      appears in the Agents section within one refresh interval.
+    - Tower unreachable: both panels keep their content under a not-connected notice and recover
+      when it returns. This is simulated against the isolated instance's own Tower endpoint; the
+      owner's Tower is never stopped.
+19. Dashboard regression: the browser dashboard's Work and Decisions tabs render and rule as before.
 
 **Non-functional:**
 
-19. Tower request rate with the combined panel open is unchanged from the source views alone. The
+20. Tower request rate with the combined panel open is unchanged from the source views alone. The
     Decisions poll stops while its panel is hidden.
-20. Neither webview opens a network connection to Tower (CSP has no `connect-src` to Tower; the key
+21. Neither webview opens a network connection to Tower (CSP has no `connect-src` to Tower; the key
     is not present in webview state).
 
 ## Risks and Mitigation
@@ -537,6 +618,10 @@ confirmation at this gate.
 | The layout command closes or discards a user editor | Low | High | Spike the layout primitive first (Assumptions). The invariant is tested with dirty, untitled and modified editors. If the primitive removes groups unsafely, only add or reuse groups |
 | Generalising `buildersView`-bound wiring regresses the existing Agents view | Medium | High | Keep the existing Agents view tests as the regression net, add per-view tests for each behaviour, and render both views in verification |
 | A menu entry is missed in the combined view (dead or absent action) | Medium | Medium | A generated test cross-checks every source-view `view/item/context` and `view/title` entry against a combined-view counterpart |
+| The combined panel goes stale because periodic refresh is gated on the Codev-container views' visibility | High if missed | Medium | The combined view and the Work panel count toward the existing visibility gate (a success criterion and tests) |
+| Tests that match `extension.ts` source text (e.g. `worktree-window-1809.test.ts`) break when wiring is generalised, and the breakage is misread as a regression | Medium | Low | Named in Success Criteria: such tests are updated to follow the wiring, with the guarded behaviour unchanged |
+| Auto-arrange or the `terminalPosition` override is unwelcome for some users | Medium | Low | `codev.cockpit.autoArrange` turns auto-arrange off; the override applies only to the arrange action |
+| A webview-supplied path or URL is used to open something outside the workspace or a non-web scheme | Low | High | Canonical-path containment, including symlink resolution, and an `http:`/`https:` allowlist, both enforced and tested host-side |
 | Moving components changes the dashboard's look or behaviour | Medium | Medium | Thin dashboard wrappers with the current fetch adapter, the existing `apps/web` tests unchanged in intent, and a dashboard render check in verification |
 | A Decisions draft is lost by the layout or by hiding the panel | Low | High | `retainContextWhenHidden`; arrangement reuses panels and never recreates them; tested. Loss on explicit panel close or reload is parity with the dashboard and stated |
 | The new button does not sit under Codev for an existing profile (VS Code persists activity-bar order) | Medium | Low | Register directly after `codev`. Verify on a fresh profile and an existing one, and note in the PR if VS Code places it elsewhere for existing profiles (the user can drag it) |
